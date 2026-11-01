@@ -554,9 +554,9 @@ fn bytes_that_are_not_a_saved_script_are_refused() -> Result<(), String> {
     assert_eq!(SavedScript::decode(b"nope"), Err(DecodeError::Mark));
     let mut later = bytes.clone();
     if let Some(version) = later.get_mut(4) {
-        *version = 2;
+        *version = 3;
     }
-    assert_eq!(SavedScript::decode(&later), Err(DecodeError::Version(2)));
+    assert_eq!(SavedScript::decode(&later), Err(DecodeError::Version(3)));
     let cut = bytes
         .get(..bytes.len().saturating_sub(1))
         .unwrap_or_default();

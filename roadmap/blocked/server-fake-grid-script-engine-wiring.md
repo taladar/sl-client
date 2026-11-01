@@ -258,3 +258,28 @@ Four `Engine` entry points with a saved script between them
 - **The acceptance leg left from the task**: a scripted object taken and
   rezzed on the fake grid resumes with its globals and its timer, and a
   deliberate `llResetScript` before the take is what clears them.
+
+## From server-lsl-lib-ossl (2026-11-01)
+
+OpenSim's own families run in an OpenSim flavour's engine, gated by the
+region's `[OSSL]` settings; seven new `Host` methods and one setting:
+
+- **`Engine::set_ossl`** with the region's `vm::ossl::Settings` — the stock
+  `osslDefaultEnable.ini` (`Settings::stock`, what the engine uses unset) or a
+  scenario's own (`Settings::from_ini`), so a test can grant or deny a
+  function. Log `Settings::ignored`, never drop it.
+- **`standing`** → what the script's owner is where the prim is: the estate's
+  owner and managers (`estate.rs`), the parcel's owner and group
+  (`ParcelInfo`), a god (the god level of the owner's session), and the
+  script item's creator and next-owner modify bit.
+- **`simulator`** → the imitated grid's version string, grid name and nick
+  (the `get_grid_info` answer) and a physics engine's type and name; for the
+  OpenSim flavour the local grid's (`OpenSim 0.9.2.1 …`, `ubODE`).
+- **`region_size`**, **`terrain_height`** → the region's size and the
+  heightmap the grid serves (`LayerData`).
+- **`day_length`** → the environment's day length over the prim (the
+  region's or parcel's day cycle; 14400 seconds by default, as OpenSim's).
+- **`prim_scripts`** → the scripts of a prim by key, for `osMessageObject`'s
+  `dataserver`.
+- **`agent_ip`** → the address of an agent's circuit, for a god's
+  `osGetAgentIP`.

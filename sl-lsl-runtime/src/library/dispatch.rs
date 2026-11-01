@@ -76,6 +76,16 @@ pub enum CallError {
         /// What it threw.
         exception: Exception,
     },
+    /// The function threw a script error of OpenSim's own — an OSSL
+    /// permission or run-time error (`OSSL Permission Error: …`), which ends
+    /// the event and is told in each engine's words.
+    #[error("{id:?} threw {}", thrown.text)]
+    Thrown {
+        /// The function that threw.
+        id: BuiltinId,
+        /// What it threw.
+        thrown: crate::vm::Thrown,
+    },
 }
 
 /// A .NET exception OpenSim's library throws out of a function.
@@ -106,6 +116,16 @@ pub enum Exception {
     VectorNotInteger,
     /// The same of a rotation button.
     RotationNotInteger,
+    /// `System.FormatException` from `String.Format`: an item that names an
+    /// argument past the list (`osFormatString`).
+    FormatIndex,
+    /// `System.FormatException` from `String.Format`: a format that is not
+    /// one — a brace without its pair, an index that is no number.
+    FormatInvalid,
+    /// `System.ArgumentException` from `Regex`: a pattern that is no regular
+    /// expression (`osMatchString`, `osReplaceString`). .NET's own message
+    /// names what the parser tripped on; this one says only that it did.
+    InvalidPattern,
 }
 
 impl Exception {
@@ -119,6 +139,8 @@ impl Exception {
             Self::InvalidCast | Self::VectorNotInteger | Self::RotationNotInteger => {
                 "InvalidCastException"
             }
+            Self::FormatIndex | Self::FormatInvalid => "FormatException",
+            Self::InvalidPattern => "ArgumentException",
         }
     }
 
@@ -133,6 +155,12 @@ impl Exception {
             Self::InvalidCast => "Specified cast is not valid.",
             Self::VectorNotInteger => "LSLInteger expected but Vector3 given",
             Self::RotationNotInteger => "LSLInteger expected but Quaternion given",
+            Self::FormatIndex => {
+                "Index (zero based) must be greater than or equal to zero and less than the size \
+                 of the argument list."
+            }
+            Self::FormatInvalid => "Input string was not in a correct format.",
+            Self::InvalidPattern => "The pattern is not a regular expression.",
         }
     }
 }

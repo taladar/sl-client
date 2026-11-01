@@ -10,7 +10,7 @@ use sl_lsl::ast::TypeName;
 use sl_types::lsl::{Rotation, Vector};
 
 use crate::bytecode::{Body, CodeOffset, Component, FunctionId, Instr, Program, StateId};
-use crate::library::{self, Event};
+use crate::library::{self, Called, Event};
 use crate::num::ticks_for;
 use crate::operand::{self, Operand};
 use crate::value::{Element, Value};
@@ -22,7 +22,9 @@ use crate::vm::fault::{Fault, RuntimeError};
 use crate::vm::flavour::EngineFlavour;
 use crate::vm::host::{CallerId, Host};
 use crate::vm::memory::{Memory, Stack, frame_cost};
+use crate::vm::ossl::{self, Admitted};
 use crate::vm::permissions::Permissions;
+use crate::vm::report::Warning;
 
 mod saved;
 
@@ -190,7 +192,7 @@ pub struct Slice {
     /// What library calls of the slice said refusing their arguments
     /// (`Could not find script 'Nope'.`), in order, for the engine to say on
     /// `DEBUG_CHANNEL`.
-    pub refusals: Vec<String>,
+    pub refusals: Vec<Warning>,
     /// What library calls of the slice raised in other scripts — changes of
     /// the linkset's data store, link messages — in the order of the calls,
     /// for the engine to post.
@@ -747,7 +749,13 @@ impl Machine<'_> {
                     self.peers,
                     (&mut *self.memory, *held),
                 );
-                let called = library::call(id, &mut ctx, args)?;
+                let called = match ossl::admit(descriptor, &mut ctx)? {
+                    Admitted::Run => library::call(id, &mut ctx, args)?,
+                    Admitted::Skip(value) => Called {
+                        value,
+                        stubbed: false,
+                    },
+                };
                 let request = ctx.take_request();
                 if called.stubbed {
                     self.host.stubbed(self.caller, id);

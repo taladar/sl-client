@@ -37,6 +37,127 @@ pub struct Builtin {
     pub god_mode: bool,
     /// The reference's description.
     pub tooltip: &'static str,
+    /// Whose library the function is: Second Life's, or one of the families
+    /// only OpenSim's engines compile.
+    pub family: Family,
+    /// What OpenSim checks before it runs the function.
+    pub gate: Gate,
+    /// What a deprecated OSSL function's warning names in its place
+    /// (`Use of function <name> is deprecated. Use <replacement> instead.`).
+    pub replacement: Option<&'static str>,
+}
+
+/// Whose library a function is.
+///
+/// Second Life compiles only [`Self::Linden`]; OpenSim's engines compile
+/// every family (book chapter `gridspec/lsl.md`, § OSSL).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum Family {
+    /// Linden Lab's `ll*` library, as Second Life serves it.
+    Linden,
+    /// An `ll*` function only OpenSim has (`llPointAt`, `llRemoteLoadScript`,
+    /// `llStopPointAt`).
+    OpenSim,
+    /// OpenSim's own `os*` functions (OSSL).
+    Ossl,
+    /// OpenSim's `ls*` functions (LightShare).
+    LightShare,
+    /// OpenSim's `mod*` functions, a script's line to region modules.
+    Mod,
+}
+
+impl Family {
+    /// Whether only OpenSim's engines compile the family.
+    #[must_use]
+    pub const fn is_opensim(self) -> bool {
+        !matches!(self, Self::Linden)
+    }
+}
+
+/// What OpenSim checks before it runs a function: the permission model of
+/// its `[OSSL]` configuration (`OSSL_Api.CheckThreatLevel`), or a family's
+/// switch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Gate {
+    /// Nothing: the function runs wherever it compiles.
+    Unchecked,
+    /// Only that OSSL is enabled at all (`AllowOSFunctions`).
+    Enabled,
+    /// The region's per-function permission: an `Allow_<name>` line when the
+    /// configuration has one, otherwise the threat level against
+    /// `OSFunctionThreatLevel`.
+    Threat {
+        /// How dangerous OpenSim rates the function.
+        level: ThreatLevel,
+        /// The name the check looks the `Allow_` line up under and its
+        /// denial names: the function's own, but for the few that share
+        /// another's (`osSetDynamicTextureDataFace` is checked as
+        /// `osSetDynamicTextureData`).
+        name: &'static str,
+    },
+    /// Only that LightShare is enabled (`AllowLightShareFunctions`).
+    LightShare,
+    /// Only that MOD is enabled (`AllowMODFunctions`).
+    Mod,
+}
+
+/// OSSL's threat levels, lowest first (`ThreatLevel` in `IOSSL_Api.cs`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ThreatLevel {
+    /// Allowed nowhere by level.
+    NoAccess,
+    /// No threat at all.
+    None,
+    /// Can cause a nuisance, such as log spew.
+    Nuisance,
+    /// Very low.
+    VeryLow,
+    /// Low.
+    Low,
+    /// Moderate.
+    Moderate,
+    /// High.
+    High,
+    /// Very high.
+    VeryHigh,
+    /// Severe.
+    Severe,
+}
+
+impl ThreatLevel {
+    /// The level a configuration names, as `OSFunctionThreatLevel` spells
+    /// it.
+    #[must_use]
+    pub fn named(name: &str) -> Option<Self> {
+        Some(match name {
+            "NoAccess" => Self::NoAccess,
+            "None" => Self::None,
+            "Nuisance" => Self::Nuisance,
+            "VeryLow" => Self::VeryLow,
+            "Low" => Self::Low,
+            "Moderate" => Self::Moderate,
+            "High" => Self::High,
+            "VeryHigh" => Self::VeryHigh,
+            "Severe" => Self::Severe,
+            _ => return None,
+        })
+    }
+
+    /// The level's name, as a denial words it.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::NoAccess => "NoAccess",
+            Self::None => "None",
+            Self::Nuisance => "Nuisance",
+            Self::VeryLow => "VeryLow",
+            Self::Low => "Low",
+            Self::Moderate => "Moderate",
+            Self::High => "High",
+            Self::VeryHigh => "VeryHigh",
+            Self::Severe => "Severe",
+        }
+    }
 }
 
 /// A library constant's value, typed.
@@ -103,6 +224,9 @@ pub struct Constant {
     pub value: ConstantValue,
     /// The reference's description.
     pub tooltip: &'static str,
+    /// Whether only OpenSim's engines know it (`OS_LISTEN_REGEX_MESSAGE`,
+    /// `WL_WATER_COLOR`, …).
+    pub opensim_only: bool,
 }
 
 /// One event a script may handle.
@@ -116,13 +240,23 @@ pub struct Event {
     pub tooltip: &'static str,
 }
 
-/// The library function called `name`, if there is one.
+/// The library function called `name`, if there is one: its first
+/// overload, where OpenSim has several ([`overloads`]).
 #[must_use]
 pub fn builtin(name: &str) -> Option<&'static Builtin> {
-    let index = BUILTINS
-        .binary_search_by(|builtin| builtin.name.cmp(name))
-        .ok()?;
-    BUILTINS.get(index)
+    overloads(name).first()
+}
+
+/// Every overload of the library function called `name`, in the order its
+/// document lists them; empty when there is no such function. Second Life's
+/// functions have one; some of OpenSim's several, which its engines tell
+/// apart by their arguments (`osApproxEquals` of two floats, of two vectors,
+/// with a margin, …).
+#[must_use]
+pub fn overloads(name: &str) -> &'static [Builtin] {
+    let start = BUILTINS.partition_point(|builtin| builtin.name < name);
+    let end = BUILTINS.partition_point(|builtin| builtin.name <= name);
+    BUILTINS.get(start..end).unwrap_or_default()
 }
 
 /// The library constant called `name`, if there is one.

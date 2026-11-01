@@ -43,6 +43,25 @@ pub struct ListenFilter {
     pub speaker: Option<String>,
     /// The message exactly, or any message when empty.
     pub message: String,
+    /// `osListenRegex`'s flags: which of the name
+    /// ([`OS_LISTEN_REGEX_NAME`]) and the message
+    /// ([`OS_LISTEN_REGEX_MESSAGE`]) are regular expressions a line need only
+    /// contain a match of, rather than text it must equal. 0 for `llListen`.
+    pub regex: i32,
+}
+
+/// `OS_LISTEN_REGEX_NAME`: `osListenRegex`'s name is a regular expression.
+pub const OS_LISTEN_REGEX_NAME: i32 = 0x1;
+
+/// `OS_LISTEN_REGEX_MESSAGE`: `osListenRegex`'s message is a regular
+/// expression.
+pub const OS_LISTEN_REGEX_MESSAGE: i32 = 0x2;
+
+/// Whether `text` holds a match of the regular expression `pattern`, as
+/// .NET's `Regex.IsMatch`; a pattern this grid cannot read matches nothing
+/// (`osListenRegex` refuses one before it opens the listen).
+fn regex_matches(pattern: &str, text: &str) -> bool {
+    regex::Regex::new(pattern).is_ok_and(|regex| regex.is_match(text))
 }
 
 impl ListenFilter {
@@ -55,19 +74,37 @@ impl ListenFilter {
             name,
             speaker,
             message,
+            regex: 0,
+        }
+    }
+
+    /// `osListenRegex(channel, name, id, message, regex)`'s filter.
+    #[must_use]
+    pub fn regex(channel: i32, name: String, id: &str, message: String, regex: i32) -> Self {
+        Self {
+            regex,
+            ..Self::new(channel, name, id, message)
         }
     }
 
     /// Whether the filter admits `heard`.
     #[must_use]
     pub fn admits(&self, heard: &Heard) -> bool {
+        let field = |pattern: &str, flag: i32, text: &str| {
+            pattern.is_empty()
+                || if self.regex & flag == flag {
+                    regex_matches(pattern, text)
+                } else {
+                    pattern == text
+                }
+        };
         self.channel == heard.channel
-            && (self.name.is_empty() || self.name == heard.name)
+            && field(&self.name, OS_LISTEN_REGEX_NAME, &heard.name)
             && self
                 .speaker
                 .as_ref()
                 .is_none_or(|speaker| speaker.eq_ignore_ascii_case(&heard.speaker))
-            && (self.message.is_empty() || self.message == heard.message)
+            && field(&self.message, OS_LISTEN_REGEX_MESSAGE, &heard.message)
     }
 }
 

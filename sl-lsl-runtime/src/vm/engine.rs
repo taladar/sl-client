@@ -4,6 +4,8 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+use sl_types::chat::ChatVolume;
+
 use core::ops::Bound;
 use core::time::Duration;
 
@@ -15,12 +17,14 @@ use crate::vm::comms::Heard;
 use crate::vm::context::{Peers, Raised, Tick};
 use crate::vm::detected::Detected;
 use crate::vm::experiences::ExperienceError;
+use crate::vm::fault::RuntimeError;
 use crate::vm::flavour::EngineFlavour;
 use crate::vm::host::{CallerId, Host};
 use crate::vm::instance::{
     Arrival, Coalescing, Instance, LOAD_WINDOW_SECONDS, Outcome, PostError, Posted, Slice, restore,
     save,
 };
+use crate::vm::ossl::{Settings, stock_ossl};
 use crate::vm::persistence::{
     CHANGED_REGION_START, OPENSIM_CHANGED_POSITION, RestoreError, SavedScript,
 };
@@ -151,6 +155,9 @@ pub struct Engine {
     /// How many scripts have been running a tick, averaged over
     /// [`LOAD_WINDOW_SECONDS`]: Second Life's active-script count.
     active: f64,
+    /// The region's `[OSSL]` configuration, which an OpenSim flavour's
+    /// OSSL, LightShare and MOD calls pass; [`None`] for the stock one.
+    ossl: Option<Arc<Settings>>,
 }
 
 /// One script's line in the region's top-scripts report.
@@ -178,7 +185,20 @@ impl Engine {
             last_served: None,
             floods: FloodGate::new(),
             active: 0.0,
+            ossl: None,
         }
+    }
+
+    /// The region's `[OSSL]` configuration: the stock
+    /// `osslDefaultEnable.ini` until [`Self::set_ossl`].
+    #[must_use]
+    pub fn ossl(&self) -> &Settings {
+        self.ossl.as_deref().unwrap_or_else(|| stock_ossl())
+    }
+
+    /// Run the region's OSSL, LightShare and MOD calls under `config`.
+    pub fn set_ossl(&mut self, config: Settings) {
+        self.ossl = Some(Arc::new(config));
     }
 
     /// The scheduling parameters.
@@ -671,17 +691,43 @@ impl Engine {
         {
             host.owner_say(id, &line);
         }
-        let refused = slice
-            .refusals
-            .iter()
-            .map(|text| (text.clone(), Some(refusal_reach(flavour))));
-        let faulted = fault
+        let refused = slice.refusals.iter().map(|warning| {
+            if warning.shouted {
+                (
+                    warning.text.clone(),
+                    ChatVolume::Shout,
+                    Some(ChatVolume::Shout),
+                )
+            } else {
+                (
+                    warning.text.clone(),
+                    ChatVolume::Say,
+                    Some(refusal_reach(flavour)),
+                )
+            }
+        });
+        // An OSSL error marked for the owner goes to the owner alone, on
+        // `DEBUG_CHANNEL` (`PermissionErrorToOwner`).
+        let to_owner = fault.is_some_and(
+            |fault| matches!(&fault.error, RuntimeError::Thrown { thrown, .. } if thrown.to_owner),
+        );
+        let fault_lines = fault
             .map(|fault| fault_lines(flavour, fault, &at))
-            .unwrap_or_default()
-            .into_iter()
-            .map(|text| (text, fault_reach(flavour)));
+            .unwrap_or_default();
+        let faulted: Vec<(String, ChatVolume, Option<ChatVolume>)> = if to_owner {
+            let owner = host.owner(id);
+            for line in &fault_lines {
+                host.say_to(id, &owner, DEBUG_CHANNEL, line);
+            }
+            Vec::new()
+        } else {
+            fault_lines
+                .into_iter()
+                .map(|text| (text, ChatVolume::Say, fault_reach(flavour)))
+                .collect()
+        };
         let quiet = ticks_for(FLOOD_QUIET_SECONDS, self.config.step);
-        for (text, to_scripts) in refused.chain(faulted) {
+        for (text, to_avatars, to_scripts) in refused.chain(faulted) {
             let text = match flavour {
                 EngineFlavour::SecondLife => match self.floods.admit(&at.object, self.now, quiet) {
                     Admission::Pass => text,
@@ -695,7 +741,7 @@ impl Engine {
                 &Speech {
                     channel: DEBUG_CHANNEL,
                     text,
-                    to_avatars: sl_types::chat::ChatVolume::Say,
+                    to_avatars,
                     to_scripts,
                 },
             );
@@ -758,6 +804,11 @@ impl Engine {
                     lifecycle("dataserver"),
                     vec![Value::Key(handle.clone()), Value::String(data.clone())],
                     vec![id],
+                ),
+                Raised::ObjectMessage { to, from, message } => (
+                    lifecycle("dataserver"),
+                    vec![Value::Key(from.clone()), Value::String(message.clone())],
+                    to.clone(),
                 ),
                 Raised::ExperienceGranted(agent) => (
                     lifecycle("experience_permissions"),
@@ -849,7 +900,11 @@ impl Engine {
                     u32::try_from(region_left)
                         .map_or(script_left, |region| script_left.min(region)),
                     host,
-                    Peers::of(&self.instances, self.config.flavour),
+                    Peers::of(
+                        &self.instances,
+                        self.config.flavour,
+                        self.ossl.as_deref().unwrap_or_else(|| stock_ossl()),
+                    ),
                 );
                 self.report(id, &slice, host);
                 self.raise(id, &mut instance, &slice, host);

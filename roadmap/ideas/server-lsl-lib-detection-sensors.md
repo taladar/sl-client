@@ -116,3 +116,19 @@ answer can come after a timer that fired 0.3 s after the call.
 loop: Second Life cast 1090 a metre-long ray a second and 45 region-crossing
 rays asking for 256 hits, with no `RCERR_*`; OpenSim 14 a second under
 YEngine and about 30 under XEngine, whatever the ray. Nothing to enforce.
+
+## From server-lsl-lib-ossl (2026-11-01)
+
+OpenSim's own functions that shadow this tranche's are this tranche's to
+implement, on the OpenSim flavours only (Second Life does not compile them):
+Both list the avatars in the region (`osGetAgents` names, `osGetAvatarList`
+keys, positions and names) — the region-wide sweep without a range. They are
+already in the library table with their signatures, compiled by OpenSim's
+dialect, and **gated**: `vm::ossl::admit` checks the region's `[OSSL]` settings
+before the function is looked for, so a denial is already right and only the
+allowed call is missing. Port each from `OSSL_Api.cs` (or `LS_Api.cs`), register
+it in `library/registry.rs` and move its line in
+`sl-lsl-runtime/src/library/opensim-scope.txt` to `in`, which the coverage test
+then holds; `ossl/available` and `ossl/errors` stop needing the answers their
+replay writes in for it (`vm/tests/ossl.rs`). The 2: `osGetAgents`,
+`osGetAvatarList`.

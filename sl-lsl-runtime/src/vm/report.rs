@@ -35,6 +35,18 @@ pub const FLOOD_QUIET_SECONDS: f64 = 20.0;
 /// `ScriptInstance.EventProcessor`).
 const OPENSIM_MAX_LINE: usize = 1000;
 
+/// A line a library call says on `DEBUG_CHANNEL` without stopping the
+/// script: a refusal of its arguments, or OpenSim's shouted OSSL warning.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Warning {
+    /// The text, worded for the flavour.
+    pub text: String,
+    /// Whether it is shouted to avatars and scripts alike, as OpenSim's
+    /// `OSSLShoutError` does, rather than carried as the flavour carries a
+    /// refusal (`refusal_reach`).
+    pub shouted: bool,
+}
+
 /// A line of chat a script's object says, and how far it carries.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Speech {
@@ -171,6 +183,7 @@ fn opensim_error(flavour: EngineFlavour, error: &RuntimeError) -> Option<String>
             | RuntimeError::OutOfHeap { .. }
             | RuntimeError::Exception { .. },
         ) => None,
+        (_, RuntimeError::Thrown { thrown, .. }) => Some(thrown.text.clone()),
         (
             _,
             other @ (RuntimeError::InvalidProgram

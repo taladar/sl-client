@@ -11,6 +11,16 @@
 //! stays a copy. A function in both stops the build: the grid serves it
 //! again, and the supplement's entry should go.
 //!
+//! OpenSim's engines compile more: the OSSL (`os*`), LightShare (`ls*`) and
+//! MOD (`mod*`) families and a few `ll*` functions and constants Second Life
+//! has not got. They come from OpenSim's own served document,
+//! `opensim/ScriptSyntax.xml`, and its supplement `opensim/ossl-unserved.xml`,
+//! each entry marked with its family so the compiler can refuse it on Second
+//! Life; an OSSL function also carries the permission check OpenSim makes
+//! before it runs, read from `opensim/ossl-checks.txt` (derived from
+//! `OSSL_Api.cs` by `opensim/extract_ossl_checks.py`). Where both documents
+//! name a function or constant, Second Life's entry is the table's.
+//!
 //! The generated file is `include!`d by `src/library/generated.rs`, which
 //! carries the lint relaxations (inner attributes cannot come through
 //! `include!`).
@@ -27,6 +37,15 @@ const SOURCE: &str = "keywords_lsl_default.xml";
 /// crate root.
 const SUPPLEMENT: &str = "keywords_lsl_unserved.xml";
 
+/// OpenSim's served document, its first line the syntax id.
+const OPENSIM: &str = "opensim/ScriptSyntax.xml";
+
+/// The functions OpenSim compiles and [`OPENSIM`] does not list.
+const OPENSIM_SUPPLEMENT: &str = "opensim/ossl-unserved.xml";
+
+/// Each OSSL function's permission check.
+const OSSL_CHECKS: &str = "opensim/ossl-checks.txt";
+
 /// A boxed error: this is a build script, and any failure should stop the
 /// build with a message.
 type BoxError = Box<dyn std::error::Error>;
@@ -35,14 +54,29 @@ type BoxError = Box<dyn std::error::Error>;
 fn main() -> Result<(), BoxError> {
     println!("cargo:rerun-if-changed={SOURCE}");
     println!("cargo:rerun-if-changed={SUPPLEMENT}");
+    println!("cargo:rerun-if-changed={OPENSIM}");
+    println!("cargo:rerun-if-changed={OPENSIM_SUPPLEMENT}");
+    println!("cargo:rerun-if-changed={OSSL_CHECKS}");
     println!("cargo:rerun-if-changed=build.rs");
 
-    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR")?;
-    let source = fs_err::read_to_string(PathBuf::from(&manifest_dir).join(SOURCE))?;
-    let document = parse_llsd_xml(&source)?;
-    let supplement = fs_err::read_to_string(PathBuf::from(&manifest_dir).join(SUPPLEMENT))?;
-    let supplement = parse_llsd_xml(&supplement)?;
-    let code = generate(&document, &supplement)?;
+    let manifest_dir = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR")?);
+    let read = |name: &str| fs_err::read_to_string(manifest_dir.join(name));
+    let document = parse_llsd_xml(&read(SOURCE)?)?;
+    let supplement = parse_llsd_xml(&read(SUPPLEMENT)?)?;
+    let opensim_file = read(OPENSIM)?;
+    let (_id, opensim_text) = opensim_file
+        .split_once('\n')
+        .ok_or_else(|| format!("{OPENSIM}: no syntax id line"))?;
+    let opensim = parse_llsd_xml(&number_overloads(opensim_text))?;
+    let opensim_supplement = parse_llsd_xml(&read(OPENSIM_SUPPLEMENT)?)?;
+    let checks = ossl_checks(&read(OSSL_CHECKS)?)?;
+    let code = generate(&Sources {
+        document: &document,
+        supplement: &supplement,
+        opensim: &opensim,
+        opensim_supplement: &opensim_supplement,
+        checks: &checks,
+    })?;
 
     let out_dir = std::env::var("OUT_DIR")?;
     fs_err::write(PathBuf::from(out_dir).join("library.rs"), code)?;
@@ -53,6 +87,39 @@ fn main() -> Result<(), BoxError> {
 fn emit(out: &mut String, args: core::fmt::Arguments<'_>) {
     use core::fmt::Write as _;
     out.write_fmt(args).unwrap_or_default();
+}
+
+/// OpenSim's document lists each overload of a function under the same key
+/// (`osApproxEquals` six times), which a map keeps only one of: this names
+/// the second and later entries of the `functions` map `name#2`, `name#3`,
+/// … so each survives as an entry of its own. The first keeps its name.
+fn number_overloads(text: &str) -> String {
+    let Some(functions) = text.find("<key>functions</key>") else {
+        return text.to_owned();
+    };
+    let (head, tail) = text.split_at(functions);
+    let mut seen: HashMap<String, usize> = HashMap::new();
+    let mut out = head.to_owned();
+    // A function's own key is the only `<key>` at one space of indentation.
+    for (index, line) in tail.split_inclusive('\n').enumerate() {
+        let name = line
+            .strip_prefix(" <key>")
+            .and_then(|rest| rest.strip_suffix("</key>\n"))
+            .filter(|_| index > 0);
+        match name {
+            Some(name) => {
+                let count = seen.entry(name.to_owned()).or_insert(0);
+                *count = count.saturating_add(1);
+                if *count > 1 {
+                    emit(&mut out, format_args!(" <key>{name}#{count}</key>\n"));
+                } else {
+                    out.push_str(line);
+                }
+            }
+            None => out.push_str(line),
+        }
+    }
+    out
 }
 
 /// One argument of a function or event, as read from the document.
@@ -67,6 +134,9 @@ struct Argument {
 struct Function {
     /// The `ll*` name.
     name: String,
+    /// Which overload of the name it is, from 1 (OpenSim's functions may
+    /// have several; Second Life's have one).
+    overload: usize,
     /// The return type keyword, or `None` for `void`.
     ret: Option<String>,
     /// The ordered arguments.
@@ -81,6 +151,105 @@ struct Function {
     deprecated: bool,
     /// Whether the document flags it god-mode only.
     god_mode: bool,
+    /// The generated `Family` variant: whose library it is.
+    family: &'static str,
+    /// The generated `Gate` expression: what OpenSim checks before it runs.
+    gate: String,
+    /// What a deprecated OSSL function's warning names in its place.
+    replacement: Option<String>,
+}
+
+/// Everything the table is generated from.
+struct Sources<'a> {
+    /// Second Life's served document.
+    document: &'a Llsd,
+    /// Second Life's unserved functions.
+    supplement: &'a Llsd,
+    /// OpenSim's served document.
+    opensim: &'a Llsd,
+    /// OpenSim's unserved functions.
+    opensim_supplement: &'a Llsd,
+    /// Each OSSL function's check, by name.
+    checks: &'a HashMap<String, Check>,
+}
+
+/// One line of [`OSSL_CHECKS`].
+struct Check {
+    /// `none`, `enabled` or a threat level.
+    kind: String,
+    /// The name the check looks the function's `Allow_` line up under.
+    checked: String,
+    /// What a deprecated function's warning names in its place.
+    replacement: Option<String>,
+}
+
+/// The threat levels `OSSL_Api` names, lowest first.
+const THREAT_LEVELS: [&str; 9] = [
+    "NoAccess", "None", "Nuisance", "VeryLow", "Low", "Moderate", "High", "VeryHigh", "Severe",
+];
+
+/// Reads [`OSSL_CHECKS`]: `<function> <check> [<checked name>] [<replacement>]`
+/// a line, `#` comments.
+fn ossl_checks(text: &str) -> Result<HashMap<String, Check>, BoxError> {
+    let mut checks = HashMap::new();
+    for line in text.lines().filter(|line| !line.starts_with('#')) {
+        let fields: Vec<&str> = line.split_whitespace().collect();
+        let (name, kind) = match fields.as_slice() {
+            [name, kind, ..] if fields.len() <= 4 => (*name, *kind),
+            _ => return Err(format!("{OSSL_CHECKS}: `{line}`").into()),
+        };
+        if kind != "none" && kind != "enabled" && !THREAT_LEVELS.contains(&kind) {
+            return Err(format!("{OSSL_CHECKS}: {name}: check `{kind}`").into());
+        }
+        let checked = fields.get(2).copied().unwrap_or(name).to_owned();
+        let replacement = fields.get(3).map(|text| (*text).to_owned());
+        let _old = checks.insert(
+            name.to_owned(),
+            Check {
+                kind: kind.to_owned(),
+                checked,
+                replacement,
+            },
+        );
+    }
+    Ok(checks)
+}
+
+/// The family a function OpenSim adds belongs to, by its prefix.
+fn opensim_family(name: &str) -> Result<&'static str, BoxError> {
+    Ok(if name.starts_with("ll") {
+        "OpenSim"
+    } else if name.starts_with("os") {
+        "Ossl"
+    } else if name.starts_with("ls") {
+        "LightShare"
+    } else if name.starts_with("mod") {
+        "Mod"
+    } else {
+        return Err(format!("{name}: no OpenSim family has that prefix").into());
+    })
+}
+
+/// The `Gate` expression for a function of `family` named `name`.
+fn gate(family: &str, name: &str, checks: &HashMap<String, Check>) -> Result<String, BoxError> {
+    Ok(match family {
+        "Ossl" => {
+            let check = checks
+                .get(name)
+                .ok_or_else(|| format!("{name}: no line in {OSSL_CHECKS}"))?;
+            match check.kind.as_str() {
+                "none" => "Gate::Unchecked".to_owned(),
+                "enabled" => "Gate::Enabled".to_owned(),
+                level => format!(
+                    "Gate::Threat {{ level: ThreatLevel::{level}, name: {:?} }}",
+                    check.checked
+                ),
+            }
+        }
+        "LightShare" => "Gate::LightShare".to_owned(),
+        "Mod" => "Gate::Mod".to_owned(),
+        _ => "Gate::Unchecked".to_owned(),
+    })
 }
 
 /// A group of the document as a name-sorted list of entries, so the
@@ -89,7 +258,7 @@ fn sorted_group<'a>(document: &'a Llsd, group: &str) -> Result<Vec<(&'a str, &'a
     let map = document
         .get(group)
         .and_then(Llsd::as_map)
-        .ok_or_else(|| format!("{SOURCE}: no `{group}` map"))?;
+        .ok_or_else(|| format!("no `{group}` map"))?;
     let mut entries: Vec<(&str, &Llsd)> = map.iter().map(|(k, v)| (k.as_str(), v)).collect();
     entries.sort_by(|a, b| a.0.cmp(b.0));
     Ok(entries)
@@ -184,50 +353,122 @@ fn f32_expr(value: f64) -> String {
     format!("f32::from_bits(0x{:08x})", single.to_bits())
 }
 
-/// Reads every function: the served document's and the supplement's, sorted
-/// by name.
-fn functions(document: &Llsd, supplement: &Llsd) -> Result<Vec<Function>, BoxError> {
-    let supplement_map = supplement
+/// The `functions` map of a supplement, which holds nothing else.
+fn supplement_functions<'a>(
+    supplement: &'a Llsd,
+    what: &str,
+) -> Result<&'a HashMap<String, Llsd>, BoxError> {
+    let map = supplement
         .as_map()
-        .ok_or_else(|| format!("{SUPPLEMENT}: not a map"))?;
-    if let Some(other) = supplement_map.keys().find(|key| *key != "functions") {
-        return Err(format!("{SUPPLEMENT}: `{other}` — it holds functions only").into());
+        .ok_or_else(|| format!("{what}: not a map"))?;
+    if let Some(other) = map.keys().find(|key| *key != "functions") {
+        return Err(format!("{what}: `{other}` — it holds functions only").into());
     }
-    let served = sorted_group(document, "functions")?;
-    let unserved = supplement
+    supplement
         .get("functions")
         .and_then(Llsd::as_map)
-        .ok_or_else(|| format!("{SUPPLEMENT}: no `functions` map"))?;
+        .ok_or_else(|| format!("{what}: no `functions` map").into())
+}
+
+/// One function read from `entry`.
+fn function(
+    name: &str,
+    entry: &Llsd,
+    family: &'static str,
+    checks: &HashMap<String, Check>,
+) -> Result<Function, BoxError> {
+    let ret = match text(entry, "return").as_str() {
+        "" | "void" => None,
+        other => {
+            type_name(other).ok_or_else(|| format!("{name}: return type `{other}`"))?;
+            Some(other.to_owned())
+        }
+    };
+    let (name, overload) = match name.split_once('#') {
+        Some((name, overload)) => (name, overload.parse()?),
+        None => (name, 1),
+    };
+    let replacement = if family == "Ossl" {
+        checks.get(name).and_then(|check| check.replacement.clone())
+    } else {
+        None
+    };
+    Ok(Function {
+        name: name.to_owned(),
+        overload,
+        ret,
+        args: arguments(name, entry)?,
+        sleep: entry.get("sleep").and_then(Llsd::as_f64).unwrap_or(0.0),
+        energy: entry.get("energy").and_then(Llsd::as_f64).unwrap_or(0.0),
+        tooltip: text(entry, "tooltip"),
+        deprecated: flag(entry, "deprecated") || replacement.is_some(),
+        god_mode: flag(entry, "god-mode"),
+        family,
+        gate: gate(family, name, checks)?,
+        replacement,
+    })
+}
+
+/// Reads every function: Second Life's served document's and its
+/// supplement's, then those OpenSim's add, sorted by name.
+fn functions(sources: &Sources<'_>) -> Result<Vec<Function>, BoxError> {
+    let served = sorted_group(sources.document, "functions")?;
+    let unserved = supplement_functions(sources.supplement, SUPPLEMENT)?;
     if let Some(name) = unserved
         .keys()
         .find(|name| served.iter().any(|(served, _entry)| served == name))
     {
         return Err(format!("{name} is in {SOURCE} now; remove it from {SUPPLEMENT}").into());
     }
-    let mut entries = served;
-    entries.extend(unserved.iter().map(|(name, entry)| (name.as_str(), entry)));
-    entries.sort_by(|a, b| a.0.cmp(b.0));
     let mut out = Vec::new();
-    for (name, entry) in entries {
-        let ret = match text(entry, "return").as_str() {
-            "" | "void" => None,
-            other => {
-                type_name(other).ok_or_else(|| format!("{name}: return type `{other}`"))?;
-                Some(other.to_owned())
-            }
-        };
-        out.push(Function {
-            name: name.to_owned(),
-            ret,
-            args: arguments(name, entry)?,
-            sleep: entry.get("sleep").and_then(Llsd::as_f64).unwrap_or(0.0),
-            energy: entry.get("energy").and_then(Llsd::as_f64).unwrap_or(0.0),
-            tooltip: text(entry, "tooltip"),
-            deprecated: flag(entry, "deprecated"),
-            god_mode: flag(entry, "god-mode"),
-        });
+    for (name, entry) in served
+        .into_iter()
+        .chain(unserved.iter().map(|(name, entry)| (name.as_str(), entry)))
+    {
+        out.push(function(name, entry, "Linden", sources.checks)?);
     }
+
+    let opensim_served = sorted_group(sources.opensim, "functions")?;
+    let opensim_unserved = supplement_functions(sources.opensim_supplement, OPENSIM_SUPPLEMENT)?;
+    if let Some(name) = opensim_unserved
+        .keys()
+        .find(|name| opensim_served.iter().any(|(served, _entry)| served == name))
+    {
+        return Err(
+            format!("{name} is in {OPENSIM} now; remove it from {OPENSIM_SUPPLEMENT}").into(),
+        );
+    }
+    for (name, entry) in opensim_served.into_iter().chain(
+        opensim_unserved
+            .iter()
+            .map(|(name, entry)| (name.as_str(), entry)),
+    ) {
+        let base = name.split('#').next().unwrap_or(name);
+        if out
+            .iter()
+            .any(|function| function.family == "Linden" && function.name == base)
+        {
+            continue;
+        }
+        out.push(function(
+            name,
+            entry,
+            opensim_family(name)?,
+            sources.checks,
+        )?);
+    }
+    out.sort_by(|a, b| (&a.name, a.overload).cmp(&(&b.name, b.overload)));
     Ok(out)
+}
+
+/// The `BuiltinId` variant of a function: `llGetListLength` →
+/// `LlGetListLength`, its second overload `…2`.
+fn function_variant(function: &Function) -> String {
+    if function.overload > 1 {
+        format!("{}{}", variant_name(&function.name), function.overload)
+    } else {
+        variant_name(&function.name)
+    }
 }
 
 /// A constant's value as the raw text the document serves (a string, an
@@ -365,16 +606,18 @@ fn argument_slice(args: &[Argument]) -> String {
 }
 
 /// Generates the whole include file.
-fn generate(document: &Llsd, supplement: &Llsd) -> Result<String, BoxError> {
-    let functions = functions(document, supplement)?;
+fn generate(sources: &Sources<'_>) -> Result<String, BoxError> {
+    let functions = functions(sources)?;
     let mut out = String::new();
     emit(
         &mut out,
         format_args!(
-            "// Generated by build.rs from {SOURCE} and {SUPPLEMENT}; do not edit.\n\n\
+            "// Generated by build.rs from {SOURCE}, {SUPPLEMENT}, {OPENSIM}, \
+             {OPENSIM_SUPPLEMENT} and {OSSL_CHECKS}; do not edit.\n\n\
              use sl_lsl::ast::TypeName;\n\
              use sl_types::lsl::{{Rotation, Vector}};\n\n\
-             use crate::library::table::{{Argument, Builtin, Constant, ConstantValue, Event}};\n\
+             use crate::library::table::{{\n    \
+             Argument, Builtin, Constant, ConstantValue, Event, Family, Gate, ThreatLevel,\n}};\n\
              use crate::library::dispatch::{{Key, Signature}};\n\
              use crate::value::Element;\n\n"
         ),
@@ -393,14 +636,19 @@ fn generate(document: &Llsd, supplement: &Llsd) -> Result<String, BoxError> {
         emit(
             &mut out,
             format_args!(
-                "    /// `{}`{}.\n    {},\n",
+                "    /// `{}`{}{}.\n    {},\n",
                 function.name,
+                if function.overload > 1 {
+                    format!(", overload {}", function.overload)
+                } else {
+                    String::new()
+                },
                 if function.deprecated {
                     " (deprecated)"
                 } else {
                     ""
                 },
-                variant_name(&function.name)
+                function_variant(function)
             ),
         );
     }
@@ -415,7 +663,7 @@ fn generate(document: &Llsd, supplement: &Llsd) -> Result<String, BoxError> {
     for function in &functions {
         emit(
             &mut out,
-            format_args!("        Self::{},\n", variant_name(&function.name)),
+            format_args!("        Self::{},\n", function_variant(function)),
         );
     }
     emit(
@@ -430,7 +678,7 @@ fn generate(document: &Llsd, supplement: &Llsd) -> Result<String, BoxError> {
             &mut out,
             format_args!(
                 "            Self::{} => {index},\n",
-                variant_name(&function.name)
+                function_variant(function)
             ),
         );
     }
@@ -462,8 +710,9 @@ fn generate(document: &Llsd, supplement: &Llsd) -> Result<String, BoxError> {
             format_args!(
                 "    Builtin {{\n        id: BuiltinId::{},\n        name: {:?},\n        \
                  args: {},\n        ret: {ret},\n        sleep: {},\n        energy: {},\n        \
-                 deprecated: {},\n        god_mode: {},\n        tooltip: {:?},\n    }},\n",
-                variant_name(&function.name),
+                 deprecated: {},\n        god_mode: {},\n        tooltip: {:?},\n        \
+                 family: Family::{},\n        gate: {},\n        replacement: {:?},\n    }},\n",
+                function_variant(function),
                 function.name,
                 argument_slice(&function.args),
                 f32_expr(function.sleep),
@@ -471,6 +720,9 @@ fn generate(document: &Llsd, supplement: &Llsd) -> Result<String, BoxError> {
                 function.deprecated,
                 function.god_mode,
                 function.tooltip,
+                function.family,
+                function.gate,
+                function.replacement,
             ),
         );
     }
@@ -478,11 +730,20 @@ fn generate(document: &Llsd, supplement: &Llsd) -> Result<String, BoxError> {
 
     // Constants.
     let mut constants = Vec::new();
-    for (name, entry) in sorted_group(document, "constants")? {
+    for (name, entry) in sorted_group(sources.document, "constants")? {
         if let Some(value) = constant_value(name, entry)? {
-            constants.push((name, value, text(entry, "tooltip")));
+            constants.push((name, value, text(entry, "tooltip"), false));
         }
     }
+    for (name, entry) in sorted_group(sources.opensim, "constants")? {
+        if constants.iter().any(|(known, ..)| *known == name) {
+            continue;
+        }
+        if let Some(value) = constant_value(name, entry)? {
+            constants.push((name, value, text(entry, "tooltip"), true));
+        }
+    }
+    constants.sort_by(|a, b| a.0.cmp(b.0));
     emit(
         &mut out,
         format_args!(
@@ -490,18 +751,19 @@ fn generate(document: &Llsd, supplement: &Llsd) -> Result<String, BoxError> {
             constants.len()
         ),
     );
-    for (name, value, tooltip) in &constants {
+    for (name, value, tooltip, opensim_only) in &constants {
         emit(
             &mut out,
             format_args!(
-                "    Constant {{ name: {name:?}, value: {value}, tooltip: {tooltip:?} }},\n"
+                "    Constant {{ name: {name:?}, value: {value}, tooltip: {tooltip:?}, \
+                 opensim_only: {opensim_only} }},\n"
             ),
         );
     }
     emit(&mut out, format_args!("];\n\n"));
 
     // Events.
-    let events = sorted_group(document, "events")?;
+    let events = sorted_group(sources.document, "events")?;
     emit(
         &mut out,
         format_args!(
@@ -531,7 +793,7 @@ fn generate(document: &Llsd, supplement: &Llsd) -> Result<String, BoxError> {
         ),
     );
     for function in &functions {
-        let variant = variant_name(&function.name);
+        let variant = function_variant(function);
         let args: Vec<&str> = function
             .args
             .iter()
@@ -558,7 +820,7 @@ fn generate(document: &Llsd, supplement: &Llsd) -> Result<String, BoxError> {
     // Every name must map to a distinct variant.
     let mut seen: HashMap<String, &str> = HashMap::new();
     for function in &functions {
-        if let Some(other) = seen.insert(variant_name(&function.name), &function.name) {
+        if let Some(other) = seen.insert(function_variant(function), &function.name) {
             return Err(format!("{} and {other} share a variant name", function.name).into());
         }
     }

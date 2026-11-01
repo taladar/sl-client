@@ -34,6 +34,9 @@
 //! - [`experiences`] — what a script in an experience asks of an avatar once
 //!   for the experience, and the key-value store the experience keeps on the
 //!   grid.
+//! - [`ossl`] — OpenSim's own library families as its engines gate them:
+//!   the region's `[OSSL]` configuration, what the script's owner is in the
+//!   region, and the check a call passes before it runs.
 //! - [`persistence`] — a script's running state saved as plain data
 //!   ([`SavedScript`]) when its object is taken or its region goes down, and
 //!   brought back when it is rezzed or the region is up again.
@@ -59,6 +62,7 @@ mod host;
 mod instance;
 pub mod linkset_data;
 pub mod memory;
+pub mod ossl;
 pub mod permissions;
 pub mod persistence;
 mod report;
@@ -95,10 +99,11 @@ pub use instance::{
 pub use linkset_data::{Answer, LinksetAction, LinksetChange, LinksetData, LinksetId};
 #[cfg(test)]
 pub(crate) use memory::{Memory, Stack};
+pub use ossl::{Allowed, Simulator, Standing, Thrown};
 pub use permissions::{Permissions, Question};
 pub use persistence::{
     CHANGED_REGION_START, DecodeError, OPENSIM_CHANGED_POSITION, RestoreError, SavedScript,
 };
 pub use report::{
-    DEBUG_CHANNEL, FLOOD_LINES, FLOOD_NOTICE, FLOOD_QUIET_SECONDS, Speech, Whereabouts,
+    DEBUG_CHANNEL, FLOOD_LINES, FLOOD_NOTICE, FLOOD_QUIET_SECONDS, Speech, Warning, Whereabouts,
 };

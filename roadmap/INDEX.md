@@ -11,17 +11,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 131 |
+| ideas | 132 |
 | ready | 331 |
 | blocked | 52 |
 | in-progress | 18 |
 | bugs | 41 |
-| done | 1465 |
+| done | 1466 |
 | deferred | 29 |
 | wont-do | 24 |
-| **total** | **2091** |
+| **total** | **2093** |
 
-## ideas (131)
+## ideas (132)
 
 ### protocol
 
@@ -256,6 +256,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-fake-grid-agent-avatars-shared`](ideas/server-fake-grid-agent-avatars-shared.md)
   — Fake grid — logged-in agents see each other's avatars (blocked by
   `gridspec-avatar-presence` (done), `gridspec-animations` (done))
+- [`server-fake-grid-dynamic-textures`](ideas/server-fake-grid-dynamic-textures.md)
+  — Dynamic textures — render a drawing list to a texture on the fake grid
 - [`server-fake-grid-opensim-arrival-bakes`](ideas/server-fake-grid-opensim-arrival-bakes.md)
   — The OpenSim flavour names solid fixture bakes where OpenSim names the
   default placeholder
@@ -288,9 +290,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Library tranche — parcel, region, estate and environment queries (blocked by
   `server-lsl-vm-execution` (done), `server-world-agent-movement`,
   `gridspec-lsl-land-region-env` (done))
-- [`server-lsl-lib-ossl`](ideas/server-lsl-lib-ossl.md) — Scope the OSSL (os*)
-  surface — how much, and why (blocked by `server-lsl-library-surface-table`
-  (done), `gridspec-lsl-ossl` (done))
 - [`server-lsl-lib-physics-vehicles`](ideas/server-lsl-lib-physics-vehicles.md)
   — Library tranche — status flags, forces, targets and vehicles (blocked by
   `server-lsl-vm-execution` (done), `server-world-collision-and-physics`,
@@ -311,6 +310,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   LSO-targeted script in LSO's 16 KB, as Second Life does
 - [`server-lsl-luau-compiler`](ideas/server-lsl-luau-compiler.md) — Compile the
   Luau target as Second Life does
+- [`server-lsl-ossl-culture-strings`](ideas/server-lsl-ossl-culture-strings.md)
+  — OSSL's culture-sensitive string search and in-place list sort
 - [`server-map-service`](ideas/server-map-service.md) — Map service — tiles and
   map items
 - [`server-message-routing`](ideas/server-message-routing.md) — Global message
@@ -1465,7 +1466,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1465)
+## done (1466)
 
 ### protocol
 
@@ -4516,6 +4517,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Library tranche — script permissions, money and payment (blocked by
   `server-lsl-vm-execution` (done), `protocol-sim-script-messages` (done),
   `gridspec-lsl-money-permissions` (done))
+- [`server-lsl-lib-ossl`](done/server-lsl-lib-ossl.md) — Scope the OSSL (os*)
+  surface — how much, and why (blocked by `server-lsl-library-surface-table`
+  (done), `gridspec-lsl-ossl` (done))
 - [`server-lsl-lib-strings-lists`](done/server-lsl-lib-strings-lists.md) —
   Library tranche — strings, lists, encoding and hashing (blocked by
   `server-lsl-vm-execution` (done), `server-lsl-library-surface-table` (done),

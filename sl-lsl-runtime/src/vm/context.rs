@@ -13,7 +13,9 @@ use crate::vm::flavour::EngineFlavour;
 use crate::vm::host::{CallerId, Host};
 use crate::vm::instance::Instance;
 use crate::vm::linkset_data::{Answer, LinksetChange, LinksetData};
+use crate::vm::ossl::{Settings, Standing, stock_ossl};
 use crate::vm::permissions::{Permissions, Question};
+use crate::vm::report::Warning;
 
 /// An event a library call raised in the scripts of its linkset or in its
 /// own, which the engine posts once the call's slice is over — in the order
@@ -41,6 +43,16 @@ pub enum Raised {
     },
     /// `experience_permissions(agent)` in the calling script.
     ExperienceGranted(String),
+    /// `dataserver(from, message)` in the scripts of another prim:
+    /// `osMessageObject`.
+    ObjectMessage {
+        /// The scripts of the prim messaged.
+        to: Vec<CallerId>,
+        /// The key of the sending prim.
+        from: String,
+        /// The message.
+        message: String,
+    },
     /// `experience_permissions_denied(agent, reason)` in the calling script.
     ExperienceDenied {
         /// The avatar asked.
@@ -88,7 +100,7 @@ pub(crate) struct ScriptData {
     pub(crate) start_parameter: i32,
     /// What library calls said refusing their arguments, worded for the
     /// flavour, waiting for the engine to say them on `DEBUG_CHANNEL`.
-    pub(crate) refusals: Vec<String>,
+    pub(crate) refusals: Vec<Warning>,
     /// What library calls raised in other scripts — a change of the
     /// linkset's data store, a link message — in the order of the calls,
     /// waiting for the engine to post it once the slice is over.
@@ -125,6 +137,8 @@ pub(crate) struct Peers<'run> {
     instances: Option<&'run BTreeMap<CallerId, Instance>>,
     /// The flavour the region imitates.
     flavour: EngineFlavour,
+    /// The region's `[OSSL]` configuration; [`None`] for the stock one.
+    ossl: Option<&'run Settings>,
 }
 
 impl<'run> Peers<'run> {
@@ -133,22 +147,31 @@ impl<'run> Peers<'run> {
     pub(crate) const NONE: Self = Self {
         instances: None,
         flavour: EngineFlavour::SecondLife,
+        ossl: None,
     };
 
-    /// The instances of an engine imitating `flavour`, less the one running.
+    /// The instances of an engine imitating `flavour` under the `[OSSL]`
+    /// configuration `ossl`, less the one running.
     pub(crate) const fn of(
         instances: &'run BTreeMap<CallerId, Instance>,
         flavour: EngineFlavour,
+        ossl: &'run Settings,
     ) -> Self {
         Self {
             instances: Some(instances),
             flavour,
+            ossl: Some(ossl),
         }
     }
 
     /// The flavour the region imitates.
     pub(crate) const fn flavour(self) -> EngineFlavour {
         self.flavour
+    }
+
+    /// The region's `[OSSL]` configuration.
+    pub(crate) fn ossl(self) -> &'run Settings {
+        self.ossl.unwrap_or_else(|| stock_ossl())
     }
 
     /// Whether the instance `id` names reads as running in this flavour;
@@ -440,6 +463,14 @@ impl<'host> ScriptCtx<'host> {
         )
     }
 
+    /// Raise `dataserver(from, message)` in the scripts `to` once the slice
+    /// is over (`osMessageObject`).
+    pub fn message_scripts(&mut self, to: Vec<CallerId>, from: String, message: String) {
+        self.data
+            .raised
+            .push(Raised::ObjectMessage { to, from, message });
+    }
+
     /// Raise `transaction_result` in the script once the slice is over.
     pub fn raise_transaction(&mut self, result: TransactionResult) {
         self.data.raised.push(Raised::Transaction(result));
@@ -450,7 +481,32 @@ impl<'host> ScriptCtx<'host> {
     /// slice is over, through the same flood limit as a run-time error. The
     /// call itself carries on and returns its answer.
     pub fn refuse(&mut self, text: String) {
-        self.data.refusals.push(text);
+        self.data.refusals.push(Warning {
+            text,
+            shouted: false,
+        });
+    }
+
+    /// Shout `text` on `DEBUG_CHANNEL` once the slice is over, to avatars
+    /// and scripts alike, as OpenSim's OSSL, LightShare and MOD warnings are
+    /// (`OSSLShoutError`): the call carries on.
+    pub fn shout_error(&mut self, text: String) {
+        self.data.refusals.push(Warning {
+            text,
+            shouted: true,
+        });
+    }
+
+    /// The region's `[OSSL]` configuration.
+    #[must_use]
+    pub fn ossl(&self) -> &Settings {
+        self.peers.ossl()
+    }
+
+    /// What the script's owner is in the region, as an `Allow_` line asks.
+    #[must_use]
+    pub fn standing(&self) -> Standing {
+        self.host.standing(self.caller)
     }
 
     /// Suspend the script for `seconds` once the function returns. A

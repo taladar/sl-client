@@ -8,6 +8,7 @@ use crate::vm::experiences::{
     ScriptExperience, SitRefusal,
 };
 use crate::vm::linkset_data::{LinksetData, LinksetId};
+use crate::vm::ossl::{Simulator, Standing};
 use crate::vm::permissions::Question;
 use crate::vm::report::{Speech, Whereabouts};
 
@@ -206,4 +207,34 @@ pub trait Host {
     ///
     /// [`SitRefusal`] when nobody sits.
     fn sit_on_link(&mut self, caller: CallerId, agent: &str, link: i32) -> Result<(), SitRefusal>;
+
+    /// What the owner of `caller`'s script is in the region — estate owner
+    /// or manager, parcel owner, a god — as an OSSL `Allow_` line asks
+    /// before an OpenSim function runs.
+    fn standing(&self, caller: CallerId) -> Standing;
+
+    /// The simulator and grid the script runs on, as OpenSim's identity
+    /// readers answer them (`osGetSimulatorVersion`, `osGetGridName`).
+    fn simulator(&self) -> Simulator;
+
+    /// The size of the region `caller` is in, in metres (`osGetRegionSize`,
+    /// whose third component is 0).
+    fn region_size(&self, caller: CallerId) -> (u32, u32);
+
+    /// The ground's height at the whole-metre point `(x, y)` of the region
+    /// `caller` is in, which lies within [`Self::region_size`]
+    /// (`osGetTerrainHeight`).
+    fn terrain_height(&self, caller: CallerId, x: u32, y: u32) -> f32;
+
+    /// The length in seconds of a day of the environment over `caller`'s
+    /// prim (`osGetSunParam("day_length")`).
+    fn day_length(&self, caller: CallerId) -> f32;
+
+    /// The scripts in the prim keyed `prim` (`osMessageObject`'s target), or
+    /// [`None`] when the region has no such prim.
+    fn prim_scripts(&self, prim: &str) -> Option<Vec<CallerId>>;
+
+    /// The address `agent` connects from, as `osGetAgentIP` gives it to a
+    /// god: the IP alone, no port; empty when `agent` is not in the region.
+    fn agent_ip(&self, agent: &str) -> String;
 }

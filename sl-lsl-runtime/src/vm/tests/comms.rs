@@ -265,7 +265,10 @@ pub(super) fn note_field(note: &str, key: &str) -> Option<String> {
     let mut characters = rest.chars();
     while let Some(character) = characters.next() {
         match character {
-            '\\' => value.push(characters.next()?),
+            '\\' => match characters.next()? {
+                'n' => value.push('\n'),
+                escaped => value.push(escaped),
+            },
             '"' => return Some(value),
             other => value.push(other),
         }

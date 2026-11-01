@@ -37,7 +37,7 @@ use core::fmt;
 use core::ops::Range;
 
 use crate::bytecode::{Position, Program, Source};
-use crate::library::ConstantValue;
+use crate::library::{self, ConstantValue};
 
 /// What a compile error says, as one of the messages Linden's compiler uses.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -146,7 +146,10 @@ impl core::error::Error for CompileError {}
 /// Second Life's rule on both.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Hash)]
 pub enum Dialect {
-    /// Second Life's compiler (Mono and LSO refuse the same sources).
+    /// Second Life's compiler (Mono and LSO refuse the same sources). It knows
+    /// none of OpenSim's own functions — the OSSL, LightShare and MOD
+    /// families and the few `ll*` ones only OpenSim has — or constants
+    /// (`ossl/available`, `ossl/errors`: `Name not defined within scope`).
     #[default]
     SecondLife,
     /// OpenSim's YEngine, its default engine and the one a fake grid that
@@ -169,14 +172,17 @@ impl Dialect {
     }
 
     /// Whether this compiler knows the library function `name` that the
-    /// library table carries. OpenSim was measured refusing two of the
-    /// functions Second Life compiles from no served document
-    /// (`keywords_lsl_unserved.xml`); which of the rest of the table it lacks
-    /// is not measured, so the rest compile.
+    /// library table carries. Second Life knows only Linden Lab's library.
+    /// OpenSim was measured refusing two of the functions Second Life
+    /// compiles from no served document (`keywords_lsl_unserved.xml`); which
+    /// of the rest of Linden Lab's table it lacks is not measured, so the
+    /// rest compile, as do all of its own.
     #[must_use]
     pub fn has_builtin(self, name: &str) -> bool {
         match self {
-            Self::SecondLife => true,
+            Self::SecondLife => {
+                library::builtin(name).is_none_or(|builtin| !builtin.family.is_opensim())
+            }
             Self::OpenSim => {
                 !OPENSIM_UNDEFINED.contains(&name)
                     && !is_linkset_data(name)
@@ -185,14 +191,17 @@ impl Dialect {
         }
     }
 
-    /// Whether this compiler knows the library constant `name`: OpenSim has
-    /// none of the `LINKSETDATA_*` ones, and none of the experience errors
-    /// (`XP_ERROR_*`) or of `llSitOnLink`'s results — its
-    /// `LSL_Constants.cs` names none of them.
+    /// Whether this compiler knows the library constant `name`: Second Life
+    /// none of the ones only OpenSim's document lists; OpenSim none of the
+    /// `LINKSETDATA_*` ones, and none of the experience errors (`XP_ERROR_*`)
+    /// or of `llSitOnLink`'s results — its `LSL_Constants.cs` names none of
+    /// them.
     #[must_use]
     pub fn has_constant(self, name: &str) -> bool {
         match self {
-            Self::SecondLife => true,
+            Self::SecondLife => {
+                library::constant(name).is_none_or(|constant| !constant.opensim_only)
+            }
             Self::OpenSim => {
                 !name.starts_with("LINKSETDATA_")
                     && !name.starts_with("XP_ERROR_")

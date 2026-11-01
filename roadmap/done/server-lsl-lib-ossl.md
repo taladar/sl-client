@@ -2,10 +2,11 @@
 id: server-lsl-lib-ossl
 title: Scope the OSSL (os*) surface — how much, and why
 topic: server
-status: ideas
+status: done
 origin: LSL-on-the-fake-grid audit (2026-09-20)
 blocked_by: [server-lsl-library-surface-table, gridspec-lsl-ossl]
-refs: [server-lsl-lib-avatar-control, viewer-opensim-region-extras-limits]
+refs: [server-lsl-lib-avatar-control, viewer-opensim-region-extras-limits,
+  server-lsl-ossl-culture-strings, server-fake-grid-dynamic-textures]
 ---
 
 Context: [context/lsl.md](../context/lsl.md).
@@ -75,3 +76,47 @@ The model to imitate, as the local OpenSim answers it
 A fake grid that flattens the tiers should still produce these texts for
 whatever it refuses, since a script (or a test) that reads the debug channel
 reads them.
+
+## Done (2026-11-01)
+
+The written scope is § *OpenSim's own functions* of the book chapter
+`simulator/lsl-engine.md`; the per-function list the coverage test holds the
+registry to is `sl-lsl-runtime/src/library/opensim-scope.txt` (in, later with a
+named task, or out with a reason). Beyond the scoping the acceptance asked
+for, the tranche implements what of it the fake grid can run today:
+
+- **The table.** OpenSim's own served document, moved from
+  `sl-fake-grid/lsl-syntax/` to `sl-lsl-runtime/opensim/` (the fake grid reads
+  it from there), is the source of OpenSim's part of the library table: 236
+  functions of the OSSL, LightShare and MOD families, 7 of them and
+  `modSendCommand` from a supplement of what OpenSim compiles and leaves out
+  (`ossl-unserved.xml`), and 139 constants only OpenSim has. Each descriptor
+  carries its `Family` and its `Gate`, the permission check derived from
+  `OSSL_Api.cs` (`ossl-checks.txt`, `extract_ossl_checks.py`). Overloads are
+  entries of their own (`OsApproxEquals` … `OsApproxEquals6`), and the
+  compiler picks one as YEngine does, by arity and then argument types.
+- **The compiler gate.** Second Life's dialect refuses every OpenSim family
+  and OpenSim-only constant; OpenSim's compiles them.
+- **The permission model**, not flattened: `vm::ossl::Settings` (the stock
+  `osslDefaultEnable.ini`, vendored, or a region's own through
+  `Engine::set_ossl`), the owner's `Standing` from the host, `Allow_` and
+  `Creators_` lines over the threat level, OpenSim's three denial texts thrown
+  as each engine reports a script exception, `PermissionErrorToOwner`, and
+  the shouted warnings with their second's sleep (`ScriptCtx::shout_error`).
+- **55 functions implemented**: strings, regular expressions, hashing,
+  numbers, vectors, the drawing-list builders, the engine's and simulator's
+  identity, region size, ground height and day length, `osGetAgentIP`,
+  `osListenRegex`, `osMessageObject` and `modSendCommand`.
+- **Proof**: `ossl/available` and `ossl/errors` replayed against both
+  OpenSim engines' transcripts (with what other tranches own answered as the
+  grid did, and one named deviation: `(string)` of a vector writes five
+  decimals here, six on OpenSim, by the value model's rule), Second Life
+  refusing both; unit tests of the permission model, overload resolution,
+  regex listens and object messages.
+
+Handed on: the world-touching `os*` functions to the tranches of the `ll*`
+functions they shadow (a note in each), .NET's culture-sensitive string
+search and the in-place sort to [[server-lsl-ossl-culture-strings]], the
+dynamic textures to [[server-fake-grid-dynamic-textures]], and the seven new
+`Host` methods and the region's `[OSSL]` settings to
+[[server-fake-grid-script-engine-wiring]].

@@ -26,7 +26,7 @@ pub mod comms;
 pub mod control;
 pub mod detection;
 pub mod dispatch;
-mod dotnet;
+pub(crate) mod dotnet;
 pub mod encoding;
 pub mod experiences;
 mod generated;
@@ -35,6 +35,7 @@ pub mod linkset;
 pub mod lists;
 pub mod math;
 pub mod money_permissions;
+pub mod ossl;
 mod range;
 mod registry;
 pub mod rotations;
@@ -49,7 +50,10 @@ pub use dispatch::{
 };
 pub use generated::{BUILTINS, BuiltinId, CONSTANTS, EVENTS, signatures};
 pub use registry::{call, status};
-pub use table::{Argument, Builtin, Constant, ConstantValue, Event, builtin, constant, event};
+pub use table::{
+    Argument, Builtin, Constant, ConstantValue, Event, Family, Gate, ThreatLevel, builtin,
+    constant, event, overloads,
+};
 
 use crate::vm::{EngineFlavour, ScriptCtx};
 
@@ -172,6 +176,34 @@ mod tests {
     }
 
     impl Host for Unreached {
+        fn standing(&self, _caller: CallerId) -> crate::vm::Standing {
+            crate::vm::Standing::default()
+        }
+
+        fn simulator(&self) -> crate::vm::Simulator {
+            crate::vm::Simulator::default()
+        }
+
+        fn region_size(&self, _caller: CallerId) -> (u32, u32) {
+            (256, 256)
+        }
+
+        fn terrain_height(&self, _caller: CallerId, _x: u32, _y: u32) -> f32 {
+            0.0
+        }
+
+        fn day_length(&self, _caller: CallerId) -> f32 {
+            14_400.0
+        }
+
+        fn prim_scripts(&self, _prim: &str) -> Option<Vec<CallerId>> {
+            None
+        }
+
+        fn agent_ip(&self, _agent: &str) -> String {
+            String::new()
+        }
+
         fn print(&mut self, _caller: CallerId, _text: &str) {}
 
         fn stubbed(&mut self, _caller: CallerId, _id: BuiltinId) {}
@@ -299,10 +331,18 @@ mod tests {
             assert_eq!(id.index(), index);
             assert_eq!(id.descriptor().id, *id);
         }
+        // An overloaded name's entries sit together, in their document's
+        // order.
         assert!(BUILTINS.windows(2).all(|pair| match pair {
-            [a, b] => a.name < b.name,
+            [a, b] => a.name < b.name || a.name == b.name && a.family.is_opensim(),
             _ => true,
         }));
+        assert_eq!(overloads("osApproxEquals").len(), 6);
+        assert_eq!(
+            builtin("osApproxEquals").map(|b| b.id),
+            Some(BuiltinId::OsApproxEquals)
+        );
+        assert!(overloads("llAbs").len() == 1 && overloads("nope").is_empty());
         assert!(CONSTANTS.windows(2).all(|pair| match pair {
             [a, b] => a.name < b.name,
             _ => true,
@@ -428,19 +468,24 @@ mod tests {
         Ok(functions.keys().cloned().collect())
     }
 
-    /// The served document's part of the table, function by function — the
-    /// supplement's functions are in no served document to compare with.
+    /// Second Life's served document's part of the table, function by
+    /// function — the supplement's functions are in no served document to
+    /// compare with, and OpenSim's are [`opensim_part_matches_its_document`]'s.
     #[test]
     fn the_generated_table_matches_an_independent_decoder() -> Result<(), String> {
         let syntax = decoded()?;
         let unserved = unserved()?;
+        let linden = || {
+            BUILTINS
+                .iter()
+                .filter(|descriptor| descriptor.family == Family::Linden)
+        };
         assert_eq!(
             syntax.functions.len().saturating_add(unserved.len()),
-            BUILTINS.len()
+            linden().count()
         );
-        for descriptor in BUILTINS
-            .iter()
-            .filter(|descriptor| !unserved.iter().any(|name| name == descriptor.name))
+        for descriptor in
+            linden().filter(|descriptor| !unserved.iter().any(|name| name == descriptor.name))
         {
             let function = syntax
                 .functions
@@ -484,8 +529,12 @@ mod tests {
         // Every constant but the `default` placeholder, with the served text
         // cast by the runtime's own LSL parsers — except the escaped strings
         // the table decodes.
-        assert_eq!(syntax.constants.len(), CONSTANTS.len().saturating_add(1));
-        for constant in &CONSTANTS {
+        let linden_constants = || CONSTANTS.iter().filter(|constant| !constant.opensim_only);
+        assert_eq!(
+            syntax.constants.len(),
+            linden_constants().count().saturating_add(1)
+        );
+        for constant in linden_constants() {
             let decoded = syntax.constants.get(constant.name).ok_or(constant.name)?;
             assert_eq!(
                 decoded.constant_type,
@@ -500,6 +549,65 @@ mod tests {
                     .map_err(|error| error.to_string())?;
                 assert_eq!(parsed, constant.value.to_value(), "{}", constant.name);
             }
+        }
+        Ok(())
+    }
+
+    /// OpenSim's part of the table against its document as `sl-wire`'s
+    /// decoder reads it: every function only OpenSim has is in the table,
+    /// one of its overloads with the decoder's signature (the decoder keeps
+    /// one entry of a name), and in the family its prefix says; every
+    /// constant only OpenSim has with the decoder's type.
+    #[test]
+    fn opensim_part_matches_its_document() -> Result<(), String> {
+        let file = include_str!("../opensim/ScriptSyntax.xml");
+        let (_id, text) = file.split_once('\n').ok_or("no syntax id line")?;
+        let document = sl_wire::parse_llsd_xml(text).map_err(|error| error.to_string())?;
+        let syntax = sl_wire::parse_lsl_syntax(&document).map_err(|error| error.to_string())?;
+        let mut checked = 0_usize;
+        for (name, function) in &syntax.functions {
+            let ours = overloads(name);
+            let Some(first) = ours.first() else {
+                return Err(format!("{name} is not in the table"));
+            };
+            if first.family == Family::Linden {
+                continue;
+            }
+            let family = match name.get(..2) {
+                Some("os") => Family::Ossl,
+                Some("ls") => Family::LightShare,
+                _ => Family::OpenSim,
+            };
+            assert_eq!(first.family, family, "{name}");
+            let types: Vec<Option<TypeName>> =
+                function.arguments.iter().map(|a| a.arg_type).collect();
+            assert!(
+                ours.iter().any(|overload| {
+                    overload.ret == function.return_type
+                        && overload.args.iter().map(|a| Some(a.ty)).collect::<Vec<_>>() == types
+                }),
+                "{name}"
+            );
+            checked = checked.saturating_add(1);
+        }
+        assert_eq!(checked, 228);
+        for constant in CONSTANTS.iter().filter(|constant| constant.opensim_only) {
+            let decoded = syntax.constants.get(constant.name).ok_or(constant.name)?;
+            assert_eq!(
+                decoded.constant_type,
+                Some(constant.value.type_name()),
+                "{}",
+                constant.name
+            );
+        }
+        // The supplement's: the MOD family and the OSSL functions the document
+        // leaves out.
+        for (name, family) in [
+            ("modSendCommand", Family::Mod),
+            ("osListenRegex", Family::Ossl),
+            ("osTriggerSoundLimited", Family::Ossl),
+        ] {
+            assert_eq!(builtin(name).map(|b| b.family), Some(family), "{name}");
         }
         Ok(())
     }
@@ -642,13 +750,41 @@ mod tests {
         Ok(entries)
     }
 
+    /// The committed scope of OpenSim's own library: function name to
+    /// `in`, `later` or `out`.
+    fn opensim_scope() -> Result<BTreeMap<&'static str, &'static str>, String> {
+        let mut entries = BTreeMap::new();
+        for line in include_str!("library/opensim-scope.txt").lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            let fields: Vec<&str> = line.split_whitespace().collect();
+            let (scope, name) = match fields.as_slice() {
+                ["in", name] => ("in", *name),
+                ["later" | "out", _why, name] => (fields.first().copied().unwrap_or(""), *name),
+                _ => return Err(format!("opensim-scope.txt: `{line}`")),
+            };
+            if builtin(name).is_none_or(|builtin| !builtin.family.is_opensim()) {
+                return Err(format!("opensim-scope.txt: no OpenSim function `{name}`"));
+            }
+            if entries.insert(name, scope).is_some() {
+                return Err(format!("opensim-scope.txt: `{name}` twice"));
+            }
+        }
+        Ok(entries)
+    }
+
     #[test]
     fn coverage_never_regresses() -> Result<(), String> {
         let baseline = baseline()?;
         let mut counts: BTreeMap<Status, usize> = BTreeMap::new();
         let mut regressed = Vec::new();
         let mut unlisted = Vec::new();
-        for descriptor in &BUILTINS {
+        let linden = BUILTINS
+            .iter()
+            .filter(|descriptor| descriptor.family == Family::Linden);
+        for descriptor in linden.clone() {
             let now = status(descriptor.id);
             let entry = counts.entry(now).or_default();
             *entry = entry.saturating_add(1);
@@ -668,13 +804,48 @@ mod tests {
             count(Status::Implemented),
             count(Status::Stubbed),
             count(Status::Missing),
-            BUILTINS.len()
+            linden.count()
+        );
+
+        // OpenSim's own families are held to their scope instead: what is
+        // in is implemented, overload by overload, and nothing else is.
+        let scope = opensim_scope()?;
+        let mut scoped: BTreeMap<&str, usize> = BTreeMap::new();
+        for descriptor in BUILTINS
+            .iter()
+            .filter(|descriptor| descriptor.family.is_opensim())
+        {
+            let Some(in_scope) = scope.get(descriptor.name).copied() else {
+                unlisted.push(format!(
+                    "{} has no line in opensim-scope.txt",
+                    descriptor.name
+                ));
+                continue;
+            };
+            let implemented = status(descriptor.id) == Status::Implemented;
+            if in_scope == "in" && !implemented {
+                regressed.push(format!(
+                    "{} ({:?} is in scope)",
+                    descriptor.name, descriptor.id
+                ));
+            } else if in_scope != "in" && implemented {
+                unlisted.push(format!("{} is implemented: mark it `in`", descriptor.name));
+            }
+            if overloads(descriptor.name).first().map(|first| first.id) == Some(descriptor.id) {
+                let entry = scoped.entry(in_scope).or_default();
+                *entry = entry.saturating_add(1);
+            }
+        }
+        let scoped_count = |scope| scoped.get(scope).copied().unwrap_or(0);
+        eprintln!(
+            "OpenSim's own library: {} implemented / {} planned / {} out of scope of {}",
+            scoped_count("in"),
+            scoped_count("later"),
+            scoped_count("out"),
+            scope.len()
         );
         if !unlisted.is_empty() {
-            eprintln!(
-                "not yet in coverage.txt (add them): {}",
-                unlisted.join(", ")
-            );
+            eprintln!("list them: {}", unlisted.join(", "));
         }
         if regressed.is_empty() {
             Ok(())

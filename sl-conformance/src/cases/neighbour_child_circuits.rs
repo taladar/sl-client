@@ -102,38 +102,53 @@ impl GridTest for NeighbourChildCircuits {
             let east = east_region_handle(ctx)?;
             let started = std::time::Instant::now();
             let session = ctx.primary();
-            session.wait_for_region(REGION_TIMEOUT).await?;
 
-            // 1. The announcement, and the simulator address it names — the key
-            //    the child circuit is opened under.
-            let sim = session
-                .wait_for(NEIGHBOUR_TIMEOUT, |event| match event {
-                    Event::NeighborDiscovered(info) if info.region_handle == east => Some(info.sim),
-                    _other => None,
-                })
-                .await?;
-
-            // 2. The seed capability for that same simulator.
-            let seed_sim = session
-                .wait_for(NEIGHBOUR_TIMEOUT, |event| match event {
-                    Event::NeighborSeed { sim: from, .. } => Some(*from),
-                    _other => None,
-                })
-                .await?;
-            check_eq("neighbour seed simulator", &seed_sim, &sim)?;
-
-            // 3. An object stamped with the neighbour's handle: the child
-            //    circuit is not merely open, it is carrying the region.
-            let local_id = session
-                .wait_for(NEIGHBOUR_TIMEOUT, |event| match event {
-                    Event::ObjectAdded(object) | Event::ObjectUpdated(object)
-                        if object.region_handle == east =>
-                    {
-                        Some(object.local_id)
+            // The region coming up, the announcement and the simulator address it names (the key
+            // the child circuit is opened under), the seed capability for a
+            // simulator, and an object stamped with the neighbour's handle —
+            // the child circuit is not merely open, it is carrying the region.
+            // Collected in one wait, in whatever order they arrive: the seed
+            // is an HTTP round trip the client makes on its own while the
+            // child circuit's UDP is already streaming, so under load the
+            // object can come first, and the announcement can come before the
+            // region's handshake completes: a wait for each in turn steps over
+            // whichever came early.
+            let mut ready = false;
+            let mut announced = None;
+            let mut seeded = None;
+            let mut streamed = None;
+            let collected = session
+                .wait_for(REGION_TIMEOUT.saturating_add(NEIGHBOUR_TIMEOUT), |event| {
+                    match event {
+                        Event::RegionHandshakeComplete | Event::RegionChanged { .. } => {
+                            ready = true;
+                        }
+                        Event::NeighborDiscovered(info) if info.region_handle == east => {
+                            announced = announced.or(Some(info.sim));
+                        }
+                        Event::NeighborSeed { sim: from, .. } => {
+                            seeded = seeded.or(Some(*from));
+                        }
+                        Event::ObjectAdded(object) | Event::ObjectUpdated(object)
+                            if object.region_handle == east =>
+                        {
+                            streamed = streamed.or(Some(object.local_id));
+                        }
+                        _other => {}
                     }
-                    _other => None,
+                    ready.then_some(())?;
+                    Some((announced?, seeded?, streamed?))
                 })
-                .await?;
+                .await;
+            // A timeout says which of the three never came.
+            let (sim, seed_sim, local_id) = collected.map_err(|failure| match failure {
+                TestFailure::Timeout(what) => TestFailure::Timeout(format!(
+                    "{what}: region ready {ready}, announced {announced:?}, seeded {seeded:?}, \
+                     streamed {streamed:?}"
+                )),
+                other => other,
+            })?;
+            check_eq("neighbour seed simulator", &seed_sim, &sim)?;
             check_eq(
                 "the neighbour's streamed object",
                 &local_id,

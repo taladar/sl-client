@@ -89,3 +89,31 @@ environment queries; what the library must hold to beyond the list above:
 - **The write half on land the owner does not own** (`llSetParcelMusicURL`)
   is silently ignored on both grids; `llGetParcelPrimOwners` answers `[]` on
   Second Life and the full list on OpenSim.
+
+## From server-lsl-lib-ossl (2026-11-01)
+
+OpenSim's own functions that shadow this tranche's are this tranche's to
+implement, on the OpenSim flavours only (Second Life does not compile them):
+LightShare's four functions (`lsGetWindlightScene` is what `ossl/errors` reads,
+its water colour answered by the test as the grid did), the wind, sun and
+environment readers and writers, the parcel and estate writers, the terrain
+writers and textures, the region map texture and statistics, and the region
+restart and notice. They are already in the library table with their signatures,
+compiled by OpenSim's dialect, and **gated**: `vm::ossl::admit` checks the
+region's `[OSSL]` settings before the function is looked for, so a denial is
+already right and only the allowed call is missing. Port each from `OSSL_Api.cs`
+(or `LS_Api.cs`), register it in `library/registry.rs` and move its line in
+`sl-lsl-runtime/src/library/opensim-scope.txt` to `in`, which the coverage test
+then holds; `ossl/available` and `ossl/errors` stop needing the answers their
+replay writes in for it (`vm/tests/ossl.rs`). The 35: `lsClearWindlightScene`,
+`lsGetWindlightScene`, `lsSetWindlightScene`, `lsSetWindlightSceneTargeted`,
+`osGetCurrentSunHour`, `osGetMapTexture`, `osGetParcelDwell`,
+`osGetRegionMapTexture`, `osGetRegionStats`, `osGetWindParam`, `osParcelJoin`,
+`osParcelSetDetails`, `osParcelSubdivide`, `osRegionNotice`, `osRegionRestart`,
+`osReplaceAgentEnvironment`, `osReplaceParcelEnvironment`,
+`osReplaceRegionEnvironment`, `osResetEnvironment`, `osSetEstateSunSettings`,
+`osSetParcelDetails`, `osSetParcelMediaURL`, `osSetParcelMusicURL`,
+`osSetParcelSIPAddress`, `osSetRegionSunSettings`, `osSetRegionWaterHeight`,
+`osSetSunParam`, `osSetTerrainHeight`, `osSetTerrainTexture`,
+`osSetTerrainTextureHeight`, `osSetWindParam`, `osSunSetParam`,
+`osTerrainFlush`, `osTerrainSetHeight`, `osWindActiveModelPluginName`.

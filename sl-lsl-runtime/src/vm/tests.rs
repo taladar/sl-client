@@ -24,6 +24,7 @@ mod linkset;
 mod math;
 mod memory;
 mod money;
+mod ossl;
 mod persistence;
 mod precision;
 mod strings;
@@ -108,6 +109,15 @@ struct Recorder {
     store_disabled: bool,
     /// `(caller, agent, link)` per avatar seated by `llSitOnLink`.
     sat: Vec<(CallerId, String, i32)>,
+    /// What the owner is in the region, but for the owner's key, which is
+    /// [`Host::owner`]'s.
+    standing: Standing,
+    /// The simulator and grid.
+    simulator: Simulator,
+    /// The ground's height everywhere in the region.
+    ground: f32,
+    /// Each avatar's address, by key.
+    addresses: std::collections::BTreeMap<String, String>,
 }
 
 /// The owner of every object a [`Recorder`] has, unless it says otherwise.
@@ -327,6 +337,47 @@ impl Host for Recorder {
         }
         self.sat.push((caller, agent.to_owned(), link));
         Ok(())
+    }
+
+    fn standing(&self, caller: CallerId) -> Standing {
+        Standing {
+            owner: self.owner(caller),
+            ..self.standing.clone()
+        }
+    }
+
+    fn simulator(&self) -> Simulator {
+        self.simulator.clone()
+    }
+
+    fn region_size(&self, _caller: CallerId) -> (u32, u32) {
+        (256, 256)
+    }
+
+    fn terrain_height(&self, _caller: CallerId, _x: u32, _y: u32) -> f32 {
+        self.ground
+    }
+
+    fn day_length(&self, _caller: CallerId) -> f32 {
+        14_400.0
+    }
+
+    fn prim_scripts(&self, prim: &str) -> Option<Vec<CallerId>> {
+        let (number, _) = self
+            .prim_keys
+            .iter()
+            .find(|(_, key)| key.eq_ignore_ascii_case(prim))?;
+        Some(
+            self.prims
+                .iter()
+                .filter(|(_, in_prim)| *in_prim == number)
+                .map(|(id, _)| *id)
+                .collect(),
+        )
+    }
+
+    fn agent_ip(&self, agent: &str) -> String {
+        self.addresses.get(agent).cloned().unwrap_or_default()
     }
 }
 

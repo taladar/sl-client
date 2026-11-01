@@ -84,6 +84,27 @@ pub(crate) fn is_uuid(text: &str) -> bool {
     }
 }
 
+/// A key `UUID.TryParse` accepts ([`is_uuid`]), in the canonical
+/// lower-case dashed form OpenMetaverse's `UUID.ToString` writes.
+pub(crate) fn canonical_uuid(text: &str) -> Option<String> {
+    if !is_uuid(text) {
+        return None;
+    }
+    let hex: String = text
+        .chars()
+        .filter(char::is_ascii_hexdigit)
+        .map(|character| character.to_ascii_lowercase())
+        .collect();
+    Some(format!(
+        "{}-{}-{}-{}-{}",
+        hex.get(..8)?,
+        hex.get(8..12)?,
+        hex.get(12..16)?,
+        hex.get(16..20)?,
+        hex.get(20..)?
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use pretty_assertions::assert_eq;
@@ -123,5 +144,18 @@ mod tests {
         assert!(!is_uuid(" 00000000-0000-0000-0000-000000000001"));
         assert!(!is_uuid("00000000-0000-0000-0000-00000000000"));
         assert!(!is_uuid("b"));
+    }
+
+    #[test]
+    fn uuids_written_as_openmetaverse_writes_them() {
+        assert_eq!(
+            canonical_uuid("{5748DECC-F629-461C-9A36-A35A221FE21F}").as_deref(),
+            Some("5748decc-f629-461c-9a36-a35a221fe21f")
+        );
+        assert_eq!(
+            canonical_uuid("00000000000000000000000000000001").as_deref(),
+            Some("00000000-0000-0000-0000-000000000001")
+        );
+        assert_eq!(canonical_uuid("nope"), None);
     }
 }

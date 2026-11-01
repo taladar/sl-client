@@ -1,0 +1,245 @@
+# The scope of OpenSim's own library on the fake grid (book chapter
+# `simulator/lsl-engine.md`, § OpenSim's own functions), read by the
+# coverage test in `library.rs`: one line per function of the OSSL,
+# LightShare and MOD families, all its overloads at once —
+#   in <function>                implemented, every overload;
+#   later <roadmap id> <function> planned, in that task;
+#   out <reason> <function>      not for this grid, the reason a word the
+#                                 book's scope section explains.
+
+in modSendCommand
+in osAngleBetween
+in osApproxEquals
+in osCheckODE
+in osDrawEllipse
+in osDrawFilledEllipse
+in osDrawFilledPolygon
+in osDrawFilledRectangle
+in osDrawImage
+in osDrawLine
+in osDrawPolygon
+in osDrawRectangle
+in osDrawResetTransform
+in osDrawRotationTransform
+in osDrawScaleTransform
+in osDrawText
+in osDrawTranslationTransform
+in osFormatString
+in osGetAgentIP
+in osGetGridName
+in osGetGridNick
+in osGetPhysicsEngineName
+in osGetPhysicsEngineType
+in osGetRegionSize
+in osGetScriptEngineName
+in osGetSimulatorVersion
+in osGetSunParam
+in osGetTerrainHeight
+in osIsNotValidNumber
+in osIsUUID
+in osListenRegex
+in osMatchString
+in osMax
+in osMessageObject
+in osMin
+in osMovePen
+in osRegexIsMatch
+in osReplaceString
+in osRound
+in osSHA256
+in osSetFontName
+in osSetFontSize
+in osSetPenCap
+in osSetPenColor
+in osSetPenColour
+in osSetPenSize
+in osSlerp
+in osStringRemove
+in osStringReplace
+in osStringSubString
+in osSunGetParam
+in osTerrainGetHeight
+in osUnixTimeToTimestamp
+in osVecDistSquare
+in osVecMagSquare
+later server-lsl-lib-avatar-control osAgentSaveAppearance
+later server-lsl-lib-avatar-control osAvatarName2Key
+later server-lsl-lib-avatar-control osAvatarPlayAnimation
+later server-lsl-lib-avatar-control osAvatarStopAnimation
+later server-lsl-lib-avatar-control osAvatarType
+later server-lsl-lib-avatar-control osCauseDamage
+later server-lsl-lib-avatar-control osCauseHealing
+later server-lsl-lib-avatar-control osDropAttachment
+later server-lsl-lib-avatar-control osDropAttachmentAt
+later server-lsl-lib-avatar-control osEjectFromGroup
+later server-lsl-lib-avatar-control osForceAttachToAvatar
+later server-lsl-lib-avatar-control osForceAttachToAvatarFromInventory
+later server-lsl-lib-avatar-control osForceAttachToOtherAvatarFromInventory
+later server-lsl-lib-avatar-control osForceDetachFromAvatar
+later server-lsl-lib-avatar-control osForceDropAttachment
+later server-lsl-lib-avatar-control osForceDropAttachmentAt
+later server-lsl-lib-avatar-control osForceOtherSit
+later server-lsl-lib-avatar-control osGetGender
+later server-lsl-lib-avatar-control osGetHealRate
+later server-lsl-lib-avatar-control osGetHealth
+later server-lsl-lib-avatar-control osGetLinkSitActiveRange
+later server-lsl-lib-avatar-control osGetLinkStandTarget
+later server-lsl-lib-avatar-control osGetNPCList
+later server-lsl-lib-avatar-control osGetNumberOfAttachments
+later server-lsl-lib-avatar-control osGetSitActiveRange
+later server-lsl-lib-avatar-control osGetStandTarget
+later server-lsl-lib-avatar-control osInviteToGroup
+later server-lsl-lib-avatar-control osIsNpc
+later server-lsl-lib-avatar-control osKey2Name
+later server-lsl-lib-avatar-control osKickAvatar
+later server-lsl-lib-avatar-control osLocalTeleportAgent
+later server-lsl-lib-avatar-control osMessageAttachments
+later server-lsl-lib-avatar-control osNpcCreate
+later server-lsl-lib-avatar-control osNpcGetOwner
+later server-lsl-lib-avatar-control osNpcGetPos
+later server-lsl-lib-avatar-control osNpcGetRot
+later server-lsl-lib-avatar-control osNpcLoadAppearance
+later server-lsl-lib-avatar-control osNpcLookAt
+later server-lsl-lib-avatar-control osNpcMoveTo
+later server-lsl-lib-avatar-control osNpcMoveToTarget
+later server-lsl-lib-avatar-control osNpcPlayAnimation
+later server-lsl-lib-avatar-control osNpcRemove
+later server-lsl-lib-avatar-control osNpcSaveAppearance
+later server-lsl-lib-avatar-control osNpcSay
+later server-lsl-lib-avatar-control osNpcSayTo
+later server-lsl-lib-avatar-control osNpcSetProfileAbout
+later server-lsl-lib-avatar-control osNpcSetProfileImage
+later server-lsl-lib-avatar-control osNpcSetRot
+later server-lsl-lib-avatar-control osNpcShout
+later server-lsl-lib-avatar-control osNpcSit
+later server-lsl-lib-avatar-control osNpcStand
+later server-lsl-lib-avatar-control osNpcStopAnimation
+later server-lsl-lib-avatar-control osNpcStopMoveToTarget
+later server-lsl-lib-avatar-control osNpcTouch
+later server-lsl-lib-avatar-control osNpcWhisper
+later server-lsl-lib-avatar-control osOwnerSaveAppearance
+later server-lsl-lib-avatar-control osSetHealRate
+later server-lsl-lib-avatar-control osSetHealth
+later server-lsl-lib-avatar-control osSetLinkSitActiveRange
+later server-lsl-lib-avatar-control osSetLinkStandTarget
+later server-lsl-lib-avatar-control osSetOwnerSpeed
+later server-lsl-lib-avatar-control osSetSitActiveRange
+later server-lsl-lib-avatar-control osSetSpeed
+later server-lsl-lib-avatar-control osSetStandTarget
+later server-lsl-lib-avatar-control osTeleportAgent
+later server-lsl-lib-avatar-control osTeleportOwner
+later server-lsl-lib-detection-sensors osGetAgents
+later server-lsl-lib-detection-sensors osGetAvatarList
+later server-lsl-lib-land-region-env lsClearWindlightScene
+later server-lsl-lib-land-region-env lsGetWindlightScene
+later server-lsl-lib-land-region-env lsSetWindlightScene
+later server-lsl-lib-land-region-env lsSetWindlightSceneTargeted
+later server-lsl-lib-land-region-env osGetCurrentSunHour
+later server-lsl-lib-land-region-env osGetMapTexture
+later server-lsl-lib-land-region-env osGetParcelDwell
+later server-lsl-lib-land-region-env osGetRegionMapTexture
+later server-lsl-lib-land-region-env osGetRegionStats
+later server-lsl-lib-land-region-env osGetWindParam
+later server-lsl-lib-land-region-env osParcelJoin
+later server-lsl-lib-land-region-env osParcelSetDetails
+later server-lsl-lib-land-region-env osParcelSubdivide
+later server-lsl-lib-land-region-env osRegionNotice
+later server-lsl-lib-land-region-env osRegionRestart
+later server-lsl-lib-land-region-env osReplaceAgentEnvironment
+later server-lsl-lib-land-region-env osReplaceParcelEnvironment
+later server-lsl-lib-land-region-env osReplaceRegionEnvironment
+later server-lsl-lib-land-region-env osResetEnvironment
+later server-lsl-lib-land-region-env osSetEstateSunSettings
+later server-lsl-lib-land-region-env osSetParcelDetails
+later server-lsl-lib-land-region-env osSetParcelMediaURL
+later server-lsl-lib-land-region-env osSetParcelMusicURL
+later server-lsl-lib-land-region-env osSetParcelSIPAddress
+later server-lsl-lib-land-region-env osSetRegionSunSettings
+later server-lsl-lib-land-region-env osSetRegionWaterHeight
+later server-lsl-lib-land-region-env osSetSunParam
+later server-lsl-lib-land-region-env osSetTerrainHeight
+later server-lsl-lib-land-region-env osSetTerrainTexture
+later server-lsl-lib-land-region-env osSetTerrainTextureHeight
+later server-lsl-lib-land-region-env osSetWindParam
+later server-lsl-lib-land-region-env osSunSetParam
+later server-lsl-lib-land-region-env osTerrainFlush
+later server-lsl-lib-land-region-env osTerrainSetHeight
+later server-lsl-lib-land-region-env osWindActiveModelPluginName
+later server-lsl-lib-time-timers osGetApparentRegionTime
+later server-lsl-lib-time-timers osGetApparentRegionTimeString
+later server-lsl-lib-time-timers osGetApparentTime
+later server-lsl-lib-time-timers osGetApparentTimeString
+later server-lsl-lib-time-timers osGetPSTWallclock
+later server-lsl-lib-task-inventory osDie
+later server-lsl-lib-task-inventory osGetInventoryDesc
+later server-lsl-lib-task-inventory osGetInventoryItemKey
+later server-lsl-lib-task-inventory osGetInventoryLastOwner
+later server-lsl-lib-task-inventory osGetInventoryName
+later server-lsl-lib-task-inventory osGetLastChangedEventKey
+later server-lsl-lib-task-inventory osGetNotecard
+later server-lsl-lib-task-inventory osGetNotecardLine
+later server-lsl-lib-task-inventory osGetNumberOfNotecardLines
+later server-lsl-lib-task-inventory osGetRezzingObject
+later server-lsl-lib-task-inventory osLoadedCreationDate
+later server-lsl-lib-task-inventory osLoadedCreationID
+later server-lsl-lib-task-inventory osLoadedCreationTime
+later server-lsl-lib-task-inventory osMakeNotecard
+later server-lsl-lib-task-inventory osResetAllScripts
+later server-lsl-lib-prim-state osAdjustSoundVolume
+later server-lsl-lib-prim-state osClearObjectAnimations
+later server-lsl-lib-prim-state osCollisionSound
+later server-lsl-lib-prim-state osForceBreakAllLinks
+later server-lsl-lib-prim-state osForceBreakLink
+later server-lsl-lib-prim-state osForceCreateLink
+later server-lsl-lib-prim-state osGetLinkNumber
+later server-lsl-lib-prim-state osGetLinkPrimitiveParams
+later server-lsl-lib-prim-state osGetPrimitiveParams
+later server-lsl-lib-prim-state osLinkParticleSystem
+later server-lsl-lib-prim-state osLoopSound
+later server-lsl-lib-prim-state osLoopSoundMaster
+later server-lsl-lib-prim-state osLoopSoundSlave
+later server-lsl-lib-prim-state osParticleSystem
+later server-lsl-lib-prim-state osPlaySound
+later server-lsl-lib-prim-state osPlaySoundSlave
+later server-lsl-lib-prim-state osPreloadSound
+later server-lsl-lib-prim-state osSetPrimitiveParams
+later server-lsl-lib-prim-state osSetProjectionParams
+later server-lsl-lib-prim-state osSetSoundRadius
+later server-lsl-lib-prim-state osStopSound
+later server-lsl-lib-prim-state osTriggerSound
+later server-lsl-lib-prim-state osTriggerSoundLimited
+later server-lsl-lib-physics-vehicles osClearInertia
+later server-lsl-lib-physics-vehicles osGetInertiaData
+later server-lsl-lib-physics-vehicles osSetInertia
+later server-lsl-lib-physics-vehicles osSetInertiaAsBox
+later server-lsl-lib-physics-vehicles osSetInertiaAsCylinder
+later server-lsl-lib-physics-vehicles osSetInertiaAsSphere
+later server-lsl-lib-physics-vehicles osSetPrimFloatOnWater
+later server-lsl-lib-physics-vehicles osTeleportObject
+later server-lsl-lib-physics-vehicles osVolumeDetect
+later server-lsl-lib-http-url osRequestSecureURL
+later server-lsl-lib-http-url osRequestURL
+later server-lsl-lib-http-url osSetContentType
+later server-lsl-ossl-culture-strings osListSortInPlace
+later server-lsl-ossl-culture-strings osStringEndsWith
+later server-lsl-ossl-culture-strings osStringIndexOf
+later server-lsl-ossl-culture-strings osStringLastIndexOf
+later server-lsl-ossl-culture-strings osStringStartsWith
+later server-fake-grid-dynamic-textures osGetDrawStringSize
+later server-fake-grid-dynamic-textures osSetDynamicTextureData
+later server-fake-grid-dynamic-textures osSetDynamicTextureDataBlend
+later server-fake-grid-dynamic-textures osSetDynamicTextureDataBlendFace
+later server-fake-grid-dynamic-textures osSetDynamicTextureDataFace
+later server-fake-grid-dynamic-textures osSetDynamicTextureURL
+later server-fake-grid-dynamic-textures osSetDynamicTextureURLBlend
+later server-fake-grid-dynamic-textures osSetDynamicTextureURLBlendFace
+out console osConsoleCommand
+out host-process osGetSimulatorMemory
+out host-process osGetSimulatorMemoryKB
+out grid-services osDetectedCountry
+out grid-services osGetAgentCountry
+out grid-services osGetAvatarHomeURI
+out grid-services osGetGridCustom
+out grid-services osGetGridGatekeeperURI
+out grid-services osGetGridHomeURI
+out grid-services osGetGridLoginURI

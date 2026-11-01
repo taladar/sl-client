@@ -56,9 +56,11 @@ const SECOND_LIFE_ID: Uuid = Uuid::from_u128(0xdc54_9834_e9a2_9600_94ce_019d_78e
 /// [`SECOND_LIFE_DOCUMENT`] (`records/aditi/simulator-features.toml`).
 const SECOND_LIFE_VERSION: &str = "0.6.12";
 
-/// OpenSim's `bin/ScriptSyntax.xml`, vendored verbatim (BSD, see
-/// `lsl-syntax/README.md`): the id on its first line, the document after it.
-const OPEN_SIM_FILE: &str = include_str!("../lsl-syntax/ScriptSyntax.xml");
+/// OpenSim's `bin/ScriptSyntax.xml`, vendored verbatim beside the script
+/// engine, which builds OpenSim's part of its library table from it (BSD, see
+/// `sl-lsl-runtime/opensim/README.md`): the id on its first line, the document
+/// after it.
+const OPEN_SIM_FILE: &str = include_str!("../../sl-lsl-runtime/opensim/ScriptSyntax.xml");
 
 /// [`LslSyntaxDocument::second_life`], shared by every session.
 static SECOND_LIFE: LazyLock<LslSyntaxDocument> = LazyLock::new(|| LslSyntaxDocument {

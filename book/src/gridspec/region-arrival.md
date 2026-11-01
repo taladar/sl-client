@@ -227,7 +227,8 @@ into it. The script syntax goes in beside the document it names
 as aditi served it on 2026-10-26 (`sl-lsl-runtime/keywords_lsl_default.xml`,
 the same copy the script engine's library table is built from) under the id
 and version advertised for it there, and the OpenSim flavour serves its
-vendored `ScriptSyntax.xml` (`sl-fake-grid/lsl-syntax/`) the way OpenSim does:
+vendored `ScriptSyntax.xml` (`sl-lsl-runtime/opensim/`, which OpenSim's part
+of the engine's table is built from too) the way OpenSim does:
 the id from the first line, every later line trimmed and joined, comment lines
 dropped. Both are the live documents rather than one rendered from the
 engine's table, because a viewer's editor is built from what the grid serves,

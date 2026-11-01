@@ -196,7 +196,14 @@ constants or the `linkset_data` event, and none of the fourteen experience
 functions (`llClearExperiencePermissions` and `llGetExperienceList` among
 them), the `XP_ERROR_*` constants, `llSitOnLink`'s `SIT_*` results or the two
 `experience_permissions*` events. Which of the rest of the library OpenSim
-lacks is unmeasured, so the rest compiles. The fake
+lacks is unmeasured, so the rest compiles. OpenSim's own families — OSSL,
+LightShare and MOD — and the constants only its document lists compile in
+that dialect alone; Second Life knows none of them (`Name not defined within
+scope`, [§ OSSL](../gridspec/lsl.md#ossl)). Some of OpenSim's functions are
+**overloaded** (`osApproxEquals` six ways, `osTeleportAgent` three), and the
+lowering picks the overload as YEngine does: the call's arity first, then
+argument by argument the overloads whose parameter is the argument's type, or
+failing that one it converts to. The fake
 grid compiles every script upload this way (`sl_fake_grid::script_compile`).
 
 The `Program` (module `bytecode`) holds the globals, a literal pool, one
@@ -790,6 +797,88 @@ from the sketch above:
   experience is answered is Linden Lab's documentation, unmeasured, and the
   module says so rule by rule (`gridspec-lsl-in-experience`).
 
+### OpenSim's own functions
+
+OpenSim's engines compile three families Second Life has not got — OSSL
+(`os*`), LightShare (`ls*`) and MOD (`mod*`) — 236 functions, and the
+scripted content of an OpenSim region leans on them. They are in the one
+table: generated from OpenSim's own served document
+(`sl-lsl-runtime/opensim/ScriptSyntax.xml`, every overload an entry of its
+own: `BuiltinId::OsApproxEquals` … `OsApproxEquals6`) and its supplement of the
+functions it compiles and leaves out (`ossl-unserved.xml`: `osListenRegex`,
+`modSendCommand`, five more), each descriptor marked with its `Family` and the
+`Gate` OpenSim checks before it runs (`ossl-checks.txt`, derived from
+`OSSL_Api.cs` by `extract_ossl_checks.py`).
+
+**The gate is OpenSim's permission model, flattened nowhere.** Before an
+OpenSim flavour runs one of these, `vm::ossl::admit` does what
+`OSSL_Api.CheckThreatLevel` does, against the region's `[OSSL]` settings
+(`vm::ossl::Settings`, the stock `osslDefaultEnable.ini` the local grid runs
+unless the host sets another with `Engine::set_ossl`) and what the script's
+owner is in the region (`Host::standing`: estate owner or manager, parcel
+owner or group, a god; the owner and creator keys). An `Allow_` line wins over
+the threat level both ways, `false` disables, a list admits those on it
+(`ESTATE_MANAGER` being a manager who is not the owner), `Creators_` admits a
+script's creator, and a function with no line is held to
+`OSFunctionThreatLevel`. A refusal is thrown in OpenSim's words —
+`OSSL Permission Error: <fn> permission denied.  Allowed threat level is …`,
+`<fn> permission denied.`, `<fn> disabled in region configuration` — and
+reported as each engine reports a script exception (YEngine holds the script
+until a reset, XEngine runs on; to the owner alone under
+`PermissionErrorToOwner`). It is checked *before* the function is looked for,
+so a denied function the grid has not written is denied all the same, as the
+probes need. A deprecated function, and the few that refuse an argument
+rather than throw, shout on `DEBUG_CHANNEL` (`ScriptCtx::shout_error`, heard by
+avatars and scripts alike) and sleep the script a second, as `OSSLShoutError`
+does; LightShare and MOD switched off shout and answer nothing.
+
+**The scope** is a line per function in `library/opensim-scope.txt`, which the
+coverage test holds the registry to (`55 implemented / 171 planned / 10 out of
+scope of 236` as this was written):
+
+- **In, now** — everything that touches nothing the fake grid lacks: the
+  string, regular-expression, hash and number functions (`osFormatString`,
+  `osMatchString`, `osReplaceString`, `osRegexIsMatch`, `osStringSubString`,
+  `osSHA256`, `osRound`, `osApproxEquals`, `osSlerp`, …); the drawing-list
+  builders (`osDrawText`, `osMovePen`, `osSetPenColor`, …), which only write
+  commands down; the engine's and the simulator's identity
+  (`osGetScriptEngineName`, `osGetSimulatorVersion`, `osGetGridName`, the
+  physics engine's — `Host::simulator`); the region's size and ground
+  (`Host::region_size`, `Host::terrain_height`) and the day's length
+  (`Host::day_length`) the probes read; `osGetAgentIP` (empty for all but a
+  god's script, `Host::agent_ip`); `osListenRegex` (a listen whose name or
+  message is a regular expression, `ListenFilter::regex`); `osMessageObject`
+  (`dataserver` in another prim's scripts, `Host::prim_scripts`); and
+  `modSendCommand` (a fresh key no module answers, the fake grid running none).
+  The patterns are the `regex` crate's, which .NET's agree with but for its
+  backreferences and lookaround: a pattern using those is refused as one that
+  does not parse.
+- **Later, with the tranche of the `ll*` functions they shadow** — the NPC
+  family, avatar animation, attachment, teleport and sitting functions
+  (`server-lsl-lib-avatar-control`, which has the NPC fixtures to answer
+  them); `osGetAgents` and `osGetAvatarList` (detection); the parcel, estate,
+  environment, wind, sun and terrain writers and LightShare
+  (`server-lsl-lib-land-region-env`); the apparent time and the wallclock
+  (`server-lsl-lib-time-timers`); notecards, inventory and the rezzing object
+  (`server-lsl-lib-task-inventory`); prim parameters, links, particles and
+  sounds (`server-lsl-lib-prim-state`); inertia and object teleports
+  (`server-lsl-lib-physics-vehicles`); URLs (`server-lsl-lib-http-url`). Two
+  new tasks take the rest: .NET's culture-sensitive string search and the
+  in-place list sort (`server-lsl-ossl-culture-strings`), and the dynamic
+  textures every OpenSim sign is drawn with
+  (`server-fake-grid-dynamic-textures`).
+- **Out** — `osConsoleCommand` (the region console, which the fake grid has
+  not got: `console`); `osGetSimulatorMemory*` (the host process's memory,
+  meaningless for an in-process grid: `host-process`); and the readers of the
+  grid services the fake grid does not run — the grid's and an avatar's home,
+  gatekeeper and login URIs, the custom grid info, an agent's country
+  (`grid-services`). Each is still compiled and gated, so a script calling
+  one is denied, or fails, exactly where OpenSim's would.
+
+The served `LSLSyntax` document stays OpenSim's own for the OpenSim flavour
+(`sl_fake_grid::script_syntax`), every function listed whatever the region
+allows, as a viewer sees on the local grid.
+
 **`ScriptCtx`, not `&mut Vm`.** A library function sees the calling
 instance through a narrow context — which script is calling, the current
 tick, the current event's detected block, the instance's accounted
@@ -826,7 +915,9 @@ permissions and money tranche added `owner`, `seated_on`, `ask_permissions`
 `set_pay_price`. The experiences tranche added `experience`,
 `experience_details`, `admission`, `ask_experience`, `key_value_store` and
 `sit_on_link` (the sit target search and parcel access, answered with a
-`SitRefusal`).
+`SitRefusal`). OpenSim's own functions added `standing` (what the script's
+owner is, for the `[OSSL]` permission check), `simulator`, `region_size`,
+`terrain_height`, `day_length`, `prim_scripts` and `agent_ip`.
 The methods the first tranches need — chat and listens, identity, position,
 hover text, and the seeded randomness and clock the determinism rule requires —
 are enough to fix its shape:

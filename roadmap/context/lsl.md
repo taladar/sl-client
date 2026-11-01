@@ -176,9 +176,12 @@ the two observable streams diffed
 
 ## Non-goals
 
-- **OSSL parity.** The `os*` surface is OpenSim-specific and mostly
-  god-level; it gets one scoping task ([[server-lsl-lib-ossl]]) and no
-  commitment.
+- **OSSL parity for its own sake.** The `os*` surface is OpenSim-specific;
+  its scope ([[server-lsl-lib-ossl]], 2026-11-01) runs what the fake grid can
+  run, gated by OpenSim's own permission model, hands the world-touching
+  functions to the tranches of the `ll*` functions they shadow, and leaves out
+  only what reads services the fake grid does not have (the region console,
+  the host process, the grid's ROBUST services).
 - **Bytecode compatibility.** Nothing here reads or writes LSO bytecode or
   Mono assemblies. Scripts are compiled from source every time; the asset
   is the source, as it is on the wire.

@@ -31,9 +31,10 @@ The *compile-time* half — which combinations are legal and what type each
 produces — is `sl_lsl::types`, and a test here runs every combination through
 both and checks they agree.
 
-And the **library table** (`library`): every `ll*` function (428), constant
-(709) and event (38), generated at build time, with a typed dispatch that makes
-an implementation at the wrong arity or argument types a compile error, and a
+And the **library table** (`library`): every `ll*` function, constant and
+event, and OpenSim's own families beside them, generated at build time, with
+a typed dispatch that makes an implementation at the wrong arity or argument
+types a compile error, and a
 coverage test that prints `implemented / stubbed / missing` and fails only if a
 function falls back from the committed baseline (`src/library/coverage.txt`).
 
@@ -98,6 +99,17 @@ it and let the tests say what moved: a test decodes the same file through
 `sl-wire`'s independent `LSLSyntax` decoder and compares every function, event
 and constant with the generated table (the supplement's functions apart, which
 another test holds to tailslide's signatures).
+
+OpenSim's engines compile more than that: its own OSSL (`os*`), LightShare
+(`ls*`) and MOD (`mod*`) families and the constants only its document lists.
+They come from `opensim/` (provenance in `opensim/README.md`): OpenSim's own
+served document, `ScriptSyntax.xml`, with every overload of a function an
+entry of its own; `ossl-unserved.xml`, the functions it compiles and leaves
+out; and `ossl-checks.txt`, the permission check each OSSL function makes,
+derived from `OSSL_Api.cs`. The table marks each such entry with its family,
+which Second Life's compiler refuses, and the coverage test holds them to the
+scope in `src/library/opensim-scope.txt`. The stock `osslDefaultEnable.ini`
+beside them is the `[OSSL]` configuration a region runs by default.
 
 The oracles are LSL PyOptimizer's `lslopt/lslbasefuncs.py` and its
 `unit_tests/expr.suite` expected outputs, which were measured against Second

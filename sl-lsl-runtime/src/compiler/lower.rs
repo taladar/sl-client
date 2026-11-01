@@ -1457,7 +1457,18 @@ impl<'source> Lowerer<'source> {
                         ret: None,
                     });
                 (Target::User(id), signature.params, signature.ret)
-            } else if let Some(builtin) = self.builtin(&callee.name) {
+            } else if let Some(first) = self.builtin(&callee.name) {
+                // An overloaded function (OpenSim's) is the overload of the
+                // call's arity; several of one arity are told apart by the
+                // arguments' types.
+                let fitting: Vec<&'static library::Builtin> = library::overloads(&callee.name)
+                    .iter()
+                    .filter(|builtin| builtin.args.len() == args.len())
+                    .collect();
+                if fitting.len() > 1 {
+                    return self.call_overloaded(&fitting, args, span);
+                }
+                let builtin = fitting.first().copied().unwrap_or(first);
                 (
                     Target::Builtin(builtin.id),
                     builtin.args.iter().map(|arg| arg.ty).collect(),
@@ -1529,6 +1540,56 @@ impl<'source> Lowerer<'source> {
             }
         }
         ret.map_or(Ty::Void, Ty::Value)
+    }
+
+    /// A call of one of several `overloads` of a library function, all of the
+    /// call's arity, as YEngine picks among them: argument by argument, the
+    /// overloads whose parameter is the argument's type, or failing that one
+    /// it converts to (an integer to a float, a string to a key); the first
+    /// of what is left where it is still open.
+    fn call_overloaded(
+        &mut self,
+        overloads: &[&'static library::Builtin],
+        args: &[Expr],
+        span: &Range<usize>,
+    ) -> Ty {
+        let mut left: Vec<&'static library::Builtin> = overloads.to_vec();
+        let param =
+            |builtin: &library::Builtin, index: usize| builtin.args.get(index).map(|arg| arg.ty);
+        for (index, arg) in args.iter().enumerate() {
+            let found = self.expr(arg);
+            if let Ty::Value(from) = found {
+                let exact: Vec<_> = left
+                    .iter()
+                    .copied()
+                    .filter(|builtin| param(builtin, index) == Some(from))
+                    .collect();
+                let converting: Vec<_> = left
+                    .iter()
+                    .copied()
+                    .filter(|builtin| {
+                        param(builtin, index).is_some_and(|to| types::implicitly_converts(from, to))
+                    })
+                    .collect();
+                if !exact.is_empty() {
+                    left = exact;
+                } else if !converting.is_empty() {
+                    left = converting;
+                }
+            }
+            let Some(to) = left.first().and_then(|builtin| param(builtin, index)) else {
+                continue;
+            };
+            left.retain(|builtin| param(builtin, index) == Some(to));
+            let name = left.first().map_or("", |builtin| builtin.name);
+            let what = format!("argument {} of `{name}`", index.saturating_add(1));
+            let _converted = self.coerce(found, to, &arg.span(), Kind::FunctionMismatch, &what);
+        }
+        let Some(chosen) = left.first() else {
+            return Ty::Error;
+        };
+        self.emit(Instr::CallBuiltin(chosen.id), span);
+        chosen.ret.map_or(Ty::Void, Ty::Value)
     }
 
     /// OpenSim's `llSetPayPrice` pads the very list it is given with

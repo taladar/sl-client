@@ -3,6 +3,7 @@
 use crate::bytecode::Position;
 use crate::error::{Division, ValueError};
 use crate::library::{BuiltinId, CallError, Exception};
+use crate::vm::ossl::Thrown;
 
 /// Why a script stopped with an error.
 ///
@@ -54,6 +55,15 @@ pub enum RuntimeError {
         /// What it threw.
         exception: Exception,
     },
+    /// A library function threw a script error of OpenSim's own: an OSSL
+    /// permission or run-time error, its text the engine's message.
+    #[error("{}", thrown.text)]
+    Thrown {
+        /// The function that threw.
+        function: BuiltinId,
+        /// What it threw.
+        thrown: Thrown,
+    },
     /// Second Life's script opened one listen more than it may hold
     /// ([`SECOND_LIFE_LISTENS`](crate::vm::SECOND_LIFE_LISTENS)).
     #[error("Too Many Listens")]
@@ -88,6 +98,10 @@ impl From<CallError> for RuntimeError {
             CallError::Exception { id, exception } => Self::Exception {
                 function: id,
                 exception,
+            },
+            CallError::Thrown { id, thrown } => Self::Thrown {
+                function: id,
+                thrown,
             },
             other @ (CallError::Arity { .. } | CallError::Argument { .. }) => {
                 Self::Internal(other.to_string())

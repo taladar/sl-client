@@ -94,3 +94,20 @@ the tables; what the flavours must differ in:
   channel and nothing else; neither grid clamps the linear motor at 30 m/s.
 - **Characters.** Second Life only (errors and `path_update` codes in the
   table); OpenSim does not compile a script that names them.
+
+## From server-lsl-lib-ossl (2026-11-01)
+
+OpenSim's own functions that shadow this tranche's are this tranche's to
+implement, on the OpenSim flavours only (Second Life does not compile them): The
+inertia functions, `osSetPrimFloatOnWater`, `osVolumeDetect` and
+`osTeleportObject`. They are already in the library table with their signatures,
+compiled by OpenSim's dialect, and **gated**: `vm::ossl::admit` checks the
+region's `[OSSL]` settings before the function is looked for, so a denial is
+already right and only the allowed call is missing. Port each from `OSSL_Api.cs`
+(or `LS_Api.cs`), register it in `library/registry.rs` and move its line in
+`sl-lsl-runtime/src/library/opensim-scope.txt` to `in`, which the coverage test
+then holds; `ossl/available` and `ossl/errors` stop needing the answers their
+replay writes in for it (`vm/tests/ossl.rs`). The 9: `osClearInertia`,
+`osGetInertiaData`, `osSetInertia`, `osSetInertiaAsBox`,
+`osSetInertiaAsCylinder`, `osSetInertiaAsSphere`, `osSetPrimFloatOnWater`,
+`osTeleportObject`, `osVolumeDetect`.

@@ -98,3 +98,26 @@ what the flavours must differ in:
 - **Effects.** Second Life names a missing sound or texture and a bad media
   parameter on the debug channel and refuses an over-long media URL; OpenSim
   is silent and keeps it.
+
+## From server-lsl-lib-ossl (2026-11-01)
+
+OpenSim's own functions that shadow this tranche's are this tranche's to
+implement, on the OpenSim flavours only (Second Life does not compile them):
+Prim parameters and links of other prims (`osGetPrimitiveParams`,
+`osSetPrimitiveParams`, `osGetLinkNumber`, `osForce*Link*`), projector
+parameters, particles, object animations and the `os*Sound*` family. They are
+already in the library table with their signatures, compiled by OpenSim's
+dialect, and **gated**: `vm::ossl::admit` checks the region's `[OSSL]` settings
+before the function is looked for, so a denial is already right and only the
+allowed call is missing. Port each from `OSSL_Api.cs` (or `LS_Api.cs`), register
+it in `library/registry.rs` and move its line in
+`sl-lsl-runtime/src/library/opensim-scope.txt` to `in`, which the coverage test
+then holds; `ossl/available` and `ossl/errors` stop needing the answers their
+replay writes in for it (`vm/tests/ossl.rs`). The 23: `osAdjustSoundVolume`,
+`osClearObjectAnimations`, `osCollisionSound`, `osForceBreakAllLinks`,
+`osForceBreakLink`, `osForceCreateLink`, `osGetLinkNumber`,
+`osGetLinkPrimitiveParams`, `osGetPrimitiveParams`, `osLinkParticleSystem`,
+`osLoopSound`, `osLoopSoundMaster`, `osLoopSoundSlave`, `osParticleSystem`,
+`osPlaySound`, `osPlaySoundSlave`, `osPreloadSound`, `osSetPrimitiveParams`,
+`osSetProjectionParams`, `osSetSoundRadius`, `osStopSound`, `osTriggerSound`,
+`osTriggerSoundLimited`.

@@ -125,3 +125,39 @@ the agent's admission and the link are the runtime's, and the sit itself is
 - **`llAttachToAvatarTemp`** of a non-owner is the other experience-only
   power (unmeasured; [[gridspec-lsl-in-experience]]).
 - The `experience/powers` replay, which this tranche left out.
+
+## From server-lsl-lib-ossl (2026-11-01)
+
+OpenSim's own functions that shadow this tranche's are this tranche's to
+implement, on the OpenSim flavours only (Second Life does not compile them):
+Most of them answer from the NPC fixtures the fake grid already has (`osNpc*`,
+`osIsNpc`, `osGetNPCList`), the rest are the avatar-side twins of this tranche's
+`ll*` functions: animation, attachment, sitting and stand targets, teleports,
+health and speed, group invitations and ejection, and `osKickAvatar`. They are
+already in the library table with their signatures, compiled by OpenSim's
+dialect, and **gated**: `vm::ossl::admit` checks the region's `[OSSL]` settings
+before the function is looked for, so a denial is already right and only the
+allowed call is missing. Port each from `OSSL_Api.cs` (or `LS_Api.cs`), register
+it in `library/registry.rs` and move its line in
+`sl-lsl-runtime/src/library/opensim-scope.txt` to `in`, which the coverage test
+then holds; `ossl/available` and `ossl/errors` stop needing the answers their
+replay writes in for it (`vm/tests/ossl.rs`). The 66: `osAgentSaveAppearance`,
+`osAvatarName2Key`, `osAvatarPlayAnimation`, `osAvatarStopAnimation`,
+`osAvatarType`, `osCauseDamage`, `osCauseHealing`, `osDropAttachment`,
+`osDropAttachmentAt`, `osEjectFromGroup`, `osForceAttachToAvatar`,
+`osForceAttachToAvatarFromInventory`, `osForceAttachToOtherAvatarFromInventory`,
+`osForceDetachFromAvatar`, `osForceDropAttachment`, `osForceDropAttachmentAt`,
+`osForceOtherSit`, `osGetGender`, `osGetHealRate`, `osGetHealth`,
+`osGetLinkSitActiveRange`, `osGetLinkStandTarget`, `osGetNPCList`,
+`osGetNumberOfAttachments`, `osGetSitActiveRange`, `osGetStandTarget`,
+`osInviteToGroup`, `osIsNpc`, `osKey2Name`, `osKickAvatar`,
+`osLocalTeleportAgent`, `osMessageAttachments`, `osNpcCreate`, `osNpcGetOwner`,
+`osNpcGetPos`, `osNpcGetRot`, `osNpcLoadAppearance`, `osNpcLookAt`,
+`osNpcMoveTo`, `osNpcMoveToTarget`, `osNpcPlayAnimation`, `osNpcRemove`,
+`osNpcSaveAppearance`, `osNpcSay`, `osNpcSayTo`, `osNpcSetProfileAbout`,
+`osNpcSetProfileImage`, `osNpcSetRot`, `osNpcShout`, `osNpcSit`, `osNpcStand`,
+`osNpcStopAnimation`, `osNpcStopMoveToTarget`, `osNpcTouch`, `osNpcWhisper`,
+`osOwnerSaveAppearance`, `osSetHealRate`, `osSetHealth`,
+`osSetLinkSitActiveRange`, `osSetLinkStandTarget`, `osSetOwnerSpeed`,
+`osSetSitActiveRange`, `osSetSpeed`, `osSetStandTarget`, `osTeleportAgent`,
+`osTeleportOwner`.

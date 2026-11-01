@@ -110,3 +110,18 @@ refused ones**, so a script retrying every half second is refused for as long
 as it keeps trying; 20 s of silence (not 15) give the whole 25 back. OpenSim
 refills its bucket of 3 by one a second and refusals do not drain it. The
 throttle per flavour is [[server-lsl-forced-delays-per-flavour]].
+
+## From server-lsl-lib-ossl (2026-11-01)
+
+OpenSim's own functions that shadow this tranche's are this tranche's to
+implement, on the OpenSim flavours only (Second Life does not compile them):
+`osRequestURL` and `osRequestSecureURL` (`llRequestURL` with options) and
+`osSetContentType`. They are already in the library table with their signatures,
+compiled by OpenSim's dialect, and **gated**: `vm::ossl::admit` checks the
+region's `[OSSL]` settings before the function is looked for, so a denial is
+already right and only the allowed call is missing. Port each from `OSSL_Api.cs`
+(or `LS_Api.cs`), register it in `library/registry.rs` and move its line in
+`sl-lsl-runtime/src/library/opensim-scope.txt` to `in`, which the coverage test
+then holds; `ossl/available` and `ossl/errors` stop needing the answers their
+replay writes in for it (`vm/tests/ossl.rs`). The 3: `osRequestSecureURL`,
+`osRequestURL`, `osSetContentType`.

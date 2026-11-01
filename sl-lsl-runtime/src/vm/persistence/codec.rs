@@ -24,8 +24,9 @@ use super::{
 /// What every saved script starts with.
 const MARK: [u8; 4] = *b"slSS";
 
-/// The version of the form this crate writes, and the only one it reads.
-const VERSION: u8 = 1;
+/// The version of the form this crate writes, and the only one it reads: 2
+/// since a listen carries `osListenRegex`'s flags.
+const VERSION: u8 = 2;
 
 /// Why bytes are not a saved script.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -507,6 +508,7 @@ impl Writer {
             self.str(&listen.filter.name);
             self.opt_str(listen.filter.speaker.as_deref());
             self.str(&listen.filter.message);
+            self.i32(listen.filter.regex);
             self.bool(listen.active);
         }
     }
@@ -787,6 +789,7 @@ impl Reader<'_> {
                 name: self.str()?,
                 speaker: self.opt_str()?,
                 message: self.str()?,
+                regex: self.i32()?,
             };
             listens.push(Listen {
                 handle,
