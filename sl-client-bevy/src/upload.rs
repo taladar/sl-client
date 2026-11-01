@@ -295,10 +295,18 @@ pub(crate) fn caps_upload_step(
         .header("Content-Type", content_type)
         .body(body)
         .send()
-        .map_err(|error| format!("upload request failed: {error}"))?;
-    let text = response
-        .text()
-        .map_err(|error| format!("upload response read failed: {error}"))?;
+        .map_err(|error| {
+            format!(
+                "upload request failed: {}",
+                sl_client_common::error_chain::error_chain(&error)
+            )
+        })?;
+    let text = response.text().map_err(|error| {
+        format!(
+            "upload response read failed: {}",
+            sl_client_common::error_chain::error_chain(&error)
+        )
+    })?;
     parse_asset_upload_response(&text)
         .map_err(|error| format!("upload response parse failed: {error}"))
 }

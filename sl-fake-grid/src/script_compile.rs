@@ -29,6 +29,12 @@
 //! grid is *when* a source is refused and where, not the wording. Where a
 //! position cannot follow the grid exactly it is said at the test that holds
 //! the rest (`sl-conformance`'s `script-compile` tables).
+//!
+//! The Luau target is the exception: Second Life answers with the reference
+//! Luau compiler's own text (`:2: Expected identifier when parsing
+//! expression, got '='`), and so does this module, by running that compiler
+//! (through `mlua`). It compiles and does not run: a Luau script has no
+//! instance here.
 
 use std::collections::BTreeSet;
 
@@ -132,16 +138,12 @@ pub fn compile_source(
 ) -> CompileOutcome {
     let text = String::from_utf8_lossy(source);
     if compiler == ScriptCompiler::SecondLife && target == sl_proto::ScriptTarget::Luau.to_wire() {
-        // Second Life marks the item Luau and runs its Luau compiler, which
-        // this workspace does not have. Saying so is the honest answer: a
-        // `compiled` for a source nothing checked would be a lie a test could
-        // build on, and so would a guess at a Luau error.
+        // Second Life marks the item Luau, compiled or not, and answers with
+        // its Luau compiler's own words.
+        let errors = luau_errors(source);
         return CompileOutcome {
-            compiled: false,
-            errors: vec![
-                ":1: the fake grid has no Luau compiler; the source was stored, not compiled"
-                    .to_owned(),
-            ],
+            compiled: errors.is_empty(),
+            errors,
             language: ScriptLanguage::Luau,
         };
     }
@@ -178,6 +180,22 @@ fn without_engine_line(source: &str) -> &str {
             name == "yengine:" || name == "xengine:"
         });
     if picked { rest } else { source }
+}
+
+/// What Second Life's Luau target answers `source` with: nothing when it
+/// compiles, else the one error the reference Luau compiler reports.
+///
+/// That error is the compiler's own text, and Second Life passes it on as it
+/// comes: `luau_compile` answers a failure with bytecode that is a zero byte
+/// and `:<line>: <message>`, the line one-based and no column, for the first
+/// parse error and for a compile error alike (an exhausted register file, a
+/// nesting too deep). `mlua` hands back what follows the `:`.
+fn luau_errors(source: &[u8]) -> Vec<String> {
+    match mlua::Compiler::new().compile(source) {
+        Ok(_bytecode) => Vec::new(),
+        Err(mlua::Error::SyntaxError { message, .. }) => vec![format!(":{message}")],
+        Err(other) => vec![other.to_string()],
+    }
 }
 
 /// The one error Second Life answers a source with, in its words: a syntax
@@ -296,27 +314,101 @@ fn linden_line_column(source: &str, offset: usize) -> (usize, usize) {
 /// one of those words is placed on the word.
 fn yengine_errors(source: &str, errors: &[CompileError]) -> Vec<String> {
     let index = sl_lsl_runtime::bytecode::Source::new(source);
+    let unknown = yengine_unknown_characters(source, &index);
+    if !unknown.is_empty() {
+        return unknown;
+    }
     let tokens: Vec<sl_lsl::SpannedToken> = sl_lsl::tokens(source)
         .filter(|token| !token.is_trivia())
         .collect();
     errors
         .iter()
         .map(|error| {
-            let statement = (error.kind == CompileErrorKind::Undefined)
-                .then(|| {
-                    tokens
-                        .iter()
-                        .rfind(|token| token.span.end <= error.span.start)
-                        .filter(|token| matches!(token.text(source), Some("jump" | "state")))
-                })
-                .flatten();
-            let position =
-                statement.map_or(error.position, |token| index.position(token.span.start));
+            let before = tokens
+                .iter()
+                .enumerate()
+                .rfind(|(_at, token)| token.span.end <= error.span.start);
+            let statement = match error.kind {
+                CompileErrorKind::Undefined => before
+                    .filter(|(_at, token)| matches!(token.text(source), Some("jump" | "state"))),
+                CompileErrorKind::Syntax => before.filter(|(at, token)| {
+                    is_yengine_statement_keyword(token.text(source))
+                        && brace_depth(source, tokens.get(..*at).unwrap_or_default()) == 0
+                }),
+                _ => None,
+            };
+            let position = statement.map_or(error.position, |(_at, token)| {
+                index.position(token.span.start)
+            });
             format!(
                 "({},{}) Error: {}",
                 position.line.saturating_sub(1),
                 position.column.saturating_sub(1),
                 error.message
+            )
+        })
+        .collect()
+}
+
+/// Whether `text` is one of the words YEngine's tokenizer makes a statement
+/// keyword of (`MMRScriptTokenize.cs`'s `delims`), which no declaration
+/// starts with: outside every body YEngine faults on the word itself, where
+/// this workspace's lexer, which knows no keywords, reads it as a type name
+/// and faults on the token after.
+fn is_yengine_statement_keyword(text: Option<&str>) -> bool {
+    matches!(
+        text,
+        Some("do" | "else" | "for" | "if" | "jump" | "return" | "while")
+    )
+}
+
+/// How many braces `tokens` (of `source`) leave open.
+fn brace_depth(source: &str, tokens: &[sl_lsl::SpannedToken]) -> usize {
+    tokens
+        .iter()
+        .fold(0_usize, |depth, token| match token.text(source) {
+            Some("{") => depth.saturating_add(1),
+            Some("}") => depth.saturating_sub(1),
+            _ => depth,
+        })
+}
+
+/// The punctuation YEngine's tokenizer knows (`MMRScriptTokenize.cs`'s
+/// `delims`, one character each of its operators).
+const YENGINE_DELIMITERS: &str = "~!@%^&*()-+={}[];:<>,.?/|#";
+
+/// YEngine's tokenizer errors for `source`: one `unknown character` for each
+/// character outside a string or comment that is no letter, digit, `_`,
+/// quote, white space or [`YENGINE_DELIMITERS`].
+///
+/// YEngine tokenizes the whole source before it parses
+/// (`MMRScriptCompile.cs`: a tokenizer error returns before `Reduce`), so
+/// when there is one it answers these and no parse error at all: a backtick
+/// on line 3 is the first error even when line 1 does not parse.
+fn yengine_unknown_characters(
+    source: &str,
+    index: &sl_lsl_runtime::bytecode::Source,
+) -> Vec<String> {
+    sl_lsl::tokens(source)
+        .filter(|token| token.token == Token::Error)
+        .flat_map(|token| {
+            let text = token.text(source).unwrap_or_default();
+            text.char_indices().map(move |(offset, character)| {
+                (token.span.start.saturating_add(offset), character)
+            })
+        })
+        .filter(|(_offset, character)| {
+            !(character.is_alphanumeric()
+                || character.is_whitespace()
+                || matches!(character, '_' | '"' | '\'')
+                || YENGINE_DELIMITERS.contains(*character))
+        })
+        .map(|(offset, character)| {
+            let position = index.position(offset);
+            format!(
+                "({},{}) Error: unknown character '{character}'",
+                position.line.saturating_sub(1),
+                position.column.saturating_sub(1)
             )
         })
         .collect()
@@ -554,17 +646,107 @@ mod tests {
         assert!(!experience.compiled, "OpenSim has no experience functions");
     }
 
-    /// The Luau target is Second Life's to compile, and this grid cannot: it
-    /// says so and marks the item Luau. OpenSim ignores the target.
+    /// Second Life compiles the Luau target with the Luau compiler and marks
+    /// the item Luau either way; LSL source happens to parse as Lua. OpenSim
+    /// ignores the target and refuses Luau source as LSL.
     #[test]
-    fn the_luau_target_is_refused_honestly_on_second_life_and_ignored_on_opensim() {
-        let source = b"default\n{\n    state_entry()\n    {\n    }\n}\n";
-        let second_life = compile_source(ScriptCompiler::SecondLife, "luau", source, asset());
-        assert!(!second_life.compiled);
+    fn the_luau_target_is_compiled_as_luau_on_second_life_and_ignored_on_opensim() {
+        let lsl = b"default\n{\n    state_entry()\n    {\n    }\n}\n";
+        let second_life = compile_source(ScriptCompiler::SecondLife, "luau", lsl, asset());
+        assert!(second_life.compiled, "{:?}", second_life.errors);
         assert_eq!(second_life.language, ScriptLanguage::Luau);
-        let opensim = compile_source(ScriptCompiler::YEngine, "luau", source, asset());
+        let broken = b"local a = 1\nlocal b = = 2\nlocal c = 3\n";
+        let refused = compile_source(ScriptCompiler::SecondLife, "luau", broken, asset());
+        assert!(!refused.compiled);
+        assert_eq!(
+            refused.errors,
+            vec![":2: Expected identifier when parsing expression, got '='".to_owned()]
+        );
+        assert_eq!(refused.language, ScriptLanguage::Luau);
+        let opensim = compile_source(ScriptCompiler::YEngine, "luau", lsl, asset());
         assert!(opensim.compiled, "{:?}", opensim.errors);
         assert_eq!(opensim.language, ScriptLanguage::Lsl);
+        let as_lsl = compile_source(ScriptCompiler::YEngine, "luau", broken, asset());
+        assert!(!as_lsl.compiled);
+        assert_eq!(as_lsl.language, ScriptLanguage::Lsl);
+    }
+
+    /// YEngine tokenizes before it parses: a character it does not know is
+    /// answered alone, every one of them, even after a line that does not
+    /// parse; inside a string or a comment it is nothing.
+    #[test]
+    fn yengine_answers_unknown_characters_before_any_parse_error() {
+        let yengine = |source: &str| {
+            compile_source(ScriptCompiler::YEngine, "mono", source.as_bytes(), asset()).errors
+        };
+        assert_eq!(
+            yengine("//YEngine:\nlocal n = 1\nlocal s = `n is {n}`\n"),
+            vec![
+                "(2,10) Error: unknown character '`'".to_owned(),
+                "(2,19) Error: unknown character '`'".to_owned(),
+            ]
+        );
+        assert_eq!(
+            yengine(
+                "default\n{\n    state_entry()\n    {\n        integer x = 1 \\ 2;\n    }\n}\n"
+            ),
+            vec!["(4,22) Error: unknown character '\\'".to_owned()]
+        );
+        let quoted = yengine(
+            "default\n{\n    state_entry()\n    {\n        llOwnerSay(\"`\"); // `\n        integer x = ;\n    }\n}\n",
+        );
+        assert!(
+            quoted
+                .iter()
+                .all(|error| !error.contains("unknown character")),
+            "{quoted:?}"
+        );
+    }
+
+    /// A statement keyword outside every body is YEngine's fault at the word
+    /// itself (`luau_unclosed_block`, measured `(1,0)`); inside a body the
+    /// error stays where the parse put it.
+    #[test]
+    fn yengine_faults_a_statement_keyword_outside_a_body_on_the_word() {
+        let yengine = |source: &str| {
+            compile_source(ScriptCompiler::YEngine, "mono", source.as_bytes(), asset()).errors
+        };
+        let top = yengine("//YEngine:\nif true then\n    local x = 1\n");
+        assert!(
+            top.first().is_some_and(|error| error.starts_with("(1,0) ")),
+            "{top:?}"
+        );
+        let inside = yengine(
+            "default\n{\n    state_entry()\n    {\n        if (TRUE) integer x = ;\n    }\n}\n",
+        );
+        assert!(
+            inside
+                .first()
+                .is_some_and(|error| !error.starts_with("(4,8) ")),
+            "{inside:?}"
+        );
+    }
+
+    /// A compile error past the parse — the register file exhausted — is
+    /// answered in the same `:<line>: ` form as a syntax error.
+    #[test]
+    fn a_luau_compile_error_is_worded_as_a_syntax_error_is() {
+        let mut locals = String::new();
+        for index in 0..201 {
+            let index = index.to_string();
+            for piece in ["    local v", &index, " = tostring(", &index, ")\n"] {
+                locals.push_str(piece);
+            }
+        }
+        let source = format!("local function f()\n{locals}end\n");
+        assert_eq!(
+            luau_errors(source.as_bytes()),
+            vec![
+                ":202: Out of local registers when trying to allocate v200: exceeded limit 200"
+                    .to_owned()
+            ]
+        );
+        assert_eq!(luau_errors(b""), Vec::<String>::new());
     }
 
     /// A clean compile runs the script as the upload asked; a failed one

@@ -26,6 +26,9 @@ http-body-util = "0.1.4"
 hyper = { version = "1.10.1", features = ["http1", "server"] }
 hyper-util = { version = "0.1.20", features = ["tokio"] }
 md5 = { workspace = true }
+# Second Life's Luau target is compiled by the reference Luau compiler, whose
+# own error text is what the grid answers (`script_compile::luau_errors`).
+mlua = { version = "0.11.6", features = ["luau"] }
 parking_lot = { workspace = true }
 sl-avatar = { workspace = true }
 # The central bake service composites with the client's own baker.

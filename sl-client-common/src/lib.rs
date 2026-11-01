@@ -15,6 +15,8 @@
 //! - [`chat_log`] — the file-I/O shell over `sl_proto`'s sans-IO chat-log core
 //!   (the local wall clock, the transcript append/seek, and the name/path
 //!   caches the Firestorm format needs).
+//! - [`error_chain`] — an error with every cause it carries, as one line, so a
+//!   failure reason keeps the part that says *why*.
 //! - [`inventory_cache`] — the gzipped on-disk inventory skeleton cache, loaded
 //!   into a [`Session`](sl_proto::Session) at login and saved back on a timer.
 //! - [`lsl_syntax_cache`] — the gzipped on-disk cache of the grid's
@@ -32,6 +34,7 @@
 //! a task, a channel or a timer cannot be shared at all.
 
 pub mod chat_log;
+pub mod error_chain;
 pub mod inventory_cache;
 pub mod lsl_syntax_cache;
 pub mod ranges;

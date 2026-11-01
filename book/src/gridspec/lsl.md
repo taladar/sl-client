@@ -375,8 +375,9 @@ listens to the scripts it uploads and the fake grid runs none yet; the
 `compiled`, error count and first-error position below, and list where they
 still differ: YEngine's follow-on syntax errors, its unterminated string,
 LSL2's 16 KB, and one column of Second Life's unterminated string. Second
-Life's Luau target is answered with an error saying the fake grid has no
-Luau compiler.
+Life's Luau target is compiled by the reference Luau compiler (through
+`mlua`), whose own words are what Second Life answers (§ The Luau target
+below); the fake grid compiles it and runs nothing.
 
 ### The answer
 
@@ -440,6 +441,47 @@ The library table `sl-lsl-runtime` compiles against is the document Second
 Life serves plus those five, from its `keywords_lsl_unserved.xml`; the
 fake grid's OpenSim flavour should refuse the two experience functions
 when it compiles on upload, and does.
+
+### The Luau target
+
+Measured on 2026-11-01 by the census's `luau` legs, twenty-three sources on
+aditi's Mauve and the local OpenSim. **Second Life answers with the
+reference Luau compiler's own words, every one of them**: `luau_compile`
+answers a failure with a zero byte and `:<line>: <message>`, and that string
+is the error — one-based line, no column, one error per source. It checks no
+types and resolves no names: an unknown global is a runtime matter. The fake
+grid runs that compiler (`mlua`, Luau 0.709) and agrees on every leg.
+OpenSim reads every source as LSL under YEngine: the item stays LSL, and
+the errors are YEngine's — mostly `(1,6) Error: looking for open paren after
+assuming local is a function name`, at `local`'s next word.
+
+| source | Second Life | OpenSim (YEngine) |
+| --- | --- | --- |
+| Luau's own syntax — `+=`, an interpolated string, an `if` expression, `//`, `continue` in a loop, a generic function, a `type` | compiles | ``(3,10) Error: unknown character '`'``, and one for the closing backtick: YEngine tokenizes first and answers only that |
+| `local x: number = "text"` | **compiles**: no type check | refused |
+| `@native` on a function | compiles | refused, at the `@` |
+| the empty source | compiles | `fetched source empty asset://…` |
+| LSL source | compiles (and fails as it starts) | compiles |
+| `local x =` | `:2: Expected identifier when parsing expression, got <eof>` | refused |
+| an `if … then` never closed | `:3: Expected 'end' (to close 'then' at line 1), got <eof>` | refused at the `if`: `looking for var name, type, state or default …` |
+| a string never closed | `:1: Malformed string; did you forget to finish it?` | refused |
+| `0x` | `:1: Malformed number` | refused |
+| `goto done` | `:2: Incomplete statement: expected assignment or a function call` | refused |
+| `local x <const> = 1` | `:1: Expected identifier when parsing expression, got '<'` | refused |
+| `break`, `continue` outside a loop | `:2: break statement must be inside a loop`, the same for `continue` | refused |
+| `...` outside a vararg function | `:1: Cannot use '...' outside of a vararg function` | refused |
+| a stray `end` | `:2: Expected <eof>, got 'end'` | refused |
+| `--[[` never closed | `:1: Expected identifier when parsing expression, got unfinished comment` | refused |
+| two syntax errors | the first only | refused once |
+| CR LF line ends | read as LF | refused |
+| 201 locals in one function | `:202: Out of local registers when trying to allocate v200: exceeded limit 200` — a compile error, worded as a parse error is | refused |
+| 1100 nested parentheses | `:1: Exceeded allowed recursion depth; simplify your expression to make the code compile` | refused |
+| the item's language afterwards | **Luau**, compiled or not | LSL |
+
+The census uploads each Luau leg to a script of its own on OpenSim: YEngine
+keeps a compile's errors in one slot per item, and uploads to one item a
+second apart took each other's answers or failed
+(`test-conformance-upload-after-yengine-start-dropped`).
 
 ### What the viewer does with it
 

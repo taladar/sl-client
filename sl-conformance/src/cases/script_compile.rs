@@ -36,8 +36,12 @@
 //! XEngine every leg but the two over a running script gets a script of its
 //! own, and after any unanswered upload the next leg does (`Run::step`).
 //!
-//! The `luau` backend has its own short list (`LUAU`): a valid Luau body, a
-//! broken one, and LSL source under the Luau target.
+//! The `luau` backend has its own list (`luau_legs`): valid Luau, sources
+//! the reference Luau compiler refuses each in its own words, and LSL source
+//! under the Luau target; after each, the language the item is marked with.
+//! On OpenSim each goes to a script of its own, as under XEngine: YEngine
+//! keeps a compile's errors in one slot per item, and quick uploads to one
+//! item took each other's answers (`Backend::fresh_each`).
 //!
 //! What each live grid was measured to answer is written up in
 //! `book/src/gridspec/lsl.md` § Compiling and held below. `1av`, live grids
@@ -147,10 +151,14 @@ impl Backend {
         }
     }
 
-    /// Whether every leg is uploaded to a script of its own (see
-    /// [`Run::step`]).
-    const fn fresh_each(self) -> bool {
-        matches!(self, Self::XEngine)
+    /// Whether every leg on `grid` is uploaded to a script of its own (see
+    /// [`Run::step`]): XEngine's, and the Luau legs' on OpenSim, which come
+    /// a second apart — YEngine posts a compile's errors in one slot per item
+    /// (`XMREngine.cs`'s `m_ScriptErrors`) for the answer to take, so quick
+    /// uploads to one item take each other's
+    /// (test-conformance-upload-after-yengine-start-dropped).
+    const fn fresh_each(self, grid: Grid) -> bool {
+        matches!(self, Self::XEngine) || (matches!(self, Self::Luau) && is_opensim(grid))
     }
 
     /// The line an OpenSim source opens with to pick its engine.
@@ -260,7 +268,13 @@ const BROKEN: &[Leg] = &[
 
 /// The Luau target's sources: a valid body, a broken one (`local x =` with
 /// nothing after it, line 1), one broken mid-line (the second `=` at 2:11),
-/// and the valid LSL script.
+/// what the reference Luau compiler answers distinctly — Luau's own syntax
+/// and type annotations (which it compiles without checking), an unclosed
+/// block, a malformed string and number, Lua 5.2's `goto` and 5.4's
+/// `<const>`, `break`, `continue` and `...` out of place, a stray `end`, an
+/// unfinished comment, two errors, CR LF, a line with multi-byte characters
+/// before the fault, attributes and the empty source — and the valid LSL
+/// script. [`luau_legs`] adds the two sources that are generated.
 const LUAU: &[Leg] = &[
     Leg {
         name: "luau_valid",
@@ -275,10 +289,115 @@ const LUAU: &[Leg] = &[
         source: "local a = 1\nlocal b = = 2\nlocal c = 3\n",
     },
     Leg {
+        name: "luau_extensions",
+        source: "local n = 1\nn += 2\nlocal s = `n is {n}`\nlocal m = if n > 2 then n // 2 else 0\nfor i = 1, 3 do\n    if i == 2 then continue end\nend\nlocal function id<T>(v: T): T return v end\ntype Point = { x: number, y: number }\n",
+    },
+    Leg {
+        name: "luau_type_mismatch",
+        source: "local x: number = \"text\"\n",
+    },
+    Leg {
+        name: "luau_unclosed_block",
+        source: "if true then\n    local x = 1\n",
+    },
+    Leg {
+        name: "luau_unterminated_string",
+        source: "local s = \"abc\nlocal t = 1\n",
+    },
+    Leg {
+        name: "luau_malformed_number",
+        source: "local x = 0x\n",
+    },
+    Leg {
+        name: "luau_goto",
+        source: "local n = 1\ngoto done\n",
+    },
+    Leg {
+        name: "luau_const",
+        source: "local x <const> = 1\n",
+    },
+    Leg {
+        name: "luau_break_outside",
+        source: "local n = 1\nbreak\n",
+    },
+    Leg {
+        name: "luau_continue_outside",
+        source: "local n = 1\ncontinue\n",
+    },
+    Leg {
+        name: "luau_vararg_outside",
+        source: "local function f() return ... end\n",
+    },
+    Leg {
+        name: "luau_stray_end",
+        source: "local n = 1\nend\n",
+    },
+    Leg {
+        name: "luau_unfinished_comment",
+        source: "--[[ never closed\nlocal n = 1\n",
+    },
+    Leg {
+        name: "luau_two_errors",
+        source: "local a = = 1\nlocal b = = 2\n",
+    },
+    Leg {
+        name: "luau_crlf",
+        source: "local a = 1\r\nlocal b = = 2\r\n",
+    },
+    Leg {
+        name: "luau_multibyte",
+        source: "local s = \"äöü\" local b = = 2\n",
+    },
+    Leg {
+        name: "luau_attribute",
+        source: "@native\nlocal function f() return 1 end\n",
+    },
+    Leg {
+        name: "luau_empty",
+        source: "",
+    },
+    Leg {
         name: "lsl_source",
         source: "default\n{\n    state_entry()\n    {\n    }\n}\n",
     },
 ];
+
+/// How many locals the `luau_register_limit` leg declares in one function:
+/// one over the Luau compiler's 200 registers.
+const LUAU_LOCALS: usize = 201;
+
+/// How deep the `luau_recursion_limit` leg nests its parentheses: over the
+/// Luau parser's recursion limit of 1000.
+const LUAU_NESTING: usize = 1100;
+
+/// Every Luau leg by name with its source: [`LUAU`], and two generated
+/// sources the compiler refuses past the parse — `luau_register_limit`
+/// ([`LUAU_LOCALS`] locals no constant folds away) and the parser's own
+/// limit, `luau_recursion_limit` ([`LUAU_NESTING`] parentheses).
+fn luau_legs() -> Vec<(&'static str, String)> {
+    let mut locals = String::new();
+    for index in 0..LUAU_LOCALS {
+        let index = index.to_string();
+        for piece in ["    local v", &index, " = tostring(", &index, ")\n"] {
+            locals.push_str(piece);
+        }
+    }
+    let nested = format!(
+        "local x = {}1{}\n",
+        "(".repeat(LUAU_NESTING),
+        ")".repeat(LUAU_NESTING)
+    );
+    let mut legs: Vec<(&'static str, String)> = LUAU
+        .iter()
+        .map(|leg| (leg.name, leg.source.to_owned()))
+        .collect();
+    legs.push((
+        "luau_register_limit",
+        format!("local function f()\n{locals}end\n"),
+    ));
+    legs.push(("luau_recursion_limit", nested));
+    legs
+}
 
 /// One call each to the five functions tailslide's `builtins.txt` lists and
 /// no `LSLSyntax` document Second Life serves does — whether the grid still
@@ -575,26 +694,22 @@ impl Run<'_> {
         };
 
         if self.backend == Backend::Luau {
-            for leg in LUAU {
-                let _answered = self
-                    .step(cube, &mut held, leg.name, leg.source, true)
-                    .await?;
-                if leg.name == "luau_valid" {
-                    let flags = self
-                        .listed(cube, held.item)
-                        .await?
-                        .map(|script| script.flags);
-                    let language = flags.map_or_else(
-                        || "no item".to_owned(),
-                        |flags| match ScriptLanguage::from_item_flags(flags) {
-                            Some(ScriptLanguage::Lsl) => "lsl".to_owned(),
-                            Some(ScriptLanguage::Luau) => "luau".to_owned(),
-                            Some(_) | None => format!("subtype {}", flags & 0xff),
-                        },
-                    );
-                    let key = self.key(leg.name, "item_language");
-                    self.metrics.set(&key, language);
-                }
+            for (name, source) in luau_legs() {
+                let _answered = self.step(cube, &mut held, name, &source, true).await?;
+                let flags = self
+                    .listed(cube, held.item)
+                    .await?
+                    .map(|script| script.flags);
+                let language = flags.map_or_else(
+                    || "no item".to_owned(),
+                    |flags| match ScriptLanguage::from_item_flags(flags) {
+                        Some(ScriptLanguage::Lsl) => "lsl".to_owned(),
+                        Some(ScriptLanguage::Luau) => "luau".to_owned(),
+                        Some(_) | None => format!("subtype {}", flags & 0xff),
+                    },
+                );
+                let key = self.key(name, "item_language");
+                self.metrics.set(&key, language);
             }
             return Ok(());
         }
@@ -691,7 +806,7 @@ impl Run<'_> {
     ) -> Result<Answered, TestFailure> {
         let reuse = matches!(leg, "v1" | "syntax" | "v3_again");
         let stalled = self.stalled.take().is_some();
-        let fresh = if stalled || (self.backend.fresh_each() && !reuse) {
+        let fresh = if stalled || (self.backend.fresh_each(self.grid) && !reuse) {
             held.made = held.made.saturating_add(1);
             held.item = self
                 .new_script(cube, &format!("Compile {}", held.made))
@@ -1672,9 +1787,237 @@ const SECOND_LIFE: &[(&str, Answer)] = &[
     ("luau_lsl_source_errors_count", Answer::Text("0")),
     ("luau_lsl_source_fresh_item", Answer::Flag(false)),
     ("luau_lsl_source_item_asset", Answer::Text("hidden")),
+    ("luau_lsl_source_item_language", Answer::Text("luau")),
     ("luau_lsl_source_new_asset", Answer::Text("another")),
     ("luau_lsl_source_running_echo", Answer::Text("true")),
     ("luau_lsl_source_upload", Answer::Text("answered")),
+    ("luau_luau_attribute_compiled", Answer::Flag(true)),
+    ("luau_luau_attribute_errors_count", Answer::Text("0")),
+    ("luau_luau_attribute_fresh_item", Answer::Flag(false)),
+    ("luau_luau_attribute_item_asset", Answer::Text("hidden")),
+    ("luau_luau_attribute_item_language", Answer::Text("luau")),
+    ("luau_luau_attribute_new_asset", Answer::Text("another")),
+    ("luau_luau_attribute_running_echo", Answer::Text("true")),
+    ("luau_luau_attribute_upload", Answer::Text("answered")),
+    ("luau_luau_break_outside_compiled", Answer::Flag(false)),
+    (
+        "luau_luau_break_outside_error_0",
+        Answer::Text(":2: break statement must be inside a loop"),
+    ),
+    ("luau_luau_break_outside_error_0_at", Answer::Text("line 2")),
+    ("luau_luau_break_outside_errors_count", Answer::Text("1")),
+    ("luau_luau_break_outside_fresh_item", Answer::Flag(false)),
+    ("luau_luau_break_outside_item_asset", Answer::Text("hidden")),
+    (
+        "luau_luau_break_outside_item_language",
+        Answer::Text("luau"),
+    ),
+    ("luau_luau_break_outside_new_asset", Answer::Text("another")),
+    ("luau_luau_break_outside_running_echo", Answer::Text("true")),
+    ("luau_luau_break_outside_upload", Answer::Text("answered")),
+    ("luau_luau_const_compiled", Answer::Flag(false)),
+    (
+        "luau_luau_const_error_0",
+        Answer::Text(":1: Expected identifier when parsing expression, got '<'"),
+    ),
+    ("luau_luau_const_error_0_at", Answer::Text("line 1")),
+    ("luau_luau_const_errors_count", Answer::Text("1")),
+    ("luau_luau_const_fresh_item", Answer::Flag(false)),
+    ("luau_luau_const_item_asset", Answer::Text("hidden")),
+    ("luau_luau_const_item_language", Answer::Text("luau")),
+    ("luau_luau_const_new_asset", Answer::Text("another")),
+    ("luau_luau_const_running_echo", Answer::Text("true")),
+    ("luau_luau_const_upload", Answer::Text("answered")),
+    ("luau_luau_continue_outside_compiled", Answer::Flag(false)),
+    (
+        "luau_luau_continue_outside_error_0",
+        Answer::Text(":2: continue statement must be inside a loop"),
+    ),
+    (
+        "luau_luau_continue_outside_error_0_at",
+        Answer::Text("line 2"),
+    ),
+    ("luau_luau_continue_outside_errors_count", Answer::Text("1")),
+    ("luau_luau_continue_outside_fresh_item", Answer::Flag(false)),
+    (
+        "luau_luau_continue_outside_item_asset",
+        Answer::Text("hidden"),
+    ),
+    (
+        "luau_luau_continue_outside_item_language",
+        Answer::Text("luau"),
+    ),
+    (
+        "luau_luau_continue_outside_new_asset",
+        Answer::Text("another"),
+    ),
+    (
+        "luau_luau_continue_outside_running_echo",
+        Answer::Text("true"),
+    ),
+    (
+        "luau_luau_continue_outside_upload",
+        Answer::Text("answered"),
+    ),
+    ("luau_luau_crlf_compiled", Answer::Flag(false)),
+    (
+        "luau_luau_crlf_error_0",
+        Answer::Text(":2: Expected identifier when parsing expression, got '='"),
+    ),
+    ("luau_luau_crlf_error_0_at", Answer::Text("line 2")),
+    ("luau_luau_crlf_errors_count", Answer::Text("1")),
+    ("luau_luau_crlf_fresh_item", Answer::Flag(false)),
+    ("luau_luau_crlf_item_asset", Answer::Text("hidden")),
+    ("luau_luau_crlf_item_language", Answer::Text("luau")),
+    ("luau_luau_crlf_new_asset", Answer::Text("another")),
+    ("luau_luau_crlf_running_echo", Answer::Text("true")),
+    ("luau_luau_crlf_upload", Answer::Text("answered")),
+    ("luau_luau_empty_compiled", Answer::Flag(true)),
+    ("luau_luau_empty_errors_count", Answer::Text("0")),
+    ("luau_luau_empty_fresh_item", Answer::Flag(false)),
+    ("luau_luau_empty_item_asset", Answer::Text("hidden")),
+    ("luau_luau_empty_item_language", Answer::Text("luau")),
+    ("luau_luau_empty_new_asset", Answer::Text("another")),
+    ("luau_luau_empty_running_echo", Answer::Text("true")),
+    ("luau_luau_empty_upload", Answer::Text("answered")),
+    ("luau_luau_extensions_compiled", Answer::Flag(true)),
+    ("luau_luau_extensions_errors_count", Answer::Text("0")),
+    ("luau_luau_extensions_fresh_item", Answer::Flag(false)),
+    ("luau_luau_extensions_item_asset", Answer::Text("hidden")),
+    ("luau_luau_extensions_item_language", Answer::Text("luau")),
+    ("luau_luau_extensions_new_asset", Answer::Text("another")),
+    ("luau_luau_extensions_running_echo", Answer::Text("true")),
+    ("luau_luau_extensions_upload", Answer::Text("answered")),
+    ("luau_luau_goto_compiled", Answer::Flag(false)),
+    (
+        "luau_luau_goto_error_0",
+        Answer::Text(":2: Incomplete statement: expected assignment or a function call"),
+    ),
+    ("luau_luau_goto_error_0_at", Answer::Text("line 2")),
+    ("luau_luau_goto_errors_count", Answer::Text("1")),
+    ("luau_luau_goto_fresh_item", Answer::Flag(false)),
+    ("luau_luau_goto_item_asset", Answer::Text("hidden")),
+    ("luau_luau_goto_item_language", Answer::Text("luau")),
+    ("luau_luau_goto_new_asset", Answer::Text("another")),
+    ("luau_luau_goto_running_echo", Answer::Text("true")),
+    ("luau_luau_goto_upload", Answer::Text("answered")),
+    ("luau_luau_malformed_number_compiled", Answer::Flag(false)),
+    (
+        "luau_luau_malformed_number_error_0",
+        Answer::Text(":1: Malformed number"),
+    ),
+    (
+        "luau_luau_malformed_number_error_0_at",
+        Answer::Text("line 1"),
+    ),
+    ("luau_luau_malformed_number_errors_count", Answer::Text("1")),
+    ("luau_luau_malformed_number_fresh_item", Answer::Flag(false)),
+    (
+        "luau_luau_malformed_number_item_asset",
+        Answer::Text("hidden"),
+    ),
+    (
+        "luau_luau_malformed_number_item_language",
+        Answer::Text("luau"),
+    ),
+    (
+        "luau_luau_malformed_number_new_asset",
+        Answer::Text("another"),
+    ),
+    (
+        "luau_luau_malformed_number_running_echo",
+        Answer::Text("true"),
+    ),
+    (
+        "luau_luau_malformed_number_upload",
+        Answer::Text("answered"),
+    ),
+    ("luau_luau_multibyte_compiled", Answer::Flag(false)),
+    (
+        "luau_luau_multibyte_error_0",
+        Answer::Text(":1: Expected identifier when parsing expression, got '='"),
+    ),
+    ("luau_luau_multibyte_error_0_at", Answer::Text("line 1")),
+    ("luau_luau_multibyte_errors_count", Answer::Text("1")),
+    ("luau_luau_multibyte_fresh_item", Answer::Flag(false)),
+    ("luau_luau_multibyte_item_asset", Answer::Text("hidden")),
+    ("luau_luau_multibyte_item_language", Answer::Text("luau")),
+    ("luau_luau_multibyte_new_asset", Answer::Text("another")),
+    ("luau_luau_multibyte_running_echo", Answer::Text("true")),
+    ("luau_luau_multibyte_upload", Answer::Text("answered")),
+    ("luau_luau_recursion_limit_compiled", Answer::Flag(false)),
+    (
+        "luau_luau_recursion_limit_error_0",
+        Answer::Text(
+            ":1: Exceeded allowed recursion depth; simplify your expression to make the code compile",
+        ),
+    ),
+    (
+        "luau_luau_recursion_limit_error_0_at",
+        Answer::Text("line 1"),
+    ),
+    ("luau_luau_recursion_limit_errors_count", Answer::Text("1")),
+    ("luau_luau_recursion_limit_fresh_item", Answer::Flag(false)),
+    (
+        "luau_luau_recursion_limit_item_asset",
+        Answer::Text("hidden"),
+    ),
+    (
+        "luau_luau_recursion_limit_item_language",
+        Answer::Text("luau"),
+    ),
+    (
+        "luau_luau_recursion_limit_new_asset",
+        Answer::Text("another"),
+    ),
+    (
+        "luau_luau_recursion_limit_running_echo",
+        Answer::Text("true"),
+    ),
+    ("luau_luau_recursion_limit_upload", Answer::Text("answered")),
+    ("luau_luau_register_limit_compiled", Answer::Flag(false)),
+    (
+        "luau_luau_register_limit_error_0",
+        Answer::Text(
+            ":202: Out of local registers when trying to allocate v200: exceeded limit 200",
+        ),
+    ),
+    (
+        "luau_luau_register_limit_error_0_at",
+        Answer::Text("line 202"),
+    ),
+    ("luau_luau_register_limit_errors_count", Answer::Text("1")),
+    ("luau_luau_register_limit_fresh_item", Answer::Flag(false)),
+    (
+        "luau_luau_register_limit_item_asset",
+        Answer::Text("hidden"),
+    ),
+    (
+        "luau_luau_register_limit_item_language",
+        Answer::Text("luau"),
+    ),
+    (
+        "luau_luau_register_limit_new_asset",
+        Answer::Text("another"),
+    ),
+    (
+        "luau_luau_register_limit_running_echo",
+        Answer::Text("true"),
+    ),
+    ("luau_luau_register_limit_upload", Answer::Text("answered")),
+    ("luau_luau_stray_end_compiled", Answer::Flag(false)),
+    (
+        "luau_luau_stray_end_error_0",
+        Answer::Text(":2: Expected <eof>, got 'end'"),
+    ),
+    ("luau_luau_stray_end_error_0_at", Answer::Text("line 2")),
+    ("luau_luau_stray_end_errors_count", Answer::Text("1")),
+    ("luau_luau_stray_end_fresh_item", Answer::Flag(false)),
+    ("luau_luau_stray_end_item_asset", Answer::Text("hidden")),
+    ("luau_luau_stray_end_item_language", Answer::Text("luau")),
+    ("luau_luau_stray_end_new_asset", Answer::Text("another")),
+    ("luau_luau_stray_end_running_echo", Answer::Text("true")),
+    ("luau_luau_stray_end_upload", Answer::Text("answered")),
     ("luau_luau_syntax_compiled", Answer::Flag(false)),
     (
         "luau_luau_syntax_error_0",
@@ -1684,6 +2027,7 @@ const SECOND_LIFE: &[(&str, Answer)] = &[
     ("luau_luau_syntax_errors_count", Answer::Text("1")),
     ("luau_luau_syntax_fresh_item", Answer::Flag(false)),
     ("luau_luau_syntax_item_asset", Answer::Text("hidden")),
+    ("luau_luau_syntax_item_language", Answer::Text("luau")),
     ("luau_luau_syntax_mid_compiled", Answer::Flag(false)),
     (
         "luau_luau_syntax_mid_error_0",
@@ -1693,12 +2037,142 @@ const SECOND_LIFE: &[(&str, Answer)] = &[
     ("luau_luau_syntax_mid_errors_count", Answer::Text("1")),
     ("luau_luau_syntax_mid_fresh_item", Answer::Flag(false)),
     ("luau_luau_syntax_mid_item_asset", Answer::Text("hidden")),
+    ("luau_luau_syntax_mid_item_language", Answer::Text("luau")),
     ("luau_luau_syntax_mid_new_asset", Answer::Text("another")),
     ("luau_luau_syntax_mid_running_echo", Answer::Text("true")),
     ("luau_luau_syntax_mid_upload", Answer::Text("answered")),
     ("luau_luau_syntax_new_asset", Answer::Text("another")),
     ("luau_luau_syntax_running_echo", Answer::Text("true")),
     ("luau_luau_syntax_upload", Answer::Text("answered")),
+    ("luau_luau_two_errors_compiled", Answer::Flag(false)),
+    (
+        "luau_luau_two_errors_error_0",
+        Answer::Text(":1: Expected identifier when parsing expression, got '='"),
+    ),
+    ("luau_luau_two_errors_error_0_at", Answer::Text("line 1")),
+    ("luau_luau_two_errors_errors_count", Answer::Text("1")),
+    ("luau_luau_two_errors_fresh_item", Answer::Flag(false)),
+    ("luau_luau_two_errors_item_asset", Answer::Text("hidden")),
+    ("luau_luau_two_errors_item_language", Answer::Text("luau")),
+    ("luau_luau_two_errors_new_asset", Answer::Text("another")),
+    ("luau_luau_two_errors_running_echo", Answer::Text("true")),
+    ("luau_luau_two_errors_upload", Answer::Text("answered")),
+    ("luau_luau_type_mismatch_compiled", Answer::Flag(true)),
+    ("luau_luau_type_mismatch_errors_count", Answer::Text("0")),
+    ("luau_luau_type_mismatch_fresh_item", Answer::Flag(false)),
+    ("luau_luau_type_mismatch_item_asset", Answer::Text("hidden")),
+    (
+        "luau_luau_type_mismatch_item_language",
+        Answer::Text("luau"),
+    ),
+    ("luau_luau_type_mismatch_new_asset", Answer::Text("another")),
+    ("luau_luau_type_mismatch_running_echo", Answer::Text("true")),
+    ("luau_luau_type_mismatch_upload", Answer::Text("answered")),
+    ("luau_luau_unclosed_block_compiled", Answer::Flag(false)),
+    (
+        "luau_luau_unclosed_block_error_0",
+        Answer::Text(":3: Expected 'end' (to close 'then' at line 1), got <eof>"),
+    ),
+    (
+        "luau_luau_unclosed_block_error_0_at",
+        Answer::Text("line 3"),
+    ),
+    ("luau_luau_unclosed_block_errors_count", Answer::Text("1")),
+    ("luau_luau_unclosed_block_fresh_item", Answer::Flag(false)),
+    (
+        "luau_luau_unclosed_block_item_asset",
+        Answer::Text("hidden"),
+    ),
+    (
+        "luau_luau_unclosed_block_item_language",
+        Answer::Text("luau"),
+    ),
+    (
+        "luau_luau_unclosed_block_new_asset",
+        Answer::Text("another"),
+    ),
+    (
+        "luau_luau_unclosed_block_running_echo",
+        Answer::Text("true"),
+    ),
+    ("luau_luau_unclosed_block_upload", Answer::Text("answered")),
+    ("luau_luau_unfinished_comment_compiled", Answer::Flag(false)),
+    (
+        "luau_luau_unfinished_comment_error_0",
+        Answer::Text(":1: Expected identifier when parsing expression, got unfinished comment"),
+    ),
+    (
+        "luau_luau_unfinished_comment_error_0_at",
+        Answer::Text("line 1"),
+    ),
+    (
+        "luau_luau_unfinished_comment_errors_count",
+        Answer::Text("1"),
+    ),
+    (
+        "luau_luau_unfinished_comment_fresh_item",
+        Answer::Flag(false),
+    ),
+    (
+        "luau_luau_unfinished_comment_item_asset",
+        Answer::Text("hidden"),
+    ),
+    (
+        "luau_luau_unfinished_comment_item_language",
+        Answer::Text("luau"),
+    ),
+    (
+        "luau_luau_unfinished_comment_new_asset",
+        Answer::Text("another"),
+    ),
+    (
+        "luau_luau_unfinished_comment_running_echo",
+        Answer::Text("true"),
+    ),
+    (
+        "luau_luau_unfinished_comment_upload",
+        Answer::Text("answered"),
+    ),
+    (
+        "luau_luau_unterminated_string_compiled",
+        Answer::Flag(false),
+    ),
+    (
+        "luau_luau_unterminated_string_error_0",
+        Answer::Text(":1: Malformed string; did you forget to finish it?"),
+    ),
+    (
+        "luau_luau_unterminated_string_error_0_at",
+        Answer::Text("line 1"),
+    ),
+    (
+        "luau_luau_unterminated_string_errors_count",
+        Answer::Text("1"),
+    ),
+    (
+        "luau_luau_unterminated_string_fresh_item",
+        Answer::Flag(false),
+    ),
+    (
+        "luau_luau_unterminated_string_item_asset",
+        Answer::Text("hidden"),
+    ),
+    (
+        "luau_luau_unterminated_string_item_language",
+        Answer::Text("luau"),
+    ),
+    (
+        "luau_luau_unterminated_string_new_asset",
+        Answer::Text("another"),
+    ),
+    (
+        "luau_luau_unterminated_string_running_echo",
+        Answer::Text("true"),
+    ),
+    (
+        "luau_luau_unterminated_string_upload",
+        Answer::Text("answered"),
+    ),
     ("luau_luau_valid_compiled", Answer::Flag(true)),
     ("luau_luau_valid_errors_count", Answer::Text("0")),
     ("luau_luau_valid_fresh_item", Answer::Flag(false)),
@@ -1707,6 +2181,34 @@ const SECOND_LIFE: &[(&str, Answer)] = &[
     ("luau_luau_valid_new_asset", Answer::Text("another")),
     ("luau_luau_valid_running_echo", Answer::Text("true")),
     ("luau_luau_valid_upload", Answer::Text("answered")),
+    ("luau_luau_vararg_outside_compiled", Answer::Flag(false)),
+    (
+        "luau_luau_vararg_outside_error_0",
+        Answer::Text(":1: Cannot use '...' outside of a vararg function"),
+    ),
+    (
+        "luau_luau_vararg_outside_error_0_at",
+        Answer::Text("line 1"),
+    ),
+    ("luau_luau_vararg_outside_errors_count", Answer::Text("1")),
+    ("luau_luau_vararg_outside_fresh_item", Answer::Flag(false)),
+    (
+        "luau_luau_vararg_outside_item_asset",
+        Answer::Text("hidden"),
+    ),
+    (
+        "luau_luau_vararg_outside_item_language",
+        Answer::Text("luau"),
+    ),
+    (
+        "luau_luau_vararg_outside_new_asset",
+        Answer::Text("another"),
+    ),
+    (
+        "luau_luau_vararg_outside_running_echo",
+        Answer::Text("true"),
+    ),
+    ("luau_luau_vararg_outside_upload", Answer::Text("answered")),
     ("mono_agent_syntax_compiled", Answer::Flag(false)),
     (
         "mono_agent_syntax_error_0",
@@ -2080,11 +2582,285 @@ const SECOND_LIFE: &[(&str, Answer)] = &[
 const OPENSIM: &[(&str, Answer)] = &[
     ("luau_lsl_source_compiled", Answer::Flag(true)),
     ("luau_lsl_source_errors_count", Answer::Text("0")),
-    ("luau_lsl_source_fresh_item", Answer::Flag(false)),
+    ("luau_lsl_source_fresh_item", Answer::Flag(true)),
     ("luau_lsl_source_item_asset", Answer::Text("replaced")),
+    ("luau_lsl_source_item_language", Answer::Text("lsl")),
     ("luau_lsl_source_new_asset", Answer::Text("the item's id")),
     ("luau_lsl_source_running_echo", Answer::Text("true")),
     ("luau_lsl_source_upload", Answer::Text("answered")),
+    ("luau_luau_attribute_compiled", Answer::Flag(false)),
+    (
+        "luau_luau_attribute_error_0",
+        Answer::Text(
+            "(1,0) Error: looking for var name, type, state or default, script-defined type declaration",
+        ),
+    ),
+    (
+        "luau_luau_attribute_error_0_at",
+        Answer::Text("line 2 column 1"),
+    ),
+    ("luau_luau_attribute_errors_count", Answer::Text("1")),
+    ("luau_luau_attribute_fresh_item", Answer::Flag(true)),
+    ("luau_luau_attribute_item_asset", Answer::Text("replaced")),
+    ("luau_luau_attribute_item_language", Answer::Text("lsl")),
+    (
+        "luau_luau_attribute_new_asset",
+        Answer::Text("the item's id"),
+    ),
+    ("luau_luau_attribute_running_echo", Answer::Text("true")),
+    ("luau_luau_attribute_upload", Answer::Text("answered")),
+    ("luau_luau_break_outside_compiled", Answer::Flag(false)),
+    (
+        "luau_luau_break_outside_error_0",
+        Answer::Text("(1,6) Error: looking for open paren after assuming local is a function name"),
+    ),
+    (
+        "luau_luau_break_outside_error_0_at",
+        Answer::Text("line 2 column 7"),
+    ),
+    ("luau_luau_break_outside_errors_count", Answer::Text("1")),
+    ("luau_luau_break_outside_fresh_item", Answer::Flag(true)),
+    (
+        "luau_luau_break_outside_item_asset",
+        Answer::Text("replaced"),
+    ),
+    ("luau_luau_break_outside_item_language", Answer::Text("lsl")),
+    (
+        "luau_luau_break_outside_new_asset",
+        Answer::Text("the item's id"),
+    ),
+    ("luau_luau_break_outside_running_echo", Answer::Text("true")),
+    ("luau_luau_break_outside_upload", Answer::Text("answered")),
+    ("luau_luau_const_compiled", Answer::Flag(false)),
+    (
+        "luau_luau_const_error_0",
+        Answer::Text("(1,6) Error: looking for open paren after assuming local is a function name"),
+    ),
+    (
+        "luau_luau_const_error_0_at",
+        Answer::Text("line 2 column 7"),
+    ),
+    ("luau_luau_const_errors_count", Answer::Text("1")),
+    ("luau_luau_const_fresh_item", Answer::Flag(true)),
+    ("luau_luau_const_item_asset", Answer::Text("replaced")),
+    ("luau_luau_const_item_language", Answer::Text("lsl")),
+    ("luau_luau_const_new_asset", Answer::Text("the item's id")),
+    ("luau_luau_const_running_echo", Answer::Text("true")),
+    ("luau_luau_const_upload", Answer::Text("answered")),
+    ("luau_luau_continue_outside_compiled", Answer::Flag(false)),
+    (
+        "luau_luau_continue_outside_error_0",
+        Answer::Text("(1,6) Error: looking for open paren after assuming local is a function name"),
+    ),
+    (
+        "luau_luau_continue_outside_error_0_at",
+        Answer::Text("line 2 column 7"),
+    ),
+    ("luau_luau_continue_outside_errors_count", Answer::Text("1")),
+    ("luau_luau_continue_outside_fresh_item", Answer::Flag(true)),
+    (
+        "luau_luau_continue_outside_item_asset",
+        Answer::Text("replaced"),
+    ),
+    (
+        "luau_luau_continue_outside_item_language",
+        Answer::Text("lsl"),
+    ),
+    (
+        "luau_luau_continue_outside_new_asset",
+        Answer::Text("the item's id"),
+    ),
+    (
+        "luau_luau_continue_outside_running_echo",
+        Answer::Text("true"),
+    ),
+    (
+        "luau_luau_continue_outside_upload",
+        Answer::Text("answered"),
+    ),
+    ("luau_luau_crlf_compiled", Answer::Flag(false)),
+    (
+        "luau_luau_crlf_error_0",
+        Answer::Text("(1,6) Error: looking for open paren after assuming local is a function name"),
+    ),
+    ("luau_luau_crlf_error_0_at", Answer::Text("line 2 column 7")),
+    ("luau_luau_crlf_errors_count", Answer::Text("1")),
+    ("luau_luau_crlf_fresh_item", Answer::Flag(true)),
+    ("luau_luau_crlf_item_asset", Answer::Text("replaced")),
+    ("luau_luau_crlf_item_language", Answer::Text("lsl")),
+    ("luau_luau_crlf_new_asset", Answer::Text("the item's id")),
+    ("luau_luau_crlf_running_echo", Answer::Text("true")),
+    ("luau_luau_crlf_upload", Answer::Text("answered")),
+    ("luau_luau_empty_compiled", Answer::Flag(false)),
+    (
+        "luau_luau_empty_error_0",
+        Answer::Text("fetched source empty asset://<id>"),
+    ),
+    ("luau_luau_empty_error_0_at", Answer::Text("nowhere")),
+    ("luau_luau_empty_errors_count", Answer::Text("1")),
+    ("luau_luau_empty_fresh_item", Answer::Flag(true)),
+    ("luau_luau_empty_item_asset", Answer::Text("replaced")),
+    ("luau_luau_empty_item_language", Answer::Text("lsl")),
+    ("luau_luau_empty_new_asset", Answer::Text("the item's id")),
+    ("luau_luau_empty_running_echo", Answer::Text("true")),
+    ("luau_luau_empty_upload", Answer::Text("answered")),
+    ("luau_luau_extensions_compiled", Answer::Flag(false)),
+    (
+        "luau_luau_extensions_error_0",
+        Answer::Text("(3,10) Error: unknown character '`'"),
+    ),
+    (
+        "luau_luau_extensions_error_0_at",
+        Answer::Text("line 4 column 11"),
+    ),
+    ("luau_luau_extensions_errors_count", Answer::Text("2")),
+    ("luau_luau_extensions_fresh_item", Answer::Flag(true)),
+    ("luau_luau_extensions_item_asset", Answer::Text("replaced")),
+    ("luau_luau_extensions_item_language", Answer::Text("lsl")),
+    (
+        "luau_luau_extensions_new_asset",
+        Answer::Text("the item's id"),
+    ),
+    ("luau_luau_extensions_running_echo", Answer::Text("true")),
+    ("luau_luau_extensions_upload", Answer::Text("answered")),
+    ("luau_luau_goto_compiled", Answer::Flag(false)),
+    (
+        "luau_luau_goto_error_0",
+        Answer::Text("(1,6) Error: looking for open paren after assuming local is a function name"),
+    ),
+    ("luau_luau_goto_error_0_at", Answer::Text("line 2 column 7")),
+    ("luau_luau_goto_errors_count", Answer::Text("1")),
+    ("luau_luau_goto_fresh_item", Answer::Flag(true)),
+    ("luau_luau_goto_item_asset", Answer::Text("replaced")),
+    ("luau_luau_goto_item_language", Answer::Text("lsl")),
+    ("luau_luau_goto_new_asset", Answer::Text("the item's id")),
+    ("luau_luau_goto_running_echo", Answer::Text("true")),
+    ("luau_luau_goto_upload", Answer::Text("answered")),
+    ("luau_luau_malformed_number_compiled", Answer::Flag(false)),
+    (
+        "luau_luau_malformed_number_error_0",
+        Answer::Text("(1,6) Error: looking for open paren after assuming local is a function name"),
+    ),
+    (
+        "luau_luau_malformed_number_error_0_at",
+        Answer::Text("line 2 column 7"),
+    ),
+    ("luau_luau_malformed_number_errors_count", Answer::Text("1")),
+    ("luau_luau_malformed_number_fresh_item", Answer::Flag(true)),
+    (
+        "luau_luau_malformed_number_item_asset",
+        Answer::Text("replaced"),
+    ),
+    (
+        "luau_luau_malformed_number_item_language",
+        Answer::Text("lsl"),
+    ),
+    (
+        "luau_luau_malformed_number_new_asset",
+        Answer::Text("the item's id"),
+    ),
+    (
+        "luau_luau_malformed_number_running_echo",
+        Answer::Text("true"),
+    ),
+    (
+        "luau_luau_malformed_number_upload",
+        Answer::Text("answered"),
+    ),
+    ("luau_luau_multibyte_compiled", Answer::Flag(false)),
+    (
+        "luau_luau_multibyte_error_0",
+        Answer::Text("(1,6) Error: looking for open paren after assuming local is a function name"),
+    ),
+    (
+        "luau_luau_multibyte_error_0_at",
+        Answer::Text("line 2 column 7"),
+    ),
+    ("luau_luau_multibyte_errors_count", Answer::Text("1")),
+    ("luau_luau_multibyte_fresh_item", Answer::Flag(true)),
+    ("luau_luau_multibyte_item_asset", Answer::Text("replaced")),
+    ("luau_luau_multibyte_item_language", Answer::Text("lsl")),
+    (
+        "luau_luau_multibyte_new_asset",
+        Answer::Text("the item's id"),
+    ),
+    ("luau_luau_multibyte_running_echo", Answer::Text("true")),
+    ("luau_luau_multibyte_upload", Answer::Text("answered")),
+    ("luau_luau_recursion_limit_compiled", Answer::Flag(false)),
+    (
+        "luau_luau_recursion_limit_error_0",
+        Answer::Text("(1,6) Error: looking for open paren after assuming local is a function name"),
+    ),
+    (
+        "luau_luau_recursion_limit_error_0_at",
+        Answer::Text("line 2 column 7"),
+    ),
+    ("luau_luau_recursion_limit_errors_count", Answer::Text("1")),
+    ("luau_luau_recursion_limit_fresh_item", Answer::Flag(true)),
+    (
+        "luau_luau_recursion_limit_item_asset",
+        Answer::Text("replaced"),
+    ),
+    (
+        "luau_luau_recursion_limit_item_language",
+        Answer::Text("lsl"),
+    ),
+    (
+        "luau_luau_recursion_limit_new_asset",
+        Answer::Text("the item's id"),
+    ),
+    (
+        "luau_luau_recursion_limit_running_echo",
+        Answer::Text("true"),
+    ),
+    ("luau_luau_recursion_limit_upload", Answer::Text("answered")),
+    ("luau_luau_register_limit_compiled", Answer::Flag(false)),
+    (
+        "luau_luau_register_limit_error_0",
+        Answer::Text("(1,6) Error: looking for open paren after assuming local is a function name"),
+    ),
+    (
+        "luau_luau_register_limit_error_0_at",
+        Answer::Text("line 2 column 7"),
+    ),
+    ("luau_luau_register_limit_errors_count", Answer::Text("1")),
+    ("luau_luau_register_limit_fresh_item", Answer::Flag(true)),
+    (
+        "luau_luau_register_limit_item_asset",
+        Answer::Text("replaced"),
+    ),
+    (
+        "luau_luau_register_limit_item_language",
+        Answer::Text("lsl"),
+    ),
+    (
+        "luau_luau_register_limit_new_asset",
+        Answer::Text("the item's id"),
+    ),
+    (
+        "luau_luau_register_limit_running_echo",
+        Answer::Text("true"),
+    ),
+    ("luau_luau_register_limit_upload", Answer::Text("answered")),
+    ("luau_luau_stray_end_compiled", Answer::Flag(false)),
+    (
+        "luau_luau_stray_end_error_0",
+        Answer::Text("(1,6) Error: looking for open paren after assuming local is a function name"),
+    ),
+    (
+        "luau_luau_stray_end_error_0_at",
+        Answer::Text("line 2 column 7"),
+    ),
+    ("luau_luau_stray_end_errors_count", Answer::Text("1")),
+    ("luau_luau_stray_end_fresh_item", Answer::Flag(true)),
+    ("luau_luau_stray_end_item_asset", Answer::Text("replaced")),
+    ("luau_luau_stray_end_item_language", Answer::Text("lsl")),
+    (
+        "luau_luau_stray_end_new_asset",
+        Answer::Text("the item's id"),
+    ),
+    ("luau_luau_stray_end_running_echo", Answer::Text("true")),
+    ("luau_luau_stray_end_upload", Answer::Text("answered")),
     ("luau_luau_syntax_compiled", Answer::Flag(false)),
     (
         "luau_luau_syntax_error_0",
@@ -2095,8 +2871,9 @@ const OPENSIM: &[(&str, Answer)] = &[
         Answer::Text("line 2 column 7"),
     ),
     ("luau_luau_syntax_errors_count", Answer::Text("1")),
-    ("luau_luau_syntax_fresh_item", Answer::Flag(false)),
+    ("luau_luau_syntax_fresh_item", Answer::Flag(true)),
     ("luau_luau_syntax_item_asset", Answer::Text("replaced")),
+    ("luau_luau_syntax_item_language", Answer::Text("lsl")),
     ("luau_luau_syntax_mid_compiled", Answer::Flag(false)),
     (
         "luau_luau_syntax_mid_error_0",
@@ -2107,8 +2884,9 @@ const OPENSIM: &[(&str, Answer)] = &[
         Answer::Text("line 2 column 7"),
     ),
     ("luau_luau_syntax_mid_errors_count", Answer::Text("1")),
-    ("luau_luau_syntax_mid_fresh_item", Answer::Flag(false)),
+    ("luau_luau_syntax_mid_fresh_item", Answer::Flag(true)),
     ("luau_luau_syntax_mid_item_asset", Answer::Text("replaced")),
+    ("luau_luau_syntax_mid_item_language", Answer::Text("lsl")),
     (
         "luau_luau_syntax_mid_new_asset",
         Answer::Text("the item's id"),
@@ -2118,6 +2896,156 @@ const OPENSIM: &[(&str, Answer)] = &[
     ("luau_luau_syntax_new_asset", Answer::Text("the item's id")),
     ("luau_luau_syntax_running_echo", Answer::Text("true")),
     ("luau_luau_syntax_upload", Answer::Text("answered")),
+    ("luau_luau_two_errors_compiled", Answer::Flag(false)),
+    (
+        "luau_luau_two_errors_error_0",
+        Answer::Text("(1,6) Error: looking for open paren after assuming local is a function name"),
+    ),
+    (
+        "luau_luau_two_errors_error_0_at",
+        Answer::Text("line 2 column 7"),
+    ),
+    ("luau_luau_two_errors_errors_count", Answer::Text("1")),
+    ("luau_luau_two_errors_fresh_item", Answer::Flag(true)),
+    ("luau_luau_two_errors_item_asset", Answer::Text("replaced")),
+    ("luau_luau_two_errors_item_language", Answer::Text("lsl")),
+    (
+        "luau_luau_two_errors_new_asset",
+        Answer::Text("the item's id"),
+    ),
+    ("luau_luau_two_errors_running_echo", Answer::Text("true")),
+    ("luau_luau_two_errors_upload", Answer::Text("answered")),
+    ("luau_luau_type_mismatch_compiled", Answer::Flag(false)),
+    (
+        "luau_luau_type_mismatch_error_0",
+        Answer::Text("(1,6) Error: looking for open paren after assuming local is a function name"),
+    ),
+    (
+        "luau_luau_type_mismatch_error_0_at",
+        Answer::Text("line 2 column 7"),
+    ),
+    ("luau_luau_type_mismatch_errors_count", Answer::Text("1")),
+    ("luau_luau_type_mismatch_fresh_item", Answer::Flag(true)),
+    (
+        "luau_luau_type_mismatch_item_asset",
+        Answer::Text("replaced"),
+    ),
+    ("luau_luau_type_mismatch_item_language", Answer::Text("lsl")),
+    (
+        "luau_luau_type_mismatch_new_asset",
+        Answer::Text("the item's id"),
+    ),
+    ("luau_luau_type_mismatch_running_echo", Answer::Text("true")),
+    ("luau_luau_type_mismatch_upload", Answer::Text("answered")),
+    ("luau_luau_unclosed_block_compiled", Answer::Flag(false)),
+    (
+        "luau_luau_unclosed_block_error_0",
+        Answer::Text(
+            "(1,0) Error: looking for var name, type, state or default, script-defined type declaration",
+        ),
+    ),
+    (
+        "luau_luau_unclosed_block_error_0_at",
+        Answer::Text("line 2 column 1"),
+    ),
+    ("luau_luau_unclosed_block_errors_count", Answer::Text("1")),
+    ("luau_luau_unclosed_block_fresh_item", Answer::Flag(true)),
+    (
+        "luau_luau_unclosed_block_item_asset",
+        Answer::Text("replaced"),
+    ),
+    (
+        "luau_luau_unclosed_block_item_language",
+        Answer::Text("lsl"),
+    ),
+    (
+        "luau_luau_unclosed_block_new_asset",
+        Answer::Text("the item's id"),
+    ),
+    (
+        "luau_luau_unclosed_block_running_echo",
+        Answer::Text("true"),
+    ),
+    ("luau_luau_unclosed_block_upload", Answer::Text("answered")),
+    ("luau_luau_unfinished_comment_compiled", Answer::Flag(false)),
+    (
+        "luau_luau_unfinished_comment_error_0",
+        Answer::Text(
+            "(1,0) Error: looking for var name, type, state or default, script-defined type declaration",
+        ),
+    ),
+    (
+        "luau_luau_unfinished_comment_error_0_at",
+        Answer::Text("line 2 column 1"),
+    ),
+    (
+        "luau_luau_unfinished_comment_errors_count",
+        Answer::Text("1"),
+    ),
+    (
+        "luau_luau_unfinished_comment_fresh_item",
+        Answer::Flag(true),
+    ),
+    (
+        "luau_luau_unfinished_comment_item_asset",
+        Answer::Text("replaced"),
+    ),
+    (
+        "luau_luau_unfinished_comment_item_language",
+        Answer::Text("lsl"),
+    ),
+    (
+        "luau_luau_unfinished_comment_new_asset",
+        Answer::Text("the item's id"),
+    ),
+    (
+        "luau_luau_unfinished_comment_running_echo",
+        Answer::Text("true"),
+    ),
+    (
+        "luau_luau_unfinished_comment_upload",
+        Answer::Text("answered"),
+    ),
+    (
+        "luau_luau_unterminated_string_compiled",
+        Answer::Flag(false),
+    ),
+    (
+        "luau_luau_unterminated_string_error_0",
+        Answer::Text("(1,6) Error: looking for open paren after assuming local is a function name"),
+    ),
+    (
+        "luau_luau_unterminated_string_error_0_at",
+        Answer::Text("line 2 column 7"),
+    ),
+    (
+        "luau_luau_unterminated_string_errors_count",
+        Answer::Text("1"),
+    ),
+    (
+        "luau_luau_unterminated_string_fresh_item",
+        Answer::Flag(true),
+    ),
+    (
+        "luau_luau_unterminated_string_item_asset",
+        Answer::Text("replaced"),
+    ),
+    (
+        "luau_luau_unterminated_string_item_language",
+        Answer::Text("lsl"),
+    ),
+    (
+        "luau_luau_unterminated_string_new_asset",
+        Answer::Text("the item's id"),
+    ),
+    (
+        "luau_luau_unterminated_string_running_echo",
+        Answer::Text("true"),
+    ),
+    (
+        "luau_luau_unterminated_string_upload",
+        Answer::Text("answered"),
+    ),
     ("luau_luau_valid_compiled", Answer::Flag(false)),
     (
         "luau_luau_valid_error_0",
@@ -2130,12 +3058,40 @@ const OPENSIM: &[(&str, Answer)] = &[
         Answer::Text("line 2 column 1"),
     ),
     ("luau_luau_valid_errors_count", Answer::Text("1")),
-    ("luau_luau_valid_fresh_item", Answer::Flag(false)),
+    ("luau_luau_valid_fresh_item", Answer::Flag(true)),
     ("luau_luau_valid_item_asset", Answer::Text("replaced")),
     ("luau_luau_valid_item_language", Answer::Text("lsl")),
     ("luau_luau_valid_new_asset", Answer::Text("the item's id")),
     ("luau_luau_valid_running_echo", Answer::Text("true")),
     ("luau_luau_valid_upload", Answer::Text("answered")),
+    ("luau_luau_vararg_outside_compiled", Answer::Flag(false)),
+    (
+        "luau_luau_vararg_outside_error_0",
+        Answer::Text("(1,6) Error: looking for open paren after assuming local is a function name"),
+    ),
+    (
+        "luau_luau_vararg_outside_error_0_at",
+        Answer::Text("line 2 column 7"),
+    ),
+    ("luau_luau_vararg_outside_errors_count", Answer::Text("1")),
+    ("luau_luau_vararg_outside_fresh_item", Answer::Flag(true)),
+    (
+        "luau_luau_vararg_outside_item_asset",
+        Answer::Text("replaced"),
+    ),
+    (
+        "luau_luau_vararg_outside_item_language",
+        Answer::Text("lsl"),
+    ),
+    (
+        "luau_luau_vararg_outside_new_asset",
+        Answer::Text("the item's id"),
+    ),
+    (
+        "luau_luau_vararg_outside_running_echo",
+        Answer::Text("true"),
+    ),
+    ("luau_luau_vararg_outside_upload", Answer::Text("answered")),
     ("xengine_agent_syntax_compiled", Answer::Flag(true)),
     ("xengine_agent_syntax_errors_count", Answer::Text("0")),
     ("xengine_agent_syntax_item_asset", Answer::Text("replaced")),
@@ -3184,7 +4140,7 @@ mod tests {
 
     use super::{
         Answer, BROKEN, Backend, LUAU, OPENSIM, SECOND_LIFE, SIZES, UNSERVED, large_code_source,
-        sized_source, valid_source, without_uuids,
+        luau_legs, sized_source, valid_source, without_uuids,
     };
     use crate::grid::Grid;
     use crate::metrics::Metrics;
@@ -3244,7 +4200,8 @@ mod tests {
     /// The compiler, the compile target and whether agent uploads compile, of
     /// the fake grid imitating `backend`'s grid — `None` for a backend it
     /// does not imitate (XEngine: the fake grid runs YEngine, OpenSim's
-    /// default; and Second Life's Luau, which it has no compiler for).
+    /// default) or whose keys both grids share (Luau, held by
+    /// [`the_fake_grid_compiles_the_luau_legs_as_measured`]).
     fn imitation(backend: Backend) -> Option<(ScriptCompiler, &'static str, bool)> {
         let grid = match backend {
             Backend::Mono | Backend::Lsl2 => ImitatedGrid::SecondLife,
@@ -3295,7 +4252,14 @@ mod tests {
                 (None, _) => "nowhere".to_owned(),
             };
             metrics.set(&key("error_0_at"), at);
+            metrics.set(&key("error_0"), without_uuids(first));
         }
+        let language = if outcome.language == sl_client_tokio::ScriptLanguage::Luau {
+            "luau"
+        } else {
+            "lsl"
+        };
+        metrics.set(&key("item_language"), language);
     }
 
     /// The fake grid's compiler answers every source the census uploads as
@@ -3360,6 +4324,60 @@ mod tests {
         }
         let known: Vec<&str> = KNOWN_DEVIATIONS.iter().map(|(key, _why)| *key).collect();
         let found: Vec<&str> = deviations.keys().copied().collect();
+        assert_eq!(found, known, "deviations: {deviations:#?}");
+    }
+
+    /// Where the fake grid's compiler answers a Luau leg otherwise than the
+    /// grid it imitates, by metric, and why.
+    const LUAU_KNOWN_DEVIATIONS: &[(&str, &str)] = &[];
+
+    /// The fake grid answers every Luau leg as each grid was measured to:
+    /// Second Life with the reference Luau compiler's own words, the item
+    /// marked Luau; OpenSim reading the source as LSL under YEngine — whether
+    /// it compiled, how many errors, where and (on Second Life, whose words
+    /// the fake grid's are) what the first says, and the item's language.
+    #[test]
+    fn the_fake_grid_compiles_the_luau_legs_as_measured() {
+        let mut deviations = BTreeMap::new();
+        for (grid, table) in [
+            (ImitatedGrid::SecondLife, SECOND_LIFE),
+            (ImitatedGrid::OpenSim, OPENSIM),
+        ] {
+            let policy = grid.script_compile_policy();
+            let imitation = (policy.compiler, Backend::Luau.target().to_wire(), true);
+            let mut metrics = Metrics::new();
+            for (name, source) in luau_legs() {
+                record(&mut metrics, Backend::Luau, imitation, name, &source);
+            }
+            let mut fields = vec![
+                "_compiled",
+                "_errors_count",
+                "_error_0_at",
+                "_item_language",
+            ];
+            if grid == ImitatedGrid::SecondLife {
+                fields.push("_error_0");
+            }
+            for (key, expected) in table {
+                if !key.starts_with("luau_") || !fields.iter().any(|field| key.ends_with(field)) {
+                    continue;
+                }
+                let found = metrics.get(key);
+                let agrees = found.is_some_and(|value| expected.is(value))
+                    || (found.is_none() && matches!(expected, Answer::Any));
+                if !agrees {
+                    let _previous = deviations.insert(
+                        format!("{grid:?} {key}"),
+                        format!("{found:?}, measured {expected:?}"),
+                    );
+                }
+            }
+        }
+        let known: Vec<&str> = LUAU_KNOWN_DEVIATIONS
+            .iter()
+            .map(|(key, _why)| *key)
+            .collect();
+        let found: Vec<&str> = deviations.keys().map(String::as_str).collect();
         assert_eq!(found, known, "deviations: {deviations:#?}");
     }
 

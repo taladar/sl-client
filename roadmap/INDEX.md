@@ -11,17 +11,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 130 |
+| ideas | 129 |
 | ready | 331 |
 | blocked | 52 |
 | in-progress | 18 |
-| bugs | 41 |
-| done | 1468 |
+| bugs | 42 |
+| done | 1469 |
 | deferred | 30 |
 | wont-do | 24 |
-| **total** | **2094** |
+| **total** | **2095** |
 
-## ideas (130)
+## ideas (129)
 
 ### protocol
 
@@ -306,8 +306,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   tranche — time, timers and sleeping, on a tick clock (blocked by
   `server-lsl-vm-execution` (done), `server-world-determinism-contract`,
   `gridspec-lsl-time-timers` (done))
-- [`server-lsl-luau-compiler`](ideas/server-lsl-luau-compiler.md) — Compile the
-  Luau target as Second Life does
 - [`server-map-service`](ideas/server-map-service.md) — Map service — tiles and
   map items
 - [`server-message-routing`](ideas/server-message-routing.md) — Global message
@@ -1359,7 +1357,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (41)
+## bugs (42)
 
 ### protocol
 
@@ -1456,13 +1454,16 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — object_asset_format fails only in a full-workspace run, and fails early
 - [`test-conformance-script-compile-xengine-cold-start`](bugs/test-conformance-script-compile-xengine-cold-start.md)
   — script-compile fails its XEngine legs on a freshly started OpenSim
+- [`test-conformance-upload-after-yengine-start-dropped`](bugs/test-conformance-upload-after-yengine-start-dropped.md)
+  — Quick script uploads to one item on OpenSim take each other's answers, or
+  fail as "operation timed out"
 - [`test-fake-grid-tests-stop-reading-client-events`](bugs/test-fake-grid-tests-stop-reading-client-events.md)
   — Fake-grid integration tests stop reading the client's events and can stall
   it
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1468)
+## done (1469)
 
 ### protocol
 
@@ -4527,6 +4528,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — The vendored library document lacks 50 current functions
 - [`server-lsl-library-unserved-functions`](done/server-lsl-library-unserved-functions.md)
   — Five functions no served LSLSyntax document lists
+- [`server-lsl-luau-compiler`](done/server-lsl-luau-compiler.md) — Compile the
+  Luau target as Second Life does
 - [`server-lsl-memory-and-limits`](done/server-lsl-memory-and-limits.md) —
   Script memory and limits, because scripts observe them (blocked by
   `server-lsl-vm-execution` (done), `server-lsl-memory-sizes` (done),

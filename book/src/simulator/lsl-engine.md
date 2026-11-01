@@ -1058,10 +1058,14 @@ tests; the engine wiring offers its region's lines to scripts through
 
 ## Out of scope
 
-- **Luau / SLua.** `sl-proto` models `ScriptLanguage::Luau`, but this
-  programme is LSL. The `Host` trait and the library table are
-  language-neutral on purpose, so a second front end could target the
-  same VM-independent host later without either being redesigned.
+- **Running Luau / SLua.** `sl-proto` models `ScriptLanguage::Luau`, but
+  this programme is LSL. The fake grid *compiles* an upload under the
+  `luau` target, with the reference Luau compiler through `mlua`
+  (`sl_fake_grid::script_compile`), so its answer is Second Life's word
+  for word; it runs nothing it compiled. The `Host` trait and the library
+  table are language-neutral on purpose, so a second front end could
+  target the same VM-independent host later without either being
+  redesigned.
 - **LSO and Mono bytecode.** Scripts are compiled from source every time;
   nothing reads or writes the reference's compiled forms.
 - **A sandbox for hostile content.** Budgets and memory limits exist
