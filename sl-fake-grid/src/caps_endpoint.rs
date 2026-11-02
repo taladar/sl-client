@@ -82,8 +82,8 @@ pub(crate) async fn dispatch_caps(
                 let world = world.lock();
                 let contents = world.local_id_of(query.task).map(|local_id| {
                     world
-                        .task_inventories
-                        .get(&local_id)
+                        .objects
+                        .contents(local_id)
                         .map_or((0, &[][..]), |held| (held.serial, held.items.as_slice()))
                 });
                 let response = SimCaps::task_inventory_response(query, contents);

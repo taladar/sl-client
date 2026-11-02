@@ -2,7 +2,7 @@
 id: server-world-update-scheduling
 title: Batch world changes into per-tick update bursts
 topic: server
-status: blocked
+status: ready
 origin: LSL-on-the-fake-grid audit (2026-09-20)
 points: 8
 blocked_by: [server-world-heartbeat, server-world-ecs-store, gridspec-circuit,
@@ -28,7 +28,7 @@ one is a whole record anyway. It is wrong the moment a script runs:
   the tick it belongs to.
 
 Wanted: the heartbeat collects the tick's changes from the store's change
-detection ([[server-world-ecs-store]]) and emits, per session:
+detection and emits, per session:
 
 - a **terse** update for entities whose only change is placement /
   velocity / rotation / angular velocity — which is the common case and
@@ -39,6 +39,16 @@ detection ([[server-world-ecs-store]]) and emits, per session:
 - `KillObject` for what left;
 - all of it **coalesced per entity per tick**, in a stable order
   ([[server-world-determinism-contract]]).
+
+The store [[server-world-ecs-store]] built (`sl_fake_grid::scene_store`) is
+a `bevy_ecs` world, and every write to a prim goes through `bevy_ecs`'s
+`Mut` (`ObjectStore::get_mut` / `for_each_mut`), so the world's change ticks
+already say which prims changed since a tick; spawns and despawns are
+`push` and `remove` / `retain`. What is this task's: reading them once a
+tick (and clearing them, `World::clear_trackers`), and telling a placement-only
+change — terse — from any other, which the `Body` component does not say
+on its own (a placement component split out of it, or a comparison in
+`ObjectMut`'s `Drop`).
 
 Two existing behaviours must survive: the properties push stays a
 *subscription* (it goes only to sessions whose selection names the

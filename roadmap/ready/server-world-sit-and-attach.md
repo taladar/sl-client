@@ -2,7 +2,7 @@
 id: server-world-sit-and-attach
 title: Sitting and attaching as world state a script can read
 topic: server
-status: blocked
+status: ready
 origin: LSL-on-the-fake-grid audit (2026-09-20)
 points: 8
 blocked_by: [server-world-ecs-store, gridspec-attachments]

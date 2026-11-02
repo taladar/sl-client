@@ -43,7 +43,10 @@ The spatial query is the shared cost: a naive per-sensor scan over every
 entity is fine for a scenario with fifty prims and is what the first
 implementation should do — but it should go through the store's index
 ([[server-world-ecs-store]]) so the cost is one change later, not
-sixteen call sites.
+sixteen call sites. The store has no spatial index yet: it indexes by id
+and by link-set root, and a query by place is this task's to add to
+`ObjectStore`, as a scan first, with the coarse bucket behind the same
+method when [[server-world-collision-and-physics]] needs it.
 
 Acceptance: a sensor prim in the scripted scenario detects an avatar
 walking into range and fires `no_sensor` when it leaves; a 16-result cap

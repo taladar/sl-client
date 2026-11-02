@@ -102,7 +102,7 @@ pub(crate) fn answer_contents_write(
                 }
                 return Some(Vec::new());
             };
-            let contents = world.task_inventories.entry(*local_id).or_default();
+            let contents = world.objects.contents_or_empty(*local_id)?;
             let mut dropped = task_item_from(&source, object.full_id, mint);
             dropped.name = contents.free_name(&dropped.name);
             contents.write(dropped);
@@ -133,7 +133,7 @@ pub(crate) fn answer_contents_write(
             }
             let runs = params.enabled || policy.stopped_script == StoppedScript::RunAnyway;
             let item_id = script.item_id;
-            let contents = world.task_inventories.entry(*local_id).or_default();
+            let contents = world.objects.contents_or_empty(*local_id)?;
             script.name = contents.free_name(&script.name);
             contents.write(script);
             let mut changes = tell(world, selection, sim, *local_id, Write::Script, now);
@@ -144,7 +144,7 @@ pub(crate) fn answer_contents_write(
         }
         ServerEvent::RemoveTaskInventory { local_id, item_id } => {
             let _object = world.object_by_local_id(*local_id)?;
-            let contents = world.task_inventories.get_mut(local_id)?;
+            let contents = world.objects.contents_mut(*local_id)?;
             let was_running = contents.running.contains(item_id);
             // An item the prim does not hold: nothing is said, on either grid.
             let removed = contents.remove(*item_id)?;
@@ -169,7 +169,7 @@ pub(crate) fn answer_contents_write(
             item_id,
         } => {
             let _object = world.object_by_local_id(*local_id)?;
-            let contents = world.task_inventories.get_mut(local_id)?;
+            let contents = world.objects.contents_mut(*local_id)?;
             let held = contents
                 .items
                 .iter()
@@ -206,7 +206,7 @@ pub(crate) fn answer_contents_write(
         }
         ServerEvent::RequestScriptRunning { object_id, item_id } => {
             let local_id = world.local_id_of(*object_id)?;
-            let contents = world.task_inventories.get(&local_id)?;
+            let contents = world.objects.contents(local_id)?;
             let item = InventoryKey::from(*item_id);
             // A script the prim does not hold is not answered, nor one with no
             // instance (OpenSim's, after an upload that did not compile).
@@ -226,7 +226,7 @@ pub(crate) fn answer_contents_write(
             running,
         } => {
             let local_id = world.local_id_of(*object_id)?;
-            let contents = world.task_inventories.get_mut(&local_id)?;
+            let contents = world.objects.contents_mut(local_id)?;
             let item = InventoryKey::from(*item_id);
             let _held = contents.items.iter().find(|held| held.item_id == item)?;
             if *running {
@@ -273,7 +273,7 @@ fn start_script(
     else {
         return Vec::new();
     };
-    let Some(contents) = world.task_inventories.get_mut(&local_id) else {
+    let Some(contents) = world.objects.contents_mut(local_id) else {
         return Vec::new();
     };
     let _was = contents.running.insert(item_id);
@@ -303,12 +303,12 @@ fn tell(
     let mut changes = Vec::new();
     // The prim's flags say whether it holds a script, which is why a grid
     // that sends a prim again at all sends it when one lands or leaves.
-    let scripted = world.task_inventories.get(&local_id).is_some_and(|held| {
+    let scripted = world.objects.contents(local_id).is_some_and(|held| {
         held.items
             .iter()
             .any(|item| item.inv_type == InventoryType::Script)
     });
-    if let Some(object) = world.object_mut(local_id) {
+    if let Some(mut object) = world.object_mut(local_id) {
         if scripted {
             object.update_flags |= prim_flags::SCRIPTED;
         } else {

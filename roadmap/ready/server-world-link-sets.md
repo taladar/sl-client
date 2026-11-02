@@ -2,7 +2,7 @@
 id: server-world-link-sets
 title: A real link-set model — link numbers, root and children
 topic: server
-status: blocked
+status: ready
 origin: LSL-on-the-fake-grid audit (2026-09-20)
 points: 5
 blocked_by: [server-world-ecs-store, gridspec-object-link-delink]

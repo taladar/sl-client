@@ -592,7 +592,7 @@ fn repoint_task_item(
         tracing::debug!("an upload named object {task_id}, which this region does not have");
         return;
     };
-    let Some(contents) = world.task_inventories.get_mut(&local_id) else {
+    let Some(contents) = world.objects.contents_mut(local_id) else {
         tracing::debug!("an upload named an item in {task_id}, which holds nothing");
         return;
     };
@@ -626,7 +626,7 @@ fn set_script_experience(
     let Some(local_id) = world.local_id_of(task_id) else {
         return;
     };
-    let Some(contents) = world.task_inventories.get_mut(&local_id) else {
+    let Some(contents) = world.objects.contents_mut(local_id) else {
         return;
     };
     match experience {
@@ -780,9 +780,9 @@ mod test {
             asset_id: Some(AssetKey::from(uuid::Uuid::from_u128(0x0117))),
             ..crate::scenario::stock_script_item()
         };
-        let _previous = fixtures
-            .task_inventories
-            .insert(local_id, TaskInventory::stated(3, vec![item]));
+        fixtures
+            .add_task_inventory(local_id, TaskInventory::stated(3, vec![item]))
+            .map_err(|_contents| "the prim the contents are for is not in the region")?;
         let world: RegionWorld = std::sync::Arc::new(parking_lot::Mutex::new(fixtures));
 
         let new_asset = AssetKey::from(uuid::Uuid::from_u128(0x0222));
@@ -790,8 +790,8 @@ mod test {
 
         let guard = world.lock();
         let contents = guard
-            .task_inventories
-            .get(&local_id)
+            .objects
+            .contents(local_id)
             .ok_or("the object still has contents")?;
         assert_eq!(contents.serial, 4, "the contents serial did not advance");
         assert_eq!(
@@ -837,6 +837,6 @@ mod test {
             InventoryKey::from(uuid::Uuid::from_u128(0xBEEF)),
             AssetKey::from(uuid::Uuid::from_u128(1)),
         );
-        assert!(world.lock().task_inventories.is_empty());
+        assert!(world.lock().objects.is_empty());
     }
 }

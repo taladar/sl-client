@@ -4,7 +4,7 @@
 //! An object's task inventory used to live here too. It does not any more: a
 //! contents *serial* is only meaningful if the store that answers it is the
 //! store a write advances, so the listings moved to the region's own world
-//! ([`SceneFixtures::task_inventories`](crate::SceneFixtures::task_inventories))
+//! (each prim's contents in [`SceneFixtures::objects`](crate::SceneFixtures::objects))
 //! where the writes land. What is left here is genuinely fixture — bytes
 //! stated up front and served back unchanged.
 //!
@@ -123,8 +123,8 @@ pub(crate) fn task_item_asset(
         let world = world.lock();
         let local_id = world.local_id_of(task)?;
         world
-            .task_inventories
-            .get(&local_id)?
+            .objects
+            .contents(local_id)?
             .items
             .iter()
             .find(|held| held.item_id == item_id)?
@@ -381,9 +381,13 @@ mod test {
             asset_id: Some(asset),
             ..crate::scenario::stock_script_item()
         };
-        let _previous = fixtures
-            .task_inventories
-            .insert(local_id, crate::world::TaskInventory::stated(1, vec![held]));
+        let added = fixtures
+            .add_task_inventory(local_id, crate::world::TaskInventory::stated(1, vec![held]));
+        assert_eq!(
+            added,
+            Ok(()),
+            "the prim the contents are for is not in the region"
+        );
         std::sync::Arc::new(parking_lot::Mutex::new(fixtures))
     }
 

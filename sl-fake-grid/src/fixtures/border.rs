@@ -377,10 +377,8 @@ pub fn border_on_painted_ground(side: BorderSide) -> RegionFixture {
 )]
 pub fn border_pair_side(side: BorderSide) -> RegionFixture {
     let mut fixture = border_on_painted_ground(side);
-    for object in &mut fixture.world.objects {
-        if object.local_id == MARKER_LOCAL_ID {
-            object.full_id = side.marker_object();
-        }
+    if let Some(mut marker) = fixture.world.objects.get_mut(MARKER_LOCAL_ID) {
+        marker.full_id = side.marker_object();
     }
     fixture.world.objects.push(vehicle(side).build());
     fixture.world.npcs.push(rider(side));

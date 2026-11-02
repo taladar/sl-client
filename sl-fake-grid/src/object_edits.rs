@@ -711,12 +711,13 @@ fn edit_properties(
         tracing::debug!("an object edit named {local_id:?}, which this region does not have");
         return;
     };
-    let Some(object) = world.object_mut(local_id) else {
+    let Some(mut object) = world.object_mut(local_id) else {
         return;
     };
     let mut properties = current;
     edit(&mut properties);
     object.properties = Some(properties);
+    drop(object);
     let Some((sim, now)) = answer else {
         return;
     };
@@ -831,8 +832,8 @@ fn edit_object(
     local_id: RegionLocalObjectId,
     edit: impl FnOnce(&mut Object),
 ) -> Option<Object> {
-    let object = world.object_mut(local_id)?;
-    edit(object);
+    let mut object = world.object_mut(local_id)?;
+    edit(&mut object);
     Some(object.clone())
 }
 
@@ -1011,7 +1012,8 @@ fn copy_object(
         }
     }
     copy.properties = record;
-    if let Some(contents) = world.task_inventories.get(&original.local_id).cloned() {
+    world.objects.push(copy.clone());
+    if let Some(contents) = world.objects.contents(original.local_id).cloned() {
         let serial = match world.edit.copy_contents_serial {
             CopiedSerial::Originals => contents.serial,
             CopiedSerial::Advanced => contents.serial.saturating_add(2),
@@ -1025,12 +1027,10 @@ fn copy_object(
                 ..item
             })
             .collect();
-        let _none = world.task_inventories.insert(
-            copy.local_id,
-            crate::world::TaskInventory::stated(serial, items),
-        );
+        if let Some(held) = world.objects.contents_or_empty(copy.local_id) {
+            *held = crate::world::TaskInventory::stated(serial, items);
+        }
     }
-    world.objects.push(copy.clone());
     // The flag is for the session that asked for the copy selected, and is
     // not the object's: nobody else is sent it.
     let mut sent = copy.clone();

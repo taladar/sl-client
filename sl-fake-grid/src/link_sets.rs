@@ -157,8 +157,7 @@ pub(crate) fn children_in_order(
 ) -> Vec<RegionLocalObjectId> {
     let children: Vec<RegionLocalObjectId> = world
         .objects
-        .iter()
-        .filter(|object| object.parent_id == root)
+        .children_of(root)
         .map(|object| object.local_id)
         .collect();
     let mut ordered: Vec<RegionLocalObjectId> = world
@@ -225,18 +224,14 @@ fn region_placement(
     world: &SceneFixtures,
     prim: RegionLocalObjectId,
 ) -> Option<(Vector, Rotation)> {
-    let object = world
-        .objects
-        .iter()
-        .find(|object| object.local_id == prim)?;
+    let object = world.objects.get(prim)?;
     let own = (
         object.motion.position.clone(),
         object.motion.rotation.clone(),
     );
-    let root = world
-        .objects
-        .iter()
-        .find(|root| object.parent_id.0 != 0 && root.local_id == object.parent_id);
+    let root = (object.parent_id.0 != 0)
+        .then(|| world.objects.get(object.parent_id))
+        .flatten();
     Some(root.map_or_else(
         || own.clone(),
         |root| out_of_frame(&root.motion.position, &root.motion.rotation, &own.0, &own.1),
@@ -256,7 +251,7 @@ fn hang(
         || placed.clone(),
         |frame| into_frame(&frame.0, &frame.1, &placed.0, &placed.1),
     );
-    if let Some(object) = world.object_mut(prim) {
+    if let Some(mut object) = world.object_mut(prim) {
         object.parent_id = root;
         object.motion.position = position;
         object.motion.rotation = rotation;
@@ -297,9 +292,7 @@ pub(crate) fn link(
     named: &[RegionLocalObjectId],
 ) -> Result<Option<RegionLocalObjectId>, LinkRefusal> {
     let policy = world.linking;
-    let is_prim = |world: &SceneFixtures, prim: RegionLocalObjectId| {
-        world.objects.iter().any(|object| object.local_id == prim)
-    };
+    let is_prim = |world: &SceneFixtures, prim: RegionLocalObjectId| world.objects.contains(prim);
     let Some((first, rest)) = named.split_first() else {
         return Ok(None);
     };
@@ -412,7 +405,7 @@ pub(crate) fn delink(
     let mut touched: Vec<RegionLocalObjectId> = Vec::new();
     let mut roots: Vec<RegionLocalObjectId> = Vec::new();
     for prim in named {
-        let Some(object) = world.objects.iter().find(|object| object.local_id == *prim) else {
+        let Some(object) = world.objects.get(*prim) else {
             continue;
         };
         let root = world.root_of(*prim);
@@ -692,7 +685,7 @@ mod test {
             let mut world = world(grid);
             // `A` lowest, `B` 48 m above it and `C` 48 m above that.
             for (prim, lift) in [(B, 48.0), (C, 96.0)] {
-                if let Some(object) = world.object_mut(prim) {
+                if let Some(mut object) = world.object_mut(prim) {
                     object.motion.position = Vector {
                         x: 100.0,
                         y: 100.0,

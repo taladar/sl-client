@@ -4929,7 +4929,7 @@ mod test {
     #[tokio::test]
     async fn the_catalogue_reaches_the_client_field_for_field() -> Result<(), TestError> {
         let fixture = sl_fake_grid::catalogue();
-        let seeded: Vec<sl_proto::Object> = fixture.world.objects.clone();
+        let seeded: Vec<sl_proto::Object> = fixture.world.objects.iter().cloned().collect();
         assert!(
             seeded.len() >= sl_fake_grid::fixtures::catalogue::NAMES.len(),
             "the catalogue seeded only {} objects",

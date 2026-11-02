@@ -9185,6 +9185,7 @@ dependencies = [
 name = "sl-fake-grid"
 version = "0.1.0"
 dependencies = [
+ "bevy_ecs",
  "bytes",
  "clap",
  "fs-err",

@@ -2,7 +2,7 @@
 id: server-world-collision-and-physics
 title: Enough physics for the collision, target and volume-detect events
 topic: server
-status: blocked
+status: ready
 origin: LSL-on-the-fake-grid audit (2026-09-20)
 points: 13
 blocked_by: [server-world-heartbeat, server-world-ecs-store]

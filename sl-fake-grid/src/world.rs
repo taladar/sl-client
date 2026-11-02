@@ -20,6 +20,7 @@ use std::time::{Duration, Instant};
 
 use crate::estate::EstateFixture;
 use crate::fixtures::{NpcAppearance, NpcFixture};
+use crate::scene_store::{ObjectMut, ObjectStore};
 use crate::terrain::TerrainFixture;
 use sl_proto::{
     AnimationKey, AssetKey, AssetSource as _, AssetType, DeRezDestination, FolderType,
@@ -86,8 +87,12 @@ pub struct SceneFixtures {
     pub listings: Vec<ParcelListing>,
     /// The objects rezzed in the region, sent in one full `ObjectUpdate` on
     /// arrival (after the agent's own avatar object, which the driver adds
-    /// from the login).
-    pub objects: Vec<Object>,
+    /// from the login), in the order they were added.
+    ///
+    /// An indexed store ([`ObjectStore`]) rather than a list: a prim is found
+    /// by either of its ids, and what the region keeps of it besides its
+    /// record — its contents, its cost, its edit history — is held with it.
+    pub objects: ObjectStore,
     /// The other avatars the region shows — scripted, because the fake grid
     /// has no inter-session broadcast. Each contributes its avatar body, an
     /// `AvatarAppearance`, an `AvatarAnimation` and its attachments to the
@@ -103,32 +108,6 @@ pub struct SceneFixtures {
     ///
     /// [`PrimFixture::animated_mesh`]: crate::fixtures::PrimFixture::animated_mesh
     pub object_animations: Vec<ObjectAnimationFixture>,
-    /// The task (prim) inventories of the region's objects, keyed by the
-    /// object's region-local id: what a `RequestTaskInventory` is answered
-    /// from and what an `UpdateTaskInventory` writes into. An object with no
-    /// entry has an empty inventory, which is what a freshly rezzed prim has.
-    ///
-    /// This lives beside [`objects`] rather than with the other legacy-UDP
-    /// fixtures because it is not a fixture: the contents *serial* is the
-    /// whole observable — a viewer decides a cached listing is stale from it
-    /// alone — and a serial only means anything if the same store both answers
-    /// it and advances it. Keyed by region-local id because that is what the
-    /// request names; the [`ObjectKey`] the reply carries is read off the
-    /// object, so the two can never describe different prims.
-    ///
-    /// [`objects`]: Self::objects
-    pub task_inventories: BTreeMap<RegionLocalObjectId, TaskInventory>,
-    /// What each object **costs the region**, keyed by its region-local id:
-    /// the numbers a `LandStatRequest` reports and a fake region cannot measure,
-    /// because it runs no scripts and simulates no physics.
-    ///
-    /// So a scene states them. An object with no entry costs nothing and never
-    /// reaches a report, which is the state of every prim a fixture did not
-    /// speak about — and of every prim in a scene that declares none, whose
-    /// report is empty exactly as it was before this existed.
-    ///
-    /// [`objects`]: Self::objects
-    pub object_costs: BTreeMap<RegionLocalObjectId, ObjectCost>,
     /// The region-local id the arriving agent's own avatar object gets. A
     /// real simulator mints one per avatar; with one agent per session a
     /// fixed id is enough, but it must not collide with [`objects`].
@@ -141,10 +120,6 @@ pub struct SceneFixtures {
     ///
     /// [`mint_local_id`]: Self::mint_local_id
     last_minted_local_id: RegionLocalObjectId,
-    /// Each edited object's history, for the `Undo` / `Redo` a build floater
-    /// sends. Not a fixture: it is empty until something is edited, and an
-    /// object that leaves the region takes its history with it.
-    undo: BTreeMap<RegionLocalObjectId, EditHistory>,
     /// Each parcel's allow and ban lists, keyed by the parcel and which list it
     /// is. They live here rather than on the [`ParcelInfo`] because that is the
     /// wire record a `ParcelProperties` carries and it has no field for them: a
@@ -302,7 +277,7 @@ impl Placed {
 /// reference viewer keeps asking after the simulator has run out: an `Undo`
 /// with nothing left to undo is answered with silence, not an error.
 #[derive(Debug, Clone, Default, PartialEq)]
-struct EditHistory {
+pub(crate) struct EditHistory {
     /// The placements to go back to, oldest first.
     past: Vec<Placed>,
     /// The placements an undo stepped out of, oldest first — what a redo
@@ -469,14 +444,13 @@ pub enum RegionChange {
 /// Where the object `key` among `objects` hears from, region-local metres:
 /// its own position for a linkset root, its root's for a child prim (whose own
 /// position is an offset from it).
-fn listening_position(objects: &[Object], key: ObjectKey) -> Option<Vector> {
-    let object = objects.iter().find(|object| object.full_id == key)?;
+fn listening_position(objects: &ObjectStore, key: ObjectKey) -> Option<Vector> {
+    let object = objects.get_by_key(key)?;
     if object.parent_id.0 == 0 {
         return Some(object.motion.position.clone());
     }
     objects
-        .iter()
-        .find(|root| root.local_id == object.parent_id)
+        .get(object.parent_id)
         .map(|root| root.motion.position.clone())
 }
 
@@ -722,14 +696,11 @@ impl SceneFixtures {
         Self {
             parcels: Vec::new(),
             listings: Vec::new(),
-            objects: Vec::new(),
+            objects: ObjectStore::new(),
             npcs: Vec::new(),
             object_animations: Vec::new(),
-            task_inventories: BTreeMap::new(),
-            object_costs: BTreeMap::new(),
             avatar_local_id: RegionLocalObjectId(1),
             last_minted_local_id: RegionLocalObjectId(0),
-            undo: BTreeMap::new(),
             parcel_access: BTreeMap::new(),
             estate: EstateFixture::default(),
             limits: None,
@@ -765,28 +736,42 @@ impl SceneFixtures {
         RegionChange::Chat(Box::new(line))
     }
 
-    /// Adds an object's stated task inventory under its region-local id — a
-    /// fixture saying what a prim already contains.
+    /// States the task inventory of the prim with the given region-local id —
+    /// a fixture saying what a prim already contains. The prim goes in first:
+    /// its contents are held with it.
     ///
-    /// Nothing checks that an object with that id exists: a fixture builds its
-    /// objects and its contents in whatever order it likes, and the answer
-    /// path resolves the object at request time.
-    pub fn add_task_inventory(&mut self, local_id: RegionLocalObjectId, inventory: TaskInventory) {
-        let _previous = self.task_inventories.insert(local_id, inventory);
+    /// # Errors
+    ///
+    /// `inventory` itself, when the region has no prim with that id.
+    pub fn add_task_inventory(
+        &mut self,
+        local_id: RegionLocalObjectId,
+        inventory: TaskInventory,
+    ) -> Result<(), TaskInventory> {
+        self.objects
+            .set_contents(local_id, inventory)
+            .map(|_replaced| ())
     }
 
     /// Mints a region-local id no object in the region holds — the id a
     /// simulator hands a freshly rezzed prim.
     ///
-    /// One above the highest id in use, counting the objects, the NPCs, the
-    /// agent's own avatar and every id previously minted, so a rez that
-    /// followed a derez cannot hand back the derezzed object's id (a viewer
-    /// keyed on it would silently update the wrong thing).
+    /// One above the highest id in use, counting every prim the region ever
+    /// held, the NPCs, the agent's own avatar and every id previously minted,
+    /// so a rez that followed a derez cannot hand back the derezzed object's
+    /// id (a viewer keyed on it would silently update the wrong thing).
     pub fn mint_local_id(&mut self) -> RegionLocalObjectId {
         let highest = self
-            .all_objects()
+            .npcs
             .iter()
-            .map(|object| object.local_id.0)
+            .flat_map(|npc| {
+                std::iter::once(npc.local_id.0).chain(
+                    npc.attachments
+                        .iter()
+                        .map(|attachment| attachment.local_id.0),
+                )
+            })
+            .chain(std::iter::once(self.objects.highest_local_id().0))
             .chain(std::iter::once(self.avatar_local_id.0))
             .chain(std::iter::once(self.last_minted_local_id.0))
             .max()
@@ -796,11 +781,29 @@ impl SceneFixtures {
     }
 
     /// The object with the given region-local id, prims and NPC bodies alike.
+    ///
+    /// A prim is an index lookup; an NPC's body is made from its fixture, as
+    /// an arrival burst makes it.
     #[must_use]
     pub fn object_by_local_id(&self, local_id: RegionLocalObjectId) -> Option<Object> {
-        self.all_objects()
-            .into_iter()
-            .find(|object| object.local_id == local_id)
+        if let Some(prim) = self.objects.get(local_id) {
+            return Some(prim.clone());
+        }
+        self.npcs.iter().find_map(|npc| {
+            if npc.local_id == local_id {
+                return Some(npc.avatar_prim());
+            }
+            npc.attachments
+                .iter()
+                .find(|attachment| attachment.local_id == local_id)
+                .cloned()
+        })
+    }
+
+    /// The object with the given full id, prims and NPC bodies alike.
+    #[must_use]
+    pub fn object_by_key(&self, full_id: ObjectKey) -> Option<Object> {
+        self.object_by_local_id(self.local_id_of(full_id)?)
     }
 
     /// The prim with the given region-local id, to edit in place.
@@ -808,10 +811,8 @@ impl SceneFixtures {
     /// Only [`objects`](Self::objects), for the reason
     /// [`remove_object`](Self::remove_object) is: an NPC's body and its
     /// attachments are scripted scenery, not prims a client may edit.
-    pub fn object_mut(&mut self, local_id: RegionLocalObjectId) -> Option<&mut Object> {
-        self.objects
-            .iter_mut()
-            .find(|object| object.local_id == local_id)
+    pub fn object_mut(&mut self, local_id: RegionLocalObjectId) -> Option<ObjectMut<'_>> {
+        self.objects.get_mut(local_id)
     }
 
     /// The region-local id of the object with the given full id — the lookup
@@ -819,10 +820,18 @@ impl SceneFixtures {
     /// object family that name an object by its full id.
     #[must_use]
     pub fn local_id_of(&self, full_id: ObjectKey) -> Option<RegionLocalObjectId> {
-        self.all_objects()
-            .into_iter()
-            .find(|object| object.full_id == full_id)
-            .map(|object| object.local_id)
+        if let Some(prim) = self.objects.get_by_key(full_id) {
+            return Some(prim.local_id);
+        }
+        self.npcs.iter().find_map(|npc| {
+            if ObjectKey::from(npc.identity.agent_id.uuid()) == full_id {
+                return Some(npc.local_id);
+            }
+            npc.attachments
+                .iter()
+                .find(|attachment| attachment.full_id == full_id)
+                .map(|attachment| attachment.local_id)
+        })
     }
 
     /// The full properties record of the object with the given region-local id:
@@ -855,8 +864,8 @@ impl SceneFixtures {
         });
         properties.ownership_cost = LindenAmount(self.properties.ownership_cost);
         properties.inventory_serial = self
-            .task_inventories
-            .get(&local_id)
+            .objects
+            .contents(local_id)
             .map_or(0, |contents| contents.serial);
         Some(properties)
     }
@@ -892,9 +901,20 @@ impl SceneFixtures {
     /// said about.
     #[must_use]
     pub fn root_of(&self, local_id: RegionLocalObjectId) -> RegionLocalObjectId {
-        self.object_by_local_id(local_id)
-            .map(|object| object.parent_id)
-            .filter(|parent| parent.0 != 0 && self.object_by_local_id(*parent).is_some())
+        // A prim is read in place; only an NPC's body is made to be read.
+        let parent = self.objects.get(local_id).map_or_else(
+            || {
+                self.object_by_local_id(local_id)
+                    .map(|object| object.parent_id)
+            },
+            |prim| Some(prim.parent_id),
+        );
+        parent
+            .filter(|parent| {
+                parent.0 != 0
+                    && (self.objects.contains(*parent)
+                        || self.object_by_local_id(*parent).is_some())
+            })
             .unwrap_or(local_id)
     }
 
@@ -904,14 +924,13 @@ impl SceneFixtures {
     /// Called before a move, a turn or a resize rather than after it: what an
     /// undo restores is the placement the edit replaced.
     pub fn record_undo(&mut self, local_id: RegionLocalObjectId) {
-        let Some(before) = self.object_by_local_id(local_id) else {
+        let Some(before) = self.objects.get(local_id).map(Placed::of) else {
             return;
         };
         let depth = self.edit.undo_depth;
-        self.undo
-            .entry(local_id)
-            .or_default()
-            .record(Placed::of(&before), depth);
+        if let Some(history) = self.objects.history_mut(local_id) {
+            history.record(before, depth);
+        }
     }
 
     /// Steps the object one place back along its history of moves, turns and
@@ -923,13 +942,13 @@ impl SceneFixtures {
         local_id: RegionLocalObjectId,
         backwards: bool,
     ) -> Option<(Object, Object)> {
-        let before = self.object_by_local_id(local_id)?;
+        let before = self.objects.get(local_id)?.clone();
         let restored = self
-            .undo
-            .get_mut(&local_id)?
+            .objects
+            .history_mut(local_id)?
             .step(Placed::of(&before), backwards)?;
-        let held = self.object_mut(local_id)?;
-        restored.place(held);
+        let mut held = self.object_mut(local_id)?;
+        restored.place(&mut held);
         Some((before, held.clone()))
     }
 
@@ -943,7 +962,7 @@ impl SceneFixtures {
         item: InventoryKey,
     ) -> Option<Option<ExperienceKey>> {
         let local_id = self.local_id_of(task)?;
-        let contents = self.task_inventories.get(&local_id)?;
+        let contents = self.objects.contents(local_id)?;
         let _held = contents.items.iter().find(|held| held.item_id == item)?;
         Some(contents.experiences.get(&item).copied())
     }
@@ -951,16 +970,11 @@ impl SceneFixtures {
     /// Removes the prim with the given region-local id, returning it.
     ///
     /// Only [`objects`](Self::objects): an NPC's body is not a prim anybody
-    /// may derez, and its task inventory goes with it either way.
+    /// may derez. Its task inventory, cost and edit history go with it.
     pub fn remove_object(&mut self, local_id: RegionLocalObjectId) -> Option<Object> {
-        let index = self
-            .objects
-            .iter()
-            .position(|object| object.local_id == local_id)?;
-        let _contents = self.task_inventories.remove(&local_id);
-        let _history = self.undo.remove(&local_id);
+        let removed = self.objects.remove(local_id)?;
         self.links.forget(local_id);
-        Some(self.objects.remove(index))
+        Some(removed)
     }
 
     /// Adds one parcel with both its halves: the region-local record a
@@ -1006,7 +1020,7 @@ impl SceneFixtures {
     /// from — an NPC is as refetchable as any prim.
     #[must_use]
     pub fn all_objects(&self) -> Vec<Object> {
-        let mut objects = self.objects.clone();
+        let mut objects: Vec<Object> = self.objects.iter().cloned().collect();
         for npc in &self.npcs {
             objects.extend(npc.objects());
         }
@@ -1766,9 +1780,7 @@ pub(crate) fn push_arrival_world(
     // both grids send it: there is no moment it stands. The seat goes ahead
     // of it (it names the region handle as well as the avatar would), so the
     // client never holds a rider whose parent it has not heard of.
-    let seat = sim
-        .seated_on()
-        .and_then(|on| world.objects.iter().find(|object| object.full_id == on));
+    let seat = sim.seated_on().and_then(|on| world.objects.get_by_key(on));
     let avatar = match seat {
         Some(seat) => {
             if let Err(error) = send_objects(sim, core::slice::from_ref(seat), now) {
@@ -1818,8 +1830,7 @@ fn coarse_others(
             let seat = npc.seat.and_then(|seat| {
                 world
                     .objects
-                    .iter()
-                    .find(|object| object.local_id == seat)
+                    .get(seat)
                     .map(|object| object.motion.position.clone())
             });
             let (x, y, z) = seat.map_or((0.0, 0.0, 0.0), |seat| (seat.x, seat.y, seat.z));
@@ -2464,7 +2475,7 @@ pub(crate) fn answer_world_request(
             let root = world.root_of(*local_id);
             // The object goes where it was sent first, and the session that
             // sent it is told so in a terse update, as of any other move.
-            if let Some(object) = world.object_mut(root) {
+            if let Some(mut object) = world.object_mut(root) {
                 object.motion.position.clone_from(to);
                 let update = sl_proto::TerseUpdate {
                     local_id: root,
@@ -2502,7 +2513,7 @@ pub(crate) fn answer_world_request(
                 );
                 return Vec::new();
             };
-            let contents = world.task_inventories.get(local_id);
+            let contents = world.objects.contents(*local_id);
             let result = match contents {
                 Some(contents) if !contents.items.is_empty() => {
                     sim.serve_task_inventory(object.full_id, contents.serial, &contents.items, now)
@@ -2525,11 +2536,7 @@ pub(crate) fn answer_world_request(
         // Second Life refuses with a named alert and OpenSim does not answer
         // at all, which leaves it to the client's own sit timeout.
         ServerEvent::SitRequested { target, offset } => {
-            let Some(seat) = world
-                .all_objects()
-                .into_iter()
-                .find(|object| object.full_id == *target)
-            else {
+            let Some(seat) = world.object_by_key(*target) else {
                 tracing::debug!("a sit was requested on {target}, which this region does not have");
                 if let Some(refusal) = sits.unknown_target {
                     let named = sl_proto::AlertInfo {
@@ -2577,11 +2584,7 @@ pub(crate) fn answer_world_request(
         // client learns it (`NpcFixture::seated_on` says the same thing
         // statically for a scripted rider).
         ServerEvent::SitConfirmed { on: Some(seat) } => {
-            let Some(parent) = world
-                .all_objects()
-                .into_iter()
-                .find(|object| object.full_id == *seat)
-            else {
+            let Some(parent) = world.object_by_key(*seat) else {
                 return Vec::new();
             };
             push_seated_avatar(
@@ -2602,10 +2605,7 @@ pub(crate) fn answer_world_request(
         // last knew it.
         ServerEvent::StoodUp { from } => {
             let known = sim.arrival_position().clone();
-            let seat = world
-                .all_objects()
-                .into_iter()
-                .find(|object| object.full_id == *from);
+            let seat = world.object_by_key(*from);
             let stands_at = seat.map_or_else(
                 || Vector {
                     x: known.position.x(),
@@ -2717,10 +2717,19 @@ pub(crate) fn answer_world_request(
             }
         }
         ServerEvent::RequestObjects { objects } => {
+            let wanted = |object: &Object| objects.iter().any(|(id, _)| *id == object.local_id);
             let matching: Vec<Object> = world
-                .all_objects()
-                .into_iter()
-                .filter(|object| objects.iter().any(|(id, _)| *id == object.local_id))
+                .objects
+                .iter()
+                .filter(|object| wanted(object))
+                .cloned()
+                .chain(
+                    world
+                        .npcs
+                        .iter()
+                        .flat_map(crate::fixtures::NpcFixture::objects)
+                        .filter(|object| wanted(object)),
+                )
                 .collect();
             if !matching.is_empty()
                 && let Err(error) = send_objects(sim, &matching, now)
@@ -2915,14 +2924,14 @@ pub fn as_seen_by(object: &Object, agent: Option<AgentKey>) -> Object {
 /// # Errors
 ///
 /// What [`SimSession::send_object_update`] fails with.
-pub fn send_objects(
+pub fn send_objects<'object>(
     sim: &mut SimSession,
-    objects: &[Object],
+    objects: impl IntoIterator<Item = &'object Object>,
     now: Instant,
 ) -> Result<(), sl_proto::Error> {
     let agent = sim.agent_id();
     let seen: Vec<Object> = objects
-        .iter()
+        .into_iter()
         .map(|object| as_seen_by(object, agent))
         .collect();
     sim.send_object_update(&seen, REAL_TIME_DILATION, now)
@@ -3466,8 +3475,8 @@ fn derez(
                 .iter()
                 .map(|member| {
                     world
-                        .task_inventories
-                        .get(&member.local_id)
+                        .objects
+                        .contents(member.local_id)
                         .cloned()
                         .unwrap_or_default()
                 })
@@ -4290,7 +4299,7 @@ mod test {
     /// Removing a prim takes its contents with it: an id that comes back
     /// round to a new object must not inherit the old one's inventory.
     #[test]
-    fn removing_a_prim_drops_its_task_inventory() {
+    fn removing_a_prim_drops_its_task_inventory() -> Result<(), &'static str> {
         let mut world = SceneFixtures::new();
         let local_id = RegionLocalObjectId(4);
         world.objects.push(box_prim(
@@ -4300,9 +4309,12 @@ mod test {
             ZERO,
             ZERO,
         ));
-        world.add_task_inventory(local_id, TaskInventory::stated(3, Vec::new()));
+        world
+            .add_task_inventory(local_id, TaskInventory::stated(3, Vec::new()))
+            .map_err(|_contents| "the prim is not in the region")?;
         let _removed = world.remove_object(local_id);
-        assert_eq!(world.task_inventories.get(&local_id), None);
+        assert_eq!(world.objects.contents(local_id), None);
+        Ok(())
     }
 
     /// A task-inventory write advances the serial — which is the whole
@@ -4615,7 +4627,9 @@ mod test {
         assert_eq!(fresh.sale_price, None);
         assert_eq!(fresh.inventory_serial, 0);
 
-        world.add_task_inventory(local_id, TaskInventory::stated(3, Vec::new()));
+        world
+            .add_task_inventory(local_id, TaskInventory::stated(3, Vec::new()))
+            .map_err(|_contents| "the object is not in the region")?;
         let stocked = world
             .properties_of(local_id)
             .ok_or("the object has no properties")?;
@@ -4623,12 +4637,13 @@ mod test {
 
         // An edit is stored on the object, and the serial still comes from the
         // inventory rather than from the record that was written.
-        let held = world.object_mut(local_id).ok_or("the object went away")?;
+        let mut held = world.object_mut(local_id).ok_or("the object went away")?;
         held.properties = Some(ObjectProperties {
             name: "Renamed".to_owned(),
             inventory_serial: 99,
             ..stocked
         });
+        drop(held);
         let edited = world
             .properties_of(local_id)
             .ok_or("the object has no properties")?;
@@ -4712,7 +4727,7 @@ mod test {
         ));
         for step in 1..=8_u8 {
             world.record_undo(local_id);
-            let held = world.object_mut(local_id).ok_or("the object went away")?;
+            let mut held = world.object_mut(local_id).ok_or("the object went away")?;
             held.motion.position.z = f32::from(step);
             held.material = step;
         }

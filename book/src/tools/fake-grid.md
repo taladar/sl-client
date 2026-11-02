@@ -777,6 +777,51 @@ shared by every session in that region rather than cloned into each. Two
 regions never share one, which is what a handover needs: the region an
 object left and the region it arrived in disagree for a moment by design.
 
+### The object store
+
+`SceneFixtures::objects` is an `ObjectStore` (`sl_fake_grid::scene_store`),
+not a list. A fixture still writes `world.objects.push(prim)`, `extend`,
+`retain` and `iter` as it did over a `Vec`, and the store keeps the order
+prims came in, so an arrival burst and a refetch are sent in the order a
+fixture stated them. Behind that is a `bevy_ecs` `World`: each prim is an
+entity with its wire record as its `Body` component, numbered in the order
+it came in (`Seq`, since an ECS world's own iteration order shifts as
+entities leave), and the store keeps the indices up to date as prims come,
+go and change:
+
+- by **region-local id** and by **full id** (`get`, `get_by_key`): a
+  constant-time lookup, which a script engine reading `llGetPos` or
+  `llGetObjectDetails` per script per tick needs, where the old list was
+  walked (and cloned whole) for every lookup;
+- by **link-set root** (`children_of`), in the store's order;
+- the **highest region-local id ever held**, which is what
+  `mint_local_id` counts so that no id is ever reused.
+
+What the region knows of a prim beyond its wire record is a component of
+its entity, not a map beside the list: its **task inventory** (`contents`,
+`contents_mut`, `set_contents`, `SceneFixtures::add_task_inventory`), what
+it **costs** the region (`cost`, `set_cost`) and its **edit history** for
+`Undo` / `Redo`. All three leave with the prim, so a later prim given its id
+cannot inherit them, and a component can only be stated for a prim that is
+in the region (`add_task_inventory` hands the inventory back otherwise).
+`get_mut` hands out an `ObjectMut`, which writes the prim in place through
+`bevy_ecs`'s `Mut` (so the world's change ticks see the write) and, when it
+is dropped, files the prim again under any id the change moved: a prim
+relinked under another root is found under it at once. NPC bodies and their
+attachments are made from their fixtures rather than stored, and
+`SceneFixtures::object_by_local_id` and `local_id_of` look for them after
+the store.
+
+`bevy_ecs` rather than a hand-rolled store or `hecs` because it is the ECS
+the viewer already runs on: physics, sensors, the update stream and a fake
+grid that holds a real simulator's number of objects can be written as Bevy
+code is, and reuse Bevy crates. It is built without reflection or an
+executor (29 small crates on top of the fake grid's own); the fake grid's
+test suites ran in the same time with it as without. A `World` cannot be
+cloned, and a scenario's world is copied once into each region that uses it
+when the grid starts, so the store's `Clone` spawns the same prims, with the
+same components and in the same order, into a fresh world.
+
 A real simulator pushes a burst of
 world state at an arriving viewer that nothing requested, and the driver
 does the same on `AgentArrived`, right after `AgentMovementComplete`:
@@ -1769,8 +1814,9 @@ the `FirstName` / `LastName` name-values), then each one's
 region-local id and whose state byte carries the attachment point). The
 bodies precede the appearances because an appearance names an avatar the
 client has to already know, and the attachments come last because each
-names its wearer. `SceneFixtures::all_objects` folds the NPCs' objects in
-beside the prims, so an object refetch answers for them too.
+names its wearer. An object refetch, `SceneFixtures::object_by_local_id`
+and `local_id_of` look among the NPCs' objects after the region's prims, so
+they answer for them too.
 
 The three server-side pushes are `SimSession::send_avatar_appearance`,
 `send_avatar_animation` and `send_terse_update` (the every-frame motion

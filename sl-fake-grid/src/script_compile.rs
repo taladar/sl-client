@@ -451,7 +451,7 @@ pub(crate) fn answer_upload(
         );
         return answer;
     };
-    let Some(contents) = world.task_inventories.get_mut(&local_id) else {
+    let Some(contents) = world.objects.contents_mut(local_id) else {
         return answer;
     };
     let Some(mut item) = contents

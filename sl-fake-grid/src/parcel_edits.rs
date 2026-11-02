@@ -382,18 +382,20 @@ fn parcel_object_owners(
     world: &SceneFixtures,
     parcel: RegionLocalParcelId,
 ) -> Vec<ParcelObjectOwner> {
-    let objects = world.all_objects();
     let mut tally: Vec<ParcelObjectOwner> = Vec::new();
-    for root in objects
+    // Prims alone: an NPC's body is an avatar and its attachments hang off it.
+    for root in world
+        .objects
         .iter()
         .filter(|object| object.parent_id.0 == 0 && object.pcode != pcode::AVATAR)
     {
         if world.parcel_at_position(&root.motion.position) != Some(parcel) {
             continue;
         }
-        let children = objects
-            .iter()
-            .filter(|child| child.parent_id == root.local_id && child.pcode != pcode::AVATAR)
+        let children = world
+            .objects
+            .children_of(root.local_id)
+            .filter(|child| child.pcode != pcode::AVATAR)
             .count();
         let prims = i32::try_from(children.saturating_add(1)).unwrap_or(i32::MAX);
         let owner = world.properties_of(root.local_id).map_or_else(
@@ -529,10 +531,10 @@ fn land_stat_rows(
     let needle = filter.trim().to_lowercase();
     let has_filter = !needle.is_empty() && request_flags & FILTER_BY_ANY_NAME != 0;
     let mut rows: Vec<LandStatItem> = world
-        .all_objects()
-        .into_iter()
+        .objects
+        .iter()
         .filter_map(|object| {
-            let cost = world.object_costs.get(&object.local_id)?;
+            let cost = world.objects.cost(object.local_id)?;
             let score = cost.score_for(report_type)?;
             let parcel = world.parcel_at_position(&object.motion.position);
             // `ParcelLocalID` scopes the report; the reference sends `0` for

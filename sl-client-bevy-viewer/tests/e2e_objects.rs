@@ -1566,9 +1566,7 @@ mod test {
         let agent = stage.agent("Alpha").await?;
         let script = agent
             .with_world(|world, _sim| {
-                let contents = world
-                    .task_inventories
-                    .get_mut(&RegionLocalObjectId(local_id))?;
+                let contents = world.objects.contents_mut(RegionLocalObjectId(local_id))?;
                 let script = contents.items.first()?.item_id;
                 let _previous = contents.experiences.insert(script, experience);
                 Some(script)

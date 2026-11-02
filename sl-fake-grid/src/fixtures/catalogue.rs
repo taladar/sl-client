@@ -365,8 +365,12 @@ pub fn catalogue() -> RegionFixture {
         CATALOGUE_PARCEL_ID,
         CATALOGUE_DWELL,
     );
-    world.objects = objects(owner);
-    world.object_costs = object_costs();
+    world.objects = objects(owner).into();
+    for (local_id, cost) in object_costs() {
+        if world.objects.set_cost(local_id, cost).is_err() {
+            tracing::error!(?local_id, "a catalogue cost names no catalogue prim");
+        }
+    }
     world.npcs = vec![npc(), seated_npc()];
     world.object_animations = animesh_animations();
 

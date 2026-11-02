@@ -2,7 +2,7 @@
 id: server-fake-grid-script-engine-wiring
 title: Wire the script engine into the fake grid
 topic: server
-status: blocked
+status: ready
 origin: LSL-on-the-fake-grid audit (2026-09-20)
 points: 8
 blocked_by: [server-lsl-vm-execution, server-world-heartbeat,
@@ -101,7 +101,7 @@ Three more `Host` methods' worth of wiring, and the region-level view:
   `OBJECT_SCRIPT_MEMORY` figure and its time (`ScriptUsage`), busiest
   first, summed per object — and keep the fixture as the fall-back for an
   object with no scripts, and for a scenario that states a cost it wants in
-  the report (the comment on `SceneFixtures::object_costs`).
+  the report (a prim's cost component, `ObjectStore::cost`).
 - **`SimStats`' `ActiveScripts`** is `Engine::active_scripts` (Second Life's
   running average, OpenSim's count of scripts present); the fake grid sends
   `0` today. `llGetObjectDetails`' `OBJECT_SCRIPT_MEMORY`,

@@ -997,7 +997,7 @@ pub(crate) async fn run_region_watcher(
                                         let listed = {
                                             let world = state.world.lock();
                                             world.object_by_local_id(*local_id).zip(
-                                                world.task_inventories.get(local_id).cloned(),
+                                                world.objects.contents(*local_id).cloned(),
                                             )
                                         };
                                         let Some((object, contents)) = listed else {

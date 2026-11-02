@@ -580,22 +580,33 @@ pub fn default_world() -> SceneFixtures {
             z: 1.0,
         },
     ));
-    world.add_task_inventory(
-        STOCK_SCRIPTED_OBJECT_LOCAL_ID,
-        TaskInventory::stated(
-            SCRIPTED_OBJECT_SERIAL,
-            vec![stock_script_item(), stock_broken_script_item()],
-        ),
-    );
+    if world
+        .add_task_inventory(
+            STOCK_SCRIPTED_OBJECT_LOCAL_ID,
+            TaskInventory::stated(
+                SCRIPTED_OBJECT_SERIAL,
+                vec![stock_script_item(), stock_broken_script_item()],
+            ),
+        )
+        .is_err()
+    {
+        tracing::error!("the stock scripted object is not in the stock region");
+    }
     // The object holds a script, so the region's top-scripts report is about
     // it. What that script *costs* is a thing a fake region cannot measure and
     // therefore states: without it the stock grid answers every top-objects
     // request with an empty list, which exercises one line of a viewer's window
     // and none of the rest.
-    world.object_costs.insert(
-        STOCK_SCRIPTED_OBJECT_LOCAL_ID,
-        ObjectCost::scripted(STOCK_SCRIPT_TIME).with_resources(STOCK_SCRIPT_MEMORY_BYTES, 1),
-    );
+    if world
+        .objects
+        .set_cost(
+            STOCK_SCRIPTED_OBJECT_LOCAL_ID,
+            ObjectCost::scripted(STOCK_SCRIPT_TIME).with_resources(STOCK_SCRIPT_MEMORY_BYTES, 1),
+        )
+        .is_err()
+    {
+        tracing::error!("the stock scripted object is not in the stock region");
+    }
     world
 }
 

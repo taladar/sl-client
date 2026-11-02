@@ -70,7 +70,7 @@ pub(crate) fn answer_grab(
     };
     let root = world.root_of(local_id);
     if follows(world, agent, local_id, root)
-        && let Some(object) = world.object_mut(root)
+        && let Some(mut object) = world.object_mut(root)
     {
         match pull {
             Pull::To(position) => object.motion.position.clone_from(position),

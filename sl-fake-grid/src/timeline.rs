@@ -1223,11 +1223,11 @@ fn edit_object(
     edit: impl FnOnce(&mut Object),
 ) -> ((), Vec<RegionChange>) {
     world.record_undo(local_id);
-    let Some(object) = world.object_mut(local_id) else {
+    let Some(mut object) = world.object_mut(local_id) else {
         tracing::warn!("a scripted edit named {local_id:?}, which this region does not have");
         return ((), Vec::new());
     };
-    edit(object);
+    edit(&mut object);
     let changed = object.clone();
     push_object(sim, &changed, now);
     ((), vec![RegionChange::Updated(Box::new(changed))])

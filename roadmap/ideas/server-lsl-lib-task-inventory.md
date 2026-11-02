@@ -11,13 +11,13 @@ refs: [server-lsl-state-and-events, test-fake-grid-rez-from-inventory]
 
 Context: [context/lsl.md](../context/lsl.md).
 
-What a prim carries and what it does with it. The fake grid has the
-store already — `SceneFixtures::task_inventories` keyed by region-local
-id, with the contents serial that is "the whole observable", plus
-`RequestTaskInventory` / `UpdateTaskInventory` / `RezScript` /
-`MoveTaskInventory` / `RemoveTaskInventory` handling and a rez-from-
-inventory path ([[test-fake-grid-rez-from-inventory]]). This tranche is
-the script-facing half of it.
+What a prim carries and what it does with it. The fake grid has the store
+already — each prim's contents component in `SceneFixtures::objects`
+(`ObjectStore::contents`), with the contents serial that is "the whole
+observable", plus `RequestTaskInventory` / `UpdateTaskInventory` / `RezScript` /
+`MoveTaskInventory` / `RemoveTaskInventory` handling and a rez-from-inventory
+path ([[test-fake-grid-rez-from-inventory]]). This tranche is the script-facing
+half of it.
 
 - **Reading**: `llGetInventoryNumber`, `llGetInventoryName`,
   `llGetInventoryType`, `llGetInventoryKey`, `llGetInventoryCreator`,
