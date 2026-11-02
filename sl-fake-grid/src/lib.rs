@@ -44,6 +44,7 @@ pub mod scenario;
 pub mod scene_store;
 pub mod script_compile;
 pub mod script_syntax;
+pub mod scripts;
 pub mod social;
 mod task_contents;
 mod teleport;
@@ -106,6 +107,7 @@ pub use script_compile::{
     CompileOutcome, CompilePolicy, FailedScript, ScriptCompiler, TaskNewAsset, compile_source,
 };
 pub use script_syntax::{LslSyntaxDocument, LslSyntaxPolicy};
+pub use scripts::{REGION_SOURCE, RegionScripts};
 pub use teleport::TELEPORT_ARRIVAL_TIMEOUT;
 pub use terrain::{Heightfield, TerrainFixture};
 pub use time::{Now, system_clock, tokio_clock};

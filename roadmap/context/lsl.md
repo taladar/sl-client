@@ -67,7 +67,9 @@ What is missing is the middle:
   each row: [[server-world-ecs-store]].)
 - There is **no simulation loop**. A change is published by the session
   that made it and streamed to the region's other sessions; nothing
-  sweeps, nothing ticks, nothing moves on its own.
+  sweeps, nothing ticks, nothing moves on its own. (Since 2026-11-02 a
+  heartbeat ticks every region, [[server-world-heartbeat]], and runs its
+  scripts: [[server-fake-grid-script-engine-wiring]].)
 - The agent's position is "the position the session was opened at"
   (`driver.rs`'s `stands_on`). `ServerEvent::AgentUpdate` is never
   consumed.

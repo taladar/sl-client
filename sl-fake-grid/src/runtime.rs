@@ -73,7 +73,7 @@ impl Default for GridIdentity {
 /// `AgentMovementComplete` — the string a viewer shows as the region's server
 /// build. The fake grid names itself (and its version) so a capture taken
 /// against it is never mistaken for one taken against a real simulator.
-const SERVER_CHANNEL_VERSION: &str = concat!("sl-fake-grid ", env!("CARGO_PKG_VERSION"));
+pub(crate) const SERVER_CHANNEL_VERSION: &str = concat!("sl-fake-grid ", env!("CARGO_PKG_VERSION"));
 
 /// One region a [`FakeGridBuilder`] defines.
 #[derive(Debug, Clone)]
@@ -650,6 +650,12 @@ pub(crate) struct GridCore {
     pub(crate) teleports_tx: broadcast::Sender<TeleportNotice>,
     /// Publishes completed border crossings.
     pub(crate) crossings_tx: broadcast::Sender<CrossingNotice>,
+    /// Each experience's key-value store, by the experience's key: the
+    /// grid's, so every object of an experience in every region shares one
+    /// and it outlives them all. Taken by a region's script tick under the
+    /// region's lock, and by nothing else.
+    pub(crate) experience_stores:
+        parking_lot::Mutex<BTreeMap<String, sl_lsl_runtime::vm::KeyValueStore>>,
 }
 
 /// Everything a successful login mints before the response is built. The
@@ -2264,6 +2270,14 @@ impl FakeGridBuilder {
                 fixtures.scripts = self.imitates.script_compile_policy();
                 fixtures.chat = self.imitates.chat_policy();
                 fixtures.region_info = self.imitates.region_info_policy();
+                fixtures.script_instances = crate::scripts::RegionScripts::new(
+                    config.heartbeat.step,
+                    self.imitates.script_engine(),
+                    // The region's id, minted from the grid's seed: a seeded
+                    // grid's scripts draw the same numbers, and the seeded
+                    // id stream is not moved on by a draw of its own.
+                    u64::try_from(region_id.as_u128() & u128::from(u64::MAX)).unwrap_or(1),
+                );
                 let world = Arc::new(parking_lot::Mutex::new(fixtures));
                 let (changes, _) = broadcast::channel(REGION_CHANGES_CHANNEL_CAPACITY);
                 let heartbeat = crate::heartbeat::Heartbeat::new(
@@ -2468,6 +2482,7 @@ impl FakeGridBuilder {
             economy_tx,
             teleports_tx,
             crossings_tx,
+            experience_stores: parking_lot::Mutex::new(BTreeMap::new()),
         });
         tokio::spawn(crate::http_service::run_http(
             Arc::clone(&core),
@@ -2884,6 +2899,31 @@ impl FakeGrid {
             .ok_or_else(|| Error::UnknownRegion {
                 region: region.to_owned(),
             })
+    }
+
+    /// Restarts the scripts of the region called `region` as a region restart
+    /// does, the region down for `down`: every script is saved and brought
+    /// back as its engine does it — its globals, state, timer, listens and
+    /// queue kept, `changed(CHANGED_REGION_START)` raised, and on Second Life
+    /// the time down counted against a sleep and the timer
+    /// ([`crate::scripts`]).
+    ///
+    /// Only the scripts: the countdown before a restart, and the agents it
+    /// sends away, are the estate's (`server-fake-grid-estate-actions`).
+    ///
+    /// # Errors
+    ///
+    /// [`Error::UnknownRegion`] when the grid has no region by that name.
+    pub fn restart_region(&self, region: &str, down: Duration) -> Result<(), Error> {
+        let index = self.region_index(region)?;
+        let entry = self
+            .core
+            .region(index)
+            .ok_or_else(|| Error::UnknownRegion {
+                region: region.to_owned(),
+            })?;
+        entry.world.lock().script_instances.restart(down);
+        Ok(())
     }
 
     /// Watches the ticks of the region called `region`: the receiver holds

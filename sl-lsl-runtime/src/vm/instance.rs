@@ -173,6 +173,10 @@ pub enum Outcome {
     /// are gone and the initialisers run next, then `default`'s
     /// `state_entry`.
     Reset,
+    /// The script called `llDie` and the host is removing its object: the
+    /// body in progress and the queue are gone and the script is stopped, so
+    /// nothing of it runs again whatever the host does next.
+    Died,
     /// A run-time error ended the body in progress. What became of the
     /// script is the flavour's: on Second Life it is stopped and held
     /// ([`Instance::is_held`]), keeping its state and its globals; on YEngine
@@ -374,6 +378,8 @@ enum Flow {
     Sleep(f64),
     /// Reset the script.
     Reset,
+    /// End the script: its object is leaving the region (`llDie`).
+    Died,
 }
 
 /// One script instance: a shared compiled program and everything that is this
@@ -857,6 +863,7 @@ impl Machine<'_> {
                 let forced = f64::from(descriptor.sleep);
                 return Ok(match request {
                     Some(Request::Reset) => Flow::Reset,
+                    Some(Request::Die) => Flow::Died,
                     Some(Request::Sleep(seconds)) => Flow::Sleep(f64::from(seconds) + forced),
                     None if forced > 0.0 => Flow::Sleep(forced),
                     None => Flow::Next,
@@ -1526,6 +1533,12 @@ impl Instance {
                     self.data.refusals = refusals;
                     self.data.raised = raised;
                     Outcome::Reset
+                }
+                Ok(Flow::Died) => {
+                    self.activity = None;
+                    self.pending_state = None;
+                    self.set_running(false);
+                    Outcome::Died
                 }
                 Err(error) => self.fault(error, at, peers.flavour()),
             };

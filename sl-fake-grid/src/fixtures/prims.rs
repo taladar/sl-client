@@ -302,6 +302,16 @@ impl PrimFixture {
         self
     }
 
+    /// Marks the prim as holding a script (`FLAGS_SCRIPTED` in its update
+    /// flags), as a simulator marks every prim with a script in its contents.
+    /// The script itself is the region's: a fixture states it as an item of
+    /// the prim's task inventory.
+    #[must_use]
+    pub const fn scripted(mut self) -> Self {
+        self.object.update_flags |= sl_proto::prim_flags::SCRIPTED;
+        self
+    }
+
     /// Makes a mesh prim an **animated object** (animesh): the `ExtraParams`
     /// extended-mesh block carries `ANIMATED_MESH_ENABLED_FLAG`, which is how a
     /// simulator says "give this linkset a control avatar of its own and pose

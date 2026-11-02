@@ -244,6 +244,10 @@ mod tests {
 
         fn left_state(&mut self, _caller: CallerId) {}
 
+        fn die(&mut self, _caller: CallerId) -> bool {
+            false
+        }
+
         fn script_named(&self, _caller: CallerId, _name: &str) -> Option<CallerId> {
             None
         }

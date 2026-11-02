@@ -13,7 +13,10 @@
 //!   viewer may say at all, how long a line may be, and how far the typing
 //!   notices and the debug channel carry, they do not, and the grid does as
 //!   the flavour it imitates ([`ChatPolicy`]).
-//! - **Scripts** hear through a listen ([`Listens`]), on any channel — and a
+//! - **Scripts** hear through their own listens (`llListen`, kept by each
+//!   script instance and offered every line in earshot by
+//!   [`crate::scripts`]); an agent or a test hears through a listen of this
+//!   module's ([`Listens`]). Either hears on any channel — and a
 //!   non-zero channel reaches nothing else, which is the whole point of the
 //!   hidden channel a dialog reply comes back on. A listen hears what an avatar
 //!   at the listening object would hear, minus its own object's lines, owner-
@@ -348,7 +351,7 @@ impl Line {
 
     /// Whether a listen of an object at `position`, on this line's channel,
     /// could hear it — before its filter is asked.
-    fn reaches_listen_at(&self, listener: ObjectKey, position: &Vector) -> bool {
+    pub(crate) fn reaches_listen_at(&self, listener: ObjectKey, position: &Vector) -> bool {
         if self.source == ChatSource::Object(listener) {
             return false;
         }
@@ -425,8 +428,9 @@ struct Listen {
 /// region is offered to. A region's, not a session's, because the object
 /// listening is.
 ///
-/// The fake grid runs no scripts yet, so whoever registers a listen is its
-/// consumer: it receives each line the listen hears on the channel
+/// A script's own listens are its instance's ([`crate::scripts`]); these are
+/// an agent's or a test's, and whoever registers one is its consumer: it
+/// receives each line the listen hears on the channel
 /// [`listen`](Self::listen) returns.
 #[derive(Debug, Clone, Default)]
 pub struct Listens {

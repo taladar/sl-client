@@ -510,8 +510,18 @@ impl Engine {
     /// rezzed (`persistence/rerez`, 2026-10-26). XEngine resets the script on
     /// the rez, so what it saves is never run.
     pub fn take(&mut self, id: CallerId) -> Option<SavedScript> {
-        let instance = self.instances.remove(&id)?;
-        let mut saved = save(&instance, self.now, self.config.step);
+        let saved = self.save(id)?;
+        let _taken = self.instances.remove(&id);
+        Some(saved)
+    }
+
+    /// The instance `id` saved as [`Self::take`] saves it, the instance left
+    /// running where it is: what a take of a copy files, while the object it
+    /// copied runs on. [`None`] when there is no such instance.
+    #[must_use]
+    pub fn save(&self, id: CallerId) -> Option<SavedScript> {
+        let instance = self.instances.get(&id)?;
+        let mut saved = save(instance, self.now, self.config.step);
         if self.config.flavour == EngineFlavour::YEngine {
             saved.wake();
         }
@@ -682,7 +692,8 @@ impl Engine {
             | Outcome::Finished
             | Outcome::Sleeping(_)
             | Outcome::StateChanged(_)
-            | Outcome::Reset => None,
+            | Outcome::Reset
+            | Outcome::Died => None,
         };
         if slice.refusals.is_empty() && fault.is_none() {
             return;

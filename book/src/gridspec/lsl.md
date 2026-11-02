@@ -11,8 +11,9 @@ the grid sent the viewers meanwhile — the permission question, the
 `ScriptControlChange`, the follow camera, the animation list — beside what
 the script printed.
 
-The fake grid runs no scripts yet, so its column says what it does with the
-wire half where it has one; the library itself is
+The fake grid runs scripts (`sl_fake_grid::scripts`, a YEngine engine on
+its OpenSim flavour) but not yet this library, so its column says what it
+does with the wire half where it has one; the library itself is
 `server-lsl-lib-avatar-control` and its siblings, built to these tables.
 
 ## Animations, sitting, controls and camera
@@ -1260,7 +1261,7 @@ starts and an idle LSO one — and another object with one Mono script.
 | `OBJECT_SCRIPT_TIME` | a few microseconds | a few milliseconds | no scripts |
 | of an avatar (the owner) | its attachments' scripts: five, `327680` | `0`, `0`, `0`: the local avatar wears none | no scripts |
 | of `NULL_KEY`, of a key that names nothing | `[]` | `[]` | no scripts |
-| the region's active-script count (`SimStats` `ActiveScripts`) | a time average (`2563.4`, `2564.7`, … on Mauve) that rose by the probe's five running scripts and fell by one while `Idle` was stopped | a whole number that counts the scripts in the region's prims, running or not (`6` for the probe's six, the self-stopped one among them, as OpenSim adds one when a script is put in a prim and takes one when it is removed) | `0`: it runs no scripts |
+| the region's active-script count (`SimStats` `ActiveScripts`) | a time average (`2563.4`, `2564.7`, … on Mauve) that rose by the probe's five running scripts and fell by one while `Idle` was stopped | a whole number that counts the scripts in the region's prims, running or not (`6` for the probe's six, the self-stopped one among them, as OpenSim adds one when a script is put in a prim and takes one when it is removed) | the engine's count, its flavour's way: the Second Life average or the OpenSim count, and the share of the runnable scripts its last tick ran for the scripts-run percentage; what the telemetry states for a region with no script |
 
 ### What the viewer does with it
 

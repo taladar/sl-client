@@ -677,9 +677,10 @@ The fake grid used to drop a `RezScript`, a remove and a move without a
 word, and answered a prim's listing over UDP alone. It lists a prim over
 the capability now on the Second-Life flavour, makes, removes and copies
 out items as its flavour's grid does, moves the serial as that grid does,
-and tells the sessions that grid tells (`task_contents`). It runs no script
-and keeps only whether each is running, which is what a viewer's Running
-box reads; it does not clear a prim's "inventory is empty" flag
+and tells the sessions that grid tells (`task_contents`). The Running box
+reads and sets the script's instance in the region's engine
+(`sl_fake_grid::scripts`), and a script with no instance reads as the item
+was last left; it does not clear a prim's "inventory is empty" flag
 (`0x800`), which Second Life's full update after a first drop does.
 
 Not measured: a move of an item the agent may not copy, which should take
@@ -709,7 +710,8 @@ it is handed, with what it detects, to its owner. It ran seven times on
 aditi (Mauve, the public sandbox parcel) and eight on the local OpenSim
 (YEngine). Every row below is checked on every run of both live grids, but
 for the ones marked **not held**; the rows of *A prim with no script* are
-checked on both fake flavours as well, which run no scripts.
+checked on both fake flavours as well; the rest wait for the touch routing
+of `server-world-touch-and-grab`.
 
 ### The events of a touch
 
@@ -825,8 +827,8 @@ lets anybody move; `llSetStatus(STATUS_BLOCK_GRAB)`; XEngine. What a
 `touch` reads on OpenSim after a click or a hold with no update cannot be
 asked: there is no such event there.
 
-The fake grid runs no scripts, so it hands nothing a touch event: that, and
-the detected values, are `server-world-touch-and-grab`. It moves and turns
+The fake grid runs scripts but hands none of them a touch event yet: that,
+and the detected values, are `server-world-touch-and-grab`. It moves and turns
 a dragged prim as above (`sl-fake-grid/src/grabs.rs`), with one row in
 `imitates.rs` for the one thing the grids differ in — OpenSim's terse
 update for an update that moved nothing. A physical prim stays where it is

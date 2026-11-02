@@ -33,6 +33,14 @@
 //! its ids the change moved: a prim relinked under another root, or given a
 //! new full id, is found under the new one at once.
 //!
+//! # What changed
+//!
+//! [`ObjectStore::take_changed_contents`] names the prims whose contents were
+//! written since it last answered — by the change tick `bevy_ecs` stamps a
+//! component with when it is written through a [`Mut`] or inserted — so the
+//! script engine follows what the region's prims hold without walking all of
+//! them every tick.
+//!
 //! # Copies
 //!
 //! A [`World`] cannot be cloned, and a scenario's world is copied into every
@@ -42,9 +50,10 @@
 
 use std::collections::{BTreeMap, HashMap};
 
+use bevy_ecs::change_detection::{DetectChanges as _, Tick};
 use bevy_ecs::component::Component;
 use bevy_ecs::entity::Entity;
-use bevy_ecs::world::{Mut, World};
+use bevy_ecs::world::{Mut, Ref, World};
 use sl_proto::{Object, RegionLocalObjectId};
 use sl_types::key::ObjectKey;
 
@@ -164,6 +173,9 @@ pub struct ObjectStore {
     world: World,
     /// Where each prim is found.
     indices: Indices,
+    /// The world's change tick when [`Self::take_changed_contents`] last
+    /// answered: a contents write stamped later is one it has not named.
+    contents_seen: Tick,
 }
 
 impl Default for ObjectStore {
@@ -171,6 +183,7 @@ impl Default for ObjectStore {
         Self {
             world: World::new(),
             indices: Indices::default(),
+            contents_seen: Tick::new(0),
         }
     }
 }
@@ -424,6 +437,31 @@ impl ObjectStore {
         Ok(replaced)
     }
 
+    /// The prims whose contents were written or stated since the last call,
+    /// in the store's order — every prim holding contents, the first time.
+    ///
+    /// A write is one through [`Self::contents_mut`] or
+    /// [`Self::contents_or_empty`] (whether or not it changed anything) or a
+    /// [`Self::set_contents`]; a prim that left the region is not named.
+    pub fn take_changed_contents(&mut self) -> Vec<RegionLocalObjectId> {
+        // Writes from here on are stamped after `seen`.
+        let seen = self.world.increment_change_tick();
+        let now = self.world.change_tick();
+        let since = self.contents_seen;
+        let mut query = self.world.query::<(&Seq, &Body, Ref<'_, Contents>)>();
+        let mut changed: Vec<(Seq, RegionLocalObjectId)> = query
+            .iter(&self.world)
+            .filter(|(_seq, _body, contents)| contents.last_changed().is_newer_than(since, now))
+            .map(|(seq, body, _contents)| (*seq, body.0.local_id))
+            .collect();
+        changed.sort_unstable_by_key(|(seq, _local_id)| *seq);
+        self.contents_seen = seen;
+        changed
+            .into_iter()
+            .map(|(_seq, local_id)| local_id)
+            .collect()
+    }
+
     /// What the prim with the given region-local id costs the region, if a
     /// fixture said.
     #[must_use]
@@ -665,6 +703,35 @@ mod test {
         let absent = store.set_contents(RegionLocalObjectId(5), TaskInventory::default());
         assert_eq!(absent, Err(TaskInventory::default()));
         assert_eq!(store.highest_local_id(), RegionLocalObjectId(4));
+        Ok(())
+    }
+
+    /// A prim is named once for each round of contents writes: every prim
+    /// holding contents the first time, then only those written since.
+    #[test]
+    fn changed_contents_are_named_once_per_write() -> Result<(), &'static str> {
+        let mut store: ObjectStore = (1..=3).map(prim).collect();
+        for local_id in [1, 3] {
+            let _none = store
+                .set_contents(RegionLocalObjectId(local_id), TaskInventory::default())
+                .map_err(|_contents| "the prim is not in the store")?;
+        }
+        assert_eq!(
+            store.take_changed_contents(),
+            vec![RegionLocalObjectId(1), RegionLocalObjectId(3)]
+        );
+        assert_eq!(store.take_changed_contents(), Vec::new());
+        store
+            .contents_mut(RegionLocalObjectId(3))
+            .ok_or("no contents")?
+            .touch();
+        let _made = store.contents_or_empty(RegionLocalObjectId(2));
+        assert_eq!(
+            store.take_changed_contents(),
+            vec![RegionLocalObjectId(2), RegionLocalObjectId(3)]
+        );
+        // A copy names everything again: it is a fresh world.
+        assert_eq!(store.clone().take_changed_contents().len(), 3);
         Ok(())
     }
 

@@ -122,6 +122,8 @@ pub(crate) enum Request {
     Sleep(f32),
     /// Restart the script from scratch (`llResetScript`).
     Reset,
+    /// End the script for good: its object is leaving the region (`llDie`).
+    Die,
 }
 
 /// The region's other scripts, as a library function may see them: their run
@@ -521,8 +523,8 @@ impl<'host> ScriptCtx<'host> {
 
     /// Suspend the script for `seconds` once the function returns. A
     /// duration that is not positive (or is NaN) does not suspend.
-    pub fn sleep(&mut self, seconds: f32) {
-        if self.request != Some(Request::Reset) {
+    pub const fn sleep(&mut self, seconds: f32) {
+        if self.request.is_none() || matches!(self.request, Some(Request::Sleep(_))) {
             self.request = Some(Request::Sleep(seconds));
         }
     }
@@ -532,6 +534,13 @@ impl<'host> ScriptCtx<'host> {
     /// `state_entry` next.
     pub const fn reset(&mut self) {
         self.request = Some(Request::Reset);
+    }
+
+    /// Run nothing more once the function returns: the script's object is
+    /// leaving the region (`llDie`), and the host removes it once control is
+    /// back with the grid.
+    pub const fn die(&mut self) {
+        self.request = Some(Request::Die);
     }
 
     /// The effect requested, taken once by the VM.

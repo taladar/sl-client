@@ -14,7 +14,7 @@ use crate::vm::ScriptCtx;
 /// # Errors
 ///
 /// None; the signature is the library's.
-pub fn ll_sleep(ctx: &mut ScriptCtx<'_>, seconds: f32) -> Result<(), CallError> {
+pub const fn ll_sleep(ctx: &mut ScriptCtx<'_>, seconds: f32) -> Result<(), CallError> {
     ctx.sleep(seconds);
     Ok(())
 }
@@ -27,6 +27,22 @@ pub fn ll_sleep(ctx: &mut ScriptCtx<'_>, seconds: f32) -> Result<(), CallError> 
 /// None; the signature is the library's.
 pub const fn ll_reset_script(ctx: &mut ScriptCtx<'_>) -> Result<(), CallError> {
     ctx.reset();
+    Ok(())
+}
+
+/// `llDie`: the object the script is in leaves the region, every prim of it
+/// and every script in them. The script runs nothing after the call; the grid
+/// removes the object once control is back with it. An attachment is left
+/// where it is, and its script carries on, as on every grid.
+///
+/// # Errors
+///
+/// None; the signature is the library's.
+pub fn ll_die(ctx: &mut ScriptCtx<'_>) -> Result<(), CallError> {
+    let caller = ctx.caller();
+    if ctx.host().die(caller) {
+        ctx.die();
+    }
     Ok(())
 }
 

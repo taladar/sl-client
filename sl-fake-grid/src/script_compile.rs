@@ -35,6 +35,10 @@
 //! expression, got '='`), and so does this module, by running that compiler
 //! (through `mlua`). It compiles and does not run: a Luau script has no
 //! instance here.
+//!
+//! A clean LSL compile of a task upload hands its program to the region's
+//! engine ([`crate::scripts`]), which starts the saved script from it at the
+//! next tick: a save is compiled once.
 
 use std::collections::BTreeSet;
 
@@ -61,7 +65,7 @@ pub enum ScriptCompiler {
 
 impl ScriptCompiler {
     /// The compiler dialect, for what compiles.
-    const fn dialect(self) -> Dialect {
+    pub(crate) const fn dialect(self) -> Dialect {
         match self {
             Self::SecondLife => Dialect::SecondLife,
             Self::YEngine => Dialect::OpenSim,
@@ -136,36 +140,53 @@ pub fn compile_source(
     source: &[u8],
     asset: AssetKey,
 ) -> CompileOutcome {
+    compile_with_program(compiler, target, source, asset).0
+}
+
+/// [`compile_source`], and the program an LSL source that compiled compiles
+/// to.
+fn compile_with_program(
+    compiler: ScriptCompiler,
+    target: &str,
+    source: &[u8],
+    asset: AssetKey,
+) -> (CompileOutcome, Option<sl_lsl_runtime::bytecode::Program>) {
     let text = String::from_utf8_lossy(source);
     if compiler == ScriptCompiler::SecondLife && target == sl_proto::ScriptTarget::Luau.to_wire() {
         // Second Life marks the item Luau, compiled or not, and answers with
         // its Luau compiler's own words.
         let errors = luau_errors(source);
-        return CompileOutcome {
+        let outcome = CompileOutcome {
             compiled: errors.is_empty(),
             errors,
             language: ScriptLanguage::Luau,
         };
+        return (outcome, None);
     }
     if compiler == ScriptCompiler::YEngine && without_engine_line(&text).is_empty() {
-        return CompileOutcome {
+        let outcome = CompileOutcome {
             compiled: false,
             errors: vec![format!("fetched source empty asset://{asset}")],
             language: ScriptLanguage::Lsl,
         };
+        return (outcome, None);
     }
-    let errors = match sl_lsl_runtime::compile_for(&text, compiler.dialect()) {
-        Ok(_program) => Vec::new(),
-        Err(errors) => match compiler {
-            ScriptCompiler::SecondLife => second_life_errors(&text, &errors),
-            ScriptCompiler::YEngine => yengine_errors(&text, &errors),
-        },
+    let (errors, program) = match sl_lsl_runtime::compile_for(&text, compiler.dialect()) {
+        Ok(program) => (Vec::new(), Some(program)),
+        Err(errors) => {
+            let worded = match compiler {
+                ScriptCompiler::SecondLife => second_life_errors(&text, &errors),
+                ScriptCompiler::YEngine => yengine_errors(&text, &errors),
+            };
+            (worded, None)
+        }
     };
-    CompileOutcome {
+    let outcome = CompileOutcome {
         compiled: errors.is_empty(),
         errors,
         language: ScriptLanguage::Lsl,
-    }
+    };
+    (outcome, program)
 }
 
 /// `source` without the first line an OpenSim source may open with to pick
@@ -429,7 +450,7 @@ pub(crate) fn answer_upload(
     if !compiles {
         return answer;
     }
-    let outcome = compile_source(
+    let (outcome, program) = compile_with_program(
         policy.compiler,
         upload.item.target(),
         &upload.source,
@@ -468,9 +489,9 @@ pub(crate) fn answer_upload(
         return answer;
     };
     // The run state the compile leaves. A clean compile runs the script as
-    // the upload asked (a save over a running script is its restart, which
-    // the engine will make once the grid runs scripts:
-    // `server-fake-grid-script-engine-wiring`).
+    // the upload asked; the save is a new asset, so the engine replaces the
+    // script's instance with one of the new program at the next tick — a
+    // save over a running script is its restart.
     set_run_state(
         &mut contents.running,
         &mut contents.uncompiled,
@@ -485,6 +506,11 @@ pub(crate) fn answer_upload(
         item.flags = flags;
         answer.inventory_flags = Some(flags);
         contents.write(item);
+    }
+    if let Some(program) = program {
+        world
+            .script_instances
+            .offer_program(upload.new_asset, program);
     }
     answer
 }

@@ -12,13 +12,18 @@
 //! 1. the region clock advances by exactly one [step](HeartbeatConfig::step),
 //!    never by the time measured since the last tick, so the region's notion
 //!    of elapsed time is `ticks × step` on every machine;
-//! 2. when the imitated grid's statistics are due, every root agent in the
+//! 2. the region's scripts run their slice (`scripts::run_tick`):
+//!    the instances are brought in line with what the prims hold, every
+//!    runnable one runs its share of the tick, and what they said and did
+//!    reaches the region;
+//! 3. when the imitated grid's statistics are due, every root agent in the
 //!    region is sent a `SimStats` whose time dilation says whether the steps
-//!    kept up with the grid's clock ([`TimeDilation`]).
+//!    kept up with the grid's clock ([`TimeDilation`]), with the region's
+//!    active scripts and the share of them that ran.
 //!
-//! The work the loop exists for — the script slice, movement and physics, and
-//! handing the tick's changes to an update scheduler — slots in between those
-//! two as each of them is built.
+//! The rest of the work the loop exists for — movement and physics, and
+//! handing the tick's changes to an update scheduler — slots in beside the
+//! script slice as each of them is built.
 //!
 //! # The step
 //!
@@ -47,11 +52,13 @@
 //! it never holds the region's world while it does: a tick serialises on its
 //! own pulse lock, which no session path takes, reads the session table and
 //! lets it go, and only then locks each session in turn (in session order, so
-//! two runs send in the same order).
+//! two runs send in the same order). The script slice keeps the same rule: it
+//! runs the scripts under the region's lock and sends what they said to the
+//! sessions after letting it go.
 
 use std::time::{Duration, Instant};
 
-use sl_proto::TimeDilation;
+use sl_proto::{RegionLoad, TimeDilation};
 use tokio::sync::{Mutex, watch};
 
 use crate::runtime::GridCore;
@@ -211,6 +218,7 @@ pub(crate) async fn beat(core: &GridCore, index: usize) -> Option<Tick> {
     let now = (core.clock)();
     pulse.number = pulse.number.saturating_add(1);
     let number = pulse.number;
+    let _scripts = crate::scripts::run_tick(core, index).await;
     let since = number.saturating_sub(pulse.stats_tick);
     let stats = if since >= heartbeat.ticks_per_stats {
         let dilation = match heartbeat.config.mode {
@@ -240,6 +248,22 @@ pub(crate) async fn beat(core: &GridCore, index: usize) -> Option<Tick> {
 /// Sends the region's statistics to every root agent in the region at
 /// `index`, in session order, and counts them.
 async fn send_stats(core: &GridCore, index: usize, dilation: TimeDilation, now: Instant) -> usize {
+    // What the region's scripts report, read and let go before any session
+    // is locked; a region with none says what its telemetry says.
+    let scripts = core.region(index).and_then(|region| {
+        let world = region.world.lock();
+        let load = (!world.script_instances.is_empty()).then(|| world.script_instances.load());
+        drop(world);
+        load
+    });
+    let load = scripts.map_or_else(
+        || RegionLoad::dilated(dilation),
+        |(active, percent)| RegionLoad {
+            dilation,
+            active_scripts: Some(active),
+            scripts_run_percent: Some(percent),
+        },
+    );
     let mut sessions: Vec<_> = core
         .sessions
         .lock()
@@ -260,7 +284,7 @@ async fn send_stats(core: &GridCore, index: usize, dilation: TimeDilation, now: 
                 }
                 state
                     .sim
-                    .send_region_stats(dilation, now)
+                    .send_region_stats(load, now)
                     .unwrap_or_else(|error| {
                         tracing::warn!(%error, "failed to send the region's statistics");
                         false

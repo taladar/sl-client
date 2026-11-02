@@ -12,9 +12,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 129 |
-| ready | 336 |
+| ready | 335 |
 | blocked | 45 |
-| in-progress | 18 |
+| in-progress | 19 |
 | bugs | 42 |
 | done | 1471 |
 | deferred | 30 |
@@ -329,7 +329,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-lsl-opensim-function-set`](ideas/gridspec-lsl-opensim-function-set.md)
   — Measure which library functions OpenSim's engines compile
 
-## ready (336)
+## ready (335)
 
 ### protocol
 
@@ -1107,10 +1107,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-fake-grid-parcel-on-movement`](ready/server-fake-grid-parcel-on-movement.md)
   — Fake grid — push the parcel an agent walks onto, and serve parcel
   environments
-- [`server-fake-grid-script-engine-wiring`](ready/server-fake-grid-script-engine-wiring.md)
-  — Wire the script engine into the fake grid (blocked by
-  `server-lsl-vm-execution` (done), `server-world-heartbeat` (done),
-  `server-world-ecs-store` (done))
 - [`server-fake-grid-terraform`](ready/server-fake-grid-terraform.md) — Fake
   grid — terraforming, undo and bake (blocked by `gridspec-terrain-editing`
   (done))
@@ -1301,7 +1297,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-voice`](blocked/gridspec-voice.md) — Voice provisioning and
   signalling on each grid (blocked by `viewer-voice-audio`)
 
-## in-progress (18)
+## in-progress (19)
 
 ### viewer
 
@@ -1352,6 +1348,13 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
+
+### server
+
+- [`server-fake-grid-script-engine-wiring`](in-progress/server-fake-grid-script-engine-wiring.md)
+  — Wire the script engine into the fake grid (blocked by
+  `server-lsl-vm-execution` (done), `server-world-heartbeat` (done),
+  `server-world-ecs-store` (done))
 
 ## bugs (42)
 

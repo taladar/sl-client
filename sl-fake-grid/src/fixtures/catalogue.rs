@@ -74,6 +74,62 @@ pub const ROW_SPACING: f32 = 4.0;
 /// height is a `u8` and `f32::from` is not a `const fn`.
 pub const ROW_Z: f32 = 25.5;
 
+/// The channel the `scripted-box`'s script listens on.
+pub const ECHO_SCRIPT_CHANNEL: i32 = 7;
+
+/// The source of the `scripted-box`'s script: it answers whoever speaks to it
+/// on [`ECHO_SCRIPT_CHANNEL`] with `Echo: ` and what they said, wherever in the
+/// region they stand (`llRegionSayTo`), removes its object when told `die`, and
+/// fails with a `Math Error` when told `throw` — the three things a test of the
+/// grid's script engine wants to provoke from outside. It says nothing unless
+/// spoken to, so the rest of the catalogue's users never hear it.
+pub const ECHO_SCRIPT_SOURCE: &str = "default
+{
+    state_entry()
+    {
+        llListen(7, \"\", NULL_KEY, \"\");
+    }
+
+    listen(integer channel, string name, key id, string message)
+    {
+        if (message == \"die\")
+        {
+            llDie();
+        }
+        else if (message == \"throw\")
+        {
+            integer zero = 0;
+            llRegionSayTo(id, 0, (string)(1 / zero));
+        }
+        else
+        {
+            llRegionSayTo(id, 0, \"Echo: \" + message);
+        }
+    }
+}
+";
+
+/// The asset [`ECHO_SCRIPT_SOURCE`] is stored as.
+const ECHO_SCRIPT_ASSET: u128 = 0xCA7_3001;
+
+/// The `scripted-box`'s script item: [`ECHO_SCRIPT_SOURCE`], running from the
+/// start.
+#[must_use]
+pub fn echo_script_item() -> sl_proto::TaskInventoryItem {
+    let script = entry("scripted-box")
+        .map_or_else(|| ObjectKey::from(uuid::Uuid::nil()), |entry| entry.full_id);
+    sl_proto::TaskInventoryItem {
+        item_id: InventoryKey::from(uuid::Uuid::from_u128(0xCA7_3002)),
+        parent_task: script,
+        asset_id: Some(AssetKey::from(uuid::Uuid::from_u128(ECHO_SCRIPT_ASSET))),
+        name: "Echo Script".to_owned(),
+        owner: OwnerKey::Agent(AgentKey::from(uuid::Uuid::from_u128(CATALOGUE_OWNER))),
+        creator_id: AgentKey::from(uuid::Uuid::from_u128(CATALOGUE_OWNER)),
+        last_owner_id: AgentKey::from(uuid::Uuid::from_u128(CATALOGUE_OWNER)),
+        ..crate::scenario::stock_script_item()
+    }
+}
+
 /// The checker texture every catalogue prim that shows a texture wears.
 pub const CHECKER_TEXTURE: TextureKey = texture_key(0xCA7_0001);
 
@@ -295,7 +351,7 @@ fn slot_offset(local_id: RegionLocalObjectId) -> f32 {
 /// The names of the catalogue's prims, in the order they stand in the row.
 /// The index into this list is the prim's offset from the first catalogue
 /// local id, so the row order and the id order are the same thing.
-pub const NAMES: [&str; 22] = [
+pub const NAMES: [&str; 23] = [
     "plain-box",
     "checker-box",
     "sphere",
@@ -318,6 +374,7 @@ pub const NAMES: [&str; 22] = [
     "placement-identity",
     "placement-rotated",
     "placement-offset-t",
+    "scripted-box",
 ];
 
 /// Every catalogue entry, in row order.
@@ -373,6 +430,19 @@ pub fn catalogue() -> RegionFixture {
     }
     world.npcs = vec![npc(), seated_npc()];
     world.object_animations = animesh_animations();
+    // The one scripted prim: its script runs from the start, as a script in a
+    // rezzed prim does on every grid.
+    if let Some(scripted) = entry("scripted-box") {
+        let item = echo_script_item();
+        let mut contents = crate::world::TaskInventory::stated(1, vec![item.clone()]);
+        let _running = contents.running.insert(item.item_id);
+        if world
+            .add_task_inventory(scripted.local_id, contents)
+            .is_err()
+        {
+            tracing::error!("the catalogue's scripted box is not in the catalogue");
+        }
+    }
 
     RegionFixture {
         world,
@@ -618,6 +688,7 @@ fn objects(owner: AgentKey) -> Vec<sl_proto::Object> {
                     ..FaceStyle::default()
                 },
             )),
+            "scripted-box" => objects.push(prim.textured(CHECKER_TEXTURE).scripted().build()),
             _unknown => objects.push(prim.build()),
         }
     }
@@ -1053,6 +1124,10 @@ fn assets() -> InMemoryAssetSource {
     let _previous = assets.insert(
         AssetKey::from(NPC_ANIMATION),
         sl_test_assets::anim::chest_twist_animation_asset(),
+    );
+    let _previous = assets.insert(
+        AssetKey::from(uuid::Uuid::from_u128(ECHO_SCRIPT_ASSET)),
+        ECHO_SCRIPT_SOURCE.as_bytes().to_vec(),
     );
     register(&mut assets, AssetKey::from(SOUND_CLIP), || {
         sl_test_assets::sound::marker_tone(sl_test_assets::sound::tones::MID)

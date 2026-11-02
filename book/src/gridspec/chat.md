@@ -83,7 +83,7 @@ instant messages become, is [LSL scripts][lsl-comms].
 [lsl-comms]: lsl.md#chat-listens-dialogs-and-link-messages
 
 The probe prim stands beside B; its owner A is the one that moves away. Not
-asked of the fake grid, which runs no scripts.
+yet asked of the fake grid (`test-fake-grid-lsl-offline-cases`).
 
 | behaviour | Second Life | OpenSim |
 | --- | --- | --- |
@@ -167,10 +167,10 @@ while away. No answer changed between two runs.
 
 The fake grid passes instant messages on as each flavour's live grid does
 (`sl-fake-grid`'s `messages` module), and both fake flavours are held to the
-census on every test run — but for a script's messages, since the fake grid
-runs no scripts, and the mute list, which it does not keep
-(`server-fake-grid-mute-list`). How long Second Life's suspension after a
-burst lasts is not measured; the fake grid's lasts a second.
+census on every test run — but for a script's messages, which no offline leg
+asks of it yet (`test-fake-grid-lsl-offline-cases`), and the mute list, which it
+does not keep (`server-fake-grid-mute-list`). How long Second Life's suspension
+after a burst lasts is not measured; the fake grid's lasts a second.
 
 ### What a message says of itself
 

@@ -5963,7 +5963,7 @@ mod test {
         let step = after(now, 11_000)?;
         let dilation =
             sl_proto::TimeDilation::from_ratio(Duration::from_millis(500), Duration::from_secs(1));
-        assert!(sim.send_region_stats(dilation, step)?);
+        assert!(sim.send_region_stats(sl_proto::RegionLoad::dilated(dilation), step)?);
         pump(&mut client, &mut sim, step)?;
         let sent: Vec<_> = drain_client(&mut client)
             .into_iter()
@@ -5984,7 +5984,10 @@ mod test {
 
         sim.make_child_agent();
         assert!(
-            !sim.send_region_stats(sl_proto::TimeDilation::NORMAL, step)?,
+            !sim.send_region_stats(
+                sl_proto::RegionLoad::dilated(sl_proto::TimeDilation::NORMAL),
+                step
+            )?,
             "a child circuit carries no region telemetry"
         );
         Ok(())

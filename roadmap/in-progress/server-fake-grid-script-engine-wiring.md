@@ -2,7 +2,7 @@
 id: server-fake-grid-script-engine-wiring
 title: Wire the script engine into the fake grid
 topic: server
-status: ready
+status: in-progress
 origin: LSL-on-the-fake-grid audit (2026-09-20)
 points: 8
 blocked_by: [server-lsl-vm-execution, server-world-heartbeat,
@@ -12,6 +12,74 @@ refs: [server-fake-grid-script-compile-on-upload, server-lsl-lib-comms,
 ---
 
 Context: [context/lsl.md](../context/lsl.md).
+
+## Built (2026-11-02)
+
+`sl_fake_grid::scripts`, recorded in the book (`simulator/lsl-engine.md`,
+§ *As built: the fake grid's host*):
+
+- **Life cycle by reconcile.** Each region's world holds a `RegionScripts`
+  (the region's `Engine`, Second Life's or YEngine by flavour, stepped by the
+  heartbeat). Each tick the instances follow the prims whose contents were
+  written since the last (`ObjectStore::take_changed_contents`, the
+  `bevy_ecs` change ticks): a fixture's script, a `RezScript`, a drop, a save
+  (a fresh instance under the same id, of the program the upload compiled) and
+  a delete all reach the engine one way, and a prim that left takes its
+  scripts. Decided: the fake grid stays **YEngine-only** on the OpenSim
+  flavour (`ImitatedGrid::script_engine`); XEngine stays rows of its own in
+  the gridspec.
+- **The commands.** `SetScriptRunning`, `GetScriptRunning` (from the
+  instance), `ScriptReset`, `ScriptAnswerYes` (`Engine::answer`, else
+  `answer_experience`), `RevokePermissions`, `ScriptDialogReply` (a
+  region-wide line from the avatar, as OpenSim says it) and `RequestPayPrice`
+  (the layout a script set, `PayPrice::reply`).
+- **Every `Host` method**, the ones listed in the sections below included:
+  chat both ways (`SceneFixtures::say` offers every line to the scripts in
+  earshot; a script's `Speech` reaches scripts and avatars each as far as it
+  says), `say_to`, dialogs, questions (the script's and an experience's),
+  pages, map destinations, instant messages (wherever the avatar is), owner
+  says, whereabouts, the seeded draw, linkset data per root, links in link
+  order, pay layouts, experience details from the catalogue, admissions from
+  the agent's preferences, the grid-wide key-value stores, standing (estate
+  owner and managers, parcel owner), the simulator, region size, terrain
+  height, day length, prim scripts and the agent's address.
+- **`llDie`** in the runtime (`Host::die`, `Outcome::Died`), the linkset
+  removed after the tick with a `KillObject` to every viewer; an attachment
+  stays.
+- **`SimStats`** carries the engine's active scripts and the last tick's
+  scripts-run percentage (`sl_proto::RegionLoad`); the top-scripts report
+  answers an object the scene states no cost for from its scripts' usage.
+- **Take, rez and restart.** A take files each prim's contents and its
+  scripts' saved state with the taken linkset (a take of a copy leaves the
+  object running); a rez puts the contents back and brings each script back
+  through `Engine::rez_saved` with `on_rez(0)`, the time away from the
+  grid's clock. `FakeGrid::restart_region(name, down)` takes the region's
+  scripts through `Engine::shut_down` / `start_up`; the estate's countdown and
+  kick (`server-fake-grid-estate-actions`) call it once they exist.
+- **Acceptance**, held by `sl-fake-grid/tests/scripts.rs` on both flavours:
+  the catalogue's new `scripted-box` runs its Echo Script from the start,
+  answers a line on channel 7, the Running checkbox stops and starts it, a
+  reset restarts it, a `throw` faults it and the region ticks on (YEngine's
+  error line reaching the client), and `die` removes the box and the viewer
+  sees the `KillObject`; and a counting script keeps its count and its
+  listen through a restart (`changed(CHANGED_REGION_START)`) and through a
+  take and a rez (`on_rez`).
+
+## Left
+
+- **Money** (§ From server-lsl-lib-money-permissions): no balances
+  (`server-fake-grid-money-ledger`), so `llGiveMoney` moves nothing,
+  `llTransferLindenDollars` refuses only a payee with no account, and a
+  `MoneyTransferRequested` to an object raises no `money`.
+- **Experiences**: a script's standing is not judged (catalogue state,
+  region and parcel settings), an answered experience question is not
+  recorded as the agent's preference, and an unanswered one never times out.
+- **Sitting** (`seated_on`, `llSitOnLink`) waits for
+  `server-world-sit-and-attach`; the lapses on a drop and a stand with it.
+- **OSSL settings** from a scenario (`Engine::set_ossl`); a god's standing.
+- **The census offline**: `script-compile` into `OFFLINE_CASES`.
+- **Viewer legs**: the dialog card answered into a `listen`, the vendor
+  paid from the viewer, the experience card.
 
 The join. The runtime crate knows nothing about prims (it talks to a
 `Host`); `sl-fake-grid` knows nothing about scripts. This task

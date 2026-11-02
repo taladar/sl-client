@@ -524,6 +524,34 @@ impl TimeDilation {
     }
 }
 
+/// How a region's loop is keeping up, as its `SimStats` state it
+/// ([`SimSession::send_region_stats`](crate::SimSession::send_region_stats)).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RegionLoad {
+    /// How much of real time the simulation kept up with
+    /// ([`SimStatId::TimeDilation`]).
+    pub dilation: TimeDilation,
+    /// The region's active-script count ([`SimStatId::ActiveScripts`]), or
+    /// [`None`] to leave the telemetry's own figure.
+    pub active_scripts: Option<f32>,
+    /// The percentage of the runnable scripts that ran
+    /// ([`SimStatId::PercentScriptsRun`]), or [`None`] to leave the
+    /// telemetry's own figure.
+    pub scripts_run_percent: Option<f32>,
+}
+
+impl RegionLoad {
+    /// A region that kept up with `dilation` and says nothing of scripts.
+    #[must_use]
+    pub const fn dilated(dilation: TimeDilation) -> Self {
+        Self {
+            dilation,
+            active_scripts: None,
+            scripts_run_percent: None,
+        }
+    }
+}
+
 /// The simulator's world time and sun state, parsed from a
 /// `SimulatorViewerTimeMessage`.
 ///

@@ -37,7 +37,8 @@
 //! An inventory offer and its answers ride the same road and are handed to
 //! [`crate::gifts`].
 //!
-//! Not modelled: a script's message (the fake grid runs no scripts), how long
+//! Not modelled here: a script's message, which the region's engine sends
+//! itself ([`crate::scripts`]); how long
 //! Second Life's suspension after a burst lasts (it is not measured; the fake
 //! grid's lasts [`SECOND_LIFE_SUSPENSION`]), messages forwarded as mail, and
 //! conferences, which start over `ChatSessionRequest` and wait for the group

@@ -319,9 +319,10 @@ pub(crate) fn answer_parcel_edit(
             }
         }
         // The top-scripts / top-colliders report, built from what the scene
-        // says its objects cost ([`ObjectCost`]). A fake region runs no scripts
-        // and simulates no physics, so a report can only be a scene's own
-        // statement — and a scene that states nothing is answered with an empty
+        // says its objects cost ([`ObjectCost`]), or else from what their
+        // scripts have cost the region's engine. A fake region simulates no
+        // physics, so a colliders report can only be a scene's own statement —
+        // and a scene that states nothing is answered with an empty
         // report rather than with no answer at all, since a viewer that gets
         // nothing waits out its own timeout and shows the same empty list.
         //
@@ -513,7 +514,8 @@ const FILTER_BY_OBJECT: u32 = 0x0000_0004;
 const FILTER_BY_PARCEL_NAME: u32 = 0x0000_0008;
 
 /// The rows of a top-objects report: every object the scene says costs
-/// something in the unit this report asks for, narrowed by the request's scope
+/// something in the unit this report asks for — or whose scripts have cost
+/// the region time, where the scene says nothing — narrowed by the request's scope
 /// and filter, highest first, capped at [`MAX_REPORT_ROWS`].
 ///
 /// The filter is the region's work, not the viewer's — the viewer sends a string
@@ -534,7 +536,18 @@ fn land_stat_rows(
         .objects
         .iter()
         .filter_map(|object| {
-            let cost = world.objects.cost(object.local_id)?;
+            // What the scene states the object costs, or else what its
+            // scripts have cost the region, summed over the linkset on its
+            // root.
+            let cost = world.objects.cost(object.local_id).copied().or_else(|| {
+                (object.parent_id.0 == 0)
+                    .then(|| {
+                        world
+                            .script_instances
+                            .usage_of_linkset(&world.objects, object.local_id)
+                    })
+                    .flatten()
+            })?;
             let score = cost.score_for(report_type)?;
             let parcel = world.parcel_at_position(&object.motion.position);
             // `ParcelLocalID` scopes the report; the reference sends `0` for

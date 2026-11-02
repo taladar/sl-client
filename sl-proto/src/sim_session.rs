@@ -232,7 +232,7 @@ use crate::types::{
     ScriptPermissions, ScriptTeleportRequest, ServerError, SetDisplayNameReply, SimWideDeleteFlags,
     SimulatorTime, SoundFlags, SoundPreload, StartLocationSlot, SurfaceInfo, TaskInventoryItem,
     TaskInventoryKey, TaskInventoryReply, TelehubInfo, TerraformArea, TerrainLayerType,
-    TerrainPatch, TextureEntry, Throttle, TimeDilation, TransactionFlags, TransferStatus, Transmit,
+    TerrainPatch, TextureEntry, Throttle, TransactionFlags, TransferStatus, Transmit,
     UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType, Wearable,
     WearableType,
 };
@@ -8535,8 +8535,11 @@ impl SimSession {
     ///
     /// The statistics are the telemetry's, with
     /// [`SimStatId::TimeDilation`](crate::SimStatId::TimeDilation) stated as
-    /// `dilation` and the two frame rates — the simulator's and its physics' —
-    /// scaled by it, which is what a simulator that fell behind reports. Sent
+    /// the load's dilation and the two frame rates — the simulator's and its
+    /// physics' — scaled by it, which is what a simulator that fell behind
+    /// reports, and the active scripts and the scripts-run percentage stated
+    /// as the load says where it says them. A statistic the telemetry does
+    /// not list is not added. Sent
     /// only to a **root** agent, as the timed ones are: a session with no
     /// telemetry, a child circuit and a circuit not yet open are sent nothing,
     /// and that is not an error.
@@ -8547,7 +8550,7 @@ impl SimSession {
     /// statistics).
     pub fn send_region_stats(
         &mut self,
-        dilation: TimeDilation,
+        load: crate::RegionLoad,
         now: Instant,
     ) -> Result<bool, Error> {
         if !matches!(self.agent_presence, AgentPresence::Root) || self.client_addr.is_none() {
@@ -8559,9 +8562,19 @@ impl SimSession {
         let mut stats = armed.telemetry.stats.clone();
         for (id, value) in &mut stats.stats {
             match id {
-                crate::SimStatId::TimeDilation => *value = dilation.get(),
+                crate::SimStatId::TimeDilation => *value = load.dilation.get(),
                 crate::SimStatId::SimFps | crate::SimStatId::PhysicsFps => {
-                    *value *= dilation.get();
+                    *value *= load.dilation.get();
+                }
+                crate::SimStatId::ActiveScripts => {
+                    if let Some(active) = load.active_scripts {
+                        *value = active;
+                    }
+                }
+                crate::SimStatId::PercentScriptsRun => {
+                    if let Some(percent) = load.scripts_run_percent {
+                        *value = percent;
+                    }
                 }
                 _ => {}
             }

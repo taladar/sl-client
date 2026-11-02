@@ -48,6 +48,14 @@ pub trait Host {
     /// the old state's `state_exit` and before the new one's `state_entry`.
     fn left_state(&mut self, caller: CallerId);
 
+    /// `llDie`: the object `caller` is in is to leave the region, every prim
+    /// of it and every script in them. The host removes it once control is
+    /// back with the grid, never from inside the call, and answers whether it
+    /// will: `false` for an attachment, which `llDie` leaves where it is on
+    /// every grid. When it answers `true` the calling script runs nothing
+    /// more; when `false` it carries on with the next instruction.
+    fn die(&mut self, caller: CallerId) -> bool;
+
     /// The script called `name` in the same prim as `caller` — the one
     /// `llGetScriptState(name)` asks about — or [`None`] when the prim's
     /// inventory has no script by that name.

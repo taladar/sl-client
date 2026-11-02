@@ -119,6 +119,8 @@ struct Recorder {
     ground: f32,
     /// Each avatar's address, by key.
     addresses: std::collections::BTreeMap<String, String>,
+    /// `(tick, caller)` per `llDie` the host agreed to.
+    died: Vec<(u64, CallerId)>,
 }
 
 /// The owner of every object a [`Recorder`] has, unless it says otherwise.
@@ -135,6 +137,14 @@ impl Host for Recorder {
 
     fn left_state(&mut self, caller: CallerId) {
         self.left.push((self.now, caller));
+    }
+
+    fn die(&mut self, caller: CallerId) -> bool {
+        if self.worn.contains_key(&caller) {
+            return false;
+        }
+        self.died.push((self.now, caller));
+        true
     }
 
     fn script_named(&self, _caller: CallerId, name: &str) -> Option<CallerId> {
@@ -823,6 +833,35 @@ fn a_reset_restarts_the_initialisers_and_drops_the_queue() -> Result<(), String>
         Some(vec![Outcome::Reset, Outcome::Finished, Outcome::Finished])
     );
     assert_eq!(engine.instance(A).map(Instance::queued), Some(0));
+    Ok(())
+}
+
+/// `llDie` asks the host to remove the object and ends the script there:
+/// nothing after the call runs, the queue goes, and later events are not
+/// taken. An attachment stays, and its script carries on past the call.
+#[test]
+fn ll_die_ends_the_script_unless_the_object_is_worn() -> Result<(), String> {
+    let source = "default {
+        state_entry() { print(\"before\"); llDie(); print(\"after\"); }
+        changed(integer change) { print(\"changed\"); }
+    }";
+    let mut engine = engine();
+    let mut host = Recorder::default();
+    let _none = engine.add(A, program(source)?);
+    let _also = engine.add(B, program(source)?);
+    let _worn = host.worn.insert(B, OWNER.to_owned());
+    let reports = run(&mut engine, &mut host, 1);
+    assert_eq!(host.texts(A), vec!["before"]);
+    assert_eq!(host.texts(B), vec!["before", "after"]);
+    assert_eq!(host.died, vec![(1, A)]);
+    assert!(
+        reports
+            .first()
+            .is_some_and(|report| outcomes(report, A).contains(&Outcome::Died))
+    );
+    assert_eq!(engine.changed(A, 1), Ok(Some(Posted::Stopped)));
+    let _later = run(&mut engine, &mut host, 2);
+    assert_eq!(host.texts(A), vec!["before"]);
     Ok(())
 }
 

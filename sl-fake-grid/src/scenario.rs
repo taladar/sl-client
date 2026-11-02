@@ -593,10 +593,10 @@ pub fn default_world() -> SceneFixtures {
         tracing::error!("the stock scripted object is not in the stock region");
     }
     // The object holds a script, so the region's top-scripts report is about
-    // it. What that script *costs* is a thing a fake region cannot measure and
-    // therefore states: without it the stock grid answers every top-objects
-    // request with an empty list, which exercises one line of a viewer's window
-    // and none of the rest.
+    // it. Its script is stopped, so it costs the region's engine nothing, and
+    // the report states a cost instead: without it the stock grid answers every
+    // top-objects request with an empty list, which exercises one line of a
+    // viewer's window and none of the rest.
     if world
         .objects
         .set_cost(

@@ -342,14 +342,13 @@ object is gone, on both grids.
 
 `sl-fake-grid` keeps each session's set (`animations.rs`,
 `ImitatedGrid::animation_policy`): it starts from `stand`, folds every
-`AgentAnimation` in, and states the set back to the agent by its flavour's
-rules — after every request on `FakeOpensim`, after a change on `FakeSl`;
-sources and the empty physical block on `FakeSl`. `animations` runs its first
-seven legs offline on both flavours and holds them to the agent's own column
-above; `animation-play-stop` joined the offline list. It wears no overrider
-and runs no script, and it shows no resident to another, so nothing a second
-viewer is told is held there
-(`server-fake-grid-agent-avatars-shared`).
+`AgentAnimation` in, and states the set back to the agent by its flavour's rules
+— after every request on `FakeOpensim`, after a change on `FakeSl`; sources and
+the empty physical block on `FakeSl`. `animations` runs its first seven legs
+offline on both flavours and holds them to the agent's own column above;
+`animation-play-stop` joined the offline list. It wears no overrider and asks
+nothing of a script, and it shows no resident to another, so nothing a second
+viewer is told is held there (`server-fake-grid-agent-avatars-shared`).
 
 ### What our viewer does with them
 
@@ -478,7 +477,8 @@ Two rules are the fake grid's own, because Second Life's could not be worked
 out from what was measured: the latest report of an avatar is its stated
 weight, and a report is held for five minutes. `overlimit` stays `0`, as it
 did on Second Life. The census runs on both flavours. Each holds everything
-except the scripted cube's legs (the fake grid runs no scripts) and what
+except the scripted cube's legs (no offline leg runs the cube's script yet,
+`test-fake-grid-lsl-offline-cases`) and what
 Second Life states of its own reckoning (B in the statement, and the report
 of B that nobody of ours sent).
 

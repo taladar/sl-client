@@ -214,7 +214,13 @@ pub(crate) fn answer_contents_write(
             if contents.uncompiled.contains(&item) {
                 return Some(Vec::new());
             }
-            let running = contents.running.contains(&item);
+            // The instance's flag, as its engine reads it; the item's own for
+            // a script with no instance (one that does not compile on Second
+            // Life, which reads as stopped).
+            let running = world
+                .script_instances
+                .reads_running(*object_id, item)
+                .unwrap_or_else(|| contents.running.contains(&item));
             if let Err(error) = sim.send_script_running_reply(*object_id, *item_id, running, now) {
                 tracing::warn!("answering a script's run state failed: {error}");
             }
@@ -234,6 +240,9 @@ pub(crate) fn answer_contents_write(
             } else {
                 let _was = contents.running.remove(&item);
             }
+            let _instance = world
+                .script_instances
+                .set_running(*object_id, item, *running);
             Some(Vec::new())
         }
         _other => None,

@@ -95,6 +95,7 @@ crate::registry! {
         LlComputeHash => encoding::ll_compute_hash,
         LlHMAC => encoding::ll_hmac,
         LlResetScript => control::ll_reset_script,
+        LlDie => control::ll_die,
         LlGetStartParameter => control::ll_get_start_parameter,
         LlSetTimerEvent => control::ll_set_timer_event,
         LlDetectedKey => detection::ll_detected_key,

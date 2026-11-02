@@ -148,7 +148,38 @@ pub(crate) struct GridAssets {
     /// Keyed by item under **both** policies, unlike the body: the rez path
     /// always has the item in hand, and one key means the two halves of a take
     /// cannot end up filed under different ones.
-    taken: Arc<RwLock<HashMap<InventoryKey, Vec<Object>>>>,
+    taken: Arc<RwLock<HashMap<InventoryKey, TakenLinkset>>>,
+}
+
+/// One prim a take removed from the world: its record, what it contained,
+/// and its scripts as they stood — all a rez puts back.
+#[derive(Debug, Clone)]
+pub(crate) struct TakenPrim {
+    /// The prim as the region held it.
+    pub(crate) object: Object,
+    /// Its task inventory, or [`None`] for a prim nothing was ever put in.
+    pub(crate) contents: Option<crate::world::TaskInventory>,
+    /// Each of its scripts' saved state, by script item: its globals, its
+    /// state, its queue, its timer and its listens
+    /// ([`Engine::take`](sl_lsl_runtime::vm::Engine::take)).
+    pub(crate) scripts: std::collections::BTreeMap<InventoryKey, sl_lsl_runtime::vm::SavedScript>,
+}
+
+/// A linkset a take removed from the world, root first, and when: the time
+/// away is what a rezzed script's sleep and timer count against.
+#[derive(Debug, Clone)]
+pub(crate) struct TakenLinkset {
+    /// Its prims, root first.
+    pub(crate) prims: Vec<TakenPrim>,
+    /// The grid's clock at the take.
+    pub(crate) taken_at: std::time::Instant,
+}
+
+impl TakenLinkset {
+    /// Its prims' records, root first.
+    pub(crate) fn objects(&self) -> Vec<Object> {
+        self.prims.iter().map(|prim| prim.object.clone()).collect()
+    }
 }
 
 impl GridAssets {
@@ -193,7 +224,7 @@ impl GridAssets {
 
     /// Records the linkset a take removed from the world under the item it was
     /// filed as — root first, children after, the order a rez wants them in.
-    pub(crate) fn insert_taken_linkset(&self, item: InventoryKey, linkset: Vec<Object>) {
+    pub(crate) fn insert_taken_linkset(&self, item: InventoryKey, linkset: TakenLinkset) {
         let _previous = self
             .taken
             .write()
@@ -205,7 +236,7 @@ impl GridAssets {
     ///
     /// [`None`] for an item no take made — a fixture's seeded object item —
     /// which is what sends the rez to the published body instead.
-    pub(crate) fn taken_linkset(&self, item: InventoryKey) -> Option<Vec<Object>> {
+    pub(crate) fn taken_linkset(&self, item: InventoryKey) -> Option<TakenLinkset> {
         self.taken
             .read()
             .unwrap_or_else(PoisonError::into_inner)

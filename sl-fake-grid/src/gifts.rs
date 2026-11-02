@@ -32,8 +32,9 @@
 //! rebuilt at each login. A gift to an avatar that is away is therefore held
 //! by the grid (`Gifts`) and filed when its next session is prepared.
 //!
-//! Not modelled: an object's gift (`TaskInventoryOffered`), since the fake
-//! grid runs no scripts to give one.
+//! Not modelled: an object's gift (`TaskInventoryOffered`), since no script
+//! the fake grid runs can give one yet (`llGiveInventory` is
+//! `server-lsl-lib-task-inventory`'s).
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -253,9 +254,12 @@ fn gift_of(
     }
     let item = inventory.item(InventoryKey::from(original))?;
     let copy = item_copy(item, core.minter.uuid(), from, to);
-    if let Some(linkset) = core.assets.taken_linkset(item.item_id) {
-        core.assets
-            .insert_taken_linkset(copy.item_id, handed_over_linkset(linkset, from, to));
+    if let Some(mut linkset) = core.assets.taken_linkset(item.item_id) {
+        let objects = handed_over_linkset(linkset.objects(), from, to);
+        for (prim, object) in linkset.prims.iter_mut().zip(objects) {
+            prim.object = object;
+        }
+        core.assets.insert_taken_linkset(copy.item_id, linkset);
     }
     Some(Gift {
         folder_type: Some(item.item_type),

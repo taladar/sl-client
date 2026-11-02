@@ -1455,6 +1455,20 @@ impl ImitatedGrid {
         }
     }
 
+    /// Whose script engine this grid's regions run ([`crate::scripts`]): the
+    /// words and reach of a run-time error, what becomes of a faulted
+    /// script, how memory is counted. OpenSim's is YEngine, its default
+    /// engine and the one the probe corpus measures a fake run against
+    /// (`probes/results/opensim-yengine/`); XEngine's divergences are rows of
+    /// their own in `book/src/gridspec/lsl.md`, not a flavour of this grid.
+    #[must_use]
+    pub const fn script_engine(self) -> sl_lsl_runtime::vm::EngineFlavour {
+        match self {
+            Self::SecondLife => sl_lsl_runtime::vm::EngineFlavour::SecondLife,
+            Self::OpenSim => sl_lsl_runtime::vm::EngineFlavour::YEngine,
+        }
+    }
+
     /// How this grid passes a viewer's effects and sounds on to the other
     /// viewers — measured by the `effects-sounds` conformance case on aditi
     /// and the local OpenSim (2026-10-13, `book/src/gridspec/avatars.md`

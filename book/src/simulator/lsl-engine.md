@@ -487,9 +487,11 @@ limits):
   instructions it was charged, averaged over thirty seconds of ticks and
   converted at the scheduler's rate — busiest first; `Engine::active_scripts`
   is `SimStats`' `ActiveScripts` (an average of the running scripts on Second
-  Life, the scripts present on OpenSim). Reporting them through
-  `LandStatRequest`, `llGetObjectDetails` and `SimStats` is the fake grid's,
-  once it runs the engine (`server-fake-grid-script-engine-wiring`).
+  Life, the scripts present on OpenSim). The fake grid reports them in
+  `SimStats` (with the scripts-run percentage of its last tick) and in a
+  `LandStatRequest`'s top scripts, summed per linkset on its root, for an
+  object the scene states no cost for; `llGetObjectDetails` is
+  `server-lsl-lib-prim-state`'s.
 - **Not modelled:** Second Life's LSO and its 16 KB, since the fake grid
   compiles every script from source; and the garbage Mono's readings carry,
   which is why a reading here sits a couple of hundred bytes under aditi's and
@@ -948,7 +950,11 @@ memory — and asks the VM for control-flow effects through it: sleep,
 reset, die. It never reaches the operand stack or the program counter.
 `llDie` in particular *requests* the object's removal and ends the slice;
 the host removes the object once control is back with the grid, which is
-the awkward case `server-fake-grid-script-engine-wiring` names.
+the awkward case `server-fake-grid-script-engine-wiring` names. **As
+built**: `Host::die` answers whether the object goes (an attachment stays,
+and its script carries on past the call); when it goes the call asks the VM
+to end the script (`Outcome::Died`: the body, the queue and the run flag
+gone), and the fake grid takes the linkset out after the tick.
 
 ## The `Host` trait
 
@@ -1055,6 +1061,64 @@ listen that admits it. The fake grid's own listen registry
 (`chat::Listens`) stays the consumer-side registry it is for agents and
 tests; the engine wiring offers its region's lines to scripts through
 `Engine::hear`.
+
+### As built: the fake grid's host
+
+`sl_fake_grid::scripts` (`server-fake-grid-script-engine-wiring`). Each
+region's world holds a `RegionScripts`: the region's `Engine`, configured
+from the heartbeat's step and the imitated grid's engine (Second Life's, or
+YEngine for the OpenSim flavour), and which prim and item each `CallerId`
+is.
+
+- **The world says which scripts exist.** Nothing creates an instance by
+  hand. Each tick the region asks its object store which prims' contents
+  were written since it last asked (`bevy_ecs`'s change ticks on the
+  `Contents` component) and brings those prims' instances in line: a script
+  item (LSL, not marked Luau, with an asset) gets an instance of what its
+  source compiles to, a removed item loses its own, a saved one (a new
+  asset) gets a fresh instance under the same id, so it keeps its place in
+  the serving order, and one that no longer compiles has none. A prim that
+  left the region, however it left, takes its scripts with it. So a
+  fixture's script, a `RezScript`, a drop, a save and a delete reach the
+  engine by one path. A save hands the engine the program its upload
+  compiled, so it is compiled once.
+- **The run flag.** A new instance runs if the prim's contents list it as
+  running (what the Running checkbox, a `RezScript`, an upload and a fixture
+  write); from then on the instance's flag is the truth. `SetScriptRunning`
+  sets both, `GetScriptRunning` reads the instance as its engine reads it,
+  and `ScriptReset` resets it.
+- **A tick** runs under the region's lock: reconcile, then one
+  `Engine::tick` against a `RegionHost` over the world, the engine lent out
+  of the world for the tick so the host can hold the rest of it. What the
+  scripts said and did is applied after the tick — a line said to the
+  region's listens, avatars and the scripts in earshot, a line offered to
+  one prim's scripts, a linkset removed — and what goes to one viewer (a
+  dialog, a permission question, a page, a map destination, a directed
+  line, an instant message) is sent once the lock is released, the crate's
+  session-then-region lock order. The region's own changes go out on its
+  change stream with the source `REGION_SOURCE`, which no session's watcher
+  takes for its own.
+- **Lines.** Every line said in the region — an avatar's, a dialog reply (a
+  region-wide line from the replying avatar, as OpenSim says it), a test's —
+  is offered to every script in earshot of it but the speaking prim's own,
+  by the line's own reach; a script's line reaches scripts as far as its
+  `Speech` says and avatars as far as its type carries.
+- **Taken, rezzed, restarted.** A take files each prim's contents and its
+  scripts' `SavedScript`s with the taken linkset (`Engine::take`, or
+  `Engine::save` for a take of a copy, which leaves the object running). A
+  rez puts the contents back under the new prims' keys and the scripts come
+  back with them at the next reconcile through `Engine::rez_saved`, the time
+  away measured on the grid's injected clock, with `on_rez(0)`; a script that
+  saved nothing, or no longer fits its program, starts afresh with `on_rez`,
+  and the misfit is logged. `FakeGrid::restart_region` takes the region's
+  scripts through `Engine::shut_down` and `Engine::start_up` with the time
+  down; the countdown and the agents a restart sends away are
+  `server-fake-grid-estate-actions`'.
+- **Not wired yet**: sitting is not world
+  state (`seated_on` is `false`, `llSitOnLink` finds no sit target); the grid
+  keeps no balances (`llGiveMoney` moves nothing, `llTransferLindenDollars`
+  refuses only a payee with no account, a payment to an object raises no
+  `money`); and an experience script may run wherever it is.
 
 ## Out of scope
 

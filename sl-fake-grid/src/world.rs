@@ -201,6 +201,10 @@ pub struct SceneFixtures {
     /// `AvatarRenderInfo`, and what it states back ([`crate::render_info`]).
     /// Not a fixture: empty until a viewer reports.
     pub(crate) render_info: crate::render_info::RegionRenderInfo,
+    /// The scripts running in the region ([`crate::scripts`]). Not a fixture:
+    /// a scene states its scripts as items in its prims' contents, and the
+    /// region starts an instance of each.
+    pub script_instances: crate::scripts::RegionScripts,
 }
 
 /// One parcel's two access lists: who may come in, and who may not.
@@ -444,7 +448,7 @@ pub enum RegionChange {
 /// Where the object `key` among `objects` hears from, region-local metres:
 /// its own position for a linkset root, its root's for a child prim (whose own
 /// position is an offset from it).
-fn listening_position(objects: &ObjectStore, key: ObjectKey) -> Option<Vector> {
+pub(crate) fn listening_position(objects: &ObjectStore, key: ObjectKey) -> Option<Vector> {
     let object = objects.get_by_key(key)?;
     if object.parent_id.0 == 0 {
         return Some(object.motion.position.clone());
@@ -498,9 +502,11 @@ pub struct TaskInventory {
     /// The experience each script among them was last compiled under, for the
     /// scripts that are under one: what a `GetMetadata` is answered from.
     pub experiences: BTreeMap<InventoryKey, ExperienceKey>,
-    /// The scripts among them that are running: what a `GetScriptRunning` is
-    /// answered from. The fake grid runs no script; this is the state a
-    /// viewer's Running checkbox reads and writes.
+    /// The scripts among them asked to run — by the viewer's Running
+    /// checkbox, a `RezScript`, an upload, a fixture — which is how a new
+    /// instance of one starts. A script with an instance is then answered
+    /// from the instance ([`crate::scripts`]); one with none (it does not
+    /// compile) from this.
     pub running: BTreeSet<InventoryKey>,
     /// The scripts among them whose last upload did not compile on a grid
     /// that then keeps no instance of them (OpenSim): a `GetScriptRunning`
@@ -722,14 +728,24 @@ impl SceneFixtures {
             terrain_composition: None,
             listens: crate::chat::Listens::default(),
             render_info: crate::render_info::RegionRenderInfo::default(),
+            script_instances: crate::scripts::RegionScripts::default(),
         }
     }
 
-    /// Say `line` in the region to its listens; the change that says it to the
-    /// region's avatars, each session's watcher deciding whether its own
-    /// avatar hears it. The one path every line takes, an avatar's and an
-    /// object's.
+    /// Say `line` in the region: to the scripts in earshot of it, to its
+    /// listens, and — the change returned — to the region's avatars, each
+    /// session's watcher deciding whether its own avatar hears it. The path
+    /// every line takes, an avatar's, a dialog reply and a test's.
     pub fn say(&mut self, line: crate::chat::Line) -> RegionChange {
+        self.script_instances.hear(&line, &self.objects);
+        self.say_to_avatars(line)
+    }
+
+    /// Say `line` to the region's listens and avatars but not its scripts: a
+    /// script's own line, which reaches scripts as far as the script says and
+    /// avatars as far as the line's type carries, two reaches the region
+    /// offers apart ([`crate::scripts`]).
+    pub(crate) fn say_to_avatars(&mut self, line: crate::chat::Line) -> RegionChange {
         let objects = &self.objects;
         self.listens
             .hear(&line, |key| listening_position(objects, key));
@@ -1228,9 +1244,11 @@ fn overlay_class(parcel: &ParcelInfo, viewer: AgentKey) -> u8 {
 /// questions a `LandStatRequest` asks, plus the extras the reply's
 /// `DataExtended` half carries.
 ///
-/// Every field is **stated by the fixture**, not measured: the fake grid runs no
-/// scripts and steps no physics, so a report of what they cost can only be a
-/// scene saying what it wants a viewer to be shown. That is the same bargain the
+/// Every field is **stated by the fixture**, not measured: a scene that wants
+/// a report row to say something says it here, and the fake grid steps no
+/// physics, so a collision count can only be stated. An object stated nothing
+/// for is reported from what its scripts cost the region's engine
+/// ([`RegionScripts::usage_of_linkset`](crate::scripts::RegionScripts::usage_of_linkset)). That is the same bargain the
 /// rest of the fixtures make (a prim's shape is stated, not tessellated), and it
 /// is what lets the top-objects windows be exercised with no grid at all.
 ///
@@ -2263,6 +2281,9 @@ pub(crate) fn answer_world_request(
     if let Some(changes) = crate::grabs::answer_grab(world, identity.agent_id, sim, event, now) {
         return changes;
     }
+    if let Some(changes) = crate::scripts::answer_script_command(world, identity, sim, event, now) {
+        return changes;
+    }
     if let Some(changes) = crate::task_contents::answer_contents_write(
         crate::task_contents::ContentsStores {
             world,
@@ -3028,15 +3049,15 @@ fn rez_from_inventory(
     // a fixture's seeded object item, which no take ever made -- is read out of
     // the published body, which is all there is for it. `store_taken_asset` and
     // the `assets` module docs say why the two sources exist.
-    let rezzed = match assets
+    let taken = assets
         .taken_linkset(item_id)
-        .filter(|linkset| !linkset.is_empty())
-    {
+        .filter(|linkset| !linkset.prims.is_empty());
+    let rezzed = match &taken {
         Some(linkset) => rez_taken_linkset(
             world,
             sim.region_handle(),
             mint,
-            &linkset,
+            &linkset.objects(),
             &item,
             request.at,
         ),
@@ -3052,6 +3073,9 @@ fn rez_from_inventory(
         }
     };
     world.objects.extend(rezzed.iter().cloned());
+    if let Some(taken) = taken {
+        restore_contents(world, &rezzed, taken, now);
+    }
     if let Err(error) = send_objects(sim, &rezzed, now) {
         tracing::warn!("streaming an object rezzed from inventory failed: {error}");
     }
@@ -3070,6 +3094,51 @@ fn rez_from_inventory(
         .into_iter()
         .map(|object| RegionChange::Rezzed(Box::new(object)))
         .collect()
+}
+
+/// Puts back into each prim of a linkset just rezzed (`rezzed`, in the order
+/// of `taken`'s prims) what it held when it was taken: its contents, under its
+/// new key, and its scripts, which the region's engine brings back from what
+/// they saved — the time away counted as the engine counts it — and tells of
+/// the rez with `on_rez(0)`, the start parameter of an object rezzed from an
+/// avatar's inventory.
+fn restore_contents(
+    world: &mut SceneFixtures,
+    rezzed: &[Object],
+    taken: crate::assets::TakenLinkset,
+    now: Instant,
+) {
+    let away = now.saturating_duration_since(taken.taken_at);
+    for (object, prim) in rezzed.iter().zip(taken.prims) {
+        let Some(mut contents) = prim.contents else {
+            continue;
+        };
+        for item in &mut contents.items {
+            item.parent_task = object.full_id;
+        }
+        let scripts: Vec<InventoryKey> = contents
+            .items
+            .iter()
+            .filter(|item| item.inv_type == InventoryType::Script)
+            .map(|item| item.item_id)
+            .collect();
+        let mut saved = prim.scripts;
+        for item in scripts {
+            world
+                .script_instances
+                .arrive(object.full_id, item, saved.remove(&item), away, 0);
+        }
+        if world
+            .objects
+            .set_contents(object.local_id, contents)
+            .is_err()
+        {
+            tracing::error!(
+                local_id = object.local_id.0,
+                "a rezzed prim is not in the region"
+            );
+        }
+    }
 }
 
 /// The objects a rez puts back when this grid is the one that **took** them:
@@ -3481,6 +3550,14 @@ fn derez(
                         .unwrap_or_default()
                 })
                 .collect();
+            // And each prim's scripts as they stand, which a rez brings
+            // back: taken out of the region with the object, or saved and
+            // left running when the take is of a copy.
+            let leaving = destination.removes_from_world();
+            let scripts: Vec<BTreeMap<InventoryKey, sl_lsl_runtime::vm::SavedScript>> = linkset
+                .iter()
+                .map(|member| world.script_instances.save_prim(member.full_id, leaving))
+                .collect();
             let item = taken_item(
                 &linkset,
                 folder,
@@ -3488,7 +3565,7 @@ fn derez(
                 mint,
                 (object_assets, policy.taken_item_masks),
             );
-            store_taken_asset(assets, &item, &linkset, &contents);
+            store_taken_asset(assets, &item, &linkset, (&contents, scripts), now);
             if returned && let Some(root) = linkset.first() {
                 notices.push(match request.off_world_at {
                     Some(at) => off_world_notice(world, region, at, &item.name),
@@ -3654,7 +3731,11 @@ fn store_taken_asset(
     assets: &crate::assets::GridAssets,
     item: &InventoryItem,
     linkset: &[Object],
-    contents: &[TaskInventory],
+    (contents, scripts): (
+        &[TaskInventory],
+        Vec<BTreeMap<InventoryKey, sl_lsl_runtime::vm::SavedScript>>,
+    ),
+    now: Instant,
 ) {
     let Some((root_object, children)) = linkset.split_first() else {
         return;
@@ -3665,7 +3746,28 @@ fn store_taken_asset(
     // a plain box. Both live grids rez from something that *can* say all of it
     // -- OpenSim's XML body, Second Life's simulator-side object -- so this one
     // keeps the linkset too. See `crate::assets`.
-    assets.insert_taken_linkset(item.item_id, linkset.to_vec());
+    // With each prim's contents and its scripts' saved state, which neither
+    // body carries in a form a rez could run.
+    let mut scripts = scripts.into_iter();
+    let prims = linkset
+        .iter()
+        .enumerate()
+        .map(|(index, object)| crate::assets::TakenPrim {
+            object: object.clone(),
+            contents: contents
+                .get(index)
+                .filter(|held| **held != TaskInventory::default())
+                .cloned(),
+            scripts: scripts.next().unwrap_or_default(),
+        })
+        .collect();
+    assets.insert_taken_linkset(
+        item.item_id,
+        crate::assets::TakenLinkset {
+            prims,
+            taken_at: now,
+        },
+    );
     if item.asset_id.is_nil() {
         // Second Life's side: the Linden text, filed where no capability
         // reaches it.
@@ -4529,7 +4631,13 @@ mod test {
         // format's, and inventing a keyword for it would write an asset no grid
         // could read -- see `sl_object_asset`'s crate docs.
         let withheld = filed(crate::assets::ObjectAssetPolicy::Withheld, 0xA55E7);
-        store_taken_asset(&assets, &withheld, std::slice::from_ref(&taken), &[]);
+        store_taken_asset(
+            &assets,
+            &withheld,
+            std::slice::from_ref(&taken),
+            (&[], Vec::new()),
+            Instant::now(),
+        );
         let text = assets
             .withheld_object(withheld.item_id)
             .ok_or("the withheld take published no body")?;
@@ -4555,7 +4663,13 @@ mod test {
         // under it, and the light and the floating text still in it. This is
         // the format OpenSim writes, and it can say all of it.
         let served = filed(crate::assets::ObjectAssetPolicy::Served, 0x00B0_D1E5);
-        store_taken_asset(&assets, &served, std::slice::from_ref(&taken), &[]);
+        store_taken_asset(
+            &assets,
+            &served,
+            std::slice::from_ref(&taken),
+            (&[], Vec::new()),
+            Instant::now(),
+        );
         let body = assets
             .read()
             .get(AssetKey::from(served.asset_id))
@@ -4804,7 +4918,8 @@ mod test {
             &assets,
             &item,
             std::slice::from_ref(&taken),
-            std::slice::from_ref(&contents),
+            (std::slice::from_ref(&contents), Vec::new()),
+            Instant::now(),
         );
 
         let body = assets
