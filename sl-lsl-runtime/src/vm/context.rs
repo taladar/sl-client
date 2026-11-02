@@ -112,6 +112,11 @@ pub(crate) struct ScriptData {
     /// The script's permissions, which a state change keeps and a reset
     /// clears.
     pub(crate) permissions: Permissions,
+    /// The script's time (`llGetTime`): the ticks begun since a reset or an
+    /// `llResetTime`, counted whether the script runs or not. On aditi script
+    /// time moves only in whole simulator frames, so a tick count is the
+    /// reference's shape, not an approximation of it.
+    pub(crate) script_ticks: u64,
 }
 
 /// A control-flow effect a library function asks the VM for. The VM acts on
@@ -283,6 +288,18 @@ impl<'host> ScriptCtx<'host> {
             interval,
             next: self.now.after(interval),
         });
+    }
+
+    /// `llGetTime`: the script's time, in seconds.
+    #[must_use]
+    pub fn script_time(&self) -> f32 {
+        let ticks = u32::try_from(self.data.script_ticks).unwrap_or(u32::MAX);
+        crate::num::to_f32(self.step.saturating_mul(ticks).as_secs_f64())
+    }
+
+    /// `llResetTime`: the script's time starts again from zero.
+    pub const fn reset_script_time(&mut self) {
+        self.data.script_ticks = 0;
     }
 
     /// `llGetStartParameter`.

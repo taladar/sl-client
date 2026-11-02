@@ -709,9 +709,8 @@ two make one gesture a leg. The script is the probe: it says every event
 it is handed, with what it detects, to its owner. It ran seven times on
 aditi (Mauve, the public sandbox parcel) and eight on the local OpenSim
 (YEngine). Every row below is checked on every run of both live grids, but
-for the ones marked **not held**; the rows of *A prim with no script* are
-checked on both fake flavours as well; the rest wait for the touch routing
-of `server-world-touch-and-grab`.
+for the ones marked **not held**, and on both fake flavours, but for those
+of *A physical prim*: the fake grid has no physics engine.
 
 ### The events of a touch
 
@@ -794,7 +793,7 @@ The same messages sent at a cube nothing takes touches in.
 | a spin by the owner: five `ObjectSpinUpdate`s ending a quarter turn left | **the prim stands as the last update says**; a terse update to everybody | the same | the same |
 | a second spin ending a quarter turn right | as that one says: the rotation is the prim's, not a turn added to it | the same | the same |
 | a spin by another avatar | the prim stays, nobody is sent anything | the prim stays, a terse update | each flavour as its grid |
-| a prim whose script takes touches, dragged by its owner | the prim **stays**, the script has its `touch_start`, `touch` and `touch_end`, nobody is sent anything | the prim stays, the same events, a terse update for every update | a prim flagged `FLAGS_HANDLE_TOUCH`, or under a root that is, stays on both flavours; neither runs a script |
+| a prim whose script takes touches, dragged by its owner | the prim **stays**, the script has its `touch_start`, `touch` and `touch_end`, nobody is sent anything | the prim stays, the same events, a terse update for every update | each flavour as its grid: the script keeps the flag true, and a prim flagged, or under a root that is, stays |
 | a prim whose script has no touch handler, dragged by its owner | moves, as a prim with no script | the same | the same |
 
 This is the drag of the reference viewer's grab tool, and it is why a
@@ -827,12 +826,19 @@ lets anybody move; `llSetStatus(STATUS_BLOCK_GRAB)`; XEngine. What a
 `touch` reads on OpenSim after a click or a hold with no update cannot be
 asked: there is no such event there.
 
-The fake grid runs scripts but hands none of them a touch event yet: that,
-and the detected values, are `server-world-touch-and-grab`. It moves and turns
-a dragged prim as above (`sl-fake-grid/src/grabs.rs`), with one row in
-`imitates.rs` for the one thing the grids differ in — OpenSim's terse
-update for an update that moved nothing. A physical prim stays where it is
-on both flavours: nothing there applies a force.
+The fake grid answers every row above but the physical prim's, each flavour
+as its grid (`sl-fake-grid/src/touches.rs`, `TouchPolicy` in `imitates.rs`):
+a Second-Life-flavoured region holds a touch open from the press to the
+release and raises `touch` on its own clock, every 1/22.5 s of it — so a run
+that counts them (`sl-conformance`'s fake grids) ticks at the live grid's 45
+frames a second rather than the fake grid's default tenth of a second, at
+which a held touch would read as one an update — and an OpenSim-flavoured one
+answers each message. It keeps `FLAGS_SCRIPTED` and `FLAGS_HANDLE_TOUCH` true
+after every tick, with each grid's rule for a child. It moves and turns a
+dragged prim as above (`sl-fake-grid/src/grabs.rs`), with one row in
+`imitates.rs` for the one thing the grids differ in — OpenSim's terse update
+for an update that moved nothing. A physical prim stays where it is on both
+flavours: nothing there applies a force.
 
 ## What our viewer does with it
 

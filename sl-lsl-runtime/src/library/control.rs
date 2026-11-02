@@ -105,3 +105,37 @@ pub fn ll_get_script_state(ctx: &mut ScriptCtx<'_>, name: String) -> Result<i32,
     };
     Ok(i32::from(running))
 }
+
+/// `llGetTime`: the script's time, in seconds — the region's ticks since the
+/// script was reset or last called `llResetTime` or `llGetAndResetTime`,
+/// counted whether it ran or not (a stopped script's time runs on, measured
+/// on every grid). On aditi it moves only in whole simulator frames, as it
+/// moves here in whole ticks.
+///
+/// # Errors
+///
+/// None; the signature is the library's.
+pub fn ll_get_time(ctx: &mut ScriptCtx<'_>) -> Result<f32, CallError> {
+    Ok(ctx.script_time())
+}
+
+/// `llResetTime`: the script's time starts again from zero.
+///
+/// # Errors
+///
+/// None; the signature is the library's.
+pub const fn ll_reset_time(ctx: &mut ScriptCtx<'_>) -> Result<(), CallError> {
+    ctx.reset_script_time();
+    Ok(())
+}
+
+/// `llGetAndResetTime`: the script's time, which then starts again from zero.
+///
+/// # Errors
+///
+/// None; the signature is the library's.
+pub fn ll_get_and_reset_time(ctx: &mut ScriptCtx<'_>) -> Result<f32, CallError> {
+    let time = ctx.script_time();
+    ctx.reset_script_time();
+    Ok(time)
+}

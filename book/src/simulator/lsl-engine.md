@@ -512,13 +512,20 @@ observable as the handlers, so each is a named rule with a test.
   up and at least one; `Engine::tick` posts `timer` first when it falls due,
   and a `timer` already waiting in the queue absorbs the next
   (`Posted::AlreadyQueued`). A reset stops it; a state change does not.
-- **Touches and collisions coalesce per tick** (under the `Reference`
-  policy below). A detection event posted in the same tick as a queued one of
-  the same kind merges into it
-  (`Posted::Merged`): the detected lists join, without repeating a key, up to
-  `MAX_DETECTED` (16), and the count parameter follows. So everyone who
-  touched in one frame arrives as one `touch_start` with a count, as on the
-  grid; a touch in the next tick is an event of its own.
+- **Touches and collisions coalesce** (under the `Reference` policy
+  below). A detection event posted in the same tick as a queued one of the
+  same kind merges into it (`Posted::Merged`): the detected lists join,
+  without repeating a key, up to `MAX_DETECTED` (16), and the count
+  parameter follows. So everyone who touched in one frame arrives as one
+  `touch_start` with a count, as on the grid. A touch merges into the same
+  touch event still queued whatever tick it was raised in — three touches a
+  second apart, made while the script slept, were one `touch_start`, one
+  `touch` and one `touch_end` on aditi (`events/merging`); a collision in the
+  next tick is an event of its own.
+- **The reference's queue is ranked** (`events/order`): an event waits
+  behind every queued event of a lower rank — a touch behind the rest, a
+  `changed` behind the touches — whenever each was raised. `Never` and
+  `WhileQueued` keep one rank, first in, first out, as OpenSim does.
 - **The detected block travels with the event.** A host posts a detection
   event (`touch*`, `collision*`, `sensor`) with `post_detected` and a list of
   `Detected` records, and the count parameter is the list's length. The block
@@ -642,11 +649,12 @@ state, and is the only way. No grid raises a `changed` for a rez, and none
 runs `state_entry` or `on_rez` after a restart. Second Life's restart is not
 measured — neither test avatar holds estate rights on aditi — so its row is
 the take's rule and the one constant Linden Lab documents. Two things the
-probes measured wait on functions this VM does not run yet: a script's
-`llGetTime` counts on through a take on Second Life and YEngine and starts
-again on XEngine (`server-lsl-lib-time-timers`), and the stopped script the
-probes stop with `llSetScriptState` (`server-lsl-lib-task-inventory`); the
-tests stop it as a host does.
+probes measured waits on a function this VM does not run yet: the stopped
+script the probes stop with `llSetScriptState`
+(`server-lsl-lib-task-inventory`); the tests stop it as a host does. A
+script's time (`llGetTime`) is saved with it (saved form 4): it counts on
+through a take and a restart on Second Life and YEngine, the time away not
+counted, and starts again on XEngine.
 
 ## 4. The library: one table, typed functions, an erased dispatch
 
@@ -1159,6 +1167,20 @@ is.
   its wearer does, and is sent to its wearer's viewer alone: residents are
   not shown to each other on the fake grid. Each avatar has a region-local
   id of its own in each region, a new one when it comes back.
+- **Touches** are the region's too (`sl_fake_grid::touches`,
+  `server-world-touch-and-grab`): `ObjectGrab`, `ObjectGrabUpdate` and
+  `ObjectDeGrab` become `touch_start`, `touch` and `touch_end` as the
+  flavour's `TouchPolicy` says — Second Life holding a touch open and raising
+  `touch` on the region's clock every 1/22.5 s (and once for a click too
+  short for it), OpenSim answering each message — with the detected block
+  filled from the toucher and the message's surface block, as sent. A touch
+  on a child reaches the child's scripts that take touches and the root's as
+  `llPassTouches` (`Host::pass_touches`, the prim's setting) and the flavour
+  say. After every tick the region keeps `FLAGS_SCRIPTED` and
+  `FLAGS_HANDLE_TOUCH` true of its scripted prims — a running script with a
+  touch handler in its current state — with each grid's rule for a child of
+  such a root: both flags, quietly, on Second Life; `FLAGS_SCRIPTED` and the
+  child sent again in full as the root's scripts change, on OpenSim.
 - **Not wired yet**: the grid keeps no balances (`llGiveMoney` moves
   nothing, `llTransferLindenDollars` refuses only a payee with no account, a
   payment to an object raises no `money`), which is
@@ -1169,7 +1191,8 @@ is.
 - **Held by** `sl-fake-grid/tests/scripts.rs` (the life of a script, its
   state through a restart and a take, the experience questions, the OSSL
   gate, a scripted seat, a taken target, Second Life's reach, a wear and a
-  drop), the `sit-stand` census offline on both flavours,
+  drop, a held touch and a click, a touch on a child), the `sit-stand` and
+  `object-touch-grab` censuses offline on both flavours,
   `sl-client-bevy-viewer/tests/e2e_running_scripts.rs` (a running
   script's dialog and experience card answered in the real viewer and heard
   back by the script) and the `script-compile` census, which runs offline

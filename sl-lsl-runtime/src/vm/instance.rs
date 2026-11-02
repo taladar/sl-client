@@ -104,13 +104,18 @@ pub enum Coalescing {
     /// four changes a fifth of a second apart, made while the script was
     /// busy, arrived as the first alone and the other three as one, every
     /// time (and three half a second apart, queued behind another event,
-    /// as one: `events/merging`, 2026-10-25). Touches and collisions merge
-    /// within the tick only here, which is not all aditi does: three
-    /// touches a second apart, made while the script slept, arrived as one,
-    /// and a collision that began and ended while it slept arrived not at
-    /// all (`events/merging`, `events/collision`) — the raisers'
-    /// tasks, `server-world-touch-and-grab` and
-    /// `server-world-collision-and-physics`, carry that.
+    /// as one: `events/merging`, 2026-10-25). A touch raised later merges
+    /// into the same touch event still queued, wherever it stands: three
+    /// touches a second apart, made while the script slept, arrived as one
+    /// `touch_start`, one `touch` and one `touch_end` (`events/merging`).
+    /// Collisions merge within the tick only here, which is not all aditi
+    /// does: a collision that began and ended while the script slept
+    /// arrived not at all (`events/collision`) — the raiser's task,
+    /// `server-world-collision-and-physics`, carries that.
+    ///
+    /// The queue is not first in, first out either (`events/order`): a
+    /// touch waits behind every other kind of event queued with it, and a
+    /// `changed` behind those and the touches, whenever each was raised.
     #[default]
     Reference,
     /// Never merge: every raise is an event of its own, the most split-up
@@ -134,7 +139,31 @@ impl Coalescing {
             Self::WhileQueued => true,
         }
     }
+
+    /// Whether a touch event may merge into the same touch event still
+    /// queued: on the reference wherever it was raised.
+    const fn merges_touch(self) -> bool {
+        match self {
+            Self::Reference | Self::WhileQueued => true,
+            Self::Never => false,
+        }
+    }
+
+    /// Where an event named `event` waits in a queue under this rule: behind
+    /// every queued event of a lower rank and ahead of every one of a higher.
+    /// One rank for all of them is first in, first out; the reference ranks
+    /// touches behind the rest and a `changed` behind those (`events/order`).
+    fn rank(self, event: &str) -> u8 {
+        match self {
+            Self::Reference if event == "changed" => 2,
+            Self::Reference if TOUCHES.contains(&event) => 1,
+            Self::Reference | Self::Never | Self::WhileQueued => 0,
+        }
+    }
 }
+
+/// The three touch events.
+const TOUCHES: [&str; 3] = ["touch", "touch_end", "touch_start"];
 
 /// When an event is posted and how it may merge: the tick, and the region's
 /// [`Coalescing`].
@@ -1103,6 +1132,13 @@ impl Instance {
         self.running
     }
 
+    /// Whether the current state has a handler for `event` — what a host
+    /// reads to know whether a prim takes a touch (`FLAGS_HANDLE_TOUCH`).
+    #[must_use]
+    pub fn handles(&self, event: &str) -> bool {
+        handler_index(&self.program, self.state, event).is_some()
+    }
+
     /// Whether a run-time error holds the script: it runs nothing and takes
     /// no events until it is reset, whatever the run flag says.
     #[must_use]
@@ -1349,9 +1385,13 @@ impl Instance {
             && let Some(detected) = &detected
             && let Some(queued) = self.queue.iter_mut().find(|queued| {
                 queued.event.name == event.name
-                    && arrival
-                        .coalescing
-                        .merges(queued.posted, arrival.tick, false)
+                    && if TOUCHES.contains(&event.name) {
+                        arrival.coalescing.merges_touch()
+                    } else {
+                        arrival
+                            .coalescing
+                            .merges(queued.posted, arrival.tick, false)
+                    }
             })
             && let Some(block) = queued.detected.as_mut()
         {
@@ -1395,7 +1435,15 @@ impl Instance {
         if first {
             self.queue.push_front(queued);
         } else {
-            self.queue.push_back(queued);
+            let rank = arrival.coalescing.rank(event.name);
+            match self
+                .queue
+                .iter()
+                .position(|waiting| arrival.coalescing.rank(waiting.event.name) > rank)
+            {
+                Some(ahead_of) => self.queue.insert(ahead_of, queued),
+                None => self.queue.push_back(queued),
+            }
         }
         Ok(Posted::Queued)
     }
@@ -1416,6 +1464,12 @@ impl Instance {
     #[must_use]
     pub const fn has_timer(&self) -> bool {
         self.data.timer.is_some()
+    }
+
+    /// One more tick of the script's time (`llGetTime`), which runs on
+    /// whether the script runs or not.
+    pub(crate) const fn count_tick(&mut self) {
+        self.data.script_ticks = self.data.script_ticks.saturating_add(1);
     }
 
     /// If the timer is due at `now`, schedule the next one and say so; the

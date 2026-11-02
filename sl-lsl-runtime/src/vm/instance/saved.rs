@@ -72,6 +72,7 @@ pub(crate) fn save(instance: &Instance, now: Tick, step: Duration) -> SavedScrip
             next: span(timer.next.0.saturating_sub(now.0), step),
         }),
         start_parameter: instance.data.start_parameter,
+        script_time: span(instance.data.script_ticks, step),
         detected: instance.data.detected.clone(),
         listens: instance.data.listens.clone(),
         permissions: instance.data.permissions.clone(),
@@ -151,6 +152,15 @@ pub(crate) fn restore(
                 next: now.after(ticks_in(timer.next, step)),
             }),
             start_parameter: saved.start_parameter,
+            // Script time counts on through a take, a rez and a restart on
+            // Second Life and YEngine; XEngine's reset of the script on a rez
+            // and a restart starts it again (`persistence/rerez`,
+            // `persistence/restart`).
+            script_ticks: if flavour == EngineFlavour::XEngine {
+                0
+            } else {
+                ticks_in(saved.script_time, step)
+            },
             refusals: Vec::new(),
             raised: Vec::new(),
             listens: saved.listens.clone(),

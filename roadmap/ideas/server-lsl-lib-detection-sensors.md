@@ -135,3 +135,12 @@ it in `library/registry.rs` and move its line in
 then holds; `ossl/available` and `ossl/errors` stop needing the answers their
 replay writes in for it (`vm/tests/ossl.rs`). The 2: `osGetAgents`,
 `osGetAvatarList`.
+
+## From server-world-touch-and-grab (2026-11-02)
+
+The touch raiser is done (`sl-fake-grid/src/touches.rs`): it fills the
+detected block from the toucher (key, name, owner, `llDetectedType` per
+flavour, the agent's position, whether its active group is the object's), the
+clicked prim's link number and the message's surface block as sent. The
+rotation and velocity are zero until [[server-world-agent-movement]] gives an
+avatar either.

@@ -222,6 +222,9 @@ pub struct SceneFixtures {
     /// which experiences each parcel admits ([`crate::experiences`]). An
     /// experience script's standing is judged by it.
     pub experience_land: crate::experiences::ExperienceLand,
+    /// The touches held open in the region and its prims' `llPassTouches`
+    /// settings ([`crate::touches`]). Not a fixture.
+    pub touches: crate::touches::Touches,
 }
 
 /// One parcel's two access lists: who may come in, and who may not.
@@ -809,6 +812,7 @@ impl SceneFixtures {
             render_info: crate::render_info::RegionRenderInfo::default(),
             script_instances: crate::scripts::RegionScripts::default(),
             experience_land: crate::experiences::ExperienceLand::default(),
+            touches: crate::touches::Touches::default(),
         }
     }
 
@@ -2434,6 +2438,15 @@ pub(crate) fn answer_world_request(
         crate::object_edits::answer_object_edit(world, mint, selection, sim, &groups, event, now)
     {
         return changes;
+    }
+    // A held button is a touch to the prim's scripts first; an update of it
+    // is the drag's as well.
+    let toucher = crate::touches::Toucher {
+        identity,
+        group: groups.groups.active.as_ref().map(|(group, ..)| *group),
+    };
+    if crate::touches::observe(world, &toucher, sim, event) {
+        return Vec::new();
     }
     if let Some(changes) = crate::grabs::answer_grab(world, identity.agent_id, sim, event, now) {
         return changes;

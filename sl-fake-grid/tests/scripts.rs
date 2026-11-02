@@ -417,6 +417,54 @@ mod test {
             Ok(lines)
         }
 
+        /// Presses on the prim `local_id`, and waits for the session to take it.
+        async fn press(
+            &mut self,
+            local_id: sl_proto::RegionLocalObjectId,
+        ) -> Result<(), TestError> {
+            let target = sl_client_tokio::ScopedObjectId::new(self.circuit, local_id);
+            self.send(
+                Command::GrabObject {
+                    local_id: target,
+                    grab_offset: OFFSET,
+                    surface: None,
+                },
+                |event| matches!(event, ServerEvent::ObjectGrabbed(_)),
+            )
+            .await
+        }
+
+        /// Releases the prim `local_id`, and waits for the session to take it.
+        async fn release(
+            &mut self,
+            local_id: sl_proto::RegionLocalObjectId,
+        ) -> Result<(), TestError> {
+            let target = sl_client_tokio::ScopedObjectId::new(self.circuit, local_id);
+            self.send(
+                Command::DegrabObject {
+                    local_id: target,
+                    surface: None,
+                },
+                |event| matches!(event, ServerEvent::ObjectReleased(_)),
+            )
+            .await
+        }
+
+        /// Every touch line said until the region falls quiet.
+        async fn touch_lines(&mut self) -> Vec<String> {
+            let mut lines = Vec::new();
+            while let Ok(Some(seen)) = tokio::time::timeout(QUIET, self.seen.recv()).await {
+                if let Seen::Chat(_, message) = seen
+                    && ["start ", "touch ", "end"]
+                        .iter()
+                        .any(|prefix| message.starts_with(prefix))
+                {
+                    lines.push(message);
+                }
+            }
+            lines
+        }
+
         /// Ends the run.
         fn stop(self) {
             for task in self.tasks {
@@ -1333,9 +1381,15 @@ default
                 },
             })
             .await?;
+        // The seat was sent once already, flagged scripted as its script
+        // started: the update that matters is the one that wears it.
         let worn = scene
             .next("the worn object", |seen| match seen {
-                Seen::Updated(object) if object.local_id == SEAT => Some(object),
+                Seen::Updated(object)
+                    if object.local_id == SEAT && object.attachment_point_id().is_some() =>
+                {
+                    Some(object)
+                }
                 _other => None,
             })
             .await?;
@@ -1412,5 +1466,199 @@ default
     #[tokio::test]
     async fn an_object_is_worn_dropped_and_worn_again_on_opensim() -> Result<(), TestError> {
         an_object_is_worn_dropped_and_worn_again(ImitatedGrid::OpenSim).await
+    }
+
+    /// A script that shouts every touch event it is handed, with the link
+    /// number, the grab offset and the face it detects.
+    const TOUCH_SOURCE: &str = "default
+{
+    touch_start(integer n)
+    {
+        llShout(0, \"start \" + (string)n + \" link \" + (string)llDetectedLinkNumber(0)
+            + \" grab \" + (string)llDetectedGrab(0) + \" face \" + (string)llDetectedTouchFace(0));
+    }
+    touch(integer n)
+    {
+        llShout(0, \"touch \" + (string)llDetectedGrab(0));
+    }
+    touch_end(integer n)
+    {
+        llShout(0, \"end\");
+    }
+}
+";
+
+    /// A script that takes no touch, and keeps its prim's touches from the
+    /// root.
+    const NEVER_PASS_SOURCE: &str = "default { state_entry() { llPassTouches(PASS_NEVER); } listen(integer c, string n, key i, string m) { } }";
+
+    /// The touched box's region-local id.
+    const TOUCHED: sl_proto::RegionLocalObjectId = sl_proto::RegionLocalObjectId(0x600);
+
+    /// The child linked to it in [`linked_region`].
+    const CHILD: sl_proto::RegionLocalObjectId = sl_proto::RegionLocalObjectId(0x601);
+
+    /// The grab offset every press states.
+    const OFFSET: sl_types::lsl::Vector = sl_types::lsl::Vector {
+        x: 0.11,
+        y: 0.22,
+        z: 0.33,
+    };
+
+    /// The zero vector as a script says it.
+    const ZERO: &str = "<0.00000, 0.00000, 0.00000>";
+
+    /// The press's offset as a script says it.
+    const SAID_OFFSET: &str = "<0.11000, 0.22000, 0.33000>";
+
+    /// A region holding one box beside the arrival point running
+    /// [`TOUCH_SOURCE`].
+    fn touch_region() -> Result<sl_fake_grid::RegionFixture, TestError> {
+        region_of(&[ScriptedBox {
+            local_id: TOUCHED,
+            source: TOUCH_SOURCE.to_owned(),
+            experience: None,
+        }])
+    }
+
+    /// A region holding the touch box as the root of a linkset whose child
+    /// runs [`NEVER_PASS_SOURCE`].
+    fn linked_region() -> Result<sl_fake_grid::RegionFixture, TestError> {
+        let mut fixture = region_of(&[
+            ScriptedBox {
+                local_id: TOUCHED,
+                source: TOUCH_SOURCE.to_owned(),
+                experience: None,
+            },
+            ScriptedBox {
+                local_id: CHILD,
+                source: NEVER_PASS_SOURCE.to_owned(),
+                experience: None,
+            },
+        ])?;
+        {
+            let mut child = fixture
+                .world
+                .object_mut(CHILD)
+                .ok_or("the child is not in the region")?;
+            child.parent_id = TOUCHED;
+            child.motion.position = sl_types::lsl::Vector {
+                x: 2.0,
+                y: 0.0,
+                z: 0.0,
+            };
+        }
+        Ok(fixture)
+    }
+
+    /// A button held five ticks and a click: Second Life raises `touch` on
+    /// the region's clock, once a tick here, and once for the click; OpenSim
+    /// raises none with no update between. The prim carries the touch flag
+    /// once its script runs.
+    async fn a_held_touch(imitated: ImitatedGrid) -> Result<(), TestError> {
+        let region = touch_region()?;
+        let mut scene = scene_of(imitated, region).await?;
+        scene.tick(2).await?;
+        let flagged = scene
+            .next("the touch box flagged", |seen| match seen {
+                Seen::Updated(object) if object.local_id == TOUCHED => Some(object.update_flags),
+                _other => None,
+            })
+            .await?;
+        assert_eq!(
+            flagged & (sl_proto::prim_flags::SCRIPTED | sl_proto::prim_flags::HANDLE_TOUCH),
+            sl_proto::prim_flags::SCRIPTED | sl_proto::prim_flags::HANDLE_TOUCH
+        );
+
+        let second_life = imitated == ImitatedGrid::SecondLife;
+        let start = if second_life {
+            format!("start 1 link 0 grab {ZERO} face -1")
+        } else {
+            format!("start 1 link 0 grab {SAID_OFFSET} face -1")
+        };
+        scene.press(TOUCHED).await?;
+        scene.tick(5).await?;
+        scene.release(TOUCHED).await?;
+        scene.tick(2).await?;
+        let mut held = vec![start.clone()];
+        if second_life {
+            held.extend(std::iter::repeat_n(format!("touch {ZERO}"), 5));
+        }
+        held.push("end".to_owned());
+        assert_eq!(scene.touch_lines().await, held);
+
+        scene.press(TOUCHED).await?;
+        scene.release(TOUCHED).await?;
+        scene.tick(2).await?;
+        let mut click = vec![start];
+        if second_life {
+            click.push(format!("touch {ZERO}"));
+        }
+        click.push("end".to_owned());
+        assert_eq!(scene.touch_lines().await, click);
+        scene.stop();
+        Ok(())
+    }
+
+    /// On a grid imitating Second Life.
+    #[tokio::test]
+    async fn a_held_touch_on_second_life() -> Result<(), TestError> {
+        a_held_touch(ImitatedGrid::SecondLife).await
+    }
+
+    /// On a grid imitating OpenSim.
+    #[tokio::test]
+    async fn a_held_touch_on_opensim() -> Result<(), TestError> {
+        a_held_touch(ImitatedGrid::OpenSim).await
+    }
+
+    /// A click on a child whose script takes no touch and said `PASS_NEVER`
+    /// reaches nobody on Second Life and the root on OpenSim, as link 2; a
+    /// click on the root reaches it as link 1 on both.
+    async fn a_touch_on_a_child(imitated: ImitatedGrid) -> Result<(), TestError> {
+        let region = linked_region()?;
+        let mut scene = scene_of(imitated, region).await?;
+        scene.tick(2).await?;
+        let grab = if imitated == ImitatedGrid::SecondLife {
+            ZERO
+        } else {
+            SAID_OFFSET
+        };
+        let touch = if imitated == ImitatedGrid::SecondLife {
+            vec![format!("touch {ZERO}")]
+        } else {
+            Vec::new()
+        };
+        scene.press(CHILD).await?;
+        scene.release(CHILD).await?;
+        scene.tick(2).await?;
+        let mut told = Vec::new();
+        if imitated == ImitatedGrid::OpenSim {
+            told.push(format!("start 1 link 2 grab {grab} face -1"));
+            told.push("end".to_owned());
+        }
+        assert_eq!(scene.touch_lines().await, told, "a click on the child");
+
+        scene.press(TOUCHED).await?;
+        scene.release(TOUCHED).await?;
+        scene.tick(2).await?;
+        let mut told = vec![format!("start 1 link 1 grab {grab} face -1")];
+        told.extend(touch);
+        told.push("end".to_owned());
+        assert_eq!(scene.touch_lines().await, told, "a click on the root");
+        scene.stop();
+        Ok(())
+    }
+
+    /// On a grid imitating Second Life.
+    #[tokio::test]
+    async fn a_touch_on_a_child_on_second_life() -> Result<(), TestError> {
+        a_touch_on_a_child(ImitatedGrid::SecondLife).await
+    }
+
+    /// On a grid imitating OpenSim.
+    #[tokio::test]
+    async fn a_touch_on_a_child_on_opensim() -> Result<(), TestError> {
+        a_touch_on_a_child(ImitatedGrid::OpenSim).await
     }
 }

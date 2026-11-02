@@ -72,6 +72,13 @@
 //! `llDetachFromAvatar` are applied after the tick, the sitter's or the
 //! wearer's own session told through the region's changes.
 //!
+//! # Touches
+//!
+//! A held mouse button reaches the scripts through [`crate::touches`]: each
+//! tick, before the scripts run, a touch held open on Second Life is due its
+//! `touch`, and after it every scripted prim's touch flags are brought in line
+//! with what its scripts handle; `llPassTouches` is the prim's setting there.
+//!
 //! # Not yet wired
 //!
 //! - The grid keeps no money balances: `llGiveMoney` moves nothing,
@@ -260,6 +267,38 @@ impl RegionScripts {
     #[must_use]
     pub const fn engine(&self) -> &Engine {
         &self.engine
+    }
+
+    /// The engine, to post an event to.
+    pub(crate) const fn engine_mut(&mut self) -> &mut Engine {
+        &mut self.engine
+    }
+
+    /// The instances of the scripts in `prim`, in the order they started.
+    #[must_use]
+    pub fn scripts_in(&self, prim: ObjectKey) -> Vec<CallerId> {
+        self.slots
+            .iter()
+            .filter(|(_id, slot)| slot.prim == prim)
+            .map(|(id, _slot)| *id)
+            .collect()
+    }
+
+    /// The programs the scripts of `prim` run, by the asset each was
+    /// compiled from, in the order the scripts started: what a save changes.
+    #[must_use]
+    pub fn assets_in(&self, prim: ObjectKey) -> Vec<AssetKey> {
+        self.slots
+            .values()
+            .filter(|slot| slot.prim == prim)
+            .map(|slot| slot.asset)
+            .collect()
+    }
+
+    /// The prims the region runs a script in.
+    #[must_use]
+    pub fn prims(&self) -> BTreeSet<ObjectKey> {
+        self.slots.values().map(|slot| slot.prim).collect()
     }
 
     /// Runs the region's OSSL, LightShare and MOD calls under `settings`
@@ -998,13 +1037,7 @@ impl RegionHost<'_> {
 
     /// The scripts in the prim keyed `prim`, in the order of their ids.
     fn scripts_in(&self, prim: ObjectKey) -> Vec<CallerId> {
-        self.world
-            .script_instances
-            .slots
-            .iter()
-            .filter(|(_id, slot)| slot.prim == prim)
-            .map(|(id, _slot)| *id)
-            .collect()
+        self.world.script_instances.scripts_in(prim)
     }
 
     /// Put the permission question `mask` — an experience's, where
@@ -1498,6 +1531,12 @@ impl Host for RegionHost<'_> {
         }
     }
 
+    fn pass_touches(&mut self, caller: CallerId, pass: i32) {
+        if let Some(origin) = self.origin(caller) {
+            self.world.touches.set_pass(origin.prim, pass);
+        }
+    }
+
     fn experience(&self, caller: CallerId) -> Option<ScriptExperience> {
         if self.world.script_instances.flavour().is_opensim() {
             return None;
@@ -1909,11 +1948,25 @@ async fn presence(core: &GridCore, index: usize) -> Vec<Present> {
 /// the grid does not have or that has no script.
 pub(crate) async fn run_tick(core: &GridCore, index: usize) -> Option<TickReport> {
     let region = core.region(index)?;
-    let scripted = {
+    let (scripted, unflagged) = {
         let mut world = region.world.lock();
         reconcile(&mut world, &core.assets);
-        !world.script_instances.is_empty()
+        let scripted = !world.script_instances.is_empty();
+        // The last script gone takes its prim's touch flags with it.
+        let unflagged = if scripted {
+            Vec::new()
+        } else {
+            crate::touches::refresh_flags(&mut world)
+        };
+        drop(world);
+        (scripted, unflagged)
     };
+    for change in unflagged {
+        drop(region.changes.send(RegionUpdate {
+            source: REGION_SOURCE,
+            change,
+        }));
+    }
     if !scripted {
         return None;
     }
@@ -1943,6 +1996,9 @@ fn tick_locked(
     present: &[Present],
 ) -> (TickReport, Vec<RegionChange>, Vec<Delivery>) {
     let config = *world.script_instances.engine.config();
+    // A touch held open is due its `touch` before the scripts run.
+    let agents: Vec<AgentKey> = present.iter().map(|present| present.agent).collect();
+    crate::touches::tick(world, config.step, &agents);
     let mut engine = core::mem::replace(&mut world.script_instances.engine, Engine::new(config));
     let mut host = RegionHost {
         core,
@@ -2025,6 +2081,9 @@ fn tick_locked(
     world
         .script_instances
         .time_out_experience_questions(report.tick, config.step);
+    // What the tick started, saved over or moved to another state may take
+    // touches now, or no longer.
+    changes.extend(crate::touches::refresh_flags(world));
     (report, changes, deliveries)
 }
 

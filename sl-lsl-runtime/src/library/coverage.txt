@@ -25,10 +25,14 @@ implemented llDetectedTouchST
 implemented llDetectedTouchUV
 implemented llDetectedType
 implemented llDetectedVel
+implemented llPassTouches
 implemented llGetScriptState
 implemented llGetStartParameter
 implemented llGetOwner
 implemented llSetTimerEvent
+implemented llGetTime
+implemented llResetTime
+implemented llGetAndResetTime
 implemented llGetFreeMemory
 implemented llGetMemoryLimit
 implemented llGetSPMaxMemory

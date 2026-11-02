@@ -169,6 +169,13 @@ pub trait Host {
     /// `RequestPayPrice` is answered [`PayPrice::reply`].
     fn set_pay_price(&mut self, caller: CallerId, layout: PayPrice);
 
+    /// `llPassTouches`: whether a touch on the prim `caller` is in also
+    /// reaches its linkset's root is now `pass`, as the script gave it
+    /// (`PASS_IF_NOT_HANDLED` 0, `PASS_ALWAYS` 1, `PASS_NEVER` 2) — the
+    /// prim's, so a reset leaves it. What a value means is the grid's: the
+    /// host routes the touches.
+    fn pass_touches(&mut self, caller: CallerId, pass: i32);
+
     /// The experience the script `caller` was compiled into (the upload's
     /// experience, kept on its inventory item), and whether it may run where
     /// the script is; [`None`] for a script compiled into none — every

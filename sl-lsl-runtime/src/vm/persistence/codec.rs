@@ -25,9 +25,9 @@ use super::{
 /// What every saved script starts with.
 const MARK: [u8; 4] = *b"slSS";
 
-/// The version of the form this crate writes, and the only one it reads: 3
-/// since a list carries its object's identity where lists are objects.
-const VERSION: u8 = 3;
+/// The version of the form this crate writes, and the only one it reads: 4
+/// since a script's time (`llGetTime`) is kept with it.
+const VERSION: u8 = 4;
 
 /// Why bytes are not a saved script.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -102,6 +102,7 @@ pub(super) fn encode(saved: &SavedScript) -> Vec<u8> {
         None => out.bool(false),
     }
     out.i32(saved.start_parameter);
+    out.duration(saved.script_time);
     out.detections(&saved.detected);
     out.listens(&saved.listens);
     out.permissions(&saved.permissions);
@@ -177,6 +178,7 @@ pub(super) fn decode(bytes: &[u8]) -> Result<SavedScript, DecodeError> {
         None
     };
     let start_parameter = input.i32()?;
+    let script_time = input.duration()?;
     let detected = input.detections()?;
     let listens = input.listens()?;
     let permissions = input.permissions()?;
@@ -207,6 +209,7 @@ pub(super) fn decode(bytes: &[u8]) -> Result<SavedScript, DecodeError> {
         asleep,
         timer,
         start_parameter,
+        script_time,
         detected,
         listens,
         permissions,

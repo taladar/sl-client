@@ -360,12 +360,18 @@ impl FakeGridHarness {
                 account
             });
         }
+        // The live grid's own frame, not the fake grid's coarser default: a
+        // census compares what a region raises in its frames with what the
+        // live grid was measured to raise in its own (a held touch).
+        let heartbeat = sl_fake_grid::HeartbeatConfig::running(imitates.frame_step());
         let start = sl_fake_grid::RegionConfig {
             name: START_REGION.to_owned(),
+            heartbeat,
             ..sl_fake_grid::RegionConfig::default()
         };
         let east = sl_fake_grid::RegionConfig {
             name: EAST_REGION.to_owned(),
+            heartbeat,
             grid_x: sl_fake_grid::RegionConfig::default()
                 .grid_x
                 .saturating_add(1),
@@ -373,6 +379,7 @@ impl FakeGridHarness {
         };
         let far = sl_fake_grid::RegionConfig {
             name: FAR_REGION.to_owned(),
+            heartbeat,
             grid_x: sl_fake_grid::RegionConfig::default()
                 .grid_x
                 .saturating_add(FAR_REGION_OFFSET),

@@ -81,3 +81,12 @@ Raised now: `CHANGED_LINK` in every script of an object on a sit and a stand
 (`scripts::raise_changed`), and OpenSim's `changed(32768)` twice before an
 `attach` on a wear and once on a drop (`scripts::raise_attach`). An
 OpenSim-flavoured region's engine now uses `Coalescing::Never`.
+
+## From server-world-touch-and-grab (2026-11-02)
+
+Where a `changed` lands in the queue is done: under `Coalescing::Reference`
+the queue is ranked (`Coalescing::rank`), a touch behind every other kind of
+event and a `changed` behind the touches, whenever each was raised
+(`second_life_runs_touches_after_the_rest_and_changed_last`). What is left
+here is raising the changes; the `events/order` rows of
+`book/src/gridspec/lsl.md` stay unasked offline until the colour change does.

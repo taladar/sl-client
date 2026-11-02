@@ -1488,6 +1488,35 @@ impl ImitatedGrid {
         }
     }
 
+    /// One frame of this grid's simulator, at the rate it was measured to
+    /// report (45 a second on Second Life, 55 on OpenSim): the heartbeat step
+    /// of a run that wants the live grid's own clock rather than the fake
+    /// grid's coarser default ([`RegionConfig::heartbeat`](crate::RegionConfig::heartbeat)) —
+    /// a census that counts what a region raises a frame, as Second Life's
+    /// held touch, reads the rate off it.
+    #[must_use]
+    pub fn frame_step(self) -> Duration {
+        Duration::from_secs_f64(1.0 / f64::from(self.arrival_policy().frames_per_second))
+    }
+
+    /// How this grid turns a held mouse button into a script's touch events —
+    /// measured by the `object-touch-grab` conformance case on aditi and the
+    /// local OpenSim (2026-10-12, `book/src/gridspec/building.md` § Touch and
+    /// grab), and applied by [`crate::touches`].
+    ///
+    /// Second Life holds a touch open from the press to the release and
+    /// raises `touch` on the region's clock, 22.5 a second; OpenSim answers
+    /// each message, a `touch` an update. They differ too in what
+    /// `llDetectedGrab` and `llDetectedType` read, in what `PASS_NEVER`
+    /// means, and in the flags a child of a touch-taking root carries.
+    #[must_use]
+    pub const fn touch_policy(self) -> crate::touches::TouchPolicy {
+        match self {
+            Self::SecondLife => crate::touches::TouchPolicy::SECOND_LIFE,
+            Self::OpenSim => crate::touches::TouchPolicy::OPENSIM,
+        }
+    }
+
     /// How this grid passes a viewer's effects and sounds on to the other
     /// viewers — measured by the `effects-sounds` conformance case on aditi
     /// and the local OpenSim (2026-10-13, `book/src/gridspec/avatars.md`

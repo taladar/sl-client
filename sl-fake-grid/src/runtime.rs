@@ -2293,6 +2293,7 @@ impl FakeGridBuilder {
                 fixtures.scripts = self.imitates.script_compile_policy();
                 fixtures.chat = self.imitates.chat_policy();
                 fixtures.region_info = self.imitates.region_info_policy();
+                fixtures.touches = crate::touches::Touches::new(self.imitates.touch_policy());
                 fixtures.script_instances = crate::scripts::RegionScripts::new(
                     config.heartbeat.step,
                     self.imitates.script_engine(),

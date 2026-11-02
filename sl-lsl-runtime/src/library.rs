@@ -299,6 +299,8 @@ mod tests {
 
         fn detach(&mut self, _caller: CallerId) {}
 
+        fn pass_touches(&mut self, _caller: CallerId, _pass: i32) {}
+
         fn placement(&self, _caller: CallerId) -> crate::vm::seating::Placement {
             crate::vm::seating::Placement {
                 position: crate::value::ZERO_VECTOR,

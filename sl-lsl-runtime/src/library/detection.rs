@@ -176,3 +176,19 @@ pub fn ll_detected_touch_binormal(
 ) -> Result<Vector, CallError> {
     Ok(field(ctx, index, |d| d.touch.binormal.clone(), ZERO_VECTOR))
 }
+
+/// `llPassTouches`: whether a touch on the prim the script is in also reaches
+/// its linkset's root — `PASS_IF_NOT_HANDLED` (0), `PASS_ALWAYS` (1) or
+/// `PASS_NEVER` (2). The setting is the prim's, so a reset leaves it, and it
+/// is handed to the host as the script gave it: what a value means is the
+/// grid's (OpenSim passes for any value but 0, `PASS_NEVER` included;
+/// `object-touch-grab`, 2026-10-12).
+///
+/// # Errors
+///
+/// None; the signature is the library's.
+pub fn ll_pass_touches(ctx: &mut ScriptCtx<'_>, pass: i32) -> Result<(), CallError> {
+    let caller = ctx.caller();
+    ctx.host().pass_touches(caller, pass);
+    Ok(())
+}

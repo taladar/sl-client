@@ -554,9 +554,9 @@ fn bytes_that_are_not_a_saved_script_are_refused() -> Result<(), String> {
     assert_eq!(SavedScript::decode(b"nope"), Err(DecodeError::Mark));
     let mut later = bytes.clone();
     if let Some(version) = later.get_mut(4) {
-        *version = 4;
+        *version = 5;
     }
-    assert_eq!(SavedScript::decode(&later), Err(DecodeError::Version(4)));
+    assert_eq!(SavedScript::decode(&later), Err(DecodeError::Version(5)));
     let cut = bytes
         .get(..bytes.len().saturating_sub(1))
         .unwrap_or_default();
@@ -590,5 +590,45 @@ fn a_saved_script_is_not_brought_back_with_another_program_or_engine() -> Result
             region: EngineFlavour::YEngine,
         })
     );
+    Ok(())
+}
+
+/// The script time a script reads after two seconds in a region, a take, a
+/// rez three seconds later and one more tick, under `flavour`.
+fn script_time_after_rerez(flavour: EngineFlavour) -> Result<String, String> {
+    let source = "default { link_message(integer s, integer n, string m, key i) { print((string)llGetTime()); } }";
+    let mut engine = region(flavour);
+    let mut host = Recorder::default();
+    let _none = engine.add(A, program_for(source, flavour)?);
+    let _reports = run(&mut engine, &mut host, 20);
+    let taken = engine.take(A).ok_or("no script to take")?;
+    let taken = SavedScript::decode(&taken.encode()).map_err(|error| error.to_string())?;
+    let _posted = engine
+        .rez_saved(
+            A,
+            program_for(source, flavour)?,
+            &taken,
+            Duration::from_secs(3),
+            0,
+        )
+        .map_err(|error| error.to_string())?;
+    let _reports = run(&mut engine, &mut host, 1);
+    let _posted = link(&mut engine, A, 0, "")?;
+    let _reports = run(&mut engine, &mut host, 1);
+    host.texts(A)
+        .last()
+        .map(|text| (*text).to_owned())
+        .ok_or_else(|| "the script printed nothing".to_owned())
+}
+
+#[test]
+fn script_time_is_kept_through_a_take_but_not_on_xengine() -> Result<(), String> {
+    // `persistence/rerez`: script time counts on through a take and a rez on
+    // Second Life and YEngine, the time away not counted; XEngine starts it
+    // again with the rez's reset.
+    for flavour in [EngineFlavour::SecondLife, EngineFlavour::YEngine] {
+        assert_eq!(script_time_after_rerez(flavour)?, "2.200000", "{flavour:?}");
+    }
+    assert_eq!(script_time_after_rerez(EngineFlavour::XEngine)?, "0.200000");
     Ok(())
 }

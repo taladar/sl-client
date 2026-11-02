@@ -327,13 +327,13 @@ chosen values (`drive=touch face=… uv=… st=… at=… normal=… binormal=�
 
 | behaviour | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
-| a touch with no surface block | `TOUCH_INVALID_FACE` (−1), `TOUCH_INVALID_TEXCOORD` (`<-1, -1, 0>`) for UV and ST, `ZERO_VECTOR` for the point, normal and binormal, in `touch_start` and `touch_end` | the same | no scripts |
-| a touch a viewer could have picked (face 1, UV, ST, a point on the prim, a unit normal) | every value **as the viewer sent it**, in both events | the same | no scripts |
-| one no viewer could pick: face 9 of a six-faced cube, UV and ST outside 0–1, a point 8.7 m off the prim, a normal of length 2, a zero binormal | **as sent**: the grid checks nothing | the same | no scripts |
-| face −1 with the rest given | face −1 and the rest as sent | the same | no scripts |
-| the other avatar's touch | its values as sent | the same | no scripts |
-| a `touch` event for a grab and a release with no drag update between | **one** per touch | **none** | no scripts |
-| `llDetectedGrab`, `llDetectedLinkNumber` | `ZERO_VECTOR`, 0 | the same | no scripts |
+| a touch with no surface block | `TOUCH_INVALID_FACE` (−1), `TOUCH_INVALID_TEXCOORD` (`<-1, -1, 0>`) for UV and ST, `ZERO_VECTOR` for the point, normal and binormal, in `touch_start` and `touch_end` | the same | each flavour's |
+| a touch a viewer could have picked (face 1, UV, ST, a point on the prim, a unit normal) | every value **as the viewer sent it**, in both events | the same | each flavour's |
+| one no viewer could pick: face 9 of a six-faced cube, UV and ST outside 0–1, a point 8.7 m off the prim, a normal of length 2, a zero binormal | **as sent**: the grid checks nothing | the same | each flavour's |
+| face −1 with the rest given | face −1 and the rest as sent | the same | each flavour's |
+| the other avatar's touch | its values as sent | the same | each flavour's |
+| a `touch` event for a grab and a release with no drag update between | **one** per touch | **none** | each flavour's |
+| `llDetectedGrab`, `llDetectedLinkNumber` | `ZERO_VECTOR`, 0 | the same | each flavour's |
 
 ### What the viewer does with it
 
@@ -556,6 +556,13 @@ Among the others the order is the order they reached the script, which is
 frame timing (the sensor's answer came after a timer set to fire at 0.3 s,
 and the helper's link message after the talker's line).
 
+The fake grid's engine queues by that rule on a Second-Life-flavoured region
+(`Coalescing::Reference`): a touch waits behind every other kind of event
+queued with it, and a `changed` behind the touches too; an OpenSim-flavoured
+one is first in, first out. The rows above stay unasked offline until the
+colour changes and the sensor that raise them do
+(`server-world-changed-raisers`, `server-lsl-lib-detection-sensors`).
+
 ### What merges
 
 `events/merging`, the same way: each round raises one kind of event several
@@ -570,7 +577,7 @@ times while the probe sleeps three seconds.
 | five identical link messages | five | the same | no scripts |
 | one line said five times, then five different lines | five each, in order | the same | no scripts |
 | `llSensor` three times in one handler | **one** `sensor` | three | no scripts |
-| three touches a second apart | **one** `touch_start` and one `touch_end`, each of one avatar, and one `touch` | three of each, no `touch` | no scripts |
+| three touches a second apart | **one** `touch_start` and one `touch_end`, each of one avatar, and one `touch` | three of each, no `touch` | each flavour's |
 
 ### Collisions
 

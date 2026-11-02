@@ -85,6 +85,8 @@ pub struct SavedScript {
     pub(crate) timer: Option<SavedTimer>,
     /// `llGetStartParameter`.
     pub(crate) start_parameter: i32,
+    /// The script's time (`llGetTime`) when it was saved.
+    pub(crate) script_time: Duration,
     /// The detected block of the event in progress.
     pub(crate) detected: Vec<Detected>,
     /// The listens.

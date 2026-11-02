@@ -895,6 +895,7 @@ impl Engine {
         // Timers first, so a timer due this tick runs in it.
         let arrival = self.arrival();
         for instance in self.instances.values_mut() {
+            instance.count_tick();
             if instance.timer_due(now) {
                 let _posted = instance.post(arrival, lifecycle("timer"), Vec::new());
             }

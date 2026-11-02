@@ -52,6 +52,7 @@ mod teleport;
 pub mod terrain;
 pub mod time;
 pub mod timeline;
+pub mod touches;
 pub mod udp_assets;
 mod uploads;
 pub mod voice;

@@ -2,7 +2,7 @@
 id: server-world-touch-and-grab
 title: Touch routing — a click on a prim reaches nothing
 topic: server
-status: ready
+status: done
 origin: LSL-on-the-fake-grid audit (2026-09-20)
 points: 5
 blocked_by: [protocol-sim-script-messages]
@@ -95,3 +95,46 @@ merges only within a tick, so it needs the measured cross-tick merge. On
 Second Life a touch raised during a sleep also runs after the link messages,
 chat, timers and sensor answers raised in it, whenever it came; on OpenSim
 in the order raised.
+
+## Done (2026-11-02)
+
+`sl-fake-grid/src/touches.rs`, applied per flavour by
+`ImitatedGrid::touch_policy` (`TouchPolicy`):
+
+- **The sequence.** Second Life holds a touch open per toucher and prim from
+  the press (or an update with none open) to the release, raises `touch` on
+  the heartbeat every 1/22.5 s of region time — at most once a tick — and
+  once on the release of a click too short for it; a second press is
+  ignored. OpenSim raises a `touch_start` per press, a `touch` per update and
+  nothing between. A release with no press is a `touch_end` on both. A touch
+  whose prim or toucher left is closed.
+- **Routing.** The root's or a lone prim's scripts; a child's scripts when
+  one takes touches, and the root's as `llPassTouches` says (Second Life:
+  `PASS_ALWAYS` passes a handled touch, `PASS_NEVER` keeps even an unhandled
+  one from the root; OpenSim: any value but 0 passes). `llPassTouches` is new
+  in the runtime (`Host::pass_touches`, the prim's setting).
+- **The detected block**: the surface block of the message the event reads
+  (Second Life's `touch` the latest message), as sent; `llDetectedGrab` and
+  `llDetectedType` per flavour; `llDetectedLinkNumber` the clicked prim's.
+  A click action filters nothing; a prim with no script is told nothing.
+- **Flags.** `refresh_flags` after every tick keeps `FLAGS_SCRIPTED` and
+  `FLAGS_HANDLE_TOUCH` true (a running script with a touch handler in its
+  current state, `Instance::handles`), with Second Life's quiet child flags
+  and OpenSim's child resent in full as the root's scripts change. The drag
+  (`grabs.rs`) reads them, so a touch-taking prim stays.
+- **The queue** (runtime): under `Coalescing::Reference` a touch merges into
+  the same touch event still queued whatever its tick (`events/merging`),
+  and the queue is ranked — touches behind the rest, `changed` behind the
+  touches (`events/order`).
+
+Beyond the plan, because the census's probe needs them: `llGetTime`,
+`llResetTime` and `llGetAndResetTime` on a tick-counted script time saved
+with the script (saved form 4); and `sl-conformance`'s fake grids tick at the
+imitated grid's frame (`ImitatedGrid::frame_step`), without which Second
+Life's held touch reads as one an update at the default 0.1 s step.
+
+Acceptance met: `object-touch-grab` runs legs 1–9 on both fake flavours held
+to `MEASURED` and `MEASURED_SCRIPTED` (the physical leg, `MEASURED_PHYSICAL`,
+stays live-only); `sl-fake-grid/tests/scripts.rs` shows a button held five
+ticks as one `touch_start`, five `touch` and one `touch_end` on Second Life
+and no `touch` on OpenSim, a click, and a touch on a `PASS_NEVER` child.

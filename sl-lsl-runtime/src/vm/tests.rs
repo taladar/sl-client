@@ -93,6 +93,8 @@ struct Recorder {
     accounts: std::collections::BTreeMap<String, i64>,
     /// Each prim's pay layout, by number.
     pay_prices: std::collections::BTreeMap<u64, PayPrice>,
+    /// What each prim's scripts last set `llPassTouches` to, by number.
+    passes: std::collections::BTreeMap<u64, i32>,
     /// The experience each script was compiled into; none when not listed.
     experiences: std::collections::BTreeMap<CallerId, ScriptExperience>,
     /// The experiences the grid knows, by key; an id not listed is no
@@ -332,6 +334,11 @@ impl Host for Recorder {
     fn set_pay_price(&mut self, caller: CallerId, layout: PayPrice) {
         let prim = self.prim_of(caller);
         let _old = self.pay_prices.insert(prim, layout);
+    }
+
+    fn pass_touches(&mut self, caller: CallerId, pass: i32) {
+        let prim = self.prim_of(caller);
+        let _old = self.passes.insert(prim, pass);
     }
 
     fn experience(&self, caller: CallerId) -> Option<ScriptExperience> {
@@ -1278,9 +1285,7 @@ fn a_state_change_releases_the_hosts_hold_and_discards_the_queue() -> Result<(),
             r#"default {
                 state_entry() { llSetTimerEvent(0.5); }
                 touch_start(integer n) { state two; }
-                link_message(integer sender, integer number, string text, key id) {
-                    print("stale link message");
-                }
+                changed(integer change) { print("stale changed"); }
             }
             state two {
                 timer() { print("timer in two"); llSetTimerEvent(0.0); }
@@ -1289,26 +1294,14 @@ fn a_state_change_releases_the_hosts_hold_and_discards_the_queue() -> Result<(),
     );
     let _reports = run(&mut engine, &mut host, 1);
     let touch = named("touch_start")?;
-    let link = named("link_message")?;
     assert_eq!(
         engine.post_detected(A, touch, vec![toucher("a")]),
         Ok(Some(Posted::Queued))
     );
-    assert_eq!(
-        engine.post(
-            A,
-            link,
-            vec![
-                Value::Integer(1),
-                Value::Integer(0),
-                Value::String(String::new()),
-                Value::Key(String::new()),
-            ]
-        ),
-        Ok(Some(Posted::Queued))
-    );
+    // A `changed` waits behind a touch on every queue rule.
+    assert_eq!(engine.changed(A, 2), Ok(Some(Posted::Queued)));
     let _reports = run(&mut engine, &mut host, 10);
-    // The link message queued behind the touch is gone with the state; the
+    // The `changed` queued behind the touch is gone with the state; the
     // host was told once; the timer set in `default` carries on in `two`.
     assert_eq!(host.from(A), vec![(6, "timer in two")]);
     assert_eq!(host.left, vec![(2, A)]);
@@ -1363,28 +1356,45 @@ fn detected_functions_read_the_block_of_the_event_being_handled_and_only_it() ->
 }
 
 #[test]
-fn touches_in_different_ticks_are_separate_events() -> Result<(), String> {
-    let mut engine = engine();
-    let mut host = Recorder::default();
-    let _none = engine.add(
-        A,
-        program("default { touch_start(integer n) { print((string)n); llSleep(0.5); } }")?,
-    );
-    let touch = named("touch_start")?;
-    assert_eq!(
-        engine.post_detected(A, touch, vec![toucher("a")]),
-        Ok(Some(Posted::Queued))
-    );
-    let _reports = run(&mut engine, &mut host, 1);
-    for name in ["b", "c"] {
+fn touches_queued_in_different_ticks_merge_on_second_life_only() -> Result<(), String> {
+    // `events/merging` (2026-10-25): three touches a second apart, made while
+    // the script slept, were one `touch_start` on Second Life and three on
+    // OpenSim.
+    for (coalescing, merged, seen) in [
+        (Coalescing::Reference, Posted::Merged, vec!["1", "2"]),
+        (Coalescing::Never, Posted::Queued, vec!["1", "1", "1"]),
+    ] {
+        let mut engine = Engine::new(EngineConfig {
+            coalescing,
+            ..EngineConfig::for_step(STEP)
+        });
+        let mut host = Recorder::default();
+        let _none = engine.add(
+            A,
+            program("default { touch_start(integer n) { print((string)n); llSleep(0.5); } }")?,
+        );
+        let touch = named("touch_start")?;
         assert_eq!(
-            engine.post_detected(A, touch, vec![toucher(name)]),
+            engine.post_detected(A, touch, vec![toucher("a")]),
             Ok(Some(Posted::Queued))
         );
         let _reports = run(&mut engine, &mut host, 1);
+        assert_eq!(
+            engine.post_detected(A, touch, vec![toucher("b")]),
+            Ok(Some(Posted::Queued))
+        );
+        let _reports = run(&mut engine, &mut host, 1);
+        // A tick later, while the first of them still waits.
+        assert_eq!(
+            engine.post_detected(A, touch, vec![toucher("c")]),
+            Ok(Some(merged))
+        );
+        let _reports = run(&mut engine, &mut host, 20);
+        assert_eq!(host.texts(A), seen, "{coalescing:?}");
     }
-    let _reports = run(&mut engine, &mut host, 20);
-    assert_eq!(host.texts(A), vec!["1", "1", "1"]);
+    let mut engine = engine();
+    let _none = engine.add(A, program("default { touch_start(integer n) { } }")?);
+    let touch = named("touch_start")?;
     assert_eq!(
         engine.post(A, touch, vec![Value::Integer(1)]),
         Err(PostError::Detection("touch_start"))
@@ -1600,8 +1610,9 @@ fn arrivals(coalescing: Coalescing) -> Result<Vec<String>, String> {
 fn a_test_can_force_every_arrival_shape_a_script_may_meet() -> Result<(), String> {
     let queued = "Ok(Some(Queued))";
     let merged = "Ok(Some(Merged))";
-    // The reference: one tick's raises merge; the late change finds the
-    // queued `changed` next in line and does not.
+    // The reference: one tick's raises merge, and the touch waits ahead of
+    // the `changed` raised before it — so the late change finds the queued
+    // `changed` behind it, not next in line, and joins it.
     assert_eq!(
         arrivals(Coalescing::Reference)?,
         vec![
@@ -1609,10 +1620,9 @@ fn a_test_can_force_every_arrival_shape_a_script_may_meet() -> Result<(), String
             merged,
             queued,
             merged,
-            queued,
-            "changed 10",
+            merged,
             "touch 2",
-            "changed 16"
+            "changed 26"
         ]
     );
     // The most split-up arrival.
@@ -1644,6 +1654,93 @@ fn a_test_can_force_every_arrival_shape_a_script_may_meet() -> Result<(), String
             "touch 2"
         ]
     );
+    Ok(())
+}
+
+/// What a sleeping script ran, in order, of a touch, a `changed` and a link
+/// message raised in that order while it slept, under `coalescing`.
+fn queue_order(coalescing: Coalescing) -> Result<Vec<String>, String> {
+    let mut engine = Engine::new(EngineConfig {
+        coalescing,
+        ..EngineConfig::for_step(STEP)
+    });
+    let mut host = Recorder::default();
+    let _none = engine.add(
+        A,
+        program(
+            r#"default {
+                state_entry() { llSleep(1.0); }
+                touch_start(integer n) { print("touch_start"); }
+                touch_end(integer n) { print("touch_end"); }
+                changed(integer change) { print("changed"); }
+                link_message(integer sender, integer num, string msg, key id) { print(msg); }
+            }"#,
+        )?,
+    );
+    let _reports = run(&mut engine, &mut host, 1);
+    let _posted = engine.post_detected(A, named("touch_start")?, vec![toucher("a")]);
+    let _reports = run(&mut engine, &mut host, 1);
+    let _posted = engine.changed(A, 2);
+    let _posted = link(&mut engine, A, 0, "link 1")?;
+    let _reports = run(&mut engine, &mut host, 1);
+    let _posted = engine.post_detected(A, named("touch_end")?, vec![toucher("a")]);
+    let _posted = link(&mut engine, A, 0, "link 2")?;
+    let _reports = run(&mut engine, &mut host, 20);
+    Ok(host.texts(A).into_iter().map(str::to_owned).collect())
+}
+
+#[test]
+fn second_life_runs_touches_after_the_rest_and_changed_last() -> Result<(), String> {
+    // `events/order` (2026-10-25): on Second Life a touch and a `changed`
+    // raised while the script slept come after the link messages, chat,
+    // timers and sensor answers of the same sleep, the `changed` last of all;
+    // OpenSim runs every event in the order it was raised.
+    assert_eq!(
+        queue_order(Coalescing::Reference)?,
+        vec!["link 1", "link 2", "touch_start", "touch_end", "changed"]
+    );
+    assert_eq!(
+        queue_order(Coalescing::Never)?,
+        vec!["touch_start", "changed", "link 1", "touch_end", "link 2"]
+    );
+    Ok(())
+}
+
+#[test]
+fn pass_touches_is_handed_to_the_host_as_the_script_gave_it() -> Result<(), String> {
+    let mut engine = engine();
+    let mut host = Recorder::default();
+    let _none = engine.add(
+        A,
+        program("default { state_entry() { llPassTouches(PASS_NEVER); llPassTouches(7); } }")?,
+    );
+    let _reports = run(&mut engine, &mut host, 2);
+    let prim = host.prim_of(A);
+    assert_eq!(host.passes.get(&prim), Some(&7));
+    Ok(())
+}
+
+#[test]
+fn a_script_says_whether_its_state_handles_an_event() -> Result<(), String> {
+    let mut engine = engine();
+    let mut host = Recorder::default();
+    let _none = engine.add(
+        A,
+        program(
+            "default { state_entry() { state other; } touch_start(integer n) { } }
+             state other { touch_end(integer n) { } }",
+        )?,
+    );
+    let handles = |engine: &Engine, event: &str| {
+        engine
+            .instance(A)
+            .is_some_and(|instance| instance.handles(event))
+    };
+    assert!(handles(&engine, "touch_start"));
+    assert!(!handles(&engine, "touch_end"));
+    let _reports = run(&mut engine, &mut host, 2);
+    assert!(!handles(&engine, "touch_start"));
+    assert!(handles(&engine, "touch_end"));
     Ok(())
 }
 
@@ -2294,4 +2391,38 @@ fn a_regions_budget_is_its_shares_whatever_the_step() {
             "step {step:?}"
         );
     }
+}
+
+#[test]
+fn script_time_counts_ticks_from_a_reset_and_runs_on_while_stopped() -> Result<(), String> {
+    let mut engine = engine();
+    let mut host = Recorder::default();
+    let _none = engine.add(
+        A,
+        program(
+            r"default {
+                touch_start(integer n) { print((string)llGetTime()); }
+                touch_end(integer n) { print((string)llGetAndResetTime()); }
+                touch(integer n) { llResetTime(); print((string)llGetTime()); }
+            }",
+        )?,
+    );
+    let _reports = run(&mut engine, &mut host, 5);
+    let _posted = engine.post_detected(A, named("touch_start")?, vec![toucher("a")]);
+    let _reports = run(&mut engine, &mut host, 1);
+    if let Some(instance) = engine.instance_mut(A) {
+        instance.set_running(false);
+    }
+    let _reports = run(&mut engine, &mut host, 4);
+    if let Some(instance) = engine.instance_mut(A) {
+        instance.set_running(true);
+    }
+    let _posted = engine.post_detected(A, named("touch_end")?, vec![toucher("a")]);
+    let _reports = run(&mut engine, &mut host, 1);
+    let _posted = engine.post_detected(A, named("touch")?, vec![toucher("a")]);
+    let _reports = run(&mut engine, &mut host, 1);
+    // Six ticks of 0.1 s, then four more stopped and one to run in; reset,
+    // and read in the tick it was reset in.
+    assert_eq!(host.texts(A), vec!["0.600000", "1.100000", "0.000000"]);
+    Ok(())
 }

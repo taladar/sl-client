@@ -69,3 +69,12 @@ script's messages: `script_im_`, `muted_script_im_`, `away_script_`,
 object's gifts, `object_`: `llGiveInventory` and `llGiveInventoryList`, which
 also need the fake grid to file a `TaskInventoryOffered` gift on the accept as
 Second Life does and at the offer as OpenSim does). Lift both exemptions here.
+
+## From server-world-touch-and-grab (2026-11-02)
+
+`object-touch-grab` is offline in full but for its physical prim (leg 10,
+`MEASURED_PHYSICAL`, live only: the fake grid has no physics engine): legs 2
+to 9 run on both fake flavours and are held to `MEASURED_SCRIPTED`. The
+conformance fake grid now ticks at the imitated grid's own frame
+(`ImitatedGrid::frame_step`, 45 and 55 a second), which a census that counts
+what a region raises a frame needs.

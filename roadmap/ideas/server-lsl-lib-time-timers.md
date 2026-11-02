@@ -111,3 +111,14 @@ then holds; `ossl/available` and `ossl/errors` stop needing the answers their
 replay writes in for it (`vm/tests/ossl.rs`). The 5: `osGetApparentRegionTime`,
 `osGetApparentRegionTimeString`, `osGetApparentTime`, `osGetApparentTimeString`,
 `osGetPSTWallclock`.
+
+## From server-world-touch-and-grab (2026-11-02)
+
+`llGetTime`, `llResetTime` and `llGetAndResetTime` are in
+(`library/control.rs`), because the `object-touch-grab` probe times its
+touches with them: script time is a tick count in the instance's
+`ScriptData`, cleared by a reset, counting on while the script is stopped,
+and saved with the script (`SavedScript::script_time`, saved form 4) — kept
+through a take and a restart on Second Life and YEngine without the time
+away, started again on XEngine. Whether Second Life counts the time away is
+not measured. The rest of the tranche stands.

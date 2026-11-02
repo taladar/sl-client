@@ -33,13 +33,13 @@
 //!     the other avatar.
 //!
 //! The script is the probe: it says each event it is handed, with the
-//! detected values, to its owner. A grid that runs no scripts answers legs 2
-//! to 9 with silence, so only leg 1 is asked of the fake grid.
+//! detected values, to its owner. The fake grid runs it, so legs 1 to 9 are
+//! asked of both fake flavours; it has no physics engine, so leg 10 is not.
 //!
 //! What each live grid answered is stated as a [`Measured`] and written up in
 //! `book/src/gridspec/building.md` § Touch and grab; every run is held to it.
 //!
-//! `2av`, `[both]`, the first leg offline on both fake flavours. The cubes
+//! `2av`, `[both]`, legs 1 to 9 offline on both fake flavours. The cubes
 //! are derezzed to the Trash, also when a leg fails.
 
 use std::time::{Duration, Instant};
@@ -207,9 +207,9 @@ const MEASURED: &[(&str, Measured<Answer>)] = &[
     ),
 ];
 
-/// What each live grid was measured to answer where a script or a physics
-/// engine is needed to ask.
-const MEASURED_LIVE: &[(&str, Measured<Answer>)] = &[
+/// What each grid was measured to answer where a script is needed to ask:
+/// every run, live or fake, is held to it.
+const MEASURED_SCRIPTED: &[(&str, Measured<Answer>)] = &[
     (
         "bare_child_passing_always_child_click_tells",
         both(Answer::Text("root (link 2)")),
@@ -664,22 +664,6 @@ const MEASURED_LIVE: &[(&str, Measured<Answer>)] = &[
     ),
     ("linkset_root_script_told_other", both(Answer::Text("full"))),
     ("linkset_root_script_told_owner", both(Answer::Text("full"))),
-    (
-        "physical_owner_drag_leaves_the_prim",
-        each(
-            Answer::Text("pulled along"),
-            Answer::Text("left where it was"),
-        ),
-    ),
-    (
-        "physical_owner_spin_leaves_the_prim",
-        both(Answer::Text("turned some other way")),
-    ),
-    ("physical_prim_is_physical", both(Answer::Flag(true))),
-    (
-        "physical_stranger_drag_leaves_the_prim",
-        both(Answer::Text("left where it was")),
-    ),
     ("probe_says_it_started", both(Answer::Flag(true))),
     ("release_with_no_press_events", both(Answer::Text("end"))),
     (
@@ -769,6 +753,27 @@ const MEASURED_LIVE: &[(&str, Measured<Answer>)] = &[
     (
         "updates_with_no_press_events",
         each(Answer::Text("start,touch"), Answer::Text("touch")),
+    ),
+];
+
+/// What each live grid was measured to answer of a physical prim: a fake
+/// grid has no physics engine to ask.
+const MEASURED_PHYSICAL: &[(&str, Measured<Answer>)] = &[
+    (
+        "physical_owner_drag_leaves_the_prim",
+        each(
+            Answer::Text("pulled along"),
+            Answer::Text("left where it was"),
+        ),
+    ),
+    (
+        "physical_owner_spin_leaves_the_prim",
+        both(Answer::Text("turned some other way")),
+    ),
+    ("physical_prim_is_physical", both(Answer::Flag(true))),
+    (
+        "physical_stranger_drag_leaves_the_prim",
+        both(Answer::Text("left where it was")),
     ),
 ];
 
@@ -1313,11 +1318,12 @@ impl GridTest for ObjectTouchGrab {
             outcome
                 .and(cleanup)
                 .and_then(|()| hold_to_measured(grid, &metrics, MEASURED, SOURCE))
+                .and_then(|()| hold_to_measured(grid, &metrics, MEASURED_SCRIPTED, SOURCE))
                 .and_then(|()| {
                     if grid.is_fake() {
                         Ok(())
                     } else {
-                        hold_to_measured(grid, &metrics, MEASURED_LIVE, SOURCE)
+                        hold_to_measured(grid, &metrics, MEASURED_PHYSICAL, SOURCE)
                     }
                 })
         })
@@ -1885,11 +1891,6 @@ async fn census(
         "plain_stranger_spin_told_toucher",
         forms(&spun.touched.to_toucher, plain.object.local_id),
     );
-    if grid.is_fake() {
-        // Nothing runs a script here, and nothing falls.
-        return Ok(());
-    }
-
     // --- 2. The flags a viewer reads. ---
     let mut cube = census.rez(residue, 2).await?;
     metrics.set("unscripted_flags", flags_text(cube.object.update_flags));
@@ -2146,6 +2147,10 @@ async fn census(
     }
 
     // --- 10. A physical prim. ---
+    if grid.is_fake() {
+        // Nothing falls here, and nothing pulls.
+        return Ok(());
+    }
     let plain_id = plain.object.scoped_id();
     let physical = |use_physics| Command::SetObjectFlags {
         local_id: plain_id,
