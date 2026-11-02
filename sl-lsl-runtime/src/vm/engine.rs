@@ -372,6 +372,22 @@ impl Engine {
         self.post(id, lifecycle("changed"), vec![Value::Integer(change)])
     }
 
+    /// The object the instance `id` is in was worn by `wearer`, or — for
+    /// [`None`] — taken off: raise `attach(wearer)`, `attach(NULL_KEY)` for
+    /// a drop.
+    ///
+    /// # Errors
+    ///
+    /// None in practice: `attach` takes one key.
+    pub fn attach(
+        &mut self,
+        id: CallerId,
+        wearer: Option<&str>,
+    ) -> Result<Option<Posted>, PostError> {
+        let key = wearer.unwrap_or(crate::value::NULL_KEY).to_owned();
+        self.post(id, lifecycle("attach"), vec![Value::Key(key)])
+    }
+
     /// The object the instance `id` is in was rezzed with `start_parameter`:
     /// set what `llGetStartParameter` answers, then raise
     /// `on_rez(start_parameter)`.

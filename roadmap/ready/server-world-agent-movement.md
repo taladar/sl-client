@@ -83,3 +83,12 @@ Acceptance: a client holding forward for N ticks arrives at a position
 the test can compute from the step and the walk speed; the viewer, run
 against the fake grid, walks; and chat-range and parcel-entry behaviour
 follow the avatar rather than its login spot.
+
+## From server-world-sit-and-attach (2026-11-02)
+
+Sitting is world state now (`sl-fake-grid/src/seating.rs`), and `sit-stand`
+runs offline but for its walks and flights: put its far legs (`far_legs`,
+and `target_legs`' 40 m sit) on the fake flavours once an avatar moves, with
+Second Life's reach edge (`SECOND_LIFE_PLAIN_REACH_M`, 8.4 m between the 7.5 m
+answered and 9.3 m not) held by them, and the drop to the ground after a
+stand.

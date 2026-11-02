@@ -45,6 +45,7 @@ pub mod scene_store;
 pub mod script_compile;
 pub mod script_syntax;
 pub mod scripts;
+mod seating;
 pub mod social;
 mod task_contents;
 mod teleport;
@@ -79,11 +80,12 @@ pub use imitates::{
     HomeNotice, HomeNotices, HomePolicy, ImitatedGrid, LandOrigin, LandmarkBody, LastOwner,
     LinkPolicy, LoginFields, LoginRefusals, LogoutReply, MapLayerAnswer, MapPolicy, MaskRules,
     NameMatch, Newcomers, NoBuildAlert, OPENSIM_ALL_PERMISSIONS, OPENSIM_FOLDED_BITS,
-    OPENSIM_MAX_AGENT_GROUPS, ObjectDelete, OutOfWorld, ParcelPolicy, Placement, PrimResent,
-    Promoted, PropertiesPolicy, RayAtNothing, RegionCapacity, RemovedItem, RestartNoticeForm,
-    RestoreToWorld, ReturnNotice, RezPolicy, RootRecord, SELECTED_PARCEL_SEQUENCE_ID,
-    SIT_TARGET_RAISE_M, SaveTold, ScriptStart, SecondLogin, SentOrder, SitPolicy, SitRefusal,
-    StockDay, StoppedScript, StoredText, TakenItemMasks, TerrainPolicy, TrashFolder, WindStart,
+    OPENSIM_MAX_AGENT_GROUPS, ObjectDelete, OutOfWorld, ParcelPolicy, Placement, PlainSeat,
+    PrimResent, Promoted, PropertiesPolicy, RayAtNothing, RegionCapacity, RemovedItem,
+    RestartNoticeForm, RestoreToWorld, ReturnNotice, RezPolicy, RootRecord,
+    SECOND_LIFE_PLAIN_REACH_M, SELECTED_PARCEL_SEQUENCE_ID, SIT_TARGET_RAISE_M, SaveTold,
+    ScriptStart, SecondLogin, SentOrder, SitPolicy, SitRefusal, StockDay, StoppedScript,
+    StoredText, TakenItemMasks, TerrainPolicy, TrashFolder, WindStart,
 };
 pub use inventory::{
     InventoryAnnouncement, LegacyUdpInventory, UploadAnnouncement, UploadAnnouncements,

@@ -67,6 +67,7 @@ pub mod ossl;
 pub mod permissions;
 pub mod persistence;
 mod report;
+pub mod seating;
 #[cfg(test)]
 mod tests;
 

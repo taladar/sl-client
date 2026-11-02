@@ -1139,15 +1139,38 @@ is.
   `PermissionsModule` does: `GRID_GOD` an account of god level 200 or more,
   `GOD` that or the estate owner (`region_owner_is_god`), `ACTIVE_GOD` an
   owner in the region with god powers on.
-- **Not wired yet**: sitting is not world state (`seated_on` is `false`,
-  `llSitOnLink` finds no sit target, and neither a drop nor a stand revokes
-  anything), which is `server-world-sit-and-attach`'s; and the grid keeps
-  no balances (`llGiveMoney` moves nothing, `llTransferLindenDollars`
-  refuses only a payee with no account, a payment to an object raises no
-  `money`), which is `server-fake-grid-money-ledger`'s.
+- **Sitting and wearing** are the region's (`sl_fake_grid::seating`): a
+  prim's seat settings (`Host::seat` — the sit target, the sitter's camera,
+  mouselook), its sitters in the order they sat and a worn root's wearer and
+  point are components of the prim in the region's store, with the store's
+  own indices from an avatar to its seat and to what it wears. A sit request
+  is answered, and the avatar seated, at once: on a free sit target raised
+  0.35 m, otherwise where the flavour's `PlainSeat` puts it (Second Life
+  stacking a second sitter 0.54 m higher, and answering a seat without a
+  free target only within 8.4 m); `changed(CHANGED_LINK)` follows in every
+  script of the object, and a stand, an `llUnSit`, a teleport, a logout or
+  the seat's leaving the region stands the avatar up, lapsing
+  `PERMISSION_TAKE_CONTROLS` and `PERMISSION_CONTROL_CAMERA`. The sitters
+  take the link numbers after the prims (`Links::sitters`, read by
+  `llGetNumberOfPrims` and `llGetLinkKey`). A wear from the world or by
+  `llAttachToAvatar` and a drop keep the object's ids and raise `attach`, on
+  OpenSim after its own `changed(32768)`; a drop lapses
+  `PERMISSION_TAKE_CONTROLS`. A worn object stands, hears and speaks where
+  its wearer does, and is sent to its wearer's viewer alone: residents are
+  not shown to each other on the fake grid. Each avatar has a region-local
+  id of its own in each region, a new one when it comes back.
+- **Not wired yet**: the grid keeps no balances (`llGiveMoney` moves
+  nothing, `llTransferLindenDollars` refuses only a payee with no account, a
+  payment to an object raises no `money`), which is
+  `server-fake-grid-money-ledger`'s; and the inventory half of wearing — the
+  item a wear from the world makes and a drop removes, a wear from the
+  inventory, and what a region move carries — is
+  `fake-grid-own-attachments-and-region-moves`'s.
 - **Held by** `sl-fake-grid/tests/scripts.rs` (the life of a script, its
   state through a restart and a take, the experience questions, the OSSL
-  gate), `sl-client-bevy-viewer/tests/e2e_running_scripts.rs` (a running
+  gate, a scripted seat, a taken target, Second Life's reach, a wear and a
+  drop), the `sit-stand` census offline on both flavours,
+  `sl-client-bevy-viewer/tests/e2e_running_scripts.rs` (a running
   script's dialog and experience card answered in the real viewer and heard
   back by the script) and the `script-compile` census, which runs offline
   on both fake flavours.

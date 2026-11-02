@@ -4,7 +4,7 @@
 
 use crate::library::{
     comms, control, detection, encoding, experiences, json_text, linkset, lists, math,
-    money_permissions, ossl, rotations, strings, usage,
+    money_permissions, ossl, rotations, sitting, strings, usage,
 };
 
 crate::registry! {
@@ -174,6 +174,26 @@ crate::registry! {
         LlKeysKeyValue => experiences::ll_keys_key_value,
         LlDataSizeKeyValue => experiences::ll_data_size_key_value,
         LlSitOnLink => experiences::ll_sit_on_link,
+        LlSitTarget => sitting::ll_sit_target,
+        LlLinkSitTarget => sitting::ll_link_sit_target,
+        LlAvatarOnSitTarget => sitting::ll_avatar_on_sit_target,
+        LlAvatarOnLinkSitTarget => sitting::ll_avatar_on_link_sit_target,
+        LlGetNumberOfPrims => sitting::ll_get_number_of_prims,
+        LlGetLinkNumber => sitting::ll_get_link_number,
+        LlGetLinkKey => sitting::ll_get_link_key,
+        LlGetObjectPrimCount => sitting::ll_get_object_prim_count,
+        LlUnSit => sitting::ll_un_sit,
+        LlSetSitText => sitting::ll_set_sit_text,
+        LlSetTouchText => sitting::ll_set_touch_text,
+        LlSetCameraEyeOffset => sitting::ll_set_camera_eye_offset,
+        LlSetCameraAtOffset => sitting::ll_set_camera_at_offset,
+        LlForceMouselook => sitting::ll_force_mouselook,
+        LlGetAttached => sitting::ll_get_attached,
+        LlAttachToAvatar => sitting::ll_attach_to_avatar,
+        LlDetachFromAvatar => sitting::ll_detach_from_avatar,
+        LlGetPos => sitting::ll_get_pos,
+        LlGetLocalPos => sitting::ll_get_local_pos,
+        LlGetRootPosition => sitting::ll_get_root_position,
         LlClearExperiencePermissions => experiences::ll_clear_experience_permissions,
         LlGetExperienceList => experiences::ll_get_experience_list,
         OsGetScriptEngineName => ossl::os_get_script_engine_name,

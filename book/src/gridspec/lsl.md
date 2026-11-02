@@ -52,14 +52,14 @@ the script's view of it.
 
 | behaviour | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
-| the sit response's `SitPosition` for the target `<0, 0, 0.5>` | `<0, 0, 0.85>` — the target raised by 0.35 m | `<0, 0, 0.5>` — the target as set | `SitPolicy::response_states_seated_position`, per flavour |
-| its rotation and camera offsets | the target's rotation; the eye and focus offsets as the script set them | the same | the camera offsets are zero (no scripts) |
-| `changed` once seated | `CHANGED_LINK`; `llAvatarOnSitTarget` the sitter, `llGetNumberOfPrims` 2, the last link the sitter, `llGetObjectPrimCount` 1, `llGetAgentSize` of the sitter not zero | the same | no scripts |
-| `llGetLinkKey(llGetNumberOfPrims())` on the lone prim, nobody seated | `NULL_KEY` | the prim's own key | no scripts |
-| the avatar-control permissions asked of the seated avatar (`TAKE_CONTROLS`, `TRIGGER_ANIMATION`, `TRACK_CAMERA`, `CONTROL_CAMERA`) | granted at once, no question — to the owner and to another avatar alike | the same (`implicitPerms` for a sitting agent) | no scripts |
-| what is held after `llUnSit` or standing up | 1040: `TAKE_CONTROLS` and `CONTROL_CAMERA` are dropped, `TRIGGER_ANIMATION` and `TRACK_CAMERA` kept, the key unchanged | the same | no scripts |
+| the sit response's `SitPosition` for the target `<0, 0, 0.5>` | `<0, 0, 0.85>` — the target raised by 0.35 m | `<0, 0, 0.5>` — the target as set | the same, per flavour (`tests/scripts.rs`) |
+| its rotation and camera offsets | the target's rotation; the eye and focus offsets as the script set them | the same | the same |
+| `changed` once seated | `CHANGED_LINK`; `llAvatarOnSitTarget` the sitter, `llGetNumberOfPrims` 2, the last link the sitter, `llGetObjectPrimCount` 1, `llGetAgentSize` of the sitter not zero | the same | the same, but `llGetAgentSize` (`server-lsl-lib-avatar-control`) |
+| `llGetLinkKey(llGetNumberOfPrims())` on the lone prim, nobody seated | `NULL_KEY` | the prim's own key | each flavour's |
+| the avatar-control permissions asked of the seated avatar (`TAKE_CONTROLS`, `TRIGGER_ANIMATION`, `TRACK_CAMERA`, `CONTROL_CAMERA`) | granted at once, no question — to the owner and to another avatar alike | the same (`implicitPerms` for a sitting agent) | the same |
+| what is held after `llUnSit` or standing up | 1040: `TAKE_CONTROLS` and `CONTROL_CAMERA` are dropped, `TRIGGER_ANIMATION` and `TRACK_CAMERA` kept, the key unchanged | the same | the same |
 | a follow camera when the sitter stands | nothing sent | a `ClearFollowCamProperties` for the seat, whether a camera was set or not | — |
-| a sit on the prim with its target cleared (`llSitTarget(ZERO_VECTOR, …)`) | seated (2 prims, the avatar the last link) but `llAvatarOnSitTarget` `NULL_KEY`; the response puts the seat at `<-0.34, 0, 0.55>`, turned half round | the same to the script; the response says `<0.415, 0, 0.9>`, unturned | — |
+| a sit on the prim with its target cleared (`llSitTarget(ZERO_VECTOR, …)`) | seated (2 prims, the avatar the last link) but `llAvatarOnSitTarget` `NULL_KEY`; the response puts the seat at `<-0.34, 0, 0.55>`, turned half round | the same to the script; the response says `<0.415, 0, 0.9>`, unturned | each flavour's |
 | the sitter's animation | the built-in `sit`, sourced from an object that is not the seat | `sit`, with no source | none |
 
 ### Controls
@@ -600,11 +600,11 @@ run all the while.
 
 | behaviour | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
-| attached from the ground | `attach` with the owner's key, alone; `llGetAttached` 5 | two `changed` of **32768** first — OpenSim's own `POSITION` bit, which LSL has no constant for — then `attach` | no scripts |
-| dropped | `attach(NULL_KEY)`, alone | one `changed` of 32768, then `attach(NULL_KEY)` | no scripts |
-| `llAttachToAvatar` | `run_time_permissions(32)`, then `attach` | `run_time_permissions(32)`, two `changed` of 32768, then `attach` | no scripts |
-| the prim's key, attached and dropped | kept | the same | no scripts |
-| worn | the timer runs and the listen hears | the same | no scripts |
+| attached from the ground | `attach` with the owner's key, alone; `llGetAttached` 5 | two `changed` of **32768** first — OpenSim's own `POSITION` bit, which LSL has no constant for — then `attach` | each flavour's (`tests/scripts.rs`) |
+| dropped | `attach(NULL_KEY)`, alone | one `changed` of 32768, then `attach(NULL_KEY)` | each flavour's |
+| `llAttachToAvatar` | `run_time_permissions(32)`, then `attach` | `run_time_permissions(32)`, two `changed` of 32768, then `attach` | each flavour's |
+| the prim's key, attached and dropped | kept | the same | the same |
+| worn | the timer runs and the listen hears | the same | the same: a worn object hears where its wearer stands |
 | taken and rezzed again | a new key; `on_rez(0)` alone; the timer and the listen carry on — the script's state is kept | YEngine the same; **XEngine resets the script**: `state_entry` runs, the globals are gone, and `on_rez(0)` comes after it | no scripts |
 
 What else a take and a rez keep — globals, permissions, the queue, a sleep —

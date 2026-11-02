@@ -13,7 +13,7 @@
 mod test {
     use std::time::Duration;
 
-    use pretty_assertions::assert_eq;
+    use pretty_assertions::{assert_eq, assert_ne};
     use sl_client_tokio::{Client, Command, Event, LoginParams, LoginRequest, StartLocation};
     use sl_fake_grid::fixtures::catalogue::{ECHO_SCRIPT_CHANNEL, echo_script_item, entry};
     use sl_fake_grid::{
@@ -49,6 +49,10 @@ mod test {
         Filed(Box<sl_client_tokio::InventoryItem>),
         /// A script asked for permissions.
         Question(Box<sl_proto::ScriptPermissionRequest>),
+        /// A sit was answered: the seat's position and turn as stated.
+        Sat(sl_types::lsl::Vector, sl_types::lsl::Rotation),
+        /// An object the client already had was sent again.
+        Updated(Box<sl_client_tokio::Object>),
     }
 
     /// A logged-in client in a stepped catalogue region.
@@ -153,6 +157,12 @@ mod test {
                     Event::ScriptRunning { running, .. } => Seen::Running(running),
                     Event::ObjectRemoved { local_id, .. } => Seen::Removed(local_id.id()),
                     Event::ObjectAdded(object) => Seen::Added(object.local_id),
+                    Event::ObjectUpdated(object) => Seen::Updated(object),
+                    Event::SitResult {
+                        sit_position,
+                        sit_rotation,
+                        ..
+                    } => Seen::Sat(sit_position, sit_rotation),
                     Event::ScriptPermissionRequest(question) => Seen::Question(question),
                     Event::InventoryItemCreated { item, .. }
                         if i32::from(item.item_type) == sl_proto::AssetType::Object.to_code() =>
@@ -336,6 +346,75 @@ mod test {
                 |event| matches!(event, ServerEvent::ScriptPermissionAnswer { .. }),
             )
             .await
+        }
+
+        /// Asks to sit on [`SEAT`] and returns what the response states, with
+        /// the avatar's own update that follows: its parent and position.
+        async fn sit(
+            &mut self,
+        ) -> Result<
+            (
+                sl_types::lsl::Vector,
+                sl_proto::RegionLocalObjectId,
+                sl_types::lsl::Vector,
+            ),
+            TestError,
+        > {
+            self.commands
+                .send(Command::Sit {
+                    target: seat_key(),
+                    offset: at(0.0, 0.0, 0.0),
+                })
+                .await?;
+            let stated = self
+                .next("the sit response", |seen| match seen {
+                    Seen::Sat(position, _rotation) => Some(position),
+                    _other => None,
+                })
+                .await?;
+            let (parent, offset) = self.own_avatar().await?;
+            Ok((stated, parent, offset))
+        }
+
+        /// The next update of the client's own avatar: its parent and
+        /// position.
+        async fn own_avatar(
+            &mut self,
+        ) -> Result<(sl_proto::RegionLocalObjectId, sl_types::lsl::Vector), TestError> {
+            let me = self.agent.agent_id().uuid();
+            self.next("the avatar's own update", |seen| match seen {
+                Seen::Updated(object) if object.full_id.uuid() == me => {
+                    Some((object.parent_id, object.motion.position.clone()))
+                }
+                _other => None,
+            })
+            .await
+        }
+
+        /// Says `message` on channel 7.
+        async fn say_seven(&mut self, message: &str) -> Result<(), TestError> {
+            self.shout(message).await
+        }
+
+        /// The next `count` lines of the worn object's.
+        async fn lines(&mut self, count: usize) -> Result<Vec<String>, TestError> {
+            let mut lines = Vec::with_capacity(count);
+            for _ in 0..count {
+                let line = self
+                    .next("a line of the worn object's", |seen| match seen {
+                        Seen::Chat(_, message)
+                            if message.starts_with("changed ")
+                                || message.starts_with("attach ") =>
+                        {
+                            Some(message)
+                        }
+                        _other => None,
+                    })
+                    .await
+                    .map_err(|error| format!("{error}, after {lines:?}"))?;
+                lines.push(line);
+            }
+            Ok(lines)
         }
 
         /// Ends the run.
@@ -904,5 +983,434 @@ default
             "a resident was let through: {resident}"
         );
         Ok(())
+    }
+
+    // ---- Sitting and wearing ---------------------------------------------
+
+    /// A seat whose script sets a sit target, says on a link change how many
+    /// links the object has, who is on its target and whose the last link
+    /// is, and on channel 7 clears its target ("clear") or stands the
+    /// speaker up ("unsit").
+    const SEAT_SOURCE: &str = "default
+{
+    state_entry()
+    {
+        llSitTarget(<0.0, 0.0, 0.5>, llEuler2Rot(<0.0, 0.0, PI_BY_TWO>));
+        llListen(7, \"\", NULL_KEY, \"\");
+    }
+
+    changed(integer change)
+    {
+        if (change & CHANGED_LINK)
+        {
+            integer links = llGetNumberOfPrims();
+            llShout(0, \"link \" + (string)links + \" \" + (string)llAvatarOnSitTarget()
+                + \" \" + (string)llGetLinkKey(links));
+        }
+    }
+
+    listen(integer channel, string name, key id, string message)
+    {
+        if (message == \"clear\")
+        {
+            llSitTarget(ZERO_VECTOR, ZERO_ROTATION);
+        }
+        else if (message == \"unsit\")
+        {
+            llUnSit(id);
+        }
+    }
+}
+";
+
+    /// The seat's region-local id.
+    const SEAT: sl_proto::RegionLocalObjectId = sl_proto::RegionLocalObjectId(0x700);
+
+    /// A grid imitating `imitated` with [`SEAT`] beside the arrival point,
+    /// running `source`, the client's account owning it.
+    async fn seat_scene(imitated: ImitatedGrid, source: &str) -> Result<Scene, TestError> {
+        let region = region_of(&[ScriptedBox {
+            local_id: SEAT,
+            source: source.to_owned(),
+            experience: None,
+        }])?;
+        let scene = scene_with(
+            imitated,
+            region,
+            RegionConfig {
+                heartbeat: HeartbeatConfig::stepped(Duration::from_millis(100)),
+                ..RegionConfig::default()
+            },
+            AccountConfig {
+                agent_id: Some(box_owner()),
+                ..AccountConfig::new("Test", "User", "password")
+            },
+        )
+        .await?;
+        scene.tick(2).await?;
+        Ok(scene)
+    }
+
+    /// The seat's full id, as [`region_of`] mints it.
+    fn seat_key() -> sl_types::key::ObjectKey {
+        sl_types::key::ObjectKey::from(uuid::Uuid::from_u128((u128::from(SEAT.0) << 8) | 0x5))
+    }
+
+    /// A vector of three components.
+    const fn at(x: f32, y: f32, z: f32) -> sl_types::lsl::Vector {
+        sl_types::lsl::Vector { x, y, z }
+    }
+
+    /// Whether two vectors are the same within a centimetre.
+    fn near(a: &sl_types::lsl::Vector, b: &sl_types::lsl::Vector) -> bool {
+        (a.x - b.x).abs() < 0.01 && (a.y - b.y).abs() < 0.01 && (a.z - b.z).abs() < 0.01
+    }
+
+    /// The key a script prints for nobody.
+    const NULL_KEY: &str = "00000000-0000-0000-0000-000000000000";
+
+    /// The whole of a scripted seat on `imitated`: a sit on its target (the
+    /// response stating the seated position on Second Life and the target on
+    /// OpenSim, the avatar 0.35 m above the target either way), the script
+    /// counting the sitter as its last link; a stand; a sit with the target
+    /// cleared, placed as the grid places a sit on a prim without one and
+    /// nobody on the target; and `llUnSit` standing the avatar.
+    async fn a_scripted_seat_seats_and_counts_its_sitter(
+        imitated: ImitatedGrid,
+    ) -> Result<(), TestError> {
+        let mut scene = seat_scene(imitated, SEAT_SOURCE).await?;
+        let me = scene.agent.agent_id().uuid().to_string();
+
+        let (stated, parent, offset) = scene.sit().await?;
+        let target = if imitated == ImitatedGrid::SecondLife {
+            0.85
+        } else {
+            0.5
+        };
+        assert!(
+            near(&stated, &at(0.0, 0.0, target)),
+            "{imitated:?} stated {stated:?}"
+        );
+        assert_eq!(parent, SEAT);
+        assert!(
+            near(&offset, &at(0.0, 0.0, 0.85)),
+            "{imitated:?} seated at {offset:?}"
+        );
+        assert_eq!(
+            scene.agent.with_sim(|sim| sim.seated_on()).await,
+            Some(seat_key()),
+            "the request alone seats the avatar"
+        );
+        scene.tick(2).await?;
+        assert_eq!(scene.line("link ").await?, format!("link 2 {me} {me}"));
+
+        scene.commands.send(Command::Stand).await?;
+        let (parent, _standing) = scene.own_avatar().await?;
+        assert_eq!(parent, sl_proto::RegionLocalObjectId(0));
+        scene.tick(2).await?;
+        let lone = if imitated == ImitatedGrid::SecondLife {
+            NULL_KEY.to_owned()
+        } else {
+            seat_key().uuid().to_string()
+        };
+        assert_eq!(
+            scene.line("link ").await?,
+            format!("link 1 {NULL_KEY} {lone}")
+        );
+
+        scene.say_seven("clear").await?;
+        scene.tick(2).await?;
+        let (stated, parent, offset) = scene.sit().await?;
+        let policy = imitated.sit_policy().plain_seat;
+        let placed = at(policy.off_centre_m, 0.0, policy.above_m);
+        assert_eq!(parent, SEAT);
+        assert!(near(&offset, &placed), "{imitated:?} put it at {offset:?}");
+        assert!(
+            near(
+                &stated,
+                &at(placed.x, 0.0, placed.z - policy.stated_below_m)
+            ),
+            "{imitated:?} stated {stated:?}"
+        );
+        scene.tick(2).await?;
+        assert_eq!(
+            scene.line("link ").await?,
+            format!("link 2 {NULL_KEY} {me}")
+        );
+
+        scene.say_seven("unsit").await?;
+        scene.tick(2).await?;
+        let (parent, _standing) = scene.own_avatar().await?;
+        assert_eq!(
+            parent,
+            sl_proto::RegionLocalObjectId(0),
+            "llUnSit left it seated"
+        );
+        assert_eq!(scene.agent.with_sim(|sim| sim.seated_on()).await, None);
+        scene.tick(2).await?;
+        assert_eq!(
+            scene.line("link ").await?,
+            format!("link 1 {NULL_KEY} {lone}")
+        );
+        scene.stop();
+        Ok(())
+    }
+
+    /// On a grid imitating Second Life.
+    #[tokio::test]
+    async fn a_scripted_seat_seats_and_counts_its_sitter_on_second_life() -> Result<(), TestError> {
+        a_scripted_seat_seats_and_counts_its_sitter(ImitatedGrid::SecondLife).await
+    }
+
+    /// On a grid imitating OpenSim.
+    #[tokio::test]
+    async fn a_scripted_seat_seats_and_counts_its_sitter_on_opensim() -> Result<(), TestError> {
+        a_scripted_seat_seats_and_counts_its_sitter(ImitatedGrid::OpenSim).await
+    }
+
+    /// A target somebody took seats the next avatar as a prim without one
+    /// does — 0.54 m higher on Second Life, where it would have sat alone on
+    /// OpenSim — and `llAvatarOnSitTarget` goes on naming the first.
+    #[tokio::test]
+    async fn a_taken_target_seats_the_next_avatar_beside_it() -> Result<(), TestError> {
+        for imitated in [ImitatedGrid::SecondLife, ImitatedGrid::OpenSim] {
+            let mut scene = seat_scene(imitated, SEAT_SOURCE).await?;
+            let first = sl_types::key::AgentKey::from(uuid::Uuid::from_u128(0xF125));
+            scene
+                .agent
+                .with_world(|world, _sim| {
+                    world.objects.sit(
+                        first,
+                        SEAT,
+                        (
+                            at(0.0, 0.0, 0.85),
+                            sl_types::lsl::Rotation {
+                                x: 0.0,
+                                y: 0.0,
+                                z: 0.0,
+                                s: 1.0,
+                            },
+                        ),
+                        true,
+                    )
+                })
+                .await
+                .ok_or("the seat is not in the region")?;
+            let (_stated, _parent, offset) = scene.sit().await?;
+            let policy = imitated.sit_policy();
+            let placed = at(
+                policy.plain_seat.off_centre_m,
+                0.0,
+                policy.plain_seat.above_m + policy.shared_seat_raise_m,
+            );
+            assert!(near(&offset, &placed), "{imitated:?} put it at {offset:?}");
+            scene.tick(2).await?;
+            let me = scene.agent.agent_id().uuid();
+            assert_eq!(
+                scene.line("link ").await?,
+                format!("link 3 {} {me}", first.uuid()),
+                "{imitated:?}"
+            );
+            scene.stop();
+        }
+        Ok(())
+    }
+
+    /// A seat without a target is answered from within reach alone on Second
+    /// Life — no response, no alert, from 22 m — and from anywhere on
+    /// OpenSim.
+    #[tokio::test]
+    async fn a_far_seat_without_a_target_is_answered_on_opensim_alone() -> Result<(), TestError> {
+        for imitated in [ImitatedGrid::SecondLife, ImitatedGrid::OpenSim] {
+            let mut scene = seat_scene(imitated, "default { state_entry() { } }").await?;
+            scene
+                .agent
+                .with_world(|world, _sim| {
+                    if let Some(mut seat) = world.objects.get_mut(SEAT) {
+                        seat.motion.position.x = 150.0;
+                    }
+                })
+                .await;
+            scene
+                .commands
+                .send(Command::Sit {
+                    target: seat_key(),
+                    offset: at(0.0, 0.0, 0.0),
+                })
+                .await?;
+            let answered = tokio::time::timeout(QUIET, async {
+                while let Some(seen) = scene.seen.recv().await {
+                    if matches!(seen, Seen::Sat(..)) {
+                        return true;
+                    }
+                }
+                false
+            })
+            .await
+            .unwrap_or(false);
+            assert_eq!(answered, imitated == ImitatedGrid::OpenSim, "{imitated:?}");
+            scene.stop();
+        }
+        Ok(())
+    }
+
+    /// An object that says what it is told of being worn: every `changed`,
+    /// every `attach` with whether it names somebody and the point it is on,
+    /// and on "wear" asks its owner to let it attach itself to the left
+    /// hand.
+    const WORN_SOURCE: &str = "default
+{
+    state_entry()
+    {
+        llListen(7, \"\", NULL_KEY, \"\");
+    }
+
+    changed(integer change)
+    {
+        llShout(0, \"changed \" + (string)change);
+    }
+
+    attach(key id)
+    {
+        llShout(0, \"attach \" + (string)(id != NULL_KEY) + \" \" + (string)llGetAttached());
+    }
+
+    listen(integer channel, string name, key id, string message)
+    {
+        if (message == \"wear\")
+        {
+            llRequestPermissions(llGetOwner(), PERMISSION_ATTACH);
+        }
+        else if (message == \"where\")
+        {
+            llShout(0, \"where \" + (string)(llGetPos() == llGetRootPosition())
+                + \" \" + (string)llGetLocalPos() + \" \" + (string)llGetPos());
+        }
+    }
+
+    run_time_permissions(integer granted)
+    {
+        if (granted & PERMISSION_ATTACH)
+        {
+            llAttachToAvatar(ATTACH_LHAND);
+        }
+    }
+}
+";
+
+    /// The lines a wear and a drop raise on `imitated`: OpenSim's own
+    /// position change twice before a wear and once before a drop, then
+    /// `attach` (`events/attach`).
+    fn worn_lines(imitated: ImitatedGrid, worn: bool) -> Vec<String> {
+        let moves = match (imitated, worn) {
+            (ImitatedGrid::SecondLife, _) => 0,
+            (ImitatedGrid::OpenSim, true) => 2,
+            (ImitatedGrid::OpenSim, false) => 1,
+        };
+        let mut lines = vec!["changed 32768".to_owned(); moves];
+        lines.push(if worn { "attach 1 5" } else { "attach 0 0" }.to_owned());
+        lines
+    }
+
+    /// Worn from the ground, dropped, and worn again by its own script: the
+    /// same object each time, the client shown it on its avatar's left hand,
+    /// the script told as each grid tells it.
+    async fn an_object_is_worn_dropped_and_worn_again(
+        imitated: ImitatedGrid,
+    ) -> Result<(), TestError> {
+        let mut scene = seat_scene(imitated, WORN_SOURCE).await?;
+        scene
+            .commands
+            .send(Command::AttachObject {
+                local_id: sl_client_tokio::ScopedObjectId::new(scene.circuit, SEAT),
+                attachment_point: sl_proto::AttachmentPoint::LeftHand,
+                mode: sl_proto::AttachmentMode::Add,
+                rotation: sl_types::lsl::Rotation {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                    s: 1.0,
+                },
+            })
+            .await?;
+        let worn = scene
+            .next("the worn object", |seen| match seen {
+                Seen::Updated(object) if object.local_id == SEAT => Some(object),
+                _other => None,
+            })
+            .await?;
+        assert_eq!(worn.attachment_point_id(), Some(5));
+        assert_ne!(worn.parent_id, sl_proto::RegionLocalObjectId(0), "{worn:?}");
+        scene.tick(6).await?;
+        assert_eq!(
+            scene.lines(worn_lines(imitated, true).len()).await?,
+            worn_lines(imitated, true)
+        );
+        scene.say_seven("where").await?;
+        scene.tick(2).await?;
+        let standing = scene
+            .agent
+            .with_sim(|sim| sim.arrival_position().position)
+            .await;
+        // Worn, it stands where its wearer does, on its point's own origin.
+        assert_eq!(
+            scene.line("where ").await?,
+            format!(
+                "where 1 <0.00000, 0.00000, 0.00000> <{:.5}, {:.5}, {:.5}>",
+                standing.x(),
+                standing.y(),
+                standing.z()
+            )
+        );
+
+        scene
+            .commands
+            .send(Command::DropAttachments {
+                local_ids: vec![sl_client_tokio::ScopedObjectId::new(scene.circuit, SEAT)],
+            })
+            .await?;
+        let dropped = scene
+            .next("the dropped object", |seen| match seen {
+                Seen::Updated(object) if object.local_id == SEAT => Some(object),
+                _other => None,
+            })
+            .await?;
+        assert_eq!(dropped.parent_id, sl_proto::RegionLocalObjectId(0));
+        assert_eq!(dropped.attachment_point_id(), None);
+        scene.tick(6).await?;
+        assert_eq!(
+            scene.lines(worn_lines(imitated, false).len()).await?,
+            worn_lines(imitated, false)
+        );
+
+        let question = scene.ask("wear").await?;
+        scene.answer(&question, question.permissions).await?;
+        scene.tick(2).await?;
+        let worn = scene
+            .next("the object worn by its script", |seen| match seen {
+                Seen::Updated(object) if object.local_id == SEAT => Some(object),
+                _other => None,
+            })
+            .await?;
+        assert_eq!(worn.attachment_point_id(), Some(5));
+        scene.tick(6).await?;
+        assert_eq!(
+            scene.lines(worn_lines(imitated, true).len()).await?,
+            worn_lines(imitated, true)
+        );
+        scene.stop();
+        Ok(())
+    }
+
+    /// On a grid imitating Second Life.
+    #[tokio::test]
+    async fn an_object_is_worn_dropped_and_worn_again_on_second_life() -> Result<(), TestError> {
+        an_object_is_worn_dropped_and_worn_again(ImitatedGrid::SecondLife).await
+    }
+
+    /// On a grid imitating OpenSim.
+    #[tokio::test]
+    async fn an_object_is_worn_dropped_and_worn_again_on_opensim() -> Result<(), TestError> {
+        an_object_is_worn_dropped_and_worn_again(ImitatedGrid::OpenSim).await
     }
 }

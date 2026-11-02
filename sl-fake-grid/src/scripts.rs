@@ -63,10 +63,17 @@
 //! nothing; and a question unanswered for five minutes of region ticks is
 //! answered `XP_ERROR_REQUEST_PERM_TIMEOUT`.
 //!
+//! # Sitting and wearing
+//!
+//! Who sits on which prim and who wears what are the region's own state
+//! (`sl_fake_grid::seating`); the host reads them for `llAvatarOnSitTarget`,
+//! `llGetNumberOfPrims`, `llGetLinkKey`, `llGetAttached` and the placement
+//! functions, and an `llUnSit`, an `llSitOnLink`, an `llAttachToAvatar` and an
+//! `llDetachFromAvatar` are applied after the tick, the sitter's or the
+//! wearer's own session told through the region's changes.
+//!
 //! # Not yet wired
 //!
-//! - Sitting is not world state: `seated_on` is always `false` and
-//!   `llSitOnLink` finds no sit target (`server-world-sit-and-attach`).
 //! - The grid keeps no money balances: `llGiveMoney` moves nothing,
 //!   `llTransferLindenDollars` refuses only a payee with no account, and a
 //!   payment to an object raises no `money` event
@@ -225,6 +232,13 @@ impl RegionScripts {
         Self {
             engine: Engine::new(EngineConfig {
                 flavour,
+                // OpenSim merges no event into another, on both engines
+                // (`events/merging`); Second Life's rule is the reference.
+                coalescing: if flavour.is_opensim() {
+                    sl_lsl_runtime::vm::Coalescing::Never
+                } else {
+                    sl_lsl_runtime::vm::Coalescing::Reference
+                },
                 ..EngineConfig::for_step(step)
             }),
             slots: BTreeMap::new(),
@@ -767,6 +781,8 @@ struct Present {
     /// [`GOD_LEVEL_FLOOR`](crate::god_powers::GOD_LEVEL_FLOOR) or more
     /// granted).
     active_god: bool,
+    /// Where it stands in the region.
+    position: Vector,
 }
 
 /// What a tick's scripts did that the region applies under its lock, once
@@ -790,6 +806,32 @@ enum Effect {
     },
     /// The linkset whose root is this prim leaves the region (`llDie`).
     Die(RegionLocalObjectId),
+    /// The avatar is stood up (`llUnSit`).
+    Unsit(AgentKey),
+    /// The avatar is seated on the prim (`llSitOnLink`).
+    Sit {
+        /// The avatar.
+        agent: AgentKey,
+        /// The prim.
+        prim: RegionLocalObjectId,
+    },
+    /// The root is put on its owner (`llAttachToAvatar`).
+    Attach {
+        /// The root.
+        root: RegionLocalObjectId,
+        /// The owner, and where it stands.
+        wearer: (AgentKey, Vector),
+        /// The point; 0 for the one it was last worn on.
+        point: u8,
+    },
+    /// The worn root is taken off into its wearer's inventory
+    /// (`llDetachFromAvatar`).
+    Detach {
+        /// The root.
+        root: RegionLocalObjectId,
+        /// Its wearer.
+        agent: AgentKey,
+    },
     /// An experience's permission question was put to an avatar: its
     /// answer, or its timeout, is waited for.
     Asked {
@@ -1015,9 +1057,34 @@ impl RegionHost<'_> {
     /// hanging off something that is not a prim of the region (an avatar).
     fn wearer(&self, caller: CallerId) -> Option<AgentKey> {
         let origin = self.origin(caller)?;
+        if let Some(attached) = self.world.objects.attached_to(origin.root) {
+            return Some(attached.agent);
+        }
+        // A scenario's worn object, put on its avatar by the record alone.
         let root = self.world.objects.get(origin.root)?;
         (root.parent_id.0 != 0 && !self.world.objects.contains(root.parent_id))
             .then(|| AgentKey::from(root.owner_id))
+    }
+
+    /// The prim numbered `link` in `caller`'s linkset, as [`Host::links`]
+    /// numbers it.
+    fn prim_numbered(&self, caller: CallerId, link: i32) -> Option<RegionLocalObjectId> {
+        let prims = self.linkset_prims(caller);
+        let root = *prims.first()?;
+        let alone = prims.len() == 1 && crate::seating::sitters_of(self.world, root).is_empty();
+        if alone {
+            return (link == 0).then_some(root);
+        }
+        usize::try_from(link)
+            .ok()?
+            .checked_sub(1)
+            .and_then(|index| prims.get(index))
+            .copied()
+    }
+
+    /// The avatar a script names by `agent`, as the grid keys it.
+    fn agent_named(agent: &str) -> Option<AgentKey> {
+        uuid::Uuid::parse_str(agent).ok().map(AgentKey::from)
     }
 }
 
@@ -1264,10 +1331,15 @@ impl Host for RegionHost<'_> {
             return Links {
                 this: 0,
                 prims: Vec::new(),
+                sitters: Vec::new(),
             };
         };
         let prims = self.linkset_prims(caller);
-        let alone = prims.len() <= 1;
+        let sitters: Vec<String> = crate::seating::sitters_of(self.world, origin.root)
+            .into_iter()
+            .map(|agent| agent.uuid().to_string())
+            .collect();
+        let alone = prims.len() <= 1 && sitters.is_empty();
         let mut this = 0;
         let linked = prims
             .iter()
@@ -1280,6 +1352,7 @@ impl Host for RegionHost<'_> {
                 let key = self.world.objects.get(*local_id)?.full_id;
                 Some(LinkedPrim {
                     link,
+                    key: key.uuid().to_string(),
                     scripts: self.scripts_in(key),
                 })
             })
@@ -1287,6 +1360,7 @@ impl Host for RegionHost<'_> {
         Links {
             this,
             prims: linked,
+            sitters,
         }
     }
 
@@ -1376,9 +1450,14 @@ impl Host for RegionHost<'_> {
             .to_string()
     }
 
-    fn seated_on(&self, _caller: CallerId, _agent: &str) -> bool {
-        // Sitting is not yet world state (`server-world-sit-and-attach`).
-        false
+    fn seated_on(&self, caller: CallerId, agent: &str) -> bool {
+        let (Some(origin), Some(agent)) = (self.origin(caller), Self::agent_named(agent)) else {
+            return false;
+        };
+        self.world
+            .objects
+            .seat_of(agent)
+            .is_some_and(|(seat, _sitter)| self.world.root_of(seat.local_id) == origin.root)
     }
 
     fn ask_permissions(&mut self, caller: CallerId, question: &Question) -> bool {
@@ -1503,17 +1582,185 @@ impl Host for RegionHost<'_> {
         Ok(self.stores.entry(experience.to_owned()).or_default())
     }
 
-    fn sit_on_link(
-        &mut self,
-        _caller: CallerId,
-        agent: &str,
-        _link: i32,
-    ) -> Result<(), SitRefusal> {
-        // Sitting is not yet world state (`server-world-sit-and-attach`).
-        if self.present(agent).is_none() {
+    fn sit_on_link(&mut self, caller: CallerId, agent: &str, link: i32) -> Result<(), SitRefusal> {
+        let Some(present) = self.present(agent) else {
             return Err(SitRefusal::InvalidAgent);
+        };
+        let agent = present.agent;
+        if self.wearer(caller).is_some() {
+            return Err(SitRefusal::InvalidObject);
         }
-        Err(SitRefusal::NoSitTarget)
+        let origin = self.origin(caller).ok_or(SitRefusal::InvalidObject)?;
+        // The parcel the object stands on has to let the avatar in.
+        let (centre, _turn) = crate::seating::frame_of(self.world, &origin.object);
+        let banned = self
+            .world
+            .parcel_at(centre.x, centre.y)
+            .is_some_and(|parcel| {
+                self.world
+                    .access_list(parcel.local_id, sl_proto::ParcelAccessScope::Ban)
+                    .iter()
+                    .any(|entry| entry.id == agent.uuid())
+            });
+        if banned {
+            return Err(SitRefusal::NoAccess);
+        }
+        // The named prim's target, or the next free one down the linkset.
+        let prims = self.linkset_prims(caller);
+        let first = self
+            .prim_numbered(caller, link)
+            .ok_or(SitRefusal::NoSitTarget)?;
+        let free = prims
+            .iter()
+            .skip_while(|prim| **prim != first)
+            .find(|prim| {
+                self.world.objects.get(**prim).is_some_and(|object| {
+                    self.world
+                        .objects
+                        .seat_settings(object.local_id)
+                        .is_some_and(|seat| seat.target.is_some())
+                        && crate::seating::place(self.world, object).on_target
+                })
+            })
+            .copied()
+            .ok_or(SitRefusal::NoSitTarget)?;
+        self.effects.push(Effect::Sit { agent, prim: free });
+        Ok(())
+    }
+
+    fn seat(
+        &mut self,
+        caller: CallerId,
+        link: i32,
+    ) -> Option<&mut sl_lsl_runtime::vm::seating::Seat> {
+        let prim = self.prim_numbered(caller, link)?;
+        self.world.objects.seat_settings_mut(prim)
+    }
+
+    fn avatar_on_sit_target(&self, caller: CallerId, link: i32) -> Option<String> {
+        let prim = self.prim_numbered(caller, link)?;
+        self.world
+            .objects
+            .sitters(prim)
+            .iter()
+            .find(|sitter| sitter.on_target)
+            .map(|sitter| sitter.agent.uuid().to_string())
+    }
+
+    fn unsit(&mut self, caller: CallerId, agent: &str) {
+        let (Some(origin), Some(agent)) = (self.origin(caller), Self::agent_named(agent)) else {
+            return;
+        };
+        let Some((seat, _sitter)) = self.world.objects.seat_of(agent) else {
+            return;
+        };
+        let on_this = self.world.root_of(seat.local_id) == origin.root;
+        // Sitting on something else, the avatar is stood up by an object whose
+        // owner owns the land it is over, or is a god (`LSL_Api.llUnSit`).
+        let over_owners_land = || {
+            let at = crate::seating::seated_position(self.world, agent);
+            let owner = AgentKey::from(origin.object.owner_id);
+            at.and_then(|at| self.world.parcel_at(at.x, at.y))
+                .is_some_and(|parcel| parcel.owner == OwnerKey::Agent(owner))
+                || self.standing(caller).is(Allowed::God)
+        };
+        if on_this || over_owners_land() {
+            self.effects.push(Effect::Unsit(agent));
+        }
+    }
+
+    fn set_pie_text(&mut self, caller: CallerId, sit: bool, text: &str) {
+        let Some(origin) = self.origin(caller) else {
+            return;
+        };
+        let Some(mut properties) = self.world.properties_of(origin.local_id) else {
+            return;
+        };
+        if sit {
+            text.clone_into(&mut properties.sit_name);
+        } else {
+            text.clone_into(&mut properties.touch_name);
+        }
+        if let Some(mut prim) = self.world.object_mut(origin.local_id) {
+            prim.properties = Some(properties);
+        }
+    }
+
+    fn attached(&self, caller: CallerId) -> i32 {
+        self.origin(caller)
+            .and_then(|origin| self.world.objects.attached_to(origin.root))
+            .map_or(0, |attached| i32::from(attached.point))
+    }
+
+    fn attach(&mut self, caller: CallerId, point: i32) {
+        let Some(origin) = self.origin(caller) else {
+            return;
+        };
+        let owner = origin.object.owner_id.to_string();
+        let Some(present) = self.present(&owner) else {
+            return;
+        };
+        let wearer = (present.agent, present.position.clone());
+        self.effects.push(Effect::Attach {
+            root: origin.root,
+            wearer,
+            point: u8::try_from(point).unwrap_or(0),
+        });
+    }
+
+    fn detach(&mut self, caller: CallerId) {
+        let Some(origin) = self.origin(caller) else {
+            return;
+        };
+        if let Some(attached) = self.world.objects.attached_to(origin.root) {
+            let agent = attached.agent;
+            self.effects.push(Effect::Detach {
+                root: origin.root,
+                agent,
+            });
+        }
+    }
+
+    fn placement(&self, caller: CallerId) -> sl_lsl_runtime::vm::seating::Placement {
+        let zero = Vector {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        };
+        let Some(origin) = self.origin(caller) else {
+            return sl_lsl_runtime::vm::seating::Placement {
+                position: zero.clone(),
+                local: zero.clone(),
+                root: zero,
+            };
+        };
+        let (position, _turn) = crate::seating::frame_of(self.world, &origin.object);
+        let root = self.world.objects.get(origin.root).map_or_else(
+            || position.clone(),
+            |root| crate::seating::frame_of(self.world, root).0,
+        );
+        // A root's own record is its region position, but a worn root's is its
+        // offset on the point; a child's is its offset from the root.
+        let local = if origin.local_id == origin.root
+            && self.world.objects.attached_to(origin.root).is_none()
+        {
+            position.clone()
+        } else {
+            origin.object.motion.position.clone()
+        };
+        sl_lsl_runtime::vm::seating::Placement {
+            position,
+            local,
+            root,
+        }
+    }
+
+    fn prim_count(&self, object: &str) -> Option<i32> {
+        let key = ObjectKey::from(uuid::Uuid::parse_str(object).ok()?);
+        let prim = self.world.objects.get_by_key(key)?;
+        let root = self.world.root_of(prim.local_id);
+        let children = crate::link_sets::children_in_order(self.world, root).len();
+        i32::try_from(children.saturating_add(1)).ok()
     }
 
     fn standing(&self, caller: CallerId) -> Standing {
@@ -1648,6 +1895,7 @@ async fn presence(core: &GridCore, index: usize) -> Vec<Present> {
                         allowed,
                         blocked,
                         active_god: state.god_mode.told >= crate::god_powers::GOD_LEVEL_FLOOR,
+                        position: crate::chat::agent_position(&state.sim),
                     }
                 })
             })
@@ -1726,6 +1974,42 @@ fn tick_locked(
                 }
             }
             Effect::Die(root) => changes.extend(remove_linkset(world, root)),
+            Effect::Unsit(agent) => {
+                if let Some(stands_at) = crate::seating::stand(world, agent) {
+                    changes.push(RegionChange::Unseated { agent, stands_at });
+                }
+            }
+            Effect::Sit { agent, prim } => {
+                let Some(seat) = world.objects.get(prim).cloned() else {
+                    continue;
+                };
+                let Some(transform) = crate::seating::sit(world, agent, &seat) else {
+                    continue;
+                };
+                if let Some((_seat, sitter)) = world.objects.seat_of(agent) {
+                    changes.push(RegionChange::Seated {
+                        agent,
+                        offset: sitter.offset.clone(),
+                        rotation: sitter.rotation.clone(),
+                        seat: Box::new(seat),
+                        transform: Box::new(transform),
+                    });
+                }
+            }
+            Effect::Attach {
+                root,
+                wearer: (agent, at),
+                point,
+            } => {
+                if let Some(objects) =
+                    crate::seating::wear(world, (agent, &at), root, (point, None))
+                {
+                    changes.push(RegionChange::Worn { agent, objects });
+                }
+            }
+            Effect::Detach { root, agent } => {
+                changes.push(RegionChange::TakeOff { agent, root });
+            }
             Effect::Asked {
                 id,
                 agent,
@@ -1744,12 +2028,89 @@ fn tick_locked(
     (report, changes, deliveries)
 }
 
+/// The scripts in the linkset whose root is `root`, prim by prim in link
+/// order.
+pub(crate) fn linkset_scripts(world: &SceneFixtures, root: RegionLocalObjectId) -> Vec<CallerId> {
+    let prims: Vec<ObjectKey> = std::iter::once(root)
+        .chain(crate::link_sets::children_in_order(world, root))
+        .filter_map(|local_id| world.objects.get(local_id).map(|prim| prim.full_id))
+        .collect();
+    let mut scripts = Vec::new();
+    for prim in prims {
+        scripts.extend(
+            world
+                .script_instances
+                .slots
+                .iter()
+                .filter(|(_id, slot)| slot.prim == prim)
+                .map(|(id, _slot)| *id),
+        );
+    }
+    scripts
+}
+
+/// Raises `changed(bits)` in every script of the linkset whose root is
+/// `root` — what concerns the whole object, as an avatar sitting on it does.
+pub(crate) fn raise_changed(world: &mut SceneFixtures, root: RegionLocalObjectId, bits: i32) {
+    for id in linkset_scripts(world, root) {
+        if let Err(error) = world.script_instances.engine.changed(id, bits) {
+            tracing::warn!(?id, %error, "raising changed failed");
+        }
+    }
+}
+
+/// Drops `bits` of what `agent` granted every script of the linkset whose
+/// root is `root`: a lapse, as a sitter's standing up drops
+/// `PERMISSION_TAKE_CONTROLS` and `PERMISSION_CONTROL_CAMERA`.
+pub(crate) fn lapse(
+    world: &mut SceneFixtures,
+    root: RegionLocalObjectId,
+    agent: AgentKey,
+    bits: i32,
+) {
+    let granter = agent.uuid().to_string();
+    for id in linkset_scripts(world, root) {
+        world.script_instances.engine.revoke(id, &granter, bits);
+    }
+}
+
+/// Tells every script of the linkset whose root is `root` that it was put on
+/// by `wearer`, or — [`None`] — taken off: `attach(wearer)`, on OpenSim after
+/// its own `changed(32768)` twice for a wear and once for a drop
+/// (`events/attach`; Second Life raises no `changed` for either).
+pub(crate) fn raise_attach(
+    world: &mut SceneFixtures,
+    root: RegionLocalObjectId,
+    wearer: Option<AgentKey>,
+) {
+    let moves = match (world.script_instances.flavour().is_opensim(), wearer) {
+        (false, _) => 0,
+        (true, Some(_)) => 2,
+        (true, None) => 1,
+    };
+    let wearer = wearer.map(|agent| agent.uuid().to_string());
+    for id in linkset_scripts(world, root) {
+        let engine = &mut world.script_instances.engine;
+        for _ in 0..moves {
+            if let Err(error) = engine.changed(id, sl_lsl_runtime::vm::OPENSIM_CHANGED_POSITION) {
+                tracing::warn!(?id, %error, "raising OpenSim's position change failed");
+            }
+        }
+        if let Err(error) = engine.attach(id, wearer.as_deref()) {
+            tracing::warn!(?id, %error, "raising attach failed");
+        }
+    }
+}
+
 /// Takes the linkset whose root is `root` out of the region with its
 /// scripts, children first: a `KillObject` for each prim.
-fn remove_linkset(world: &mut SceneFixtures, root: RegionLocalObjectId) -> Vec<RegionChange> {
+pub(crate) fn remove_linkset(
+    world: &mut SceneFixtures,
+    root: RegionLocalObjectId,
+) -> Vec<RegionChange> {
+    let mut changes = crate::seating::stand_all_on(world, root);
     let mut prims = crate::link_sets::children_in_order(world, root);
     prims.push(root);
-    let mut changes = Vec::with_capacity(prims.len());
     for local_id in prims {
         let Some(object) = world.remove_object(local_id) else {
             continue;

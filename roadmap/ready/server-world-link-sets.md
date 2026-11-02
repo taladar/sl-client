@@ -83,3 +83,10 @@ and a rez and a save and a restore — and its move onto the entity store.
 The case's `MEASURED_LIVE` table (what the scripts said) is the
 specification: this task is done when the fake grid's scripts say the same
 and those rows move into `MEASURED`.
+
+## From server-world-sit-and-attach (2026-11-02)
+
+`llGetLinkNumber` and `llGetLinkKey` are implemented over `Host::links`, whose
+`Links` now carries each prim's key and the sitters after the prims in sit
+order; a lone prim with a sitter is link 1. The rest of the family is still
+this task's.

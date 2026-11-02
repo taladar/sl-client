@@ -321,6 +321,8 @@ pub struct LinkedPrim {
     /// Its link number: `0` for a prim linked to nothing, `1` for a
     /// linkset's root and `2…` for its children.
     pub link: i32,
+    /// Its key (`llGetLinkKey`).
+    pub key: String,
     /// The scripts in it, each of which gets a link message to the prim.
     pub scripts: Vec<CallerId>,
 }
@@ -334,6 +336,9 @@ pub struct Links {
     pub this: i32,
     /// Every prim of the linkset in link order, the root first.
     pub prims: Vec<LinkedPrim>,
+    /// The avatars sitting on the linkset, by key, in the order they sat:
+    /// the link numbers after the last prim's are theirs.
+    pub sitters: Vec<String>,
 }
 
 /// `LINK_ROOT`, which is also the link number 1.
@@ -521,8 +526,10 @@ mod tests {
             this: 0,
             prims: vec![LinkedPrim {
                 link: 0,
+                key: KEY.to_owned(),
                 scripts: vec![CallerId(1), CallerId(2)],
             }],
+            sitters: Vec::new(),
         }
     }
 
@@ -534,9 +541,11 @@ mod tests {
             prims: (1..=3)
                 .map(|link| LinkedPrim {
                     link,
+                    key: KEY.to_owned(),
                     scripts: vec![CallerId(u64::try_from(link).unwrap_or_default())],
                 })
                 .collect(),
+            sitters: Vec::new(),
         }
     }
 

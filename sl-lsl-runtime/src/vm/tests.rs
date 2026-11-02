@@ -28,6 +28,7 @@ mod money;
 mod ossl;
 mod persistence;
 mod precision;
+mod sitting;
 mod strings;
 
 /// A tenth of a second: ten ticks to the second, so `llSleep(2.0)` is twenty.
@@ -121,6 +122,26 @@ struct Recorder {
     addresses: std::collections::BTreeMap<String, String>,
     /// `(tick, caller)` per `llDie` the host agreed to.
     died: Vec<(u64, CallerId)>,
+    /// Each prim's seat settings, by number.
+    seats: std::collections::BTreeMap<u64, crate::vm::seating::Seat>,
+    /// The avatars sitting on every script's object, in the order they sat.
+    sitters: Vec<String>,
+    /// The avatar on each prim's sit target, by number.
+    on_target: std::collections::BTreeMap<u64, String>,
+    /// `(caller, agent)` per `llUnSit`.
+    unsat: Vec<(CallerId, String)>,
+    /// `(caller, sit, text)` per pie text set.
+    pie_texts: Vec<(CallerId, bool, String)>,
+    /// The point each script's object is worn on; not worn when not listed.
+    points: std::collections::BTreeMap<CallerId, i32>,
+    /// `(caller, point)` per `llAttachToAvatar` handed over.
+    attached_to: Vec<(CallerId, i32)>,
+    /// The callers whose objects were taken off.
+    detached: Vec<CallerId>,
+    /// Where each script's prim stands; at the origin when not listed.
+    placements: std::collections::BTreeMap<CallerId, crate::vm::seating::Placement>,
+    /// How many prims each object has, by a prim's key.
+    prim_counts: std::collections::BTreeMap<String, i32>,
 }
 
 /// The owner of every object a [`Recorder`] has, unless it says otherwise.
@@ -201,9 +222,16 @@ impl Host for Recorder {
             scripts.push(caller);
         }
         scripts.sort();
+        // A lone prim with an avatar on it is the root of a linkset.
+        let link = i32::from(!self.sitters.is_empty());
         Links {
-            this: 0,
-            prims: vec![LinkedPrim { link: 0, scripts }],
+            this: link,
+            prims: vec![LinkedPrim {
+                link,
+                key: self.prim_key(prim),
+                scripts,
+            }],
+            sitters: self.sitters.clone(),
         }
     }
 
@@ -214,11 +242,7 @@ impl Host for Recorder {
                 .get(&caller)
                 .cloned()
                 .unwrap_or_else(|| "object-a".to_owned()),
-            prim: self
-                .prim_keys
-                .get(&self.prim_of(caller))
-                .cloned()
-                .unwrap_or_else(|| "fab01e52-3517-4545-be1b-4cbf6d8ace3b".to_owned()),
+            prim: self.prim_key(self.prim_of(caller)),
             name: "Faulty prim".to_owned(),
             script: self
                 .scripts
@@ -267,6 +291,10 @@ impl Host for Recorder {
         self.seated
             .get(&caller)
             .is_some_and(|sitter| sitter.eq_ignore_ascii_case(agent))
+            || self
+                .sitters
+                .iter()
+                .any(|sitter| sitter.eq_ignore_ascii_case(agent))
     }
 
     fn ask_permissions(&mut self, caller: CallerId, question: &Question) -> bool {
@@ -390,6 +418,57 @@ impl Host for Recorder {
     fn agent_ip(&self, agent: &str) -> String {
         self.addresses.get(agent).cloned().unwrap_or_default()
     }
+
+    fn seat(&mut self, caller: CallerId, link: i32) -> Option<&mut crate::vm::seating::Seat> {
+        let this = self.links(caller).this;
+        if link != this {
+            return None;
+        }
+        let prim = self.prim_of(caller);
+        Some(self.seats.entry(prim).or_default())
+    }
+
+    fn avatar_on_sit_target(&self, caller: CallerId, link: i32) -> Option<String> {
+        if link != self.links(caller).this {
+            return None;
+        }
+        self.on_target.get(&self.prim_of(caller)).cloned()
+    }
+
+    fn unsit(&mut self, caller: CallerId, agent: &str) {
+        self.unsat.push((caller, agent.to_owned()));
+    }
+
+    fn set_pie_text(&mut self, caller: CallerId, sit: bool, text: &str) {
+        self.pie_texts.push((caller, sit, text.to_owned()));
+    }
+
+    fn attached(&self, caller: CallerId) -> i32 {
+        self.points.get(&caller).copied().unwrap_or(0)
+    }
+
+    fn attach(&mut self, caller: CallerId, point: i32) {
+        self.attached_to.push((caller, point));
+    }
+
+    fn detach(&mut self, caller: CallerId) {
+        self.detached.push(caller);
+    }
+
+    fn placement(&self, caller: CallerId) -> crate::vm::seating::Placement {
+        self.placements
+            .get(&caller)
+            .cloned()
+            .unwrap_or(crate::vm::seating::Placement {
+                position: crate::value::ZERO_VECTOR,
+                local: crate::value::ZERO_VECTOR,
+                root: crate::value::ZERO_VECTOR,
+            })
+    }
+
+    fn prim_count(&self, object: &str) -> Option<i32> {
+        self.prim_counts.get(object).copied()
+    }
 }
 
 impl Recorder {
@@ -408,6 +487,14 @@ impl Recorder {
     /// The prim `caller` is in.
     fn prim_of(&self, caller: CallerId) -> u64 {
         self.prims.get(&caller).copied().unwrap_or(caller.0)
+    }
+
+    /// The key of the prim numbered `prim`.
+    fn prim_key(&self, prim: u64) -> String {
+        self.prim_keys
+            .get(&prim)
+            .cloned()
+            .unwrap_or_else(|| "fab01e52-3517-4545-be1b-4cbf6d8ace3b".to_owned())
     }
 
     /// What `caller` printed, with the tick of each.

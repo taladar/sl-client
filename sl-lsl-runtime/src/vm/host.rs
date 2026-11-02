@@ -11,6 +11,7 @@ use crate::vm::linkset_data::{LinksetData, LinksetId};
 use crate::vm::ossl::{Simulator, Standing};
 use crate::vm::permissions::Question;
 use crate::vm::report::{Speech, Whereabouts};
+use crate::vm::seating::{Placement, Seat};
 
 /// Which script instance is calling, as the host knows it.
 ///
@@ -215,6 +216,53 @@ pub trait Host {
     ///
     /// [`SitRefusal`] when nobody sits.
     fn sit_on_link(&mut self, caller: CallerId, agent: &str, link: i32) -> Result<(), SitRefusal>;
+
+    /// The seat settings of the prim numbered `link` in the linkset `caller`
+    /// is in (a number [`Self::links`] gave it, never a `LINK_*` constant),
+    /// to read and change: its sit target, its sitter's camera and
+    /// mouselook. [`None`] when the linkset has no prim of that number. The
+    /// host keeps one per prim, empty until a script sets it; a reset of the
+    /// script leaves it, and an avatar who sits there is placed by it.
+    fn seat(&mut self, caller: CallerId, link: i32) -> Option<&mut Seat>;
+
+    /// The avatar sitting on the sit target of the prim numbered `link` in
+    /// `caller`'s linkset (`llAvatarOnSitTarget`), or [`None`]: for a prim
+    /// with no target, one whose target nobody took — an avatar seated on
+    /// the prim beside a sitter already on its target is not on it — and no
+    /// prim of that number.
+    fn avatar_on_sit_target(&self, caller: CallerId, link: i32) -> Option<String>;
+
+    /// `llUnSit`: stand `agent` up when it sits on `caller`'s object, or —
+    /// sitting anywhere — stands over land the object's owner owns or holds
+    /// estate powers over. Anything else is nothing.
+    fn unsit(&mut self, caller: CallerId, agent: &str);
+
+    /// `llSetSitText` and `llSetTouchText`: what the viewer's pie menu says
+    /// for sitting on (`sit` true) or touching `caller`'s prim, already cut.
+    fn set_pie_text(&mut self, caller: CallerId, sit: bool, text: &str);
+
+    /// The attachment point `caller`'s object is worn on (`llGetAttached`),
+    /// `0` when it is not worn.
+    fn attached(&self, caller: CallerId) -> i32;
+
+    /// `llAttachToAvatar`: wear `caller`'s object on its owner's `point`, the
+    /// owner having granted `PERMISSION_ATTACH` and being in the region; the
+    /// region raises `attach` once it is worn. `0` is the point the object
+    /// was last worn on.
+    fn attach(&mut self, caller: CallerId, point: i32);
+
+    /// `llDetachFromAvatar`: take `caller`'s worn object off, back into its
+    /// wearer's inventory.
+    fn detach(&mut self, caller: CallerId);
+
+    /// Where `caller`'s prim stands (`llGetPos`, `llGetLocalPos`,
+    /// `llGetRootPosition`).
+    fn placement(&self, caller: CallerId) -> Placement;
+
+    /// How many prims the object one of whose prims is keyed `object` has,
+    /// the avatars sitting on it left out (`llGetObjectPrimCount`); [`None`]
+    /// for a key no prim of the region has — an avatar's among them.
+    fn prim_count(&self, object: &str) -> Option<i32>;
 
     /// What the owner of `caller`'s script is in the region — estate owner
     /// or manager, parcel owner, a god — as an OSSL `Allow_` line asks

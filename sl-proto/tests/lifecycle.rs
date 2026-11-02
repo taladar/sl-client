@@ -2195,6 +2195,49 @@ mod test {
         })
     }
 
+    /// The grid standing the agent up or seating it by itself says so only
+    /// with the avatar's own object update — no parent, or the seat's — and
+    /// the session follows it, as the reference viewer follows its avatar's
+    /// parent: an `llUnSit` leaves no recorded seat behind, and an
+    /// `llSitOnLink` records the seat it never asked for.
+    #[test]
+    fn the_own_avatars_parent_seats_and_unseats_the_agent() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        let seat = uuid::Uuid::from_u128(0x5EA7_0F11);
+        let prim = object_update(700, 0x5EA7_0F11, zero_vec());
+        session.handle_datagram(sim_addr(), &server_message(&prim, 20, true)?, now)?;
+        session.sit_on(ObjectKey::from(seat), vec3(0.0, 0.0, 0.0), now)?;
+        drain(&mut session)?;
+        session.handle_datagram(
+            sim_addr(),
+            &server_message(&sit_response(seat), 21, false)?,
+            now,
+        )?;
+        drain(&mut session)?;
+        assert_eq!(session.seat(), Some(ObjectKey::from(seat)));
+
+        let standing = avatar_update(9, 1);
+        session.handle_datagram(sim_addr(), &server_message(&standing, 22, true)?, now)?;
+        assert_eq!(session.seat(), None, "the grid stood the agent up");
+
+        let AnyMessage::ObjectUpdate(mut seated) = avatar_update(9, 1) else {
+            return Err("avatar_update builds an ObjectUpdate".into());
+        };
+        if let Some(block) = seated.object_data.first_mut() {
+            block.parent_id = 700;
+        }
+        let seated = AnyMessage::ObjectUpdate(seated);
+        session.handle_datagram(sim_addr(), &server_message(&seated, 23, true)?, now)?;
+        assert_eq!(
+            session.seat(),
+            Some(ObjectKey::from(seat)),
+            "the grid seated the agent"
+        );
+        Ok(())
+    }
+
     #[test]
     fn sit_request_completes_on_response() -> Result<(), TestError> {
         let now = Instant::now();

@@ -40,6 +40,7 @@ pub mod ossl;
 mod range;
 mod registry;
 pub mod rotations;
+pub mod sitting;
 pub mod strings;
 pub mod table;
 mod text;
@@ -274,7 +275,40 @@ mod tests {
             Links {
                 this: 0,
                 prims: Vec::new(),
+                sitters: Vec::new(),
             }
+        }
+
+        fn seat(&mut self, _caller: CallerId, _link: i32) -> Option<&mut crate::vm::seating::Seat> {
+            None
+        }
+
+        fn avatar_on_sit_target(&self, _caller: CallerId, _link: i32) -> Option<String> {
+            None
+        }
+
+        fn unsit(&mut self, _caller: CallerId, _agent: &str) {}
+
+        fn set_pie_text(&mut self, _caller: CallerId, _sit: bool, _text: &str) {}
+
+        fn attached(&self, _caller: CallerId) -> i32 {
+            0
+        }
+
+        fn attach(&mut self, _caller: CallerId, _point: i32) {}
+
+        fn detach(&mut self, _caller: CallerId) {}
+
+        fn placement(&self, _caller: CallerId) -> crate::vm::seating::Placement {
+            crate::vm::seating::Placement {
+                position: crate::value::ZERO_VECTOR,
+                local: crate::value::ZERO_VECTOR,
+                root: crate::value::ZERO_VECTOR,
+            }
+        }
+
+        fn prim_count(&self, _object: &str) -> Option<i32> {
+            None
         }
 
         fn whereabouts(&self, _caller: CallerId) -> Whereabouts {
@@ -700,8 +734,12 @@ mod tests {
             })
         );
         assert_eq!(
-            call(BuiltinId::LlGetPos, &mut ctx, vec![]),
-            Err(CallError::Missing(BuiltinId::LlGetPos))
+            call(
+                BuiltinId::LlSetPos,
+                &mut ctx,
+                vec![Value::Vector(crate::value::ZERO_VECTOR)]
+            ),
+            Err(CallError::Missing(BuiltinId::LlSetPos))
         );
     }
 

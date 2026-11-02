@@ -102,14 +102,21 @@ mod test {
         Ok(())
     }
 
-    /// Where `flavour` puts an avatar that stands up from [`SEAT`].
+    /// Where `flavour` puts an avatar that stands up from [`SEAT`], a box
+    /// with no sit target: in front of where the grid's plain seat put it,
+    /// which on Second Life faces back out over its edge.
     fn stands_at(flavour: ImitatedGrid) -> [f32; 3] {
         let policy = flavour.sit_policy();
-        let sat = sl_fake_grid::world::SIT_TARGET_OFFSET;
+        let plain = policy.plain_seat;
+        let forward = if plain.faces_outwards {
+            -policy.stand_forward_m
+        } else {
+            policy.stand_forward_m
+        };
         [
-            SEAT_AT.x + sat.x + policy.stand_forward_m,
-            SEAT_AT.y + sat.y,
-            SEAT_AT.z + sat.z + policy.stand_up_m,
+            SEAT_AT.x + plain.off_centre_m + forward,
+            SEAT_AT.y,
+            SEAT_AT.z + plain.above_m + policy.stand_up_m,
         ]
     }
 

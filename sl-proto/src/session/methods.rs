@@ -3453,6 +3453,38 @@ impl Session {
         });
     }
 
+    /// Keeps the sit state in step with the agent's own avatar object from
+    /// the root region, as the reference viewer does by its avatar's parent
+    /// (`LLViewerObject::processUpdateMessage` seating or unseating it as
+    /// the `ParentID` changes): a simulator that stands the agent up itself
+    /// — a script's `llUnSit`, the seat gone, a teleport — says so only by
+    /// sending the avatar with no parent, and one that seats it without a
+    /// request (`llSitOnLink`) only by sending it as the seat's child. A
+    /// pending request is left to its `AvatarSitResponse`.
+    fn follow_own_parent(&mut self, circuit_id: CircuitId, object: &Object) {
+        if self
+            .circuit
+            .as_ref()
+            .is_none_or(|root| root.id != circuit_id)
+        {
+            return;
+        }
+        match self.sit {
+            SitState::Seated { .. } if object.parent_id == RegionLocalObjectId(0) => {
+                self.sit = SitState::NotSitting;
+            }
+            SitState::NotSitting if object.parent_id != RegionLocalObjectId(0) => {
+                if let Some(seat) = self
+                    .world
+                    .object(ScopedObjectId::new(circuit_id, object.parent_id))
+                {
+                    self.sit = SitState::Seated { on: seat.full_id };
+                }
+            }
+            SitState::NotSitting | SitState::AwaitingResponse { .. } | SitState::Seated { .. } => {}
+        }
+    }
+
     /// Inserts or refreshes a scene object in the cache for simulator `from`,
     /// emitting [`Event::ObjectAdded`] for a newly seen local id or
     /// [`Event::ObjectUpdated`] for one already cached. Any previously merged
@@ -3479,6 +3511,7 @@ impl Session {
                 .is_some_and(|agent| agent.uuid() == object.full_id.uuid())
         {
             self.note_own_avatar(circuit_id, object.local_id);
+            self.follow_own_parent(circuit_id, &object);
         }
         // This object arrived: clear any outstanding parent-request for it (a
         // child waiting on it can now resolve, and a later re-orphan re-requests).

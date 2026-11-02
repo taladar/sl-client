@@ -161,3 +161,15 @@ replay writes in for it (`vm/tests/ossl.rs`). The 66: `osAgentSaveAppearance`,
 `osSetLinkSitActiveRange`, `osSetLinkStandTarget`, `osSetOwnerSpeed`,
 `osSetSitActiveRange`, `osSetSpeed`, `osSetStandTarget`, `osTeleportAgent`,
 `osTeleportOwner`.
+
+## From server-world-sit-and-attach (2026-11-02)
+
+The sitting and attachment functions this tranche listed are implemented
+(`library::sitting`): `llSitTarget`, `llLinkSitTarget`, `llAvatarOnSitTarget`,
+`llAvatarOnLinkSitTarget`, `llUnSit`, `llSetSitText`, `llSetTouchText`,
+`llForceMouselook`, `llSetCameraEyeOffset`, `llSetCameraAtOffset`,
+`llAttachToAvatar`, `llDetachFromAvatar`, `llGetAttached`, and the `attach`
+event; `Host::seated_on` and `Host::sit_on_link` answer from the region.
+Left: `llGetAgentSize` (the `avatar/sit` probe reads it of the sitter),
+`llAttachToAvatarTemp`, `llGetAttachedList`, the follow camera cleared when a
+sitter stands on OpenSim, and the rest of the tranche.

@@ -122,3 +122,9 @@ replay writes in for it (`vm/tests/ossl.rs`). The 23: `osAdjustSoundVolume`,
 `osPlaySound`, `osPlaySoundSlave`, `osPreloadSound`, `osSetPrimitiveParams`,
 `osSetProjectionParams`, `osSetSoundRadius`, `osStopSound`, `osTriggerSound`,
 `osTriggerSoundLimited`.
+
+## From server-world-sit-and-attach (2026-11-02)
+
+`llGetPos`, `llGetLocalPos` and `llGetRootPosition` are implemented over
+`Host::placement` (a worn prim's region position its wearer's, its local one
+its offset on the point), and `llGetObjectPrimCount` over `Host::prim_count`.

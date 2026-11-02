@@ -254,7 +254,7 @@ pub fn ll_data_size_key_value(ctx: &mut ScriptCtx<'_>) -> Result<Key, CallError>
 /// `llSitOnLink` reads it: `LINK_THIS` the caller's, `LINK_ROOT` the root,
 /// a number the prim of that number (0 and 1 alike for a prim linked to
 /// nothing); [`None`] for no prim and for a constant naming several.
-fn single_prim(ctx: &mut ScriptCtx<'_>, link: i32) -> Option<i32> {
+pub(crate) fn single_prim(ctx: &mut ScriptCtx<'_>, link: i32) -> Option<i32> {
     let caller = ctx.caller();
     let links = ctx.host().links(caller);
     let alone = links.prims.len() == 1;

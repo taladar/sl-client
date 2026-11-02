@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 129 |
-| ready | 340 |
+| ready | 339 |
 | blocked | 40 |
 | in-progress | 18 |
 | bugs | 42 |
-| done | 1472 |
+| done | 1473 |
 | deferred | 30 |
 | wont-do | 24 |
 | **total** | **2095** |
@@ -277,7 +277,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-lsl-lib-avatar-control`](ideas/server-lsl-lib-avatar-control.md) —
   Library tranche — avatars, animation, sitting, controls and camera (blocked by
   `server-lsl-vm-execution` (done), `server-world-agent-movement`,
-  `server-world-sit-and-attach`, `gridspec-lsl-avatar-control` (done))
+  `server-world-sit-and-attach` (done), `gridspec-lsl-avatar-control` (done))
 - [`server-lsl-lib-detection-sensors`](ideas/server-lsl-lib-detection-sensors.md)
   — Library tranche — the detected block, sensors and raycasts (blocked by
   `server-lsl-state-and-events` (done), `server-world-ecs-store` (done),
@@ -329,7 +329,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-lsl-opensim-function-set`](ideas/gridspec-lsl-opensim-function-set.md)
   — Measure which library functions OpenSim's engines compile
 
-## ready (340)
+## ready (339)
 
 ### protocol
 
@@ -1139,9 +1139,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-world-link-sets`](ready/server-world-link-sets.md) — A real link-set
   model — link numbers, root and children (blocked by `server-world-ecs-store`
   (done), `gridspec-object-link-delink` (done))
-- [`server-world-sit-and-attach`](ready/server-world-sit-and-attach.md) —
-  Sitting and attaching as world state a script can read (blocked by
-  `server-world-ecs-store` (done), `gridspec-attachments` (done))
 - [`server-world-touch-and-grab`](ready/server-world-touch-and-grab.md) — Touch
   routing — a click on a prim reaches nothing (blocked by
   `protocol-sim-script-messages` (done))
@@ -1452,7 +1449,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1472)
+## done (1473)
 
 ### protocol
 
@@ -4555,6 +4552,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   store for the region, in place of a Vec of objects
 - [`server-world-heartbeat`](done/server-world-heartbeat.md) — A region
   heartbeat — the fake grid has no simulation loop at all
+- [`server-world-sit-and-attach`](done/server-world-sit-and-attach.md) — Sitting
+  and attaching as world state a script can read (blocked by
+  `server-world-ecs-store` (done), `gridspec-attachments` (done))
 
 ### gridspec
 

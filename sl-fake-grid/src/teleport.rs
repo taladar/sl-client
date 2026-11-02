@@ -194,6 +194,14 @@ pub(crate) async fn teleport_session(
         .account_by_agent(agent_id)
         .cloned()
         .ok_or(Error::UnknownAccount)?;
+    // A teleport takes the avatar off its seat, on both grids
+    // (`sit-stand`): the object's scripts hear it stand.
+    source
+        .with_state(|state| {
+            let _stood = crate::seating::stand(&mut state.world.lock(), agent_id);
+            let _was = state.sim.unseat_agent();
+        })
+        .await;
 
     let policy = core.teleport_policy;
     if source_region == request.region {
@@ -234,8 +242,16 @@ pub(crate) async fn teleport_session(
                 // physics, so without this the avatar would go on standing,
                 // for everyone, where it was.
                 let landing = request.arrival.position;
+                state.world.lock().objects.move_wearer(
+                    state.avatar.agent_id,
+                    &sl_types::lsl::Vector {
+                        x: landing.x(),
+                        y: landing.y(),
+                        z: landing.z(),
+                    },
+                );
                 let avatar = crate::world::avatar_prim(
-                    state.world.lock().avatar_local_id,
+                    state.world.lock().avatar_id(state.avatar.agent_id),
                     &state.avatar,
                     sl_types::lsl::Vector {
                         x: landing.x(),

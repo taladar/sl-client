@@ -631,7 +631,7 @@ const fn conjugate(rotation: &Rotation) -> Rotation {
 
 /// `first` followed by `second`, in the order Second Life composes rotations
 /// (`second * first` in Hamilton's product).
-fn multiply(second: &Rotation, first: &Rotation) -> Rotation {
+pub(crate) fn multiply(second: &Rotation, first: &Rotation) -> Rotation {
     Rotation {
         x: second.s.mul_add(
             first.x,

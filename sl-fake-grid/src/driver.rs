@@ -464,8 +464,11 @@ impl SharedSim {
                 // agent's own avatar, the parcel overlay, its parcel, the
                 // ground, and every object in view — before the scenario's
                 // own hook.
+                // Its avatar is given its region-local id as it arrives.
+                let mut world = state.world.lock();
+                let _avatar = world.arrive_avatar(state.avatar.agent_id);
                 push_arrival_world(
-                    &state.world.lock(),
+                    &world,
                     Ground {
                         fixture: &state.terrain,
                         policy: &state.terrain_policy,
@@ -476,6 +479,7 @@ impl SharedSim {
                     &mut state.sim,
                     now,
                 );
+                drop(world);
                 crate::world::push_own_animation(
                     &state.avatar,
                     &state.animations,
@@ -929,6 +933,7 @@ pub(crate) async fn run_region_watcher(
                                 RegionChange::Chat(_)
                                     | RegionChange::Effects(_)
                                     | RegionChange::Sound(_)
+                                    | RegionChange::Unseated { .. }
                             ) => {}
                     Ok(RegionUpdate { change, .. }) => {
                         // A line is heard over a border too, by where the
@@ -953,6 +958,17 @@ pub(crate) async fn run_region_watcher(
                         }
                         shared
                             .with_state(|state| {
+                                // Another avatar's worn object is never
+                                // drawn here ([`crate::seating::shown_to`]).
+                                if let RegionChange::Rezzed(object)
+                                | RegionChange::Updated(object)
+                                | RegionChange::Moved(object) = &change
+                                {
+                                    let world = state.world.lock();
+                                    if !crate::seating::shown_to(&world, object, state.avatar.agent_id) {
+                                        return;
+                                    }
+                                }
                                 let result = match &change {
                                     RegionChange::Rezzed(object)
                                     | RegionChange::Updated(object) => crate::world::send_objects(
@@ -960,6 +976,84 @@ pub(crate) async fn run_region_watcher(
                                         std::slice::from_ref(object.as_ref()),
                                         now,
                                     ),
+                                    RegionChange::Unseated { agent, stands_at } => {
+                                        if *agent != state.avatar.agent_id {
+                                            return;
+                                        }
+                                        let _was = state.sim.unseat_agent();
+                                        let world = state.world.lock();
+                                        crate::world::stand_avatar(
+                                            &world,
+                                            &state.avatar,
+                                            &mut state.sim,
+                                            stands_at,
+                                            now,
+                                        );
+                                        Ok(())
+                                    }
+                                    RegionChange::Seated {
+                                        agent,
+                                        seat,
+                                        transform,
+                                        offset,
+                                        rotation,
+                                    } => {
+                                        if *agent != state.avatar.agent_id {
+                                            return;
+                                        }
+                                        let sent = state.sim.send_avatar_sit_response(
+                                            seat.full_id,
+                                            transform,
+                                            now,
+                                        );
+                                        state.sim.seat_agent(seat.full_id);
+                                        let world = state.world.lock();
+                                        crate::world::push_seated_avatar(
+                                            &world,
+                                            &state.avatar,
+                                            seat.local_id,
+                                            (offset.clone(), rotation.clone()),
+                                            &mut state.sim,
+                                            now,
+                                        );
+                                        sent
+                                    }
+                                    // The wearer is shown its object worn; any
+                                    // other viewer loses it from the world.
+                                    RegionChange::Worn { agent, objects } => {
+                                        if *agent == state.avatar.agent_id {
+                                            crate::world::send_objects(&mut state.sim, objects, now)
+                                        } else {
+                                            let ids: Vec<sl_proto::RegionLocalObjectId> =
+                                                objects.iter().map(|object| object.local_id).collect();
+                                            state.sim.send_kill_object(&ids, now)
+                                        }
+                                    }
+                                    RegionChange::TakeOff { agent, root } => {
+                                        if *agent != state.avatar.agent_id {
+                                            return;
+                                        }
+                                        let minter = state.minter.clone();
+                                        let mut world = state.world.lock();
+                                        let changes = crate::world::take_off(
+                                            &mut world,
+                                            &state.assets,
+                                            (&state.avatar, &state.identity),
+                                            (state.object_assets, state.inventory_announcement),
+                                            &move || minter.uuid(),
+                                            &mut state.sim,
+                                            &[*root],
+                                            now,
+                                        );
+                                        for change in changes {
+                                            drop(state.changes.send(RegionUpdate {
+                                                source: state.seq,
+                                                change,
+                                            }));
+                                        }
+                                        drop(world);
+                                        Ok(())
+                                    }
                                     RegionChange::Moved(object) => state.sim.send_terse_update(
                                         &[sl_proto::TerseUpdate {
                                             local_id: object.local_id,

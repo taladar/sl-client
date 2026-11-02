@@ -74,3 +74,10 @@ changes made by a helper script while the probe slept:
   constant) on an attach from the ground (twice), a drop (once) and an
   `llAttachToAvatar` (twice); Second Life raises no `changed` for any of them
   (`events/attach`). An OpenSim flavour that is faithful raises it too.
+
+## From server-world-sit-and-attach (2026-11-02)
+
+Raised now: `CHANGED_LINK` in every script of an object on a sit and a stand
+(`scripts::raise_changed`), and OpenSim's `changed(32768)` twice before an
+`attach` on a wear and once on a drop (`scripts::raise_attach`). An
+OpenSim-flavoured region's engine now uses `Coalescing::Never`.

@@ -947,7 +947,9 @@ async fn execute(
             shared
                 .with_region(move |world, sim, now| {
                     let mut worn = object;
-                    worn.parent_id = world.avatar_local_id;
+                    worn.parent_id = sim
+                        .agent_id()
+                        .map_or(world.avatar_local_id, |agent| world.avatar_id(agent));
                     worn.state = attachment_state_from_point(point);
                     let attach = format!("AttachItemID STRING RW SV {}", item.uuid());
                     worn.name_value = if worn.name_value.is_empty() {

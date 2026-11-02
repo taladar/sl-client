@@ -1419,6 +1419,22 @@ async fn reap_closed_session(core: Arc<GridCore>, seq: u64, shared: SharedSim) {
             }
         }
     }
+    // Gone from the region: off its seat, and what it wore taken out with
+    // it, as a logout takes them on both grids.
+    let (region, agent) = {
+        let state = shared.state.lock().await;
+        (state.region, state.avatar.agent_id)
+    };
+    if let Some(entry) = core.region(region) {
+        let changes = crate::seating::leave(&mut entry.world.lock(), agent);
+        for change in changes {
+            // A region nobody is left in has nobody to tell.
+            drop(entry.changes.send(crate::world::RegionUpdate {
+                source: crate::scripts::REGION_SOURCE,
+                change,
+            }));
+        }
+    }
     core.remove_session(seq).await;
 }
 
@@ -2269,6 +2285,7 @@ impl FakeGridBuilder {
                 fixtures.capacity = Some(capacity);
                 fixtures.properties = self.imitates.properties_policy();
                 fixtures.rez = self.imitates.rez_policy();
+                fixtures.sits = self.imitates.sit_policy();
                 fixtures.edit = self.imitates.edit_policy();
                 fixtures.linking = self.imitates.link_policy();
                 fixtures.contents = self.imitates.contents_policy();
@@ -3178,15 +3195,34 @@ impl FakeAgent {
         let now = self.shared.now();
         {
             let state = &mut *guard;
-            let world = state.world.lock();
+            let mut world = state.world.lock();
             if let Some(riding) = world.object_by_local_id(seat) {
                 state.sim.seat_agent(riding.full_id);
             }
+            let unturned = sl_types::lsl::Rotation {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+                s: 1.0,
+            };
+            // On its sit target where it has a free one; the region's other
+            // readers — a script's `llAvatarOnSitTarget` among them — see the
+            // sit as they see one the agent asked for.
+            let on_target = world
+                .objects
+                .get(seat)
+                .is_some_and(|prim| crate::seating::place(&world, prim).on_target);
+            let _recorded = world.objects.sit(
+                state.avatar.agent_id,
+                seat,
+                (offset.clone(), unturned.clone()),
+                on_target,
+            );
             crate::world::push_seated_avatar(
                 &world,
                 &state.avatar,
                 seat,
-                offset,
+                (offset, unturned),
                 &mut state.sim,
                 now,
             );

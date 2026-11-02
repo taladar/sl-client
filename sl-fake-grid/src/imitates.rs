@@ -70,6 +70,9 @@
 //! | a sit on an object the region does not have ([`SitPolicy::unknown_target`]) | refused at once with the named alert `SitFailNotSameRegion` | not answered: the client's own sit timeout ends it |
 //! | where standing up puts the avatar ([`SitPolicy::stand_forward_m`], [`SitPolicy::stand_up_m`]) | 0.34 m in front of where it sat, at the same height | 0.65 m in front and 0.57 m above |
 //! | the seat position in an `AvatarSitResponse` for a seat with a sit target ([`SitPolicy::response_states_seated_position`]) | where the avatar is put: the target raised by 0.35 m | the target as the script set it, 0.35 m below where the avatar is put |
+//! | where a seat without a sit target puts an avatar ([`SitPolicy::plain_seat`]) | at an edge 0.34 m off the centre, 0.88 m above it, facing outwards; the response states it 0.33 m lower | 0.415 m off the centre the other way, 0.90 m above it, unturned; the response states that |
+//! | a second avatar on a taken seat ([`SitPolicy::shared_seat_raise_m`]) | seated 0.54 m higher than the first | seated where it would have sat alone |
+//! | how far a seat without a sit target is answered from ([`SitPolicy::plain_reach_m`]) | 7.5 m answered, 9.3 m not: no answer at all past it | from anywhere |
 //! | who is sent an object's record when its name or description is edited ([`PropertiesPolicy::rename_answered`]) | the editor, selected or not | nobody |
 //! | who is sent it when something is written into its contents ([`PropertiesPolicy::contents_change_told_to`]) | every session holding it selected, the writer among them or not | the writer, selected or not |
 //! | what a select and a deselect bring besides the record ([`PropertiesPolicy::strangers_select_resends_object`], [`PropertiesPolicy::deselect_sends_terse`]) | a deselect brings a terse update of the object | a select of somebody else's object brings it again in full |
@@ -730,12 +733,28 @@ impl ImitatedGrid {
                 response_states_seated_position: true,
                 stand_forward_m: 0.34,
                 stand_up_m: 0.0,
+                plain_seat: PlainSeat {
+                    off_centre_m: -0.34,
+                    above_m: 0.88,
+                    faces_outwards: true,
+                    stated_below_m: 0.33,
+                },
+                shared_seat_raise_m: 0.54,
+                plain_reach_m: Some(SECOND_LIFE_PLAIN_REACH_M),
             },
             Self::OpenSim => SitPolicy {
                 unknown_target: None,
                 response_states_seated_position: false,
                 stand_forward_m: 0.65,
                 stand_up_m: 0.57,
+                plain_seat: PlainSeat {
+                    off_centre_m: 0.415,
+                    above_m: 0.90,
+                    faces_outwards: false,
+                    stated_below_m: 0.0,
+                },
+                shared_seat_raise_m: 0.0,
+                plain_reach_m: None,
             },
         }
     }
@@ -3945,6 +3964,56 @@ pub struct SitPolicy {
     /// How far above where it sat it is put, in metres. Second Life stands
     /// it at the height it sat at and lets it drop; OpenSim lifts it first.
     pub stand_up_m: f32,
+    /// Where a seat without a sit target — or with one somebody already
+    /// took — puts an avatar.
+    pub plain_seat: PlainSeat,
+    /// How much higher than the avatars already on it a further avatar on a
+    /// seat without a free target is put, in metres, for each of them:
+    /// Second Life stacks them, OpenSim seats each where it would have sat
+    /// alone.
+    pub shared_seat_raise_m: f32,
+    /// How far from a seat without a free sit target, along the ground, an
+    /// avatar may be for the sit to be answered, or [`None`] for anywhere.
+    /// Past it Second Life sends nothing at all — no response, no alert —
+    /// and the client's own sit timeout ends the request; a seat with a free
+    /// target is answered from anywhere on both.
+    pub plain_reach_m: Option<f32>,
+}
+
+impl Default for SitPolicy {
+    /// Second Life's, as every policy of a world no grid has adopted.
+    fn default() -> Self {
+        ImitatedGrid::SecondLife.sit_policy()
+    }
+}
+
+/// How far from a seat without a sit target Second Life still answers a sit,
+/// in metres: halfway between the furthest distance answered (7.5 m) and the
+/// nearest refused (9.3 m) on 2026-10-08, the edge itself unmeasured.
+pub const SECOND_LIFE_PLAIN_REACH_M: f32 = 8.4;
+
+/// Where a seat without a sit target puts an avatar
+/// ([`SitPolicy::plain_seat`]), measured on a half-metre cube asked for at
+/// its centre (`sit-stand`, `avatar/sit`).
+///
+/// Both grids choose the spot by the point clicked and the prim's surface
+/// (`book/src/gridspec/movement.md` § Where the avatar is put); the fake grid
+/// does not search a surface, and puts every avatar on every such seat where
+/// the measured cube put it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PlainSeat {
+    /// How far off the centre along the prim's own `x` the avatar is put, in
+    /// metres: Second Life's edge is behind it, OpenSim's ahead.
+    pub off_centre_m: f32,
+    /// How far above the centre, in metres.
+    pub above_m: f32,
+    /// Whether the avatar faces outwards from that edge — turned half round
+    /// on Second Life's side — rather than the prim's way.
+    pub faces_outwards: bool,
+    /// How much lower than where the avatar is put the response states the
+    /// seat, in metres: Second Life's states 0.55 m against the 0.88 m its
+    /// avatar update says; OpenSim's states where it is.
+    pub stated_below_m: f32,
 }
 
 /// How far above a script's sit target both grids put the seated avatar, in

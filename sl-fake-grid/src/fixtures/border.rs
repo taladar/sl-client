@@ -330,6 +330,13 @@ pub fn border() -> RegionFixture {
 pub fn border_with_vehicle(side: BorderSide, ridden: bool) -> RegionFixture {
     let mut fixture = border();
     fixture.world.objects.push(vehicle(side).build());
+    if let Some(seat) = fixture
+        .world
+        .objects
+        .seat_settings_mut(side.vehicle_local_id())
+    {
+        *seat = crate::world::fixture_seat();
+    }
     if ridden {
         fixture.world.npcs.push(rider(side));
     }
@@ -381,6 +388,13 @@ pub fn border_pair_side(side: BorderSide) -> RegionFixture {
         marker.full_id = side.marker_object();
     }
     fixture.world.objects.push(vehicle(side).build());
+    if let Some(seat) = fixture
+        .world
+        .objects
+        .seat_settings_mut(side.vehicle_local_id())
+    {
+        *seat = crate::world::fixture_seat();
+    }
     fixture.world.npcs.push(rider(side));
     fixture
 }

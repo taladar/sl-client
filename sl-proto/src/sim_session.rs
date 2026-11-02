@@ -11062,6 +11062,21 @@ impl SimSession {
         self.sit_expires = None;
     }
 
+    /// Records that the agent no longer sits, with no `STAND_UP` from the
+    /// client: the simulator stood it up itself — a script's `llUnSit`, the
+    /// seat taken out of the region, a teleport from it. Sends nothing; the
+    /// visible half is the avatar's own object update with no `ParentID`.
+    /// The object it sat on, or [`None`] when it sat on nothing.
+    pub const fn unseat_agent(&mut self) -> Option<ObjectKey> {
+        let on = match self.sit {
+            SimSitState::Seated { on } | SimSitState::ResponseSent { on } => Some(on),
+            SimSitState::NotSitting => None,
+        };
+        self.sit = SimSitState::NotSitting;
+        self.sit_expires = None;
+        on
+    }
+
     /// Places the agent's arrival: the position and facing the
     /// `AgentMovementComplete` reply carries when the client completes its
     /// movement into this region. A teleport destination sets this to the

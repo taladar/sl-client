@@ -54,8 +54,10 @@ use bevy_ecs::change_detection::{DetectChanges as _, Tick};
 use bevy_ecs::component::Component;
 use bevy_ecs::entity::Entity;
 use bevy_ecs::world::{Mut, Ref, World};
+use sl_lsl_runtime::vm::seating::Seat;
 use sl_proto::{Object, RegionLocalObjectId};
-use sl_types::key::ObjectKey;
+use sl_types::key::{AgentKey, ObjectKey};
+use sl_types::lsl::{Rotation, Vector};
 
 use crate::world::{EditHistory, ObjectCost, TaskInventory};
 
@@ -79,6 +81,52 @@ pub(crate) struct History(pub(crate) EditHistory);
 /// The order a prim came into the region in: the store walks prims by it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Component)]
 pub struct Seq(u64);
+
+/// What a prim's scripts set of it as a seat: its sit target, its sitter's
+/// camera. A prim no script set anything of has none, which reads as a seat
+/// without a target.
+#[derive(Debug, Clone, Component)]
+pub struct SeatSettings(pub Seat);
+
+/// One avatar sitting on a prim: where on it, and in which turn it sat.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Sitter {
+    /// The avatar.
+    pub agent: AgentKey,
+    /// Where it sits, from the prim's centre in the prim's frame — the
+    /// position its own object update states, as a seated avatar's is.
+    pub offset: Vector,
+    /// Its turn, in the prim's frame.
+    pub rotation: Rotation,
+    /// Whether it took the prim's sit target, which a second avatar on the
+    /// same prim does not (`llAvatarOnSitTarget`).
+    pub on_target: bool,
+    /// When it sat, among every sitter of the region: the link numbers a
+    /// linkset's sitters take after its prims follow it.
+    pub order: u64,
+}
+
+/// The avatars sitting on a prim, in the order they sat — the seat's half of
+/// the index whose avatar's half the store keeps
+/// ([`ObjectStore::seat_of`]). A prim nobody sits on has none.
+#[derive(Debug, Clone, Default, Component)]
+pub struct Sitters(pub Vec<Sitter>);
+
+/// What a worn object's root is attached to: the wearer and the point, as
+/// `llGetAttached` reads it. The object's record carries the same, as the
+/// wire does — the wearer's avatar as its parent, the point in its state.
+#[derive(Debug, Clone, PartialEq, Component)]
+pub struct AttachedTo {
+    /// The avatar wearing it.
+    pub agent: AgentKey,
+    /// The attachment point.
+    pub point: u8,
+    /// Where the wearer stands in the region: what the object's region
+    /// position is (`llGetPos`), and where it hears and speaks from. Set
+    /// when it is put on and moved with its wearer's sits and stands, the
+    /// only moves an avatar makes within a fake region.
+    pub at: Vector,
+}
 
 /// The ids a prim is filed under.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -120,6 +168,14 @@ struct Indices {
     highest_local_id: u32,
     /// The number the next prim to come in is given.
     next_seq: u64,
+    /// The prim each seated avatar sits on: the avatar's half of the index
+    /// whose seat's half is each prim's [`Sitters`].
+    seated: HashMap<AgentKey, Entity>,
+    /// The roots each avatar wears, in the store's order: the wearer's half
+    /// of the index whose object's half is each root's [`AttachedTo`].
+    worn: HashMap<AgentKey, BTreeMap<Seq, Entity>>,
+    /// The order the next avatar to sit is given.
+    next_sit: u64,
 }
 
 impl Indices {
@@ -147,6 +203,16 @@ impl Indices {
                 .entry(ids.parent)
                 .or_default()
                 .insert(seq, entity);
+        }
+    }
+
+    /// Takes the root that came in as `seq` off `agent`'s worn roots.
+    fn unwear(&mut self, agent: AgentKey, seq: Seq) {
+        if let Some(worn) = self.worn.get_mut(&agent) {
+            let _gone = worn.remove(&seq);
+            if worn.is_empty() {
+                let _none = self.worn.remove(&agent);
+            }
         }
     }
 
@@ -215,6 +281,11 @@ impl Clone for ObjectStore {
             if let Some(history) = self.world.get::<History>(*entity) {
                 let _held = spawned.insert(history.clone());
             }
+            if let Some(seat) = self.world.get::<SeatSettings>(*entity) {
+                let _held = spawned.insert(seat.clone());
+            }
+            // Who sits where, and who wears what, are the region's agents',
+            // and a copy is a region nobody is in yet.
         }
         copy.indices.highest_local_id = self.indices.highest_local_id;
         copy
@@ -326,6 +397,20 @@ impl ObjectStore {
         let body = self.world.get::<Body>(entity)?.0.clone();
         let _was = self.indices.order.remove(&seq);
         self.indices.unfile(entity, seq, Filed::of(&body));
+        // A prim that goes takes its sitters off it and its wearer's hold on
+        // it: the region's own unseat and detach run first where they are
+        // told of, and this keeps a removal they were not told of from
+        // leaving the indices naming an entity that is gone.
+        if let Some(sitters) = self.world.get::<Sitters>(entity) {
+            for sitter in &sitters.0 {
+                if self.indices.seated.get(&sitter.agent) == Some(&entity) {
+                    let _gone = self.indices.seated.remove(&sitter.agent);
+                }
+            }
+        }
+        if let Some(attached) = self.world.get::<AttachedTo>(entity) {
+            self.indices.unwear(attached.agent, seq);
+        }
         let _despawned = self.world.despawn(entity);
         Some(body)
     }
@@ -506,6 +591,179 @@ impl ObjectStore {
         self.world
             .get_mut::<History>(entity)
             .map(|history| &mut history.into_inner().0)
+    }
+
+    /// The seat settings of the prim with the given region-local id, where a
+    /// script or a fixture set any.
+    #[must_use]
+    pub fn seat_settings(&self, local_id: RegionLocalObjectId) -> Option<&Seat> {
+        self.world
+            .get::<SeatSettings>(self.entity(local_id)?)
+            .map(|seat| &seat.0)
+    }
+
+    /// The seat settings of the prim with the given region-local id, to
+    /// change, empty ones made where it has none yet; [`None`] for a prim that
+    /// is not here.
+    pub fn seat_settings_mut(&mut self, local_id: RegionLocalObjectId) -> Option<&mut Seat> {
+        let entity = self.entity(local_id)?;
+        let mut prim = self.world.get_entity_mut(entity).ok()?;
+        if prim.get::<SeatSettings>().is_none() {
+            let _held = prim.insert(SeatSettings(Seat::default()));
+        }
+        self.world
+            .get_mut::<SeatSettings>(entity)
+            .map(|seat| &mut seat.into_inner().0)
+    }
+
+    /// The avatars sitting on the prim with the given region-local id, in
+    /// the order they sat; empty for a prim nobody sits on or that is not
+    /// here.
+    #[must_use]
+    pub fn sitters(&self, local_id: RegionLocalObjectId) -> &[Sitter] {
+        self.entity(local_id)
+            .and_then(|entity| self.world.get::<Sitters>(entity))
+            .map_or(&[], |sitters| sitters.0.as_slice())
+    }
+
+    /// Seats `agent` on the prim with the given region-local id at `offset`,
+    /// turned by `rotation`, on its sit target or beside it, standing it up
+    /// from wherever it sat before; the sitter as stored, or [`None`] for a
+    /// prim that is not here.
+    pub fn sit(
+        &mut self,
+        agent: AgentKey,
+        local_id: RegionLocalObjectId,
+        (offset, rotation): (Vector, Rotation),
+        on_target: bool,
+    ) -> Option<Sitter> {
+        let entity = self.entity(local_id)?;
+        let _before = self.stand(agent);
+        let sitter = Sitter {
+            agent,
+            offset,
+            rotation,
+            on_target,
+            order: self.indices.next_sit,
+        };
+        self.indices.next_sit = self.indices.next_sit.saturating_add(1);
+        let mut prim = self.world.get_entity_mut(entity).ok()?;
+        if let Some(mut sitters) = prim.get_mut::<Sitters>() {
+            sitters.0.push(sitter.clone());
+        } else {
+            let _held = prim.insert(Sitters(vec![sitter.clone()]));
+        }
+        let _was = self.indices.seated.insert(agent, entity);
+        Some(sitter)
+    }
+
+    /// Stands `agent` up: the prim it sat on and where on it, or [`None`]
+    /// when it sat nowhere here.
+    pub fn stand(&mut self, agent: AgentKey) -> Option<(RegionLocalObjectId, Sitter)> {
+        let entity = self.indices.seated.remove(&agent)?;
+        let local_id = self.world.get::<Body>(entity)?.0.local_id;
+        let mut prim = self.world.get_entity_mut(entity).ok()?;
+        let (sitter, emptied) = {
+            let mut sitters = prim.get_mut::<Sitters>()?;
+            let index = sitters.0.iter().position(|sitter| sitter.agent == agent)?;
+            let sitter = sitters.0.remove(index);
+            (sitter, sitters.0.is_empty())
+        };
+        if emptied {
+            let _empty = prim.take::<Sitters>();
+        }
+        Some((local_id, sitter))
+    }
+
+    /// The prim `agent` sits on and where on it, or [`None`] when it sits
+    /// nowhere here.
+    #[must_use]
+    pub fn seat_of(&self, agent: AgentKey) -> Option<(&Object, &Sitter)> {
+        let entity = *self.indices.seated.get(&agent)?;
+        let body = &self.world.get::<Body>(entity)?.0;
+        let sitter = self
+            .world
+            .get::<Sitters>(entity)?
+            .0
+            .iter()
+            .find(|sitter| sitter.agent == agent)?;
+        Some((body, sitter))
+    }
+
+    /// Puts the root with the given region-local id on `attached.agent`'s
+    /// `attached.point`, taking it off whoever wore it before; `false` for a
+    /// prim that is not here. The record's parent and state are the caller's
+    /// to set, as the wire states them.
+    pub fn wear(&mut self, local_id: RegionLocalObjectId, attached: AttachedTo) -> bool {
+        let Some(entity) = self.entity(local_id) else {
+            return false;
+        };
+        let Some(seq) = self.world.get::<Seq>(entity).copied() else {
+            return false;
+        };
+        let _before = self.take_off(local_id);
+        let Ok(mut prim) = self.world.get_entity_mut(entity) else {
+            return false;
+        };
+        let agent = attached.agent;
+        let _held = prim.insert(attached);
+        let _new = self
+            .indices
+            .worn
+            .entry(agent)
+            .or_default()
+            .insert(seq, entity);
+        true
+    }
+
+    /// `agent` now stands at `at`: what it wears is there too.
+    pub fn move_wearer(&mut self, agent: AgentKey, at: &Vector) {
+        let worn: Vec<Entity> = self
+            .indices
+            .worn
+            .get(&agent)
+            .into_iter()
+            .flat_map(BTreeMap::values)
+            .copied()
+            .collect();
+        for entity in worn {
+            if let Some(mut attached) = self.world.get_mut::<AttachedTo>(entity) {
+                attached.at = at.clone();
+            }
+        }
+    }
+
+    /// Takes the root with the given region-local id off its wearer: who wore
+    /// it where, or [`None`] for one nobody wears.
+    pub fn take_off(&mut self, local_id: RegionLocalObjectId) -> Option<AttachedTo> {
+        let entity = self.entity(local_id)?;
+        let seq = *self.world.get::<Seq>(entity)?;
+        let attached = self
+            .world
+            .get_entity_mut(entity)
+            .ok()?
+            .take::<AttachedTo>()?;
+        self.indices.unwear(attached.agent, seq);
+        Some(attached)
+    }
+
+    /// Who wears the root with the given region-local id, on which point;
+    /// [`None`] for one nobody wears, a child among them.
+    #[must_use]
+    pub fn attached_to(&self, local_id: RegionLocalObjectId) -> Option<&AttachedTo> {
+        self.world.get::<AttachedTo>(self.entity(local_id)?)
+    }
+
+    /// The roots `agent` wears, in the store's order.
+    #[must_use]
+    pub fn worn_by(&self, agent: AgentKey) -> Vec<RegionLocalObjectId> {
+        self.indices
+            .worn
+            .get(&agent)
+            .into_iter()
+            .flat_map(BTreeMap::values)
+            .filter_map(|entity| self.world.get::<Body>(*entity).map(|body| body.0.local_id))
+            .collect()
     }
 }
 

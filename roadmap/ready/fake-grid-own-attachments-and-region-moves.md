@@ -121,3 +121,27 @@ and see it arrive with its COF link; detach it from the pie menu and from
 inventory and see the kill and the link drop; teleport to a neighbour and
 back with it worn, and see one copy, still worn, still linked; a refused
 attach never reads as worn.
+
+## From server-world-sit-and-attach (2026-11-02)
+
+A worn object is now the region's state (`sl-fake-grid/src/seating.rs`): its
+root carries `AttachedTo { agent, point, at }`, the store indexes what each
+avatar wears, `ObjectAttach` and a script's `llAttachToAvatar` re-send it worn
+under the same ids and `ObjectDrop` puts it back, each raising `attach`, and a
+worn object is sent to its wearer's viewer alone (`seating::shown_to`, every
+fake residents not being shown to each other). Each avatar of a region has
+its own local id now (`SceneFixtures::arrive_avatar`), a new one on its
+return, which takes "give each region its own avatar local id" off this
+task's scope; a teleport or crossing still carries no attachment, which is
+the "same full id, new local id" move left to exercise. Left for this task,
+on top of
+its own scope:
+
+- the item an attach from the world makes and a drop removes; `ObjectDetach`
+  restating the worn item (`world::take_off` files a new one today) and
+  `DetachAttachmentIntoInv`, which is ignored;
+- the `attach(NULL_KEY)` a detach into the inventory raises before the object
+  leaves, which needs the object kept in the region for a tick;
+- a teleport away or a logout takes the worn objects out of the region
+  (`seating::leave`), scripts and all; carrying them, with their scripts'
+  state, is the region move this task already names.

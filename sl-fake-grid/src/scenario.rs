@@ -592,6 +592,13 @@ pub fn default_world() -> SceneFixtures {
     {
         tracing::error!("the stock scripted object is not in the stock region");
     }
+    // A seat a test sits on, its sitter where a fixture seat puts one.
+    if let Some(seat) = world
+        .objects
+        .seat_settings_mut(STOCK_SCRIPTED_OBJECT_LOCAL_ID)
+    {
+        *seat = crate::world::fixture_seat();
+    }
     // The object holds a script, so the region's top-scripts report is about
     // it. Its script is stopped, so it costs the region's engine nothing, and
     // the report states a cost instead: without it the stock grid answers every

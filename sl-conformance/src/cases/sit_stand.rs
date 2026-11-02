@@ -30,9 +30,10 @@
 //! - **neighbour** — a sit on an object of a neighbouring region, where one
 //!   was in view when the avatar arrived.
 //!
-//! On a fake grid only the legs that need neither a second resident in view,
-//! nor a moving avatar, nor a compiled script are run: near, stand, ground and
-//! unknown.
+//! On a fake grid every leg but far runs, and target from where the avatar
+//! stands rather than from further off: the fake grid moves no avatar
+//! (`server-world-agent-movement`), so the walks and flights those legs make
+//! go nowhere there.
 
 use std::collections::BTreeSet;
 use std::time::{Duration, Instant};
@@ -987,13 +988,21 @@ impl Found {
                 &reply.autopilot,
             )?;
         }
-        // A fake grid's seats all have a sit target, so its near sit is the
-        // one a live grid's scripted seat is compared with.
-        let (plain, target) = if is_fake(grid) {
-            (None, near)
-        } else {
-            (near, self.target.as_ref())
-        };
+        // Every grid this workspace wrote runs the scripted seat and the
+        // teleport from it: a fake grid that skipped them would pass on less.
+        if is_fake(grid) {
+            crate::support::check(
+                self.target
+                    .as_ref()
+                    .is_some_and(|target| target.seated.is_some()),
+                "the fake grid never seated the avatar on the scripted seat",
+            )?;
+            crate::support::check(
+                self.seated_after_teleport.is_some(),
+                "the fake grid never teleported the avatar from its seat",
+            )?;
+        }
+        let (plain, target) = (near, self.target.as_ref());
         if let Some(same) = plain.and_then(answer_is_where_it_sits) {
             PLAIN_ANSWER_IS_WHERE_IT_SITS.check(
                 "whether a scriptless seat's answer states where the avatar sits",
@@ -1218,12 +1227,11 @@ async fn near_legs(
     Ok(())
 }
 
-/// The legs that move the avatar away from the seat, give the seat a sit
-/// target and teleport the seated avatar: live grids only.
+/// The legs that move the avatar away from the seat and ask for it from
+/// there: live grids only, the fake grid moving no avatar.
 async fn far_legs(
     session: &mut Session,
     watch: &mut Watch,
-    mut second: Option<&mut Second<'_>>,
     seat: &Object,
     metrics: &mut Metrics,
     found: &mut Found,
@@ -1249,9 +1257,23 @@ async fn far_legs(
             stood.record(&format!("{leg}_stand"), seat_at, metrics);
         }
     }
+    Ok(())
+}
 
-    // The seat gets a sit target. The avatar is where the last far leg left
-    // it; the camera goes back to the seat, which the script upload names.
+/// The legs that give the seat a sit target, ask for it — from where the last
+/// far leg left the avatar on a live grid, from beside it on a fake one — let
+/// the second avatar ask for the taken target, and teleport the avatar from
+/// the seat: from 40 m off on a live grid, from where it stands on a fake one.
+async fn target_legs(
+    session: &mut Session,
+    watch: &mut Watch,
+    mut second: Option<&mut Second<'_>>,
+    (seat, moves): (&Object, bool),
+    metrics: &mut Metrics,
+    found: &mut Found,
+) -> Result<(), TestFailure> {
+    let seat_at = &seat.motion.position;
+    // The camera goes back to the seat, which the script upload names.
     look_at(session, seat_at).await?;
     let compiled = plant_sit_target(session, seat).await?;
     metrics.set("sit_target_script_compiled", compiled);
@@ -1284,12 +1306,20 @@ async fn far_legs(
         stood.record("target_stand", seat_at, metrics);
     }
 
-    // The target from further off, and a teleport asked from the seat.
-    move_to(session, watch, seat_at, FAR_TARGET_M, Gait::Flying).await?;
-    let leg = format!("target_{FAR_TARGET_M:.0}m");
-    let attempt = try_sit(session, watch, seat.full_id, Some(seat_at), ANSWER_BUDGET).await?;
-    attempt.record(&leg, metrics);
-    found.far_target = Some(attempt.answered());
+    // The target from further off where the avatar can be moved, and a
+    // teleport asked from the seat.
+    let attempt = if moves {
+        move_to(session, watch, seat_at, FAR_TARGET_M, Gait::Flying).await?;
+        let leg = format!("target_{FAR_TARGET_M:.0}m");
+        let attempt = try_sit(session, watch, seat.full_id, Some(seat_at), ANSWER_BUDGET).await?;
+        attempt.record(&leg, metrics);
+        found.far_target = Some(attempt.answered());
+        attempt
+    } else {
+        let attempt = try_sit(session, watch, seat.full_id, Some(seat_at), ANSWER_BUDGET).await?;
+        attempt.record("target_again", metrics);
+        attempt
+    };
     if attempt.seated.is_none() {
         return Ok(());
     }
@@ -1390,9 +1420,7 @@ async fn set_up(ctx: &mut TestContext, guard: &mut DeleteOnDrop) -> Result<Setup
     // The second avatar comes to the same spot before the seat exists, so
     // that settling its scene does not swallow the seat's arrival.
     let mut second_avatar = None;
-    if !is_fake(grid)
-        && let Some(second) = ctx.secondary()
-    {
+    if let Some(second) = ctx.secondary() {
         second.wait_for_region(REGION_TIMEOUT).await?;
         let settled =
             settle_scene_with_avatar(second, grid, build_position, SETTLE_WINDOW, SETTLE_IDLE)
@@ -1470,12 +1498,16 @@ async fn drive(ctx: &mut TestContext, setup: &Setup, found: &mut Found) -> Resul
             found,
         )
         .await?;
-        if !is_fake(grid) && found.near.as_ref().is_some_and(Attempt::answered) {
-            far_legs(
+        if found.near.as_ref().is_some_and(Attempt::answered) {
+            let moves = !is_fake(grid);
+            if moves {
+                far_legs(session, &mut watch, &setup.seat, &mut metrics, found).await?;
+            }
+            target_legs(
                 session,
                 &mut watch,
                 second.as_mut(),
-                &setup.seat,
+                (&setup.seat, moves),
                 &mut metrics,
                 found,
             )
