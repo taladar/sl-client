@@ -28,4 +28,7 @@ Wanted: on the Second Life flavour, a nil `asset_id` for a script in the
 `FetchInventory2` / `FetchInventoryDescendents2` and the UDP fetches, and in
 `UpdateCreateInventoryItem`; the transfer of a task script by item still
 answering with the source. The `script-compile` census records the answer
-as `item_asset`, so its fake run (once it has one) holds it.
+as `item_asset` and runs offline on both fake flavours; its Second Life
+flavour excuses `*_item_asset` and `*_new_asset` meanwhile
+(`FAKE_SL_PENDING` in `sl-conformance/src/cases/script_compile.rs`), and
+those two entries come out with this.

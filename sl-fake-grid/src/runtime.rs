@@ -128,6 +128,11 @@ pub struct RegionConfig {
     /// [`DEFAULT_STEP`](crate::heartbeat::DEFAULT_STEP) by itself unless a test
     /// asks for a coarser clock, a finer one, or one it steps by hand.
     pub heartbeat: HeartbeatConfig,
+    /// The region's `[OSSL]` settings — which of OpenSim's own functions a
+    /// script may call, and who — or [`None`] for the stock
+    /// `osslDefaultEnable.ini` the local OpenSim runs. Read by the OpenSim
+    /// flavour's engine; Second Life compiles none of the functions.
+    pub ossl: Option<sl_lsl_runtime::vm::ossl::Settings>,
 }
 
 impl RegionConfig {
@@ -186,6 +191,7 @@ impl Default for RegionConfig {
             product: ProductType::FullRegion,
             capacity: None,
             heartbeat: HeartbeatConfig::default(),
+            ossl: None,
         }
     }
 }
@@ -2278,6 +2284,12 @@ impl FakeGridBuilder {
                     // id stream is not moved on by a draw of its own.
                     u64::try_from(region_id.as_u128() & u128::from(u64::MAX)).unwrap_or(1),
                 );
+                if let Some(ossl) = &config.ossl {
+                    for ignored in &ossl.ignored {
+                        tracing::warn!(region = %config.name, %ignored, "an [OSSL] setting OpenSim would ignore");
+                    }
+                    fixtures.script_instances.set_ossl(ossl.clone());
+                }
                 let world = Arc::new(parking_lot::Mutex::new(fixtures));
                 let (changes, _) = broadcast::channel(REGION_CHANGES_CHANNEL_CAPACITY);
                 let heartbeat = crate::heartbeat::Heartbeat::new(

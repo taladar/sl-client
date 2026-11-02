@@ -2,7 +2,7 @@
 id: test-lsl-differential-opensim
 title: Run one script on both grids and diff what it did
 topic: test
-status: blocked
+status: ready
 origin: LSL-on-the-fake-grid audit (2026-09-20)
 points: 8
 blocked_by: [server-fake-grid-script-engine-wiring,

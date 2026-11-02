@@ -1114,11 +1114,43 @@ is.
   scripts through `Engine::shut_down` and `Engine::start_up` with the time
   down; the countdown and the agents a restart sends away are
   `server-fake-grid-estate-actions`'.
-- **Not wired yet**: sitting is not world
-  state (`seated_on` is `false`, `llSitOnLink` finds no sit target); the grid
-  keeps no balances (`llGiveMoney` moves nothing, `llTransferLindenDollars`
+- **Experiences.** A script compiled into an experience (the experience
+  its upload named, kept on the item) stands where its prim is as the
+  experience documentation says, which no live measurement has held yet:
+  an id the catalogue does not know is `XP_ERROR_INVALID_EXPERIENCE`; a
+  suspended or disabled record says so; one the estate blocks, or one a
+  restricted parcel does not admit, is `XP_ERROR_NOT_PERMITTED_LAND`; one
+  rated above the region is `XP_ERROR_MATURITY_EXCEEDED`; and a land-scoped
+  (not grid-wide) experience runs only where the estate allowed, trusted or
+  defaulted it, or the parcel admits it by name. The lists are the
+  region's (`ExperienceLand`), seeded from the fixture every session's
+  store is seeded from and rewritten by a `RegionExperiences` POST. A
+  question put under an experience is remembered: a *Yes* records the
+  experience allowed for the agent (the reference viewer sends nothing
+  else — `script_question_cb` only posts a local event), so every later
+  script of it is granted unasked; a *No* records nothing and the script
+  hears `XP_ERROR_NOT_PERMITTED`; a block arrives over
+  `ExperiencePreferences` on its own; and a question still unanswered
+  after five minutes of region ticks is `XP_ERROR_REQUEST_PERM_TIMEOUT`.
+- **OSSL.** `RegionConfig::ossl` hands the engine the region's `[OSSL]`
+  settings (`Settings::from_ini` of a scenario's own, every value OpenSim
+  would ignore logged as a warning); unset, the stock
+  `osslDefaultEnable.ini`. The owner's standing names the gods as OpenSim's
+  `PermissionsModule` does: `GRID_GOD` an account of god level 200 or more,
+  `GOD` that or the estate owner (`region_owner_is_god`), `ACTIVE_GOD` an
+  owner in the region with god powers on.
+- **Not wired yet**: sitting is not world state (`seated_on` is `false`,
+  `llSitOnLink` finds no sit target, and neither a drop nor a stand revokes
+  anything), which is `server-world-sit-and-attach`'s; and the grid keeps
+  no balances (`llGiveMoney` moves nothing, `llTransferLindenDollars`
   refuses only a payee with no account, a payment to an object raises no
-  `money`); and an experience script may run wherever it is.
+  `money`), which is `server-fake-grid-money-ledger`'s.
+- **Held by** `sl-fake-grid/tests/scripts.rs` (the life of a script, its
+  state through a restart and a take, the experience questions, the OSSL
+  gate), `sl-client-bevy-viewer/tests/e2e_running_scripts.rs` (a running
+  script's dialog and experience card answered in the real viewer and heard
+  back by the script) and the `script-compile` census, which runs offline
+  on both fake flavours.
 
 ## Out of scope
 

@@ -2,7 +2,7 @@
 id: server-fake-grid-script-engine-wiring
 title: Wire the script engine into the fake grid
 topic: server
-status: in-progress
+status: done
 origin: LSL-on-the-fake-grid audit (2026-09-20)
 points: 8
 blocked_by: [server-lsl-vm-execution, server-world-heartbeat,
@@ -64,22 +64,43 @@ Context: [context/lsl.md](../context/lsl.md).
   sees the `KillObject`; and a counting script keeps its count and its
   listen through a restart (`changed(CHANGED_REGION_START)`) and through a
   take and a rez (`on_rez`).
+- **Experiences** (`ExperienceLand`, `sl_fake_grid::experiences`): a
+  script's standing judged by the catalogue record (no such experience,
+  suspended, disabled), the estate's lists (blocked; a land-scoped experience
+  only where allowed, trusted or the default), the parcel's admissions and
+  the region's maturity — the documented rules, unmeasured. The lists are the
+  region's, seeded from the fixture the sessions are and rewritten by a
+  `RegionExperiences` POST. A *Yes* to an experience's question records the
+  experience allowed for the agent (the reference viewer sends nothing else),
+  so the experience's next script is granted unasked; a *No* records nothing;
+  a question unanswered for five minutes of ticks answers
+  `XP_ERROR_REQUEST_PERM_TIMEOUT`.
+- **OSSL**: `RegionConfig::ossl` → `Engine::set_ossl`, what OpenSim would
+  ignore logged; the standing's `GRID_GOD`, `GOD` and `ACTIVE_GOD` as
+  OpenSim's `PermissionsModule` reads them.
+- **`llGetOwner`** in the runtime library (`Host::owner`), which the census's
+  listening script needs.
+- **The census offline**: `script-compile` declares both fake flavours and is
+  in `OFFLINE_CASES`, about 85 s a flavour, held to its live grid's table but
+  for the errors' wording, `KNOWN_DEVIATIONS`, the XEngine legs and, on the
+  Second Life flavour, `FAKE_SL_PENDING` (the hidden script asset id,
+  `server-fake-grid-hide-script-asset-ids`; LSL2's large-code error,
+  `server-lsl-lso-memory`).
+- **More acceptance**: `tests/scripts.rs` adds an experience accepted for
+  its every script and refused where suspended (9) or estate-blocked (17), a
+  refusal (4) and a timeout (18), and the region's `[OSSL]` admitting a god
+  alone; `sl-client-bevy-viewer/tests/e2e_running_scripts.rs` has the real
+  viewer answer a running script's dialog (both flavours, heard back by the
+  script's `listen`) and its experience card (Second Life,
+  `experience_permissions` raised and the experience allowed).
 
-## Left
+## Handed on
 
-- **Money** (§ From server-lsl-lib-money-permissions): no balances
-  (`server-fake-grid-money-ledger`), so `llGiveMoney` moves nothing,
-  `llTransferLindenDollars` refuses only a payee with no account, and a
-  `MoneyTransferRequested` to an object raises no `money`.
-- **Experiences**: a script's standing is not judged (catalogue state,
-  region and parcel settings), an answered experience question is not
-  recorded as the agent's preference, and an unanswered one never times out.
-- **Sitting** (`seated_on`, `llSitOnLink`) waits for
-  `server-world-sit-and-attach`; the lapses on a drop and a stand with it.
-- **OSSL settings** from a scenario (`Engine::set_ossl`); a god's standing.
-- **The census offline**: `script-compile` into `OFFLINE_CASES`.
-- **Viewer legs**: the dialog card answered into a `listen`, the vendor
-  paid from the viewer, the experience card.
+- **Money** (§ From server-lsl-lib-money-permissions) to
+  `server-fake-grid-money-ledger`, the vendor paid from the viewer with it
+  (which also waits for the viewer's pay dialog, `viewer-money-economy-ui`).
+- **Sitting** (`seated_on`, `llSitOnLink`, the lapses on a drop and a
+  stand) to `server-world-sit-and-attach`.
 
 The join. The runtime crate knows nothing about prims (it talks to a
 `Host`); `sl-fake-grid` knows nothing about scripts. This task

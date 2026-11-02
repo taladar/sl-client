@@ -43,9 +43,17 @@
 //! administers. A fixture where owned == admin == contributor cannot show that
 //! a viewer has wired each tab to its own capability.
 
-use sl_proto::{ExperienceInfo, ExperienceLocation, ExperienceProperties, SimSession};
+use std::collections::{BTreeMap, BTreeSet};
+
+use sl_lsl_runtime::vm::ExperienceError;
+use sl_proto::{
+    ExperienceInfo, ExperienceLocation, ExperienceProperties, Maturity, RegionLocalParcelId,
+    SimSession,
+};
 use sl_types::key::{AgentKey, ExperienceKey, GroupKey};
-use sl_wire::{PROPERTY_GRID, PROPERTY_PRIVATE, PROPERTY_PRIVILEGED, PROPERTY_SUSPENDED};
+use sl_wire::{
+    PROPERTY_DISABLED, PROPERTY_GRID, PROPERTY_PRIVATE, PROPERTY_PRIVILEGED, PROPERTY_SUSPENDED,
+};
 use uuid::Uuid;
 
 use crate::world::AvatarIdentity;
@@ -282,18 +290,19 @@ pub fn seed_catalogue(sim: &mut SimSession) {
     // viewer's per-list picker filters — land-scoped in Allowed, grid-scoped
     // and unprivileged in Blocked — so the panel is never seeded with a row its
     // own Add would have refused.
-    sim.experiences_mut().set_region_lists(
-        vec![experience_key(OFFSET_ARENA)],
-        vec![filler_key(2)],
-        vec![experience_key(OFFSET_WEATHER)],
-    );
+    //
+    // The lists are the region's ([`ExperienceLand`]): a session is seeded
+    // with what the region starts with.
+    let land = ExperienceLand::default();
+    sim.experiences_mut()
+        .set_region_lists(land.allowed, land.blocked, land.trusted);
     // The estate's default experience — the reply's fourth key, and a row the
     // panel must show in the Key list *and* refuse to remove. Seeded as a
     // fourth id, in none of the three lists, so the sticky row can only have
     // come from `default`: a default that was also in `trusted` would show up
     // either way and prove nothing.
     sim.experiences_mut()
-        .set_region_default_experience(Some(experience_key(OFFSET_ESTATE_DEFAULT)));
+        .set_region_default_experience(land.default);
     // A group's experience list is a statement about the group, not about
     // whoever is logged in, so it belongs on this side of the split.
     sim.experiences_mut().set_group(
@@ -331,6 +340,133 @@ pub fn seed_for_agent(sim: &mut SimSession, agent: &AvatarIdentity) {
     store.set_owned(owned);
     store.set_admin(admin);
     store.set_creator(vec![experience_key(OFFSET_TOUR)]);
+}
+
+/// The record of the experience `key` as a script owned by `owner` finds it:
+/// the catalogue's, or one of the experiences [`agent_catalogue`] builds for
+/// the owner.
+#[must_use]
+pub fn record_for(key: ExperienceKey, owner: AgentKey) -> Option<ExperienceInfo> {
+    let identity = AvatarIdentity::new(owner, "", "");
+    catalogue()
+        .into_iter()
+        .chain(agent_catalogue(&identity))
+        .find(|record| record.public_id == key)
+}
+
+/// What the land of one region says of experiences: the estate's allowed,
+/// blocked and trusted lists, its default experience, and which experiences
+/// a parcel admits. The region's own, which an experience script's standing is
+/// judged by ([`ExperienceLand::standing`]); each session is seeded with the
+/// same lists at login, and a `RegionExperiences` POST from any of them
+/// writes them here too.
+///
+/// [`Default`] is the fixture: the lists [`seed_catalogue`] gives every
+/// session, and no parcel restricted.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExperienceLand {
+    /// The estate's allowed experiences.
+    pub allowed: Vec<ExperienceKey>,
+    /// The estate's blocked experiences.
+    pub blocked: Vec<ExperienceKey>,
+    /// The estate's trusted experiences.
+    pub trusted: Vec<ExperienceKey>,
+    /// The estate's default experience.
+    pub default: Option<ExperienceKey>,
+    /// Which experiences each parcel admits, by its region-local id; a parcel
+    /// with no entry admits every experience, as
+    /// [`SimExperiences::parcel_admits`](sl_proto::SimExperiences::parcel_admits)
+    /// answers it.
+    parcels: BTreeMap<RegionLocalParcelId, BTreeSet<ExperienceKey>>,
+}
+
+impl Default for ExperienceLand {
+    fn default() -> Self {
+        Self {
+            allowed: vec![experience_key(OFFSET_ARENA)],
+            blocked: vec![filler_key(2)],
+            trusted: vec![experience_key(OFFSET_WEATHER)],
+            default: Some(experience_key(OFFSET_ESTATE_DEFAULT)),
+            parcels: BTreeMap::new(),
+        }
+    }
+}
+
+impl ExperienceLand {
+    /// Declares the experiences the parcel `parcel` admits: from now on it
+    /// admits those alone.
+    pub fn set_parcel(
+        &mut self,
+        parcel: RegionLocalParcelId,
+        admitted: impl IntoIterator<Item = ExperienceKey>,
+    ) {
+        drop(self.parcels.insert(parcel, admitted.into_iter().collect()));
+    }
+
+    /// Replaces the estate's three lists (a `RegionExperiences` POST).
+    pub fn set_lists(
+        &mut self,
+        allowed: Vec<ExperienceKey>,
+        blocked: Vec<ExperienceKey>,
+        trusted: Vec<ExperienceKey>,
+    ) {
+        self.allowed = allowed;
+        self.blocked = blocked;
+        self.trusted = trusted;
+    }
+
+    /// Whether a script of the experience `record` (its id `key`, the record
+    /// [`None`] when no experience has that id) may run over the parcel
+    /// `parcel` of a region rated `region`.
+    ///
+    /// The rules are the experience documentation's, not a measurement: no
+    /// such experience is [`ExperienceError::InvalidExperience`]; one its owner
+    /// disabled or Linden Lab suspended says so; one the estate blocked, or
+    /// one a restricted parcel does not admit, is
+    /// [`ExperienceError::NotPermittedLand`]; one rated above the region is
+    /// [`ExperienceError::MaturityExceeded`]; and a land-scoped (not
+    /// grid-wide) experience runs only where the estate allowed, trusted or
+    /// defaulted it or the parcel admits it by name.
+    ///
+    /// # Errors
+    ///
+    /// The `XP_ERROR_*` that stops the script, as above.
+    pub fn standing(
+        &self,
+        key: ExperienceKey,
+        record: Option<&ExperienceInfo>,
+        parcel: Option<RegionLocalParcelId>,
+        region: Maturity,
+    ) -> Result<(), ExperienceError> {
+        let Some(record) = record else {
+            return Err(ExperienceError::InvalidExperience);
+        };
+        let properties = record.properties.0;
+        if properties & PROPERTY_SUSPENDED != 0 {
+            return Err(ExperienceError::ExperienceSuspended);
+        }
+        if properties & PROPERTY_DISABLED != 0 {
+            return Err(ExperienceError::ExperienceDisabled);
+        }
+        if self.blocked.contains(&key) {
+            return Err(ExperienceError::NotPermittedLand);
+        }
+        let named_by_parcel = parcel
+            .and_then(|parcel| self.parcels.get(&parcel))
+            .map(|admitted| admitted.contains(&key));
+        if named_by_parcel == Some(false) {
+            return Err(ExperienceError::NotPermittedLand);
+        }
+        if record.maturity > i32::from(region.to_sim_access()) {
+            return Err(ExperienceError::MaturityExceeded);
+        }
+        let by_estate =
+            self.allowed.contains(&key) || self.trusted.contains(&key) || self.default == Some(key);
+        if properties & PROPERTY_GRID == 0 && !by_estate && named_by_parcel != Some(true) {
+            return Err(ExperienceError::NotPermittedLand);
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]

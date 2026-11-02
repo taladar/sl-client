@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 129 |
-| ready | 335 |
-| blocked | 45 |
-| in-progress | 19 |
+| ready | 340 |
+| blocked | 40 |
+| in-progress | 18 |
 | bugs | 42 |
-| done | 1471 |
+| done | 1472 |
 | deferred | 30 |
 | wont-do | 24 |
 | **total** | **2095** |
@@ -300,8 +300,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `server-world-update-scheduling`, `gridspec-lsl-prim-state` (done))
 - [`server-lsl-lib-task-inventory`](ideas/server-lsl-lib-task-inventory.md) —
   Library tranche — task inventory, giving, rezzing and notecards (blocked by
-  `server-lsl-vm-execution` (done), `server-fake-grid-script-engine-wiring`,
-  `gridspec-lsl-task-inventory` (done))
+  `server-lsl-vm-execution` (done), `server-fake-grid-script-engine-wiring`
+  (done), `gridspec-lsl-task-inventory` (done))
 - [`server-lsl-lib-time-timers`](ideas/server-lsl-lib-time-timers.md) — Library
   tranche — time, timers and sleeping, on a tick clock (blocked by
   `server-lsl-vm-execution` (done), `server-world-determinism-contract`,
@@ -329,7 +329,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-lsl-opensim-function-set`](ideas/gridspec-lsl-opensim-function-set.md)
   — Measure which library functions OpenSim's engines compile
 
-## ready (335)
+## ready (340)
 
 ### protocol
 
@@ -1050,6 +1050,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-handover-distant-and-vehicle-aditi`](ready/test-handover-distant-and-vehicle-aditi.md)
   — Live-test distant teleport (world_reset) and vehicle corner crossings, incl.
   on aditi
+- [`test-lsl-differential-opensim`](ready/test-lsl-differential-opensim.md) —
+  Run one script on both grids and diff what it did (blocked by
+  `server-fake-grid-script-engine-wiring` (done),
+  `gridspec-lsl-live-differential-runner` (done))
 - [`test-lsl-script-corpus`](ready/test-lsl-script-corpus.md) — An executable
   LSL corpus that runs in cargo test with no grid (blocked by
   `server-lsl-vm-execution` (done))
@@ -1058,6 +1062,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`repl-audit-binary-duplication`](ready/repl-audit-binary-duplication.md) —
   The two REPL binaries share ~400 near-verbatim lines and have already drifted
+- [`repl-lsl-script-control`](ready/repl-lsl-script-control.md) — sl-repl verbs
+  for compiling, running and watching scripts (blocked by
+  `server-fake-grid-script-engine-wiring` (done))
 
 ### server
 
@@ -1107,6 +1114,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-fake-grid-parcel-on-movement`](ready/server-fake-grid-parcel-on-movement.md)
   — Fake grid — push the parcel an agent walks onto, and serve parcel
   environments
+- [`server-fake-grid-scripted-avatars`](ready/server-fake-grid-scripted-avatars.md)
+  — Scripted avatars — a client that grants, pays, sits and answers (blocked by
+  `server-fake-grid-script-engine-wiring` (done))
+- [`server-fake-grid-scripted-scenario`](ready/server-fake-grid-scripted-scenario.md)
+  — A scripts scenario — one prim per scripted behaviour (blocked by
+  `server-fake-grid-script-engine-wiring` (done))
 - [`server-fake-grid-terraform`](ready/server-fake-grid-terraform.md) — Fake
   grid — terraforming, undo and bake (blocked by `gridspec-terrain-editing`
   (done))
@@ -1114,6 +1127,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   agent never moves — AgentUpdate is decoded and ignored (blocked by
   `server-world-heartbeat` (done), `gridspec-neighbours-crossing` (done),
   `gridspec-agent-movement` (done))
+- [`server-world-changed-raisers`](ready/server-world-changed-raisers.md) —
+  Raise changed() from every grid-side cause, with the right bit (blocked by
+  `server-fake-grid-script-engine-wiring` (done), `gridspec-lsl-events` (done))
 - [`server-world-collision-and-physics`](ready/server-world-collision-and-physics.md)
   — Enough physics for the collision, target and volume-detect events (blocked
   by `server-world-heartbeat` (done), `server-world-ecs-store` (done))
@@ -1142,7 +1158,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-sl-mfa-challenge`](ready/gridspec-sl-mfa-challenge.md) — Record
   Second Life's MFA challenge and whether a remembered mfa_hash gets past it
 
-## blocked (45)
+## blocked (40)
 
 ### viewer
 
@@ -1251,20 +1267,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-lsl-content-suite`](blocked/test-lsl-content-suite.md) — A test harness
   for somebody else's LSL content (blocked by
   `server-fake-grid-scripted-avatars`)
-- [`test-lsl-differential-opensim`](blocked/test-lsl-differential-opensim.md) —
-  Run one script on both grids and diff what it did (blocked by
-  `server-fake-grid-script-engine-wiring`,
-  `gridspec-lsl-live-differential-runner` (done))
 - [`test-voice-account`](blocked/test-voice-account-provision-a-voice-account.md)
   — provision a voice account (blocked by `viewer-voice-audio`)
 - [`test-voice-signaling`](blocked/test-voice-signaling-exchange-voice-signalling.md)
   — exchange voice signalling (blocked by `test-voice-account`)
-
-### repl
-
-- [`repl-lsl-script-control`](blocked/repl-lsl-script-control.md) — sl-repl
-  verbs for compiling, running and watching scripts (blocked by
-  `server-fake-grid-script-engine-wiring`)
 
 ### server
 
@@ -1275,29 +1281,20 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-fake-grid-profiles`](blocked/server-fake-grid-profiles.md) — Fake
   grid — profiles, picks, classifieds and notes with each grid's quirks (blocked
   by `gridspec-profiles` (done), `protocol-sim-profile-messages`)
-- [`server-fake-grid-scripted-avatars`](blocked/server-fake-grid-scripted-avatars.md)
-  — Scripted avatars — a client that grants, pays, sits and answers (blocked by
-  `server-fake-grid-script-engine-wiring`)
-- [`server-fake-grid-scripted-scenario`](blocked/server-fake-grid-scripted-scenario.md)
-  — A scripts scenario — one prim per scripted behaviour (blocked by
-  `server-fake-grid-script-engine-wiring`)
 - [`server-lsl-forced-delays-per-flavour`](blocked/server-lsl-forced-delays-per-flavour.md)
   — Charge each grid flavour's measured forced delays and throttles, not the
   keyword file's (blocked by `gridspec-lsl-throttles` (done),
   `server-lsl-lib-comms` (done), `server-lsl-lib-http-url`,
   `server-lsl-lib-task-inventory`, `server-lsl-lib-math-rotations` (done),
   `server-lsl-lib-land-region-env`, `server-lsl-lib-prim-state`,
-  `server-fake-grid-script-engine-wiring`)
-- [`server-world-changed-raisers`](blocked/server-world-changed-raisers.md) —
-  Raise changed() from every grid-side cause, with the right bit (blocked by
-  `server-fake-grid-script-engine-wiring`, `gridspec-lsl-events` (done))
+  `server-fake-grid-script-engine-wiring` (done))
 
 ### gridspec
 
 - [`gridspec-voice`](blocked/gridspec-voice.md) — Voice provisioning and
   signalling on each grid (blocked by `viewer-voice-audio`)
 
-## in-progress (19)
+## in-progress (18)
 
 ### viewer
 
@@ -1348,13 +1345,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
-
-### server
-
-- [`server-fake-grid-script-engine-wiring`](in-progress/server-fake-grid-script-engine-wiring.md)
-  — Wire the script engine into the fake grid (blocked by
-  `server-lsl-vm-execution` (done), `server-world-heartbeat` (done),
-  `server-world-ecs-store` (done))
 
 ## bugs (42)
 
@@ -1462,7 +1452,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1471)
+## done (1472)
 
 ### protocol
 
@@ -4479,6 +4469,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-fake-grid-script-compile-on-upload`](done/server-fake-grid-script-compile-on-upload.md)
   — A script upload is accepted and never compiled (blocked by
   `server-lsl-compiler-ir` (done), `gridspec-lsl-compile` (done))
+- [`server-fake-grid-script-engine-wiring`](done/server-fake-grid-script-engine-wiring.md)
+  — Wire the script engine into the fake grid (blocked by
+  `server-lsl-vm-execution` (done), `server-world-heartbeat` (done),
+  `server-world-ecs-store` (done))
 - [`server-fake-grid-top-objects-report`](done/server-fake-grid-top-objects-report.md)
   — Fake grid — a top-objects report with rows in it, and a return that finds
   them

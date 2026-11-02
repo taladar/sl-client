@@ -158,6 +158,7 @@ mod test {
         notecards_gestures => "notecards-gestures" [fake_sl, fake_opensim],
         avatar_render_info => "avatar-render-info" [fake_sl, fake_opensim],
         landmarks_home => "landmarks-home" [fake_sl, fake_opensim],
+        script_compile => "script-compile" [fake_sl, fake_opensim],
         instant_messages => "instant-messages" [fake_sl, fake_opensim],
     }
 

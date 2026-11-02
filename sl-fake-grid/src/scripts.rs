@@ -53,15 +53,24 @@
 //! ([`FakeGrid::restart_region`](crate::FakeGrid::restart_region)) saves and
 //! brings back every script in place, with `changed(CHANGED_REGION_START)`.
 //!
+//! # Experiences
+//!
+//! A script of an experience stands where its prim is as the region's
+//! [`ExperienceLand`](crate::experiences::ExperienceLand) judges it. A
+//! question put under the experience is remembered until it is answered: a
+//! *Yes* records the experience allowed for the agent, which is what lets the
+//! experience's every later script be granted unasked; a *No* records
+//! nothing; and a question unanswered for five minutes of region ticks is
+//! answered `XP_ERROR_REQUEST_PERM_TIMEOUT`.
+//!
 //! # Not yet wired
 //!
 //! - Sitting is not world state: `seated_on` is always `false` and
-//!   `llSitOnLink` finds no sit target.
+//!   `llSitOnLink` finds no sit target (`server-world-sit-and-attach`).
 //! - The grid keeps no money balances: `llGiveMoney` moves nothing,
 //!   `llTransferLindenDollars` refuses only a payee with no account, and a
-//!   payment to an object raises no `money` event.
-//! - An experience script's standing is not judged against the catalogue,
-//!   the region and the parcel: it may run wherever it is.
+//!   payment to an object raises no `money` event
+//!   (`server-fake-grid-money-ledger`).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -75,11 +84,11 @@ use sl_lsl_runtime::vm::{
     ExperienceError, ExperienceQuestion, Heard, Host, InstantMessage, KeyValueStore, LinkedPrim,
     Links, LinksetData, LinksetId, LoadUrl, MapDestination, MoneyRefusal, PayPrice, Payment,
     Question, SavedScript, ScriptExperience, ScriptUsage, Simulator, SitRefusal, Speech, Standing,
-    TickReport, Whereabouts,
+    Tick, TickReport, Whereabouts,
 };
 use sl_proto::{
-    AssetKey, AssetSource as _, AssetType, ChatSource, ChatType, ImDialog, InventoryType,
-    LoadUrlRequest, Object, RegionLocalObjectId, ScriptDialog, ScriptLanguage,
+    AssetKey, AssetSource as _, AssetType, ChatSource, ChatType, ExperiencePermission, ImDialog,
+    InventoryType, LoadUrlRequest, Object, RegionLocalObjectId, ScriptDialog, ScriptLanguage,
     ScriptPermissionRequest, ScriptTeleportRequest, ServerEvent, SimSession, TaskInventoryItem,
 };
 use sl_types::chat::{ChatChannel, ChatVolume};
@@ -122,6 +131,11 @@ const REGION_EDGE_M: u32 = 256;
 /// never takes the program (an upload to an item the prim does not hold)
 /// must not keep it for good.
 const PROGRAM_HANDOFF_TICKS: u32 = 100;
+
+/// How long an experience's permission question waits for its answer before
+/// the script is told `XP_ERROR_REQUEST_PERM_TIMEOUT` (the runtime's
+/// [`Host::ask_experience`] contract: five minutes).
+const EXPERIENCE_QUESTION_TIMEOUT: Duration = Duration::from_secs(300);
 
 /// One script instance's place in the region: the prim and the item it is,
 /// the asset its program was compiled from, and the item's name.
@@ -179,6 +193,9 @@ pub struct RegionScripts {
     /// the next reconcile to start them: what they saved at their take, if
     /// anything, and what the rez says.
     arriving: BTreeMap<(ObjectKey, InventoryKey), Arriving>,
+    /// The experience questions put and not yet answered, by the script and
+    /// the avatar asked: the experience, and the tick the question went out.
+    experience_questions: BTreeMap<(CallerId, AgentKey), (ExperienceKey, Tick)>,
 }
 
 /// A script arriving in the region with the object it is in.
@@ -221,6 +238,7 @@ impl RegionScripts {
             draws: seed.max(1),
             last_load: (0, 0),
             arriving: BTreeMap::new(),
+            experience_questions: BTreeMap::new(),
         }
     }
 
@@ -228,6 +246,12 @@ impl RegionScripts {
     #[must_use]
     pub const fn engine(&self) -> &Engine {
         &self.engine
+    }
+
+    /// Runs the region's OSSL, LightShare and MOD calls under `settings`
+    /// ([`Engine::set_ossl`]).
+    pub(crate) fn set_ossl(&mut self, settings: sl_lsl_runtime::vm::ossl::Settings) {
+        self.engine.set_ossl(settings);
     }
 
     /// Which grid's engine the region imitates.
@@ -482,8 +506,38 @@ impl RegionScripts {
         }
     }
 
-    /// Take the instance `id` out of the region.
+    /// Tells every script whose experience question has waited
+    /// [`EXPERIENCE_QUESTION_TIMEOUT`] by `now` (ticks of `step`) that it
+    /// timed out.
+    fn time_out_experience_questions(&mut self, now: Tick, step: Duration) {
+        let limit = u64::try_from(
+            EXPERIENCE_QUESTION_TIMEOUT
+                .as_micros()
+                .div_ceil(step.as_micros().max(1)),
+        )
+        .unwrap_or(u64::MAX);
+        let expired: Vec<(CallerId, AgentKey)> = self
+            .experience_questions
+            .iter()
+            .filter(|(_asked, (_experience, at))| now.0.saturating_sub(at.0) >= limit)
+            .map(|(asked, _question)| *asked)
+            .collect();
+        for (id, agent) in expired {
+            let _asked = self.experience_questions.remove(&(id, agent));
+            let agent = agent.uuid().to_string();
+            if let Err(error) =
+                self.engine
+                    .answer_experience(id, &agent, Err(ExperienceError::RequestTimedOut))
+            {
+                tracing::warn!(?id, %error, "an experience question's timeout could not be posted");
+            }
+        }
+    }
+
+    /// Take the instance `id` out of the region, with the questions it put.
     fn remove(&mut self, id: CallerId) {
+        self.experience_questions
+            .retain(|(asked, _agent), _question| *asked != id);
         let _instance = self.engine.remove(id);
         if let Some(slot) = self.slots.remove(&id) {
             let _gone = self.by_item.remove(&(slot.prim, slot.item));
@@ -709,6 +763,10 @@ struct Present {
     allowed: Vec<ExperienceKey>,
     /// The experiences it has blocked.
     blocked: Vec<ExperienceKey>,
+    /// Whether it has god powers on (OpenSim's `IsGod`: a level of
+    /// [`GOD_LEVEL_FLOOR`](crate::god_powers::GOD_LEVEL_FLOOR) or more
+    /// granted).
+    active_god: bool,
 }
 
 /// What a tick's scripts did that the region applies under its lock, once
@@ -732,6 +790,16 @@ enum Effect {
     },
     /// The linkset whose root is this prim leaves the region (`llDie`).
     Die(RegionLocalObjectId),
+    /// An experience's permission question was put to an avatar: its
+    /// answer, or its timeout, is waited for.
+    Asked {
+        /// The script that asked.
+        id: CallerId,
+        /// The avatar asked.
+        agent: AgentKey,
+        /// The experience.
+        experience: ExperienceKey,
+    },
 }
 
 /// What a tick's scripts send to a viewer, delivered once the region's lock
@@ -916,6 +984,13 @@ impl RegionHost<'_> {
         else {
             return false;
         };
+        if let Some(experience) = experience {
+            self.effects.push(Effect::Asked {
+                id: caller,
+                agent,
+                experience,
+            });
+        }
         let (first, last) = self.name_of(origin.object.owner_id);
         let object_owner = if last.is_empty() {
             first
@@ -1353,9 +1428,23 @@ impl Host for RegionHost<'_> {
             .world
             .script_experience(slot.prim, slot.item)
             .flatten()?;
+        let origin = self.origin(caller)?;
+        let record =
+            crate::experiences::record_for(experience, AgentKey::from(origin.object.owner_id));
+        let position = self.position(caller);
+        let maturity = self
+            .core
+            .region(self.index)
+            .map_or(sl_proto::Maturity::Pg, |region| region.config.maturity);
+        let standing = self.world.experience_land.standing(
+            experience,
+            record.as_ref(),
+            self.world.parcel_at_position(&position),
+            maturity,
+        );
         Some(ScriptExperience {
             key: experience.uuid().to_string(),
-            standing: Ok(()),
+            standing,
         })
     }
 
@@ -1457,6 +1546,27 @@ impl Host for RegionHost<'_> {
         {
             roles.push(Allowed::ParcelOwner);
         }
+        // OpenSim's `PermissionsModule`: a grid god is an account of a god's
+        // level; any god (`IsAdministrator`) is one, or the estate owner
+        // (`region_owner_is_god`, as `GodMode::at_login` grants it); an active
+        // god has god powers on in the region.
+        let grid_god = self.core.accounts.iter().any(|account| {
+            account.agent_id.uuid() == owner
+                && account.config.god_level >= crate::god_powers::GOD_LEVEL_FLOOR
+        });
+        if grid_god {
+            roles.push(Allowed::GridGod);
+        }
+        if grid_god || owner == estate_owner {
+            roles.push(Allowed::God);
+        }
+        if self
+            .present
+            .iter()
+            .any(|present| present.agent.uuid() == owner && present.active_god)
+        {
+            roles.push(Allowed::ActiveGod);
+        }
         Standing {
             owner: owner.to_string(),
             creator: item
@@ -1537,6 +1647,7 @@ async fn presence(core: &GridCore, index: usize) -> Vec<Present> {
                         agent: state.avatar.agent_id,
                         allowed,
                         blocked,
+                        active_god: state.god_mode.told >= crate::god_powers::GOD_LEVEL_FLOOR,
                     }
                 })
             })
@@ -1615,8 +1726,21 @@ fn tick_locked(
                 }
             }
             Effect::Die(root) => changes.extend(remove_linkset(world, root)),
+            Effect::Asked {
+                id,
+                agent,
+                experience,
+            } => {
+                let _earlier = world
+                    .script_instances
+                    .experience_questions
+                    .insert((id, agent), (experience, report.tick));
+            }
         }
     }
+    world
+        .script_instances
+        .time_out_experience_questions(report.tick, config.step);
     (report, changes, deliveries)
 }
 
@@ -1729,20 +1853,33 @@ pub(crate) fn answer_script_command(
             let Some(id) = world.script_instances.instance_of(*task_id, *item_id) else {
                 return Some(Vec::new());
             };
-            let engine = &mut world.script_instances.engine;
-            let answered = match engine.answer(id, &agent, permissions.0) {
-                Ok(Some(_posted)) => Ok(true),
-                Ok(None) => {
-                    let answer = if permissions.0 == 0 {
-                        Err(ExperienceError::NotPermitted)
-                    } else {
-                        Ok(())
-                    };
-                    engine
-                        .answer_experience(id, &agent, answer)
-                        .map(|posted| posted.is_some())
-                }
-                Err(error) => Err(error),
+            let scripts = &mut world.script_instances;
+            let experience = scripts
+                .experience_questions
+                .remove(&(id, identity.agent_id))
+                .map(|(experience, _asked)| experience);
+            let answered = if let Some(experience) = experience {
+                // Accepting an experience's question is the agent allowing
+                // the experience, which the simulator records: the viewer
+                // sends nothing else (`script_question_cb`). A refusal is
+                // recorded by nobody; a block comes over
+                // `ExperiencePreferences` on its own.
+                let answer = if permissions.0 == 0 {
+                    Err(ExperienceError::NotPermitted)
+                } else {
+                    sim.experiences_mut()
+                        .set_preference(experience, ExperiencePermission::Allow);
+                    Ok(())
+                };
+                scripts
+                    .engine
+                    .answer_experience(id, &agent, answer)
+                    .map(|posted| posted.is_some())
+            } else {
+                scripts
+                    .engine
+                    .answer(id, &agent, permissions.0)
+                    .map(|posted| posted.is_some())
             };
             match answered {
                 Ok(true) => {}

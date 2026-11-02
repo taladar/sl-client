@@ -44,13 +44,13 @@
 //! item took each other's answers (`Backend::fresh_each`).
 //!
 //! What each live grid was measured to answer is written up in
-//! `book/src/gridspec/lsl.md` § Compiling and held below. `1av`, live grids
-//! only: the fake grid compiles every upload as the grid it imitates
-//! (`sl_fake_grid::script_compile`), but runs no script yet, and half the
-//! census listens to the script it uploaded
-//! (`server-fake-grid-script-engine-wiring`). Until it can, the tests below
-//! hold the fake grid's compiler to every compile answer the tables record
-//! for the sources the census uploads, offline.
+//! `book/src/gridspec/lsl.md` § Compiling and held below. `1av`. On the fake
+//! grid, which compiles every upload as the grid it imitates
+//! (`sl_fake_grid::script_compile`) and runs the script, each flavour is held
+//! to its live grid's table but for what `hold` excuses: the errors'
+//! wording, the compile answers the unit tests below name, the XEngine legs
+//! (the fake grid runs YEngine alone) and what is still open on the Second
+//! Life flavour.
 
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
@@ -70,7 +70,8 @@ use crate::grid::Grid;
 use crate::metrics::Metrics;
 use crate::registry::{GridTest, TestFuture};
 use crate::support::{
-    REGION_TIMEOUT, REPLY_TIMEOUT, is_opensim, secs_metric, settle_scene, wait_for_own_new_object,
+    REGION_TIMEOUT, REPLY_TIMEOUT, content_is_ours, is_opensim, secs_metric, settle_scene,
+    wait_for_own_new_object,
 };
 
 /// Where the measurements are written down.
@@ -121,11 +122,20 @@ enum Backend {
     XEngine,
 }
 
+/// Whether `grid` answers as OpenSim does: the local grid, or the fake grid
+/// imitating it.
+const fn opensim_like(grid: Grid) -> bool {
+    matches!(grid.behaves_like(), sl_fake_grid::ImitatedGrid::OpenSim)
+}
+
 impl Backend {
     /// The backends a grid is measured on, in order.
     const fn on(grid: Grid) -> &'static [Self] {
         if is_opensim(grid) {
             &[Self::YEngine, Self::XEngine, Self::Luau]
+        } else if opensim_like(grid) {
+            // The fake grid runs YEngine alone (`ImitatedGrid::script_engine`).
+            &[Self::YEngine, Self::Luau]
         } else {
             &[Self::Mono, Self::Lsl2, Self::Luau]
         }
@@ -158,7 +168,7 @@ impl Backend {
     /// uploads to one item take each other's
     /// (test-conformance-upload-after-yengine-start-dropped).
     const fn fresh_each(self, grid: Grid) -> bool {
-        matches!(self, Self::XEngine) || (matches!(self, Self::Luau) && is_opensim(grid))
+        matches!(self, Self::XEngine) || (matches!(self, Self::Luau) && opensim_like(grid))
     }
 
     /// The line an OpenSim source opens with to pick its engine.
@@ -166,7 +176,7 @@ impl Backend {
         match self {
             Self::YEngine => "//YEngine:\n",
             Self::XEngine => "//XEngine:\n",
-            Self::Luau if is_opensim(grid) => "//YEngine:\n",
+            Self::Luau if opensim_like(grid) => "//YEngine:\n",
             Self::Mono | Self::Lsl2 | Self::Luau => "",
         }
     }
@@ -506,7 +516,7 @@ impl GridTest for ScriptCompile {
     }
 
     fn grids(&self) -> &'static [Grid] {
-        &[Grid::Opensim, Grid::Aditi]
+        &[Grid::Opensim, Grid::Aditi, Grid::FakeSl, Grid::FakeOpensim]
     }
 
     fn rezzes_objects(&self) -> bool {
@@ -564,7 +574,7 @@ async fn census(ctx: &mut TestContext, metrics: &mut Metrics) -> Result<(), Test
         settle_scene(session, grid, build_position, SETTLE_WINDOW, SETTLE_IDLE).await?
     };
     let Some(reference) = reference else {
-        if is_opensim(grid) {
+        if content_is_ours(grid) {
             return Err(TestFailure::Assertion(
                 "no primitive appeared in the region's object stream".to_owned(),
             ));
@@ -4110,15 +4120,103 @@ const OPENSIM: &[(&str, Answer)] = &[
     ("yengine_v3_running_upload", Answer::Text("answered")),
 ];
 
-/// Holds `metrics` to `grid`'s table.
+/// Where the fake grid's compiler is known to answer a census source
+/// otherwise than the grid it imitates, by metric, and why. Every other
+/// `compiled`, `errors_count` and `error_0_at` the census measured for a
+/// source it compiles is held by
+/// `the_fake_grid_compiles_the_census_sources_as_measured`, and a fake grid's
+/// run of the census is excused them.
+const KNOWN_DEVIATIONS: &[(&str, &str)] = &[
+    (
+        "lsl2_large_code_compiled",
+        "LSL2 refuses 60 KB of string constants: an LSO script has 16 KB, which the fake \
+         grid does not model (server-lsl-lso-memory)",
+    ),
+    (
+        "lsl2_large_code_errors_count",
+        "the same: LSL2 answered 1203 errors of no position",
+    ),
+    (
+        "lsl2_unterminated_string_error_0_at",
+        "Second Life places the fault one column left of the `;` after the name; its lexer \
+         seems not to count the unmatched `\"`, which one reading cannot settle",
+    ),
+    (
+        "mono_unterminated_string_error_0_at",
+        "the same as under LSL2",
+    ),
+    (
+        "yengine_crlf_errors_count",
+        "YEngine's parser recovers from a syntax error and reports the follow-on errors it \
+         drags (three for one missing expression); the fake grid's stops at the first",
+    ),
+    (
+        "yengine_multibyte_column_errors_count",
+        "the same follow-on errors",
+    ),
+    ("yengine_syntax_errors_count", "the same follow-on errors"),
+    (
+        "yengine_tab_column_errors_count",
+        "the same follow-on errors",
+    ),
+    (
+        "yengine_two_syntax_errors_errors_count",
+        "the same follow-on errors",
+    ),
+    (
+        "yengine_unterminated_string_error_0_at",
+        "YEngine reads an unterminated string to the end of the source and fails there \
+         (`invalid operator`); the fake grid's lexer ends it and reads the rest as names",
+    ),
+];
+
+/// What the fake grid imitating Second Life still answers otherwise than
+/// aditi, by the end of a metric's key, and the task that closes the gap.
+const FAKE_SL_PENDING: &[(&str, &str)] = &[
+    // Second Life lists a script with a nil asset id and names another in the
+    // upload's answer; the fake grid lists the real one.
+    ("_item_asset", "server-fake-grid-hide-script-asset-ids"),
+    ("_new_asset", "server-fake-grid-hide-script-asset-ids"),
+    // LSL2's 1203 errors of no position, as `lsl2_large_code_errors_count`
+    // in [`KNOWN_DEVIATIONS`].
+    ("lsl2_large_code_error_0_at", "server-lsl-lso-memory"),
+];
+
+/// Whether `key` is an error's text (`…_error_<n>`) rather than where it is
+/// or how many there are. The fake grid's compiler words its errors its own
+/// way where the situation is the same (a missing expression, an undeclared
+/// name); only Second Life's Luau errors are its words, which
+/// `the_fake_grid_compiles_the_luau_legs_as_measured` holds.
+fn is_error_text(key: &str) -> bool {
+    key.rsplit_once("_error_")
+        .is_some_and(|(_leg, n)| !n.is_empty() && n.bytes().all(|byte| byte.is_ascii_digit()))
+}
+
+/// Holds `metrics` to `grid`'s table: a fake grid's, but for the compile
+/// answers its compiler is known to give otherwise ([`KNOWN_DEVIATIONS`]),
+/// the errors' wording ([`is_error_text`]), what is still open on the Second
+/// Life flavour ([`FAKE_SL_PENDING`]) and the XEngine legs it does not run.
 fn hold(grid: Grid, metrics: &Metrics) -> Result<(), TestFailure> {
-    let table = if is_opensim(grid) {
+    let table = if opensim_like(grid) {
         OPENSIM
     } else {
         SECOND_LIFE
     };
+    let excused = |key: &str| {
+        grid.is_fake()
+            && (key.starts_with("xengine_")
+                || is_error_text(key)
+                || (grid == Grid::FakeSl
+                    && FAKE_SL_PENDING
+                        .iter()
+                        .any(|(suffix, _task)| key.ends_with(suffix)))
+                || KNOWN_DEVIATIONS
+                    .iter()
+                    .any(|(deviation, _why)| *deviation == key))
+    };
     let failures: Vec<String> = table
         .iter()
+        .filter(|(key, _expected)| !excused(key))
         .filter_map(|(key, expected)| match metrics.get(key) {
             Some(value) if expected.is(value) => None,
             Some(value) => Some(format!("{key} was {value:?}, measured {expected:?}")),
@@ -4139,63 +4237,14 @@ mod tests {
     use std::collections::BTreeMap;
 
     use super::{
-        Answer, BROKEN, Backend, LUAU, OPENSIM, SECOND_LIFE, SIZES, UNSERVED, large_code_source,
-        luau_legs, sized_source, valid_source, without_uuids,
+        Answer, BROKEN, Backend, KNOWN_DEVIATIONS, LUAU, OPENSIM, SECOND_LIFE, SIZES, UNSERVED,
+        large_code_source, luau_legs, sized_source, valid_source, without_uuids,
     };
     use crate::grid::Grid;
     use crate::metrics::Metrics;
     use pretty_assertions::assert_eq;
     use sl_client_tokio::{AssetKey, ScriptCompileError, Uuid};
     use sl_fake_grid::{ImitatedGrid, ScriptCompiler};
-
-    /// Where the fake grid's compiler is known to answer a census source
-    /// otherwise than the grid it imitates, by metric, and why. Every other
-    /// `compiled`, `errors_count` and `error_0_at` the census measured for a
-    /// source it compiles is held by
-    /// [`the_fake_grid_compiles_the_census_sources_as_measured`].
-    const KNOWN_DEVIATIONS: &[(&str, &str)] = &[
-        (
-            "lsl2_large_code_compiled",
-            "LSL2 refuses 60 KB of string constants: an LSO script has 16 KB, which the fake \
-             grid does not model (server-lsl-lso-memory)",
-        ),
-        (
-            "lsl2_large_code_errors_count",
-            "the same: LSL2 answered 1203 errors of no position",
-        ),
-        (
-            "lsl2_unterminated_string_error_0_at",
-            "Second Life places the fault one column left of the `;` after the name; its lexer \
-             seems not to count the unmatched `\"`, which one reading cannot settle",
-        ),
-        (
-            "mono_unterminated_string_error_0_at",
-            "the same as under LSL2",
-        ),
-        (
-            "yengine_crlf_errors_count",
-            "YEngine's parser recovers from a syntax error and reports the follow-on errors it \
-             drags (three for one missing expression); the fake grid's stops at the first",
-        ),
-        (
-            "yengine_multibyte_column_errors_count",
-            "the same follow-on errors",
-        ),
-        ("yengine_syntax_errors_count", "the same follow-on errors"),
-        (
-            "yengine_tab_column_errors_count",
-            "the same follow-on errors",
-        ),
-        (
-            "yengine_two_syntax_errors_errors_count",
-            "the same follow-on errors",
-        ),
-        (
-            "yengine_unterminated_string_error_0_at",
-            "YEngine reads an unterminated string to the end of the source and fails there \
-             (`invalid operator`); the fake grid's lexer ends it and reads the rest as names",
-        ),
-    ];
 
     /// The compiler, the compile target and whether agent uploads compile, of
     /// the fake grid imitating `backend`'s grid — `None` for a backend it

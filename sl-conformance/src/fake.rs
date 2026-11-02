@@ -233,6 +233,7 @@ pub const OFFLINE_CASES: &[&str] = &[
     "notecards-gestures",
     "avatar-render-info",
     "landmarks-home",
+    "script-compile",
 ];
 
 /// The offline cases meaningful on **one** fake flavour only, each with the

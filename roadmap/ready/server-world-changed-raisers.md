@@ -2,7 +2,7 @@
 id: server-world-changed-raisers
 title: Raise changed() from every grid-side cause, with the right bit
 topic: server
-status: blocked
+status: ready
 origin: server-lsl-state-and-events review (2026-09-28)
 points: 5
 blocked_by: [server-fake-grid-script-engine-wiring, gridspec-lsl-events]

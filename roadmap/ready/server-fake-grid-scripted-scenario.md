@@ -2,7 +2,7 @@
 id: server-fake-grid-scripted-scenario
 title: A scripts scenario — one prim per scripted behaviour
 topic: server
-status: blocked
+status: ready
 origin: LSL-on-the-fake-grid audit (2026-09-20)
 points: 5
 blocked_by: [server-fake-grid-script-engine-wiring]

@@ -97,6 +97,7 @@ crate::registry! {
         LlResetScript => control::ll_reset_script,
         LlDie => control::ll_die,
         LlGetStartParameter => control::ll_get_start_parameter,
+        LlGetOwner => control::ll_get_owner,
         LlSetTimerEvent => control::ll_set_timer_event,
         LlDetectedKey => detection::ll_detected_key,
         LlDetectedName => detection::ll_detected_name,

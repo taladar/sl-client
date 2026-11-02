@@ -67,3 +67,24 @@ or `BuyObjectInventory` handler. Per flavour:
   copy is an `UpdateCreateInventoryItem`, contents unasked
   `InventoryDescendents` of the root and the new folder; no balance replies;
   `BuyObjectInventory` unhandled.
+
+## From server-fake-grid-script-engine-wiring (2026-11-02)
+
+The script engine runs on the fake grid and its money calls reach the host,
+which has nothing to move them with (`sl_fake_grid::scripts`, `RegionHost`):
+
+- **`give_money` / `transfer_money`**: the owner pays the payee, transaction
+  type `5009`, the object's name as the item, the two balance replies; a
+  transfer the economy refuses is a `MoneyRefusal` (no account, or on Second
+  Life insufficient funds with the failed balance reply to the owner).
+  Today `llGiveMoney` moves nothing and `llTransferLindenDollars` refuses only
+  a payee with no account.
+- **A payment to an object** (`ServerEvent::MoneyTransferRequested`, type
+  `5008`): judged by `PayPrice::takes` on Second Life (taken, dropped
+  silently, or refused with `PAYMENT_STOPPED` as an alert to the payer); a
+  taken one is moved and raised with `Engine::paid` in every script of the
+  prim. `RequestPayPrice` is already answered from the layout the script set.
+- **Acceptance**: a vendor prim paid raises `money` with the amount, and the
+  payer's balance and the economy event stream agree; from the viewer once
+  it has a pay dialog (`viewer-money-economy-ui`), from a conformance case's
+  session until then.

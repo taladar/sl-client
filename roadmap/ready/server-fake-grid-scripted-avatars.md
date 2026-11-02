@@ -2,7 +2,7 @@
 id: server-fake-grid-scripted-avatars
 title: Scripted avatars — a client that grants, pays, sits and answers
 topic: server
-status: blocked
+status: ready
 origin: LSL-on-the-fake-grid audit (2026-09-20); raised by the user while
   scoping the scripts scenario
 points: 8

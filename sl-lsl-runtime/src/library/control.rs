@@ -4,7 +4,7 @@
 //! through the [`ScriptCtx`]; a sleep or reset takes effect once the call has
 //! returned.
 
-use crate::library::CallError;
+use crate::library::{CallError, Key};
 use crate::vm::ScriptCtx;
 
 /// `llSleep`: suspend the script for `seconds`, counted in ticks and rounded
@@ -67,6 +67,16 @@ pub fn ll_set_timer_event(ctx: &mut ScriptCtx<'_>, seconds: f32) -> Result<(), C
 /// None; the signature is the library's.
 pub const fn ll_get_start_parameter(ctx: &mut ScriptCtx<'_>) -> Result<i32, CallError> {
     Ok(ctx.start_parameter())
+}
+
+/// `llGetOwner`: the key of the object's owner, as the host knows it.
+///
+/// # Errors
+///
+/// None; the signature is the library's.
+pub fn ll_get_owner(ctx: &mut ScriptCtx<'_>) -> Result<Key, CallError> {
+    let caller = ctx.caller();
+    Ok(Key(ctx.host().owner(caller)))
 }
 
 /// `llGetScriptState`: whether the script called `name` in this prim is

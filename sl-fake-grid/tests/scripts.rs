@@ -1,9 +1,13 @@
 //! Scripts run on the fake grid: the catalogue's scripted box runs its script
 //! from the start, answers a line said on its channel, stops and starts with
 //! the viewer's Running checkbox, restarts on a reset, survives a script that
-//! throws, and takes its object out of the region with `llDie`; and a script
-//! keeps what it holds through a region restart and through a take and a rez
-//! — each step driven by a real client, the region ticked one step at a time.
+//! throws, and takes its object out of the region with `llDie`; a script
+//! keeps what it holds through a region restart and through a take and a rez;
+//! an experience once accepted is granted to its every script, refused where
+//! its standing stops it, and a question refused or left unanswered is
+//! answered as Second Life answers it; and a region's `[OSSL]` settings gate
+//! a function to gods — each step driven by a real client, the region ticked
+//! one step at a time.
 
 #[cfg(test)]
 mod test {
@@ -43,6 +47,8 @@ mod test {
         Added(sl_proto::RegionLocalObjectId),
         /// An object item was filed in the agent's inventory.
         Filed(Box<sl_client_tokio::InventoryItem>),
+        /// A script asked for permissions.
+        Question(Box<sl_proto::ScriptPermissionRequest>),
     }
 
     /// A logged-in client in a stepped catalogue region.
@@ -75,13 +81,42 @@ mod test {
         imitated: ImitatedGrid,
         fixture: sl_fake_grid::RegionFixture,
     ) -> Result<Scene, TestError> {
-        let region = fixture.into_region(RegionConfig {
-            heartbeat: HeartbeatConfig::stepped(Duration::from_millis(100)),
-            ..RegionConfig::default()
-        });
+        scene_stepped(imitated, fixture, Duration::from_millis(100)).await
+    }
+
+    /// A grid imitating `imitated`, its one region `fixture` under a
+    /// heartbeat stepped by hand in steps of `step`, and a client logged into
+    /// it and arrived.
+    async fn scene_stepped(
+        imitated: ImitatedGrid,
+        fixture: sl_fake_grid::RegionFixture,
+        step: Duration,
+    ) -> Result<Scene, TestError> {
+        scene_with(
+            imitated,
+            fixture,
+            RegionConfig {
+                heartbeat: HeartbeatConfig::stepped(step),
+                ..RegionConfig::default()
+            },
+            AccountConfig::new("Test", "User", "password"),
+        )
+        .await
+    }
+
+    /// A grid imitating `imitated`, its one region `fixture` configured as
+    /// `config` (whose heartbeat must be stepped), and a client logged into it
+    /// as `account` and arrived.
+    async fn scene_with(
+        imitated: ImitatedGrid,
+        fixture: sl_fake_grid::RegionFixture,
+        config: RegionConfig,
+        account: AccountConfig,
+    ) -> Result<Scene, TestError> {
+        let region = fixture.into_region(config);
         let grid = FakeGridBuilder::new()
             .imitates(imitated)
-            .account(AccountConfig::new("Test", "User", "password"))
+            .account(account)
             .region(region)
             .start()
             .await?;
@@ -118,6 +153,7 @@ mod test {
                     Event::ScriptRunning { running, .. } => Seen::Running(running),
                     Event::ObjectRemoved { local_id, .. } => Seen::Removed(local_id.id()),
                     Event::ObjectAdded(object) => Seen::Added(object.local_id),
+                    Event::ScriptPermissionRequest(question) => Seen::Question(question),
                     Event::InventoryItemCreated { item, .. }
                         if i32::from(item.item_type) == sl_proto::AssetType::Object.to_code() =>
                     {
@@ -265,6 +301,41 @@ mod test {
             self.shout(message).await?;
             self.tick(2).await?;
             self.line("heard ").await
+        }
+
+        /// Says `name` on channel 7 and waits for the question it raises.
+        async fn ask(
+            &mut self,
+            name: &str,
+        ) -> Result<sl_proto::ScriptPermissionRequest, TestError> {
+            self.shout(name).await?;
+            self.tick(2).await?;
+            let question = self
+                .next("an experience's question", |seen| match seen {
+                    Seen::Question(question) => Some(question),
+                    _other => None,
+                })
+                .await?;
+            Ok(*question)
+        }
+
+        /// Answers `question` with `permissions`, and waits for the session
+        /// to take the answer.
+        async fn answer(
+            &mut self,
+            question: &sl_proto::ScriptPermissionRequest,
+            permissions: sl_types::lsl::ScriptPermissions,
+        ) -> Result<(), TestError> {
+            self.send(
+                Command::AnswerScriptPermissions {
+                    task_id: question.task_id,
+                    item_id: question.item_id,
+                    permissions,
+                    experience_id: question.experience_id,
+                },
+                |event| matches!(event, ServerEvent::ScriptPermissionAnswer { .. }),
+            )
+            .await
         }
 
         /// Ends the run.
@@ -441,45 +512,77 @@ default
     /// The counting box's region-local id.
     const COUNTER: sl_proto::RegionLocalObjectId = sl_proto::RegionLocalObjectId(0x500);
 
+    /// Who owns every box [`region_of`] builds.
+    fn box_owner() -> sl_types::key::AgentKey {
+        sl_types::key::AgentKey::from(uuid::Uuid::from_u128(0xB0C0))
+    }
+
+    /// One scripted box of a test region: its region-local id, its script's
+    /// source and the experience the script was compiled under.
+    struct ScriptedBox {
+        /// Its region-local id; its keys are minted from it.
+        local_id: sl_proto::RegionLocalObjectId,
+        /// Its script's source, running.
+        source: String,
+        /// The script's experience.
+        experience: Option<sl_types::key::ExperienceKey>,
+    }
+
+    /// A region holding `boxes` in a row beside the arrival point, each with
+    /// its one script running.
+    fn region_of(boxes: &[ScriptedBox]) -> Result<sl_fake_grid::RegionFixture, TestError> {
+        let owner = box_owner();
+        let mut fixture = sl_fake_grid::RegionFixture::new();
+        for (index, scripted) in (0_u16..).zip(boxes) {
+            let id = u128::from(scripted.local_id.0) << 8;
+            let key = sl_types::key::ObjectKey::from(uuid::Uuid::from_u128(id | 0x5));
+            let asset = sl_proto::AssetKey::from(uuid::Uuid::from_u128(id | 0x6));
+            fixture.world.objects.push(sl_fake_grid::world::box_prim(
+                scripted.local_id,
+                key,
+                owner,
+                sl_types::lsl::Vector {
+                    x: 132.0 + 2.0 * f32::from(index),
+                    y: 128.0,
+                    z: 25.5,
+                },
+                sl_types::lsl::Vector {
+                    x: 1.0,
+                    y: 1.0,
+                    z: 1.0,
+                },
+            ));
+            let item = sl_proto::TaskInventoryItem {
+                item_id: sl_types::key::InventoryKey::from(uuid::Uuid::from_u128(id | 0x7)),
+                parent_task: key,
+                asset_id: Some(asset),
+                name: "Script".to_owned(),
+                ..sl_fake_grid::scenario::stock_script_item()
+            };
+            let mut contents = sl_fake_grid::world::TaskInventory::stated(1, vec![item.clone()]);
+            let _running = contents.running.insert(item.item_id);
+            if let Some(experience) = scripted.experience {
+                let _previous = contents.experiences.insert(item.item_id, experience);
+            }
+            fixture
+                .world
+                .add_task_inventory(scripted.local_id, contents)
+                .map_err(|_contents| "the box is not in the region")?;
+            let _previous = fixture
+                .assets
+                .insert(asset, scripted.source.as_bytes().to_vec());
+        }
+        Ok(fixture)
+    }
+
     /// A region holding one box beside the arrival point, its script
     /// [`COUNTER_SOURCE`] running.
     fn counting_region() -> Result<sl_fake_grid::RegionFixture, TestError> {
-        let owner = sl_types::key::AgentKey::from(uuid::Uuid::from_u128(0xB0C0));
-        let key = sl_types::key::ObjectKey::from(uuid::Uuid::from_u128(0xB0C5));
-        let asset = sl_proto::AssetKey::from(uuid::Uuid::from_u128(0xB0C6));
-        let mut fixture = sl_fake_grid::RegionFixture::new();
-        fixture.world.objects.push(sl_fake_grid::world::box_prim(
-            COUNTER,
-            key,
-            owner,
-            sl_types::lsl::Vector {
-                x: 132.0,
-                y: 128.0,
-                z: 25.5,
-            },
-            sl_types::lsl::Vector {
-                x: 1.0,
-                y: 1.0,
-                z: 1.0,
-            },
-        ));
-        let item = sl_proto::TaskInventoryItem {
-            item_id: sl_types::key::InventoryKey::from(uuid::Uuid::from_u128(0xB0C7)),
-            parent_task: key,
-            asset_id: Some(asset),
-            name: "Counter".to_owned(),
-            ..sl_fake_grid::scenario::stock_script_item()
-        };
-        let mut contents = sl_fake_grid::world::TaskInventory::stated(1, vec![item.clone()]);
-        let _running = contents.running.insert(item.item_id);
-        fixture
-            .world
-            .add_task_inventory(COUNTER, contents)
-            .map_err(|_contents| "the box is not in the region")?;
-        let _previous = fixture
-            .assets
-            .insert(asset, COUNTER_SOURCE.as_bytes().to_vec());
-        Ok(fixture)
+        region_of(&[ScriptedBox {
+            local_id: COUNTER,
+            source: COUNTER_SOURCE.to_owned(),
+            experience: None,
+        }])
     }
 
     /// A script keeps its globals and its listen through a region restart,
@@ -596,5 +699,210 @@ default
     #[tokio::test]
     async fn a_script_keeps_its_state_on_opensim() -> Result<(), TestError> {
         a_script_keeps_its_state(ImitatedGrid::OpenSim).await
+    }
+
+    /// A script of an experience that asks the avatar who says `name` on
+    /// channel 7 for the experience's permissions, and tells it the answer.
+    fn asking_source(name: &str) -> String {
+        format!(
+            "default
+{{
+    state_entry()
+    {{
+        llListen(7, \"\", NULL_KEY, \"{name}\");
+    }}
+
+    listen(integer channel, string speaker, key id, string message)
+    {{
+        llRequestExperiencePermissions(id, \"\");
+    }}
+
+    experience_permissions(key agent)
+    {{
+        llRegionSayTo(agent, 0, \"{name} granted\");
+    }}
+
+    experience_permissions_denied(key agent, integer reason)
+    {{
+        llRegionSayTo(agent, 0, \"{name} denied \" + (string)reason);
+    }}
+}}
+"
+        )
+    }
+
+    /// A box at `local_id` whose script, of `experience`, answers to `name`.
+    fn asking_box(
+        local_id: u32,
+        name: &str,
+        experience: sl_types::key::ExperienceKey,
+    ) -> ScriptedBox {
+        ScriptedBox {
+            local_id: sl_proto::RegionLocalObjectId(local_id),
+            source: asking_source(name),
+            experience: Some(experience),
+        }
+    }
+
+    /// The experience no fixture list mentions: the agent has answered
+    /// nothing of it, and it is grid-wide, so it may run anywhere.
+    fn stranger() -> sl_types::key::ExperienceKey {
+        sl_fake_grid::experiences::stranger_experience()
+    }
+
+    /// An experience script asks; accepting it allows the experience for the
+    /// agent, so a second script of it is granted without a question; and a
+    /// suspended experience, or one the estate blocks, is refused before
+    /// anybody is asked.
+    #[tokio::test]
+    async fn an_experience_once_allowed_is_allowed_for_its_every_script() -> Result<(), TestError> {
+        let workshop = sl_fake_grid::experiences::catalogue()
+            .into_iter()
+            .find(|record| record.name == "Fake Grid Workshop")
+            .ok_or("the catalogue has no workshop")?
+            .public_id;
+        let blocked = sl_fake_grid::experiences::ExperienceLand::default()
+            .blocked
+            .first()
+            .copied()
+            .ok_or("the estate blocks no experience")?;
+        let region = region_of(&[
+            asking_box(0x600, "A", stranger()),
+            asking_box(0x601, "B", stranger()),
+            asking_box(0x602, "C", workshop),
+            asking_box(0x603, "D", blocked),
+        ])?;
+        let mut scene = scene_of(ImitatedGrid::SecondLife, region).await?;
+        scene.tick(2).await?;
+
+        let question = scene.ask("A").await?;
+        assert_eq!(question.experience_id, Some(stranger()));
+        scene.answer(&question, question.permissions).await?;
+        scene.tick(2).await?;
+        assert_eq!(scene.line("A ").await?, "A granted");
+        let allowed = scene
+            .agent
+            .with_sim(|sim| sim.experiences().agent_permissions().0)
+            .await;
+        assert!(
+            allowed.contains(&stranger()),
+            "accepting did not allow the experience: {allowed:?}"
+        );
+
+        scene.shout("B").await?;
+        scene.tick(2).await?;
+        assert_eq!(scene.line("B ").await?, "B granted");
+
+        scene.shout("C").await?;
+        scene.tick(2).await?;
+        assert_eq!(scene.line("C ").await?, "C denied 9");
+
+        scene.shout("D").await?;
+        scene.tick(2).await?;
+        assert_eq!(scene.line("D ").await?, "D denied 17");
+        scene.stop();
+        Ok(())
+    }
+
+    /// A refusal is the script's `XP_ERROR_NOT_PERMITTED` and records
+    /// nothing, so the next request asks again; a question nobody answers
+    /// times out after five minutes as `XP_ERROR_REQUEST_PERM_TIMEOUT`.
+    #[tokio::test]
+    async fn an_experience_question_refused_or_unanswered() -> Result<(), TestError> {
+        let region = region_of(&[asking_box(0x600, "A", stranger())])?;
+        let step = Duration::from_secs(10);
+        let mut scene = scene_stepped(ImitatedGrid::SecondLife, region, step).await?;
+        scene.tick(2).await?;
+
+        let question = scene.ask("A").await?;
+        scene
+            .answer(&question, sl_types::lsl::ScriptPermissions(0))
+            .await?;
+        scene.tick(2).await?;
+        assert_eq!(scene.line("A ").await?, "A denied 4");
+
+        let _again = scene.ask("A").await?;
+        // Five minutes of ten-second ticks, and the one the answer runs in.
+        scene.tick(30).await?;
+        assert_eq!(scene.line("A ").await?, "A denied 18");
+        let (allowed, blocked) = scene
+            .agent
+            .with_sim(|sim| sim.experiences().agent_permissions())
+            .await;
+        assert!(!allowed.contains(&stranger()) && !blocked.contains(&stranger()));
+        scene.stop();
+        Ok(())
+    }
+
+    /// A script asking the simulator's version on channel 7 (a function
+    /// OpenSim gates at threat level `High`), and saying it.
+    const VERSION_SOURCE: &str = "default
+{
+    state_entry()
+    {
+        llListen(7, \"\", NULL_KEY, \"name\");
+    }
+
+    listen(integer channel, string speaker, key id, string message)
+    {
+        llShout(0, \"version: \" + osGetSimulatorVersion());
+    }
+}
+";
+
+    /// Whether the script of a box owned by an account of `god_level`, in a
+    /// region whose `[OSSL]` allows `osGetSimulatorVersion` to gods alone, is
+    /// let call it: the version, or YEngine's refusal on the debug channel.
+    async fn version_for(god_level: u8) -> Result<String, TestError> {
+        let region = region_of(&[ScriptedBox {
+            local_id: sl_proto::RegionLocalObjectId(0x700),
+            source: VERSION_SOURCE.to_owned(),
+            experience: None,
+        }])?;
+        let ossl = sl_lsl_runtime::vm::ossl::Settings::from_ini(
+            "[OSSL]\nAllow_osGetSimulatorVersion = GOD\n",
+        );
+        assert_eq!(ossl.ignored, Vec::<String>::new());
+        let mut scene = scene_with(
+            ImitatedGrid::OpenSim,
+            region,
+            RegionConfig {
+                heartbeat: HeartbeatConfig::stepped(Duration::from_millis(100)),
+                ossl: Some(ossl),
+                ..RegionConfig::default()
+            },
+            AccountConfig {
+                agent_id: Some(box_owner()),
+                god_level,
+                ..AccountConfig::new("Test", "User", "password")
+            },
+        )
+        .await?;
+        scene.tick(2).await?;
+        scene.shout("name").await?;
+        scene.tick(2).await?;
+        let said = scene
+            .next("the version or the refusal", |seen| match seen {
+                Seen::Chat(ChatType::DebugChannel, message) => Some(message),
+                Seen::Chat(_, message) if message.starts_with("version: ") => Some(message),
+                _other => None,
+            })
+            .await?;
+        scene.stop();
+        Ok(said)
+    }
+
+    /// The region's `[OSSL]` settings are the engine's, and a god — an
+    /// account of god level 200 or more — is what `GOD` admits.
+    #[tokio::test]
+    async fn the_region_ossl_settings_admit_a_god_alone() -> Result<(), TestError> {
+        let god = version_for(200).await?;
+        assert!(god.starts_with("version: "), "a god was refused: {god}");
+        let resident = version_for(0).await?;
+        assert!(
+            resident.contains("osGetSimulatorVersion permission denied"),
+            "a resident was let through: {resident}"
+        );
+        Ok(())
     }
 }

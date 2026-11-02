@@ -27,6 +27,7 @@ implemented llDetectedType
 implemented llDetectedVel
 implemented llGetScriptState
 implemented llGetStartParameter
+implemented llGetOwner
 implemented llSetTimerEvent
 implemented llGetFreeMemory
 implemented llGetMemoryLimit

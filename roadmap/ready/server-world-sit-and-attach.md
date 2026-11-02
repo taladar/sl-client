@@ -95,3 +95,17 @@ drop (`ObjectDrop`) raises `attach(NULL_KEY)`, after one `changed(32768)` on
 OpenSim. `llAttachToAvatar` after `PERMISSION_ATTACH`: `run_time_permissions`,
 then the same as the attach from the ground. The prim keeps its key through
 both, the timer runs and a listen hears while worn, on every grid.
+
+## From server-fake-grid-script-engine-wiring (2026-11-02)
+
+Scripts run on the fake grid, and three of their host calls wait for sitting
+to be world state (`sl_fake_grid::scripts`, `RegionHost`):
+
+- **`seated_on`** answers `false` for every agent; answer it from the sit.
+- **`sit_on_link`** (`llSitOnLink`) refuses every agent with
+  `SitRefusal::NoSitTarget`: search for a sit target down the linkset from
+  the prim named, with parcel access and the attachment refusal.
+- **The lapses**: a drop revokes `PERMISSION_TAKE_CONTROLS`, a sitter
+  standing `PERMISSION_TAKE_CONTROLS | PERMISSION_CONTROL_CAMERA`, each
+  through `Engine::revoke` with the agent as granter
+  (`book/src/gridspec/lsl.md`: 1040 held after a stand).

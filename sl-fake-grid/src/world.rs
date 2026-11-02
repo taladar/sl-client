@@ -205,6 +205,10 @@ pub struct SceneFixtures {
     /// a scene states its scripts as items in its prims' contents, and the
     /// region starts an instance of each.
     pub script_instances: crate::scripts::RegionScripts,
+    /// What the region's land says of experiences: the estate's lists and
+    /// which experiences each parcel admits ([`crate::experiences`]). An
+    /// experience script's standing is judged by it.
+    pub experience_land: crate::experiences::ExperienceLand,
 }
 
 /// One parcel's two access lists: who may come in, and who may not.
@@ -729,6 +733,7 @@ impl SceneFixtures {
             listens: crate::chat::Listens::default(),
             render_info: crate::render_info::RegionRenderInfo::default(),
             script_instances: crate::scripts::RegionScripts::default(),
+            experience_land: crate::experiences::ExperienceLand::default(),
         }
     }
 
@@ -2283,6 +2288,19 @@ pub(crate) fn answer_world_request(
     }
     if let Some(changes) = crate::scripts::answer_script_command(world, identity, sim, event, now) {
         return changes;
+    }
+    // The estate's experience lists are the region's: a POST from one session
+    // is what the region's scripts are judged by from then on.
+    if let ServerEvent::RegionExperiencesSet {
+        allowed,
+        blocked,
+        trusted,
+    } = event
+    {
+        world
+            .experience_land
+            .set_lists(allowed.clone(), blocked.clone(), trusted.clone());
+        return Vec::new();
     }
     if let Some(changes) = crate::task_contents::answer_contents_write(
         crate::task_contents::ContentsStores {

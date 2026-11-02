@@ -41,7 +41,8 @@ ends in an object update, and a wrong one is visible in a frame.
 - **Identity and inventory-adjacent** — `llGetKey`, `llGetObjectName`,
   `llSetObjectName`, `llGetObjectDesc`, `llSetObjectDesc`,
   `llGetObjectDetails` (a second parameter-code sub-language, over *any*
-  key in the region), `llGetOwner`, `llGetCreator`, `llGetLinkNumber`,
+  key in the region), `llGetOwner` (done, 2026-11-02: `Host::owner`, for
+  the `script-compile` census offline), `llGetCreator`, `llGetLinkNumber`,
   `llGetNumberOfPrims`, `llGetNumberOfSides`, `llSetClickAction`,
   `llSetPayPrice`.
 - **Sound and media** — `llPlaySound`, `llLoopSound`,

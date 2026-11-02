@@ -2,7 +2,7 @@
 id: repl-lsl-script-control
 title: sl-repl verbs for compiling, running and watching scripts
 topic: repl
-status: blocked
+status: ready
 origin: LSL-on-the-fake-grid audit (2026-09-20)
 points: 3
 blocked_by: [server-fake-grid-script-engine-wiring]
