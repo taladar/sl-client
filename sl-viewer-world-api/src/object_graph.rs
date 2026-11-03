@@ -750,6 +750,7 @@ impl ObjectState {
             root_scoped,
             root_full: root.full_key,
             flags: picked.update_flags | root.update_flags,
+            root_flags: root.update_flags,
             picked_click_action: picked.click_action,
             root_click_action: root.click_action,
             attachment,
@@ -1367,6 +1368,10 @@ pub struct ObjectPickSummary {
     pub root_full: ObjectKey,
     /// The union of the picked prim's and the root's `PrimFlags` bits.
     pub flags: u32,
+    /// The root's own `PrimFlags` bits — what a question about the whole
+    /// object reads, such as whether its contents may be opened (the
+    /// reference's `parent->allowOpen()`).
+    pub root_flags: u32,
     /// The picked prim's own click action ([`TrackedObject::click_action`]).
     pub picked_click_action: u8,
     /// The root's click action — the attachment root's for a worn chain.

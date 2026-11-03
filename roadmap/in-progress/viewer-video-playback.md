@@ -135,3 +135,11 @@ headroom, as designed), a served-MIME probe if extension dispatch proves
 insufficient, and legacy whole-parcel media video
 (`ParcelMediaUpdate` / `ParcelMediaCommand` — the pre-MoaP parcel media
 texture).
+
+## From viewer-left-click-click-actions (2026-11-03)
+
+A left click on a prim whose click action is *play* raises
+`ClickActionPlayUnavailable` (`left_click_actions`): the reference's
+`handle_click_action_play` toggles the legacy parcel media above. When that
+plays, answer `ClickedAction::Play` with play / pause / start, and let *open
+media* play it when the clicked face shows it.

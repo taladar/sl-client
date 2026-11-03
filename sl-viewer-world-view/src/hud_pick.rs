@@ -36,6 +36,13 @@
 //!   so one follows the press and another every time the cursor moves to a
 //!   different point of the surface, which is when the reference viewer
 //!   sends them (`LLToolGrab::handleHoverNonPhysical`).
+//! - **A prim's click action before its touch** ([`left_click`]): a left click
+//!   on a prim in the world set to sit, pay, buy, open, play, open media or
+//!   zoom carries that out instead — written as a [`ClickActionRequest`] for
+//!   the feature that owns it — and one set to *disabled* does nothing. Only a
+//!   prim that takes a touch (a script listening for one, or physics) is
+//!   touched at all, as only such a prim is in the reference
+//!   (`LLToolPie::handleLeftClickPick`); a click on any other sends nothing.
 //! - **Updates only for a prim whose script takes touches**
 //!   ([`FLAGS_HANDLE_TOUCH`] on it or its root). Both grids *move* a prim
 //!   that is not physical to an update's grab position when its owner sends
@@ -48,12 +55,16 @@ use bevy::picking::hover::HoverMap;
 use bevy::picking::mesh_picking::ray_cast::RayMeshHit;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
-use sl_client_bevy::{Command, ObjectKey, ScopedObjectId, SlCommand, SurfaceInfo, Vector};
+use sl_client_bevy::{
+    Command, ObjectKey, ScopedObjectId, SlAgentParcel, SlCommand, SurfaceInfo, Vector,
+};
+use sl_viewer_settings::ViewerSettings;
 
 use crate::hud::{HudCamera, HudScreen};
 use sl_viewer_world_api::targeted_ray_cast::{TargetVisibility, TargetedRayCast};
 use sl_viewer_world_api::{
-    FLAGS_HANDLE_TOUCH, MediaWorldClick, ObjectState, SurfaceFrame, ViewerCamera,
+    ClickActionRequest, ClickerState, FLAGS_HANDLE_TOUCH, LeftClick, MediaWorldClick, ObjectState,
+    SETTING_BLOCK_CLICK_SIT, SelfGroundSit, SurfaceFrame, ViewerCamera, left_click,
     pointer_over_blocking_ui, surface_info_from_hit,
 };
 use sl_viewer_world_objects::objects::{FaceTextureDebug, PrimFaceEntity, SceneObject};
@@ -188,11 +199,40 @@ pub struct TouchTargets<'w, 's> {
     globals: Query<'w, 's, &'static GlobalTransform>,
     /// The parent links walked up the linkset.
     parents: Query<'w, 's, &'static ChildOf>,
-    /// The object graph: whether a script in the prim takes touches.
+    /// The object graph: whether a script in the prim takes touches, and its
+    /// click action.
     state: Res<'w, ObjectState>,
+    /// Whether the agent sits on an object; absent without a session.
+    parcel: Option<Res<'w, SlAgentParcel>>,
+    /// Whether the agent sits on the ground; absent without the menus that
+    /// track it.
+    ground_sit: Option<Res<'w, SelfGroundSit>>,
+    /// Whether the user blocked click-sitting; absent in a settings-less app.
+    settings: Option<Res<'w, ViewerSettings>>,
 }
 
 impl TouchTargets<'_, '_> {
+    /// The agent's side of a left click: whether it sits, and whether a click
+    /// may seat it.
+    fn clicker(&self) -> ClickerState {
+        ClickerState {
+            sitting: self
+                .parcel
+                .as_ref()
+                .is_some_and(|parcel| parcel.seated_on.is_some())
+                || self
+                    .ground_sit
+                    .as_ref()
+                    .is_some_and(|ground| ground.sitting),
+            block_click_sit: self.settings.as_ref().is_some_and(|settings| {
+                settings
+                    .store()
+                    .get_bool(SETTING_BLOCK_CLICK_SIT)
+                    .unwrap_or(false)
+            }),
+        }
+    }
+
     /// The prim the face or submesh `entity` belongs to, with its entity.
     fn prim_of(&self, entity: Entity) -> Option<(ScopedObjectId, Entity)> {
         let mut current = entity;
@@ -205,12 +245,18 @@ impl TouchTargets<'_, '_> {
     }
 
     /// The surface `hit` struck on the face `entity` of the prim whose entity
-    /// is `object`: in the prim's own frame for a HUD, in the region's for
-    /// anything in the world.
-    fn surface(&self, entity: Entity, object: Entity, hit: &RayMeshHit, hud: bool) -> SurfaceInfo {
+    /// is `object`: in the prim's own frame when `object_frame` (what a HUD
+    /// touch states), in the region's otherwise (what a world touch states).
+    fn surface(
+        &self,
+        entity: Entity,
+        object: Entity,
+        hit: &RayMeshHit,
+        object_frame: bool,
+    ) -> SurfaceInfo {
         let face = self.faces.get(entity).ok();
         let frame = match self.globals.get(object) {
-            Ok(global) if hud => SurfaceFrame::Object(global),
+            Ok(global) if object_frame => SurfaceFrame::Object(global),
             _ => SurfaceFrame::Region,
         };
         surface_info_from_hit(
@@ -236,6 +282,8 @@ pub struct TouchOut<'w> {
     writer: MessageWriter<'w, SlCommand>,
     /// The media system's click channel.
     media_clicks: MessageWriter<'w, MediaWorldClick>,
+    /// The channel a prim's click action is handed on in place of a touch.
+    click_actions: MessageWriter<'w, ClickActionRequest>,
     /// The touch the button is holding open.
     held: ResMut<'w, HeldTouch>,
     /// The mouse buttons: whether the press that made a touch is still down
@@ -388,9 +436,11 @@ impl HudRayCast<'_, '_> {
     }
 }
 
-/// Resolve a ray hit to its object and begin a touch of it, carrying the
-/// surface the ray struck. Returns whether the hit was taken (a hit that
-/// resolves to no object — e.g. an avatar's own mesh — is not).
+/// Resolve a ray hit to its object and carry out what a left click on it does
+/// ([`left_click`]): its click action, a touch carrying the surface the ray
+/// struck, or nothing. Returns whether the hit was taken (a hit that resolves
+/// to no object — e.g. an avatar's own mesh — is not; a prim that takes no
+/// click is, since it still stands in front of what is behind it).
 ///
 /// The touch is an `ObjectGrab`, and for a prim whose script takes touches
 /// the `ObjectGrabUpdate` the reference follows it with. It stays open while
@@ -425,6 +475,27 @@ fn touch_hit(
         });
         return true;
     }
+    let Some(summary) = targets.state.pick_summary(scoped) else {
+        return true;
+    };
+    match left_click(&summary, targets.clicker()) {
+        LeftClick::Act(action) => {
+            info!("left click on {scoped:?}: click action {action:?}");
+            out.click_actions.write(ClickActionRequest {
+                action,
+                summary,
+                // The prim's own frame, as a pie pick states it: what a sit's
+                // offset is measured in.
+                surface: targets.surface(entity, object, hit, true),
+            });
+            return true;
+        }
+        LeftClick::Nothing => {
+            debug!("left click on {scoped:?}: the prim takes no click");
+            return true;
+        }
+        LeftClick::Touch => {}
+    }
     info!(
         "touch ({}) object {scoped:?} face={} pos=({:.2},{:.2},{:.2})",
         if hud { "HUD" } else { "world" },
@@ -440,11 +511,7 @@ fn touch_hit(
         grab_offset: NO_OFFSET,
         surface: Some(surface.clone()),
     }));
-    let updates = targets
-        .state
-        .pick_summary(scoped)
-        .filter(|summary| summary.flags & FLAGS_HANDLE_TOUCH != 0)
-        .map(|summary| summary.picked_full);
+    let updates = (summary.flags & FLAGS_HANDLE_TOUCH != 0).then_some(summary.picked_full);
     let mut held = Held {
         scoped,
         object,

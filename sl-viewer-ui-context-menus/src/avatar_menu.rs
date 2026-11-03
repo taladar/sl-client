@@ -87,7 +87,7 @@ use bevy::input::mouse::AccumulatedMouseMotion;
 use bevy::picking::hover::HoverMap;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
-use sl_client_bevy::{AgentKey, Command, MuteType, SlCommand};
+use sl_client_bevy::{AgentKey, Command, MuteType, SlAgentParcel, SlCommand};
 
 use crate::attachment_menu::{ATTACHMENT_MENU_ELEMENT, OpenAttachmentMenu};
 use crate::avatars::RefetchAvatarTextures;
@@ -841,6 +841,7 @@ impl Plugin for AvatarMenuPlugin {
                     resolve_right_click_pick,
                     open_avatar_menu,
                     handle_avatar_menu_actions,
+                    toggle_sit_on_action,
                     clear_ground_sit_on_move,
                 )
                     .chain(),
@@ -1267,7 +1268,7 @@ fn open_avatar_menu(
             // pair shows one live slice and one greyed, whichever way round.
             // Sitting is either an object-sit (`seated_on`) or a ground-sit (the
             // viewer-tracked flag, since the session keeps no ground-sit state).
-            let sitting = parcel.seated_on.is_some() || ground_sit.sitting;
+            let sitting = self_sitting(&parcel, &ground_sit);
             let condition = if sitting { SELF_SITTING } else { SELF_STANDING };
             (&AVATAR_SELF_PIE, vec![condition])
         } else {
@@ -1363,14 +1364,8 @@ fn handle_avatar_menu_actions(
             continue;
         }
         match action.action {
-            "stand" => {
-                ground_sit.sitting = false;
-                commands.write(SlCommand(Command::Stand));
-            }
-            "sit-ground" => {
-                ground_sit.sitting = true;
-                commands.write(SlCommand(Command::SitOnGround));
-            }
+            "stand" => stand_up(&mut ground_sit, &mut commands),
+            "sit-ground" => sit_down(&mut ground_sit, &mut commands),
             "im" => {
                 conversations.write(OpenConversation {
                     key: ConversationKey::Direct(agent),
@@ -1421,6 +1416,47 @@ fn handle_avatar_menu_actions(
             // Every other slice is a disabled placeholder: no behaviour yet.
             _other => {}
         }
+    }
+}
+
+/// **Sit Down**: sit the own avatar on the ground (`AgentSitOnGround`, the
+/// reference's `gAgent.sitDown()`), and record the ground sit the wire never
+/// reports back. Shared by the self pie, Avatar ▸ Movement and the
+/// [`Action::ToggleSit`] binding.
+pub fn sit_down(ground_sit: &mut SelfGroundSit, commands: &mut MessageWriter<SlCommand>) {
+    ground_sit.sitting = true;
+    commands.write(SlCommand(Command::SitOnGround));
+}
+
+/// **Stand Up**: stand the own avatar up from any sit (`AgentUpdate`'s stand,
+/// the reference's `gAgent.standUp()`), and clear the tracked ground sit.
+pub fn stand_up(ground_sit: &mut SelfGroundSit, commands: &mut MessageWriter<SlCommand>) {
+    ground_sit.sitting = false;
+    commands.write(SlCommand(Command::Stand));
+}
+
+/// Whether the own avatar sits: on an object (`seated_on`, which the session
+/// tracks) or on the ground (which only the viewer does).
+#[must_use]
+pub const fn self_sitting(parcel: &SlAgentParcel, ground_sit: &SelfGroundSit) -> bool {
+    parcel.seated_on.is_some() || ground_sit.sitting
+}
+
+/// The rebindable **Sit/Stand** action ([`Action::ToggleSit`], the reference's
+/// `toggle_sit`): stand up when sitting, sit on the ground when standing.
+fn toggle_sit_on_action(
+    actions: Res<ButtonInput<Action>>,
+    parcel: Res<SlAgentParcel>,
+    mut ground_sit: ResMut<SelfGroundSit>,
+    mut commands: MessageWriter<SlCommand>,
+) {
+    if !actions.just_pressed(Action::ToggleSit) {
+        return;
+    }
+    if self_sitting(&parcel, &ground_sit) {
+        stand_up(&mut ground_sit, &mut commands);
+    } else {
+        sit_down(&mut ground_sit, &mut commands);
     }
 }
 

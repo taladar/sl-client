@@ -827,6 +827,9 @@ impl Plugin for ObjectMenuPlugin {
                 )
                     .chain(),
             );
+        // A left click's click action (`viewer-left-click-click-actions`):
+        // the sit, open and zoom a pie slice would do, answered beside the pie.
+        crate::left_click_actions::build(app);
     }
 }
 
@@ -968,9 +971,9 @@ struct ObjectMenuOut<'w> {
 /// [`SystemParam`](bevy::ecs::system::SystemParam): the seat's world pose and
 /// reported motion, and the camera the sit offset is measured from.
 #[derive(Debug, bevy::ecs::system::SystemParam)]
-struct SeatPoses<'w, 's> {
+pub(crate) struct SeatPoses<'w, 's> {
     /// The seat's world pose and its reported Second Life motion.
-    seat_poses: Query<
+    pub(crate) seat_poses: Query<
         'w,
         's,
         (
@@ -979,7 +982,8 @@ struct SeatPoses<'w, 's> {
         ),
     >,
     /// The camera the sit offset is measured from.
-    seat_cameras: Query<'w, 's, &'static GlobalTransform, With<crate::world_api::ViewerCamera>>,
+    pub(crate) seat_cameras:
+        Query<'w, 's, &'static GlobalTransform, With<crate::world_api::ViewerCamera>>,
 }
 
 /// Dispatch a picked object-menu slice to the command behind it.
@@ -1124,7 +1128,7 @@ fn handle_object_menu_actions(
 /// seat prim's entity / pose or the camera is not available — the sit still goes
 /// out, just without the faithful offset. When a prim has a real sit target the
 /// simulator ignores this offset entirely, so the fallback is harmless there.
-fn sit_here_offset(
+pub(crate) fn sit_here_offset(
     hit: &ObjectRayHit,
     state: &ObjectState,
     seat_poses: &Query<(&GlobalTransform, &crate::objects::ObjectSlMotion)>,

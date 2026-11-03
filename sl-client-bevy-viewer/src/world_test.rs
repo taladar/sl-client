@@ -815,6 +815,7 @@ pub(crate) fn seed_attachment(
         point,
         position,
         crate::objects::fixture_object(pcode::PRIMITIVE).scale,
+        0,
     )
 }
 
@@ -824,7 +825,8 @@ pub(crate) fn seed_attachment(
 /// vertically, so the shared fixture seed's 2 × 3 × 4 m box covers the whole
 /// screen several times over. That is fine for a test that only ever clicks the
 /// centre, and useless for one that has to click *beside* the HUD; such a test
-/// wears a small cube, as the live test avatar does.
+/// wears a small cube, as the live test avatar does. `extra_flags` adds to its
+/// permission flags — a touch script's, for one a left click is to touch.
 pub(crate) fn seed_attachment_scaled(
     app: &mut App,
     wearer_local: u32,
@@ -832,6 +834,7 @@ pub(crate) fn seed_attachment_scaled(
     point: u8,
     position: sl_client_bevy::Vector,
     scale: sl_client_bevy::Vector,
+    extra_flags: u32,
 ) -> ScopedObjectId {
     let mut object: Object = crate::objects::fixture_object(pcode::PRIMITIVE);
     object.scale = scale;
@@ -845,7 +848,8 @@ pub(crate) fn seed_attachment_scaled(
     object.motion.position = position;
     object.update_flags = crate::world_api::FLAGS_OBJECT_MODIFY
         | crate::world_api::FLAGS_OBJECT_MOVE
-        | crate::world_api::FLAGS_OBJECT_COPY;
+        | crate::world_api::FLAGS_OBJECT_COPY
+        | extra_flags;
     seed_object(app, object)
 }
 
@@ -4131,8 +4135,7 @@ mod hud_click_tests {
 
     use super::{
         drain_commands, install_camera, install_hud_camera_projection, scene_position_of,
-        seed_attachment_scaled, seed_avatar, seed_prim_numbered, settle, world_app_with_hud,
-        world_to_viewport,
+        seed_attachment_scaled, seed_avatar, settle, world_app_with_hud, world_to_viewport,
     };
 
     /// A boxed error so tests can use `?` instead of the disallowed
@@ -4159,6 +4162,11 @@ mod hud_click_tests {
         z: 0.1,
     };
 
+    /// A script with a `touch` event: what makes a left click on a prim a
+    /// touch rather than nothing.
+    const TOUCH_SCRIPT: u32 =
+        sl_client_bevy::prim_flags::SCRIPTED | sl_client_bevy::prim_flags::HANDLE_TOUCH;
+
     /// The viewport centre, where the HUD point node projects.
     const CENTRE: Vec2 = Vec2::new(400.0, 300.0);
 
@@ -4172,6 +4180,9 @@ mod hud_click_tests {
     /// A fixture world with the own avatar arrived and — when `hud` — a small
     /// HUD cube worn on HUD Center, plus a fat prim at `prim_at` in the world
     /// behind it. Returns the app and the prim's scoped id.
+    ///
+    /// Both carry a touch script, so a left click on either is a touch: a prim
+    /// that takes none is sent nothing at all ([`a_left_click_on_a_prim_does_what_the_prim_says`]).
     fn hud_world(hud: bool, prim_at: &Vector) -> Result<(App, ScopedObjectId), TestError> {
         let mut app = world_app_with_hud()?;
         let own = AgentKey::from(Uuid::from_u128(OWN));
@@ -4190,9 +4201,20 @@ mod hud_click_tests {
         );
         settle(&mut app, 3);
         if hud {
-            seed_attachment_scaled(&mut app, WEARER, 3, HUD_CENTER, ON_THE_POINT, SMALL_HUD);
+            seed_attachment_scaled(
+                &mut app,
+                WEARER,
+                3,
+                HUD_CENTER,
+                ON_THE_POINT,
+                SMALL_HUD,
+                TOUCH_SCRIPT,
+            );
         }
-        let prim = seed_prim_numbered(&mut app, 4, prim_at.clone());
+        let prim = super::seed_object(
+            &mut app,
+            super::fixture_prim(4, prim_at.clone(), TOUCH_SCRIPT),
+        );
         settle(&mut app, 5);
         install_hud_camera_projection(&mut app)
             .ok_or("no HUD camera spawned — did the vendored character assets load?")?;
@@ -4259,7 +4281,13 @@ mod hud_click_tests {
                 vec!["grab", "update"],
                 vec!["update"],
             ),
-            (0, vec!["grab"], vec![]),
+            // Physics alone takes a touch too — the grab tool's drag — and,
+            // with no script listening, no update.
+            (
+                sl_client_bevy::prim_flags::USE_PHYSICS,
+                vec!["grab"],
+                vec![],
+            ),
         ] {
             let mut app = world_app_with_hud()?;
             let prim = super::seed_object(&mut app, super::fixture_prim(4, prim_at.clone(), flags));
@@ -4338,6 +4366,233 @@ mod hud_click_tests {
             "the touch is on the prim, in region metres: {:?}",
             surface.position
         );
+        Ok(())
+    }
+
+    /// What one left click on a prim reached: the commands it put on the wire,
+    /// in order, and how many requests it raised on each of the click
+    /// actions' other channels.
+    #[derive(Debug, PartialEq, Eq)]
+    struct Clicked {
+        /// The names of the commands sent.
+        commands: Vec<&'static str>,
+        /// Object Contents floaters opened.
+        contents: usize,
+        /// Camera framings asked for.
+        frames: usize,
+        /// The notifications raised.
+        notices: Vec<&'static str>,
+    }
+
+    impl Clicked {
+        /// Nothing at all: no command and no request.
+        const NOTHING: Self = Self {
+            commands: Vec::new(),
+            contents: 0,
+            frames: 0,
+            notices: Vec::new(),
+        };
+
+        /// Only `commands` on the wire.
+        fn sent(commands: &[&'static str]) -> Self {
+            Self {
+                commands: commands.to_vec(),
+                ..Self::NOTHING
+            }
+        }
+
+        /// Only the notification `notice`.
+        fn noticed(notice: &'static str) -> Self {
+            Self {
+                notices: vec![notice],
+                ..Self::NOTHING
+            }
+        }
+    }
+
+    /// The whole of a touch: the grab of the press, the update a touch
+    /// script's prim is sent, the degrab of the release.
+    const TOUCHED: [&str; 3] = ["GrabObject", "GrabObjectUpdate", "DegrabObject"];
+
+    /// Left-click a prim of the agent's own, with click action `action` and the
+    /// extra `flags`, in a world where click-sitting is `blocked` or not, and
+    /// report what the click reached.
+    fn left_click_on(
+        action: sl_client_bevy::ClickAction,
+        flags: u32,
+        blocked: bool,
+    ) -> Result<Clicked, TestError> {
+        use crate::edit_contents::OpenObjectContents;
+        use crate::world_api::FrameObject;
+        use sl_viewer_notifications::ShowNotification;
+
+        let mut app = world_app_with_hud()?;
+        record::<OpenObjectContents>(&mut app);
+        record::<FrameObject>(&mut app);
+        record::<ShowNotification>(&mut app);
+        app.world_mut()
+            .resource_mut::<crate::settings::ViewerSettings>()
+            .set(
+                sl_settings::Scope::Global,
+                crate::world_api::SETTING_BLOCK_CLICK_SIT,
+                sl_settings::SettingValue::Bool(blocked),
+            );
+        let mut object = super::fixture_prim(
+            4,
+            Vector {
+                x: 128.0,
+                y: 128.0,
+                z: 30.0,
+            },
+            flags,
+        );
+        object.click_action = action.to_code();
+        let prim = super::seed_object(&mut app, object);
+        settle(&mut app, 5);
+        let target = scene_position_of(&mut app, prim).ok_or("the fixture prim has no entity")?;
+        // Component-wise plain `f32`, per the workspace convention: the
+        // `arithmetic_side_effects` lint fires on `glam`'s operators.
+        let eye = Vec3::new(target.x, target.y, target.z + 6.0);
+        install_camera(&mut app, eye, target);
+        settle(&mut app, 12);
+        let at = world_to_viewport(&mut app, target).ok_or("the prim projects nowhere")?;
+        let _stale = drain_commands(&mut app);
+        let _stale = drain::<OpenObjectContents>(&mut app);
+        let _stale = drain::<FrameObject>(&mut app);
+        let _stale = drain::<ShowNotification>(&mut app);
+
+        interact::click(&mut app, at, MouseButton::Left);
+        settle(&mut app, 6);
+        Ok(Clicked {
+            commands: drain_commands(&mut app).iter().map(Command::name).collect(),
+            contents: drain::<OpenObjectContents>(&mut app).len(),
+            frames: drain::<FrameObject>(&mut app).len(),
+            notices: drain::<ShowNotification>(&mut app)
+                .iter()
+                .map(|notice| notice.template)
+                .collect(),
+        })
+    }
+
+    /// **A left click on a prim does what the prim says**
+    /// (`viewer-left-click-click-actions`): each click action is carried out
+    /// *instead of* a touch, even on a prim whose script listens for one;
+    /// *disabled* does nothing at all; and a prim that takes no touch — no
+    /// script listening, no physics — is sent nothing, where it used to be sent
+    /// a grab and a degrab (`viewer-left-click-touches-a-prim-that-takes-none`).
+    #[test]
+    fn a_left_click_on_a_prim_does_what_the_prim_says() -> Result<(), TestError> {
+        use crate::world_api::{FLAGS_INVENTORY_EMPTY, FLAGS_TAKES_MONEY};
+        use sl_client_bevy::ClickAction;
+        use sl_viewer_ui_context_menus::left_click_actions::{
+            BUY_UNAVAILABLE, PAY_UNAVAILABLE, PLAY_UNAVAILABLE,
+        };
+
+        for (action, flags, blocked, expected, what) in [
+            (
+                ClickAction::Touch,
+                0,
+                false,
+                Clicked::NOTHING,
+                "a plain prim",
+            ),
+            (
+                ClickAction::Touch,
+                TOUCH_SCRIPT,
+                false,
+                Clicked::sent(&TOUCHED),
+                "a touch script's prim",
+            ),
+            (
+                ClickAction::Sit,
+                TOUCH_SCRIPT,
+                false,
+                Clicked::sent(&["Sit"]),
+                "a sit prim seats the avatar, and touches nothing",
+            ),
+            (
+                ClickAction::Sit,
+                TOUCH_SCRIPT,
+                true,
+                Clicked::sent(&TOUCHED),
+                "with click-sitting blocked, a sit prim with a touch script is touched",
+            ),
+            (
+                ClickAction::Sit,
+                0,
+                true,
+                Clicked::NOTHING,
+                "with click-sitting blocked, a plain sit prim takes no click",
+            ),
+            (
+                ClickAction::Open,
+                TOUCH_SCRIPT,
+                false,
+                Clicked {
+                    contents: 1,
+                    ..Clicked::NOTHING
+                },
+                "an open prim of the agent's own opens its contents",
+            ),
+            (
+                ClickAction::Open,
+                TOUCH_SCRIPT | FLAGS_INVENTORY_EMPTY,
+                false,
+                Clicked::NOTHING,
+                "an open prim with no contents does nothing, and is not touched",
+            ),
+            (
+                ClickAction::Zoom,
+                TOUCH_SCRIPT,
+                false,
+                Clicked {
+                    frames: 1,
+                    ..Clicked::NOTHING
+                },
+                "a zoom prim frames the camera on it",
+            ),
+            (
+                ClickAction::Pay,
+                FLAGS_TAKES_MONEY,
+                false,
+                Clicked::noticed(PAY_UNAVAILABLE),
+                "a pay prim with a money script",
+            ),
+            (
+                ClickAction::Pay,
+                TOUCH_SCRIPT,
+                false,
+                Clicked::sent(&TOUCHED),
+                "a pay prim that takes no money is touched",
+            ),
+            (
+                ClickAction::Buy,
+                TOUCH_SCRIPT,
+                false,
+                Clicked::noticed(BUY_UNAVAILABLE),
+                "a buy prim",
+            ),
+            (
+                ClickAction::Play,
+                TOUCH_SCRIPT,
+                false,
+                Clicked::noticed(PLAY_UNAVAILABLE),
+                "a play prim",
+            ),
+            (
+                ClickAction::Disabled,
+                TOUCH_SCRIPT,
+                false,
+                Clicked::NOTHING,
+                "a disabled prim, even with a touch script",
+            ),
+        ] {
+            pretty_assertions::assert_eq!(
+                left_click_on(action, flags, blocked)?,
+                expected,
+                "{what}"
+            );
+        }
         Ok(())
     }
 
@@ -5908,6 +6163,55 @@ mod pie_dispatch_tests {
             "Stand Up sends exactly one Stand"
         );
         assert!(!ground_sitting(&app), "Stand Up must end the ground sit");
+        Ok(())
+    }
+
+    /// **The Sit/Stand action is a toggle** (the reference's `toggle_sit`):
+    /// standing, it sits on the ground; sitting — on the ground or on an
+    /// object — it stands up. One command a press, and the tracked ground sit
+    /// follows it either way.
+    #[test]
+    fn the_sit_stand_action_toggles() -> Result<(), TestError> {
+        use crate::input_action::Action;
+
+        /// Press the action for one frame, as a bound key would, and let the
+        /// toggle run.
+        fn toggle(app: &mut App) {
+            app.world_mut()
+                .resource_mut::<ButtonInput<Action>>()
+                .press(Action::ToggleSit);
+            app.update();
+            let mut actions = app.world_mut().resource_mut::<ButtonInput<Action>>();
+            actions.release(Action::ToggleSit);
+            actions.clear();
+            settle(app, 2);
+        }
+
+        let own = AgentKey::from(Uuid::from_u128(0xA));
+        let mut app = avatar_world(own, Some(own))?;
+        toggle(&mut app);
+        assert_eq!(
+            command_names(&mut app),
+            vec!["SitOnGround"],
+            "standing: sit"
+        );
+        assert!(ground_sitting(&app), "the ground sit is recorded");
+        toggle(&mut app);
+        assert_eq!(
+            command_names(&mut app),
+            vec!["Stand"],
+            "on the ground: stand"
+        );
+        assert!(!ground_sitting(&app), "the ground sit is over");
+
+        app.world_mut().resource_mut::<SlAgentParcel>().seated_on =
+            Some(ObjectKey::from(Uuid::from_u128(0x5)));
+        toggle(&mut app);
+        assert_eq!(
+            command_names(&mut app),
+            vec!["Stand"],
+            "on an object: stand"
+        );
         Ok(())
     }
 

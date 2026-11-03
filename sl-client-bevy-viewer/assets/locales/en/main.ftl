@@ -2662,6 +2662,9 @@ notification-water-exclusion-surfaces-warning = Checking the hide water box will
 notification-water-exclusion-no-material = Unable to apply material to the water exclusion surface.
 notification-image-upload-resized = The texture you are uploading has been resized from [ORIGINAL_WIDTH]x[ORIGINAL_HEIGHT] to [NEW_WIDTH]x[NEW_HEIGHT] in order to to fit the maximum size of [MAX_WIDTH]x[MAX_HEIGHT] pixels.
 notification-image-empty-alpha-layer = The image you are trying to upload contains an empty, or almost empty alpha channel (transparency information). This is almost always not desired and should be stripped off. Adding an alpha channel to an image will lead to textures flipping on top of each other at different camera angles, and it makes rendering slower. So, unless you really need this texture to have an empty / almost empty alpha channel, consider stripping it out.
+notification-click-action-pay-unavailable = Clicking this object pays it, and this viewer has no pay dialog yet. Nothing was paid.
+notification-click-action-buy-unavailable = Clicking this object buys it, and this viewer cannot buy objects yet. Nothing was bought.
+notification-click-action-play-unavailable = Clicking this object plays the parcel's media, and this viewer does not play parcel media yet.
 
 ## IM & chat (viewer-notification-catalogue-im-chat). Bodies follow
 ## the reference notifications.xml with the standard trims (KB URLs,
@@ -4244,6 +4247,7 @@ preferences-row-double-click-action = Double-click on the ground
 preferences-double-click-none = No action
 preferences-double-click-teleport = Teleport to the clicked point
 preferences-row-double-click-scripted-objects = Double-click on scripted objects too
+preferences-row-block-click-sit = Block left-click sitting on objects
 preferences-reset-default = Reset
 
 # The network & cache tab (viewer-preferences-network-cache-tab): bandwidth
@@ -4764,6 +4768,9 @@ menu-bar-help = Help
 menu-bar-about = About…
 menu-bar-shortcuts = Shortcuts
 menu-bar-joystick-flycam = Joystick Flycam
+menu-bar-movement = Movement
+menu-bar-sit-down = Sit Down
+menu-bar-stand-up = Stand Up
 menu-bar-advanced = Advanced
 menu-bar-script-errors = Script Errors…
 menu-bar-debug-settings = Debug settings…
@@ -5333,6 +5340,7 @@ setting-desc-EnvironmentRepeatedTogglesShared = Picking the environment preset t
 setting-desc-ExperienceLogDays = How many days of experience events to keep in the per-account log (0 keeps none, 14 is the reference's maximum)
 setting-desc-ExperienceSearchMaturity = The highest content rating experience search results may carry (13 General, 21 Moderate, 42 Adult)
 setting-desc-FSAllowDoubleClickOnScriptedObjects = Let a double-click teleport land on an object that takes a click itself (a touch script, or a click action other than sit)
+setting-desc-FSBlockClickSit = Keep a left click on an object set to sit from seating the avatar; the click touches it instead, where a script listens for touches
 setting-desc-FSDisableMouseWheelCameraZoom = Keep the mouse wheel from zooming the camera (drag zoom still works)
 setting-desc-FSLimitFramerate = Cap the frame rate at FramePerSecondLimit (thermals / battery)
 setting-desc-FadeRange = Metres past the fade start at which name tags are fully hidden

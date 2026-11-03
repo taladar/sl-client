@@ -38,6 +38,16 @@ pub const FLAGS_OBJECT_YOU_OWNER: u32 = 1 << 5;
 /// `flagHandleTouch` — what every Touch entry is enabled on.
 pub const FLAGS_HANDLE_TOUCH: u32 = 1 << 7;
 
+/// The `FLAGS_TAKES_MONEY` bit of `PrimFlags` (`object_flags.h`): a script in
+/// the object has a `money` event, so it can be paid — the reference viewer's
+/// `flagTakesMoney`, which a *pay* click action needs on the prim or its root.
+pub const FLAGS_TAKES_MONEY: u32 = 1 << 9;
+
+/// The `FLAGS_INVENTORY_EMPTY` bit of `PrimFlags` (`object_flags.h`): the
+/// object's contents are empty — the reference's `flagInventoryEmpty`, which
+/// keeps an *open* click action from opening nothing.
+pub const FLAGS_INVENTORY_EMPTY: u32 = 1 << 11;
+
 /// The agent-relative `FLAGS_OBJECT_MOVE` bit: this agent may move (position /
 /// rotate) the object — set for the owner and for an "anyone can move" object.
 pub const FLAGS_OBJECT_MOVE: u32 = 1 << 8;

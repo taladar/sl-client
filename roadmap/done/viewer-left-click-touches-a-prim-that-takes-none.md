@@ -2,7 +2,7 @@
 id: viewer-left-click-touches-a-prim-that-takes-none
 title: A left click sends a grab and a degrab to a prim that takes no touch
 topic: viewer
-status: bugs
+status: done
 origin: gridspec-touch-grab (2026-10-12)
 refs: [gridspec-touch-grab, viewer-left-click-click-actions,
   viewer-automation-world-aim]
@@ -36,3 +36,14 @@ click by its `GrabObject` (`world_test.rs`, `automation_world_aim.rs`)
 click prims with no touch flag and need one, and the automation's world
 aim reports a click on such a prim as done: decide there whether "nothing
 takes this click" is a refusal.
+
+## Fixed (2026-11-03)
+
+With [[viewer-left-click-click-actions]]: `prim_clicks::left_click` gates the
+grab on the reference's rule — a touch script on the prim or its root (and the
+prim's own click action not *disabled*), or physics — and anything else sends
+nothing. The world tests' touch fixtures now carry a touch script
+(`hud_world`, the held-touch test's second case is a physical prim), and the
+click-action test asserts a plain prim sends nothing. The automation's world
+aim was left alone: a click is input delivered, and whether the grid hears
+anything is the prim's business, which is what the reference does too.
