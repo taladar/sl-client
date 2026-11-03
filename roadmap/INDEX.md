@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 338 |
 | blocked | 39 |
 | in-progress | 17 |
-| bugs | 42 |
-| done | 1477 |
+| bugs | 41 |
+| done | 1478 |
 | deferred | 30 |
 | wont-do | 24 |
 | **total** | **2096** |
@@ -1336,7 +1336,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (42)
+## bugs (41)
 
 ### protocol
 
@@ -1365,8 +1365,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A ground reveal can put the camera under higher ground beside the point
 - [`viewer-bespoke-card-responses-lose-the-button`](bugs/viewer-bespoke-card-responses-lose-the-button.md)
   — Bespoke notification cards resolve every click as "no choice"
-- [`viewer-build-phantom-flag-wrong-bit`](bugs/viewer-build-phantom-flag-wrong-bit.md)
-  — Build floater's Phantom checkbox reads and writes the any-owner bit
 - [`viewer-calling-card-offer-unanswered`](bugs/viewer-calling-card-offer-unanswered.md)
   — A calling card offered to us is never shown or answered
 - [`viewer-camera-framing-ends-inside-the-framed-object`](bugs/viewer-camera-framing-ends-inside-the-framed-object.md)
@@ -1442,7 +1440,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1477)
+## done (1478)
 
 ### protocol
 
@@ -2079,6 +2077,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-build-numeric-field-spinners`](done/viewer-build-numeric-field-spinners.md)
   — Spinner widget — up/down arrow numeric fields (build window and every
   reference spinner)
+- [`viewer-build-phantom-flag-wrong-bit`](done/viewer-build-phantom-flag-wrong-bit.md)
+  — Build floater's Phantom checkbox reads and writes the any-owner bit
 - [`viewer-build-systems-gate-on-build-mode`](done/viewer-build-systems-gate-on-build-mode.md)
   — Performance — gate all build-tool systems on build mode being active
 - [`viewer-build-tool-modify-permission-gate`](done/viewer-build-tool-modify-permission-gate.md)

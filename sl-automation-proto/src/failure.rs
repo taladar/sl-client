@@ -487,6 +487,7 @@ mod tests {
             hover_text: None,
             name_tag: None,
             bakes: Vec::new(),
+            behaviour: crate::world::ObjectBehaviour::default(),
         };
         let error = AutomationError::WorldTimedOut {
             locator: WorldLocator::kind(WorldKind::Object).named("Door"),

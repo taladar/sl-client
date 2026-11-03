@@ -124,6 +124,7 @@ use crate::world_api::EditTool;
 pub use crate::world_api::FLAGS_HANDLE_TOUCH;
 use crate::world_api::ObjectState;
 use crate::world_api::SelfGroundSit;
+use crate::world_api::{FLAGS_OBJECT_COPY, FLAGS_OBJECT_YOU_OWNER};
 
 /// The `element` the object pie attributes its [`UiAction`]s to.
 pub const OBJECT_MENU_ELEMENT: &str = "object-menu";
@@ -151,13 +152,6 @@ pub const TARGET_OWNED: &str = "target-owned";
 /// (`FLAGS_OBJECT_COPY`) — enables Take Copy, the reference's
 /// `Tools.EnableTakeCopy`.
 pub const TARGET_COPYABLE: &str = "target-copyable";
-
-/// The `FLAGS_OBJECT_COPY` bit of an object's update flags (`object_flags.h`):
-/// the agent may copy this object.
-const FLAGS_OBJECT_COPY: u32 = 1 << 3;
-
-/// The `FLAGS_OBJECT_YOU_OWNER` bit: the agent owns this object.
-const FLAGS_OBJECT_YOU_OWNER: u32 = 1 << 5;
 
 // ---------------------------------------------------------------------------
 // The take sub-pie (the reference's "Take Submenu", chained after Buy at the

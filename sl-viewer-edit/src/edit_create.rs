@@ -55,6 +55,7 @@ use crate::ui::{UiPanelShown, column, row};
 use crate::ui_combo::{ComboChanged, ComboSpec, spawn_combo};
 use crate::ui_font::UiFont;
 use crate::ui_radio::{RadioLayout, RadioSelection, RadioSpec, spawn_radio_group};
+use crate::world_api::FLAGS_CREATE_SELECTED;
 use crate::world_api::ObjectState;
 use crate::world_api::SelectionSet;
 use crate::world_api::ViewerCamera;
@@ -104,11 +105,6 @@ const SHEAR_NEG_HALF: u8 = 206;
 /// given up on — a generous window covering a slow round-trip, after which an
 /// un-matched rez (e.g. one the simulator refused) stops trying to auto-select.
 const PENDING_REZ_TTL: f32 = 10.0;
-
-/// The `FLAGS_CREATE_SELECTED` bit of an object's update flags
-/// (`object_flags.h`): the simulator created it for this agent asking that it
-/// arrive selected.
-const FLAGS_CREATE_SELECTED: u32 = 1 << 1;
 
 /// How near (metres) a streamed object's **horizontal** position must be to a
 /// pending rez point to count as that rez's object — the placement is exact in

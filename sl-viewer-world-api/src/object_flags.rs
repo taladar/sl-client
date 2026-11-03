@@ -66,6 +66,18 @@ pub const FLAGS_ALLOW_INVENTORY_DROP: u32 = 1 << 16;
 /// files it in the non-collidable layer.
 pub const FLAGS_PHANTOM: u32 = 1 << 10;
 
+/// The `FLAGS_CREATE_SELECTED` bit of `PrimFlags` (`object_flags.h`): the
+/// simulator created the object for this agent asking that it arrive selected.
+pub const FLAGS_CREATE_SELECTED: u32 = 1 << 1;
+
+/// The agent-relative `FLAGS_OBJECT_TRANSFER` bit of `PrimFlags`
+/// (`object_flags.h`): this agent may transfer (give away or sell) the object.
+pub const FLAGS_OBJECT_TRANSFER: u32 = 1 << 17;
+
+/// The `FLAGS_TEMPORARY_ON_REZ` bit of `PrimFlags` (`object_flags.h`): the
+/// object is temporary and the simulator deletes it a while after it is rezzed.
+pub const FLAGS_TEMPORARY_ON_REZ: u32 = 1 << 29;
+
 /// Whether a raw attachment-point id names a HUD (screen-space) slot rather than
 /// a body joint — the reference viewer's `LLVOVolume::isHUDAttachment`, which
 /// tests the same `31..=38` id range.

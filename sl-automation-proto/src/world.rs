@@ -322,6 +322,37 @@ pub struct WorldNode {
     /// avatar looks like.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub bakes: Vec<Uuid>,
+    /// How an object behaves in the world: physical, phantom, temporary — as
+    /// the grid last said, or as an edit the viewer sent showed it ahead of
+    /// the grid's answer. Left out when it is none of them, and for an avatar.
+    #[serde(default, skip_serializing_if = "ObjectBehaviour::is_plain")]
+    pub behaviour: ObjectBehaviour,
+}
+
+/// The three behaviour flags an object's owner sets on the Build window's
+/// Object tab (`FLAGS_USE_PHYSICS`, `FLAGS_PHANTOM` and
+/// `FLAGS_TEMPORARY_ON_REZ` in `object_flags.h`).
+///
+/// In JSON each is left out when it is off: `{"phantom":true}`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ObjectBehaviour {
+    /// The grid's physics engine moves it.
+    #[serde(default, skip_serializing_if = "core::ops::Not::not")]
+    pub physical: bool,
+    /// Nothing collides with it.
+    #[serde(default, skip_serializing_if = "core::ops::Not::not")]
+    pub phantom: bool,
+    /// The grid deletes it a while after it is rezzed.
+    #[serde(default, skip_serializing_if = "core::ops::Not::not")]
+    pub temporary: bool,
+}
+
+impl ObjectBehaviour {
+    /// Whether it is none of the three: a solid, still, lasting object.
+    #[must_use]
+    pub const fn is_plain(&self) -> bool {
+        !(self.physical || self.phantom || self.temporary)
+    }
 }
 
 /// One line naming the thing for a person reading an error — kind, name, ids
@@ -395,7 +426,7 @@ mod tests {
     use pretty_assertions::assert_eq;
     use uuid::Uuid;
 
-    use super::{Anchor, GroundPoint, WorldKind, WorldLocator, WorldNode};
+    use super::{Anchor, GroundPoint, ObjectBehaviour, WorldKind, WorldLocator, WorldNode};
 
     /// A named prim with every optional part filled.
     fn door() -> WorldNode {
@@ -420,7 +451,26 @@ mod tests {
             hover_text: Some("Open me".to_owned()),
             name_tag: None,
             bakes: Vec::new(),
+            behaviour: ObjectBehaviour::default(),
         }
+    }
+
+    /// An object's behaviour names only the flags it has, and a plain object
+    /// says nothing of it at all; either reads back as it was.
+    #[test]
+    fn a_behaviour_names_only_what_is_set() -> Result<(), serde_json::Error> {
+        let plain = door();
+        assert!(!serde_json::to_string(&plain)?.contains("behaviour"));
+        let mut ghost = door();
+        ghost.behaviour.phantom = true;
+        let json = serde_json::to_string(&ghost)?;
+        assert!(json.contains(r#""behaviour":{"phantom":true}"#), "{json}");
+        assert_eq!(serde_json::from_str::<WorldNode>(&json)?, ghost);
+        assert_eq!(
+            serde_json::from_str::<WorldNode>(&serde_json::to_string(&plain)?)?,
+            plain
+        );
+        Ok(())
     }
 
     /// A ground point says which region and where, in JSON and to a person.
