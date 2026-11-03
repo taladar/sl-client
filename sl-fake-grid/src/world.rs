@@ -196,10 +196,6 @@ pub struct SceneFixtures {
     /// How the region states its record, where the live grids disagree.
     /// Second Life's unless the grid's flavour says otherwise.
     pub(crate) region_info: crate::imitates::RegionInfoPolicy,
-    /// The order each linkset keeps its prims in ([`crate::link_sets`]). Not
-    /// a fixture: a set nobody has linked or delinked is in the order its
-    /// prims were stated.
-    pub(crate) links: crate::link_sets::LinkSets,
     /// The region's terrain textures and blend heights as an estate manager has
     /// changed them, or [`None`] while they are still the identity's.
     ///
@@ -806,7 +802,6 @@ impl SceneFixtures {
             scripts: crate::script_compile::CompilePolicy::default(),
             chat: crate::chat::ChatPolicy::default(),
             region_info: crate::imitates::RegionInfoPolicy::default(),
-            links: crate::link_sets::LinkSets::default(),
             terrain_composition: None,
             listens: crate::chat::Listens::default(),
             render_info: crate::render_info::RegionRenderInfo::default(),
@@ -1108,9 +1103,7 @@ impl SceneFixtures {
     /// Only [`objects`](Self::objects): an NPC's body is not a prim anybody
     /// may derez. Its task inventory, cost and edit history go with it.
     pub fn remove_object(&mut self, local_id: RegionLocalObjectId) -> Option<Object> {
-        let removed = self.objects.remove(local_id)?;
-        self.links.forget(local_id);
-        Some(removed)
+        self.objects.remove(local_id)
     }
 
     /// Adds one parcel with both its halves: the region-local record a
@@ -5046,6 +5039,83 @@ mod test {
             Some("Lamp"),
             "the rezzed object is not named after the item it came out of"
         );
+        Ok(())
+    }
+
+    /// A linkset taken into inventory comes back in its link order: the take
+    /// files it root first and the children by their link numbers, and the
+    /// rez puts them in the region in that order — a set whose newcomer was
+    /// numbered 2 on Second Life (`A C B`) is still `A C B` once rezzed.
+    #[test]
+    fn a_taken_linkset_comes_back_in_its_link_order() -> Result<(), String> {
+        let owner = agent(0x1);
+        let mut world = SceneFixtures::new();
+        world.linking = crate::imitates::ImitatedGrid::SecondLife.link_policy();
+        let named = |index: u32| {
+            let mut prim = box_prim(
+                RegionLocalObjectId(index),
+                ObjectKey::from(uuid::Uuid::from_u128(u128::from(index))),
+                owner,
+                ZERO,
+                ZERO,
+            );
+            let mut record = default_object_properties(&prim);
+            record.name = format!("prim {index}");
+            prim.properties = Some(record);
+            prim
+        };
+        for index in [10, 11, 12] {
+            world.objects.push(named(index));
+        }
+        let (a, b, c) = (
+            RegionLocalObjectId(10),
+            RegionLocalObjectId(11),
+            RegionLocalObjectId(12),
+        );
+        let _linked = crate::link_sets::link(&mut world, &[a, b])
+            .map_err(|refusal| format!("{refusal:?}"))?;
+        let _linked = crate::link_sets::link(&mut world, &[a, c])
+            .map_err(|refusal| format!("{refusal:?}"))?;
+        let taken: Vec<Object> = crate::link_sets::prims_in_order(&world, a)
+            .into_iter()
+            .filter_map(|prim| world.object_by_local_id(prim))
+            .collect();
+        for prim in [a, b, c] {
+            let _gone = world.remove_object(prim);
+        }
+        let item = InventoryItem {
+            name: "Set".to_owned(),
+            ..taken_item(
+                &taken,
+                InventoryFolderKey::from(uuid::Uuid::from_u128(0xF0)),
+                owner,
+                &|| uuid::Uuid::from_u128(0x5E7),
+                (
+                    crate::assets::ObjectAssetPolicy::Served,
+                    crate::imitates::TakenItemMasks::Objects,
+                ),
+            )
+        };
+        let next = std::cell::Cell::new(0x100_u128);
+        let rezzed = rez_taken_linkset(
+            &mut world,
+            sl_wire::RegionHandle(0),
+            &|| {
+                next.set(next.get() + 1);
+                uuid::Uuid::from_u128(next.get())
+            },
+            &taken,
+            &item,
+            Some(&ZERO),
+        );
+        world.objects.extend(rezzed.iter().cloned());
+        let root = rezzed.first().ok_or("the rez put nothing back")?.local_id;
+        let names: Vec<String> = crate::link_sets::prims_in_order(&world, root)
+            .into_iter()
+            .filter_map(|prim| world.objects.get(prim))
+            .filter_map(|prim| prim.properties.as_ref().map(|record| record.name.clone()))
+            .collect();
+        assert_eq!(names, vec!["Set", "prim 12", "prim 11"]);
         Ok(())
     }
 

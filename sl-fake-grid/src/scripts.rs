@@ -95,10 +95,10 @@ use sl_lsl_runtime::bytecode::Program;
 use sl_lsl_runtime::library::BuiltinId;
 use sl_lsl_runtime::vm::{
     Admission, Allowed, CallerId, Dialog, Engine, EngineConfig, EngineFlavour, ExperienceDetails,
-    ExperienceError, ExperienceQuestion, Heard, Host, InstantMessage, KeyValueStore, LinkedPrim,
-    Links, LinksetData, LinksetId, LoadUrl, MapDestination, MoneyRefusal, PayPrice, Payment,
-    Question, SavedScript, ScriptExperience, ScriptUsage, Simulator, SitRefusal, Speech, Standing,
-    Tick, TickReport, Whereabouts,
+    ExperienceError, ExperienceQuestion, Heard, Host, InstantMessage, InvalidLinkTarget,
+    KeyValueStore, LinkedAvatar, LinkedPrim, Links, LinksetData, LinksetId, LoadUrl,
+    MapDestination, MoneyRefusal, PayPrice, Payment, Question, SavedScript, ScriptExperience,
+    ScriptUsage, Simulator, SitRefusal, Speech, Standing, Tick, TickReport, Whereabouts,
 };
 use sl_proto::{
     AssetKey, AssetSource as _, AssetType, ChatSource, ChatType, ExperiencePermission, ImDialog,
@@ -845,6 +845,19 @@ enum Effect {
     },
     /// The linkset whose root is this prim leaves the region (`llDie`).
     Die(RegionLocalObjectId),
+    /// The set `second` is in is linked under the set `first` is in
+    /// (`llCreateLink`).
+    Link {
+        /// A prim of the set that is to be the root.
+        first: RegionLocalObjectId,
+        /// A prim of the set that is to join it.
+        second: RegionLocalObjectId,
+    },
+    /// The prim leaves its set (`llBreakLink`).
+    BreakLink(RegionLocalObjectId),
+    /// Every prim of the set whose root is this prim leaves it
+    /// (`llBreakAllLinks`).
+    BreakAllLinks(RegionLocalObjectId),
     /// The avatar is stood up (`llUnSit`).
     Unsit(AgentKey),
     /// The avatar is seated on the prim (`llSitOnLink`).
@@ -1368,9 +1381,15 @@ impl Host for RegionHost<'_> {
             };
         };
         let prims = self.linkset_prims(caller);
-        let sitters: Vec<String> = crate::seating::sitters_of(self.world, origin.root)
+        let sitters: Vec<LinkedAvatar> = crate::seating::sitters_of(self.world, origin.root)
             .into_iter()
-            .map(|agent| agent.uuid().to_string())
+            .map(|agent| {
+                let (first, last) = self.name_of(agent.uuid());
+                LinkedAvatar {
+                    key: agent.uuid().to_string(),
+                    name: format!("{first} {last}").trim_end().to_owned(),
+                }
+            })
             .collect();
         let alone = prims.len() <= 1 && sitters.is_empty();
         let mut this = 0;
@@ -1383,9 +1402,15 @@ impl Host for RegionHost<'_> {
                     this = link;
                 }
                 let key = self.world.objects.get(*local_id)?.full_id;
+                let name = self
+                    .world
+                    .properties_of(*local_id)
+                    .map(|properties| properties.name)
+                    .unwrap_or_default();
                 Some(LinkedPrim {
                     link,
                     key: key.uuid().to_string(),
+                    name,
                     scripts: self.scripts_in(key),
                 })
             })
@@ -1394,6 +1419,62 @@ impl Host for RegionHost<'_> {
             this,
             prims: linked,
             sitters,
+        }
+    }
+
+    fn create_link(
+        &mut self,
+        caller: CallerId,
+        target: &str,
+        parent: bool,
+    ) -> Result<(), InvalidLinkTarget> {
+        let origin = self.origin(caller).ok_or(InvalidLinkTarget)?;
+        let key = uuid::Uuid::parse_str(target).map_err(|_error| InvalidLinkTarget)?;
+        let other = self
+            .world
+            .objects
+            .get_by_key(ObjectKey::from(key))
+            .map(|prim| prim.local_id)
+            .ok_or(InvalidLinkTarget)?;
+        let other_root = self.world.root_of(other);
+        let owner =
+            |root: RegionLocalObjectId| self.world.objects.get(root).map(|prim| prim.owner_id);
+        // Neither grid links an object somebody wears, or another owner's.
+        let worn = |root: RegionLocalObjectId| self.world.objects.attached_to(root).is_some();
+        if worn(other_root) || worn(origin.root) || owner(other_root) != owner(origin.root) {
+            return Err(InvalidLinkTarget);
+        }
+        let (first, second) = if parent {
+            (origin.local_id, other)
+        } else {
+            (other, origin.local_id)
+        };
+        self.effects.push(Effect::Link { first, second });
+        Ok(())
+    }
+
+    fn break_link(&mut self, caller: CallerId, prim: &str) {
+        let Some(origin) = self.origin(caller) else {
+            return;
+        };
+        if self.world.objects.attached_to(origin.root).is_some() {
+            return;
+        }
+        let Some(local_id) = uuid::Uuid::parse_str(prim)
+            .ok()
+            .and_then(|key| self.world.local_id_of(ObjectKey::from(key)))
+        else {
+            return;
+        };
+        self.effects.push(Effect::BreakLink(local_id));
+    }
+
+    fn break_all_links(&mut self, caller: CallerId) {
+        let Some(origin) = self.origin(caller) else {
+            return;
+        };
+        if self.world.objects.attached_to(origin.root).is_none() {
+            self.effects.push(Effect::BreakAllLinks(origin.root));
         }
     }
 
@@ -2030,6 +2111,15 @@ fn tick_locked(
                 }
             }
             Effect::Die(root) => changes.extend(remove_linkset(world, root)),
+            Effect::Link { first, second } => {
+                changes.extend(crate::link_sets::script_link(world, first, second));
+            }
+            Effect::BreakLink(prim) => {
+                changes.extend(crate::link_sets::script_break_link(world, prim));
+            }
+            Effect::BreakAllLinks(root) => {
+                changes.extend(crate::link_sets::script_break_all_links(world, root));
+            }
             Effect::Unsit(agent) => {
                 if let Some(stands_at) = crate::seating::stand(world, agent) {
                     changes.push(RegionChange::Unseated { agent, stands_at });
@@ -2114,6 +2204,26 @@ pub(crate) fn raise_changed(world: &mut SceneFixtures, root: RegionLocalObjectId
     for id in linkset_scripts(world, root) {
         if let Err(error) = world.script_instances.engine.changed(id, bits) {
             tracing::warn!(?id, %error, "raising changed failed");
+        }
+    }
+}
+
+/// Raises `changed(bits)` in the scripts of each of `prims`, prim by prim in
+/// the order given — what concerns a prim and not its whole set, as a link
+/// that moved it into one does on OpenSim.
+pub(crate) fn raise_changed_in(
+    world: &mut SceneFixtures,
+    prims: &[RegionLocalObjectId],
+    bits: i32,
+) {
+    for local_id in prims {
+        let Some(key) = world.objects.get(*local_id).map(|prim| prim.full_id) else {
+            continue;
+        };
+        for id in world.script_instances.scripts_in(key) {
+            if let Err(error) = world.script_instances.engine.changed(id, bits) {
+                tracing::warn!(?id, %error, "raising changed failed");
+            }
         }
     }
 }

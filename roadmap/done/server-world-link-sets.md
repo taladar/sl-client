@@ -2,7 +2,7 @@
 id: server-world-link-sets
 title: A real link-set model — link numbers, root and children
 topic: server
-status: ready
+status: done
 origin: LSL-on-the-fake-grid audit (2026-09-20)
 points: 5
 blocked_by: [server-world-ecs-store, gridspec-object-link-delink]
@@ -90,3 +90,67 @@ and those rows move into `MEASURED`.
 `Links` now carries each prim's key and the sitters after the prims in sit
 order; a lone prim with a sitter is link 1. The rest of the family is still
 this task's.
+
+## Done (2026-11-03)
+
+What a script sees of a linkset, over the order `link_sets` already kept:
+
+- **The order on the entity store.** `scene_store::LinkOrder` is a component of
+  each root — its children by link number and, for the OpenSim flavour, its part
+  collection's slots — so a root that leaves takes it and a copy of the region
+  (`ObjectStore`'s `Clone`, a scenario copied into its region) keeps it.
+  `SceneFixtures::links` is gone. A take files a set root first in link order
+  and a rez pushes it back in that order, which is what `children_in_order`
+  falls back on (`a_taken_linkset_comes_back_in_its_link_order`,
+  `a_copy_of_the_region_keeps_the_order`); a restart leaves the prims as they
+  are.
+- **The runtime's `Links`.** Each `LinkedPrim` carries its name and each
+  sitter is a `LinkedAvatar` (key and legacy name). `Links::numbered` is the
+  one resolution of a single link number (`LINK_THIS`, a lone prim's 0, the
+  prims, then the sitters; `LSL_Api.GetLinkEntity`'s rule, which both grids
+  follow for `llGetLinkName`), and `Links::named` the one resolution of the
+  `LINK_*` sets, which `llMessageLinked` now goes through and the
+  `llSetLink*` family is to.
+- **Functions.** `llGetLinkName`, `llGetObjectName` (`library/sitting.rs`),
+  `llGetLinkKey` rewritten over `Links::numbered`; `llCreateLink`,
+  `llBreakLink` and `llBreakAllLinks` (`library/linking.rs`) behind the new
+  `PERMISSION_CHANGE_LINKS`, refused in each grid's words (`prim/link` and
+  the new `prim/link-refusals`, run on aditi, YEngine and XEngine; the wiki's
+  Second Life delink wording turned out wrong), through three new
+  `Host` methods (`create_link`, `break_link`, `break_all_links`).
+- **The region.** `RegionHost` validates a link target (a prim of the region,
+  not worn, the same owner) and defers the link or delink as an `Effect`
+  applied after the tick through `link_sets::link` / `delink`, the same calls
+  a viewer's `ObjectLink` / `ObjectDelink` make, and publishes the changed
+  sets whole under `REGION_SOURCE`.
+- **`CHANGED_LINK`** on a viewer's link and delink (every prim of the sets
+  touched) and on a script's, per `LinkPolicy::events` (`LinkEvents`): on
+  OpenSim a newcomer first hears its own 32768, `llBreakLink` of a child
+  tells the child alone (the recorded OpenSim run; the book's row said "the
+  same" and is corrected), `llBreakAllLinks` tells the root once per child,
+  `llBreakLink` stands the sitters up first on both grids, and
+  `llBreakAllLinks` does on Second Life alone (`prim/link-refusals`). A
+  scripted link too far is refused silently on Second Life (the same probe);
+  OpenSim has no distance limit. Unmeasured still: the refusal of a scripted
+  link that would make too many prims (the probe would need 256), heard as
+  nothing.
+
+Acceptance: `object-link-delink`'s `MEASURED_LIVE` rows
+(`a_single_prim_is_link_number`, `numbers_linked_at_once`,
+`numbers_with_a_prim_added`, `numbers_of_two_sets_joined`,
+`numbers_once_the_root_left`, `a_root_delinked_alone_promotes`) moved into
+`MEASURED`, and the case plants its reporting scripts on both fake flavours and
+passes offline — the live OpenSim numbers the check was to be held against are
+those rows, measured there on 2026-10-11. `sl-fake-grid/tests/scripts.rs`'s
+`a_scripted_linkset` runs a three-prim set whose root reports `1/3: A B C`,
+pings exactly the two children with `LINK_ALL_OTHERS`, and, granted, breaks link
+2, links it back (as 2 on Second Life, last on OpenSim) and breaks every link,
+each prim hearing what its grid tells it; a lone prim reads link 0 (runtime
+tests in `vm/tests/linking.rs`).
+
+Not done here, and left to [[server-lsl-lib-prim-state]], which lists them
+already: the parameter half — `llGetLinkPrimitiveParams`,
+`llSetLinkPrimitiveParams(Fast)`, `llSetLinkColor`, `llSetLinkAlpha`,
+`llSetLinkTexture` — which need the `PRIM_*` codec and the update plumbing of
+that tranche; they resolve their link argument through `Links::named`. The
+`prim/link` probe replays only once they exist.

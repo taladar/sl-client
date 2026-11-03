@@ -1971,8 +1971,8 @@ newer rules go by number, since OpenSim has no constants for them.
 | what | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
 | a fresh prim | `llGetLinkNumber` 0, `llGetNumberOfPrims` 1, `llGetCreator` the owner | the same | no scripts |
-| `llGetLinkKey(0)`, `llGetLinkKey(1)` on a single prim | the prim, `NULL_KEY` | the prim, **the prim** | no scripts |
-| `llGetLinkName(1)` on a single prim | `NULL_KEY` as text | the same | no scripts |
+| `llGetLinkKey(0)`, `llGetLinkKey(1)` on a single prim | the prim, `NULL_KEY` | the prim, **the prim** | each flavour as its grid |
+| `llGetLinkName(1)` on a single prim | `NULL_KEY` as text | the same | the same |
 | `llSetObjectName` of 64 or 100 characters | cut to **63** | **kept** | no scripts |
 | a name of forty `é` | sixty-two `?`: cut to whole characters within 63 bytes, and every byte of a character outside ASCII reads back as `?` | kept | no scripts |
 | a description of 128 or 200 characters | cut to 127 | the same | no scripts |
@@ -1996,10 +1996,10 @@ granted `PERMISSION_CHANGE_LINKS`; each step is a second and a half apart.
 
 | what | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
-| `llCreateLink` with no permission | `Script trying to link but PERMISSION_CHANGE_LINKS permission not set!` | `llCreateLink: PERMISSION_CHANGE_LINKS permission not set` | no scripts |
-| `llCreateLink` of `NULL_KEY`, a key nothing has, the owner | `Script trying to link but target is invalid.` each | nothing, silently | no scripts |
-| linked | `CHANGED_LINK` in both prims; the root is link 1, the child 2, `llGetNumberOfPrims` 2 | the same, and the child gets a `changed` of 32768 (OpenSim's `CHANGED_POSITION`) whenever it moves | no scripts |
-| `llGetLinkKey(0)` in a linkset | `NULL_KEY` | the prim itself | no scripts |
+| `llCreateLink` with no permission | `Script trying to link but PERMISSION_CHANGE_LINKS permission not set!` | `llCreateLink: PERMISSION_CHANGE_LINKS permission not set` | each flavour as its grid |
+| `llCreateLink` of `NULL_KEY`, a key nothing has, the owner | `Script trying to link but target is invalid.` each | nothing, silently | each flavour as its grid |
+| linked | `CHANGED_LINK` in both prims; the root is link 1, the child 2, `llGetNumberOfPrims` 2 | the same, and the child gets a `changed` of 32768 (OpenSim's `CHANGED_POSITION`) whenever it moves | each flavour as its grid; the 32768 at the link alone, since nothing moves a child yet |
+| `llGetLinkKey(0)` in a linkset | `NULL_KEY` | the prim itself | each flavour as its grid |
 | `llSetLinkPrimitiveParamsFast` of `LINK_SET`, `LINK_ALL_OTHERS`, `LINK_ALL_CHILDREN`, `LINK_ROOT`, `LINK_THIS`, 1, 2 | the prims each names | the same | no scripts |
 | … of link 0 or 3 in a linkset of two | nothing | the same | no scripts |
 | `llGetLinkPrimitiveParams` of `LINK_SET`, `LINK_ALL_OTHERS`, `LINK_ALL_CHILDREN` | **nothing** | the prims each names, in link order | no scripts |
@@ -2007,10 +2007,24 @@ granted `PERMISSION_CHANGE_LINKS`; each step is a second and a half apart.
 | the child's `PRIM_POS_LOCAL` 5, 20, 60 m | set as given | the same | no scripts |
 | the child's `PRIM_POSITION` of a region position 5, 20, 60 m from the root | **nothing**: the child stays where it was | the region position is taken **as the offset**: the child goes that far from the root | no scripts |
 | `llSetPos` in a child, 15 m from the root | 15 m: no 10 m cap for a child's offset | **12 m**: capped 10 m from where it was (2 m) | no scripts |
-| `llBreakLink(2)`, `llBreakLink(1)` | unlinks; `CHANGED_LINK` in both | the same | no scripts |
-| `llBreakLink(3)` | nothing | the same | no scripts |
-| `llCreateLink(…, FALSE)` | the target becomes the root, this script's prim link 2 | the same | no scripts |
-| `llBreakAllLinks` from a child | unlinks every prim | the same | no scripts |
+| `llBreakLink(2)`, `llBreakLink(1)` | unlinks; `CHANGED_LINK` in both | unlinks; `CHANGED_LINK` in both for `llBreakLink(1)`, but **in the child alone** for `llBreakLink(2)` | each flavour as its grid |
+| `llBreakLink(3)` | nothing | the same | the same |
+| `llCreateLink(…, FALSE)` | the target becomes the root, this script's prim link 2 | the same | the same |
+| `llBreakAllLinks` from a child | unlinks every prim | the same | the same |
+
+`prim/link-refusals`: prim A holds the Leader, which is granted
+`PERMISSION_CHANGE_LINKS`, and a second script that holds no permission;
+prim B stands two metres east, prim C seventy metres above. The other avatar
+sits on prim A, no sit target set.
+
+| what | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| `llCreateLink` of a prim 70 m away | nothing, silently: no link, no `changed` in the far prim | **links** it: no distance limit | each flavour as its grid |
+| `llBreakLink(2)`, `llBreakLink(1)` with no permission | `Script trying to break links but PERMISSION_CHANGE_LINKS permission not set!` | `llBreakLink: PERMISSION_CHANGE_LINKS permission not set` | each flavour as its grid |
+| `llBreakAllLinks` with no permission | the same words as `llBreakLink`'s | `llBreakAllLinks: Script trying to link but PERMISSION_CHANGE_LINKS permission not set!` | each flavour as its grid |
+| `llBreakLink(2)` with an avatar sitting on the root | the avatar is **stood up**, the child unlinked | the same | the same |
+| `llBreakLink` of the sitter's link number | nothing: the avatar stays | the same | the same |
+| `llBreakAllLinks` with an avatar sitting on the root | the avatar is **stood up**, every prim unlinked | every prim unlinked, the avatar **stays seated** on the root | each flavour as its grid |
 
 ### `changed`: which setter raises what
 

@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 129 |
-| ready | 338 |
+| ready | 337 |
 | blocked | 40 |
 | in-progress | 18 |
 | bugs | 42 |
-| done | 1474 |
+| done | 1475 |
 | deferred | 30 |
 | wont-do | 24 |
 | **total** | **2095** |
@@ -296,7 +296,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `gridspec-lsl-physics-vehicles` (done))
 - [`server-lsl-lib-prim-state`](ideas/server-lsl-lib-prim-state.md) — Library
   tranche — reading and writing the prim (blocked by `server-lsl-vm-execution`
-  (done), `server-world-ecs-store` (done), `server-world-link-sets`,
+  (done), `server-world-ecs-store` (done), `server-world-link-sets` (done),
   `server-world-update-scheduling`, `gridspec-lsl-prim-state` (done))
 - [`server-lsl-lib-task-inventory`](ideas/server-lsl-lib-task-inventory.md) —
   Library tranche — task inventory, giving, rezzing and notecards (blocked by
@@ -329,7 +329,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-lsl-opensim-function-set`](ideas/gridspec-lsl-opensim-function-set.md)
   — Measure which library functions OpenSim's engines compile
 
-## ready (338)
+## ready (337)
 
 ### protocol
 
@@ -1136,9 +1136,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-world-determinism-contract`](ready/server-world-determinism-contract.md)
   — Keep the fake grid reproducible once it runs scripts (blocked by
   `server-world-heartbeat` (done))
-- [`server-world-link-sets`](ready/server-world-link-sets.md) — A real link-set
-  model — link numbers, root and children (blocked by `server-world-ecs-store`
-  (done), `gridspec-object-link-delink` (done))
 - [`server-world-update-scheduling`](ready/server-world-update-scheduling.md) —
   Batch world changes into per-tick update bursts (blocked by
   `server-world-heartbeat` (done), `server-world-ecs-store` (done),
@@ -1446,7 +1443,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1474)
+## done (1475)
 
 ### protocol
 
@@ -4549,6 +4546,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   store for the region, in place of a Vec of objects
 - [`server-world-heartbeat`](done/server-world-heartbeat.md) — A region
   heartbeat — the fake grid has no simulation loop at all
+- [`server-world-link-sets`](done/server-world-link-sets.md) — A real link-set
+  model — link numbers, root and children (blocked by `server-world-ecs-store`
+  (done), `gridspec-object-link-delink` (done))
 - [`server-world-sit-and-attach`](done/server-world-sit-and-attach.md) — Sitting
   and attaching as world state a script can read (blocked by
   `server-world-ecs-store` (done), `gridspec-attachments` (done))

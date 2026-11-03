@@ -3,7 +3,7 @@
 //! registration will not compile unless its signature is the table's.
 
 use crate::library::{
-    comms, control, detection, encoding, experiences, json_text, linkset, lists, math,
+    comms, control, detection, encoding, experiences, json_text, linking, linkset, lists, math,
     money_permissions, ossl, rotations, sitting, strings, usage,
 };
 
@@ -185,6 +185,11 @@ crate::registry! {
         LlGetNumberOfPrims => sitting::ll_get_number_of_prims,
         LlGetLinkNumber => sitting::ll_get_link_number,
         LlGetLinkKey => sitting::ll_get_link_key,
+        LlGetLinkName => sitting::ll_get_link_name,
+        LlGetObjectName => sitting::ll_get_object_name,
+        LlCreateLink => linking::ll_create_link,
+        LlBreakLink => linking::ll_break_link,
+        LlBreakAllLinks => linking::ll_break_all_links,
         LlGetObjectPrimCount => sitting::ll_get_object_prim_count,
         LlUnSit => sitting::ll_un_sit,
         LlSetSitText => sitting::ll_set_sit_text,

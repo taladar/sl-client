@@ -323,8 +323,56 @@ pub struct LinkedPrim {
     pub link: i32,
     /// Its key (`llGetLinkKey`).
     pub key: String,
+    /// Its name (`llGetLinkName`, `llGetObjectName`).
+    pub name: String,
     /// The scripts in it, each of which gets a link message to the prim.
     pub scripts: Vec<CallerId>,
+}
+
+/// One avatar sitting on a linkset, which takes a link number after the
+/// prims'.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LinkedAvatar {
+    /// Its key (`llGetLinkKey`).
+    pub key: String,
+    /// Its name as `llGetLinkName` gives it: the legacy name.
+    pub name: String,
+}
+
+/// `llCreateLink` named nothing it could link: no prim of the region, or one
+/// of an object worn or owned by somebody else (`prim/link`: `NULL_KEY`, a
+/// key nothing has and the owner's own are each refused alike).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("the link target is no prim the script's owner may link")]
+pub struct InvalidLinkTarget;
+
+/// What one link number names: a prim of the linkset or an avatar on it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Linked<'links> {
+    /// A prim.
+    Prim(&'links LinkedPrim),
+    /// A sitter.
+    Avatar(&'links LinkedAvatar),
+}
+
+impl Linked<'_> {
+    /// Its key.
+    #[must_use]
+    pub fn key(&self) -> &str {
+        match self {
+            Self::Prim(prim) => &prim.key,
+            Self::Avatar(avatar) => &avatar.key,
+        }
+    }
+
+    /// Its name.
+    #[must_use]
+    pub fn name(&self) -> &str {
+        match self {
+            Self::Prim(prim) => &prim.name,
+            Self::Avatar(avatar) => &avatar.name,
+        }
+    }
 }
 
 /// The linkset a script is in, as its host describes it for
@@ -336,9 +384,9 @@ pub struct Links {
     pub this: i32,
     /// Every prim of the linkset in link order, the root first.
     pub prims: Vec<LinkedPrim>,
-    /// The avatars sitting on the linkset, by key, in the order they sat:
-    /// the link numbers after the last prim's are theirs.
-    pub sitters: Vec<String>,
+    /// The avatars sitting on the linkset in the order they sat: the link
+    /// numbers after the last prim's are theirs.
+    pub sitters: Vec<LinkedAvatar>,
 }
 
 /// `LINK_ROOT`, which is also the link number 1.
@@ -353,18 +401,64 @@ const LINK_ALL_CHILDREN: i32 = -3;
 const LINK_THIS: i32 = -4;
 
 impl Links {
-    /// The scripts a link message to `target` reaches, prim by prim in link
-    /// order: `LINK_SET` every prim, `LINK_ALL_OTHERS` all but the sender's,
-    /// `LINK_ALL_CHILDREN` all but the root, `LINK_THIS` the sender's, and a
-    /// number the prim of that link number — the sender's own scripts,
-    /// itself included, whenever its prim is among them. A prim linked to
-    /// nothing is link 0, so on Second Life `LINK_ROOT` (1) reaches nobody;
-    /// OpenSim takes it for the root whatever its number
-    /// (`comms/link-messages`).
+    /// Whether the caller's prim is linked to nothing and nobody sits on it:
+    /// the one case where its link number is 0.
     #[must_use]
-    pub fn reached(&self, target: i32, flavour: EngineFlavour) -> Vec<CallerId> {
+    pub const fn is_alone(&self) -> bool {
+        self.prims.len() == 1 && self.sitters.is_empty()
+    }
+
+    /// The caller's own prim.
+    #[must_use]
+    pub fn this_prim(&self) -> Option<&LinkedPrim> {
+        self.prims.iter().find(|prim| prim.link == self.this)
+    }
+
+    /// The prim or sitter the single link number `link` names, the way both
+    /// grids resolve it for `llGetLinkName` (`prim/identity`, `prim/link`;
+    /// `LSL_Api.GetLinkEntity`): `LINK_THIS` the caller's prim; 0 the prim
+    /// of a prim on its own and nothing in a linkset; 1 up to the last prim's
+    /// number the prim; the numbers after it the sitters in the order they
+    /// sat. A prim on its own has no link 1, and every other constant names
+    /// nothing.
+    #[must_use]
+    pub fn numbered(&self, link: i32) -> Option<Linked<'_>> {
+        match link {
+            LINK_THIS => self.this_prim().map(Linked::Prim),
+            0 if self.is_alone() => self.this_prim().map(Linked::Prim),
+            number if number <= 0 || self.is_alone() => None,
+            number => {
+                let prims = i32::try_from(self.prims.len()).unwrap_or(i32::MAX);
+                if number <= prims {
+                    self.prims
+                        .iter()
+                        .find(|prim| prim.link == number)
+                        .map(Linked::Prim)
+                } else {
+                    usize::try_from(number.saturating_sub(prims).saturating_sub(1))
+                        .ok()
+                        .and_then(|index| self.sitters.get(index))
+                        .map(Linked::Avatar)
+                }
+            }
+        }
+    }
+
+    /// The prims a link argument names, in link order: `LINK_SET` every
+    /// prim, `LINK_ALL_OTHERS` all but the caller's, `LINK_ALL_CHILDREN` all
+    /// but the root, `LINK_THIS` the caller's, and a number the prim of that
+    /// link number. A prim linked to nothing is link 0, so on Second Life
+    /// `LINK_ROOT` (1) names nothing there; OpenSim takes it for the root
+    /// whatever its number (`comms/link-messages`).
+    ///
+    /// This is the one resolution of the `LINK_*` constants every function
+    /// that addresses prims by link goes through; what a function then makes
+    /// of the prims named (a get that answers nothing for a set, a set that
+    /// skips a lone prim's link 1) is the function's.
+    #[must_use]
+    pub fn named(&self, target: i32, flavour: EngineFlavour) -> Vec<&LinkedPrim> {
         let root = self.prims.first().map(|prim| prim.link);
-        let reaches = |prim: &LinkedPrim| match target {
+        let names = |prim: &LinkedPrim| match target {
             LINK_SET => true,
             LINK_ALL_OTHERS => prim.link != self.this,
             LINK_ALL_CHILDREN => Some(prim.link) != root,
@@ -373,9 +467,16 @@ impl Links {
             number if number >= 0 => prim.link == number,
             _ => false,
         };
-        self.prims
-            .iter()
-            .filter(|prim| reaches(prim))
+        self.prims.iter().filter(|prim| names(prim)).collect()
+    }
+
+    /// The scripts a link message to `target` reaches: those of every prim
+    /// [`Self::named`] names, prim by prim in link order — the sender's own
+    /// scripts, itself included, whenever its prim is among them.
+    #[must_use]
+    pub fn reached(&self, target: i32, flavour: EngineFlavour) -> Vec<CallerId> {
+        self.named(target, flavour)
+            .into_iter()
             .flat_map(|prim| prim.scripts.iter().copied())
             .collect()
     }
@@ -527,6 +628,7 @@ mod tests {
             prims: vec![LinkedPrim {
                 link: 0,
                 key: KEY.to_owned(),
+                name: "Object".to_owned(),
                 scripts: vec![CallerId(1), CallerId(2)],
             }],
             sitters: Vec::new(),
@@ -542,6 +644,7 @@ mod tests {
                 .map(|link| LinkedPrim {
                     link,
                     key: KEY.to_owned(),
+                    name: format!("Prim {link}"),
                     scripts: vec![CallerId(u64::try_from(link).unwrap_or_default())],
                 })
                 .collect(),

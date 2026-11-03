@@ -128,3 +128,15 @@ replay writes in for it (`vm/tests/ossl.rs`). The 23: `osAdjustSoundVolume`,
 `llGetPos`, `llGetLocalPos` and `llGetRootPosition` are implemented over
 `Host::placement` (a worn prim's region position its wearer's, its local one
 its offset on the point), and `llGetObjectPrimCount` over `Host::prim_count`.
+
+## From server-world-link-sets (2026-11-03)
+
+`llGetObjectName` and `llGetLinkName` are implemented (`Links` carries each
+prim's name and each sitter's). The `llSetLink*` and `llGetLinkPrimitiveParams`
+family is this tranche's: resolve a link argument with `Links::named` (the one
+resolution of the `LINK_*` sets, which `llMessageLinked` uses) and a single
+number with `Links::numbered`, then apply this tranche's per-function rules
+(Second Life answering only link 0 and `LINK_THIS` on a single prim, a get of
+a set answering nothing). The `prim/link` probe replays once they exist; its
+link and delink rows already hold offline in `vm/tests/linking.rs` and
+`sl-fake-grid/tests/scripts.rs`.

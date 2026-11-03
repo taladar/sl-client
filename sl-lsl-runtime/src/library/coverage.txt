@@ -181,6 +181,11 @@ implemented llAvatarOnLinkSitTarget
 implemented llGetNumberOfPrims
 implemented llGetLinkNumber
 implemented llGetLinkKey
+implemented llGetLinkName
+implemented llGetObjectName
+implemented llCreateLink
+implemented llBreakLink
+implemented llBreakAllLinks
 implemented llGetObjectPrimCount
 implemented llUnSit
 implemented llSetSitText

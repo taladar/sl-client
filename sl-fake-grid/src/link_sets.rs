@@ -20,46 +20,34 @@
 //!   have, a prim on its own included, because a slot freed by one delink is
 //!   taken by a link much later.
 //!
-//! A set this module has never been told about — a fixture's, a rezzed
-//! item's — is in the order its prims stand in the region's store, which is
-//! the order they were stated in.
+//! The order is kept on each root in the region's store, as its
+//! [`LinkOrder`](crate::scene_store::LinkOrder): a root that leaves takes it,
+//! and a copy of the region keeps it. A set this module has never been told
+//! about — a fixture's, a rezzed item's — is in the order its prims stand in
+//! the region's store, which is the order they were stated in; a take files a
+//! set root first and in its link order, so a rez brings it back in it.
 //!
-//! Link numbers as a script reads them (`llGetLinkNumber` and the rest) are
-//! `server-world-link-sets`; this is the order they will be read from.
+//! It is also the order a script reads its link numbers from
+//! (`server-world-link-sets`): the region's script host numbers the root 1 and
+//! the children from [`children_in_order`], and a script's own `llCreateLink`,
+//! `llBreakLink` and `llBreakAllLinks` go through [`link`] and [`delink`] the
+//! way a viewer's edit does, so the two cannot disagree about what a set is.
+//! Who hears `changed(CHANGED_LINK)` of either is the flavour's
+//! ([`LinkEvents`](crate::imitates::LinkEvents)).
 
-use std::collections::BTreeMap;
-
+use sl_lsl_runtime::vm::seating::CHANGED_LINK;
 use sl_proto::RegionLocalObjectId;
 use sl_types::lsl::{Rotation, Vector};
 
-use crate::imitates::{LinkPolicy, Newcomers, NoBuildAlert, Promoted, SentOrder};
+use crate::imitates::{BreakLinkHeard, LinkPolicy, Newcomers, NoBuildAlert, Promoted, SentOrder};
 use crate::object_edits::{into_frame, out_of_frame};
-use crate::world::SceneFixtures;
-
-/// The order each linkset keeps its prims in.
-#[derive(Debug, Clone, Default)]
-pub(crate) struct LinkSets {
-    /// Each root's children in the order of their link numbers, number 2
-    /// first.
-    numbers: BTreeMap<RegionLocalObjectId, Vec<RegionLocalObjectId>>,
-    /// Each root's part collection as OpenSim keeps it, the root included.
-    parts: BTreeMap<RegionLocalObjectId, Parts>,
-}
-
-impl LinkSets {
-    /// Forgets what was kept about `root`: the prim left the region, or it
-    /// became a group of its own, which starts with a fresh collection.
-    pub(crate) fn forget(&mut self, root: RegionLocalObjectId) {
-        let _numbers = self.numbers.remove(&root);
-        let _parts = self.parts.remove(&root);
-    }
-}
+use crate::world::{RegionChange, SceneFixtures};
 
 /// A .NET `Dictionary`'s slots, as far as its order of enumeration goes: an
 /// added key takes the slot freed last, or a new one at the end, and the keys
 /// are listed slot by slot.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-struct Parts {
+pub(crate) struct Parts {
     /// The slots, an empty one where a part was removed.
     slots: Vec<Option<RegionLocalObjectId>>,
     /// The empty slots, the one freed last at the end.
@@ -161,9 +149,9 @@ pub(crate) fn children_in_order(
         .map(|object| object.local_id)
         .collect();
     let mut ordered: Vec<RegionLocalObjectId> = world
-        .links
-        .numbers
-        .get(&root)
+        .objects
+        .link_order(root)
+        .and_then(|order| order.children.as_ref())
         .into_iter()
         .flatten()
         .copied()
@@ -190,9 +178,9 @@ pub(crate) fn prims_of(world: &SceneFixtures, root: RegionLocalObjectId) -> usiz
 fn parts_in_order(world: &SceneFixtures, root: RegionLocalObjectId) -> Vec<RegionLocalObjectId> {
     let children = children_in_order(world, root);
     let mut ordered: Vec<RegionLocalObjectId> = world
-        .links
-        .parts
-        .get(&root)
+        .objects
+        .link_order(root)
+        .and_then(|order| order.parts.as_ref())
         .into_iter()
         .flat_map(Parts::listed)
         .filter(|part| children.contains(part))
@@ -205,17 +193,40 @@ fn parts_in_order(world: &SceneFixtures, root: RegionLocalObjectId) -> Vec<Regio
     ordered
 }
 
-/// The part collection of the group `root` is the root of, made of the
-/// root and its children where nothing was kept of it yet.
-fn parts_mut(world: &mut SceneFixtures, root: RegionLocalObjectId) -> &mut Parts {
-    if !world.links.parts.contains_key(&root) {
-        let children = children_in_order(world, root);
-        let _none = world
-            .links
-            .parts
-            .insert(root, Parts::of(std::iter::once(root).chain(children)));
+/// Changes the part collection of the group `root` is the root of with
+/// `change`, the collection made of the root and its children where nothing
+/// was kept of it yet. Nothing for a root the region does not have.
+fn change_parts(
+    world: &mut SceneFixtures,
+    root: RegionLocalObjectId,
+    change: impl FnOnce(&mut Parts),
+) {
+    let kept = world
+        .objects
+        .link_order(root)
+        .is_some_and(|order| order.parts.is_some());
+    let fresh =
+        (!kept).then(|| Parts::of(std::iter::once(root).chain(children_in_order(world, root))));
+    if let Some(order) = world.objects.link_order_mut(root) {
+        if let Some(fresh) = fresh {
+            order.parts = Some(fresh);
+        }
+        if let Some(parts) = &mut order.parts {
+            change(parts);
+        }
     }
-    world.links.parts.entry(root).or_default()
+}
+
+/// States the children of `root` in the order of their link numbers, number
+/// 2 first.
+fn set_children(
+    world: &mut SceneFixtures,
+    root: RegionLocalObjectId,
+    children: Vec<RegionLocalObjectId>,
+) {
+    if let Some(order) = world.objects.link_order_mut(root) {
+        order.children = Some(children);
+    }
 }
 
 /// Where `prim` stands and how it is turned in the region's own frame,
@@ -275,9 +286,56 @@ fn is_modifiable(world: &SceneFixtures, prim: RegionLocalObjectId) -> bool {
     })
 }
 
+/// What a link joined.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Joined {
+    /// The root of the set it made.
+    pub(crate) root: RegionLocalObjectId,
+    /// The prims it brought into that set, in the order it numbered them.
+    pub(crate) newcomers: Vec<RegionLocalObjectId>,
+}
+
+/// The prims of the set `root` is the root of in the order of their link
+/// numbers, the root first.
+#[must_use]
+pub(crate) fn prims_in_order(
+    world: &SceneFixtures,
+    root: RegionLocalObjectId,
+) -> Vec<RegionLocalObjectId> {
+    std::iter::once(root)
+        .chain(children_in_order(world, root))
+        .collect()
+}
+
+/// Tells the scripts of the set a link made of it
+/// ([`LinkEvents`](crate::imitates::LinkEvents)): on OpenSim each newcomer
+/// first hears it was moved, and then every prim of the set hears
+/// `CHANGED_LINK`.
+pub(crate) fn announce_link(world: &mut SceneFixtures, joined: &Joined) {
+    if world.linking.events.newcomers_moved {
+        crate::scripts::raise_changed_in(
+            world,
+            &joined.newcomers,
+            sl_lsl_runtime::vm::OPENSIM_CHANGED_POSITION,
+        );
+    }
+    let prims = prims_in_order(world, joined.root);
+    crate::scripts::raise_changed_in(world, &prims, CHANGED_LINK);
+}
+
+/// Tells the scripts of every set in `roots` — the sets a delink changed, the
+/// prims it set free among them — that their links changed: `CHANGED_LINK`
+/// once in each prim, as a viewer's delink does on both grids.
+pub(crate) fn announce_delink(world: &mut SceneFixtures, roots: &[RegionLocalObjectId]) {
+    for root in roots {
+        let prims = prims_in_order(world, *root);
+        crate::scripts::raise_changed_in(world, &prims, CHANGED_LINK);
+    }
+}
+
 /// Links the sets `named` are in under the set of the first: an
-/// `ObjectLink`. Returns the root of the set that made, or [`None`] where
-/// the link had nothing to join.
+/// `ObjectLink`. Returns what it joined, or [`None`] where the link had
+/// nothing to join.
 ///
 /// The first prim named is the root, and a prim named that is a child
 /// brings its whole set, on both live grids. Where the newcomers are
@@ -290,7 +348,7 @@ fn is_modifiable(world: &SceneFixtures, prim: RegionLocalObjectId) -> bool {
 pub(crate) fn link(
     world: &mut SceneFixtures,
     named: &[RegionLocalObjectId],
-) -> Result<Option<RegionLocalObjectId>, LinkRefusal> {
+) -> Result<Option<Joined>, LinkRefusal> {
     let policy = world.linking;
     let is_prim = |world: &SceneFixtures, prim: RegionLocalObjectId| world.objects.contains(prim);
     let Some((first, rest)) = named.split_first() else {
@@ -375,18 +433,19 @@ pub(crate) fn link(
         hang(world, *prim, root, placement, Some(&frame));
     }
     for of in &joining {
-        world.links.forget(*of);
+        world.objects.forget_link_order(*of);
     }
     let numbered = match policy.newcomers {
         Newcomers::AfterTheRoot => newcomers.iter().chain(&had).copied().collect(),
         Newcomers::AtTheEnd => had.iter().chain(&newcomers).copied().collect(),
     };
-    let _previous = world.links.numbers.insert(root, numbered);
-    let parts = parts_mut(world, root);
-    for prim in newcomers {
-        parts.insert(prim);
-    }
-    Ok(Some(root))
+    set_children(world, root, numbered);
+    change_parts(world, root, |parts| {
+        for prim in &newcomers {
+            parts.insert(*prim);
+        }
+    });
+    Ok(Some(Joined { root, newcomers }))
 }
 
 /// Takes the prims `named` out of their sets: an `ObjectDelink`. Returns
@@ -419,13 +478,17 @@ pub(crate) fn delink(
             continue;
         };
         hang(world, *prim, RegionLocalObjectId(0), &placement, None);
-        parts_mut(world, root).remove(*prim);
-        if let Some(numbers) = world.links.numbers.get_mut(&root) {
+        change_parts(world, root, |parts| parts.remove(*prim));
+        if let Some(numbers) = world
+            .objects
+            .link_order_mut(root)
+            .and_then(|order| order.children.as_mut())
+        {
             numbers.retain(|numbered| numbered != prim);
         }
         // A prim on its own is a group of its own, with a collection
         // nothing was ever removed from.
-        world.links.forget(*prim);
+        world.objects.forget_link_order(*prim);
         touched.extend([root, *prim]);
     }
     for root in roots {
@@ -440,11 +503,14 @@ pub(crate) fn delink(
             .iter()
             .filter_map(|prim| Some((*prim, region_placement(world, *prim)?)))
             .collect();
-        let parts = parts_mut(world, root);
-        for prim in &rest {
-            parts.remove(*prim);
+        change_parts(world, root, |parts| {
+            for prim in &rest {
+                parts.remove(*prim);
+            }
+        });
+        if let Some(order) = world.objects.link_order_mut(root) {
+            order.children = None;
         }
-        let _numbers = world.links.numbers.remove(&root);
         let frame = placed
             .iter()
             .find(|(prim, _placement)| prim == promoted)
@@ -456,13 +522,12 @@ pub(crate) fn delink(
                 hang(world, *prim, *promoted, placement, frame.as_ref());
             }
         }
-        world.links.forget(*promoted);
-        if !others.is_empty() {
-            let _none = world.links.numbers.insert(*promoted, others.to_vec());
-            let _none = world
-                .links
-                .parts
-                .insert(*promoted, Parts::of(rest.iter().copied()));
+        world.objects.forget_link_order(*promoted);
+        if !others.is_empty()
+            && let Some(order) = world.objects.link_order_mut(*promoted)
+        {
+            order.children = Some(others.to_vec());
+            order.parts = Some(Parts::of(rest.iter().copied()));
         }
         touched.extend([root, *promoted]);
     }
@@ -473,6 +538,106 @@ pub(crate) fn delink(
         }
     }
     changed
+}
+
+/// Every prim of the sets in `roots` again, each set in the order the grid
+/// sends it: what the region's viewers are told of a script's link or
+/// delink.
+fn updated_sets(world: &SceneFixtures, roots: &[RegionLocalObjectId]) -> Vec<RegionChange> {
+    roots
+        .iter()
+        .flat_map(|root| sent_in_order(world, *root))
+        .filter_map(|prim| world.object_by_local_id(prim))
+        .map(|object| RegionChange::Updated(Box::new(object)))
+        .collect()
+}
+
+/// `llCreateLink`, once the tick is over: links the set `first` is in and
+/// the set `second` is in under the set of `first`, as a viewer's link of the
+/// two would, and tells their scripts. A link the grid refuses (too far, too
+/// many) leaves both as they were.
+pub(crate) fn script_link(
+    world: &mut SceneFixtures,
+    first: RegionLocalObjectId,
+    second: RegionLocalObjectId,
+) -> Vec<RegionChange> {
+    match link(world, &[first, second]) {
+        Ok(Some(joined)) => {
+            announce_link(world, &joined);
+            updated_sets(world, &[joined.root])
+        }
+        Ok(None) => Vec::new(),
+        Err(refusal) => {
+            // Second Life refuses a script's link too far without a word to
+            // the script (`prim/link-refusals`); the region notes it.
+            tracing::info!(?refusal, ?first, ?second, "a script's link was refused");
+            Vec::new()
+        }
+    }
+}
+
+/// `llBreakLink`, once the tick is over: takes `prim` out of its set as a
+/// viewer's delink of it would — a root delinked alone leaves the rest under
+/// the prim the grid promotes — and tells the scripts who hear it
+/// ([`LinkEvents`](crate::imitates::LinkEvents)). Whoever sits on the set is
+/// stood up first, on both grids.
+pub(crate) fn script_break_link(
+    world: &mut SceneFixtures,
+    prim: RegionLocalObjectId,
+) -> Vec<RegionChange> {
+    let events = world.linking.events;
+    let root = world.root_of(prim);
+    let mut changes = crate::seating::stand_all_on(world, root);
+    let roots = delink(world, &[prim]);
+    if roots.is_empty() {
+        return changes;
+    }
+    match events.break_link {
+        // OpenSim's `DelinkFromGroup` tells the child it let go alone; a root
+        // goes the way of `LINK_ROOT`, which tells every prim.
+        BreakLinkHeard::TheChildAlone if prim != root => {
+            crate::scripts::raise_changed_in(world, &[prim], CHANGED_LINK);
+        }
+        BreakLinkHeard::TheChildAlone | BreakLinkHeard::TheWholeSet => {
+            announce_delink(world, &roots);
+        }
+    }
+    changes.extend(updated_sets(world, &roots));
+    changes
+}
+
+/// `llBreakAllLinks`, once the tick is over: sets every prim of the set
+/// `root` is the root of free, and tells their scripts — on OpenSim the root
+/// once for each child it let go. On Second Life whoever sits on the set is
+/// stood up first; OpenSim leaves them sitting on the root.
+pub(crate) fn script_break_all_links(
+    world: &mut SceneFixtures,
+    root: RegionLocalObjectId,
+) -> Vec<RegionChange> {
+    let prims = prims_in_order(world, root);
+    if prims.len() < 2 {
+        return Vec::new();
+    }
+    let mut changes = if world.linking.events.break_all_links_stands_sitters {
+        crate::seating::stand_all_on(world, root)
+    } else {
+        Vec::new()
+    };
+    let roots = delink(world, &prims);
+    if roots.is_empty() {
+        return changes;
+    }
+    if world.linking.events.root_hears_each_child {
+        let children = prims.get(1..).unwrap_or_default();
+        crate::scripts::raise_changed_in(world, children, CHANGED_LINK);
+        for _child in children {
+            crate::scripts::raise_changed_in(world, &[root], CHANGED_LINK);
+        }
+    } else {
+        crate::scripts::raise_changed_in(world, &prims, CHANGED_LINK);
+    }
+    changes.extend(updated_sets(world, &roots));
+    changes
 }
 
 /// The prims of the set `root` is the root of, in the order the grid
@@ -500,7 +665,7 @@ pub(crate) fn note_copy(
     if children.is_empty() {
         return;
     }
-    let _none = world.links.numbers.insert(copy, children);
+    set_children(world, copy, children);
 }
 
 /// How far apart two places are, in metres.
@@ -513,9 +678,13 @@ fn distance(one: &Vector, other: &Vector) -> f32 {
 mod test {
     use pretty_assertions::assert_eq;
     use sl_proto::RegionLocalObjectId;
+    use sl_types::key::AgentKey;
     use sl_types::lsl::Vector;
 
-    use super::{LinkRefusal, Parts, children_in_order, delink, link, region_placement};
+    use super::{
+        LinkRefusal, Parts, children_in_order, delink, link, region_placement,
+        script_break_all_links, script_break_link,
+    };
     use crate::imitates::ImitatedGrid;
     use crate::world::{SceneFixtures, box_prim};
 
@@ -645,7 +814,10 @@ mod test {
     fn a_named_child_brings_its_set() -> Result<(), LinkRefusal> {
         let mut world = world(ImitatedGrid::SecondLife);
         let _root = link(&mut world, &[A, B])?;
-        assert_eq!(link(&mut world, &[C, B])?, Some(C));
+        assert_eq!(
+            link(&mut world, &[C, B])?.map(|joined| joined.root),
+            Some(C)
+        );
         assert_eq!(world.root_of(A), C);
         assert_eq!(world.root_of(B), C);
         assert_eq!(link(&mut world, &[D])?, None);
@@ -674,6 +846,72 @@ mod test {
         Ok(())
     }
 
+    /// The order is the root's, kept on the region's store: a copy of the
+    /// region — a scenario's, copied into each region that uses it — keeps
+    /// it, and OpenSim's part collection with it, and a root that leaves takes
+    /// it along.
+    #[test]
+    fn a_copy_of_the_region_keeps_the_order() -> Result<(), LinkRefusal> {
+        for (grid, numbered, peeled) in [
+            (ImitatedGrid::SecondLife, vec![A, C, B], vec![A, C, B]),
+            (ImitatedGrid::OpenSim, vec![A, B, C], vec![A, C, B]),
+        ] {
+            // A link and a delink first, so OpenSim's slots are not the link
+            // order and only a copied collection peels as the original does.
+            let mut world = world(grid);
+            let _root = link(&mut world, &[A, B, C])?;
+            let _changed = delink(&mut world, &[B]);
+            let _changed = delink(&mut world, &[C]);
+            let _root = link(&mut world, &[A, B])?;
+            let _root = link(&mut world, &[A, C])?;
+            let mut copy = world.clone();
+            assert_eq!(numbers(&copy, A), numbered, "{grid:?}");
+            assert_eq!(peel(&mut copy, A), peeled, "{grid:?}");
+
+            let _gone = world.remove_object(A);
+            assert!(world.objects.link_order(A).is_none(), "{grid:?}");
+        }
+        Ok(())
+    }
+
+    /// An avatar sitting on the root when a script delinks, as
+    /// `prim/link-refusals` measured it: `llBreakLink` stands it up on both
+    /// grids, `llBreakAllLinks` on Second Life alone.
+    #[test]
+    fn a_scripted_delink_stands_the_sitter_as_its_grid() -> Result<(), LinkRefusal> {
+        let agent = AgentKey::from(uuid::Uuid::from_u128(0xA9));
+        for (grid, all_links_stands) in [
+            (ImitatedGrid::SecondLife, true),
+            (ImitatedGrid::OpenSim, false),
+        ] {
+            let mut world = world(grid);
+            let seat_on_a = |world: &mut SceneFixtures| {
+                let seat = world.object_by_local_id(A);
+                seat.and_then(|seat| crate::seating::sit(world, agent, &seat))
+                    .is_some()
+            };
+
+            let _root = link(&mut world, &[A, B])?;
+            assert!(seat_on_a(&mut world), "{grid:?}");
+            let _changes = script_break_link(&mut world, B);
+            assert!(
+                crate::seating::sitters_of(&world, A).is_empty(),
+                "{grid:?}: llBreakLink"
+            );
+
+            let _root = link(&mut world, &[A, B])?;
+            assert!(seat_on_a(&mut world), "{grid:?}");
+            let _changes = script_break_all_links(&mut world, A);
+            assert_eq!(
+                crate::seating::sitters_of(&world, A).is_empty(),
+                all_links_stands,
+                "{grid:?}: llBreakAllLinks"
+            );
+            assert!(children_in_order(&world, A).is_empty(), "{grid:?}");
+        }
+        Ok(())
+    }
+
     /// Second Life refuses a link of prims more than 64 m apart whole,
     /// whichever of them is the root; OpenSim links at any distance.
     #[test]
@@ -698,9 +936,12 @@ mod test {
                 assert_eq!(from_the_middle, Err(LinkRefusal::TooFar { pieces: 3 }));
                 assert_eq!(world.root_of(A), A);
                 assert_eq!(world.root_of(C), C);
-                assert_eq!(link(&mut world, &[A, B])?, Some(A));
+                assert_eq!(
+                    link(&mut world, &[A, B])?.map(|joined| joined.root),
+                    Some(A)
+                );
             } else {
-                assert_eq!(from_the_middle?, Some(B));
+                assert_eq!(from_the_middle?.map(|joined| joined.root), Some(B));
             }
         }
         Ok(())

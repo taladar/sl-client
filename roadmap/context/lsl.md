@@ -64,7 +64,9 @@ What is missing is the middle:
   linear scans and no link-set structure beyond `parent_id`. It is a
   fixture store, not a scene graph. (Since 2026-11-02 its objects are an
   indexed `ObjectStore` with the per-prim side tables as components of
-  each row: [[server-world-ecs-store]].)
+  each row: [[server-world-ecs-store]]; since 2026-11-03 each root holds its
+  link order there and scripts read and change it:
+  [[server-world-link-sets]].)
 - There is **no simulation loop**. A change is published by the session
   that made it and streamed to the region's other sessions; nothing
   sweeps, nothing ticks, nothing moves on its own. (Since 2026-11-02 a

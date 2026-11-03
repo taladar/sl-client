@@ -21,6 +21,7 @@ mod comms;
 mod experiences;
 mod identity;
 mod json;
+mod linking;
 mod linkset;
 mod math;
 mod memory;
@@ -144,6 +145,17 @@ struct Recorder {
     placements: std::collections::BTreeMap<CallerId, crate::vm::seating::Placement>,
     /// How many prims each object has, by a prim's key.
     prim_counts: std::collections::BTreeMap<String, i32>,
+    /// The linkset every script is in, where a test states one in full;
+    /// otherwise each script's prim is a lone one.
+    linked: Option<Links>,
+    /// The keys `llCreateLink` may link; every other is an invalid target.
+    linkable: std::collections::BTreeSet<String>,
+    /// `(caller, target, parent)` per `llCreateLink` handed over.
+    created_links: Vec<(CallerId, String, bool)>,
+    /// `(caller, prim)` per `llBreakLink` handed over.
+    broken_links: Vec<(CallerId, String)>,
+    /// The callers per `llBreakAllLinks` handed over.
+    broken_all: Vec<CallerId>,
 }
 
 /// The owner of every object a [`Recorder`] has, unless it says otherwise.
@@ -224,6 +236,9 @@ impl Host for Recorder {
             scripts.push(caller);
         }
         scripts.sort();
+        if let Some(linked) = &self.linked {
+            return linked.clone();
+        }
         // A lone prim with an avatar on it is the root of a linkset.
         let link = i32::from(!self.sitters.is_empty());
         Links {
@@ -231,10 +246,39 @@ impl Host for Recorder {
             prims: vec![LinkedPrim {
                 link,
                 key: self.prim_key(prim),
+                name: "Object".to_owned(),
                 scripts,
             }],
-            sitters: self.sitters.clone(),
+            sitters: self
+                .sitters
+                .iter()
+                .map(|key| LinkedAvatar {
+                    key: key.clone(),
+                    name: format!("Sitter {}", key.get(..8).unwrap_or(key)),
+                })
+                .collect(),
         }
+    }
+
+    fn create_link(
+        &mut self,
+        caller: CallerId,
+        target: &str,
+        parent: bool,
+    ) -> Result<(), InvalidLinkTarget> {
+        if !self.linkable.contains(target) {
+            return Err(InvalidLinkTarget);
+        }
+        self.created_links.push((caller, target.to_owned(), parent));
+        Ok(())
+    }
+
+    fn break_link(&mut self, caller: CallerId, prim: &str) {
+        self.broken_links.push((caller, prim.to_owned()));
+    }
+
+    fn break_all_links(&mut self, caller: CallerId) {
+        self.broken_all.push(caller);
     }
 
     fn whereabouts(&self, caller: CallerId) -> Whereabouts {

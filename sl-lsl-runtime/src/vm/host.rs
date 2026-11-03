@@ -1,7 +1,7 @@
 //! The boundary between a running script and the world it runs in.
 
 use crate::library::BuiltinId;
-use crate::vm::comms::{Dialog, InstantMessage, Links, LoadUrl, MapDestination};
+use crate::vm::comms::{Dialog, InstantMessage, InvalidLinkTarget, Links, LoadUrl, MapDestination};
 use crate::vm::economy::{MoneyRefusal, PayPrice, Payment};
 use crate::vm::experiences::{
     Admission, ExperienceDetails, ExperienceError, ExperienceQuestion, KeyValueStore,
@@ -102,9 +102,37 @@ pub trait Host {
     /// not an attachment (`llMapDestination` outside a touch).
     fn worn_by(&self, caller: CallerId) -> Option<String>;
 
-    /// The linkset `caller` is in, prim by prim with the scripts in each, for
-    /// `llMessageLinked`.
+    /// The linkset `caller` is in, prim by prim with the scripts in each, and
+    /// the avatars sitting on it: what every function that addresses a prim
+    /// by its link number reads.
     fn links(&self, caller: CallerId) -> Links;
+
+    /// `llCreateLink`: link the object one of whose prims is keyed `target`
+    /// with `caller`'s — `caller`'s object the root when `parent` is true,
+    /// `target`'s when it is false — the script holding
+    /// `PERMISSION_CHANGE_LINKS`. The host links them once control is back
+    /// with the grid, the way a viewer's link of the two would, and raises
+    /// `changed(CHANGED_LINK)` as the grid does.
+    ///
+    /// # Errors
+    ///
+    /// [`InvalidLinkTarget`] when `target` names no prim of the region, or
+    /// one of an object worn or owned by somebody else than `caller`'s.
+    fn create_link(
+        &mut self,
+        caller: CallerId,
+        target: &str,
+        parent: bool,
+    ) -> Result<(), InvalidLinkTarget>;
+
+    /// `llBreakLink`: take the prim keyed `prim`, which [`Self::links`]
+    /// named, out of `caller`'s linkset, as a viewer's delink of it would,
+    /// once control is back with the grid. Nothing for a worn object.
+    fn break_link(&mut self, caller: CallerId, prim: &str);
+
+    /// `llBreakAllLinks`: take every prim of `caller`'s linkset out of it,
+    /// once control is back with the grid. Nothing for a worn object.
+    fn break_all_links(&mut self, caller: CallerId);
 
     /// The script's object tells its owner `text` and nobody else, wherever
     /// in the region the owner is — `llOwnerSay`'s reach; an owner in

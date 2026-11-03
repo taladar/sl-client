@@ -348,14 +348,16 @@ pub(crate) fn answer_object_edit(
         // What a link makes of the order, and which links it refuses, is
         // [`crate::link_sets`]'s.
         ServerEvent::ObjectsLinked { local_ids } => {
-            let root = match crate::link_sets::link(world, local_ids) {
-                Ok(Some(root)) => root,
+            let joined = match crate::link_sets::link(world, local_ids) {
+                Ok(Some(joined)) => joined,
                 Ok(None) => return Some(Vec::new()),
                 Err(refusal) => {
                     send_alert(sim, refusal.alert(), &refusal.parameters(), now);
                     return Some(Vec::new());
                 }
             };
+            crate::link_sets::announce_link(world, &joined);
+            let root = joined.root;
             let changes = resend_set(world, sim, root, now);
             // A link is followed by the root's record: always on OpenSim, and
             // on Second Life where the linker holds the root selected.
@@ -379,8 +381,10 @@ pub(crate) fn answer_object_edit(
             if allowed.len() != local_ids.len() {
                 send_alert(sim, LinkPolicy::UNLINK_REFUSED, &[], now);
             }
+            let roots = crate::link_sets::delink(world, &allowed);
+            crate::link_sets::announce_delink(world, &roots);
             let mut changes = Vec::new();
-            for root in crate::link_sets::delink(world, &allowed) {
+            for root in roots {
                 changes.extend(resend_set(world, sim, root, now));
             }
             return Some(changes);

@@ -90,3 +90,12 @@ event and a `changed` behind the touches, whenever each was raised
 (`second_life_runs_touches_after_the_rest_and_changed_last`). What is left
 here is raising the changes; the `events/order` rows of
 `book/src/gridspec/lsl.md` stay unasked offline until the colour change does.
+
+## From server-world-link-sets (2026-11-03)
+
+Raised now: `CHANGED_LINK` in every prim of the sets a viewer's `ObjectLink`
+or `ObjectDelink` touched (`link_sets::announce_link` / `announce_delink`),
+and for a script's `llCreateLink`, `llBreakLink` and `llBreakAllLinks` as
+each flavour's grid tells it (`imitates::LinkEvents`), OpenSim's newcomer
+first hearing its own 32768. `scripts::raise_changed_in` raises a bit in the
+scripts of named prims alone, for the per-prim rows of the table above.

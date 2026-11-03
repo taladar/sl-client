@@ -32,6 +32,7 @@ pub mod encoding;
 pub mod experiences;
 mod generated;
 pub mod json_text;
+pub mod linking;
 pub mod linkset;
 pub mod lists;
 pub mod math;
@@ -278,6 +279,19 @@ mod tests {
                 sitters: Vec::new(),
             }
         }
+
+        fn create_link(
+            &mut self,
+            _caller: CallerId,
+            _target: &str,
+            _parent: bool,
+        ) -> Result<(), crate::vm::InvalidLinkTarget> {
+            Err(crate::vm::InvalidLinkTarget)
+        }
+
+        fn break_link(&mut self, _caller: CallerId, _prim: &str) {}
+
+        fn break_all_links(&mut self, _caller: CallerId) {}
 
         fn seat(&mut self, _caller: CallerId, _link: i32) -> Option<&mut crate::vm::seating::Seat> {
             None

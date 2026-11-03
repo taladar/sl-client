@@ -1790,6 +1790,12 @@ impl ImitatedGrid {
                 reach_m: Some(64.0),
                 unmodifiable: Some(LinkPolicy::NO_EDIT_PERMISSION),
                 most_physical_prims: Some(32),
+                events: LinkEvents {
+                    newcomers_moved: false,
+                    break_link: BreakLinkHeard::TheWholeSet,
+                    root_hears_each_child: false,
+                    break_all_links_stands_sitters: true,
+                },
             },
             Self::OpenSim => LinkPolicy {
                 root_record: RootRecord::Always,
@@ -1800,6 +1806,12 @@ impl ImitatedGrid {
                 reach_m: None,
                 unmodifiable: None,
                 most_physical_prims: None,
+                events: LinkEvents {
+                    newcomers_moved: true,
+                    break_link: BreakLinkHeard::TheChildAlone,
+                    root_hears_each_child: true,
+                    break_all_links_stands_sitters: false,
+                },
             },
         }
     }
@@ -3133,6 +3145,45 @@ pub struct LinkPolicy {
     /// is a physics cost; a fake region simulates no physics, and a cube
     /// costs one.
     pub most_physical_prims: Option<usize>,
+    /// What the scripts of a set hear of a link and a delink.
+    pub events: LinkEvents,
+}
+
+/// What the scripts of a linkset hear when it is linked or delinked, and what
+/// becomes of whoever sits on it ([`LinkPolicy::events`]), as the `prim/link`
+/// and `prim/link-refusals` probes measured it on each grid
+/// (`book/src/gridspec/lsl.md` § Linking) and, where they did not, OpenSim's
+/// `SceneObjectGroup`, `SceneGraph` and `LSL_Api`.
+///
+/// A link, a viewer's or a script's, raises `changed(CHANGED_LINK)` once in
+/// every prim of the set it made on both grids, and a viewer's delink once in
+/// every prim of every set it touched, the prims it set free among them. A
+/// script's `llBreakLink` of a prim stands up everybody sitting on the set
+/// first on both grids; one of a sitter's link number does nothing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LinkEvents {
+    /// Whether each prim a link brings into a set first hears OpenSim's own
+    /// `changed(32768)` (its `CHANGED_POSITION`, no LSL constant): the
+    /// prim was moved into the set.
+    pub newcomers_moved: bool,
+    /// Who hears a script's `llBreakLink` of a child.
+    pub break_link: BreakLinkHeard,
+    /// Whether a script's `llBreakAllLinks` raises `CHANGED_LINK` in the root
+    /// once per child it lets go (OpenSim's `BreakAllLinks`) rather than once.
+    pub root_hears_each_child: bool,
+    /// Whether a script's `llBreakAllLinks` stands up everybody sitting on
+    /// the set first, as Second Life does; OpenSim's `BreakAllLinks` leaves
+    /// them sitting on the root.
+    pub break_all_links_stands_sitters: bool,
+}
+
+/// Who hears a script's `llBreakLink` of a child ([`LinkEvents::break_link`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BreakLinkHeard {
+    /// The child and the rest of the set: Second Life.
+    TheWholeSet,
+    /// The child alone (`DelinkFromGroup`'s own event): OpenSim.
+    TheChildAlone,
 }
 
 impl LinkPolicy {

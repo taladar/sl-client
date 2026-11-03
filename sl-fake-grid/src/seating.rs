@@ -306,8 +306,9 @@ pub(crate) fn stand(world: &mut SceneFixtures, agent: AgentKey) -> Option<Vector
     Some(stands)
 }
 
-/// Stands up every avatar sitting on the linkset whose root is `root`, which
-/// is about to leave the region: what each one's session is to be told.
+/// Stands up every avatar sitting on the linkset whose root is `root` — one
+/// about to leave the region, or that a script is delinking: what each one's
+/// session is to be told.
 pub(crate) fn stand_all_on(
     world: &mut SceneFixtures,
     root: RegionLocalObjectId,

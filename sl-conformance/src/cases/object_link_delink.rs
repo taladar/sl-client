@@ -132,6 +132,27 @@ const SOURCE: &str = "book/src/gridspec/building.md § Linking (object-link-deli
 /// What each grid was measured to answer, by the metric the census records it
 /// under. Every run — live or fake — is held to all of it at the end.
 const MEASURED: &[(&str, Measured<Answer>)] = &[
+    (
+        "a_root_delinked_alone_promotes",
+        each(
+            Answer::Text("link number 2"),
+            Answer::Text("link number 2, link number 3, link number 4"),
+        ),
+    ),
+    ("a_single_prim_is_link_number", both(Answer::Text("0"))),
+    ("numbers_linked_at_once", both(Answer::Text("A B C D"))),
+    (
+        "numbers_of_two_sets_joined",
+        each(Answer::Text("A C D B"), Answer::Text("A B C D")),
+    ),
+    (
+        "numbers_once_the_root_left",
+        each(Answer::Text("B C D"), Answer::Text("D C B")),
+    ),
+    (
+        "numbers_with_a_prim_added",
+        each(Answer::Text("A C B"), Answer::Text("A B C")),
+    ),
     ("copy_of_a_set_of_four_prims", both(Answer::Count(4))),
     (
         "delink_all_brings_a_child",
@@ -378,33 +399,6 @@ const MEASURED: &[(&str, Measured<Answer>)] = &[
     ("unselected_link_took", both(Answer::Flag(true))),
 ];
 
-/// What a script says of a linkset on each live grid. The fake grid's scripts
-/// know nothing of link numbers (`server-world-link-sets`), so only a live
-/// run is held to these.
-const MEASURED_LIVE: &[(&str, Measured<Answer>)] = &[
-    (
-        "a_root_delinked_alone_promotes",
-        each(
-            Answer::Text("link number 2"),
-            Answer::Text("link number 2, link number 3, link number 4"),
-        ),
-    ),
-    ("a_single_prim_is_link_number", both(Answer::Text("0"))),
-    ("numbers_linked_at_once", both(Answer::Text("A B C D"))),
-    (
-        "numbers_of_two_sets_joined",
-        each(Answer::Text("A C D B"), Answer::Text("A B C D")),
-    ),
-    (
-        "numbers_once_the_root_left",
-        each(Answer::Text("B C D"), Answer::Text("D C B")),
-    ),
-    (
-        "numbers_with_a_prim_added",
-        each(Answer::Text("A C B"), Answer::Text("A B C")),
-    ),
-];
-
 /// What a metric reads on a grid that never records it: a leg the grid's own
 /// answer cut short.
 const ABSENT: Answer = Answer::Text("not recorded");
@@ -430,10 +424,8 @@ const fn each(second_life: Answer, opensim: Answer) -> Measured<Answer> {
 /// Holds what the census recorded to [`MEASURED`], naming every metric that
 /// reads otherwise — or was never recorded.
 fn hold_to_measured(grid: Grid, metrics: &Metrics) -> Result<(), TestFailure> {
-    let live: &[(&str, Measured<Answer>)] = if grid.is_fake() { &[] } else { MEASURED_LIVE };
     let failures: Vec<String> = MEASURED
         .iter()
-        .chain(live)
         .filter_map(|(key, measured)| {
             let expected = measured.on(grid);
             match metrics.get(key) {
@@ -665,24 +657,19 @@ async fn census(
         )
         .await?;
     }
-    // The fake grid's scripts know nothing of link numbers
-    // (`server-world-link-sets`), so there the order is read from the delinks
-    // alone.
-    if !grid.is_fake() {
-        let mut alone = Vec::new();
-        for cube in &cubes {
-            let heard = plant(session, &run, cube).await?;
-            alone.push(
-                reports(&heard)
-                    .last()
-                    .map_or_else(|| "nothing said".to_owned(), |(own, _names)| own.clone()),
-            );
-        }
-        alone.sort();
-        alone.dedup();
-        metrics.set("a_single_prim_is_link_number", alone.join(", "));
-        scene.scripted = true;
+    let mut alone = Vec::new();
+    for cube in &cubes {
+        let heard = plant(session, &run, cube).await?;
+        alone.push(
+            reports(&heard)
+                .last()
+                .map_or_else(|| "nothing said".to_owned(), |(own, _names)| own.clone()),
+        );
     }
+    alone.sort();
+    alone.dedup();
+    metrics.set("a_single_prim_is_link_number", alone.join(", "));
+    scene.scripted = true;
 
     let at_once = links(session, &run, scene, metrics, &cubes, &stood).await?;
     orders(session, &run, scene, metrics, &cubes, at_once).await?;

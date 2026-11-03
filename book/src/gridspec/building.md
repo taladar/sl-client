@@ -406,9 +406,9 @@ four times on aditi (Mauve, the public sandbox parcel) and four on the
 local OpenSim, and once more on aditi with three cubes in a line linked in
 all six orders at four spacings. Every row below is checked on every run of
 both live grids and of both fake flavours, but for the ones marked **not
-held** and the ones marked **live only**, which are what the scripts said:
-the fake grid's scripts know nothing of link numbers yet
-(`server-world-link-sets`).
+held**. What the scripts said is held on the fake flavours too since
+2026-11-03 (`server-world-link-sets`): there the same scripts run, read the
+same link numbers and hear the same `CHANGED_LINK`.
 
 ### What a link and a delink are answered with
 
@@ -437,10 +437,10 @@ root was delinked alone — again and again, until nothing was left linked.
 
 | set | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
-| a prim on its own (**live only**) | says its link number is 0 | the same | — |
-| `A B C D`, linked in one message (**live only**) | numbered `A B C D`: the order they were named in | the same | — |
-| `C` linked into the set `A B` (**live only**) | numbered `A C B`: the newcomer is 2 | numbered `A B C`: the newcomer is last | — |
-| the set `C D` linked into the set `A B` (**live only**) | numbered `A C D B`: the set that joined comes whole, in its own order, ahead of the prims the root had | numbered `A B C D`: it comes after them | — |
+| a prim on its own | says its link number is 0 | the same | the same |
+| `A B C D`, linked in one message | numbered `A B C D`: the order they were named in | the same | the same |
+| `C` linked into the set `A B` | numbered `A C B`: the newcomer is 2 | numbered `A B C`: the newcomer is last | each flavour as its grid |
+| the set `C D` linked into the set `A B` | numbered `A C D B`: the set that joined comes whole, in its own order, ahead of the prims the root had | numbered `A B C D`: it comes after them | each flavour as its grid |
 | which prim a root delinked alone is replaced by | **link number 2**, the rest keeping their order: `A B C D` without `A` is numbered `B C D` | **not a link number**: of the three sets above it was number 2, number 3 and number 4, and the rest was renumbered from it — `A B C D` without `A` was numbered `D C B` | each flavour as its grid |
 | the order the roots came out in, delinking the root until none was left | `A B C D`, `A C B`, `A C D B`: the link numbers | `A B C D`, `A C B`, `A D C B` | each flavour as its grid |
 
@@ -527,8 +527,13 @@ alone, copy a root without its set, and send only the children of a link.
 It keeps each set's order now (`link_sets`), numbers newcomers and
 promotes a root as its flavour's grid does, sends a changed set whole and
 in that grid's order, and refuses what Second Life refuses on the
-Second-Life flavour. Its scripts still cannot read a link number:
-`server-world-link-sets`.
+Second-Life flavour. Since 2026-11-03 its scripts read the order too
+(`server-world-link-sets`): the link numbers, the names by number and the
+prim count, `CHANGED_LINK` in every prim of a set a viewer links or delinks,
+and a script's own `llCreateLink`, `llBreakLink` and `llBreakAllLinks`
+([LSL § Linking](lsl.md#linking)). The order is kept on the root in the
+region's store, so a copy of the region keeps it, and a take files a set in
+it and a rez brings it back in it.
 
 Not measured: whether Second Life's reach is every pair's or a box's, and
 whether it grows with prims larger than ten metres; the order a delink's

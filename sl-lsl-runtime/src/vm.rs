@@ -72,8 +72,9 @@ pub mod seating;
 mod tests;
 
 pub use comms::{
-    Dialog, Heard, InstantMessage, LinkMessage, LinkedPrim, Links, ListenFilter, Listens, LoadUrl,
-    MapDestination, OPENSIM_LISTENS, SECOND_LIFE_LISTENS, TEXT_BOX_BUTTON, TooManyListens,
+    Dialog, Heard, InstantMessage, InvalidLinkTarget, LinkMessage, Linked, LinkedAvatar,
+    LinkedPrim, Links, ListenFilter, Listens, LoadUrl, MapDestination, OPENSIM_LISTENS,
+    SECOND_LIFE_LISTENS, TEXT_BOX_BUTTON, TooManyListens,
 };
 #[cfg(test)]
 pub(crate) use context::{Peers, ScriptData};

@@ -26,8 +26,6 @@ const LINK_SET: i32 = -1;
 const LINK_ALL_OTHERS: i32 = -2;
 /// `LINK_ALL_CHILDREN`.
 const LINK_ALL_CHILDREN: i32 = -3;
-/// `LINK_THIS`.
-const LINK_THIS: i32 = -4;
 
 /// How many characters of a pie menu's sit or touch text a prim keeps
 /// (`LSL_Api.llSetSitText`; unmeasured on Second Life, whose pie shows no
@@ -198,41 +196,51 @@ pub fn ll_get_link_key(ctx: &mut ScriptCtx<'_>, link: i32) -> Result<Key, CallEr
     let caller = ctx.caller();
     let links = ctx.host().links(caller);
     let null = || NULL_KEY.to_owned();
-    let this = || {
+    let key = if ctx.flavour().is_opensim() && (0..2).contains(&link) {
         links
             .prims
-            .iter()
-            .find(|prim| prim.link == links.this)
-            .map_or_else(null, |prim| prim.key.clone())
-    };
-    let alone = links.prims.len() == 1 && links.sitters.is_empty();
-    let key = match link {
-        LINK_THIS => this(),
-        number if number < 0 => null(),
-        number if ctx.flavour().is_opensim() && number < 2 => links
-            .prims
             .first()
-            .map_or_else(null, |root| root.key.clone()),
-        0 if alone => this(),
-        number => {
-            let prims = i32::try_from(links.prims.len()).unwrap_or(i32::MAX);
-            if alone {
-                null()
-            } else if number <= prims {
-                links
-                    .prims
-                    .iter()
-                    .find(|prim| prim.link == number)
-                    .map_or_else(null, |prim| prim.key.clone())
-            } else {
-                usize::try_from(number.saturating_sub(prims).saturating_sub(1))
-                    .ok()
-                    .and_then(|index| links.sitters.get(index))
-                    .map_or_else(null, Clone::clone)
-            }
-        }
+            .map_or_else(null, |root| root.key.clone())
+    } else {
+        links
+            .numbered(link)
+            .map_or_else(null, |linked| linked.key().to_owned())
     };
     Ok(Key(key))
+}
+
+/// `llGetLinkName`: the name of the prim or the sitter numbered `link`,
+/// resolved as [`ll_get_link_key`] resolves it on Second Life — and on
+/// OpenSim too, which answers a lone prim's link 1 with `NULL_KEY` here
+/// though its `llGetLinkKey(1)` is the prim (`prim/identity`). What names
+/// nothing answers `NULL_KEY` as text, on both grids.
+///
+/// # Errors
+///
+/// None; the signature is the library's.
+pub fn ll_get_link_name(ctx: &mut ScriptCtx<'_>, link: i32) -> Result<String, CallError> {
+    let caller = ctx.caller();
+    Ok(ctx
+        .host()
+        .links(caller)
+        .numbered(link)
+        .map_or_else(|| NULL_KEY.to_owned(), |linked| linked.name().to_owned()))
+}
+
+/// `llGetObjectName`: the name of the prim the script is in — the prim's,
+/// not its linkset root's.
+///
+/// # Errors
+///
+/// None; the signature is the library's.
+pub fn ll_get_object_name(ctx: &mut ScriptCtx<'_>) -> Result<String, CallError> {
+    let caller = ctx.caller();
+    Ok(ctx
+        .host()
+        .links(caller)
+        .this_prim()
+        .map(|prim| prim.name.clone())
+        .unwrap_or_default())
 }
 
 /// `llGetObjectPrimCount`: how many prims the object holding the prim

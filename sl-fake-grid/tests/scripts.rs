@@ -1661,4 +1661,276 @@ default
     async fn a_touch_on_a_child_on_opensim() -> Result<(), TestError> {
         a_touch_on_a_child(ImitatedGrid::OpenSim).await
     }
+
+    /// The root of [`linkset_region`], named `A`.
+    const LINK_ROOT: sl_proto::RegionLocalObjectId = sl_proto::RegionLocalObjectId(0x800);
+
+    /// Its first child, named `B`.
+    const LINK_B: sl_proto::RegionLocalObjectId = sl_proto::RegionLocalObjectId(0x801);
+
+    /// Its second child, named `C`.
+    const LINK_C: sl_proto::RegionLocalObjectId = sl_proto::RegionLocalObjectId(0x802);
+
+    /// The key [`region_of`] mints for the prim `local_id`.
+    fn key_of(local_id: sl_proto::RegionLocalObjectId) -> uuid::Uuid {
+        uuid::Uuid::from_u128((u128::from(local_id.0) << 8) | 0x5)
+    }
+
+    /// What the root's script does: on channel 7, `report` says its link
+    /// number, the prim count and the names in link order and pings the other
+    /// prims; `ask` asks the owner for `PERMISSION_CHANGE_LINKS`; `break 2`,
+    /// `break all` and `link B` link and delink; and every `CHANGED_LINK`
+    /// is reported.
+    fn leader_source() -> String {
+        format!(
+            "report(string label)
+{{
+    integer prims = llGetNumberOfPrims();
+    string said = label + \" \" + (string)llGetLinkNumber() + \"/\" + (string)prims + \":\";
+    if (prims < 2)
+    {{
+        said += \" \" + llGetObjectName();
+    }}
+    else
+    {{
+        integer link;
+        for (link = 1; link <= prims; ++link)
+        {{
+            said += \" \" + llGetLinkName(link);
+        }}
+    }}
+    llShout(0, said);
+}}
+
+default
+{{
+    state_entry()
+    {{
+        llListen(7, \"\", NULL_KEY, \"\");
+    }}
+
+    listen(integer channel, string name, key id, string message)
+    {{
+        if (message == \"report\")
+        {{
+            report(\"report\");
+            llMessageLinked(LINK_ALL_OTHERS, 0, \"ping\", \"\");
+        }}
+        else if (message == \"ask\")
+        {{
+            llRequestPermissions(llGetOwner(), PERMISSION_CHANGE_LINKS);
+        }}
+        else if (message == \"break 2\")
+        {{
+            llBreakLink(2);
+        }}
+        else if (message == \"break all\")
+        {{
+            llBreakAllLinks();
+        }}
+        else if (message == \"link B\")
+        {{
+            llCreateLink(\"{}\", TRUE);
+        }}
+    }}
+
+    run_time_permissions(integer granted)
+    {{
+        llShout(0, \"granted \" + (string)granted);
+    }}
+
+    changed(integer change)
+    {{
+        if (change & CHANGED_LINK)
+        {{
+            report(\"changed\");
+        }}
+    }}
+}}
+",
+            key_of(LINK_B)
+        )
+    }
+
+    /// What each child's script does: says whom a link message came from,
+    /// and its link number and the prim count at every `CHANGED_LINK`.
+    const FOLLOWER_SOURCE: &str = "default
+{
+    link_message(integer sender, integer number, string message, key id)
+    {
+        llShout(0, \"pinged \" + llGetObjectName() + \" by \" + (string)sender);
+    }
+
+    changed(integer change)
+    {
+        if (change & CHANGED_LINK)
+        {
+            llShout(0, \"child \" + llGetObjectName() + \" \" + (string)llGetLinkNumber() + \"/\"
+                + (string)llGetNumberOfPrims());
+        }
+    }
+}
+";
+
+    /// A region holding a linkset of three cubes, `A` the root and `B` and `C`
+    /// its children in that order, owned by the logged-in user: the root
+    /// running [`leader_source`], the children [`FOLLOWER_SOURCE`].
+    fn linkset_region() -> Result<sl_fake_grid::RegionFixture, TestError> {
+        let follower = |local_id| ScriptedBox {
+            local_id,
+            source: FOLLOWER_SOURCE.to_owned(),
+            experience: None,
+        };
+        let mut fixture = region_of(&[
+            ScriptedBox {
+                local_id: LINK_ROOT,
+                source: leader_source(),
+                experience: None,
+            },
+            follower(LINK_B),
+            follower(LINK_C),
+        ])?;
+        for (local_id, name, along) in [
+            (LINK_ROOT, "A", 0.0),
+            (LINK_B, "B", 1.0),
+            (LINK_C, "C", 2.0),
+        ] {
+            let mut prim = fixture
+                .world
+                .object_mut(local_id)
+                .ok_or("a cube is not in the region")?;
+            let mut record = sl_fake_grid::world::default_object_properties(&prim);
+            record.name = name.to_owned();
+            prim.properties = Some(record);
+            if local_id != LINK_ROOT {
+                prim.parent_id = LINK_ROOT;
+                prim.motion.position = sl_types::lsl::Vector {
+                    x: along,
+                    y: 0.0,
+                    z: 0.0,
+                };
+            }
+        }
+        Ok(fixture)
+    }
+
+    /// Every line said until the region falls quiet, sorted: what one step
+    /// said, whichever script spoke first.
+    async fn said_lines(scene: &mut Scene) -> Vec<String> {
+        let mut lines = Vec::new();
+        while let Ok(Some(seen)) = tokio::time::timeout(QUIET, scene.seen.recv()).await {
+            if let Seen::Chat(ChatType::Shout, message) = seen {
+                lines.push(message);
+            }
+        }
+        lines.sort();
+        lines
+    }
+
+    /// `message` shouted on channel 7, the region ticked `ticks` times, and
+    /// everything said after.
+    async fn step(scene: &mut Scene, message: &str, ticks: u32) -> Result<Vec<String>, TestError> {
+        scene.shout(message).await?;
+        scene.tick(ticks).await?;
+        Ok(said_lines(scene).await)
+    }
+
+    /// Sorted owned lines.
+    fn lines(said: &[&str]) -> Vec<String> {
+        let mut lines: Vec<String> = said.iter().map(|line| (*line).to_owned()).collect();
+        lines.sort();
+        lines
+    }
+
+    /// A scripted linkset of three reads its link numbers, names and prim
+    /// count as the grids do; `LINK_ALL_OTHERS` from the root reaches exactly
+    /// the two children; and, granted `PERMISSION_CHANGE_LINKS`, the root
+    /// delinks a child, links it back and breaks every link, each prim
+    /// hearing `CHANGED_LINK` as its grid tells it (`prim/link`) and the
+    /// returning child numbered where its grid numbers a newcomer.
+    async fn a_scripted_linkset(imitated: ImitatedGrid) -> Result<(), TestError> {
+        let region = linkset_region()?;
+        let mut scene = scene_with(
+            imitated,
+            region,
+            RegionConfig {
+                heartbeat: HeartbeatConfig::stepped(Duration::from_millis(100)),
+                ..RegionConfig::default()
+            },
+            AccountConfig {
+                agent_id: Some(box_owner()),
+                ..AccountConfig::new("Test", "User", "password")
+            },
+        )
+        .await?;
+        scene.tick(2).await?;
+        let _arrival = said_lines(&mut scene).await;
+        let opensim = imitated == ImitatedGrid::OpenSim;
+
+        assert_eq!(
+            step(&mut scene, "report", 2).await?,
+            lines(&["report 1/3: A B C", "pinged B by 1", "pinged C by 1"])
+        );
+
+        scene.shout("ask").await?;
+        scene.tick(2).await?;
+        let question = scene
+            .next("the link question", |seen| match seen {
+                Seen::Question(question) => Some(question),
+                _other => None,
+            })
+            .await?;
+        scene
+            .answer(
+                &question,
+                sl_types::lsl::ScriptPermissions(sl_types::lsl::ScriptPermissions::CHANGE_LINKS),
+            )
+            .await?;
+        scene.tick(2).await?;
+        assert_eq!(said_lines(&mut scene).await, lines(&["granted 128"]));
+
+        // Second Life tells the whole set; OpenSim the child it let go alone.
+        let broken = step(&mut scene, "break 2", 3).await?;
+        let mut told = vec!["child B 0/1"];
+        if !opensim {
+            told.extend(["changed 1/2: A C", "child C 2/2"]);
+        }
+        assert_eq!(broken, lines(&told), "llBreakLink(2)");
+
+        // The child comes back as link 2 on Second Life and last on OpenSim;
+        // the link's forced second of sleep is over within fifteen ticks.
+        let relinked = step(&mut scene, "link B", 15).await?;
+        let told = if opensim {
+            ["changed 1/3: A C B", "child B 3/3", "child C 2/3"]
+        } else {
+            ["changed 1/3: A B C", "child B 2/3", "child C 3/3"]
+        };
+        assert_eq!(relinked, lines(&told), "llCreateLink");
+
+        // OpenSim's root hears it once for each child it let go.
+        let all = step(&mut scene, "break all", 3).await?;
+        let mut told = vec!["changed 0/1: A", "child B 0/1", "child C 0/1"];
+        if opensim {
+            told.push("changed 0/1: A");
+        }
+        assert_eq!(all, lines(&told), "llBreakAllLinks");
+        assert_eq!(
+            step(&mut scene, "report", 2).await?,
+            lines(&["report 0/1: A"])
+        );
+        scene.stop();
+        Ok(())
+    }
+
+    /// On a grid imitating Second Life.
+    #[tokio::test]
+    async fn a_scripted_linkset_on_second_life() -> Result<(), TestError> {
+        a_scripted_linkset(ImitatedGrid::SecondLife).await
+    }
+
+    /// On a grid imitating OpenSim.
+    #[tokio::test]
+    async fn a_scripted_linkset_on_opensim() -> Result<(), TestError> {
+        a_scripted_linkset(ImitatedGrid::OpenSim).await
+    }
 }

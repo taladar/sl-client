@@ -12,8 +12,8 @@
 //!   entity that left is never confused with one that came later, because a
 //!   reused index carries a new generation;
 //! - its wire record is its [`Body`] component, and what the region knows of
-//!   it besides — its contents, what it costs the region, its edit history —
-//!   are components of their own, so they leave with it;
+//!   it besides — its contents, what it costs the region, its edit history, a
+//!   root's link order — are components of their own, so they leave with it;
 //! - its region-local id, its full id and its link-set root are **indices
 //!   into** the world, kept by the store as prims come, go and change;
 //! - a write goes through `bevy_ecs`'s [`Mut`], so the world's change ticks
@@ -111,6 +111,19 @@ pub struct Sitter {
 /// ([`ObjectStore::seat_of`]). A prim nobody sits on has none.
 #[derive(Debug, Clone, Default, Component)]
 pub struct Sitters(pub Vec<Sitter>);
+
+/// The order a linkset keeps its prims in, on its root
+/// ([`crate::link_sets`]). A set nobody has linked or delinked has none and is
+/// in the order its prims came into the region; a root that leaves takes it.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Component)]
+pub(crate) struct LinkOrder {
+    /// The children in the order of their link numbers, number 2 first,
+    /// where a link or a delink set it.
+    pub(crate) children: Option<Vec<RegionLocalObjectId>>,
+    /// The group's part collection as OpenSim keeps it, the root included,
+    /// where a link or a delink needed it.
+    pub(crate) parts: Option<crate::link_sets::Parts>,
+}
 
 /// What a worn object's root is attached to: the wearer and the point, as
 /// `llGetAttached` reads it. The object's record carries the same, as the
@@ -283,6 +296,9 @@ impl Clone for ObjectStore {
             }
             if let Some(seat) = self.world.get::<SeatSettings>(*entity) {
                 let _held = spawned.insert(seat.clone());
+            }
+            if let Some(order) = self.world.get::<LinkOrder>(*entity) {
+                let _held = spawned.insert(order.clone());
             }
             // Who sits where, and who wears what, are the region's agents',
             // and a copy is a region nobody is in yet.
@@ -614,6 +630,35 @@ impl ObjectStore {
         self.world
             .get_mut::<SeatSettings>(entity)
             .map(|seat| &mut seat.into_inner().0)
+    }
+
+    /// The order the linkset whose root has the given region-local id keeps
+    /// its prims in, where a link or a delink set one.
+    #[must_use]
+    pub(crate) fn link_order(&self, root: RegionLocalObjectId) -> Option<&LinkOrder> {
+        self.world.get::<LinkOrder>(self.entity(root)?)
+    }
+
+    /// The order of the linkset whose root has the given region-local id, to
+    /// change, an empty one made where it has none yet; [`None`] for a prim
+    /// that is not here.
+    pub(crate) fn link_order_mut(&mut self, root: RegionLocalObjectId) -> Option<&mut LinkOrder> {
+        let entity = self.entity(root)?;
+        let mut prim = self.world.get_entity_mut(entity).ok()?;
+        if prim.get::<LinkOrder>().is_none() {
+            let _held = prim.insert(LinkOrder::default());
+        }
+        self.world.get_mut::<LinkOrder>(entity).map(Mut::into_inner)
+    }
+
+    /// Forgets the order kept for the prim with the given region-local id:
+    /// it became a group of its own, which starts with a fresh collection.
+    pub(crate) fn forget_link_order(&mut self, root: RegionLocalObjectId) {
+        if let Some(entity) = self.entity(root)
+            && let Ok(mut prim) = self.world.get_entity_mut(entity)
+        {
+            let _forgotten = prim.take::<LinkOrder>();
+        }
     }
 
     /// The avatars sitting on the prim with the given region-local id, in
