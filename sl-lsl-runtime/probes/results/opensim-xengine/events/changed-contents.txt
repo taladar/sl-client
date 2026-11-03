@@ -1,0 +1,69 @@
+grid: opensim-xengine
+date: 2026-11-03
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Default Region
+engine: XEngine
+settings: OpenSimDefaults.ini: [YEngine] MinTimerInterval=0.1; [XEngine] MinTimerInterval unset (LSL_Api default 0.5); ScriptDelayFactor=1.0, SensorMaxRange=96, SensorMaxResults=16, UseLlCastRayV3=false (defaults) on both; [YEngine] ScriptHeapSize=1024 KiB, ScriptStackSize=2048 KiB (defaults); OpenSim.ini [Network] OutboundDisallowForUserScriptsExcept=127.0.0.1:9000 (the simulator itself), [ScriptsHttpRequestModule] and llHTTPRequest limits at their defaults
+
+# chat type=say from="Object" length=14 text="Script running"
+# chat type=say from="Object" length=14 text="Script running"
+PROBE events/changed-contents rec=start region="Default Region" channel="OpenSim" version="OpenSim 0.9.2.1 Yeti Dev   36f6d16 (Unix/Mono)"
+PROBE events/changed-contents rec=waiting drive=answer grant=128
+# question permissions=128 object="Object" owner="<first> <last>" experience=none
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# answer grant=128
+PROBE events/changed-contents rec=permissions got=128
+PROBE events/changed-contents rec=changed prim=B step=0 bits=32768 items=1
+PROBE events/changed-contents rec=changed prim=B step=0 bits=LINK items=1
+PROBE events/changed-contents rec=changed prim=A step=0 bits=LINK items=1
+PROBE events/changed-contents rec=step n=1 allow_drop=0 items=1
+PROBE events/changed-contents rec=waiting drive=contents op=drop name=Dropped
+# contents prim=A op=drop name="Dropped"
+PROBE events/changed-contents rec=changed prim=A step=1 bits=INVENTORY items=2
+# alert text="Notecard updated"
+PROBE events/changed-contents rec=step n=2 allow_drop=0 items=2
+PROBE events/changed-contents rec=waiting drive=contents op=rename name=Dropped to=Renamed
+# contents prim=A op=rename name="Dropped" to="Renamed"
+PROBE events/changed-contents rec=changed prim=A step=2 bits=INVENTORY items=2
+PROBE events/changed-contents rec=step n=3 allow_drop=0 items=2
+PROBE events/changed-contents rec=waiting drive=contents op=remove name=Renamed
+# contents prim=A op=remove name="Renamed"
+PROBE events/changed-contents rec=changed prim=A step=3 bits=INVENTORY items=1
+PROBE events/changed-contents rec=step n=4 allow_drop=0 items=1
+PROBE events/changed-contents rec=waiting drive=contents op=new-script name=Fresh
+# contents prim=A op=new-script name="Fresh"
+PROBE events/changed-contents rec=changed prim=A step=4 bits=INVENTORY items=2
+# chat type=say from="Object" length=14 text="Script running"
+PROBE events/changed-contents rec=step n=5 allow_drop=0 items=2
+PROBE events/changed-contents rec=waiting drive=contents op=save-script name=Fresh
+# chat by=other type=say from="Object" length=14 text="Script running"
+PROBE events/changed-contents rec=changed prim=A step=5 bits=INVENTORY items=2
+# contents prim=A op=save-script name="Fresh" compiled=1
+PROBE events/changed-contents rec=step n=6 allow_drop=0 items=2
+PROBE events/changed-contents rec=waiting drive=contents op=remove name=Fresh
+# contents prim=A op=remove name="Fresh"
+PROBE events/changed-contents rec=changed prim=A step=6 bits=INVENTORY items=1
+PROBE events/changed-contents rec=step n=7 allow_drop=0 items=1
+PROBE events/changed-contents rec=waiting drive=contents op=drop name=Card prim=B
+# contents prim=B op=drop name="Card"
+PROBE events/changed-contents rec=changed prim=B step=7 bits=INVENTORY items=2
+# alert text="Notecard updated"
+PROBE events/changed-contents rec=step n=8 allow_drop=0 items=1
+PROBE events/changed-contents rec=waiting drive=contents by=other op=drop name=Gift
+# contents by=other prim=A op=drop name="Gift"
+PROBE events/changed-contents rec=step n=9 allow_drop=1 items=1
+PROBE events/changed-contents rec=waiting drive=contents by=other op=drop name=Allowed
+# alert by=other text="Notecard updated"
+# contents by=other prim=A op=drop name="Allowed"
+PROBE events/changed-contents rec=changed prim=A step=9 bits=ALLOWED_DROP items=2
+PROBE events/changed-contents rec=step n=10 allow_drop=1 items=2
+PROBE events/changed-contents rec=waiting drive=contents op=drop name=Owned
+# alert by=other text="Notecard updated"
+# contents prim=A op=drop name="Owned"
+PROBE events/changed-contents rec=changed prim=A step=10 bits=INVENTORY items=3
+# alert text="Notecard updated"
+PROBE events/changed-contents rec=step n=11 what=unlink allow_drop=0 items=3
+PROBE events/changed-contents rec=changed prim=B step=11 bits=LINK items=2
+PROBE events/changed-contents rec=changed prim=A step=11 bits=LINK items=3
+PROBE events/changed-contents rec=end items=3 prims=1

@@ -227,9 +227,13 @@ pub(crate) fn answer_object_edit(
         // is what a fixture and a test read, the blob is what
         // `full_update_block` copies onto the wire.
         ServerEvent::ObjectShapeSet { local_id, shape } => {
-            return Some(update_object(world, *local_id, sim, now, |object| {
+            let changes = update_object(world, *local_id, sim, now, |object| {
                 object.shape.clone_from(shape);
-            }));
+            });
+            if !changes.is_empty() {
+                crate::changes::reshaped(world, *local_id);
+            }
+            return Some(changes);
         }
         ServerEvent::ObjectImageSet {
             local_id,
@@ -249,10 +253,24 @@ pub(crate) fn answer_object_edit(
                     None
                 }
             });
-            return Some(update_object(world, *local_id, sim, now, |object| {
+            let before = world.object_by_local_id(*local_id);
+            let changes = update_object(world, *local_id, sim, now, |object| {
                 object.media_url = media;
                 object.texture_entry = sl_proto::encode_texture_entry(texture_entry);
-            }));
+            });
+            if let Some(before) = before {
+                crate::changes::retextured(world, *local_id, &before);
+            }
+            return Some(changes);
+        }
+        // Face media set or cleared over `ObjectMedia`: the media itself is
+        // the session's (`server-fake-grid-object-media-region`), what the
+        // prim's scripts hear the region's.
+        ServerEvent::ObjectMediaSet { object_id, .. } => {
+            if let Some(local_id) = world.local_id_of(*object_id) {
+                crate::changes::media_set(world, local_id);
+            }
+            return Some(Vec::new());
         }
         ServerEvent::ObjectExtraParamsSet { local_id, params } => {
             return Some(update_object(world, *local_id, sim, now, |object| {
@@ -333,6 +351,7 @@ pub(crate) fn answer_object_edit(
                 tracing::debug!("a transform named {target:?}, which this region does not have");
                 return Some(Vec::new());
             };
+            crate::changes::transformed(world, target, transform);
             // A move and a turn come back in a terse update on both grids, a
             // resize in a full one.
             if transform.scale.is_some() {

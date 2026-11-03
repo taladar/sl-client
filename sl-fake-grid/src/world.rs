@@ -182,6 +182,10 @@ pub struct SceneFixtures {
     /// What the region says of a write into a prim's contents, where the live
     /// grids disagree. Second Life's unless the grid's flavour says otherwise.
     pub(crate) contents: crate::imitates::ContentsPolicy,
+    /// Which `changed` a viewer's change raises in a prim's scripts, where
+    /// the live grids disagree. Second Life's unless the grid's flavour says
+    /// otherwise.
+    pub(crate) changes: crate::imitates::ChangePolicy,
     /// How the region passes a viewer's effects and sounds on to the other
     /// viewers, where the live grids disagree. Second Life's unless the
     /// grid's flavour says otherwise.
@@ -797,6 +801,7 @@ impl SceneFixtures {
             sits: crate::imitates::SitPolicy::default(),
             edit: crate::imitates::EditPolicy::default(),
             linking: crate::imitates::LinkPolicy::default(),
+            changes: crate::imitates::ChangePolicy::default(),
             contents: crate::imitates::ContentsPolicy::default(),
             relays: crate::relays::RelayPolicy::default(),
             scripts: crate::script_compile::CompilePolicy::default(),

@@ -145,3 +145,13 @@ its own scope:
 - a teleport away or a logout takes the worn objects out of the region
   (`seating::leave`), scripts and all; carrying them, with their scripts'
   state, is the region move this task already names.
+
+## From server-world-changed-raisers (2026-11-03)
+
+`events/changed-worn`: a worn object's script hears `CHANGED_REGION |
+CHANGED_TELEPORT` on arriving in each region of a teleport there and back on
+Second Life, and nothing else; on OpenSim YEngine first hears its own 32768 as
+it leaves, and **XEngine runs `state_entry` again** in the worn object on every
+arrival, its globals lost. Once attachments travel, their scripts travel with
+them and raise these (`book/src/gridspec/lsl.md` § `changed`: what a viewer's
+change raises).

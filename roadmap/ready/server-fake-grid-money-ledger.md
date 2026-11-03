@@ -88,3 +88,14 @@ which has nothing to move them with (`sl_fake_grid::scripts`, `RegionHost`):
   payer's balance and the economy event stream agree; from the viewer once
   it has a pay dialog (`viewer-money-economy-ui`), from a conformance case's
   session until then.
+
+## From server-world-changed-raisers (2026-11-03)
+
+`events/changed-owner` (`book/src/gridspec/lsl.md` § `changed`: what a viewer's
+change raises): a purchase of an original for L$ 0 raises `CHANGED_OWNER` in
+the bought prim's script **once** on Second Life, the new owner read at once,
+and **three times** on OpenSim (both engines). Second Life tells the buyer
+`You are now the owner of object Object` and sends both a `MoneyBalanceReply`
+of type 5000 ("You paid <seller> L$0 for Object."). Raise it with
+`scripts::raise_changed_in` in every prim of the bought set when a purchase
+lands (`changes.rs` holds the bit constants).

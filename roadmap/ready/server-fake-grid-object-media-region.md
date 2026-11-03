@@ -41,3 +41,10 @@ To do here:
   `sl-conformance/tests/offline.rs`;
 - an `e2e` test on each flavour that the viewer refetches when another
   session navigates.
+
+## From server-world-changed-raisers (2026-11-03)
+
+A viewer's `ObjectMedia` set or clear raises `CHANGED_MEDIA` in the prim's
+scripts on both grids (`events/changed-edits`); the fake grid raises it from the
+session's `ServerEvent::ObjectMediaSet` (`object_edits.rs`). Keep it when the
+media becomes region state.

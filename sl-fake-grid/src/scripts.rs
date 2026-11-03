@@ -104,6 +104,7 @@ use sl_proto::{
     AssetKey, AssetSource as _, AssetType, ChatSource, ChatType, ExperiencePermission, ImDialog,
     InventoryType, LoadUrlRequest, Object, RegionLocalObjectId, ScriptDialog, ScriptLanguage,
     ScriptPermissionRequest, ScriptTeleportRequest, ServerEvent, SimSession, TaskInventoryItem,
+    prim_flags,
 };
 use sl_types::chat::{ChatChannel, ChatVolume};
 use sl_types::key::{AgentKey, ExperienceKey, InventoryKey, ObjectKey, OwnerKey, TextureKey};
@@ -858,6 +859,14 @@ enum Effect {
     /// Every prim of the set whose root is this prim leaves it
     /// (`llBreakAllLinks`).
     BreakAllLinks(RegionLocalObjectId),
+    /// The prim lets anybody drop an item in, or stops letting them
+    /// (`llAllowInventoryDrop`).
+    AllowDrop {
+        /// The prim.
+        prim: RegionLocalObjectId,
+        /// Whether anybody may.
+        allow: bool,
+    },
     /// The avatar is stood up (`llUnSit`).
     Unsit(AgentKey),
     /// The avatar is seated on the prim (`llSitOnLink`).
@@ -1476,6 +1485,16 @@ impl Host for RegionHost<'_> {
         if self.world.objects.attached_to(origin.root).is_none() {
             self.effects.push(Effect::BreakAllLinks(origin.root));
         }
+    }
+
+    fn allow_inventory_drop(&mut self, caller: CallerId, allow: bool) {
+        let Some(origin) = self.origin(caller) else {
+            return;
+        };
+        self.effects.push(Effect::AllowDrop {
+            prim: origin.local_id,
+            allow,
+        });
     }
 
     fn owner_say(&mut self, caller: CallerId, text: &str) {
@@ -2119,6 +2138,22 @@ fn tick_locked(
             }
             Effect::BreakAllLinks(root) => {
                 changes.extend(crate::link_sets::script_break_all_links(world, root));
+            }
+            Effect::AllowDrop { prim, allow } => {
+                if let Some(mut object) = world.object_mut(prim) {
+                    let flags = object.update_flags;
+                    if allow {
+                        object.update_flags |= prim_flags::ALLOW_INVENTORY_DROP;
+                    } else {
+                        object.update_flags &= !prim_flags::ALLOW_INVENTORY_DROP;
+                    }
+                    if object.update_flags == flags {
+                        continue;
+                    }
+                }
+                if let Some(object) = world.object_by_local_id(prim) {
+                    changes.push(RegionChange::Updated(Box::new(object)));
+                }
             }
             Effect::Unsit(agent) => {
                 if let Some(stands_at) = crate::seating::stand(world, agent) {

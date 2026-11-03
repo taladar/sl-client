@@ -134,6 +134,11 @@ pub trait Host {
     /// once control is back with the grid. Nothing for a worn object.
     fn break_all_links(&mut self, caller: CallerId);
 
+    /// `llAllowInventoryDrop`: whether anybody, not only those who may
+    /// modify it, may drop an item into `caller`'s prim — the prim's
+    /// allow-drop flag, which a viewer reads off its object update.
+    fn allow_inventory_drop(&mut self, caller: CallerId, allow: bool);
+
     /// The script's object tells its owner `text` and nobody else, wherever
     /// in the region the owner is — `llOwnerSay`'s reach; an owner in
     /// another region gets nothing. The runtime tells an owner this way what

@@ -65,6 +65,14 @@ pub enum Drive {
     /// Restarting the probe's region, as an estate manager does
     /// (`EstateOwnerMessage` `restart`), and coming back once it is up.
     Restart,
+    /// A change made to one of the probe's prims with the build floater: a
+    /// colour, a texture, a size, a shape, a name, media on a face.
+    Edit,
+    /// A change made to one of the probe's prims' contents from a viewer: an
+    /// item dropped in, renamed, removed, a script made or saved.
+    Contents,
+    /// The other avatar buying prim A, which the owner puts up for sale.
+    Buy,
 }
 
 impl Drive {
@@ -87,6 +95,9 @@ impl Drive {
             "pay-price" => Some(Self::PayPrice),
             "revoke" => Some(Self::Revoke),
             "restart" => Some(Self::Restart),
+            "edit" => Some(Self::Edit),
+            "contents" => Some(Self::Contents),
+            "buy" => Some(Self::Buy),
             _ => None,
         }
     }
@@ -727,6 +738,231 @@ pub enum Action {
         /// the region sends before it goes down.
         seconds: u32,
     },
+    /// Change the prim labelled `prim` as the build floater does.
+    Edit {
+        /// What is changed, and to what.
+        edit: Edit,
+        /// The prim changed (`A` unless the record names another).
+        prim: String,
+    },
+    /// Change the contents of the prim labelled `prim` as a viewer does.
+    Contents {
+        /// What is done to them.
+        op: ContentsOp,
+        /// The prim whose contents change (`A` unless the record names
+        /// another).
+        prim: String,
+    },
+    /// The owner puts prim A up for sale, the original for L$ 0, and the
+    /// other avatar buys it (`ObjectSaleInfo`, then `ObjectBuy`).
+    Buy,
+}
+
+/// What an `edit` stimulus changes: `what=<kind>`, and for every kind but
+/// `light-on` and `light-off` a `value=…`. Each is sent as the build floater
+/// sends it — the face changes as an `ObjectImage` of every face, the size and
+/// placement as a `MultipleObjectUpdate`, the shape as an `ObjectShape`, the
+/// light as an `ObjectExtraParams`, media over `ObjectMedia`.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Edit {
+    /// `color`: every face's colour, `value=<r>,<g>,<b>` (bytes, 0 to 255),
+    /// the alpha kept.
+    Color([u8; 3]),
+    /// `alpha`: every face's alpha, `value=<a>` (a byte, 255 opaque).
+    Alpha(u8),
+    /// `texture`: every face's texture, `value=<asset uuid>`.
+    Texture(String),
+    /// `repeats`: every face's texture repeats, `value=<n>` across and up.
+    Repeats(f32),
+    /// `glow`: every face's glow, `value=<g>`.
+    Glow(f32),
+    /// `fullbright`: every face's full-bright flag, `value=0|1`.
+    Fullbright(bool),
+    /// `scale`: the prim's size, `value=<x>,<y>,<z>` in metres.
+    Scale([f32; 3]),
+    /// `move`: the prim moved by `value=<x>,<y>,<z>` metres from where it is.
+    Move([f32; 3]),
+    /// `turn`: the prim turned to `value=<degrees>` about the vertical.
+    Turn(f32),
+    /// `cut`: the path cut's start, `value=<percent>` (0 to 100, the
+    /// shape's begin).
+    Cut(u8),
+    /// `light`: the prim a light (`value=1`) or not (`value=0`).
+    Light(bool),
+    /// `name`: the prim renamed, `value="…"`.
+    Name(String),
+    /// `description`: the prim's description, `value="…"`.
+    Description(String),
+    /// `phantom`: the prim phantom (`value=1`) or not (`value=0`).
+    Phantom(bool),
+    /// `media`: face 0's shared media, `value="<url>"`; an empty URL clears
+    /// every face's.
+    Media(String),
+}
+
+impl Edit {
+    /// Reads an `edit` record's `what` and `value`.
+    ///
+    /// # Errors
+    ///
+    /// No `what`, a kind that is none of [`Edit`]'s, or a `value` missing or
+    /// not of the kind's form.
+    fn from_waiting(line: &Line) -> Result<Self, String> {
+        let what = line.field("what").ok_or("an edit drive without `what`")?;
+        let value = || {
+            line.field("value")
+                .ok_or_else(|| format!("an edit drive of `what={what}` without `value`"))
+        };
+        let number = || -> Result<f32, String> {
+            value()?
+                .trim()
+                .parse::<f32>()
+                .ok()
+                .filter(|number| number.is_finite())
+                .ok_or_else(|| format!("an edit of `what={what}` whose `value` is not a number"))
+        };
+        let triple = || -> Result<[f32; 3], String> {
+            let numbers = value()?
+                .split(',')
+                .map(|number| number.trim().parse::<f32>().ok().filter(|n| n.is_finite()))
+                .collect::<Option<Vec<_>>>()
+                .unwrap_or_default();
+            <[f32; 3]>::try_from(numbers).map_err(|_numbers| {
+                format!("an edit of `what={what}` whose `value` is not three numbers")
+            })
+        };
+        let bytes = || -> Result<Vec<u8>, String> {
+            value()?
+                .split(',')
+                .map(|byte| byte.trim().parse::<u8>().ok())
+                .collect::<Option<Vec<_>>>()
+                .ok_or_else(|| format!("an edit of `what={what}` whose `value` is not bytes"))
+        };
+        let flag = || -> Result<bool, String> {
+            match value()? {
+                "0" => Ok(false),
+                "1" => Ok(true),
+                other => Err(format!(
+                    "an edit of `what={what}` whose `value={other}` is neither 0 nor 1"
+                )),
+            }
+        };
+        let text = || value().map(str::to_owned);
+        Ok(match what {
+            "color" => Self::Color(<[u8; 3]>::try_from(bytes()?).map_err(|_bytes| {
+                "an edit of `what=color` whose `value` is not three bytes".to_owned()
+            })?),
+            "alpha" => Self::Alpha(match bytes()?.as_slice() {
+                [alpha] => *alpha,
+                _ => return Err("an edit of `what=alpha` whose `value` is not a byte".to_owned()),
+            }),
+            "texture" => {
+                let id = value()?;
+                let is_uuid = id.len() == 36
+                    && id.char_indices().all(|(at, c)| {
+                        if matches!(at, 8 | 13 | 18 | 23) {
+                            c == '-'
+                        } else {
+                            c.is_ascii_hexdigit()
+                        }
+                    });
+                if !is_uuid {
+                    return Err(format!(
+                        "an edit of `what=texture` whose `value={id}` is no uuid"
+                    ));
+                }
+                Self::Texture(id.to_owned())
+            }
+            "repeats" => Self::Repeats(number()?),
+            "glow" => Self::Glow(number()?),
+            "fullbright" => Self::Fullbright(flag()?),
+            "scale" => Self::Scale(triple()?),
+            "move" => Self::Move(triple()?),
+            "turn" => Self::Turn(number()?),
+            "cut" => Self::Cut(match bytes()?.as_slice() {
+                [percent] if *percent <= 100 => *percent,
+                _ => {
+                    return Err(
+                        "an edit of `what=cut` whose `value` is not a percentage".to_owned()
+                    );
+                }
+            }),
+            "light" => Self::Light(flag()?),
+            "name" => Self::Name(text()?),
+            "description" => Self::Description(text()?),
+            "phantom" => Self::Phantom(flag()?),
+            "media" => Self::Media(text()?),
+            other => return Err(format!("`what={other}` is no edit")),
+        })
+    }
+}
+
+/// What a `contents` stimulus does to a prim's contents: `op=<op>` and the
+/// item's `name="…"`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ContentsOp {
+    /// `drop`: a notecard called `name` made in the avatar's inventory and
+    /// dropped in (`UpdateTaskInventory`) — by the owner, or by the other
+    /// avatar, which owns nothing of the probe's.
+    Drop {
+        /// The notecard's name.
+        name: String,
+    },
+    /// `rename`: the item called `name` renamed `to="…"`, as the contents
+    /// tab does it (`UpdateTaskInventory` of the item itself).
+    Rename {
+        /// The item's name.
+        name: String,
+        /// Its new name.
+        to: String,
+    },
+    /// `remove`: the item called `name` deleted (`RemoveTaskInventory`).
+    Remove {
+        /// The item's name.
+        name: String,
+    },
+    /// `new-script`: a new script called `name` made in the prim
+    /// (`RezScript`), not running.
+    NewScript {
+        /// The script's name.
+        name: String,
+    },
+    /// `save-script`: the script called `name` saved again, with a body that
+    /// does nothing, not running (`UpdateScriptTask`).
+    SaveScript {
+        /// The script's name.
+        name: String,
+    },
+}
+
+impl ContentsOp {
+    /// Reads a `contents` record's `op`, `name` and `to`.
+    ///
+    /// # Errors
+    ///
+    /// No `op` or `name`, an op that is none of [`ContentsOp`]'s, or a rename
+    /// without `to`.
+    fn from_waiting(line: &Line) -> Result<Self, String> {
+        let op = line.field("op").ok_or("a contents drive without `op`")?;
+        let name = line
+            .field("name")
+            .ok_or_else(|| format!("a contents drive of `op={op}` without `name`"))?
+            .to_owned();
+        Ok(match op {
+            "drop" => Self::Drop { name },
+            "rename" => Self::Rename {
+                name,
+                to: line
+                    .field("to")
+                    .ok_or("a contents drive of `op=rename` without `to`")?
+                    .to_owned(),
+            },
+            "remove" => Self::Remove { name },
+            "new-script" => Self::NewScript { name },
+            "save-script" => Self::SaveScript { name },
+            other => return Err(format!("`op={other}` is no contents change")),
+        })
+    }
 }
 
 /// The HTTP request a `fetch` stimulus sends: `url=<url> [method=<name>]
@@ -827,13 +1063,16 @@ impl Action {
             Self::PayPrice { .. } => Drive::PayPrice,
             Self::Revoke { .. } => Drive::Revoke,
             Self::Restart { .. } => Drive::Restart,
+            Self::Edit { .. } => Drive::Edit,
+            Self::Contents { .. } => Drive::Contents,
+            Self::Buy => Drive::Buy,
         }
     }
 }
 
 /// What a `waiting` record asks the runner for:
 /// `rec=waiting
-/// drive=touch|chat|answer|sit|stand|control|dialog|away|attach|drop|rerez|fetch|pay|pay-price|revoke|restart
+/// drive=touch|chat|answer|sit|stand|control|dialog|away|attach|drop|rerez|fetch|pay|pay-price|revoke|restart|edit|contents|buy
 /// [by=owner|other]`, and for a touch optionally `face=<n> uv=<u>,<v>
 /// st=<s>,<t> at=<x>,<y>,<z> normal=<x>,<y>,<z> binormal=<x>,<y>,<z>` (all of
 /// them, or none), for chat `channel=<n> text="…"`, for an answer
@@ -841,10 +1080,13 @@ impl Action {
 /// away `seconds=<n>`, for attach `point=<n>`, for a fetch what [`Fetch`]
 /// reads, for a payment `amount=<n> [prim=<label>]`, for the pay buttons
 /// `[prim=<label>]`, for a revocation `perms=<mask> [target=object|region]`,
-/// for a restart `seconds=<n>`. Without `by` it is the owner; only the owner
-/// goes `away`, attaches, drops or re-rezzes, and neither a fetch nor a
-/// restart comes from either avatar: a fetch comes from no avatar at all, a
-/// restart from the estate's.
+/// for a restart `seconds=<n>`, for an edit what [`Edit`] reads and
+/// `[prim=<label>]`, for a contents change what [`ContentsOp`] reads and
+/// `[prim=<label>]`. Without `by` it is the owner; only the owner goes `away`,
+/// attaches, drops, re-rezzes or edits, only the other avatar buys, neither a
+/// fetch nor a restart comes from either avatar — a fetch comes from no avatar
+/// at all, a restart from the estate's — and of the contents changes the other
+/// avatar may only drop an item in.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Stimulus {
     /// Who gives it.
@@ -966,15 +1208,31 @@ impl Stimulus {
                         .ok_or("a restart drive without an unsigned integer `seconds`")?,
                 }
             }
+            Some(Drive::Edit) => Action::Edit {
+                edit: Edit::from_waiting(line)?,
+                prim: line.field("prim").unwrap_or("A").to_owned(),
+            },
+            Some(Drive::Contents) => Action::Contents {
+                op: ContentsOp::from_waiting(line)?,
+                prim: line.field("prim").unwrap_or("A").to_owned(),
+            },
+            Some(Drive::Buy) => Action::Buy,
             None => return Err(format!("`drive={drive}` is not a drive")),
         };
-        if by == By::Other
-            && matches!(
-                action,
-                Action::Away { .. } | Action::Attach { .. } | Action::Drop | Action::Rerez
-            )
-        {
+        let owners_alone = match &action {
+            Action::Away { .. }
+            | Action::Attach { .. }
+            | Action::Drop
+            | Action::Rerez
+            | Action::Edit { .. } => true,
+            Action::Contents { op, .. } => !matches!(op, ContentsOp::Drop { .. }),
+            _ => false,
+        };
+        if by == By::Other && owners_alone {
             return Err(format!("`drive={drive}` is the owner's alone"));
+        }
+        if by == By::Owner && action == Action::Buy {
+            return Err("`drive=buy` is the other avatar's: the owner sells".to_owned());
         }
         Ok(Self { by, action })
     }
@@ -1159,8 +1417,8 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     use super::{
-        Action, BarePrim, By, Drive, Fetch, Header, HeaderError, Library, Line, ResultFile, Stat,
-        Stimulus, Target, TouchSurface,
+        Action, BarePrim, By, ContentsOp, Drive, Edit, Fetch, Header, HeaderError, Library, Line,
+        ResultFile, Stat, Stimulus, Target, TouchSurface,
     };
 
     #[test]
@@ -1414,7 +1672,83 @@ mod tests {
                 header: None,
             })
         );
+        assert_eq!(
+            read("PROBE a/b rec=waiting drive=edit what=color value=255,0,128")?,
+            Stimulus {
+                by: By::Owner,
+                action: Action::Edit {
+                    edit: Edit::Color([255, 0, 128]),
+                    prim: "A".to_owned()
+                }
+            }
+        );
+        assert_eq!(
+            read("PROBE a/b rec=waiting drive=edit what=light value=1 prim=B")?.action,
+            Action::Edit {
+                edit: Edit::Light(true),
+                prim: "B".to_owned()
+            }
+        );
+        assert_eq!(
+            read(
+                "PROBE a/b rec=waiting drive=edit what=texture \
+                 value=89556747-24cb-43ed-920b-47caed15465f"
+            )?
+            .action,
+            Action::Edit {
+                edit: Edit::Texture("89556747-24cb-43ed-920b-47caed15465f".to_owned()),
+                prim: "A".to_owned()
+            }
+        );
+        assert_eq!(
+            read("PROBE a/b rec=waiting drive=edit what=media value=\"\"")?.action,
+            Action::Edit {
+                edit: Edit::Media(String::new()),
+                prim: "A".to_owned()
+            }
+        );
+        assert_eq!(
+            read(r#"PROBE a/b rec=waiting drive=contents by=other op=drop name="Gift""#)?,
+            Stimulus {
+                by: By::Other,
+                action: Action::Contents {
+                    op: ContentsOp::Drop {
+                        name: "Gift".to_owned()
+                    },
+                    prim: "A".to_owned()
+                }
+            }
+        );
+        assert_eq!(
+            read(r#"PROBE a/b rec=waiting drive=contents op=rename name=a to="b c" prim=B"#)?
+                .action,
+            Action::Contents {
+                op: ContentsOp::Rename {
+                    name: "a".to_owned(),
+                    to: "b c".to_owned()
+                },
+                prim: "B".to_owned()
+            }
+        );
+        assert_eq!(
+            read("PROBE a/b rec=waiting drive=buy by=other")?.action,
+            Action::Buy
+        );
         for refused in [
+            "PROBE a/b rec=waiting drive=edit",
+            "PROBE a/b rec=waiting drive=edit what=color",
+            "PROBE a/b rec=waiting drive=edit what=color value=255,0",
+            "PROBE a/b rec=waiting drive=edit what=color value=1,0,0.5",
+            "PROBE a/b rec=waiting drive=edit what=cut value=101",
+            "PROBE a/b rec=waiting drive=edit what=light value=2",
+            "PROBE a/b rec=waiting drive=edit what=texture value=plywood",
+            "PROBE a/b rec=waiting drive=edit what=wobble value=1",
+            "PROBE a/b rec=waiting drive=edit by=other what=alpha value=0.5",
+            "PROBE a/b rec=waiting drive=contents op=drop",
+            "PROBE a/b rec=waiting drive=contents op=rename name=a",
+            "PROBE a/b rec=waiting drive=contents op=shred name=a",
+            "PROBE a/b rec=waiting drive=contents by=other op=remove name=a",
+            "PROBE a/b rec=waiting drive=buy",
             "PROBE a/b rec=waiting drive=fetch",
             "PROBE a/b rec=waiting drive=fetch url=u by=owner",
             "PROBE a/b rec=waiting drive=fetch url=u method=\"GE T\"",

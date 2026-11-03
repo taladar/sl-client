@@ -18,6 +18,7 @@ use crate::library::{BuiltinId, Event, event};
 use crate::value::Value;
 
 mod comms;
+mod contents;
 mod experiences;
 mod identity;
 mod json;
@@ -156,6 +157,8 @@ struct Recorder {
     broken_links: Vec<(CallerId, String)>,
     /// The callers per `llBreakAllLinks` handed over.
     broken_all: Vec<CallerId>,
+    /// `(caller, allow)` per `llAllowInventoryDrop` handed over.
+    allowed_drops: Vec<(CallerId, bool)>,
 }
 
 /// The owner of every object a [`Recorder`] has, unless it says otherwise.
@@ -279,6 +282,10 @@ impl Host for Recorder {
 
     fn break_all_links(&mut self, caller: CallerId) {
         self.broken_all.push(caller);
+    }
+
+    fn allow_inventory_drop(&mut self, caller: CallerId, allow: bool) {
+        self.allowed_drops.push((caller, allow));
     }
 
     fn whereabouts(&self, caller: CallerId) -> Whereabouts {

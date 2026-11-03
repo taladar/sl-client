@@ -2046,6 +2046,44 @@ after it.
 | a render material (`PRIM_RENDER_MATERIAL`) | `CHANGED_RENDER_MATERIAL` | nothing: the rule is unsupported | no scripts |
 | colour and size in one call | one event, `CHANGED_COLOR \| CHANGED_SCALE` | **two** events | no scripts |
 
+### `changed`: what a viewer's change raises
+
+Measured on 2026-11-03 by `events/changed-edits`, `events/changed-contents`,
+`events/changed-owner` and `events/changed-worn`, on aditi (Mauve) and the
+local OpenSim under both engines, which agree but where the last table says.
+The runner made each change as the reference viewer makes it, one every few
+seconds (the `edit`, `contents` and `buy` drives,
+[the probe corpus](../tools/lsl-probes.md#writing-a-probe)); prims A (the
+root) and B (its child) each printed every `changed` event they got.
+
+| a viewer's edit | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| a face's colour, a face's alpha (`ObjectImage` of every face) | `CHANGED_COLOR` | the same | each flavour as its grid |
+| the same colour or alpha again | nothing | the same | the same |
+| a texture, its repeats, glow, full bright | `CHANGED_TEXTURE` — unlike a script's `llSetTexture` on Second Life, which raises nothing | the same | the same |
+| the same texture again | nothing | the same | the same |
+| a resize (`MultipleObjectUpdate`) | `CHANGED_SCALE` | the same | the same |
+| a resize to the size it has | `CHANGED_SCALE` again | the same | the same |
+| a move, a turn of the root | nothing | 32768 (`CHANGED_POSITION`): a move once in the root and **twice** in the child, a turn once in the child alone | each flavour as its grid |
+| the path cut (`ObjectShape`) | `CHANGED_SHAPE` | the same | the same |
+| a light (`ObjectExtraParams`), the name, the description, phantom on and off | nothing | the same | the same |
+| face media set, and cleared (`ObjectMedia`) | `CHANGED_MEDIA` each | the same | the same |
+| the child's colour, its texture | in the child alone | the same | the same |
+| the child resized | `CHANGED_SCALE` **in the root**, not in the child | in the child | each flavour as its grid |
+| the child moved | nothing | 32768 in the child | each flavour as its grid |
+
+| a change to the contents, from a viewer | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| the owner drops a notecard in, renames it in the contents tab, deletes it; makes a new script, saves it, deletes it | `CHANGED_INVENTORY` each, in that prim alone (a drop into the child: the child) | the same | the same |
+| another avatar drops a notecard into a prim that allows no drops | refused: nothing changes, the dropper is told `Unable to edit this!` | refused silently | each flavour as its grid |
+| the same into a prim that allows them (`llAllowInventoryDrop(TRUE)`) | `CHANGED_ALLOWED_DROP` | the same | the same |
+| the owner drops one in while it allows them | `CHANGED_INVENTORY` (Second Life's arrived seconds late, after the next step's) | `CHANGED_INVENTORY` | `CHANGED_INVENTORY` |
+
+| an owner or a region change | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| the other avatar buys the original for L$ 0 | **one** `CHANGED_OWNER`, the new owner read at once; the buyer is told `You are now the owner of object Object`, and both get a balance reply of type 5000 | **three** `CHANGED_OWNER` | no purchase (`server-fake-grid-money-ledger`) |
+| worn, its wearer teleports to another region and back | `CHANGED_REGION \| CHANGED_TELEPORT` on arrival, each way, and nothing else | YEngine: 32768 as it leaves, then `CHANGED_REGION \| CHANGED_TELEPORT` on arrival, each way; **XEngine runs `state_entry` again** in the object on each arrival, so the script loses its globals and nothing it held of the trip survives | worn objects do not travel (`fake-grid-own-attachments-and-region-moves`) |
+
 ### Sound, particles, texture animation and media
 
 `prim/effects`: no function reads these back.

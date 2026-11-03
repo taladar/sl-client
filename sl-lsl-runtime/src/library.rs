@@ -24,6 +24,7 @@
 
 pub(crate) mod collation;
 pub mod comms;
+pub mod contents;
 pub mod control;
 pub mod detection;
 pub mod dispatch;
@@ -292,6 +293,8 @@ mod tests {
         fn break_link(&mut self, _caller: CallerId, _prim: &str) {}
 
         fn break_all_links(&mut self, _caller: CallerId) {}
+
+        fn allow_inventory_drop(&mut self, _caller: CallerId, _allow: bool) {}
 
         fn seat(&mut self, _caller: CallerId, _link: i32) -> Option<&mut crate::vm::seating::Seat> {
             None

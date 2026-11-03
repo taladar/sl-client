@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 129 |
-| ready | 337 |
+| ready | 338 |
 | blocked | 40 |
 | in-progress | 18 |
 | bugs | 42 |
-| done | 1475 |
+| done | 1476 |
 | deferred | 30 |
 | wont-do | 24 |
-| **total** | **2095** |
+| **total** | **2097** |
 
 ## ideas (129)
 
@@ -329,7 +329,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-lsl-opensim-function-set`](ideas/gridspec-lsl-opensim-function-set.md)
   — Measure which library functions OpenSim's engines compile
 
-## ready (337)
+## ready (338)
 
 ### protocol
 
@@ -1127,9 +1127,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   agent never moves — AgentUpdate is decoded and ignored (blocked by
   `server-world-heartbeat` (done), `gridspec-neighbours-crossing` (done),
   `gridspec-agent-movement` (done))
-- [`server-world-changed-raisers`](ready/server-world-changed-raisers.md) —
-  Raise changed() from every grid-side cause, with the right bit (blocked by
-  `server-fake-grid-script-engine-wiring` (done), `gridspec-lsl-events` (done))
+- [`server-world-changed-object-crossing`](ready/server-world-changed-object-crossing.md)
+  — Measure and raise changed() when an unworn object crosses a region border
+  (blocked by `gridspec-neighbours-crossing` (done))
+- [`server-world-changed-owner-deed`](ready/server-world-changed-owner-deed.md)
+  — Measure and raise CHANGED_OWNER when an object is deeded to a group (blocked
+  by `server-fake-grid-groups` (done))
 - [`server-world-collision-and-physics`](ready/server-world-collision-and-physics.md)
   — Enough physics for the collision, target and volume-detect events (blocked
   by `server-world-heartbeat` (done), `server-world-ecs-store` (done))
@@ -1443,7 +1446,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1475)
+## done (1476)
 
 ### protocol
 
@@ -4540,6 +4543,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-lsl-vm-execution`](done/server-lsl-vm-execution.md) — The script VM —
   suspendable execution in per-tick slices (blocked by `server-lsl-compiler-ir`
   (done))
+- [`server-world-changed-raisers`](done/server-world-changed-raisers.md) — Raise
+  changed() from every grid-side cause, with the right bit (blocked by
+  `server-fake-grid-script-engine-wiring` (done), `gridspec-lsl-events` (done))
 - [`server-world-chat-routing`](done/server-world-chat-routing.md) — The fake
   grid hears local chat and drops it
 - [`server-world-ecs-store`](done/server-world-ecs-store.md) — An ECS scene

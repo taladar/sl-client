@@ -6,8 +6,9 @@
 //! an experience once accepted is granted to its every script, refused where
 //! its standing stops it, and a question refused or left unanswered is
 //! answered as Second Life answers it; and a region's `[OSSL]` settings gate
-//! a function to gods — each step driven by a real client, the region ticked
-//! one step at a time.
+//! a function to gods; and a viewer's edits and contents changes raise
+//! `changed` as each grid raises it — each step driven by a real client, the
+//! region ticked one step at a time.
 
 #[cfg(test)]
 mod test {
@@ -53,6 +54,8 @@ mod test {
         Sat(sl_types::lsl::Vector, sl_types::lsl::Rotation),
         /// An object the client already had was sent again.
         Updated(Box<sl_client_tokio::Object>),
+        /// An alert's text.
+        Alert(String),
     }
 
     /// A logged-in client in a stepped catalogue region.
@@ -164,6 +167,7 @@ mod test {
                         ..
                     } => Seen::Sat(sit_position, sit_rotation),
                     Event::ScriptPermissionRequest(question) => Seen::Question(question),
+                    Event::AlertMessage { message, .. } => Seen::Alert(message),
                     Event::InventoryItemCreated { item, .. }
                         if i32::from(item.item_type) == sl_proto::AssetType::Object.to_code() =>
                     {
@@ -463,6 +467,35 @@ mod test {
                 }
             }
             lines
+        }
+
+        /// Sends `command`, which the session takes as the event `taken`
+        /// picks, ticks twice, and returns everything said after.
+        async fn edit(
+            &mut self,
+            command: Command,
+            taken: impl Fn(&ServerEvent) -> bool + Send + Sync,
+        ) -> Result<Vec<String>, TestError> {
+            self.send(command, taken).await?;
+            self.tick(2).await?;
+            Ok(said_lines(self).await)
+        }
+
+        /// Moves, turns or resizes the prim `local_id` with `transform`.
+        async fn transform(
+            &mut self,
+            local_id: sl_proto::RegionLocalObjectId,
+            transform: sl_client_tokio::ObjectTransform,
+        ) -> Result<Vec<String>, TestError> {
+            let local_id = sl_client_tokio::ScopedObjectId::new(self.circuit, local_id);
+            self.edit(
+                Command::UpdateObject {
+                    local_id,
+                    transform,
+                },
+                |event| matches!(event, ServerEvent::ObjectTransformSet { .. }),
+            )
+            .await
         }
 
         /// Ends the run.
@@ -1932,5 +1965,344 @@ default
     #[tokio::test]
     async fn a_scripted_linkset_on_opensim() -> Result<(), TestError> {
         a_scripted_linkset(ImitatedGrid::OpenSim).await
+    }
+
+    /// What every prim of [`changes_region`] runs: each `changed` shouted as
+    /// the prim's name and the bits, and on channel 7 `allow` lets anybody
+    /// drop an item into the prim.
+    const REPORTER_SOURCE: &str = "default
+{
+    state_entry()
+    {
+        llListen(7, \"\", NULL_KEY, \"\");
+    }
+
+    listen(integer channel, string name, key id, string message)
+    {
+        if (message == \"allow\")
+        {
+            llAllowInventoryDrop(TRUE);
+        }
+    }
+
+    changed(integer change)
+    {
+        llShout(0, llGetObjectName() + \" \" + (string)change);
+    }
+}
+";
+
+    /// The box of [`changes_region`] somebody else owns.
+    const STRANGERS: sl_proto::RegionLocalObjectId = sl_proto::RegionLocalObjectId(0x810);
+
+    /// The box of [`changes_region`] the client takes, to drop it in again.
+    const SPARE: sl_proto::RegionLocalObjectId = sl_proto::RegionLocalObjectId(0x811);
+
+    /// A region holding the linkset of [`linkset_region`] — `A`, `B` and `C`,
+    /// owned by the logged-in user — a box `D` owned by somebody else and a box
+    /// `E` of the user's, every prim running [`REPORTER_SOURCE`].
+    fn changes_region() -> Result<sl_fake_grid::RegionFixture, TestError> {
+        let reporter = |local_id| ScriptedBox {
+            local_id,
+            source: REPORTER_SOURCE.to_owned(),
+            experience: None,
+        };
+        let mut fixture = region_of(&[
+            reporter(LINK_ROOT),
+            reporter(LINK_B),
+            reporter(LINK_C),
+            reporter(STRANGERS),
+            reporter(SPARE),
+        ])?;
+        let stranger = uuid::Uuid::from_u128(0x5_7A2A);
+        for (local_id, name, along) in [
+            (LINK_ROOT, "A", 0.0),
+            (LINK_B, "B", 1.0),
+            (LINK_C, "C", 2.0),
+            (STRANGERS, "D", 0.0),
+            (SPARE, "E", 0.0),
+        ] {
+            let mut prim = fixture
+                .world
+                .object_mut(local_id)
+                .ok_or("a cube is not in the region")?;
+            if local_id == STRANGERS {
+                prim.owner_id = stranger;
+            }
+            let mut record = sl_fake_grid::world::default_object_properties(&prim);
+            record.name = name.to_owned();
+            prim.properties = Some(record);
+            if matches!(local_id, LINK_B | LINK_C) {
+                prim.parent_id = LINK_ROOT;
+                prim.motion.position = sl_types::lsl::Vector {
+                    x: along,
+                    y: 0.0,
+                    z: 0.0,
+                };
+            }
+        }
+        Ok(fixture)
+    }
+
+    /// Every face of a box, the default texture, tinted `color` and glowing
+    /// `glow`.
+    fn faces(color: [u8; 4], glow: f32) -> sl_client_tokio::TextureEntry {
+        let face = sl_client_tokio::TextureFace {
+            color,
+            glow,
+            ..sl_client_tokio::TextureFace::new(sl_types::key::TextureKey::from(
+                sl_proto::DEFAULT_PRIM_TEXTURE,
+            ))
+        };
+        sl_client_tokio::TextureEntry {
+            faces: vec![face; 6],
+        }
+    }
+
+    /// Everything shouted and every alert the client is told until the
+    /// session falls quiet, the shouts sorted.
+    async fn shouts_and_alerts(scene: &mut Scene) -> (Vec<String>, Vec<String>) {
+        let mut shouts = Vec::new();
+        let mut alerts = Vec::new();
+        while let Ok(Some(seen)) = tokio::time::timeout(QUIET, scene.seen.recv()).await {
+            match seen {
+                Seen::Chat(ChatType::Shout, message) => shouts.push(message),
+                Seen::Alert(message) => alerts.push(message),
+                _other => {}
+            }
+        }
+        shouts.sort();
+        (shouts, alerts)
+    }
+
+    /// A viewer's edits and contents changes raise `changed` in the prims each
+    /// grid raises it in, with the bits it raises (`events/changed-edits`,
+    /// `events/changed-contents`): a face's colour `CHANGED_COLOR` and its
+    /// glow `CHANGED_TEXTURE`, each only when it changed; a resize
+    /// `CHANGED_SCALE` every time, a child's heard by the root on Second Life;
+    /// a move and a turn OpenSim's own 32768 alone; a shape `CHANGED_SHAPE`;
+    /// a drop and a new script `CHANGED_INVENTORY`; and a drop into somebody
+    /// else's prim refused — Second Life saying so — until a script there
+    /// allows drops, when it raises `CHANGED_ALLOWED_DROP`.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one step per row of the probes' tables, each a few lines"
+    )]
+    async fn a_viewers_changes_raise_changed(imitated: ImitatedGrid) -> Result<(), TestError> {
+        let region = changes_region()?;
+        let mut scene = scene_with(
+            imitated,
+            region,
+            RegionConfig {
+                heartbeat: HeartbeatConfig::stepped(Duration::from_millis(100)),
+                ..RegionConfig::default()
+            },
+            AccountConfig {
+                agent_id: Some(box_owner()),
+                ..AccountConfig::new("Test", "User", "password")
+            },
+        )
+        .await?;
+        scene.tick(2).await?;
+        let _arrival = said_lines(&mut scene).await;
+        let opensim = imitated == ImitatedGrid::OpenSim;
+        let root = sl_client_tokio::ScopedObjectId::new(scene.circuit, LINK_ROOT);
+        let retexture = |texture_entry| Command::SetObjectImage {
+            local_id: root,
+            media_url: None,
+            texture_entry,
+        };
+        let retextured = |event: &ServerEvent| matches!(event, ServerEvent::ObjectImageSet { .. });
+
+        let red = scene
+            .edit(retexture(faces([255, 0, 0, 255], 0.0)), retextured)
+            .await?;
+        assert_eq!(red, lines(&["A 2"]), "a colour");
+        let again = scene
+            .edit(retexture(faces([255, 0, 0, 255], 0.0)), retextured)
+            .await?;
+        assert_eq!(again, lines(&[]), "the same colour again");
+        let glowing = scene
+            .edit(retexture(faces([255, 0, 0, 255], 0.2)), retextured)
+            .await?;
+        assert_eq!(glowing, lines(&["A 16"]), "a glow");
+
+        let size = |x: f32| sl_client_tokio::ObjectTransform {
+            scale: Some(sl_types::lsl::Vector { x, y: x, z: x }),
+            ..sl_client_tokio::ObjectTransform::default()
+        };
+        assert_eq!(
+            scene.transform(LINK_ROOT, size(0.6)).await?,
+            lines(&["A 8"]),
+            "a resize"
+        );
+        assert_eq!(
+            scene.transform(LINK_ROOT, size(0.6)).await?,
+            lines(&["A 8"]),
+            "a resize to the same size"
+        );
+        let resized_child = scene.transform(LINK_B, size(0.4)).await?;
+        let heard = if opensim { "B 8" } else { "A 8" };
+        assert_eq!(resized_child, lines(&[heard]), "a child's resize");
+
+        let moved = scene
+            .transform(
+                LINK_ROOT,
+                sl_client_tokio::ObjectTransform {
+                    position: Some(sl_types::lsl::Vector {
+                        x: 132.0,
+                        y: 128.0,
+                        z: 25.8,
+                    }),
+                    ..sl_client_tokio::ObjectTransform::default()
+                },
+            )
+            .await?;
+        let told: &[&str] = if opensim {
+            &["A 32768", "B 32768", "B 32768", "C 32768", "C 32768"]
+        } else {
+            &[]
+        };
+        assert_eq!(moved, lines(told), "a move of the root");
+        let turned = scene
+            .transform(
+                LINK_ROOT,
+                sl_client_tokio::ObjectTransform {
+                    rotation: Some(sl_types::lsl::Rotation {
+                        x: 0.0,
+                        y: 0.0,
+                        z: 0.383,
+                        s: 0.924,
+                    }),
+                    ..sl_client_tokio::ObjectTransform::default()
+                },
+            )
+            .await?;
+        let told: &[&str] = if opensim {
+            &["B 32768", "C 32768"]
+        } else {
+            &[]
+        };
+        assert_eq!(turned, lines(told), "a turn of the root");
+
+        let shape = sl_client_tokio::PrimShapeParams {
+            path_curve: 16,
+            profile_curve: 1,
+            path_begin: 12_500,
+            path_scale_x: 100,
+            path_scale_y: 100,
+            ..sl_client_tokio::PrimShapeParams::default()
+        };
+        let reshaped = scene
+            .edit(
+                Command::SetObjectShape {
+                    local_id: sl_client_tokio::ScopedObjectId::new(scene.circuit, LINK_B),
+                    shape,
+                },
+                |event| matches!(event, ServerEvent::ObjectShapeSet { .. }),
+            )
+            .await?;
+        assert_eq!(reshaped, lines(&["B 4"]), "a shape");
+
+        let made = scene
+            .edit(
+                Command::RezScript {
+                    target: sl_client_tokio::ScopedObjectId::new(scene.circuit, LINK_C),
+                    params: Box::new(sl_client_tokio::RezScriptParams {
+                        group_id: None,
+                        enabled: false,
+                        item: sl_client_tokio::RestoreItem::new_script(
+                            box_owner(),
+                            sl_types::key::ObjectKey::from(key_of(LINK_C)),
+                            "New Script",
+                            uuid::Uuid::from_u128(0x5C),
+                        ),
+                    }),
+                },
+                |event| matches!(event, ServerEvent::RezScript { .. }),
+            )
+            .await?;
+        assert_eq!(made, lines(&["C 1"]), "a new script");
+
+        // The spare box taken, to be dropped in again.
+        let objects = scene
+            .agent
+            .with_sim(|sim| {
+                sim.agent_inventory()
+                    .folders()
+                    .find(|folder| {
+                        folder.folder_type == sl_client_tokio::FolderType::Object.to_code()
+                    })
+                    .map(|folder| folder.folder_id)
+            })
+            .await
+            .ok_or("the account has no Objects folder")?;
+        scene
+            .commands
+            .send(Command::DerezObjects {
+                local_ids: vec![sl_client_tokio::ScopedObjectId::new(scene.circuit, SPARE)],
+                destination: sl_client_tokio::DeRezDestination::TakeIntoAgentInventory(objects),
+                transaction_id: sl_client_tokio::TransactionId::from(uuid::Uuid::from_u128(0x7B)),
+                group_id: None,
+            })
+            .await?;
+        let spare = scene
+            .next("the taken item", |seen| match seen {
+                Seen::Filed(item) => Some(item),
+                _other => None,
+            })
+            .await?;
+        scene.tick(2).await?;
+        let _taken = said_lines(&mut scene).await;
+        let drop_into = |local_id: sl_proto::RegionLocalObjectId, circuit| {
+            let task = sl_types::key::ObjectKey::from(key_of(local_id));
+            sl_client_tokio::RestoreItem::for_task_drop(&spare, task, uuid::Uuid::from_u128(0xD0))
+                .map(|item| Command::UpdateTaskInventory {
+                    target: sl_client_tokio::ScopedObjectId::new(circuit, local_id),
+                    key: sl_client_tokio::TaskInventoryKey::Item,
+                    item: Box::new(item),
+                })
+        };
+        let dropped =
+            |event: &ServerEvent| matches!(event, ServerEvent::UpdateTaskInventory { .. });
+        let own = scene
+            .edit(drop_into(LINK_ROOT, scene.circuit)?, dropped)
+            .await?;
+        assert_eq!(own, lines(&["A 1"]), "a drop into the owner's prim");
+
+        scene
+            .send(drop_into(STRANGERS, scene.circuit)?, dropped)
+            .await?;
+        scene.tick(2).await?;
+        let (refused, told) = shouts_and_alerts(&mut scene).await;
+        assert_eq!(refused, lines(&[]), "a drop into somebody else's prim");
+        let alerts: &[&str] = if opensim {
+            &[]
+        } else {
+            &["Unable to edit this!"]
+        };
+        assert_eq!(told, lines(alerts), "what a refused drop is told");
+
+        scene.shout("allow").await?;
+        scene.tick(2).await?;
+        let _allowed = said_lines(&mut scene).await;
+        let let_in = scene
+            .edit(drop_into(STRANGERS, scene.circuit)?, dropped)
+            .await?;
+        assert_eq!(let_in, lines(&["D 64"]), "a drop it allows");
+        scene.stop();
+        Ok(())
+    }
+
+    /// On a grid imitating Second Life.
+    #[tokio::test]
+    async fn a_viewers_changes_raise_changed_on_second_life() -> Result<(), TestError> {
+        a_viewers_changes_raise_changed(ImitatedGrid::SecondLife).await
+    }
+
+    /// On a grid imitating OpenSim.
+    #[tokio::test]
+    async fn a_viewers_changes_raise_changed_on_opensim() -> Result<(), TestError> {
+        a_viewers_changes_raise_changed(ImitatedGrid::OpenSim).await
     }
 }

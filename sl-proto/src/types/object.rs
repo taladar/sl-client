@@ -58,6 +58,10 @@ pub mod prim_flags {
     /// The object is listed in parcel search (`FLAGS_INCLUDE_IN_SEARCH`), what
     /// an `ObjectIncludeInSearch` sets.
     pub const INCLUDE_IN_SEARCH: u32 = 1 << 15;
+    /// Anybody may drop an item into the object, not only those who may
+    /// modify it (`FLAGS_ALLOW_INVENTORY_DROP`) — a script's
+    /// `llAllowInventoryDrop`.
+    pub const ALLOW_INVENTORY_DROP: u32 = 1 << 16;
     /// The receiving agent may transfer (take) the object
     /// (`FLAGS_OBJECT_TRANSFER`).
     pub const OBJECT_TRANSFER: u32 = 1 << 17;

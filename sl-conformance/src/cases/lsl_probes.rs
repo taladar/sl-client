@@ -26,8 +26,10 @@
 //!    the region for a while, attaching prim A from the ground, dropping it,
 //!    or taking it and rezzing it back (when it takes a new key), or the
 //!    region restarting — asked for by the estate owner the runner keeps on
-//!    call, after which both avatars log in again — one the probe's header
-//!    declares among its `drive`s;
+//!    call, after which both avatars log in again — or an edit of a prim, a
+//!    change to its contents, or a sale of prim A to the other avatar
+//!    (the `edits` submodule): one the probe's header declares among its
+//!    `drive`s;
 //! 4. keeps every owner-say line of the probe's (`PROBE <id> …`) from its
 //!    prims, and every `DEBUG_CHANNEL` message they shout as a `#` note,
 //!    until the probe prints `end` — and a little longer, for a second
@@ -55,23 +57,24 @@ use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::time::{Duration, Instant};
 
 use sl_client_tokio::{
-    AgentKey, AssetType, AssetUpdateLocation, AttachmentMode, AttachmentPoint, ChatAudible,
-    ChatChannel, ChatMessage, ChatSource, ChatType, Command, ControlFlags, DeRezDestination,
-    DisconnectReason, Event, FolderType, InstantMessage, InventoryFolder, InventoryFolderKey,
-    InventoryKey, InventoryType, LindenAmount, MoneyBalance, MoneyTransactionType,
-    NewInventoryItem, Object, ObjectKey, OwnerKey, Permissions, PrimShape, RegionHandle,
-    RegionLocalObjectId, RestoreItem, RezScriptParams, Rotation, ScopedObjectId, ScriptDialog,
-    ScriptPermissionRequest, ScriptPermissions, ScriptTarget, ScriptUploadLocation, SimStatId,
-    SurfaceInfo, TaskInventoryItem, TaskInventoryKey, TransactionId, UpdatableAssetType, Uuid,
-    Vector, WearableType, XferListing,
+    AgentKey, AssetType, AttachmentMode, AttachmentPoint, ChatAudible, ChatChannel, ChatMessage,
+    ChatSource, ChatType, Command, ControlFlags, DeRezDestination, DisconnectReason, Event,
+    FolderType, InstantMessage, InventoryFolder, InventoryFolderKey, InventoryKey, InventoryType,
+    LindenAmount, MoneyBalance, MoneyTransactionType, Object, ObjectKey, OwnerKey, PrimShape,
+    RegionHandle, RegionLocalObjectId, RestoreItem, RezScriptParams, Rotation, ScopedObjectId,
+    ScriptDialog, ScriptPermissionRequest, ScriptPermissions, ScriptTarget, ScriptUploadLocation,
+    SimStatId, SurfaceInfo, TaskInventoryItem, TaskInventoryKey, TransactionId, Uuid, Vector,
+    XferListing,
 };
 use sl_lsl_runtime::probe::{
     Action, By, COMPILE_ERROR_NOTE, Drive, Fetch, Line, PREFIX, ResultFile, Stat, Stimulus, Target,
     TouchSurface,
 };
 
+mod edits;
+
 use super::object_rez_derez::rez_params;
-use super::task_inventory::{drop_item, notecard_bytes};
+use super::task_inventory::drop_item;
 use crate::context::{Session, StandbyLogin, TestContext, TestFailure, now_rfc3339};
 use crate::grid::Grid;
 use crate::probe_corpus::{
@@ -407,6 +410,10 @@ struct Transcript {
     /// Each avatar's L$ balance as the grid last told it (by role), so that
     /// a note can say how a balance changed and never what it is.
     balances: HashMap<&'static str, u64>,
+    /// The objects the region told the owner it removed, which the run does
+    /// not wait to see removed again when it clears the probe's prims away —
+    /// a prim that died, or that another avatar bought and then died.
+    removed: HashSet<ScopedObjectId>,
 }
 
 impl Transcript {
@@ -730,6 +737,10 @@ impl Transcript {
                 let _previous = self.latest.insert(object.full_id, (**object).clone());
                 return None;
             }
+            Event::ObjectRemoved { local_id, .. } => {
+                self.removed.insert(*local_id);
+                return None;
+            }
             Event::ScriptPermissionRequest(request) if self.is_probe(prims, request.task_id) => {
                 self.question("", request);
                 return None;
@@ -997,10 +1008,29 @@ async fn run_corpus(ctx: &mut TestContext, xengine: bool) -> Result<(), TestFail
         };
         (settled.seen, settled.anchor, trip)
     };
-    let other_active_group = {
+    let changes_contents = probes
+        .iter()
+        .any(|probe| probe.drives().contains(&Drive::Contents));
+    let (other_active_group, other_trash) = {
         let other = ctx.secondary().ok_or_else(|| {
             TestFailure::State("the case runs with a secondary avatar".to_owned())
         })?;
+        let other_trash = if changes_contents {
+            let folders = other
+                .wait_for(REPLY_TIMEOUT, |event| match event {
+                    Event::InventorySkeleton(folders) => Some(folders.clone()),
+                    _ => None,
+                })
+                .await?;
+            Some(trash_folder(&folders).ok_or_else(|| {
+                TestFailure::Assertion(
+                    "the other avatar's inventory skeleton had neither a Trash nor a root"
+                        .to_owned(),
+                )
+            })?)
+        } else {
+            None
+        };
         other.wait_for_region(REGION_TIMEOUT).await?;
         // The other avatar stands where the owner does, within chat range of
         // the prims: a login that a telehub redirected (Mauve's) leaves it at
@@ -1015,7 +1045,7 @@ async fn run_corpus(ctx: &mut TestContext, xengine: bool) -> Result<(), TestFail
             )
             .await?;
         }
-        active_group(other).await?
+        (active_group(other).await?, other_trash)
     };
     let Some(reference) = reference else {
         if is_opensim(grid) {
@@ -1063,6 +1093,7 @@ async fn run_corpus(ctx: &mut TestContext, xengine: bool) -> Result<(), TestFail
                     grid,
                     build_position: build_position.clone(),
                 },
+                other_trash,
             },
             probe,
             engine,
@@ -1190,6 +1221,9 @@ struct Avatars<'a> {
     estate: Option<&'a StandbyLogin>,
     /// How both avatars come back to the probe's prims after a restart.
     comeback: Comeback,
+    /// The other avatar's Trash, where it makes what it drops into a prim;
+    /// `None` when no probe of the run changes a prim's contents.
+    other_trash: Option<InventoryFolderKey>,
 }
 
 /// How both avatars come back to the probe's prims after a restart: logged
@@ -1386,6 +1420,7 @@ async fn run_probe(
                     prims: &mut prims,
                     seen: &mut *seen,
                     trash,
+                    engine,
                 },
                 &keys,
                 &mut transcript,
@@ -1422,6 +1457,7 @@ async fn run_probe(
             prim.clone_from(latest);
         }
     }
+    prims.retain(|_label, prim| !transcript.removed.contains(&prim.scoped_id()));
     clear_away(avatars.session, &prims, trash).await?;
     Ok(transcript)
 }
@@ -1574,6 +1610,22 @@ async fn stimulate(
         Action::Restart { seconds } => {
             return restart(avatars, probe, scene, keys, transcript, *seconds).await;
         }
+        Action::Edit { edit, prim } => {
+            return edits::edit_prim(avatars.session, probe, scene, transcript, (edit, prim)).await;
+        }
+        Action::Contents { op, prim } => {
+            return edits::change_contents(
+                avatars,
+                stimulus.by,
+                probe,
+                scene,
+                keys,
+                transcript,
+                (op, prim),
+            )
+            .await;
+        }
+        Action::Buy => return edits::buy(avatars, probe, scene, keys, transcript).await,
         Action::Fetch(fetch) => {
             return fetch_url(avatars.session, probe, keys, transcript, fetch).await;
         }
@@ -1672,7 +1724,10 @@ async fn stimulate(
         | Action::Fetch(_)
         | Action::Pay { .. }
         | Action::PayPrice { .. }
-        | Action::Revoke { .. } => Ok(()),
+        | Action::Revoke { .. }
+        | Action::Edit { .. }
+        | Action::Contents { .. }
+        | Action::Buy => Ok(()),
         Action::Touch(surface) => {
             let prim = prims
                 .get("A")
@@ -2108,6 +2163,8 @@ struct Scene<'a> {
     seen: &'a mut HashSet<ScopedObjectId>,
     /// The owner's Trash, which a re-rez takes prim A into.
     trash: InventoryFolderKey,
+    /// The run's engine, which a script saved during the probe is for.
+    engine: Vm,
 }
 
 impl Scene<'_> {
@@ -2990,62 +3047,14 @@ async fn put_notecard(
     trash: InventoryFolderKey,
     watch: &mut Watch<'_>,
 ) -> Result<(), TestFailure> {
-    session
-        .send(Command::CreateInventoryItem(NewInventoryItem {
-            folder_id: trash,
-            transaction_id: Uuid::nil(),
-            next_owner_mask: Permissions::ALL.bits(),
-            asset_type: AssetType::Notecard,
-            inv_type: InventoryType::Notecard,
-            wearable_type: WearableType::Shape,
-            name: notecard.name.clone(),
-            description: "sl-conformance lsl-probes".to_owned(),
-        }))
-        .await?;
-    let mut item = session
-        .wait_for(STEP_TIMEOUT, |event| match event {
-            // By its type, not its name: OpenSim keeps a name that is not
-            // ASCII as a hex dump of its bytes, and the item is listed so.
-            Event::InventoryItemCreated { item, .. }
-                if i32::from(item.inv_type) == InventoryType::Notecard.to_code() =>
-            {
-                Some(item.clone())
-            }
-            other => {
-                let _kept = watch.transcript.take(watch.id, watch.prims, other);
-                None
-            }
-        })
-        .await
-        .map_err(|failure| in_step(failure, &format!("creating notecard {:?}", notecard.name)))?;
-    session
-        .send(Command::UpdateInventoryAsset {
-            location: AssetUpdateLocation::AgentInventory {
-                item_id: item.item_id,
-            },
-            asset_type: UpdatableAssetType::Notecard,
-            data: notecard_bytes(&notecard.text),
-        })
-        .await?;
-    let saved = session
-        .wait_for(STEP_TIMEOUT, |event| match event {
-            Event::AssetUploaded { new_asset, .. } => Some(Ok(*new_asset)),
-            Event::AssetUploadFailed { reason } => Some(Err(reason.clone())),
-            other => {
-                let _kept = watch.transcript.take(watch.id, watch.prims, other);
-                None
-            }
-        })
-        .await
-        .map_err(|failure| in_step(failure, &format!("saving notecard {:?}", notecard.name)))?
-        .map_err(|reason| {
-            TestFailure::Assertion(format!(
-                "{}: saving notecard {:?} failed: {reason}",
-                watch.id, notecard.name
-            ))
-        })?;
-    // The drop's checksum covers the asset the item holds now.
-    item.asset_id = saved;
+    let item = edits::saved_notecard(session, (&notecard.name, &notecard.text), trash, |event| {
+        let _kept = watch.transcript.take(watch.id, watch.prims, event);
+    })
+    .await
+    .map_err(|failure| match failure {
+        TestFailure::Assertion(reason) => TestFailure::Assertion(format!("{}: {reason}", watch.id)),
+        other => other,
+    })?;
     session
         .send(Command::UpdateTaskInventory {
             target: prim.scoped_id(),

@@ -117,3 +117,11 @@ replay writes in for it (`vm/tests/ossl.rs`). The 15: `osDie`,
 `osGetNotecardLine`, `osGetNumberOfNotecardLines`, `osGetRezzingObject`,
 `osLoadedCreationDate`, `osLoadedCreationID`, `osLoadedCreationTime`,
 `osMakeNotecard`, `osResetAllScripts`.
+
+## From server-world-changed-raisers (2026-11-03)
+
+A viewer's writes into a prim's contents raise `CHANGED_INVENTORY` there
+(`changes::contents_written`). `llRemoveInventory` raises nothing on Second
+Life and `CHANGED_INVENTORY` on OpenSim, and `llGiveInventory` into a prim
+`CHANGED_INVENTORY` in the receiver on both (`book/src/gridspec/lsl.md` §
+Giving); `llAllowInventoryDrop` is done.

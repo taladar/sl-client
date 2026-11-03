@@ -2289,6 +2289,7 @@ impl FakeGridBuilder {
                 fixtures.edit = self.imitates.edit_policy();
                 fixtures.linking = self.imitates.link_policy();
                 fixtures.contents = self.imitates.contents_policy();
+                fixtures.changes = self.imitates.change_policy();
                 fixtures.relays = self.imitates.relay_policy();
                 fixtures.scripts = self.imitates.script_compile_policy();
                 fixtures.chat = self.imitates.chat_policy();

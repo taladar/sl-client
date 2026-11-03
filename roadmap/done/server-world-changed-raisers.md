@@ -2,7 +2,7 @@
 id: server-world-changed-raisers
 title: Raise changed() from every grid-side cause, with the right bit
 topic: server
-status: ready
+status: done
 origin: server-lsl-state-and-events review (2026-09-28)
 points: 5
 blocked_by: [server-fake-grid-script-engine-wiring, gridspec-lsl-events]
@@ -99,3 +99,42 @@ and for a script's `llCreateLink`, `llBreakLink` and `llBreakAllLinks` as
 each flavour's grid tells it (`imitates::LinkEvents`), OpenSim's newcomer
 first hearing its own 32768. `scripts::raise_changed_in` raises a bit in the
 scripts of named prims alone, for the per-prim rows of the table above.
+
+## Done (2026-11-03)
+
+Measured the grid-side causes by four new probes, `events/changed-edits`,
+`events/changed-contents`, `events/changed-owner` and `events/changed-worn`,
+run on aditi and on the local OpenSim under YEngine and XEngine
+(`book/src/gridspec/lsl.md` § `changed`: what a viewer's change raises). The
+probe runner got three drives for them: `edit` (a build-floater change of a
+prim's faces, size, place, shape, light, name, description, phantom flag or face
+media), `contents` (a drop — by the other avatar too — a contents-tab rename, a
+remove, a new script and a save) and `buy` (the owner sells prim A for L$ 0, the
+other avatar buys it), and skips at teardown a prim the region already removed.
+
+Raised now on the fake grid (`sl_fake_grid::changes`, the disagreements in
+`ImitatedGrid::change_policy`): a face's colour or alpha `CHANGED_COLOR`, any
+other face field `CHANGED_TEXTURE`, each only when it changed; a resize
+`CHANGED_SCALE` every time, a child's heard by the root on Second Life and by
+the child on OpenSim; a move or a turn OpenSim's 32768 (root moved: once in the
+root, twice in each child; root turned: once in each child; a child moved: once
+in it) and nothing on Second Life; a shape `CHANGED_SHAPE`; face media set or
+cleared `CHANGED_MEDIA`; a drop, a contents-tab rename (which the fake grid now
+takes), a remove, a new script and a save `CHANGED_INVENTORY` in the prim
+written. A drop by an avatar who does not own the prim is refused unless the
+prim allows drops — `llAllowInventoryDrop`, now in the runtime, sets
+`FLAGS_ALLOW_INVENTORY_DROP` — and then raises `CHANGED_ALLOWED_DROP`; refused,
+Second Life tells the dropper `Unable to edit this!` and OpenSim nothing. Held
+by `tests/scripts.rs`'s `a_viewers_changes_raise_changed` on both flavours.
+
+Not raised, each for want of the cause on the fake grid, and handed on with
+its measurement: `CHANGED_OWNER` on a purchase
+([[server-fake-grid-money-ledger]]: once on Second Life, three times on
+OpenSim), `CHANGED_REGION | CHANGED_TELEPORT` of a worn object
+([[fake-grid-own-attachments-and-region-moves]]), the scripted setters' rows
+of `prim/changed` ([[server-lsl-lib-prim-state]]) and `llRemoveInventory` and
+`llGiveInventory` into a prim ([[server-lsl-lib-task-inventory]]). Not
+measured, each its own task: an owner change by a deed to a group (no group on
+the aditi accounts; [[server-world-changed-owner-deed]]), and a crossing of an
+unworn object, which the fake grid does not make either
+([[server-world-changed-object-crossing]]).

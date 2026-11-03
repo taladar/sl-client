@@ -1445,6 +1445,39 @@ impl ImitatedGrid {
         }
     }
 
+    /// Which `changed` a change made from a viewer raises in a prim's
+    /// scripts, where the live grids disagree — measured by the
+    /// `events/changed-edits` and `events/changed-contents` probes on aditi
+    /// and the local OpenSim under both engines (2026-11-03,
+    /// `book/src/gridspec/lsl.md` § `changed`: what a viewer's change raises),
+    /// and applied where the region takes a viewer's edits and contents
+    /// writes.
+    ///
+    /// They agree on the rest: a face's colour or alpha raises
+    /// `CHANGED_COLOR` and any other face field `CHANGED_TEXTURE`, each only
+    /// when it changed; a resize raises `CHANGED_SCALE` even to the size the
+    /// prim has; a shape `CHANGED_SHAPE`, face media `CHANGED_MEDIA` (a set and
+    /// a clear); a light, a name, a description and the phantom flag nothing;
+    /// a drop, a rename, a remove, a new script and a save raise
+    /// `CHANGED_INVENTORY` in the prim written alone, and an avatar who may not
+    /// edit the prim may drop into it only where it allows drops, raising
+    /// `CHANGED_ALLOWED_DROP`.
+    #[must_use]
+    pub const fn change_policy(self) -> ChangePolicy {
+        match self {
+            Self::SecondLife => ChangePolicy {
+                moves: MovesHeard::Nothing,
+                child_resize: ChildResizeHeard::TheRoot,
+                refused_drop_alert: Some(ChangePolicy::REFUSED_DROP),
+            },
+            Self::OpenSim => ChangePolicy {
+                moves: MovesHeard::OpenSimPosition,
+                child_resize: ChildResizeHeard::TheChild,
+                refused_drop_alert: None,
+            },
+        }
+    }
+
     /// How this grid answers a script upload — measured by the
     /// `script-compile` census on aditi and the local OpenSim (2026-10-25,
     /// `book/src/gridspec/lsl.md` § Compiling), and applied by
@@ -3217,6 +3250,57 @@ impl LinkPolicy {
         text: "Can't enable physics for object with physics resource cost greater than 32",
         key: Some("CantEnablePhysCostTooGreat"),
     };
+}
+
+/// Which `changed` a viewer's change raises where the grids disagree
+/// ([`ImitatedGrid::change_policy`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ChangePolicy {
+    /// What a move or a turn of a prim with the build floater raises.
+    pub moves: MovesHeard,
+    /// Which prim's scripts hear a resize of a child.
+    pub child_resize: ChildResizeHeard,
+    /// What an avatar who may not edit a prim, dropping an item into it while
+    /// it does not allow drops, is told; the drop is refused either way.
+    pub refused_drop_alert: Option<NoBuildAlert>,
+}
+
+impl ChangePolicy {
+    /// What Second Life tells an avatar whose drop into a prim it may not
+    /// edit, which allows no drops, it refused (`events/changed-contents`).
+    pub const REFUSED_DROP: NoBuildAlert = NoBuildAlert {
+        text: "Unable to edit this!",
+        key: None,
+    };
+}
+
+impl Default for ChangePolicy {
+    /// Second Life's, as the grid's own default flavour is.
+    fn default() -> Self {
+        ImitatedGrid::SecondLife.change_policy()
+    }
+}
+
+/// What a move or a turn made with the build floater raises
+/// ([`ChangePolicy::moves`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MovesHeard {
+    /// Nothing: Second Life.
+    Nothing,
+    /// OpenSim's own `changed(32768)` (its `CHANGED_POSITION`): a root moved
+    /// is heard once in the root and twice in each child, a root turned once
+    /// in each child, a child moved once in the child.
+    OpenSimPosition,
+}
+
+/// Which prim's scripts hear a resize of a child
+/// ([`ChangePolicy::child_resize`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChildResizeHeard {
+    /// The root's, and not the child's: Second Life.
+    TheRoot,
+    /// The child's: OpenSim.
+    TheChild,
 }
 
 impl Default for LinkPolicy {

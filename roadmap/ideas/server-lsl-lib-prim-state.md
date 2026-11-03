@@ -140,3 +140,12 @@ number with `Links::numbered`, then apply this tranche's per-function rules
 a set answering nothing). The `prim/link` probe replays once they exist; its
 link and delink rows already hold offline in `vm/tests/linking.rs` and
 `sl-fake-grid/tests/scripts.rs`.
+
+## From server-world-changed-raisers (2026-11-03)
+
+A viewer's edits now raise their `changed` (`sl_fake_grid::changes`). The
+setters here raise the `prim/changed` rows (`book/src/gridspec/lsl.md` §
+`changed`: which setter raises what), which differ from an edit's: Second Life
+raises `CHANGED_COLOR` for a colour set to the one it has and nothing for
+`llSetTexture`, where an edit raises neither. Raise them through
+`scripts::raise_changed_in` with `changes.rs`'s bits.

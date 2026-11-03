@@ -8,6 +8,7 @@ mod bake_service;
 pub mod bakes;
 pub mod benefits;
 mod caps_endpoint;
+mod changes;
 pub mod chat;
 pub mod crossing;
 mod driver;

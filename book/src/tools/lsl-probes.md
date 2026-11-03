@@ -37,7 +37,7 @@ A probe's id is its path below `probes/` without the extension
 | key | meaning |
 | --- | --- |
 | `probe` | the id; required |
-| `drive` | `none` (runs from `state_entry`), or the stimuli the probe asks for with `waiting` records, comma-separated: `touch`, `chat`, `answer`, `sit`, `stand`, `control`, `dialog`, `away`, `attach`, `drop`, `rerez`, `fetch`, `pay`, `pay-price`, `revoke`, `restart`; required |
+| `drive` | `none` (runs from `state_entry`), or the stimuli the probe asks for with `waiting` records, comma-separated: `touch`, `chat`, `answer`, `sit`, `stand`, `control`, `dialog`, `away`, `attach`, `drop`, `rerez`, `fetch`, `pay`, `pay-price`, `revoke`, `restart`, `edit`, `contents`, `buy`; required |
 | `script` | the inventory name, which the probe's scripts find each other by; required in a probe of several |
 | `order` | where the script comes in the save order; required in a probe of several |
 | `prim` | the object that holds it, `A` (the default), `B`, … |
@@ -123,10 +123,31 @@ other avatar in again as soon as the region takes them (a login that lands in
 another region, OpenSim's fallback while the region is down, is logged out and
 tried again) and walks them back to the build location. With no `estate-owner`
 in the credentials (aditi's) nothing is sent. The time it takes is not counted
-against the probe's three minutes. `by=other` has the runner's second avatar do
-it, which owns nothing of the probe's; without `by` it is the owner (a `fetch`
-and a `restart` take no `by`). A probe asks only for the drives its header
-declares, and the run fails if it asks for another.
+against the probe's three minutes. `drive=edit what=<kind> value=<value>`
+(optionally `prim=<label>`) changes that prim as the build floater does, as the
+owner: `color` (`value=<r>,<g>,<b>`, bytes) and `alpha` (a byte), `texture` (a
+uuid), `repeats`, `glow` and `fullbright` (`0`/`1`) of every face, as an
+`ObjectImage` carrying the faces the prim has with that one thing changed;
+`scale` (`<x>,<y>,<z>`), `move` (that far from where it is) and `turn` (degrees
+about the vertical) as a `MultipleObjectUpdate`; `cut` (the path cut's start in
+per cent) as an `ObjectShape`; `light` (`0`/`1`) as an `ObjectExtraParams`;
+`name` and `description` (`value="…"`); `phantom` (`0`/`1`); and `media`
+(`value="<url>"` on face 0, `""` clearing every face) over `ObjectMedia`.
+`drive=contents op=<op> name="…"` (optionally `prim=<label>`) changes the prim's
+contents as a viewer does: `drop` makes a notecard of that name in the avatar's
+Trash and drops it in — the only op the other avatar may do too, into a prim it
+may not edit — `rename` (`to="…"`) renames the item in the contents tab,
+`remove` deletes it, `new-script` makes a script, not running, and `save-script`
+saves a script again with a body that does nothing, not running; an item that is
+not there is noted `found=0`. `drive=buy by=other` has the owner put prim A up
+for sale, the original at no price, and the other avatar buy it: a probe that
+asks for it should have prim A report through a prim the owner keeps, since its
+owner-says go to the buyer, and delete itself before the end, since the runner
+cannot clear away a prim it no longer owns (it skips any prim the region already
+removed). `by=other` has the runner's second avatar do it, which owns nothing of
+the probe's; without `by` it is the owner (a `fetch` and a `restart` take no
+`by`). A probe asks only for the drives its header declares, and the run fails
+if it asks for another.
 
 ```text
 PROBE avatar/permissions rec=waiting drive=answer grant=1044
@@ -142,6 +163,10 @@ PROBE money/pay rec=waiting drive=pay by=other amount=7
 PROBE money/pay-price rec=waiting drive=pay-price prim=B
 PROBE money/lapse rec=waiting drive=revoke target=region perms=32784
 PROBE persistence/restart rec=waiting drive=restart seconds=15
+PROBE events/changed-edits rec=waiting drive=edit what=color value=255,0,0 prim=B
+PROBE events/changed-contents rec=waiting drive=contents op=rename name=A to=B
+PROBE events/changed-contents rec=waiting drive=contents by=other op=drop name=Gift
+PROBE events/changed-owner rec=waiting drive=buy by=other
 ```
 
 What a probe prints is one `llOwnerSay` line per observation:
@@ -298,7 +323,11 @@ What has bitten already, and how a probe should be shaped for it:
   inventory runs `state_entry` before its `on_rez` there, where Second Life
   and YEngine run `on_rez` alone (`inventory/rez`): a child that must not act
   on being saved into its object should act in `on_rez` only, and expect
-  `state_entry` too.
+  `state_entry` too. It also runs `state_entry` again in a worn object each
+  time its wearer arrives in a region (`events/changed-worn`), globals lost: a
+  probe that sends a wearer `away` keeps what it must not lose in the object's
+  description, and tells a fresh start from such a restart by
+  `llGetAttached`.
 - **The runner is slow back from a trip `away`.** It settles the owner in and
   walks it to the build location before it answers anything, which can take
   half a minute on Second Life; a probe that asks a question right after the

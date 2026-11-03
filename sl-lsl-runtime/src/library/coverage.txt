@@ -186,6 +186,7 @@ implemented llGetObjectName
 implemented llCreateLink
 implemented llBreakLink
 implemented llBreakAllLinks
+implemented llAllowInventoryDrop
 implemented llGetObjectPrimCount
 implemented llUnSit
 implemented llSetSitText

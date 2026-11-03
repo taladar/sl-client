@@ -92,6 +92,45 @@ pub(crate) fn answer_contents_write(
         // task copy is a new item, not the same one in two places.
         ServerEvent::UpdateTaskInventory { local_id, item, .. } => {
             let object = world.object_by_local_id(*local_id)?;
+            let agent = sim.agent_id()?;
+            let editor = object.owner_id == agent.uuid();
+            // An item the prim holds already: the contents tab's rename, which
+            // writes the item back with its new name and description.
+            if world
+                .objects
+                .contents(*local_id)
+                .is_some_and(|held| held.items.iter().any(|held| held.item_id == item.item_id))
+            {
+                if !editor {
+                    return Some(Vec::new());
+                }
+                let contents = world.objects.contents_mut(*local_id)?;
+                if let Some(held) = contents
+                    .items
+                    .iter_mut()
+                    .find(|held| held.item_id == item.item_id)
+                {
+                    held.name.clone_from(&item.name);
+                    held.description.clone_from(&item.description);
+                }
+                contents.touch();
+                let changes = tell(world, selection, sim, *local_id, Write::Drop, now);
+                crate::changes::contents_written(world, *local_id, false);
+                return Some(changes);
+            }
+            // An avatar who may not edit the prim drops into it only where it
+            // allows drops, and never a script; refused, it is told as its
+            // grid tells it.
+            let allowed_drop = !editor;
+            if allowed_drop
+                && (object.update_flags & prim_flags::ALLOW_INVENTORY_DROP == 0
+                    || InventoryType::from_code(i32::from(item.inv_type)) == InventoryType::Script)
+            {
+                if let Some(alert) = world.changes.refused_drop_alert {
+                    crate::object_edits::send_alert(sim, alert, &[], now);
+                }
+                return Some(Vec::new());
+            }
             let Some(source) = sim.agent_inventory().item(item.item_id).cloned() else {
                 tracing::debug!(
                     "a task inventory write named item {}, which this agent does not hold",
@@ -106,13 +145,20 @@ pub(crate) fn answer_contents_write(
             let mut dropped = task_item_from(&source, object.full_id, mint);
             dropped.name = contents.free_name(&dropped.name);
             contents.write(dropped);
-            Some(tell(world, selection, sim, *local_id, Write::Drop, now))
+            let changes = tell(world, selection, sim, *local_id, Write::Drop, now);
+            crate::changes::contents_written(world, *local_id, allowed_drop);
+            Some(changes)
         }
         // A script: made new, when the item names no id, or the agent's own
         // dropped in.
         ServerEvent::RezScript { local_id, params } => {
             let object = world.object_by_local_id(*local_id)?;
             let agent = sim.agent_id()?;
+            // Nobody but the prim's editor puts a script into it, whether or
+            // not it allows drops.
+            if object.owner_id != agent.uuid() {
+                return Some(Vec::new());
+            }
             let mut script = if params.item.item_id.uuid().is_nil() {
                 new_script(&params.item, object.full_id, agent, mint)
             } else {
@@ -137,13 +183,17 @@ pub(crate) fn answer_contents_write(
             script.name = contents.free_name(&script.name);
             contents.write(script);
             let mut changes = tell(world, selection, sim, *local_id, Write::Script, now);
+            crate::changes::contents_written(world, *local_id, false);
             if runs {
                 changes.extend(start_script(world, selection, sim, *local_id, item_id, now));
             }
             Some(changes)
         }
         ServerEvent::RemoveTaskInventory { local_id, item_id } => {
-            let _object = world.object_by_local_id(*local_id)?;
+            let object = world.object_by_local_id(*local_id)?;
+            if object.owner_id != sim.agent_id()?.uuid() {
+                return Some(Vec::new());
+            }
             let contents = world.objects.contents_mut(*local_id)?;
             let was_running = contents.running.contains(item_id);
             // An item the prim does not hold: nothing is said, on either grid.
@@ -158,7 +208,9 @@ pub(crate) fn answer_contents_write(
                 sim.agent_inventory_mut().insert_item(filed.clone());
                 announce_created_items(announcement, sim, &[filed], nil_transaction(), now);
             }
-            Some(tell(world, selection, sim, *local_id, Write::Remove, now))
+            let changes = tell(world, selection, sim, *local_id, Write::Remove, now);
+            crate::changes::contents_written(world, *local_id, false);
+            Some(changes)
         }
         // A copy into the agent's inventory. An item the agent may copy stays
         // in the prim, the serial stays where it was, and nobody is told
@@ -183,7 +235,9 @@ pub(crate) fn answer_contents_write(
             }
             // The one copy there is leaves the prim with it.
             let _taken = contents.remove(*item_id);
-            Some(tell(world, selection, sim, *local_id, Write::Remove, now))
+            let changes = tell(world, selection, sim, *local_id, Write::Remove, now);
+            crate::changes::contents_written(world, *local_id, false);
+            Some(changes)
         }
         // A save over an `Update*TaskInventory` capability. The asset and the
         // serial are the upload's own business ([`crate::uploads`], which ran
@@ -202,7 +256,9 @@ pub(crate) fn answer_contents_write(
             {
                 tracing::warn!("telling of a saved task item failed: {error}");
             }
-            Some(tell(world, selection, sim, local_id, Write::Save, now))
+            let changes = tell(world, selection, sim, local_id, Write::Save, now);
+            crate::changes::contents_written(world, local_id, false);
+            Some(changes)
         }
         ServerEvent::RequestScriptRunning { object_id, item_id } => {
             let local_id = world.local_id_of(*object_id)?;
