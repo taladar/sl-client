@@ -62,7 +62,8 @@ use crate::notification_persist::{
     PersistNotification, PersistedKind, ReloadPersistedNotification,
 };
 use crate::notifications::{
-    NotificationId, NotificationKind, NotificationManager, NotificationPriority, ToastButton,
+    GroupNoticeAnswer, NotificationId, NotificationKind, NotificationManager, NotificationPriority,
+    ToastButton,
 };
 use crate::skin::BUTTON_CLASS;
 use crate::skin::{role_class, text_role};
@@ -611,12 +612,13 @@ fn spawn_group_notice_card(
             kind: NotificationKind::Alert,
             priority: NotificationPriority::Normal,
             template: GROUP_NOTICE_TEMPLATE,
-            default_button: Some("OK"),
+            default_button: Some(GroupNoticeAnswer::Ok.name()),
             history_body: notice.subject.clone(),
             buttons: vec![
-                ToastButton::new("OK", content.ok_label.clone()).default_choice(),
-                ToastButton::new("Notices", content.notices_label.clone()),
-                ToastButton::new("Chat", content.chat_label.clone()),
+                ToastButton::answer(GroupNoticeAnswer::Ok, content.ok_label.clone())
+                    .default_choice(),
+                ToastButton::answer(GroupNoticeAnswer::Notices, content.notices_label.clone()),
+                ToastButton::answer(GroupNoticeAnswer::Chat, content.chat_label.clone()),
             ],
         },
     );
@@ -624,13 +626,10 @@ fn spawn_group_notice_card(
     // OK / close ×: resolve the toast through the host's teardown — a user close,
     // the only thing that ends the notice.
     let root = card.root;
-    for (button, name) in [(card.ok, Some("OK")), (card.close, None)] {
+    for (button, answer) in [(card.ok, Some(GroupNoticeAnswer::Ok)), (card.close, None)] {
         commands.entity(button).observe(
             move |_activate: On<Activate>, mut resolves: MessageWriter<ResolveNotification>| {
-                resolves.write(ResolveNotification {
-                    toast: root,
-                    button: name,
-                });
+                resolves.write(ResolveNotification::answered(root, answer));
             },
         );
     }

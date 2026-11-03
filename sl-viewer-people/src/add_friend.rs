@@ -317,7 +317,7 @@ mod tests {
         app.world_mut().write_message(NotificationResponse {
             id: some_id(),
             template: ASK_TEMPLATE.name(),
-            button: button.map(OfferCancel::name),
+            button: button.map(|button| button.name().into()),
             ignored: false,
             input: message.map(ToOwned::to_owned),
         });

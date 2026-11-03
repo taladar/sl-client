@@ -80,7 +80,8 @@ use crate::notification_host::{
     NotificationChannelRoot, ResolveNotification, ToastSpec, adopt_toast,
 };
 use crate::notifications::{
-    NotificationId, NotificationKind, NotificationManager, NotificationPriority, ToastButton,
+    ExperiencePermissionAnswer, NotificationId, NotificationKind, NotificationManager,
+    NotificationPriority, ToastButton,
 };
 use crate::script_permission::{is_caution, other_permission_keys, recognized_mask};
 use crate::skin_palette::SkinPalette;
@@ -475,10 +476,16 @@ fn spawn_experience_card(
             default_button: None,
             history_body: history,
             buttons: vec![
-                ToastButton::new("Yes", content.yes_label.clone()),
-                ToastButton::new("No", content.no_label.clone()),
-                ToastButton::new("BlockExperience", content.block_experience_label.clone()),
-                ToastButton::new("BlockObject", content.block_object_label.clone()),
+                ToastButton::answer(ExperiencePermissionAnswer::Yes, content.yes_label.clone()),
+                ToastButton::answer(ExperiencePermissionAnswer::No, content.no_label.clone()),
+                ToastButton::answer(
+                    ExperiencePermissionAnswer::BlockExperience,
+                    content.block_experience_label.clone(),
+                ),
+                ToastButton::answer(
+                    ExperiencePermissionAnswer::BlockObject,
+                    content.block_object_label.clone(),
+                ),
             ],
         },
     );
@@ -495,10 +502,10 @@ fn spawn_experience_card(
               mut resolves: MessageWriter<ResolveNotification>| {
             set_experience_permission(&mut sl, experience_id, ExperiencePermission::Allow);
             answer_permissions(&mut sl, task_id, item_id, granted, experience_id);
-            resolves.write(ResolveNotification {
-                toast: root,
-                button: None,
-            });
+            resolves.write(ResolveNotification::chose(
+                root,
+                ExperiencePermissionAnswer::Yes,
+            ));
         },
     );
 
@@ -514,10 +521,10 @@ fn spawn_experience_card(
                 ScriptPermissions::default(),
                 experience_id,
             );
-            resolves.write(ResolveNotification {
-                toast: root,
-                button: None,
-            });
+            resolves.write(ResolveNotification::chose(
+                root,
+                ExperiencePermissionAnswer::No,
+            ));
         },
     );
 
@@ -534,10 +541,10 @@ fn spawn_experience_card(
                 ScriptPermissions::default(),
                 experience_id,
             );
-            resolves.write(ResolveNotification {
-                toast: root,
-                button: None,
-            });
+            resolves.write(ResolveNotification::chose(
+                root,
+                ExperiencePermissionAnswer::BlockExperience,
+            ));
         },
     );
 
@@ -561,10 +568,10 @@ fn spawn_experience_card(
                 object_name.clone(),
                 MuteType::Object,
             ));
-            resolves.write(ResolveNotification {
-                toast: root,
-                button: None,
-            });
+            resolves.write(ResolveNotification::chose(
+                root,
+                ExperiencePermissionAnswer::BlockObject,
+            ));
         },
     );
 
@@ -580,10 +587,7 @@ fn spawn_experience_card(
                 ScriptPermissions::default(),
                 experience_id,
             );
-            resolves.write(ResolveNotification {
-                toast: root,
-                button: None,
-            });
+            resolves.write(ResolveNotification::dismissed(root));
         },
     );
     id
@@ -926,9 +930,88 @@ fn wire_specimen_actions(commands: &mut Commands, card: &ExperienceCard) {
 
 #[cfg(test)]
 mod tests {
-    use super::{resolved_name, scope_key};
+    use super::{PendingExperienceQuestion, resolved_name, scope_key, spawn_experience_card};
+    use crate::i18n::Translator;
+    use crate::intents::RequestBlock;
+    use crate::notification_host::{click_named, resolve_test_app};
+    use crate::notifications::NotificationManager;
+    use bevy::ecs::system::RunSystemOnce as _;
+    use bevy::prelude::{App, Commands, ResMut};
     use pretty_assertions::assert_eq;
-    use sl_client_bevy::{ExperienceInfo, ExperienceProperties};
+    use sl_client_bevy::{
+        ExperienceInfo, ExperienceKey, ExperienceProperties, InventoryKey, ObjectKey,
+        ScriptPermissions, SlCommand, Uuid,
+    };
+
+    /// An app holding one experience permission card.
+    fn card_app() -> Result<App, String> {
+        let (mut app, channel) = resolve_test_app();
+        app.add_message::<SlCommand>().add_message::<RequestBlock>();
+        let experience_id = ExperienceKey::from(Uuid::from_u128(0xe8e1));
+        let question = PendingExperienceQuestion {
+            task_id: ObjectKey::from(Uuid::from_u128(0x7a5c)),
+            item_id: InventoryKey::from(Uuid::from_u128(0x17e3)),
+            object_name: "Quest Giver".to_owned(),
+            object_owner: "Bob Resident".to_owned(),
+            permissions: ScriptPermissions(ScriptPermissions::TAKE_CONTROLS),
+        };
+        let info = ExperienceInfo {
+            public_id: experience_id,
+            name: "The Quest".to_owned(),
+            ..ExperienceInfo::default()
+        };
+        app.world_mut()
+            .run_system_once(
+                move |mut commands: Commands,
+                      mut manager: ResMut<NotificationManager>,
+                      translator: Translator| {
+                    spawn_experience_card(
+                        &mut commands,
+                        &channel,
+                        &mut manager,
+                        &translator,
+                        experience_id,
+                        &question,
+                        &info,
+                    );
+                },
+            )
+            .map_err(|error| error.to_string())?;
+        Ok(app)
+    }
+
+    /// Each button records the answer it gives, and the close × records no
+    /// choice (it still denies, but nothing was chosen).
+    #[test]
+    fn each_button_records_its_answer() -> Result<(), String> {
+        for (button, answer) in [
+            (
+                "experience-permission-action:experience-permission-button-yes",
+                Some("Yes"),
+            ),
+            (
+                "experience-permission-action:experience-permission-button-no",
+                Some("No"),
+            ),
+            (
+                "experience-permission-action:experience-permission-button-block-experience",
+                Some("BlockExperience"),
+            ),
+            (
+                "experience-permission-action:experience-permission-button-block-object",
+                Some("BlockObject"),
+            ),
+            ("experience-permission-close", None),
+        ] {
+            let mut app = card_app()?;
+            assert_eq!(
+                click_named(&mut app, button)?,
+                answer.map(ToOwned::to_owned),
+                "{button}"
+            );
+        }
+        Ok(())
+    }
     use sl_types::experience::PROPERTY_GRID;
 
     /// A grid experience takes the grid-wide scope key; a land experience takes the

@@ -76,7 +76,8 @@ use crate::notification_host::{
     NotificationChannelRoot, ResolveNotification, ToastSpec, adopt_toast,
 };
 use crate::notifications::{
-    NotificationId, NotificationKind, NotificationManager, NotificationPriority, ToastButton,
+    NotificationId, NotificationKind, NotificationManager, NotificationPriority,
+    ScriptPermissionAnswer, ToastButton,
 };
 use crate::skin_palette::SkinPalette;
 use crate::ui::{column, row};
@@ -466,12 +467,18 @@ fn spawn_script_permission_card(
             default_button: None,
             history_body: history,
             buttons: [
-                Some(ToastButton::new("Grant", content.grant_label.clone())),
-                Some(ToastButton::new("Deny", content.deny_label.clone())),
+                Some(ToastButton::answer(
+                    ScriptPermissionAnswer::Grant,
+                    content.grant_label.clone(),
+                )),
+                Some(ToastButton::answer(
+                    ScriptPermissionAnswer::Deny,
+                    content.deny_label.clone(),
+                )),
                 content
                     .block_label
                     .as_ref()
-                    .map(|label| ToastButton::new("Block", label.clone())),
+                    .map(|label| ToastButton::answer(ScriptPermissionAnswer::Block, label.clone())),
             ]
             .into_iter()
             .flatten()
@@ -491,10 +498,10 @@ fn spawn_script_permission_card(
               mut sl: MessageWriter<SlCommand>,
               mut resolves: MessageWriter<ResolveNotification>| {
             answer_permissions(&mut sl, task_id, item_id, granted, experience_id);
-            resolves.write(ResolveNotification {
-                toast: root,
-                button: None,
-            });
+            resolves.write(ResolveNotification::chose(
+                root,
+                ScriptPermissionAnswer::Grant,
+            ));
         },
     );
 
@@ -510,10 +517,10 @@ fn spawn_script_permission_card(
                 ScriptPermissions::default(),
                 experience_id,
             );
-            resolves.write(ResolveNotification {
-                toast: root,
-                button: None,
-            });
+            resolves.write(ResolveNotification::chose(
+                root,
+                ScriptPermissionAnswer::Deny,
+            ));
         },
     );
 
@@ -538,10 +545,10 @@ fn spawn_script_permission_card(
                     object_name.clone(),
                     MuteType::Object,
                 ));
-                resolves.write(ResolveNotification {
-                    toast: root,
-                    button: None,
-                });
+                resolves.write(ResolveNotification::chose(
+                    root,
+                    ScriptPermissionAnswer::Block,
+                ));
             },
         );
     }
@@ -559,10 +566,7 @@ fn spawn_script_permission_card(
                 ScriptPermissions::default(),
                 experience_id,
             );
-            resolves.write(ResolveNotification {
-                toast: root,
-                button: None,
-            });
+            resolves.write(ResolveNotification::dismissed(root));
         },
     );
     id
@@ -881,9 +885,77 @@ fn wire_specimen_actions(
 mod tests {
     use super::{
         PERMISSION_QUESTIONS, is_caution, known_mask, other_permission_keys, recognized_mask,
+        spawn_script_permission_card,
     };
+    use crate::i18n::Translator;
+    use crate::intents::RequestBlock;
+    use crate::notification_host::{click_named, resolve_test_app};
+    use crate::notifications::NotificationManager;
+    use bevy::ecs::system::RunSystemOnce as _;
+    use bevy::prelude::{App, Commands, ResMut};
     use pretty_assertions::assert_eq;
-    use sl_client_bevy::ScriptPermissions;
+    use sl_client_bevy::{
+        InventoryKey, ObjectKey, ScriptPermissionRequest, ScriptPermissions, SlCommand, Uuid,
+    };
+
+    /// An app holding one standard (Yes / No / Block) permission card.
+    fn card_app() -> Result<App, String> {
+        let (mut app, channel) = resolve_test_app();
+        app.add_message::<SlCommand>().add_message::<RequestBlock>();
+        let request = ScriptPermissionRequest {
+            task_id: ObjectKey::from(Uuid::from_u128(0x7a5c)),
+            item_id: InventoryKey::from(Uuid::from_u128(0x17e3)),
+            object_name: "Dance Ball".to_owned(),
+            object_owner: "Bob Resident".to_owned(),
+            experience_id: None,
+            permissions: ScriptPermissions(ScriptPermissions::TAKE_CONTROLS),
+        };
+        app.world_mut()
+            .run_system_once(
+                move |mut commands: Commands,
+                      mut manager: ResMut<NotificationManager>,
+                      translator: Translator| {
+                    spawn_script_permission_card(
+                        &mut commands,
+                        &channel,
+                        &mut manager,
+                        &request,
+                        &translator,
+                    );
+                },
+            )
+            .map_err(|error| error.to_string())?;
+        Ok(app)
+    }
+
+    /// Each button records the answer it gives, and the close × records no
+    /// choice (it still denies, but nothing was chosen).
+    #[test]
+    fn each_button_records_its_answer() -> Result<(), String> {
+        for (button, answer) in [
+            (
+                "script-permission-action:script-permission-button-yes",
+                Some("Grant"),
+            ),
+            (
+                "script-permission-action:script-permission-button-no",
+                Some("Deny"),
+            ),
+            (
+                "script-permission-action:script-permission-button-block",
+                Some("Block"),
+            ),
+            ("script-permission-close", None),
+        ] {
+            let mut app = card_app()?;
+            assert_eq!(
+                click_named(&mut app, button)?,
+                answer.map(ToOwned::to_owned),
+                "{button}"
+            );
+        }
+        Ok(())
+    }
 
     /// The recognised mask keeps the modelled requested bits and drops the rest:
     /// an unmodelled bit (here `RemapControlInputs`, `1 << 3`) is stripped, and a

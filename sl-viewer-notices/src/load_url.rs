@@ -68,7 +68,8 @@ use crate::notification_host::{
     NotificationChannelRoot, ResolveNotification, ToastSpec, adopt_toast,
 };
 use crate::notifications::{
-    NotificationId, NotificationKind, NotificationManager, NotificationPriority, ToastButton,
+    LoadUrlAnswer, NotificationId, NotificationKind, NotificationManager, NotificationPriority,
+    ToastButton,
 };
 use crate::skin_palette::SkinPalette;
 use crate::ui::{column, row};
@@ -356,9 +357,9 @@ fn spawn_load_url_card(
             default_button: None,
             history_body: url.clone(),
             buttons: vec![
-                ToastButton::new("Load", content.load_label.clone()),
-                ToastButton::new("Block", content.block_label.clone()),
-                ToastButton::new("Ignore", content.ignore_label.clone()),
+                ToastButton::answer(LoadUrlAnswer::Load, content.load_label.clone()),
+                ToastButton::answer(LoadUrlAnswer::Block, content.block_label.clone()),
+                ToastButton::answer(LoadUrlAnswer::Ignore, content.ignore_label.clone()),
             ],
         },
     );
@@ -382,10 +383,7 @@ fn spawn_load_url_card(
             browsers.write(OpenWebBrowser {
                 url: Some(url.clone()),
             });
-            resolves.write(ResolveNotification {
-                toast: root,
-                button: None,
-            });
+            resolves.write(ResolveNotification::chose(root, LoadUrlAnswer::Load));
         },
     );
 
@@ -401,24 +399,22 @@ fn spawn_load_url_card(
                 object_name.clone(),
                 MuteType::Object,
             ));
-            resolves.write(ResolveNotification {
-                toast: root,
-                button: None,
-            });
+            resolves.write(ResolveNotification::chose(root, LoadUrlAnswer::Block));
         },
     );
 
-    // Ignore / close ×: tear the card down with no action.
-    for button in [card.ignore, card.close] {
-        commands.entity(button).observe(
-            move |_activate: On<Activate>, mut resolves: MessageWriter<ResolveNotification>| {
-                resolves.write(ResolveNotification {
-                    toast: root,
-                    button: None,
-                });
-            },
-        );
-    }
+    // Ignore: tear the card down with no action. The close × does the same,
+    // but chooses nothing.
+    commands.entity(card.ignore).observe(
+        move |_activate: On<Activate>, mut resolves: MessageWriter<ResolveNotification>| {
+            resolves.write(ResolveNotification::chose(root, LoadUrlAnswer::Ignore));
+        },
+    );
+    commands.entity(card.close).observe(
+        move |_activate: On<Activate>, mut resolves: MessageWriter<ResolveNotification>| {
+            resolves.write(ResolveNotification::dismissed(root));
+        },
+    );
     id
 }
 
@@ -685,10 +681,71 @@ const SPECIMEN_MESSAGE: &str = "Visit our store to see the full catalogue and to
 
 #[cfg(test)]
 mod tests {
-    use super::{owner_name, request_owner_name};
+    use super::{owner_name, request_owner_name, spawn_load_url_card};
+    use crate::i18n::Translator;
+    use crate::intents::{OpenWebBrowser, RequestBlock};
+    use crate::notification_host::{click_named, resolve_test_app};
+    use crate::notifications::NotificationManager;
+    use bevy::ecs::system::RunSystemOnce as _;
     use pretty_assertions::assert_eq;
-    use sl_client_bevy::{AgentKey, Command, GroupKey, OwnerKey, SlCommand, Uuid};
+    use sl_client_bevy::{
+        AgentKey, Command, GroupKey, LoadUrlRequest, ObjectKey, OwnerKey, SlCommand, Uuid,
+    };
     use std::collections::HashMap;
+
+    /// An app holding one web-page offer card.
+    fn card_app() -> Result<bevy::prelude::App, String> {
+        use bevy::prelude::{Commands, MessageWriter, ResMut};
+        let (mut app, channel) = resolve_test_app();
+        app.add_message::<SlCommand>()
+            .add_message::<RequestBlock>()
+            .add_message::<OpenWebBrowser>();
+        let request = LoadUrlRequest {
+            object_name: "Info Board".to_owned(),
+            object_id: ObjectKey::from(Uuid::from_u128(0x10ad)),
+            owner: OwnerKey::Agent(AgentKey::from(Uuid::from_u128(0xa9e7))),
+            message: "Our homepage".to_owned(),
+            url: url::Url::parse("https://example.com/").map_err(|error| error.to_string())?,
+        };
+        app.world_mut()
+            .run_system_once(
+                move |mut commands: Commands,
+                      mut manager: ResMut<NotificationManager>,
+                      translator: Translator,
+                      mut sl: MessageWriter<SlCommand>| {
+                    spawn_load_url_card(
+                        &mut commands,
+                        &channel,
+                        &mut manager,
+                        &translator,
+                        &mut sl,
+                        &request,
+                    );
+                },
+            )
+            .map_err(|error| error.to_string())?;
+        Ok(app)
+    }
+
+    /// Each button records the answer it gives — Ignore too, which does nothing
+    /// else — and the close × records no choice.
+    #[test]
+    fn each_button_records_its_answer() -> Result<(), String> {
+        for (button, answer) in [
+            ("load-url-action:load-url-button-load", Some("Load")),
+            ("load-url-action:load-url-button-block", Some("Block")),
+            ("load-url-action:load-url-button-ignore", Some("Ignore")),
+            ("load-url-close", None),
+        ] {
+            let mut app = card_app()?;
+            assert_eq!(
+                click_named(&mut app, button)?,
+                answer.map(ToOwned::to_owned),
+                "{button}"
+            );
+        }
+        Ok(())
+    }
 
     /// An agent owner resolves from the agent map and ignores the group map; a
     /// group owner does the reverse; an owner in neither map is unresolved.

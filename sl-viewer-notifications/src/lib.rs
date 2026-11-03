@@ -61,6 +61,7 @@
 //!   and re-exported here.
 
 use std::{
+    borrow::Cow,
     collections::{HashMap, VecDeque},
     fmt::Debug,
     marker::PhantomData,
@@ -689,10 +690,11 @@ pub struct NotificationResponse {
     /// The catalogue template name, so a consumer can route without tracking the
     /// [`id`](Self::id).
     pub template: &'static str,
-    /// The chosen button's [`name`](NotificationButton::name), or `None` when the
-    /// toast expired or was dismissed without a choice (a fading tip, or an
-    /// external [`DismissNotification`]).
-    pub button: Option<&'static str>,
+    /// The chosen button's name — a catalogue button's
+    /// [`name`](NotificationButton::name), a bespoke card's [`ToastButton`]
+    /// name — or `None` when the toast expired or was dismissed without a
+    /// choice (a fading tip, or an external [`DismissNotification`]).
+    pub button: Option<ButtonName>,
     /// Whether the "don't show me this again" checkbox was ticked — the host has
     /// already recorded the suppression; a consumer may act on it too.
     pub ignored: bool,
@@ -722,7 +724,7 @@ impl NotificationResponse {
         if !self.is_for(template) {
             return None;
         }
-        let name = self.button?;
+        let name = self.button.as_deref()?;
         let answer = A::from_name(name);
         if answer.is_none() {
             tracing::error!(
@@ -743,6 +745,11 @@ pub struct DismissNotification {
     /// The notification to dismiss.
     pub id: NotificationId,
 }
+
+/// The name a chosen button answers with: borrowed for a name fixed at
+/// compile time (a catalogue form's, a bespoke card's [`FormAnswer`]), owned
+/// for one only known at run time — a script dialog's own button text.
+pub type ButtonName = Cow<'static, str>;
 
 /// One button a live notification card shows: the name its answer goes by, the
 /// label the user reads, and whether it is the card's default.
@@ -767,6 +774,14 @@ impl ToastButton {
             label: label.into(),
             is_default: false,
         }
+    }
+
+    /// The button `answer` names, labelled `label` — how a bespoke card
+    /// offers a button of its [`FormAnswer`] set, so the name it shows and the
+    /// name its click answers with are the same value.
+    #[must_use]
+    pub fn answer<A: FormAnswer>(answer: A, label: impl Into<String>) -> Self {
+        Self::new(answer.name(), label)
     }
 
     /// This button, as the card's default.
@@ -799,9 +814,9 @@ pub struct NotificationRecord {
     pub kind: NotificationKind,
     /// The resolved, display-ready body text.
     pub body: String,
-    /// The chosen button once answered, or `None` while still live or if it
-    /// expired / was dismissed without a choice.
-    pub response: Option<&'static str>,
+    /// The chosen button's name once answered, or `None` while still live or
+    /// if it expired / was dismissed without a choice.
+    pub response: Option<ButtonName>,
 }
 
 /// The most history entries kept: a bounded ring, so a long session's toasts do
@@ -875,7 +890,7 @@ impl NotificationManager {
 
     /// Record the response on the history entry for `id`, if it is still in the
     /// ring.
-    pub fn record_response(&mut self, id: NotificationId, button: Option<&'static str>) {
+    pub fn record_response(&mut self, id: NotificationId, button: Option<ButtonName>) {
         if let Some(record) = self.history.iter_mut().rev().find(|record| record.id == id) {
             record.response = button;
         }
@@ -912,7 +927,41 @@ mod tests {
     use super::{
         FormAnswer, NotificationResponse, OK_CANCEL_FORM, OkCancel, OkOnly, TemplateRef, YesNo,
     };
+    use super::{OfferAnswer, ToastButton};
     use pretty_assertions::{assert_eq, assert_ne};
+    use std::borrow::Cow;
+
+    /// Every bespoke card's answer set has unique names, so a recorded answer
+    /// says which of its buttons was clicked.
+    #[test]
+    fn card_answer_sets_have_unique_names() {
+        for set in super::forms::CARD_ANSWER_SETS {
+            let mut names = set.to_vec();
+            names.sort_unstable();
+            names.dedup();
+            assert_eq!(names.len(), set.len(), "{set:?}: duplicate name");
+        }
+    }
+
+    /// A card button built from an answer carries that answer's name, and a
+    /// response naming it reads back as the same answer.
+    #[test]
+    fn a_card_button_answers_with_its_own_name() {
+        let button = ToastButton::answer(OfferAnswer::Decline, "Decline");
+        assert_eq!(button.name, OfferAnswer::Decline.name());
+        assert_eq!(
+            OfferAnswer::from_name(&button.name),
+            Some(OfferAnswer::Decline)
+        );
+        let response = NotificationResponse {
+            id: super::NotificationManager::default().allocate_id(),
+            template: "UserGiveItem",
+            button: Some(Cow::Owned(button.name)),
+            ignored: false,
+            input: None,
+        };
+        assert_eq!(response.button.as_deref(), Some("Decline"));
+    }
 
     /// Names are the catalogue's primary key and what a response routes on, so a
     /// duplicate would make one template's raise ambiguous.
@@ -1742,12 +1791,12 @@ mod tests {
             body: String::from("alert"),
             response: None,
         });
-        manager.record_response(live, Some("OK"));
+        manager.record_response(live, Some(Cow::Borrowed("OK")));
         assert_eq!(
             manager
                 .history()
                 .find(|record| record.id == live)
-                .and_then(|record| record.response),
+                .and_then(|record| record.response.as_deref()),
             Some("OK")
         );
     }
@@ -1814,10 +1863,10 @@ mod tests {
     fn response_answer_is_typed_and_scoped_to_its_template() {
         const DELETE_MEDIA: TemplateRef<OkCancel> = TemplateRef::new("DeleteMedia");
         let id = NotificationManager::default().allocate_id();
-        let response = |template, button| NotificationResponse {
+        let response = |template, button: Option<&'static str>| NotificationResponse {
             id,
             template,
-            button,
+            button: button.map(Cow::Borrowed),
             ignored: false,
             input: None,
         };

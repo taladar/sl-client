@@ -89,7 +89,7 @@ use crate::notification_host::{
     NotificationChannelRoot, ResolveNotification, ToastSpec, adopt_toast,
 };
 use crate::notifications::{
-    NotificationKind, NotificationManager, NotificationPriority, ToastButton,
+    NotificationKind, NotificationManager, NotificationPriority, OfferAnswer, ToastButton,
 };
 use crate::skin::BUTTON_CLASS;
 use crate::skin::role_class;
@@ -419,13 +419,11 @@ fn ingest_offers_invites(
                     deferred.held.push(im.clone());
                     continue;
                 }
-                spawn_inventory_offer_card(
-                    &mut sinks.commands,
-                    &channel,
-                    &mut sinks.manager,
-                    &translator,
-                    im,
-                );
+                if let Some(built) =
+                    spawn_inventory_offer_card(&mut sinks.commands, &translator, im)
+                {
+                    adopt_offer_card(&mut sinks.commands, &channel, &mut sinks.manager, built);
+                }
             }
             ImDialog::LureUser
             | ImDialog::TeleportRequest
@@ -436,40 +434,26 @@ fn ingest_offers_invites(
                 deferred.held.push(im.clone());
             }
             ImDialog::TeleportRequest => {
-                spawn_teleport_request_card(
-                    &mut sinks.commands,
-                    &channel,
-                    &mut sinks.manager,
-                    &translator,
-                    im,
-                );
+                if let Some(built) =
+                    spawn_teleport_request_card(&mut sinks.commands, &translator, im)
+                {
+                    adopt_offer_card(&mut sinks.commands, &channel, &mut sinks.manager, built);
+                }
             }
             ImDialog::LureUser => {
-                spawn_lure_card(
-                    &mut sinks.commands,
-                    &channel,
-                    &mut sinks.manager,
-                    &translator,
-                    im,
-                );
+                if let Some(built) = spawn_lure_card(&mut sinks.commands, &translator, im) {
+                    adopt_offer_card(&mut sinks.commands, &channel, &mut sinks.manager, built);
+                }
             }
             ImDialog::FriendshipOffered => {
-                spawn_friendship_card(
-                    &mut sinks.commands,
-                    &channel,
-                    &mut sinks.manager,
-                    &translator,
-                    im,
-                );
+                if let Some(built) = spawn_friendship_card(&mut sinks.commands, &translator, im) {
+                    adopt_offer_card(&mut sinks.commands, &channel, &mut sinks.manager, built);
+                }
             }
             ImDialog::GroupInvitation => {
-                spawn_group_invite_card(
-                    &mut sinks.commands,
-                    &channel,
-                    &mut sinks.manager,
-                    &translator,
-                    im,
-                );
+                if let Some(built) = spawn_group_invite_card(&mut sinks.commands, &translator, im) {
+                    adopt_offer_card(&mut sinks.commands, &channel, &mut sinks.manager, built);
+                }
             }
             _ => {}
         }
@@ -644,6 +628,7 @@ struct OfferContent {
 
 /// The entities [`build_offer_card`] produced that a caller wires: the card root,
 /// the accept / decline boxes, the optional Block box, and the close box.
+#[derive(Debug, Clone, Copy)]
 struct OfferCard {
     /// The card root node (left with no parent — the caller adopts it).
     root: Entity,
@@ -741,7 +726,7 @@ fn build_offer_card(commands: &mut Commands, content: &OfferContent) -> OfferCar
     let accept = spawn_action_button(
         commands,
         action_row,
-        ACCEPT_BUTTON,
+        OfferAnswer::Accept,
         &content.accept_label,
         content.accent,
         1,
@@ -749,13 +734,20 @@ fn build_offer_card(commands: &mut Commands, content: &OfferContent) -> OfferCar
     let decline = spawn_action_button(
         commands,
         action_row,
-        DECLINE_BUTTON,
+        OfferAnswer::Decline,
         &content.decline_label,
         BUTTON_BORDER,
         2,
     );
     let block = content.block_label.as_ref().map(|label| {
-        spawn_action_button(commands, action_row, BLOCK_BUTTON, label, BUTTON_BORDER, 3)
+        spawn_action_button(
+            commands,
+            action_row,
+            OfferAnswer::Block,
+            label,
+            BUTTON_BORDER,
+            3,
+        )
     });
 
     OfferCard {
@@ -767,28 +759,34 @@ fn build_offer_card(commands: &mut Commands, content: &OfferContent) -> OfferCar
     }
 }
 
-/// The name of a card's accepting response — Accept, Teleport, Join — which
-/// the readout reports and its button is addressed by.
-const ACCEPT_BUTTON: &str = "Accept";
-
-/// The name of a card's declining response.
-const DECLINE_BUTTON: &str = "Decline";
-
-/// The name of an inventory offer's Block response.
-const BLOCK_BUTTON: &str = "Block";
+/// An offer card built and wired by one of the `spawn_*_card` functions, with
+/// what [`adopt_offer_card`] needs to raise it.
+struct BuiltOffer {
+    /// The card's entities.
+    card: OfferCard,
+    /// What it shows.
+    content: OfferContent,
+    /// The template it reports as.
+    template: &'static str,
+    /// Its line in the notification history.
+    history: String,
+}
 
 /// Adopt a built card into the shared toast channel as a sticky
-/// [`Alert`](NotificationKind::Alert), recording a history line, and return its
-/// root for observer wiring. Shared by all four kinds.
+/// [`Alert`](NotificationKind::Alert), recording a history line. Shared by all
+/// five kinds.
 fn adopt_offer_card(
     commands: &mut Commands,
     channel: &NotificationChannelRoot,
     manager: &mut NotificationManager,
-    card: &OfferCard,
-    content: &OfferContent,
-    template: &'static str,
-    history: String,
+    built: BuiltOffer,
 ) {
+    let BuiltOffer {
+        card,
+        content,
+        template,
+        history,
+    } = built;
     adopt_toast(
         commands,
         manager,
@@ -801,18 +799,18 @@ fn adopt_offer_card(
             default_button: None,
             history_body: history,
             buttons: [
-                Some(ToastButton::new(
-                    ACCEPT_BUTTON,
+                Some(ToastButton::answer(
+                    OfferAnswer::Accept,
                     content.accept_label.clone(),
                 )),
-                Some(ToastButton::new(
-                    DECLINE_BUTTON,
+                Some(ToastButton::answer(
+                    OfferAnswer::Decline,
                     content.decline_label.clone(),
                 )),
                 content
                     .block_label
                     .as_ref()
-                    .map(|label| ToastButton::new(BLOCK_BUTTON, label.clone())),
+                    .map(|label| ToastButton::answer(OfferAnswer::Block, label.clone())),
             ]
             .into_iter()
             .flatten()
@@ -827,14 +825,10 @@ fn adopt_offer_card(
 /// their destination folder from the live [`InventoryModel`] at click time.
 fn spawn_inventory_offer_card(
     commands: &mut Commands,
-    channel: &NotificationChannelRoot,
-    manager: &mut NotificationManager,
     translator: &Translator,
     im: &InstantMessage,
-) {
-    let Some(offer) = im.inventory_offer() else {
-        return;
-    };
+) -> Option<BuiltOffer> {
+    let offer = im.inventory_offer()?;
     let lead = translator.format(
         "offer-inventory-from",
         &TransArgs::new().text("name", &im.from_agent_name),
@@ -849,15 +843,12 @@ fn spawn_inventory_offer_card(
         block_label: Some(translator.get("offer-button-block")),
     };
     let card = build_offer_card(commands, &content);
-    adopt_offer_card(
-        commands,
-        channel,
-        manager,
-        &card,
-        &content,
-        INVENTORY_OFFER_TEMPLATE,
-        lead,
-    );
+    let built = BuiltOffer {
+        card,
+        content,
+        template: INVENTORY_OFFER_TEMPLATE,
+        history: lead,
+    };
 
     let root = card.root;
     let giver = offer.from_agent_id;
@@ -876,10 +867,7 @@ fn spawn_inventory_offer_card(
                     folder_id,
                 }));
             }
-            resolves.write(ResolveNotification {
-                toast: root,
-                button: None,
-            });
+            resolves.write(ResolveNotification::chose(root, OfferAnswer::Accept));
         },
     );
 
@@ -890,10 +878,7 @@ fn spawn_inventory_offer_card(
               mut sl: MessageWriter<SlCommand>,
               mut resolves: MessageWriter<ResolveNotification>| {
             decline_inventory(&inventory, &offer, &mut sl);
-            resolves.write(ResolveNotification {
-                toast: root,
-                button: None,
-            });
+            resolves.write(ResolveNotification::chose(root, OfferAnswer::Decline));
         },
     );
 
@@ -912,10 +897,7 @@ fn spawn_inventory_offer_card(
                     giver_name.clone(),
                     MuteType::Agent,
                 ));
-                resolves.write(ResolveNotification {
-                    toast: root,
-                    button: None,
-                });
+                resolves.write(ResolveNotification::chose(root, OfferAnswer::Block));
             },
         );
     }
@@ -927,12 +909,10 @@ fn spawn_inventory_offer_card(
               mut sl: MessageWriter<SlCommand>,
               mut resolves: MessageWriter<ResolveNotification>| {
             decline_inventory(&inventory, &offer, &mut sl);
-            resolves.write(ResolveNotification {
-                toast: root,
-                button: None,
-            });
+            resolves.write(ResolveNotification::dismissed(root));
         },
     );
+    Some(built)
 }
 
 /// The system folder a freshly accepted inventory offer of a given asset type is
@@ -1020,11 +1000,9 @@ fn discard_command(offer: &InventoryOffer, trash: InventoryFolderKey) -> Option<
 /// (teleporting to the offer's location), Decline sends the lure-declined reply.
 fn spawn_lure_card(
     commands: &mut Commands,
-    channel: &NotificationChannelRoot,
-    manager: &mut NotificationManager,
     translator: &Translator,
     im: &InstantMessage,
-) {
+) -> Option<BuiltOffer> {
     let from_agent_id = im.from_agent_id;
     let lure_id = LureId::from(im.id);
     let lead = translator.format(
@@ -1051,15 +1029,12 @@ fn spawn_lure_card(
         block_label: None,
     };
     let card = build_offer_card(commands, &content);
-    adopt_offer_card(
-        commands,
-        channel,
-        manager,
-        &card,
-        &content,
-        TELEPORT_OFFER_TEMPLATE,
-        lead,
-    );
+    let built = BuiltOffer {
+        card,
+        content,
+        template: TELEPORT_OFFER_TEMPLATE,
+        history: lead,
+    };
 
     let root = card.root;
 
@@ -1069,15 +1044,15 @@ fn spawn_lure_card(
               mut sl: MessageWriter<SlCommand>,
               mut resolves: MessageWriter<ResolveNotification>| {
             sl.write(SlCommand(Command::AcceptTeleportLure { lure_id }));
-            resolves.write(ResolveNotification {
-                toast: root,
-                button: None,
-            });
+            resolves.write(ResolveNotification::chose(root, OfferAnswer::Accept));
         },
     );
 
     // Decline (and the conservative close ×): send the lure-declined reply.
-    for button in [Some(card.decline), Some(card.close)].into_iter().flatten() {
+    for (button, answer) in [
+        (card.decline, Some(OfferAnswer::Decline)),
+        (card.close, None),
+    ] {
         commands.entity(button).observe(
             move |_activate: On<Activate>,
                   mut sl: MessageWriter<SlCommand>,
@@ -1086,13 +1061,11 @@ fn spawn_lure_card(
                     from_agent_id,
                     lure_id,
                 }));
-                resolves.write(ResolveNotification {
-                    toast: root,
-                    button: None,
-                });
+                resolves.write(ResolveNotification::answered(root, answer));
             },
         );
     }
+    Some(built)
 }
 
 /// The locale key naming the rating of the region a teleport offer leads to,
@@ -1118,11 +1091,9 @@ fn lure_rating_key(im: &InstantMessage) -> Option<&'static str> {
 /// too — so the card is simply dismissed.
 fn spawn_teleport_request_card(
     commands: &mut Commands,
-    channel: &NotificationChannelRoot,
-    manager: &mut NotificationManager,
     translator: &Translator,
     im: &InstantMessage,
-) {
+) -> Option<BuiltOffer> {
     let requester = im.from_agent_id;
     let lead = translator.format(
         "offer-teleport-request-from",
@@ -1142,15 +1113,12 @@ fn spawn_teleport_request_card(
         block_label: None,
     };
     let card = build_offer_card(commands, &content);
-    adopt_offer_card(
-        commands,
-        channel,
-        manager,
-        &card,
-        &content,
-        TELEPORT_REQUEST_TEMPLATE,
-        lead,
-    );
+    let built = BuiltOffer {
+        card,
+        content,
+        template: TELEPORT_REQUEST_TEMPLATE,
+        history: lead,
+    };
 
     let root = card.root;
 
@@ -1160,24 +1128,22 @@ fn spawn_teleport_request_card(
               mut sl: MessageWriter<SlCommand>,
               mut resolves: MessageWriter<ResolveNotification>| {
             sl.write(SlCommand(teleport_request_answer(requester)));
-            resolves.write(ResolveNotification {
-                toast: root,
-                button: None,
-            });
+            resolves.write(ResolveNotification::chose(root, OfferAnswer::Accept));
         },
     );
 
     // Decline and the close ×: nothing to send.
-    for button in [Some(card.decline), Some(card.close)].into_iter().flatten() {
+    for (button, answer) in [
+        (card.decline, Some(OfferAnswer::Decline)),
+        (card.close, None),
+    ] {
         commands.entity(button).observe(
             move |_activate: On<Activate>, mut resolves: MessageWriter<ResolveNotification>| {
-                resolves.write(ResolveNotification {
-                    toast: root,
-                    button: None,
-                });
+                resolves.write(ResolveNotification::answered(root, answer));
             },
         );
     }
+    Some(built)
 }
 
 /// What agreeing to a teleport request sends: an offer to the requester, with
@@ -1194,11 +1160,9 @@ fn teleport_request_answer(requester: AgentKey) -> Command {
 /// friendship-declined reply.
 fn spawn_friendship_card(
     commands: &mut Commands,
-    channel: &NotificationChannelRoot,
-    manager: &mut NotificationManager,
     translator: &Translator,
     im: &InstantMessage,
-) {
+) -> Option<BuiltOffer> {
     let transaction_id = TransactionId::from(im.id);
     // The reference answers an offer that was kept while the agent was away
     // over the AcceptFriendship / DeclineFriendship capabilities wherever the
@@ -1224,15 +1188,12 @@ fn spawn_friendship_card(
         block_label: None,
     };
     let card = build_offer_card(commands, &content);
-    adopt_offer_card(
-        commands,
-        channel,
-        manager,
-        &card,
-        &content,
-        FRIENDSHIP_OFFER_TEMPLATE,
-        lead,
-    );
+    let built = BuiltOffer {
+        card,
+        content,
+        template: FRIENDSHIP_OFFER_TEMPLATE,
+        history: lead,
+    };
 
     let root = card.root;
     let friend_id = FriendKey::from(im.from_agent_id.uuid());
@@ -1258,15 +1219,15 @@ fn spawn_friendship_card(
                 // friend event: re-read the buddy list, after the accept.
                 sl.write(SlCommand(Command::QueryFriends));
             }
-            resolves.write(ResolveNotification {
-                toast: root,
-                button: None,
-            });
+            resolves.write(ResolveNotification::chose(root, OfferAnswer::Accept));
         },
     );
 
     // Decline (and the conservative close ×): send the friendship-declined reply.
-    for button in [Some(card.decline), Some(card.close)].into_iter().flatten() {
+    for (button, answer) in [
+        (card.decline, Some(OfferAnswer::Decline)),
+        (card.close, None),
+    ] {
         commands.entity(button).observe(
             move |_activate: On<Activate>,
                   mut sl: MessageWriter<SlCommand>,
@@ -1276,13 +1237,11 @@ fn spawn_friendship_card(
                     friend_id,
                     use_offline_cap,
                 }));
-                resolves.write(ResolveNotification {
-                    toast: root,
-                    button: None,
-                });
+                resolves.write(ResolveNotification::answered(root, answer));
             },
         );
     }
+    Some(built)
 }
 
 /// Build and wire a **group-membership invitation** card. Join accepts the
@@ -1290,14 +1249,10 @@ fn spawn_friendship_card(
 /// sends the invitation-declined reply.
 fn spawn_group_invite_card(
     commands: &mut Commands,
-    channel: &NotificationChannelRoot,
-    manager: &mut NotificationManager,
     translator: &Translator,
     im: &InstantMessage,
-) {
-    let Some(invite) = im.group_invitation() else {
-        return;
-    };
+) -> Option<BuiltOffer> {
+    let invite = im.group_invitation()?;
     let lead = translator.format(
         "offer-group-from",
         &TransArgs::new().text("name", &invite.inviter_name),
@@ -1322,15 +1277,12 @@ fn spawn_group_invite_card(
         block_label: None,
     };
     let card = build_offer_card(commands, &content);
-    adopt_offer_card(
-        commands,
-        channel,
-        manager,
-        &card,
-        &content,
-        GROUP_INVITE_TEMPLATE,
-        lead,
-    );
+    let built = BuiltOffer {
+        card,
+        content,
+        template: GROUP_INVITE_TEMPLATE,
+        history: lead,
+    };
 
     let root = card.root;
     let group_id = invite.group_id;
@@ -1347,15 +1299,15 @@ fn spawn_group_invite_card(
                 transaction_id,
                 use_offline_cap,
             }));
-            resolves.write(ResolveNotification {
-                toast: root,
-                button: None,
-            });
+            resolves.write(ResolveNotification::chose(root, OfferAnswer::Accept));
         },
     );
 
     // Decline (and the conservative close ×): send the invitation-declined reply.
-    for button in [Some(card.decline), Some(card.close)].into_iter().flatten() {
+    for (button, answer) in [
+        (card.decline, Some(OfferAnswer::Decline)),
+        (card.close, None),
+    ] {
         commands.entity(button).observe(
             move |_activate: On<Activate>,
                   mut sl: MessageWriter<SlCommand>,
@@ -1365,26 +1317,25 @@ fn spawn_group_invite_card(
                     transaction_id,
                     use_offline_cap,
                 }));
-                resolves.write(ResolveNotification {
-                    toast: root,
-                    button: None,
-                });
+                resolves.write(ResolveNotification::answered(root, answer));
             },
         );
     }
+    Some(built)
 }
 
 /// Spawn one bottom-row action button (accept / decline / Block), bordered in the
 /// given accent (the accept default wears the card accent, the rest the neutral
 /// button border). Returns the clickable box for the caller to wire onto.
 ///
-/// `button` is the response's own name (`Accept`, `Decline`, `Block` — the
-/// card's [`ToastButton`] names), and the button is addressed by it whatever
-/// its caption says in the viewer's language.
+/// `button` is the answer it gives — whatever the accepting button reads
+/// (Accept, Teleport, Join), it answers [`OfferAnswer::Accept`] — and the
+/// button is addressed by that answer's name whatever its caption says in the
+/// viewer's language.
 fn spawn_action_button(
     commands: &mut Commands,
     parent: Entity,
-    button: &str,
+    button: OfferAnswer,
     label: &str,
     border: Color,
     tab: i32,
@@ -1394,7 +1345,7 @@ fn spawn_action_button(
         parent,
         ButtonSpec::bordered(
             UiLabel::literal(label),
-            format!("offer-invite-action:{button}"),
+            format!("offer-invite-action:{}", button.name()),
         )
         .kind(ButtonKind::Headless)
         .tab_index(tab)
@@ -1603,15 +1554,128 @@ fn wire_specimen_actions(commands: &mut Commands, card: &OfferCard, element: &'s
 #[cfg(test)]
 mod tests {
     use super::{
-        MutedOffer, decline_command, discard_command, lure_rating_key, muted_offer, offer_class,
-        teleport_request_answer,
+        BuiltOffer, MutedOffer, decline_command, discard_command, lure_rating_key, muted_offer,
+        offer_class, spawn_friendship_card, spawn_group_invite_card, spawn_inventory_offer_card,
+        spawn_lure_card, spawn_teleport_request_card, teleport_request_answer,
     };
     use crate::auto_reject::{OfferClass, RejectKind};
+    use crate::i18n::{Translator, install_untranslated};
+    use crate::intents::RequestBlock;
+    use crate::inventory::InventoryModel;
+    use crate::notification_host::ResolveNotification;
+    use bevy::ecs::system::RunSystemOnce as _;
+    use bevy::prelude::{App, Commands, Entity, In, Messages, Name};
+    use bevy::ui_widgets::Activate;
     use pretty_assertions::assert_eq;
     use sl_client_bevy::{
         AgentKey, Command, FriendKey, GroupKey, ImDialog, InstantMessage, RegionCoordinates,
-        TransactionId, Uuid,
+        SlCommand, TransactionId, Uuid,
     };
+
+    /// A card builder, as the five `spawn_*_card` functions are.
+    type Spawn = fn(&mut Commands, &Translator, &InstantMessage) -> Option<BuiltOffer>;
+
+    /// Build `im`'s card with `spawn` in a bare app, click the button named
+    /// `button` and return the answer its resolve carries — `Ok(None)` for a
+    /// resolve that chose nothing.
+    fn click(spawn: Spawn, im: InstantMessage, button: &str) -> Result<Option<String>, String> {
+        let mut app = App::new();
+        app.add_message::<ResolveNotification>()
+            .add_message::<SlCommand>()
+            .add_message::<RequestBlock>()
+            .init_resource::<InventoryModel>();
+        install_untranslated(&mut app);
+        let built = app
+            .world_mut()
+            .run_system_once_with(
+                move |In(im): In<InstantMessage>,
+                      mut commands: Commands,
+                      translator: Translator| {
+                    spawn(&mut commands, &translator, &im).is_some()
+                },
+                im,
+            )
+            .map_err(|error| error.to_string())?;
+        if !built {
+            return Err("the message built no card".to_owned());
+        }
+        let mut named = app.world_mut().query::<(Entity, &Name)>();
+        let entity = named
+            .iter(app.world())
+            .find(|(_entity, name)| name.as_str() == button)
+            .map(|(entity, _name)| entity)
+            .ok_or_else(|| format!("no button named {button}"))?;
+        app.world_mut().trigger(Activate {
+            entity,
+            button: None,
+        });
+        let messages = app.world().resource::<Messages<ResolveNotification>>();
+        let mut resolves = messages.get_cursor();
+        let resolve = resolves
+            .read(messages)
+            .last()
+            .ok_or_else(|| format!("{button} resolved nothing"))?;
+        Ok(resolve.button.as_deref().map(ToOwned::to_owned))
+    }
+
+    /// The buttons every offer card has, and the answer each records.
+    const ANSWERS: [(&str, Option<&str>); 3] = [
+        ("offer-invite-action:Accept", Some("Accept")),
+        ("offer-invite-action:Decline", Some("Decline")),
+        ("offer-invite-close", None),
+    ];
+
+    /// **The filed bug, for the offers.** Every kind's Accept and Decline
+    /// record the button — the decline and the close share an observer, and
+    /// only the decline chose — and the close records no choice.
+    #[test]
+    fn every_offer_records_the_button_clicked() -> Result<(), String> {
+        let from = Uuid::from_u128(0x6009);
+        let id = Uuid::from_u128(0x7b);
+        let mut item_offer = offer(ImDialog::InventoryOffered, from, id);
+        // A notecard (asset type 7), then the item's id.
+        item_offer.binary_bucket = core::iter::once(7_u8)
+            .chain(Uuid::from_u128(0x17e).into_bytes())
+            .collect();
+        let cards: [(&str, Spawn, InstantMessage); 5] = [
+            ("item", spawn_inventory_offer_card, item_offer.clone()),
+            ("lure", spawn_lure_card, offer(ImDialog::LureUser, from, id)),
+            (
+                "teleport request",
+                spawn_teleport_request_card,
+                offer(ImDialog::TeleportRequest, from, id),
+            ),
+            (
+                "friendship",
+                spawn_friendship_card,
+                offer(ImDialog::FriendshipOffered, from, id),
+            ),
+            (
+                "group invite",
+                spawn_group_invite_card,
+                offer(ImDialog::GroupInvitation, from, id),
+            ),
+        ];
+        for (kind, spawn, im) in cards {
+            for (button, answer) in ANSWERS {
+                assert_eq!(
+                    click(spawn, im.clone(), button)?,
+                    answer.map(ToOwned::to_owned),
+                    "{kind}: {button}"
+                );
+            }
+        }
+        assert_eq!(
+            click(
+                spawn_inventory_offer_card,
+                item_offer,
+                "offer-invite-action:Block"
+            )?,
+            Some("Block".to_owned()),
+            "item: Block"
+        );
+        Ok(())
+    }
 
     /// An offer IM of the given dialog, from `from`, carrying `id` as its
     /// dialog-dependent id (a lure id / transaction id) — the shape the reject

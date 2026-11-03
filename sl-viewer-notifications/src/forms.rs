@@ -24,6 +24,28 @@ macro_rules! form_answers {
         $(#[$meta:meta])*
         $answer:ident { $($variant:ident = $name:literal),+ $(,)? }
     )+) => {
+        answer_enums! {
+            $(
+                $(#[$meta])*
+                $answer { $($variant = $name),+ }
+            )+
+        }
+
+        /// Every button set's [`FormAnswer::NAMES`], in declaration order.
+        #[cfg(test)]
+        pub(crate) const ANSWER_SETS: &[&[&str]] = &[$(<$answer as FormAnswer>::NAMES),+];
+    };
+}
+
+/// The enum half of [`form_answers!`]: each set's enum, its `const fn name`
+/// and its [`FormAnswer`] impl, without joining `ANSWER_SETS` — which is how
+/// the bespoke cards' answer sets ([`OfferAnswer`], [`ScriptDialogAction`], …)
+/// are declared, since no catalogue form is built from them.
+macro_rules! answer_enums {
+    ($(
+        $(#[$meta:meta])*
+        $answer:ident { $($variant:ident = $name:literal),+ $(,)? }
+    )+) => {
         $(
             $(#[$meta])*
             #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -61,10 +83,6 @@ macro_rules! form_answers {
                 }
             }
         )+
-
-        /// Every button set's [`FormAnswer::NAMES`], in declaration order.
-        #[cfg(test)]
-        pub(crate) const ANSWER_SETS: &[&[&str]] = &[$(<$answer as FormAnswer>::NAMES),+];
     };
 }
 
@@ -1803,4 +1821,69 @@ pub const ALLOW_ALWAYS_ALLOW_DENY_FORM: &[NotificationButton] = &[
         label_key: "notification-button-deny",
         is_default: false,
     },
+];
+
+// The bespoke cards' answer sets: the cards that build their own content (a
+// script dialog, a permission request, an offer, …) rather than render a
+// catalogue form. Each card names its buttons and resolves its clicks through
+// its set, so the button a card offers and the answer its click records are
+// one value. They are not catalogue forms, so they stay out of `ANSWER_SETS`.
+answer_enums! {
+    /// A script dialog's built-in actions (`ScriptDialog`), beside the script's
+    /// own buttons — the reference form's names: Block is `Client_Side_Mute`
+    /// and Ignore `Client_Side_Ignore`, so neither is mistaken for a script
+    /// button labelled "Block" or "Ignore". Submit answers an `llTextBox`.
+    ScriptDialogAction {
+        Submit = "Submit",
+        Block = "Client_Side_Mute",
+        Ignore = "Client_Side_Ignore",
+    }
+    /// A script permission request's buttons (`ScriptQuestion` /
+    /// `ScriptQuestionCaution`).
+    ScriptPermissionAnswer {
+        Grant = "Grant",
+        Deny = "Deny",
+        Block = "Block",
+    }
+    /// An experience permission request's buttons
+    /// (`ScriptQuestionExperience`).
+    ExperiencePermissionAnswer {
+        Yes = "Yes",
+        No = "No",
+        BlockExperience = "BlockExperience",
+        BlockObject = "BlockObject",
+    }
+    /// A scripted web-page offer's buttons (`LoadWebPage`).
+    LoadUrlAnswer {
+        Load = "Load",
+        Block = "Block",
+        Ignore = "Ignore",
+    }
+    /// An offer or invitation's buttons — an item, a teleport offer or
+    /// request, a friendship, a group invitation. Whatever the Accept button
+    /// reads (Teleport, Join, …), it answers `Accept`.
+    OfferAnswer {
+        Accept = "Accept",
+        Decline = "Decline",
+        Block = "Block",
+    }
+    /// A group notice's buttons (`GroupNotice`). Only OK answers the notice;
+    /// Notices and Chat open something and leave it up.
+    GroupNoticeAnswer {
+        Ok = "OK",
+        Notices = "Notices",
+        Chat = "Chat",
+    }
+}
+
+/// Every bespoke card's [`FormAnswer::NAMES`], so a test can hold each to
+/// unique names.
+#[cfg(test)]
+pub(crate) const CARD_ANSWER_SETS: &[&[&str]] = &[
+    ScriptDialogAction::NAMES,
+    ScriptPermissionAnswer::NAMES,
+    ExperiencePermissionAnswer::NAMES,
+    LoadUrlAnswer::NAMES,
+    OfferAnswer::NAMES,
+    GroupNoticeAnswer::NAMES,
 ];

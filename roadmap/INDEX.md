@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 338 |
 | blocked | 39 |
 | in-progress | 17 |
-| bugs | 41 |
-| done | 1478 |
+| bugs | 40 |
+| done | 1479 |
 | deferred | 30 |
 | wont-do | 24 |
 | **total** | **2096** |
@@ -1336,7 +1336,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (41)
+## bugs (40)
 
 ### protocol
 
@@ -1363,8 +1363,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   stale
 - [`viewer-automation-ground-reveal-eye-under-terrain`](bugs/viewer-automation-ground-reveal-eye-under-terrain.md)
   — A ground reveal can put the camera under higher ground beside the point
-- [`viewer-bespoke-card-responses-lose-the-button`](bugs/viewer-bespoke-card-responses-lose-the-button.md)
-  — Bespoke notification cards resolve every click as "no choice"
 - [`viewer-calling-card-offer-unanswered`](bugs/viewer-calling-card-offer-unanswered.md)
   — A calling card offered to us is never shown or answered
 - [`viewer-camera-framing-ends-inside-the-framed-object`](bugs/viewer-camera-framing-ends-inside-the-framed-object.md)
@@ -1440,7 +1438,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1478)
+## done (1479)
 
 ### protocol
 
@@ -2061,6 +2059,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   client-baking region's cache before re-uploading the own bakes
 - [`viewer-beacons-beam-render`](done/viewer-beacons-beam-render.md) — Tracking
   beacon — beam + off-screen direction arrow
+- [`viewer-bespoke-card-responses-lose-the-button`](done/viewer-bespoke-card-responses-lose-the-button.md)
+  — Bespoke notification cards resolve every click as "no choice"
 - [`viewer-bevy-empty-text-measures-at-parley-defaults`](done/viewer-bevy-empty-text-measures-at-parley-defaults.md)
   — An empty text node is measured at parley's defaults, not its own font
 - [`viewer-block-list`](done/viewer-block-list.md) — Block / mute list UI

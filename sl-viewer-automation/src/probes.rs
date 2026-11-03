@@ -121,7 +121,7 @@ pub fn read_notifications(world: &mut World) -> Vec<NotificationReadout> {
                 text: record.body,
                 buttons,
                 live: shown.is_some(),
-                response: record.response.map(ToOwned::to_owned),
+                response: record.response.map(std::borrow::Cow::into_owned),
             }
         })
         .collect()
