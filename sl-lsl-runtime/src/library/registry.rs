@@ -26,6 +26,7 @@ crate::registry! {
         LlAtan2 => math::ll_atan2,
         LlModPow => math::ll_mod_pow,
         LlFrand => math::ll_frand,
+        LlGenerateKey => math::ll_generate_key,
         LlVecMag => rotations::ll_vec_mag,
         LlVecDist => rotations::ll_vec_dist,
         LlVecNorm => rotations::ll_vec_norm,

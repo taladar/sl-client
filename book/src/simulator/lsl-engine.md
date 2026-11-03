@@ -1181,6 +1181,11 @@ is.
   touch handler in its current state — with each grid's rule for a child of
   such a root: both flags, quietly, on Second Life; `FLAGS_SCRIPTED` and the
   child sent again in full as the root's scripts change, on OpenSim.
+- **Randomness and calendar time.** `Host::random_bits` draws from a
+  xorshift64 stream per region seeded with the region's id, and the region's
+  world holds the grid's wall clock (`SceneFixtures::wall`), where a script's
+  date is to start before its ticks move it, so what a script draws and reads
+  follows from the seed and the ticks ([determinism](determinism.md)).
 - **Not wired yet**: the grid keeps no balances (`llGiveMoney` moves
   nothing, `llTransferLindenDollars` refuses only a payee with no account, a
   payment to an object raises no `money`), which is

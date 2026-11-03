@@ -156,7 +156,9 @@ minter; a per-tick execution budget is counted in *instructions*, never in
 elapsed microseconds; and anything that genuinely cannot be made
 deterministic (outbound HTTP) is off by default and injected. This is
 written down once here and enforced by
-[[server-world-determinism-contract]].
+[[server-world-determinism-contract]]. (Since 2026-11-03 the contract is
+the book chapter `book/src/simulator/determinism.md`, and
+`sl-fake-grid/tests/determinism.rs` holds a scripted region to it.)
 
 ## Reference sources
 

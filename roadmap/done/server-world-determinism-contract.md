@@ -2,7 +2,7 @@
 id: server-world-determinism-contract
 title: Keep the fake grid reproducible once it runs scripts
 topic: server
-status: ready
+status: done
 origin: LSL-on-the-fake-grid audit (2026-09-20)
 points: 5
 blocked_by: [server-world-heartbeat]
@@ -11,6 +11,48 @@ refs: [server-lsl-vm-execution, server-lsl-lib-time-timers,
 ---
 
 Context: [context/lsl.md](../context/lsl.md).
+
+Done (2026-11-03). Most of the mechanics were already in place from the
+heartbeat, the VM and the engine wiring — ticks as the clock, an instruction
+budget, `Host::random_bits` from a per-region xorshift64 seeded with the
+region's minted id, scripts served in `CallerId` order, listens in
+registration order, a tick's effects applied in order onto one change list.
+What this task added:
+
+- **The contract**, as the book chapter `book/src/simulator/determinism.md`
+  (and a section of `sl-lsl-runtime/README.md`), with where each part lives.
+- **`llGenerateKey`** from four seeded draws, shaped as each grid shapes its
+  keys. The new `data/generate-key` probe, run on aditi, YEngine and XEngine,
+  measured them: Second Life's are 128 random bits with no digit fixed (the
+  version and variant digits through all sixteen values over 200 keys),
+  OpenSim's version-4 uuids. The runtime replays the probe against all three
+  transcripts. (The first aditi run also found `!` on a key a compile-time
+  type mismatch on Second Life, which OpenSim compiles; `sl-lsl` already
+  refuses it.)
+- **The grid's wall clock** (`sl_fake_grid::time::WallClock`): the calendar
+  instant the grid started at, moved on by the injected clock. The four helpers
+  that read `SystemTime::now()` are gone, and everything they fed — a login's
+  `seconds_since_epoch`, the time message, instant-message and group-notice
+  stamps, the groups' account and ban dates, a calling card's creation date and
+  an access pass's expiry — reads it instead. `FakeGridBuilder::epoch` names the
+  start; a seeded grid starts at `SEEDED_EPOCH_SECONDS`. Each region's world
+  holds a copy (`SceneFixtures::wall`); the date functions of
+  [[server-lsl-lib-time-timers]] are to read it where the region started,
+  advanced by the ticks, not by the clock (the book chapter says why).
+- **The guard**: `tests/determinism.rs`'s
+  `scripts_tell_a_client_the_same_twice_from_one_seed` — two scripted boxes
+  (a timer, `llFrand`, `llGenerateKey`, `llListRandomize`, an allow-drop flag
+  flipped each tick, one script talking to the other on a hidden channel) under
+  a stepped heartbeat with a real client logged in; on both flavours two runs
+  from one seed tell the client the same lines and object updates in the same
+  order, and another seed other rolls in a stream of the same shape. It fails
+  when the region's draws are seeded from the machine instead (checked by
+  mutation).
+
+"Real time is off by default" holds trivially: no outbound function is
+implemented yet; [[server-lsl-lib-http-url]] inherits the requirement.
+
+## The task as planned
 
 `sl-fake-grid` is deterministic on purpose: `FakeGridBuilder::deterministic`
 seeds a xorshift `IdMinter` so two grids built from one seed mint the same

@@ -56,7 +56,7 @@ use uuid::Uuid;
 
 use crate::driver::SharedSim;
 use crate::runtime::GridCore;
-use crate::social::{Whereabouts, now_epoch_seconds, session_of, tell, warn_on};
+use crate::social::{Whereabouts, session_of, tell, warn_on};
 
 /// The estate every region of the fake grid belongs to.
 const ESTATE: u32 = 1;
@@ -288,8 +288,14 @@ const fn nowhere() -> RegionCoordinates {
 }
 
 impl ImPolicy {
-    /// `im` of `from`'s as this grid passes it on to the avatar it names.
-    pub(crate) fn passed_on(&self, from: &Whereabouts, im: &InstantMessage) -> InstantMessage {
+    /// `im` of `from`'s as this grid passes it on to the avatar it names, at
+    /// `stamp` (the grid's UNIX seconds).
+    pub(crate) fn passed_on(
+        &self,
+        from: &Whereabouts,
+        im: &InstantMessage,
+        stamp: u32,
+    ) -> InstantMessage {
         let to = im.to_agent_id;
         let passed = InstantMessage {
             from_agent_id: from.agent,
@@ -319,7 +325,7 @@ impl ImPolicy {
             Statement::Stamped => InstantMessage {
                 from_agent_name: im.from_agent_name.clone(),
                 position: im.position,
-                timestamp: Some(now_epoch_seconds()),
+                timestamp: Some(stamp),
                 id: if im.id.is_nil() { passed.id } else { im.id },
                 binary_bucket: im.binary_bucket.clone(),
                 ..passed
@@ -327,8 +333,13 @@ impl ImPolicy {
         }
     }
 
-    /// A teleport request of `from`'s as this grid passes it on.
-    fn request_passed_on(&self, from: &Whereabouts, im: &InstantMessage) -> InstantMessage {
+    /// A teleport request of `from`'s as this grid passes it on, at `stamp`.
+    fn request_passed_on(
+        &self,
+        from: &Whereabouts,
+        im: &InstantMessage,
+        stamp: u32,
+    ) -> InstantMessage {
         match self.statement {
             Statement::Rewritten => InstantMessage {
                 from_agent_id: from.agent,
@@ -345,23 +356,23 @@ impl ImPolicy {
                 message: cut(&im.message),
                 binary_bucket: vec![0],
             },
-            Statement::Stamped => self.passed_on(from, im),
+            Statement::Stamped => self.passed_on(from, im, stamp),
         }
     }
 
     /// What the grid says itself to `to`: of `dialog`, from `from` under the
-    /// grid's signature, under `id`, from nowhere.
+    /// grid's signature, under `id`, from nowhere, at `stamp`.
     fn notice(
         &self,
-        from: AgentKey,
-        to: AgentKey,
+        (from, to): (AgentKey, AgentKey),
         dialog: ImDialog,
         id: Uuid,
         text: &str,
+        stamp: u32,
     ) -> InstantMessage {
         let (timestamp, binary_bucket) = match self.statement {
             Statement::Rewritten => (None, vec![0]),
-            Statement::Stamped => (Some(now_epoch_seconds()), Vec::new()),
+            Statement::Stamped => (Some(stamp), Vec::new()),
         };
         InstantMessage {
             from_agent_id: from,
@@ -384,11 +395,12 @@ impl ImPolicy {
 /// `passed`, a message of `from`'s, as it is kept for an avatar that is away:
 /// over `RetrieveInstantMessages` as it would have arrived, flagged kept,
 /// with the time it was sent; as Second Life's `ReadOfflineMsgs` record, from
-/// the sender's region and place, estate 1.
-fn kept(from: &Whereabouts, passed: InstantMessage) -> KeptMessage {
+/// the sender's region and place, estate 1. `stamp` is the grid's UNIX
+/// seconds.
+fn kept(from: &Whereabouts, passed: InstantMessage, stamp: u32) -> KeptMessage {
     let message = InstantMessage {
         offline: true,
-        timestamp: Some(now_epoch_seconds()),
+        timestamp: Some(stamp),
         ..passed
     };
     let record = InstantMessage {
@@ -503,7 +515,9 @@ async fn stated(
         let state = shared.state.lock().await;
         Whereabouts::of(&state)
     };
-    let passed = core.im_policy.passed_on(&from, im);
+    let passed = core
+        .im_policy
+        .passed_on(&from, im, core.wall.unix_seconds_u32());
     (from, passed)
 }
 
@@ -532,7 +546,9 @@ async fn pass_on(core: &GridCore, shared: &SharedSim, im: &InstantMessage) {
 fn keep(core: &GridCore, from: &Whereabouts, passed: InstantMessage) {
     let to = passed.to_agent_id;
     if core.account_by_agent(to).is_some() {
-        core.social.lock().keep(to, kept(from, passed));
+        core.social
+            .lock()
+            .keep(to, kept(from, passed, core.wall.unix_seconds_u32()));
     }
 }
 
@@ -542,11 +558,11 @@ async fn tell_kept(core: &GridCore, passed: &InstantMessage) {
     let policy = core.im_policy;
     let (sender, recipient) = (passed.from_agent_id, passed.to_agent_id);
     let told = policy.notice(
-        recipient,
-        sender,
+        (recipient, sender),
         ImDialog::Message,
         session_between(sender, recipient),
         policy.kept_text,
+        core.wall.unix_seconds_u32(),
     );
     tell(core, sender, |state, now| {
         warn_on(state.sim.send_instant_message(&told, now), "a kept message");
@@ -569,11 +585,11 @@ async fn message(core: &GridCore, shared: &SharedSim, im: &InstantMessage) {
             Admission::Dropped => return,
             Admission::Suspended => {
                 let told = policy.notice(
-                    AgentKey::from(Uuid::nil()),
-                    from.agent,
+                    (AgentKey::from(Uuid::nil()), from.agent),
                     ImDialog::Message,
                     Uuid::nil(),
                     SECOND_LIFE_SUSPENDED_TEXT,
+                    core.wall.unix_seconds_u32(),
                 );
                 warn_on(
                     shared
@@ -607,11 +623,11 @@ async fn auto_response(core: &GridCore, shared: &SharedSim, im: &InstantMessage)
         AwayAutoResponse::Kept => keep(core, &from, passed),
         AwayAutoResponse::Refused => {
             let told = policy.notice(
-                from.agent,
-                passed.to_agent_id,
+                (from.agent, passed.to_agent_id),
                 ImDialog::DoNotDisturbAutoResponse,
                 session_between(from.agent, passed.to_agent_id),
                 OPENSIM_AUTO_RESPONSE_REFUSED,
+                core.wall.unix_seconds_u32(),
             );
             warn_on(
                 shared
@@ -633,7 +649,9 @@ async fn request(core: &GridCore, shared: &SharedSim, im: &InstantMessage) {
         let state = shared.state.lock().await;
         Whereabouts::of(&state)
     };
-    let passed = core.im_policy.request_passed_on(&from, im);
+    let passed = core
+        .im_policy
+        .request_passed_on(&from, im, core.wall.unix_seconds_u32());
     let _here = deliver(core, &passed).await;
 }
 
@@ -728,7 +746,7 @@ async fn offer_lure(core: &GridCore, shared: &SharedSim, text: &str, targets: &[
                 }
                 .to_uuid();
                 offer.position = from.position;
-                offer.timestamp = Some(now_epoch_seconds());
+                offer.timestamp = Some(core.wall.unix_seconds_u32());
             }
         }
         if policy.lures == Lures::Held {
@@ -792,6 +810,9 @@ mod tests {
         AgentKey::from(Uuid::from_u128(0xff00))
     }
 
+    /// The grid's time a message is passed on at.
+    const STAMP: u32 = 1_700_000_000;
+
     /// Where the sender stands.
     fn where_the_sender_is() -> Whereabouts {
         Whereabouts {
@@ -826,7 +847,7 @@ mod tests {
     fn second_life_rewrites_what_a_viewer_claims_but_the_time() {
         let policy = ImitatedGrid::SecondLife.im_policy();
         let from = where_the_sender_is();
-        let passed = policy.passed_on(&from, &claiming(ImDialog::Message));
+        let passed = policy.passed_on(&from, &claiming(ImDialog::Message), STAMP);
         assert_eq!(passed.from_agent_name, "Avatar Writer");
         assert_eq!(passed.id, Uuid::from_u128(0xf00f));
         assert_eq!(passed.region_id, Some(from.region_id));
@@ -836,7 +857,7 @@ mod tests {
         assert_eq!(passed.binary_bucket, vec![0]);
         assert!(!passed.offline);
         // An automatic reply is from nowhere.
-        let reply = policy.passed_on(&from, &claiming(ImDialog::DoNotDisturbAutoResponse));
+        let reply = policy.passed_on(&from, &claiming(ImDialog::DoNotDisturbAutoResponse), STAMP);
         assert_eq!(reply.region_id, None);
         assert_eq!(reply.position, RegionCoordinates::new(0.0, 0.0, 0.0));
         assert_eq!(reply.parent_estate_id, 0);
@@ -848,12 +869,12 @@ mod tests {
         assert_eq!(policy.statement, Statement::Stamped);
         let from = where_the_sender_is();
         let claimed = claiming(ImDialog::Message);
-        let passed = policy.passed_on(&from, &claimed);
+        let passed = policy.passed_on(&from, &claimed, STAMP);
         assert_eq!(passed.from_agent_name, "Somebody Else");
         assert_eq!(passed.id, claimed.id);
         assert_eq!(passed.region_id, Some(from.region_id));
         assert_eq!(passed.position, claimed.position);
-        assert_ne!(passed.timestamp, claimed.timestamp);
+        assert_eq!(passed.timestamp, Some(STAMP));
         assert_eq!(passed.parent_estate_id, 1);
         assert_eq!(passed.binary_bucket, claimed.binary_bucket);
         assert!(!passed.offline);
@@ -863,7 +884,7 @@ mod tests {
             ..claimed
         };
         assert_eq!(
-            policy.passed_on(&from, &unnamed).id,
+            policy.passed_on(&from, &unnamed, STAMP).id,
             session_between(sender(), recipient())
         );
     }

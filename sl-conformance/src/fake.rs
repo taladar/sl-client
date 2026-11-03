@@ -348,8 +348,12 @@ impl FakeGridHarness {
                 "{grid_flavour} is a live grid; there is nothing to start"
             ))
         })?;
+        // Seeded for its ids, but on the machine's calendar: it stands in for
+        // a live grid, and the cases judge a stamp (an instant message's, a
+        // notice's) against the time they sent it, as they do on aditi.
         let mut builder = sl_fake_grid::FakeGridBuilder::new()
             .deterministic(SEED)
+            .epoch(std::time::SystemTime::now())
             .imitates(imitates);
         for (label, first_name, agent_id) in ACCOUNTS {
             let account = sl_fake_grid::AccountConfig::new(first_name, LAST_NAME, PASSWORD)

@@ -58,6 +58,17 @@ that never stacks and survives a state change, the detected block a touch
 carries and any other event clears, and `changed` and touches merging by a
 policy a test can switch to force either arrival shape.
 
+## Determinism
+
+A script's observable behaviour is a function of the region's seed, the
+scenario and the client's own input, and of nothing else
+(`book/src/simulator/determinism.md`). For this crate that means: time is
+ticks, the budget is instructions, every random number comes through
+`Host::random_bits` (`llFrand`, `llListRandomize`, `llGenerateKey`), instances
+are served in `CallerId` order and listens fire in registration order. Nothing
+here reads a clock, the machine's randomness or the network; a function that
+needs one of those asks the host.
+
 ## Vendored library definition
 
 `keywords_lsl_default.xml` is Linden Lab's own `LSLSyntax` document as

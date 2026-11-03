@@ -590,6 +590,8 @@ pub(crate) struct GridCore {
     pub(crate) voice_backend: VoiceBackend,
     /// The clock every session machine is stamped from.
     pub(crate) clock: Now,
+    /// The calendar time the grid stamps, counted on [`Self::clock`].
+    pub(crate) wall: crate::time::WallClock,
     /// How long an empty `EventQueueGet` poll is held before the 502.
     pub(crate) eq_hold: Duration,
     /// How long a datagram spends on the way to or from a client
@@ -855,6 +857,8 @@ impl GridCore {
                             .and_then(|index| self.region(index))
                             .map(|region| (region.handle(), home))
                     }),
+                    seconds_since_epoch: i64::try_from(self.wall.unix_seconds())
+                        .unwrap_or(i64::MAX),
                 },
             );
         }
@@ -932,7 +936,7 @@ impl GridCore {
                     self.imitated
                         .region_capacity(region.config.product)
                         .land_impact,
-                    now_epoch_micros(),
+                    self.wall.unix_micros(),
                 ),
             ),
             now,
@@ -1492,6 +1496,8 @@ struct LoginPolicy<'grid> {
     /// The home the account set, and its region's handle; `None` until it
     /// has set one.
     home: Option<(sl_wire::RegionHandle, crate::agent_requests::StoredHome)>,
+    /// The grid's calendar time, as whole UNIX seconds.
+    seconds_since_epoch: i64,
 }
 
 /// Fills the optional login-response fields the fixtures can answer:
@@ -1509,6 +1515,7 @@ fn enrich_success(
         fields,
         packages,
         home,
+        seconds_since_epoch,
     } = policy;
     success.first_name = Some(account.config.first_name.clone());
     success.last_name = Some(account.config.last_name.clone());
@@ -1619,7 +1626,7 @@ fn enrich_success(
     // (`login-options`, 2026-10-04). The backend is named in
     // `SimulatorFeatures` instead.
     success.start_location = Some("last".to_owned());
-    success.seconds_since_epoch = Some(now_epoch_seconds());
+    success.seconds_since_epoch = Some(seconds_since_epoch);
 
     let (roots, skeleton) = skeleton_of(sim.agent_inventory());
     success.inventory_root = roots.first().copied();
@@ -1640,21 +1647,6 @@ fn enrich_success(
         .map_or(1, |folder| folder.version);
     let now = success.seconds_since_epoch.unwrap_or(0);
     fields.sections.fill(success, now, cof_version);
-}
-
-/// The wall-clock time as UNIX microseconds — what both live grids put in a
-/// time message's `usec_since_start`, whatever the field is called.
-fn now_epoch_micros() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |elapsed| u64::try_from(elapsed.as_micros()).unwrap_or(0))
-}
-
-/// The wall-clock time as UNIX seconds (the `seconds_since_epoch` field).
-fn now_epoch_seconds() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |elapsed| i64::try_from(elapsed.as_secs()).unwrap_or(0))
 }
 
 /// Derives the login-response skeleton from an inventory tree: the root
@@ -1757,6 +1749,10 @@ pub struct FakeGridBuilder {
     /// The clock every session machine is stamped from (the system clock
     /// unless [`FakeGridBuilder::clock`] replaced it).
     clock: Now,
+    /// The calendar instant the grid's wall clock starts at, when one was
+    /// named ([`FakeGridBuilder::epoch`]) or the grid is seeded; the
+    /// machine's time at the start otherwise.
+    epoch: Option<std::time::SystemTime>,
 }
 
 impl std::fmt::Debug for FakeGridBuilder {
@@ -1814,6 +1810,23 @@ impl FakeGridBuilder {
     #[must_use]
     pub fn deterministic(mut self, seed: u64) -> Self {
         self.minter = IdMinter::seeded(seed);
+        // The calendar too: a time read off the machine would be the one
+        // stamp two runs never agreed on.
+        if self.epoch.is_none() {
+            self.epoch = std::time::UNIX_EPOCH
+                .checked_add(Duration::from_secs(crate::time::SEEDED_EPOCH_SECONDS));
+        }
+        self
+    }
+
+    /// Starts the grid's wall clock at `epoch`: the calendar time it stamps
+    /// into a login, a time message, an instant message, a group notice and
+    /// an access pass, from which it moves as the grid's clock does
+    /// ([`crate::time::WallClock`]). The machine's time at the start unless
+    /// named, or [`crate::time::SEEDED_EPOCH_SECONDS`] on a seeded grid.
+    #[must_use]
+    pub const fn epoch(mut self, epoch: std::time::SystemTime) -> Self {
+        self.epoch = Some(epoch);
         self
     }
 
@@ -1839,6 +1852,7 @@ impl FakeGridBuilder {
             scenario: Scenario::default(),
             minter: IdMinter::default(),
             clock: system_clock(),
+            epoch: None,
             gates: LoginGates::default(),
             stale_presence: false,
             eq_hold: Duration::from_secs(30),
@@ -2221,6 +2235,10 @@ impl FakeGridBuilder {
         check_duplicates(&self.accounts, &self.regions)?;
         check_heartbeats(&self.regions)?;
         let minter = self.minter.clone();
+        let wall = crate::time::WallClock::starting_at(
+            Arc::clone(&self.clock),
+            self.epoch.unwrap_or_else(std::time::SystemTime::now),
+        );
         for account in &self.accounts {
             if let Some(region) = &account.start_region
                 && !self.regions.iter().any(|entry| entry.name == *region)
@@ -2295,6 +2313,7 @@ impl FakeGridBuilder {
                 fixtures.chat = self.imitates.chat_policy();
                 fixtures.region_info = self.imitates.region_info_policy();
                 fixtures.touches = crate::touches::Touches::new(self.imitates.touch_policy());
+                fixtures.wall = wall.clone();
                 fixtures.script_instances = crate::scripts::RegionScripts::new(
                     config.heartbeat.step,
                     self.imitates.script_engine(),
@@ -2473,6 +2492,7 @@ impl FakeGridBuilder {
             voice_backend: self
                 .voice_backend
                 .unwrap_or_else(|| self.imitates.voice_backend()),
+            wall,
             clock: self.clock,
             eq_hold: self.eq_hold,
             link_latency: self.link_latency,

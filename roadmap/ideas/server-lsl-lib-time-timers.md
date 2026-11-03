@@ -42,6 +42,10 @@ careful.
   at a constant for exactly this reason) and advances by the tick, so
   `llGetUnixTime` is a pure function of the seed and the tick count. A
   scenario may set the starting epoch; nothing reads the host clock.
+  (Since 2026-11-03 the epoch exists: the grid's `WallClock`, which
+  `FakeGridBuilder::epoch` sets and a seeded grid pins, with a copy in each
+  region's `SceneFixtures::wall` — read its time where the region started and
+  add the ticks; `book/src/simulator/determinism.md`.)
 - `llGetRegionTimeDilation` and `llGetRegionFPS`, answered from the
   heartbeat's own measurements rather than invented.
 

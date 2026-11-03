@@ -157,7 +157,13 @@ pub(crate) fn answer_parcel_edit(
             let allowed = world
                 .access_list(*local_id, ParcelAccessScope::Access)
                 .to_vec();
-            match land_sales::sell_pass(&parcel, &allowed, agent.agent_id, unix_now(), policy) {
+            match land_sales::sell_pass(
+                &parcel,
+                &allowed,
+                agent.agent_id,
+                world.wall.unix_seconds_i32(),
+                policy,
+            ) {
                 land_sales::PassAnswer::Sold { entry, told } => {
                     let held = world.access_list_mut(*local_id, ParcelAccessScope::Access);
                     held.retain(|kept| kept.id != entry.id);
@@ -735,14 +741,6 @@ fn hands_changed(
     resend_overlay(world, agent, sim, now);
     changes.push(RegionChange::OverlayChanged);
     changes
-}
-
-/// The Unix time now, in the `time_t` an access-list entry carries.
-fn unix_now() -> i32 {
-    let seconds = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |since| since.as_secs());
-    i32::try_from(seconds).unwrap_or(i32::MAX)
 }
 
 /// Re-sends a changed parcel's whole record to the editing client, under the

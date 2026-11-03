@@ -257,13 +257,6 @@ pub(crate) fn session_of(one: AgentKey, other: AgentKey) -> Uuid {
     Uuid::from_bytes(session)
 }
 
-/// The wall-clock time as UNIX seconds, as an instant message states it.
-pub(crate) fn now_epoch_seconds() -> u32 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |elapsed| u32::try_from(elapsed.as_secs()).unwrap_or(0))
-}
-
 /// Where an avatar is, as what it sends states it.
 #[derive(Debug, Clone)]
 pub(crate) struct Whereabouts {
@@ -362,13 +355,15 @@ pub(crate) fn folder_of_type(sim: &SimSession, folder_type: i8) -> Option<Invent
         .map(|folder| folder.folder_id)
 }
 
-/// A calling card for `of`, called `name`, in `owner`'s `folder`.
+/// A calling card for `of`, called `name`, in `owner`'s `folder`, made at
+/// `created` (UNIX seconds).
 fn calling_card(
     item_id: Uuid,
     folder: InventoryFolderKey,
     owner: AgentKey,
     of: AgentKey,
     name: &str,
+    created: i32,
 ) -> InventoryItem {
     InventoryItem {
         item_id: InventoryKey::from(item_id),
@@ -381,7 +376,7 @@ fn calling_card(
         flags: 0,
         sale_type: 0,
         sale_price: None,
-        creation_date: i32::try_from(now_epoch_seconds()).unwrap_or(i32::MAX),
+        creation_date: created,
         owner: OwnerKey::Agent(owner),
         last_owner_id: Uuid::nil(),
         creator_id: of,
@@ -687,7 +682,7 @@ async fn offer(core: &Arc<GridCore>, shared: &SharedSim, im: &InstantMessage) {
         // session of the two and the offerer's region and place instead.
         let message = InstantMessage {
             offline: true,
-            timestamp: Some(now_epoch_seconds()),
+            timestamp: Some(core.wall.unix_seconds_u32()),
             ..passed
         };
         let record = InstantMessage {
@@ -824,6 +819,7 @@ async fn befriend(core: &Arc<GridCore>, offer: Offer, folder: Option<InventoryFo
                     offer.from,
                     offer.to,
                     &accepter_name,
+                    core.wall.unix_seconds_i32(),
                 );
                 give_card(state, card, now);
             })
@@ -836,8 +832,14 @@ async fn befriend(core: &Arc<GridCore>, offer: Offer, folder: Option<InventoryFo
                     "a new friend online",
                 );
                 let folder = folder.unwrap_or_else(|| InventoryFolderKey::from(Uuid::nil()));
-                let card =
-                    calling_card(card_of_offerer, folder, offer.to, offer.from, &offerer_name);
+                let card = calling_card(
+                    card_of_offerer,
+                    folder,
+                    offer.to,
+                    offer.from,
+                    &offerer_name,
+                    core.wall.unix_seconds_i32(),
+                );
                 give_card(state, card, now);
             })
             .await;
@@ -1024,7 +1026,14 @@ async fn offer_card(
                     .unwrap_or_else(|| InventoryFolderKey::from(Uuid::nil()));
                 give_card(
                     state,
-                    calling_card(item, folder, to, from.agent, &from.name),
+                    calling_card(
+                        item,
+                        folder,
+                        to,
+                        from.agent,
+                        &from.name,
+                        core.wall.unix_seconds_i32(),
+                    ),
                     now,
                 );
                 warn_on(
@@ -1077,7 +1086,14 @@ async fn card_answered(
                 tell(core, agent, |state, now| {
                     give_card(
                         state,
-                        calling_card(item, folder, agent, card.from, &name),
+                        calling_card(
+                            item,
+                            folder,
+                            agent,
+                            card.from,
+                            &name,
+                            core.wall.unix_seconds_i32(),
+                        ),
                         now,
                     );
                 })

@@ -47,7 +47,7 @@ use uuid::Uuid;
 
 use crate::driver::{SharedSim, SimState};
 use crate::runtime::{GridCore, SessionRole};
-use crate::social::{Whereabouts, legacy_name, message_from, now_epoch_seconds, tell, warn_on};
+use crate::social::{Whereabouts, legacy_name, message_from, tell, warn_on};
 
 /// The power to deed an object to the group (`GP_OBJECT_DEED`).
 pub const POWER_OBJECT_DEED: u64 = 1 << 33;
@@ -831,7 +831,7 @@ async fn answer(core: &Arc<GridCore>, shared: &SharedSim, agent: AgentKey, event
                     .groups
                     .get(&group_id)
                     .map_or(0, |group| group.members.len());
-                let today = today();
+                let today = today(core);
                 let summary = GroupAccountSummary {
                     group_id,
                     request_id,
@@ -878,7 +878,7 @@ async fn answer(core: &Arc<GridCore>, shared: &SharedSim, agent: AgentKey, event
                     request_id,
                     interval_days,
                     current_interval,
-                    start_date: today(),
+                    start_date: today(core),
                     entries: Vec::new(),
                 };
                 let now = shared.now();
@@ -904,7 +904,7 @@ async fn answer(core: &Arc<GridCore>, shared: &SharedSim, agent: AgentKey, event
                     request_id,
                     interval_days,
                     current_interval,
-                    start_date: today(),
+                    start_date: today(core),
                     entries: Vec::new(),
                 };
                 let now = shared.now();
@@ -984,14 +984,16 @@ fn calendar(seconds: i64) -> Option<(String, String)> {
     Some((date, time))
 }
 
-/// Today, as the accounts state a date.
-fn today() -> String {
-    calendar(i64::from(now_epoch_seconds())).map_or_else(String::new, |(date, _time)| date)
+/// Today on the grid's wall clock, as the accounts state a date.
+fn today(core: &GridCore) -> String {
+    calendar(i64::try_from(core.wall.unix_seconds()).unwrap_or(i64::MAX))
+        .map_or_else(String::new, |(date, _time)| date)
 }
 
-/// Now, as a ban states when it was made: an ISO-8601 date and time.
-fn ban_date() -> String {
-    calendar(i64::from(now_epoch_seconds()))
+/// Now on the grid's wall clock, as a ban states when it was made: an
+/// ISO-8601 date and time.
+fn ban_date(core: &GridCore) -> String {
+    calendar(i64::try_from(core.wall.unix_seconds()).unwrap_or(i64::MAX))
         .map_or_else(String::new, |(date, time)| format!("{date}T{time}Z"))
 }
 
@@ -1906,7 +1908,7 @@ async fn post_notice(
             .map_or(im.message.as_str(), |(subject, _message)| subject)
             .to_owned(),
         text: im.message.clone(),
-        timestamp: now_epoch_seconds(),
+        timestamp: core.wall.unix_seconds_u32(),
         attachment,
     };
     let recipients: Vec<AgentKey> = {
@@ -2098,7 +2100,7 @@ async fn invite(
             // inviter's message about the group, from no region.
             let message = InstantMessage {
                 offline: true,
-                timestamp: Some(now_epoch_seconds()),
+                timestamp: Some(core.wall.unix_seconds_u32()),
                 ..message
             };
             let record = InstantMessage {
@@ -2258,7 +2260,7 @@ pub(crate) fn change_bans(
     let Some(group) = groups.groups.get_mut(&group_id) else {
         return;
     };
-    let date = ban_date();
+    let date = ban_date(core);
     for agent in agents {
         match action {
             GroupBanAction::Ban => {

@@ -424,7 +424,9 @@ fn offer_of(
     im: &InstantMessage,
     copy: Uuid,
 ) -> InstantMessage {
-    let mut offer = core.im_policy.passed_on(from, im);
+    let mut offer = core
+        .im_policy
+        .passed_on(from, im, core.wall.unix_seconds_u32());
     offer.id = match core.gift_policy.offer_id {
         OfferId::Transaction => im.id,
         OfferId::Copy => copy,

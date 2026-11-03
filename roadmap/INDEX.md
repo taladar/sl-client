@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 129 |
-| ready | 338 |
+| ready | 337 |
 | blocked | 40 |
 | in-progress | 18 |
 | bugs | 42 |
-| done | 1476 |
+| done | 1477 |
 | deferred | 30 |
 | wont-do | 24 |
 | **total** | **2097** |
@@ -284,7 +284,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `server-world-touch-and-grab` (done), `gridspec-lsl-detection-sensors` (done))
 - [`server-lsl-lib-http-url`](ideas/server-lsl-lib-http-url.md) — Library
   tranche — outbound HTTP and in-world URLs (blocked by
-  `server-lsl-vm-execution` (done), `server-world-determinism-contract`,
+  `server-lsl-vm-execution` (done), `server-world-determinism-contract` (done),
   `gridspec-lsl-http-url` (done))
 - [`server-lsl-lib-land-region-env`](ideas/server-lsl-lib-land-region-env.md) —
   Library tranche — parcel, region, estate and environment queries (blocked by
@@ -304,7 +304,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (done), `gridspec-lsl-task-inventory` (done))
 - [`server-lsl-lib-time-timers`](ideas/server-lsl-lib-time-timers.md) — Library
   tranche — time, timers and sleeping, on a tick clock (blocked by
-  `server-lsl-vm-execution` (done), `server-world-determinism-contract`,
+  `server-lsl-vm-execution` (done), `server-world-determinism-contract` (done),
   `gridspec-lsl-time-timers` (done))
 - [`server-map-service`](ideas/server-map-service.md) — Map service — tiles and
   map items
@@ -329,7 +329,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-lsl-opensim-function-set`](ideas/gridspec-lsl-opensim-function-set.md)
   — Measure which library functions OpenSim's engines compile
 
-## ready (338)
+## ready (337)
 
 ### protocol
 
@@ -1136,9 +1136,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-world-collision-and-physics`](ready/server-world-collision-and-physics.md)
   — Enough physics for the collision, target and volume-detect events (blocked
   by `server-world-heartbeat` (done), `server-world-ecs-store` (done))
-- [`server-world-determinism-contract`](ready/server-world-determinism-contract.md)
-  — Keep the fake grid reproducible once it runs scripts (blocked by
-  `server-world-heartbeat` (done))
 - [`server-world-update-scheduling`](ready/server-world-update-scheduling.md) —
   Batch world changes into per-tick update bursts (blocked by
   `server-world-heartbeat` (done), `server-world-ecs-store` (done),
@@ -1446,7 +1443,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1476)
+## done (1477)
 
 ### protocol
 
@@ -4548,6 +4545,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `server-fake-grid-script-engine-wiring` (done), `gridspec-lsl-events` (done))
 - [`server-world-chat-routing`](done/server-world-chat-routing.md) — The fake
   grid hears local chat and drops it
+- [`server-world-determinism-contract`](done/server-world-determinism-contract.md)
+  — Keep the fake grid reproducible once it runs scripts (blocked by
+  `server-world-heartbeat` (done))
 - [`server-world-ecs-store`](done/server-world-ecs-store.md) — An ECS scene
   store for the region, in place of a Vec of objects
 - [`server-world-heartbeat`](done/server-world-heartbeat.md) — A region

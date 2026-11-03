@@ -99,6 +99,15 @@ reason.
 Both `SimHook` and `SimEventHook` take that instant as a parameter — a
 hook that sends never has to reach for a clock of its own.
 
+Calendar time — a login's `seconds_since_epoch`, the time message, an instant
+message's or a group notice's date, an access pass's expiry — comes from the
+grid's `WallClock`: the calendar instant the grid started at, moved on by that
+same clock, so it pauses and skews with it. `FakeGridBuilder::epoch(time)`
+names the start; a seeded grid starts at `SEEDED_EPOCH_SECONDS`
+(2023-11-14T22:13:20Z), the machine's time at the start otherwise. What a
+running script may depend on is [the determinism
+contract](../simulator/determinism.md).
+
 ## The region heartbeat
 
 Every region has a loop of its own (`sl_fake_grid::heartbeat`), started

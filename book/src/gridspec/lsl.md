@@ -2309,7 +2309,7 @@ rotation.
 
 ### Numbers
 
-`math/functions`.
+`math/functions`, and `data/generate-key` for `llGenerateKey`.
 
 | what | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
@@ -2327,6 +2327,7 @@ rotation.
 | `llModPow(-2, 3, 7)`, `(2, -1, 7)`, `(2, 3, -7)` | 1, 1, 8: every operand read as an **unsigned** 32-bit integer | −1, 0, 1 | no scripts |
 | `llModPow(7, 1000000007, 1000000007)`, `(2147483647, 2147483647, 2147483646)`, `(3, 2147483647, 65537)` | 7, 1, 21846: exact | −291172004, −8, −32769: `Math.Pow` in a double, cut to a long | no scripts |
 | `llFrand(1.0)`, `(−1.0)`, `(0.0)` over 2000 draws | in (0, 1), in (−1, 0), always 0; no draw of the first two was 0 | the same | no scripts |
+| `llGenerateKey` over 200 keys (`data/generate-key`, 2026-11-03) | 128 random bits: **no digit fixed**, the version and variant digits through all sixteen values; lower case, none repeated | a version-4 uuid: the version digit `4`, the variant `8`–`b` | each flavour as its grid, drawn from the region's seed |
 | `llFabs(-0.0)`, `llSqrt(-0.0)` | `-0.000000` | `0.000000` | no scripts |
 
 ### Casts and conversions

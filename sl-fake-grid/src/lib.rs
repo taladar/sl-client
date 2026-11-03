@@ -114,7 +114,7 @@ pub use script_syntax::{LslSyntaxDocument, LslSyntaxPolicy};
 pub use scripts::{REGION_SOURCE, RegionScripts};
 pub use teleport::TELEPORT_ARRIVAL_TIMEOUT;
 pub use terrain::{Heightfield, TerrainFixture};
-pub use time::{Now, system_clock, tokio_clock};
+pub use time::{Now, SEEDED_EPOCH_SECONDS, WallClock, system_clock, tokio_clock};
 pub use timeline::{
     Action, At, EventPredicate, ObjectEdit, ParcelEdit, RegionEdit, Step, Timeline,
 };

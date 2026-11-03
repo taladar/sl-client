@@ -11,7 +11,7 @@
 //! range, a digit in the sixth decimal and a negative zero's sign come out
 //! differently though the function's formula is OpenSim's.
 
-use pretty_assertions::assert_eq;
+use pretty_assertions::{assert_eq, assert_ne};
 
 use super::strings::{hold, offline, probe_lines, replay};
 use super::*;
@@ -349,5 +349,66 @@ default
             .take(50)
             .any(|line| Some(line) != first.first())
     );
+    Ok(())
+}
+
+/// `data/generate-key` under `flavour` against `transcript`: the keys' shape,
+/// their fixed digits and that none repeats, all as the grid printed them.
+fn generate_key_holds(flavour: EngineFlavour, transcript: &str) -> Result<(), String> {
+    let source = offline(include_str!("../../../probes/data/generate-key.lsl"), "");
+    let (_host, ours) = replay(&source, flavour, 4000)?;
+    hold(&ours, &probe_lines(transcript), &[]);
+    Ok(())
+}
+
+#[test]
+fn llgeneratekey_shapes_its_keys_as_aditi_did() -> Result<(), String> {
+    generate_key_holds(
+        EngineFlavour::SecondLife,
+        include_str!("../../../probes/results/aditi/data/generate-key.txt"),
+    )
+}
+
+#[test]
+fn llgeneratekey_shapes_its_keys_as_yengine_did() -> Result<(), String> {
+    generate_key_holds(
+        EngineFlavour::YEngine,
+        include_str!("../../../probes/results/opensim-yengine/data/generate-key.txt"),
+    )
+}
+
+#[test]
+fn llgeneratekey_shapes_its_keys_as_xengine_did() -> Result<(), String> {
+    generate_key_holds(
+        EngineFlavour::XEngine,
+        include_str!("../../../probes/results/opensim-xengine/data/generate-key.txt"),
+    )
+}
+
+#[test]
+fn llgeneratekey_draws_the_same_keys_from_the_same_seed() -> Result<(), String> {
+    let source = r#"
+default
+{
+    state_entry()
+    {
+        print((string)llGenerateKey() + " " + (string)llGenerateKey());
+    }
+}"#;
+    let draws = || -> Result<Vec<String>, String> {
+        let mut engine = engine();
+        let mut host = Recorder::default();
+        let _none = engine.add(A, program(source)?);
+        let _reports = run(&mut engine, &mut host, 5);
+        Ok(host.texts(A).into_iter().map(str::to_owned).collect())
+    };
+    let first = draws()?;
+    assert_eq!(first.len(), 1);
+    assert_eq!(first, draws()?);
+    let (one, two) = first
+        .first()
+        .and_then(|line| line.split_once(' '))
+        .ok_or("two keys")?;
+    assert_ne!(one, two);
     Ok(())
 }

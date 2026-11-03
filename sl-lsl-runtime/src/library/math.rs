@@ -10,7 +10,7 @@
 
 use sl_types::lsl::Vector;
 
-use crate::library::{BuiltinId, CallError, Exception, PureCtx};
+use crate::library::{BuiltinId, CallError, Exception, Key, PureCtx};
 use crate::num::{double_to_long, float_to_int, integral_to_long, to_f32, wide_to_double};
 use crate::vm::ScriptCtx;
 
@@ -375,6 +375,38 @@ pub fn ll_frand(ctx: &mut ScriptCtx<'_>, magnitude: f32) -> Result<f32, CallErro
     }
     let unit = f64::from(ctx.random_bits() >> 8_u32) / SCALE;
     Ok(truncate_to_float(unit * f64::from(magnitude)))
+}
+
+/// `llGenerateKey`: a new key, drawn like `llFrand` from the region's seeded
+/// source and never from the machine, so a scenario run twice from one seed
+/// hands out the same keys.
+///
+/// Second Life's key is 128 bits with no digit fixed (`data/generate-key`:
+/// over 200 keys every position but the dashes varied, the version and
+/// variant digits among them through all sixteen values); OpenSim's is a
+/// version-4 uuid (`UUID.Random()`: the version digit always `4`, the
+/// variant digit `8` to `b`). Lower case on both.
+///
+/// # Errors
+///
+/// None; the signature is the library's.
+pub fn ll_generate_key(ctx: &mut ScriptCtx<'_>) -> Result<Key, CallError> {
+    /// The version digit, the uuid's thirteenth hex digit.
+    const VERSION: u128 = 0xF << 76_u32;
+    /// The variant's two top bits, at the seventeenth hex digit.
+    const VARIANT: u128 = 0x3 << 62_u32;
+    let mut bits = 0_u128;
+    for _ in 0..4 {
+        bits = (bits << 32_u32) | u128::from(ctx.random_bits());
+    }
+    if ctx.flavour().is_opensim() {
+        bits = (bits & !VERSION) | (0x4 << 76_u32);
+        bits = (bits & !VARIANT) | (0x2 << 62_u32);
+    }
+    let hex = format!("{bits:032x}");
+    let fields =
+        [0..8, 8..12, 12..16, 16..20, 20..32].map(|range| hex.get(range).unwrap_or_default());
+    Ok(Key(fields.join("-")))
 }
 
 /// Each component of `vector` through `curve`, in double, rounded to a float.

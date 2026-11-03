@@ -1,0 +1,13 @@
+grid: opensim-yengine
+date: 2026-11-03
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Default Region
+engine: YEngine
+settings: OpenSimDefaults.ini: [YEngine] MinTimerInterval=0.1; [XEngine] MinTimerInterval unset (LSL_Api default 0.5); ScriptDelayFactor=1.0, SensorMaxRange=96, SensorMaxResults=16, UseLlCastRayV3=false (defaults) on both; [YEngine] ScriptHeapSize=1024 KiB, ScriptStackSize=2048 KiB (defaults); OpenSim.ini [Network] OutboundDisallowForUserScriptsExcept=127.0.0.1:9000 (the simulator itself), [ScriptsHttpRequestModule] and llHTTPRequest limits at their defaults
+
+PROBE data/generate-key rec=start region="Default Region" channel="OpenSim" version="OpenSim 0.9.2.1 Yeti Dev   36f6d16 (Unix/Mono)"
+PROBE data/generate-key rec=shape count=200 length=36 upper=0 invalid=0 repeats=0
+PROBE data/generate-key rec=digits version="4" variant="89ab"
+PROBE data/generate-key rec=fixed mask="........-....-4...-....-............"
+PROBE data/generate-key rec=pair differ=1
+PROBE data/generate-key rec=end

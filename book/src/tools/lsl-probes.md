@@ -349,6 +349,9 @@ What has bitten already, and how a probe should be shaped for it:
   frame, so `llSleep(0.01)` takes 22 ms and `llSleep(0.05)` 67 ms
   (`time/timer-floor`, `time/sleep-lengths`). Time a sleep by
   `llGetTimestamp`'s microseconds, not by `llGetTime`.
+- **`!` takes no key on Second Life.** `if (!(key)k)` is a compile-time
+  `Type mismatch` there, where OpenSim's engines compile it; test a key with
+  `if ((key)k) {} else …` (`data/generate-key`).
 - **XEngine throws on a negative sleep.** `llSleep(-1.0)` is an
   `ArgumentOutOfRangeException` there, which ends the event
   (`time/sleep-negative`); the other grids return at once. A negative

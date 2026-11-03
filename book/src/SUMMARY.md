@@ -78,6 +78,7 @@
 ## Simulator
 
 - [LSL engine architecture](simulator/lsl-engine.md)
+- [Determinism](simulator/determinism.md)
 
 ## Authoring
 

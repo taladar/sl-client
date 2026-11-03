@@ -107,6 +107,7 @@ implemented llAcos
 implemented llAtan2
 implemented llModPow
 implemented llFrand
+implemented llGenerateKey
 implemented llVecMag
 implemented llVecDist
 implemented llVecNorm
