@@ -94,8 +94,13 @@ spawn instead of `DeferredFloaterContent`.
   - [[viewer-key-wearable-editor]] (`edit_wearable.rs`, `"wearable-editor"`) —
     bodyparts and clothing layers, keyed by item; the bake preview is the part
     that does not fall out of the pattern.
-  - [[viewer-key-material-editor]] (`edit_material_asset.rs`,
-    `"material-editor"`) — per material item.
+  - ~~[[viewer-key-material-editor]] (`edit_material_asset.rs`,
+    `"material-editor"`)~~ — **done** (2026-11-03), per material item; a
+    material embedded in a notecard is keyed by the notecard too, as About
+    Landmark keys an embedded landmark. The preview needed nothing: each
+    `MaterialPreview` node already gets a studio on a render layer of its own.
+    A landed save now rebinds the item's asset in the inventory model, closing
+    the stale-reopen gap the notecard and script editors had closed earlier.
   - [[viewer-key-object-contents]] (`edit_contents.rs`, `"object-contents"`) —
     per object, not per item: the window lists one object's inventory, and the
     Build tab's surface stays a singleton.

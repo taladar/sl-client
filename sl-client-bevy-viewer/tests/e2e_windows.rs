@@ -4,6 +4,9 @@
 //!
 //! - the notecard and script windows' text bodies grow with the window when
 //!   it is resized;
+//! - each material edits in a window of its own: an unsaved edit survives a
+//!   second material opening and a re-open, Save reports where it was pressed,
+//!   and a saved material re-opens as saved;
 //! - the Build window's material controls grey on a prim the agent may not
 //!   modify, and stay live on one it may;
 //! - About Region's Experiences tab pins the estate's default experience to
@@ -91,6 +94,15 @@ mod test {
     /// The landmark the agent owns, onto the home region.
     const LANDMARK: (u128, &str) = (0x57A6_E1E0_0003, "Stage Landmark");
 
+    /// The first material the agent owns, on the stock material asset.
+    const MATERIAL_A: (u128, &str) = (0x57A6_E1E0_0004, "Stage Material A");
+
+    /// The second material the agent owns, on an asset of its own.
+    const MATERIAL_B: (u128, &str) = (0x57A6_E1E0_0005, "Stage Material B");
+
+    /// The second material's asset.
+    const MATERIAL_B_ASSET: u128 = 0x57A6_E1A5_0005;
+
     /// The landmark's asset: the home region at [`LANDMARK_AT`].
     const LANDMARK_ASSET: u128 = 0x57A6_E1A5_0003;
 
@@ -162,8 +174,8 @@ mod test {
     }
 
     /// What the agent owns beyond the stock fixtures: a notecard and a script
-    /// it may edit, a landmark onto the home region, and one clothing item per
-    /// layer.
+    /// it may edit, a landmark onto the home region, two materials on two
+    /// assets, and one clothing item per layer.
     fn own_items(agent: AgentKey) -> Vec<InventoryItem> {
         let mut items = vec![
             own_item(
@@ -188,6 +200,22 @@ mod test {
                 LANDMARK.1,
                 Uuid::from_u128(LANDMARK_ASSET),
                 (AssetType::Landmark, InventoryType::Landmark),
+                0,
+            ),
+            own_item(
+                agent,
+                MATERIAL_A.0,
+                MATERIAL_A.1,
+                fixture_id(AssetType::Material),
+                (AssetType::Material, InventoryType::Material),
+                0,
+            ),
+            own_item(
+                agent,
+                MATERIAL_B.0,
+                MATERIAL_B.1,
+                Uuid::from_u128(MATERIAL_B_ASSET),
+                (AssetType::Material, InventoryType::Material),
                 0,
             ),
         ];
@@ -216,6 +244,10 @@ mod test {
         let _replaced = scenario.assets.insert(
             AssetKey::from(Uuid::from_u128(LANDMARK_ASSET)),
             landmark_to_wire(Uuid::from_u128(HOME_ID), RegionCoordinates::new(x, y, z)),
+        );
+        let _replaced = scenario.assets.insert(
+            AssetKey::from(Uuid::from_u128(MATERIAL_B_ASSET)),
+            sl_test_assets::gltf_material_asset([0.0, 1.0, 0.0, 1.0], None),
         );
         if let Some(parcel) = scenario.world.parcels.first_mut() {
             parcel.snapshot_id = Some(TextureKey::from(fixture_id(AssetType::Texture)));
@@ -310,11 +342,16 @@ mod test {
         Ok(())
     }
 
-    /// The inventory window, open and searched for `term`.
+    /// The inventory window, open and searched for `term`. It opens from the
+    /// toolbar button rather than Ctrl+I, which a focused text field keeps.
     async fn inventory(alpha: &Viewer, term: &str) -> Result<UiLocator, BodyError> {
         let inventory = alpha.ui().window("inventory");
         if !inventory.is_visible().await? {
-            alpha.press("Ctrl+I").await?;
+            let _clicked = alpha
+                .ui()
+                .test_id("bottom-toolbar-button:toggle-inventory")
+                .click()
+                .await?;
             let _shown = alpha.expect(&inventory).to_be_visible().await?;
         }
         let _searched = inventory
@@ -507,6 +544,108 @@ mod test {
                     Ok(())
                 })?;
         }
+        Ok(())
+    }
+
+    // ---- One material window per material -----------------------------------
+
+    /// Open the material `(id, name)` from its inventory row's Edit, close the
+    /// inventory so it covers nothing, and return the material's window once
+    /// its controls have built (the asset has decoded).
+    async fn open_material(
+        alpha: &Viewer,
+        (id, name): (u128, &str),
+    ) -> Result<UiLocator, BodyError> {
+        inventory_item_menu(alpha, "Materials", name, "menu-inv-edit").await?;
+        close_window(alpha, &alpha.ui().window("inventory")).await?;
+        let window = alpha
+            .ui()
+            .window(&format!("material-editor#{}", Uuid::from_u128(id)));
+        let _built = alpha
+            .expect(&window.test_id("material-metallic:field"))
+            .timeout(WAIT)
+            .to_be_visible()
+            .await?;
+        Ok(window)
+    }
+
+    /// The number `window`'s metallic factor spinner holds (its text is its
+    /// label).
+    async fn metallic_of(window: &UiLocator) -> Result<f32, BodyError> {
+        match window.test_id("material-metallic:field").value().await? {
+            Some(sl_automation_proto::NodeValue::Number(value)) => Ok(value),
+            other => Err(format!("the metallic field holds no number: {other:?}").into()),
+        }
+    }
+
+    /// Whether the metallic factor `value` is the 0.25 the test types.
+    fn is_typed_metallic(value: f32) -> bool {
+        (value - 0.25).abs() < 1e-3
+    }
+
+    /// **One window per material** (`viewer-key-material-editor`): two
+    /// materials open two windows; an unsaved edit in the first survives
+    /// opening the second and re-opening the first, and does not show in the
+    /// second; Save reports in the window that saved; closing one leaves the
+    /// other; and a saved material re-opens as it was saved, not as it was
+    /// before.
+    #[test]
+    fn each_material_edits_in_a_window_of_its_own() -> Result<(), TestError> {
+        stage("material_window_per_material")
+            .region(home())
+            .run(async |stage: &Stage| {
+                let alpha = &stage.viewer("Alpha")?;
+                let first = open_material(alpha, MATERIAL_A).await?;
+                let metallic = first.test_id("material-metallic:field");
+                let _typed = metallic.fill("0.25").await?;
+                metallic.press("Enter").await?;
+
+                let second = open_material(alpha, MATERIAL_B).await?;
+                let _kept = alpha.expect(&metallic).to_contain_text("0.25").await?;
+                let other = metallic_of(&second).await?;
+                assert!(
+                    !is_typed_metallic(other),
+                    "the second material's window shows the first's edit: {other:?}"
+                );
+
+                // Re-opening the first raises it; it must not reload over the
+                // edit nobody has saved.
+                let again = open_material(alpha, MATERIAL_A).await?;
+                let _still = alpha
+                    .expect(&again.test_id("material-metallic:field"))
+                    .to_contain_text("0.25")
+                    .await?;
+                let _both = alpha.expect(&second).to_be_visible().await?;
+
+                let _saved = first.test_id("material-button:Save").click().await?;
+                let _reported = alpha
+                    .expect(&first.test_id("material-status"))
+                    .timeout(WAIT)
+                    .to_have_text("Saved.")
+                    .await?;
+                // An empty status line is no node at all, so the window that
+                // did not save shows none.
+                let quiet = second.test_id("material-status").count().await?;
+                assert_eq!(
+                    quiet, 0,
+                    "the save reported in the window that did not save"
+                );
+
+                close_window(alpha, &first).await?;
+                let _left = alpha.expect(&second).to_be_visible().await?;
+
+                // A fresh window on the saved material loads what the save
+                // wrote, not the asset the item had before it.
+                let reopened = open_material(alpha, MATERIAL_A).await?;
+                let saved = metallic_of(&reopened).await?;
+                assert!(
+                    is_typed_metallic(saved),
+                    "the saved material re-opened as it was before the save: {saved:?}"
+                );
+                close_window(alpha, &reopened).await?;
+                close_window(alpha, &second).await?;
+                Ok(())
+            })?;
         Ok(())
     }
 

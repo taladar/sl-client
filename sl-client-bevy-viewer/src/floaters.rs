@@ -253,7 +253,9 @@ pub const FLOATERS: &[FloaterElement] = &[
     FloaterElement {
         id: "material-editor",
         summary: "Edit Material: the GLTF material asset editor — the base-colour, metallic / \
-                  roughness, normal and emissive channels with their texture swatches.",
+                  roughness, normal and emissive channels with their texture swatches. One \
+                  window per material, so a second one cannot discard the first's unsaved \
+                  edit.",
         spec: crate::edit_material_asset::material_editor_floater_spec,
         content: crate::edit_material_asset::spawn_material_editor_specimen,
     },
