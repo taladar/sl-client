@@ -56,6 +56,7 @@ use sl_viewer_ui_core::ui_font::UiFont;
 use sl_viewer_ui_core::ui_spawn::{self, ButtonKind, ButtonSpec, UiLabel};
 use sl_viewer_ui_widgets::ui_slider::{SliderStyle, SliderWidgetPlugin, spawn_slider};
 use sl_viewer_ui_widgets::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
+use sl_viewer_world_api::FLAGS_OBJECT_YOU_OWNER;
 use sl_viewer_world_api::MediaFocus;
 use sl_viewer_world_api::MediaTarget;
 use sl_viewer_world_api::ObjectState;
@@ -67,9 +68,6 @@ pub const MEDIA_CONTROLS_ELEMENT: &str = "media-controls";
 /// Seconds without pointer activity before the bar hides (the reference's
 /// `MediaControlTimeout`).
 const INACTIVITY_HIDE_SECONDS: f32 = 3.0;
-
-/// The `FLAGS_OBJECT_YOU_OWNER` update-flags bit (the agent owns the object).
-const FLAGS_OBJECT_YOU_OWNER: u32 = 1 << 5;
 
 /// `MediaEntry::controls` value for the reduced (mini) control set.
 const CONTROLS_MINI: i32 = 1;

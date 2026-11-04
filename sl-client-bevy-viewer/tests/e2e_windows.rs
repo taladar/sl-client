@@ -4,6 +4,12 @@
 //!
 //! - the notecard and script windows' text bodies grow with the window when
 //!   it is resized;
+//! - each material edits in a window of its own: an unsaved edit survives a
+//!   second material opening and a re-open, Save reports where it was pressed,
+//!   and a saved material re-opens as saved;
+//! - each worn wearable edits in a window of its own: an unsaved slider move
+//!   survives a second wearable opening and a re-open, and Save reports in
+//!   the window that saved;
 //! - the Build window's material controls grey on a prim the agent may not
 //!   modify, and stay live on one it may;
 //! - About Region's Experiences tab pins the estate's default experience to
@@ -37,7 +43,7 @@ mod test {
 
     use pretty_assertions::assert_eq;
     use serde_json::json;
-    use sl_automation_proto::{Bounds, InventoryRoot, Locator, Probe, Role};
+    use sl_automation_proto::{Bounds, InventoryRoot, Locator, NodeState, Probe, Role};
     use sl_e2e::{BodyError, Grid, Need, Stage, StageBuilder};
     use sl_fake_grid::scenario::{Scenario, class_folder};
     use sl_fake_grid::{ImitatedGrid, RegionConfig};
@@ -90,6 +96,15 @@ mod test {
 
     /// The landmark the agent owns, onto the home region.
     const LANDMARK: (u128, &str) = (0x57A6_E1E0_0003, "Stage Landmark");
+
+    /// The first material the agent owns, on the stock material asset.
+    const MATERIAL_A: (u128, &str) = (0x57A6_E1E0_0004, "Stage Material A");
+
+    /// The second material the agent owns, on an asset of its own.
+    const MATERIAL_B: (u128, &str) = (0x57A6_E1E0_0005, "Stage Material B");
+
+    /// The second material's asset.
+    const MATERIAL_B_ASSET: u128 = 0x57A6_E1A5_0005;
 
     /// The landmark's asset: the home region at [`LANDMARK_AT`].
     const LANDMARK_ASSET: u128 = 0x57A6_E1A5_0003;
@@ -162,8 +177,8 @@ mod test {
     }
 
     /// What the agent owns beyond the stock fixtures: a notecard and a script
-    /// it may edit, a landmark onto the home region, and one clothing item per
-    /// layer.
+    /// it may edit, a landmark onto the home region, two materials on two
+    /// assets, and one clothing item per layer.
     fn own_items(agent: AgentKey) -> Vec<InventoryItem> {
         let mut items = vec![
             own_item(
@@ -188,6 +203,22 @@ mod test {
                 LANDMARK.1,
                 Uuid::from_u128(LANDMARK_ASSET),
                 (AssetType::Landmark, InventoryType::Landmark),
+                0,
+            ),
+            own_item(
+                agent,
+                MATERIAL_A.0,
+                MATERIAL_A.1,
+                fixture_id(AssetType::Material),
+                (AssetType::Material, InventoryType::Material),
+                0,
+            ),
+            own_item(
+                agent,
+                MATERIAL_B.0,
+                MATERIAL_B.1,
+                Uuid::from_u128(MATERIAL_B_ASSET),
+                (AssetType::Material, InventoryType::Material),
                 0,
             ),
         ];
@@ -216,6 +247,10 @@ mod test {
         let _replaced = scenario.assets.insert(
             AssetKey::from(Uuid::from_u128(LANDMARK_ASSET)),
             landmark_to_wire(Uuid::from_u128(HOME_ID), RegionCoordinates::new(x, y, z)),
+        );
+        let _replaced = scenario.assets.insert(
+            AssetKey::from(Uuid::from_u128(MATERIAL_B_ASSET)),
+            sl_test_assets::gltf_material_asset([0.0, 1.0, 0.0, 1.0], None),
         );
         if let Some(parcel) = scenario.world.parcels.first_mut() {
             parcel.snapshot_id = Some(TextureKey::from(fixture_id(AssetType::Texture)));
@@ -310,11 +345,16 @@ mod test {
         Ok(())
     }
 
-    /// The inventory window, open and searched for `term`.
+    /// The inventory window, open and searched for `term`. It opens from the
+    /// toolbar button rather than Ctrl+I, which a focused text field keeps.
     async fn inventory(alpha: &Viewer, term: &str) -> Result<UiLocator, BodyError> {
         let inventory = alpha.ui().window("inventory");
         if !inventory.is_visible().await? {
-            alpha.press("Ctrl+I").await?;
+            let _clicked = alpha
+                .ui()
+                .test_id("bottom-toolbar-button:toggle-inventory")
+                .click()
+                .await?;
             let _shown = alpha.expect(&inventory).to_be_visible().await?;
         }
         let _searched = inventory
@@ -507,6 +547,264 @@ mod test {
                     Ok(())
                 })?;
         }
+        Ok(())
+    }
+
+    // ---- One material window per material -----------------------------------
+
+    /// Open the material `(id, name)` from its inventory row's Edit, close the
+    /// inventory so it covers nothing, and return the material's window once
+    /// its controls have built (the asset has decoded).
+    async fn open_material(
+        alpha: &Viewer,
+        (id, name): (u128, &str),
+    ) -> Result<UiLocator, BodyError> {
+        inventory_item_menu(alpha, "Materials", name, "menu-inv-edit").await?;
+        close_window(alpha, &alpha.ui().window("inventory")).await?;
+        let window = alpha
+            .ui()
+            .window(&format!("material-editor#{}", Uuid::from_u128(id)));
+        let _built = alpha
+            .expect(&window.test_id("material-metallic:field"))
+            .timeout(WAIT)
+            .to_be_visible()
+            .await?;
+        Ok(window)
+    }
+
+    /// The number `window`'s metallic factor spinner holds (its text is its
+    /// label).
+    async fn metallic_of(window: &UiLocator) -> Result<f32, BodyError> {
+        match window.test_id("material-metallic:field").value().await? {
+            Some(sl_automation_proto::NodeValue::Number(value)) => Ok(value),
+            other => Err(format!("the metallic field holds no number: {other:?}").into()),
+        }
+    }
+
+    /// Whether the metallic factor `value` is the 0.25 the test types.
+    fn is_typed_metallic(value: f32) -> bool {
+        (value - 0.25).abs() < 1e-3
+    }
+
+    /// **One window per material** (`viewer-key-material-editor`): two
+    /// materials open two windows; an unsaved edit in the first survives
+    /// opening the second and re-opening the first, and does not show in the
+    /// second; Save reports in the window that saved; closing one leaves the
+    /// other; and a saved material re-opens as it was saved, not as it was
+    /// before.
+    #[test]
+    fn each_material_edits_in_a_window_of_its_own() -> Result<(), TestError> {
+        stage("material_window_per_material")
+            .region(home())
+            .run(async |stage: &Stage| {
+                let alpha = &stage.viewer("Alpha")?;
+                let first = open_material(alpha, MATERIAL_A).await?;
+                let metallic = first.test_id("material-metallic:field");
+                let _typed = metallic.fill("0.25").await?;
+                metallic.press("Enter").await?;
+
+                let second = open_material(alpha, MATERIAL_B).await?;
+                let _kept = alpha.expect(&metallic).to_contain_text("0.25").await?;
+                let other = metallic_of(&second).await?;
+                assert!(
+                    !is_typed_metallic(other),
+                    "the second material's window shows the first's edit: {other:?}"
+                );
+
+                // Re-opening the first raises it; it must not reload over the
+                // edit nobody has saved.
+                let again = open_material(alpha, MATERIAL_A).await?;
+                let _still = alpha
+                    .expect(&again.test_id("material-metallic:field"))
+                    .to_contain_text("0.25")
+                    .await?;
+                let _both = alpha.expect(&second).to_be_visible().await?;
+
+                let _saved = first.test_id("material-button:Save").click().await?;
+                let _reported = alpha
+                    .expect(&first.test_id("material-status"))
+                    .timeout(WAIT)
+                    .to_have_text("Saved.")
+                    .await?;
+                // An empty status line is no node at all, so the window that
+                // did not save shows none.
+                let quiet = second.test_id("material-status").count().await?;
+                assert_eq!(
+                    quiet, 0,
+                    "the save reported in the window that did not save"
+                );
+
+                close_window(alpha, &first).await?;
+                let _left = alpha.expect(&second).to_be_visible().await?;
+
+                // A fresh window on the saved material loads what the save
+                // wrote, not the asset the item had before it.
+                let reopened = open_material(alpha, MATERIAL_A).await?;
+                let saved = metallic_of(&reopened).await?;
+                assert!(
+                    is_typed_metallic(saved),
+                    "the saved material re-opened as it was before the save: {saved:?}"
+                );
+                close_window(alpha, &reopened).await?;
+                close_window(alpha, &second).await?;
+                Ok(())
+            })?;
+        Ok(())
+    }
+
+    // ---- One wearable window per wearable ------------------------------------
+
+    /// The `avatar_lad` id of the shirt's Sleeve Length slider.
+    const SLEEVE_LENGTH: i32 = 800;
+
+    /// The `avatar_lad` id of the pants' Pants Length slider.
+    const PANTS_LENGTH: i32 = 815;
+
+    /// The id of the clothing item of `layer`.
+    fn layer_item_id(layer: WearableType) -> Result<u128, BodyError> {
+        let index = LAYERS
+            .iter()
+            .position(|(each, _glyph)| *each == layer)
+            .ok_or_else(|| format!("no stage item for {layer:?}"))?;
+        Ok(FIRST_LAYER_ITEM.saturating_add(u128::try_from(index)?))
+    }
+
+    /// Put on the stage's clothing item of `layer` from its inventory row.
+    async fn wear(alpha: &Viewer, layer: WearableType) -> Result<(), BodyError> {
+        inventory_item_menu(alpha, "Clothing", &layer_item_name(layer), "menu-inv-wear").await
+    }
+
+    /// Open the editor on the worn clothing item of `layer` from the Edit of
+    /// the `row`th inventory row of its name, close the inventory so it covers
+    /// nothing, and return the item's window once its slider `param` shows.
+    ///
+    /// A worn item is listed twice: in its own folder, and as the Current
+    /// Outfit Folder's link to it. Both rows edit the item.
+    async fn open_wearable(
+        alpha: &Viewer,
+        (layer, row): (WearableType, u32),
+        param: i32,
+    ) -> Result<UiLocator, BodyError> {
+        let name = layer_item_name(layer);
+        let inventory = inventory(alpha, &name).await?;
+        item_known(alpha, "Clothing", &name).await?;
+        let edit = alpha
+            .ui()
+            .locator(Locator::role(Role::MenuItem).name_key("menu-inv-edit"));
+        // Edit is offered once the outfit says the item is worn, which follows
+        // the Wear a moment later: open the menu until it is.
+        let started = tokio::time::Instant::now();
+        loop {
+            let _menu = item_row(&inventory, &name).nth(row).right_click().await?;
+            let enabled = alpha.expect(&edit).timeout(WAIT).to_be_visible().await?;
+            if enabled
+                .first()
+                .is_some_and(|node| !node.has_state(NodeState::Disabled))
+            {
+                break;
+            }
+            alpha.press("Escape").await?;
+            if started.elapsed() > WAIT {
+                return Err(format!("{name} never became editable: is it worn?").into());
+            }
+            tokio::time::sleep(Duration::from_millis(250)).await;
+        }
+        let _picked = edit.click().await?;
+        close_window(alpha, &inventory).await?;
+        let window = alpha.ui().window(&format!(
+            "wearable-editor#{}",
+            Uuid::from_u128(layer_item_id(layer)?)
+        ));
+        let _built = alpha
+            .expect(&window.test_id(&format!("wearable-slider:{param}")))
+            .timeout(WAIT)
+            .to_be_visible()
+            .await?;
+        Ok(window)
+    }
+
+    /// The value `window`'s slider for `param` holds.
+    async fn slider_of(window: &UiLocator, param: i32) -> Result<f32, BodyError> {
+        match window
+            .test_id(&format!("wearable-slider:{param}"))
+            .value()
+            .await?
+        {
+            Some(sl_automation_proto::NodeValue::Number(value)) => Ok(value),
+            other => Err(format!("slider {param} holds no number: {other:?}").into()),
+        }
+    }
+
+    /// **One window per wearable** (`viewer-key-wearable-editor`): two worn
+    /// wearables open two windows; a slider moved in the first and not saved
+    /// survives opening the second and re-opening the first; Save reports in
+    /// the window that saved; and closing one leaves the other.
+    #[test]
+    fn each_wearable_edits_in_a_window_of_its_own() -> Result<(), TestError> {
+        stage("wearable_window_per_wearable")
+            .region(home())
+            .run(async |stage: &Stage| {
+                let alpha = &stage.viewer("Alpha")?;
+                wear(alpha, WearableType::Shirt).await?;
+                wear(alpha, WearableType::Pants).await?;
+
+                let shirt = open_wearable(alpha, (WearableType::Shirt, 0), SLEEVE_LENGTH).await?;
+                let before = slider_of(&shirt, SLEEVE_LENGTH).await?;
+                shirt
+                    .test_id(&format!("wearable-slider:{SLEEVE_LENGTH}"))
+                    .press("End")
+                    .await?;
+                let moved = slider_of(&shirt, SLEEVE_LENGTH).await?;
+                assert!(
+                    (moved - before).abs() > 1e-3,
+                    "End did not move the sleeve slider from {before}"
+                );
+
+                let pants = open_wearable(alpha, (WearableType::Pants, 0), PANTS_LENGTH).await?;
+                let _both = alpha.expect(&shirt).to_be_visible().await?;
+                let kept = slider_of(&shirt, SLEEVE_LENGTH).await?;
+                assert!(
+                    (kept - moved).abs() < 1e-3,
+                    "opening the pants reset the shirt's unsaved edit: {moved} -> {kept}"
+                );
+
+                // Re-opening the shirt — from its other row, so the item's
+                // own row and its outfit link both — raises its one window; it
+                // must not re-seed over the edit nobody has saved.
+                let again = open_wearable(alpha, (WearableType::Shirt, 1), SLEEVE_LENGTH).await?;
+                let windows = alpha
+                    .ui()
+                    .locator(Locator::role(Role::Window).named("Edit: Stage Shirt Layer"))
+                    .count()
+                    .await?;
+                assert_eq!(windows, 1, "the shirt's two rows opened two windows");
+                let still = slider_of(&again, SLEEVE_LENGTH).await?;
+                assert!(
+                    (still - moved).abs() < 1e-3,
+                    "re-opening the shirt reset its unsaved edit: {moved} -> {still}"
+                );
+
+                let _saved = shirt.test_id("wearable-button:Save").click().await?;
+                let _reported = alpha
+                    .expect(&shirt.test_id("wearable-status"))
+                    .timeout(WAIT)
+                    .to_have_text("Saved.")
+                    .await?;
+                // An empty status line is no node at all, so the window that
+                // did not save shows none.
+                let quiet = pants.test_id("wearable-status").count().await?;
+                assert_eq!(
+                    quiet, 0,
+                    "the save reported in the window that did not save"
+                );
+
+                // The shirt is in front (its re-open raised it), and saved, so
+                // its close asks nothing.
+                close_window(alpha, &shirt).await?;
+                let _left = alpha.expect(&pants).to_be_visible().await?;
+                close_window(alpha, &pants).await?;
+                Ok(())
+            })?;
         Ok(())
     }
 

@@ -309,6 +309,7 @@ mod tests {
             hover_text: None,
             name_tag: None,
             bakes: Vec::new(),
+            behaviour: sl_automation_proto::ObjectBehaviour::default(),
         };
         assert_eq!(found, vec![expected]);
         assert!(

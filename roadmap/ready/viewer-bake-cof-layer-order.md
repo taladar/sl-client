@@ -11,13 +11,23 @@ refs: [viewer-inventory-cof-maintenance, viewer-outfit-layer-reorder]
 Context: [context/viewer.md](../context/viewer.md).
 
 The **client-side compositor** (the P15.3 composite used where there
-is no server bake, i.e. OpenSim) currently stacks same-type clothing
-layers in held wear-set order. Sort them by the COF links' ordering
-tokens instead (`@type*100+index`, parsed by
-`parse_order_token`) when a COF with tokens is present — so our own
-render agrees with what the SL bake service (which reads the same
-tokens) would produce, and with other viewers. Falls back to the
-wear-set order when there is no COF or no tokens (plain OpenSim).
+is no server bake, i.e. OpenSim, and for the appearance editor's preview
+everywhere) draws every worn wearable of a type, in the order the bake
+inputs hold them — bottom first (`sl-bake` `WornLayer`, since
+2026-11-04; before that it drew only the first of each type, which is
+why this ordering never showed).
 
-Touches: `bake_inputs.rs` (layer collection order); the token helpers
-live in `inventory_actions.rs`.
+Where that order comes from:
+
+- **Second Life** answers `AgentWearablesRequest` with placeholders, so
+  the outfit is read from the Current Outfit Folder, already sorted by
+  the links' ordering tokens (`@type*100+index`, `cof_wearables` in
+  `bake_inputs.rs`). Done.
+- **OpenSim** answers with the outfit it holds, in its own wear-set
+  order, and the COF is not consulted. **This is what is left:** when a
+  COF with tokens is present there, order the held wear set by them —
+  so our own render agrees with what the SL bake service (which reads
+  the same tokens) would produce, and with other viewers. Fall back to
+  the wear-set order when there is no COF or no tokens (plain OpenSim).
+
+Touches: `bake_inputs.rs` (outfit order: `take_outfit` / `CofOutfit`).

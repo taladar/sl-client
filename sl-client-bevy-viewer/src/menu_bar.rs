@@ -36,6 +36,7 @@
 
 use bevy::prelude::*;
 
+use crate::avatar_menu::{SELF_SITTING, SELF_STANDING, self_sitting, sit_down, stand_up};
 use crate::floater::toggle_floater;
 use crate::menu::{
     MenuBarDef, MenuCommand, MenuConditions, MenuDef, MenuItemDef, PrimaryMenuBar,
@@ -259,6 +260,28 @@ const fn rlv_master_toggle(label: &'static str) -> MenuItemDef {
     MenuItemDef::Command(MenuCommand::new(label, SETTING_MAIN).checked_when(RLV_ENABLED))
 }
 
+/// The Avatar ▸ **Movement** submenu — the reference's `Movement` under its
+/// avatar menu, with the entries that have a live target today: **Sit Down**
+/// (on the ground) and **Stand Up**. They share the reference's `Alt+Shift+S`
+/// and only one is ever drawn — Sit Down while standing, Stand Up while
+/// sitting (`Self.ShowSitDown` / `Self.ShowStandUp`) — so the chord is a
+/// sit/stand toggle, as the reference's is.
+static MOVEMENT_MENU: MenuDef = MenuDef {
+    label_key: "menu-bar-movement",
+    items: &[
+        MenuItemDef::Command(
+            MenuCommand::new("menu-bar-sit-down", "sit-ground")
+                .accel("Alt+Shift+S")
+                .visible_when(SELF_STANDING),
+        ),
+        MenuItemDef::Command(
+            MenuCommand::new("menu-bar-stand-up", "stand")
+                .accel("Alt+Shift+S")
+                .visible_when(SELF_SITTING),
+        ),
+    ],
+};
+
 /// The Avatar (Me) menu — the entries with a live target today.
 static AVATAR_MENU: MenuDef = MenuDef {
     label_key: "menu-bar-avatar",
@@ -277,6 +300,7 @@ static AVATAR_MENU: MenuDef = MenuDef {
             MenuCommand::new("menu-bar-experiences", "toggle-experiences")
                 .checked_when(EXPERIENCES_OPEN),
         ),
+        MenuItemDef::Submenu(&MOVEMENT_MENU),
         MenuItemDef::Separator,
         MenuItemDef::Command(MenuCommand::new("menu-bar-quit", "quit").accel("Ctrl+Q")),
     ],
@@ -910,6 +934,10 @@ impl Plugin for TopMenuBarPlugin {
             // Likewise the flycam toggle, which the camera plugin registers and a
             // menu-only fold does not mount.
             .add_message::<crate::world_api::ToggleFlycam>()
+            // And the wire Sit Down / Stand Up write to, and the ground sit
+            // they record (the avatar menu's, which a menu-only fold lacks).
+            .add_message::<sl_client_bevy::SlCommand>()
+            .init_resource::<crate::world_api::SelfGroundSit>()
             .add_systems(
                 Startup,
                 spawn_top_menu_bar.after(UiScaffoldSystems::SpawnRoot),
@@ -996,6 +1024,21 @@ struct TopMenuFacts<'w> {
     bulk_import: Option<Res<'w, crate::bulk_import::BulkImportRun>>,
     /// The camera mode, for the flycam toggle.
     camera_mode: Option<Res<'w, crate::world_api::CameraMode>>,
+    /// Whether the own avatar sits on an object, for Sit Down / Stand Up.
+    parcel: Option<Res<'w, sl_client_bevy::SlAgentParcel>>,
+    /// Whether it sits on the ground, likewise.
+    ground_sit: Res<'w, crate::world_api::SelfGroundSit>,
+}
+
+/// What Avatar ▸ Movement's Sit Down / Stand Up act on, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the tracked ground sit and
+/// the wire.
+#[derive(bevy::ecs::system::SystemParam)]
+struct TopMenuSit<'w> {
+    /// The ground sit the two entries record, as the self pie's do.
+    ground_sit: ResMut<'w, crate::world_api::SelfGroundSit>,
+    /// The wire.
+    commands: MessageWriter<'w, sl_client_bevy::SlCommand>,
 }
 
 /// The mutable state a top-menu action flips, bundled as one
@@ -1055,6 +1098,8 @@ fn update_top_menu_conditions(
         rlv_session,
         bulk_import,
         camera_mode,
+        parcel,
+        ground_sit,
     } = facts;
     // A floater's open state, resolved by stable id — not through its module's
     // `XUi` resource, which a lazily-built floater only gains on first open.
@@ -1136,6 +1181,12 @@ fn update_top_menu_conditions(
     if render_settings_open {
         wanted.push(AVATAR_RENDER_SETTINGS_OPEN);
     }
+    // Avatar ▸ Movement draws exactly one of Sit Down / Stand Up. No session
+    // reads as standing, which is what a logged-out viewer is.
+    let sitting = parcel
+        .as_deref()
+        .is_some_and(|parcel| self_sitting(parcel, &ground_sit));
+    wanted.push(if sitting { SELF_SITTING } else { SELF_STANDING });
     if settings
         .store()
         .get_bool(crate::derender::SETTING_FRIENDS_ONLY)
@@ -1320,6 +1371,7 @@ fn handle_top_menu_actions(
     agent_parcel: Res<sl_client_bevy::SlAgentParcel>,
     state: TopMenuState,
     out: TopMenuOut,
+    mut sit: TopMenuSit,
 ) {
     use crate::environment::FixedEnvironment;
     use crate::sky_presets::FixedSky;
@@ -1382,6 +1434,10 @@ fn handle_top_menu_actions(
             continue;
         }
         match action.action {
+            // Avatar ▸ Movement: the self pie's Sit Down / Stand Up, through
+            // the same helpers so the tracked ground sit follows either way.
+            "sit-ground" => sit_down(&mut sit.ground_sit, &mut sit.commands),
+            "stand" => stand_up(&mut sit.ground_sit, &mut sit.commands),
             "quit" => {
                 // Route through a graceful logout, not an abrupt `AppExit`, so
                 // the grid session closes cleanly (see `handle_quit_requests`).
@@ -1788,6 +1844,11 @@ mod tests {
             ("menu-bar-avatar".to_owned(), "toggle-preferences"),
             ("menu-bar-avatar".to_owned(), "toggle-inventory"),
             ("menu-bar-avatar".to_owned(), "toggle-experiences"),
+            (
+                "menu-bar-avatar > menu-bar-movement".to_owned(),
+                "sit-ground",
+            ),
+            ("menu-bar-avatar > menu-bar-movement".to_owned(), "stand"),
             ("menu-bar-avatar".to_owned(), "quit"),
             ("menu-bar-comm".to_owned(), "toggle-conversations"),
             (
@@ -2011,7 +2072,8 @@ mod tests {
     }
 
     /// **Every accelerator the bar draws is one the keyboard can dispatch, and
-    /// no two entries claim the same chord.**
+    /// no two entries claim the same chord** — but for Sit Down and Stand Up,
+    /// which the reference gives one chord on purpose and draws one at a time.
     ///
     /// The accelerator labels are live since `viewer-menu-accelerators-inert`:
     /// [`sl_viewer_ui_widgets::menu_accel`] parses the drawn string and routes
@@ -2036,13 +2098,18 @@ mod tests {
             "these drawn accelerators do not parse, so the keyboard cannot dispatch \
              them and the label promises nothing: {unparsed:?}"
         );
+        // The one pair that shares a chord: never drawn together (each is
+        // `visible_when` one of two conditions exactly one of which holds), so
+        // the dispatcher only ever sees one of them.
+        let toggle_pair = ["sit-ground", "stand"];
         let mut seen: Vec<(Accelerator, &'static str)> = Vec::new();
         for (label, action) in drawn {
             let Some(chord) = Accelerator::parse(label) else {
                 continue;
             };
             assert!(
-                !seen.iter().any(|(other, _action)| *other == chord),
+                !seen.iter().any(|(other, earlier)| *other == chord
+                    && !(toggle_pair.contains(earlier) && toggle_pair.contains(&action))),
                 "two menu-bar entries claim {label}; {action} is the second"
             );
             seen.push((chord, action));
@@ -2054,6 +2121,10 @@ mod tests {
             vec![
                 "toggle-preferences",
                 "toggle-inventory",
+                // Avatar ▸ Movement ▸ Sit Down / Stand Up, both on the
+                // reference's `alt|shift|S`, one drawn at a time.
+                "sit-ground",
+                "stand",
                 "quit",
                 "toggle-conversations",
                 "toggle-world-map",

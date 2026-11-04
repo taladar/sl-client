@@ -10284,6 +10284,7 @@ dependencies = [
  "sl-viewer-intents",
  "sl-viewer-inventory",
  "sl-viewer-kit",
+ "sl-viewer-notifications",
  "sl-viewer-people",
  "sl-viewer-places",
  "sl-viewer-social",

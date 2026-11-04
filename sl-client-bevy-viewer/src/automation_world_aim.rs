@@ -52,11 +52,21 @@ mod tests {
     /// The fixture with the camera group: the target prim at the region's
     /// middle and, 5 m south of it, a wall wide and tall enough to hide it
     /// from the south. Returns the app and the two prims' scene positions.
+    ///
+    /// Both carry a touch script, so a left click on either is a touch and
+    /// the wire says which one a click reached: a prim that takes no touch is
+    /// sent nothing at all.
     fn walled() -> Result<(App, Vec3, Vec3), TestError> {
+        /// A script listening for touches.
+        const TOUCH_SCRIPT: u32 =
+            sl_client_bevy::prim_flags::SCRIPTED | sl_client_bevy::prim_flags::HANDLE_TOUCH;
         let mut app = world_app_with_input();
         app.add_plugins(WorldModelPlugin);
-        seed_object(&mut app, fixture_prim(TARGET, at(128.0, 128.0, 30.0), 0));
-        let mut wall = fixture_prim(WALL, at(128.0, 123.0, 30.0), 0);
+        seed_object(
+            &mut app,
+            fixture_prim(TARGET, at(128.0, 128.0, 30.0), TOUCH_SCRIPT),
+        );
+        let mut wall = fixture_prim(WALL, at(128.0, 123.0, 30.0), TOUCH_SCRIPT);
         wall.scale = at(12.0, 0.5, 12.0);
         seed_object(&mut app, wall);
         settle(&mut app, 5);

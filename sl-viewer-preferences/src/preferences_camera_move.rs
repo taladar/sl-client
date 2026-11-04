@@ -6,7 +6,10 @@
 //! (field of view, offset scale, smoothing, maximum distance, wheel-zoom
 //! gate), the **mouselook** feel (sensitivity, pitch invert, own-avatar
 //! visibility) and the **movement** options (tap-tap-hold-to-run, hold-jump
-//! automatic fly, turn speed, the in-world double-click action).
+//! automatic fly, turn speed, the in-world double-click action, and
+//! Firestorm's block-left-click-sitting option — which Firestorm files on its
+//! own *Firestorm* tab, and which sits here with the other things a click in
+//! the world does).
 //!
 //! Every row is a **live** control: the camera / movement systems read the
 //! [`CameraTuning`] / [`MovementTuning`] resources this module refreshes from
@@ -228,6 +231,14 @@ pub fn register_settings(settings: &mut ViewerSettings) {
         SettingValue::F32(movement.turn_rate_rad_per_sec),
         "setting-desc-AvatarTurnRate",
     );
+    // Off by default, as Firestorm's is: a left click on a sit prim seats the
+    // avatar unless the user asks otherwise.
+    settings.register_in(
+        MOVEMENT_SECTION,
+        crate::world_api::SETTING_BLOCK_CLICK_SIT,
+        SettingValue::Bool(false),
+        "setting-desc-FSBlockClickSit",
+    );
 }
 
 /// Build the tab's content: the camera, mouselook and movement sections per
@@ -359,6 +370,12 @@ pub(crate) fn build_camera_move_tab(commands: &mut Commands, panel: Entity) {
         panel,
         "preferences-row-double-click-scripted-objects",
         SettingBinding::global(crate::world_api::SETTING_DOUBLE_CLICK_SCRIPTED_OBJECTS),
+    );
+    spawn_pref_checkbox(
+        commands,
+        panel,
+        "preferences-row-block-click-sit",
+        SettingBinding::global(crate::world_api::SETTING_BLOCK_CLICK_SIT),
     );
 }
 
@@ -769,7 +786,7 @@ mod tests {
     }
 
     /// Building the tab into an empty panel spawns every searchable row — five
-    /// camera, three mouselook, four movement — without panicking. The shell
+    /// camera, three mouselook, six movement — without panicking. The shell
     /// defers the build to the floater's first open, so a broken build fn
     /// would otherwise only surface live.
     #[test]
@@ -783,7 +800,7 @@ mod tests {
         let mut rows = app
             .world_mut()
             .query::<&crate::preferences::PrefSearchRow>();
-        assert_eq!(rows.iter(app.world()).count(), 13, "13 searchable rows");
+        assert_eq!(rows.iter(app.world()).count(), 14, "14 searchable rows");
     }
 
     /// Every row / section / option Fluent key this tab spawns is distinct, so

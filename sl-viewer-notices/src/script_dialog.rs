@@ -54,7 +54,8 @@ use crate::notification_host::{
     NotificationChannelRoot, ResolveNotification, ToastSpec, adopt_toast,
 };
 use crate::notifications::{
-    NotificationId, NotificationKind, NotificationManager, NotificationPriority, ToastButton,
+    FormAnswer as _, NotificationId, NotificationKind, NotificationManager, NotificationPriority,
+    ScriptDialogAction, ToastButton,
 };
 use crate::skin_palette::SkinPalette;
 use crate::ui::{column, row};
@@ -212,6 +213,7 @@ struct ScriptDialogContent {
 /// card root, the script buttons (each with its message index and label), the
 /// text field + Submit box (for an `llTextBox`), and the Block / Ignore / close
 /// boxes.
+#[derive(Debug, Clone)]
 struct ScriptDialogCard {
     /// The card root node (left with no parent — the caller adopts / parents it).
     root: Entity,
@@ -363,20 +365,46 @@ fn spawn_script_dialog_card(
         ignore_label: translator.get("script-dialog-button-ignore"),
         submit_label: translator.get("script-dialog-button-submit"),
     };
-    let card = build_script_dialog_card(commands, &content);
-    // What the card offers: the script's own buttons (a reply carries the
-    // button's text, so that is its name), Submit for a text box, then Block
-    // and Ignore.
-    let mut buttons: Vec<ToastButton> = card
+    adopt_script_dialog_card(commands, channel, manager, dialog, &content).0
+}
+
+/// Build the card for `dialog` from its resolved `content`, adopt it into the
+/// shared toast channel and wire its buttons — each click answering the toast
+/// with that button's name. Returns the toast's id and the card's entities.
+fn adopt_script_dialog_card(
+    commands: &mut Commands,
+    channel: &NotificationChannelRoot,
+    manager: &mut NotificationManager,
+    dialog: &ScriptDialog,
+    content: &ScriptDialogContent,
+) -> (NotificationId, ScriptDialogCard) {
+    let card = build_script_dialog_card(commands, content);
+    // What the card offers: the script's own buttons, each under its own name
+    // ([`script_button_names`]), Submit for a text box, then Block and Ignore.
+    let script_buttons: Vec<(Entity, i32, String, String)> = card
         .buttons
         .iter()
-        .map(|(_entity, _index, label)| ToastButton::new(label.clone(), label.clone()))
+        .zip(script_button_names(&content.form, &card.buttons))
+        .map(|((entity, index, label), name)| (*entity, *index, label.clone(), name))
+        .collect();
+    let mut buttons: Vec<ToastButton> = script_buttons
+        .iter()
+        .map(|(_entity, _index, label, name)| ToastButton::new(name.clone(), label.clone()))
         .collect();
     if card.submit.is_some() {
-        buttons.push(ToastButton::new("Submit", content.submit_label.clone()));
+        buttons.push(ToastButton::answer(
+            ScriptDialogAction::Submit,
+            content.submit_label.clone(),
+        ));
     }
-    buttons.push(ToastButton::new("Block", content.block_label.clone()));
-    buttons.push(ToastButton::new("Ignore", content.ignore_label.clone()));
+    buttons.push(ToastButton::answer(
+        ScriptDialogAction::Block,
+        content.block_label.clone(),
+    ));
+    buttons.push(ToastButton::answer(
+        ScriptDialogAction::Ignore,
+        content.ignore_label.clone(),
+    ));
 
     // Adopt the card into the shared toast channel so it stacks / orders /
     // overflow-cycles with the catalogue notifications. An `Alert` never
@@ -402,17 +430,15 @@ fn spawn_script_dialog_card(
     let chat_channel = dialog.chat_channel;
 
     // Each script button: reply with its index / label on the hidden channel and
-    // tear the card down (a chosen button ends the dialog).
-    for (button, index, label) in card.buttons {
+    // tear the card down (a chosen button ends the dialog), answering with the
+    // button's own name.
+    for (button, index, label, name) in script_buttons {
         commands.entity(button).observe(
             move |_activate: On<Activate>,
                   mut sl: MessageWriter<SlCommand>,
                   mut resolves: MessageWriter<ResolveNotification>| {
                 reply_script_button(&mut sl, object_id, chat_channel, index, label.clone());
-                resolves.write(ResolveNotification {
-                    toast: root,
-                    button: None,
-                });
+                resolves.write(ResolveNotification::named(root, name.clone()));
             },
         );
     }
@@ -430,10 +456,7 @@ fn spawn_script_dialog_card(
                     .map(|editable| editable.value().to_string())
                     .unwrap_or_default();
                 reply_script_button(&mut sl, object_id, chat_channel, 0, typed);
-                resolves.write(ResolveNotification {
-                    toast: root,
-                    button: None,
-                });
+                resolves.write(ResolveNotification::chose(root, ScriptDialogAction::Submit));
             },
         );
     }
@@ -449,26 +472,57 @@ fn spawn_script_dialog_card(
                 object_name.clone(),
                 MuteType::Object,
             ));
-            resolves.write(ResolveNotification {
-                toast: root,
-                button: None,
-            });
+            resolves.write(ResolveNotification::chose(root, ScriptDialogAction::Block));
         },
     );
 
-    // Ignore / close ×: tear the card down with no reply — the reference "Ignore"
-    // dismisses the dialog without answering the script.
-    for button in [card.ignore, card.close] {
-        commands.entity(button).observe(
-            move |_activate: On<Activate>, mut resolves: MessageWriter<ResolveNotification>| {
-                resolves.write(ResolveNotification {
-                    toast: root,
-                    button: None,
-                });
-            },
-        );
+    // Ignore: tear the card down with no reply — the reference "Ignore"
+    // dismisses the dialog without answering the script. The close × does the
+    // same, but chooses nothing.
+    commands.entity(card.ignore).observe(
+        move |_activate: On<Activate>, mut resolves: MessageWriter<ResolveNotification>| {
+            resolves.write(ResolveNotification::chose(root, ScriptDialogAction::Ignore));
+        },
+    );
+    commands.entity(card.close).observe(
+        move |_activate: On<Activate>, mut resolves: MessageWriter<ResolveNotification>| {
+            resolves.write(ResolveNotification::dismissed(root));
+        },
+    );
+    (id, card)
+}
+
+/// The name each of `wired`'s script buttons answers with, in `wired`'s order.
+///
+/// A script button is named by its label, as the reference names it — unless
+/// that name is already taken, by an earlier button with the same label (a
+/// script may repeat one) or by one of the card's own actions
+/// ([`ScriptDialogAction`]), when the button's 1-based position in the dialog
+/// is appended (`Yes#2`). So every button on a card answers with a name no
+/// other button has, and the history says which one was clicked. The names
+/// are assigned in the dialog's order, whatever order the grid shows them in.
+fn script_button_names(form: &DialogForm, wired: &[(Entity, i32, String)]) -> Vec<String> {
+    let DialogForm::Buttons(labels) = form else {
+        return Vec::new();
+    };
+    let mut names: Vec<String> = Vec::with_capacity(labels.len());
+    for (position, label) in (1_usize..).zip(labels) {
+        let mut name = label.clone();
+        while ScriptDialogAction::from_name(&name).is_some() || names.contains(&name) {
+            name = format!("{name}#{position}");
+        }
+        names.push(name);
     }
-    id
+    wired
+        .iter()
+        .map(|(_entity, index, label)| {
+            usize::try_from(*index)
+                .ok()
+                .and_then(|index| names.get(index))
+                .cloned()
+                .unwrap_or_else(|| label.clone())
+        })
+        .collect()
 }
 
 /// Queue a `ScriptDialogReply` for the chosen `button_index` / `button_label` on
@@ -856,9 +910,168 @@ const _: () = assert!(
 
 #[cfg(test)]
 mod tests {
-    use super::{DialogForm, GRID_COLUMNS, bottom_up_rows, dialog_form, owner_display};
+    use super::{
+        DialogForm, GRID_COLUMNS, ScriptDialogCard, ScriptDialogContent, adopt_script_dialog_card,
+        bottom_up_rows, dialog_form, owner_display, script_button_names,
+    };
+    use crate::intents::RequestBlock;
+    use crate::notification_host::{recorded_response, resolve_test_app};
+    use crate::notifications::NotificationManager;
+    use bevy::ecs::system::RunSystemOnce as _;
+    use bevy::prelude::{App, Commands, Entity, ResMut};
+    use bevy::ui_widgets::Activate;
     use pretty_assertions::assert_eq;
-    use sl_client_bevy::{ChatChannel, ObjectKey, ScriptDialog, TextureKey, Uuid};
+    use sl_client_bevy::{
+        ChatChannel, Command, ObjectKey, ScriptDialog, SlCommand, TextureKey, Uuid,
+    };
+
+    /// The names `labels` (a buttons dialog) gives its script buttons, in the
+    /// dialog's order.
+    fn names(labels: &[&str]) -> Vec<String> {
+        let labels: Vec<String> = labels.iter().map(|label| (*label).to_owned()).collect();
+        let wired: Vec<(Entity, i32, String)> = (0_i32..)
+            .zip(&labels)
+            .map(|(index, label)| (Entity::PLACEHOLDER, index, label.clone()))
+            .collect();
+        script_button_names(&DialogForm::Buttons(labels), &wired)
+    }
+
+    /// A script button is named by its label; a repeated label, or one that is
+    /// the name of the card's own Block / Ignore / Submit, takes its position
+    /// as well, so no two buttons on a card answer alike.
+    #[test]
+    fn script_buttons_get_names_of_their_own() {
+        assert_eq!(names(&["Yes", "No"]), vec!["Yes", "No"]);
+        assert_eq!(names(&["Yes", "Yes", "Yes"]), vec!["Yes", "Yes#2", "Yes#3"]);
+        // The card's actions are not named like their labels, so a script's
+        // own "Ignore" / "Block" keeps its name.
+        assert_eq!(names(&["Ignore", "Block"]), vec!["Ignore", "Block"]);
+        assert_eq!(
+            names(&["Client_Side_Ignore", "Submit"]),
+            vec!["Client_Side_Ignore#1", "Submit#2"]
+        );
+        // A label that is a name another button was given is renamed too.
+        assert_eq!(names(&["A#3", "A", "A"]), vec!["A#3", "A", "A#3#3"]);
+    }
+
+    /// A text box has no script buttons to name.
+    #[test]
+    fn a_text_box_names_no_script_buttons() {
+        assert_eq!(
+            script_button_names(&DialogForm::TextBox, &[]),
+            Vec::<String>::new()
+        );
+    }
+
+    /// An app holding a script-dialog card offering `form`, adopted into the
+    /// host's channel, and the card's entities.
+    fn card_app(form: DialogForm) -> Result<(App, ScriptDialogCard), String> {
+        let (mut app, channel) = resolve_test_app();
+        app.add_message::<SlCommand>().add_message::<RequestBlock>();
+        let content = ScriptDialogContent {
+            title: "Bob Resident's 'Vendor'".to_owned(),
+            message: "Pick one".to_owned(),
+            form,
+            block_label: "Block".to_owned(),
+            ignore_label: "Ignore".to_owned(),
+            submit_label: "Submit".to_owned(),
+        };
+        let dialog = dialog("Bob", "Resident", &[]);
+        let card = app
+            .world_mut()
+            .run_system_once(
+                move |mut commands: Commands, mut manager: ResMut<NotificationManager>| {
+                    adopt_script_dialog_card(
+                        &mut commands,
+                        &channel,
+                        &mut manager,
+                        &dialog,
+                        &content,
+                    )
+                    .1
+                },
+            )
+            .map_err(|error| error.to_string())?;
+        Ok((app, card))
+    }
+
+    /// Click `button` and run the resolve; the response the history recorded.
+    fn click(app: &mut App, button: Entity) -> Option<String> {
+        app.world_mut().trigger(Activate {
+            entity: button,
+            button: None,
+        });
+        app.update();
+        recorded_response(app)
+    }
+
+    /// The script button at message index `index` on `card`.
+    fn script_button(card: &ScriptDialogCard, index: i32) -> Result<Entity, String> {
+        card.buttons
+            .iter()
+            .find(|(_entity, message_index, _label)| *message_index == index)
+            .map(|(entity, _index, _label)| *entity)
+            .ok_or_else(|| format!("no script button {index}"))
+    }
+
+    /// Labels for a buttons form.
+    fn buttons(labels: &[&str]) -> DialogForm {
+        DialogForm::Buttons(labels.iter().map(|label| (*label).to_owned()).collect())
+    }
+
+    /// **The filed bug.** A click on a script button records that button —
+    /// the second of two "Yes" buttons as `Yes#2` — and still replies with its
+    /// own index and label.
+    #[test]
+    fn a_script_button_click_records_the_button() -> Result<(), String> {
+        let (mut app, card) = card_app(buttons(&["Yes", "Yes", "Ignore"]))?;
+        let second = script_button(&card, 1)?;
+        assert_eq!(click(&mut app, second), Some("Yes#2".to_owned()));
+        let messages = app.world().resource::<bevy::prelude::Messages<SlCommand>>();
+        let replied = messages.get_cursor().read(messages).any(|command| {
+            matches!(
+                &command.0,
+                Command::ReplyScriptDialog { button_index: 1, button_label, .. }
+                    if button_label == "Yes"
+            )
+        });
+        assert!(replied, "the reply names the clicked button");
+
+        let (mut app, card) = card_app(buttons(&["Yes", "Yes", "Ignore"]))?;
+        let ignore_button = script_button(&card, 2)?;
+        assert_eq!(
+            click(&mut app, ignore_button),
+            Some("Ignore".to_owned()),
+            "a script's own Ignore is not the card's"
+        );
+        Ok(())
+    }
+
+    /// The card's own actions record their names, and the close × records no
+    /// choice.
+    #[test]
+    fn the_card_actions_record_their_names() -> Result<(), String> {
+        let (mut app, card) = card_app(buttons(&["Yes"]))?;
+        assert_eq!(
+            click(&mut app, card.ignore),
+            Some("Client_Side_Ignore".to_owned())
+        );
+        let (mut app, card) = card_app(buttons(&["Yes"]))?;
+        assert_eq!(
+            click(&mut app, card.block),
+            Some("Client_Side_Mute".to_owned())
+        );
+        let (mut app, card) = card_app(DialogForm::TextBox)?;
+        let submit = card.submit.ok_or("a text box has a Submit")?;
+        assert_eq!(click(&mut app, submit), Some("Submit".to_owned()));
+        let (mut app, card) = card_app(buttons(&["Yes"]))?;
+        assert_eq!(click(&mut app, card.close), None);
+        assert!(
+            app.world().get_entity(card.root).is_err(),
+            "the close still tore the card down"
+        );
+        Ok(())
+    }
 
     /// A minimal dialog with the given owner-name and buttons, for the helper tests.
     fn dialog(first: &str, last: &str, buttons: &[&str]) -> ScriptDialog {

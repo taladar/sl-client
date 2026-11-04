@@ -108,3 +108,11 @@ is dropped with no reply at all — and refuses every amount, alerting "Payment
 stopped: …", when everything is hidden; so the floater should offer only
 what the layout offers. `book/src/gridspec/lsl.md` § Script permissions,
 money and payment.
+
+## From viewer-left-click-click-actions (2026-11-03)
+
+A left click on a prim whose click action is *pay* (and which takes money) or
+*buy* raises `ClickActionPayUnavailable` / `ClickActionBuyUnavailable`
+(`sl_viewer_ui_context_menus::left_click_actions`). When the pay dialog and the
+buy floater land, answer `ClickedAction::Pay` (the picked prim) and
+`ClickedAction::Buy` (the root) there instead, and drop the two templates.

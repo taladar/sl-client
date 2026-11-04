@@ -124,6 +124,7 @@ use crate::world_api::EditTool;
 pub use crate::world_api::FLAGS_HANDLE_TOUCH;
 use crate::world_api::ObjectState;
 use crate::world_api::SelfGroundSit;
+use crate::world_api::{FLAGS_OBJECT_COPY, FLAGS_OBJECT_YOU_OWNER};
 
 /// The `element` the object pie attributes its [`UiAction`]s to.
 pub const OBJECT_MENU_ELEMENT: &str = "object-menu";
@@ -151,13 +152,6 @@ pub const TARGET_OWNED: &str = "target-owned";
 /// (`FLAGS_OBJECT_COPY`) — enables Take Copy, the reference's
 /// `Tools.EnableTakeCopy`.
 pub const TARGET_COPYABLE: &str = "target-copyable";
-
-/// The `FLAGS_OBJECT_COPY` bit of an object's update flags (`object_flags.h`):
-/// the agent may copy this object.
-const FLAGS_OBJECT_COPY: u32 = 1 << 3;
-
-/// The `FLAGS_OBJECT_YOU_OWNER` bit: the agent owns this object.
-const FLAGS_OBJECT_YOU_OWNER: u32 = 1 << 5;
 
 // ---------------------------------------------------------------------------
 // The take sub-pie (the reference's "Take Submenu", chained after Buy at the
@@ -827,6 +821,9 @@ impl Plugin for ObjectMenuPlugin {
                 )
                     .chain(),
             );
+        // A left click's click action (`viewer-left-click-click-actions`):
+        // the sit, open and zoom a pie slice would do, answered beside the pie.
+        crate::left_click_actions::build(app);
     }
 }
 
@@ -968,9 +965,9 @@ struct ObjectMenuOut<'w> {
 /// [`SystemParam`](bevy::ecs::system::SystemParam): the seat's world pose and
 /// reported motion, and the camera the sit offset is measured from.
 #[derive(Debug, bevy::ecs::system::SystemParam)]
-struct SeatPoses<'w, 's> {
+pub(crate) struct SeatPoses<'w, 's> {
     /// The seat's world pose and its reported Second Life motion.
-    seat_poses: Query<
+    pub(crate) seat_poses: Query<
         'w,
         's,
         (
@@ -979,7 +976,8 @@ struct SeatPoses<'w, 's> {
         ),
     >,
     /// The camera the sit offset is measured from.
-    seat_cameras: Query<'w, 's, &'static GlobalTransform, With<crate::world_api::ViewerCamera>>,
+    pub(crate) seat_cameras:
+        Query<'w, 's, &'static GlobalTransform, With<crate::world_api::ViewerCamera>>,
 }
 
 /// Dispatch a picked object-menu slice to the command behind it.
@@ -1124,7 +1122,7 @@ fn handle_object_menu_actions(
 /// seat prim's entity / pose or the camera is not available — the sit still goes
 /// out, just without the faithful offset. When a prim has a real sit target the
 /// simulator ignores this offset entirely, so the fallback is harmless there.
-fn sit_here_offset(
+pub(crate) fn sit_here_offset(
     hit: &ObjectRayHit,
     state: &ObjectState,
     seat_poses: &Query<(&GlobalTransform, &crate::objects::ObjectSlMotion)>,

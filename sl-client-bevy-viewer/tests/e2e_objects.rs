@@ -63,7 +63,8 @@ mod test {
 
     use serde_json::json;
     use sl_automation_proto::{
-        Locator, LogStream, NodeValue, Probe, Role, WorldKind, WorldLocator, WorldNode,
+        Locator, LogStream, NodeValue, ObjectBehaviour, Probe, Role, WorldKind, WorldLocator,
+        WorldNode,
     };
     use sl_e2e::{BodyError, Grid, Need, Stage, StageBuilder};
     use sl_fake_grid::{ImitatedGrid, RegionConfig};
@@ -114,14 +115,20 @@ mod test {
     /// change and its first objects back 0.4 s after the next.
     const CHANGE: Duration = Duration::from_secs(6);
 
-    /// Wait until `alpha` stands in a region.
+    /// Wait until `alpha` stands in a region: the region is known, and so are
+    /// where the avatar stands and where the camera looks from. The region
+    /// comes with the handshake and the position with the avatar's own
+    /// object a moment later, and a viewer quick to the next step — a rez
+    /// beside the avatar — found the one without the other.
     async fn arrived(alpha: &Viewer) -> Result<(), BodyError> {
-        let _arrived = alpha
-            .expect_state(Probe::Agent)
-            .at("/region")
-            .timeout(WAIT)
-            .to_be_present()
-            .await?;
+        for pointer in ["/region", "/position", "/camera_eye"] {
+            let _known = alpha
+                .expect_state(Probe::Agent)
+                .at(pointer)
+                .timeout(WAIT)
+                .to_be_present()
+                .await?;
+        }
         Ok(())
     }
 
@@ -471,8 +478,13 @@ mod test {
             if !(name.ends_with(MARK) || name == UNNAMED) {
                 continue;
             }
-            // By its pie, which asks nothing of where the keyboard is.
-            pie(alpha, &prim, &DELETE).await?;
+            // By its pie, which asks nothing of where the keyboard is. One the
+            // right-click cannot reach after all — a click on the prim beside
+            // or above it takes it — is left, as an unselectable one is.
+            if pie(alpha, &prim, &DELETE).await.is_err() {
+                alpha.press("Escape").await?;
+                continue;
+            }
             let _gone = alpha
                 .expect_world(&prim)
                 .timeout(WAIT)
@@ -750,6 +762,185 @@ mod test {
                 "a grid's own answer to a select and to a rename",
             ))
             .run(the_build_window_follows_the_record)?;
+        Ok(())
+    }
+
+    /// Wait until the prim `prim` names behaves as `wanted` says in the
+    /// viewer's world, and go on doing so once the grid has answered.
+    ///
+    /// The window echoes a toggle into the world ahead of the grid, so the
+    /// first reading only says what the viewer showed; the grid answers a
+    /// flag update with the object again, and the reading after that is
+    /// what the grid kept. On the fake grid the grid's own record is read
+    /// too.
+    async fn behaves(
+        stage: &Stage,
+        prim: &sl_viewer_driver::WorldHandle,
+        local_id: u32,
+        wanted: ObjectBehaviour,
+        what: &str,
+    ) -> Result<(), BodyError> {
+        let waited = tokio::time::timeout(WAIT, async {
+            loop {
+                if let Ok(node) = prim.node().await
+                    && node.behaviour == wanted
+                {
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(250)).await;
+            }
+        })
+        .await;
+        if waited.is_err() {
+            let node = prim.node().await?;
+            return Err(format!("{what}: the prim reads {:?}", node.behaviour).into());
+        }
+        tokio::time::sleep(UNANSWERED).await;
+        let kept = prim.node().await?.behaviour;
+        if kept != wanted {
+            return Err(format!("{what}: the grid answered with {kept:?}").into());
+        }
+        if stage.on_grid() == Grid::Fake {
+            let flags = stage
+                .agent("Alpha")
+                .await?
+                .with_world(|world, _sim| {
+                    world
+                        .objects
+                        .get(RegionLocalObjectId(local_id))
+                        .map(|object| object.update_flags)
+                })
+                .await
+                .ok_or("the grid holds no such prim")?;
+            let held = ObjectBehaviour {
+                physical: flags & sl_proto::prim_flags::USE_PHYSICS != 0,
+                phantom: flags & sl_proto::prim_flags::PHANTOM != 0,
+                temporary: flags & sl_proto::prim_flags::TEMPORARY_ON_REZ != 0,
+            };
+            if held != wanted {
+                return Err(format!("{what}: the grid holds {held:?}").into());
+            }
+        }
+        Ok(())
+    }
+
+    /// Rez a prim and work the Object tab's Physical, Temporary and Phantom
+    /// checkboxes one at a time, reading after each what the grid kept: a
+    /// toggle changes its own flag and no other. The prim is owned, which
+    /// both grids flag with a bit the Phantom checkbox once read as its own
+    /// (`viewer-build-phantom-flag-wrong-bit`): it showed every owned prim
+    /// phantom, made one phantom on a Physical or Temporary click, and could
+    /// not make one phantom at all. On a live grid the prim is then deleted.
+    async fn each_behaviour_checkbox_sets_its_own_flag(stage: &Stage) -> Result<(), BodyError> {
+        let alpha = &stage.viewer("Alpha")?;
+        arrived(alpha).await?;
+        let (build, _spot) = rez_a_prim(stage, alpha).await?;
+        let field = build.test_id("build-name:field");
+        let _live = alpha.expect(&field).timeout(WAIT).to_be_enabled().await?;
+        let selected = alpha.selection().await?;
+        let [prim] = selected.as_slice() else {
+            return Err(format!("the rez left {selected:?} selected").into());
+        };
+        let (prim_id, local_id) = (prim.full_id, prim.local_id);
+        let this_prim = alpha
+            .world()
+            .locator(WorldLocator::full_id(prim_id))
+            .timeout(WAIT);
+        let _object = build
+            .get(Locator::role(Role::Tab).name_key("build-tab-object"))
+            .click()
+            .await?;
+        let checkbox = |key: &str| build.get(Locator::role(Role::Checkbox).name_key(key));
+        let (physical, temporary, phantom) = (
+            checkbox("build-flag-physical"),
+            checkbox("build-flag-temporary"),
+            checkbox("build-flag-phantom"),
+        );
+        let plain = ObjectBehaviour::default();
+
+        // A fresh prim is none of the three, and the window says so.
+        behaves(stage, &this_prim, local_id, plain, "a fresh prim").await?;
+        for (name, box_) in [
+            ("Physical", &physical),
+            ("Temporary", &temporary),
+            ("Phantom", &phantom),
+        ] {
+            if box_.is_checked().await? {
+                return Err(format!("a fresh prim shows {name} ticked").into());
+            }
+        }
+
+        // Phantom, and Temporary on top of it: the second keeps the first.
+        // Temporary comes off again before a live grid's clean-up could take
+        // the prim.
+        phantom.check().await?;
+        let ghost = ObjectBehaviour {
+            phantom: true,
+            ..plain
+        };
+        behaves(stage, &this_prim, local_id, ghost, "Phantom ticked").await?;
+        temporary.check().await?;
+        let fleeting = ObjectBehaviour {
+            temporary: true,
+            ..ghost
+        };
+        behaves(stage, &this_prim, local_id, fleeting, "Temporary ticked").await?;
+        temporary.uncheck().await?;
+        behaves(stage, &this_prim, local_id, ghost, "Temporary unticked").await?;
+        phantom.uncheck().await?;
+        behaves(stage, &this_prim, local_id, plain, "Phantom unticked").await?;
+
+        // Physical leaves the prim solid.
+        physical.check().await?;
+        let moving = ObjectBehaviour {
+            physical: true,
+            ..plain
+        };
+        behaves(stage, &this_prim, local_id, moving, "Physical ticked").await?;
+        physical.uncheck().await?;
+        behaves(stage, &this_prim, local_id, plain, "Physical unticked").await?;
+
+        if stage.on_grid() != Grid::Fake {
+            pie(alpha, &this_prim, &DELETE).await?;
+            let _gone = alpha
+                .expect_world(&this_prim)
+                .timeout(SETTLE)
+                .to_be_detached()
+                .await?;
+        }
+        Ok(())
+    }
+
+    /// **The behaviour checkboxes, on each fake flavour**: on an owned prim
+    /// Physical, Temporary and Phantom each read unticked, and each sets its
+    /// own flag in the grid's record and no other.
+    #[test]
+    fn each_behaviour_checkbox_sets_its_own_flag_on_each_fake_flavour() -> Result<(), TestError> {
+        for (flavour, name) in [
+            (ImitatedGrid::SecondLife, "behaviour_second_life"),
+            (ImitatedGrid::OpenSim, "behaviour_open_sim"),
+        ] {
+            StageBuilder::new(name)
+                .viewer_binary(VIEWER)
+                .viewer("Alpha")
+                .needs(Need::Content("the stock scene's unnamed box, to rez on"))
+                .needs(Need::GridControl)
+                .configure_grid(move |grid| grid.imitates(flavour))
+                .run(each_behaviour_checkbox_sets_its_own_flag)?;
+        }
+        Ok(())
+    }
+
+    /// **The behaviour checkboxes, live** (`SL_E2E_GRID=opensim|aditi`, where
+    /// the avatar stands on land it may build on): the same against what the
+    /// grid sends back after each flag update.
+    #[test]
+    fn each_behaviour_checkbox_sets_its_own_flag_on_a_live_grid() -> Result<(), TestError> {
+        StageBuilder::new("behaviour_live")
+            .viewer_binary(VIEWER)
+            .viewer("Alpha")
+            .needs(Need::LiveGrid("a grid's own answer to a flag update"))
+            .run(each_behaviour_checkbox_sets_its_own_flag)?;
         Ok(())
     }
 

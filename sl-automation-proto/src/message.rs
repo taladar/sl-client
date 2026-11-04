@@ -911,6 +911,7 @@ mod tests {
             hover_text: None,
             name_tag: None,
             bakes: Vec::new(),
+            behaviour: crate::world::ObjectBehaviour::default(),
         }
     }
 

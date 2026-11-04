@@ -36,7 +36,6 @@ pub(crate) use sl_viewer_ui_core::ui_element;
 pub(crate) use sl_viewer_ui_core::ui_font;
 pub(crate) use sl_viewer_ui_core::ui_spawn;
 pub(crate) use sl_viewer_ui_widgets::floater;
-pub(crate) use sl_viewer_ui_widgets::floater_persist;
 pub(crate) use sl_viewer_ui_widgets::ui_checkbox;
 pub(crate) use sl_viewer_ui_widgets::ui_color_picker;
 pub(crate) use sl_viewer_ui_widgets::ui_radio;

@@ -526,7 +526,7 @@ mod tests {
             .ok_or("GenericAlert has no default")?;
         app.world_mut()
             .resource_mut::<NotificationManager>()
-            .record_response(id, Some(answer));
+            .record_response(id, Some(answer.into()));
         assert_eq!(
             read_notifications(app.world_mut()),
             vec![expected(shown, true, Some(answer))]

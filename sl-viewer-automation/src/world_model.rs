@@ -11,15 +11,24 @@ use std::collections::HashMap;
 
 use bevy::ecs::system::{SystemParam, SystemParamValidationError, SystemState};
 use bevy::prelude::*;
-use sl_automation_proto::{WorldKind, WorldNode};
+use sl_automation_proto::{ObjectBehaviour, WorldKind, WorldNode};
 use sl_client_bevy::{
     AgentKey, ObjectKey, ScopedObjectId, SlEvent, SlIdentity, SlSessionEvent, Uuid, pcode,
 };
 use sl_viewer_kit::coords::{bevy_to_sl_vec, region_offset_bevy, sl_to_bevy_rotation};
 use sl_viewer_world_api::{
-    AvatarState, MAX_PARENT_WALK, ObjectState, SelectionSet, TagContent, TrackedObject,
-    is_hud_point,
+    AvatarState, FLAGS_PHANTOM, FLAGS_TEMPORARY_ON_REZ, FLAGS_USE_PHYSICS, MAX_PARENT_WALK,
+    ObjectState, SelectionSet, TagContent, TrackedObject, is_hud_point,
 };
+
+/// The behaviour flags an object's `PrimFlags` word says.
+const fn behaviour_of(update_flags: u32) -> ObjectBehaviour {
+    ObjectBehaviour {
+        physical: update_flags & FLAGS_USE_PHYSICS != 0,
+        phantom: update_flags & FLAGS_PHANTOM != 0,
+        temporary: update_flags & FLAGS_TEMPORARY_ON_REZ != 0,
+    }
+}
 
 /// Collects what [`ObjectFacts`] needs from the session's events. Added by
 /// whoever installs automation; everything else the world model reads is kept
@@ -258,6 +267,7 @@ impl WorldModel<'_, '_> {
                     hover_text: None,
                     name_tag: self.tag_text(label),
                     bakes: avatars.baked_texture_ids(agent),
+                    behaviour: ObjectBehaviour::default(),
                 }
             })
             .collect()
@@ -343,6 +353,7 @@ impl WorldModel<'_, '_> {
                     hover_text: (!tracked.text.is_empty()).then(|| tracked.text.clone()),
                     name_tag: None,
                     bakes: Vec::new(),
+                    behaviour: behaviour_of(tracked.update_flags),
                 }
             })
             .collect()

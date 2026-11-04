@@ -55,7 +55,9 @@ use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use sl_settings::{Scope, SettingValue};
 
-use sl_client_bevy::{AgentKey, RegionCoordinates, RegionHandle, SlCommand, SlIdentity, Vector};
+use sl_client_bevy::{
+    AgentKey, ClickAction, RegionCoordinates, RegionHandle, SlCommand, SlIdentity, Vector,
+};
 
 use crate::avatar_assets::AvatarAssetLibrary;
 use crate::coords::bevy_to_sl_vec;
@@ -69,6 +71,7 @@ use crate::world_api::pointer_over_blocking_ui;
 use crate::world_api::{
     AvatarState, FLAGS_HANDLE_TOUCH, InputContext, ObjectPickSummary, ObjectState,
     SETTING_DOUBLE_CLICK_ACTION, SETTING_DOUBLE_CLICK_SCRIPTED_OBJECTS, TerrainState,
+    final_click_action,
 };
 
 /// The persisted setting section — shared with other input-behaviour settings.
@@ -93,6 +96,7 @@ const CLICK_ACTION_SIT: u8 = 1;
 
 /// The `click_action` byte the build floater calls "None"
 /// (`CLICK_ACTION_DISABLED`): no click action, and it masks the root's.
+#[cfg(test)]
 const CLICK_ACTION_DISABLED: u8 = 8;
 
 /// The step, metres, of the march along the pick ray from a water hit down to
@@ -390,24 +394,23 @@ impl ObjectClick {
         }
     }
 
-    /// The click action a left click on it carries out — the reference's
-    /// `final_click_action`: none for an attachment, the prim's own when it
-    /// has one or the root disables its own, the root's otherwise.
-    const fn final_action(self) -> u8 {
-        if !matches!(self.worn, Worn::No) {
-            0
-        } else if self.root_action == CLICK_ACTION_DISABLED || self.picked_action != 0 {
-            self.picked_action
-        } else {
-            self.root_action
-        }
+    /// The click action a click on it carries out — the reference's
+    /// `final_click_action`, shared with the left click
+    /// ([`crate::world_api::final_click_action`]).
+    const fn final_action(self) -> ClickAction {
+        final_click_action(
+            self.picked_action,
+            self.root_action,
+            !matches!(self.worn, Worn::No),
+        )
     }
 
     /// Whether a left click on it does something of its own: a click action
     /// or a touch script, unless the click action is *disabled*.
     const fn takes_a_click(self) -> bool {
         let action = self.final_action();
-        (action != 0 || self.handles_touch) && action != CLICK_ACTION_DISABLED
+        (!matches!(action, ClickAction::Touch) || self.handles_touch)
+            && !matches!(action, ClickAction::Disabled)
     }
 }
 

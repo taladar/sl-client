@@ -2,7 +2,7 @@
 id: viewer-rlv-enforce-forced-actions
 title: RLV — forced actions and the #RLV inventory sub-protocol
 topic: viewer
-status: blocked
+status: ready
 origin: user request (2026-07); split from viewer-rlva-enforcement
 blocked_by: [viewer-rlv-restriction-state, viewer-sit-stand-actions, viewer-inventory-folder-tree]
 ---

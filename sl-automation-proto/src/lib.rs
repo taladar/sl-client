@@ -110,4 +110,6 @@ pub use crate::snapshot::{Bounds, NodeId, NodeState, NodeValue, NodeVisibility, 
 pub use crate::state::{
     Probe, ProbeReadout, StateCondition, StateObservation, ValueTest, includes,
 };
-pub use crate::world::{Anchor, GroundPoint, Near, WorldKind, WorldLocator, WorldNode};
+pub use crate::world::{
+    Anchor, GroundPoint, Near, ObjectBehaviour, WorldKind, WorldLocator, WorldNode,
+};

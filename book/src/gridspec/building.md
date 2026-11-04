@@ -986,6 +986,20 @@ A touch, by the same measurements:
   since Second Life reads a `touch` from the latest message.
 - For any other prim no update is sent at all, on either grid: an owner's
   update would carry the prim off.
+- Only a prim that takes a touch is touched at all: one whose script takes
+  touches (and whose own click action is not *disabled*), or a physical
+  one, as in the reference. A click on any other sends nothing; it used to
+  send a grab and a degrab that did nothing on either grid.
+- A prim in the world with a click action has it carried out instead, the
+  prim's own action before its root's: *sit* seats the avatar (unless it
+  already sits, or the user blocked click-sitting with Firestorm's
+  `FSBlockClickSit`, when the click falls through to the touch), *open*
+  opens the root's contents when the agent owns or may modify it and it
+  holds anything, *zoom* frames the camera on the prim, *open media* opens
+  the parcel's media URL, and a child's *disabled* that masks its root's
+  action does nothing at all (a physical prim set to *disabled* on its own
+  is still grabbed, as in the reference). *Pay*, *buy*
+  and *play* say in a notification that the viewer cannot do them yet.
 - The surface a touch in the world states is in the region's frame — the
   point, the normal and the binormal. It used to be in the prim's own,
   which both grids handed a script as `llDetectedTouchPos` unchanged. A
@@ -998,13 +1012,15 @@ touch), and through the viewer automation on each fake flavour
 grid as a grab, an update and a degrab, in that order, the grab stating a
 point on the prim in region metres.
 
-Not done in the viewer: a click on a prim that takes no touch still sends
-the grab and the degrab, where the reference sends nothing
-(`viewer-left-click-touches-a-prim-that-takes-none`); a click action is
-not carried out and *disabled* does not stop a touch
-(`viewer-left-click-click-actions`); the cursor does not say a prim takes
-a touch (`viewer-touch-cursor`); and nothing drags or spins a prim
-(`viewer-build-tool-row-parity`).
+The click actions are checked in the viewer's world tests too, one click a
+case, each asserting what went on the wire and which window or camera
+request it raised.
+
+Not done in the viewer: the cursor does not say a prim takes a touch
+(`viewer-touch-cursor`); nothing drags or spins a prim
+(`viewer-build-tool-row-parity`); and the pay, buy and parcel-media
+features behind three click actions do not exist yet
+(`viewer-money-economy-ui`, `viewer-video-playback`).
 
 The fake grid neither returns somebody else's object, nor returns anything
 by itself, nor ends a temporary prim: `server-fake-grid-object-return`. It

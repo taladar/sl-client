@@ -212,10 +212,7 @@ fn ingest_restart_notices(
             | SlSessionEvent::Disconnected(_)
             | SlSessionEvent::LoggedOut => {
                 if let Some(card) = countdown.card.take() {
-                    resolves.write(ResolveNotification {
-                        toast: card.root,
-                        button: None,
-                    });
+                    resolves.write(ResolveNotification::dismissed(card.root));
                 }
             }
             _other => {}
@@ -303,10 +300,7 @@ fn spawn_countdown_card(
     );
     commands.entity(close).observe(
         move |_activate: On<Activate>, mut resolves: MessageWriter<ResolveNotification>| {
-            resolves.write(ResolveNotification {
-                toast: root,
-                button: None,
-            });
+            resolves.write(ResolveNotification::dismissed(root));
         },
     );
     CountdownCard {

@@ -82,11 +82,17 @@ pub enum Action {
     ToggleMouselook,
     /// Enter or leave the free **flycam**.
     ToggleFlycam,
+    /// **Sit down** on the ground, or **stand up** from any sit — the
+    /// reference's `toggle_sit`. Like the reference's, it is bound to no key by
+    /// default: its `Alt+Shift+S` is the accelerator on Avatar ▸ Movement ▸
+    /// Sit Down / Stand Up, and the action is here so a key can be bound to it
+    /// (the reference lists it in its rebinding table as *Sit/Stand*).
+    ToggleSit,
 }
 
 impl Action {
     /// Every action, for the per-frame reconciliation in `update_action_input`.
-    pub(crate) const ALL: [Self; 10] = [
+    pub(crate) const ALL: [Self; 11] = [
         Self::MoveForward,
         Self::MoveBackward,
         Self::MoveLeft,
@@ -97,6 +103,7 @@ impl Action {
         Self::ToggleFly,
         Self::ToggleMouselook,
         Self::ToggleFlycam,
+        Self::ToggleSit,
     ];
 }
 
@@ -137,7 +144,8 @@ pub(crate) enum BindingTarget {
 /// Derived from the camera mode by [`crate::camera`] (never assigned by hand),
 /// this is the second axis of `viewer-input-focus-contexts` — the one that task
 /// deliberately left with a single inhabitant until mouselook / flycam gave it
-/// more. `Sitting` / `EditAvatar` (`viewer-sit-stand-actions`) extend it later.
+/// more. `Sitting` / `EditAvatar` (`viewer-input-sitting-edit-avatar-modes`)
+/// extend it later.
 #[derive(Resource, Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
 pub(crate) enum InputMode {
     /// Orbiting third-person: the movement keys drive the avatar.
@@ -507,6 +515,42 @@ mod tests {
         assert_eq!(
             profile.target(KeyCode::KeyG),
             Some(BindingTarget::Gesture(sl_client_bevy::Uuid::nil()))
+        );
+    }
+
+    /// **Sit/Stand is bindable but unbound**, as the reference's `toggle_sit`
+    /// is: no default key reaches it in any mode (its `Alt+Shift+S` is a menu
+    /// accelerator, and `Alt` is a chord the map never resolves), and a key
+    /// bound to it resolves like any other action.
+    #[test]
+    fn toggle_sit_is_bindable_and_unbound_by_default() {
+        let bindings = InputBindings::default();
+        for mode in [
+            InputMode::ThirdPerson,
+            InputMode::Mouselook,
+            InputMode::Flycam,
+        ] {
+            let bound = bindings.profile(mode).is_some_and(|profile| {
+                profile
+                    .iter()
+                    .any(|(_key, target)| target == BindingTarget::Action(Action::ToggleSit))
+            });
+            assert!(!bound, "{mode:?} binds no key to Sit/Stand by default");
+        }
+
+        let mut app = action_app(InputContext::World);
+        let mut bound = InputBindings::default();
+        bound.profiles.insert(
+            InputMode::ThirdPerson,
+            BindingProfile::default().action(KeyCode::KeyX, Action::ToggleSit),
+        );
+        app.insert_resource(bound);
+        press(&mut app, KeyCode::KeyX);
+        assert!(
+            app.world()
+                .resource::<ButtonInput<Action>>()
+                .just_pressed(Action::ToggleSit),
+            "a key bound to Sit/Stand fires it"
         );
     }
 

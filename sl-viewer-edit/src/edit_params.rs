@@ -80,27 +80,14 @@ use crate::world_api::SelectionSet;
 // Wire constants (the reference's `llprimitive.cpp` limits, SL variants).
 // ---------------------------------------------------------------------------
 
-/// The `FLAGS_USE_PHYSICS` bit of `PrimFlags` (`object_flags.h`).
-const FLAGS_USE_PHYSICS: u32 = 1 << 0;
-
-/// The `FLAGS_PHANTOM` bit of `PrimFlags`.
-const FLAGS_PHANTOM: u32 = 1 << 4;
-
-/// The `FLAGS_TEMPORARY_ON_REZ` bit of `PrimFlags`.
-const FLAGS_TEMPORARY_ON_REZ: u32 = 1 << 29;
-
-/// The `FLAGS_CAST_SHADOWS` legacy bit of `PrimFlags`, round-tripped so an
-/// `ObjectFlagUpdate` does not silently clear it on objects that carry it.
-const FLAGS_CAST_SHADOWS: u32 = 1 << 1;
-
-// The agent-relative permission bits (`FLAGS_OBJECT_MODIFY` / `_COPY` / `_MOVE`)
-// live on [`crate::objects`], shared with the build-tool permission gate.
-use crate::world_api::{FLAGS_OBJECT_COPY, FLAGS_OBJECT_MODIFY, FLAGS_OBJECT_MOVE};
+// Every `PrimFlags` bit lives in one place, shared with the build-tool
+// permission gate and the object menus.
+use crate::world_api::{
+    FLAGS_OBJECT_COPY, FLAGS_OBJECT_MODIFY, FLAGS_OBJECT_MOVE, FLAGS_OBJECT_TRANSFER,
+    FLAGS_PHANTOM, FLAGS_TEMPORARY_ON_REZ, FLAGS_USE_PHYSICS,
+};
 use sl_viewer_ui_core::semantic::LabelledBy;
 use sl_viewer_ui_core::skin_palette::SkinPalette;
-
-/// The agent-relative `FLAGS_OBJECT_TRANSFER` bit.
-const FLAGS_OBJECT_TRANSFER: u32 = 1 << 17;
 
 /// The group-share mask (the reference's `onCommitGroupShare`): modify +
 /// move + copy on the group mask, toggled as one.
@@ -3183,6 +3170,19 @@ struct ParamEdit<'w> {
     commands: MessageWriter<'w, SlCommand>,
 }
 
+/// The `ObjectFlagUpdate` settings an object's `PrimFlags` word says, as the
+/// reference's `LLViewerObject::updateFlags` builds them: physics, temporary
+/// and phantom from their own bits, and `CastsShadows` always `false` — the
+/// bit it once read (23) is retired and no simulator unpacks the field.
+const fn object_flag_settings(flags: u32) -> ObjectFlagSettings {
+    ObjectFlagSettings {
+        use_physics: flags & FLAGS_USE_PHYSICS != 0,
+        is_temporary: flags & FLAGS_TEMPORARY_ON_REZ != 0,
+        is_phantom: flags & FLAGS_PHANTOM != 0,
+        casts_shadows: false,
+    }
+}
+
 /// The observer every [`ParamToggle`] row runs on press: flip the toggle's
 /// wire state for the primary selection and send the corresponding message
 /// (the toggle is read off the pressed row's component).
@@ -3219,12 +3219,7 @@ fn handle_toggle_press(
                 _phantom => FLAGS_PHANTOM,
             };
             let flags = data.update_flags ^ bit;
-            let settings = ObjectFlagSettings {
-                use_physics: flags & FLAGS_USE_PHYSICS != 0,
-                is_temporary: flags & FLAGS_TEMPORARY_ON_REZ != 0,
-                is_phantom: flags & FLAGS_PHANTOM != 0,
-                casts_shadows: flags & FLAGS_CAST_SHADOWS != 0,
-            };
+            let settings = object_flag_settings(flags);
             objects.apply_local_flag_edit(&primary_scoped, bit, flags & bit != 0);
             snapshot.shown = None;
             commands.write(SlCommand(Command::SetObjectFlags {
@@ -3551,11 +3546,67 @@ mod tests {
         quantize_hollow, quantize_path_scale, quantize_revolutions, quantize_shear,
         quantize_signed, shape_display_value, shape_from_ui, srgb_to_linear_byte,
     };
-    use crate::world_api::{AvatarState, NameAlias};
+    use crate::world_api::{
+        AvatarState, FLAGS_CREATE_SELECTED, FLAGS_OBJECT_COPY, FLAGS_OBJECT_MODIFY,
+        FLAGS_OBJECT_MOVE, FLAGS_OBJECT_YOU_OWNER, FLAGS_PHANTOM, FLAGS_TEMPORARY_ON_REZ,
+        FLAGS_USE_PHYSICS, NameAlias,
+    };
     use pretty_assertions::{assert_eq, assert_ne};
     use sl_client_bevy::{
-        AgentKey, DisplayName, HoleType, Material, PrimShapeFloat, PrimShapeParams, Uuid,
+        AgentKey, DisplayName, HoleType, Material, ObjectFlagSettings, PrimShapeFloat,
+        PrimShapeParams, Uuid,
     };
+
+    /// The reference's `FLAGS_OBJECT_ANY_OWNER` (`object_flags.h`), which both
+    /// grids set on every owned object. The viewer reads nothing from it; the
+    /// test needs it only because it is the bit the Phantom checkbox once read.
+    const FLAGS_OBJECT_ANY_OWNER: u32 = 1 << 4;
+
+    /// An owned, solid, permanent box as a simulator flags it: the owner bits,
+    /// the agent-relative grants and the create-selected bit, and nothing
+    /// physical, phantom or temporary.
+    const OWNED_SOLID_BOX: u32 = FLAGS_OBJECT_ANY_OWNER
+        | FLAGS_OBJECT_YOU_OWNER
+        | FLAGS_OBJECT_MODIFY
+        | FLAGS_OBJECT_COPY
+        | FLAGS_OBJECT_MOVE
+        | FLAGS_CREATE_SELECTED;
+
+    /// Each Build-floater toggle changes its own field of the
+    /// `ObjectFlagUpdate` and no other: an owned box made physical stays
+    /// solid, made phantom becomes phantom, a phantom one made temporary stays
+    /// phantom, and `CastsShadows` is never set
+    /// (`viewer-build-phantom-flag-wrong-bit`).
+    #[test]
+    fn a_flag_toggle_changes_only_its_own_field() {
+        assert_eq!(
+            super::object_flag_settings(OWNED_SOLID_BOX),
+            ObjectFlagSettings::default(),
+            "an owned solid box reads as nothing set",
+        );
+        assert_eq!(
+            super::object_flag_settings(OWNED_SOLID_BOX ^ FLAGS_USE_PHYSICS),
+            ObjectFlagSettings {
+                use_physics: true,
+                ..ObjectFlagSettings::default()
+            },
+        );
+        assert_eq!(
+            super::object_flag_settings(OWNED_SOLID_BOX ^ FLAGS_PHANTOM),
+            ObjectFlagSettings {
+                is_phantom: true,
+                ..ObjectFlagSettings::default()
+            },
+        );
+        assert_eq!(
+            super::object_flag_settings((OWNED_SOLID_BOX | FLAGS_PHANTOM) ^ FLAGS_TEMPORARY_ON_REZ),
+            ObjectFlagSettings {
+                is_temporary: true,
+                is_phantom: true,
+                ..ObjectFlagSettings::default()
+            },
+        );
+    }
 
     /// The creator / owner line shows the name the rest of the viewer shows —
     /// the display name, and the user's own pseudonym over it — and asks for an

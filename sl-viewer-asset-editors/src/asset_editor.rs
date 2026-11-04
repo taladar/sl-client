@@ -455,7 +455,7 @@ mod tests {
             .write(NotificationResponse {
                 id: some_id(),
                 template: SAVE_CHANGES.name(),
-                button: Some(button.name()),
+                button: Some(button.name().into()),
                 ignored: false,
                 input: None,
             });

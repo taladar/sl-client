@@ -1892,4 +1892,33 @@ mod tests {
         );
         Ok(())
     }
+
+    /// **`Alt+Shift+S` sits down, and the same chord stands back up** — the
+    /// reference's one accelerator on Avatar ▸ Movement's Sit Down and Stand
+    /// Up, of which only the one that applies is drawn. Through the real bar
+    /// and its accelerator dispatch, so a condition that failed to follow the
+    /// sit (and left Sit Down drawn) would send a second `SitOnGround`.
+    #[test]
+    fn alt_shift_s_sits_down_and_stands_back_up() -> Result<(), TestError> {
+        /// Press `Alt+Shift+S` and let the menu dispatch run.
+        fn chord(app: &mut App) {
+            interact::with_modifier(app, KeyCode::AltLeft, Key::Alt, |app| {
+                interact::with_modifier(app, KeyCode::ShiftLeft, Key::Shift, |app| {
+                    interact::tap(app, KeyCode::KeyS, Key::Character("S".into()));
+                });
+            });
+            settle(app, 3);
+        }
+
+        let mut app = crate::world_test::world_app_with_build_tools()?;
+        settle(&mut app, 3);
+        let _settling = drain_commands(&mut app);
+        chord(&mut app);
+        let names: Vec<&str> = drain_commands(&mut app).iter().map(Command::name).collect();
+        assert_eq!(names, vec!["SitOnGround"], "standing, the chord sits down");
+        chord(&mut app);
+        let names: Vec<&str> = drain_commands(&mut app).iter().map(Command::name).collect();
+        assert_eq!(names, vec!["Stand"], "sitting, the same chord stands up");
+        Ok(())
+    }
 }

@@ -253,7 +253,9 @@ pub const FLOATERS: &[FloaterElement] = &[
     FloaterElement {
         id: "material-editor",
         summary: "Edit Material: the GLTF material asset editor — the base-colour, metallic / \
-                  roughness, normal and emissive channels with their texture swatches.",
+                  roughness, normal and emissive channels with their texture swatches. One \
+                  window per material, so a second one cannot discard the first's unsaved \
+                  edit.",
         spec: crate::edit_material_asset::material_editor_floater_spec,
         content: crate::edit_material_asset::spawn_material_editor_specimen,
     },
@@ -482,7 +484,8 @@ pub const FLOATERS: &[FloaterElement] = &[
     FloaterElement {
         id: "wearable-editor",
         summary: "Edit Wearable: a worn item's visual-param sliders and its texture swatches, with \
-                  the Save / Save As row.",
+                  the Save / Save As row. One window per wearable, so a second one cannot discard \
+                  the first's unsaved edit.",
         spec: crate::edit_wearable::wearable_editor_floater_spec,
         content: crate::edit_wearable::spawn_wearable_editor_specimen,
     },

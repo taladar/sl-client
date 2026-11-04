@@ -33,6 +33,34 @@
 //! `LLAgentWearables::saveWearable`. **Save As** mints a fresh item via the CAPS
 //! uploader. **Revert** restores the asset the editor opened on.
 //!
+//! # One window per wearable
+//!
+//! The editor is a **keyed floater** ([`FloaterKey`], `viewer-key-wearable-
+//! editor`): opening a second wearable opens a second window rather than
+//! re-pointing the first, so a shape can be edited beside the skin it sits
+//! under, and opening one can never discard another's unsaved edit. A window
+//! is keyed by its inventory item — a Current Outfit Folder link opens the item
+//! it links to, so a link row and the item's own row are one window, and Save
+//! writes onto the wearable rather than onto the link. Re-opening a wearable
+//! already up only **raises** its window and never re-seeds it.
+//!
+//! Each window's edit (`WearEdit`) is a component on that window, and every
+//! system and observer here reaches its edit through the window the control
+//! lives in ([`FloaterHost`]): a picker reply names its swatch, a drag its
+//! slider, a press its button. Closing a window ends it and its edit.
+//!
+//! - **The preview.** The worn avatar is one, and every open editor previews
+//!   on it. That is safe because the bake inputs hold the worn assets **by
+//!   item** ([`OwnBakeInputs::set_preview_asset`]): each window substitutes its
+//!   own item's asset, so a shape window and a skin window both show, and a
+//!   window closing puts back its own item's asset and leaves the other's edit
+//!   on the avatar. Two layers of one type preview independently too: the
+//!   composite draws every worn wearable of a type, in worn order, each from
+//!   its own asset (`sl-bake`'s `WornLayer`).
+//! - **Save.** An in-place save is matched back by the transaction it minted,
+//!   a Save As by its ticket in the shared creation queue — both carried by the
+//!   window that sent them, so a reply lands in the window that saved.
+//!
 //! Reference (Firestorm, read-only): `llpaneleditwearable.cpp`,
 //! `llfloatercustomize.cpp`, `llwearabletype.cpp`.
 
@@ -45,9 +73,10 @@ use bevy::picking::hover::HoverMap;
 use bevy::prelude::*;
 use bevy::ui_widgets::{Activate, Slider, SliderRange, SliderStep, SliderValue, ValueChange};
 use sl_client_bevy::{
-    AssetType, Command, InventoryType, ItemInfo, JointOverrides, ParamEffect, ParamGroup, ParamSex,
-    ResolvedParams, SkeletalDeformations, SlCommand, SlEvent, SlSessionEvent, TextureKey,
-    TransactionId, Uuid, WearableAsset, WearablePermissions, WearableSaleType, WearableType,
+    ASSET_CODE_LINK, AssetType, Command, InventoryKey, InventoryType, ItemInfo, JointOverrides,
+    ParamEffect, ParamGroup, ParamSex, ResolvedParams, SkeletalDeformations, SlCommand, SlEvent,
+    SlSessionEvent, TextureKey, TransactionId, Uuid, WearableAsset, WearablePermissions,
+    WearableSaleType, WearableType,
 };
 use sl_client_bevy::{SaleType, avatar_texture};
 
@@ -55,14 +84,17 @@ use crate::asset_editor::{SaveEditorWindow, UnsavedWork};
 use crate::avatar_assets::AvatarAssetLibrary;
 use crate::avatars::OwnLocalBake;
 use crate::bake_inputs::{OwnBakeInputs, shape_is_male};
-use crate::floater::{FloaterCaps, FloaterHandle, FloaterSpec, spawn_floater};
+use crate::floater::{
+    FloaterCaps, FloaterHandle, FloaterHost, FloaterKey, FloaterSpec, FloaterSystems,
+    KeyedFloaterOpen, KeyedFloaters,
+};
 use crate::intents::TexturePicked;
 use crate::intents::{ItemCreationFinished, ItemCreationTicket, PendingItemCreations};
-use crate::inventory::OpenWearableEditor;
+use crate::inventory::{InventoryModel, OpenWearableEditor};
 use crate::inventory_actions::{wearable_param_group, wearable_type_of};
 use crate::inventory_properties::to_wire_item;
 use crate::textures::{TextureDecoded, TextureManager};
-use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
+use crate::ui::{column, row};
 use crate::ui_color_picker::{ColorPicked, ColorSwatchValue, spawn_color_swatch};
 use crate::ui_font::UiFont;
 use crate::ui_radio::{RadioLayout, RadioSelection, RadioSpec, spawn_radio_group};
@@ -165,25 +197,10 @@ enum WearButton {
     Revert,
 }
 
-/// The editor floater's entity handles.
-#[derive(Resource)]
-struct WearEditorUi {
-    /// The floater root (open / close by its [`UiPanelShown`]).
-    panel: Entity,
-    /// The rebuilt-per-open content column.
-    content: Entity,
-    /// The floater title text.
-    title: Entity,
-}
-
-/// The live edit in progress, or `None` when the editor is closed.
-#[derive(Resource, Default)]
-struct WearEditState {
-    /// The active edit.
-    active: Option<WearEdit>,
-}
-
-/// One in-progress wearable edit.
+/// One window's wearable edit — a **component on the window**, since the
+/// editor opens per wearable ([`FloaterKey`]) and the edit lives exactly as
+/// long as its window.
+#[derive(Component)]
 struct WearEdit {
     /// The item being edited (its permissions / folder feed Save).
     item: ItemInfo,
@@ -236,33 +253,40 @@ struct WearEdit {
 pub struct EditWearablePlugin;
 
 impl Plugin for EditWearablePlugin {
-    /// Register the open message, state and systems; spawn the hidden floater.
+    /// Register the open message and the open / per-window systems.
+    ///
+    /// Nothing spawns at `Startup`: a wearable window exists only while that
+    /// wearable is open, so `open_wearable_editor` spawns the instance. The
+    /// per-window systems are gated on there being a window; the preview's
+    /// restore runs as the window's edit goes (`restore_preview_on_close`).
     fn build(&self, app: &mut App) {
         if !app.is_plugin_added::<SliderWidgetPlugin>() {
             app.add_plugins(SliderWidgetPlugin);
         }
-        app.init_resource::<WearEditState>()
-            .add_message::<OpenWearableEditor>()
-            .add_systems(
-                Startup,
-                spawn_wearable_editor.after(UiScaffoldSystems::SpawnRoot),
-            )
+        app.add_message::<OpenWearableEditor>()
+            .add_observer(restore_preview_on_close)
             .add_systems(
                 Update,
                 (
-                    open_wearable_editor,
-                    apply_wear_texture_picked,
-                    apply_wear_tint_picked,
-                    apply_wear_gender_radio,
-                    note_edited_texture_decoded,
-                    drive_wearable_preview,
-                    sync_wearable_sliders,
-                    save_wearable,
-                    report_wearable_save,
-                    report_wearable_save_as,
-                    end_wearable_edit_on_close,
-                    track_wearable_unsaved,
-                    scroll_wearable_list,
+                    // After the manager's command pass — see `FloaterSystems`:
+                    // the inventory row whose Edit opens a wearable also raises
+                    // the inventory window, and the later raise wins.
+                    open_wearable_editor.after(FloaterSystems::Commands),
+                    (
+                        apply_wear_texture_picked,
+                        apply_wear_tint_picked,
+                        apply_wear_gender_radio,
+                        note_edited_texture_decoded,
+                        drive_wearable_preview,
+                        sync_wearable_sliders,
+                        save_wearable,
+                        report_wearable_save,
+                        report_wearable_save_as,
+                        track_wearable_unsaved,
+                        scroll_wearable_list,
+                    )
+                        .chain()
+                        .run_if(any_with_component::<WearEdit>),
                 )
                     .chain(),
             );
@@ -291,29 +315,6 @@ pub fn wearable_editor_floater_spec() -> FloaterSpec {
             dockable: false,
         },
     }
-}
-
-/// Spawn the (hidden) editor floater and stash its handles.
-fn spawn_wearable_editor(mut commands: Commands, root: Res<UiRoot>) {
-    let FloaterHandle {
-        root: panel,
-        content,
-        title_text,
-    } = spawn_floater(&mut commands, root.0, wearable_editor_floater_spec());
-    // Subject-bound: it opens on whatever item you clicked, so its geometry is
-    // meaningless across sessions.
-    commands.entity(panel).insert((
-        crate::floater_persist::FloaterPersistExempt,
-        // The edit previews on the avatar and is not stored until a Save, so a
-        // close with the sliders moved throws real work away — the scaffold's
-        // guard asks first ([`track_wearable_unsaved`]).
-        UnsavedWork::default(),
-    ));
-    commands.insert_resource(WearEditorUi {
-        panel,
-        content,
-        title: title_text,
-    });
 }
 
 // ---------------------------------------------------------------------------
@@ -372,50 +373,86 @@ fn prettify(name: &str) -> String {
 // Open — rebuild the content from the worn wearable.
 // ---------------------------------------------------------------------------
 
-/// What opening the editor rebuilds, bundled as one
-/// [`SystemParam`](bevy::ecs::system::SystemParam): the panel it shows, the
-/// title it rewrites, and the commands the whole control list is spawned
-/// through.
-#[derive(bevy::ecs::system::SystemParam)]
-struct WearOpenWidgets<'w, 's> {
-    /// The floater's panel, shown once the controls are up.
-    panels: Query<'w, 's, &'static mut UiPanelShown>,
-    /// The title text, rewritten to the opened item.
-    texts: Query<'w, 's, &'static mut Text>,
-    /// What the control list is spawned through.
-    commands: Commands<'w, 's>,
+/// The item a wearable row stands for: the item itself, or — for a Current
+/// Outfit Folder **link** — the item it links to, when that is loaded.
+///
+/// A link is not the wearable: its asset id names its target, and a save
+/// written onto it would land on the link. Keying by the target also makes a
+/// link row and the item's own row one window rather than two editors of one
+/// wearable. A link whose target is not loaded is opened as it is.
+fn resolve_wearable(item: &ItemInfo, model: Option<&InventoryModel>) -> ItemInfo {
+    if item.asset_type != AssetType::Other(ASSET_CODE_LINK) {
+        return item.clone();
+    }
+    model
+        .and_then(|model| model.find_item(InventoryKey::from(item.asset_id)))
+        .cloned()
+        .unwrap_or_else(|| item.clone())
 }
 
-/// Handle an [`OpenWearableEditor`]: seed the edit state from the worn wearable
-/// and rebuild the floater's controls.
+/// The [`FloaterKey`] of the window editing the wearable `item`.
+fn wearable_key(item: InventoryKey) -> FloaterKey {
+    FloaterKey::subject(&item)
+}
+
+/// What a new window's edit is seeded from, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the worn outfit's parsed
+/// assets, the avatar-param library its sliders are listed from, and the
+/// inventory a link row is resolved through.
+#[derive(bevy::ecs::system::SystemParam)]
+struct WearSeed<'w> {
+    /// The worn assets, by item.
+    inputs: Res<'w, OwnBakeInputs>,
+    /// The avatar-param library, for the slot's sliders.
+    library: Option<Res<'w, AvatarAssetLibrary>>,
+    /// The inventory, for a link's target.
+    inventory: Option<Res<'w, InventoryModel>>,
+}
+
+/// Open a wearable **per wearable** (`viewer-key-wearable-editor`): raise its
+/// window when it is already up, and otherwise spawn one, seed a fresh
+/// [`WearEdit`] from the worn asset and build the controls into it.
+///
+/// Every open of the frame is honoured, not just the last. A window already up
+/// is only raised — never re-seeded — because re-seeding it would throw away
+/// exactly what a second open must not touch: the resident's unsaved edits.
 fn open_wearable_editor(
     mut opens: MessageReader<OpenWearableEditor>,
-    ui: Option<Res<WearEditorUi>>,
-    inputs: Res<OwnBakeInputs>,
-    library: Option<Res<AvatarAssetLibrary>>,
-    mut state: ResMut<WearEditState>,
-    widgets: WearOpenWidgets,
+    mut floaters: KeyedFloaters,
+    seed: WearSeed,
+    mut commands: Commands,
 ) {
-    let WearOpenWidgets {
-        mut panels,
-        mut texts,
-        mut commands,
-    } = widgets;
-    let (Some(ui), Some(open)) = (ui, opens.read().last()) else {
-        return;
-    };
-    let item = open.item.clone();
-    let slot = wearable_type_of(&item);
-    if let Ok(mut title) = texts.get_mut(ui.title) {
-        title.0 = format!("Edit: {}", item.name);
+    for open in opens.read() {
+        let item = resolve_wearable(&open.item, seed.inventory.as_deref());
+        let KeyedFloaterOpen::Spawned(handle) =
+            floaters.open(wearable_editor_floater_spec(), wearable_key(item.item_id))
+        else {
+            continue;
+        };
+        build_wearable_window(&mut commands, handle, item, &seed);
     }
-    // Tear down the previous content.
-    commands.entity(ui.content).despawn_related::<Children>();
+}
 
-    // Seed the edited asset from the worn wearable (falling back to a fresh
-    // defaults asset if the outfit's bake inputs are not assembled yet).
-    let mut edited = inputs
-        .worn_asset(slot)
+/// Furnish a freshly spawned wearable window: its title, its controls, the
+/// unsaved-work guard, and the [`WearEdit`] the per-window systems find it by.
+fn build_wearable_window(
+    commands: &mut Commands,
+    handle: FloaterHandle,
+    item: ItemInfo,
+    seed: &WearSeed,
+) {
+    let slot = wearable_type_of(&item);
+    // The title node carries no Fluent key, so a direct text set is not fought
+    // by the translator.
+    commands
+        .entity(handle.title_text)
+        .insert(Text::new(format!("Edit: {}", item.name)));
+
+    // Seed the edited asset from this item's worn asset (falling back to a
+    // fresh defaults asset if the outfit's bake inputs are not assembled yet).
+    let mut edited = seed
+        .inputs
+        .worn_asset_of(item.item_id)
         .cloned()
         .unwrap_or_else(|| WearableAsset {
             version: WEARABLE_VERSION,
@@ -427,12 +464,12 @@ fn open_wearable_editor(
     edited.wearable_type = slot;
 
     let tint_params = wearable_tint_params(slot);
-    let sex = avatar_sex(library.as_deref(), inputs.worn_asset(WearableType::Shape));
+    let library = seed.library.as_deref();
+    let sex = avatar_sex(library, seed.inputs.worn_asset(WearableType::Shape));
 
     // Fill in every editable group param at its current (or default) value, so
     // the saved asset is complete and the sliders start at the right place.
     let sliders: Vec<ParamSliderSpec> = library
-        .as_deref()
         .map(|library| editable_params(library, slot, sex, tint_params))
         .unwrap_or_default();
     for slider in &sliders {
@@ -440,39 +477,40 @@ fn open_wearable_editor(
     }
 
     let gender_param = library
-        .as_deref()
         .and_then(|library| library.params().by_name("male"))
         .map(|param| param.id);
     let controls = spawn_wearable_controls(
-        &mut commands,
-        ui.content,
+        commands,
+        handle.content,
         FONT,
         &edited,
         &sliders,
         gender_param,
     );
 
-    state.active = Some(WearEdit {
-        item,
-        wearable_type: slot,
-        original: edited.clone(),
-        edited,
-        tint_params,
-        tint_swatch: controls.tint_swatch,
-        gender_param,
-        height_label: controls.height_label,
-        pending_textures: HashSet::new(),
-        shape_dirty: true,
-        bake_dirty: true,
-        saving: None,
-        creation: None,
-        dirty: false,
-        status: Some(controls.status),
-    });
-
-    if let Ok(mut shown) = panels.get_mut(ui.panel) {
-        shown.0 = true;
-    }
+    commands.entity(handle.root).insert((
+        // The edit previews on the avatar and is not stored until a Save, so a
+        // close with the sliders moved throws real work away — the scaffold's
+        // guard asks first ([`track_wearable_unsaved`]).
+        UnsavedWork::default(),
+        WearEdit {
+            item,
+            wearable_type: slot,
+            original: edited.clone(),
+            edited,
+            tint_params,
+            tint_swatch: controls.tint_swatch,
+            gender_param,
+            height_label: controls.height_label,
+            pending_textures: HashSet::new(),
+            shape_dirty: true,
+            bake_dirty: true,
+            saving: None,
+            creation: None,
+            dirty: false,
+            status: Some(controls.status),
+        },
+    ));
 }
 
 /// The control entities [`spawn_wearable_controls`] returns, the ones the
@@ -523,6 +561,7 @@ fn spawn_wearable_controls(
             Text::new(String::new()),
             UiFont::Sans.at(font_size),
             text_role(LABEL_COLOR),
+            Name::new("wearable-status"),
             Node {
                 margin: UiRect::bottom(Val::Px(4.0)),
                 ..Default::default()
@@ -897,7 +936,8 @@ fn spawn_action_button(
 fn on_wear_slider_change(
     change: On<ValueChange<f32>>,
     sliders: Query<(&WearParamSlider, &SliderRange)>,
-    state: Option<ResMut<WearEditState>>,
+    host: FloaterHost,
+    mut edits: Query<&mut WearEdit>,
     mut commands: Commands,
 ) {
     let Ok((info, range)) = sliders.get(change.source) else {
@@ -905,9 +945,10 @@ fn on_wear_slider_change(
     };
     let clamped = range.clamp(change.value);
     commands.entity(change.source).insert(SliderValue(clamped));
-    // Absent only in the gallery, whose specimen has no edit to record into.
-    if let Some(mut state) = state
-        && let Some(edit) = state.active.as_mut()
+    // No edit only in the gallery, whose specimen has no window of its own.
+    if let Some(mut edit) = host
+        .of(change.source)
+        .and_then(|window| edits.get_mut(window).ok())
     {
         let _prev = edit.edited.params.insert(info.id, clamped);
         edit.dirty = true;
@@ -919,19 +960,23 @@ fn on_wear_slider_change(
     }
 }
 
+/// The gender radios whose selection changed this frame.
+type ChangedGenderRadio = (With<WearGenderRadio>, Changed<RadioSelection>);
+
 /// The Shape gender radio (Female = `0` / Male = `1`): write the `male` param
 /// and re-shape the body when the selection changes.
 fn apply_wear_gender_radio(
-    radios: Query<&RadioSelection, (With<WearGenderRadio>, Changed<RadioSelection>)>,
-    mut state: ResMut<WearEditState>,
+    radios: Query<(Entity, &RadioSelection), ChangedGenderRadio>,
+    host: FloaterHost,
+    mut edits: Query<&mut WearEdit>,
 ) {
-    let Some(edit) = state.active.as_mut() else {
-        return;
-    };
-    let Some(id) = edit.gender_param else {
-        return;
-    };
-    for selection in &radios {
+    for (radio, selection) in &radios {
+        let Some(mut edit) = host.of(radio).and_then(|window| edits.get_mut(window).ok()) else {
+            continue;
+        };
+        let Some(id) = edit.gender_param else {
+            continue;
+        };
         let male = if selection.active >= 1 { 1.0 } else { 0.0 };
         if edit.edited.params.get(&id).copied() != Some(male) {
             let _prev = edit.edited.params.insert(id, male);
@@ -941,20 +986,23 @@ fn apply_wear_gender_radio(
     }
 }
 
-/// A texture pick: record the new layer texture, repaint the swatch, and mark
-/// the bake dirty.
+/// A texture pick: record the new layer texture in the edit of the window the
+/// swatch lives in, repaint the swatch, and mark the bake dirty.
 fn apply_wear_texture_picked(
     mut picks: MessageReader<TexturePicked>,
     swatches: Query<&WearTextureSwatch>,
     mut values: Query<&mut TextureSwatchValue>,
-    mut state: ResMut<WearEditState>,
+    host: FloaterHost,
+    mut edits: Query<&mut WearEdit>,
 ) {
-    let Some(edit) = state.active.as_mut() else {
-        picks.clear();
-        return;
-    };
     for pick in picks.read() {
         let Ok(slot) = swatches.get(pick.requester) else {
+            continue;
+        };
+        let Some(mut edit) = host
+            .of(pick.requester)
+            .and_then(|window| edits.get_mut(window).ok())
+        else {
             continue;
         };
         let _prev = edit.edited.textures.insert(
@@ -969,22 +1017,26 @@ fn apply_wear_texture_picked(
     }
 }
 
-/// A tint pick: write the colour into the slot's three colour params, repaint
-/// the swatch, and mark the bake dirty.
+/// A tint pick: write the colour into the slot's three colour params of the
+/// window whose tint swatch asked, repaint the swatch, and mark the bake dirty.
 fn apply_wear_tint_picked(
     mut picks: MessageReader<ColorPicked>,
     mut values: Query<&mut ColorSwatchValue, With<WearTintSwatch>>,
-    mut state: ResMut<WearEditState>,
+    host: FloaterHost,
+    mut edits: Query<&mut WearEdit>,
 ) {
-    let Some(edit) = state.active.as_mut() else {
-        picks.clear();
-        return;
-    };
-    let (Some([r, g, b]), Some(tint_swatch)) = (edit.tint_params, edit.tint_swatch) else {
-        picks.clear();
-        return;
-    };
     for pick in picks.read() {
+        let Some(mut edit) = host
+            .of(pick.requester)
+            .and_then(|window| edits.get_mut(window).ok())
+        else {
+            continue;
+        };
+        // The window's own tint swatch, not merely one inside it: a colour
+        // picker answers every swatch that opened one.
+        let (Some([r, g, b]), Some(tint_swatch)) = (edit.tint_params, edit.tint_swatch) else {
+            continue;
+        };
         if pick.requester != tint_swatch {
             continue;
         }
@@ -1004,74 +1056,32 @@ fn apply_wear_tint_picked(
 /// preview composite picks it up.
 fn note_edited_texture_decoded(
     mut decoded: MessageReader<TextureDecoded>,
-    mut state: ResMut<WearEditState>,
+    mut edits: Query<&mut WearEdit>,
 ) {
-    let Some(edit) = state.active.as_mut() else {
-        decoded.clear();
+    let keys: Vec<TextureKey> = decoded.read().map(|&TextureDecoded(key)| key).collect();
+    if keys.is_empty() {
         return;
-    };
-    for &TextureDecoded(key) in decoded.read() {
-        if edit.pending_textures.remove(&key) {
-            edit.bake_dirty = true;
+    }
+    for mut edit in &mut edits {
+        for key in &keys {
+            if edit.pending_textures.remove(key) {
+                edit.bake_dirty = true;
+            }
         }
     }
 }
 
-/// Push the edited wearable into the bake inputs when something changed, so the
-/// shape morph and bake composite re-derive from it (the live preview).
+/// Push each window's edited wearable into the bake inputs when something in
+/// it changed, so the shape morph and bake composite re-derive from it (the
+/// live preview).
 fn drive_wearable_preview(
-    mut state: ResMut<WearEditState>,
-    mut inputs: ResMut<OwnBakeInputs>,
-    mut texture_manager: ResMut<TextureManager>,
-    store: Res<DecodedTextures>,
-    library: Option<Res<AvatarAssetLibrary>>,
-    mut local_bake: ResMut<OwnLocalBake>,
+    mut edits: Query<&mut WearEdit>,
+    mut preview: WearPreview,
     mut texts: Query<&mut Text>,
 ) {
-    let Some(edit) = state.active.as_mut() else {
-        return;
-    };
-    if !edit.shape_dirty && !edit.bake_dirty {
-        return;
+    for mut edit in &mut edits {
+        preview.show(&mut edit, &mut texts);
     }
-    // The shape morph re-derives from the substituted asset; the bake needs an
-    // explicit texture request + reassemble + rebuild.
-    inputs.set_preview_asset(edit.edited.clone());
-    // Update the Shape height read-out from the edited body proportions (the
-    // reference's `computeBodySize` `mBodySize.z`).
-    if edit.shape_dirty
-        && edit.wearable_type == WearableType::Shape
-        && let (Some(library), Some(label)) = (library.as_deref(), edit.height_label)
-    {
-        let bytes = inputs.visual_params(library.params());
-        let resolved = ResolvedParams::from_appearance(library.params(), &bytes);
-        let deform = SkeletalDeformations::from_resolved(library.params(), &resolved);
-        if let Some(metrics) = library
-            .skeleton()
-            .body_size_metrics(&deform, &JointOverrides::default())
-            && let Ok(mut text) = texts.get_mut(label)
-        {
-            text.0 = format!("{:.2} m", metrics.body_size_z);
-        }
-    }
-    if edit.bake_dirty {
-        inputs.request_asset_textures(&edit.edited, &mut texture_manager, &store);
-        // Track edited textures still decoding so the composite re-runs once
-        // they land.
-        edit.pending_textures = edit
-            .edited
-            .textures
-            .values()
-            .copied()
-            .filter(|id| !id.is_nil())
-            .map(TextureKey::from)
-            .filter(|key| store.get(*key).is_none())
-            .collect();
-        inputs.reassemble(&store, library.as_deref());
-        local_bake.invalidate();
-    }
-    edit.shape_dirty = false;
-    edit.bake_dirty = false;
 }
 
 /// Keep each slider's value **readout** in sync with its [`SliderValue`]. The
@@ -1104,15 +1114,15 @@ fn sync_wearable_sliders(
 fn on_wear_button(
     activate: On<Activate>,
     buttons: Query<&WearButton>,
-    ui: Option<Res<WearEditorUi>>,
-    state: Option<ResMut<WearEditState>>,
+    host: FloaterHost,
+    mut edits: Query<&mut WearEdit>,
     mut preview: Option<WearPreview>,
     out: Option<WearSaveOut>,
     mut texts: Query<&mut Text>,
 ) {
-    // Both are absent only in the gallery, whose specimen has no edit. The
-    // preview is too, and only Revert reads it, so only Revert asks for it.
-    let (Some(mut state), Some(out)) = (state, out) else {
+    // Absent only in the gallery, whose specimen has no edit. The preview is
+    // too, and only Revert reads it, so only Revert asks for it.
+    let Some(out) = out else {
         return;
     };
     let WearSaveOut {
@@ -1123,14 +1133,16 @@ fn on_wear_button(
     let Ok(kind) = buttons.get(activate.entity).copied() else {
         return;
     };
-    let Some(edit) = state.active.as_mut() else {
+    let Some(window) = host.of(activate.entity) else {
         return;
     };
+    let Ok(mut edit) = edits.get_mut(window) else {
+        return;
+    };
+    let edit = &mut *edit;
     match kind {
         WearButton::Save => {
-            if let Some(ui) = ui.as_deref() {
-                saves.write(SaveEditorWindow { window: ui.panel });
-            }
+            saves.write(SaveEditorWindow { window });
         }
         WearButton::SaveAs => {
             let perms = wearable_permissions(&edit.item);
@@ -1166,7 +1178,7 @@ fn on_wear_button(
             };
             edit.edited.clone_from(&edit.original);
             // Re-derive the preview from the restored asset.
-            preview.restore(&edit.original);
+            preview.restore(edit.item.item_id, &edit.original);
             edit.shape_dirty = true;
             // Back to what was opened on, so there is nothing unsaved left to
             // ask about on a close.
@@ -1216,10 +1228,62 @@ struct WearPreview<'w> {
 }
 
 impl WearPreview<'_> {
-    /// Re-derive the worn preview from `original`, the asset the editor was
-    /// opened on.
-    fn restore(&mut self, original: &WearableAsset) {
-        self.inputs.set_preview_asset(original.clone());
+    /// Show one window's edit on the avatar when something in it changed: the
+    /// shape re-derives from the substituted asset, the Shape height read-out
+    /// follows, and a texture or tint change re-composites the bake.
+    fn show(&mut self, edit: &mut WearEdit, texts: &mut Query<&mut Text>) {
+        if !edit.shape_dirty && !edit.bake_dirty {
+            return;
+        }
+        // The shape morph re-derives from the substituted asset; the bake needs
+        // an explicit texture request + reassemble + rebuild.
+        self.inputs
+            .set_preview_asset(edit.item.item_id, edit.edited.clone());
+        // Update the Shape height read-out from the edited body proportions
+        // (the reference's `computeBodySize` `mBodySize.z`).
+        if edit.shape_dirty
+            && edit.wearable_type == WearableType::Shape
+            && let (Some(library), Some(label)) = (self.library.as_deref(), edit.height_label)
+        {
+            let bytes = self.inputs.visual_params(library.params());
+            let resolved = ResolvedParams::from_appearance(library.params(), &bytes);
+            let deform = SkeletalDeformations::from_resolved(library.params(), &resolved);
+            if let Some(metrics) = library
+                .skeleton()
+                .body_size_metrics(&deform, &JointOverrides::default())
+                && let Ok(mut text) = texts.get_mut(label)
+            {
+                text.0 = format!("{:.2} m", metrics.body_size_z);
+            }
+        }
+        if edit.bake_dirty {
+            self.inputs.request_asset_textures(
+                &edit.edited,
+                &mut self.texture_manager,
+                &self.store,
+            );
+            // Track edited textures still decoding so the composite re-runs
+            // once they land.
+            edit.pending_textures = edit
+                .edited
+                .textures
+                .values()
+                .copied()
+                .filter(|id| !id.is_nil())
+                .map(TextureKey::from)
+                .filter(|key| self.store.get(*key).is_none())
+                .collect();
+            self.inputs.reassemble(&self.store, self.library.as_deref());
+            self.local_bake.invalidate();
+        }
+        edit.shape_dirty = false;
+        edit.bake_dirty = false;
+    }
+
+    /// Re-derive the worn preview of `item` from `original`, the asset its
+    /// editor was opened on (or last saved).
+    fn restore(&mut self, item: InventoryKey, original: &WearableAsset) {
+        self.inputs.set_preview_asset(item, original.clone());
         self.inputs
             .request_asset_textures(original, &mut self.texture_manager, &self.store);
         self.inputs.reassemble(&self.store, self.library.as_deref());
@@ -1232,20 +1296,13 @@ impl WearPreview<'_> {
 /// somebody else's.
 fn save_wearable(
     mut requests: MessageReader<SaveEditorWindow>,
-    ui: Option<Res<WearEditorUi>>,
-    mut state: ResMut<WearEditState>,
+    mut edits: Query<&mut WearEdit>,
     mut commands: MessageWriter<SlCommand>,
     mut texts: Query<&mut Text>,
 ) {
-    let Some(ui) = ui.as_deref() else {
-        requests.clear();
-        return;
-    };
     for request in requests.read() {
-        if request.window != ui.panel {
-            continue;
-        }
-        let Some(edit) = state.active.as_mut() else {
+        // Another editor's window, or one closed since the request was raised.
+        let Ok(mut edit) = edits.get_mut(request.window) else {
             continue;
         };
         let perms = wearable_permissions(&edit.item);
@@ -1266,36 +1323,43 @@ fn save_wearable(
 /// names **this** editor's transaction.
 fn report_wearable_save(
     mut events: MessageReader<SlEvent>,
-    mut state: ResMut<WearEditState>,
+    mut edits: Query<&mut WearEdit>,
+    mut inventory: Option<ResMut<InventoryModel>>,
     mut texts: Query<&mut Text>,
 ) {
-    let Some(edit) = state.active.as_mut() else {
-        events.clear();
-        return;
-    };
     for event in events.read() {
         let SlSessionEvent::InventoryAssetSaved {
             transaction_id,
+            asset_id,
             success,
-            ..
         } = &event.0
         else {
             continue;
         };
-        // Ours only if it names the transaction this editor minted. Without the
+        // Ours only if it names the transaction this window minted. Without the
         // check, any save completing while this one is in flight — another
-        // editor's, or an earlier save of this one that timed out — is reported
+        // window's, or an earlier save of this one that timed out — is reported
         // here as this save's result.
-        if edit.saving.is_none() || *transaction_id != edit.saving {
+        let Some(mut edit) = edits
+            .iter_mut()
+            .find(|edit| edit.saving.is_some() && *transaction_id == edit.saving)
+        else {
             continue;
-        }
+        };
         edit.saving = None;
         if *success {
             // Stored, so the edit *is* what the item holds now: nothing unsaved
             // is left, a Revert should go back to this rather than to what was
             // opened on, and a close waiting on the save may go ahead.
-            edit.original.clone_from(&edit.edited);
+            let saved = edit.edited.clone();
+            edit.original = saved;
             edit.dirty = false;
+            // The save stored a new asset and the grid rebound the item to it;
+            // follow it, so what reads the item's asset reads the saved one.
+            edit.item.asset_id = *asset_id;
+            if let Some(model) = inventory.as_mut() {
+                let _folder = model.rebind_asset(edit.item.item_id, *asset_id);
+            }
         }
         let message = if *success { "Saved." } else { "Save failed." };
         set_status(&mut texts, edit.status, message);
@@ -1306,17 +1370,16 @@ fn report_wearable_save(
 /// out of the shared creation queue.
 fn report_wearable_save_as(
     mut finished: MessageReader<ItemCreationFinished>,
-    mut state: ResMut<WearEditState>,
+    mut edits: Query<&mut WearEdit>,
     mut texts: Query<&mut Text>,
 ) {
-    let Some(edit) = state.active.as_mut() else {
-        finished.clear();
-        return;
-    };
     for creation in finished.read() {
-        if edit.creation != Some(creation.ticket) {
+        let Some(mut edit) = edits
+            .iter_mut()
+            .find(|edit| edit.creation == Some(creation.ticket))
+        else {
             continue;
-        }
+        };
         edit.creation = None;
         let message = if creation.item.is_some() {
             "Saved a copy to inventory."
@@ -1327,8 +1390,8 @@ fn report_wearable_save_as(
     }
 }
 
-/// End the edit when the window closes: restore the worn wearable the editor
-/// opened on and drop the live edit.
+/// End the edit when its window closes: put back the worn asset the editor
+/// opened on (or last saved).
 ///
 /// Closing is the one answer the guard does not stop — either the resident
 /// saved first (in which case the restored asset *is* what they saved), or they
@@ -1337,48 +1400,29 @@ fn report_wearable_save_as(
 /// outfit, so leaving it in place keeps the avatar wearing an unsaved edit with
 /// no window left to save, revert or even see it in — and the next open would
 /// read that preview back as if it were what is worn.
-fn end_wearable_edit_on_close(
-    ui: Option<Res<WearEditorUi>>,
-    panels: Query<&UiPanelShown, Changed<UiPanelShown>>,
-    mut state: ResMut<WearEditState>,
+///
+/// An observer on the edit's removal, since closing a keyed window despawns it:
+/// there is no hidden window left for a system to notice. It restores only this
+/// window's item, so another window's edit stays on the avatar.
+fn restore_preview_on_close(
+    removed: On<Remove, WearEdit>,
+    edits: Query<&WearEdit>,
     mut preview: WearPreview,
-    mut works: Query<&mut UnsavedWork>,
 ) {
-    let Some(ui) = ui.as_deref() else {
+    let Ok(edit) = edits.get(removed.entity) else {
         return;
     };
-    let Ok(shown) = panels.get(ui.panel) else {
-        return;
-    };
-    if shown.0 {
-        return;
-    }
-    let Some(edit) = state.active.take() else {
-        return;
-    };
-    preview.restore(&edit.original);
-    if let Ok(mut work) = works.get_mut(ui.panel) {
-        *work = UnsavedWork::default();
-    }
+    preview.restore(edit.item.item_id, &edit.original);
 }
 
-/// Keep the editor floater's close guard in step with the edit: while the
-/// wearable on screen differs from what was opened on (or last saved), closing
-/// the window would throw that away, and the scaffold asks first.
-fn track_wearable_unsaved(
-    ui: Option<Res<WearEditorUi>>,
-    state: Res<WearEditState>,
-    mut windows: Query<&mut UnsavedWork>,
-) {
-    let Some(ui) = ui.as_deref() else {
-        return;
-    };
-    let Ok(mut work) = windows.get_mut(ui.panel) else {
-        return;
-    };
-    let dirty = state.active.as_ref().is_some_and(|edit| edit.dirty);
-    if work.dirty != dirty {
-        work.dirty = dirty;
+/// Keep each window's close guard in step with its edit: while the wearable on
+/// screen differs from what was opened on (or last saved), closing the window
+/// would throw that away, and the scaffold asks first.
+fn track_wearable_unsaved(mut windows: Query<(&WearEdit, &mut UnsavedWork)>) {
+    for (edit, mut work) in &mut windows {
+        if work.dirty != edit.dirty {
+            work.dirty = edit.dirty;
+        }
     }
 }
 
@@ -1474,7 +1518,7 @@ fn set_status(texts: &mut Query<&mut Text>, node: Option<Entity>, message: &str)
 
 #[cfg(test)]
 mod tests {
-    use super::{WearEdit, WearEditState, report_wearable_save, report_wearable_save_as};
+    use super::{WearEdit, report_wearable_save, report_wearable_save_as};
     use crate::intents::PendingItemCreations;
     use bevy::prelude::*;
     use pretty_assertions::assert_eq;
@@ -1489,17 +1533,21 @@ mod tests {
     /// `expect`.
     type TestError = Box<dyn core::error::Error>;
 
-    /// The shirt the editor is editing.
-    fn shirt() -> ItemInfo {
+    /// The worn wearable item `id` of `slot`.
+    fn wearable(id: u128, slot: WearableType) -> ItemInfo {
         ItemInfo {
-            item_id: InventoryKey::from(Uuid::from_u128(0x11)),
+            item_id: InventoryKey::from(Uuid::from_u128(id)),
             folder_id: InventoryFolderKey::from(Uuid::from_u128(0x22)),
-            name: "A shirt".to_owned(),
+            name: format!("Wearable {id:#x}"),
             description: String::new(),
-            asset_id: Uuid::from_u128(0x33),
-            asset_type: AssetType::Clothing,
+            asset_id: Uuid::from_u128(id << 8),
+            asset_type: if slot.is_body_part() {
+                AssetType::Bodypart
+            } else {
+                AssetType::Clothing
+            },
             inv_type: InventoryType::Wearable,
-            flags: 0,
+            flags: u32::from(slot.to_code()),
             sale: sl_client_bevy::SaleInfo::default(),
             creation_date: 0,
             owner: OwnerKey::Agent(AgentKey::from(Uuid::from_u128(0x44))),
@@ -1516,30 +1564,42 @@ mod tests {
         }
     }
 
-    /// An editor with an open, modified edit and a status readout, plus the
-    /// systems that report a save's outcome.
-    fn editor_app() -> (App, Entity) {
+    /// The shirt the editor is editing.
+    fn shirt() -> ItemInfo {
+        let mut shirt = wearable(0x11, WearableType::Shirt);
+        "A shirt".clone_into(&mut shirt.name);
+        shirt
+    }
+
+    /// An empty asset of `slot` named `name`.
+    fn asset(name: &str, slot: WearableType) -> WearableAsset {
+        WearableAsset {
+            version: super::WEARABLE_VERSION,
+            name: name.to_owned(),
+            wearable_type: slot,
+            params: BTreeMap::new(),
+            textures: BTreeMap::new(),
+        }
+    }
+
+    /// An editor window with an open, modified edit and a status readout, plus
+    /// the systems that report a save's outcome: the app, the window and the
+    /// status node.
+    fn editor_app() -> (App, Entity, Entity) {
         let mut app = App::new();
         app.add_message::<SlEvent>()
             .add_message::<crate::intents::ItemCreationFinished>()
-            .init_resource::<WearEditState>()
             .init_resource::<PendingItemCreations>()
             .add_systems(Update, (report_wearable_save, report_wearable_save_as));
         let status = app.world_mut().spawn(Text::new(String::new())).id();
-        app.world_mut().resource_mut::<WearEditState>().active = Some(open_edit(status));
+        let window = app.world_mut().spawn(open_edit(status)).id();
         app.update();
-        (app, status)
+        (app, window, status)
     }
 
     /// An open, modified edit of [`shirt`] reporting to `status`.
     fn open_edit(status: Entity) -> WearEdit {
-        let asset = WearableAsset {
-            version: super::WEARABLE_VERSION,
-            name: "A shirt".to_owned(),
-            wearable_type: WearableType::Shirt,
-            params: BTreeMap::new(),
-            textures: BTreeMap::new(),
-        };
+        let asset = asset("A shirt", WearableType::Shirt);
         WearEdit {
             item: shirt(),
             wearable_type: WearableType::Shirt,
@@ -1559,6 +1619,20 @@ mod tests {
         }
     }
 
+    /// The edit in `window`, to change.
+    fn edit_mut(app: &mut App, window: Entity) -> Result<Mut<'_, WearEdit>, TestError> {
+        app.world_mut()
+            .get_mut::<WearEdit>(window)
+            .ok_or_else(|| TestError::from("the window has no edit"))
+    }
+
+    /// The edit in `window`.
+    fn edit_of(app: &App, window: Entity) -> Result<&WearEdit, TestError> {
+        app.world()
+            .get::<WearEdit>(window)
+            .ok_or_else(|| TestError::from("the window has no edit"))
+    }
+
     /// What the status readout says.
     fn status_of(app: &App, status: Entity) -> String {
         app.world()
@@ -1576,17 +1650,10 @@ mod tests {
     /// surface's — decided what it told the resident about theirs.
     #[test]
     fn a_foreign_completion_is_not_this_save() -> Result<(), TestError> {
-        let (mut app, status) = editor_app();
+        let (mut app, window, status) = editor_app();
         let ours = TransactionId::from(Uuid::from_u128(0xAA));
         let theirs = TransactionId::from(Uuid::from_u128(0xBB));
-        if let Some(edit) = app
-            .world_mut()
-            .resource_mut::<WearEditState>()
-            .active
-            .as_mut()
-        {
-            edit.saving = Some(ours);
-        }
+        edit_mut(&mut app, window)?.saving = Some(ours);
 
         app.world_mut()
             .write_message(SlEvent(SlSessionEvent::InventoryAssetSaved {
@@ -1600,12 +1667,9 @@ mod tests {
             "",
             "another save's failure was reported as this editor's"
         );
-        assert!(
-            app.world()
-                .resource::<WearEditState>()
-                .active
-                .as_ref()
-                .is_some_and(|edit| edit.saving == Some(ours)),
+        assert_eq!(
+            edit_of(&app, window)?.saving,
+            Some(ours),
             "another save's completion cleared this editor's in-flight save"
         );
 
@@ -1618,12 +1682,16 @@ mod tests {
             }));
         app.update();
         assert_eq!(status_of(&app, status), "Saved.");
-        let state = app.world().resource::<WearEditState>();
-        let edit = state.active.as_ref().ok_or("the edit went away")?;
+        let edit = edit_of(&app, window)?;
         assert_eq!(edit.saving, None, "the save is no longer in flight");
         assert!(
             !edit.dirty,
             "a stored edit is no longer unsaved work to ask about"
+        );
+        assert_eq!(
+            edit.item.asset_id,
+            Uuid::from_u128(0xA0),
+            "the window still names the asset the item had before the save"
         );
         Ok(())
     }
@@ -1632,16 +1700,9 @@ mod tests {
     /// Revert still has somewhere to go back to.
     #[test]
     fn a_refused_save_leaves_the_work_unsaved() -> Result<(), TestError> {
-        let (mut app, status) = editor_app();
+        let (mut app, window, status) = editor_app();
         let ours = TransactionId::from(Uuid::from_u128(0xCC));
-        if let Some(edit) = app
-            .world_mut()
-            .resource_mut::<WearEditState>()
-            .active
-            .as_mut()
-        {
-            edit.saving = Some(ours);
-        }
+        edit_mut(&mut app, window)?.saving = Some(ours);
         app.world_mut()
             .write_message(SlEvent(SlSessionEvent::InventoryAssetSaved {
                 transaction_id: Some(ours),
@@ -1650,9 +1711,10 @@ mod tests {
             }));
         app.update();
         assert_eq!(status_of(&app, status), "Save failed.");
-        let state = app.world().resource::<WearEditState>();
-        let edit = state.active.as_ref().ok_or("the edit went away")?;
-        assert!(edit.dirty, "a refused save must not clear the unsaved work");
+        assert!(
+            edit_of(&app, window)?.dirty,
+            "a refused save must not clear the unsaved work"
+        );
         Ok(())
     }
 
@@ -1664,7 +1726,7 @@ mod tests {
     /// yet; a refused upload left that claim standing.
     #[test]
     fn save_as_reports_the_copy_it_actually_got() -> Result<(), TestError> {
-        let (mut app, status) = editor_app();
+        let (mut app, window, status) = editor_app();
         // The ticket comes out of the real queue, the way the button takes one.
         let ticket = app
             .world_mut()
@@ -1680,14 +1742,7 @@ mod tests {
                 u32::from(WearableType::Pants.to_code()),
                 InventoryFolderKey::from(Uuid::from_u128(0x99)),
             );
-        if let Some(edit) = app
-            .world_mut()
-            .resource_mut::<WearEditState>()
-            .active
-            .as_mut()
-        {
-            edit.creation = Some(ticket);
-        }
+        edit_mut(&mut app, window)?.creation = Some(ticket);
 
         // Somebody else's creation on the shared queue is not this Save As.
         app.world_mut()
@@ -1716,7 +1771,7 @@ mod tests {
     /// screen.
     #[test]
     fn a_refused_save_as_says_so() -> Result<(), TestError> {
-        let (mut app, status) = editor_app();
+        let (mut app, window, status) = editor_app();
         let ticket = app
             .world_mut()
             .resource_mut::<PendingItemCreations>()
@@ -1724,14 +1779,7 @@ mod tests {
                 u32::from(WearableType::Shirt.to_code()),
                 InventoryFolderKey::from(Uuid::from_u128(0x22)),
             );
-        if let Some(edit) = app
-            .world_mut()
-            .resource_mut::<WearEditState>()
-            .active
-            .as_mut()
-        {
-            edit.creation = Some(ticket);
-        }
+        edit_mut(&mut app, window)?.creation = Some(ticket);
         app.world_mut()
             .write_message(crate::intents::ItemCreationFinished { ticket, item: None });
         app.update();
@@ -1744,12 +1792,15 @@ mod tests {
     /// The chrome buttons used to observe `Pointer<Press>`, so `Tab` reached
     /// them and `Enter` / `Space` did nothing (`viewer-floater-buttons-ignore-
     /// keyboard-activate`). Each gesture, in a fresh app under the real input
-    /// and focus stack, must do exactly what the click does.
+    /// and focus stack, must do exactly what the click does. The buttons sit in
+    /// an editor window, as they do live, since each reaches its edit through
+    /// the window it lives in.
     #[test]
     fn the_save_buttons_answer_enter_space_and_a_click() -> Result<(), TestError> {
-        use super::{WearButton, WearEditorUi, spawn_action_button};
+        use super::{WearButton, spawn_action_button, wearable_editor_floater_spec};
         use crate::asset_editor::SaveEditorWindow;
-        use crate::ui::{UiRoot, UiScaffoldSystems};
+        use crate::floater::{FloaterPlugin, spawn_floater};
+        use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems};
         use bevy::input::keyboard::Key;
         use sl_client_bevy::{Command, SlCommand};
         use sl_viewer_testkit::interact::{self, InteractionTest};
@@ -1783,36 +1834,50 @@ mod tests {
             Ok(())
         }
 
-        /// The editor's window stand-in, and what `gesture` on the button
-        /// named `node` did to an open edit.
+        /// The editor's window, and what `gesture` on the button named `node`
+        /// did to its open edit.
         fn after(node: &str, gesture: Gesture) -> Result<(Entity, Outcome), TestError> {
             let mut app = InteractionTest::new().build();
-            app.init_resource::<PendingItemCreations>();
+            app.init_resource::<PendingItemCreations>()
+                .add_plugins(FloaterPlugin);
             record::<SaveEditorWindow>(&mut app);
             record::<SlCommand>(&mut app);
-            let window = app.world_mut().spawn_empty().id();
-            let status = app.world_mut().spawn(Text::new(String::new())).id();
-            app.insert_resource(WearEditorUi {
-                panel: window,
-                content: window,
-                title: window,
-            });
-            app.insert_resource(WearEditState {
-                active: Some(open_edit(status)),
-            });
             app.add_systems(
                 Startup,
                 (|mut commands: Commands, root: Res<UiRoot>| {
+                    let window =
+                        spawn_floater(&mut commands, root.0, wearable_editor_floater_spec());
+                    // A floater spawns hidden and its opener shows it; a hidden
+                    // window has no box for a pointer to find.
+                    commands.entity(window.root).insert(UiPanelShown(true));
                     let mut tab = 0_i32;
                     for (kind, label) in
                         [(WearButton::Save, "Save"), (WearButton::SaveAs, "Save As")]
                     {
-                        spawn_action_button(&mut commands, root.0, kind, label, &mut tab, 13.0);
+                        spawn_action_button(
+                            &mut commands,
+                            window.content,
+                            kind,
+                            label,
+                            &mut tab,
+                            13.0,
+                        );
                     }
+                    let status = commands
+                        .spawn((Text::new(String::new()), ChildOf(window.content)))
+                        .id();
+                    commands.entity(window.root).insert(open_edit(status));
                 })
                 .after(UiScaffoldSystems::SpawnRoot),
             );
             settle(&mut app);
+            let (window, status) = app
+                .world_mut()
+                .query::<(Entity, &WearEdit)>()
+                .iter(app.world())
+                .next()
+                .and_then(|(window, edit)| Some((window, edit.status?)))
+                .ok_or("the edit was never opened")?;
             let button = find_by_name(&mut app, node).ok_or_else(|| format!("no `{node}`"))?;
             gesture(&mut app, button)?;
             settle(&mut app);
@@ -1843,5 +1908,375 @@ mod tests {
             );
         }
         Ok(())
+    }
+
+    /// **One window per wearable** (`viewer-key-wearable-editor`): the open
+    /// path, driven by the message an inventory row's Edit writes, and the
+    /// per-window passes behind it.
+    ///
+    /// What the keying buys is not two windows for their own sake — it is that
+    /// opening a second wearable cannot touch the first window's **unsaved
+    /// edit**, which the singleton editor replaced on every open.
+    mod instances {
+        use super::super::{
+            WearEdit, WearTintSwatch, apply_wear_tint_picked, open_wearable_editor,
+            report_wearable_save, resolve_wearable, restore_preview_on_close, save_wearable,
+            wearable_key,
+        };
+        use super::{TestError, asset, edit_mut, edit_of, wearable};
+        use crate::asset_editor::SaveEditorWindow;
+        use crate::avatars::OwnLocalBake;
+        use crate::bake_inputs::OwnBakeInputs;
+        use crate::floater::{Floater, FloaterCommand, FloaterOp, FloaterPlugin, host_floater};
+        use crate::intents::TexturePicked;
+        use crate::inventory::{InventoryModel, OpenWearableEditor};
+        use crate::textures::TextureManager;
+        use crate::ui::UiRoot;
+        use crate::ui_color_picker::ColorPicked;
+        use crate::world_api::DecodedTextures;
+        use bevy::prelude::*;
+        use pretty_assertions::assert_eq;
+        use sl_client_bevy::{
+            ASSET_CODE_LINK, AssetType, Command, InventoryFolderKey, InventoryKey, SlCommand,
+            SlEvent, SlSessionEvent, Uuid, WearableType,
+        };
+
+        /// The shirt's item id.
+        const SHIRT: u128 = 0xA1;
+
+        /// The pants' item id.
+        const PANTS: u128 = 0xB2;
+
+        /// The upper of two layered shirts' item id ([`SHIRT`] the lower).
+        const UPPER: u128 = 0xC3;
+
+        /// An app with the floater manager, the open path, the close restore
+        /// and the per-window passes that need no live session: the tint pick,
+        /// the save and its report.
+        fn editor_app() -> App {
+            let mut app = App::new();
+            app.add_message::<SlCommand>()
+                .add_message::<SlEvent>()
+                .add_message::<OpenWearableEditor>()
+                .add_message::<ColorPicked>()
+                .add_message::<TexturePicked>()
+                .add_message::<SaveEditorWindow>()
+                .init_resource::<UiScale>()
+                .init_resource::<ButtonInput<KeyCode>>()
+                .init_resource::<OwnBakeInputs>()
+                .init_resource::<TextureManager>()
+                .init_resource::<DecodedTextures>()
+                .init_resource::<OwnLocalBake>()
+                .add_plugins(FloaterPlugin)
+                .add_observer(restore_preview_on_close)
+                .add_systems(
+                    Update,
+                    (
+                        open_wearable_editor,
+                        apply_wear_tint_picked,
+                        save_wearable,
+                        report_wearable_save,
+                    )
+                        .chain(),
+                );
+            let root = app.world_mut().spawn(Node::default()).id();
+            app.insert_resource(UiRoot(root));
+            app.update();
+            app
+        }
+
+        /// The item id `id` stands for.
+        fn key(id: u128) -> InventoryKey {
+            InventoryKey::from(Uuid::from_u128(id))
+        }
+
+        /// Open wearable `id` of `slot` the way the inventory's Edit does — by
+        /// writing the message.
+        fn open(app: &mut App, id: u128, slot: WearableType) {
+            app.world_mut().write_message(OpenWearableEditor {
+                item: wearable(id, slot),
+            });
+            app.update();
+        }
+
+        /// Every live wearable window, as (window, item id) pairs.
+        fn windows(app: &mut App) -> Vec<(Entity, InventoryKey)> {
+            app.world_mut()
+                .query::<(Entity, &WearEdit)>()
+                .iter(app.world())
+                .map(|(window, edit)| (window, edit.item.item_id))
+                .collect()
+        }
+
+        /// The window editing wearable `id`.
+        fn window_of(app: &mut App, id: u128) -> Result<Entity, TestError> {
+            windows(app)
+                .into_iter()
+                .find_map(|(window, item)| (item == key(id)).then_some(window))
+                .ok_or_else(|| TestError::from(format!("wearable {id:#x} has no window")))
+        }
+
+        /// The parent links and windows `host_floater` walks up through.
+        type HostLookup<'world, 'state> = (
+            Query<'world, 'state, &'static ChildOf>,
+            Query<'world, 'state, (Entity, &'static Floater)>,
+        );
+
+        /// The tint swatch built into `window`.
+        fn tint_swatch(app: &mut App, window: Entity) -> Result<Entity, TestError> {
+            let swatches: Vec<Entity> = app
+                .world_mut()
+                .query_filtered::<Entity, With<WearTintSwatch>>()
+                .iter(app.world())
+                .collect();
+            let mut system_state: bevy::ecs::system::SystemState<HostLookup<'_, '_>> =
+                bevy::ecs::system::SystemState::new(app.world_mut());
+            let (parents, floaters) = system_state.get(app.world())?;
+            swatches
+                .into_iter()
+                .find(|swatch| host_floater(*swatch, &parents, &floaters) == Some(window))
+                .ok_or_else(|| TestError::from("the window has no tint swatch"))
+        }
+
+        /// The name of the worn asset the bake inputs hold for `id`.
+        fn worn_name(app: &App, id: u128) -> Option<String> {
+            app.world()
+                .resource::<OwnBakeInputs>()
+                .worn_asset_of(key(id))
+                .map(|asset| asset.name.clone())
+        }
+
+        /// Two wearables are two windows, each on its own item, with its own
+        /// title, under its own key.
+        #[test]
+        fn two_wearables_open_two_windows() -> Result<(), TestError> {
+            let mut app = editor_app();
+            open(&mut app, SHIRT, WearableType::Shirt);
+            open(&mut app, PANTS, WearableType::Pants);
+
+            assert_eq!(
+                windows(&mut app).len(),
+                2,
+                "the second wearable reused the first window"
+            );
+            let shirt = window_of(&mut app, SHIRT)?;
+            let pants = window_of(&mut app, PANTS)?;
+            let key_of = |window: Entity| {
+                app.world()
+                    .get::<Floater>(window)
+                    .and_then(Floater::key)
+                    .cloned()
+            };
+            assert_eq!(key_of(shirt), Some(wearable_key(key(SHIRT))));
+            assert_eq!(key_of(pants), Some(wearable_key(key(PANTS))));
+            Ok(())
+        }
+
+        /// **Re-opening a wearable that is already up keeps its edit.** A
+        /// second open raises the window; it must not re-seed the edit from the
+        /// worn asset over what the resident changed and has not saved.
+        #[test]
+        fn reopening_a_wearable_keeps_its_unsaved_edit() -> Result<(), TestError> {
+            let mut app = editor_app();
+            open(&mut app, SHIRT, WearableType::Shirt);
+            let window = window_of(&mut app, SHIRT)?;
+            {
+                let mut edit = edit_mut(&mut app, window)?;
+                let _prev = edit.edited.params.insert(600, 0.25);
+                edit.dirty = true;
+            }
+
+            open(&mut app, SHIRT, WearableType::Shirt);
+            assert_eq!(windows(&mut app).len(), 1, "a re-open spawned a window");
+            let edit = edit_of(&app, window)?;
+            assert_eq!(
+                (edit.edited.params.get(&600).copied(), edit.dirty),
+                (Some(0.25), true),
+                "a re-open re-seeded the wearable over the unsaved edit"
+            );
+            Ok(())
+        }
+
+        /// A window is seeded from **its own item's** worn asset — not from
+        /// whichever wearable of its type the outfit lists first, which is what
+        /// a type lookup answered for the second of two layered shirts.
+        #[test]
+        fn a_window_seeds_from_its_own_item() -> Result<(), TestError> {
+            let mut app = editor_app();
+            {
+                let mut inputs = app.world_mut().resource_mut::<OwnBakeInputs>();
+                inputs.set_preview_asset(key(SHIRT), asset("lower shirt", WearableType::Shirt));
+                inputs.set_preview_asset(key(UPPER), asset("upper shirt", WearableType::Shirt));
+            }
+            open(&mut app, UPPER, WearableType::Shirt);
+            let window = window_of(&mut app, UPPER)?;
+            assert_eq!(edit_of(&app, window)?.edited.name, "upper shirt");
+            Ok(())
+        }
+
+        /// A Current Outfit Folder link opens the wearable it links to: one
+        /// window for the link row and the item's own row, and a Save that
+        /// writes onto the wearable rather than the link.
+        #[test]
+        fn a_link_row_opens_the_item_it_links_to() {
+            let target = wearable(SHIRT, WearableType::Shirt);
+            let mut link = wearable(0xD4, WearableType::Shirt);
+            link.asset_type = AssetType::Other(ASSET_CODE_LINK);
+            link.asset_id = target.item_id.uuid();
+            let mut model = InventoryModel::default();
+            model.set_items(
+                InventoryFolderKey::from(Uuid::from_u128(0x22)),
+                core::slice::from_ref(&target),
+            );
+            assert_eq!(
+                resolve_wearable(&link, Some(&model)).item_id,
+                target.item_id
+            );
+            assert_eq!(
+                resolve_wearable(&target, Some(&model)).item_id,
+                target.item_id,
+                "a wearable resolves to itself"
+            );
+            assert_eq!(
+                resolve_wearable(&link, None).item_id,
+                link.item_id,
+                "an unresolvable link opens as it is"
+            );
+        }
+
+        /// **Closing one window puts back only its own item.** Both edits are
+        /// previewing on the avatar; closing the shirt's window restores the
+        /// shirt as it was opened and leaves the pants' unsaved edit on.
+        #[test]
+        fn closing_one_wearable_restores_only_its_own() -> Result<(), TestError> {
+            let mut app = editor_app();
+            {
+                let mut inputs = app.world_mut().resource_mut::<OwnBakeInputs>();
+                inputs.set_preview_asset(key(SHIRT), asset("shirt", WearableType::Shirt));
+                inputs.set_preview_asset(key(PANTS), asset("pants", WearableType::Pants));
+            }
+            open(&mut app, SHIRT, WearableType::Shirt);
+            open(&mut app, PANTS, WearableType::Pants);
+            let shirt = window_of(&mut app, SHIRT)?;
+            {
+                // Both windows' edits on the avatar, as the preview pass puts
+                // them there.
+                let mut inputs = app.world_mut().resource_mut::<OwnBakeInputs>();
+                inputs.set_preview_asset(key(SHIRT), asset("shirt, edited", WearableType::Shirt));
+                inputs.set_preview_asset(key(PANTS), asset("pants, edited", WearableType::Pants));
+            }
+
+            app.world_mut()
+                .resource_mut::<Messages<FloaterCommand>>()
+                .write(FloaterCommand {
+                    floater: shirt,
+                    op: FloaterOp::CloseNow,
+                });
+            app.update();
+
+            assert_eq!(
+                windows(&mut app)
+                    .into_iter()
+                    .map(|(_window, item)| item)
+                    .collect::<Vec<_>>(),
+                vec![key(PANTS)],
+                "closing one window took the other with it"
+            );
+            assert_eq!(
+                worn_name(&app, SHIRT).as_deref(),
+                Some("shirt"),
+                "the closed window's edit stayed on the avatar"
+            );
+            assert_eq!(
+                worn_name(&app, PANTS).as_deref(),
+                Some("pants, edited"),
+                "closing the shirt took the pants' edit off the avatar"
+            );
+            Ok(())
+        }
+
+        /// **A tint pick lands in the window whose swatch asked for it.** The
+        /// reply names a swatch; the swatch's window is the edit it writes, and
+        /// the other window's colour is untouched.
+        #[test]
+        fn a_tint_pick_changes_only_its_own_window() -> Result<(), TestError> {
+            let mut app = editor_app();
+            open(&mut app, SHIRT, WearableType::Shirt);
+            open(&mut app, PANTS, WearableType::Pants);
+            let shirt = window_of(&mut app, SHIRT)?;
+            let pants = window_of(&mut app, PANTS)?;
+            let untouched = edit_of(&app, shirt)?.edited.params.clone();
+
+            let swatch = tint_swatch(&mut app, pants)?;
+            app.world_mut().write_message(ColorPicked {
+                requester: swatch,
+                color: Color::srgb(1.0, 0.0, 0.0),
+                final_pick: true,
+            });
+            app.update();
+
+            let [red, green, blue] = edit_of(&app, pants)?
+                .tint_params
+                .ok_or("pants have no tint")?;
+            let params = &edit_of(&app, pants)?.edited.params;
+            assert_eq!(
+                [red, green, blue].map(|id| params.get(&id).copied()),
+                [Some(1.0), Some(0.0), Some(0.0)]
+            );
+            assert_eq!(
+                edit_of(&app, shirt)?.edited.params,
+                untouched,
+                "a pick in one window changed the other's wearable"
+            );
+            assert!(edit_of(&app, pants)?.dirty && !edit_of(&app, shirt)?.dirty);
+            Ok(())
+        }
+
+        /// **A save goes out for, and is reported in, the window that
+        /// saved.** Save on the shirt writes the shirt; the reply lands in the
+        /// shirt's window and the pants' window has no save to hear about.
+        #[test]
+        fn a_save_lands_in_the_window_that_saved() -> Result<(), TestError> {
+            let mut app = editor_app();
+            open(&mut app, SHIRT, WearableType::Shirt);
+            open(&mut app, PANTS, WearableType::Pants);
+            let shirt = window_of(&mut app, SHIRT)?;
+            let pants = window_of(&mut app, PANTS)?;
+            edit_mut(&mut app, shirt)?.dirty = true;
+            let _drained = app
+                .world_mut()
+                .resource_mut::<Messages<SlCommand>>()
+                .drain()
+                .count();
+
+            app.world_mut()
+                .write_message(SaveEditorWindow { window: shirt });
+            app.update();
+            let saved: Vec<InventoryKey> = app
+                .world_mut()
+                .resource_mut::<Messages<SlCommand>>()
+                .drain()
+                .filter_map(|command| match command.0 {
+                    Command::SaveInventoryAsset { item, .. } => Some(item.item_id),
+                    _other => None,
+                })
+                .collect();
+            assert_eq!(saved, vec![key(SHIRT)], "the save wrote the wrong item");
+            let transaction = edit_of(&app, shirt)?.saving;
+            assert!(transaction.is_some() && edit_of(&app, pants)?.saving.is_none());
+
+            app.world_mut()
+                .write_message(SlEvent(SlSessionEvent::InventoryAssetSaved {
+                    transaction_id: transaction,
+                    asset_id: Uuid::from_u128(0x5A_7ED),
+                    success: true,
+                }));
+            app.update();
+            assert!(
+                !edit_of(&app, shirt)?.dirty,
+                "the save did not land in its own window"
+            );
+            Ok(())
+        }
     }
 }

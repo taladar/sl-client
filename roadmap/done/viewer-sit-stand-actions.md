@@ -2,7 +2,7 @@
 id: viewer-sit-stand-actions
 title: Sit / stand actions
 topic: viewer
-status: in-progress
+status: done
 origin: reference-viewer feature-cluster survey (2026-07); split from viewer-sit-stand
 blocked_by: [viewer-object-selection-core]
 ---
@@ -59,3 +59,24 @@ code:
   Alt+Shift+S).
 - The block-left-click-sit option (`FSBlockClickSit`: off / on /
   on-unless-scripted).
+
+## Done (2026-11-03)
+
+The residue landed, together with [[viewer-left-click-click-actions]] (which
+the block option needed — a left click did not sit at all before it):
+
+- `Action::ToggleSit` in the input action map: stand up when sitting (on an
+  object or the ground), sit on the ground when standing. Bound to no key by
+  default, as the reference's `toggle_sit` is not in its `keys.xml`; the
+  rebinding UI ([[viewer-input-rebinding-ui]]) is where a key gets bound.
+- The reference's `Alt+Shift+S` is a **menu accelerator** there, not a
+  binding, so it is one here too: Avatar ▸ Movement ▸ **Sit Down** / **Stand
+  Up**, the two drawn one at a time (`Self.ShowSitDown` / `ShowStandUp`), on
+  one chord. The self pie, the menu and the action share `sit_down` /
+  `stand_up` in `avatar_menu`.
+- Block left-click sitting: `FSBlockClickSit`, a checkbox on the camera &
+  movement preferences tab. **Not three modes**: the reference's setting is a
+  plain boolean (Firestorm's `settings.xml`, `lltoolpie.cpp`), so the
+  off / on / on-unless-scripted guess above was dropped for its real shape. A
+  blocked sit click falls through to pay and then to the touch, as the
+  reference's `switch` does.

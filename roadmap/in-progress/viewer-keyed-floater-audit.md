@@ -91,11 +91,20 @@ spawn instead of `DeferredFloaterContent`.
 - **The remaining inventory-item editors** — every one of these opens *on* an
   item and shares one id today, so each is a keyed conversion with the same
   shape as the notecard editor. One task each:
-  - [[viewer-key-wearable-editor]] (`edit_wearable.rs`, `"wearable-editor"`) —
-    bodyparts and clothing layers, keyed by item; the bake preview is the part
-    that does not fall out of the pattern.
-  - [[viewer-key-material-editor]] (`edit_material_asset.rs`,
-    `"material-editor"`) — per material item.
+  - ~~[[viewer-key-wearable-editor]] (`edit_wearable.rs`,
+    `"wearable-editor"`)~~ — **done** (2026-11-04), per worn item, a COF link
+    opening the item it links to. The bake preview was the part that did not
+    fall out of the pattern: the bake inputs now hold worn assets **by item**,
+    so every open window previews its own item and a close restores only its
+    own — which also fixed Edit on the second of two layered shirts showing
+    (and saving) the first shirt's content.
+  - ~~[[viewer-key-material-editor]] (`edit_material_asset.rs`,
+    `"material-editor"`)~~ — **done** (2026-11-03), per material item; a
+    material embedded in a notecard is keyed by the notecard too, as About
+    Landmark keys an embedded landmark. The preview needed nothing: each
+    `MaterialPreview` node already gets a studio on a render layer of its own.
+    A landed save now rebinds the item's asset in the inventory model, closing
+    the stale-reopen gap the notecard and script editors had closed earlier.
   - [[viewer-key-object-contents]] (`edit_contents.rs`, `"object-contents"`) —
     per object, not per item: the window lists one object's inventory, and the
     Build tab's surface stays a singleton.

@@ -21,6 +21,12 @@ ui-context-menus) and applied as raw `u32` masks on `TrackedObject.
 update_flags`, `ObjectPickSummary.flags`, snapshot flags and the minimap — the
 duplication that produced [[viewer-build-phantom-flag-wrong-bit]].
 
+*Narrowed 2026-11-03 by that fix:* the copies in `edit_params.rs`,
+`edit_create.rs`, `media_controls.rs` and ui-context-menus are gone (all four
+now import `sl-viewer-world-api::object_flags`). Still left: `sl-proto`'s
+`prim_flags`, `minimap_math.rs`, `hover_tooltip.rs`'s bare shifts, and the
+raw `u32` field type everywhere.
+
 Object wire codes stay `u8` past ingest though sl-proto has the enums:
 click action (`double_click_teleport.rs` re-declares `CLICK_ACTION_SIT` /
 `_DISABLED`), material (`world_sounds.rs` matches raw `0..=6`), attachment

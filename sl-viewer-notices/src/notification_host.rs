@@ -62,10 +62,10 @@ use crate::i18n::Translator;
 use crate::intents::LocalChatNotice;
 use crate::notification_persist::{PersistNotification, PersistedKind};
 use crate::notifications::{
-    DismissNotification, NOTIFICATIONS, NOTIFICATIONS_SECTION, NotificationIgnore,
-    NotificationKind, NotificationManager, NotificationPriority, NotificationRecord,
-    NotificationResponse, NotificationTemplate, ShowNotification, TOAST_GAP, ToastButton,
-    ToastButtons, last_response_setting_name, substitute, template,
+    ButtonName, DismissNotification, FormAnswer, NOTIFICATIONS, NOTIFICATIONS_SECTION,
+    NotificationIgnore, NotificationKind, NotificationManager, NotificationPriority,
+    NotificationRecord, NotificationResponse, NotificationTemplate, ShowNotification, TOAST_GAP,
+    ToastButton, ToastButtons, last_response_setting_name, substitute, template,
 };
 use crate::settings::ViewerSettings;
 use crate::skin_palette::SkinPalette;
@@ -502,12 +502,55 @@ struct CycleToasts;
 /// [`NotificationResponse`]. Exposed so a bespoke-content toast (the group-notice
 /// card, `crate::group_notice`) tears down through the same path as the
 /// catalogue toasts — the reference "close counts as acknowledged".
-#[derive(Message, Debug, Clone, Copy)]
+///
+/// A bespoke card resolves a click with [`chose`](Self::chose) (or
+/// [`named`](Self::named) for a button whose name is only known at run time),
+/// so the history and the response say which button it was; only a close ×,
+/// an expiry or a dismissal is [`dismissed`](Self::dismissed).
+#[derive(Message, Debug, Clone)]
 pub struct ResolveNotification {
     /// The `Toast`-bearing entity to tear down.
     pub toast: Entity,
-    /// The chosen button, or `None` for an expiry / external dismiss.
-    pub button: Option<&'static str>,
+    /// The chosen button's name, or `None` for a close, an expiry or an
+    /// external dismiss.
+    pub button: Option<ButtonName>,
+}
+
+impl ResolveNotification {
+    /// `toast` answered with `answer` — a click on one of a card's buttons.
+    #[must_use]
+    pub fn chose<A: FormAnswer>(toast: Entity, answer: A) -> Self {
+        Self::named(toast, answer.name())
+    }
+
+    /// `toast` answered with `answer`, or closed without a choice for `None` —
+    /// for one observer wired to a button and the close × alike.
+    #[must_use]
+    pub fn answered<A: FormAnswer>(toast: Entity, answer: Option<A>) -> Self {
+        answer.map_or_else(
+            || Self::dismissed(toast),
+            |answer| Self::chose(toast, answer),
+        )
+    }
+
+    /// `toast` answered with the button named `name` — for a card whose
+    /// buttons are named at run time (a script dialog's own buttons).
+    #[must_use]
+    pub fn named(toast: Entity, name: impl Into<ButtonName>) -> Self {
+        Self {
+            toast,
+            button: Some(name.into()),
+        }
+    }
+
+    /// `toast` closed without a choice: its close ×, an expiry, a dismissal.
+    #[must_use]
+    pub const fn dismissed(toast: Entity) -> Self {
+        Self {
+            toast,
+            button: None,
+        }
+    }
 }
 
 /// Startup: declare each suppressible notification's "show again" flag
@@ -1278,7 +1321,7 @@ fn raise_notifications(
             responses.write(NotificationResponse {
                 id: manager.allocate_id(),
                 template: tmpl.name,
-                button: auto_response_button(tmpl, settings.as_deref()),
+                button: auto_response_button(tmpl, settings.as_deref()).map(ButtonName::Borrowed),
                 ignored: true,
                 input: None,
             });
@@ -1410,10 +1453,7 @@ fn raise_notifications(
                 .observe(
                     move |_activate: On<Activate>,
                           mut resolves: MessageWriter<ResolveNotification>| {
-                        resolves.write(ResolveNotification {
-                            toast: target,
-                            button: Some(name),
-                        });
+                        resolves.write(ResolveNotification::named(target, name));
                     },
                 );
         }
@@ -1427,10 +1467,7 @@ fn raise_notifications(
                 .observe(
                     move |_activate: On<Activate>,
                           mut resolves: MessageWriter<ResolveNotification>| {
-                        resolves.write(ResolveNotification {
-                            toast: target,
-                            button: None,
-                        });
+                        resolves.write(ResolveNotification::dismissed(target));
                     },
                 );
         }
@@ -1512,7 +1549,7 @@ fn age_and_fade_toasts(
             toast.resolved = true;
             resolves.write(ResolveNotification {
                 toast: entity,
-                button: toast.default_button,
+                button: toast.default_button.map(ButtonName::Borrowed),
             });
         } else if toast.age > toast.lifetime {
             let faded = (toast.age - toast.lifetime) / crate::notifications::TOAST_FADE_SECS;
@@ -1535,10 +1572,7 @@ fn handle_dismiss(
             .iter()
             .find(|(_entity, toast)| toast.id == dismissal.id)
         {
-            resolves.write(ResolveNotification {
-                toast: entity,
-                button: None,
-            });
+            resolves.write(ResolveNotification::dismissed(entity));
         }
     }
 }
@@ -1585,7 +1619,7 @@ fn resolve_notifications(
         {
             settings.set_account(toast.template, SettingValue::Bool(false));
             if tmpl.ignore == NotificationIgnore::LastResponse
-                && let Some(button) = resolution.button
+                && let Some(button) = resolution.button.as_deref()
             {
                 settings.set_account(
                     &last_response_setting_name(toast.template),
@@ -1593,24 +1627,79 @@ fn resolve_notifications(
                 );
             }
         }
-        manager.record_response(toast.id, resolution.button);
+        manager.record_response(toast.id, resolution.button.clone());
         manager.clear_unique(toast.id);
         // The input field's edited text, for a template that carries one —
         // read only when a button was chosen (a dismissal submits nothing).
         let input = resolution
             .button
+            .as_ref()
             .and(toast.input_field)
             .and_then(|field| editors.get(field).ok())
             .map(|editor| editor.value().to_string());
         responses.write(NotificationResponse {
             id: toast.id,
             template: toast.template,
-            button: resolution.button,
+            button: resolution.button.clone(),
             ignored,
             input,
         });
         commands.entity(resolution.toast).despawn();
     }
+}
+
+/// A bare app holding the host's resolve path and an empty channel to adopt
+/// into — for a bespoke card's test to click its buttons and read back what
+/// the history recorded, without the rest of the host.
+#[cfg(test)]
+pub(crate) fn resolve_test_app() -> (App, NotificationChannelRoot) {
+    let mut app = App::new();
+    app.add_message::<ResolveNotification>()
+        .add_message::<NotificationResponse>()
+        .init_resource::<NotificationManager>()
+        .add_systems(Update, resolve_notifications);
+    // Every key resolves to itself, so a card's labels are its locale keys.
+    crate::i18n::install_untranslated(&mut app);
+    let channel = app.world_mut().spawn(Node::default()).id();
+    let overflow = app
+        .world_mut()
+        .spawn((Node::default(), ChildOf(channel)))
+        .id();
+    (app, NotificationChannelRoot { channel, overflow })
+}
+
+/// The response the history recorded for the only notification in `app`'s
+/// [`NotificationManager`], or `None` while it has none.
+#[cfg(test)]
+pub(crate) fn recorded_response(app: &App) -> Option<String> {
+    app.world()
+        .resource::<NotificationManager>()
+        .history()
+        .last()
+        .and_then(|record| record.response.as_deref())
+        .map(ToOwned::to_owned)
+}
+
+/// Click the button whose [`Name`] is `name` and run the resolve; the response
+/// the history recorded, as [`recorded_response`].
+///
+/// # Errors
+///
+/// When no entity has that name.
+#[cfg(test)]
+pub(crate) fn click_named(app: &mut App, name: &str) -> Result<Option<String>, String> {
+    let mut named = app.world_mut().query::<(Entity, &Name)>();
+    let entity = named
+        .iter(app.world())
+        .find(|(_entity, entity_name)| entity_name.as_str() == name)
+        .map(|(entity, _name)| entity)
+        .ok_or_else(|| format!("no button named {name}"))?;
+    app.world_mut().trigger(Activate {
+        entity,
+        button: None,
+    });
+    app.update();
+    Ok(recorded_response(app))
 }
 
 /// Scale each fading node's colours by its toast's opacity, capturing the base
@@ -1855,10 +1944,7 @@ fn cap_queued_toasts(
             queued = queued.len(),
             "notification: the toast queue is full, dropping the newest queued toast"
         );
-        resolves.write(ResolveNotification {
-            toast: *entity,
-            button: None,
-        });
+        resolves.write(ResolveNotification::dismissed(*entity));
     }
 }
 
@@ -2661,8 +2747,10 @@ mod tests {
                 input_field: Some(field),
             })
             .id();
-        app.world_mut()
-            .write_message(ResolveNotification { toast, button });
+        app.world_mut().write_message(ResolveNotification {
+            toast,
+            button: button.map(std::borrow::Cow::Borrowed),
+        });
         app.update();
         let messages = app.world().resource::<Messages<NotificationResponse>>();
         let mut cursor = messages.get_cursor();
@@ -2708,8 +2796,10 @@ mod tests {
             })
             .add_child(checkbox)
             .id();
-        app.world_mut()
-            .write_message(ResolveNotification { toast, button });
+        app.world_mut().write_message(ResolveNotification {
+            toast,
+            button: button.map(std::borrow::Cow::Borrowed),
+        });
         app.update();
         app
     }
@@ -2806,7 +2896,10 @@ mod tests {
             response.as_ref().and_then(|r| r.input.as_deref()),
             Some("Renamed Outfit")
         );
-        assert_eq!(response.as_ref().and_then(|r| r.button), Some("OK"));
+        assert_eq!(
+            response.as_ref().and_then(|r| r.button.as_deref()),
+            Some("OK")
+        );
     }
 
     /// A dismissal (no button chosen) submits nothing: the response carries no
@@ -3312,10 +3405,8 @@ mod tests {
             )
             .map_err(|error| error.to_string())?;
         assert_eq!(live_notifications(app.world_mut()), vec![(id, declared)]);
-        app.world_mut().write_message(ResolveNotification {
-            toast: card,
-            button: None,
-        });
+        app.world_mut()
+            .write_message(ResolveNotification::dismissed(card));
         app.update();
         assert_eq!(live_notifications(app.world_mut()), Vec::new());
         Ok(())
@@ -3411,6 +3502,61 @@ mod tests {
             oldest.context.as_deref(),
             Some("5"),
             "the five oldest were the ones dropped"
+        );
+        Ok(())
+    }
+
+    /// A resolve built from an answer carries its name, an owned name is kept
+    /// as given, and `answered` chooses only for `Some`.
+    #[test]
+    fn resolve_constructors_name_what_was_chosen() {
+        use crate::notifications::GroupNoticeAnswer;
+        let toast = Entity::PLACEHOLDER;
+        let chose = ResolveNotification::chose(toast, GroupNoticeAnswer::Ok);
+        assert_eq!(chose.button.as_deref(), Some("OK"));
+        let named = ResolveNotification::named(toast, "Yes#2".to_owned());
+        assert_eq!(named.button.as_deref(), Some("Yes#2"));
+        let answered = ResolveNotification::answered(toast, Some(GroupNoticeAnswer::Ok));
+        assert_eq!(answered.button.as_deref(), Some("OK"));
+        let closed = ResolveNotification::answered::<GroupNoticeAnswer>(toast, None);
+        assert_eq!(closed.button, None);
+        assert_eq!(ResolveNotification::dismissed(toast).button, None);
+    }
+
+    /// An owned button name — a script dialog's own button — reaches the
+    /// history and the response as given.
+    #[test]
+    fn an_owned_button_name_is_recorded() -> Result<(), TestError> {
+        let (mut app, channel) = super::resolve_test_app();
+        let id = app
+            .world_mut()
+            .resource_mut::<NotificationManager>()
+            .allocate_id();
+        let mut toast = probe_toast(NotificationPriority::Normal, NotificationKind::Alert);
+        toast.id = id;
+        toast.template = "ScriptDialog";
+        let card = app
+            .world_mut()
+            .spawn((toast, Node::default(), ChildOf(channel.channel)))
+            .id();
+        app.world_mut()
+            .resource_mut::<NotificationManager>()
+            .push_history(crate::notifications::NotificationRecord {
+                id,
+                template: "ScriptDialog",
+                kind: NotificationKind::Alert,
+                body: "Pick one".to_owned(),
+                response: None,
+            });
+        app.world_mut()
+            .write_message(ResolveNotification::named(card, format!("Red#{}", 2)));
+        app.update();
+        assert_eq!(super::recorded_response(&app).as_deref(), Some("Red#2"));
+        let messages = app.world().resource::<Messages<NotificationResponse>>();
+        let response = messages.get_cursor().read(messages).next().cloned();
+        assert_eq!(
+            response.and_then(|response| response.button).as_deref(),
+            Some("Red#2")
         );
         Ok(())
     }

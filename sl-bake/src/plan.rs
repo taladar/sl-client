@@ -598,81 +598,156 @@ pub const fn region_plan(region: BakeRegion) -> &'static [PlannedLayer] {
     }
 }
 
+/// One worn wearable a layer is drawn from: its type, and where it sits in the
+/// stack of worn wearables of that type — `0` the bottom one, the one put on
+/// first.
+///
+/// Two shirts, or a jacket over a jacket, are two layers of one planned slot,
+/// each with its own texture, tint and garment masks — the reference viewer's
+/// `LLTexLayerTemplate`, which renders a layer once per worn wearable of its
+/// type, writing each wearable's params to the avatar before its pass.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WornLayer {
+    /// The wearable type.
+    pub wearable: WearableType,
+    /// Its place in the stack of that type, bottom first.
+    pub index: usize,
+}
+
+impl WornLayer {
+    /// The bottom (or only) worn wearable of `wearable` — what a layer that is
+    /// not drawn per wearable (a solid or static base) reads its tint from.
+    #[must_use]
+    pub const fn bottom(wearable: WearableType) -> Self {
+        Self { wearable, index: 0 }
+    }
+}
+
 /// Assemble the ordered [`Layer`] list a bake region composites from, resolving
 /// each planned layer against the worn wearables and the static `character/`
 /// TGAs.
 ///
-/// - `worn(type)` — whether a wearable of that type is worn (gates every base
-///   layer, which is the region's opaque foundation).
-/// - `image_for(slot)` — the decoded texture for a `TextureEntry` layer slot, or
-///   `None` when no worn wearable supplies it (that layer is then omitted).
+/// - `worn_count(type)` — how many wearables of that type are worn. A planned
+///   worn-wearable layer is drawn once per worn wearable of its type, bottom to
+///   top, and a base layer (the region's opaque foundation) only when its
+///   wearable is worn at all.
+/// - `image_for(slot, worn)` — the decoded texture the worn wearable `worn`
+///   supplies for a `TextureEntry` layer slot, or `None` when it supplies none
+///   (that copy of the layer is then omitted).
 /// - `static_image(file)` — the decoded static `character/` TGA of that name, or
 ///   `None` when it could not be loaded (a static base then falls back to a solid
 ///   tint fill; a static detail layer is omitted; a garment-shape mask whose TGA
 ///   is absent is simply not applied).
-/// - `tint_for(tint, wearable)` — the RGBA tint for a layer, resolved from the
-///   wearable's visual params (opaque white for [`LayerTint::White`]). It
+/// - `tint_for(tint, worn)` — the RGBA tint for a layer, resolved from the visual
+///   params of the wearable `worn` (opaque white for [`LayerTint::White`]). It
 ///   multiplies the layer's encoded texels, not linear light — see the
-///   [`composite`](crate::composite) module docs.
-/// - `mask_weight(param_id, wearable)` — the worn wearable's weight for a
-///   garment-shape mask's driving param (the raw param value, e.g. sleeve length),
-///   falling back to the param's default when the wearable does not set it (R14).
+///   [`composite`](crate::composite) module docs. A solid or static layer asks
+///   with [`WornLayer::bottom`].
+/// - `mask_weight(param_id, worn)` — the weight the wearable `worn` gives a
+///   garment-shape mask's driving param (the raw param value, e.g. sleeve
+///   length), falling back to the param's default when it does not set it (R14).
+///   Each copy of a garment layer is cut by its own wearable's masks, so a
+///   short-sleeved shirt over a long-sleeved one shows both sleeves.
 ///
-/// A worn-wearable layer whose `image_for` yields `None` is skipped; a base layer
-/// is skipped unless its wearable is worn. A clothing layer additionally carries
-/// its garment-shape masks ([`ShapeMaskSpec`]), resolved here into [`ShapeMask`]s
-/// that bound the fabric to the garment extent. The result feeds
-/// [`composite_region`](crate::composite_region).
+/// A clothing layer carries its garment-shape masks ([`ShapeMaskSpec`]),
+/// resolved here into [`ShapeMask`]s that bound the fabric to the garment
+/// extent. The result feeds [`composite_region`](crate::composite_region).
 pub fn region_layers(
     region: BakeRegion,
-    worn: impl Fn(WearableType) -> bool,
-    image_for: impl Fn(usize) -> Option<DecodedImage>,
+    worn_count: impl Fn(WearableType) -> usize,
+    image_for: impl Fn(usize, WornLayer) -> Option<DecodedImage>,
     static_image: impl Fn(&str) -> Option<DecodedImage>,
-    tint_for: impl Fn(LayerTint, WearableType) -> [f32; 4],
-    mask_weight: impl Fn(i32, WearableType) -> f32,
+    tint_for: impl Fn(LayerTint, WornLayer) -> [f32; 4],
+    mask_weight: impl Fn(i32, WornLayer) -> f32,
 ) -> Vec<Layer> {
     let mut layers = Vec::new();
     for planned in region_plan(region) {
+        let count = worn_count(planned.wearable);
         // A base layer (the region's opaque foundation — skin grain, eye sclera)
         // renders only when its wearable is worn, matching the reference layer-set.
-        if planned.kind == LayerKind::Base && !worn(planned.wearable) {
+        if planned.kind == LayerKind::Base && count == 0 {
             continue;
         }
-        let tint = tint_for(planned.tint, planned.wearable);
-        let image = match planned.source {
-            LayerSource::Solid => None,
-            // A worn-wearable layer with no decoded texture contributes nothing.
-            LayerSource::Wearable(slot) => match image_for(slot) {
-                Some(image) => Some(image),
-                None => continue,
-            },
-            LayerSource::Static(file) => static_image(file),
-        };
-        let layer = match image {
-            Some(image) => {
-                let base = match planned.kind {
-                    LayerKind::Base => Layer::base(image),
-                    LayerKind::Blend => Layer::blend(image),
-                    LayerKind::AlphaMask => Layer::alpha_mask(image),
-                };
-                let masks = resolve_masks(planned, &static_image, &mask_weight);
-                base.with_tint(tint)
-                    .with_tex_gen(planned.tex_gen)
-                    .with_masks(masks)
-            }
-            // No image: only a base falls back to a solid tint fill (the skin-tone
-            // foundation, or a static base whose TGA was unavailable); a
-            // detail / mask layer with no texture is dropped.
-            None => {
-                if planned.kind != LayerKind::Base {
-                    continue;
+        match planned.source {
+            // Once per worn wearable of the type, bottom to top; a wearable that
+            // supplies no texture for the slot contributes nothing.
+            LayerSource::Wearable(slot) => {
+                for index in 0..count {
+                    let worn = WornLayer {
+                        wearable: planned.wearable,
+                        index,
+                    };
+                    if let Some(image) = image_for(slot, worn) {
+                        layers.push(textured_layer(
+                            planned,
+                            image,
+                            worn,
+                            &static_image,
+                            &tint_for,
+                            &mask_weight,
+                        ));
+                    }
                 }
-                Layer::solid(LayerKind::Base, tint).with_tex_gen(planned.tex_gen)
             }
-        };
-        layers.push(layer);
+            LayerSource::Static(file) => {
+                let worn = WornLayer::bottom(planned.wearable);
+                match static_image(file) {
+                    Some(image) => layers.push(textured_layer(
+                        planned,
+                        image,
+                        worn,
+                        &static_image,
+                        &tint_for,
+                        &mask_weight,
+                    )),
+                    // A static base whose TGA was unavailable falls back to a
+                    // solid tint fill; a static detail layer is dropped.
+                    None => layers.extend(solid_base(planned, &tint_for)),
+                }
+            }
+            // The skin-tone foundation.
+            LayerSource::Solid => layers.extend(solid_base(planned, &tint_for)),
+        }
     }
     layers
+}
+
+/// The solid tint fill a **base** layer with no image falls back to, tinted
+/// from the bottom worn wearable of its type; `None` for any other layer, which
+/// without an image contributes nothing.
+fn solid_base(
+    planned: &PlannedLayer,
+    tint_for: impl Fn(LayerTint, WornLayer) -> [f32; 4],
+) -> Option<Layer> {
+    (planned.kind == LayerKind::Base).then(|| {
+        Layer::solid(
+            LayerKind::Base,
+            tint_for(planned.tint, WornLayer::bottom(planned.wearable)),
+        )
+        .with_tex_gen(planned.tex_gen)
+    })
+}
+
+/// One textured layer of `planned`, drawn from `image` for the worn wearable
+/// `worn`: composited as the plan says, tinted and cut by that wearable's own
+/// params.
+fn textured_layer(
+    planned: &PlannedLayer,
+    image: DecodedImage,
+    worn: WornLayer,
+    static_image: impl Fn(&str) -> Option<DecodedImage>,
+    tint_for: impl Fn(LayerTint, WornLayer) -> [f32; 4],
+    mask_weight: impl Fn(i32, WornLayer) -> f32,
+) -> Layer {
+    let base = match planned.kind {
+        LayerKind::Base => Layer::base(image),
+        LayerKind::Blend => Layer::blend(image),
+        LayerKind::AlphaMask => Layer::alpha_mask(image),
+    };
+    let masks = resolve_masks(planned, worn, &static_image, &mask_weight);
+    base.with_tint(tint_for(planned.tint, worn))
+        .with_tex_gen(planned.tex_gen)
+        .with_masks(masks)
 }
 
 /// Resolve a planned clothing layer's garment-shape masks into compositor
@@ -681,8 +756,9 @@ pub fn region_layers(
 /// dropped rather than zeroing the layer.
 fn resolve_masks(
     planned: &PlannedLayer,
+    worn: WornLayer,
     static_image: impl Fn(&str) -> Option<DecodedImage>,
-    mask_weight: impl Fn(i32, WearableType) -> f32,
+    mask_weight: impl Fn(i32, WornLayer) -> f32,
 ) -> Vec<ShapeMask> {
     planned
         .masks
@@ -690,7 +766,7 @@ fn resolve_masks(
         .filter_map(|spec| {
             static_image(spec.tga).map(|image| ShapeMask {
                 image,
-                weight: mask_weight(spec.param_id, planned.wearable),
+                weight: mask_weight(spec.param_id, worn),
                 domain: spec.domain,
                 multiply_blend: spec.multiply_blend,
             })
@@ -824,8 +900,8 @@ mod tests {
             // A worn universal wearable supplying the slot → one composited layer.
             let worn = region_layers(
                 region,
-                |wearable| wearable == WearableType::Universal,
-                |s| (s == slot).then(|| image([1, 2, 3, 255])),
+                |wearable| usize::from(wearable == WearableType::Universal),
+                |s, _worn| (s == slot).then(|| image([1, 2, 3, 255])),
                 |_file| None,
                 |_tint, _wearable| [1.0, 1.0, 1.0, 1.0],
                 |_id, _wearable| 0.0,
@@ -834,8 +910,8 @@ mod tests {
             // Nothing worn → no layers → the region is skipped (no empty bake).
             let bare = region_layers(
                 region,
-                |_wearable| false,
-                |_slot| None,
+                |_wearable| 0,
+                |_slot, _worn| None,
                 |_file| None,
                 |_tint, _wearable| [1.0, 1.0, 1.0, 1.0],
                 |_id, _wearable| 0.0,
@@ -850,8 +926,8 @@ mod tests {
     fn skin_only_head_has_base_and_bodypaint() -> Result<(), TestError> {
         let layers = region_layers(
             BakeRegion::Head,
-            |wearable| wearable == WearableType::Skin,
-            |slot| (slot == tex::HEAD_BODYPAINT).then(|| image([200, 150, 100, 255])),
+            |wearable| usize::from(wearable == WearableType::Skin),
+            |slot, _worn| (slot == tex::HEAD_BODYPAINT).then(|| image([200, 150, 100, 255])),
             // No static TGAs available: the skin-grain base falls back to a solid
             // skin-tone fill, the face-colour detail is dropped.
             |_file| None,
@@ -880,8 +956,8 @@ mod tests {
     fn eyes_gain_white_sclera_base() -> Result<(), TestError> {
         let layers = region_layers(
             BakeRegion::Eyes,
-            |wearable| wearable == WearableType::Eyes,
-            |slot| (slot == tex::EYES_IRIS).then(|| image([90, 60, 30, 255])),
+            |wearable| usize::from(wearable == WearableType::Eyes),
+            |slot, _worn| (slot == tex::EYES_IRIS).then(|| image([90, 60, 30, 255])),
             // The eye sclera TGA is available (a solid white here).
             |file| (file == "eyewhite.tga").then(|| image([255, 255, 255, 255])),
             |_tint, _wearable| [1.0, 1.0, 1.0, 1.0],
@@ -904,8 +980,8 @@ mod tests {
     fn static_base_falls_back_to_solid() -> Result<(), TestError> {
         let layers = region_layers(
             BakeRegion::Eyes,
-            |wearable| wearable == WearableType::Eyes,
-            |_slot| None,
+            |wearable| usize::from(wearable == WearableType::Eyes),
+            |_slot, _worn| None,
             // No static TGAs available.
             |_file| None,
             |_tint, _wearable| [0.5, 0.5, 0.5, 1.0],
@@ -924,8 +1000,8 @@ mod tests {
     fn nothing_worn_is_empty() {
         let layers = region_layers(
             BakeRegion::UpperBody,
-            |_wearable| false,
-            |_slot| None,
+            |_wearable| 0,
+            |_slot, _worn| None,
             |_file| None,
             |_tint, _wearable| [1.0, 1.0, 1.0, 1.0],
             |_id, _wearable| 0.0,
@@ -939,8 +1015,8 @@ mod tests {
     fn shirt_over_skin_orders_and_tints() -> Result<(), TestError> {
         let layers = region_layers(
             BakeRegion::UpperBody,
-            |wearable| matches!(wearable, WearableType::Skin | WearableType::Shirt),
-            |slot| (slot == tex::UPPER_SHIRT).then(|| image([10, 20, 200, 255])),
+            |wearable| usize::from(matches!(wearable, WearableType::Skin | WearableType::Shirt)),
+            |slot, _worn| (slot == tex::UPPER_SHIRT).then(|| image([10, 20, 200, 255])),
             |_file| None,
             |tint, _wearable| match tint {
                 LayerTint::Global("skin_color") => [0.9, 0.7, 0.6, 1.0],
@@ -967,8 +1043,8 @@ mod tests {
     fn garment_layer_resolves_shape_masks() -> Result<(), TestError> {
         let layers = region_layers(
             BakeRegion::UpperBody,
-            |wearable| matches!(wearable, WearableType::Skin | WearableType::Shirt),
-            |slot| (slot == tex::UPPER_SHIRT).then(|| image([10, 20, 200, 255])),
+            |wearable| usize::from(matches!(wearable, WearableType::Skin | WearableType::Shirt)),
+            |slot, _worn| (slot == tex::UPPER_SHIRT).then(|| image([10, 20, 200, 255])),
             // Every shape-mask TGA resolves to a stand-in image.
             |_file| Some(image([255, 255, 255, 255])),
             |_tint, _wearable| [1.0, 1.0, 1.0, 1.0],
@@ -990,6 +1066,82 @@ mod tests {
         let base = layers.first().ok_or("base layer")?;
         assert_eq!(base.kind, LayerKind::Base);
         assert!(base.masks.is_empty());
+        Ok(())
+    }
+
+    /// **Two shirts are two layers.** A shirt worn over another composites
+    /// both, bottom first — each with its own texture, its own tint and its own
+    /// sleeve cut — the way the reference renders a layer once per worn
+    /// wearable of its type. Only the first shirt used to be drawn.
+    #[test]
+    fn layered_shirts_composite_each_bottom_first() -> Result<(), TestError> {
+        use super::WornLayer;
+        let layers = region_layers(
+            BakeRegion::UpperBody,
+            |wearable| match wearable {
+                WearableType::Skin => 1,
+                WearableType::Shirt => 2,
+                _ => 0,
+            },
+            |slot, worn| {
+                (slot == tex::UPPER_SHIRT).then(|| {
+                    // The bottom shirt red, the top one blue.
+                    if worn.index == 0 {
+                        image([200, 0, 0, 255])
+                    } else {
+                        image([0, 0, 200, 255])
+                    }
+                })
+            },
+            |_file| Some(image([255, 255, 255, 255])),
+            |tint, worn| match (tint, worn.index) {
+                (LayerTint::Params(_), 0) => [1.0, 0.0, 0.0, 1.0],
+                (LayerTint::Params(_), _) => [0.0, 0.0, 1.0, 1.0],
+                _ => [1.0, 1.0, 1.0, 1.0],
+            },
+            // The bottom shirt long-sleeved, the top one short.
+            |_id, worn| {
+                if worn
+                    == (WornLayer {
+                        wearable: WearableType::Shirt,
+                        index: 1,
+                    })
+                {
+                    0.2
+                } else {
+                    0.9
+                }
+            },
+        );
+        let shirts: Vec<&Layer> = layers
+            .iter()
+            .filter(|layer| layer.masks.len() == super::SHIRT_MASKS.len())
+            .collect();
+        assert_eq!(shirts.len(), 2, "one shirt layer per worn shirt");
+        let (bottom, top) = (
+            shirts.first().ok_or("bottom shirt")?,
+            shirts.get(1).ok_or("top shirt")?,
+        );
+        let first_texel = |layer: &Layer| {
+            layer
+                .image
+                .as_ref()
+                .and_then(|image| image.pixels.first().copied())
+        };
+        assert_eq!(
+            (first_texel(bottom), first_texel(top)),
+            (Some(200), Some(0)),
+            "the bottom shirt is drawn first"
+        );
+        assert_tint(bottom, [1.0, 0.0, 0.0, 1.0]);
+        assert_tint(top, [0.0, 0.0, 1.0, 1.0]);
+        // Bit patterns: the weight is passed through, not computed.
+        let sleeve = |layer: &Layer| layer.masks.first().map(|mask| mask.weight.to_bits());
+        assert_eq!(
+            (sleeve(bottom), sleeve(top)),
+            (Some(0.9_f32.to_bits()), Some(0.2_f32.to_bits())),
+            "each shirt is cut by its own sleeve length"
+        );
         Ok(())
     }
 

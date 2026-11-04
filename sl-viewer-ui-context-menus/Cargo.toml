@@ -22,6 +22,7 @@ sl-viewer-edit = { workspace = true }
 sl-viewer-intents = { workspace = true }
 sl-viewer-inventory = { workspace = true }
 sl-viewer-kit = { workspace = true }
+sl-viewer-notifications = { workspace = true }
 sl-viewer-people = { workspace = true }
 sl-viewer-places = { workspace = true }
 sl-viewer-social = { workspace = true }

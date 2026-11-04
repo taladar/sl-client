@@ -825,7 +825,7 @@ mod tests {
         app.world_mut().write_message(NotificationResponse {
             id,
             template: RESET_CONFIRM.name(),
-            button: Some(OkCancel::Ok.name()),
+            button: Some(OkCancel::Ok.name().into()),
             ignored: false,
             input: None,
         });

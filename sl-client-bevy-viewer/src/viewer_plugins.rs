@@ -481,6 +481,9 @@ impl Plugin for ViewerWorldPlugins {
         // A held touch ends when the button is let go, whatever tool has been
         // taken up meanwhile.
         app.init_resource::<crate::hud_pick::HeldTouch>();
+        // A left click's click action, handed from the pick to the object
+        // menu's handler (`crate::object_menu`) in place of a touch.
+        app.add_message::<crate::world_api::ClickActionRequest>();
         app.add_systems(
             Update,
             crate::hud_pick::hold_touch

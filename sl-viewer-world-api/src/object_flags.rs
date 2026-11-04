@@ -38,6 +38,16 @@ pub const FLAGS_OBJECT_YOU_OWNER: u32 = 1 << 5;
 /// `flagHandleTouch` — what every Touch entry is enabled on.
 pub const FLAGS_HANDLE_TOUCH: u32 = 1 << 7;
 
+/// The `FLAGS_TAKES_MONEY` bit of `PrimFlags` (`object_flags.h`): a script in
+/// the object has a `money` event, so it can be paid — the reference viewer's
+/// `flagTakesMoney`, which a *pay* click action needs on the prim or its root.
+pub const FLAGS_TAKES_MONEY: u32 = 1 << 9;
+
+/// The `FLAGS_INVENTORY_EMPTY` bit of `PrimFlags` (`object_flags.h`): the
+/// object's contents are empty — the reference's `flagInventoryEmpty`, which
+/// keeps an *open* click action from opening nothing.
+pub const FLAGS_INVENTORY_EMPTY: u32 = 1 << 11;
+
 /// The agent-relative `FLAGS_OBJECT_MOVE` bit: this agent may move (position /
 /// rotate) the object — set for the owner and for an "anyone can move" object.
 pub const FLAGS_OBJECT_MOVE: u32 = 1 << 8;
@@ -55,6 +65,18 @@ pub const FLAGS_ALLOW_INVENTORY_DROP: u32 = 1 << 16;
 /// collider (so it is in the shared spatial index for proximity queries) but
 /// files it in the non-collidable layer.
 pub const FLAGS_PHANTOM: u32 = 1 << 10;
+
+/// The `FLAGS_CREATE_SELECTED` bit of `PrimFlags` (`object_flags.h`): the
+/// simulator created the object for this agent asking that it arrive selected.
+pub const FLAGS_CREATE_SELECTED: u32 = 1 << 1;
+
+/// The agent-relative `FLAGS_OBJECT_TRANSFER` bit of `PrimFlags`
+/// (`object_flags.h`): this agent may transfer (give away or sell) the object.
+pub const FLAGS_OBJECT_TRANSFER: u32 = 1 << 17;
+
+/// The `FLAGS_TEMPORARY_ON_REZ` bit of `PrimFlags` (`object_flags.h`): the
+/// object is temporary and the simulator deletes it a while after it is rezzed.
+pub const FLAGS_TEMPORARY_ON_REZ: u32 = 1 << 29;
 
 /// Whether a raw attachment-point id names a HUD (screen-space) slot rather than
 /// a body joint — the reference viewer's `LLVOVolume::isHUDAttachment`, which

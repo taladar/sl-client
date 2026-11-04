@@ -97,8 +97,10 @@ pub struct OwnBakeInputs {
     cof: CofOutfit,
     /// The worn wearables (those carrying an asset id), from `AgentWearables`.
     wearables: Vec<Wearable>,
-    /// The parsed worn wearable assets, in worn order.
-    assets: Vec<WearableAsset>,
+    /// The parsed worn wearable assets, each with the item that wears it, in
+    /// worn order (the order of [`wearables`](Self::wearables), whatever order
+    /// the fetches finished in).
+    assets: Vec<WornAsset>,
     /// The wearable asset ids still being fetched.
     pending_assets: HashSet<AssetKey>,
     /// The layer texture ids still being fetched / decoded.
@@ -108,6 +110,21 @@ pub struct OwnBakeInputs {
     deadline: Option<f32>,
     /// The assembled per-region layer lists — the P15.2 output consumed by P15.3.
     layers: HashMap<BakeRegion, Vec<Layer>>,
+}
+
+/// One parsed worn wearable asset and the inventory item that wears it.
+///
+/// The item is what tells two worn wearables of one type apart — layered
+/// shirts, say — which the asset alone cannot: an editor open on the second
+/// shirt must read and preview the second shirt, not whichever of the two
+/// came first.
+#[derive(Debug, Clone)]
+struct WornAsset {
+    /// The worn item.
+    item: InventoryKey,
+    /// Its parsed asset — or, while an appearance editor previews it, the
+    /// edited one.
+    asset: WearableAsset,
 }
 
 impl OwnBakeInputs {
@@ -159,38 +176,71 @@ impl OwnBakeInputs {
         params.encode_appearance(|id| {
             self.assets
                 .iter()
-                .find_map(|wearable| wearable.params.get(&id).copied())
+                .find_map(|worn| worn.asset.params.get(&id).copied())
         })
     }
 
-    /// The worn asset of `wearable_type`, for the appearance editor to seed its
-    /// controls from the currently-worn wearable. The first of that type — the
-    /// passive viewer keys worn assets by type only, so a layered same-type stack
-    /// resolves to its lead layer (a known limitation the editor inherits).
+    /// The worn asset of `wearable_type` — the first of that type in worn
+    /// order, so a layered same-type stack answers with its lead layer. What
+    /// asks a question of the slot as a whole (the Shape's sex) wants this; an
+    /// editor open on one item wants [`worn_asset_of`](Self::worn_asset_of).
     #[must_use]
     pub fn worn_asset(&self, wearable_type: WearableType) -> Option<&WearableAsset> {
         self.assets
             .iter()
-            .find(|asset| asset.wearable_type == wearable_type)
+            .find(|worn| worn.asset.wearable_type == wearable_type)
+            .map(|worn| &worn.asset)
     }
 
-    /// Live-edit preview: substitute the worn asset of `edited`'s wearable type
-    /// with `edited` (append it if none is worn) so the shape morph
-    /// (`apply_own_shape_from_wearables`)
-    /// and the bake composite re-derive from the edited wearable. The caller
-    /// follows this with [`request_asset_textures`](Self::request_asset_textures)
-    /// and [`reassemble`](Self::reassemble), then clears the local bake's built
+    /// The worn asset of the item `item`, for the appearance editor to seed
+    /// its controls from — that item's own asset even when another of its type
+    /// is worn under or over it. `None` while it is not parsed (or not worn).
+    #[must_use]
+    pub fn worn_asset_of(&self, item: InventoryKey) -> Option<&WearableAsset> {
+        self.assets
+            .iter()
+            .find(|worn| worn.item == item)
+            .map(|worn| &worn.asset)
+    }
+
+    /// Live-edit preview: substitute the worn asset of `item` with `edited`
+    /// (append it if it is not parsed yet) so the shape morph
+    /// (`apply_own_shape_from_wearables`) and the bake composite re-derive from
+    /// the edited wearable. The caller follows this with
+    /// [`request_asset_textures`](Self::request_asset_textures) and
+    /// [`reassemble`](Self::reassemble), then clears the local bake's built
     /// flag to re-composite.
-    pub fn set_preview_asset(&mut self, edited: WearableAsset) {
-        if let Some(slot) = self
-            .assets
-            .iter_mut()
-            .find(|asset| asset.wearable_type == edited.wearable_type)
-        {
-            *slot = edited;
+    ///
+    /// By item, not by type: two editors open on two worn items each preview
+    /// their own, and one closing puts back its own item's asset without
+    /// touching the other's edit.
+    pub fn set_preview_asset(&mut self, item: InventoryKey, edited: WearableAsset) {
+        if let Some(worn) = self.assets.iter_mut().find(|worn| worn.item == item) {
+            worn.asset = edited;
         } else {
-            self.assets.push(edited);
+            self.assets.push(WornAsset {
+                item,
+                asset: edited,
+            });
+            self.sort_assets();
         }
+    }
+
+    /// Put [`assets`](Self::assets) back into worn order, an item not in the
+    /// worn list last (stable, so those keep their own order).
+    fn sort_assets(&mut self) {
+        let wearables = &self.wearables;
+        self.assets.sort_by_key(|worn| {
+            wearables
+                .iter()
+                .position(|wearable| wearable.item_id == worn.item)
+                .unwrap_or(usize::MAX)
+        });
+    }
+
+    /// The parsed assets alone, in worn order — what the bake plan reads.
+    fn plain_assets(&self) -> Vec<WearableAsset> {
+        self.assets.iter().map(|worn| worn.asset.clone()).collect()
     }
 
     /// Request (boosted) every non-nil layer texture an edited asset references,
@@ -834,7 +884,7 @@ pub fn assemble_own_bake(
             continue;
         }
         if let Some(bytes) = manager.fetched.get(&id) {
-            parse_and_request_textures(&mut state, &mut texture_manager, &store, bytes);
+            parse_and_request_textures(&mut state, &mut texture_manager, &store, id, bytes);
         }
     }
     // As layer textures decode, clear them from the pending set.
@@ -902,6 +952,7 @@ fn parse_and_request_textures(
     state: &mut OwnBakeInputs,
     texture_manager: &mut TextureManager,
     store: &DecodedTextures,
+    asset_id: AssetKey,
     bytes: &[u8],
 ) {
     let Ok(text) = std::str::from_utf8(bytes) else {
@@ -938,7 +989,33 @@ fn parse_and_request_textures(
             }
         }
     }
-    state.assets.push(asset);
+    file_worn_asset(state, asset_id, &asset);
+}
+
+/// File a parsed asset under every worn item that wears it (two copies of one
+/// wearable worn at once share an asset and are two entries), keeping the list
+/// in worn order.
+///
+/// An item that already has an entry keeps it: that entry is an appearance
+/// editor's preview, put there before the fetch finished, and it is the edit on
+/// screen — replacing it would show the avatar the asset as it was before the
+/// edit while the editor still shows the edit.
+fn file_worn_asset(state: &mut OwnBakeInputs, asset_id: AssetKey, asset: &WearableAsset) {
+    let items: Vec<InventoryKey> = state
+        .wearables
+        .iter()
+        .filter(|wearable| wearable.asset_id.map(AssetKey::from) == Some(asset_id))
+        .map(|wearable| wearable.item_id)
+        .collect();
+    for item in items {
+        if state.assets.iter().all(|worn| worn.item != item) {
+            state.assets.push(WornAsset {
+                item,
+                asset: asset.clone(),
+            });
+        }
+    }
+    state.sort_assets();
 }
 
 /// Assemble the per-region layer lists from the parsed wearable assets and their
@@ -950,7 +1027,7 @@ fn assemble(
     library: Option<&AvatarAssetLibrary>,
 ) {
     let layers = assemble_layers(
-        &state.assets,
+        &state.plain_assets(),
         library.map(AvatarAssetLibrary::params),
         |id| {
             store
@@ -1125,5 +1202,118 @@ mod tests {
             Some(1),
             "after the grace, what resolved"
         );
+    }
+
+    /// Worn assets by item: what the appearance editor seeds from and previews
+    /// into.
+    mod by_item {
+        use super::super::{OwnBakeInputs, file_worn_asset};
+        use pretty_assertions::assert_eq;
+        use sl_client_bevy::{AssetKey, InventoryKey, Uuid, Wearable, WearableAsset, WearableType};
+        use std::collections::BTreeMap;
+
+        /// The item id `id` stands for.
+        fn key(id: u128) -> InventoryKey {
+            InventoryKey::from(Uuid::from_u128(id))
+        }
+
+        /// A worn wearable: item `item` wearing asset `asset` in `slot`.
+        fn worn(item: u128, asset: u128, slot: WearableType) -> Wearable {
+            Wearable {
+                item_id: key(item),
+                asset_id: Some(Uuid::from_u128(asset)),
+                wearable_type: slot,
+            }
+        }
+
+        /// A parsed asset of `slot` named `name`.
+        fn asset(name: &str, slot: WearableType) -> WearableAsset {
+            WearableAsset {
+                version: 22,
+                name: name.to_owned(),
+                wearable_type: slot,
+                params: BTreeMap::new(),
+                textures: BTreeMap::new(),
+            }
+        }
+
+        /// Two layered shirts: the lower one (item 1) then the upper (item 2).
+        fn two_shirts() -> OwnBakeInputs {
+            OwnBakeInputs {
+                wearables: vec![
+                    worn(1, 0xA1, WearableType::Shirt),
+                    worn(2, 0xA2, WearableType::Shirt),
+                ],
+                ..OwnBakeInputs::default()
+            }
+        }
+
+        /// The name of the asset filed under `item`.
+        fn name_of(inputs: &OwnBakeInputs, item: u128) -> Option<String> {
+            inputs
+                .worn_asset_of(key(item))
+                .map(|asset| asset.name.clone())
+        }
+
+        /// **Each layered shirt is its own.** The second shirt's asset is the
+        /// second shirt's, even though both are shirts — and the list is in
+        /// worn order although the fetches finished the other way round.
+        #[test]
+        fn layered_wearables_of_one_type_are_told_apart() {
+            let mut inputs = two_shirts();
+            file_worn_asset(
+                &mut inputs,
+                AssetKey::from(Uuid::from_u128(0xA2)),
+                &asset("upper", WearableType::Shirt),
+            );
+            file_worn_asset(
+                &mut inputs,
+                AssetKey::from(Uuid::from_u128(0xA1)),
+                &asset("lower", WearableType::Shirt),
+            );
+            assert_eq!(name_of(&inputs, 1).as_deref(), Some("lower"));
+            assert_eq!(name_of(&inputs, 2).as_deref(), Some("upper"));
+            assert_eq!(
+                inputs
+                    .worn_asset(WearableType::Shirt)
+                    .map(|asset| asset.name.as_str()),
+                Some("lower"),
+                "the slot answers with its lead layer, in worn order"
+            );
+        }
+
+        /// **A preview replaces only its own item.** Previewing an edit of the
+        /// upper shirt leaves the lower one as it is; and a fetch finishing
+        /// after a preview does not overwrite the edit on screen.
+        #[test]
+        fn a_preview_replaces_only_its_own_item() {
+            let mut inputs = two_shirts();
+            file_worn_asset(
+                &mut inputs,
+                AssetKey::from(Uuid::from_u128(0xA1)),
+                &asset("lower", WearableType::Shirt),
+            );
+            inputs.set_preview_asset(key(2), asset("upper, edited", WearableType::Shirt));
+            file_worn_asset(
+                &mut inputs,
+                AssetKey::from(Uuid::from_u128(0xA2)),
+                &asset("upper", WearableType::Shirt),
+            );
+            assert_eq!(name_of(&inputs, 1).as_deref(), Some("lower"));
+            assert_eq!(
+                name_of(&inputs, 2).as_deref(),
+                Some("upper, edited"),
+                "the late fetch replaced the preview"
+            );
+            assert_eq!(
+                inputs
+                    .plain_assets()
+                    .iter()
+                    .map(|asset| asset.name.as_str())
+                    .collect::<Vec<_>>(),
+                vec!["lower", "upper, edited"],
+                "one entry per item, in worn order"
+            );
+        }
     }
 }

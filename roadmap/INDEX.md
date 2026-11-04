@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 129 |
-| ready | 337 |
-| blocked | 40 |
-| in-progress | 18 |
-| bugs | 40 |
-| done | 1479 |
+| ready | 335 |
+| blocked | 39 |
+| in-progress | 17 |
+| bugs | 38 |
+| done | 1486 |
 | deferred | 30 |
 | wont-do | 24 |
-| **total** | **2097** |
+| **total** | **2098** |
 
 ## ideas (129)
 
@@ -329,7 +329,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-lsl-opensim-function-set`](ideas/gridspec-lsl-opensim-function-set.md)
   — Measure which library functions OpenSim's engines compile
 
-## ready (337)
+## ready (335)
 
 ### protocol
 
@@ -645,20 +645,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-inventory-thumbnails`](ready/viewer-inventory-thumbnails.md) —
   Inventory thumbnails — view & edit (blocked by `viewer-ui-texture-picker`
   (done))
-- [`viewer-key-material-editor`](ready/viewer-key-material-editor.md) — One
-  material-editor window per material item
 - [`viewer-key-object-contents`](ready/viewer-key-object-contents.md) — One
   Object Contents window per object
-- [`viewer-key-wearable-editor`](ready/viewer-key-wearable-editor.md) — One
-  wearable-editor window per bodypart / clothing item
 - [`viewer-key-web-browser`](ready/viewer-key-web-browser.md) — Decide whether
   the web browser is many windows or one with tabs
 - [`viewer-land-holdings`](ready/viewer-land-holdings.md) — My land holdings
   floater (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-land-transactions`](ready/viewer-land-transactions.md) — Land sale &
   transfer actions — sell, deed, abandon, reclaim, buy pass
-- [`viewer-left-click-click-actions`](ready/viewer-left-click-click-actions.md)
-  — Carry out a prim's click action on a left click
 - [`viewer-linden-home`](ready/viewer-linden-home.md) — Linden Home management
   menu entry
 - [`viewer-local-light-count-setting`](ready/viewer-local-light-count-setting.md)
@@ -895,6 +889,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   camera restrictions and vision overlay (blocked by
   `viewer-rlv-restriction-state` (done), `viewer-camera-third-person-orbit`
   (done))
+- [`viewer-rlv-enforce-forced-actions`](ready/viewer-rlv-enforce-forced-actions.md)
+  — RLV — forced actions and the #RLV inventory sub-protocol (blocked by
+  `viewer-rlv-restriction-state` (done), `viewer-sit-stand-actions` (done),
+  `viewer-inventory-folder-tree` (done))
 - [`viewer-rlv-receive-side-consumers`](ready/viewer-rlv-receive-side-consumers.md)
   — RLV — make the viewer's receive paths ask the RlvActions façade
 - [`viewer-rlv-send-side-consumers`](ready/viewer-rlv-send-side-consumers.md) —
@@ -1149,7 +1147,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-sl-mfa-challenge`](ready/gridspec-sl-mfa-challenge.md) — Record
   Second Life's MFA challenge and whether a remembered mfa_hash gets past it
 
-## blocked (40)
+## blocked (39)
 
 ### viewer
 
@@ -1215,10 +1213,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   toggle axis — every effect must differ where it should and nowhere else
   (blocked by `viewer-render-context-matrix`, `viewer-render-overrides-resource`
   (done))
-- [`viewer-rlv-enforce-forced-actions`](blocked/viewer-rlv-enforce-forced-actions.md)
-  — RLV — forced actions and the #RLV inventory sub-protocol (blocked by
-  `viewer-rlv-restriction-state` (done), `viewer-sit-stand-actions`,
-  `viewer-inventory-folder-tree` (done))
 - [`viewer-rlv-enforce-info-hiding`](blocked/viewer-rlv-enforce-info-hiding.md)
   — RLV — information hiding / anonymisation layer (blocked by
   `viewer-rlv-restriction-state` (done), `viewer-name-tags-decorations`,
@@ -1285,7 +1279,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-voice`](blocked/gridspec-voice.md) — Voice provisioning and
   signalling on each grid (blocked by `viewer-voice-audio`)
 
-## in-progress (18)
+## in-progress (17)
 
 ### viewer
 
@@ -1316,8 +1310,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Render context matrix — subjects × eye, time of day, mirror, layering
   (blocked by `viewer-render-pixel-oracle` (done), `viewer-plugin-groups`
   (done), `viewer-render-gpu-serialisation` (done))
-- [`viewer-sit-stand-actions`](in-progress/viewer-sit-stand-actions.md) — Sit /
-  stand actions (blocked by `viewer-object-selection-core` (done))
 - [`viewer-ui-text-caret-grapheme-motion`](in-progress/viewer-ui-text-caret-grapheme-motion.md)
   — Upstream issue — parley caret motion steps one codepoint, not one grapheme
 - [`viewer-ui-text-parley-pr-backdelete`](in-progress/viewer-ui-text-parley-pr-backdelete.md)
@@ -1337,7 +1329,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (40)
+## bugs (38)
 
 ### protocol
 
@@ -1364,10 +1356,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   stale
 - [`viewer-automation-ground-reveal-eye-under-terrain`](bugs/viewer-automation-ground-reveal-eye-under-terrain.md)
   — A ground reveal can put the camera under higher ground beside the point
-- [`viewer-bespoke-card-responses-lose-the-button`](bugs/viewer-bespoke-card-responses-lose-the-button.md)
-  — Bespoke notification cards resolve every click as "no choice"
-- [`viewer-build-phantom-flag-wrong-bit`](bugs/viewer-build-phantom-flag-wrong-bit.md)
-  — Build floater's Phantom checkbox reads and writes the any-owner bit
 - [`viewer-calling-card-offer-unanswered`](bugs/viewer-calling-card-offer-unanswered.md)
   — A calling card offered to us is never shown or answered
 - [`viewer-camera-framing-ends-inside-the-framed-object`](bugs/viewer-camera-framing-ends-inside-the-framed-object.md)
@@ -1383,8 +1371,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-inventory-settings-subtree-shows-unloaded`](bugs/viewer-inventory-settings-subtree-shows-unloaded.md)
   — The Library root and its Environments subtree never read as loaded in the
   viewer model
-- [`viewer-left-click-touches-a-prim-that-takes-none`](bugs/viewer-left-click-touches-a-prim-that-takes-none.md)
-  — A left click sends a grab and a degrab to a prim that takes no touch
 - [`viewer-live-opensim-world-renders-white`](bugs/viewer-live-opensim-world-renders-white.md)
   — The world renders all white at times on the live OpenSim grid
 - [`viewer-lsl-editor-flags-unserved-functions`](bugs/viewer-lsl-editor-flags-unserved-functions.md)
@@ -1433,13 +1419,15 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-conformance-upload-after-yengine-start-dropped`](bugs/test-conformance-upload-after-yengine-start-dropped.md)
   — Quick script uploads to one item on OpenSim take each other's answers, or
   fail as "operation timed out"
+- [`test-e2e-relog-gesture-wait-margin`](bugs/test-e2e-relog-gesture-wait-margin.md)
+  — e2e_relog's active-gesture test runs at the edge of its 60 s wait
 - [`test-fake-grid-tests-stop-reading-client-events`](bugs/test-fake-grid-tests-stop-reading-client-events.md)
   — Fake-grid integration tests stop reading the client's events and can stall
   it
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1479)
+## done (1486)
 
 ### protocol
 
@@ -2060,6 +2048,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   client-baking region's cache before re-uploading the own bakes
 - [`viewer-beacons-beam-render`](done/viewer-beacons-beam-render.md) — Tracking
   beacon — beam + off-screen direction arrow
+- [`viewer-bespoke-card-responses-lose-the-button`](done/viewer-bespoke-card-responses-lose-the-button.md)
+  — Bespoke notification cards resolve every click as "no choice"
 - [`viewer-bevy-empty-text-measures-at-parley-defaults`](done/viewer-bevy-empty-text-measures-at-parley-defaults.md)
   — An empty text node is measured at parley's defaults, not its own font
 - [`viewer-block-list`](done/viewer-block-list.md) — Block / mute list UI
@@ -2076,6 +2066,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-build-numeric-field-spinners`](done/viewer-build-numeric-field-spinners.md)
   — Spinner widget — up/down arrow numeric fields (build window and every
   reference spinner)
+- [`viewer-build-phantom-flag-wrong-bit`](done/viewer-build-phantom-flag-wrong-bit.md)
+  — Build floater's Phantom checkbox reads and writes the any-owner bit
 - [`viewer-build-systems-gate-on-build-mode`](done/viewer-build-systems-gate-on-build-mode.md)
   — Performance — gate all build-tool systems on build mode being active
 - [`viewer-build-tool-modify-permission-gate`](done/viewer-build-tool-modify-permission-gate.md)
@@ -2451,10 +2443,18 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   animation-preview window per animation
 - [`viewer-key-color-picker`](done/viewer-key-color-picker.md) — One
   colour-picker window per field, like the texture picker
+- [`viewer-key-material-editor`](done/viewer-key-material-editor.md) — One
+  material-editor window per material item
 - [`viewer-key-texture-preview`](done/viewer-key-texture-preview.md) — One
   texture-preview window per texture
+- [`viewer-key-wearable-editor`](done/viewer-key-wearable-editor.md) — One
+  wearable-editor window per bodypart / clothing item
 - [`viewer-land-context-menu`](done/viewer-land-context-menu.md) — Land /
   terrain context pie menu entries (blocked by `viewer-ui-radial-menu` (done))
+- [`viewer-left-click-click-actions`](done/viewer-left-click-click-actions.md) —
+  Carry out a prim's click action on a left click
+- [`viewer-left-click-touches-a-prim-that-takes-none`](done/viewer-left-click-touches-a-prim-that-takes-none.md)
+  — A left click sends a grab and a degrab to a prim that takes no touch
 - [`viewer-load-url-body-links`](done/viewer-load-url-body-links.md) — Script
   web-page toast body — clickable URLs / SLURLs (blocked by
   `viewer-url-linkification` (done))
@@ -3304,6 +3304,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-sit-on-neighbour-object-uses-root-circuit`](done/viewer-sit-on-neighbour-object-uses-root-circuit.md)
   — Sitting on an object in a neighbour region fails silently instead of "move
   closer"
+- [`viewer-sit-stand-actions`](done/viewer-sit-stand-actions.md) — Sit / stand
+  actions (blocked by `viewer-object-selection-core` (done))
 - [`viewer-sit-target-and-stand-button`](done/viewer-sit-target-and-stand-button.md)
   — Sit target ignored on sit, and no Stand button while seated
 - [`viewer-skin-active-class-means-selected-not-pressed`](done/viewer-skin-active-class-means-selected-not-pressed.md)
