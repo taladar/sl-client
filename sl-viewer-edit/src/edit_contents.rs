@@ -21,6 +21,37 @@
 //!   lists a picked object's contents and offers **Copy To Inventory** /
 //!   **Copy And Wear**, which move the contents into the agent's inventory.
 //!
+//! What a surface shows and has picked is one `ContentsPane`: the rendered
+//! view, the selected row and the last click (for the double-click Open). The
+//! Build tab's pane is a resource, `BuildContents` — it is a tab in one window.
+//!
+//! # One Object Contents window per object
+//!
+//! The Object Contents floater is a **keyed** floater
+//! (`viewer-key-object-contents`): one window per object, keyed by the
+//! object's grid-wide [`ObjectKey`] (which, unlike the region-scoped id,
+//! survives the object being re-announced under a new local id). Its pane, its
+//! target and its widget handles are a `ContentsWindow` component on the
+//! window root, so dragging an item from one object's contents into another's
+//! has both listings on screen, and a click in one window never selects, opens
+//! or double-clicks in the other. Which pane a row, a viewport or a button
+//! belongs to is a `PaneRef`: the Build tab, or the window it lives in.
+//!
+//! The reference keeps `LLFloaterOpenObject` a singleton over the current
+//! selection. We key it anyway, as About Land and About Region are keyed — a
+//! deliberate divergence, recorded in [[viewer-keyed-floater-audit]].
+//!
+//! What stays a **resource**, shared by every pane:
+//!
+//! - `TaskInventoryCache` — a cache of grid state keyed by object, not window
+//!   state; two windows (or a window and the Build tab) on one object share its
+//!   one listing and its one fetch.
+//! - `PendingMutations` — keyed by object and item. Two windows on different
+//!   objects cannot collide in it, and two views of one object *should* both
+//!   show a change in flight, so per-window copies would only disagree.
+//! - `ContentsRename` — the inline rename is the Build tab's alone; the window
+//!   offers no rename.
+//!
 //! # The cache — why cycling linkset parts stays instant
 //!
 //! Fetching a prim's inventory is a round trip (a `RequestTaskInventory`, then a
@@ -69,13 +100,16 @@ use sl_client_bevy::{
 };
 
 use crate::edit_tool::{BuildTabPages, LABEL_CLASS, TOOL_FONT_SIZE, VALUE_CLASS};
-use crate::floater::{FloaterCaps, FloaterHandle, FloaterSpec, spawn_floater};
+use crate::floater::{
+    FloaterCaps, FloaterHandle, FloaterHost, FloaterKey, FloaterSpec, FloaterSystems,
+    KeyedFloaterOpen, KeyedFloaters,
+};
 use crate::i18n::{TransArgs, Translated, Translator};
 use crate::intents::ContentsMutated;
 use crate::intents::LocalChatNotice;
 use crate::inventory::{InventoryModel, item_icon, label_clip_node};
 use crate::ui::focus_within;
-use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
+use crate::ui::{column, row};
 use crate::ui_element::{ContentMayOverflow, TextMayClip};
 use crate::ui_font::UiFont;
 use crate::ui_spawn::{self, ButtonKind, ButtonSpec, UiLabel};
@@ -514,63 +548,76 @@ struct ContentsSurfaceView {
     unreadable: bool,
 }
 
-/// Both surfaces' flattened views, rebuilt from the selection / open-target and
-/// the cache each time either changes.
-#[derive(Resource, Debug, Default)]
-struct ContentsViews {
-    /// The Build-tab surface's view.
-    build: ContentsSurfaceView,
-    /// The Open-floater surface's view.
-    open: ContentsSurfaceView,
-}
-
-impl ContentsViews {
-    /// The view for `surface`.
-    const fn view(&self, surface: ContentsSurface) -> &ContentsSurfaceView {
-        match surface {
-            ContentsSurface::BuildTab => &self.build,
-            ContentsSurface::OpenFloater => &self.open,
-        }
-    }
-}
-
-/// Which item is selected in each surface's list (for rename / remove).
-#[derive(Resource, Debug, Default)]
-struct ContentsSelection {
-    /// The Build-tab surface's selected item.
-    build: Option<InventoryKey>,
-    /// The Open-floater surface's selected item.
-    open: Option<InventoryKey>,
-}
-
-impl ContentsSelection {
-    /// The selected item for `surface`.
-    const fn get(&self, surface: ContentsSurface) -> Option<InventoryKey> {
-        match surface {
-            ContentsSurface::BuildTab => self.build,
-            ContentsSurface::OpenFloater => self.open,
-        }
-    }
-
-    /// Set the selected item for `surface`.
-    const fn set(&mut self, surface: ContentsSurface, item: Option<InventoryKey>) {
-        match surface {
-            ContentsSurface::BuildTab => self.build = item,
-            ContentsSurface::OpenFloater => self.open = item,
-        }
-    }
-}
-
 /// How long after a click a second click on the **same** item still counts as a
 /// double-click (the reference's open gesture), in seconds.
 const DOUBLE_CLICK_SECONDS: f32 = 0.4;
 
-/// The most recent contents-row click, so a second click on the same item
-/// within [`DOUBLE_CLICK_SECONDS`] is recognised as a double-click Open.
+/// One contents list's state: what it shows, which row is picked, and the last
+/// click on it. The Build tab has one ([`BuildContents`]); each Object Contents
+/// window has its own ([`ContentsWindow`]).
+#[derive(Debug, Default)]
+struct ContentsPane {
+    /// The flattened view, rebuilt from the target and the cache.
+    view: ContentsSurfaceView,
+    /// The selected item (for open / rename / remove).
+    selection: Option<InventoryKey>,
+    /// The most recent row click — the item and the time (seconds since
+    /// startup) — so a second click on the same item within
+    /// [`DOUBLE_CLICK_SECONDS`] is a double-click Open. Per pane, so a click
+    /// in one list and a click in another never make a double-click.
+    last_click: Option<(InventoryKey, f32)>,
+}
+
+impl ContentsPane {
+    /// A primary click on `item` at `now`: select it, and answer whether it
+    /// completes a double-click (a second click on the same item within
+    /// [`DOUBLE_CLICK_SECONDS`]). A double-click is consumed, so a third click
+    /// starts a new pair.
+    fn click(&mut self, item: InventoryKey, now: f32) -> bool {
+        self.selection = Some(item);
+        let double = self
+            .last_click
+            .is_some_and(|(prev, at)| prev == item && now - at < DOUBLE_CLICK_SECONDS);
+        self.last_click = if double { None } else { Some((item, now)) };
+        double
+    }
+
+    /// Whether the selected item has a mutation in flight (so rename / remove
+    /// must be blocked to avoid racing the change already sent).
+    fn selection_is_pending(&self) -> bool {
+        let Some(item) = self.selection else {
+            return false;
+        };
+        self.view
+            .rows
+            .iter()
+            .find(|row| row.item_id == item)
+            .is_some_and(|row| row.state.is_pending())
+    }
+
+    /// Drop the selection when its item is no longer listed.
+    fn keep_selection_valid(&mut self) {
+        if let Some(selected) = self.selection
+            && !self.view.rows.iter().any(|row| row.item_id == selected)
+        {
+            self.selection = None;
+        }
+    }
+}
+
+/// The Build tab's pane — a singleton, since the tab is one page of the one
+/// Build window. It follows the build selection.
 #[derive(Resource, Debug, Default)]
-struct ContentsLastClick {
-    /// The item clicked, and the time (seconds since startup) it was clicked.
-    last: Option<(InventoryKey, f32)>,
+struct BuildContents(ContentsPane);
+
+/// Which pane something belongs to: the Build tab's, or the Object Contents
+/// window `.0`'s.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PaneRef {
+    /// The Build floater's Content tab.
+    BuildTab,
+    /// The Object Contents window with this root entity.
+    Window(Entity),
 }
 
 // ---------------------------------------------------------------------------
@@ -663,23 +710,29 @@ pub(crate) struct ContentsTabUi {
     remove: Entity,
 }
 
-/// The standalone Object Contents floater's entities.
-#[derive(Resource, Debug)]
-pub(crate) struct OpenObjectFloaterUi {
-    /// The floater root (carries `UiPanelShown`).
-    panel: Entity,
+/// One Object Contents window — a **component on the window root**, since the
+/// floater opens per object ([`FloaterKey`]) and everything it shows lives
+/// exactly as long as its window. See the
+/// [module docs](self#one-object-contents-window-per-object).
+#[derive(Component, Debug)]
+struct ContentsWindow {
+    /// The object this window lists: its region-scoped id (what a fetch
+    /// addresses, refreshed on a re-open) and its grid-wide key (the window's
+    /// key).
+    target: (ScopedObjectId, ObjectKey),
+    /// The object's name, latched from the first properties record that names
+    /// it — the build selection's, or one the grid sent unasked — so the window
+    /// keeps it after the selection moves on.
+    name: String,
     /// The virtualized list viewport.
     viewport: Entity,
     /// The object-name line.
     name_text: Entity,
-}
-
-/// The Open-floater's current target object, set by the object pie's **Open**
-/// action.
-#[derive(Resource, Debug, Default)]
-struct OpenObjectFloaterState {
-    /// The picked object (region-scoped id + grid-wide key), or `None`.
-    target: Option<(ScopedObjectId, ObjectKey)>,
+    /// The title bar's text, rewritten with the object's name once it is known
+    /// so two windows are tellable apart.
+    title_text: Entity,
+    /// What this window shows and has picked.
+    pane: ContentsPane,
 }
 
 /// A request to open the Object Contents floater against a picked object, sent
@@ -742,19 +795,12 @@ impl Plugin for EditContentsPlugin {
         // notice, so the channel is registered by the crate that writes it.
         app.add_message::<LocalChatNotice>()
             .init_resource::<TaskInventoryCache>()
-            .init_resource::<ContentsViews>()
-            .init_resource::<ContentsSelection>()
-            .init_resource::<ContentsLastClick>()
+            .init_resource::<BuildContents>()
             .init_resource::<PendingMutations>()
-            .init_resource::<OpenObjectFloaterState>()
             .init_resource::<ContentsRename>()
             .add_message::<OpenObjectContents>()
             .add_message::<ContentsMutated>()
             .add_message::<ContentsActionRequest>()
-            .add_systems(
-                Startup,
-                spawn_open_object_floater.after(UiScaffoldSystems::SpawnRoot),
-            )
             // Fills the Build floater's Content page once its lazily-built
             // content publishes the pages (`BuildTabPages` appears on first
             // open); ordered after the general parameter tabs, as before.
@@ -764,11 +810,22 @@ impl Plugin for EditContentsPlugin {
                     .run_if(resource_added::<BuildTabPages>)
                     .after(crate::edit_params::spawn_param_tabs),
             )
+            // Nothing spawns at `Startup`: an Object Contents window exists only
+            // while that object's contents are open, so the open system spawns
+            // each instance. It runs after the manager's command pass — see
+            // `FloaterSystems`: the pie click that opens a window also raises
+            // whatever it landed in, and the later raise wins.
+            .add_systems(
+                Update,
+                open_object_contents_requests
+                    .after(FloaterSystems::Commands)
+                    .before(ingest_task_inventory),
+            )
             .add_systems(
                 Update,
                 (
                     ingest_task_inventory,
-                    open_object_contents_requests,
+                    latch_window_names,
                     handle_contents_mutated,
                     rebuild_contents_views,
                     drive_contents_fetch,
@@ -908,21 +965,30 @@ pub fn object_contents_floater_spec() -> FloaterSpec {
     }
 }
 
-/// Spawn the standalone Object Contents floater (the Open floater).
-fn spawn_open_object_floater(mut commands: Commands, root: Option<Res<UiRoot>>) {
-    let Some(root) = root.map(|root| root.0) else {
-        return;
-    };
-    let handle: FloaterHandle = spawn_floater(&mut commands, root, object_contents_floater_spec());
+/// The [`FloaterKey`] of the Object Contents window listing `object`.
+fn contents_window_key(object: ObjectKey) -> FloaterKey {
+    FloaterKey::subject(&object)
+}
+
+/// Furnish a freshly spawned Object Contents window on `target`: its title
+/// (the kind until the object's name is known), its content, and the
+/// [`ContentsWindow`] every per-window system finds it by.
+fn build_contents_window(
+    commands: &mut Commands,
+    handle: FloaterHandle,
+    target: (ScopedObjectId, ObjectKey),
+) {
     commands
         .entity(handle.title_text)
         .insert(Translated::new("object-contents-floater-title"));
-    let parts =
-        spawn_open_object_content(&mut commands, handle.content, TOOL_FONT_SIZE, ROW_FONT_SIZE);
-    commands.insert_resource(OpenObjectFloaterUi {
-        panel: handle.root,
+    let parts = spawn_open_object_content(commands, handle.content, TOOL_FONT_SIZE, ROW_FONT_SIZE);
+    commands.entity(handle.root).insert(ContentsWindow {
+        target,
+        name: String::new(),
         viewport: parts.viewport,
         name_text: parts.name_text,
+        title_text: handle.title_text,
+        pane: ContentsPane::default(),
     });
 }
 
@@ -1027,7 +1093,7 @@ fn spawn_open_object_content(
 /// the row pool uses and bound by the same `bind_contents_row`, one selected
 /// and one mid-delete; the name line is the same `open_floater_name_line`.
 ///
-/// It inserts no `OpenObjectFloaterUi`, so the live systems leave it alone.
+/// It inserts no `ContentsWindow`, so the live systems leave it alone.
 pub fn spawn_object_contents_specimen(
     commands: &mut Commands,
     parent: Entity,
@@ -1328,14 +1394,41 @@ fn spawn_contents_button(
     commands.entity(button).observe(
         // `Activate`, not `Pointer<Press>`: the headless button raises it for a
         // primary click and for `Enter` / `Space` on the focused button alike.
-        move |_activate: On<Activate>, requests: Option<MessageWriter<ContentsActionRequest>>| {
+        move |activate: On<Activate>,
+              host: FloaterHost,
+              requests: Option<MessageWriter<ContentsActionRequest>>| {
             // Absent only in the gallery, whose specimen has no contents to act on.
-            if let Some(mut requests) = requests {
-                requests.write(ContentsActionRequest { surface, action });
-            }
+            let Some(mut requests) = requests else {
+                return;
+            };
+            // A window's button acts on *its* window's object.
+            let pane = match surface {
+                ContentsSurface::BuildTab => PaneRef::BuildTab,
+                ContentsSurface::OpenFloater => match host.of(activate.entity) {
+                    Some(window) => PaneRef::Window(window),
+                    None => return,
+                },
+            };
+            requests.write(ContentsActionRequest { pane, action });
         },
     );
     button
+}
+
+/// The pane a contents viewport of `surface` belongs to: the Build tab's, or
+/// the window among `windows` — `(window, its viewport)` pairs — whose list it
+/// is. `None` for a viewport no live pane owns: a gallery specimen's.
+fn pane_of_viewport(
+    surface: ContentsSurface,
+    viewport: Entity,
+    mut windows: impl Iterator<Item = (Entity, Entity)>,
+) -> Option<PaneRef> {
+    match surface {
+        ContentsSurface::BuildTab => Some(PaneRef::BuildTab),
+        ContentsSurface::OpenFloater => windows
+            .find_map(|(window, list)| (list == viewport).then_some(window))
+            .map(PaneRef::Window),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1453,21 +1546,63 @@ fn ingest_task_inventory(
     }
 }
 
-/// React to an object pie **Open** request: point the Object Contents floater at
-/// the picked object and show it.
+/// Open an object's contents **per object** (`viewer-key-object-contents`):
+/// raise its window when it is already up, and otherwise spawn one listing it.
+///
+/// Every open of the frame is honoured, not just the last. A window already up
+/// keeps its selection and scroll — only its region-scoped id is refreshed,
+/// since that is what the key exists to outlive (an object re-announced after a
+/// region change carries a new local id).
 fn open_object_contents_requests(
     mut requests: MessageReader<OpenObjectContents>,
-    ui: Option<Res<OpenObjectFloaterUi>>,
-    mut state: ResMut<OpenObjectFloaterState>,
-    mut panels: Query<&mut UiPanelShown>,
+    mut floaters: KeyedFloaters,
+    mut windows: Query<&mut ContentsWindow>,
+    mut commands: Commands,
 ) {
-    let Some(ui) = ui else {
-        return;
-    };
     for request in requests.read() {
-        state.target = Some((request.scoped, request.full));
-        if let Ok(mut shown) = panels.get_mut(ui.panel) {
-            shown.0 = true;
+        let target = (request.scoped, request.full);
+        match floaters.open(
+            object_contents_floater_spec(),
+            contents_window_key(request.full),
+        ) {
+            KeyedFloaterOpen::Spawned(handle) => {
+                build_contents_window(&mut commands, handle, target);
+            }
+            KeyedFloaterOpen::Existing(window) => {
+                if let Ok(mut window) = windows.get_mut(window)
+                    && window.target != target
+                {
+                    window.target = target;
+                }
+            }
+        }
+    }
+}
+
+/// Latch each Object Contents window's object name from whatever names it: the
+/// build selection's properties when the window's object is selected, or a
+/// properties record the grid sent. Latched rather than read live, so a window
+/// keeps its name once the selection has moved on to another object.
+fn latch_window_names(
+    mut events: MessageReader<SlEvent>,
+    selection: Res<SelectionSet>,
+    mut windows: Query<&mut ContentsWindow>,
+) {
+    let mut learn = |object: &ObjectKey, name: &str| {
+        for mut window in &mut windows {
+            if window.target.1 == *object && !name.is_empty() && window.name != name {
+                name.clone_into(&mut window.name);
+            }
+        }
+    };
+    if let Some(primary) = selection.primary()
+        && let Some(properties) = primary.properties.as_ref()
+    {
+        learn(&primary.full, &properties.name);
+    }
+    for event in events.read() {
+        if let SlSessionEvent::ObjectProperties(properties) = &event.0 {
+            learn(&properties.object_id, &properties.name);
         }
     }
 }
@@ -1500,14 +1635,14 @@ fn handle_contents_mutated(
 /// (and not already being fetched). The cache's `fetching` flag debounces
 /// repeat requests while the round trip is in flight.
 fn drive_contents_fetch(
-    views: Res<ContentsViews>,
+    build: Res<BuildContents>,
+    windows: Query<&ContentsWindow>,
     mut cache: ResMut<TaskInventoryCache>,
     mut commands: MessageWriter<SlCommand>,
 ) {
-    for surface in [ContentsSurface::BuildTab, ContentsSurface::OpenFloater] {
-        let Some((scoped, full)) = views.view(surface).target else {
-            continue;
-        };
+    let targets = core::iter::once(build.0.view.target)
+        .chain(windows.iter().map(|window| window.pane.view.target));
+    for (scoped, full) in targets.flatten() {
         let needs_fetch = cache
             .get(&full)
             .is_none_or(|entry| !entry.loaded && !entry.fetching && !entry.unreadable);
@@ -1538,28 +1673,27 @@ struct ContentsStore<'w> {
     pending: ResMut<'w, PendingMutations>,
 }
 
-/// What the two contents surfaces currently show, bundled as one
+/// Every contents pane — the Build tab's and each Object Contents window's —
+/// and the Build tab's inline rename, bundled as one
 /// [`SystemParam`](bevy::ecs::system::SystemParam).
 #[derive(bevy::ecs::system::SystemParam)]
-struct ContentsModel<'w> {
-    /// The rendered rows of each surface.
-    views: ResMut<'w, ContentsViews>,
-    /// Which row each surface has picked.
-    selection: ResMut<'w, ContentsSelection>,
-    /// The in-place rename, if one is open.
+struct ContentsModel<'w, 's> {
+    /// The Build tab's pane.
+    build: ResMut<'w, BuildContents>,
+    /// The Object Contents windows, each holding its own pane.
+    windows: Query<'w, 's, &'static mut ContentsWindow>,
+    /// The in-place rename, if one is open (the Build tab's alone).
     rename: ResMut<'w, ContentsRename>,
 }
 
-/// The two places object contents is shown — the Build tab and the Open-object
-/// floater — bundled as one
-/// [`SystemParam`](bevy::ecs::system::SystemParam). Either may be absent, its
-/// surface not having been built yet.
-#[derive(bevy::ecs::system::SystemParam)]
-struct ContentsSurfaces<'w> {
-    /// The Build tab's handles.
-    tab_ui: Option<Res<'w, ContentsTabUi>>,
-    /// The Open-object floater's handles.
-    open_ui: Option<Res<'w, OpenObjectFloaterUi>>,
+impl ContentsModel<'_, '_> {
+    /// The pane `pane` names, if it still exists.
+    fn pane(&self, pane: PaneRef) -> Option<&ContentsPane> {
+        match pane {
+            PaneRef::BuildTab => Some(&self.build.0),
+            PaneRef::Window(window) => self.windows.get(window).ok().map(|window| &window.pane),
+        }
+    }
 }
 
 /// What a contents action sends and how its text is worded, bundled as one
@@ -1592,97 +1726,90 @@ struct RenameWidgets<'w, 's> {
     commands: Commands<'w, 's>,
 }
 
-/// Recompute both surfaces' views from the current build selection / open target
-/// and the cache, and set each list's item count. Cheap when nothing changed:
-/// the whole body only runs on a change to the selection, the tool state, the
-/// open target, or the cache.
+/// Recompute every pane's view from its target and the cache, and set each
+/// list's item count. Cheap when nothing changed: the Build tab's pane only
+/// rebuilds on a change to the selection, the tool state or the cache, and a
+/// window's on those or a change to the window itself (opened, re-targeted, a
+/// name latched).
 fn rebuild_contents_views(
     tool: Res<EditToolState>,
     selection: Res<SelectionSet>,
-    open_state: Res<OpenObjectFloaterState>,
     store: ContentsStore,
-    surfaces: ContentsSurfaces,
+    tab_ui: Option<Res<ContentsTabUi>>,
     mut model: ContentsModel,
     mut lists: Query<&mut VirtualList>,
 ) {
-    if !(selection.is_changed()
+    let shared_changed = selection.is_changed()
         || tool.is_changed()
-        || open_state.is_changed()
         || store.cache.is_changed()
-        || store.pending.is_changed())
-    {
-        return;
-    }
+        || store.pending.is_changed();
 
-    // The Build tab follows the primary selection while the tool is open.
-    let build_target = if tool.active {
-        selection.primary().map(|node| (node.scoped, node.full))
-    } else {
-        None
-    };
-    rebuild_one_view(
-        &mut model.views.build,
-        build_target,
-        &store.objects,
-        &store.cache,
-        &store.pending,
-        &selection,
-    );
-    rebuild_one_view(
-        &mut model.views.open,
-        open_state.target,
-        &store.objects,
-        &store.cache,
-        &store.pending,
-        &selection,
-    );
-
-    // Keep each surface's selection valid: drop it if its item is gone.
-    for (surface, view) in [
-        (ContentsSurface::BuildTab, &model.views.build),
-        (ContentsSurface::OpenFloater, &model.views.open),
-    ] {
-        if let Some(selected) = model.selection.get(surface)
-            && !view.rows.iter().any(|row| row.item_id == selected)
-        {
-            model.selection.set(surface, None);
+    if shared_changed {
+        // The Build tab follows the primary selection while the tool is open.
+        let build_target = if tool.active {
+            selection.primary().map(|node| (node.scoped, node.full))
+        } else {
+            None
+        };
+        // The primary selection's `ObjectProperties` name — it *is* the target.
+        let build_name = selection
+            .primary()
+            .and_then(|primary| primary.properties.as_ref())
+            .map_or("", |properties| properties.name.as_str());
+        let pane = &mut model.build.0;
+        rebuild_one_view(
+            &mut pane.view,
+            build_target,
+            build_name,
+            &store.objects,
+            &store.cache,
+            &store.pending,
+        );
+        pane.keep_selection_valid();
+        if let Some(ui) = &tab_ui {
+            sync_item_count(&mut lists, ui.viewport, pane.view.rows.len());
         }
     }
 
-    if let Some(ui) = surfaces.tab_ui
-        && let Ok(mut list) = lists.get_mut(ui.viewport)
-    {
-        let count = model.views.build.rows.len();
-        if list.item_count != count {
-            list.item_count = count;
-            list.scroll_to_top();
+    for mut window in &mut model.windows {
+        if !(shared_changed || window.is_changed()) {
+            continue;
         }
-    }
-    if let Some(ui) = surfaces.open_ui
-        && let Ok(mut list) = lists.get_mut(ui.viewport)
-    {
-        let count = model.views.open.rows.len();
-        if list.item_count != count {
-            list.item_count = count;
-            list.scroll_to_top();
-        }
+        let window = &mut *window;
+        rebuild_one_view(
+            &mut window.pane.view,
+            Some(window.target),
+            &window.name,
+            &store.objects,
+            &store.cache,
+            &store.pending,
+        );
+        window.pane.keep_selection_valid();
+        sync_item_count(&mut lists, window.viewport, window.pane.view.rows.len());
     }
 }
 
-/// Keep each surface's viewport [`ContentsDropTarget`] pointed at the object its
+/// Set `viewport`'s list to `count` rows, back at the top when the count moved.
+fn sync_item_count(lists: &mut Query<&mut VirtualList>, viewport: Entity, count: usize) {
+    if let Ok(mut list) = lists.get_mut(viewport)
+        && list.item_count != count
+    {
+        list.item_count = count;
+        list.scroll_to_top();
+    }
+}
+
+/// Keep each pane's viewport [`ContentsDropTarget`] pointed at the object its
 /// view shows — but only when the agent may **add** to it — so an inventory drag
 /// dropped on the list adds to that prim's contents (and is refused otherwise).
 ///
 /// [`ContentsDropTarget`]: crate::inventory_drag::ContentsDropTarget
 fn sync_contents_drop_targets(
-    views: Res<ContentsViews>,
+    build: Res<BuildContents>,
     tab_ui: Option<Res<ContentsTabUi>>,
-    open_ui: Option<Res<OpenObjectFloaterUi>>,
+    windows: Query<Ref<ContentsWindow>>,
     mut drop_targets: Query<&mut crate::inventory_drag::ContentsDropTarget>,
 ) {
-    if !views.is_changed() {
-        return;
-    }
     let mut apply = |viewport: Entity, view: &ContentsSurfaceView| {
         if let Ok(mut target) = drop_targets.get_mut(viewport) {
             let resolved = view.target.filter(|_target| view.perms.can_add());
@@ -1691,25 +1818,29 @@ fn sync_contents_drop_targets(
             }
         }
     };
-    if let Some(ui) = tab_ui {
-        apply(ui.viewport, &views.build);
+    if build.is_changed()
+        && let Some(ui) = tab_ui
+    {
+        apply(ui.viewport, &build.0.view);
     }
-    if let Some(ui) = open_ui {
-        apply(ui.viewport, &views.open);
+    for window in &windows {
+        if window.is_changed() {
+            apply(window.viewport, &window.pane.view);
+        }
     }
 }
 
-/// Rebuild one surface's view from its target, the cache, and the pending
-/// mutation overlay: the server's listing forms the base rows, each item's
-/// pending mutation (if any) recolours / relabels its row, and pending **adds**
-/// (not yet in the listing) append phantom rows.
+/// Rebuild one pane's view of `target` (named `name`, when known) from the
+/// cache and the pending mutation overlay: the server's listing forms the base
+/// rows, each item's pending mutation (if any) recolours / relabels its row, and
+/// pending **adds** (not yet in the listing) append phantom rows.
 fn rebuild_one_view(
     view: &mut ContentsSurfaceView,
     target: Option<(ScopedObjectId, ObjectKey)>,
+    name: &str,
     objects: &ObjectState,
     cache: &TaskInventoryCache,
     pending: &PendingMutations,
-    selection: &SelectionSet,
 ) {
     view.target = target;
     view.rows.clear();
@@ -1721,13 +1852,7 @@ fn rebuild_one_view(
         return;
     };
     view.perms = ContentsPerms::resolve(objects, &scoped);
-    // The primary selection's `ObjectProperties` name, when it is this target.
-    if let Some(primary) = selection.primary()
-        && primary.full == full
-        && let Some(properties) = primary.properties.as_ref()
-    {
-        properties.name.clone_into(&mut view.name);
-    }
+    name.clone_into(&mut view.name);
     view.unreadable = cache.get(&full).is_some_and(|entry| entry.unreadable);
     let Some(entry) = cache.get(&full).filter(|entry| entry.loaded) else {
         view.loading = !view.unreadable;
@@ -1809,15 +1934,13 @@ fn populate_new_contents_rows(
 /// it as an `Option`: absent only in the gallery, whose specimen rows have no
 /// contents model behind them.
 #[derive(bevy::ecs::system::SystemParam)]
-struct ContentsRowClick<'w> {
-    /// What each surface shows, to resolve the clicked row's item.
-    views: Res<'w, ContentsViews>,
+struct ContentsRowClick<'w, 's> {
+    /// The Build tab's pane.
+    build: ResMut<'w, BuildContents>,
+    /// The Object Contents windows, each with its own pane.
+    windows: Query<'w, 's, (Entity, &'static mut ContentsWindow)>,
     /// The clock the double-click window is measured on.
     time: Res<'w, Time>,
-    /// Each surface's selected item.
-    selection: ResMut<'w, ContentsSelection>,
-    /// The previous click, for the double-click Open.
-    last_click: ResMut<'w, ContentsLastClick>,
     /// Where a double-click's Open goes.
     requests: MessageWriter<'w, ContentsActionRequest>,
     /// Focused on a click, so the wheel scrolls the list.
@@ -1908,45 +2031,55 @@ fn dress_contents_row(
         .insert(ContentsRowParts { icon, label })
         .observe(
             move |press: On<Pointer<Press>>,
-                  rows: Query<&VirtualRow>,
+                  rows: Query<(&VirtualRow, &ChildOf)>,
                   click: Option<ContentsRowClick>| {
                 if press.button != PointerButton::Primary {
                     return;
                 }
                 let Some(ContentsRowClick {
-                    views,
+                    mut build,
+                    mut windows,
                     time,
-                    mut selection,
-                    mut last_click,
                     mut requests,
                     mut focus,
                 }) = click
                 else {
                     return;
                 };
-                if let Ok(row) = rows.get(press.entity)
-                    && let Some(index) = row.index
-                    && let Some(display) = views.view(surface).rows.get(index)
-                {
-                    let item = display.item_id;
-                    selection.set(surface, Some(item));
-                    // Clicking the list focuses it so the wheel scrolls it.
-                    focus.set(press.entity, FocusCause::Navigated);
-                    // A second primary click on the same item within the
-                    // double-click window opens it (the reference's openItem).
-                    let now = time.elapsed_secs();
-                    let double = last_click
-                        .last
-                        .is_some_and(|(prev, at)| prev == item && now - at < DOUBLE_CLICK_SECONDS);
-                    if double {
-                        last_click.last = None;
-                        requests.write(ContentsActionRequest {
-                            surface,
-                            action: ContentsAction::Open,
-                        });
-                    } else {
-                        last_click.last = Some((item, now));
-                    }
+                let Ok((row, child_of)) = rows.get(press.entity) else {
+                    return;
+                };
+                // The row's own pane — its window's, never another window's.
+                let Some(pane_ref) = pane_of_viewport(
+                    surface,
+                    child_of.parent(),
+                    windows.iter().map(|(window, it)| (window, it.viewport)),
+                ) else {
+                    return;
+                };
+                let pane = match pane_ref {
+                    PaneRef::BuildTab => &mut build.0,
+                    PaneRef::Window(window) => match windows.get_mut(window) {
+                        Ok((_window, it)) => &mut it.into_inner().pane,
+                        Err(_) => return,
+                    },
+                };
+                let Some(item) = row
+                    .index
+                    .and_then(|index| pane.view.rows.get(index))
+                    .map(|display| display.item_id)
+                else {
+                    return;
+                };
+                // Clicking the list focuses it so the wheel scrolls it.
+                focus.set(press.entity, FocusCause::Navigated);
+                // A second primary click on the same item within the
+                // double-click window opens it (the reference's openItem).
+                if pane.click(item, time.elapsed_secs()) {
+                    requests.write(ContentsActionRequest {
+                        pane: pane_ref,
+                        action: ContentsAction::Open,
+                    });
                 }
             },
         );
@@ -1956,23 +2089,35 @@ fn dress_contents_row(
 /// pending-state suffix ("…adding" / "…deleting" / "…refreshing") and greying it
 /// while a mutation is in flight.
 fn bind_contents_rows(
-    views: Res<ContentsViews>,
+    build: Res<BuildContents>,
+    windows: Query<(Entity, Ref<ContentsWindow>)>,
     rows: Query<(Ref<VirtualRow>, &ChildOf, &ContentsRowParts)>,
     viewports: Query<&ContentsViewport>,
     translator: Translator,
     mut texts: Query<RowText>,
     mut nodes: Query<&mut Node>,
 ) {
-    let rebuild_all = views.is_changed();
     for (row, child_of, parts) in &rows {
         let Ok(&ContentsViewport(surface)) = viewports.get(child_of.parent()) else {
             continue;
         };
-        if !rebuild_all && !row.is_changed() {
+        // Only the panes whose view moved rebind every row.
+        let (pane, pane_changed) = match surface {
+            ContentsSurface::BuildTab => (&build.0, build.is_changed()),
+            ContentsSurface::OpenFloater => {
+                let Some(window) = windows.iter().find_map(|(_entity, window)| {
+                    (window.viewport == child_of.parent()).then_some(window)
+                }) else {
+                    continue;
+                };
+                let changed = window.is_changed();
+                (&window.into_inner().pane, changed)
+            }
+        };
+        if !pane_changed && !row.is_changed() {
             continue;
         }
-        let view = views.view(surface);
-        let bound = row.index.and_then(|index| view.rows.get(index));
+        let bound = row.index.and_then(|index| pane.view.rows.get(index));
         bind_contents_row(parts, bound, &translator, &mut texts, &mut nodes);
     }
 }
@@ -2030,8 +2175,8 @@ fn bind_contents_row(
 /// [`LIST_ROW_CLASS`], so the skin paints the selection as it paints every
 /// other list's.
 fn paint_contents_selection(
-    selection: Res<ContentsSelection>,
-    views: Res<ContentsViews>,
+    build: Res<BuildContents>,
+    windows: Query<&ContentsWindow>,
     viewports: Query<&ContentsViewport>,
     mut rows: Query<(&VirtualRow, &ChildOf, &mut ClassList)>,
 ) {
@@ -2039,10 +2184,23 @@ fn paint_contents_selection(
         let Ok(&ContentsViewport(surface)) = viewports.get(child_of.parent()) else {
             continue;
         };
+        let pane = match surface {
+            ContentsSurface::BuildTab => &build.0,
+            ContentsSurface::OpenFloater => {
+                match windows
+                    .iter()
+                    .find(|window| window.viewport == child_of.parent())
+                {
+                    Some(window) => &window.pane,
+                    // A specimen's rows: its own one-shot paints them.
+                    None => continue,
+                }
+            }
+        };
         let selected = row
             .index
-            .and_then(|index| views.view(surface).rows.get(index))
-            .is_some_and(|display| selection.get(surface) == Some(display.item_id));
+            .and_then(|index| pane.view.rows.get(index))
+            .is_some_and(|display| pane.selection == Some(display.item_id));
         set_state_class(&mut classes, SELECTED_CLASS, selected);
     }
 }
@@ -2084,17 +2242,42 @@ fn set_row_text(text: &mut Mut<'_, Text>, value: &str) {
 // ---------------------------------------------------------------------------
 
 /// Keep the Content-tab count line current and gate the action buttons by the
-/// resolved permissions / selection.
+/// resolved permissions / selection; keep each Object Contents window's name
+/// line and title current.
+///
+/// The window offers no permission-gated buttons — its Copy actions are the
+/// simulator's to arbitrate per item — so its object's permissions gate only
+/// its drop target ([`sync_contents_drop_targets`]), per window.
 fn gate_contents_buttons(
-    surfaces: ContentsSurfaces,
-    model: ContentsModel,
+    tab_ui: Option<Res<ContentsTabUi>>,
+    build: Res<BuildContents>,
+    windows: Query<&ContentsWindow>,
     translator: Translator,
     mut texts: Query<&mut Text>,
     mut last_enabled: Local<Option<[bool; 3]>>,
     mut commands: Commands,
 ) {
-    if let Some(ui) = &surfaces.tab_ui {
-        let view = &model.views.build;
+    for window in &windows {
+        if let Ok(mut text) = texts.get_mut(window.name_text) {
+            let want = open_floater_name_line(&window.pane.view, &translator);
+            if text.0 != want {
+                text.0 = want;
+            }
+        }
+        // The title carries the object's name once it is known (a plain
+        // string, so the translator stops owning it), the way About Land's
+        // carries its parcel's.
+        if !window.name.is_empty()
+            && let Ok(mut title) = texts.get_mut(window.title_text)
+            && title.0 != window.name
+        {
+            window.name.clone_into(&mut title.0);
+            commands.entity(window.title_text).remove::<Translated>();
+        }
+    }
+    if let Some(ui) = &tab_ui {
+        let pane = &build.0;
+        let view = &pane.view;
         if let Ok(mut text) = texts.get_mut(ui.count_text) {
             let want = contents_summary(view, &translator);
             if text.0 != want {
@@ -2103,8 +2286,7 @@ fn gate_contents_buttons(
         }
         let has_target = view.target.is_some();
         // A pending (in-flight) selection cannot be re-edited until it clears.
-        let selected = model.selection.build.is_some()
-            && !selection_is_pending(ContentsSurface::BuildTab, &model.views, &model.selection);
+        let selected = pane.selection.is_some() && !pane.selection_is_pending();
         // Only touch the buttons' interaction state on a transition, so a stable
         // selection does not churn archetypes every frame.
         let enabled = [
@@ -2118,15 +2300,6 @@ fn gate_contents_buttons(
             set_button_enabled(&mut commands, ui.new_script, add);
             set_button_enabled(&mut commands, ui.rename, rename);
             set_button_enabled(&mut commands, ui.remove, remove);
-        }
-    }
-    if let Some(ui) = &surfaces.open_ui {
-        let view = &model.views.open;
-        if let Ok(mut text) = texts.get_mut(ui.name_text) {
-            let want = open_floater_name_line(view, &translator);
-            if text.0 != want {
-                text.0 = want;
-            }
         }
     }
 }
@@ -2158,24 +2331,6 @@ fn contents_summary(view: &ContentsSurfaceView, translator: &Translator) -> Stri
     translator.format("build-content-count", &TransArgs::new().int("count", count))
 }
 
-/// Whether `surface`'s currently-selected item has a mutation in flight (so
-/// rename / remove must be blocked to avoid racing the change already sent).
-fn selection_is_pending(
-    surface: ContentsSurface,
-    views: &ContentsViews,
-    selection: &ContentsSelection,
-) -> bool {
-    let Some(item) = selection.get(surface) else {
-        return false;
-    };
-    views
-        .view(surface)
-        .rows
-        .iter()
-        .find(|row| row.item_id == item)
-        .is_some_and(|row| row.state.is_pending())
-}
-
 /// Enable or disable a button (its interaction + a disabled visual class).
 fn set_button_enabled(commands: &mut Commands, button: Entity, enabled: bool) {
     if enabled {
@@ -2203,7 +2358,7 @@ fn contents_hotkeys(
     context: Res<InputContext>,
     focus: Res<InputFocus>,
     tab_ui: Option<Res<ContentsTabUi>>,
-    selection: Res<ContentsSelection>,
+    build: Res<BuildContents>,
     child_of: Query<&ChildOf>,
     mut requests: MessageWriter<ContentsActionRequest>,
 ) {
@@ -2216,28 +2371,29 @@ fn contents_hotkeys(
     let focused_here = focus
         .get()
         .is_some_and(|focused| focus_within(focused, ui.viewport, &child_of));
-    if !focused_here || selection.build.is_none() {
+    if !focused_here || build.0.selection.is_none() {
         return;
     }
     if keyboard.just_pressed(KeyCode::F2) {
         requests.write(ContentsActionRequest {
-            surface: ContentsSurface::BuildTab,
+            pane: PaneRef::BuildTab,
             action: ContentsAction::Rename,
         });
     }
     if keyboard.just_pressed(KeyCode::Delete) || keyboard.just_pressed(KeyCode::Backspace) {
         requests.write(ContentsActionRequest {
-            surface: ContentsSurface::BuildTab,
+            pane: PaneRef::BuildTab,
             action: ContentsAction::Remove,
         });
     }
 }
 
-/// A contents action fired by a header button.
+/// A contents action fired by a header button, a hotkey or a double-click.
 #[derive(Message, Debug, Clone, Copy)]
 struct ContentsActionRequest {
-    /// The surface the action acts on.
-    surface: ContentsSurface,
+    /// The pane the action acts on — the Build tab, or the window it was
+    /// fired in.
+    pane: PaneRef,
     /// Which action.
     action: ContentsAction,
 }
@@ -2252,8 +2408,12 @@ fn run_contents_actions(
     mut outbox: ContentsOutbox,
 ) {
     for request in requests.read() {
-        let view = model.views.view(request.surface);
-        let Some((scoped, full)) = view.target else {
+        // What the pane the action was fired in shows and has picked — never
+        // another pane's.
+        let Some((Some((scoped, full)), perms, selected)) = model
+            .pane(request.pane)
+            .map(|pane| (pane.view.target, pane.view.perms, pane.selection))
+        else {
             continue;
         };
         match request.action {
@@ -2261,7 +2421,7 @@ fn run_contents_actions(
                 refetch(&mut store.cache, &mut outbox.commands, scoped, full);
             }
             ContentsAction::Open => {
-                let Some(item_id) = model.selection.get(request.surface) else {
+                let Some(item_id) = selected else {
                     continue;
                 };
                 let Some(item) = store
@@ -2297,7 +2457,7 @@ fn run_contents_actions(
                 // Editable needs BOTH the object's modify and the item's own
                 // modify bit (the reference's two-level rule); otherwise the
                 // item opens read-only.
-                let editable = view.perms.can_modify && item_modifiable(item);
+                let editable = perms.can_modify && item_modifiable(item);
                 if item.inv_type == InventoryType::Script {
                     outbox.script_opens.write(crate::intents::OpenScript {
                         name: item.name.clone(),
@@ -2324,7 +2484,7 @@ fn run_contents_actions(
                 }
             }
             ContentsAction::NewScript => {
-                if !view.perms.can_add() {
+                if !perms.can_add() {
                     outbox.notices.write(LocalChatNotice::new(
                         outbox.translator.get("build-content-no-modify"),
                     ));
@@ -2360,26 +2520,26 @@ fn run_contents_actions(
                 reconcile_after_mutation(&mut store.cache, &mut outbox.commands, scoped, full);
             }
             ContentsAction::Rename => {
-                if let Some(item) = model.selection.get(request.surface)
+                if let Some(item) = selected
                     && !store.pending.is_pending(&full, &item)
                 {
                     model.rename.pending = Some(item);
                 }
             }
             ContentsAction::Remove => {
-                let Some(item_id) = model.selection.get(request.surface) else {
+                let Some(item_id) = selected else {
                     continue;
                 };
                 // Already in flight — do not race the change already sent.
                 if store.pending.is_pending(&full, &item_id) {
                     continue;
                 }
-                if !view.perms.can_remove_menu() {
+                if !perms.can_remove_menu() {
                     continue;
                 }
                 // The reference offers Remove to an owner but only *applies* it
                 // with object modify — an owner-without-modify gets the notice.
-                if !view.perms.can_modify {
+                if !perms.can_modify {
                     outbox.notices.write(LocalChatNotice::new(
                         outbox.translator.get("build-content-no-modify"),
                     ));
@@ -2515,7 +2675,7 @@ struct ActiveContentsRename {
 /// Begin a pending Content-tab rename once its row is on screen.
 fn start_contents_rename(
     mut rename: ResMut<ContentsRename>,
-    views: Res<ContentsViews>,
+    build: Res<BuildContents>,
     tab_ui: Option<Res<ContentsTabUi>>,
     rows: Query<(Entity, &VirtualRow, &ContentsRowParts, &ChildOf)>,
     mut nodes: Query<&mut Node>,
@@ -2531,7 +2691,7 @@ fn start_contents_rename(
     let Some(ui) = tab_ui else {
         return;
     };
-    let view = &views.build;
+    let view = &build.0.view;
     let Some(index) = view.rows.iter().position(|row| row.item_id == item_id) else {
         return;
     };
@@ -2592,7 +2752,7 @@ fn drive_contents_rename(
     let Some(active) = model.rename.active else {
         return;
     };
-    let view = &model.views.build;
+    let view = &model.build.0.view;
     // Cancel when the hosting row no longer shows the renamed item.
     let still_bound = widgets
         .rows
@@ -3001,7 +3161,7 @@ mod tests {
     #[test]
     fn a_contents_button_acts_on_enter_space_and_a_click() -> Result<(), String> {
         use super::{
-            ContentsAction, ContentsActionRequest, ContentsSurface, spawn_contents_button,
+            ContentsAction, ContentsActionRequest, ContentsSurface, PaneRef, spawn_contents_button,
         };
         use crate::ui::{UiRoot, UiScaffoldSystems};
         use bevy::input::keyboard::Key;
@@ -3015,7 +3175,7 @@ mod tests {
         /// The requests one gesture on the Refresh button raised.
         fn requests_after(
             gesture: fn(&mut App, Entity) -> Result<(), String>,
-        ) -> Result<Vec<(ContentsSurface, ContentsAction)>, String> {
+        ) -> Result<Vec<(PaneRef, ContentsAction)>, String> {
             let mut app = InteractionTest::new().build();
             record::<ContentsActionRequest>(&mut app);
             app.add_systems(
@@ -3040,11 +3200,11 @@ mod tests {
             settle(&mut app);
             Ok(drain::<ContentsActionRequest>(&mut app)
                 .into_iter()
-                .map(|request| (request.surface, request.action))
+                .map(|request| (request.pane, request.action))
                 .collect())
         }
 
-        let want = vec![(ContentsSurface::BuildTab, ContentsAction::Refresh)];
+        let want = vec![(PaneRef::BuildTab, ContentsAction::Refresh)];
         assert_eq!(
             requests_after(|app, _button| interact::click_node(app, REFRESH))?,
             want,
@@ -3069,5 +3229,397 @@ mod tests {
             "Space on the focused button"
         );
         Ok(())
+    }
+
+    /// **One Object Contents window per object** (`viewer-key-object-contents`),
+    /// run through the whole plugin and the floater manager.
+    ///
+    /// What the keying buys is not two windows for their own sake — it is that
+    /// one object's listing, selection and actions cannot reach the other's,
+    /// which the singleton floater repointed on every Open.
+    mod instances {
+        use super::super::{
+            ContentsAction, ContentsActionRequest, ContentsPane, ContentsWindow,
+            EditContentsPlugin, OpenObjectContents, PaneRef, TaskInventoryCache,
+            contents_window_key,
+        };
+        use super::task_item;
+        use crate::floater::{Floater, FloaterCommand, FloaterOp, FloaterPlugin, host_floater};
+        use crate::intents::{NotecardSource, OpenNotecard, OpenScript};
+        use crate::inventory::InventoryModel;
+        use crate::ui::UiRoot;
+        use crate::world_api::{EditToolState, InputContext, ObjectState, SelectionSet};
+        use bevy::input_focus::InputFocus;
+        use bevy::prelude::*;
+        use bevy::ui_widgets::Activate;
+        use pretty_assertions::assert_eq;
+        use sl_client_bevy::{
+            CircuitId, Command, InventoryKey, ObjectKey, RegionLocalObjectId, ScopedObjectId,
+            SlCommand, SlEvent, SlIdentity, Uuid,
+        };
+        use sl_viewer_testkit::{drain, record};
+
+        /// A boxed error so tests can use `?` rather than the disallowed
+        /// `unwrap` / `expect`.
+        type TestError = Box<dyn core::error::Error>;
+
+        /// The first object's id.
+        const FIRST: u32 = 0xA1;
+
+        /// The second object's id.
+        const SECOND: u32 = 0xB2;
+
+        /// The object `id` stands for: its region-scoped id and its grid-wide
+        /// key.
+        fn object(id: u32) -> (ScopedObjectId, ObjectKey) {
+            (
+                ScopedObjectId::new(CircuitId::new(1), RegionLocalObjectId(id)),
+                ObjectKey::from(Uuid::from_u128(u128::from(id))),
+            )
+        }
+
+        /// The item id `id` stands for.
+        fn item_key(id: u128) -> InventoryKey {
+            InventoryKey::from(Uuid::from_u128(id))
+        }
+
+        /// An app with the floater manager and the whole contents plugin over
+        /// default world state; strings resolve to their keys.
+        fn contents_app() -> App {
+            let mut app = App::new();
+            app.add_message::<SlCommand>()
+                .add_message::<SlEvent>()
+                .add_message::<OpenNotecard>()
+                .add_message::<OpenScript>()
+                .init_resource::<UiScale>()
+                .init_resource::<ButtonInput<KeyCode>>()
+                .init_resource::<Time>()
+                .init_resource::<InputFocus>()
+                .init_resource::<InputContext>()
+                .init_resource::<ObjectState>()
+                .init_resource::<SelectionSet>()
+                .init_resource::<EditToolState>()
+                .init_resource::<SlIdentity>()
+                .init_resource::<InventoryModel>()
+                .add_plugins((FloaterPlugin, EditContentsPlugin));
+            crate::i18n::install_untranslated(&mut app);
+            record::<SlCommand>(&mut app);
+            record::<OpenNotecard>(&mut app);
+            record::<ContentsActionRequest>(&mut app);
+            let root = app.world_mut().spawn(Node::default()).id();
+            app.insert_resource(UiRoot(root));
+            app.update();
+            app
+        }
+
+        /// Open object `id`'s contents, under the region-scoped id `scoped`,
+        /// the way the object pie does — by writing the message.
+        fn open_as(app: &mut App, scoped: ScopedObjectId, id: u32) {
+            app.world_mut().write_message(OpenObjectContents {
+                scoped,
+                full: object(id).1,
+            });
+            app.update();
+        }
+
+        /// Open object `id`'s contents.
+        fn open(app: &mut App, id: u32) {
+            open_as(app, object(id).0, id);
+        }
+
+        /// Every live contents window, as (window, object key) pairs.
+        fn windows(app: &mut App) -> Vec<(Entity, ObjectKey)> {
+            app.world_mut()
+                .query::<(Entity, &ContentsWindow)>()
+                .iter(app.world())
+                .map(|(window, it)| (window, it.target.1))
+                .collect()
+        }
+
+        /// The window listing object `id`.
+        fn window_of(app: &mut App, id: u32) -> Result<Entity, TestError> {
+            windows(app)
+                .into_iter()
+                .find_map(|(window, key)| (key == object(id).1).then_some(window))
+                .ok_or_else(|| TestError::from(format!("object {id:#x} has no window")))
+        }
+
+        /// The contents window component on `window`.
+        fn window(app: &App, window: Entity) -> Result<&ContentsWindow, TestError> {
+            app.world()
+                .get::<ContentsWindow>(window)
+                .ok_or_else(|| TestError::from("the window has no contents"))
+        }
+
+        /// Have the grid list `items` — `(item id, name)` notecards — for
+        /// object `id`.
+        fn list(app: &mut App, id: u32, items: &[(u128, &str)]) {
+            let items = items
+                .iter()
+                .map(|(item, name)| task_item(*item, name))
+                .collect();
+            let _settled = app.world_mut().resource_mut::<TaskInventoryCache>().store(
+                object(id).1,
+                1,
+                items,
+                0.0,
+            );
+            app.update();
+        }
+
+        /// Select item `item` in `window`'s list, as a row click does.
+        fn select(app: &mut App, window: Entity, item: u128) -> Result<(), TestError> {
+            app.world_mut()
+                .get_mut::<ContentsWindow>(window)
+                .ok_or("the window has no contents")?
+                .pane
+                .selection = Some(item_key(item));
+            Ok(())
+        }
+
+        /// The object every `FetchTaskInventory` recorded since the last
+        /// drain addressed.
+        fn fetched(app: &mut App) -> Vec<ScopedObjectId> {
+            // The recorder runs unordered in `Update`: one more frame lets it
+            // see what the last one wrote.
+            app.update();
+            drain::<SlCommand>(app)
+                .into_iter()
+                .filter_map(|command| match command.0 {
+                    Command::FetchTaskInventory { target, .. } => Some(target),
+                    _other => None,
+                })
+                .collect()
+        }
+
+        /// Two objects are two windows, each on its own object under its own
+        /// key, each with its own list.
+        #[test]
+        fn two_objects_open_two_windows() -> Result<(), TestError> {
+            let mut app = contents_app();
+            open(&mut app, FIRST);
+            open(&mut app, SECOND);
+
+            assert_eq!(
+                windows(&mut app).len(),
+                2,
+                "the second object repointed the first window"
+            );
+            let first = window_of(&mut app, FIRST)?;
+            let second = window_of(&mut app, SECOND)?;
+            assert!(
+                window(&app, first)?.viewport != window(&app, second)?.viewport,
+                "both windows list into one viewport"
+            );
+            let key_of = |window: Entity| {
+                app.world()
+                    .get::<Floater>(window)
+                    .and_then(Floater::key)
+                    .cloned()
+            };
+            assert_eq!(key_of(first), Some(contents_window_key(object(FIRST).1)));
+            assert_eq!(key_of(second), Some(contents_window_key(object(SECOND).1)));
+            Ok(())
+        }
+
+        /// Each window lists its own object, and each object is asked for
+        /// once — the cache is shared, the windows are not.
+        #[test]
+        fn each_window_lists_its_own_object() -> Result<(), TestError> {
+            let mut app = contents_app();
+            let _startup = fetched(&mut app);
+            open(&mut app, FIRST);
+            open(&mut app, SECOND);
+            let mut asked = fetched(&mut app);
+            asked.sort_by_key(|scoped| scoped.id().0);
+            assert_eq!(asked, vec![object(FIRST).0, object(SECOND).0]);
+
+            list(&mut app, FIRST, &[(1, "First Note")]);
+            list(&mut app, SECOND, &[(2, "Second Note"), (3, "Another")]);
+            let names = |app: &mut App, id: u32| -> Result<Vec<String>, TestError> {
+                let window = window_of(app, id)?;
+                Ok(window_names(app, window))
+            };
+            assert_eq!(names(&mut app, FIRST)?, vec!["First Note"]);
+            assert_eq!(names(&mut app, SECOND)?, vec!["Second Note", "Another"]);
+            Ok(())
+        }
+
+        /// The names `window` lists, in order.
+        fn window_names(app: &App, window: Entity) -> Vec<String> {
+            app.world()
+                .get::<ContentsWindow>(window)
+                .map(|it| {
+                    it.pane
+                        .view
+                        .rows
+                        .iter()
+                        .map(|row| row.name.clone())
+                        .collect()
+                })
+                .unwrap_or_default()
+        }
+
+        /// **Re-opening an object that is up raises its window and keeps its
+        /// selection** — only the region-scoped id moves, which is what the
+        /// grid-wide key exists to outlive.
+        #[test]
+        fn reopening_an_object_keeps_its_window_and_selection() -> Result<(), TestError> {
+            let mut app = contents_app();
+            open(&mut app, FIRST);
+            list(&mut app, FIRST, &[(1, "First Note")]);
+            let first = window_of(&mut app, FIRST)?;
+            select(&mut app, first, 1)?;
+
+            let moved = ScopedObjectId::new(CircuitId::new(2), RegionLocalObjectId(0x77));
+            open_as(&mut app, moved, FIRST);
+            assert_eq!(windows(&mut app).len(), 1, "a re-open spawned a window");
+            let kept = window(&app, first)?;
+            assert_eq!(kept.pane.selection, Some(item_key(1)));
+            assert_eq!(kept.target, (moved, object(FIRST).1));
+            Ok(())
+        }
+
+        /// Closing one window ends it and leaves the other open.
+        #[test]
+        fn closing_one_window_leaves_the_other() -> Result<(), TestError> {
+            let mut app = contents_app();
+            open(&mut app, FIRST);
+            open(&mut app, SECOND);
+            let first = window_of(&mut app, FIRST)?;
+
+            app.world_mut()
+                .resource_mut::<Messages<FloaterCommand>>()
+                .write(FloaterCommand {
+                    floater: first,
+                    op: FloaterOp::Close,
+                });
+            app.update();
+
+            let left: Vec<ObjectKey> = windows(&mut app).into_iter().map(|(_w, key)| key).collect();
+            assert_eq!(left, vec![object(SECOND).1]);
+            Ok(())
+        }
+
+        /// **An action acts on the window it was fired in**: Open in the
+        /// second window opens the second window's selection out of the
+        /// second object — not the first window's, which has its own.
+        #[test]
+        fn an_open_acts_on_its_own_windows_selection() -> Result<(), TestError> {
+            let mut app = contents_app();
+            open(&mut app, FIRST);
+            open(&mut app, SECOND);
+            list(&mut app, FIRST, &[(1, "First Note")]);
+            list(&mut app, SECOND, &[(2, "Second Note")]);
+            let first = window_of(&mut app, FIRST)?;
+            let second = window_of(&mut app, SECOND)?;
+            select(&mut app, first, 1)?;
+            select(&mut app, second, 2)?;
+            let _before = drain::<OpenNotecard>(&mut app);
+
+            app.world_mut().write_message(ContentsActionRequest {
+                pane: PaneRef::Window(second),
+                action: ContentsAction::Open,
+            });
+            app.update();
+            app.update();
+
+            let opened: Vec<(String, NotecardSource)> = drain::<OpenNotecard>(&mut app)
+                .into_iter()
+                .map(|open| (open.name, open.source))
+                .collect();
+            assert_eq!(
+                opened,
+                vec![(
+                    String::from("Second Note"),
+                    NotecardSource::Task {
+                        task_id: object(SECOND).1,
+                        item_id: item_key(2),
+                    }
+                )]
+            );
+            Ok(())
+        }
+
+        /// **A window's button acts on its own window**: Copy To Inventory
+        /// pressed in the second window asks for the second window's object.
+        #[test]
+        fn a_windows_button_names_its_own_window() -> Result<(), TestError> {
+            let mut app = contents_app();
+            open(&mut app, FIRST);
+            open(&mut app, SECOND);
+            let second = window_of(&mut app, SECOND)?;
+            let copy = copy_button(&mut app, second)?;
+            let _before = drain::<ContentsActionRequest>(&mut app);
+
+            app.world_mut().trigger(Activate {
+                entity: copy,
+                button: None,
+            });
+            app.update();
+            app.update();
+
+            let asked: Vec<(PaneRef, ContentsAction)> = drain::<ContentsActionRequest>(&mut app)
+                .into_iter()
+                .map(|request| (request.pane, request.action))
+                .collect();
+            assert_eq!(
+                asked,
+                vec![(PaneRef::Window(second), ContentsAction::CopyToInventory)]
+            );
+            Ok(())
+        }
+
+        /// The parent links and windows `host_floater` walks up through.
+        type HostLookup<'world, 'state> = (
+            Query<'world, 'state, &'static ChildOf>,
+            Query<'world, 'state, (Entity, &'static Floater)>,
+        );
+
+        /// The Copy To Inventory button built into `window`.
+        fn copy_button(app: &mut App, window: Entity) -> Result<Entity, TestError> {
+            let buttons: Vec<Entity> = app
+                .world_mut()
+                .query::<(Entity, &Name)>()
+                .iter(app.world())
+                .filter(|(_button, name)| name.as_str() == "contents-button:object-contents-copy")
+                .map(|(button, _name)| button)
+                .collect();
+            let mut system_state: bevy::ecs::system::SystemState<HostLookup<'_, '_>> =
+                bevy::ecs::system::SystemState::new(app.world_mut());
+            let (parents, floaters) = system_state.get(app.world())?;
+            buttons
+                .into_iter()
+                .find(|button| host_floater(*button, &parents, &floaters) == Some(window))
+                .ok_or_else(|| TestError::from("the window has no Copy button"))
+        }
+
+        /// **A double-click is two clicks in one pane**: a click in each of two
+        /// panes on the same item is no double-click, and a click in one
+        /// selects only there.
+        #[test]
+        fn clicks_in_two_panes_never_make_a_double_click() {
+            let mut first = ContentsPane::default();
+            let mut second = ContentsPane::default();
+            let item = item_key(1);
+
+            assert!(!first.click(item, 0.0), "a first click is no double-click");
+            assert!(
+                !second.click(item, 0.1),
+                "a click in another pane completed the first pane's double-click"
+            );
+            assert_eq!(first.selection, Some(item));
+            assert!(first.click(item, 0.2), "two clicks in one pane");
+            assert!(
+                !first.click(item, 0.3),
+                "a double-click is consumed: a third click starts a new pair"
+            );
+            assert!(
+                !second.click(item_key(2), 0.4),
+                "a click on another item is no double-click"
+            );
+            assert_eq!(second.selection, Some(item_key(2)));
+            assert_eq!(first.selection, Some(item));
+        }
     }
 }

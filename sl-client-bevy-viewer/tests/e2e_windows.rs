@@ -12,6 +12,9 @@
 //!   the window that saved;
 //! - the Build window's material controls grey on a prim the agent may not
 //!   modify, and stay live on one it may;
+//! - each object's contents open in a window of their own: each lists its own
+//!   object, a pick in one is not a pick in the other, a double-click opens
+//!   the notecard out of its own object, and closing one leaves the other;
 //! - About Region's Experiences tab pins the estate's default experience to
 //!   the Key list with no Remove, two About Region windows on two regions each
 //!   get a picker of their own and only the one that asked takes the pick, and
@@ -921,6 +924,185 @@ mod test {
                         .to_be_enabled()
                         .await?;
                 }
+                Ok(())
+            })?;
+        Ok(())
+    }
+
+    // ---- One Object Contents window per object ----------------------------
+
+    /// A prim whose contents the test opens: region-local id, grid-wide key,
+    /// name, where it stands, and the notecard it holds (item id, name).
+    type Holder = (u32, u128, &'static str, f32, (u128, &'static str));
+
+    /// The two prims whose contents the test opens.
+    const HOLDERS: [Holder; 2] = [
+        (
+            0x57A7,
+            0x57A6_0C0A,
+            "Holder A",
+            126.0,
+            (0x57A6_1C0A, "Note In A"),
+        ),
+        (
+            0x57A8,
+            0x57A6_0C0B,
+            "Holder B",
+            130.0,
+            (0x57A6_1C0B, "Note In B"),
+        ),
+    ];
+
+    /// Put the [`HOLDERS`] in the region, each holding its one notecard, and
+    /// show them.
+    async fn rez_holders(stage: &Stage, label: &str) -> Result<(), BodyError> {
+        let agent = stage.agent(label).await?;
+        let owner = stage.agent_id(label)?;
+        let now = agent.now();
+        let mut prims = Vec::new();
+        let mut contents = Vec::new();
+        for (local_id, key, name, x, (item, item_name)) in HOLDERS {
+            let object = ObjectKey::from(Uuid::from_u128(key));
+            let mut prim = sl_fake_grid::world::box_prim(
+                RegionLocalObjectId(local_id),
+                object,
+                owner,
+                sl_proto::Vector {
+                    x,
+                    y: 124.0,
+                    z: 25.5,
+                },
+                sl_proto::Vector {
+                    x: 1.0,
+                    y: 1.0,
+                    z: 1.0,
+                },
+            );
+            let mut properties = sl_fake_grid::world::default_object_properties(&prim);
+            properties.name = name.to_owned();
+            prim.properties = Some(properties);
+            prims.push(prim);
+            let notecard = sl_proto::TaskInventoryItem {
+                item_id: InventoryKey::from(Uuid::from_u128(item)),
+                parent_task: object,
+                asset_id: Some(AssetKey::from(fixture_id(AssetType::Notecard))),
+                asset_type: AssetType::Notecard,
+                inv_type: InventoryType::Notecard,
+                name: item_name.to_owned(),
+                ..sl_fake_grid::scenario::stock_script_item()
+            };
+            contents.push((local_id, notecard));
+        }
+        agent
+            .with_world(|world, sim| {
+                world.objects.extend(prims.iter().cloned());
+                for (local_id, notecard) in contents {
+                    let _stated = world.objects.set_contents(
+                        RegionLocalObjectId(local_id),
+                        sl_fake_grid::world::TaskInventory::stated(1, vec![notecard]),
+                    );
+                }
+                sl_fake_grid::world::send_objects(sim, &prims, now)
+            })
+            .await
+            .map_err(|error| format!("showing the holders: {error}"))?;
+        Ok(())
+    }
+
+    /// Open the contents of the holder `name` from its pie, and return its
+    /// window once its notecard is listed.
+    async fn open_contents(
+        alpha: &Viewer,
+        (key, name, note): (u128, &str, &str),
+    ) -> Result<UiLocator, BodyError> {
+        let object = alpha.world().object_named(name).timeout(WAIT);
+        let _pie = object.open_pie().await?;
+        let _open = alpha
+            .pie_slice(Locator::role(Role::MenuItem).name_key("pie-object-open"))
+            .await?;
+        let window = alpha
+            .ui()
+            .window(&format!("object-contents#{}", Uuid::from_u128(key)));
+        let _listed = alpha
+            .expect(&contents_row(&window, note))
+            .timeout(WAIT)
+            .to_be_visible()
+            .await?;
+        Ok(window)
+    }
+
+    /// The row of `window`'s list naming `note`.
+    fn contents_row(window: &UiLocator, note: &str) -> UiLocator {
+        window.get(Locator::role(Role::ListItem).name_containing(note))
+    }
+
+    /// Whether the row of `window`'s list naming `note` is selected.
+    async fn row_selected(window: &UiLocator, note: &str) -> Result<bool, BodyError> {
+        Ok(contents_row(window, note)
+            .node()
+            .await?
+            .has_state(NodeState::Selected))
+    }
+
+    /// **One window per object** (`viewer-key-object-contents`): two objects'
+    /// Open slices open two windows, each listing its own object; a row picked
+    /// in one is not picked in the other; a double-click opens the notecard
+    /// out of the object whose window it was in; and closing one window leaves
+    /// the other.
+    #[test]
+    fn each_object_lists_its_contents_in_a_window_of_its_own() -> Result<(), TestError> {
+        stage("contents_window_per_object")
+            .region(home())
+            .needs(Need::GridControl)
+            .run(async |stage: &Stage| {
+                let alpha = &stage.viewer("Alpha")?;
+                rez_holders(stage, "Alpha").await?;
+                let [
+                    (_, key_a, name_a, _, (item_a, note_a)),
+                    (_, key_b, name_b, _, (_, note_b)),
+                ] = HOLDERS;
+
+                let first = open_contents(alpha, (key_a, name_a, note_a)).await?;
+                // Out of the way: the second holder's pie opens where the
+                // first window landed.
+                let _moved = first
+                    .test_id("floater-title-bar")
+                    .drag_by(750.0, 0.0)
+                    .await?;
+                let second = open_contents(alpha, (key_b, name_b, note_b)).await?;
+                let _both = alpha.expect(&first).to_be_visible().await?;
+                // Each lists its own object, and only that.
+                let strays = (
+                    contents_row(&first, note_b).count().await?,
+                    contents_row(&second, note_a).count().await?,
+                );
+                assert_eq!(strays, (0, 0), "a window lists the other object's contents");
+
+                // A pick in one window is that window's alone.
+                let _picked = contents_row(&second, note_b).click().await?;
+                let _picked = contents_row(&first, note_a).click().await?;
+                assert!(
+                    row_selected(&first, note_a).await?,
+                    "the click did not pick the row"
+                );
+                assert!(
+                    row_selected(&second, note_b).await?,
+                    "a pick in the first window cleared the second's"
+                );
+
+                // A double-click opens the notecard out of its own object.
+                let _opened = contents_row(&first, note_a).double_click().await?;
+                let editor = alpha.ui().window(&format!(
+                    "notecard-editor#{}/{}",
+                    Uuid::from_u128(key_a),
+                    Uuid::from_u128(item_a)
+                ));
+                let _shown = alpha.expect(&editor).timeout(WAIT).to_be_visible().await?;
+                close_window(alpha, &editor).await?;
+
+                close_window(alpha, &first).await?;
+                let _left = alpha.expect(&second).to_be_visible().await?;
+                close_window(alpha, &second).await?;
                 Ok(())
             })?;
         Ok(())

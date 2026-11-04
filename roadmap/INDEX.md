@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 129 |
-| ready | 335 |
+| ready | 334 |
 | blocked | 39 |
 | in-progress | 17 |
 | bugs | 38 |
-| done | 1486 |
+| done | 1487 |
 | deferred | 30 |
 | wont-do | 24 |
 | **total** | **2098** |
@@ -329,7 +329,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-lsl-opensim-function-set`](ideas/gridspec-lsl-opensim-function-set.md)
   — Measure which library functions OpenSim's engines compile
 
-## ready (335)
+## ready (334)
 
 ### protocol
 
@@ -645,8 +645,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-inventory-thumbnails`](ready/viewer-inventory-thumbnails.md) —
   Inventory thumbnails — view & edit (blocked by `viewer-ui-texture-picker`
   (done))
-- [`viewer-key-object-contents`](ready/viewer-key-object-contents.md) — One
-  Object Contents window per object
 - [`viewer-key-web-browser`](ready/viewer-key-web-browser.md) — Decide whether
   the web browser is many windows or one with tabs
 - [`viewer-land-holdings`](ready/viewer-land-holdings.md) — My land holdings
@@ -1427,7 +1425,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1486)
+## done (1487)
 
 ### protocol
 
@@ -2445,6 +2443,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   colour-picker window per field, like the texture picker
 - [`viewer-key-material-editor`](done/viewer-key-material-editor.md) — One
   material-editor window per material item
+- [`viewer-key-object-contents`](done/viewer-key-object-contents.md) — One
+  Object Contents window per object
 - [`viewer-key-texture-preview`](done/viewer-key-texture-preview.md) — One
   texture-preview window per texture
 - [`viewer-key-wearable-editor`](done/viewer-key-wearable-editor.md) — One

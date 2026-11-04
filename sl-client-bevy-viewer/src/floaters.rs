@@ -306,8 +306,9 @@ pub const FLOATERS: &[FloaterElement] = &[
     },
     FloaterElement {
         id: "object-contents",
-        summary: "Object Contents: the selected prim's task-inventory list with its drop target \
-                  and the open / remove actions.",
+        summary: "Object Contents: a picked object's task-inventory list with its drop target, \
+                  the double-click open and the copy actions. One window per object, so two \
+                  objects' contents can be side by side.",
         spec: crate::edit_contents::object_contents_floater_spec,
         content: crate::edit_contents::spawn_object_contents_specimen,
     },

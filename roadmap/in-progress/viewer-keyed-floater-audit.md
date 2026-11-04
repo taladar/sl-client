@@ -105,9 +105,15 @@ spawn instead of `DeferredFloaterContent`.
     `MaterialPreview` node already gets a studio on a render layer of its own.
     A landed save now rebinds the item's asset in the inventory model, closing
     the stale-reopen gap the notecard and script editors had closed earlier.
-  - [[viewer-key-object-contents]] (`edit_contents.rs`, `"object-contents"`) —
-    per object, not per item: the window lists one object's inventory, and the
-    Build tab's surface stays a singleton.
+  - ~~[[viewer-key-object-contents]] (`edit_contents.rs`,
+    `"object-contents"`)~~ — **done** (2026-11-04), per object (its
+    `ObjectKey`), the Build tab's surface staying a singleton. Each list's
+    view, selection and last click became one `ContentsPane`, so the
+    double-click timer is per window — it had been one timer shared by the
+    Build tab and the floater. A window latches its object's name, since the
+    build selection it used to read moves on. The reference's
+    `LLFloaterOpenObject` is a selection-bound singleton; keying it is a
+    deliberate divergence, as for About Land / Region.
   - ~~[[viewer-key-color-picker]] (`ui_color_picker.rs`, `"color-picker"`)~~ —
     **done** (2026-09-12), with the avatar and settings pickers beside it, in
     [[viewer-audit-picker-requester-identity]]. Not by the **named** key this
