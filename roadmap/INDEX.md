@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 333 |
 | blocked | 39 |
 | in-progress | 16 |
-| bugs | 39 |
-| done | 1489 |
+| bugs | 38 |
+| done | 1490 |
 | deferred | 30 |
 | wont-do | 24 |
 | **total** | **2099** |
@@ -1323,7 +1323,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (39)
+## bugs (38)
 
 ### protocol
 
@@ -1350,8 +1350,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   stale
 - [`viewer-automation-ground-reveal-eye-under-terrain`](bugs/viewer-automation-ground-reveal-eye-under-terrain.md)
   — A ground reveal can put the camera under higher ground beside the point
-- [`viewer-browser-view-popups-dropped`](bugs/viewer-browser-view-popups-dropped.md)
-  — A target= link in any embedded browser but the browser window does nothing
 - [`viewer-calling-card-offer-unanswered`](bugs/viewer-calling-card-offer-unanswered.md)
   — A calling card offered to us is never shown or answered
 - [`viewer-camera-framing-ends-inside-the-framed-object`](bugs/viewer-camera-framing-ends-inside-the-framed-object.md)
@@ -1423,7 +1421,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1489)
+## done (1490)
 
 ### protocol
 
@@ -2054,6 +2052,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-bom-mesh-alpha-feet-through-boots`](done/viewer-bom-mesh-alpha-feet-through-boots.md)
   — BoM mesh body feet render through mesh boots (bake alpha ignored on BoM
   faces)
+- [`viewer-browser-view-popups-dropped`](done/viewer-browser-view-popups-dropped.md)
+  — A target= link in any embedded browser but the browser window does nothing
 - [`viewer-build-floater-interaction-tests`](done/viewer-build-floater-interaction-tests.md)
   — The build floater — reflect, edit, commit (blocked by
   `viewer-ui-keyboard-text-harness` (done), `viewer-world-test-harness` (done))

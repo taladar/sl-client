@@ -17,7 +17,8 @@
 //! - with web media on, the web browser window and the search window's web
 //!   tab load a page, and every page keeps a browser window of its own — two
 //!   menu opens are two windows, a page's named link a third, and closing one
-//!   leaves the others' pages alone.
+//!   leaves the others' pages alone; a named link in the search web tab opens
+//!   its browser window too.
 
 #[cfg(test)]
 mod test {
@@ -616,7 +617,10 @@ mod test {
                 // The request line names the page; the rest of the head runs
                 // up to its blank line.
                 let _request = reader.read_line(&mut line);
-                let opener = line.starts_with(&format!("GET /{OPENER_PATH} "));
+                // With or without a query: the search tab asks `opener?q=…`.
+                let opener = line
+                    .strip_prefix(&format!("GET /{OPENER_PATH}"))
+                    .is_some_and(|rest| rest.starts_with([' ', '?']));
                 line.clear();
                 while reader.read_line(&mut line).is_ok_and(|read| read > 2) {
                     line.clear();
@@ -782,6 +786,51 @@ mod test {
                     .expect(&search.get(Locator::role(Role::Document).named(PAGE_TITLE)))
                     .timeout(WAIT)
                     .to_be_visible()
+                    .await?;
+                Ok(())
+            })?;
+        Ok(())
+    }
+
+    /// **A link in any embedded page opens a browser window**: the search web
+    /// tab, on a page whose link names a window, opens that window on a click
+    /// — not only the browser window's own pages do, as the reference's
+    /// `LLMediaCtrl` routes every view's clicked `target=` link.
+    #[test]
+    fn a_named_link_in_the_search_web_tab_opens_its_browser_window() -> Result<(), TestError> {
+        let base = serve_page()?;
+        stage("web_search_popup")
+            .web_media()
+            .region(searching_region(&format!("{base}{OPENER_PATH}"))?)
+            .run(async |stage: &Stage| {
+                let alpha = &stage.viewer("Alpha")?;
+                let search = alpha.open_floater(SEARCH).await?;
+                let _web = search
+                    .get(Locator::role(Role::Tab).name_key("search-tab-web"))
+                    .click()
+                    .await?;
+                let query = search.test_id("search-query:field");
+                let _typed = query.fill("stage").await?;
+                query.press("Enter").await?;
+                let _searched = alpha
+                    .expect(&page(&search))
+                    .timeout(WAIT)
+                    .to_contain_text(&format!("{base}{OPENER_PATH}?q=stage"))
+                    .await?;
+                let _followed = page(&search).click().await?;
+
+                let popup = alpha
+                    .ui()
+                    .test_id(&format!("floater:web-browser#target-{POPUP_TARGET}"));
+                let _popped = alpha
+                    .expect(&page(&popup))
+                    .timeout(WAIT)
+                    .to_have_text(&format!("{base}{POPPED_PATH}"))
+                    .await?;
+                // The search tab stays on its own page.
+                let _kept = alpha
+                    .expect(&page(&search))
+                    .to_contain_text(&format!("{base}{OPENER_PATH}?q=stage"))
                     .await?;
                 Ok(())
             })?;

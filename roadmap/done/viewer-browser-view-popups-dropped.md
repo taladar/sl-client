@@ -2,7 +2,7 @@
 id: viewer-browser-view-popups-dropped
 title: A target= link in any embedded browser but the browser window does nothing
 topic: viewer
-status: bugs
+status: done
 origin: found keying the web browser window (viewer-key-web-browser, 2026-11-04)
 refs: [viewer-key-web-browser, viewer-keyed-floater-audit]
 ---
@@ -45,3 +45,36 @@ Note from writing the e2e test for [[viewer-key-web-browser]]: a page's
 load-time `window.open`, with no click behind it, never reached the viewer —
 only a clicked `target=` link did. That matches what a browser lets a page do
 and is not part of this bug.
+
+## Outcome
+
+Fixed in `sl-viewer-media/src/browser_widget.rs`: `route_browser_popups`
+takes the popup of **every** `BrowserView` each frame, and the browser
+window's own popup handling moved into it. The fix shape's "`Viewer`-trust
+views" was the wrong filter: the profile Web tab and the media preview are
+`InWorld`-trust (their pages are resident-written), yet the reference routes
+them through the same `LLMediaCtrl` handler. Every `BrowserView` is a UI
+widget (in-world media creates its surfaces directly), so all of them route.
+
+`popup_route` follows the reference handler in full, not only the window
+case:
+
+- a SLURL (any non-web link the linkifier recognises, including a
+  `maps.secondlife.com` location) goes to `DispatchSlurl`, as
+  `LLURLDispatcher::dispatch` comes first;
+- `target="_external"` opens the system browser (`LLWeb::loadURL`);
+- `_internal`, `_blank` and no target open a new window; any other name
+  opens or reuses that name's window.
+
+`BrowserPopupSystems` orders the web floater's open after the routing, so a
+popup's window opens in the frame the popup arrives.
+
+Not ported: the reference's `UseExternalBrowser` preference (send every page
+to the system browser). This viewer has no such setting; no item covers it.
+
+Tests: `popup_route` unit tests (window by target, `_external`, SLURL
+dispatch), and the e2e
+`a_named_link_in_the_search_web_tab_opens_its_browser_window`. It fails with
+the routing disabled and passes with it. The SLURL and `_external` routes are
+covered by unit tests only. No e2e check confirms that CEF raises a popup for
+a `secondlife://` link.

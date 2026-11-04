@@ -19,7 +19,8 @@
 //! closing the least recently opened. This module does the same: an
 //! [`OpenWebBrowser`] carries a [`WebTarget`], a window is keyed by it
 //! ([`web_window_key`]), a page's popup opens through the same message with
-//! the target the page named, and [`SETTING_WEB_WINDOW_LIMIT`] is the cap.
+//! the target the page named (routed for every embedded view by
+//! [`crate::browser_widget`]), and [`SETTING_WEB_WINDOW_LIMIT`] is the cap.
 //! Every window has its own embedded view, so its own history, address and
 //! title; closing one ends its view and leaves the others alone.
 
@@ -31,7 +32,8 @@ use bevy::ui_widgets::Activate;
 use bevy_flair::style::components::ClassList;
 
 use crate::browser_widget::{
-    BrowserView, BrowserViewSpec, SurfaceTrust, ValidatedMediaUrl, spawn_browser_view,
+    BrowserPopupSystems, BrowserView, BrowserViewSpec, SurfaceTrust, ValidatedMediaUrl,
+    spawn_browser_view,
 };
 use crate::media_engine::{MediaEngineSystems, MediaSurfaces};
 use sl_cef::SurfaceStatus;
@@ -139,6 +141,8 @@ impl Plugin for WebFloaterPlugin {
                 (open_web_browser, sync_web_floater)
                     .chain()
                     .after(MediaEngineSystems::Pump)
+                    // A page's popup opens its window in the frame it arrives.
+                    .after(BrowserPopupSystems)
                     // A link clicked inside another window both raises that
                     // window and opens this one; opening after the command
                     // pass keeps the new window on top (`FloaterSystems`).
@@ -651,16 +655,13 @@ struct WebChrome<'w, 's> {
 
 /// Mirror each shown window's view status into its chrome: title, address
 /// (unless being edited), back/forward enablement, stop-vs-reload glyph, the
-/// secure lock, and the status row. Also turns a page's popup request into an
-/// [`OpenWebBrowser`] — in the window the page named, or a new one, as the
-/// reference's `LLMediaCtrl` does with a clicked `target=` link (popups are
-/// suppressed engine-side).
+/// secure lock, and the status row. A page's popup is the browser widget's to
+/// route (`browser_widget::route_browser_popups`), as for every other view.
 fn sync_web_floater(
     windows: Query<(&WebWindow, &UiPanelShown)>,
     views: Query<&BrowserView>,
     surfaces: Option<NonSend<MediaSurfaces>>,
     focus: Res<InputFocus>,
-    mut opens: MessageWriter<OpenWebBrowser>,
     mut chrome: WebChrome,
 ) {
     let Some(surfaces) = surfaces else {
@@ -678,13 +679,6 @@ fn sync_web_floater(
         else {
             continue;
         };
-        // The page's choice of URL, not the user's: validated when it opens.
-        if let Some(popup) = slot.surface.take_popup_request() {
-            opens.write(OpenWebBrowser {
-                url: Some(popup.url),
-                target: popup.target.map_or(WebTarget::New, WebTarget::Named),
-            });
-        }
         let status = &slot.status;
         if let Ok(mut title) = chrome.texts.get_mut(window.title_text) {
             let want = if status.title.is_empty() {

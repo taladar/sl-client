@@ -551,7 +551,7 @@ pub struct DispatchSlurl {
 /// a window of its own unless it names one — a menu entry, a chat link and a
 /// script's `llLoadURL` each get a fresh window, while a page's
 /// `target="name"` link lands in that name's window every time.
-#[derive(Message, Debug, Clone)]
+#[derive(Message, Debug, Clone, PartialEq, Eq)]
 pub struct OpenWebBrowser {
     /// The URL to show; `None` opens the home page in a new window, or just
     /// raises a named window that is already up.
