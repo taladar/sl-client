@@ -22,12 +22,12 @@ use sl_avatar::{
     AppearanceValues, ResolvedParams, VisualParams, WearableAsset, combine_layer_color,
     global_color,
 };
-use sl_proto::{DiscardLevel, WearableType, avatar_texture};
+use sl_proto::{DiscardLevel, WearableType};
 use sl_texture::DecodedImage;
 use uuid::Uuid;
 
 use crate::composite::{Layer, composite_region};
-use crate::plan::{LayerTint, region_layers, shape_mask_files, static_layer_files};
+use crate::plan::{LayerTint, WornLayer, region_layers, shape_mask_files, static_layer_files};
 use crate::region::BakeRegion;
 
 /// The side of a baked image, in pixels: the reference's bake size.
@@ -40,6 +40,10 @@ const RGBA_CHANNELS: usize = 4;
 /// `assets`, resolving each layer's tint and garment-shape mask weights
 /// against the visual-parameter table `params` (white tints and default
 /// weights where it is absent).
+///
+/// `assets` is in **worn order**: of two wearables of one type, the earlier is
+/// the one underneath. Every worn wearable is drawn — two shirts are two
+/// layers, the second over the first — each tinted and cut by its own params.
 ///
 /// - `image_for(id)` — the decoded layer texture `id`, or `None` when it is
 ///   not in hand (that layer is then left out);
@@ -63,11 +67,15 @@ pub fn assemble_layers(
         .map(|region| {
             let layers = region_layers(
                 region,
-                |wearable| assets.iter().any(|asset| asset.wearable_type == wearable),
-                |slot| layer_image(assets, &image_for, slot),
+                |wearable| worn_of_type(assets, wearable).count(),
+                |slot, worn| {
+                    worn_asset(assets, worn)
+                        .and_then(|asset| asset.layer_texture(slot))
+                        .and_then(&image_for)
+                },
                 &static_image,
-                |tint, wearable| layer_tint(assets, params, tint, wearable),
-                |param_id, wearable| mask_weight(&resolved, params, param_id, wearable),
+                |tint, worn| layer_tint(worn_asset(assets, worn), params, tint),
+                |param_id, worn| mask_weight(&resolved, params, param_id, worn),
             );
             (region, layers)
         })
@@ -75,50 +83,44 @@ pub fn assemble_layers(
 }
 
 /// The layer texture ids the worn `assets` supply to `region`'s plan, in plan
-/// order — what a grid's bake of the region is made of.
+/// order and, within one slot, in worn order — what a grid's bake of the
+/// region is made of.
 #[must_use]
 pub fn region_texture_ids(region: BakeRegion, assets: &[WearableAsset]) -> Vec<Uuid> {
     crate::plan::region_plan(region)
         .iter()
-        .filter_map(|planned| match planned.source {
-            crate::plan::LayerSource::Wearable(slot) => layer_texture_id(assets, slot),
-            _ => None,
+        .flat_map(|planned| match planned.source {
+            crate::plan::LayerSource::Wearable(slot) => worn_of_type(assets, planned.wearable)
+                .filter_map(|asset| asset.layer_texture(slot))
+                .collect(),
+            _ => Vec::new(),
         })
         .collect()
 }
 
-/// The texture id of the first worn wearable of `slot`'s type that supplies
-/// it.
-fn layer_texture_id(assets: &[WearableAsset], slot: usize) -> Option<Uuid> {
-    let wearable_type = avatar_texture::layer_wearable_type(slot)?;
-    assets
-        .iter()
-        .filter(|asset| asset.wearable_type == wearable_type)
-        .find_map(|asset| asset.layer_texture(slot))
-}
-
-/// The decoded texture for a bake-region layer `slot`: the first worn wearable
-/// of the slot's wearable type that supplies it, if its texture is in hand.
-fn layer_image(
+/// The worn wearables of `wearable`'s type, bottom first.
+fn worn_of_type(
     assets: &[WearableAsset],
-    image_for: impl Fn(Uuid) -> Option<DecodedImage>,
-    slot: usize,
-) -> Option<DecodedImage> {
-    let wearable_type = avatar_texture::layer_wearable_type(slot)?;
+    wearable: WearableType,
+) -> impl Iterator<Item = &WearableAsset> {
     assets
         .iter()
-        .filter(|asset| asset.wearable_type == wearable_type)
-        .find_map(|asset| asset.layer_texture(slot).and_then(&image_for))
+        .filter(move |asset| asset.wearable_type == wearable)
 }
 
-/// The linear-RGBA tint for a layer, resolved from the worn wearable's visual
-/// params against the `avatar_lad.xml` table (opaque white when the table is
-/// absent or the tint is [`LayerTint::White`]).
+/// The worn wearable `worn` names: the `index`th of its type, bottom first.
+fn worn_asset(assets: &[WearableAsset], worn: WornLayer) -> Option<&WearableAsset> {
+    worn_of_type(assets, worn.wearable).nth(worn.index)
+}
+
+/// The linear-RGBA tint for a layer, resolved from the visual params of the
+/// worn wearable `asset` it is drawn from against the `avatar_lad.xml` table
+/// (opaque white when the table is absent or the tint is [`LayerTint::White`];
+/// the params' defaults when no wearable of the type is worn).
 fn layer_tint(
-    assets: &[WearableAsset],
+    asset: Option<&WearableAsset>,
     params: Option<&VisualParams>,
     tint: LayerTint,
-    wearable: WearableType,
 ) -> [f32; 4] {
     const WHITE: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
     let (LayerTint::Global(_) | LayerTint::Params(_)) = tint else {
@@ -127,8 +129,7 @@ fn layer_tint(
     let Some(params) = params else {
         return WHITE;
     };
-    // The worn wearable of this layer's type supplies the colour param weights.
-    let asset = assets.iter().find(|asset| asset.wearable_type == wearable);
+    // The wearable this layer is drawn from supplies the colour param weights.
     let weight_of = |id: i32| asset.and_then(|asset| asset.params.get(&id).copied());
     match tint {
         LayerTint::Global(name) => global_color(params, name, weight_of).unwrap_or(WHITE),
@@ -138,9 +139,9 @@ fn layer_tint(
 }
 
 /// Resolve each worn wearable's full param set — driver → driven propagation
-/// (R14) — keyed by wearable type, so a garment's driven shape params (sleeve /
-/// pants length, …) carry the weight derived from the wearable's stored group-0
-/// driver. Empty when the visual-param table is not loaded.
+/// (R14) — with its type, in worn order, so a garment's driven shape params
+/// (sleeve / pants length, …) carry the weight derived from the wearable's
+/// stored group-0 driver. Empty when the visual-param table is not loaded.
 fn resolve_wearable_params(
     assets: &[WearableAsset],
     params: Option<&VisualParams>,
@@ -164,18 +165,21 @@ fn resolve_wearable_params(
         .collect()
 }
 
-/// The weight for a garment-shape mask's driving param (R14): the worn wearable's
-/// driver-resolved weight for `param_id` (a driven shape param), falling back to
-/// the visual-param table's default (then `0.0`). This is what carves a garment's
-/// fabric to its sleeve / bottom / collar / pants-length extent so it does not
-/// paint the bare hands and feet.
+/// The weight for a garment-shape mask's driving param (R14): the
+/// driver-resolved weight the worn wearable `worn` gives `param_id` (a driven
+/// shape param), falling back to the visual-param table's default (then `0.0`).
+/// This is what carves a garment's fabric to its sleeve / bottom / collar /
+/// pants-length extent so it does not paint the bare hands and feet.
 fn mask_weight(
     resolved: &[(WearableType, ResolvedParams)],
     params: Option<&VisualParams>,
     param_id: i32,
-    wearable: WearableType,
+    worn: WornLayer,
 ) -> f32 {
-    if let Some((_, resolved)) = resolved.iter().find(|(kind, _)| *kind == wearable)
+    if let Some((_, resolved)) = resolved
+        .iter()
+        .filter(|(kind, _)| *kind == worn.wearable)
+        .nth(worn.index)
         && let Some(weight) = resolved.weight(param_id)
     {
         return weight;

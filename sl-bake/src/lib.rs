@@ -39,7 +39,7 @@ pub use outfit::{
     load_static_layers, region_texture_ids,
 };
 pub use plan::{
-    LayerSource, LayerTint, PlannedLayer, ShapeMaskSpec, region_layers, region_plan,
+    LayerSource, LayerTint, PlannedLayer, ShapeMaskSpec, WornLayer, region_layers, region_plan,
     shape_mask_files, static_layer_files,
 };
 pub use region::BakeRegion;
