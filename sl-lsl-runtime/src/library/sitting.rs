@@ -2,7 +2,9 @@
 //! (`server-world-sit-and-attach`) — what a script sets of its prim as a
 //! seat, who it finds sitting there, how many links the object has once
 //! somebody sits on it, wearing the object and taking it off, and where it
-//! stands.
+//! stands — and `llSetPos`, which moves it, ahead of the rest of the
+//! prim-state tranche (`server-lsl-lib-prim-state`) because the update
+//! scheduler needed a script that moves a prim.
 //!
 //! Who sits where, and what is worn by whom, is the region's: the host
 //! answers it. The rules here are the grids' as measured by the `avatar/sit`,
@@ -427,6 +429,51 @@ pub fn ll_detach_from_avatar(ctx: &mut ScriptCtx<'_>) -> Result<(), CallError> {
 pub fn ll_get_pos(ctx: &mut ScriptCtx<'_>) -> Result<Vector, CallError> {
     let caller = ctx.caller();
     Ok(ctx.host().placement(caller).position)
+}
+
+/// How far one `llSetPos` moves a prim, in metres: a target farther away is
+/// reached this far towards it, in one call (`prim/placement`).
+const SET_POS_REACH_M: f32 = 10.0;
+
+/// `to`, or the point [`SET_POS_REACH_M`] from `from` towards it where it is
+/// farther (`LSL_Api.SetPosAdjust`).
+fn within_reach(from: &Vector, to: Vector) -> Vector {
+    let (dx, dy, dz) = (to.x - from.x, to.y - from.y, to.z - from.z);
+    let distance = dz.mul_add(dz, dx.mul_add(dx, dy * dy)).sqrt();
+    if distance <= SET_POS_REACH_M {
+        return to;
+    }
+    let share = SET_POS_REACH_M / distance;
+    Vector {
+        x: dx.mul_add(share, from.x),
+        y: dy.mul_add(share, from.y),
+        z: dz.mul_add(share, from.z),
+    }
+}
+
+/// `llSetPos`: moves the prim to `target`, its position from its parent — a
+/// root's region position, a worn root's offset on its point, a child's
+/// offset from its root (`prim/placement`, `prim/link`).
+///
+/// A move farther than 10 m goes 10 m towards the target, on both grids for
+/// a root. A child's offset is not capped on Second Life and is capped 10 m
+/// from where the child was on OpenSim. The host keeps a root out of the
+/// ground. The 0.2 s the call costs is the library table's forced delay.
+///
+/// # Errors
+///
+/// None; the signature is the library's.
+pub fn ll_set_pos(ctx: &mut ScriptCtx<'_>, target: Vector) -> Result<(), CallError> {
+    let caller = ctx.caller();
+    let child = ctx.host().links(caller).this >= 2;
+    let to = if child && !ctx.flavour().is_opensim() {
+        target
+    } else {
+        let here = ctx.host().placement(caller).local;
+        within_reach(&here, target)
+    };
+    ctx.host().set_position(caller, to);
+    Ok(())
 }
 
 /// `llGetLocalPos`: the prim's position from its parent — a root's region

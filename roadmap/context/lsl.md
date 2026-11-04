@@ -71,7 +71,9 @@ What is missing is the middle:
   that made it and streamed to the region's other sessions; nothing
   sweeps, nothing ticks, nothing moves on its own. (Since 2026-11-02 a
   heartbeat ticks every region, [[server-world-heartbeat]], and runs its
-  scripts: [[server-fake-grid-script-engine-wiring]].)
+  scripts: [[server-fake-grid-script-engine-wiring]]. Since 2026-11-04 what
+  a tick changes in the region's prims goes out as one burst per tick, terse
+  for a prim that only moved: [[server-world-update-scheduling]].)
 - The agent's position is "the position the session was opened at"
   (`driver.rs`'s `stands_on`). `ServerEvent::AgentUpdate` is never
   consumed.

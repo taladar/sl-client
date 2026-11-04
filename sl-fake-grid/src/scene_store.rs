@@ -39,7 +39,10 @@
 //! written since it last answered — by the change tick `bevy_ecs` stamps a
 //! component with when it is written through a [`Mut`] or inserted — so the
 //! script engine follows what the region's prims hold without walking all of
-//! them every tick.
+//! them every tick. `ObjectStore::take_written` does the same for the prims'
+//! records, for the update scheduler ([`crate::updates`]), which keeps beside
+//! each prim what the region's viewers were last shown of it (`Shown`) to
+//! tell a move from any other change.
 //!
 //! # Copies
 //!
@@ -77,6 +80,13 @@ pub struct Cost(pub ObjectCost);
 /// A prim's history of moves, turns and resizes, from its first edit.
 #[derive(Debug, Clone, Component)]
 pub(crate) struct History(pub(crate) EditHistory);
+
+/// What the region's viewers were last shown of a prim: its record as the
+/// update scheduler ([`crate::updates`]) last published it, or as a session
+/// that changed it told the region. A prim the scheduler has not seen yet has
+/// none, and its first update is a full one.
+#[derive(Debug, Clone, Component)]
+pub(crate) struct Shown(pub(crate) Object);
 
 /// The order a prim came into the region in: the store walks prims by it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Component)]
@@ -255,6 +265,8 @@ pub struct ObjectStore {
     /// The world's change tick when [`Self::take_changed_contents`] last
     /// answered: a contents write stamped later is one it has not named.
     contents_seen: Tick,
+    /// The world's change tick when [`Self::take_written`] last answered.
+    bodies_seen: Tick,
 }
 
 impl Default for ObjectStore {
@@ -263,6 +275,7 @@ impl Default for ObjectStore {
             world: World::new(),
             indices: Indices::default(),
             contents_seen: Tick::new(0),
+            bodies_seen: Tick::new(0),
         }
     }
 }
@@ -561,6 +574,73 @@ impl ObjectStore {
             .into_iter()
             .map(|(_seq, local_id)| local_id)
             .collect()
+    }
+
+    /// The prims whose record was written since the last call, in the store's
+    /// order — every prim, the first time.
+    ///
+    /// A write is one through [`Self::get_mut`] or [`Self::for_each_mut`],
+    /// whether or not it changed anything, or a prim's arrival; a prim that
+    /// left the region is not named. Whether a write changed what a viewer
+    /// sees is the update scheduler's question ([`Self::shown`]).
+    pub(crate) fn take_written(&mut self) -> Vec<RegionLocalObjectId> {
+        // Writes from here on are stamped after `seen`.
+        let seen = self.world.increment_change_tick();
+        let now = self.world.change_tick();
+        let since = self.bodies_seen;
+        let mut query = self.world.query::<(&Seq, Ref<'_, Body>)>();
+        let mut written: Vec<(Seq, RegionLocalObjectId)> = query
+            .iter(&self.world)
+            .filter(|(_seq, body)| body.last_changed().is_newer_than(since, now))
+            .map(|(seq, body)| (*seq, body.0.local_id))
+            .collect();
+        written.sort_unstable_by_key(|(seq, _local_id)| *seq);
+        self.bodies_seen = seen;
+        written
+            .into_iter()
+            .map(|(_seq, local_id)| local_id)
+            .collect()
+    }
+
+    /// What the region's viewers were last shown of the prim with the given
+    /// region-local id, or `None` for a prim the update scheduler has not seen.
+    #[must_use]
+    pub(crate) fn shown(&self, local_id: RegionLocalObjectId) -> Option<&Object> {
+        self.world
+            .get::<Shown>(self.entity(local_id)?)
+            .map(|shown| &shown.0)
+    }
+
+    /// Records the prim with the given region-local id as shown as it now
+    /// stands. Writing the record of what was shown is not a write of the
+    /// prim: [`Self::take_written`] does not name it for this.
+    pub(crate) fn mark_shown(&mut self, local_id: RegionLocalObjectId) {
+        let Some(entity) = self.entity(local_id) else {
+            return;
+        };
+        let Some(body) = self.world.get::<Body>(entity).map(|body| body.0.clone()) else {
+            return;
+        };
+        let _held = self.world.entity_mut(entity).insert(Shown(body));
+    }
+
+    /// Changes what the region's viewers were shown of the prim with the
+    /// given region-local id with `amend`: how a write the grid deliberately
+    /// does not announce — a quiet flag — keeps the update scheduler from
+    /// announcing it later, without hiding anything else written to the prim
+    /// in the same tick. A prim with nothing shown yet is left so, its first
+    /// update being a full one anyway.
+    pub(crate) fn amend_shown(
+        &mut self,
+        local_id: RegionLocalObjectId,
+        amend: impl FnOnce(&mut Object),
+    ) {
+        let Some(entity) = self.entity(local_id) else {
+            return;
+        };
+        if let Some(mut shown) = self.world.get_mut::<Shown>(entity) {
+            amend(&mut shown.0);
+        }
     }
 
     /// What the prim with the given region-local id costs the region, if a
@@ -1035,6 +1115,51 @@ mod test {
         );
         // A copy names everything again: it is a fresh world.
         assert_eq!(store.clone().take_changed_contents().len(), 3);
+        Ok(())
+    }
+
+    /// A prim is named once for each round of writes to its record, every
+    /// prim the first time, and recording what was shown of it is not one.
+    #[test]
+    fn written_prims_are_named_once_per_write() -> Result<(), &'static str> {
+        let mut store: ObjectStore = (1..=3).map(prim).collect();
+        assert_eq!(
+            store.take_written(),
+            vec![
+                RegionLocalObjectId(1),
+                RegionLocalObjectId(2),
+                RegionLocalObjectId(3)
+            ]
+        );
+        assert_eq!(store.take_written(), Vec::new());
+        store
+            .get_mut(RegionLocalObjectId(3))
+            .ok_or("no prim")?
+            .motion
+            .position
+            .x = 9.0;
+        store.mark_shown(RegionLocalObjectId(2));
+        store.push(prim(4));
+        assert_eq!(
+            store.take_written(),
+            vec![RegionLocalObjectId(3), RegionLocalObjectId(4)]
+        );
+        assert_eq!(store.shown(RegionLocalObjectId(3)), None);
+        store.mark_shown(RegionLocalObjectId(3));
+        assert_eq!(
+            store
+                .shown(RegionLocalObjectId(3))
+                .map(|shown| shown.motion.position.x),
+            Some(9.0)
+        );
+        store.amend_shown(RegionLocalObjectId(3), |shown| shown.update_flags = 7);
+        assert_eq!(
+            store
+                .shown(RegionLocalObjectId(3))
+                .map(|shown| shown.update_flags),
+            Some(7)
+        );
+        assert_eq!(store.take_written(), Vec::new());
         Ok(())
     }
 

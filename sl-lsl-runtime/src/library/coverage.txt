@@ -201,3 +201,4 @@ implemented llDetachFromAvatar
 implemented llGetPos
 implemented llGetLocalPos
 implemented llGetRootPosition
+implemented llSetPos

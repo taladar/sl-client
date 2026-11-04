@@ -55,6 +55,7 @@ pub mod time;
 pub mod timeline;
 pub mod touches;
 pub mod udp_assets;
+pub mod updates;
 mod uploads;
 pub mod voice;
 pub mod world;

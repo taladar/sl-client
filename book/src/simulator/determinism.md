@@ -94,9 +94,13 @@ Every walk whose order a viewer could see is over an ordered collection:
 - **A line** is offered to the scripts in earshot in `CallerId` order.
 - **What the scripts did** in a tick — lines said, objects changed, linksets
   linked or removed — is applied in the order they did it, and goes to the
-  region's sessions as one ordered list of changes. A script's chat and its
-  object updates therefore reach a viewer in the order they happened.
-  `llOwnerSay` is among those changes. What goes to one viewer alone (a
+  region's sessions as one ordered list of changes, `llOwnerSay` among them.
+  What the tick changed in the region's prims comes last, as one update burst
+  (`sl_fake_grid::updates`): one entry per prim, terse where only its
+  placement changed, the prims in the order the tick announced them and then
+  in the store's order (`Seq`). So a viewer hears a tick's lines before it
+  sees what the tick did to the prims, and sees a prim changed three times in
+  a tick once. What goes to one viewer alone (a
   dialog, a permission question, an instant message, a page, a map
   destination, `llRegionSayTo` to an avatar) is sent after the tick, in the
   order it was made.

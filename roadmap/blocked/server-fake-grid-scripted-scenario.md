@@ -2,15 +2,30 @@
 id: server-fake-grid-scripted-scenario
 title: A scripts scenario — one prim per scripted behaviour
 topic: server
-status: ready
+status: blocked
 origin: LSL-on-the-fake-grid audit (2026-09-20)
 points: 5
-blocked_by: [server-fake-grid-script-engine-wiring]
+blocked_by: [server-fake-grid-script-engine-wiring, server-lsl-lib-prim-state,
+  server-lsl-lib-detection-sensors, server-lsl-lib-avatar-control,
+  server-fake-grid-money-ledger, server-lsl-lib-task-inventory,
+  server-lsl-lib-physics-vehicles]
 refs: [viewer-fake-grid-render-catalogue, test-fake-grid-lsl-offline-cases,
   test-firestorm-fake-grid-crosscheck, server-fake-grid-scripted-avatars]
 ---
 
 Context: [context/lsl.md](../context/lsl.md).
+
+Blocked 2026-11-04: half the roster below calls functions no tranche has
+implemented yet (the library implemented 198 of ~425 functions that day).
+The timer prim needs `llSetPos` / `llSetColor` / `llTargetOmega` / `llSetText`
+([[server-lsl-lib-prim-state]]), the sensor prim `llSensorRepeat`
+([[server-lsl-lib-detection-sensors]]), the pose ball `llStartAnimation`
+([[server-lsl-lib-avatar-control]]), the vendor a `money` event
+([[server-fake-grid-money-ledger]]), the rezzer and the notecard reader
+`llRezObject` and `llGetNotecardLine` ([[server-lsl-lib-task-inventory]]),
+and the physical prim `llSetStatus` and collisions
+([[server-lsl-lib-physics-vehicles]]). Touch, dialog, listen, sit target,
+pay price, link messages and the broken-compile specimen run today.
 
 `sl-fake-grid`'s `fixtures::scenarios` already offers `stock`,
 `catalogue` (one prim per rendering feature plus an NPC),

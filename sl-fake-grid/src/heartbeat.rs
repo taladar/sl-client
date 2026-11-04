@@ -15,15 +15,16 @@
 //! 2. the region's scripts run their slice (`scripts::run_tick`):
 //!    the instances are brought in line with what the prims hold, every
 //!    runnable one runs its share of the tick, and what they said and did
-//!    reaches the region;
+//!    reaches the region — what they changed in its prims as one update
+//!    burst ([`crate::updates`]), a terse update for a prim that only moved;
 //! 3. when the imitated grid's statistics are due, every root agent in the
 //!    region is sent a `SimStats` whose time dilation says whether the steps
 //!    kept up with the grid's clock ([`TimeDilation`]), with the region's
 //!    active scripts and the share of them that ran.
 //!
-//! The rest of the work the loop exists for — movement and physics, and
-//! handing the tick's changes to an update scheduler — slots in beside the
-//! script slice as each of them is built.
+//! The rest of the work the loop exists for — movement and physics — slots
+//! in beside the script slice as each of them is built, inside the same
+//! update bracket.
 //!
 //! # The step
 //!

@@ -394,6 +394,11 @@ pub enum RegionChange {
     Moved(Box<Object>),
     /// An object left the region; every other viewer needs its `KillObject`.
     Killed(RegionLocalObjectId),
+    /// What one heartbeat tick changed in the region's prims, coalesced to
+    /// one entry per prim ([`crate::updates`]): every viewer is sent the
+    /// burst's full updates, its terse updates and its kills, one message of
+    /// each. Only the region publishes it.
+    Burst(Box<crate::updates::UpdateBurst>),
     /// Something was written into an object's task inventory, which its
     /// **properties** record announces in its
     /// [`inventory_serial`](sl_proto::ObjectProperties::inventory_serial).

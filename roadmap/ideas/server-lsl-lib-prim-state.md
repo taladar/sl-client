@@ -149,3 +149,15 @@ setters here raise the `prim/changed` rows (`book/src/gridspec/lsl.md` §
 raises `CHANGED_COLOR` for a colour set to the one it has and nothing for
 `llSetTexture`, where an edit raises neither. Raise them through
 `scripts::raise_changed_in` with `changes.rs`'s bits.
+
+## From server-world-update-scheduling (2026-11-04)
+
+`llSetPos` is implemented (`sitting::ll_set_pos` over the new
+`Host::set_position`), to give the update scheduler a script that moves a prim:
+the 10 m cap (a root on both grids, a child on OpenSim only), the ground under
+an unworn root, OpenSim's `changed(32768)` and the 0.2 s delay, each as
+measured. A move that would end outside the region leaves the prim where it was
+until objects cross borders ([[server-world-changed-object-crossing]]). What a
+setter writes reaches the viewers through `sl_fake_grid::updates` on its own:
+write the prim in the store during the tick (`RegionHost::set_position` is the
+pattern) and the tick's burst sends it, terse when only the placement changed.

@@ -29,6 +29,7 @@ mod memory;
 mod money;
 mod ossl;
 mod persistence;
+mod placement;
 mod precision;
 mod sitting;
 mod strings;
@@ -144,6 +145,9 @@ struct Recorder {
     detached: Vec<CallerId>,
     /// Where each script's prim stands; at the origin when not listed.
     placements: std::collections::BTreeMap<CallerId, crate::vm::seating::Placement>,
+    /// `(caller, local)` per `llSetPos` handed over; each also becomes the
+    /// prim's local and region position.
+    moves: Vec<(CallerId, sl_types::lsl::Vector)>,
     /// How many prims each object has, by a prim's key.
     prim_counts: std::collections::BTreeMap<String, i32>,
     /// The linkset every script is in, where a test states one in full;
@@ -522,6 +526,14 @@ impl Host for Recorder {
                 local: crate::value::ZERO_VECTOR,
                 root: crate::value::ZERO_VECTOR,
             })
+    }
+
+    fn set_position(&mut self, caller: CallerId, local: sl_types::lsl::Vector) {
+        let mut placement = self.placement(caller);
+        placement.local = local.clone();
+        placement.position = local.clone();
+        let _was = self.placements.insert(caller, placement);
+        self.moves.push((caller, local));
     }
 
     fn prim_count(&self, object: &str) -> Option<i32> {

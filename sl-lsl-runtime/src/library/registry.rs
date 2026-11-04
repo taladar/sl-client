@@ -204,6 +204,7 @@ crate::registry! {
         LlDetachFromAvatar => sitting::ll_detach_from_avatar,
         LlGetPos => sitting::ll_get_pos,
         LlGetLocalPos => sitting::ll_get_local_pos,
+        LlSetPos => sitting::ll_set_pos,
         LlGetRootPosition => sitting::ll_get_root_position,
         LlClearExperiencePermissions => experiences::ll_clear_experience_permissions,
         LlGetExperienceList => experiences::ll_get_experience_list,

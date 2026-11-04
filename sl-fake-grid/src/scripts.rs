@@ -867,6 +867,14 @@ enum Effect {
         /// Whether anybody may.
         allow: bool,
     },
+    /// The prim was moved (`llSetPos`), already in the store: its scripts
+    /// are told as a viewer's move tells them, once the engine is back.
+    Moved {
+        /// The prim.
+        prim: RegionLocalObjectId,
+        /// Where it now stands, from its parent.
+        to: Vector,
+    },
     /// The avatar is stood up (`llUnSit`).
     Unsit(AgentKey),
     /// The avatar is seated on the prim (`llSitOnLink`).
@@ -1894,6 +1902,43 @@ impl Host for RegionHost<'_> {
         }
     }
 
+    fn set_position(&mut self, caller: CallerId, local: Vector) {
+        let Some(origin) = self.origin(caller) else {
+            return;
+        };
+        let mut to = local;
+        // An unworn root's position is a place in the region: it stays out
+        // of the ground, as on both grids, and in the region. A move past the
+        // edge would cross to a neighbour on Second Life; the fake grid does
+        // not carry an object over a border yet
+        // (`server-world-changed-object-crossing`), so the prim stays where
+        // it was, as OpenSim's refusal of a position outside its region
+        // leaves it.
+        if origin.local_id == origin.root && self.world.objects.attached_to(origin.root).is_none() {
+            let edge = u16::try_from(REGION_EDGE_M).map_or(f32::MAX, f32::from);
+            if !(0.0..edge).contains(&to.x) || !(0.0..edge).contains(&to.y) {
+                return;
+            }
+            let ground = self
+                .core
+                .region(self.index)
+                .map_or(0.0, |region| region.config.terrain.height_at(to.x, to.y));
+            to.z = to.z.max(ground);
+        }
+        let Some(mut prim) = self.world.object_mut(origin.local_id) else {
+            return;
+        };
+        if prim.motion.position == to {
+            return;
+        }
+        prim.motion.position = to.clone();
+        drop(prim);
+        self.effects.push(Effect::Moved {
+            prim: origin.local_id,
+            to,
+        });
+    }
+
     fn prim_count(&self, object: &str) -> Option<i32> {
         let key = ObjectKey::from(uuid::Uuid::parse_str(object).ok()?);
         let prim = self.world.objects.get_by_key(key)?;
@@ -2073,7 +2118,11 @@ pub(crate) async fn run_tick(core: &GridCore, index: usize) -> Option<TickReport
     let present = presence(core, index).await;
     let (report, changes, deliveries) = {
         let mut world = region.world.lock();
-        tick_locked(core, index, &mut world, &present)
+        crate::updates::begin(&mut world);
+        let (report, changes, deliveries) = tick_locked(core, index, &mut world, &present);
+        let changes = crate::updates::finish(&mut world, changes);
+        drop(world);
+        (report, changes, deliveries)
     };
     for change in changes {
         // A region nobody is in has nobody to tell.
@@ -2154,6 +2203,13 @@ fn tick_locked(
                 if let Some(object) = world.object_by_local_id(prim) {
                     changes.push(RegionChange::Updated(Box::new(object)));
                 }
+            }
+            Effect::Moved { prim, to } => {
+                let transform = sl_proto::ObjectTransform {
+                    position: Some(to),
+                    ..sl_proto::ObjectTransform::default()
+                };
+                crate::changes::transformed(world, prim, &transform);
             }
             Effect::Unsit(agent) => {
                 if let Some(stands_at) = crate::seating::stand(world, agent) {

@@ -1,5 +1,7 @@
 //! The boundary between a running script and the world it runs in.
 
+use sl_types::lsl::Vector;
+
 use crate::library::BuiltinId;
 use crate::vm::comms::{Dialog, InstantMessage, InvalidLinkTarget, Links, LoadUrl, MapDestination};
 use crate::vm::economy::{MoneyRefusal, PayPrice, Payment};
@@ -298,6 +300,14 @@ pub trait Host {
     /// Where `caller`'s prim stands (`llGetPos`, `llGetLocalPos`,
     /// `llGetRootPosition`).
     fn placement(&self, caller: CallerId) -> Placement;
+
+    /// `llSetPos`: moves `caller`'s prim to `local`, its position from its
+    /// parent as [`Placement::local`] reads it — an unworn root's region
+    /// position, a worn root's offset on its attachment point, a child's
+    /// offset from its root. The library has capped the move already; the
+    /// host keeps an unworn root on or above the ground under it, as both
+    /// grids do, and a later [`Self::placement`] reads the new position.
+    fn set_position(&mut self, caller: CallerId, local: Vector);
 
     /// How many prims the object one of whose prims is keyed `object` has,
     /// the avatars sitting on it left out (`llGetObjectPrimCount`); [`None`]

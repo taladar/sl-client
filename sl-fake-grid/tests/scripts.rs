@@ -56,6 +56,12 @@ mod test {
         Updated(Box<sl_client_tokio::Object>),
         /// An alert's text.
         Alert(String),
+        /// A message of the object-update stream: its form and the objects
+        /// it named.
+        Stream(
+            sl_proto::ObjectUpdateForm,
+            Vec<sl_proto::RegionLocalObjectId>,
+        ),
     }
 
     /// A logged-in client in a stepped catalogue region.
@@ -168,6 +174,10 @@ mod test {
                     } => Seen::Sat(sit_position, sit_rotation),
                     Event::ScriptPermissionRequest(question) => Seen::Question(question),
                     Event::AlertMessage { message, .. } => Seen::Alert(message),
+                    Event::ObjectStreamBatch(batch) => Seen::Stream(
+                        batch.form,
+                        batch.entries.iter().map(|entry| entry.local_id).collect(),
+                    ),
                     Event::InventoryItemCreated { item, .. }
                         if i32::from(item.item_type) == sl_proto::AssetType::Object.to_code() =>
                     {
@@ -2304,5 +2314,155 @@ default
     #[tokio::test]
     async fn a_viewers_changes_raise_changed_on_opensim() -> Result<(), TestError> {
         a_viewers_changes_raise_changed(ImitatedGrid::OpenSim).await
+    }
+
+    /// A script that lets anything be dropped into its prim and takes
+    /// touches: two of the prim's flags, both set in the tick it starts.
+    const DROP_AND_TOUCH_SOURCE: &str =
+        "default { state_entry() { llAllowInventoryDrop(TRUE); } touch_start(integer n) { } }";
+
+    /// The box [`DROP_AND_TOUCH_SOURCE`] runs in.
+    const FLAGGED: sl_proto::RegionLocalObjectId = sl_proto::RegionLocalObjectId(0x900);
+
+    /// What a tick changed in a prim reaches the viewer as one update: the
+    /// script's drop flag and the region's touch and scripted flags, set in
+    /// the same tick, arrive in a single full `ObjectUpdate` rather than one
+    /// per change.
+    async fn one_tick_is_one_update(imitated: ImitatedGrid) -> Result<(), TestError> {
+        let region = region_of(&[ScriptedBox {
+            local_id: FLAGGED,
+            source: DROP_AND_TOUCH_SOURCE.to_owned(),
+            experience: None,
+        }])?;
+        let mut scene = scene_of(imitated, region).await?;
+        scene
+            .next("the box", |seen| match seen {
+                Seen::Added(local_id) if local_id == FLAGGED => Some(()),
+                _other => None,
+            })
+            .await?;
+        scene.tick(3).await?;
+        let mut told = Vec::new();
+        let mut flags = None;
+        let _quiet = tokio::time::timeout(QUIET, async {
+            while let Some(seen) = scene.seen.recv().await {
+                match seen {
+                    Seen::Stream(form, ids) if ids.contains(&FLAGGED) => told.push(form),
+                    Seen::Updated(object) if object.local_id == FLAGGED => {
+                        flags = Some(object.update_flags);
+                    }
+                    _other => {}
+                }
+            }
+        })
+        .await;
+        assert_eq!(told, vec![sl_proto::ObjectUpdateForm::Full]);
+        let wanted = sl_proto::prim_flags::ALLOW_INVENTORY_DROP
+            | sl_proto::prim_flags::SCRIPTED
+            | sl_proto::prim_flags::HANDLE_TOUCH;
+        assert_eq!(flags.map(|flags| flags & wanted), Some(wanted));
+        scene.stop();
+        Ok(())
+    }
+
+    /// On a grid imitating Second Life.
+    #[tokio::test]
+    async fn one_tick_is_one_update_on_second_life() -> Result<(), TestError> {
+        one_tick_is_one_update(ImitatedGrid::SecondLife).await
+    }
+
+    /// On a grid imitating OpenSim.
+    #[tokio::test]
+    async fn one_tick_is_one_update_on_opensim() -> Result<(), TestError> {
+        one_tick_is_one_update(ImitatedGrid::OpenSim).await
+    }
+
+    /// A script that, told `go` on the echo channel, moves its prim half a
+    /// metre east five times, and told `sink`, tries to take it 20 m down
+    /// and shouts where it ended up.
+    fn mover_source() -> String {
+        format!(
+            "default {{
+    state_entry() {{ llListen({ECHO_SCRIPT_CHANNEL}, \"\", NULL_KEY, \"\"); }}
+    listen(integer channel, string name, key id, string message) {{
+        if (message == \"go\") {{
+            integer i;
+            for (i = 0; i < 5; ++i) {{ llSetPos(llGetPos() + <0.5, 0.0, 0.0>); }}
+        }} else if (message == \"sink\") {{
+            llSetPos(llGetPos() - <0.0, 0.0, 20.0>);
+            llShout(0, \"at \" + (string)llGetPos());
+        }}
+    }}
+}}"
+        )
+    }
+
+    /// The box [`mover_source`] runs in.
+    const MOVER: sl_proto::RegionLocalObjectId = sl_proto::RegionLocalObjectId(0x901);
+
+    /// A script moving its prim every tick — `llSetPos` costs it 0.2 s, the
+    /// region's step here — reaches the viewer as one terse update a tick
+    /// and no full update, ending where the moves took it; and a move into
+    /// the ground stops on it.
+    async fn a_moving_prim_goes_out_terse(imitated: ImitatedGrid) -> Result<(), TestError> {
+        let region = region_of(&[ScriptedBox {
+            local_id: MOVER,
+            source: mover_source(),
+            experience: None,
+        }])?;
+        let mut scene = scene_stepped(imitated, region, Duration::from_millis(200)).await?;
+        scene
+            .next("the box", |seen| match seen {
+                Seen::Added(local_id) if local_id == MOVER => Some(()),
+                _other => None,
+            })
+            .await?;
+        // The script starting flags its prim: that full update first.
+        scene.tick(3).await?;
+        while let Ok(Some(_seen)) = tokio::time::timeout(QUIET, scene.seen.recv()).await {}
+
+        scene.shout("go").await?;
+        scene.tick(7).await?;
+        let mut told = Vec::new();
+        let mut at = None;
+        while let Ok(Some(seen)) = tokio::time::timeout(QUIET, scene.seen.recv()).await {
+            match seen {
+                Seen::Stream(form, ids) if ids.contains(&MOVER) => told.push(form),
+                Seen::Updated(object) if object.local_id == MOVER => {
+                    let position = &object.motion.position;
+                    at = Some(format!(
+                        "{:.2} {:.2} {:.2}",
+                        position.x, position.y, position.z
+                    ));
+                }
+                _other => {}
+            }
+        }
+        assert_eq!(told, vec![sl_proto::ObjectUpdateForm::Terse; 5]);
+        assert_eq!(at.as_deref(), Some("134.50 128.00 25.50"));
+
+        scene.shout("sink").await?;
+        scene.tick(3).await?;
+        let ended = scene
+            .next("where the sunk box ended", |seen| match seen {
+                Seen::Chat(ChatType::Shout, message) if message.starts_with("at ") => Some(message),
+                _other => None,
+            })
+            .await?;
+        assert_eq!(ended, "at <134.50000, 128.00000, 25.00000>");
+        scene.stop();
+        Ok(())
+    }
+
+    /// On a grid imitating Second Life.
+    #[tokio::test]
+    async fn a_moving_prim_goes_out_terse_on_second_life() -> Result<(), TestError> {
+        a_moving_prim_goes_out_terse(ImitatedGrid::SecondLife).await
+    }
+
+    /// On a grid imitating OpenSim.
+    #[tokio::test]
+    async fn a_moving_prim_goes_out_terse_on_opensim() -> Result<(), TestError> {
+        a_moving_prim_goes_out_terse(ImitatedGrid::OpenSim).await
     }
 }

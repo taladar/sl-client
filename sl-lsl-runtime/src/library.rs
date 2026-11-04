@@ -326,6 +326,8 @@ mod tests {
             }
         }
 
+        fn set_position(&mut self, _caller: CallerId, _local: sl_types::lsl::Vector) {}
+
         fn prim_count(&self, _object: &str) -> Option<i32> {
             None
         }
@@ -754,11 +756,11 @@ mod tests {
         );
         assert_eq!(
             call(
-                BuiltinId::LlSetPos,
+                BuiltinId::LlSetColor,
                 &mut ctx,
-                vec![Value::Vector(crate::value::ZERO_VECTOR)]
+                vec![Value::Vector(crate::value::ZERO_VECTOR), Value::Integer(0)]
             ),
-            Err(CallError::Missing(BuiltinId::LlSetPos))
+            Err(CallError::Missing(BuiltinId::LlSetColor))
         );
     }
 

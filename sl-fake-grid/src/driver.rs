@@ -890,6 +890,48 @@ async fn deliver_datagram(shared: &SharedSim, from: SocketAddr, datagram: &[u8])
 /// The health an arriving agent is told it has: all of it.
 const FULL_HEALTH: f32 = 100.0;
 
+/// Sends this session's viewer what a tick changed in the region's prims
+/// ([`crate::updates`]): the full updates as one `ObjectUpdate`, the terse
+/// ones as one `ImprovedTerseObjectUpdate`, the kills as one `KillObject`,
+/// leaving out what this viewer is not shown (another avatar's worn object,
+/// [`crate::seating::shown_to`]).
+fn send_burst(
+    state: &mut SimState,
+    burst: &crate::updates::UpdateBurst,
+    now: std::time::Instant,
+) -> Result<(), sl_proto::Error> {
+    let (full, terse): (Vec<&sl_proto::Object>, Vec<sl_proto::TerseUpdate>) = {
+        let world = state.world.lock();
+        let agent = state.avatar.agent_id;
+        let shown = |object: &&sl_proto::Object| crate::seating::shown_to(&world, object, agent);
+        (
+            burst.full.iter().filter(shown).collect(),
+            burst
+                .terse
+                .iter()
+                .filter(shown)
+                .map(|object| sl_proto::TerseUpdate {
+                    local_id: object.local_id,
+                    state: object.state,
+                    motion: object.motion.clone(),
+                })
+                .collect(),
+        )
+    };
+    if !full.is_empty() {
+        crate::world::send_objects(&mut state.sim, full, now)?;
+    }
+    if !terse.is_empty() {
+        state
+            .sim
+            .send_terse_update(&terse, crate::world::REAL_TIME_DILATION, now)?;
+    }
+    if !burst.killed.is_empty() {
+        state.sim.send_kill_object(&burst.killed, now)?;
+    }
+    Ok(())
+}
+
 /// The region watcher: streams the changes *other* sessions in this region
 /// made to the shared world — an object rezzed, an object taken away — to this
 /// session's viewer.
@@ -1065,6 +1107,12 @@ pub(crate) async fn run_region_watcher(
                                     ),
                                     RegionChange::Killed(local_id) => {
                                         state.sim.send_kill_object(&[*local_id], now)
+                                    }
+                                    // A tick's changes to the region's prims:
+                                    // one message of each form, with what this
+                                    // viewer is not shown left out.
+                                    RegionChange::Burst(burst) => {
+                                        send_burst(state, burst, now)
                                     }
                                     // The one change that is a subscription
                                     // rather than a broadcast: a client that is

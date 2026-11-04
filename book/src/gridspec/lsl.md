@@ -1780,7 +1780,7 @@ own in prims B and C. A valid frame here is half a metre up in a second.
 | `KFM_REVERSE` | plays the frame backwards: ends 0.5 m below | the same | no scripts |
 | 20 m in 0.2 s | plays: no speed limit | the same | no scripts |
 | a loop paused, played, stopped | the pause holds it, play goes on, stop leaves it where it is (not back at the start) | the same | no scripts |
-| `llSetPos` during a motion | refused: `Cannot use a script to move a linkset while it is playing an animation. Stop the animation first.` | **moves it**, and the motion goes on from there | no scripts |
+| `llSetPos` during a motion | refused: `Cannot use a script to move a linkset while it is playing an animation. Stop the animation first.` | **moves it**, and the motion goes on from there | no keyframed motion yet |
 | physics on during a motion | refused: `Can't enable physics for keyframed objects.` | **turns physical** and falls | no scripts |
 | a motion on a physical prim | nothing, silently (a `moving_end`) | nothing, silently | no scripts |
 | `KFM_CMD_PLAY` with nothing playing | plays the last motion given, here the one given while physical | nothing | no scripts |
@@ -1849,9 +1849,9 @@ an offset from there.
 
 | what | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
-| `llSetPos` 5 and 10 m | moves there | the same | no scripts |
-| `llSetPos` 15 or 50 m east, 15 or 100 m up, past the region's east edge, past 4096 m | **10 m** towards the target, in one call | the same | no scripts |
-| `llSetPos` or `llSetRegionPos` 20 m down, below the ground | stops at the ground (here 2.1 m below the prim) | the same | no scripts |
+| `llSetPos` 5 and 10 m | moves there | the same | the same |
+| `llSetPos` 15 or 50 m east, 15 or 100 m up, past the region's east edge, past 4096 m | **10 m** towards the target, in one call | the same | the same; a move that would end outside the region leaves the prim where it was (no object crosses a border yet) |
+| `llSetPos` or `llSetRegionPos` 20 m down, below the ground | stops at the ground (here 2.1 m below the prim) | the same | `llSetPos` the same; `llSetRegionPos` no scripts |
 | `PRIM_POS_LOCAL` of a root prim | the region position, like `llSetPos` | the same | no scripts |
 | `llSetRegionPos` 50 m east, 100 m up, to 4000 m | moves there in one call, answers TRUE | the same | no scripts |
 | `llSetRegionPos` into the ground | stops at the ground and answers **FALSE** | the same | no scripts |
@@ -2006,7 +2006,7 @@ granted `PERMISSION_CHANGE_LINKS`; each step is a second and a half apart.
 | `PRIM_LINK_TARGET` in a get and in a set | moves on to the link named | the same | no scripts |
 | the child's `PRIM_POS_LOCAL` 5, 20, 60 m | set as given | the same | no scripts |
 | the child's `PRIM_POSITION` of a region position 5, 20, 60 m from the root | **nothing**: the child stays where it was | the region position is taken **as the offset**: the child goes that far from the root | no scripts |
-| `llSetPos` in a child, 15 m from the root | 15 m: no 10 m cap for a child's offset | **12 m**: capped 10 m from where it was (2 m) | no scripts |
+| `llSetPos` in a child, 15 m from the root | 15 m: no 10 m cap for a child's offset | **12 m**: capped 10 m from where it was (2 m) | each flavour as its grid |
 | `llBreakLink(2)`, `llBreakLink(1)` | unlinks; `CHANGED_LINK` in both | unlinks; `CHANGED_LINK` in both for `llBreakLink(1)`, but **in the child alone** for `llBreakLink(2)` | each flavour as its grid |
 | `llBreakLink(3)` | nothing | the same | the same |
 | `llCreateLink(…, FALSE)` | the target becomes the root, this script's prim link 2 | the same | the same |
@@ -2040,7 +2040,7 @@ after it.
 | `llSetScale`, `PRIM_SIZE` | `CHANGED_SCALE` | the same | no scripts |
 | the same scale again | nothing | `CHANGED_SCALE` again | no scripts |
 | `PRIM_TYPE` | `CHANGED_SHAPE` | the same | no scripts |
-| `llSetPos` | nothing | 32768 (`CHANGED_POSITION`, OpenSim's own) | no scripts |
+| `llSetPos` | nothing | 32768 (`CHANGED_POSITION`, OpenSim's own) | each flavour as its grid |
 | `llSetRot`, text, name, description, light, flexible, material, phantom, slice, `llTargetOmega`, texture animation, particles, sit target, sit text, click action, `llAllowInventoryDrop` | nothing | the same | no scripts |
 | `llSetPrimMediaParams`, `llClearPrimMedia` | `CHANGED_MEDIA` | YEngine the same; XEngine nothing for the set, **two** for the clear | no scripts |
 | a render material (`PRIM_RENDER_MATERIAL`) | `CHANGED_RENDER_MATERIAL` | nothing: the rule is unsupported | no scripts |
@@ -2655,7 +2655,7 @@ either grid.
 | call | documented | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- | --- |
 | `llRegionSay`, `llSetColor`, `llSetScale`, `llSetLinkPrimitiveParamsFast` | 0 | 0 (a frame once) | 0 | no scripts |
-| `llSetPos`, `llSetRot`, `llSetLocalRot` | 0.2 | 0.2–0.22 | 0.2 | no scripts |
+| `llSetPos`, `llSetRot`, `llSetLocalRot` | 0.2 | 0.2–0.22 | 0.2 | `llSetPos` 0.2; the others no scripts |
 | `llSetTexture`, `llSetLinkTexture`, `llScaleTexture`, `llOffsetTexture`, `llRotateTexture` | 0.2 | 0.2–0.22; one `llSetTexture` took 0.47 | 0.2 | no scripts |
 | `llSetPrimitiveParams`, `llSetLinkPrimitiveParams` | 0.2 | 0.2–0.22 | 0.2 | no scripts |
 | `llSetRemoteScriptAccessPin` | 0.2 | 0.2 | **0** | no scripts |

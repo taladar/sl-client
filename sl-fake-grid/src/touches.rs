@@ -685,7 +685,13 @@ pub(crate) fn refresh_flags(world: &mut SceneFixtures) -> Vec<RegionChange> {
                 && child_flags == ChildFlags::TouchQuietly;
             let sent = object.clone();
             drop(object);
-            if !quiet {
+            if quiet {
+                // Not announced now, and not by the tick's update burst
+                // either ([`crate::updates`]).
+                world.objects.amend_shown(local_id, |shown| {
+                    shown.update_flags = (shown.update_flags & !mask) | wanted;
+                });
+            } else {
                 changes.push(RegionChange::Updated(Box::new(sent)));
             }
         }
