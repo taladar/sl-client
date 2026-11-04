@@ -31,10 +31,13 @@
 //! 7. makes a script in the agent's inventory and uploads a broken then a
 //!    valid source over `UpdateScriptAgent`.
 //!
-//! XEngine answers no upload to a script that holds a running instance, and
-//! each unanswered upload keeps one of OpenSim's HTTP handlers; so under
-//! XEngine every leg but the two over a running script gets a script of its
-//! own, and after any unanswered upload the next leg does (`Run::step`).
+//! XEngine answers no upload to a script that holds a running instance; so
+//! under XEngine every leg but the two over a running script gets a script of
+//! its own, and after any unanswered upload the next leg does (`Run::step`).
+//! An unanswered upload still ends, in the client's timeout a minute after it
+//! was sent, and the next upload waits that out (`STALLED_UPLOAD_ENDS`); a
+//! valid script's start line is waited for rather than heard in a fixed
+//! window (`START_TIMEOUT`), since XEngine compiles after it answers.
 //!
 //! The `luau` backend has its own list (`luau_legs`): valid Luau, sources
 //! the reference Luau compiler refuses each in its own words, and LSL source
@@ -96,6 +99,22 @@ const UPLOAD_TIMEOUT: Duration = Duration::from_secs(30);
 /// How long the census listens for what a script says after an upload or a
 /// ping.
 const LISTEN: Duration = Duration::from_secs(5);
+
+/// How long a valid script may take to say it started. XEngine compiles C#
+/// after it has answered the upload, and its first compile after OpenSim
+/// starts (or a later one under load) takes far longer than [`LISTEN`]:
+/// heard in a fixed window, the line is booked to the next leg and every
+/// later answer shifts (test-conformance-script-compile-xengine-cold-start).
+/// The same bound as the probe runner's compile.
+const START_TIMEOUT: Duration = Duration::from_secs(90);
+
+/// How long after it was sent an upload the census stopped waiting for can
+/// still end: the client gives each of its two HTTP steps 60 s
+/// (`sl-client-tokio`'s `UPLOAD_STEP_TIMEOUT`), and then reports the timeout
+/// as an `AssetUploadFailed` that names no upload. Uploaded meanwhile, the
+/// next leg would take that failure as its own answer, so the census waits
+/// it out first.
+const STALLED_UPLOAD_ENDS: Duration = Duration::from_secs(65);
 
 /// The channel the valid script listens to its owner on — positive, since
 /// Second Life passes no avatar's chat on a negative one.
@@ -588,6 +607,9 @@ async fn census(ctx: &mut TestContext, metrics: &mut Metrics) -> Result<(), Test
         z: reference.z + LIFT_M,
     };
     let session = ctx.primary();
+    // An upload left unanswered at the end of one backend's legs can still
+    // end during the next one's.
+    let mut unended = None;
     for backend in Backend::on(grid) {
         let mut run = Run {
             session: &mut *session,
@@ -596,8 +618,10 @@ async fn census(ctx: &mut TestContext, metrics: &mut Metrics) -> Result<(), Test
             backend: *backend,
             heard: Vec::new(),
             stalled: None,
+            unended,
         };
         run.backend_legs(&position, &mut seen, trash, root).await?;
+        unended = run.unended;
     }
     Ok(())
 }
@@ -617,6 +641,9 @@ struct Run<'a> {
     /// The last upload the grid did not answer, until a fresh script is
     /// made for the next.
     stalled: Option<String>,
+    /// When the last upload the grid did not answer was sent, until its own
+    /// end has been waited out ([`STALLED_UPLOAD_ENDS`]).
+    unended: Option<Instant>,
 }
 
 /// The cube's script the legs upload to.
@@ -727,7 +754,7 @@ impl Run<'_> {
         // 1. The valid script, running.
         let v1 = valid_source(self.backend, "v1");
         let _answered = self.step(cube, &mut held, "v1", &v1, true).await?;
-        self.listen().await?;
+        self.listen_for_start("v1").await?;
         self.record_heard("v1");
         self.read_source(cube, &held, "v1", &[("v1", &v1)]).await?;
 
@@ -785,7 +812,7 @@ impl Run<'_> {
         self.metrics.set(&key, running);
         let v3 = valid_source(self.backend, "v3");
         let _answered = self.step(cube, &mut held, "v3_running", &v3, true).await?;
-        self.listen().await?;
+        self.listen_for_start("v3").await?;
         self.record_heard("v3_running");
         let running = self.running(cube, held.item).await?;
         let key = self.key("v3_running", "after_running");
@@ -793,7 +820,7 @@ impl Run<'_> {
 
         // 6. The same valid source again, over the running script.
         let _answered = self.step(cube, &mut held, "v3_again", &v3, true).await?;
-        self.listen().await?;
+        self.listen_for_start("v3").await?;
         self.record_heard("v3_again");
         Ok(())
     }
@@ -804,8 +831,7 @@ impl Run<'_> {
     /// and under XEngine for every leg but `v1` and the two over the running
     /// script it leaves (`syntax`, `v3_again`): XEngine answers no upload
     /// to a script that holds a running instance (it stores and restarts it
-    /// all the same), and every unanswered upload keeps one of OpenSim's HTTP
-    /// handlers until later uploads are refused outright.
+    /// all the same), so a leg uploaded over one would go unanswered too.
     async fn step(
         &mut self,
         cube: &Object,
@@ -938,6 +964,7 @@ impl Run<'_> {
         location: ScriptUploadLocation,
         source: String,
     ) -> Result<Answered, TestFailure> {
+        self.wait_out_unended().await?;
         let started = Instant::now();
         self.session
             .send(Command::UploadScript {
@@ -993,6 +1020,7 @@ impl Run<'_> {
                 let key = self.key(leg, "upload");
                 self.metrics.set(&key, "no answer");
                 self.stalled = Some(leg.to_owned());
+                self.unended = Some(started);
                 return Ok(Answered::default());
             }
             Err(other) => return Err(other),
@@ -1035,6 +1063,46 @@ impl Run<'_> {
                 .map_or_else(|| "none".to_owned(), |running| running.to_string()),
         );
         Ok(answered)
+    }
+
+    /// Waits, keeping what the script says, until the last unanswered upload
+    /// has ended — its late answer or the client's timeout — or until it can
+    /// no longer end ([`STALLED_UPLOAD_ENDS`] after it was sent). An end that
+    /// came while the census was waiting for something else was dropped
+    /// there, so a run may wait out the remainder for nothing.
+    async fn wait_out_unended(&mut self) -> Result<(), TestFailure> {
+        let Some(sent) = self.unended.take() else {
+            return Ok(());
+        };
+        let left = STALLED_UPLOAD_ENDS.saturating_sub(sent.elapsed());
+        if left.is_zero() {
+            return Ok(());
+        }
+        let heard = &mut self.heard;
+        let ended = self
+            .session
+            .wait_for(left, |event| match event {
+                Event::ScriptUploaded { .. } => Some("answered late".to_owned()),
+                Event::AssetUploadFailed { reason } => Some(format!("failed: {reason}")),
+                other => {
+                    keep_heard(heard, other);
+                    None
+                }
+            })
+            .await;
+        match ended {
+            Ok(how) => {
+                tracing::info!(
+                    backend = self.backend.key(),
+                    how,
+                    seconds = sent.elapsed().as_secs_f64(),
+                    "an unanswered upload ended"
+                );
+                Ok(())
+            }
+            Err(TestFailure::Timeout(_)) => Ok(()),
+            Err(other) => Err(other),
+        }
     }
 
     /// Records which asset the cube's script is listed with after `leg`'s
@@ -1286,6 +1354,35 @@ impl Run<'_> {
         self.listen().await?;
         self.record_heard(&format!("{leg}_ping"));
         Ok(())
+    }
+
+    /// Keeps what the script says until valid script `version` says it
+    /// started (for at most [`START_TIMEOUT`]), then for [`LISTEN`] more, so
+    /// a line said after the start line is kept too. Every grid measured
+    /// says it, so waiting for it costs a run nothing and makes the next
+    /// leg start only once this script runs.
+    async fn listen_for_start(&mut self, version: &str) -> Result<(), TestFailure> {
+        let started = format!("CMP {} {version} start", self.backend.key());
+        let heard = &mut self.heard;
+        let outcome = self
+            .session
+            .wait_for(START_TIMEOUT, |event| {
+                keep_heard(heard, event);
+                heard.contains(&started).then_some(())
+            })
+            .await;
+        match outcome {
+            Ok(()) => self.listen().await,
+            Err(TestFailure::Timeout(_)) => {
+                tracing::warn!(
+                    backend = self.backend.key(),
+                    version,
+                    "the valid script never said it started"
+                );
+                Ok(())
+            }
+            Err(other) => Err(other),
+        }
     }
 
     /// Keeps what the script says for [`LISTEN`].

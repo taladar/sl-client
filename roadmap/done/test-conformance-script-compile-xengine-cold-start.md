@@ -2,12 +2,37 @@
 id: test-conformance-script-compile-xengine-cold-start
 title: script-compile fails its XEngine legs on a freshly started OpenSim
 topic: test
-status: bugs
+status: done
 origin: server-lsl-library-unserved-functions (2026-10-30)
 refs: [gridspec-lsl-compile, test-unbounded-waits-in-test-harnesses]
 ---
 
 Context: [context/test.md](../context/test.md).
+
+Fixed (2026-11-04). Two causes, both the census's own:
+
+- **The start line was heard in a fixed 5 s window.** XEngine answers the
+  upload and compiles afterwards, and its first compile after a start takes
+  longer. The census now waits for the valid script's `start` line after
+  `v1`, `v3_running` and `v3_again` (up to 90 s, the probe runner's compile
+  bound), then listens 5 s more. Every grid measured says that line, so a
+  warm run loses nothing.
+- **An unanswered upload's late end was taken for a later one's answer.**
+  The census stops waiting for an upload after 30 s, but the client gives
+  each HTTP step 60 s and then reports `AssetUploadFailed` ("error sending
+  request … operation timed out"), which names no upload. Whatever upload
+  was awaited at that moment took it as its own refusal, while OpenSim had
+  in fact compiled it (its log shows the compile). In the first cold run
+  after the window fix, that hit the first Luau leg, `luau_break_outside`,
+  exactly 60 s after XEngine's unanswered `v3_again`. The census now waits
+  out an unanswered upload's end (65 s after it was sent) before the next
+  upload. `multibyte_column`'s refusal below was the same timeout, and so
+  were the refusals the book had put down to OpenSim running out of HTTP
+  handlers; the gridspec row is corrected. A script of its own per XEngine
+  leg stays, since XEngine answers no upload to a running script.
+
+The census passed on OpenSim restarted seconds before the run (2026-11-03,
+23:58), and on aditi. The fake flavours run it in `tests/offline.rs`.
 
 ## Observation
 

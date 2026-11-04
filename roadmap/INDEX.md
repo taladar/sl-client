@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 337 |
 | blocked | 40 |
 | in-progress | 18 |
-| bugs | 42 |
-| done | 1477 |
+| bugs | 41 |
+| done | 1478 |
 | deferred | 30 |
 | wont-do | 24 |
 | **total** | **2097** |
@@ -1337,7 +1337,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (42)
+## bugs (41)
 
 ### protocol
 
@@ -1432,8 +1432,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — The last derez and both logouts of an OpenSim probe run go unacknowledged
 - [`test-conformance-object-asset-format-fails-under-load`](bugs/test-conformance-object-asset-format-fails-under-load.md)
   — object_asset_format fails only in a full-workspace run, and fails early
-- [`test-conformance-script-compile-xengine-cold-start`](bugs/test-conformance-script-compile-xengine-cold-start.md)
-  — script-compile fails its XEngine legs on a freshly started OpenSim
 - [`test-conformance-upload-after-yengine-start-dropped`](bugs/test-conformance-upload-after-yengine-start-dropped.md)
   — Quick script uploads to one item on OpenSim take each other's answers, or
   fail as "operation timed out"
@@ -1443,7 +1441,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1477)
+## done (1478)
 
 ### protocol
 
@@ -3996,6 +3994,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — start an ad-hoc conference; verify it is distinct from a 1:1 (multi-pa
 - [`test-conformance-object-edit-click-action-opensim`](done/test-conformance-object-edit-click-action-opensim.md)
   — object-edit on OpenSim never sees the sit click action re-broadcast
+- [`test-conformance-script-compile-xengine-cold-start`](done/test-conformance-script-compile-xengine-cold-start.md)
+  — script-compile fails its XEngine legs on a freshly started OpenSim
 - [`test-crosscheck-day-position-is-inert`](done/test-crosscheck-day-position-is-inert.md)
   — --day-position asks for a keyframe the stock cycle does not have
 - [`test-crosscheck-pin-ui-scale`](done/test-crosscheck-pin-ui-scale.md) — A
