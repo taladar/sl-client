@@ -121,9 +121,8 @@ fn carry_out_click_actions(
                     .and_then(|parcel| parcel.current.as_ref())
                     .and_then(|parcel| parcel.media_url.as_ref());
                 if let Some(url) = url {
-                    out.browser.write(OpenWebBrowser {
-                        url: Some(url.to_string()),
-                    });
+                    out.browser
+                        .write(OpenWebBrowser::new_window(Some(url.to_string())));
                 } else {
                     info!("left click: open media, but the parcel has no media URL");
                 }

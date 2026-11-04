@@ -93,6 +93,7 @@ pub(crate) const REGISTRARS: &[fn(&mut crate::settings::ViewerSettings)] = &[
     crate::environment::register_settings,
     crate::experience_log::register_settings,
     crate::experiences_floater::register_settings,
+    crate::web_floater::register_settings,
 ];
 
 // The leaf toolkit (geometry math, render leaves, small models) is its own

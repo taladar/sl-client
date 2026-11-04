@@ -5516,6 +5516,7 @@ setting-desc-UiScale = The UI scale factor (1.0 = native size)
 setting-desc-UiSkin = The UI skin (a directory under assets/skins)
 setting-desc-UiSkinTheme = The skin's theme overlay; empty for the skin's own base
 setting-desc-UseLegacyIMLogNames = Name transcript files with the legacy resident-name scheme
+setting-desc-WebContentWindowLimit = Most web browser windows open at once; opening another closes the oldest (0 = no limit)
 setting-desc-WorldMapScale = World-map zoom, in pixels per 256 m region (1-256)
 setting-desc-WorldMapShowAdultEvents = Show Adult event markers on the world map
 setting-desc-WorldMapShowEvents = Show event markers on the world map

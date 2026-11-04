@@ -15,7 +15,9 @@
 //! - in a right-to-left language, a tab strip that overflows to the left
 //!   still scrolls to its far end;
 //! - with web media on, the web browser window and the search window's web
-//!   tab load a page.
+//!   tab load a page, and every page keeps a browser window of its own — two
+//!   menu opens are two windows, a page's named link a third, and closing one
+//!   leaves the others' pages alone.
 
 #[cfg(test)]
 mod test {
@@ -590,23 +592,48 @@ mod test {
     /// The title of the page the test's server answers with.
     const PAGE_TITLE: &str = "Stage Page";
 
+    /// The page on the stage server that is one link to [`POPPED_PATH`] in
+    /// the window named [`POPUP_TARGET`].
+    const OPENER_PATH: &str = "opener";
+
+    /// The page the opener opens.
+    const POPPED_PATH: &str = "popped";
+
+    /// The window name the opener asks for.
+    const POPUP_TARGET: &str = "stagewin";
+
     /// Serve the one page [`PAGE_TITLE`] names on a loopback port, whatever
     /// is asked for, from a thread that lives as long as the test process;
     /// answers its base URL.
     fn serve_page() -> Result<String, TestError> {
         let listener = TcpListener::bind("127.0.0.1:0")?;
         let base = format!("http://{}/", listener.local_addr()?);
+        let popped = format!("{base}{POPPED_PATH}");
         let _server = std::thread::spawn(move || {
             for stream in listener.incoming().flatten() {
                 let mut reader = BufReader::new(&stream);
                 let mut line = String::new();
-                // The request head, up to its blank line.
+                // The request line names the page; the rest of the head runs
+                // up to its blank line.
+                let _request = reader.read_line(&mut line);
+                let opener = line.starts_with(&format!("GET /{OPENER_PATH} "));
+                line.clear();
                 while reader.read_line(&mut line).is_ok_and(|read| read > 2) {
                     line.clear();
                 }
+                // The opener is one link, filling the page so a click
+                // anywhere on it follows the link, that names its window.
+                let link = if opener {
+                    format!(
+                        "<a href={popped:?} target={POPUP_TARGET:?} style=\"position:fixed;\
+                         inset:0\">Open the stage window</a>"
+                    )
+                } else {
+                    String::new()
+                };
                 let body = format!(
                     "<!doctype html><html><head><title>{PAGE_TITLE}</title></head>\
-                     <body><p>Hello from the stage.</p></body></html>"
+                     <body><p>Hello from the stage.</p>{link}</body></html>"
                 );
                 let mut writer = &stream;
                 let _written = write!(
@@ -646,6 +673,66 @@ mod test {
         window.get(Locator::role(Role::Document))
     }
 
+    /// **One browser window per page**: two presses of Content ▸ Web Browser
+    /// are two windows, each keeping the address typed into it; a page that
+    /// links to a window by name gets a third, keyed by that name; and closing
+    /// one window leaves the others' pages where they were.
+    #[test]
+    fn every_page_keeps_a_browser_window_of_its_own() -> Result<(), TestError> {
+        let base = serve_page()?;
+        stage("web_windows")
+            .web_media()
+            .run(async |stage: &Stage| {
+                let alpha = &stage.viewer("Alpha")?;
+                let browse = async |key: &str, path: &str| -> Result<UiLocator, BodyError> {
+                    let _opened = alpha
+                        .menu_path(&["menu-bar-content", "menu-bar-web-browser"])
+                        .await?;
+                    let window = alpha.ui().test_id(&format!("floater:web-browser#{key}"));
+                    let address = window.test_id("web-address:field");
+                    let wanted = format!("{base}{path}");
+                    let _typed = address.fill(&wanted).await?;
+                    address.press("Enter").await?;
+                    let _loaded = alpha
+                        .expect(&page(&window))
+                        .timeout(WAIT)
+                        .to_have_text(&wanted)
+                        .await?;
+                    Ok(window)
+                };
+                let first = browse("new-0", "first").await?;
+                let second = browse("new-1", OPENER_PATH).await?;
+                // A click on the page follows its link, which names a window.
+                let _followed = page(&second).click().await?;
+
+                let popup = alpha
+                    .ui()
+                    .test_id(&format!("floater:web-browser#target-{POPUP_TARGET}"));
+                let _popped = alpha
+                    .expect(&page(&popup))
+                    .timeout(WAIT)
+                    .to_have_text(&format!("{base}{POPPED_PATH}"))
+                    .await?;
+                let _first_kept = alpha
+                    .expect(&page(&first))
+                    .to_have_text(&format!("{base}first"))
+                    .await?;
+
+                let _closed = second.button_key("floater-chrome-close").click().await?;
+                let _gone = alpha.expect(&second).timeout(WAIT).to_be_detached().await?;
+                let _first_still = alpha
+                    .expect(&page(&first))
+                    .to_have_text(&format!("{base}first"))
+                    .await?;
+                let _popup_still = alpha
+                    .expect(&page(&popup))
+                    .to_have_text(&format!("{base}{POPPED_PATH}"))
+                    .await?;
+                Ok(())
+            })?;
+        Ok(())
+    }
+
     /// **Web pages load**: with web media on, an address typed into the web
     /// browser window loads that page, and the search window's web tab loads
     /// the grid's search page for a query.
@@ -657,7 +744,11 @@ mod test {
             .region(searching_region(&format!("{base}search"))?)
             .run(async |stage: &Stage| {
                 let alpha = &stage.viewer("Alpha")?;
-                let browser = alpha.open_floater("web-browser").await?;
+                // One window per page: the menu opens the first, keyed `new-0`.
+                let _opened = alpha
+                    .menu_path(&["menu-bar-content", "menu-bar-web-browser"])
+                    .await?;
+                let browser = alpha.ui().test_id("floater:web-browser#new-0");
                 let address = browser.test_id("web-address:field");
                 let wanted = format!("{base}browser");
                 let _typed = address.fill(&wanted).await?;

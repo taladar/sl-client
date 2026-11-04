@@ -2,10 +2,11 @@
 id: viewer-keyed-floater-audit
 title: Audit the other per-subject singletons onto the keyed-floater scaffold
 topic: viewer
-status: in-progress
+status: done
 origin: split out of [[viewer-profile-floater-single-instance]] when the
   keyed-instance scaffold landed (2026-09-06)
 refs: [viewer-profile-floater-single-instance, viewer-ui-floater-basic,
+  viewer-key-web-browser,
   viewer-social-group-profile, viewer-about-land-options-tab,
   viewer-about-landmark-floater, viewer-notecard-editor]
 ---
@@ -197,18 +198,27 @@ spawn instead of `DeferredFloaterContent`.
   profile — and comparing two parcels' covenants or two regions' settings is a
   real thing to want. That is a deliberate divergence from the reference, and
   this is where it is written down.
-- [[viewer-key-web-browser]] (`web_floater.rs`) — a decision before an
-  implementation: the browser is arguably tabs rather than windows, and the
-  reference's answer has to be read before either is built.
+- ~~[[viewer-key-web-browser]] (`web_floater.rs`, `"web-browser"`)~~ —
+  **done** (2026-11-04), as keyed windows rather than tabs, because that is
+  what the reference does. `LLFloaterWebContent` gives every page a fresh id,
+  so each opener gets a window of its own. Only a page's named `target` reuses
+  a window, and `WebContentWindowLimit` (5) closes the oldest. So the key is
+  the *target*: `new-<seq>` for a fresh window, `target-<name>` for a named
+  one. This is the first kind here whose key is not a subject at all. The
+  measured cost of a window is a renderer process per site (about 60–140 MiB),
+  shared between windows on the same site; a tab strip would cost the same.
+  A page's popup now opens through the same message with the page's target,
+  instead of replacing the page that asked for it. The other embedded views
+  still drop theirs ([[viewer-browser-view-popups-dropped]]).
 
 Not every floater should be keyed (Preferences, Search, the minimap, the
 inventory and the Conversations floater are singletons in the reference too),
 so this is an audit, not a sweep. A window that stays a singleton is a finding
 worth writing down here, not a no-op.
 
-Each window still to convert now has **its own task** (linked above), so they
-can be picked up and reviewed one at a time; this file stays the record of
-what was decided and what each conversion taught the scaffold.
+Every window on the list is converted or recorded as a singleton, so the
+audit is closed. Each conversion had its own task (linked above); this file
+stays the record of what was decided and what each one taught the scaffold.
 
 ## What the first conversion taught the scaffold
 

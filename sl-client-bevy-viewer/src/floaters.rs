@@ -493,7 +493,8 @@ pub const FLOATERS: &[FloaterElement] = &[
     FloaterElement {
         id: "web-browser",
         summary: "Web Browser: the navigation toolbar, the embedded browser view and the status \
-                  row — where a script's `llLoadURL` and a profile's web tab land.",
+                  row — where a script's `llLoadURL` and a profile's web tab land. One window per \
+                  page, as the reference opens them, so its geometry is not persisted.",
         spec: crate::web_floater::web_floater_spec,
         content: crate::web_floater::spawn_web_floater_specimen,
     },

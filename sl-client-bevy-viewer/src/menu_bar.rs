@@ -102,10 +102,6 @@ const REJECT_FRIENDSHIP_REQUESTS: &str = "reject-friendship-requests-on";
 /// check mark on the Avatar ▸ Experiences entry.
 const EXPERIENCES_OPEN: &str = "experiences-open";
 
-/// The condition key that holds while the web browser floater is open — drives
-/// the check mark on the Content ▸ Web Browser entry.
-const WEB_BROWSER_OPEN: &str = "web-browser-open";
-
 /// The condition key that holds while the Search floater is open — drives the
 /// check mark on the Content ▸ Search entry.
 const SEARCH_OPEN: &str = "search-open";
@@ -668,8 +664,9 @@ static CONTENT_MENU: MenuDef = MenuDef {
         ),
         MenuItemDef::Separator,
         MenuItemDef::Command(
-            MenuCommand::new("menu-bar-web-browser", "toggle-web-browser")
-                .checked_when(WEB_BROWSER_OPEN),
+            // Not a toggle: every press opens a browser window of its own on
+            // the home page, as the reference's does (`web_floater`).
+            MenuCommand::new("menu-bar-web-browser", "open-web-browser"),
         ),
     ],
 };
@@ -1074,6 +1071,8 @@ struct TopMenuOut<'w> {
     bulk_import: MessageWriter<'w, crate::bulk_import::StartWindlightBulkImport>,
     /// The flycam toggle.
     flycam: MessageWriter<'w, crate::world_api::ToggleFlycam>,
+    /// A new web browser window.
+    web_browser: MessageWriter<'w, crate::intents::OpenWebBrowser>,
 }
 
 /// Recompute the bar's live conditions each frame from the world.
@@ -1113,7 +1112,6 @@ fn update_top_menu_conditions(
     let about_open = open(crate::about_floater::ABOUT_FLOATER_ID);
     let inventory_open = open(crate::inventory::INVENTORY_FLOATER_ID);
     let conversations_open = open(crate::conversations::CONVERSATIONS_FLOATER_ID);
-    let web_browser_open = open(crate::web_floater::WEB_FLOATER_ID);
     let minimap_open = open(crate::minimap::MINIMAP_FLOATER_ID);
     let radar_open = open(crate::radar::RADAR_FLOATER_ID);
     let world_map_open = open(crate::world_map::WORLD_MAP_FLOATER_ID);
@@ -1143,9 +1141,6 @@ fn update_top_menu_conditions(
     }
     if conversations_open {
         wanted.push(CONVERSATIONS_OPEN);
-    }
-    if web_browser_open {
-        wanted.push(WEB_BROWSER_OPEN);
     }
     if minimap_open {
         wanted.push(MINIMAP_OPEN);
@@ -1389,6 +1384,7 @@ fn handle_top_menu_actions(
         mut quit,
         mut bulk_import,
         mut flycam,
+        mut web_browser,
     } = out;
     // Whether picking the environment already pinned reverts to the shared one
     // (`EnvironmentRepeatedTogglesShared`). Read once, before the loop, because
@@ -1491,8 +1487,8 @@ fn handle_top_menu_actions(
                 );
                 people_tabs.write(crate::people::OpenPeopleSubTab(sub_tab));
             }
-            "toggle-web-browser" => {
-                toggle_floater(&floaters, &mut panels, crate::web_floater::WEB_FLOATER_ID);
+            "open-web-browser" => {
+                web_browser.write(crate::intents::OpenWebBrowser::new_window(None));
             }
             "toggle-minimap" => {
                 toggle_floater(&floaters, &mut panels, crate::minimap::MINIMAP_FLOATER_ID);
@@ -1979,7 +1975,7 @@ mod tests {
             ("menu-bar-build".to_owned(), "link-objects"),
             ("menu-bar-build".to_owned(), "unlink-objects"),
             ("menu-bar-content".to_owned(), "toggle-search"),
-            ("menu-bar-content".to_owned(), "toggle-web-browser"),
+            ("menu-bar-content".to_owned(), "open-web-browser"),
             // The RLVa menu. Its toggle entries carry the *setting name* as
             // their action, which is what lets one dispatch arm serve all of
             // them (`is_rlv_setting`) — so the pinned names here are the

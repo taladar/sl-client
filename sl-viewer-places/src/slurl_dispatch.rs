@@ -429,9 +429,8 @@ fn request_parcel(
 /// ([`ExternalUrl`]) rather than handing the desktop a string.
 fn open_web(url: &str, trusted: bool, out: &mut DispatchOut) {
     if trusted {
-        out.browsers.write(OpenWebBrowser {
-            url: Some(url.to_owned()),
-        });
+        out.browsers
+            .write(OpenWebBrowser::new_window(Some(url.to_owned())));
     } else if let Ok(url) = ExternalUrl::parse(url)
         .inspect_err(|error| warn!("SLURL web link not opened in the system browser: {error}"))
     {

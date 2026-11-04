@@ -476,15 +476,39 @@ pub struct SurfaceStatus {
     pub network_diagnosable: bool,
     /// The cursor the page currently requests.
     pub cursor: CursorKind,
-    /// A URL the page asked to open in a new window (popups are suppressed;
-    /// the viewer decides whether to open it elsewhere). Cleared on read via
-    /// [`MediaSurface::take_popup_request`].
-    pub popup_request: Option<String>,
+    /// A page the page asked to open in another window (popups are
+    /// suppressed; the viewer decides whether to open it elsewhere). Cleared
+    /// on read via [`MediaSurface::take_popup_request`].
+    pub popup_request: Option<PopupRequest>,
     /// Whether the surface has been fully closed (its engine side is gone and
     /// the surface can be dropped).
     pub closed: bool,
     /// Time-based playback state ([`None`] on web surfaces).
     pub playback: Option<PlaybackStatus>,
+}
+
+/// A page's request to open a URL in another window — a `target=` link or a
+/// `window.open` — which the engine suppresses and hands to the viewer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PopupRequest {
+    /// The URL the page asked to open. The page's choice, so remote data: the
+    /// viewer validates it before anything navigates to it.
+    pub url: String,
+    /// The window the page named, so a second link to the same name lands in
+    /// the same window — or `None` for a fresh one (no name, or `_blank`).
+    pub target: Option<String>,
+}
+
+impl PopupRequest {
+    /// A request for `url` in the window the page called `target_frame` —
+    /// the engine's raw name, where empty and `_blank` both mean "a new
+    /// window" and are folded into `None`.
+    #[must_use]
+    pub fn new(url: String, target_frame: &str) -> Self {
+        let target = (!target_frame.is_empty() && !target_frame.eq_ignore_ascii_case("_blank"))
+            .then(|| target_frame.to_owned());
+        Self { url, target }
+    }
 }
 
 /// One offscreen media surface.
@@ -604,7 +628,7 @@ pub trait MediaSurface {
     /// Returns the current status snapshot (see [`SurfaceStatus`]).
     fn status(&self) -> SurfaceStatus;
     /// Takes (and clears) a pending popup-open request, if any.
-    fn take_popup_request(&self) -> Option<String>;
+    fn take_popup_request(&self) -> Option<PopupRequest>;
     /// Asks the engine to close the surface. The surface reports
     /// [`SurfaceStatus::closed`] once tear-down completed (which may require
     /// further [`MediaBackend::pump`] calls).

@@ -545,12 +545,40 @@ pub struct DispatchSlurl {
     pub url: String,
 }
 
-/// Open (and optionally navigate) the web browser floater.
+/// Open a page in a web browser window.
+///
+/// The reference's `LLWeb::loadURLInternal(url, target)`: every page opens in
+/// a window of its own unless it names one — a menu entry, a chat link and a
+/// script's `llLoadURL` each get a fresh window, while a page's
+/// `target="name"` link lands in that name's window every time.
 #[derive(Message, Debug, Clone)]
 pub struct OpenWebBrowser {
-    /// The URL to show; `None` keeps the current page (or the home page on
-    /// first open).
+    /// The URL to show; `None` opens the home page in a new window, or just
+    /// raises a named window that is already up.
     pub url: Option<String>,
+    /// Which window the page goes in.
+    pub target: WebTarget,
+}
+
+impl OpenWebBrowser {
+    /// `url` in a window of its own — what every opener but a page's named
+    /// link asks for.
+    #[must_use]
+    pub const fn new_window(url: Option<String>) -> Self {
+        Self {
+            url,
+            target: WebTarget::New,
+        }
+    }
+}
+
+/// Which web browser window a page opens in — the reference's link `target`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WebTarget {
+    /// A window of its own (no target, or `_blank`).
+    New,
+    /// The window the page called this name, opened if there is none yet.
+    Named(String),
 }
 
 /// A concrete teleport target, kept so the overlay's **Retry** button can

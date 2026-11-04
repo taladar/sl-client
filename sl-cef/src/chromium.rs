@@ -41,8 +41,8 @@ use cef::{
 
 use crate::{
     AudioSink, BackendConfig, CursorKind, FrameView, KeyInput, MediaBackend, MediaError,
-    MediaSurface, Modifiers, MouseButton, SharedCookie, SurfaceConfig, SurfaceStatus, SurfaceTrust,
-    ValidatedMediaUrl,
+    MediaSurface, Modifiers, MouseButton, PopupRequest, SharedCookie, SurfaceConfig, SurfaceStatus,
+    SurfaceTrust, ValidatedMediaUrl,
 };
 
 /// Whether the global CEF runtime was initialised in this process. CEF can
@@ -305,7 +305,7 @@ wrap_life_span_handler! {
             _frame: Option<&mut Frame>,
             _popup_id: c_int,
             target_url: Option<&CefString>,
-            _target_frame_name: Option<&CefString>,
+            target_frame_name: Option<&CefString>,
             _target_disposition: WindowOpenDisposition,
             _user_gesture: c_int,
             _popup_features: Option<&PopupFeatures>,
@@ -317,7 +317,8 @@ wrap_life_span_handler! {
         ) -> c_int {
             if let Some(url) = target_url {
                 let mut shared = self.shared.borrow_mut();
-                shared.status.popup_request = Some(url.to_string());
+                let target = target_frame_name.map(ToString::to_string).unwrap_or_default();
+                shared.status.popup_request = Some(PopupRequest::new(url.to_string(), &target));
                 shared.touch_status();
             }
             1
@@ -928,7 +929,7 @@ impl MediaSurface for CefMediaSurface {
         self.shared.borrow().status.clone()
     }
 
-    fn take_popup_request(&self) -> Option<String> {
+    fn take_popup_request(&self) -> Option<PopupRequest> {
         self.shared.borrow_mut().status.popup_request.take()
     }
 
