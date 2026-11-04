@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 337 |
 | blocked | 40 |
 | in-progress | 18 |
-| bugs | 41 |
-| done | 1478 |
+| bugs | 40 |
+| done | 1479 |
 | deferred | 30 |
 | wont-do | 24 |
 | **total** | **2097** |
@@ -1337,7 +1337,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (41)
+## bugs (40)
 
 ### protocol
 
@@ -1428,8 +1428,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-conformance-cancelled-case-leaves-its-prims`](bugs/test-conformance-cancelled-case-leaves-its-prims.md)
   — A conformance case cancelled by its timeout or a panic leaves its rezzed
   prims in the region
-- [`test-conformance-lsl-probes-teardown-unacked`](bugs/test-conformance-lsl-probes-teardown-unacked.md)
-  — The last derez and both logouts of an OpenSim probe run go unacknowledged
 - [`test-conformance-object-asset-format-fails-under-load`](bugs/test-conformance-object-asset-format-fails-under-load.md)
   — object_asset_format fails only in a full-workspace run, and fails early
 - [`test-conformance-upload-after-yengine-start-dropped`](bugs/test-conformance-upload-after-yengine-start-dropped.md)
@@ -1441,7 +1439,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1478)
+## done (1479)
 
 ### protocol
 
@@ -3992,6 +3990,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Chat whisper/shout range — [aditi] variant
 - [`test-conference-roster`](done/test-conference-roster-start-an-ad-hoc-conference-verify-it-is-distinct-from-a-1-1.md)
   — start an ad-hoc conference; verify it is distinct from a 1:1 (multi-pa
+- [`test-conformance-lsl-probes-teardown-unacked`](done/test-conformance-lsl-probes-teardown-unacked.md)
+  — The last derez and both logouts of an OpenSim probe run go unacknowledged
 - [`test-conformance-object-edit-click-action-opensim`](done/test-conformance-object-edit-click-action-opensim.md)
   — object-edit on OpenSim never sees the sit click action re-broadcast
 - [`test-conformance-script-compile-xengine-cold-start`](done/test-conformance-script-compile-xengine-cold-start.md)

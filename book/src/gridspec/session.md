@@ -190,6 +190,7 @@ the case records it and asserts only what does not vary.
 | `LogoutReply` to a settled logout | sent, every time, 0.17 s after the request (0.07 s from the region with neighbours) | **sent in 5 of 20** logouts made three seconds or more after arriving, within 3 ms; otherwise nothing | `FakeSl` sends it; `FakeOpensim` withholds it |
 | `LogoutReply` to a logout made as the region handshake completes | sent, 0.18 s | **never**: 0 of 15 made within two seconds of arriving | as above |
 | the `LogoutRequest`'s acknowledgement when no reply comes | — | none: the root circuit sends nothing at all after the request | `FakeOpensim` sends nothing either |
+| the acknowledgement of a request sent just before the logout (a `DeRezObject`) when no reply comes | — | **never sent**, though the request was carried out: the `KillObject` and the Trash item that answer a derez carry no acknowledgement, which waits for the next periodic flush, and the close discards it | the same: closing drops every acknowledgement owed |
 | `InventoryData` in the reply | settled: four item ids (on both accounts measured); early: one block holding the nil id | one block holding the nil id | one block holding the nil id, on both |
 | what the client does without a reply | — | resends the request unanswered, and reports `LoggedOut` at five seconds | the same against `FakeOpensim` |
 
@@ -204,6 +205,17 @@ of the arrival burst; later it is a matter of timing. The request's
 acknowledgement rides out with the reply or not at all, which is why a
 client that resends reliable packets sometimes logs the `LogoutRequest` as
 having exhausted its retransmissions just before its logout timeout fires.
+
+The same clearing takes every other acknowledgement OpenSim still owes.
+OpenSim sends those on a half-second flush (`ClientOutgoingPacketHandler`,
+`m_sendAcks`) or appended to an outgoing packet, and neither the
+`KillObject` nor the `UpdateCreateInventoryItem` a derez to the Trash
+answers with carried the derez's (measured 2026-11-04 by
+`sl-conformance`'s `lsl-probes` teardown, which derezzes its prims, waits
+for their removal and logs out milliseconds later). So a `DeRezObject`
+sent within half a second of the logout is carried out but never
+acknowledged, and the client logs it, too, as having exhausted its
+retransmissions.
 
 The close itself always happens, reply or no reply: OpenSim's log shows the
 agent removed and the presence logged out within the same second.

@@ -2,12 +2,36 @@
 id: test-conformance-lsl-probes-teardown-unacked
 title: The last derez and both logouts of an OpenSim probe run go unacknowledged
 topic: test
-status: bugs
+status: done
 origin: gridspec-lsl-runtime-errors (2026-10-27)
 refs: [gridspec-lsl-runtime-errors, test-conformance-cancelled-case-leaves-its-prims]
 ---
 
 Context: [context/test.md](../context/test.md).
+
+Resolved (2026-11-04): the grid's, written up in
+`book/src/gridspec/session.md` § Logout. Neither suspect held. The client
+reads its socket throughout, and the runner waits for the derez's
+`KillObject` before it logs out.
+
+Reproduced with five probes in one session (single-probe runs never showed
+it), with a temporary trace of every acknowledgement the client took in.
+The last one before the teardown covered an earlier packet. The derez's
+`KillObject` and its Trash item (`UpdateCreateInventoryItem`) arrived
+carrying none. The `LogoutRequest` followed 2 ms later. OpenSim's close
+clears every acknowledgement it still owes along with the reply, so a derez
+whose acknowledgement had not yet gone out on OpenSim's half-second flush
+is carried out and never acknowledged.
+
+Both logouts going unanswered is the race already measured in
+[[protocol-logout-reply-sometimes-missing-on-opensim]]. In these runs the
+second avatar's reply did come, within 2 ms of its request; it was logged
+just after the first avatar's five-second timeout, which made it look late.
+The fake OpenSim already drops owed acknowledgements on close.
+
+Nothing to change in the harness. Waiting half a second before a logout
+would save the derez's acknowledgement, but the logout's own warnings
+would stay.
 
 ## Observation
 
