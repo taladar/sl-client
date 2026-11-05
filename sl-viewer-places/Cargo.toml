@@ -21,11 +21,14 @@ bevy = { version = "0.19.0" }
 # crate names the CSS engine directly. Already in the closure through
 # sl-viewer-ui-core; the package set is unchanged.
 bevy_flair = { version = "0.8.0" }
+fs-err = { workspace = true }
 sl-automation-proto = { workspace = true }
 sl-client-bevy = { workspace = true, features = [
   "bevy_pbr",
 ] }
+sl-material = { workspace = true }
 sl-notecard = { path = "../sl-notecard", version = "0.1.0" }
+sl-settings = { workspace = true }
 sl-types = { workspace = true }
 sl-viewer-environment = { workspace = true }
 sl-viewer-intents = { workspace = true }
@@ -35,11 +38,13 @@ sl-viewer-notices = { workspace = true }
 sl-viewer-notifications = { workspace = true }
 sl-viewer-pickers = { workspace = true }
 sl-viewer-platform = { workspace = true }
+sl-viewer-settings = { workspace = true }
 sl-viewer-social = { workspace = true }
 sl-viewer-ui-core = { workspace = true }
 sl-viewer-ui-sounds = { workspace = true }
 sl-viewer-ui-widgets = { workspace = true }
 sl-viewer-world-api = { workspace = true }
+sl-viewer-world-objects = { workspace = true }
 url = { workspace = true }
 
 [dev-dependencies]

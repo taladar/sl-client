@@ -14,9 +14,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ideas | 129 |
 | ready | 333 |
 | blocked | 39 |
-| in-progress | 16 |
+| in-progress | 15 |
 | bugs | 38 |
-| done | 1490 |
+| done | 1491 |
 | deferred | 30 |
 | wont-do | 24 |
 | **total** | **2099** |
@@ -1275,7 +1275,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-voice`](blocked/gridspec-voice.md) — Voice provisioning and
   signalling on each grid (blocked by `viewer-voice-audio`)
 
-## in-progress (16)
+## in-progress (15)
 
 ### viewer
 
@@ -1296,9 +1296,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Real-time mirrors (hero probes)
 - [`viewer-region-options-estate`](in-progress/viewer-region-options-estate.md)
   — Region / Estate floater — estate tab (blocked by
-  `viewer-region-options-debug` (done))
-- [`viewer-region-options-terrain`](in-progress/viewer-region-options-terrain.md)
-  — Region / Estate floater — terrain tab (blocked by
   `viewer-region-options-debug` (done))
 - [`viewer-render-context-matrix`](in-progress/viewer-render-context-matrix.md)
   — Render context matrix — subjects × eye, time of day, mirror, layering
@@ -1421,7 +1418,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1490)
+## done (1491)
 
 ### protocol
 
@@ -3179,6 +3176,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (done))
 - [`viewer-region-options-general`](done/viewer-region-options-general.md) —
   Region / Estate floater — region (general) tab (blocked by
+  `viewer-region-options-debug` (done))
+- [`viewer-region-options-terrain`](done/viewer-region-options-terrain.md) —
+  Region / Estate floater — terrain tab (blocked by
   `viewer-region-options-debug` (done))
 - [`viewer-region-push-discards-pending-edits`](done/viewer-region-push-discards-pending-edits.md)
   — A region push throws away the estate manager's unapplied edits

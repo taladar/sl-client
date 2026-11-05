@@ -174,6 +174,20 @@ the agent's).
   not ask for yet (`viewer-terraform-parcel-refusal`).
 - Undo sends `UndoLand` and expects nothing: on OpenSim nothing comes, and the
   viewer draws whatever patches arrive.
+- The About Region Terrain tab's **Download / Upload RAW terrain…** and
+  **Bake Terrain** are greyed for anyone but the region's owner or a god, as
+  in the reference. A RAW transfer names only the picked file's own name to
+  the grid (OpenSim picks its loader from the extension), never the local
+  directory; Bake and an Apply whose elevation ranges are inverted ask first
+  (`ConfirmBakeTerrain`, `ConfirmTextureHeights`), and nothing is sent if the
+  agent left the region while the chooser or the question was up.
+- The tab tells a region on PBR materials from one on textures the
+  reference's way — any detail id that decodes as a texture means textures,
+  else any that decodes as a material means materials — and shows the material
+  swatches and their transforms for the first. Apply refuses a texture that is
+  not opaque RGB(A) or is over 2048 px, and a material that has not loaded, is
+  double-sided or is blended. The transforms ride `ModifyRegion`, so on
+  OpenSim, which grants none, they are shown but not written.
 - `Command::RequestTerrainMaterialOverrides` and
   `Command::SetTerrainMaterialOverrides` read and write the overrides; a
   refusal arrives with the grid's reason. Drawing them is `viewer-pbr-terrain`.

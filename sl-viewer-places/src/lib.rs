@@ -2,7 +2,9 @@
 //!
 //! [`about_land`] is the parcel floater -- ownership, access, media, sale and
 //! the options a parcel owner sets. [`about_region`] is its region and estate
-//! counterpart, down to the terrain textures and the estate manager list.
+//! counterpart, down to the terrain textures and the estate manager list;
+//! [`region_terrain_actions`] carries its Terrain tab's file transfers and
+//! confirmations to the wire.
 //! [`about_landmark`] is the small one: a landmark item's destination, and the
 //! teleport to it. [`telehub`] hangs off [`about_region`]: the region's telehub
 //! object and the spawn points arriving teleports are placed on, and so does
@@ -62,6 +64,7 @@ pub mod about_landmark;
 pub mod about_region;
 mod edit_fields;
 mod name_revisions;
+pub mod region_terrain_actions;
 pub mod slurl_dispatch;
 mod specimen;
 pub mod telehub;

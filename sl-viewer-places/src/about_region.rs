@@ -90,6 +90,21 @@
 //! `setregiondebug` toggles, the terrain `setregionterrain` fields) are shown as
 //! **permanently disabled** controls reflecting the grid's value, not as prose.
 //!
+//! # The Terrain tab's owner actions
+//!
+//! **Download RAW terrain…**, **Upload RAW terrain…** and **Bake Terrain** are
+//! the region **owner's** (or a god's), not an estate manager's — the
+//! reference's `owner_or_god` — so they carry their own gate
+//! (`OwnerOnlyButton`, `AboutRegionState::owner_or_god`) beside the managers'
+//! one. They, and the terrain **Apply**, wait on a file chooser or a
+//! confirmation, so this floater only asks and
+//! [`crate::region_terrain_actions`] carries each one to the wire.
+//!
+//! The tab's **PBR-material variant** — the "PBR Metallic Roughness" switch,
+//! the material swatches, the `ModifyRegion` transforms, and the texture and
+//! material checks Apply makes before anything is sent — is the
+//! `terrain_pbr` child module.
+//!
 //! # The windows this one opens
 //!
 //! The Region tab's **Manage Telehub…** opens [`crate::telehub`], the estate
@@ -120,10 +135,24 @@ use sl_client_bevy::{
     EstateAccessKind, EstateAccessLists, EstateBan, EstateCovenant, EstateInfo, EstateInfoUpdate,
     ExperienceInfo, ExperienceKey, GroupKey, LandArea, LandStatReportType, Maturity, OwnerKey,
     ProductType, RegionDebugUpdate, RegionFlags, RegionIdentity, RegionInfoUpdate, RegionName,
-    RegionTerrainUpdate, SlCapabilities, SlCommand, SlCurrentRegion, SlEvent, SlRegionIdentity,
-    SlRegionLimits, SlSessionEvent, TextureKey, Uuid,
+    RegionTerrainUpdate, SlCapabilities, SlCommand, SlCurrentRegion, SlEvent, SlIdentity,
+    SlRegionIdentity, SlRegionLimits, SlSessionEvent, TextureKey, Uuid,
 };
 use sl_viewer_notices::experience_profile::{OpenExperienceProfile, maturity_key};
+use sl_viewer_notices::god_mode::AgentGodLevel;
+
+mod terrain_pbr;
+
+use terrain_pbr::{
+    ModifyRegionSupport, PbrHandles, TerrainChecks, TerrainPbr, apply_material_picks,
+    build_caption_row, build_material_swatch, build_terrain_sub_tabs, build_transforms,
+    ingest_modify_region_capability, ingest_terrain_overrides, read_transform_fields,
+    request_terrain_overrides, resolve_terrain_kind, sync_terrain_pbr_controls,
+};
+
+use crate::region_terrain_actions::{
+    RegionTerrainActionsPlugin, RegionTerrainRequest, TerrainRequest,
+};
 
 use crate::notifications::ShowNotification;
 
@@ -434,12 +463,20 @@ struct AboutRegionState {
     /// Whether the agent may manage the estate (owner or manager) **and** this
     /// window is current; gates editing.
     can_manage: bool,
+    /// Whether the agent **owns** the region or is a god, **and** this window is
+    /// current; gates the terrain actions the reference keeps from estate
+    /// managers (Download / Upload RAW and Bake Terrain, `owner_or_god` in
+    /// `LLPanelRegionTerrainInfo::refreshFromRegion`).
+    owner_or_god: bool,
     /// The editable region-settings draft, seeded from the live region.
     draft: RegionInfoUpdate,
     /// The editable region-debug draft (disable scripts / collisions / physics).
     debug_draft: RegionDebugUpdate,
     /// The editable region-terrain draft (water / limits / textures / elevation).
     terrain_draft: RegionTerrainUpdate,
+    /// The Terrain tab's PBR-material variant: which set of assets the detail
+    /// slots hold, the material set, and the materials' transforms.
+    terrain_pbr: TerrainPbr,
     /// The editable estate-flags draft (access / limit / voice / teleport bits).
     estate_draft: RegionFlags,
     /// The three records the drafts were last seeded or merged from — the
@@ -778,6 +815,9 @@ struct AboutRegionDirty {
     debug_values: bool,
     /// The Terrain tab's values need refreshing.
     terrain_values: bool,
+    /// The Terrain tab's PBR variant — which swatches show, the checkbox, the
+    /// material swatches — needs refreshing.
+    terrain_pbr: bool,
     /// The Estate tab's values need refreshing.
     estate_values: bool,
     /// The Covenant tab's values need refreshing.
@@ -799,6 +839,7 @@ impl AboutRegionDirty {
         self.region_values = true;
         self.debug_values = true;
         self.terrain_values = true;
+        self.terrain_pbr = true;
         self.estate_values = true;
         self.covenant_values = true;
         self.controls = true;
@@ -951,6 +992,8 @@ struct TerrainHandles {
     start_fields: [Option<Entity>; 4],
     /// The four per-corner blend-range edit fields (slot order 00, 01, 10, 11).
     range_fields: [Option<Entity>; 4],
+    /// The PBR variant's checkbox, captions, material swatches and transforms.
+    pbr: PbrHandles,
 }
 
 /// The Estate tab's handles.
@@ -1242,6 +1285,13 @@ fn ingest_dispatch_capability(
 #[derive(Component, Debug, Clone, Copy)]
 struct WriteButton;
 
+/// A marker on the write buttons only the region's **owner** (or a god) may
+/// press — the terrain RAW transfers and Bake Terrain. An estate manager sees
+/// them greyed, as in the reference ("Available only to estate owners, not
+/// managers").
+#[derive(Component, Debug, Clone, Copy)]
+struct OwnerOnlyButton;
+
 /// A per-row access Remove button: which list it targets and the pooled table
 /// row it sits in (so a press resolves the current entry via the table view).
 #[derive(Component, Debug, Clone, Copy)]
@@ -1427,11 +1477,16 @@ enum AboutRegionAction {
     Apply,
     /// Commit the region-debug draft via [`Command::SetRegionDebug`].
     ApplyDebug,
-    /// Commit the region-terrain draft via [`Command::SetRegionTerrain`].
+    /// Commit the region-terrain draft via [`Command::SetRegionTerrain`], once
+    /// its elevation ranges pass ([`crate::region_terrain_actions`]).
     ApplyTerrain,
     /// Bake the region's current heightmap as its revert baseline via
-    /// [`Command::BakeRegionTerrain`].
+    /// [`Command::BakeRegionTerrain`], once the user confirms.
     BakeTerrain,
+    /// Save the region's heightmap to a RAW file the user names.
+    DownloadRawTerrain,
+    /// Replace the region's heightmap with a RAW file the user picks.
+    UploadRawTerrain,
     /// Commit the estate-flags draft via [`Command::SetEstateInfo`].
     ApplyEstate,
     /// Open the avatar picker to teleport one resident home.
@@ -1464,6 +1519,18 @@ enum AboutRegionAction {
     TopColliders,
     /// Open the Top Objects window on the region's top-scripts report.
     TopScripts,
+}
+
+impl AboutRegionAction {
+    /// Whether only the region's owner or a god may take this action — the
+    /// terrain RAW transfers and Bake, which the reference keeps from estate
+    /// managers.
+    const fn is_owner_only(self) -> bool {
+        matches!(
+            self,
+            Self::BakeTerrain | Self::DownloadRawTerrain | Self::UploadRawTerrain
+        )
+    }
 }
 
 /// A marker on a terrain texture-swatch button carrying which detail slot it
@@ -1500,12 +1567,21 @@ impl Plugin for AboutRegionPlugin {
         if !app.is_plugin_added::<TopObjectsPlugin>() {
             app.add_plugins(TopObjectsPlugin);
         }
+        if !app.is_plugin_added::<RegionTerrainActionsPlugin>() {
+            app.add_plugins(RegionTerrainActionsPlugin);
+        }
         app.add_message::<OpenAboutRegion>()
             .add_message::<SlCapabilities>()
             .init_resource::<RegionDispatchSupport>()
+            .init_resource::<ModifyRegionSupport>()
+            .add_message::<crate::world_api::BoostTexture>()
+            .add_message::<TexturePicked>()
             // Every capability map is folded in, window or no window: the
             // first comes at login, long before anybody opens the floater.
-            .add_systems(Update, ingest_dispatch_capability)
+            .add_systems(
+                Update,
+                (ingest_dispatch_capability, ingest_modify_region_capability),
+            )
             .add_systems(
                 Update,
                 // After the manager's command pass — see `FloaterSystems`: the
@@ -1562,6 +1638,23 @@ impl Plugin for AboutRegionPlugin {
                 )
                     .chain()
                     .after(ingest_about_region_events)
+                    .after(refresh_on_region)
+                    .before(layout_virtual_lists)
+                    .run_if(any_with_component::<AboutRegionState>),
+            )
+            // The Terrain tab's PBR variant: which kind the region's detail
+            // assets are, the material picks, the `ModifyRegion` overrides and
+            // the controls that show them.
+            .add_systems(
+                Update,
+                (
+                    resolve_terrain_kind,
+                    apply_material_picks,
+                    request_terrain_overrides,
+                    ingest_terrain_overrides,
+                    sync_terrain_pbr_controls,
+                )
+                    .chain()
                     .after(refresh_on_region)
                     .before(layout_virtual_lists)
                     .run_if(any_with_component::<AboutRegionState>),
@@ -2074,7 +2167,11 @@ fn build_terrain_tab(commands: &mut Commands, panel: Entity, font_size: f32) -> 
         font_size,
     ));
 
-    spawn_section_label(commands, panel, "about-region-terrain-textures", font_size);
+    build_caption_row(commands, panel, &mut handles, font_size);
+    // The four slots side by side, each captioned above its swatch, as the
+    // reference lays them out — stacked, they push the sub-tabs out of the
+    // window.
+    let slots_row = spawn_row(commands, panel);
     for (index, key) in [
         "about-region-terrain-tex-1",
         "about-region-terrain-tex-2",
@@ -2084,13 +2181,41 @@ fn build_terrain_tab(commands: &mut Commands, panel: Entity, font_size: f32) -> 
     .into_iter()
     .enumerate()
     {
-        let row_entity = spawn_labeled_row(commands, panel, key, font_size);
+        let row_entity = commands
+            .spawn((
+                Node {
+                    flex_direction: FlexDirection::Column,
+                    row_gap: Val::Px(4.0),
+                    ..Default::default()
+                },
+                ChildOf(slots_row),
+            ))
+            .id();
+        spawn_section_label(commands, row_entity, key, font_size);
         if let Some(slot) = handles.textures.get_mut(index) {
             *slot = Some(spawn_detail_swatch(commands, row_entity, index));
         }
+        build_material_swatch(commands, row_entity, index, &mut handles);
+        // The caption above is not a row label, so the swatch is called what
+        // it says (the material swatch names itself the same way).
+        if let Some(swatch) = handles.textures.get(index).copied().flatten() {
+            commands
+                .entity(swatch)
+                .insert(Semantic::new(Role::Button).name_key(key));
+        }
     }
 
-    spawn_section_label(commands, panel, "about-region-terrain-elevation", font_size);
+    // Elevation and, on materials, Transforms share one sub-tab strip, as the
+    // reference's `terrain_tabs` do — stacked, the two sections no longer fit
+    // the window.
+    let sub_tabs = build_terrain_sub_tabs(commands, panel, &mut handles, font_size);
+    let elevation = sub_tabs.first().copied().unwrap_or(panel);
+    spawn_section_label(
+        commands,
+        elevation,
+        "about-region-terrain-elevation",
+        font_size,
+    );
     for (index, keys) in [
         ("about-region-corner-sw-low", "about-region-corner-sw-high"),
         ("about-region-corner-se-low", "about-region-corner-se-high"),
@@ -2101,7 +2226,7 @@ fn build_terrain_tab(commands: &mut Commands, panel: Entity, font_size: f32) -> 
     .enumerate()
     {
         let (low_key, high_key) = keys;
-        let row_entity = spawn_row(commands, panel);
+        let row_entity = spawn_row(commands, elevation);
         spawn_key_label(commands, row_entity, low_key, DIM_LABEL_COLOR, font_size);
         let low = spawn_terrain_field(
             commands,
@@ -2134,6 +2259,8 @@ fn build_terrain_tab(commands: &mut Commands, panel: Entity, font_size: f32) -> 
             *slot = Some(high);
         }
     }
+    let transforms = sub_tabs.get(1).copied().unwrap_or(panel);
+    build_transforms(commands, transforms, &mut handles, font_size);
     spawn_row_action_button(
         commands,
         panel,
@@ -2142,17 +2269,34 @@ fn build_terrain_tab(commands: &mut Commands, panel: Entity, font_size: f32) -> 
         7,
         font_size,
     );
-    // Bake: the current heightmap becomes the region's revert baseline, which
-    // is what the Land tool's Revert brush restores to. It commits nothing from
-    // the draft above, so it is its own button rather than part of Apply.
-    spawn_row_action_button(
-        commands,
-        panel,
-        "about-region-terrain-bake",
-        AboutRegionAction::BakeTerrain,
-        8,
-        font_size,
-    );
+    // The owner's three, in the reference's order: the heightmap to a file,
+    // from a file, and Bake — the current heightmap becomes the region's revert
+    // baseline, which is what the Land tool's Revert brush restores to. None of
+    // them commits anything from the draft above, so they are buttons of their
+    // own rather than part of Apply.
+    let owner_row = spawn_row(commands, panel);
+    for (label_key, action, tab_index) in [
+        (
+            "about-region-terrain-download-raw",
+            AboutRegionAction::DownloadRawTerrain,
+            8,
+        ),
+        (
+            "about-region-terrain-upload-raw",
+            AboutRegionAction::UploadRawTerrain,
+            9,
+        ),
+        (
+            "about-region-terrain-bake",
+            AboutRegionAction::BakeTerrain,
+            10,
+        ),
+    ] {
+        let button = spawn_action_button(
+            commands, owner_row, label_key, action, tab_index, false, font_size,
+        );
+        commands.entity(button).insert(OwnerOnlyButton);
+    }
     handles
 }
 
@@ -2887,8 +3031,15 @@ fn request_name(agent: AgentKey, commands: &mut MessageWriter<SlCommand>) {
 fn refresh_on_region(
     mut windows: Query<(&mut AboutRegionState, &mut AboutRegionDirty)>,
     regions: Query<(Ref<SlRegionIdentity>, Option<Ref<SlRegionLimits>>), With<SlCurrentRegion>>,
+    agent: AgentRights,
     mut commands: MessageWriter<SlCommand>,
 ) {
+    // A god grant moves the owner-only rights without any region record
+    // arriving, so it counts as a change of its own.
+    let god_changed = agent
+        .god_level
+        .as_ref()
+        .is_some_and(DetectChanges::is_changed);
     let current = regions.iter().next();
     let current_region = current
         .as_ref()
@@ -2899,6 +3050,7 @@ fn refresh_on_region(
             state.is_current = is_current;
             if !is_current {
                 state.can_manage = false;
+                state.owner_or_god = false;
             }
             // Re-arm the experiences GET: a window walked back into asks again,
             // since the lists may have moved while it was frozen.
@@ -2914,13 +3066,15 @@ fn refresh_on_region(
         let Some((identity, limits)) = current.as_ref() else {
             continue;
         };
-        let changed =
-            identity.is_changed() || limits.as_ref().is_some_and(|limits| limits.is_changed());
+        let changed = identity.is_changed()
+            || limits.as_ref().is_some_and(|limits| limits.is_changed())
+            || god_changed;
         if !changed && state.seeded.is_some() {
             continue;
         }
         state.identity = Some(identity.0.clone());
         state.can_manage = identity.0.is_estate_manager;
+        state.owner_or_god = agent.owns_or_rules(&identity.0);
         // `FieldSeed::All` only where there was no form to protect: the first
         // record a window ever reads, and the one a re-open asked for.
         let seed = if state.seeded.is_some() {
@@ -2936,6 +3090,33 @@ fn refresh_on_region(
         // snapshot, which moved even when no draft field did, and the rights may
         // have changed with it.
         dirty.mark_all(seed);
+    }
+}
+
+/// Who the agent is, for the rights only a region's owner or a god has: its id
+/// and its god level, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam).
+#[derive(bevy::ecs::system::SystemParam)]
+struct AgentRights<'w> {
+    /// The agent's identity, for its id.
+    identity: Option<Res<'w, SlIdentity>>,
+    /// The god level the simulator last granted.
+    god_level: Option<Res<'w, AgentGodLevel>>,
+}
+
+impl AgentRights<'_> {
+    /// Whether the agent owns `region` or is a god — the reference's
+    /// `owner_or_god` (`gAgent.isGodlike() || region->getOwner() ==
+    /// gAgent.getID()`).
+    fn owns_or_rules(&self, region: &RegionIdentity) -> bool {
+        let is_god = self.god_level.as_ref().is_some_and(|level| level.0 > 0);
+        let is_owner = !region.sim_owner.is_nil()
+            && self
+                .identity
+                .as_ref()
+                .and_then(|identity| identity.agent_id)
+                .is_some_and(|agent| agent == AgentKey::from(region.sim_owner));
+        is_god || is_owner
     }
 }
 
@@ -3193,6 +3374,8 @@ fn set_swatch(swatches: &mut Query<&mut TextureSwatchValue>, node: Option<Entity
 struct RegionEnableGates<'w, 's> {
     /// The buttons that write to the region.
     write_buttons: Query<'w, 's, Entity, With<WriteButton>>,
+    /// The terrain buttons only the region's owner or a god may press.
+    owner_only: Query<'w, 's, Entity, With<OwnerOnlyButton>>,
     /// The nodes an edit gate greys.
     gated: Query<'w, 's, Entity, With<EditGate>>,
     /// Which of them already carry the disabled marker.
@@ -3221,6 +3404,19 @@ struct AccessNames<'a> {
     bans: Option<(&'a BTreeMap<Uuid, EstateBan>, &'a str)>,
 }
 
+/// What an About Region action reads besides its window — the edit fields, the
+/// current region and the stores the terrain Apply checks — bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam).
+#[derive(bevy::ecs::system::SystemParam)]
+struct RegionActionInputs<'w, 's> {
+    /// The text fields Apply reads.
+    fields: Query<'w, 's, &'static EditableText>,
+    /// The current region, which an action applies to.
+    regions: Query<'w, 's, &'static SlRegionIdentity, With<SlCurrentRegion>>,
+    /// The stores the terrain Apply checks its textures and materials against.
+    checks: TerrainChecks<'w>,
+}
+
 /// The four pickers and two reports an About Region action opens, bundled as one
 /// [`SystemParam`](bevy::ecs::system::SystemParam).
 #[derive(bevy::ecs::system::SystemParam)]
@@ -3239,6 +3435,8 @@ struct RegionActionOut<'w> {
     reports: MessageWriter<'w, OpenTopObjects>,
     /// The notice an Apply raises when it changes the region's rating.
     notifications: MessageWriter<'w, ShowNotification>,
+    /// The Terrain tab's checked, confirmed and file-backed actions.
+    terrain: MessageWriter<'w, RegionTerrainRequest>,
 }
 
 /// Grey each window's write buttons and every editable control to follow the
@@ -3268,41 +3466,56 @@ fn update_control_enable(
 ) {
     let RegionEnableGates {
         write_buttons,
+        owner_only,
         gated,
         disabled,
         needs_dispatch,
         dispatch,
         checks,
     } = gates;
-    // The windows repainting this frame, and what each one allows.
-    let mut repainting: Vec<(Entity, bool)> = Vec::new();
+    // The windows repainting this frame, and what each one allows: estate
+    // management, and the owner-only terrain actions.
+    let mut repainting: Vec<(Entity, bool, bool)> = Vec::new();
     for (window, mut dirty, state) in &mut windows {
         if !dirty.controls {
             continue;
         }
         dirty.controls = false;
-        repainting.push((window, state.can_manage));
+        repainting.push((window, state.can_manage, state.owner_or_god));
     }
     if repainting.is_empty() {
         return;
     }
-    let can_manage = |entity: Entity| {
+    let rights = |entity: Entity| {
         let hosting = host.of(entity)?;
         repainting
             .iter()
-            .find_map(|(window, can_manage)| (*window == hosting).then_some(*can_manage))
+            .find_map(|(window, can_manage, owner_or_god)| {
+                (*window == hosting).then_some((*can_manage, *owner_or_god))
+            })
     };
-    for entity in write_buttons.iter().chain(gated.iter()) {
-        let Some(can_manage) = can_manage(entity) else {
-            continue;
-        };
-        let can_manage = can_manage && (dispatch.supported || !needs_dispatch.contains(entity));
+    let mut set_enabled = |entity: Entity, enabled: bool| {
         let is_disabled = disabled.contains(entity);
-        if can_manage && is_disabled {
+        if enabled && is_disabled {
             commands.entity(entity).remove::<InteractionDisabled>();
-        } else if !can_manage && !is_disabled {
+        } else if !enabled && !is_disabled {
             commands.entity(entity).insert(InteractionDisabled);
         }
+    };
+    for entity in write_buttons.iter().chain(gated.iter()) {
+        let Some((can_manage, _owner_or_god)) = rights(entity) else {
+            continue;
+        };
+        set_enabled(
+            entity,
+            can_manage && (dispatch.supported || !needs_dispatch.contains(entity)),
+        );
+    }
+    for entity in &owner_only {
+        let Some((_can_manage, owner_or_god)) = rights(entity) else {
+            continue;
+        };
+        set_enabled(entity, owner_or_god);
     }
     // The marker above is the whole of it now: `.sk-button:disabled .sk-text`
     // greys the caption, so nothing here walks a button's children to repaint
@@ -3313,7 +3526,7 @@ fn update_control_enable(
         let Some(hosting) = host.of(entity) else {
             continue;
         };
-        if !repainting.iter().any(|(window, _)| *window == hosting) {
+        if !repainting.iter().any(|(window, ..)| *window == hosting) {
             continue;
         }
         let Ok((_window, _dirty, state)) = windows.get(hosting) else {
@@ -4312,17 +4525,20 @@ fn on_about_region_check(
     check.kind.toggle(&mut state);
 }
 
-/// Dispatch a floater action-button press.
 /// Dispatch a floater action-button press, in the window it was pressed in.
 fn on_about_region_action(
     press: On<Pointer<Press>>,
     actions: Query<&AboutRegionAction>,
     mut windows: Query<(&mut AboutRegionState, &AboutRegionUi)>,
     host: FloaterHost,
-    fields: Query<&EditableText>,
-    regions: Query<&SlRegionIdentity, With<SlCurrentRegion>>,
+    inputs: RegionActionInputs,
     out: RegionActionOut,
 ) {
+    let RegionActionInputs {
+        fields,
+        regions,
+        checks,
+    } = inputs;
     let RegionActionOut {
         mut sl_commands,
         mut pickers,
@@ -4331,6 +4547,7 @@ fn on_about_region_action(
         mut telehubs,
         mut reports,
         mut notifications,
+        mut terrain,
     } = out;
     if press.button != PointerButton::Primary {
         return;
@@ -4346,7 +4563,12 @@ fn on_about_region_action(
     };
     // A window whose region the agent has left has no rights: every write here
     // goes out on the current circuit (see the module header).
-    if !state.can_manage {
+    let allowed = if action.is_owner_only() {
+        state.owner_or_god
+    } else {
+        state.can_manage
+    };
+    if !allowed {
         return;
     }
     let read = |entity: Option<Entity>| {
@@ -4384,18 +4606,49 @@ fn on_about_region_action(
             sl_commands.write(SlCommand(Command::SetRegionDebug(state.debug_draft)));
             sl_commands.write(SlCommand(Command::RequestRegionInfo));
         }
+        // The four terrain actions ask; `region_terrain_actions` carries each
+        // through its check, confirmation or file chooser, and sends it only if
+        // the agent is still in this window's region by then.
+        // Checked first, as the reference's `sendUpdate` does: a texture or
+        // material the terrain cannot draw stops the whole Apply.
         AboutRegionAction::ApplyTerrain => {
             read_terrain_fields(&mut state, ui, &read);
-            sl_commands.write(SlCommand(Command::SetRegionTerrain(
-                state.terrain_draft.clone(),
-            )));
+            read_transform_fields(&mut state, ui, &read);
+            match checks.prepare_apply(&state) {
+                Ok((update, overrides)) => {
+                    terrain.write(RegionTerrainRequest {
+                        region: state.region,
+                        request: TerrainRequest::apply(update, overrides),
+                    });
+                }
+                Err(notices) => {
+                    for notice in notices {
+                        notifications.write(notice);
+                    }
+                }
+            }
         }
         // The reference's estate `Bake Terrain`: make the ground as it stands
         // now the baseline a Revert brush restores to. Region-wide and
         // unconfirmed by the simulator -- there is no reply to wait for -- so
         // nothing is re-requested after it.
         AboutRegionAction::BakeTerrain => {
-            sl_commands.write(SlCommand(Command::BakeRegionTerrain));
+            terrain.write(RegionTerrainRequest {
+                region: state.region,
+                request: TerrainRequest::Bake,
+            });
+        }
+        AboutRegionAction::DownloadRawTerrain => {
+            terrain.write(RegionTerrainRequest {
+                region: state.region,
+                request: TerrainRequest::DownloadRaw,
+            });
+        }
+        AboutRegionAction::UploadRawTerrain => {
+            terrain.write(RegionTerrainRequest {
+                region: state.region,
+                request: TerrainRequest::UploadRaw,
+            });
         }
         AboutRegionAction::ApplyEstate => {
             let Some(estate) = &state.estate else {
@@ -5832,7 +6085,7 @@ mod tests {
     mod instances {
         use super::super::{
             AboutRegionAction, AboutRegionPlugin, AboutRegionState, AboutRegionUi, OpenAboutRegion,
-            WriteButton, region_key,
+            OwnerOnlyButton, WriteButton, region_key,
         };
         use crate::floater::{Floater, FloaterCommand, FloaterOp, FloaterPlugin};
         use crate::intents::GroupPicked;
@@ -5843,11 +6096,13 @@ mod tests {
         use bevy::text::EditableText;
         use bevy::ui::InteractionDisabled;
         use pretty_assertions::assert_eq;
+        use sl_client_bevy::AgentKey;
         use sl_client_bevy::{
             Command, EstateAccessDelta, GridCoordinates, GroupKey, Maturity, OwnerKey, ProductType,
             RegionHandle, RegionIdentity, RegionName, RegionTerrainComposition, SlCommand,
             SlCurrentRegion, SlEvent, SlRegionIdentity, Uuid,
         };
+        use sl_viewer_notices::god_mode::AgentGodLevel;
 
         /// A boxed error so tests use `?` rather than the disallowed
         /// `unwrap` / `expect`.
@@ -6164,6 +6419,75 @@ mod tests {
             assert_eq!(
                 live.first().map(|(_window, id, _current)| *id),
                 Some(second.region_id)
+            );
+            Ok(())
+        }
+
+        /// Whether each owner-only terrain button (RAW download / upload, Bake)
+        /// is greyed, in action order.
+        fn owner_buttons_greyed(app: &mut App) -> Vec<(AboutRegionAction, bool)> {
+            let mut buttons: Vec<(AboutRegionAction, bool)> = app
+                .world_mut()
+                .query_filtered::<(&AboutRegionAction, Has<InteractionDisabled>), With<OwnerOnlyButton>>()
+                .iter(app.world())
+                .map(|(action, greyed)| (*action, greyed))
+                .collect();
+            buttons.sort_by_key(|(action, _greyed)| format!("{action:?}"));
+            buttons
+        }
+
+        /// The terrain RAW transfers and Bake are the region **owner's** (or a
+        /// god's): an estate manager sees them greyed while every other write
+        /// button is live, as the reference's `owner_or_god` has it.
+        #[test]
+        fn terrain_owner_actions_grey_for_a_manager() -> Result<(), TestError> {
+            let agent = Uuid::from_u128(0xA9E7);
+            let mut here = region(0xA1, "Alpha");
+            here.sim_owner = Uuid::from_u128(0x0E1E);
+            let mut app = region_app();
+            app.insert_resource(sl_client_bevy::SlIdentity {
+                agent_id: Some(AgentKey::from(agent)),
+                ..Default::default()
+            });
+            app.init_resource::<AgentGodLevel>();
+            stand_in(&mut app, &here);
+            open(&mut app);
+            app.update();
+
+            let manager = owner_buttons_greyed(&mut app);
+            assert_eq!(manager.len(), 3, "three owner buttons: {manager:?}");
+            assert!(
+                manager.iter().all(|(_action, greyed)| *greyed),
+                "a manager who does not own the region may not press them: {manager:?}"
+            );
+            let live_write = app
+                .world_mut()
+                .query_filtered::<Has<InteractionDisabled>, With<WriteButton>>()
+                .iter(app.world())
+                .filter(|greyed| !greyed)
+                .count();
+            assert!(live_write > 0, "while the manager's own buttons stay live");
+
+            // A god grant opens them without any new region record.
+            app.insert_resource(AgentGodLevel(200));
+            app.update();
+            assert!(
+                owner_buttons_greyed(&mut app)
+                    .iter()
+                    .all(|(_action, greyed)| !greyed),
+                "a god may press them"
+            );
+
+            // And so may the owner, god or not.
+            app.insert_resource(AgentGodLevel(0));
+            here.sim_owner = agent;
+            stand_in(&mut app, &here);
+            app.update();
+            assert!(
+                owner_buttons_greyed(&mut app)
+                    .iter()
+                    .all(|(_action, greyed)| !greyed),
+                "the owner may press them"
             );
             Ok(())
         }

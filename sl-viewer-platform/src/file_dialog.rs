@@ -1,5 +1,5 @@
-//! Asking the **desktop** to pick a file — or a folder: the viewer's one
-//! file-open dialog.
+//! Asking the **desktop** to pick a file — a folder, or a file to save to: the
+//! viewer's one file dialog.
 //!
 //! Every "… from disk" the viewer will ever grow — importing a legacy WindLight
 //! preset, uploading a texture or a mesh, loading a notecard — needs the host's
@@ -63,7 +63,7 @@ use std::path::{Path, PathBuf};
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, block_on, futures_lite::future::poll_once};
 
-/// A request for the host's file-open dialog.
+/// A request for the host's file dialog.
 ///
 /// Written by whoever wants a file; answered by exactly one
 /// [`FileDialogClosed`] carrying the same [`purpose`](Self::purpose).
@@ -97,20 +97,29 @@ pub struct OpenFileDialog {
 
 /// What a file dialog asks the user to choose.
 ///
-/// Both answer with one [`PathBuf`], because a directory is a path like any
-/// other; what differs is what the chooser lets the user point at.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+/// All three answer with one [`PathBuf`], because a directory — or a file that
+/// does not exist yet — is a path like any other; what differs is what the
+/// chooser lets the user point at.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum FileDialogSelection {
-    /// One file (`rfd`'s `pick_file`) — the default, and what every "… from
-    /// disk" wants.
+    /// One existing file (`rfd`'s `pick_file`) — the default, and what every
+    /// "… from disk" wants.
     #[default]
     File,
     /// One directory (`rfd`'s `pick_folder`), for a bulk operation that works
     /// on a folder's worth of files rather than on one the user named.
     Folder,
+    /// A file to **write** (`rfd`'s `save_file`): the chooser offers
+    /// `file_name` and lets the user name a file that does not exist yet, or
+    /// confirm replacing one that does — every "… to disk", such as the
+    /// region's terrain RAW download (the reference's `FFSAVE_*` pickers).
+    Save {
+        /// The name the chooser suggests (`"terrain.raw"`).
+        file_name: Box<str>,
+    },
 }
 
-/// One entry of a file-open dialog's type filter.
+/// One entry of a file dialog's type filter.
 #[derive(Debug, Clone)]
 pub struct FileDialogFilter {
     /// The human-readable label (`"WindLight preset"`).
@@ -129,7 +138,7 @@ pub struct FileDialogClosed {
     pub outcome: FileDialogOutcome,
 }
 
-/// What came of a file-open dialog.
+/// What came of a file dialog.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FileDialogOutcome {
     /// The user chose this file.
@@ -289,7 +298,7 @@ fn open_file_dialogs(
             state.pending = Some(PendingFileDialog {
                 purpose: request.purpose.clone(),
                 title: request.title.clone(),
-                selection: request.selection,
+                selection: request.selection.clone(),
             });
             continue;
         }
@@ -313,11 +322,14 @@ fn spawn_dialog(request: &OpenFileDialog, directory: Option<PathBuf>) -> Task<Op
     if let Some(directory) = directory {
         dialog = dialog.set_directory(directory);
     }
-    let selection = request.selection;
+    let selection = request.selection.clone();
     IoTaskPool::get().spawn(async move {
         let picked = match selection {
             FileDialogSelection::File => dialog.pick_file().await,
             FileDialogSelection::Folder => dialog.pick_folder().await,
+            FileDialogSelection::Save { file_name } => {
+                dialog.set_file_name(file_name).save_file().await
+            }
         };
         picked.map(|handle| handle.path().to_path_buf())
     })
@@ -340,7 +352,7 @@ fn poll_file_dialogs(
     }
 }
 
-/// Registers the file-open dialog service: the [`OpenFileDialog`] /
+/// Registers the file dialog service: the [`OpenFileDialog`] /
 /// [`FileDialogClosed`] message pair and the systems that drive one.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct FileDialogPlugin;
@@ -516,6 +528,46 @@ mod tests {
         assert!(
             answer_pending_dialog(app.world_mut(), None).is_none(),
             "nothing is left to answer"
+        );
+        Ok(())
+    }
+
+    /// A save dialog waits like any other, carrying the name it suggests, and
+    /// its answer — a file that need not exist yet — is the ordinary reply.
+    #[test]
+    fn a_save_dialog_waits_with_its_suggested_name() -> Result<(), TestError> {
+        let mut app = app();
+        app.insert_resource(FileDialogBackend::Answered);
+        let mut save = request("terrain-raw-download");
+        save.selection = FileDialogSelection::Save {
+            file_name: "terrain.raw".into(),
+        };
+        app.world_mut().write_message(save);
+        app.update();
+        let pending = app
+            .world()
+            .resource::<FileDialogState>()
+            .pending()
+            .cloned()
+            .ok_or("the save dialog waits for an answer")?;
+        assert_eq!(
+            pending.selection,
+            FileDialogSelection::Save {
+                file_name: "terrain.raw".into()
+            },
+            "the suggested name travels with the request"
+        );
+        let _answered = answer_pending_dialog(
+            app.world_mut(),
+            Some(PathBuf::from("/terrain/new-island.raw")),
+        )
+        .ok_or("a dialog was waiting")?;
+        let reply = replies(&mut app);
+        assert_eq!(
+            reply.first().map(|reply| reply.outcome.clone()),
+            Some(FileDialogOutcome::Picked(PathBuf::from(
+                "/terrain/new-island.raw"
+            )))
         );
         Ok(())
     }

@@ -36,6 +36,12 @@
 //!   cancelled;
 //! - About Region's Access tab shows a ban's banner, which only the
 //!   `EstateAccess` capability tells;
+//! - About Region's Terrain tab lets the region's owner download and upload
+//!   its RAW heightmap through the file chooser, bake after confirming, and
+//!   asks before applying an inverted elevation range — and greys the owner's
+//!   buttons for an estate manager who does not own the region; on a region
+//!   whose slots are materials it switches to its PBR variant and writes the
+//!   materials and their transforms;
 //! - the balance shows each grid's currency symbol, a Second Life payment
 //!   reply raises a payment notice and OpenSim's message box the system tip.
 
@@ -1212,6 +1218,303 @@ mod test {
                     Ok(())
                 })?;
         }
+        Ok(())
+    }
+
+    /// Open the Region / Estate window on the region the agent is in — the
+    /// region `id` — on its Terrain tab.
+    async fn terrain_tab(alpha: &Viewer, id: u128) -> Result<UiLocator, BodyError> {
+        let _opened = alpha.menu_path(&REGION_ESTATE).await?;
+        let window = about_region(alpha, id);
+        let _shown = alpha.expect(&window).timeout(WAIT).to_be_visible().await?;
+        let _tab = window
+            .get(Locator::role(Role::Tab).name_key("about-region-tab-terrain"))
+            .click()
+            .await?;
+        Ok(window)
+    }
+
+    /// One of the Terrain tab's owner-only buttons, by its label key.
+    fn terrain_button(window: &UiLocator, key: &str) -> UiLocator {
+        window.test_id(&format!("about-region-button:about-region-terrain-{key}"))
+    }
+
+    /// Wait for the modal notice `template`, then dismiss it with its OK — a
+    /// modal alert refuses every other click while it is up.
+    async fn acknowledge(alpha: &Viewer, template: &str) -> Result<(), BodyError> {
+        let _notice = alpha
+            .expect_notification()
+            .timeout(WAIT)
+            .to_show(template)
+            .await?;
+        let ok = alpha.ui().test_id("toast-button:OK");
+        let _ok = ok.click().await?;
+        let _gone = alpha.expect(&ok).to_be_detached().await?;
+        Ok(())
+    }
+
+    /// A throwaway directory under the system temp dir, unique to this run.
+    fn scratch_dir(label: &str) -> Result<std::path::PathBuf, BodyError> {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)?
+            .as_nanos();
+        let dir =
+            std::env::temp_dir().join(format!("sl-e2e-{label}-{}-{nanos}", std::process::id()));
+        fs_err::create_dir_all(&dir)?;
+        Ok(dir)
+    }
+
+    /// **The Terrain tab's owner actions** (`viewer-region-options-terrain`):
+    /// the region's owner downloads its heightmap to the file a save chooser
+    /// names, uploads a file back (the grid receives exactly its bytes, under
+    /// the file's own name), bakes after confirming, and an Apply whose
+    /// elevation range is inverted asks first and sends once it is waved
+    /// through.
+    #[test]
+    fn the_region_owner_transfers_raw_terrain_and_confirms_bake() -> Result<(), TestError> {
+        stage("terrain_owner_actions")
+            .region(home())
+            .estate_manager("Alpha")
+            .needs(Need::GridControl)
+            .run(async |stage: &Stage| {
+                let alpha = &stage.viewer("Alpha")?;
+                let mut heard = stage.agent("Alpha").await?.events();
+                let window = terrain_tab(alpha, HOME_ID).await?;
+                let dir = scratch_dir("terrain-raw")?;
+
+                // Download: a save chooser, and the file written where it says.
+                let download = terrain_button(&window, "download-raw");
+                let _open = alpha
+                    .expect(&download)
+                    .timeout(WAIT)
+                    .to_be_enabled()
+                    .await?;
+                let _asked = download.click().await?;
+                let saved = dir.join("island.raw");
+                let dialog = alpha.answer_file_dialog(Some(&saved)).await?;
+                assert_eq!(dialog.purpose, "about-region-terrain-raw-download");
+                acknowledge(alpha, "FinishedRawDownload").await?;
+                let raw = fs_err::read(&saved)?;
+                assert!(
+                    !raw.is_empty() && raw.len() % 13 == 0,
+                    "a RAW heightmap is 13 bytes a sample: {} bytes",
+                    raw.len()
+                );
+
+                // Upload: a changed copy, received byte for byte under its own
+                // name — never the local directory.
+                let mut changed = raw.clone();
+                if let Some(height) = changed.first_mut() {
+                    *height = height.wrapping_add(40);
+                }
+                let upload_file = dir.join("hills.raw");
+                fs_err::write(&upload_file, &changed)?;
+                let _asked = terrain_button(&window, "upload-raw").click().await?;
+                let dialog = alpha.answer_file_dialog(Some(&upload_file)).await?;
+                assert_eq!(dialog.purpose, "about-region-terrain-raw-upload");
+                acknowledge(alpha, "RawUploadStarted").await?;
+                let (filename, received) =
+                    grid_hears(&mut heard, "terrain RAW upload", |event| match event {
+                        ServerEvent::XferReceived { filename, data, .. } => {
+                            Some((filename.clone(), data.clone()))
+                        }
+                        _ => None,
+                    })
+                    .await?;
+                assert_eq!(filename, "hills.raw", "only the file's own name");
+                assert!(received == changed, "the grid holds the uploaded bytes");
+
+                // Bake: asked first, sent on OK.
+                let _asked = terrain_button(&window, "bake").click().await?;
+                acknowledge(alpha, "ConfirmBakeTerrain").await?;
+                grid_hears(&mut heard, "terrain bake", |event| {
+                    matches!(event, ServerEvent::TerrainBakeRequested).then_some(())
+                })
+                .await?;
+
+                // An inverted range: the first corner's low above its high.
+                let low = window.test_id("about-region-corner-low:field").nth(0);
+                let _typed = low.fill("70").await?;
+                low.press("Enter").await?;
+                let high = window.test_id("about-region-corner-high:field").nth(0);
+                let _typed = high.fill("10").await?;
+                high.press("Enter").await?;
+                // The Region, Debug and Terrain tabs each have an Apply, built
+                // in that order.
+                let _applied = window
+                    .test_id("about-region-button:about-region-apply")
+                    .nth(2)
+                    .click()
+                    .await?;
+                let _asked = alpha
+                    .expect_notification()
+                    .timeout(WAIT)
+                    .to_show("ConfirmTextureHeights")
+                    .await?;
+                let _yes = alpha.ui().test_id("toast-button:Yes").click().await?;
+                let corner = grid_hears(&mut heard, "elevation ranges", |event| match event {
+                    ServerEvent::EstateOwnerRequest { method, params, .. }
+                        if method == "textureheights" =>
+                    {
+                        params.first().cloned()
+                    }
+                    _ => None,
+                })
+                .await?;
+                let numbers: Vec<f32> = corner
+                    .split_whitespace()
+                    .filter_map(|word| word.parse().ok())
+                    .collect();
+                assert_eq!(numbers, [0.0, 70.0, 10.0], "corner 0 as typed: {corner}");
+                fs_err::remove_dir_all(&dir)?;
+                Ok(())
+            })?;
+        Ok(())
+    }
+
+    /// [`home`] with PBR terrain: all four detail slots name the material
+    /// [`MATERIAL_B_ASSET`], which the scenario serves.
+    fn pbr_terrain_home() -> RegionConfig {
+        let mut region = home();
+        region.terrain.composition.detail_textures = [Uuid::from_u128(MATERIAL_B_ASSET); 4];
+        region
+    }
+
+    /// **The Terrain tab's PBR variant** (`viewer-region-options-terrain`): on
+    /// a region whose detail slots are materials, the tab finds that out from
+    /// what decodes, ticks "PBR Metallic Roughness", shows the material
+    /// swatches and the Transforms section in place of the texture swatches —
+    /// and an Apply sends the materials in the `texturedetail` slots and the
+    /// edited transform over `ModifyRegion`.
+    #[test]
+    fn a_pbr_terrain_region_edits_its_materials_and_transforms() -> Result<(), TestError> {
+        stage("terrain_pbr_variant")
+            .region(pbr_terrain_home())
+            .estate_manager("Alpha")
+            .configure_grid(|grid| grid.imitates(ImitatedGrid::SecondLife))
+            .needs(Need::GridControl)
+            .run(async |stage: &Stage| {
+                let alpha = &stage.viewer("Alpha")?;
+                let agent = stage.agent("Alpha").await?;
+                let mut heard = agent.events();
+                let window = terrain_tab(alpha, HOME_ID).await?;
+                let _pbr = alpha
+                    .expect(&window.test_id("about-region-terrain-pbr:checkbox"))
+                    .timeout(WAIT)
+                    .to_be_checked()
+                    .await?;
+                let material = window
+                    .test_id("about-region-terrain-material:texture-swatch")
+                    .nth(0);
+                let _shown = alpha.expect(&material).to_be_visible().await?;
+                let texture = window
+                    .test_id("about-region-terrain-detail:texture-swatch")
+                    .nth(0);
+                let _hidden = alpha.expect(&texture).to_be_hidden().await?;
+
+                // The first material's scale u, the first transform field, on
+                // the Transforms sub-tab only a materials region shows.
+                let _tab = window
+                    .get(Locator::role(Role::Tab).name_key("about-region-terrain-transforms-tab"))
+                    .click()
+                    .await?;
+                let scale_u = window
+                    .test_id("about-region-terrain-transform:field")
+                    .nth(0);
+                let _shown = alpha.expect(&scale_u).to_be_visible().await?;
+                let _typed = scale_u.fill("4").await?;
+                scale_u.press("Enter").await?;
+                let _applied = window
+                    .test_id("about-region-button:about-region-apply")
+                    .nth(2)
+                    .click()
+                    .await?;
+                let slot = grid_hears(&mut heard, "material slots", |event| match event {
+                    ServerEvent::EstateOwnerRequest { method, params, .. }
+                        if method == "texturedetail" =>
+                    {
+                        params.first().cloned()
+                    }
+                    _ => None,
+                })
+                .await?;
+                assert_eq!(
+                    slot,
+                    format!("0 {}", Uuid::from_u128(MATERIAL_B_ASSET)),
+                    "the material goes in the slot"
+                );
+                let written = tokio::time::timeout(WAIT, async {
+                    loop {
+                        let scale = agent
+                            .with_world(|world, _sim| {
+                                world
+                                    .terrain_material_overrides
+                                    .0
+                                    .first()
+                                    .and_then(|slot| slot.get("ti"))
+                                    .and_then(|infos| infos.as_array()?.first().cloned())
+                                    .and_then(|info| info.get("s").cloned())
+                            })
+                            .await;
+                        if let Some(scale) = scale {
+                            return scale;
+                        }
+                        tokio::time::sleep(Duration::from_millis(200)).await;
+                    }
+                })
+                .await
+                .map_err(|_elapsed| "the grid never stored the transform")?;
+                let scale: Vec<f32> = written
+                    .as_array()
+                    .unwrap_or_default()
+                    .iter()
+                    .filter_map(|value| value.as_f32())
+                    .collect();
+                assert_eq!(scale, [4.0, 1.0], "the edited scale u, v untouched");
+                Ok(())
+            })?;
+        Ok(())
+    }
+
+    /// **The owner's buttons are the owner's**: a second estate manager, who
+    /// does not own the region, sees Download / Upload RAW and Bake greyed
+    /// while the tab's Apply stays live — as the reference's `owner_or_god`.
+    /// The region is on textures, so the PBR switch is off and there is no
+    /// Transforms tab.
+    #[test]
+    fn a_manager_who_does_not_own_the_region_cannot_transfer_terrain() -> Result<(), TestError> {
+        stage("terrain_owner_actions_manager")
+            .viewer("Beta")
+            .region(home())
+            // The first estate manager is the grid's estate owner.
+            .estate_manager("Alpha")
+            .estate_manager("Beta")
+            .run(async |stage: &Stage| {
+                let beta = &stage.viewer("Beta")?;
+                let window = terrain_tab(beta, HOME_ID).await?;
+                let apply = window
+                    .test_id("about-region-button:about-region-apply")
+                    .nth(2);
+                let _live = beta.expect(&apply).timeout(WAIT).to_be_enabled().await?;
+                // A textures region: the PBR switch off, no Transforms tab.
+                let _textures = beta
+                    .expect(&window.test_id("about-region-terrain-pbr:checkbox"))
+                    .to_be_unchecked()
+                    .await?;
+                let _no_transforms = beta
+                    .expect(&window.get(
+                        Locator::role(Role::Tab).name_key("about-region-terrain-transforms-tab"),
+                    ))
+                    .to_be_hidden()
+                    .await?;
+                for key in ["download-raw", "upload-raw", "bake"] {
+                    let _greyed = beta
+                        .expect(&terrain_button(&window, key))
+                        .to_be_disabled()
+                        .await?;
+                }
+                Ok(())
+            })?;
         Ok(())
     }
 

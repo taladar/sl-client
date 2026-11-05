@@ -237,6 +237,20 @@ struct FaceSlot {
     glow: f32,
 }
 
+/// Where one material asset's fetch and decode stand
+/// ([`MaterialManager::material_status`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MaterialStatus {
+    /// Fetched and decoded: [`MaterialManager::decoded_material`] has it.
+    Decoded,
+    /// Being fetched or decoded, or waiting for the `ViewerAsset` capability.
+    Loading,
+    /// The fetch or the decode failed; it is not retried.
+    Unavailable,
+    /// Nobody has asked for it.
+    Unrequested,
+}
+
 /// The PBR material fetch/decode/apply pipeline: an [`AssetStore`] over the
 /// `ViewerAsset` capability for `AT_MATERIAL` assets, the in-flight fetch tasks,
 /// the decoded materials, and the bookkeeping tying face materials to the assets,
@@ -540,6 +554,23 @@ impl MaterialManager {
     #[must_use]
     pub fn decoded_material(&self, id: AssetKey) -> Option<&GltfMaterial> {
         self.decoded.get(&id)
+    }
+
+    /// Where material asset `id`'s fetch and decode stand — the reference's
+    /// `isLoaded` / `isFetching` pair, which the region terrain tab's Apply
+    /// needs to tell "not loaded yet" from "failed to load"
+    /// (`sl_viewer_places::about_region`).
+    #[must_use]
+    pub fn material_status(&self, id: AssetKey) -> MaterialStatus {
+        if self.decoded.contains_key(&id) {
+            MaterialStatus::Decoded
+        } else if self.unavailable.contains(&id) {
+            MaterialStatus::Unavailable
+        } else if self.inflight.contains_key(&id) || self.pending_cap.contains(&id) {
+            MaterialStatus::Loading
+        } else {
+            MaterialStatus::Unrequested
+        }
     }
 
     /// Ensure material asset `id` is being fetched + decoded so
