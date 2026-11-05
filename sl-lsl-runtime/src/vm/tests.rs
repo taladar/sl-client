@@ -31,6 +31,7 @@ mod ossl;
 mod persistence;
 mod placement;
 mod precision;
+mod prim_state;
 mod sitting;
 mod strings;
 
@@ -163,6 +164,25 @@ struct Recorder {
     broken_all: Vec<CallerId>,
     /// `(caller, allow)` per `llAllowInventoryDrop` handed over.
     allowed_drops: Vec<(CallerId, bool)>,
+    /// Each prim's state, by key; a prim not listed is a fresh box.
+    prim_states: std::collections::BTreeMap<String, crate::vm::prim::Prim>,
+    /// `(prim key, bits)` per `changed` a write raised, in order.
+    changes: Vec<(String, i32)>,
+    /// `(caller, prim key, cue)` per sound played or preloaded.
+    sounds: Vec<(CallerId, String, crate::vm::prim::SoundCue)>,
+    /// The asset key of each item of the scripts' prims, by name and type.
+    inventory: std::collections::BTreeMap<(String, i32), String>,
+    /// What `llGetObjectDetails` reads of each key.
+    details: std::collections::BTreeMap<String, crate::vm::prim::ObjectDetails>,
+    /// The land impact and the streaming, physics and server costs of every
+    /// prim; Second Life's of a half-metre cube when not stated.
+    detail_costs: Option<(f32, f32, f32, f32)>,
+    /// Whether a move by `llSetPos` raises OpenSim's `changed(32768)`, as
+    /// the fake grid's move path does on an OpenSim region.
+    moves_heard: bool,
+    /// Whether a prim's last owner reads as its owner (OpenSim) rather than
+    /// `NULL_KEY` (Second Life, for a prim nobody else owned).
+    last_owner_is_owner: bool,
 }
 
 /// The owner of every object a [`Recorder`] has, unless it says otherwise.
@@ -253,7 +273,10 @@ impl Host for Recorder {
             prims: vec![LinkedPrim {
                 link,
                 key: self.prim_key(prim),
-                name: "Object".to_owned(),
+                name: self
+                    .prim_states
+                    .get(&self.prim_key(prim))
+                    .map_or_else(|| "Object".to_owned(), |state| state.name.clone()),
                 scripts,
             }],
             sitters: self
@@ -529,7 +552,15 @@ impl Host for Recorder {
     }
 
     fn set_position(&mut self, caller: CallerId, local: sl_types::lsl::Vector) {
+        let mut local = local;
+        if self.linked.is_none() {
+            local.z = local.z.max(self.ground);
+        }
         let mut placement = self.placement(caller);
+        if self.moves_heard && placement.local != local {
+            self.changes
+                .push((self.prim_key(self.prim_of(caller)), 0x8000));
+        }
         placement.local = local.clone();
         placement.position = local.clone();
         let _was = self.placements.insert(caller, placement);
@@ -538,6 +569,135 @@ impl Host for Recorder {
 
     fn prim_count(&self, object: &str) -> Option<i32> {
         self.prim_counts.get(object).copied()
+    }
+
+    fn prim(&self, caller: CallerId, prim: &str) -> Option<crate::vm::prim::Prim> {
+        let mut state = self
+            .prim_states
+            .get(prim)
+            .cloned()
+            .unwrap_or_else(|| crate::vm::prim::Prim::new_box(prim, OWNER));
+        if prim == self.prim_key(self.prim_of(caller)) {
+            let placement = self.placement(caller);
+            state.position = placement.position;
+            state.local_position = placement.local;
+        }
+        Some(state)
+    }
+
+    fn set_prim(&mut self, caller: CallerId, state: &crate::vm::prim::Prim, changed: &[i32]) {
+        let mut state = state.clone();
+        if state.key == self.prim_key(self.prim_of(caller)) {
+            let mut placement = self.placement(caller);
+            if placement.local != state.local_position {
+                let mut to = state.local_position.clone();
+                if self.linked.is_none() {
+                    to.z = to.z.max(self.ground);
+                    placement.position = to.clone();
+                }
+                placement.local = to.clone();
+                state.local_position = to.clone();
+                state.position = placement.position.clone();
+                let _was = self.placements.insert(caller, placement);
+            }
+        }
+        if self.linked.is_none() {
+            state.rotation = state.local_rotation.clone();
+            state.root_rotation = state.local_rotation.clone();
+        }
+        for bits in changed {
+            self.changes.push((state.key.clone(), *bits));
+        }
+        let _was = self.prim_states.insert(state.key.clone(), state);
+    }
+
+    fn set_region_position(
+        &mut self,
+        caller: CallerId,
+        position: sl_types::lsl::Vector,
+    ) -> Option<sl_types::lsl::Vector> {
+        if !(0.0..256.0).contains(&position.x) || !(0.0..256.0).contains(&position.y) {
+            return None;
+        }
+        let mut to = position;
+        to.z = to.z.max(self.ground);
+        let mut placement = self.placement(caller);
+        placement.local = to.clone();
+        placement.position = to.clone();
+        let _was = self.placements.insert(caller, placement);
+        Some(to)
+    }
+
+    fn linkset_of(&self, key: &str) -> Vec<String> {
+        let own: Vec<String> = self
+            .linked
+            .as_ref()
+            .map(|links| links.prims.iter().map(|prim| prim.key.clone()).collect())
+            .unwrap_or_default();
+        if own.iter().any(|prim| prim == key) {
+            return own;
+        }
+        if self.prim_keys.values().any(|prim| prim == key) || self.prim_states.contains_key(key) {
+            return vec![key.to_owned()];
+        }
+        Vec::new()
+    }
+
+    fn object_details(
+        &self,
+        caller: CallerId,
+        key: &str,
+    ) -> Option<crate::vm::prim::ObjectDetails> {
+        if let Some(details) = self.details.get(key) {
+            return Some(details.clone());
+        }
+        let prim = self.prim(caller, key).filter(|_| {
+            self.prim_states.contains_key(key) || self.prim_keys.values().any(|prim| prim == key)
+        })?;
+        Some(crate::vm::prim::ObjectDetails {
+            avatar: false,
+            name: prim.name.clone(),
+            description: prim.description.clone(),
+            position: prim.position.clone(),
+            rotation: prim.rotation.clone(),
+            velocity: crate::value::ZERO_VECTOR,
+            owner: OWNER.to_owned(),
+            group: crate::value::NULL_KEY.to_owned(),
+            creator: prim.creator.clone(),
+            last_owner: if self.last_owner_is_owner {
+                OWNER.to_owned()
+            } else {
+                crate::value::NULL_KEY.to_owned()
+            },
+            root: prim.key.clone(),
+            attached_point: 0,
+            scripts: (1, 1),
+            script_memory: 0x0001_0000,
+            prim_count: 1,
+            inventory_count: 1,
+            click_action: prim.click_action,
+            omega: crate::value::ZERO_VECTOR,
+            scale: prim.scale.clone(),
+            material: prim.material,
+            flags: (prim.physics, prim.phantom, prim.temp_on_rez),
+            text: prim.text.clone(),
+            costs: self.detail_costs.unwrap_or((1.0, 0.05, 1.0, 0.5)),
+            selected: (0, 0),
+            rez_time: String::new(),
+            rezzer: OWNER.to_owned(),
+            masks: [i32::MAX, i32::MAX, 0, 0, 532_480],
+            hover_height: 0.0,
+            body_shape: -1.0,
+            animated: 0,
+        })
+    }
+
+    fn inventory_key(&self, _caller: CallerId, name: &str, asset_type: i32) -> Option<String> {
+        self.inventory.get(&(name.to_owned(), asset_type)).cloned()
+    }
+
+    fn sound(&mut self, caller: CallerId, prim: &str, cue: &crate::vm::prim::SoundCue) {
+        self.sounds.push((caller, prim.to_owned(), cue.clone()));
     }
 }
 
@@ -658,6 +818,12 @@ fn outcomes(report: &TickReport, caller: CallerId) -> Vec<Outcome> {
 
 const A: CallerId = CallerId(1);
 const B: CallerId = CallerId(2);
+/// A third script.
+const C: CallerId = CallerId(3);
+/// A fourth script.
+const D: CallerId = CallerId(4);
+/// A fifth script.
+const E: CallerId = CallerId(5);
 
 #[test]
 fn a_script_initialises_its_globals_then_enters_default() -> Result<(), String> {
@@ -1193,7 +1359,7 @@ fn a_call_to_a_function_nobody_wrote_stops_the_script() -> Result<(), String> {
     let mut host = Recorder::default();
     let _none = engine.add(
         A,
-        program("default { state_entry() { llSetText(\"hi\", <1, 1, 1>, 1.0); } }")?,
+        program("default { state_entry() { llSetStatus(1, TRUE); } }")?,
     );
     let reports = run(&mut engine, &mut host, 1);
     assert!(matches!(
@@ -1201,7 +1367,7 @@ fn a_call_to_a_function_nobody_wrote_stops_the_script() -> Result<(), String> {
         Some([
             Outcome::Finished,
             Outcome::Faulted(Fault {
-                error: RuntimeError::Unimplemented(BuiltinId::LlSetText),
+                error: RuntimeError::Unimplemented(BuiltinId::LlSetStatus),
                 ..
             })
         ])

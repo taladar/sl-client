@@ -2465,4 +2465,154 @@ default
     async fn a_moving_prim_goes_out_terse_on_opensim() -> Result<(), TestError> {
         a_moving_prim_goes_out_terse(ImitatedGrid::OpenSim).await
     }
+
+    /// A script that, told `dress` on the echo channel, sets its prim's
+    /// colour, hover text, size, light, particles and texture animation in
+    /// one rule list; told `read`, shouts its first face's colour and its
+    /// size as `llGetPrimitiveParams` reads them; and shouts every `changed`.
+    fn dresser_source() -> String {
+        format!(
+            "default {{
+    state_entry() {{ llListen({ECHO_SCRIPT_CHANNEL}, \"\", NULL_KEY, \"\"); }}
+    listen(integer channel, string name, key id, string message) {{
+        if (message == \"dress\") {{
+            llSetLinkPrimitiveParamsFast(LINK_THIS, [PRIM_COLOR, 0, <0.5, 0.0, 0.0>, 1.0,
+                PRIM_TEXT, \"hello\", <1.0, 1.0, 1.0>, 1.0, PRIM_SIZE, <2.0, 1.0, 1.0>,
+                PRIM_POINT_LIGHT, TRUE, <1.0, 1.0, 0.0>, 1.0, 10.0, 0.5]);
+            llParticleSystem([PSYS_PART_MAX_AGE, 2.0, PSYS_SRC_BURST_RATE, 0.5]);
+            llSetTextureAnim(ANIM_ON | LOOP, ALL_SIDES, 2, 2, 0.0, 4.0, 1.0);
+        }} else if (message == \"read\") {{
+            llShout(0, \"color \" + llList2CSV(llGetPrimitiveParams([PRIM_COLOR, 0, PRIM_SIZE])));
+        }}
+    }}
+    changed(integer change) {{ llShout(0, \"changed \" + (string)change); }}
+}}"
+        )
+    }
+
+    /// The box [`dresser_source`] runs in.
+    const DRESSER: sl_proto::RegionLocalObjectId = sl_proto::RegionLocalObjectId(0x902);
+
+    /// A script's rule list reaches the viewer as the prim's update — its
+    /// first face tinted, its text, its size, its light, its particles and
+    /// its texture animation — and raises `changed` as the grid does: one
+    /// event for colour and size on Second Life, one each on OpenSim. The
+    /// script reads its colour back as the grid stores it (0.5, a byte's
+    /// 0.498039 on OpenSim); a viewer's retexture since is what it reads
+    /// next, the record no longer what the script wrote.
+    async fn a_script_dresses_its_prim(imitated: ImitatedGrid) -> Result<(), TestError> {
+        let region = region_of(&[ScriptedBox {
+            local_id: DRESSER,
+            source: dresser_source(),
+            experience: None,
+        }])?;
+        let mut scene = scene_with(
+            imitated,
+            region,
+            RegionConfig {
+                heartbeat: HeartbeatConfig::stepped(Duration::from_millis(100)),
+                ..RegionConfig::default()
+            },
+            AccountConfig {
+                agent_id: Some(box_owner()),
+                ..AccountConfig::new("Test", "User", "password")
+            },
+        )
+        .await?;
+        scene
+            .next("the box", |seen| match seen {
+                Seen::Added(local_id) if local_id == DRESSER => Some(()),
+                _other => None,
+            })
+            .await?;
+        scene.tick(2).await?;
+        while let Ok(Some(_seen)) = tokio::time::timeout(QUIET, scene.seen.recv()).await {}
+        let opensim = imitated == ImitatedGrid::OpenSim;
+
+        scene.shout("dress").await?;
+        scene.tick(3).await?;
+        let mut dressed = None;
+        let mut said = Vec::new();
+        while let Ok(Some(seen)) = tokio::time::timeout(QUIET, scene.seen.recv()).await {
+            match seen {
+                Seen::Updated(object) if object.local_id == DRESSER => dressed = Some(object),
+                Seen::Chat(ChatType::Shout, message) => said.push(message),
+                _other => {}
+            }
+        }
+        let dressed = dressed.ok_or("the dressed box was never sent")?;
+        let entry = sl_proto::decode_texture_entry(&dressed.texture_entry, 6);
+        let first = entry.faces.first().map(|face| face.color);
+        let red = if opensim { 127 } else { 128 };
+        assert_eq!(first, Some([red, 0, 0, 255]), "the first face's colour");
+        assert_eq!(dressed.text, "hello");
+        assert_eq!(dressed.text_color, [255, 255, 255, 0], "opaque white text");
+        assert_eq!(
+            dressed.scale,
+            sl_types::lsl::Vector {
+                x: 2.0,
+                y: 1.0,
+                z: 1.0
+            }
+        );
+        assert!(dressed.extra.light.is_some(), "the light");
+        assert!(!dressed.particle_system.is_empty(), "the particles");
+        assert_eq!(
+            dressed
+                .texture_animation
+                .map(|anim| (anim.mode, anim.size_x, anim.size_y)),
+            Some((3, 2, 2)),
+            "the texture animation"
+        );
+        let changed = if opensim {
+            lines(&["changed 2", "changed 8"])
+        } else {
+            lines(&["changed 10"])
+        };
+        said.sort();
+        assert_eq!(said, changed, "what the rule list raised");
+
+        // `llGetPrimitiveParams` costs 0.2 s: its shout comes on the third tick.
+        let read = step(&mut scene, "read", 4).await?;
+        let colour = if opensim {
+            "color <0.498039, 0.000000, 0.000000>, 1.000000, <2.000000, 1.000000, 1.000000>"
+        } else {
+            "color <0.500000, 0.000000, 0.000000>, 1.000000, <2.000000, 1.000000, 1.000000>"
+        };
+        assert_eq!(read, lines(&[colour]));
+
+        let local_id = sl_client_tokio::ScopedObjectId::new(scene.circuit, DRESSER);
+        let _retextured = scene
+            .edit(
+                Command::SetObjectImage {
+                    local_id,
+                    media_url: None,
+                    texture_entry: faces([0, 0, 255, 255], 0.0),
+                },
+                |event| matches!(event, ServerEvent::ObjectImageSet { .. }),
+            )
+            .await?;
+        // `llGetPrimitiveParams` costs 0.2 s: its shout comes on the third tick.
+        let read = step(&mut scene, "read", 4).await?;
+        assert_eq!(
+            read,
+            lines(&[
+                "color <0.000000, 0.000000, 1.000000>, 1.000000, <2.000000, 1.000000, 1.000000>"
+            ])
+        );
+        scene.stop();
+        Ok(())
+    }
+
+    /// On a grid imitating Second Life.
+    #[tokio::test]
+    async fn a_script_dresses_its_prim_on_second_life() -> Result<(), TestError> {
+        a_script_dresses_its_prim(ImitatedGrid::SecondLife).await
+    }
+
+    /// On a grid imitating OpenSim.
+    #[tokio::test]
+    async fn a_script_dresses_its_prim_on_opensim() -> Result<(), TestError> {
+        a_script_dresses_its_prim(ImitatedGrid::OpenSim).await
+    }
 }

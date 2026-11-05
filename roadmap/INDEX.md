@@ -11,17 +11,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 129 |
+| ideas | 128 |
 | ready | 333 |
 | blocked | 40 |
 | in-progress | 17 |
-| bugs | 38 |
-| done | 1487 |
+| bugs | 40 |
+| done | 1488 |
 | deferred | 30 |
 | wont-do | 24 |
-| **total** | **2098** |
+| **total** | **2100** |
 
-## ideas (129)
+## ideas (128)
 
 ### protocol
 
@@ -294,10 +294,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Library tranche — status flags, forces, targets and vehicles (blocked by
   `server-lsl-vm-execution` (done), `server-world-collision-and-physics`,
   `gridspec-lsl-physics-vehicles` (done))
-- [`server-lsl-lib-prim-state`](ideas/server-lsl-lib-prim-state.md) — Library
-  tranche — reading and writing the prim (blocked by `server-lsl-vm-execution`
-  (done), `server-world-ecs-store` (done), `server-world-link-sets` (done),
-  `server-world-update-scheduling` (done), `gridspec-lsl-prim-state` (done))
 - [`server-lsl-lib-task-inventory`](ideas/server-lsl-lib-task-inventory.md) —
   Library tranche — task inventory, giving, rezzing and notecards (blocked by
   `server-lsl-vm-execution` (done), `server-fake-grid-script-engine-wiring`
@@ -1261,8 +1257,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   by `gridspec-profiles` (done), `protocol-sim-profile-messages`)
 - [`server-fake-grid-scripted-scenario`](blocked/server-fake-grid-scripted-scenario.md)
   — A scripts scenario — one prim per scripted behaviour (blocked by
-  `server-fake-grid-script-engine-wiring` (done), `server-lsl-lib-prim-state`,
-  `server-lsl-lib-detection-sensors`, `server-lsl-lib-avatar-control`,
+  `server-fake-grid-script-engine-wiring` (done), `server-lsl-lib-prim-state`
+  (done), `server-lsl-lib-detection-sensors`, `server-lsl-lib-avatar-control`,
   `server-fake-grid-money-ledger`, `server-lsl-lib-task-inventory`,
   `server-lsl-lib-physics-vehicles`)
 - [`server-lsl-forced-delays-per-flavour`](blocked/server-lsl-forced-delays-per-flavour.md)
@@ -1270,7 +1266,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   keyword file's (blocked by `gridspec-lsl-throttles` (done),
   `server-lsl-lib-comms` (done), `server-lsl-lib-http-url`,
   `server-lsl-lib-task-inventory`, `server-lsl-lib-math-rotations` (done),
-  `server-lsl-lib-land-region-env`, `server-lsl-lib-prim-state`,
+  `server-lsl-lib-land-region-env`, `server-lsl-lib-prim-state` (done),
   `server-fake-grid-script-engine-wiring` (done))
 
 ### gridspec
@@ -1328,7 +1324,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (38)
+## bugs (40)
 
 ### protocol
 
@@ -1426,7 +1422,15 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1487)
+### server
+
+- [`server-lsl-flood-gate-passes-spaced-lines`](bugs/server-lsl-flood-gate-passes-spaced-lines.md)
+  — Second Life's error flood gate drops lines aditi passed
+- [`server-lsl-media-changed-before-timer`](bugs/server-lsl-media-changed-before-timer.md)
+  — A changed raised before a forced delay runs after the timer that fell due in
+  it
+
+## done (1488)
 
 ### protocol
 
@@ -4502,6 +4506,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-lsl-lib-ossl`](done/server-lsl-lib-ossl.md) — Scope the OSSL (os*)
   surface — how much, and why (blocked by `server-lsl-library-surface-table`
   (done), `gridspec-lsl-ossl` (done))
+- [`server-lsl-lib-prim-state`](done/server-lsl-lib-prim-state.md) — Library
+  tranche — reading and writing the prim (blocked by `server-lsl-vm-execution`
+  (done), `server-world-ecs-store` (done), `server-world-link-sets` (done),
+  `server-world-update-scheduling` (done), `gridspec-lsl-prim-state` (done))
 - [`server-lsl-lib-strings-lists`](done/server-lsl-lib-strings-lists.md) —
   Library tranche — strings, lists, encoding and hashing (blocked by
   `server-lsl-vm-execution` (done), `server-lsl-library-surface-table` (done),

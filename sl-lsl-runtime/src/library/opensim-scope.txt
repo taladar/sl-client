@@ -8,9 +8,12 @@
 #                                 book's scope section explains.
 
 in modSendCommand
+in osAdjustSoundVolume
 in osAngleBetween
 in osApproxEquals
 in osCheckODE
+in osClearObjectAnimations
+in osCollisionSound
 in osDrawEllipse
 in osDrawFilledEllipse
 in osDrawFilledPolygon
@@ -24,12 +27,18 @@ in osDrawRotationTransform
 in osDrawScaleTransform
 in osDrawText
 in osDrawTranslationTransform
+in osForceBreakAllLinks
+in osForceBreakLink
+in osForceCreateLink
 in osFormatString
 in osGetAgentIP
 in osGetGridName
 in osGetGridNick
+in osGetLinkNumber
+in osGetLinkPrimitiveParams
 in osGetPhysicsEngineName
 in osGetPhysicsEngineType
+in osGetPrimitiveParams
 in osGetRegionSize
 in osGetScriptEngineName
 in osGetSimulatorVersion
@@ -37,13 +46,21 @@ in osGetSunParam
 in osGetTerrainHeight
 in osIsNotValidNumber
 in osIsUUID
+in osLinkParticleSystem
 in osListenRegex
 in osListSortInPlace
+in osLoopSound
+in osLoopSoundMaster
+in osLoopSoundSlave
 in osMatchString
 in osMax
 in osMessageObject
 in osMin
 in osMovePen
+in osParticleSystem
+in osPlaySound
+in osPlaySoundSlave
+in osPreloadSound
 in osRegexIsMatch
 in osReplaceString
 in osRound
@@ -53,8 +70,12 @@ in osSetPenCap
 in osSetPenColor
 in osSetPenColour
 in osSetPenSize
+in osSetPrimitiveParams
+in osSetProjectionParams
+in osSetSoundRadius
 in osSHA256
 in osSlerp
+in osStopSound
 in osStringEndsWith
 in osStringIndexOf
 in osStringLastIndexOf
@@ -64,6 +85,8 @@ in osStringStartsWith
 in osStringSubString
 in osSunGetParam
 in osTerrainGetHeight
+in osTriggerSound
+in osTriggerSoundLimited
 in osUnixTimeToTimestamp
 in osVecDistSquare
 in osVecMagSquare
@@ -190,29 +213,6 @@ later server-lsl-lib-task-inventory osLoadedCreationID
 later server-lsl-lib-task-inventory osLoadedCreationTime
 later server-lsl-lib-task-inventory osMakeNotecard
 later server-lsl-lib-task-inventory osResetAllScripts
-later server-lsl-lib-prim-state osAdjustSoundVolume
-later server-lsl-lib-prim-state osClearObjectAnimations
-later server-lsl-lib-prim-state osCollisionSound
-later server-lsl-lib-prim-state osForceBreakAllLinks
-later server-lsl-lib-prim-state osForceBreakLink
-later server-lsl-lib-prim-state osForceCreateLink
-later server-lsl-lib-prim-state osGetLinkNumber
-later server-lsl-lib-prim-state osGetLinkPrimitiveParams
-later server-lsl-lib-prim-state osGetPrimitiveParams
-later server-lsl-lib-prim-state osLinkParticleSystem
-later server-lsl-lib-prim-state osLoopSound
-later server-lsl-lib-prim-state osLoopSoundMaster
-later server-lsl-lib-prim-state osLoopSoundSlave
-later server-lsl-lib-prim-state osParticleSystem
-later server-lsl-lib-prim-state osPlaySound
-later server-lsl-lib-prim-state osPlaySoundSlave
-later server-lsl-lib-prim-state osPreloadSound
-later server-lsl-lib-prim-state osSetPrimitiveParams
-later server-lsl-lib-prim-state osSetProjectionParams
-later server-lsl-lib-prim-state osSetSoundRadius
-later server-lsl-lib-prim-state osStopSound
-later server-lsl-lib-prim-state osTriggerSound
-later server-lsl-lib-prim-state osTriggerSoundLimited
 later server-lsl-lib-physics-vehicles osClearInertia
 later server-lsl-lib-physics-vehicles osGetInertiaData
 later server-lsl-lib-physics-vehicles osSetInertia

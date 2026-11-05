@@ -386,7 +386,7 @@ fn cross(a: &Vector, b: &Vector) -> Vector {
 
 /// The conjugate `<-x, -y, -z, s>` — the inverse of a unit rotation, and
 /// what `/ rotation` multiplies by. Not normalised, as in the reference.
-const fn conjugate(rotation: &Rotation) -> Rotation {
+pub(crate) const fn conjugate(rotation: &Rotation) -> Rotation {
     Rotation {
         x: -rotation.x,
         y: -rotation.y,
@@ -400,7 +400,7 @@ const fn conjugate(rotation: &Rotation) -> Rotation {
 /// to `f32` (PyOptimizer's `mul`) — what Mono does with it too
 /// (`math/rotation-bits` on aditi: all seven cases). The rotation is not
 /// normalised first.
-fn rotate(vector: &Vector, rotation: &Rotation) -> Vector {
+pub(crate) fn rotate(vector: &Vector, rotation: &Rotation) -> Vector {
     let (a0, a1, a2) = (
         f64::from(vector.x),
         f64::from(vector.y),
@@ -439,7 +439,7 @@ fn rotate(vector: &Vector, rotation: &Rotation) -> Vector {
 /// `<3, 5, 7, 17> * <.22, .26, .38, .86>`, comes out with `y` the float
 /// nearest `8.32` (`8.3199997`); rounding each product first, the oracles'
 /// formula, gave `8.320001`.
-fn compose(left: &Rotation, right: &Rotation) -> Rotation {
+pub(crate) fn compose(left: &Rotation, right: &Rotation) -> Rotation {
     let (a, b) = (left, right);
     let term = |x: f32, y: f32| f64::from(x) * f64::from(y);
     Rotation {
@@ -454,7 +454,7 @@ fn compose(left: &Rotation, right: &Rotation) -> Rotation {
 /// `right`, in the operand order of Linden's `llquaternion.cpp` and with
 /// **every operation rounded to `f32`** (`math/rotation-bits` on aditi: all
 /// seven cases; the same products in [`compose`]'s order match two).
-fn divide(left: &Rotation, right: &Rotation) -> Rotation {
+pub(crate) fn divide(left: &Rotation, right: &Rotation) -> Rotation {
     let (a, b) = (left, &conjugate(right));
     Rotation {
         x: b.s * a.x + b.x * a.s + b.y * a.z - b.z * a.y,

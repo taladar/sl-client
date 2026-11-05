@@ -111,3 +111,11 @@ replay writes in for it (`vm/tests/ossl.rs`). The 9: `osClearInertia`,
 `osGetInertiaData`, `osSetInertia`, `osSetInertiaAsBox`,
 `osSetInertiaAsCylinder`, `osSetInertiaAsSphere`, `osSetPrimFloatOnWater`,
 `osTeleportObject`, `osVolumeDetect`.
+
+## From server-lsl-lib-prim-state (2026-11-04)
+
+`PRIM_PHYSICS`, `PRIM_PHANTOM` and `PRIM_TEMP_ON_REZ` are set and read through
+the rule list (`library/prim_params`); `llSetStatus`/`llGetStatus` are not, and
+the `prim/changed` replay (`vm/tests/prim_state.rs`) rewrites the probe's
+`llSetStatus(STATUS_PHANTOM, …)` as `PRIM_PHANTOM` until they are. Drop that
+rewrite when they land.

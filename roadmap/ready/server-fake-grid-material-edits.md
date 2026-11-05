@@ -54,3 +54,11 @@ measurement with the discovery task's conformance cases run against
   `ac`, `ds`, `tex`, `ti`); turning `gltf_json` into them is the encoder
   half `sl-material` does not have yet.
 - Then add `Grid::FakeSl` and `Grid::FakeOpensim` to the `materials` case.
+
+## From server-lsl-lib-prim-state (2026-11-04)
+
+A script's `PRIM_NORMAL`, `PRIM_SPECULAR`, `PRIM_ALPHA_MODE` and glTF override
+writes are kept in the prim's `ScriptedPrim` store (`sl_fake_grid::prim_state`)
+and read back from it, but reach no viewer. Once the region holds materials,
+have `prim_state::write` put them there too, so a script's material and a
+viewer's edit are the same state.

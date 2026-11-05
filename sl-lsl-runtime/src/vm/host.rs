@@ -12,6 +12,7 @@ use crate::vm::experiences::{
 use crate::vm::linkset_data::{LinksetData, LinksetId};
 use crate::vm::ossl::{Simulator, Standing};
 use crate::vm::permissions::Question;
+use crate::vm::prim::{ObjectDetails, Prim, SoundCue};
 use crate::vm::report::{Speech, Whereabouts};
 use crate::vm::seating::{Placement, Seat};
 
@@ -308,6 +309,50 @@ pub trait Host {
     /// host keeps an unworn root on or above the ground under it, as both
     /// grids do, and a later [`Self::placement`] reads the new position.
     fn set_position(&mut self, caller: CallerId, local: Vector);
+
+    /// The prim keyed `prim` as the library reads it, or [`None`] when the
+    /// region has no prim of that key. `caller` names the script asking:
+    /// its linkset decides nothing here, since a library function resolves
+    /// a link number to a key ([`Self::links`]) before it asks, and OpenSim's
+    /// functions read prims of other objects by key.
+    fn prim(&self, caller: CallerId, prim: &str) -> Option<Prim>;
+
+    /// Writes `state` back as the prim keyed [`Prim::key`]: everything a
+    /// setter changed, which the library has clamped as the grid clamps it.
+    /// The host keeps what it was given, so a later [`Self::prim`] reads the
+    /// values set; a move of an unworn root it keeps out of the ground and in
+    /// the region, as [`Self::set_position`] does. Then it raises
+    /// `changed(bits)` in the prim's scripts once per element of `changed`,
+    /// in order — one event for a grid that joins two kinds of change in one
+    /// call, two for one that raises each.
+    fn set_prim(&mut self, caller: CallerId, state: &Prim, changed: &[i32]);
+
+    /// `llSetRegionPos`: moves `caller`'s object so its root stands at
+    /// `position` in the region, in one move however far; the host keeps it
+    /// out of the ground. Where the root ended, or [`None`] when it does not
+    /// move: a position outside the region, or a worn object.
+    fn set_region_position(&mut self, caller: CallerId, position: Vector) -> Option<Vector>;
+
+    /// The keys of every prim of the object one of whose prims is keyed
+    /// `key`, its root first and its children in link order; empty for a key
+    /// no prim of the region has (`llGetBoundingBox` of another object).
+    fn linkset_of(&self, key: &str) -> Vec<String>;
+
+    /// What `llGetObjectDetails` reads of the object or avatar keyed `key`,
+    /// or [`None`] when the region has neither.
+    fn object_details(&self, caller: CallerId, key: &str) -> Option<ObjectDetails>;
+
+    /// The asset key of the item named `name` of the asset type `asset_type`
+    /// (`INVENTORY_TEXTURE`, `INVENTORY_SOUND`, …) in `caller`'s prim, or
+    /// [`None`] when its contents have none: how a setter given a name
+    /// rather than a key finds the texture or the sound.
+    fn inventory_key(&self, caller: CallerId, name: &str, asset_type: i32) -> Option<String>;
+
+    /// Plays or preloads a sound from the prim keyed `prim`, which is
+    /// `caller`'s or one of its linkset: the viewers in earshot are sent it,
+    /// and the region keeps nothing of it. What a prim plays on is in
+    /// [`Prim::sound`], written with [`Self::set_prim`].
+    fn sound(&mut self, caller: CallerId, prim: &str, cue: &SoundCue);
 
     /// How many prims the object one of whose prims is keyed `object` has,
     /// the avatars sitting on it left out (`llGetObjectPrimCount`); [`None`]

@@ -48,3 +48,11 @@ A viewer's `ObjectMedia` set or clear raises `CHANGED_MEDIA` in the prim's
 scripts on both grids (`events/changed-edits`); the fake grid raises it from the
 session's `ServerEvent::ObjectMediaSet` (`object_edits.rs`). Keep it when the
 media becomes region state.
+
+## From server-lsl-lib-prim-state (2026-11-04)
+
+`llSetPrimMediaParams`, `llClearPrimMedia` and their link variants keep a
+prim's face media in its `ScriptedPrim` store (`sl_fake_grid::prim_state`),
+where only scripts read it. Once media is region state, have
+`prim_state::write` set it there (bumping `MediaURL`), and the reads take it
+from there.

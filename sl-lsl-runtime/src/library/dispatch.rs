@@ -136,6 +136,10 @@ pub enum Exception {
     /// start past the string's end: OpenSim's `llParseString2List` going on
     /// after a delimiter that matched an expansion at the end (`ae` in `æ`).
     StartIndexOutOfRange,
+    /// `System.Exception` from OpenMetaverse's `TextureEntry.GetFace`: a get
+    /// of a face the texture entry cannot index (`prim/params-rules`: face
+    /// 100, and −2 as the unsigned 4294967294).
+    FaceOutOfRange(u32),
 }
 
 impl Exception {
@@ -152,13 +156,25 @@ impl Exception {
             Self::FormatIndex | Self::FormatInvalid => "FormatException",
             Self::InvalidPattern => "ArgumentException",
             Self::CountOutOfRange | Self::StartIndexOutOfRange => "ArgumentOutOfRangeException",
+            Self::FaceOutOfRange(_) => "Exception",
         }
     }
 
     /// The exception's message.
     #[must_use]
-    pub const fn message(self) -> &'static str {
+    pub fn message(self) -> std::borrow::Cow<'static, str> {
         match self {
+            Self::FaceOutOfRange(face) => {
+                std::borrow::Cow::Owned(format!("{face} is outside the range of MAX_FACES"))
+            }
+            other => std::borrow::Cow::Borrowed(other.fixed_message()),
+        }
+    }
+
+    /// The message of an exception whose message names nothing of the call.
+    const fn fixed_message(self) -> &'static str {
+        match self {
+            Self::FaceOutOfRange(_) => "",
             Self::IndexOutOfRange => "Index was outside the bounds of the array.",
             Self::Overflow => "Value was either too large or too small for an Int32.",
             Self::ArithmeticOverflow => "Arithmetic operation resulted in an overflow.",

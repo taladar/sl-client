@@ -1842,6 +1842,13 @@ engine's. OpenSim stores a colour, an alpha and a glow as a byte, so a value
 it reads back is the nearest 1/255 (0.5 reads 0.498039); Second Life reads
 back what was set.
 
+The fake grid's column holds offline: `vm/tests/prim_state.rs` replays each
+probe's transcripts against the runtime, flavour by flavour. One deviation runs
+through every table: the runtime's flood gate stops a script's debug-channel
+lines after eight, where aditi passed every line of `prim/params`,
+`prim/params-rules` and `prim/effects`, which came spaced
+(`server-lsl-flood-gate-passes-spaced-lines`).
+
 ### Placement
 
 `prim/placement`: each move starts where the prim was rezzed and is read as
@@ -1851,24 +1858,24 @@ an offset from there.
 | --- | --- | --- | --- |
 | `llSetPos` 5 and 10 m | moves there | the same | the same |
 | `llSetPos` 15 or 50 m east, 15 or 100 m up, past the region's east edge, past 4096 m | **10 m** towards the target, in one call | the same | the same; a move that would end outside the region leaves the prim where it was (no object crosses a border yet) |
-| `llSetPos` or `llSetRegionPos` 20 m down, below the ground | stops at the ground (here 2.1 m below the prim) | the same | `llSetPos` the same; `llSetRegionPos` no scripts |
-| `PRIM_POS_LOCAL` of a root prim | the region position, like `llSetPos` | the same | no scripts |
-| `llSetRegionPos` 50 m east, 100 m up, to 4000 m | moves there in one call, answers TRUE | the same | no scripts |
-| `llSetRegionPos` into the ground | stops at the ground and answers **FALSE** | the same | no scripts |
-| `llSetRegionPos` to 5000 m | does not move, FALSE | the same | no scripts |
-| `llSetRegionPos` past the west edge, no neighbour there | moves the object off the region and **returns it to its owner's inventory** (seen once, 2026-10-27; the probe leaves it out since) | FALSE, it does not move (OpenSim's code refuses any position outside the region) | no scripts |
-| `llSetRot` of a rotation that is not normalised, `<0,0,2,2>`, and `PRIM_ROTATION` of it | normalised: `<0,0,0.7071,0.7071>` | the same | no scripts |
-| `llSetRot` of `<0,0,0,0>` | the identity | the same | no scripts |
-| `llSetRot` of `<0,0,0,−1>` | read back as `<0,0,0,−1>`, not flipped | the same | no scripts |
-| `llSetLocalRot` of a root prim | the region rotation | the same | no scripts |
-| `llSetScale` and `PRIM_SIZE` under 0.01 (0.005) | **0.01** | **0.005**: kept | no scripts |
-| a negative or zero axis | 0.01 | 0.001 | no scripts |
-| past 64 m (65) | **64** | kept | no scripts |
-| past 256 m (300) | 64 | **256** | no scripts |
-| `llGetBoundingBox` in the event that set the scale | **the box of an earlier scale**: it follows a scale late | the new box | no scripts |
-| `llGetBoundingBox` a second later; `llGetGeometricCenter` | the half sizes of the new scale, in the prim's frame (a quarter turn does not change it); the centre 0 | the same | no scripts |
-| `llTargetOmega(<0,0,1>, 2, 1)` | `PRIM_OMEGA` reads it back; `llGetRot` does not move (the spin is the viewer's) | the same | no scripts |
-| `PRIM_OMEGA` with a gain of 0.5 | read back 0.5 | read back **1.0** | no scripts |
+| `llSetPos` or `llSetRegionPos` 20 m down, below the ground | stops at the ground (here 2.1 m below the prim) | the same | each flavour as its grid, stopping at the ground the region reads, where Second Life stopped 4 cm above it |
+| `PRIM_POS_LOCAL` of a root prim | the region position, like `llSetPos` | the same | each flavour as its grid |
+| `llSetRegionPos` 50 m east, 100 m up, to 4000 m | moves there in one call, answers TRUE | the same | each flavour as its grid |
+| `llSetRegionPos` into the ground | stops at the ground and answers **FALSE** | the same | each flavour as its grid |
+| `llSetRegionPos` to 5000 m | does not move, FALSE | the same | each flavour as its grid |
+| `llSetRegionPos` past the west edge, no neighbour there | moves the object off the region and **returns it to its owner's inventory** (seen once, 2026-10-27; the probe leaves it out since) | FALSE, it does not move (OpenSim's code refuses any position outside the region) | FALSE, it does not move, on both flavours (no object leaves the region yet) |
+| `llSetRot` of a rotation that is not normalised, `<0,0,2,2>`, and `PRIM_ROTATION` of it | normalised: `<0,0,0.7071,0.7071>` | the same | each flavour as its grid |
+| `llSetRot` of `<0,0,0,0>` | the identity | the same | each flavour as its grid |
+| `llSetRot` of `<0,0,0,−1>` | read back as `<0,0,0,−1>`, not flipped | the same | each flavour as its grid |
+| `llSetLocalRot` of a root prim | the region rotation | the same | each flavour as its grid |
+| `llSetScale` and `PRIM_SIZE` under 0.01 (0.005) | **0.01** | **0.005**: kept | each flavour as its grid |
+| a negative or zero axis | 0.01 | 0.001 | each flavour as its grid |
+| past 64 m (65) | **64** | kept | each flavour as its grid |
+| past 256 m (300) | 64 | **256** | each flavour as its grid |
+| `llGetBoundingBox` in the event that set the scale | **the box of an earlier scale**: it follows a scale late | the new box | the new box on both flavours |
+| `llGetBoundingBox` a second later; `llGetGeometricCenter` | the half sizes of the new scale, in the prim's frame (a quarter turn does not change it); the centre 0 | the same | each flavour as its grid |
+| `llTargetOmega(<0,0,1>, 2, 1)` | `PRIM_OMEGA` reads it back; `llGetRot` does not move (the spin is the viewer's) | the same | each flavour as its grid |
+| `PRIM_OMEGA` with a gain of 0.5 | read back 0.5 | read back **1.0** | each flavour as its grid |
 
 ### `PRIM_*` round trips
 
@@ -1877,41 +1884,41 @@ newer rules go by number, since OpenSim has no constants for them.
 
 | what | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
-| a fresh prim's `PRIM_MATERIAL` | 3 (wood) | the same | no scripts |
-| a fresh prim's `PRIM_POINT_LIGHT` intensity, `PRIM_TEXT` alpha | 0 and 1 | **1 and 0** | no scripts |
-| a fresh prim's `PRIM_ALLOW_UNSIT`, `PRIM_SCRIPTED_SIT_ONLY`, `PRIM_CLICK_ACTION`, `PRIM_REFLECTION_PROBE`, `PRIM_RENDER_MATERIAL`, `PRIM_SIT_FLAGS` | 1, 0, 0, off, `NULL_KEY`, 2 | nothing: each is `unsupported parameter` on the debug channel, set or get | no scripts |
-| `PRIM_PROJECTOR` (42), `PRIM_CAST_SHADOWS` (24), get | nothing, `llGetPrimitiveParams error: Param 0 error, unknown parameter` | nothing, silently; a set of 24 is `unsupported parameter` under YEngine and **never returns under XEngine** (left out there) | no scripts |
-| hollow 0.99 | **0.95** | kept, 0.99 | no scripts |
-| cut, twist, taper and shear past their ranges | clamped to `[0,1]`, `[−1,1]`, `[0,2]` and `[−0.5,0.5]` | the same | no scripts |
-| a cut whose begin is past its end (0.8, 0.2) | the begin pulled to 0.02 below the end: `<0.18, 0.2>` | the same | no scripts |
-| a hole shape that does not exist (`0x40`) | kept as the default, with `warning running rule #1 (PRIM_TYPE_BOX): Invalid hole type.` | the default, silently | no scripts |
-| a torus's revolutions 0, radius offset 2 | revolutions 1; radius offset **0.666667** | revolutions 1; radius offset 1 | no scripts |
-| a torus's hole size `<2, 0.01>`, top shear 1, taper `<2, 2>`, radius offset 5, skew 2 | hole **`<1, 0.05>`**, shear 0.5, taper `<1, 1>`, radius offset 1, skew 0.95 | hole `<1, 0.01>`; the rest the same | no scripts |
-| a tube's or ring's radius offset 1 | read back **0** | read back 1 | no scripts |
-| a sculpt type no grid has (6) | kept, 6 | 7 (mesh) | no scripts |
-| a sculpt map that is not a key, a prim type that does not exist (9) | nothing changes; the second says `error running rule #1: unknown rule.` | nothing changes; the second says `Error running rule #2: arg #0 - unsupported parameter` | no scripts |
-| colour and alpha past their ranges | clamped to `[0,1]` | the same | no scripts |
-| texture offsets past ±1, rotation past 2π | kept as given (3, 7) | clamped to ±1, the rotation taken modulo 2π | no scripts |
-| texture repeats of ±200 and 0 | kept | the same | no scripts |
-| a texture `NULL_KEY` | **applied**, silently (unlike `llSetTexture`, below) | not applied, silently | no scripts |
-| a texture name not in the inventory | not applied, silently | the same | no scripts |
-| a texture key no asset has | applied | the same | no scripts |
-| shiny 7, bump 40 | refused, `bounds error; 7 is not in (0, 3).` | **set to 0 and 8** | no scripts |
-| fullbright 2, glow 2 or −1, texgen 5, material 8 or −1 | refused, each with a `bounds error` line naming the range | fullbright TRUE, glow clamped to `[0,1]`, texgen 0, the materials refused silently | no scripts |
-| a light with intensity 2, radius 30, falloff 3 | clamped to 1, 20, 2 | the same | no scripts |
-| a light with negative values | 0, 0, 0 | 0, **0.1, 0.01** | no scripts |
-| a light or flexible path turned off | every value read back as 0 | the other values kept (a light's colour, radius 0.1 and falloff 0.01) | no scripts |
-| a flexible path past its ranges: softness 5, gravity 20, friction −20, wind 20, tension 20 | clamped: 3, 10, 0, 10, 10 | kept as given | no scripts |
-| a flexible tension of 0.25 | read back 0.2: kept in tenths | 0.25 | no scripts |
-| hover text of 300 characters | **refused**: the old text stays | cut to 254 | no scripts |
-| a slice past its range; reversed (0.8, 0.2) | clamped; the begin pulled below the end, `<0.18, 0.2>` | clamped; **swapped round**, `<0.2, 0.8>` | no scripts |
-| a name of 100 characters | cut to 63 | **kept** | no scripts |
-| a description of 200 characters | cut to 127 | the same | no scripts |
-| a pipe or a newline in a name or description | each becomes `?` | kept | no scripts |
-| alpha mode with a cutoff past 255, an alpha mode that does not exist (9) | 255; mode 3 | refused: `must be 0 to 255`, `must be 0 to 3` | no scripts |
-| normal and specular maps | round-trip | the same | no scripts |
-| the sit target, `PRIM_ALLOW_UNSIT`, `PRIM_SCRIPTED_SIT_ONLY`, a click action, sit flags, a reflection probe, a render material | set and read back; a click action of 99 is ignored | the sit target round-trips; the rest are `unsupported parameter` | no scripts |
-| `PRIM_POSITION` 15 m east | 10 m | 10 m | no scripts |
+| a fresh prim's `PRIM_MATERIAL` | 3 (wood) | the same | each flavour as its grid |
+| a fresh prim's `PRIM_POINT_LIGHT` intensity, `PRIM_TEXT` alpha | 0 and 1 | **1 and 0** | each flavour as its grid |
+| a fresh prim's `PRIM_ALLOW_UNSIT`, `PRIM_SCRIPTED_SIT_ONLY`, `PRIM_CLICK_ACTION`, `PRIM_REFLECTION_PROBE`, `PRIM_RENDER_MATERIAL`, `PRIM_SIT_FLAGS` | 1, 0, 0, off, `NULL_KEY`, 2 | nothing: each is `unsupported parameter` on the debug channel, set or get | each flavour as its grid |
+| `PRIM_PROJECTOR` (42), `PRIM_CAST_SHADOWS` (24), get | nothing, `llGetPrimitiveParams error: Param 0 error, unknown parameter` | nothing, silently; a set of 24 is `unsupported parameter` under YEngine and **never returns under XEngine** (left out there) | each flavour as its grid; XEngine's set of 24 returns, as YEngine's does |
+| hollow 0.99 | **0.95** | kept, 0.99 | each flavour as its grid |
+| cut, twist, taper and shear past their ranges | clamped to `[0,1]`, `[−1,1]`, `[0,2]` and `[−0.5,0.5]` | the same | each flavour as its grid |
+| a cut whose begin is past its end (0.8, 0.2) | the begin pulled to 0.02 below the end: `<0.18, 0.2>` | the same | each flavour as its grid |
+| a hole shape that does not exist (`0x40`) | kept as the default, with `warning running rule #1 (PRIM_TYPE_BOX): Invalid hole type.` | the default, silently | each flavour as its grid |
+| a torus's revolutions 0, radius offset 2 | revolutions 1; radius offset **0.666667** | revolutions 1; radius offset 1 | each flavour as its grid |
+| a torus's hole size `<2, 0.01>`, top shear 1, taper `<2, 2>`, radius offset 5, skew 2 | hole **`<1, 0.05>`**, shear 0.5, taper `<1, 1>`, radius offset 1, skew 0.95 | hole `<1, 0.01>`; the rest the same | each flavour as its grid |
+| a tube's or ring's radius offset 1 | read back **0** | read back 1 | each flavour as its grid |
+| a sculpt type no grid has (6) | kept, 6 | 7 (mesh) | each flavour as its grid |
+| a sculpt map that is not a key, a prim type that does not exist (9) | nothing changes; the second says `error running rule #1: unknown rule.` | nothing changes; the second says `Error running rule #2: arg #0 - unsupported parameter` | each flavour as its grid |
+| colour and alpha past their ranges | clamped to `[0,1]` | the same | each flavour as its grid |
+| texture offsets past ±1, rotation past 2π | kept as given (3, 7) | clamped to ±1, the rotation taken modulo 2π | each flavour as its grid |
+| texture repeats of ±200 and 0 | kept | the same | each flavour as its grid |
+| a texture `NULL_KEY` | **applied**, silently (unlike `llSetTexture`, below) | not applied, silently | each flavour as its grid |
+| a texture name not in the inventory | not applied, silently | the same | each flavour as its grid |
+| a texture key no asset has | applied | the same | each flavour as its grid |
+| shiny 7, bump 40 | refused, `bounds error; 7 is not in (0, 3).` | **set to 0 and 8** | each flavour as its grid |
+| fullbright 2, glow 2 or −1, texgen 5, material 8 or −1 | refused, each with a `bounds error` line naming the range | fullbright TRUE, glow clamped to `[0,1]`, texgen 0, the materials refused silently | each flavour as its grid |
+| a light with intensity 2, radius 30, falloff 3 | clamped to 1, 20, 2 | the same | each flavour as its grid |
+| a light with negative values | 0, 0, 0 | 0, **0.1, 0.01** | each flavour as its grid |
+| a light or flexible path turned off | every value read back as 0 | the other values kept (a light's colour, radius 0.1 and falloff 0.01) | each flavour as its grid |
+| a flexible path past its ranges: softness 5, gravity 20, friction −20, wind 20, tension 20 | clamped: 3, 10, 0, 10, 10 | kept as given | each flavour as its grid |
+| a flexible tension of 0.25 | read back 0.2: kept in tenths | 0.25 | each flavour as its grid |
+| hover text of 300 characters | **refused**: the old text stays | cut to 254 | each flavour as its grid |
+| a slice past its range; reversed (0.8, 0.2) | clamped; the begin pulled below the end, `<0.18, 0.2>` | clamped; **swapped round**, `<0.2, 0.8>` | each flavour as its grid |
+| a name of 100 characters | cut to 63 | **kept** | each flavour as its grid |
+| a description of 200 characters | cut to 127 | the same | each flavour as its grid |
+| a pipe or a newline in a name or description | each becomes `?` | kept | each flavour as its grid |
+| alpha mode with a cutoff past 255, an alpha mode that does not exist (9) | 255; mode 3 | refused: `must be 0 to 255`, `must be 0 to 3` | each flavour as its grid |
+| normal and specular maps | round-trip | the same | round-trip; the maps are the script's alone, sent to no viewer yet (`server-fake-grid-material-edits`) |
+| the sit target, `PRIM_ALLOW_UNSIT`, `PRIM_SCRIPTED_SIT_ONLY`, a click action, sit flags, a reflection probe, a render material | set and read back; a click action of 99 is ignored | the sit target round-trips; the rest are `unsupported parameter` | each flavour as its grid |
+| `PRIM_POSITION` 15 m east | 10 m | 10 m | each flavour as its grid |
 
 ### Rule lists
 
@@ -1919,24 +1926,24 @@ newer rules go by number, since OpenSim has no constants for them.
 
 | what | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
-| several rules in a get, the same rule twice | in the order asked, once per asking | the same | no scripts |
-| `ALL_SIDES` in a get | one entry per face, in face order | the same | no scripts |
-| a get of a face past the prim's (6, 100, −2) | nothing for that rule; the rules after it are answered (−2 is `ALL_SIDES`) | face 6 is answered as if it were there; **face 100 and −2 throw**: YEngine stops the script (`100 is outside the range of MAX_FACES`), XEngine ends the event | no scripts |
-| a set of face 6, of face −2 | face 6 nothing; −2 as `ALL_SIDES` | nothing for either | no scripts |
-| an unknown rule code in a get (9999, −5) | the whole get answers **nothing**, `Param 0 error, unknown parameter` | the code is skipped, the rules after it answered | no scripts |
-| an unknown rule code in a set | `error running rule #1: unknown rule.`; the rules after it do not run | `unsupported parameter`; the rules after it do not run | no scripts |
-| a rule code as a string (`"7"`) | the get answers nothing | read as the integer | no scripts |
-| a value of the wrong type: a glow as a string, a vector; a face as a float; a colour as a string; a name as an integer or a key | refused with `arg #2 (glow) float expected but string given.` and its like; the rules after it do not run | a string, integer or key that converts is **taken** (glow `"0.5"`, name `7`); a vector, a float face and a string colour are refused (`parameter 3 must be float`), and the rules after them do not run | no scripts |
-| a glow as an integer | taken | taken | no scripts |
-| a rule with too few values | the rule does nothing, silently | the same | no scripts |
-| a name, a glow of `"x"`, then a colour | the name is set, the colour is not | all three run: `"x"` is read as a glow of 0 | no scripts |
-| `PRIM_LINK_TARGET` 0, `LINK_THIS` on a single prim | the prim | the same | no scripts |
-| `PRIM_LINK_TARGET` 1 or `LINK_SET` on a single prim, get | nothing | the prim | no scripts |
-| `PRIM_LINK_TARGET` 2 on a single prim | nothing for the rules after it | the same | no scripts |
-| `llGetLinkPrimitiveParams` of 0, `LINK_THIS` on a single prim | the prim | the same | no scripts |
-| `llGetLinkPrimitiveParams` of 1, `LINK_SET`, `LINK_ROOT` on a single prim | nothing | **the prim** | no scripts |
-| `llSetLinkPrimitiveParamsFast` of 0, `LINK_THIS`, `LINK_SET` on a single prim | the prim | the same | no scripts |
-| `llSetLinkPrimitiveParamsFast` of 1, `LINK_ROOT` on a single prim | nothing | **the prim** | no scripts |
+| several rules in a get, the same rule twice | in the order asked, once per asking | the same | each flavour as its grid |
+| `ALL_SIDES` in a get | one entry per face, in face order | the same | each flavour as its grid |
+| a get of a face past the prim's (6, 100, −2) | nothing for that rule; the rules after it are answered (−2 is `ALL_SIDES`) | face 6 is answered as if it were there; **face 100 and −2 throw**: YEngine stops the script (`100 is outside the range of MAX_FACES`), XEngine ends the event | each flavour as its grid |
+| a set of face 6, of face −2 | face 6 nothing; −2 as `ALL_SIDES` | nothing for either | each flavour as its grid |
+| an unknown rule code in a get (9999, −5) | the whole get answers **nothing**, `Param 0 error, unknown parameter` | the code is skipped, the rules after it answered | each flavour as its grid |
+| an unknown rule code in a set | `error running rule #1: unknown rule.`; the rules after it do not run | `unsupported parameter`; the rules after it do not run | each flavour as its grid |
+| a rule code as a string (`"7"`) | the get answers nothing | read as the integer | each flavour as its grid |
+| a value of the wrong type: a glow as a string, a vector; a face as a float; a colour as a string; a name as an integer or a key | refused with `arg #2 (glow) float expected but string given.` and its like; the rules after it do not run | a string, integer or key that converts is **taken** (glow `"0.5"`, name `7`); a vector, a float face and a string colour are refused (`parameter 3 must be float`), and the rules after them do not run | each flavour as its grid |
+| a glow as an integer | taken | taken | each flavour as its grid |
+| a rule with too few values | the rule does nothing, silently | the same | each flavour as its grid |
+| a name, a glow of `"x"`, then a colour | the name is set, the colour is not | all three run: `"x"` is read as a glow of 0 | each flavour as its grid |
+| `PRIM_LINK_TARGET` 0, `LINK_THIS` on a single prim | the prim | the same | each flavour as its grid |
+| `PRIM_LINK_TARGET` 1 or `LINK_SET` on a single prim, get | nothing | the prim | each flavour as its grid |
+| `PRIM_LINK_TARGET` 2 on a single prim | nothing for the rules after it | the same | each flavour as its grid |
+| `llGetLinkPrimitiveParams` of 0, `LINK_THIS` on a single prim | the prim | the same | each flavour as its grid |
+| `llGetLinkPrimitiveParams` of 1, `LINK_SET`, `LINK_ROOT` on a single prim | nothing | **the prim** | each flavour as its grid |
+| `llSetLinkPrimitiveParamsFast` of 0, `LINK_THIS`, `LINK_SET` on a single prim | the prim | the same | each flavour as its grid |
+| `llSetLinkPrimitiveParamsFast` of 1, `LINK_ROOT` on a single prim | nothing | **the prim** | each flavour as its grid |
 
 ### The older per-face calls
 
@@ -1944,25 +1951,25 @@ newer rules go by number, since OpenSim has no constants for them.
 
 | what | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
-| `llGetColor(ALL_SIDES)` | the **mean** of the faces' colours | the same | no scripts |
-| `llGetAlpha(ALL_SIDES)` | the **sum** of the faces' alphas (6 for an opaque cube) | the same | no scripts |
-| `llSetColor` past its range, read by `llGetColor` in the same event | **as given**, `<2,−1,0.5>` (`PRIM_COLOR` reads it clamped) | clamped | no scripts |
-| `llSetColor` of face 6 | nothing | the same | no scripts |
-| `llSetColor` of face −2 | every face, as `ALL_SIDES` | nothing | no scripts |
-| `llGetColor` or `llGetAlpha` of face 6 | white, 1 | **black, 0** | no scripts |
-| `llGetColor` of face −2 | the mean, as `ALL_SIDES` | black | no scripts |
-| `llSetAlpha` past 1 and below 0 | clamped | the same | no scripts |
-| `llSetTexture` of a name not in the inventory, `NULL_KEY` or `""` | not applied, `Could not find texture '…'.` (also for `NULL_KEY`) | a name or `""`: not applied, silently; **`NULL_KEY` is applied** | no scripts |
-| `llGetTexture` of face 6 | `NULL_KEY` | the same | no scripts |
-| `llScaleTexture` past its range, of 0 | kept as given | the same | no scripts |
-| `llOffsetTexture` past ±1 | kept | clamped to ±1 | no scripts |
-| `llRotateTexture` past 2π | kept | modulo 2π | no scripts |
-| `llSetText` alpha 2 | 1 | **0** | no scripts |
-| `llSetText` alpha −1 | 0 | **1** | no scripts |
-| `llSetText` of 300 characters; of 100 + three `é` + 300 | cut to 254; to 251 characters (254 bytes) | the same | no scripts |
-| `llGetNumberOfSides`: box 6, hollow 7, cut 6, hollow and cut 7, tapered to a point 6; cylinder 3, hollow and cut 6; prism 5; sphere 1, hollow, cut and dimpled 6; torus 3; tube 6; ring 5; sculpt 1 | as listed | the same | no scripts |
-| `llSetLinkColor`, `llSetLinkAlpha`, `llSetLinkTexture` of `LINK_THIS`; of link 0 | the prim | the same | no scripts |
-| `llSetLinkColor` of link 2 on a single prim | nothing | the same | no scripts |
+| `llGetColor(ALL_SIDES)` | the **mean** of the faces' colours | the same | each flavour as its grid |
+| `llGetAlpha(ALL_SIDES)` | the **sum** of the faces' alphas (6 for an opaque cube) | the same | each flavour as its grid |
+| `llSetColor` past its range, read by `llGetColor` in the same event | **as given**, `<2,−1,0.5>` (`PRIM_COLOR` reads it clamped) | clamped | each flavour as its grid |
+| `llSetColor` of face 6 | nothing | the same | each flavour as its grid |
+| `llSetColor` of face −2 | every face, as `ALL_SIDES` | nothing | each flavour as its grid |
+| `llGetColor` or `llGetAlpha` of face 6 | white, 1 | **black, 0** | each flavour as its grid |
+| `llGetColor` of face −2 | the mean, as `ALL_SIDES` | black | each flavour as its grid |
+| `llSetAlpha` past 1 and below 0 | clamped | the same | each flavour as its grid |
+| `llSetTexture` of a name not in the inventory, `NULL_KEY` or `""` | not applied, `Could not find texture '…'.` (also for `NULL_KEY`) | a name or `""`: not applied, silently; **`NULL_KEY` is applied** | each flavour as its grid |
+| `llGetTexture` of face 6 | `NULL_KEY` | the same | each flavour as its grid |
+| `llScaleTexture` past its range, of 0 | kept as given | the same | each flavour as its grid |
+| `llOffsetTexture` past ±1 | kept | clamped to ±1 | each flavour as its grid |
+| `llRotateTexture` past 2π | kept | modulo 2π | each flavour as its grid |
+| `llSetText` alpha 2 | 1 | **0** | each flavour as its grid |
+| `llSetText` alpha −1 | 0 | **1** | each flavour as its grid |
+| `llSetText` of 300 characters; of 100 + three `é` + 300 | cut to 254; to 251 characters (254 bytes) | the same | each flavour as its grid |
+| `llGetNumberOfSides`: box 6, hollow 7, cut 6, hollow and cut 7, tapered to a point 6; cylinder 3, hollow and cut 6; prism 5; sphere 1, hollow, cut and dimpled 6; torus 3; tube 6; ring 5; sculpt 1 | as listed | the same | each flavour as its grid |
+| `llSetLinkColor`, `llSetLinkAlpha`, `llSetLinkTexture` of `LINK_THIS`; of link 0 | the prim | the same | each flavour as its grid |
+| `llSetLinkColor` of link 2 on a single prim | nothing | the same | each flavour as its grid |
 
 ### The object's identity
 
@@ -1970,24 +1977,24 @@ newer rules go by number, since OpenSim has no constants for them.
 
 | what | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
-| a fresh prim | `llGetLinkNumber` 0, `llGetNumberOfPrims` 1, `llGetCreator` the owner | the same | no scripts |
+| a fresh prim | `llGetLinkNumber` 0, `llGetNumberOfPrims` 1, `llGetCreator` the owner | the same | each flavour as its grid |
 | `llGetLinkKey(0)`, `llGetLinkKey(1)` on a single prim | the prim, `NULL_KEY` | the prim, **the prim** | each flavour as its grid |
 | `llGetLinkName(1)` on a single prim | `NULL_KEY` as text | the same | the same |
-| `llSetObjectName` of 64 or 100 characters | cut to **63** | **kept** | no scripts |
-| a name of forty `é` | sixty-two `?`: cut to whole characters within 63 bytes, and every byte of a character outside ASCII reads back as `?` | kept | no scripts |
-| a description of 128 or 200 characters | cut to 127 | the same | no scripts |
-| a description of a hundred `é` | a hundred and twenty-six `?` | sixty-three `é`: cut within 127 bytes | no scripts |
-| a pipe or a newline in a name or description | `?` | kept | no scripts |
-| leading and trailing spaces, an empty name | kept | the same | no scripts |
-| `llSetClickAction` 0 to 9 | `PRIM_CLICK_ACTION` and `OBJECT_CLICK_ACTION` read it back | `OBJECT_CLICK_ACTION` reads it back; `PRIM_CLICK_ACTION` is unsupported | no scripts |
-| `llSetClickAction` 10, 99, −1 | ignored: reads 0 | **kept**: 10, 99, 255 | no scripts |
-| `llGetObjectDetails` of `NULL_KEY`, a key nothing has, text that is no key, or with no codes | an empty list | the same | no scripts |
-| an unknown code among known ones | −1 in its place (`OBJECT_UNKNOWN_DETAIL`) | the same | no scripts |
-| `OBJECT_VELOCITY` of a prim at rest | a vector | a value `llGetListEntryType` calls `TYPE_INVALID`, printed `<0, 0, 0>` | no scripts |
-| `OBJECT_STREAMING_COST`, `OBJECT_PHYSICS_COST`, `OBJECT_SERVER_COST` of the cube | 0.05, 1.0, 0.5 | 1.0, 0.1, 0 | no scripts |
-| `OBJECT_LAST_OWNER_ID` | `NULL_KEY` | the owner | no scripts |
-| codes 42 to 56 (`OBJECT_MATERIAL` to `OBJECT_VOLUME_DETECT`) | answered (material 3, mass 125, scale, text colour and alpha, health, damage, the five permission masks, …) | **−1** for each | no scripts |
-| `OBJECT_PRIM_COUNT` of the owner | the prims the avatar wears (22 here) | 0 | no scripts |
+| `llSetObjectName` of 64 or 100 characters | cut to **63** | **kept** | each flavour as its grid |
+| a name of forty `é` | sixty-two `?`: cut to whole characters within 63 bytes, and every byte of a character outside ASCII reads back as `?` | kept | each flavour as its grid |
+| a description of 128 or 200 characters | cut to 127 | the same | each flavour as its grid |
+| a description of a hundred `é` | a hundred and twenty-six `?` | sixty-three `é`: cut within 127 bytes | each flavour as its grid |
+| a pipe or a newline in a name or description | `?` | kept | each flavour as its grid |
+| leading and trailing spaces, an empty name | kept | the same | each flavour as its grid |
+| `llSetClickAction` 0 to 9 | `PRIM_CLICK_ACTION` and `OBJECT_CLICK_ACTION` read it back | `OBJECT_CLICK_ACTION` reads it back; `PRIM_CLICK_ACTION` is unsupported | each flavour as its grid |
+| `llSetClickAction` 10, 99, −1 | ignored: reads 0 | **kept**: 10, 99, 255 | each flavour as its grid |
+| `llGetObjectDetails` of `NULL_KEY`, a key nothing has, text that is no key, or with no codes | an empty list | the same | each flavour as its grid |
+| an unknown code among known ones | −1 in its place (`OBJECT_UNKNOWN_DETAIL`) | the same | each flavour as its grid |
+| `OBJECT_VELOCITY` of a prim at rest | a vector | a value `llGetListEntryType` calls `TYPE_INVALID`, printed `<0, 0, 0>` | a vector on both flavours |
+| `OBJECT_STREAMING_COST`, `OBJECT_PHYSICS_COST`, `OBJECT_SERVER_COST` of the cube | 0.05, 1.0, 0.5 | 1.0, 0.1, 0 | each flavour as its grid, for every prim: the region has no cost model yet |
+| `OBJECT_LAST_OWNER_ID` | `NULL_KEY` | the owner | each flavour as its grid |
+| codes 42 to 56 (`OBJECT_MATERIAL` to `OBJECT_VOLUME_DETECT`) | answered (material 3, mass 125, scale, text colour and alpha, health, damage, the five permission masks, …) | **−1** for each | each flavour as its grid |
+| `OBJECT_PRIM_COUNT` of the owner | the prims the avatar wears (22 here) | 0 | each flavour as its grid |
 
 ### Linking
 
@@ -2000,12 +2007,12 @@ granted `PERMISSION_CHANGE_LINKS`; each step is a second and a half apart.
 | `llCreateLink` of `NULL_KEY`, a key nothing has, the owner | `Script trying to link but target is invalid.` each | nothing, silently | each flavour as its grid |
 | linked | `CHANGED_LINK` in both prims; the root is link 1, the child 2, `llGetNumberOfPrims` 2 | the same, and the child gets a `changed` of 32768 (OpenSim's `CHANGED_POSITION`) whenever it moves | each flavour as its grid; the 32768 at the link alone, since nothing moves a child yet |
 | `llGetLinkKey(0)` in a linkset | `NULL_KEY` | the prim itself | each flavour as its grid |
-| `llSetLinkPrimitiveParamsFast` of `LINK_SET`, `LINK_ALL_OTHERS`, `LINK_ALL_CHILDREN`, `LINK_ROOT`, `LINK_THIS`, 1, 2 | the prims each names | the same | no scripts |
-| … of link 0 or 3 in a linkset of two | nothing | the same | no scripts |
-| `llGetLinkPrimitiveParams` of `LINK_SET`, `LINK_ALL_OTHERS`, `LINK_ALL_CHILDREN` | **nothing** | the prims each names, in link order | no scripts |
-| `PRIM_LINK_TARGET` in a get and in a set | moves on to the link named | the same | no scripts |
-| the child's `PRIM_POS_LOCAL` 5, 20, 60 m | set as given | the same | no scripts |
-| the child's `PRIM_POSITION` of a region position 5, 20, 60 m from the root | **nothing**: the child stays where it was | the region position is taken **as the offset**: the child goes that far from the root | no scripts |
+| `llSetLinkPrimitiveParamsFast` of `LINK_SET`, `LINK_ALL_OTHERS`, `LINK_ALL_CHILDREN`, `LINK_ROOT`, `LINK_THIS`, 1, 2 | the prims each names | the same | each flavour as its grid; not replayed in a linkset yet |
+| … of link 0 or 3 in a linkset of two | nothing | the same | each flavour as its grid; not replayed in a linkset yet |
+| `llGetLinkPrimitiveParams` of `LINK_SET`, `LINK_ALL_OTHERS`, `LINK_ALL_CHILDREN` | **nothing** | the prims each names, in link order | each flavour as its grid; not replayed in a linkset yet |
+| `PRIM_LINK_TARGET` in a get and in a set | moves on to the link named | the same | each flavour as its grid; not replayed in a linkset yet |
+| the child's `PRIM_POS_LOCAL` 5, 20, 60 m | set as given | the same | each flavour as its grid; not replayed in a linkset yet |
+| the child's `PRIM_POSITION` of a region position 5, 20, 60 m from the root | **nothing**: the child stays where it was | the region position is taken **as the offset**: the child goes that far from the root | each flavour as its grid; not replayed in a linkset yet |
 | `llSetPos` in a child, 15 m from the root | 15 m: no 10 m cap for a child's offset | **12 m**: capped 10 m from where it was (2 m) | each flavour as its grid |
 | `llBreakLink(2)`, `llBreakLink(1)` | unlinks; `CHANGED_LINK` in both | unlinks; `CHANGED_LINK` in both for `llBreakLink(1)`, but **in the child alone** for `llBreakLink(2)` | each flavour as its grid |
 | `llBreakLink(3)` | nothing | the same | the same |
@@ -2033,18 +2040,18 @@ after it.
 
 | setter | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
-| `llSetColor`, `llSetAlpha`, `llSetLinkColor` | `CHANGED_COLOR` | the same | no scripts |
-| the same colour again | `CHANGED_COLOR` again | **nothing** | no scripts |
-| the same alpha again | `CHANGED_COLOR` | the same | no scripts |
-| `llSetTexture`, `llScaleTexture`, `llOffsetTexture`, `llRotateTexture`, glow, fullbright, bump and shiny, texgen, alpha mode, normal and specular maps | **nothing** | `CHANGED_TEXTURE` (the same texture again: nothing) | no scripts |
-| `llSetScale`, `PRIM_SIZE` | `CHANGED_SCALE` | the same | no scripts |
-| the same scale again | nothing | `CHANGED_SCALE` again | no scripts |
-| `PRIM_TYPE` | `CHANGED_SHAPE` | the same | no scripts |
+| `llSetColor`, `llSetAlpha`, `llSetLinkColor` | `CHANGED_COLOR` | the same | each flavour as its grid |
+| the same colour again | `CHANGED_COLOR` again | **nothing** | each flavour as its grid |
+| the same alpha again | `CHANGED_COLOR` | the same | each flavour as its grid |
+| `llSetTexture`, `llScaleTexture`, `llOffsetTexture`, `llRotateTexture`, glow, fullbright, bump and shiny, texgen, alpha mode, normal and specular maps | **nothing** | `CHANGED_TEXTURE` (the same texture again: nothing) | each flavour as its grid |
+| `llSetScale`, `PRIM_SIZE` | `CHANGED_SCALE` | the same | each flavour as its grid |
+| the same scale again | nothing | `CHANGED_SCALE` again | each flavour as its grid |
+| `PRIM_TYPE` | `CHANGED_SHAPE` | the same | each flavour as its grid |
 | `llSetPos` | nothing | 32768 (`CHANGED_POSITION`, OpenSim's own) | each flavour as its grid |
-| `llSetRot`, text, name, description, light, flexible, material, phantom, slice, `llTargetOmega`, texture animation, particles, sit target, sit text, click action, `llAllowInventoryDrop` | nothing | the same | no scripts |
-| `llSetPrimMediaParams`, `llClearPrimMedia` | `CHANGED_MEDIA` | YEngine the same; XEngine nothing for the set, **two** for the clear | no scripts |
-| a render material (`PRIM_RENDER_MATERIAL`) | `CHANGED_RENDER_MATERIAL` | nothing: the rule is unsupported | no scripts |
-| colour and size in one call | one event, `CHANGED_COLOR \| CHANGED_SCALE` | **two** events | no scripts |
+| `llSetRot`, text, name, description, light, flexible, material, phantom, slice, `llTargetOmega`, texture animation, particles, sit target, sit text, click action, `llAllowInventoryDrop` | nothing | the same | each flavour as its grid |
+| `llSetPrimMediaParams`, `llClearPrimMedia` | `CHANGED_MEDIA` | YEngine the same; XEngine nothing for the set, **two** for the clear | each flavour as its grid, but on Second Life the event comes after the probe's next timer (`server-lsl-media-changed-before-timer`) |
+| a render material (`PRIM_RENDER_MATERIAL`) | `CHANGED_RENDER_MATERIAL` | nothing: the rule is unsupported | each flavour as its grid |
+| colour and size in one call | one event, `CHANGED_COLOR \| CHANGED_SCALE` | **two** events | each flavour as its grid |
 
 ### `changed`: what a viewer's change raises
 
@@ -2090,16 +2097,16 @@ root) and B (its child) each printed every `changed` event they got.
 
 | what | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
-| a sound name not in the inventory, `NULL_KEY` or `""`, to `llPlaySound`, `llLoopSound`, its master and slave, `llTriggerSound`, `llPreloadSound` | `Could not find sound '…'.` | nothing, silently | no scripts |
-| a sound key no asset has, a volume past 1 or below 0, `llCollisionSound` of a missing name, the radius, volume and queueing calls past their ranges, `llStopSound` with nothing playing | nothing | the same | no scripts |
-| `llParticleSystem` with a value of the wrong type | `PSYS error: Rule 1 error, PSYS_PART_MAX_AGE needs float data.` | nothing | no scripts |
-| … with a rule missing its value | nothing; the script carries on | **throws** (`IndexOutOfRangeException`): YEngine stops the script, XEngine ends the event | no scripts |
-| … with an unknown rule, a missing texture, values past their ranges; `llLinkParticleSystem` of link 3; texture animations of zero frames, a negative rate, face 9, without `ANIM_ON` | nothing | the same | no scripts |
-| `llSetPrimMediaParams` of face 9 | 1003 (`STATUS_NOT_FOUND`), `PRIM_MEDIA error: face 9 on object … not found` | 1003, silently | no scripts |
-| a URL past 1024 characters, a width past 2048 | 1002 (`STATUS_BOUNDS_ERROR`), `Bounds error near parameter #0, param=3.  No values have been set.` | **0**: kept as given | no scripts |
-| an unknown media rule | 1000 (`STATUS_MALFORMED_PARAMS`), `Malformed parameters …` | 1000, silently | no scripts |
-| `llGetPrimMediaParams` of an unknown rule | nothing | `1000` | no scripts |
-| `llClearPrimMedia` of face 9 | 1003 | the same | no scripts |
+| a sound name not in the inventory, `NULL_KEY` or `""`, to `llPlaySound`, `llLoopSound`, its master and slave, `llTriggerSound`, `llPreloadSound` | `Could not find sound '…'.` | nothing, silently | each flavour as its grid |
+| a sound key no asset has, a volume past 1 or below 0, `llCollisionSound` of a missing name, the radius, volume and queueing calls past their ranges, `llStopSound` with nothing playing | nothing | the same | each flavour as its grid |
+| `llParticleSystem` with a value of the wrong type | `PSYS error: Rule 1 error, PSYS_PART_MAX_AGE needs float data.` | nothing | each flavour as its grid |
+| … with a rule missing its value | nothing; the script carries on | **throws** (`IndexOutOfRangeException`): YEngine stops the script, XEngine ends the event | each flavour as its grid |
+| … with an unknown rule, a missing texture, values past their ranges; `llLinkParticleSystem` of link 3; texture animations of zero frames, a negative rate, face 9, without `ANIM_ON` | nothing | the same | each flavour as its grid |
+| `llSetPrimMediaParams` of face 9 | 1003 (`STATUS_NOT_FOUND`), `PRIM_MEDIA error: face 9 on object … not found` | 1003, silently | each flavour as its grid; the media is the script's alone, sent to no viewer yet (`server-fake-grid-object-media-region`) |
+| a URL past 1024 characters, a width past 2048 | 1002 (`STATUS_BOUNDS_ERROR`), `Bounds error near parameter #0, param=3.  No values have been set.` | **0**: kept as given | each flavour as its grid |
+| an unknown media rule | 1000 (`STATUS_MALFORMED_PARAMS`), `Malformed parameters …` | 1000, silently | each flavour as its grid |
+| `llGetPrimMediaParams` of an unknown rule | nothing | `1000` | each flavour as its grid |
+| `llClearPrimMedia` of face 9 | 1003 | the same | each flavour as its grid |
 
 ### What the viewer does with it
 

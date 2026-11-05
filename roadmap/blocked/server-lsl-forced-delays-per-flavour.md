@@ -71,3 +71,10 @@ re-times (`llTextBox`, `llLoadURL`, `llGiveInventory`, `llModPow`,
 and both throttles would have had no consumer, and the acceptance needs the
 fake grid to run scripts. It waits on the tranches that add those calls and
 on [[server-fake-grid-script-engine-wiring]].
+
+## From server-lsl-lib-prim-state (2026-11-04)
+
+The prim functions charge the keyword file's delays (`llGetPrimitiveParams`
+0.2 s, `llSetPrimitiveParams` 0.2 s, the media calls 1 s). OpenSim's refusals of
+a rule sleep a second of their own, written into `prim_params::args` and
+`prim_params::set`, not the table.

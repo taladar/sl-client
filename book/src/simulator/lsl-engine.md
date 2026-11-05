@@ -490,8 +490,10 @@ limits):
   Life, the scripts present on OpenSim). The fake grid reports them in
   `SimStats` (with the scripts-run percentage of its last tick) and in a
   `LandStatRequest`'s top scripts, summed per linkset on its root, for an
-  object the scene states no cost for; `llGetObjectDetails` is
-  `server-lsl-lib-prim-state`'s.
+  object the scene states no cost for. `llGetObjectDetails` does not read
+  them yet: its host answers while the engine is lent to the tick, so
+  `OBJECT_SCRIPT_MEMORY` is 64 KiB a script, `OBJECT_SCRIPT_TIME` 0 and every
+  script with an instance counts as running.
 - **Not modelled:** Second Life's LSO and its 16 KB, since the fake grid
   compiles every script from source; and the garbage Mono's readings carry,
   which is why a reading here sits a couple of hundred bytes under aditi's and
@@ -902,7 +904,16 @@ scope of 236` as this was written):
   `osStringLastIndexOf`, `osStringStartsWith` and `osStringEndsWith` are in
   too, on a port of the collator OpenSim's Mono runs (below), and
   `osListSortInPlace`, which sorts the list object it is handed — and so
-  every variable holding it (the list objects, below).
+  every variable holding it (the list objects, below). With the prim tranche
+  came the 23 that shadow its functions: the rule lists of any prim by key
+  (`osGetPrimitiveParams`, `osSetPrimitiveParams` of a prim its owner owns)
+  and of a link (`osGetLinkPrimitiveParams`), `osGetLinkNumber`, the links
+  forced without `PERMISSION_CHANGE_LINKS` (`osForceCreateLink`,
+  `osForceBreakLink`, `osForceBreakAllLinks`), the three overloads of
+  `osSetProjectionParams` (a projector, the light's image on the wire),
+  `osParticleSystem` and `osLinkParticleSystem`, the `os*Sound*` family by
+  link number, `osCollisionSound`, and `osClearObjectAnimations` (0: nothing
+  on the fake grid starts an object animation yet).
 - **Later, with the tranche of the `ll*` functions they shadow** — the NPC
   family, avatar animation, attachment, teleport and sitting functions
   (`server-lsl-lib-avatar-control`, which has the NPC fixtures to answer
@@ -910,8 +921,7 @@ scope of 236` as this was written):
   environment, wind, sun and terrain writers and LightShare
   (`server-lsl-lib-land-region-env`); the apparent time and the wallclock
   (`server-lsl-lib-time-timers`); notecards, inventory and the rezzing object
-  (`server-lsl-lib-task-inventory`); prim parameters, links, particles and
-  sounds (`server-lsl-lib-prim-state`); inertia and object teleports
+  (`server-lsl-lib-task-inventory`); inertia and object teleports
   (`server-lsl-lib-physics-vehicles`); URLs (`server-lsl-lib-http-url`). A
   task of its own takes the dynamic textures every OpenSim sign is drawn with
   (`server-fake-grid-dynamic-textures`).
@@ -993,7 +1003,12 @@ permissions and money tranche added `owner`, `seated_on`, `ask_permissions`
 `sit_on_link` (the sit target search and parcel access, answered with a
 `SitRefusal`). OpenSim's own functions added `standing` (what the script's
 owner is, for the `[OSSL]` permission check), `simulator`, `region_size`,
-`terrain_height`, `day_length`, `prim_scripts` and `agent_ip`.
+`terrain_height`, `day_length`, `prim_scripts` and `agent_ip`. The prim
+tranche (`server-lsl-lib-prim-state`) added `prim` and `set_prim` — a whole
+prim lent as the runtime's `vm::prim::Prim` and handed back with the
+`changed` it raises — `set_region_position`, `linkset_of`, `object_details`
+(any object or avatar by key), `inventory_key` (a texture or sound named
+rather than keyed) and `sound` (a sound played once, triggered or preloaded).
 The methods the first tranches need — chat and listens, identity, position,
 hover text, and the seeded randomness and clock the determinism rule requires —
 are enough to fix its shape:
@@ -1181,6 +1196,26 @@ is.
   touch handler in its current state — with each grid's rule for a child of
   such a root: both flags, quietly, on Second Life; `FLAGS_SCRIPTED` and the
   child sent again in full as the root's scripts change, on OpenSim.
+- **Prims** (`sl_fake_grid::prim_state`, `server-lsl-lib-prim-state`). A
+  prim is lent to the library read out of its `Object` — the volume
+  parameters, the texture entry, the extra parameters, the hover text, the
+  flags, the angular velocity, the attached sound, the particle system and
+  texture animation — and its properties record (name, description,
+  creator), and written back into them; what it changed goes out in the
+  tick's burst like any other write. The wire holds less than a grid keeps
+  (a colour as a byte, a texture offset as 16 bits, a spin as an angular
+  velocity, a normal map or a sit flag not at all), so the last prim a
+  script wrote is kept with the record it wrote (a `ScriptedPrim` component
+  in the store), and a read takes each part from there — the faces, the
+  text, the shape, the light, the flexible path, the spin, the particles,
+  the projector — while that part of the record is still what was written; a
+  viewer's edit since is what the next read decodes. The hover text's alpha
+  travels flipped (`255 − opacity`): Second Life reads the opacity, OpenSim
+  the flipped byte, which is why its `llSetText(…, 1.0)` reads 0. A setter's
+  `changed` is raised after the tick, in the written prim's scripts; a sound
+  played once, triggered or preloaded goes to every avatar in the region
+  (`llTriggerSoundLimited`'s to those inside its box) as `AttachedSound`,
+  `SoundTrigger` or `PreloadSound`.
 - **Randomness and calendar time.** `Host::random_bits` draws from a
   xorshift64 stream per region seeded with the region's id, and the region's
   world holds the grid's wall clock (`SceneFixtures::wall`), where a script's
@@ -1196,7 +1231,8 @@ is.
 - **Held by** `sl-fake-grid/tests/scripts.rs` (the life of a script, its
   state through a restart and a take, the experience questions, the OSSL
   gate, a scripted seat, a taken target, Second Life's reach, a wear and a
-  drop, a held touch and a click, a touch on a child), the `sit-stand` and
+  drop, a held touch and a click, a touch on a child, a prim a script dresses
+  and a viewer retextures), the `sit-stand` and
   `object-touch-grab` censuses offline on both flavours,
   `sl-client-bevy-viewer/tests/e2e_running_scripts.rs` (a running
   script's dialog and experience card answered in the real viewer and heard

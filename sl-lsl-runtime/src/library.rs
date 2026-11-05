@@ -29,6 +29,7 @@ pub mod control;
 pub mod detection;
 pub mod dispatch;
 pub(crate) mod dotnet;
+pub mod effects;
 pub mod encoding;
 pub mod experiences;
 mod generated;
@@ -39,6 +40,9 @@ pub mod lists;
 pub mod math;
 pub mod money_permissions;
 pub mod ossl;
+pub mod ossl_prim;
+pub(crate) mod prim_params;
+pub mod prim_state;
 mod range;
 mod registry;
 pub mod rotations;
@@ -53,6 +57,7 @@ pub use dispatch::{
     invoke, stub,
 };
 pub use generated::{BUILTINS, BuiltinId, CONSTANTS, EVENTS, signatures};
+pub use prim_params::faces_of;
 pub use registry::{call, status};
 pub use table::{
     Argument, Builtin, Constant, ConstantValue, Event, Family, Gate, ThreatLevel, builtin,
@@ -213,6 +218,45 @@ mod tests {
     }
 
     impl Host for Unreached {
+        fn prim(&self, _caller: CallerId, _prim: &str) -> Option<crate::vm::prim::Prim> {
+            None
+        }
+
+        fn set_prim(
+            &mut self,
+            _caller: CallerId,
+            _state: &crate::vm::prim::Prim,
+            _changed: &[i32],
+        ) {
+        }
+
+        fn set_region_position(&mut self, _caller: CallerId, _position: Vector) -> Option<Vector> {
+            None
+        }
+
+        fn linkset_of(&self, _key: &str) -> Vec<String> {
+            Vec::new()
+        }
+
+        fn object_details(
+            &self,
+            _caller: CallerId,
+            _key: &str,
+        ) -> Option<crate::vm::prim::ObjectDetails> {
+            None
+        }
+
+        fn inventory_key(
+            &self,
+            _caller: CallerId,
+            _name: &str,
+            _asset_type: i32,
+        ) -> Option<String> {
+            None
+        }
+
+        fn sound(&mut self, _caller: CallerId, _prim: &str, _cue: &crate::vm::prim::SoundCue) {}
+
         fn standing(&self, _caller: CallerId) -> crate::vm::Standing {
             crate::vm::Standing::default()
         }
@@ -756,11 +800,11 @@ mod tests {
         );
         assert_eq!(
             call(
-                BuiltinId::LlSetColor,
+                BuiltinId::LlSetStatus,
                 &mut ctx,
-                vec![Value::Vector(crate::value::ZERO_VECTOR), Value::Integer(0)]
+                vec![Value::Integer(1), Value::Integer(0)]
             ),
-            Err(CallError::Missing(BuiltinId::LlSetColor))
+            Err(CallError::Missing(BuiltinId::LlSetStatus))
         );
     }
 

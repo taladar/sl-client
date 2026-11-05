@@ -108,7 +108,7 @@ use sl_proto::{
 };
 use sl_types::chat::{ChatChannel, ChatVolume};
 use sl_types::key::{AgentKey, ExperienceKey, InventoryKey, ObjectKey, OwnerKey, TextureKey};
-use sl_types::lsl::{ScriptPermissions, Vector};
+use sl_types::lsl::{Rotation, ScriptPermissions, Vector};
 use sl_types::map::{Direction, RegionCoordinates};
 
 use crate::chat::{DEBUG_CHANNEL, FULLY_AUDIBLE, Line};
@@ -829,6 +829,14 @@ struct Present {
 /// the engine is back in place.
 #[derive(Debug, Clone)]
 enum Effect {
+    /// `changed(bits)` a setter raised in the scripts of a prim: raised once
+    /// the engine is back in place.
+    Changed {
+        /// The prim.
+        prim: RegionLocalObjectId,
+        /// The bits.
+        bits: i32,
+    },
     /// A line said: what the avatars and the agents' listens hear, and what
     /// the scripts in earshot are offered, where any are.
     Say {
@@ -959,6 +967,31 @@ enum Delivery {
         /// The message.
         message: Box<sl_proto::InstantMessage>,
     },
+    /// A sound a prim played once, triggered or had preloaded.
+    Sound {
+        /// The avatar who hears it.
+        agent: AgentKey,
+        /// What it hears.
+        sound: Box<HeardSound>,
+    },
+}
+
+/// A sound an avatar is sent (`llPlaySound`, `llTriggerSound`,
+/// `llPreloadSound`).
+#[derive(Debug, Clone)]
+struct HeardSound {
+    /// The prim it comes from.
+    object: ObjectKey,
+    /// The prim's linkset root, when that is another prim.
+    parent: Option<ObjectKey>,
+    /// The prim's owner.
+    owner: OwnerKey,
+    /// The sound's asset.
+    asset: AssetKey,
+    /// Where the prim is in the region.
+    position: Vector,
+    /// How it is played.
+    cue: sl_lsl_runtime::vm::prim::SoundCue,
 }
 
 /// The region as a script sees it: the [`Host`] the engine runs a tick
@@ -1143,6 +1176,179 @@ impl RegionHost<'_> {
             .checked_sub(1)
             .and_then(|index| prims.get(index))
             .copied()
+    }
+
+    /// Whether the region imitates OpenSim.
+    const fn opensim(&self) -> bool {
+        self.world.script_instances.flavour().is_opensim()
+    }
+
+    /// The region-local id of the prim keyed `prim`.
+    fn prim_keyed(&self, prim: &str) -> Option<RegionLocalObjectId> {
+        let key = ObjectKey::from(uuid::Uuid::parse_str(prim).ok()?);
+        self.world
+            .objects
+            .get_by_key(key)
+            .map(|object| object.local_id)
+    }
+
+    /// What `llGetObjectDetails` reads of the prim `local_id`.
+    fn prim_details(
+        &self,
+        local_id: RegionLocalObjectId,
+    ) -> Option<sl_lsl_runtime::vm::prim::ObjectDetails> {
+        let prim = crate::prim_state::read(self.world, local_id, self.opensim())?;
+        let object = self.world.objects.get(local_id)?;
+        let properties = self.world.properties_of(local_id)?;
+        let root = self.world.root_of(local_id);
+        let prims: Vec<RegionLocalObjectId> = std::iter::once(root)
+            .chain(crate::link_sets::children_in_order(self.world, root))
+            .collect();
+        let scripts: Vec<CallerId> = prims
+            .iter()
+            .filter_map(|prim| self.world.objects.get(*prim))
+            .flat_map(|prim| self.world.script_instances.scripts_in(prim.full_id))
+            .collect();
+        // The engine is lent to the tick, so a script's own run flag cannot
+        // be read here; every script with an instance counts as running.
+        let running = scripts.len();
+        let inventory: usize = prims
+            .iter()
+            .filter_map(|prim| self.world.objects.contents(*prim))
+            .map(|contents| contents.items.len())
+            .sum();
+        let count = |value: usize| i32::try_from(value).unwrap_or(i32::MAX);
+        let owner = match properties.owner {
+            OwnerKey::Agent(agent) => agent.uuid(),
+            OwnerKey::Group(group) => group.uuid(),
+        };
+        let masks = &properties.permissions;
+        let mask = |value: sl_wire::Permissions| value.bits().cast_signed();
+        let attached = self
+            .world
+            .objects
+            .attached_to(root)
+            .map_or(0, |attached| i32::from(attached.point));
+        Some(sl_lsl_runtime::vm::prim::ObjectDetails {
+            avatar: false,
+            name: prim.name.clone(),
+            description: prim.description.clone(),
+            position: prim.position.clone(),
+            rotation: prim.rotation.clone(),
+            velocity: object.motion.velocity.clone(),
+            owner: owner.to_string(),
+            group: properties.group.map_or_else(
+                || uuid::Uuid::nil().to_string(),
+                |group| group.uuid().to_string(),
+            ),
+            creator: prim.creator.clone(),
+            last_owner: properties.last_owner_id.to_string(),
+            root: self
+                .world
+                .objects
+                .get(root)
+                .map_or_else(|| prim.key.clone(), |root| root.full_id.uuid().to_string()),
+            attached_point: attached,
+            scripts: (count(scripts.len()), count(running)),
+            script_memory: count(scripts.len().saturating_mul(0x0001_0000)),
+            prim_count: count(prims.len()),
+            inventory_count: count(inventory),
+            click_action: prim.click_action,
+            omega: Vector {
+                x: prim.omega.axis.x * prim.omega.spin,
+                y: prim.omega.axis.y * prim.omega.spin,
+                z: prim.omega.axis.z * prim.omega.spin,
+            },
+            scale: prim.scale.clone(),
+            material: prim.material,
+            flags: (prim.physics, prim.phantom, prim.temp_on_rez),
+            text: prim.text.clone(),
+            // The region has no cost model yet: every prim costs what each
+            // grid said the probe's cube cost (`prim/identity`).
+            costs: if self.opensim() {
+                (1.0, 1.0, 0.1, 0.0)
+            } else {
+                (1.0, 0.05, 1.0, 0.5)
+            },
+            selected: (0, count(crate::seating::sitters_of(self.world, root).len())),
+            rez_time: String::new(),
+            rezzer: uuid::Uuid::nil().to_string(),
+            masks: [
+                mask(masks.base),
+                mask(masks.owner),
+                mask(masks.group),
+                mask(masks.everyone),
+                mask(masks.next_owner),
+            ],
+            hover_height: 0.0,
+            body_shape: -1.0,
+            animated: 0,
+        })
+    }
+
+    /// What `llGetObjectDetails` reads of an avatar in the region.
+    fn avatar_details(&self, present: &Present) -> sl_lsl_runtime::vm::prim::ObjectDetails {
+        let agent = present.agent.uuid();
+        let (first, last) = self.name_of(agent);
+        let worn = self.world.objects.worn_by(present.agent);
+        let key = agent.to_string();
+        sl_lsl_runtime::vm::prim::ObjectDetails {
+            avatar: true,
+            name: format!("{first} {last}"),
+            description: String::new(),
+            position: present.position.clone(),
+            rotation: Rotation {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+                s: 1.0,
+            },
+            velocity: Vector {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            owner: key.clone(),
+            group: uuid::Uuid::nil().to_string(),
+            creator: uuid::Uuid::nil().to_string(),
+            last_owner: uuid::Uuid::nil().to_string(),
+            root: key,
+            attached_point: 0,
+            scripts: (0, 0),
+            script_memory: 0,
+            prim_count: i32::try_from(worn.len()).unwrap_or(i32::MAX),
+            inventory_count: 0,
+            click_action: 0,
+            omega: Vector {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            scale: Vector {
+                x: 0.45,
+                y: 0.6,
+                z: 1.9,
+            },
+            material: 0,
+            flags: (false, false, false),
+            text: sl_lsl_runtime::vm::prim::HoverText {
+                text: String::new(),
+                color: Vector {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+                alpha: 0.0,
+            },
+            costs: (0.0, 0.0, 0.0, 0.0),
+            selected: (0, 0),
+            rez_time: String::new(),
+            rezzer: uuid::Uuid::nil().to_string(),
+            masks: [0; 5],
+            hover_height: 0.0,
+            body_shape: 0.0,
+            animated: 0,
+        }
     }
 
     /// The avatar a script names by `agent`, as the grid keys it.
@@ -1939,6 +2145,138 @@ impl Host for RegionHost<'_> {
         });
     }
 
+    fn prim(&self, _caller: CallerId, prim: &str) -> Option<sl_lsl_runtime::vm::prim::Prim> {
+        let local_id = self.prim_keyed(prim)?;
+        crate::prim_state::read(self.world, local_id, self.opensim())
+    }
+
+    fn set_prim(
+        &mut self,
+        _caller: CallerId,
+        state: &sl_lsl_runtime::vm::prim::Prim,
+        changed: &[i32],
+    ) {
+        let Some(local_id) = self.prim_keyed(&state.key) else {
+            return;
+        };
+        let opensim = self.opensim();
+        let region = self.core.region(self.index);
+        let ground =
+            |x: f32, y: f32| region.map_or(0.0, |region| region.config.terrain.height_at(x, y));
+        let edge = u16::try_from(REGION_EDGE_M).map_or(f32::MAX, f32::from);
+        let _written = crate::prim_state::write(self.world, local_id, state, opensim, ground, edge);
+        for bits in changed {
+            self.effects.push(Effect::Changed {
+                prim: local_id,
+                bits: *bits,
+            });
+        }
+    }
+
+    fn set_region_position(&mut self, caller: CallerId, position: Vector) -> Option<Vector> {
+        let origin = self.origin(caller)?;
+        if self.world.objects.attached_to(origin.root).is_some() {
+            return None;
+        }
+        let edge = u16::try_from(REGION_EDGE_M).map_or(f32::MAX, f32::from);
+        if !(0.0..edge).contains(&position.x) || !(0.0..edge).contains(&position.y) {
+            return None;
+        }
+        let ground = self.core.region(self.index).map_or(0.0, |region| {
+            region.config.terrain.height_at(position.x, position.y)
+        });
+        let mut to = position;
+        to.z = to.z.max(ground);
+        let mut root = self.world.object_mut(origin.root)?;
+        root.motion.position = to.clone();
+        Some(to)
+    }
+
+    fn linkset_of(&self, key: &str) -> Vec<String> {
+        let Some(local_id) = self.prim_keyed(key) else {
+            return Vec::new();
+        };
+        let root = self.world.root_of(local_id);
+        std::iter::once(root)
+            .chain(crate::link_sets::children_in_order(self.world, root))
+            .filter_map(|prim| self.world.objects.get(prim))
+            .map(|prim| prim.full_id.uuid().to_string())
+            .collect()
+    }
+
+    fn object_details(
+        &self,
+        _caller: CallerId,
+        key: &str,
+    ) -> Option<sl_lsl_runtime::vm::prim::ObjectDetails> {
+        if let Some(local_id) = self.prim_keyed(key) {
+            return self.prim_details(local_id);
+        }
+        let present = self.present(key)?;
+        Some(self.avatar_details(present))
+    }
+
+    fn inventory_key(&self, caller: CallerId, name: &str, asset_type: i32) -> Option<String> {
+        let origin = self.origin(caller)?;
+        self.world
+            .objects
+            .contents(origin.local_id)?
+            .items
+            .iter()
+            .find(|item| item.name == name && item.asset_type.to_code() == asset_type)
+            .and_then(|item| item.asset_id)
+            .map(|asset| asset.uuid().to_string())
+    }
+
+    fn sound(&mut self, _caller: CallerId, prim: &str, cue: &sl_lsl_runtime::vm::prim::SoundCue) {
+        use sl_lsl_runtime::vm::prim::SoundCue;
+        let Some(local_id) = self.prim_keyed(prim) else {
+            return;
+        };
+        let Some(object) = self.world.objects.get(local_id).cloned() else {
+            return;
+        };
+        let asset = match cue {
+            SoundCue::Play { sound, .. }
+            | SoundCue::Trigger { sound, .. }
+            | SoundCue::Preload { sound } => sound,
+        };
+        let Ok(asset) = uuid::Uuid::parse_str(asset) else {
+            return;
+        };
+        let root = self.world.root_of(local_id);
+        let parent = (root != local_id)
+            .then(|| self.world.objects.get(root).map(|root| root.full_id))
+            .flatten();
+        let (position, _turn) = crate::seating::frame_of(self.world, &object);
+        let bounds = match cue {
+            SoundCue::Trigger { bounds, .. } => bounds.clone(),
+            _ => None,
+        };
+        for present in self.present {
+            if let Some((low, high)) = &bounds {
+                let at = &present.position;
+                let inside = (low.x..=high.x).contains(&at.x)
+                    && (low.y..=high.y).contains(&at.y)
+                    && (low.z..=high.z).contains(&at.z);
+                if !inside {
+                    continue;
+                }
+            }
+            self.deliveries.push(Delivery::Sound {
+                agent: present.agent,
+                sound: Box::new(HeardSound {
+                    object: object.full_id,
+                    parent,
+                    owner: OwnerKey::Agent(AgentKey::from(object.owner_id)),
+                    asset: AssetKey::from(asset),
+                    position: position.clone(),
+                    cue: cue.clone(),
+                }),
+            });
+        }
+    }
+
     fn prim_count(&self, object: &str) -> Option<i32> {
         let key = ObjectKey::from(uuid::Uuid::parse_str(object).ok()?);
         let prim = self.world.objects.get_by_key(key)?;
@@ -2167,6 +2505,7 @@ fn tick_locked(
     let mut changes = Vec::new();
     for effect in effects {
         match effect {
+            Effect::Changed { prim, bits } => raise_changed_in(world, &[prim], bits),
             Effect::Say { avatars, scripts } => {
                 if let Some(line) = scripts {
                     world.script_instances.hear(&line, &world.objects);
@@ -2400,7 +2739,8 @@ async fn deliver(core: &GridCore, index: usize, deliveries: Vec<Delivery>) {
             | Delivery::Question { agent, .. }
             | Delivery::LoadUrl { agent, .. }
             | Delivery::MapDestination { agent, .. }
-            | Delivery::Message { agent, .. } => *agent,
+            | Delivery::Message { agent, .. }
+            | Delivery::Sound { agent, .. } => *agent,
         };
         let Some(shared) = core.root_session_of(agent).await else {
             tracing::debug!(%agent, "a script spoke to an avatar no longer in world");
@@ -2441,6 +2781,45 @@ fn send(sim: &mut SimSession, delivery: &Delivery, now: Instant) -> Result<(), s
             sim.send_script_teleport_request(destination, now)
         }
         Delivery::Message { message, .. } => sim.send_instant_message(message, now),
+        Delivery::Sound { sound, .. } => send_sound(sim, sound, now),
+    }
+}
+
+/// Sends `sound` down `sim`: a sound played once is the prim's attached
+/// sound without the loop flag, a triggered one a `SoundTrigger` at the
+/// prim's position, a preload a `PreloadSound`.
+fn send_sound(
+    sim: &mut SimSession,
+    sound: &HeardSound,
+    now: Instant,
+) -> Result<(), sl_proto::Error> {
+    use sl_lsl_runtime::vm::prim::SoundCue;
+    match &sound.cue {
+        SoundCue::Play { volume, slave, .. } => {
+            let flags = if *slave {
+                sl_proto::SoundFlags(sl_proto::SoundFlags::SYNC_SLAVE)
+            } else {
+                sl_proto::SoundFlags(0)
+            };
+            sim.send_attached_sound(sound.object, sound.owner, sound.asset, *volume, flags, now)
+        }
+        SoundCue::Trigger { volume, .. } => sim.send_sound_trigger(
+            sound.asset,
+            sound.owner,
+            sound.object,
+            sound.parent,
+            sound.position.clone(),
+            *volume,
+            now,
+        ),
+        SoundCue::Preload { .. } => sim.send_preload_sound(
+            &[sl_proto::SoundPreload {
+                object_id: sound.object,
+                owner_id: sound.owner.uuid(),
+                sound_id: sound.asset.uuid(),
+            }],
+            now,
+        ),
     }
 }
 

@@ -87,3 +87,10 @@ menu, sit on and pay the fixtures by hand; the same scenario run with
 its scripted avatars exercises the grant, pay, sit and animate paths
 unattended; and `sl-crosscheck --scenario scripts` produces a frame pair
 from both viewers.
+
+## From server-lsl-lib-prim-state (2026-11-04)
+
+The prim tranche's acceptance left the rendered half here: a prim whose script
+changes colour, texture, text, scale and particles on a timer, and both
+viewers' frames agreeing. `sl-fake-grid/tests/scripts.rs`'s
+`a_script_dresses_its_prim` already checks the update such a script sends.

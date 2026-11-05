@@ -2,7 +2,7 @@
 id: server-lsl-lib-prim-state
 title: Library tranche — reading and writing the prim
 topic: server
-status: ideas
+status: done
 origin: LSL-on-the-fake-grid audit (2026-09-20)
 blocked_by: [server-lsl-vm-execution, server-world-ecs-store,
   server-world-link-sets, server-world-update-scheduling,
@@ -161,3 +161,59 @@ until objects cross borders ([[server-world-changed-object-crossing]]). What a
 setter writes reaches the viewers through `sl_fake_grid::updates` on its own:
 write the prim in the store during the tick (`RegionHost::set_position` is the
 pattern) and the tick's burst sends it, terse when only the placement changed.
+
+## Done (2026-11-04)
+
+The runtime keeps a prim as `vm::prim::Prim` (the shape in floats as Linden
+Lab's `LLVolumeParams` holds it, each face, the light, flexible path, text,
+omega, particles, texture animation, sound, media and the rest) and reaches it
+through new `Host` methods: `prim`/`set_prim`, `set_region_position`,
+`linkset_of`, `object_details`, `inventory_key` and `sound`.
+
+- **Rule lists** — `library/prim_params` is the one codec over `PRIM_*`:
+  `args` reads each value as each grid reads it (Second Life's `arg #k …
+  expected but … given.` and stop, OpenSim's conversions and `parameter n must
+  be …` with its second's sleep), `set` applies every rule with each grid's
+  clamps and storage (OpenSim's bytes, 1/50000ths, 16-bit rotation and its
+  doubles), `get` answers each rule, and `shape` ports the type rules (Second
+  Life's `LLVolumeParams` limits, OpenSim's `GetNumberOfSides`). The link
+  targets, the `llSetLink*`/`llGetLinkPrimitiveParams` families and the
+  `changed` each write raises (one OR'ed event on Second Life, one per kind on
+  OpenSim) follow from it.
+- **Functions** — `library/prim_state` (placement, scale, the per-face calls,
+  text, identity, click action, sit flags, render material, `llGetObjectDetails`
+  over any prim or avatar), `library/effects` (the sounds, particles, texture
+  animation and face media) and `library/ossl_prim` (the 23 os* functions;
+  `opensim-scope.txt` marks them `in`).
+- **Fake grid** — `sl_fake_grid::prim_state` converts a `Prim` to the wire
+  record and back; a `ScriptedPrim` component keeps what a script last wrote,
+  and a read takes each group from it while the wire record of that group is
+  unchanged (a viewer's edit since wins). A write lands in the store during the
+  tick and the update burst sends it; sounds go out as `AttachedSound`,
+  `SoundTrigger` and `PreloadSound`. `tests/scripts.rs`'s
+  `a_script_dresses_its_prim` checks the update, the `changed` and the read
+  back, on both flavours.
+- **Replays** — `vm/tests/prim_state.rs` replays `prim/params`,
+  `prim/params-rules`, `prim/faces`, `prim/identity`, `prim/placement`,
+  `prim/changed` and `prim/effects` against every transcript; the gridspec's
+  fake-grid column names the deviations.
+
+Left open:
+
+- The acceptance's rendered cross-check (`sl-crosscheck` frames of a scripted
+  prim) waits for [[server-fake-grid-scripted-scenario]]; the wire update is
+  tested, the frames are not.
+- Normal, specular and alpha-mode maps and glTF overrides are kept for the
+  script alone and reach no viewer ([[server-fake-grid-material-edits]]); face
+  media likewise ([[server-fake-grid-object-media-region]]).
+- `prim/link` and `prim/link-refusals` are not replayed with the new rule lists
+  in a linkset; their link and delink rows hold as before.
+- `llGetObjectDetails`' costs are each grid's figures for the probe's cube for
+  every prim, its script memory 64 KiB a script, and every script counts as
+  running (the engine is lent out during the tick).
+- Second Life's late `llGetBoundingBox` is not imitated, and a prim stops at
+  the ground the region reads, not 4 cm above it as aditi's did.
+- The two bugs this filed: [[server-lsl-flood-gate-passes-spaced-lines]] and
+  [[server-lsl-media-changed-before-timer]]. The `prim/changed` replay sets
+  phantom by `PRIM_PHANTOM`, `llSetStatus` being
+  [[server-lsl-lib-physics-vehicles]]'s.

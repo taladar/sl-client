@@ -66,6 +66,7 @@ pub(crate) mod objects;
 pub mod ossl;
 pub mod permissions;
 pub mod persistence;
+pub mod prim;
 mod report;
 pub mod seating;
 #[cfg(test)]

@@ -98,6 +98,11 @@ pub struct Seq(u64);
 #[derive(Debug, Clone, Component)]
 pub struct SeatSettings(pub Seat);
 
+/// What a prim's scripts last wrote of it, and the record that write gave it
+/// ([`crate::prim_state`]). A prim no script wrote has none.
+#[derive(Debug, Clone, Component)]
+pub(crate) struct ScriptedPrim(pub(crate) crate::prim_state::Scripted);
+
 /// One avatar sitting on a prim: where on it, and in which turn it sat.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Sitter {
@@ -312,6 +317,9 @@ impl Clone for ObjectStore {
             }
             if let Some(order) = self.world.get::<LinkOrder>(*entity) {
                 let _held = spawned.insert(order.clone());
+            }
+            if let Some(scripted) = self.world.get::<ScriptedPrim>(*entity) {
+                let _held = spawned.insert(scripted.clone());
             }
             // Who sits where, and who wears what, are the region's agents',
             // and a copy is a region nobody is in yet.
@@ -710,6 +718,33 @@ impl ObjectStore {
         self.world
             .get_mut::<SeatSettings>(entity)
             .map(|seat| &mut seat.into_inner().0)
+    }
+
+    /// The last prim a script wrote as the prim with the given region-local
+    /// id, and the record it wrote, where a script wrote one.
+    #[must_use]
+    pub(crate) fn scripted(
+        &self,
+        local_id: RegionLocalObjectId,
+    ) -> Option<&crate::prim_state::Scripted> {
+        self.world
+            .get::<ScriptedPrim>(self.entity(local_id)?)
+            .map(|scripted| &scripted.0)
+    }
+
+    /// Keeps `scripted` as what a script last wrote as the prim with the
+    /// given region-local id.
+    pub(crate) fn set_scripted(
+        &mut self,
+        local_id: RegionLocalObjectId,
+        scripted: crate::prim_state::Scripted,
+    ) {
+        let Some(entity) = self.entity(local_id) else {
+            return;
+        };
+        if let Ok(mut prim) = self.world.get_entity_mut(entity) {
+            let _held = prim.insert(ScriptedPrim(scripted));
+        }
     }
 
     /// The order the linkset whose root has the given region-local id keeps
