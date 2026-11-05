@@ -1380,4 +1380,7 @@ pub(crate) fn set_media(prim: &mut Prim, face: i32, media: Option<&Media>, chang
             changes.raise(super::CHANGED_MEDIA);
         }
     }
+    if media.is_some() {
+        prim.has_media_list = true;
+    }
 }

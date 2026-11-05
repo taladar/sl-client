@@ -363,6 +363,10 @@ struct Activity {
     /// What the frames and their locals hold toward running out, all
     /// together.
     held: Stack,
+    /// The library call at the executing frame's instruction has had its
+    /// forced delay already, before it ran: XEngine sleeps first in the
+    /// functions of [`SLEEPS_FIRST`], so the call runs when it wakes.
+    slept_first: bool,
 }
 
 impl Activity {
@@ -377,9 +381,25 @@ impl Activity {
             frames: vec![frame],
             stack: Vec::new(),
             held,
+            slept_first: false,
         }
     }
 }
+
+/// The library functions whose forced delay OpenSim takes before the call
+/// rather than after it (`ScriptSleep` first in `LSL_Api`): the media ones.
+/// XEngine blocks its thread there, so what the call does — the `changed`
+/// it raises — comes after a timer that fell due in the delay
+/// (`events/timer-reset`); YEngine suspends a script only when the call has
+/// returned, which puts every delay after its call.
+const SLEEPS_FIRST: [&str; 6] = [
+    "llClearLinkMedia",
+    "llClearPrimMedia",
+    "llGetLinkMedia",
+    "llGetPrimMediaParams",
+    "llSetLinkMedia",
+    "llSetPrimMediaParams",
+];
 
 /// An event waiting for its handler.
 #[derive(Debug, Clone)]
@@ -668,6 +688,7 @@ impl Machine<'_> {
             frames,
             stack,
             held,
+            slept_first,
             ..
         } = &mut *self.activity;
         let frame = frames
@@ -837,6 +858,19 @@ impl Machine<'_> {
             }
             Instr::CallBuiltin(id) => {
                 let descriptor = id.descriptor();
+                let forced = f64::from(descriptor.sleep);
+                let sleeps_first = forced > 0.0
+                    && self.peers.flavour() == EngineFlavour::XEngine
+                    && SLEEPS_FIRST.contains(&descriptor.name);
+                if sleeps_first && !*slept_first {
+                    // The delay first; the call runs again from the top when
+                    // the script wakes, its arguments still on the stack.
+                    *slept_first = true;
+                    frame.pc = frame.pc.saturating_sub(1);
+                    return Ok(Flow::Sleep(forced));
+                }
+                *slept_first = false;
+                let after = if sleeps_first { 0.0 } else { forced };
                 let (args, arg_objects): (Vec<Value>, Vec<Option<ListId>>) =
                     pop_n_held(stack, descriptor.args.len())?
                         .into_iter()
@@ -889,12 +923,11 @@ impl Machine<'_> {
                         returned.and_then(|argument| arg_objects.get(argument).copied().flatten());
                     stack.push(objects::operand(value, object));
                 }
-                let forced = f64::from(descriptor.sleep);
                 return Ok(match request {
                     Some(Request::Reset) => Flow::Reset,
                     Some(Request::Die) => Flow::Died,
-                    Some(Request::Sleep(seconds)) => Flow::Sleep(f64::from(seconds) + forced),
-                    None if forced > 0.0 => Flow::Sleep(forced),
+                    Some(Request::Sleep(seconds)) => Flow::Sleep(f64::from(seconds) + after),
+                    None if after > 0.0 => Flow::Sleep(after),
                     None => Flow::Next,
                 });
             }
@@ -1474,7 +1507,17 @@ impl Instance {
 
     /// If the timer is due at `now`, schedule the next one and say so; the
     /// caller posts the `timer` event.
-    pub(crate) fn timer_due(&mut self, now: Tick) -> bool {
+    ///
+    /// On Second Life a timer does not fall due while its own handler runs:
+    /// one that came due meanwhile is raised in the first tick after the
+    /// handler returned, behind whatever the handler raised, and a new
+    /// interval set in the handler replaces it. Busy in any other handler,
+    /// the script has it queued when it falls due (`events/timer-reset`,
+    /// 2026-11-05). OpenSim's timer thread queues it whatever runs.
+    pub(crate) fn timer_due(&mut self, now: Tick, flavour: EngineFlavour) -> bool {
+        if flavour == EngineFlavour::SecondLife && self.runs_timer_handler() {
+            return false;
+        }
         match self.data.timer.as_mut() {
             Some(timer) if timer.next <= now => {
                 timer.next = now.after(timer.interval);
@@ -1482,6 +1525,18 @@ impl Instance {
             }
             Some(_) | None => false,
         }
+    }
+
+    /// Whether the body in progress is the current state's `timer` handler.
+    fn runs_timer_handler(&self) -> bool {
+        self.activity.as_ref().is_some_and(|activity| {
+            activity.phase == Phase::Event
+                && matches!(
+                    activity.frames.first().map(|frame| frame.body),
+                    Some(BodyRef::Handler { state, index })
+                        if handler_index(&self.program, state, "timer") == Some(index)
+                )
+        })
     }
 
     /// Run at most `budget` instructions at tick `now`, stopping early at the
@@ -1565,7 +1620,11 @@ impl Instance {
                 peers,
                 memory: &mut self.memory,
             };
-            return match machine.step(used) {
+            let flow = machine.step(used);
+            if core::mem::take(&mut self.data.drop_queued_timer) {
+                self.queue.retain(|queued| queued.event.name != "timer");
+            }
+            return match flow {
                 Ok(Flow::Next) => continue,
                 Ok(Flow::BodyDone) => self.finish_body(caller, host),
                 Ok(Flow::Sleep(seconds)) => {

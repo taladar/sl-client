@@ -64,6 +64,7 @@ pub(crate) fn save(instance: &Instance, now: Tick, step: Duration) -> SavedScrip
                 })
                 .collect(),
             stack: activity.stack.clone(),
+            slept_first: activity.slept_first,
         }),
         pending_state: instance.pending_state,
         asleep: span(instance.wake.0.saturating_sub(now.0), step),
@@ -151,6 +152,7 @@ pub(crate) fn restore(
                 interval: ticks_in(timer.interval, step).max(1),
                 next: now.after(ticks_in(timer.next, step)),
             }),
+            drop_queued_timer: false,
             start_parameter: saved.start_parameter,
             // Script time counts on through a take, a rez and a restart on
             // Second Life and YEngine; XEngine's reset of the script on a rez
@@ -243,6 +245,7 @@ fn restored_activity(
         frames,
         stack: saved.stack.clone(),
         held,
+        slept_first: saved.slept_first,
     })
 }
 

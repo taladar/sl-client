@@ -563,6 +563,40 @@ one is first in, first out. The rows above stay unasked offline until the
 colour changes and the sensor that raise them do
 (`server-world-changed-raisers`, `server-lsl-lib-detection-sensors`).
 
+### A timer that falls due while the script is busy
+
+`events/timer-reset` (2026-11-05): a round sets a short timer, keeps the
+script busy past it — a one-second `llSleep` or a media setter's forced
+delay — and leaves the timer be, sets a three-second one or stops it, then
+lists what runs after the busy handler returned, in tenths of a second since
+(anything within a quarter of a second is `@0`). Busy in another handler
+(the round's link message) or in the timer's own handler.
+
+| busy where, with what | Second Life | OpenSim YEngine | OpenSim XEngine | fake grid |
+| --- | --- | --- | --- | --- |
+| another handler, a sleep, the timer left | timer at once | the same | the same | each flavour as its grid |
+| — then a 3 s timer set | timer at once: **the queued one is kept** | the same | the same | each flavour as its grid |
+| — then the timer stopped | **nothing**: the stop takes the queued one | the same | **timer at once** | each flavour as its grid |
+| another handler, a colour change and a sleep | timer, **then** `changed` | `changed`, timer | the same as YEngine | each flavour as its grid |
+| another handler, `llSetPrimMediaParams` or `llClearPrimMedia` | timer, then `changed` | **`changed`, timer** | timer, then `changed` | each flavour as its grid |
+| the timer's own handler, a sleep, the timer left | timer at once | the same | the same | each flavour as its grid |
+| — then a 3 s timer set | **timer 3 s on**: none was queued | timer at once | the same | each flavour as its grid |
+| the timer's own handler, the media setter, then a 1 s timer (`prim/changed`) | **`changed`, then the timer a second on** | `changed`, timer at once | timer, then `changed` | each flavour as its grid |
+| the timer's own handler, the media setter, the timer left | **`changed`, then the timer** | `changed`, timer | timer, then `changed` | each flavour as its grid |
+| how long `llSetPrimMediaParams`, `llClearPrimMedia` and `llGetPrimMediaParams` keep the script | 1.0 s each (45 or 46 frames) | 1.0 s | 1.0 s | each flavour as its grid |
+
+On Second Life **a timer does not fall due while its own handler runs**: one
+that came due meanwhile is raised in a frame or two after the handler ends,
+behind what the handler raised, and an interval set in the handler replaces
+it. Busy in any other handler, the timer is queued as it falls due, where the
+queue's rule puts it ahead of a `changed`. OpenSim's timer thread queues it
+whatever runs. XEngine takes the media functions' forced delay *before* the
+call (`ScriptSleep` first in `LSL_Api`, a thread blocked), so the media's
+`changed` comes after a timer that fell due in the delay; YEngine suspends a
+script only once the call has returned, which puts every delay after its
+call. OpenSim raises no `changed` for a clear of a prim that never had media
+(its media list is still null), where Second Life raises one.
+
 ### What merges
 
 `events/merging`, the same way: each round raises one kind of event several
@@ -2049,7 +2083,7 @@ after it.
 | `PRIM_TYPE` | `CHANGED_SHAPE` | the same | each flavour as its grid |
 | `llSetPos` | nothing | 32768 (`CHANGED_POSITION`, OpenSim's own) | each flavour as its grid |
 | `llSetRot`, text, name, description, light, flexible, material, phantom, slice, `llTargetOmega`, texture animation, particles, sit target, sit text, click action, `llAllowInventoryDrop` | nothing | the same | each flavour as its grid |
-| `llSetPrimMediaParams`, `llClearPrimMedia` | `CHANGED_MEDIA` | YEngine the same; XEngine nothing for the set, **two** for the clear | each flavour as its grid, but on Second Life the event comes after the probe's next timer (`server-lsl-media-changed-before-timer`) |
+| `llSetPrimMediaParams`, `llClearPrimMedia` | `CHANGED_MEDIA` | YEngine the same; XEngine nothing for the set, **two** for the clear — one each, but the set's comes after the next timer ([a timer that falls due while the script is busy](#a-timer-that-falls-due-while-the-script-is-busy)) | each flavour as its grid |
 | a render material (`PRIM_RENDER_MATERIAL`) | `CHANGED_RENDER_MATERIAL` | nothing: the rule is unsupported | each flavour as its grid |
 | colour and size in one call | one event, `CHANGED_COLOR \| CHANGED_SCALE` | **two** events | each flavour as its grid |
 
@@ -2800,7 +2834,7 @@ timer whose handler sleeps 0.3 s, then 0.7 s.
 | --- | --- | --- | --- | --- |
 | 1.0 s, ten events | the tenth at 10.009 s: **the phase is kept**, each event on the frame nearest its due time | the tenth at 10.084 s: each gap 1.002–1.010 s, **the error adds up** — the next event is counted from when this one ran | the first at 1.077 s, then every 1.000 s: the phase of the first is kept | no scripts |
 | 0.5 s, the handler sleeping 0.3 s | events at 0.5 s steps (gaps 0.489 and 0.511 by turns): **the phase is kept** | gaps of 0.501–0.516 s, adding up | gaps of 0.500 s | no scripts |
-| 0.5 s, the handler sleeping 0.7 s | **0.755 s apart**: the next event two or three frames after the handler ends, not on the next 0.5 s step | 0.701–0.736 s apart: as the handler ends | 0.700 s apart: as the handler ends | no scripts |
+| 0.5 s, the handler sleeping 0.7 s | **0.755 s apart**: the next event two or three frames after the handler ends, not on the next 0.5 s step | 0.701–0.736 s apart: as the handler ends | 0.700 s apart: as the handler ends | Second Life's a tick after the handler ends (`events/timer-reset`); OpenSim's as it ends |
 
 A timer never stacks on any grid (`events/timer-no-stack`): a handler longer
 than the interval delays the next event, and no event is made up for later.
@@ -2815,8 +2849,8 @@ than the interval delays the next event, and no event is made up for later.
 | 2.0, and 1.5 a second in | at 2.56 | at 2.50–2.52 | no scripts |
 | 1.0, and 2.0 half a second in | at 2.51 | the same | no scripts |
 | 1.0, 0.0 and 1.0 at once | at 1.0 | the same | no scripts |
-| 1.0, a 2 s sleep in which it falls due, then 3.0 | at 2.0: **the event already due still runs**, the new set does not drop it | the same | no scripts |
-| 1.0, the same sleep, then 0.0 | **no event**: stopping the timer drops the one already due | YEngine the same; **XEngine runs it** | no scripts |
+| 1.0, a 2 s sleep in which it falls due, then 3.0 | at 2.0: **the event already due still runs**, the new set does not drop it | the same | each flavour as its grid |
+| 1.0, the same sleep, then 0.0 | **no event**: stopping the timer drops the one already due | YEngine the same; **XEngine runs it** | each flavour as its grid |
 
 ### The clocks
 

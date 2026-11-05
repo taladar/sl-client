@@ -732,15 +732,14 @@ fn media_with(
     Ok(media)
 }
 
-/// Whether a set or a clear of media raises `CHANGED_MEDIA` under
-/// `flavour`, and how many times: XEngine raises nothing for a set and two
-/// for a clear (`prim/changed`).
-const fn media_events(flavour: EngineFlavour, clear: bool) -> usize {
-    match flavour {
-        EngineFlavour::XEngine if clear => 2,
-        EngineFlavour::XEngine => 0,
-        _ => 1,
-    }
+/// Whether a set or a clear of media on `prim` raises `CHANGED_MEDIA` under
+/// `flavour`: every set and every clear does, but a clear on OpenSim of a
+/// prim that never had media, which finds no media list to clear
+/// (`events/timer-reset`). XEngine raises it after the call's forced delay,
+/// which it takes first, so a timer that fell due in the delay runs before
+/// it.
+const fn media_raises(flavour: EngineFlavour, prim: &Prim, clear: bool) -> bool {
+    !(clear && flavour.is_opensim() && !prim.has_media_list)
 }
 
 /// Sets media on face `face` of the prim keyed `key`, or clears it.
@@ -784,10 +783,15 @@ fn media_set(
             }
         }
     };
+    let raises = media_raises(ctx.flavour(), &prim, params.is_none());
     let mut changes = Changes::default();
     set_media(&mut prim, face, media.as_ref(), &mut changes);
-    let events = vec![prim_params::CHANGED_MEDIA; media_events(ctx.flavour(), params.is_none())];
-    ctx.host().set_prim(caller, &prim, &events);
+    let events: &[i32] = if raises {
+        &[prim_params::CHANGED_MEDIA]
+    } else {
+        &[]
+    };
+    ctx.host().set_prim(caller, &prim, events);
     STATUS_OK
 }
 

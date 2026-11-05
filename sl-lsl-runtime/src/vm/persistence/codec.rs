@@ -25,9 +25,9 @@ use super::{
 /// What every saved script starts with.
 const MARK: [u8; 4] = *b"slSS";
 
-/// The version of the form this crate writes, and the only one it reads: 4
-/// since a script's time (`llGetTime`) is kept with it.
-const VERSION: u8 = 4;
+/// The version of the form this crate writes, and the only one it reads: 5
+/// since a body in progress keeps whether its library call has slept first.
+const VERSION: u8 = 5;
 
 /// Why bytes are not a saved script.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -513,6 +513,7 @@ impl Writer {
                 }
             }
         }
+        self.bool(activity.slept_first);
     }
 
     /// The list object each of a run of slots holds.
@@ -813,10 +814,12 @@ impl Reader<'_> {
                 }
             });
         }
+        let slept_first = self.bool()?;
         Ok(SavedActivity {
             phase,
             frames,
             stack,
+            slept_first,
         })
     }
 

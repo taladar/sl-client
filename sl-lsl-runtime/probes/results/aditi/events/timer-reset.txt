@@ -1,0 +1,23 @@
+grid: aditi
+date: 2026-11-05
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Mauve
+engine: Mono
+settings: Linden Lab's; a resident cannot set them
+
+# animations avatar=owner playing=""
+PROBE events/timer-reset rec=start region="Mauve" channel="Luau" version="2026-11-04.41913513044"
+# animations avatar=other playing=""
+PROBE events/timer-reset rec=round label=sleep-keep events="timer@0" tenths=10 took=1.045070 stray=1
+PROBE events/timer-reset rec=round label=sleep-reset events="timer@0" tenths=10 took=1.000145 stray=0
+PROBE events/timer-reset rec=round label=sleep-stop events="" tenths=10 took=1.022904 stray=0
+PROBE events/timer-reset rec=round label=color-keep events="timer@0,changed2@0" tenths=10 took=1.022787 stray=0
+PROBE events/timer-reset rec=round label=media-keep events="timer@0,changed2048@0" tenths=10 took=1.000029 stray=0
+PROBE events/timer-reset rec=round label=media-reset events="timer@0,changed2048@0" tenths=10 took=1.000816 stray=0
+PROBE events/timer-reset rec=round label=clear-keep events="timer@0,changed2048@0" tenths=10 took=1.022148 stray=0
+PROBE events/timer-reset rec=round label=media-get events="" tenths=10 took=1.022976 stray=0
+PROBE events/timer-reset rec=round label=in-timer-keep events="timer@0" tenths=10 took=1.044315 stray=0
+PROBE events/timer-reset rec=round label=in-timer-reset events="timer@30" tenths=10 took=1.022964 stray=0
+PROBE events/timer-reset rec=round label=in-timer-media events="changed2048@0,timer@10" tenths=10 took=1.021240 stray=0
+PROBE events/timer-reset rec=round label=in-timer-media-keep events="changed2048@0,timer@0" tenths=10 took=1.022850 stray=0
+PROBE events/timer-reset rec=end

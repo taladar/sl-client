@@ -162,6 +162,9 @@ pub(crate) struct SavedActivity {
     pub(crate) frames: Vec<SavedFrame>,
     /// The operand stack.
     pub(crate) stack: Vec<Operand>,
+    /// The library call at the executing frame's instruction has had its
+    /// forced delay already (XEngine's media functions sleep first).
+    pub(crate) slept_first: bool,
 }
 
 /// The repeating timer, saved as lengths of time.

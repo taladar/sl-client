@@ -617,6 +617,10 @@ pub struct Prim {
     /// Each face's shared media, [`None`] for a face with none; as many as
     /// it has faces.
     pub media: Vec<Option<Media>>,
+    /// Whether it has had media on a face: OpenSim keeps no media list
+    /// before the first set, and a clear finding none raises no `changed`
+    /// there (`events/timer-reset`); Second Life raises one all the same.
+    pub has_media_list: bool,
 }
 
 impl Prim {
@@ -695,6 +699,7 @@ impl Prim {
             particles: None,
             sound: SoundSettings::default(),
             media: vec![None; 6],
+            has_media_list: false,
         }
     }
 }

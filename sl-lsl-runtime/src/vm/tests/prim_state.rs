@@ -115,7 +115,7 @@ fn name_of(line: &str) -> String {
 
 /// Hold `ours` to `theirs` but for the lines named in `deviations`, each of
 /// which must differ — a deviation that agrees now should go.
-fn hold(ours: &[String], theirs: &[String], deviations: &[&str], context: &str) {
+pub(super) fn hold(ours: &[String], theirs: &[String], deviations: &[&str], context: &str) {
     let kept = |lines: &[String]| -> Vec<String> {
         lines
             .iter()
@@ -143,7 +143,7 @@ fn hold(ours: &[String], theirs: &[String], deviations: &[&str], context: &str) 
 /// A region of `flavour` with the probe's scripts in it: `scripts` as
 /// `(id, name, prim, source)`, `ground` the height of the ground and `home`
 /// where each prim stands.
-fn region(
+pub(super) fn region(
     flavour: EngineFlavour,
     scripts: &[(CallerId, &str, u64, String)],
     ground: f32,
@@ -183,7 +183,7 @@ fn region(
 
 /// Runs `region` until a script printed `end` or `ticks` ran out, raising
 /// each `changed` a write raised in the scripts of the prim written.
-fn run_out(region: &mut Region, ticks: u32) -> Result<(), String> {
+pub(super) fn run_out(region: &mut Region, ticks: u32) -> Result<(), String> {
     for _ in 0..ticks {
         region.tick()?;
         let raised = core::mem::take(&mut region.host.changes);
@@ -213,7 +213,7 @@ fn run_out(region: &mut Region, ticks: u32) -> Result<(), String> {
 /// lines of the scripts in other prims first, as the runner's transcript has
 /// them (they are saved, and print, before the leader starts), then the
 /// leader's.
-fn compared(region: &Region, transcript: &str) -> (Vec<String>, Vec<String>) {
+pub(super) fn compared(region: &Region, transcript: &str) -> (Vec<String>, Vec<String>) {
     let probe = |line: &&(u64, CallerId, String)| line.2.starts_with("PROBE ");
     let mut callers: Vec<CallerId> = region
         .host
@@ -253,7 +253,7 @@ fn compared(region: &Region, transcript: &str) -> (Vec<String>, Vec<String>) {
 
 /// Where the probe's prim stood on each grid, and the ground under it
 /// (`prim/placement`'s `home` record and the moves that hit the ground).
-fn home_of(flavour: EngineFlavour) -> (Vector, f32) {
+pub(super) fn home_of(flavour: EngineFlavour) -> (Vector, f32) {
     if flavour.is_opensim() {
         (
             Vector {
@@ -456,17 +456,7 @@ fn setters_raise_changed_as_each_grid_did() -> Result<(), String> {
         let mut region = region(flavour, &[(A, "Probe", 1, source.clone())], ground, &home)?;
         run_out(&mut region, 1200)?;
         let (ours, theirs) = compared(&region, transcript);
-        // The media setters cost the script a second, in which the probe's
-        // repeating timer falls due; Second Life's queue runs a `changed`
-        // after a timer raised in the same sleep (`events/order`), so the
-        // runtime reports each `CHANGED_MEDIA` a window late, where aditi
-        // reported it in its own (`server-lsl-media-changed-before-timer`).
-        let deviations: &[&str] = if flavour.is_opensim() {
-            &[]
-        } else {
-            &["changed media", "changed media-clear", "changed alpha-mode"]
-        };
-        hold(&ours, &theirs, deviations, &format!("{flavour:?}"));
+        hold(&ours, &theirs, &[], &format!("{flavour:?}"));
         assert_eq!(
             region.debug_lines(),
             gated(debug_notes(transcript), flavour),

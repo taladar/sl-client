@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 333 |
 | blocked | 40 |
 | in-progress | 17 |
-| bugs | 40 |
-| done | 1488 |
+| bugs | 39 |
+| done | 1489 |
 | deferred | 30 |
 | wont-do | 24 |
 | **total** | **2100** |
@@ -1324,7 +1324,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (40)
+## bugs (39)
 
 ### protocol
 
@@ -1426,11 +1426,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`server-lsl-flood-gate-passes-spaced-lines`](bugs/server-lsl-flood-gate-passes-spaced-lines.md)
   — Second Life's error flood gate drops lines aditi passed
-- [`server-lsl-media-changed-before-timer`](bugs/server-lsl-media-changed-before-timer.md)
-  — A changed raised before a forced delay runs after the timer that fell due in
-  it
 
-## done (1488)
+## done (1489)
 
 ### protocol
 
@@ -4523,6 +4520,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Five functions no served LSLSyntax document lists
 - [`server-lsl-luau-compiler`](done/server-lsl-luau-compiler.md) — Compile the
   Luau target as Second Life does
+- [`server-lsl-media-changed-before-timer`](done/server-lsl-media-changed-before-timer.md)
+  — A changed raised before a forced delay runs after the timer that fell due in
+  it
 - [`server-lsl-memory-and-limits`](done/server-lsl-memory-and-limits.md) —
   Script memory and limits, because scripts observe them (blocked by
   `server-lsl-vm-execution` (done), `server-lsl-memory-sizes` (done),

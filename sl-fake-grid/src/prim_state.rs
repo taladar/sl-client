@@ -705,6 +705,7 @@ fn keep_written(prim: &mut Prim, object: &Object, scripted: &Scripted) {
     if kept.media.len() == prim.media.len() {
         prim.media.clone_from(&kept.media);
     }
+    prim.has_media_list = kept.has_media_list;
     prim.physics_shape = kept.physics_shape;
     prim.allow_unsit = kept.allow_unsit;
     prim.scripted_sit_only = kept.scripted_sit_only;

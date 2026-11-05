@@ -97,6 +97,10 @@ pub(crate) struct ScriptData {
     pub(crate) detected: Vec<Detected>,
     /// The repeating timer, if one is set.
     pub(crate) timer: Option<Timer>,
+    /// The timer was just stopped on a flavour whose stop also takes a
+    /// `timer` event still queued (Second Life and YEngine,
+    /// `events/timer-reset`); the instance drops it after the call.
+    pub(crate) drop_queued_timer: bool,
     /// `llGetStartParameter`: what the object was rezzed with.
     pub(crate) start_parameter: i32,
     /// What library calls said refusing their arguments, worded for the
@@ -288,6 +292,13 @@ impl<'host> ScriptCtx<'host> {
             interval,
             next: self.now.after(interval),
         });
+        // A stop takes the `timer` already queued with it on Second Life and
+        // on YEngine (OpenSim's `CancelScriptEvent`), not on XEngine, whose
+        // cancel leaves its queue alone; setting another interval leaves it
+        // on all three (`events/timer-reset`, 2026-11-05).
+        if interval == 0 && self.flavour() != EngineFlavour::XEngine {
+            self.data.drop_queued_timer = true;
+        }
     }
 
     /// `llGetTime`: the script's time, in seconds.

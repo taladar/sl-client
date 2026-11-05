@@ -892,13 +892,17 @@ impl Engine {
             runnable: 0,
             served: 0,
         };
-        // Timers first, so a timer due this tick runs in it.
-        let arrival = self.arrival();
+        // Timers first, so a timer due this tick runs in it; but XEngine's
+        // come from OpenSim's async command pass, after what the scripts do
+        // in the same moment — a call its forced delay held back runs before
+        // a timer due as the delay ends (`prim/changed`).
+        let flavour = self.config.flavour;
+        let timers_last = flavour == EngineFlavour::XEngine;
         for instance in self.instances.values_mut() {
             instance.count_tick();
-            if instance.timer_due(now) {
-                let _posted = instance.post(arrival, lifecycle("timer"), Vec::new());
-            }
+        }
+        if !timers_last {
+            self.post_due_timers(now);
         }
         let mut region_left = self.config.region_budget;
         for id in order {
@@ -954,8 +958,22 @@ impl Engine {
             }
             let _none = self.instances.insert(id, instance);
         }
+        if timers_last {
+            self.post_due_timers(now);
+        }
         self.settle();
         report
+    }
+
+    /// Post a `timer` event to every script whose timer is due at `now`.
+    fn post_due_timers(&mut self, now: Tick) {
+        let arrival = self.arrival();
+        let flavour = self.config.flavour;
+        for instance in self.instances.values_mut() {
+            if instance.timer_due(now, flavour) {
+                let _posted = instance.post(arrival, lifecycle("timer"), Vec::new());
+            }
+        }
     }
 
     /// Fold the tick into every script's load and the active-script count.

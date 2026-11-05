@@ -34,6 +34,7 @@ mod precision;
 mod prim_state;
 mod sitting;
 mod strings;
+mod timers;
 
 /// A tenth of a second: ten ticks to the second, so `llSleep(2.0)` is twenty.
 const STEP: Duration = Duration::from_millis(100);
@@ -1494,11 +1495,13 @@ fn a_timer_repeats_on_its_ticks_and_never_stacks() -> Result<(), String> {
     );
     let _reports = run(&mut engine, &mut host, 40);
     // Due at 4 and 7; the second handler sleeps ten ticks, through three
-    // more due ticks (10, 13, 16), which queue one event, not three. That one
-    // runs when the sleep ends, at 17, and stops the timer.
+    // more due ticks (10, 13, 16). On Second Life a timer does not fall due
+    // while its own handler runs (`events/timer-reset`): the one overdue is
+    // raised once, in the tick after the handler returned at 17, and stops
+    // the timer.
     assert_eq!(
         host.from(A),
-        vec![(4, "timer 1"), (7, "timer 2"), (17, "timer 3")]
+        vec![(4, "timer 1"), (7, "timer 2"), (18, "timer 3")]
     );
     assert_eq!(engine.instance(A).map(Instance::has_timer), Some(false));
     Ok(())
