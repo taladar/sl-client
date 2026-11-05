@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 334 |
 | blocked | 38 |
 | in-progress | 14 |
-| bugs | 38 |
-| done | 1492 |
+| bugs | 37 |
+| done | 1493 |
 | deferred | 30 |
 | wont-do | 24 |
 | **total** | **2099** |
@@ -1317,7 +1317,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (38)
+## bugs (37)
 
 ### protocol
 
@@ -1344,8 +1344,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   stale
 - [`viewer-automation-ground-reveal-eye-under-terrain`](bugs/viewer-automation-ground-reveal-eye-under-terrain.md)
   — A ground reveal can put the camera under higher ground beside the point
-- [`viewer-calling-card-offer-unanswered`](bugs/viewer-calling-card-offer-unanswered.md)
-  — A calling card offered to us is never shown or answered
 - [`viewer-camera-framing-ends-inside-the-framed-object`](bugs/viewer-camera-framing-ends-inside-the-framed-object.md)
   — A framing glide can carry the camera inside the object it frames
 - [`viewer-day-cycle-strip-click-mirrored-rtl`](bugs/viewer-day-cycle-strip-click-mirrored-rtl.md)
@@ -1415,7 +1413,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1492)
+## done (1493)
 
 ### protocol
 
@@ -2069,6 +2067,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-build-undo-redo`](done/viewer-build-undo-redo.md) — Object-edit
   undo/redo stack (blocked by `viewer-transform-gizmos` (done),
   `viewer-prim-parameter-editing` (done))
+- [`viewer-calling-card-offer-unanswered`](done/viewer-calling-card-offer-unanswered.md)
+  — A calling card offered to us is never shown or answered
 - [`viewer-camera-collision`](done/viewer-camera-collision.md) — Camera
   collision (blocked by `viewer-camera-third-person-orbit` (done))
 - [`viewer-camera-flycam`](done/viewer-camera-flycam.md) — Flycam mode

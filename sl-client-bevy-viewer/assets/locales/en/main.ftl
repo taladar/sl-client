@@ -3905,7 +3905,8 @@ experience-permission-short-unknown = Unknown ({ $permission })
 
 # The offers & invites toasts (viewer-dialog-offers-invites): the accept /
 # decline cards the grid throws at the user over IM — an inventory offer, a
-# teleport offer / lure, a friendship offer, and a group-membership invitation.
+# teleport offer / lure, a friendship offer, a group-membership invitation, and
+# a calling-card offer.
 offer-inventory-heading = Inventory Offer
 offer-inventory-from = { $name } has given you an item:
 offer-teleport-heading = Teleport Offer
@@ -3921,6 +3922,9 @@ offer-friendship-from = { $name } is offering to be your friend.
 offer-group-heading = Group Invitation
 offer-group-from = { $name } has invited you to join a group:
 offer-group-fee = There is a fee of L$ { $fee } to join this group.
+offer-calling-card-heading = Calling Card Offer
+offer-calling-card-from = { $name } is offering their calling card.
+offer-calling-card-detail = This will add a bookmark in your inventory so you can quickly IM this resident.
 offer-button-accept = Accept
 offer-button-decline = Decline
 offer-button-teleport = Teleport

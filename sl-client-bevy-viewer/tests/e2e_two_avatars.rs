@@ -716,6 +716,114 @@ mod test {
         Ok(())
     }
 
+    // ---- Calling-card offers -----------------------------------------------
+
+    /// The template a calling-card offer's card reports as.
+    const CALLING_CARD_OFFER: &str = "OfferCallingCard";
+
+    /// The account that offers its calling card: one the grid knows, so its
+    /// name resolves, and that never logs in.
+    const CARDER: &str = "Carder";
+
+    /// Offer viewer `label` the calling card of `from`, under `transaction`,
+    /// from the grid.
+    async fn offer_calling_card(
+        stage: &Stage,
+        label: &str,
+        from: AgentKey,
+        transaction: sl_proto::TransactionId,
+    ) -> Result<(), BodyError> {
+        let agent = stage.agent(label).await?;
+        let now = agent.now();
+        agent
+            .with_sim(|sim| sim.send_offer_calling_card(from, transaction, now))
+            .await
+            .map_err(|error| format!("offering the calling card: {error}"))?;
+        Ok(())
+    }
+
+    /// **Calling-card offers** (`viewer-calling-card-offer-unanswered`): an
+    /// offer raises a card naming its sender once the name resolves; Accept
+    /// files the card in a folder and Decline turns it down, each reaching
+    /// the grid under the offer's transaction. While Unavailable, an offer
+    /// raises no card: it is declined at once and the sender hears the busy
+    /// reply, as the reference does.
+    #[test]
+    fn a_calling_card_offer_is_asked_about_and_declined_while_unavailable() -> Result<(), TestError>
+    {
+        stage("calling_card_offers", &["Alpha"])
+            .needs(Need::GridControl)
+            .configure_grid(|grid| grid.account(AccountConfig::new(FIRST_NAME, CARDER, "password")))
+            .run(async |stage: &Stage| {
+                let alpha = &stage.viewer("Alpha")?;
+                let carder = account_id(stage, CARDER)?;
+                let mut heard = stage.agent("Alpha").await?.events();
+                let transaction = |n: u128| sl_proto::TransactionId::from(Uuid::from_u128(n));
+
+                // Accepted: filed in a folder of the viewer's inventory.
+                offer_calling_card(stage, "Alpha", carder, transaction(0xca_0001)).await?;
+                let _shown = alpha
+                    .expect_notification()
+                    .timeout(WAIT)
+                    .to_show(CALLING_CARD_OFFER)
+                    .await?;
+                let lead = offer_card(alpha)
+                    .get(Locator::role(Role::Text).name_containing("offering their calling card"));
+                let _named = alpha
+                    .expect(&lead)
+                    .timeout(WAIT)
+                    .to_contain_text(CARDER)
+                    .await?;
+                answer_offer(alpha, "Accept").await?;
+                let accepted = grid_hears(&mut heard, "calling-card accept", |event| {
+                    matches!(event, ServerEvent::CallingCardAccepted { transaction: t, .. }
+                        if *t == transaction(0xca_0001))
+                })
+                .await?;
+                assert!(
+                    matches!(accepted, ServerEvent::CallingCardAccepted { folder, .. }
+                        if !folder.uuid().is_nil()),
+                    "the card is filed in a real folder: {accepted:?}"
+                );
+
+                // Declined from the card.
+                offer_calling_card(stage, "Alpha", carder, transaction(0xca_0002)).await?;
+                let _asked = alpha
+                    .expect(&offer_card(alpha))
+                    .timeout(WAIT)
+                    .to_be_visible()
+                    .await?;
+                answer_offer(alpha, "Decline").await?;
+                let _declined = grid_hears(&mut heard, "calling-card decline", |event| {
+                    matches!(event, ServerEvent::CallingCardDeclined { transaction: t }
+                        if *t == transaction(0xca_0002))
+                })
+                .await?;
+
+                // Unavailable: declined at once, with the busy reply, and no
+                // card.
+                let _on = alpha.menu_path(&UNAVAILABLE).await?;
+                offer_calling_card(stage, "Alpha", carder, transaction(0xca_0003)).await?;
+                let _declined =
+                    grid_hears(&mut heard, "calling-card decline while busy", |event| {
+                        matches!(event, ServerEvent::CallingCardDeclined { transaction: t }
+                        if *t == transaction(0xca_0003))
+                    })
+                    .await?;
+                let _replied = grid_hears(&mut heard, "busy reply to the offerer", |event| {
+                    busy_reply_to(event, carder).is_some()
+                })
+                .await?;
+                assert_eq!(
+                    offer_card(alpha).count().await?,
+                    0,
+                    "an offer declined for Do Not Disturb raises no card"
+                );
+                Ok(())
+            })?;
+        Ok(())
+    }
+
     /// File the friend `last` under the one contact set there is, from their
     /// profile: Friends ▸ the row ▸ Profile ▸ Add to Set… ▸ Add.
     async fn file_friend(viewer: &Viewer, stage: &Stage, last: &str) -> Result<(), BodyError> {

@@ -423,6 +423,15 @@ pub const ELEMENTS: &[UiElement] = &[
         spawn: crate::offers_invites::spawn_group_invite_specimen,
     },
     UiElement {
+        id: "calling-card-offer-toast",
+        summary: "A calling-card offer card (viewer-calling-card-offer-unanswered): the card \
+                  heading, the \"{agent} is offering their calling card\" lead, what accepting \
+                  does, and the Accept / Decline actions. The live host \
+                  (`crate::offers_invites`) pops one per received calling-card offer once its \
+                  sender's name resolves; here it is static so the layout is swept.",
+        spawn: crate::offers_invites::spawn_calling_card_offer_specimen,
+    },
+    UiElement {
         id: "minimap",
         summary: "The minimap surface (`crate::minimap`), built by the live floater's content \
                   builder at its default size: the live compositor's frame of a sample \
