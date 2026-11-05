@@ -740,6 +740,9 @@ impl Plugin for ViewerUiPlugins {
             // The Nearby Media window (LLPanelNearByMedia): the parcel stream and every
             // media face around the agent, each with its own controls.
             .add_plugins(crate::nearby_media::NearbyMediaPlugin)
+            // Legacy whole-parcel media (LLViewerParcelMedia): the parcel's media URL
+            // played onto every face wearing its media texture.
+            .add_plugins(crate::parcel_media::ParcelMediaPlugin)
             // Parcel streaming audio (viewer-streaming-audio): the GStreamer radio
             // stream following the agent's parcel, with its bottom-bar controls.
             .add_plugins(crate::parcel_audio::ParcelAudioPlugin)

@@ -1048,6 +1048,7 @@ nearby-media-col-playing = On
 nearby-media-col-name = Name
 # The list's name for the parcel's music stream row.
 nearby-media-parcel-audio = Parcel Streaming Audio
+nearby-media-parcel-media = Parcel Streaming Media
 # A media face with neither a title nor a URL.
 nearby-media-empty = <empty>
 # Appended to the name of media that is playing.
@@ -2679,7 +2680,6 @@ notification-image-upload-resized = The texture you are uploading has been resiz
 notification-image-empty-alpha-layer = The image you are trying to upload contains an empty, or almost empty alpha channel (transparency information). This is almost always not desired and should be stripped off. Adding an alpha channel to an image will lead to textures flipping on top of each other at different camera angles, and it makes rendering slower. So, unless you really need this texture to have an empty / almost empty alpha channel, consider stripping it out.
 notification-click-action-pay-unavailable = Clicking this object pays it, and this viewer has no pay dialog yet. Nothing was paid.
 notification-click-action-buy-unavailable = Clicking this object buys it, and this viewer cannot buy objects yet. Nothing was bought.
-notification-click-action-play-unavailable = Clicking this object plays the parcel's media, and this viewer does not play parcel media yet.
 
 ## IM & chat (viewer-notification-catalogue-im-chat). Bodies follow
 ## the reference notifications.xml with the standard trims (KB URLs,
@@ -4214,6 +4214,8 @@ preferences-row-collision-sounds = Play collision sounds
 preferences-section-streaming = Streaming
 preferences-row-music-autoplay = Play the parcel's music stream automatically
 preferences-row-media-autoplay = Auto-play media on objects
+preferences-row-parcel-media-autoplay = Auto-play parcel media
+preferences-row-scripted-media = Allow scripts to play parcel media
 preferences-section-audio-device = Output device
 preferences-row-output-device = Output device
 preferences-audio-device-default = System default
@@ -5387,6 +5389,8 @@ setting-desc-LogTimestampDate = Include the date in logged timestamps
 setting-desc-LogTimestampSeconds = Include seconds in logged timestamps
 setting-desc-LoginStartLocation = The default login start location: last, home, or uri:Region&x&y&z
 setting-desc-MediaAutoPlayEnabled = Start media-on-a-prim faces marked auto-play without a click
+setting-desc-ParcelMediaAutoPlayEnable = Start the parcel's media by itself a few seconds after arriving, while its screen is in view
+setting-desc-PermAllowScriptedMedia = Let a script start the parcel's media (stopping and pausing it are always allowed)
 setting-desc-MediaSoundsEarLocation = Where the ears are: 0 the camera position, 1 the avatar position
 setting-desc-MiniMapAutoCenter = Ease a panned minimap back to centre
 setting-desc-MiniMapChatRing = Show chat-distance rings on the minimap

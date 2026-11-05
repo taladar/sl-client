@@ -198,6 +198,18 @@ pub(crate) fn build_audio_tab(commands: &mut Commands, panel: Entity) {
         "preferences-row-media-autoplay",
         SettingBinding::global(crate::media_prim::MEDIA_AUTO_PLAY_SETTING),
     );
+    spawn_pref_checkbox(
+        commands,
+        panel,
+        "preferences-row-parcel-media-autoplay",
+        SettingBinding::global(crate::parcel_media::PARCEL_MEDIA_AUTO_PLAY_SETTING),
+    );
+    spawn_pref_checkbox(
+        commands,
+        panel,
+        "preferences-row-scripted-media",
+        SettingBinding::global(crate::parcel_media::SCRIPTED_MEDIA_SETTING),
+    );
 
     spawn_pref_section(commands, panel, "preferences-section-audio-device");
     // The build hook has no resource access, so neither the requested device nor

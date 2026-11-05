@@ -43,6 +43,7 @@ pub mod media_prim;
 pub mod movement;
 pub mod nearby_media;
 pub mod panorama;
+pub mod parcel_media;
 pub mod physics;
 pub mod quiescence;
 pub mod scene_dump;

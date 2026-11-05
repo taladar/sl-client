@@ -114,7 +114,7 @@ pub use sl_proto::{
     ObjectPropertiesFamily, ObjectStreamBatch, ObjectStreamEntry, ObjectTransform,
     ObjectUpdateForm, OpenRegionInfo, OpenSimExtras, OwnerKey, PacketFlags, ParcelAccessEntry,
     ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelCollision, ParcelDetails,
-    ParcelFlags, ParcelInfo, ParcelKey, ParcelListingFlags, ParcelMediaCommand,
+    ParcelFlags, ParcelInfo, ParcelKey, ParcelListingFlags, ParcelMediaCommand, ParcelMediaData,
     ParcelMediaUpdateInfo, ParcelObjectOwner, ParcelObjectOwnersPart, ParcelOverlayCell,
     ParcelOverlayGrid, ParcelOverlayInfo, ParcelOwnership, ParcelRect, ParcelRequestResult,
     ParcelReturnType, ParcelStatus, ParcelUpdate, ParcelVoiceInfo, ParticleSystem, PermissionField,

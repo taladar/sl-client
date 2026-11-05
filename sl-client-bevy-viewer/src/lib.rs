@@ -247,6 +247,7 @@ pub(crate) use sl_viewer_world_view::input_context;
 pub(crate) use sl_viewer_world_view::media_controls;
 pub(crate) use sl_viewer_world_view::media_prim;
 pub(crate) use sl_viewer_world_view::nearby_media;
+pub(crate) use sl_viewer_world_view::parcel_media;
 mod menu_bar;
 mod menu_search;
 pub(crate) use sl_viewer_asset_editors::notecard_render;

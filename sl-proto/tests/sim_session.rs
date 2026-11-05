@@ -7954,6 +7954,66 @@ mod test {
         Ok(())
     }
 
+    /// Legacy parcel media round-trips: the sim's `send_parcel_media_update`
+    /// surfaces on the client as the same [`Event::ParcelMediaUpdate`] (an unset
+    /// size staying unset), and `send_parcel_media_command` as the same
+    /// [`Event::ParcelMediaCommand`].
+    #[test]
+    fn parcel_media_update_and_command_round_trip() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+        drain_client(&mut client);
+
+        let media = sl_proto::ParcelMediaUpdateInfo {
+            media_url: url::Url::parse("https://video.example/feature.mp4").ok(),
+            media_id: Some(TextureKey::from(uuid::Uuid::from_u128(0x5C2E))),
+            media_auto_scale: true,
+            media_type: "video/mp4".to_owned(),
+            media_desc: "the feature".to_owned(),
+            media_width: None,
+            media_height: None,
+            media_loop: true,
+        };
+        sim.send_parcel_media_update(&media, now)?;
+        sim.send_parcel_media_command(
+            (1 << 2) | (1 << 6),
+            sl_proto::ParcelMediaCommand::Play,
+            12.5,
+            now,
+        )?;
+        pump(&mut client, &mut sim, now)?;
+        let events = drain_client(&mut client);
+        let received = events
+            .iter()
+            .find_map(|event| match event {
+                Event::ParcelMediaUpdate(update) => Some(update.clone()),
+                _ => None,
+            })
+            .ok_or("expected a ParcelMediaUpdate client event")?;
+        assert_eq!(received, media);
+        let command = events
+            .iter()
+            .find_map(|event| match event {
+                Event::ParcelMediaCommand {
+                    flags,
+                    command,
+                    time,
+                } => Some((*flags, *command, *time)),
+                _ => None,
+            })
+            .ok_or("expected a ParcelMediaCommand client event")?;
+        assert_eq!(
+            command,
+            (
+                (1 << 2) | (1 << 6),
+                sl_proto::ParcelMediaCommand::Play,
+                12.5
+            )
+        );
+        Ok(())
+    }
+
     /// The script permission/control flow round-trips: the sim's
     /// `send_script_question` surfaces on the client, the client's
     /// `answer_script_permissions` converges both grant mirrors

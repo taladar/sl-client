@@ -4380,6 +4380,8 @@ mod hud_click_tests {
         contents: usize,
         /// Camera framings asked for.
         frames: usize,
+        /// What the parcel media player was asked.
+        parcel_media: Vec<crate::world_api::ParcelMediaControl>,
         /// The notifications raised.
         notices: Vec<&'static str>,
     }
@@ -4390,6 +4392,7 @@ mod hud_click_tests {
             commands: Vec::new(),
             contents: 0,
             frames: 0,
+            parcel_media: Vec::new(),
             notices: Vec::new(),
         };
 
@@ -4430,6 +4433,7 @@ mod hud_click_tests {
         record::<OpenObjectContents>(&mut app);
         record::<FrameObject>(&mut app);
         record::<ShowNotification>(&mut app);
+        record::<crate::world_api::ParcelMediaControl>(&mut app);
         app.world_mut()
             .resource_mut::<crate::settings::ViewerSettings>()
             .set(
@@ -4460,6 +4464,7 @@ mod hud_click_tests {
         let _stale = drain::<OpenObjectContents>(&mut app);
         let _stale = drain::<FrameObject>(&mut app);
         let _stale = drain::<ShowNotification>(&mut app);
+        let _stale = drain::<crate::world_api::ParcelMediaControl>(&mut app);
 
         interact::click(&mut app, at, MouseButton::Left);
         settle(&mut app, 6);
@@ -4467,6 +4472,7 @@ mod hud_click_tests {
             commands: drain_commands(&mut app).iter().map(Command::name).collect(),
             contents: drain::<OpenObjectContents>(&mut app).len(),
             frames: drain::<FrameObject>(&mut app).len(),
+            parcel_media: drain::<crate::world_api::ParcelMediaControl>(&mut app),
             notices: drain::<ShowNotification>(&mut app)
                 .iter()
                 .map(|notice| notice.template)
@@ -4484,9 +4490,7 @@ mod hud_click_tests {
     fn a_left_click_on_a_prim_does_what_the_prim_says() -> Result<(), TestError> {
         use crate::world_api::{FLAGS_INVENTORY_EMPTY, FLAGS_TAKES_MONEY};
         use sl_client_bevy::ClickAction;
-        use sl_viewer_ui_context_menus::left_click_actions::{
-            BUY_UNAVAILABLE, PAY_UNAVAILABLE, PLAY_UNAVAILABLE,
-        };
+        use sl_viewer_ui_context_menus::left_click_actions::{BUY_UNAVAILABLE, PAY_UNAVAILABLE};
 
         for (action, flags, blocked, expected, what) in [
             (
@@ -4576,8 +4580,11 @@ mod hud_click_tests {
                 ClickAction::Play,
                 TOUCH_SCRIPT,
                 false,
-                Clicked::noticed(PLAY_UNAVAILABLE),
-                "a play prim",
+                Clicked {
+                    parcel_media: vec![crate::world_api::ParcelMediaControl::Toggle],
+                    ..Clicked::NOTHING
+                },
+                "a play prim plays, pauses or resumes the parcel's media",
             ),
             (
                 ClickAction::Disabled,

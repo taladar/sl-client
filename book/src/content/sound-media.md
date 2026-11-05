@@ -76,7 +76,11 @@ media and no address, so it costs that face and not the object.
 Older **parcel media** (a single video/image for a whole parcel) is separate:
 its settings arrive as `Event::ParcelMediaUpdate`, and scripts can drive
 playback — play, stop, pause, unload, seek — surfaced as
-`Event::ParcelMediaCommand`.
+`Event::ParcelMediaCommand`. A viewer plays it by replacing the parcel's media
+texture (`media_id`) wherever a face wears it; the declared MIME type
+(`ParcelMediaData::media_type`, the legacy QuickTime type when a grid sends no
+media block) chooses the engine, and `none/none` means the media is off. The
+bundled viewer's player is `sl_viewer_world_view::parcel_media`.
 
 ## Voice
 

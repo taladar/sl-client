@@ -9,19 +9,18 @@
 //!   parcel has one. It is the parcel-audio bar's player, reached through
 //!   [`sl_viewer_media::parcel_stream`] (the player lives in a crate this one
 //!   does not depend on), and it heads the list as it does in the reference.
+//! - **Parcel Streaming Media** — the agent's parcel's legacy whole-parcel
+//!   media ([`crate::parcel_media`]), while the parcel has some, right under the
+//!   stream as in the reference.
 //! - **Every media-on-a-prim face the surface driver ranks** — playing or not,
 //!   in the driver's own order (the focused face, then nearest first), each
 //!   named by its page title or URL and marked *(playing)* while it holds a
 //!   surface.
 //!
-//! The reference also lists legacy whole-parcel media (`ParcelMediaUpdate`),
-//! which this viewer does not play yet (`viewer-video-playback`), so it has no
-//! row.
-//!
 //! The **Show** filter is the reference's: all, the media in this parcel,
 //! outside it, or worn by other avatars. "In this parcel" is the reference's
 //! `isInAgentParcel` — a face on the agent's region inside the agent parcel's
-//! membership bitmap — and the parcel stream counts as in it.
+//! membership bitmap — and the parcel stream and parcel media count as in it.
 //!
 //! # Controls
 //!
@@ -74,10 +73,11 @@ use sl_viewer_ui_widgets::ui_table::{
     TableAlign, TableColumn, TableColumnKind, TableColumnWidth, TableRowCells, TableSelectionMode,
     TableSpec, set_table_cell, spawn_specimen_table_rows, spawn_table, spawn_table_row,
 };
-use sl_viewer_world_api::{MediaFocus, MediaTarget, ObjectState};
+use sl_viewer_world_api::{MediaFocus, MediaTarget, ObjectState, ParcelMediaControl};
 
 use crate::media_controls::{MediaControlsState, MediaZoomRequest};
 use crate::media_prim::{MediaData, MediaPrimState, MediaStartRequests};
+use crate::parcel_media::ParcelMediaPlayer;
 
 /// The [`UiAction`] element the window's buttons and menu report under.
 pub const NEARBY_MEDIA_ELEMENT: &str = "nearby-media";
@@ -173,6 +173,8 @@ static NEARBY_MEDIA_MENU: MenuDef = MenuDef {
 pub enum NearbyMediaId {
     /// The agent's parcel's music stream.
     ParcelAudio,
+    /// The agent's parcel's legacy whole-parcel media.
+    ParcelMedia,
     /// A media-on-a-prim face.
     Prim(MediaTarget),
 }
@@ -229,8 +231,9 @@ impl MediaListFilter {
         Self::ALL.get(index).copied().unwrap_or_default()
     }
 
-    /// Whether a row of `class` shows — `None` is the parcel stream, which the
-    /// reference lists under *All* and *In this Parcel* only.
+    /// Whether a row of `class` shows — `None` is the parcel stream or the
+    /// parcel media, which the reference lists under *All* and *In this Parcel*
+    /// only.
     #[must_use]
     pub const fn admits(self, class: Option<MediaClass>) -> bool {
         match (self, class) {
@@ -289,7 +292,7 @@ pub struct NearbyMediaRow {
     pub name: String,
     /// The URL the media shows (what Copy URL copies), if any.
     pub url: Option<String>,
-    /// Where it is (`None`: the parcel stream).
+    /// Where it is (`None`: the parcel stream or the parcel media).
     pub class: Option<MediaClass>,
     /// How it is playing.
     pub playback: MediaPlayback,
@@ -344,7 +347,7 @@ pub const fn controls_for(row: Option<&NearbyMediaRow>) -> ControlSet {
     };
     let zoom = match row.id {
         NearbyMediaId::Prim(_) => ControlShow::Enabled,
-        NearbyMediaId::ParcelAudio => ControlShow::Hidden,
+        NearbyMediaId::ParcelAudio | NearbyMediaId::ParcelMedia => ControlShow::Hidden,
     };
     match row.playback {
         MediaPlayback::Idle => ControlSet {
@@ -534,6 +537,8 @@ impl Plugin for NearbyMediaPlugin {
             .add_message::<NearbyMediaCommand>()
             .add_message::<OpenMediaPreferences>()
             .add_message::<MediaZoomRequest>()
+            .add_message::<ParcelMediaControl>()
+            .init_resource::<ParcelMediaPlayer>()
             .add_systems(
                 Startup,
                 spawn_nearby_media_floater.after(UiScaffoldSystems::SpawnRoot),
@@ -853,7 +858,15 @@ pub fn spawn_nearby_media_specimen(
     let values: Vec<Vec<(String, Color)>> = samples
         .iter()
         .map(|sample| {
-            let (name, color) = row_name(sample, "Parcel Streaming Audio", "<empty>", "(playing)");
+            let (name, color) = row_name(
+                sample,
+                &RowNames {
+                    parcel_audio: "Parcel Streaming Audio",
+                    parcel_media: "Parcel Streaming Media",
+                    empty: "<empty>",
+                    playing: "(playing)",
+                },
+            );
             vec![(String::new(), color), (cx.text(&name), color)]
         })
         .collect();
@@ -895,6 +908,15 @@ fn specimen_rows() -> Vec<NearbyMediaRow> {
             volume: 0.3,
         },
         NearbyMediaRow {
+            id: NearbyMediaId::ParcelMedia,
+            name: String::new(),
+            url: Some("https://video.example/feature.mp4".to_owned()),
+            class: None,
+            playback: MediaPlayback::Timed { playing: false },
+            muted: false,
+            volume: 1.0,
+        },
+        NearbyMediaRow {
             id: face(1),
             name: "Welcome board".to_owned(),
             url: Some("https://example.com/welcome".to_owned()),
@@ -929,6 +951,8 @@ struct RowSources<'w, 's> {
     surfaces: NonSend<'w, MediaSurfaces>,
     /// The parcel stream.
     parcel_stream: Res<'w, ParcelStreamStatus>,
+    /// The parcel media player.
+    parcel_media: Res<'w, ParcelMediaPlayer>,
     /// The object model, for where a face is and who wears it.
     objects: Res<'w, ObjectState>,
     /// World transforms, for a face's position.
@@ -940,9 +964,10 @@ struct RowSources<'w, 's> {
 }
 
 impl RowSources<'_, '_> {
-    /// Every row, parcel stream first, then the faces in the driver's order.
+    /// Every row, parcel stream and parcel media first, then the faces in the
+    /// driver's order.
     fn rows(&self) -> Vec<NearbyMediaRow> {
-        let mut rows = Vec::with_capacity(self.prim_state.nearby.len().saturating_add(1));
+        let mut rows = Vec::with_capacity(self.prim_state.nearby.len().saturating_add(2));
         if let Some(url) = &self.parcel_stream.url {
             rows.push(NearbyMediaRow {
                 id: NearbyMediaId::ParcelAudio,
@@ -956,10 +981,38 @@ impl RowSources<'_, '_> {
                 volume: self.parcel_stream.volume,
             });
         }
+        if let Some(row) = self.parcel_media_row() {
+            rows.push(row);
+        }
         for face in &self.prim_state.nearby {
             rows.push(self.prim_row(face.target));
         }
         rows
+    }
+
+    /// The parcel media's row, while the agent's parcel has media.
+    fn parcel_media_row(&self) -> Option<NearbyMediaRow> {
+        let media = self.parcel_media.media()?;
+        let slot = self
+            .parcel_media
+            .live()
+            .and_then(|live| self.surfaces.get(live.surface));
+        let (playback, muted, volume) = slot.map_or((MediaPlayback::Idle, false, 1.0), |slot| {
+            (
+                slot_playback(slot),
+                slot.surface.muted(),
+                slot.audio.as_ref().map_or(1.0, |audio| audio.gain()),
+            )
+        });
+        Some(NearbyMediaRow {
+            id: NearbyMediaId::ParcelMedia,
+            name: String::new(),
+            url: media.url.as_ref().map(ToString::to_string),
+            class: None,
+            playback,
+            muted,
+            volume,
+        })
     }
 
     /// One face's row.
@@ -985,19 +1038,7 @@ impl RowSources<'_, '_> {
                 } else {
                     slot.status.title.clone()
                 };
-                let playback = match slot.kind {
-                    MediaEngineKind::Web => MediaPlayback::Page,
-                    MediaEngineKind::Video => MediaPlayback::Timed {
-                        playing: slot.status.playback.as_ref().is_some_and(|playback| {
-                            matches!(
-                                playback.state,
-                                sl_cef::PlaybackState::Playing
-                                    | sl_cef::PlaybackState::Buffering
-                                    | sl_cef::PlaybackState::Loading
-                            )
-                        }),
-                    },
-                };
+                let playback = slot_playback(slot);
                 let volume = slot.audio.as_ref().map_or(1.0, |audio| audio.gain());
                 (name, url, playback, slot.surface.muted(), volume)
             }
@@ -1058,6 +1099,23 @@ impl RowSources<'_, '_> {
         } else {
             MediaClass::OutsideParcel
         }
+    }
+}
+
+/// How a live surface is playing: a page, or a media clock that runs or not.
+fn slot_playback(slot: &sl_viewer_media::media_engine::MediaSlot) -> MediaPlayback {
+    match slot.kind {
+        MediaEngineKind::Web => MediaPlayback::Page,
+        MediaEngineKind::Video => MediaPlayback::Timed {
+            playing: slot.status.playback.as_ref().is_some_and(|playback| {
+                matches!(
+                    playback.state,
+                    sl_cef::PlaybackState::Playing
+                        | sl_cef::PlaybackState::Buffering
+                        | sl_cef::PlaybackState::Loading
+                )
+            }),
+        },
     }
 }
 
@@ -1144,22 +1202,30 @@ fn filtered(rows: &[NearbyMediaRow], filter: MediaListFilter) -> Vec<NearbyMedia
         .collect()
 }
 
-/// A row's drawn name and colour: the parcel stream's fixed name, a face's
-/// title / URL (or `<empty>`), with *(playing)* after a live one, dimmed while
-/// it is not.
-fn row_name(
-    row: &NearbyMediaRow,
-    parcel_audio_name: &str,
-    empty_name: &str,
-    playing_suffix: &str,
-) -> (String, Color) {
+/// The fixed texts a row's name is drawn from.
+struct RowNames<'a> {
+    /// The parcel stream's name.
+    parcel_audio: &'a str,
+    /// The parcel media's name.
+    parcel_media: &'a str,
+    /// A nameless face's name.
+    empty: &'a str,
+    /// What follows a live row's name.
+    playing: &'a str,
+}
+
+/// A row's drawn name and colour: the parcel stream's and parcel media's fixed
+/// names, a face's title / URL (or `<empty>`), with *(playing)* after a live
+/// one, dimmed while it is not.
+fn row_name(row: &NearbyMediaRow, names: &RowNames<'_>) -> (String, Color) {
     let base = match row.id {
-        NearbyMediaId::ParcelAudio => parcel_audio_name,
-        NearbyMediaId::Prim(_) if row.name.is_empty() => empty_name,
+        NearbyMediaId::ParcelAudio => names.parcel_audio,
+        NearbyMediaId::ParcelMedia => names.parcel_media,
+        NearbyMediaId::Prim(_) if row.name.is_empty() => names.empty,
         NearbyMediaId::Prim(_) => row.name.as_str(),
     };
     if row.playback.is_live() {
-        (format!("{base} {playing_suffix}"), LABEL_COLOR)
+        (format!("{base} {}", names.playing), LABEL_COLOR)
     } else {
         (base.to_owned(), DIM_LABEL_COLOR)
     }
@@ -1241,8 +1307,15 @@ fn bind_nearby_media_rows(
     };
     let refresh_all = view.is_changed() || selected.is_changed();
     let parcel_audio_name = translator.get("nearby-media-parcel-audio");
+    let parcel_media_name = translator.get("nearby-media-parcel-media");
     let empty_name = translator.get("nearby-media-empty");
     let playing_suffix = translator.get("nearby-media-playing");
+    let names = RowNames {
+        parcel_audio: &parcel_audio_name,
+        parcel_media: &parcel_media_name,
+        empty: &empty_name,
+        playing: &playing_suffix,
+    };
     for (row_entity, row, child_of, cells, mut bound) in &mut rows {
         if child_of.parent() != ui.viewport {
             continue;
@@ -1257,7 +1330,7 @@ fn bind_nearby_media_rows(
         }
         let (name, color) = data.map_or_else(
             || (String::new(), LABEL_COLOR),
-            |entry| row_name(entry, &parcel_audio_name, &empty_name, &playing_suffix),
+            |entry| row_name(entry, &names),
         );
         if let Some(cell) = cells.cell(COL_NAME) {
             set_table_cell(&mut texts, cell, &name, color);
@@ -1352,7 +1425,7 @@ fn sync_nearby_media_controls(
     let muted = row.is_some_and(|row| row.muted);
     let zoomed = row.is_some_and(|row| match row.id {
         NearbyMediaId::Prim(target) => zoom.zoomed() == Some(target),
-        NearbyMediaId::ParcelAudio => false,
+        NearbyMediaId::ParcelAudio | NearbyMediaId::ParcelMedia => false,
     });
     if let Ok(mut classes) = chrome.classes.get_mut(controls.mute_label) {
         set_state_class(&mut classes, glyph::MUTED, muted);
@@ -1568,6 +1641,10 @@ struct CommandTargets<'w> {
     view: Res<'w, NearbyMediaView>,
     /// The parcel stream's player.
     parcel_stream: MessageWriter<'w, ParcelStreamRequest>,
+    /// The parcel media player.
+    parcel_media: MessageWriter<'w, ParcelMediaControl>,
+    /// The parcel media's live surface.
+    parcel_media_player: Res<'w, ParcelMediaPlayer>,
 }
 
 /// Carry out the per-row commands.
@@ -1599,6 +1676,33 @@ fn apply_nearby_media_commands(
                 targets
                     .parcel_stream
                     .write(ParcelStreamRequest::SetVolume(volume));
+            }
+            NearbyMediaCommand::Start(NearbyMediaId::ParcelMedia) => {
+                targets.parcel_media.write(ParcelMediaControl::Play);
+            }
+            NearbyMediaCommand::Stop(NearbyMediaId::ParcelMedia) => {
+                targets.parcel_media.write(ParcelMediaControl::Stop);
+            }
+            NearbyMediaCommand::Pause(NearbyMediaId::ParcelMedia) => {
+                targets.parcel_media.write(ParcelMediaControl::Pause);
+            }
+            NearbyMediaCommand::ToggleMute(NearbyMediaId::ParcelMedia) => {
+                if let Some(slot) = targets
+                    .parcel_media_player
+                    .live()
+                    .and_then(|live| targets.surfaces.get(live.surface))
+                {
+                    slot.surface.set_muted(!slot.surface.muted());
+                }
+            }
+            NearbyMediaCommand::Volume(NearbyMediaId::ParcelMedia, volume) => {
+                let Some(surface) = targets.parcel_media_player.live().map(|live| live.surface)
+                else {
+                    continue;
+                };
+                if let Some(slot) = targets.surfaces.get_mut(surface) {
+                    set_slot_volume(slot, volume);
+                }
             }
             NearbyMediaCommand::Start(NearbyMediaId::Prim(target)) => {
                 // A paused video resumes where it is; anything else starts.
@@ -1647,15 +1751,19 @@ fn apply_nearby_media_commands(
                     continue;
                 };
                 if let Some(slot) = targets.surfaces.get_mut(surface) {
-                    // Routed into the mixer, the level is the source's own gain
-                    // there; an engine still on its own device takes it itself.
-                    match slot.audio.as_mut() {
-                        Some(audio) => audio.set_gain(volume),
-                        None => slot.surface.set_volume(f64::from(volume)),
-                    }
+                    set_slot_volume(slot, volume);
                 }
             }
         }
+    }
+}
+
+/// Set a live surface's volume: routed into the mixer, the level is the
+/// source's own gain there; an engine still on its own device takes it itself.
+fn set_slot_volume(slot: &mut sl_viewer_media::media_engine::MediaSlot, volume: f32) {
+    match slot.audio.as_mut() {
+        Some(audio) => audio.set_gain(volume),
+        None => slot.surface.set_volume(f64::from(volume)),
     }
 }
 

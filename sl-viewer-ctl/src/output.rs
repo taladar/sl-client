@@ -9,7 +9,7 @@ use serde_json::{Value as JsonValue, json};
 use sl_automation_proto::{
     AgentReadout, ConversationReadout, ConversationRef, EnvironmentReadout, GroundPoint,
     InventoryFolderReadout, LogEntry, NodeState, NodeValue, NodeVisibility, NotificationReadout,
-    UiNode, ViewerIdentity, WorldMapReadout, WorldNode,
+    ParcelMediaReadout, UiNode, ViewerIdentity, WorldMapReadout, WorldNode,
 };
 use sl_viewer_driver::{AnsweredFileDialog, Screenshot};
 
@@ -66,6 +66,8 @@ pub enum Outcome {
     Environment(EnvironmentReadout),
     /// What the world map knows.
     WorldMap(WorldMapReadout),
+    /// The agent parcel's legacy media.
+    ParcelMedia(ParcelMediaReadout),
     /// A setting as it now stands.
     Setting {
         /// The setting's key.
@@ -221,6 +223,7 @@ fn json_of(outcome: &Outcome) -> io::Result<JsonValue> {
         Outcome::InventoryTree(folders) => to_json(folders)?,
         Outcome::Environment(environment) => to_json(environment)?,
         Outcome::WorldMap(map) => to_json(map)?,
+        Outcome::ParcelMedia(media) => to_json(media)?,
         Outcome::Setting { key, value } => json!({ "setting": key, "value": value }),
         Outcome::FileDialog { answered, picked } => json!({
             "done": if picked.is_some() { "answered" } else { "cancelled" },
@@ -315,6 +318,7 @@ fn text_of(out: &mut impl Write, outcome: &Outcome) -> io::Result<()> {
         Outcome::InventoryTree(folders) => inventory_lines(out, folders)?,
         Outcome::Environment(environment) => environment_lines(out, environment)?,
         Outcome::WorldMap(map) => world_map_lines(out, map)?,
+        Outcome::ParcelMedia(media) => parcel_media_lines(out, media)?,
         Outcome::Setting { key, value } => writeln!(out, "{key} = {value}")?,
         Outcome::FileDialog { answered, picked } => match picked {
             Some(path) => writeln!(
@@ -573,6 +577,25 @@ fn inventory_lines(out: &mut impl Write, folders: &[InventoryFolderReadout]) -> 
         "{} folders, {items} items, {unloaded} not loaded",
         folders.len()
     )
+}
+
+/// The parcel media readout: the media, then whether it plays.
+fn parcel_media_lines(out: &mut impl Write, media: &ParcelMediaReadout) -> io::Result<()> {
+    let Some(url) = &media.url else {
+        return writeln!(out, "media    (none)");
+    };
+    let texture = media
+        .texture
+        .map_or_else(|| "(no texture)".to_owned(), |texture| texture.to_string());
+    writeln!(out, "media    {url} ({}) on {texture}", media.media_type)?;
+    match &media.engine {
+        Some(engine) => writeln!(
+            out,
+            "playing  on the {engine} engine, {} face(s)",
+            media.faces
+        ),
+        None => writeln!(out, "playing  no"),
+    }
 }
 
 /// The world map's readout: the tiles, then a region a line, then an item

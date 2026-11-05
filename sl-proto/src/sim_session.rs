@@ -161,6 +161,8 @@ use sl_wire::messages::{
 };
 use sl_wire::messages::{
     ParcelAccessListReply, ParcelAccessListReplyDataBlock, ParcelAccessListReplyListBlock,
+    ParcelMediaCommandMessage, ParcelMediaCommandMessageCommandBlockBlock, ParcelMediaUpdate,
+    ParcelMediaUpdateDataBlockBlock, ParcelMediaUpdateDataBlockExtendedBlock,
     RegionInfo as RegionInfoMessage, RegionInfoAgentDataBlock, RegionInfoCombatSettingsBlock,
     RegionInfoRegionInfo2Block, RegionInfoRegionInfo3Block, RegionInfoRegionInfo5Block,
     RegionInfoRegionInfoBlock,
@@ -6306,6 +6308,74 @@ impl SimSession {
                     pass_to_agent: control.pass_to_agent,
                 })
                 .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends the client a `ParcelMediaUpdate`: the agent parcel's media URL,
+    /// replaced texture, type, size or looping changed (an owner's edit, or a
+    /// script's `llParcelMediaCommandList` URL / texture / type / size). The
+    /// inverse of [`Event::ParcelMediaUpdate`](crate::Event::ParcelMediaUpdate).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
+    /// if the message fails to encode.
+    pub fn send_parcel_media_update(
+        &mut self,
+        media: &crate::ParcelMediaUpdateInfo,
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::ParcelMediaUpdate(ParcelMediaUpdate {
+            data_block: ParcelMediaUpdateDataBlockBlock {
+                media_url: with_nul(&sl_wire::optional_url_to_wire(media.media_url.as_ref())),
+                media_id: media
+                    .media_id
+                    .map_or_else(Uuid::nil, |texture| texture.uuid()),
+                media_auto_scale: u8::from(media.media_auto_scale),
+            },
+            data_block_extended: ParcelMediaUpdateDataBlockExtendedBlock {
+                media_type: with_nul(&media.media_type),
+                media_desc: with_nul(&media.media_desc),
+                media_width: media.media_width.unwrap_or(0),
+                media_height: media.media_height.unwrap_or(0),
+                media_loop: u8::from(media.media_loop),
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends the client a `ParcelMediaCommandMessage` — a script's
+    /// `llParcelMediaCommandList` play / pause / stop / seek reaching the viewers
+    /// on the parcel. `flags` carries one bit per `PARCEL_MEDIA_COMMAND_*` the
+    /// script named; `time` is the seek target in seconds. The inverse of
+    /// [`Event::ParcelMediaCommand`](crate::Event::ParcelMediaCommand).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
+    /// if the message fails to encode.
+    pub fn send_parcel_media_command(
+        &mut self,
+        flags: u32,
+        command: crate::ParcelMediaCommand,
+        time: f32,
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::ParcelMediaCommandMessage(ParcelMediaCommandMessage {
+            command_block: ParcelMediaCommandMessageCommandBlockBlock {
+                flags,
+                command: command.to_u32(),
+                time,
+            },
         });
         self.send(&message, Reliability::Reliable, now)?;
         Ok(())

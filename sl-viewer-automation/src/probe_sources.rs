@@ -21,7 +21,9 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use bevy::prelude::*;
-use sl_automation_proto::{ConversationReadout, TeleportReadout, WorldMapReadout};
+use sl_automation_proto::{
+    ConversationReadout, ParcelMediaReadout, TeleportReadout, WorldMapReadout,
+};
 use sl_client_bevy::Uuid;
 use sl_viewer_notifications::{NotificationId, ToastButton};
 
@@ -57,6 +59,8 @@ pub struct ProbeSources {
     pub published_bakes: Option<fn(&mut World) -> Vec<Uuid>>,
     /// What the world map knows: its regions, its items, its tiles.
     pub world_map: Option<fn(&mut World) -> WorldMapReadout>,
+    /// The agent parcel's legacy media and whether it plays.
+    pub parcel_media: Option<fn(&mut World) -> ParcelMediaReadout>,
 }
 
 /// What the scene's environment holds beyond the sky the RLV slot publishes.

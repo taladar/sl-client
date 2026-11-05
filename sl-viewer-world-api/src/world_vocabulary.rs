@@ -146,6 +146,33 @@ pub struct MediaFocus {
     pub pressed: Option<MediaTarget>,
 }
 
+/// What a click or a window asks of the agent parcel's **legacy whole-parcel
+/// media** (`ParcelMediaUpdate`, the media texture the parcel replaces), answered
+/// by the parcel media player (`parcel_media`) — the reference's
+/// `LLViewerParcelMedia` entry points.
+#[derive(Message, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ParcelMediaControl {
+    /// A *play* click action (`handle_click_action_play`): pause it while it
+    /// plays, resume it while paused, else start it.
+    Toggle,
+    /// Play: resume it while paused, else start it.
+    Play,
+    /// Pause it, keeping it loaded.
+    Pause,
+    /// Stop and unload it.
+    Stop,
+}
+
+/// What the parcel media player is showing: the texture it paints over while a
+/// surface is live, `None` while nothing plays — the reference's
+/// `getMediaImplFromTextureID`, which an *open media* click consults to decide
+/// whether a face is showing the parcel's media.
+#[derive(Resource, Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct ParcelMediaShown {
+    /// The replaced texture while the media is live.
+    pub texture: Option<TextureKey>,
+}
+
 /// How many leading hex characters of the agent id to show as a provisional tag
 /// before the real name resolves.
 const PROVISIONAL_ID_CHARS: usize = 8;

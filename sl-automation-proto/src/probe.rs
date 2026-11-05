@@ -291,6 +291,28 @@ pub struct WorldMapReadout {
     pub tiles_absent: usize,
 }
 
+/// The agent parcel's legacy whole-parcel media, as the viewer's player holds
+/// it: what the parcel states, and whether a surface plays it on the faces
+/// wearing its texture.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ParcelMediaReadout {
+    /// The media URL, while the parcel has media that could play.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    /// The declared MIME type (empty when unset or when there is no media).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub media_type: String,
+    /// The texture the media replaces.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub texture: Option<Uuid>,
+    /// The engine a live surface runs on (`"web"` or `"video"`), `None` while
+    /// nothing plays.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub engine: Option<String>,
+    /// How many faces wear the media now.
+    pub faces: usize,
+}
+
 /// A region the world map knows.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MapRegionReadout {
@@ -579,6 +601,7 @@ mod tests {
     use serde::Serialize;
     use serde::de::DeserializeOwned;
 
+    use super::ParcelMediaReadout;
     use super::{
         AgentReadout, CameraView, ChatKind, ClockTime, ConversationReadout, ConversationRef,
         DiagnosticLine, DiagnosticsReadout, EnvironmentReadout, InventoryEntry,
@@ -789,6 +812,24 @@ mod tests {
             nothing,
             r#"{"tiles_ready":0,"tiles_pending":0,"tiles_absent":0}"#
         );
+        Ok(())
+    }
+
+    #[test]
+    fn parcel_media_round_trips() -> Result<(), serde_json::Error> {
+        let json = round_trip(&ParcelMediaReadout {
+            url: Some("https://video.example/feature.mp4".to_owned()),
+            media_type: "video/mp4".to_owned(),
+            texture: Some(uuid::Uuid::from_u128(0x5C2E)),
+            engine: Some("video".to_owned()),
+            faces: 3,
+        })?;
+        assert_eq!(
+            json,
+            r#"{"url":"https://video.example/feature.mp4","media_type":"video/mp4","texture":"00000000-0000-0000-0000-000000005c2e","engine":"video","faces":3}"#
+        );
+        let nothing = round_trip(&ParcelMediaReadout::default())?;
+        assert_eq!(nothing, r#"{"faces":0}"#);
         Ok(())
     }
 

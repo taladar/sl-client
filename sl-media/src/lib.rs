@@ -24,7 +24,7 @@
 //!   dispatch, by URL scheme / extension).
 //!
 //! Design notes (see `roadmap/in-progress/viewer-media-prim-browser.md` and
-//! `roadmap/in-progress/viewer-video-playback.md` in the workspace): input
+//! `roadmap/done/viewer-video-playback.md` in the workspace): input
 //! crosses the boundary as portable *Windows virtual-key code + text* (never
 //! native key blobs), frames cross as CPU BGRA buffers (zero-copy is deferred
 //! headroom), and everything is **single-threaded** from the caller's view:
@@ -786,14 +786,134 @@ pub fn classify_url(url: &ValidatedMediaUrl) -> MediaKind {
     }
 }
 
+/// The MIME type a parcel declares when its media is switched off — the
+/// reference's `LLMIMETypes::getDefaultMimeType()`, which it never plays.
+pub const NO_MEDIA_MIME_TYPE: &str = "none/none";
+
+/// What a **declared** MIME type says about the engine — a parcel's media type
+/// (`ParcelMediaUpdate` / the `MediaData` block of `ParcelProperties`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MimeDispatch {
+    /// `none/none`: the media is off and must never play.
+    Never,
+    /// A type `mime_types.xml` names a plugin for: use that engine.
+    Kind(MediaKind),
+    /// Empty, or a type the table does not know: the reference probes the
+    /// served type; [`classify_media`] falls back to [`classify_url`].
+    Unknown,
+}
+
+/// Which engine a declared MIME type `mime` dispatches to, after the
+/// reference's `mime_types.xml`: `video/*`, `audio/*`, `application/ogg` and
+/// `application/octet-stream` play on the playback engine (GStreamer); `text/*`,
+/// `image/*` and the document types render in the browser. The legacy default
+/// `video/vnd.secondlife.qt.legacy` is a `video/*` type and goes to the
+/// playback engine, as it does there. Case and parameters (`; charset=…`) are
+/// ignored.
+#[must_use]
+pub fn classify_mime(mime: &str) -> MimeDispatch {
+    let essence = mime
+        .split(';')
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase();
+    if essence.is_empty() {
+        return MimeDispatch::Unknown;
+    }
+    if essence == NO_MEDIA_MIME_TYPE {
+        return MimeDispatch::Never;
+    }
+    let Some((family, subtype)) = essence.split_once('/') else {
+        return MimeDispatch::Unknown;
+    };
+    match (family, subtype) {
+        ("video", _) | ("application", "ogg" | "octet-stream") => {
+            MimeDispatch::Kind(MediaKind::Video)
+        }
+        ("audio", _) => MimeDispatch::Kind(MediaKind::Audio),
+        ("text" | "image", _)
+        | (
+            "application",
+            "xhtml+xml" | "javascript" | "pdf" | "postscript" | "rtf" | "smil" | "x-director",
+        ) => MimeDispatch::Kind(MediaKind::Web),
+        _other => MimeDispatch::Unknown,
+    }
+}
+
+/// Which engine media of declared type `mime` at `url` plays on, `None` for a
+/// `none/none` type — the reference's `navigateInternal`: a declared type the
+/// table knows wins (so a server that serves a bogus type cannot override the
+/// owner's choice), and anything else falls back to the URL ([`classify_url`]),
+/// where the reference would probe the served type.
+#[must_use]
+pub fn classify_media(mime: &str, url: &ValidatedMediaUrl) -> Option<MediaKind> {
+    match classify_mime(mime) {
+        MimeDispatch::Never => None,
+        MimeDispatch::Kind(kind) => Some(kind),
+        MimeDispatch::Unknown => Some(classify_url(url)),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use pretty_assertions::assert_eq;
 
     use super::{
-        MEDIA_URL_SCHEMES, MediaKind, MediaUrlError, STREAM_SCHEMES, ValidatedMediaUrl,
-        classify_url,
+        MEDIA_URL_SCHEMES, MediaKind, MediaUrlError, MimeDispatch, STREAM_SCHEMES,
+        ValidatedMediaUrl, classify_media, classify_mime, classify_url,
     };
+
+    #[test]
+    fn declared_mime_types_pick_the_engine() {
+        assert_eq!(classify_mime("none/none"), MimeDispatch::Never);
+        assert_eq!(classify_mime("None/None"), MimeDispatch::Never);
+        assert_eq!(
+            classify_mime("video/vnd.secondlife.qt.legacy"),
+            MimeDispatch::Kind(MediaKind::Video)
+        );
+        assert_eq!(
+            classify_mime("video/mp4"),
+            MimeDispatch::Kind(MediaKind::Video)
+        );
+        assert_eq!(
+            classify_mime("application/ogg"),
+            MimeDispatch::Kind(MediaKind::Video)
+        );
+        assert_eq!(
+            classify_mime("audio/mpeg"),
+            MimeDispatch::Kind(MediaKind::Audio)
+        );
+        assert_eq!(
+            classify_mime("text/html; charset=utf-8"),
+            MimeDispatch::Kind(MediaKind::Web)
+        );
+        assert_eq!(
+            classify_mime("image/png"),
+            MimeDispatch::Kind(MediaKind::Web)
+        );
+        assert_eq!(classify_mime(""), MimeDispatch::Unknown);
+        assert_eq!(classify_mime("  "), MimeDispatch::Unknown);
+        assert_eq!(classify_mime("model/gltf"), MimeDispatch::Unknown);
+        assert_eq!(classify_mime("nonsense"), MimeDispatch::Unknown);
+    }
+
+    #[test]
+    fn a_known_type_beats_the_url_and_an_unknown_one_falls_back() -> Result<(), String> {
+        let page =
+            ValidatedMediaUrl::parse("https://example.com/").map_err(|error| error.to_string())?;
+        let clip = ValidatedMediaUrl::parse("https://example.com/clip.mp4")
+            .map_err(|error| error.to_string())?;
+        // The owner's declared type wins over what the URL looks like.
+        assert_eq!(classify_media("video/mp4", &page), Some(MediaKind::Video));
+        assert_eq!(classify_media("text/html", &clip), Some(MediaKind::Web));
+        // An empty type is the URL's call.
+        assert_eq!(classify_media("", &clip), Some(MediaKind::Video));
+        assert_eq!(classify_media("", &page), Some(MediaKind::Web));
+        // Switched-off media never plays.
+        assert_eq!(classify_media("none/none", &clip), None);
+        Ok(())
+    }
 
     /// The [`MediaKind`] for a literal URL the allowlist accepts.
     fn kind(text: &str) -> Result<MediaKind, String> {

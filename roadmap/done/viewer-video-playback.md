@@ -2,9 +2,9 @@
 id: viewer-video-playback
 title: Video playback backend (a second media engine, not the browser)
 topic: viewer
-status: in-progress
+status: done
 origin: user request (2026-07)
-refs: [viewer-audio-backend]
+refs: [viewer-audio-backend, viewer-media-zero-copy-frames, viewer-media-served-mime-probe]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
@@ -128,18 +128,58 @@ The engine, the dispatch and the transport controls are implemented:
   title / decoder-gap error in the status slot. A focused video face
   deliberately leaves the keyboard with the world (nothing to type at).
 
-Still open here: the PCM hand-off + per-prim spatialisation (filed as
-[[viewer-gst-audio-mixer-handoff]], waits on [[viewer-audio-backend]]),
-zero-copy per-platform frame paths (deferred
-headroom, as designed), a served-MIME probe if extension dispatch proves
-insufficient, and legacy whole-parcel media video
-(`ParcelMediaUpdate` / `ParcelMediaCommand` — the pre-MoaP parcel media
-texture).
+Done since: the PCM hand-off ([[viewer-gst-audio-mixer-handoff]]) and legacy
+whole-parcel media (2026-11-05, below). Split out as their own tasks: zero-copy
+per-platform frame paths ([[viewer-media-zero-copy-frames]], already filed when
+viewer-media-prim-browser closed) and a served-MIME probe
+([[viewer-media-served-mime-probe]], only if extension dispatch proves
+insufficient).
 
-## From viewer-left-click-click-actions (2026-11-03)
+## Legacy whole-parcel media (2026-11-05)
 
-A left click on a prim whose click action is *play* raises
-`ClickActionPlayUnavailable` (`left_click_actions`): the reference's
-`handle_click_action_play` toggles the legacy parcel media above. When that
-plays, answer `ClickedAction::Play` with play / pause / start, and let *open
-media* play it when the clicked face shows it.
+`sl-viewer-world-view/src/parcel_media.rs`, the reference's
+`LLViewerParcelMedia` + `LLViewerParcelMediaAutoPlay`:
+
+- The agent parcel's media (properties, then any later `ParcelMediaUpdate`)
+  plays on the engine its **declared MIME type** picks — `sl_media::
+  classify_mime` / `classify_media`, after `mime_types.xml`: a known type wins,
+  an empty one falls back to `classify_url` (where the reference probes), and
+  `none/none` never plays. The served-MIME probe item above therefore only
+  remains for prim media and for parcels with no type.
+- Every face whose texture is the media texture wears the surface (a
+  `ParcelMediaFace` component holds its own material, put back on stop or when
+  the face changes texture); a face with live prim media keeps that. 2-D audio.
+- Autoplay once per parcel entry: five seconds on it, agent under 0.1 m/s, the
+  texture over 24 × 24 px on screen, behind the new `ParcelMediaAutoPlayEnable`
+  preference (off, the reference default).
+- Script commands (`command_steps`): stop / pause / unload / seek always; play,
+  loop and a seek with nothing loaded only with `PermAllowScriptedMedia` on
+  (Firestorm's default is off) — both new rows on the audio preferences tab.
+- Leaving the parcel stops it unless the next names the same media; a changed
+  URL / texture of the same type restarts it (`on_parcel_change`).
+- *Play* click action toggles it (pause / resume / start); *open media* on a
+  face showing it does the same, else opens the URL as before. The
+  `ClickActionPlayUnavailable` notification is gone.
+- Nearby Media lists it as *Parcel Streaming Media* under the stream.
+
+Not ported: the first-use `ParcelCanPlayMedia` warning, the *ask* autoplay
+mode (unsupported in the reference's own settings comment), the media filter
+(`viewer-media-playback-policies`). `media_auto_scale` is not consulted — it
+picks the page's render resolution there, not the face coverage, and the
+surface here always fills the face.
+
+Automation: `Probe::ParcelMedia` (`ParcelMediaReadout`: URL, type, texture,
+engine, faces wearing it; `Viewer::parcel_media`, `sl-viewer-ctl
+parcel-media`), the server mirrors `SimSession::send_parcel_media_update` /
+`send_parcel_media_command`, and a `StageBuilder::video_media` switch (stage
+viewers now run without GStreamer unless asked, on both backends). The stage
+`e2e_parcel_media` has the fake grid state the media on the stock plywood and
+send a script's play: refused while `PermAllowScriptedMedia` is off, playing on
+the video engine and on the plywood faces once on, listed as *Parcel Streaming
+Media (playing)* in Nearby Media, and off every face after the script's stop.
+
+Tests: `cargo test --release -p sl-viewer-world-view parcel_media` (the pure
+decisions plus an app test through the real GStreamer engine: a face wearing
+the texture swaps to the media material, another keeps its own, stop puts it
+back), `-p sl-media` (the MIME dispatch), and the viewer's
+`a_left_click_on_a_prim_does_what_the_prim_says`.

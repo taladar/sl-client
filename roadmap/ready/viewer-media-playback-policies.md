@@ -23,7 +23,10 @@ against persisted per-account allow/deny lists; unknown domains prompt
 tables (add/remove; lists persist in `medialist.xml`). This is an
 IP-privacy/security feature — media and stream servers see the
 viewer's IP, and hostile parcels use media URLs as IP grabbers — so it
-matters on Second Life proper. Our players
+matters on Second Life proper. (Since 2026-11-05 the legacy parcel media
+player, `sl-viewer-world-view/src/parcel_media.rs`, already honours
+`PermAllowScriptedMedia` for script-started play and has its own
+`ParcelMediaAutoPlayEnable`; the filter should gate its `play` too.) Our players
 (`sl-viewer-media/src/media_audio.rs`, `parcel_stream.rs`,
 `sl-viewer-world-view/src/media_prim.rs`,
 `sl-viewer-audio/src/parcel_audio.rs`) auto-play with no URL gate at all

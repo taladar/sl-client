@@ -11,17 +11,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 129 |
-| ready | 334 |
-| blocked | 38 |
-| in-progress | 14 |
+| ideas | 130 |
+| ready | 335 |
+| blocked | 37 |
+| in-progress | 13 |
 | bugs | 36 |
-| done | 1495 |
+| done | 1496 |
 | deferred | 30 |
 | wont-do | 24 |
-| **total** | **2100** |
+| **total** | **2101** |
 
-## ideas (129)
+## ideas (130)
 
 ### protocol
 
@@ -92,6 +92,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — open the grid's marketplace storefront
 - [`viewer-material-asset-authoring`](ideas/viewer-material-asset-authoring.md)
   — Create and upload GLTF material assets
+- [`viewer-media-served-mime-probe`](ideas/viewer-media-served-mime-probe.md) —
+  Probe the served MIME type before dispatching media to an engine
 - [`viewer-minimap-collision-parcels`](ideas/viewer-minimap-collision-parcels.md)
   — Minimap collision-parcel ("banned from here") fill
 - [`viewer-minimized-floaters-move-to-a-shelf`](ideas/viewer-minimized-floaters-move-to-a-shelf.md)
@@ -329,7 +331,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-lsl-opensim-function-set`](ideas/gridspec-lsl-opensim-function-set.md)
   — Measure which library functions OpenSim's engines compile
 
-## ready (334)
+## ready (335)
 
 ### protocol
 
@@ -999,6 +1001,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-usb-route-map-display`](ready/viewer-usb-route-map-display.md) — USB
   route display on the minimap & world map (blocked by `viewer-minimap` (done),
   `viewer-world-map-floater` (done))
+- [`viewer-video-recording`](ready/viewer-video-recording.md) — In-viewer video
+  recording (machinima capture) (blocked by `viewer-ui-widget-scaffold` (done),
+  `viewer-video-playback` (done))
 - [`viewer-viewer-effect-render`](ready/viewer-viewer-effect-render.md) — Render
   inbound ViewerEffects (beams, spheres)
 - [`viewer-voice-audio`](ready/viewer-voice-audio.md) — Voice audio transport
@@ -1146,7 +1151,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-sl-mfa-challenge`](ready/gridspec-sl-mfa-challenge.md) — Record
   Second Life's MFA challenge and whether a remembered mfa_hash gets past it
 
-## blocked (38)
+## blocked (37)
 
 ### viewer
 
@@ -1224,9 +1229,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-usb-route-following`](blocked/viewer-usb-route-following.md) — USB
   route following — advancing waypoint beacons (blocked by
   `viewer-usb-route-map-display`, `viewer-beacons-beam-render` (done))
-- [`viewer-video-recording`](blocked/viewer-video-recording.md) — In-viewer
-  video recording (machinima capture) (blocked by `viewer-ui-widget-scaffold`
-  (done), `viewer-video-playback`)
 - [`viewer-vintage-bottom-bar`](blocked/viewer-vintage-bottom-bar.md) — Classic
   (Vintage) bottom-bar arrangement (blocked by `viewer-animation-overrider`,
   `viewer-toolbar-customization`)
@@ -1275,7 +1277,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-voice`](blocked/gridspec-voice.md) — Voice provisioning and
   signalling on each grid (blocked by `viewer-voice-audio`)
 
-## in-progress (14)
+## in-progress (13)
 
 ### viewer
 
@@ -1309,8 +1311,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-virtual-trackball`](in-progress/viewer-ui-virtual-trackball.md) —
   Virtual trackball widget (sun / moon direction) (blocked by
   `viewer-ui-widget-scaffold` (done))
-- [`viewer-video-playback`](in-progress/viewer-video-playback.md) — Video
-  playback backend (a second media engine, not the browser)
 
 ### chat
 
@@ -1410,7 +1410,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1495)
+## done (1496)
 
 ### protocol
 
@@ -3600,6 +3600,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — An item the viewer just uploaded is not in its own inventory
 - [`viewer-url-linkification`](done/viewer-url-linkification.md) — URLs in chat
   & other text contexts (blocked by `viewer-ui-text-foundation` (done))
+- [`viewer-video-playback`](done/viewer-video-playback.md) — Video playback
+  backend (a second media engine, not the browser)
 - [`viewer-vintage-skin`](done/viewer-vintage-skin.md) — Ship a Vintage-alike
   skin (blocked by `viewer-skin-light-surface-roles` (done),
   `viewer-skin-image-backed-widgets` (done))

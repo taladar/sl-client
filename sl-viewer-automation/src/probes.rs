@@ -12,8 +12,9 @@ use bevy::ecs::system::SystemState;
 use bevy::prelude::*;
 use sl_automation_proto::{
     AgentReadout, CameraView, ClockTime, ConversationReadout, EnvironmentReadout, InventoryEntry,
-    InventoryFolderReadout, InventoryRoot, NotificationReadout, OfferedButton, QuiescenceReadout,
-    RegionReadout, SelectedObject, SkyReadout, StatusReadout, WaterReadout, WorldMapReadout,
+    InventoryFolderReadout, InventoryRoot, NotificationReadout, OfferedButton, ParcelMediaReadout,
+    QuiescenceReadout, RegionReadout, SelectedObject, SkyReadout, StatusReadout, WaterReadout,
+    WorldMapReadout,
 };
 use sl_client_bevy::{
     FolderState, InventoryFolderKey, SlAgentParcel, SlCurrentRegion, SlIdentity, SlRegion,
@@ -263,6 +264,16 @@ pub fn read_environment(world: &mut World) -> EnvironmentReadout {
 pub fn read_world_map(world: &mut World) -> WorldMapReadout {
     ProbeSources::of(world)
         .world_map
+        .map(|reader| reader(world))
+        .unwrap_or_default()
+}
+
+/// The agent parcel's legacy media, through [`ProbeSources::parcel_media`]. An
+/// app without the parcel media player has none.
+#[must_use]
+pub fn read_parcel_media(world: &mut World) -> ParcelMediaReadout {
+    ProbeSources::of(world)
+        .parcel_media
         .map(|reader| reader(world))
         .unwrap_or_default()
 }

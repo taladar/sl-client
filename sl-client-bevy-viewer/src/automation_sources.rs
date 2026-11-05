@@ -31,6 +31,40 @@ pub(crate) fn probe_sources() -> ProbeSources {
         environment_scene: Some(environment_scene),
         published_bakes: Some(published_bakes),
         world_map: Some(sl_viewer_map::world_map::world_map_readout),
+        parcel_media: Some(parcel_media),
+    }
+}
+
+/// The agent parcel's legacy media as the parcel media player holds it, and how
+/// many faces wear it.
+fn parcel_media(world: &mut World) -> sl_viewer_automation::ParcelMediaReadout {
+    use sl_viewer_media::media_engine::MediaEngineKind;
+    use sl_viewer_world_view::parcel_media::{ParcelMediaFace, ParcelMediaPlayer};
+
+    let faces = world
+        .query_filtered::<(), With<ParcelMediaFace>>()
+        .iter(world)
+        .count();
+    let Some(player) = world.get_resource::<ParcelMediaPlayer>() else {
+        return sl_viewer_automation::ParcelMediaReadout::default();
+    };
+    let media = player.media();
+    sl_viewer_automation::ParcelMediaReadout {
+        url: media
+            .and_then(|media| media.url.as_ref())
+            .map(ToString::to_string),
+        media_type: media.map(|media| media.mime.clone()).unwrap_or_default(),
+        texture: media
+            .and_then(|media| media.texture)
+            .map(|texture| texture.uuid()),
+        engine: player.live().map(|live| {
+            match live.kind {
+                MediaEngineKind::Web => "web",
+                MediaEngineKind::Video => "video",
+            }
+            .to_owned()
+        }),
+        faces,
     }
 }
 
