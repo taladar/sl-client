@@ -22049,6 +22049,7 @@ mod test {
             from_group,
             session_name,
             message,
+            channel,
             region_id,
             position,
             parent_estate_id,
@@ -22065,6 +22066,7 @@ mod test {
         assert!(from_group);
         assert_eq!(session_name, "My Group");
         assert_eq!(message, "join us");
+        assert_eq!(channel, InviteChannel::Text);
         assert_eq!(region_id, region);
         assert_eq!(position, RegionCoordinates::new(1.5, 2.5, 3.5));
         assert_eq!(parent_estate_id, 101);

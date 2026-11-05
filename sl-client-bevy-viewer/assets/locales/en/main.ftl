@@ -70,10 +70,6 @@ conversations-you = You
 # The "someone is typing" status line under a transcript.
 conversations-typing-one = { $name } is typing…
 conversations-typing-many = Several people are typing…
-# The pending-invite bar shown until a group / conference invite is accepted.
-conversations-invite-prompt = You're invited to this conversation.
-conversations-invite-accept = Accept
-conversations-invite-decline = Decline
 
 ## The People / Contacts surface (viewer-social-people-panel), hosted as a pinned
 ## tab inside the Conversations floater: the Friends list plus a Groups

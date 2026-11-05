@@ -89,15 +89,13 @@ pub struct TranscriptLine {
     pub text: String,
 }
 
-/// One conversation: its transcript and whether it waits on the user.
+/// One conversation: its transcript and how much of it is unread.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ConversationReadout {
     /// Which conversation this is.
     pub conversation: ConversationRef,
     /// Lines that arrived while it was not the one shown.
     pub unread: u32,
-    /// Whether it is an invitation the user has not accepted yet.
-    pub pending_invite: bool,
     /// The lines of this session, oldest first. Lines recalled from an earlier
     /// session's log are not among them.
     pub lines: Vec<TranscriptLine>,
@@ -606,7 +604,6 @@ mod tests {
         let nearby = ConversationReadout {
             conversation: ConversationRef::Nearby,
             unread: 2,
-            pending_invite: false,
             lines: vec![
                 TranscriptLine {
                     own: false,
@@ -635,7 +632,6 @@ mod tests {
             round_trip(&ConversationReadout {
                 conversation,
                 unread: 0,
-                pending_invite: true,
                 lines: vec![TranscriptLine {
                     own: true,
                     speaker: "You".to_owned(),

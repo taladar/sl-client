@@ -6,7 +6,7 @@
 //! # The strip is the shared widget's; the panes are this module's
 //!
 //! Conversations are **dynamic** — a tab appears the moment a new IM / group /
-//! conference message (or invite) arrives and lives for the session (or until
+//! conference message (or invitation) arrives and lives for the session (or until
 //! its close button ends it). The strip is a [`DynamicTabStrip`], the tab
 //! widget's form for exactly that: a tab is added when a conversation opens
 //! and removed when it closes, each button carrying its `ConversationTab`
@@ -28,7 +28,7 @@
 //!
 //! [`ConversationModel`] is a plain, unit-tested resource: the ordered list of
 //! conversations, each with a bounded transcript, an unread count, who is typing,
-//! whether it is a pending invite, and a revision stamp, plus the name caches that
+//! and a revision stamp, plus the name caches that
 //! resolve a peer / group / conference to a readable tab title. It is fed **only**
 //! from the [`SlEvent`] stream (the viewer never reaches into the session),
 //! mirroring `crate::chat`'s overlay but keyed per conversation.
@@ -78,7 +78,7 @@ use sl_automation_proto::{
 };
 use sl_client_bevy::{
     AgentKey, ChatAudible, ChatSource, ChatType, Command, GroupKey, ImDialog, ImSessionId,
-    MessageCursor, ObjectKey, SlCommand, SlEvent, SlIdentity, SlSessionEvent, Uuid,
+    InviteChannel, MessageCursor, ObjectKey, SlCommand, SlEvent, SlIdentity, SlSessionEvent, Uuid,
     chat_text_muted,
 };
 
@@ -235,19 +235,6 @@ const CONVERSATIONS_CLASS: &str = "sk-conversations";
 /// The "X is typing…" line's colour — dim, so it reads as ephemeral status.
 const TYPING_COLOR: Color = SkinPalette::FALLBACK.text_muted;
 
-/// The pending-invite bar's background — a faint highlight so the prompt stands
-/// out above the (empty) transcript.
-const INVITE_BACKGROUND: Color = Color::srgba(0.22, 0.26, 0.34, 0.9);
-
-/// The invite prompt / button text colour.
-const INVITE_TEXT_COLOR: Color = SkinPalette::FALLBACK.text_primary;
-
-/// The Accept button's background — a muted green.
-const ACCEPT_BACKGROUND: Color = Color::srgb(0.20, 0.42, 0.26);
-
-/// The Decline button's background — a muted red.
-const DECLINE_BACKGROUND: Color = Color::srgb(0.45, 0.22, 0.24);
-
 /// The dock host's leading (left, mirrored under RTL) inset from the window edge,
 /// in logical pixels — flush to the corner like the nearby-chat bar.
 const DOCK_INSET: f32 = 0.0;
@@ -279,15 +266,6 @@ const TYPING_ONE_KEY: &str = "conversations-typing-one";
 
 /// The Fluent key for the "several people are typing" status.
 const TYPING_MANY_KEY: &str = "conversations-typing-many";
-
-/// The Fluent key for the pending-invite prompt.
-const INVITE_PROMPT_KEY: &str = "conversations-invite-prompt";
-
-/// The Fluent key for the invite Accept button.
-const INVITE_ACCEPT_KEY: &str = "conversations-invite-accept";
-
-/// The Fluent key for the invite Decline button.
-const INVITE_DECLINE_KEY: &str = "conversations-invite-decline";
 
 // ---------------------------------------------------------------------------
 // Pure model
@@ -328,7 +306,7 @@ struct TranscriptLine {
 }
 
 /// One conversation: its key, bounded transcript, unread count, who is currently
-/// typing, whether it is a pending invite, and a revision stamp bumped on every
+/// typing, and a revision stamp bumped on every
 /// appended line (so the view knows when to re-render the transcript).
 #[derive(Debug, Clone)]
 struct Conversation {
@@ -340,9 +318,6 @@ struct Conversation {
     unread: u32,
     /// Who is currently typing, id → display name (for the "X is typing…" line).
     typing: BTreeMap<AgentKey, String>,
-    /// Whether this is an invitation we have not yet accepted (shows the
-    /// Accept / Decline bar). Cleared on accept or when the first message lands.
-    pending_invite: bool,
     /// Persisted **recall** lines rendered *above* the live [`lines`](Self::lines),
     /// loaded once from the on-disk chat-log transcript so the panel opens on
     /// previous-session history (the reference viewer's "load previous
@@ -374,7 +349,6 @@ impl Conversation {
             lines: VecDeque::new(),
             unread: 0,
             typing: BTreeMap::new(),
-            pending_invite: false,
             recall: Vec::new(),
             server_history: Vec::new(),
             revision: 0,
@@ -405,7 +379,6 @@ pub fn conversation_readouts(world: &mut World) -> Vec<ConversationReadout> {
                 .map(|entry| ConversationReadout {
                     conversation: conversation_ref(entry.key),
                     unread: entry.unread,
-                    pending_invite: entry.pending_invite,
                     lines: entry
                         .lines
                         .iter()
@@ -568,9 +541,6 @@ impl ConversationModel {
                 entry.lines.pop_front();
             }
             entry.revision = entry.revision.wrapping_add(1);
-            // A message means the session is live — an invite that was pending is
-            // now joined.
-            entry.pending_invite = false;
             if !is_own && key != active {
                 entry.unread = entry.unread.saturating_add(1);
             }
@@ -732,23 +702,6 @@ impl ConversationModel {
         }
     }
 
-    /// Marks `key` as a pending invite (creating the conversation if new).
-    fn mark_invite(&mut self, key: ConversationKey) {
-        let index = self.ensure(key);
-        if let Some(entry) = self.entries.get_mut(index) {
-            entry.pending_invite = true;
-        }
-    }
-
-    /// Clears `key`'s pending-invite flag (on accept).
-    fn accept_invite(&mut self, key: ConversationKey) {
-        if let Some(index) = self.index_of(key)
-            && let Some(entry) = self.entries.get_mut(index)
-        {
-            entry.pending_invite = false;
-        }
-    }
-
     /// Makes `key`'s conversation the active one and clears its unread count.
     /// A no-op if there is no such conversation.
     fn select(&mut self, key: ConversationKey) {
@@ -883,27 +836,6 @@ fn command_for(key: ConversationKey, message: String) -> Option<Command> {
     }
 }
 
-/// The accept / decline [`Command`] for a pending invite `key`, or `None` for a
-/// key that is never an invite (Nearby / Direct).
-fn invite_command(key: ConversationKey, accept: bool) -> Option<Command> {
-    let (session_id, from_group) = match key {
-        ConversationKey::Group(id) => (ImSessionId::from(id.uuid()), true),
-        ConversationKey::Conference(id) => (id, false),
-        ConversationKey::Nearby | ConversationKey::Direct(_) => return None,
-    };
-    Some(if accept {
-        Command::AcceptChatInvite {
-            session_id,
-            from_group,
-        }
-    } else {
-        Command::DeclineChatInvite {
-            session_id,
-            from_group,
-        }
-    })
-}
-
 /// The linkified source text for one transcript line — the speaker name followed
 /// by the body — as fed to [`spawn_linkified_text`]. The speaker name is a
 /// clickable link where the speaker is known: a `secondlife:///app/agent/<id>/…`
@@ -1010,8 +942,6 @@ struct ConversationView {
     tab: TabHandle,
     /// The pane node (displayed only while this is the active conversation).
     panel: Entity,
-    /// The pending-invite bar (Accept / Decline), shown only while invited.
-    invite_bar: Entity,
     /// The transcript's line column — one linkified row per line, rebuilt when the
     /// revision advances.
     transcript_column: Entity,
@@ -1043,16 +973,6 @@ pub(crate) struct ExternalStripTab;
 struct CloseConversation {
     /// The conversation to close.
     key: ConversationKey,
-}
-
-/// A request to accept (`accept`) or decline a pending invite `key` — written by
-/// the invite bar's buttons.
-#[derive(Message, Debug, Clone, Copy)]
-struct RespondToInvite {
-    /// The invited conversation.
-    key: ConversationKey,
-    /// Whether to accept (else decline).
-    accept: bool,
 }
 
 /// A pane's **add-participants** button, carrying the conversation it adds to.
@@ -1180,7 +1100,6 @@ impl Plugin for ConversationsPlugin {
             .init_resource::<NearbyRecallState>()
             .init_resource::<KeyedRecallState>()
             .add_message::<CloseConversation>()
-            .add_message::<RespondToInvite>()
             .add_message::<OpenConversation>()
             .add_message::<StartConference>()
             .add_message::<NearbyChatNotice>()
@@ -1200,7 +1119,6 @@ impl Plugin for ConversationsPlugin {
                     start_conferences,
                     open_conversations,
                     follow_strip_selection,
-                    respond_to_invites,
                     close_conversations,
                     spawn_conversation_tabs,
                     restyle_transcripts_on_font_change,
@@ -1460,7 +1378,7 @@ fn spawn_conversation_view(
     // can be read back as a conversation.
     let tab = strip.add_tab(commands, TabCaption::Literal(""), None);
     commands.entity(tab.button).insert(ConversationTab(key));
-    // The pane — [invite bar | transcript scroll | typing | input], hidden unless
+    // The pane — [transcript scroll | typing | input], hidden unless
     // active. A closable tab's close button lives in the pane's top-trailing
     // corner (below), not on the strip tab — the reference viewer's arrangement.
     let panel = commands
@@ -1482,7 +1400,6 @@ fn spawn_conversation_view(
             ChildOf(panel_area),
         ))
         .id();
-    let invite_bar = spawn_invite_bar(commands, panel, key, font_size);
     // The transcript and its scrollbar share a row that takes the pane's
     // spare height.
     let transcript_row = commands
@@ -1601,7 +1518,6 @@ fn spawn_conversation_view(
     ConversationView {
         tab,
         panel,
-        invite_bar,
         transcript_column,
         transcript_scroll,
         typing_text,
@@ -1716,90 +1632,6 @@ fn spawn_add_participants_button(
                 ));
             },
         );
-}
-
-/// Spawn a pane's pending-invite bar (a prompt plus Accept / Decline), hidden
-/// until the conversation is a pending invite.
-fn spawn_invite_bar(
-    commands: &mut Commands,
-    panel: Entity,
-    key: ConversationKey,
-    font_size: f32,
-) -> Entity {
-    let bar = commands
-        .spawn((
-            Node {
-                width: Val::Percent(100.0),
-                display: Display::None,
-                align_items: AlignItems::Center,
-                padding: UiRect::all(Val::Px(6.0)),
-                ..row(Val::Px(8.0))
-            },
-            BackgroundColor(INVITE_BACKGROUND),
-            Name::new("conversations-invite-bar"),
-            ChildOf(panel),
-        ))
-        .id();
-    commands.spawn((
-        Text::new(String::new()),
-        UiFont::Sans.at(font_size),
-        text_role(INVITE_TEXT_COLOR),
-        crate::i18n::Translated::new(INVITE_PROMPT_KEY),
-        Node {
-            flex_grow: 1.0,
-            min_width: Val::Px(0.0),
-            ..default()
-        },
-        Name::new("conversations-invite-prompt"),
-        ChildOf(bar),
-    ));
-    spawn_invite_button(
-        commands,
-        bar,
-        key,
-        true,
-        INVITE_ACCEPT_KEY,
-        ACCEPT_BACKGROUND,
-        font_size,
-    );
-    spawn_invite_button(
-        commands,
-        bar,
-        key,
-        false,
-        INVITE_DECLINE_KEY,
-        DECLINE_BACKGROUND,
-        font_size,
-    );
-    bar
-}
-
-/// Spawn one Accept / Decline invite button: the button widget, Accept the
-/// call to act (`.sk-button-primary`), so what sets the two apart is a class a
-/// skin can see rather than a green and a red only the pre-load frame shows.
-fn spawn_invite_button(
-    commands: &mut Commands,
-    bar: Entity,
-    key: ConversationKey,
-    accept: bool,
-    label_key: &'static str,
-    background: Color,
-    font_size: f32,
-) {
-    let spec = ButtonSpec::bordered(UiLabel::key(label_key), "conversations-invite-button")
-        .kind(ButtonKind::Headless)
-        .padding(10.0, 4.0)
-        .colors(background, background)
-        .label_color(INVITE_TEXT_COLOR)
-        .font_size(font_size)
-        .layout(|node| node.flex_shrink = 0.0);
-    let button =
-        ui_spawn::spawn_button(commands, bar, if accept { spec.primary() } else { spec }).button;
-    commands.entity(button).observe(
-        move |_activate: On<Activate>, mut respond: MessageWriter<RespondToInvite>| {
-            respond.write(RespondToInvite { key, accept });
-        },
-    );
 }
 
 // ---------------------------------------------------------------------------
@@ -2238,12 +2070,16 @@ pub(crate) fn ingest_conversation_events(
                     );
                 }
             }
-            // An invitation opens the tab (and records its name) as a *pending
-            // invite* — Accept / Decline in the pane. The line it carries is
-            // the session's first (both grids invite with the message that
-            // opened the session, `group-chat` census), so it is shown, as the
-            // reference does (`LLViewerChatterBoxInvitation`): our own line,
-            // which OpenSim routes back through here, is not.
+            // A text invitation opens the tab (and records its name) and is
+            // accepted at once, as the reference does
+            // (`LLViewerChatterBoxInvitation::post` → `chatterBoxInvitationCoro`):
+            // until it is, Second Life hands every further line over as a
+            // fresh invitation and sends no roster (`gridspec/chat.md`). The
+            // line it carries is the session's first (both grids invite with
+            // the message that opened the session, `group-chat` census), so it
+            // is shown: our own line, which OpenSim routes back through here,
+            // is not, and our own invitation is not answered — we are in that
+            // session already.
             SlSessionEvent::ConferenceInvited {
                 session_id,
                 from_agent_id,
@@ -2251,11 +2087,31 @@ pub(crate) fn ingest_conversation_events(
                 from_group,
                 session_name,
                 message,
+                channel,
                 ..
             } => {
-                let carried = (!message.is_empty()
-                    && facts.identity.agent_id != Some(*from_agent_id))
-                .then_some((*from_agent_id, from_name.as_str(), message.as_str()));
+                // A voice call. The reference shows one only while voice works
+                // (`voiceEnabled() && isVoiceWorking()`), and this viewer has no
+                // voice calls yet (`viewer-voice-call-dialogs`), so it is left
+                // unanswered, as there. An invitation to both channels is a text
+                // one first, as the reference reads it.
+                if *channel == InviteChannel::Voice {
+                    info!(
+                        "conversations: voice invitation to {session_id} from {from_agent_id} \
+                         not shown: no voice calls in this viewer yet"
+                    );
+                    continue;
+                }
+                let own = facts.identity.agent_id == Some(*from_agent_id);
+                let carried = (!message.is_empty() && !own).then_some((
+                    *from_agent_id,
+                    from_name.as_str(),
+                    message.as_str(),
+                ));
+                let accept = (!own).then_some(Command::AcceptChatInvite {
+                    session_id: ImSessionId::from(*session_id),
+                    from_group: *from_group,
+                });
                 // The inviter's name counts too, as in the reference
                 // (`isMuted(id, name, flagTextChat)`): a by-name entry blocks
                 // an inviter whose id it does not know.
@@ -2274,7 +2130,7 @@ pub(crate) fn ingest_conversation_events(
                         avatars.note_legacy_name(from, name);
                         model.push_remote(ConversationKey::Group(group), from, name, line);
                     }
-                    model.mark_invite(ConversationKey::Group(group));
+                    let _index = model.ensure(ConversationKey::Group(group));
                 } else {
                     let id = ImSessionId::from(*session_id);
                     // The ignore-conferences mode: decline the invitation and
@@ -2306,7 +2162,10 @@ pub(crate) fn ingest_conversation_events(
                         avatars.note_legacy_name(from, name);
                         model.push_remote(ConversationKey::Conference(id), from, name, line);
                     }
-                    model.mark_invite(ConversationKey::Conference(id));
+                    let _index = model.ensure(ConversationKey::Conference(id));
+                }
+                if let Some(command) = accept {
+                    sl.write(SlCommand(command));
                 }
             }
             // The grid's answer to a conference we started: the session id we
@@ -2790,25 +2649,6 @@ fn follow_strip_selection(
     }
 }
 
-/// Accept / decline pending invites: send the grid command, then clear the
-/// pending state (accept) or close the conversation (decline).
-fn respond_to_invites(
-    mut responses: MessageReader<RespondToInvite>,
-    mut model: ResMut<ConversationModel>,
-    mut commands: MessageWriter<SlCommand>,
-) {
-    for response in responses.read() {
-        if let Some(command) = invite_command(response.key, response.accept) {
-            commands.write(SlCommand(command));
-        }
-        if response.accept {
-            model.accept_invite(response.key);
-        } else {
-            model.close(response.key);
-        }
-    }
-}
-
 /// Close conversations: remove them from the model and despawn their view nodes.
 fn close_conversations(
     mut closes: MessageReader<CloseConversation>,
@@ -2890,7 +2730,7 @@ struct RefreshContext<'w> {
 }
 
 /// Keep the view in step with the model: each tab's label and attention state,
-/// the strip's active tab, the active pane's visibility, the invite bar, the typing line,
+/// the strip's active tab, the active pane's visibility, the typing line,
 /// and each transcript node when its revision has advanced.
 fn refresh_conversations(
     model: Res<ConversationModel>,
@@ -3020,9 +2860,6 @@ fn refresh_conversations(
 
         // Pane visibility — only the active pane is laid out.
         set_display(&mut chrome.nodes, view.panel, is_active);
-
-        // The pending-invite bar shows only while invited.
-        set_display(&mut chrome.nodes, view.invite_bar, entry.pending_invite);
 
         // The typing line: "X is typing…", hidden when nobody is.
         let typing = typing_status(&translator, &entry.typing);
@@ -3334,19 +3171,19 @@ mod tests {
     use super::{
         Command, ConferencePlan, ConversationKey, ConversationModel, ConversationTitle, MuteModel,
         SpeakerLink, TranscriptLine, command_for, conference_plan, conversation_readouts,
-        invite_command, line_text, tab_label, transcript_line_color,
+        line_text, tab_label, transcript_line_color,
     };
     use bevy::app::{App, Update};
-    use bevy::prelude::World;
+    use bevy::prelude::{Messages, World};
     use pretty_assertions::assert_eq;
     use sl_automation_proto::{
         ChatKind, ConversationReadout, ConversationRef, SpeakerKind, TranscriptLine as ReadoutLine,
     };
     use sl_client_bevy::{
         AgentKey, ChatAudible, ChatMessage, ChatSessionKind, ChatSource, ChatType, GroupKey,
-        ImDialog, ImSessionId, InstantMessage, MuteEntry, MuteFlags, MuteType, ObjectKey,
-        RegionCoordinates, ServerHistoryMessage, SlCommand, SlEvent, SlIdentity, SlSessionEvent,
-        Uuid,
+        ImDialog, ImSessionId, InstantMessage, InviteChannel, MuteEntry, MuteFlags, MuteType,
+        ObjectKey, RegionCoordinates, ServerHistoryMessage, SlCommand, SlEvent, SlIdentity,
+        SlSessionEvent, Uuid,
     };
 
     /// The automation readout is the live transcript of every tab, in tab
@@ -3420,7 +3257,6 @@ mod tests {
                 ConversationReadout {
                     conversation: ConversationRef::Nearby,
                     unread: 0,
-                    pending_invite: false,
                     lines: vec![
                         line(
                             false,
@@ -3451,7 +3287,6 @@ mod tests {
                 ConversationReadout {
                     conversation: ConversationRef::Direct(other.uuid()),
                     unread: 1,
-                    pending_invite: false,
                     lines: vec![
                         line(
                             false,
@@ -3678,27 +3513,21 @@ mod tests {
         assert_eq!(model.entries.len(), 1);
     }
 
-    /// An invite marks the conversation pending; a message clears it; typing sets
-    /// and clears the typist.
+    /// Typing sets the typist; their message clears it.
     #[test]
-    fn invite_typing_and_message_lifecycle() {
+    fn typing_and_message_lifecycle() {
         let mut model = ConversationModel::default();
         let group = GroupKey::from(Uuid::from_u128(6));
-        model.mark_invite(ConversationKey::Group(group));
-        assert_eq!(
-            get(&model, ConversationKey::Group(group)).map(|c| c.pending_invite),
-            Some(true)
-        );
+        model.ensure(ConversationKey::Group(group));
         let typist = AgentKey::from(Uuid::from_u128(7));
         model.set_typing(ConversationKey::Group(group), typist, "Avatar Six", true);
         assert_eq!(
             get(&model, ConversationKey::Group(group)).map(|c| c.typing.len()),
             Some(1)
         );
-        // A message clears both the pending flag and the sender's typing flag.
+        // A message clears the sender's typing flag.
         model.push_remote(ConversationKey::Group(group), typist, "Avatar Six", "hey");
         let entry = get(&model, ConversationKey::Group(group));
-        assert_eq!(entry.map(|c| c.pending_invite), Some(false));
         assert_eq!(entry.map(|c| c.typing.is_empty()), Some(true));
     }
 
@@ -3765,29 +3594,6 @@ mod tests {
             command_for(ConversationKey::Conference(conf), "hi".to_owned()),
             Some(Command::SendConferenceMessage { .. })
         ));
-    }
-
-    /// Invite accept / decline map to the accept / decline commands; a group
-    /// invite is flagged `from_group`, a conference is not.
-    #[test]
-    fn invite_command_mapping() {
-        let group = GroupKey::from(Uuid::from_u128(14));
-        assert!(matches!(
-            invite_command(ConversationKey::Group(group), true),
-            Some(Command::AcceptChatInvite {
-                from_group: true,
-                ..
-            })
-        ));
-        let conf = ImSessionId::from(Uuid::from_u128(15));
-        assert!(matches!(
-            invite_command(ConversationKey::Conference(conf), false),
-            Some(Command::DeclineChatInvite {
-                from_group: false,
-                ..
-            })
-        ));
-        assert!(invite_command(ConversationKey::Nearby, true).is_none());
     }
 
     /// One line renders as `"name: body"`, with the speaker a labelled
@@ -4457,29 +4263,78 @@ mod tests {
         assert_eq!(model.entries.len(), 1, "only the permanent Nearby tab");
     }
 
-    /// An invitation's line is the session's first: the tab shows it and still
-    /// waits for an answer.
+    /// A chat-session invitation from `from` to `session`, carrying `message`
+    /// on `channel`.
+    fn invitation(
+        session: Uuid,
+        from: AgentKey,
+        from_group: bool,
+        message: &str,
+        channel: InviteChannel,
+    ) -> SlSessionEvent {
+        SlSessionEvent::ConferenceInvited {
+            session_id: session,
+            from_agent_id: from,
+            from_name: "Avatar One".to_owned(),
+            dialog: if from_group {
+                ImDialog::SessionGroupStart
+            } else {
+                ImDialog::SessionConferenceStart
+            },
+            from_group,
+            session_name: "A Session".to_owned(),
+            message: message.to_owned(),
+            channel,
+            region_id: Uuid::nil(),
+            position: RegionCoordinates::new(0.0, 0.0, 0.0),
+            parent_estate_id: 1,
+            timestamp: None,
+            binary_bucket: Vec::new(),
+        }
+    }
+
+    /// The accept / decline answers the last update sent, as `(session,
+    /// from_group, accepted)`.
+    fn invitation_answers(app: &App) -> Vec<(ImSessionId, bool, bool)> {
+        app.world()
+            .resource::<Messages<SlCommand>>()
+            .iter_current_update_messages()
+            .filter_map(|command| match &command.0 {
+                Command::AcceptChatInvite {
+                    session_id,
+                    from_group,
+                } => Some((*session_id, *from_group, true)),
+                Command::DeclineChatInvite {
+                    session_id,
+                    from_group,
+                } => Some((*session_id, *from_group, false)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// A text invitation to a group is joined at once, as the reference does
+    /// (Second Life sends no roster and hands every further line over as a
+    /// fresh invitation until it is): the tab shows the line it carries, and
+    /// the acceptance goes out with no button pressed.
     #[test]
-    fn an_invitation_shows_the_line_it_carries() {
+    fn a_group_invitation_is_accepted_at_once_with_its_line() {
         let friend = AgentKey::from(Uuid::from_u128(0xF11E));
         let group = GroupKey::from(Uuid::from_u128(0x640A));
         let mut app = ingest_app(&[]);
         ingest(
             &mut app,
-            SlSessionEvent::ConferenceInvited {
-                session_id: group.uuid(),
-                from_agent_id: friend,
-                from_name: "Avatar One".to_owned(),
-                dialog: ImDialog::SessionSend,
-                from_group: true,
-                session_name: "A Group".to_owned(),
-                message: "first line".to_owned(),
-                region_id: Uuid::nil(),
-                position: RegionCoordinates::new(0.0, 0.0, 0.0),
-                parent_estate_id: 1,
-                timestamp: None,
-                binary_bucket: Vec::new(),
-            },
+            invitation(
+                group.uuid(),
+                friend,
+                true,
+                "first line",
+                InviteChannel::Text,
+            ),
+        );
+        assert_eq!(
+            invitation_answers(&app),
+            vec![(ImSessionId::from(group.uuid()), true, true)]
         );
         let model = app.world().resource::<ConversationModel>();
         let entry = get(model, ConversationKey::Group(group));
@@ -4487,7 +4342,100 @@ mod tests {
             .map(|entry| entry.lines.iter().map(|line| line.body.as_str()).collect())
             .unwrap_or_default();
         assert_eq!(lines, vec!["first line"]);
-        assert_eq!(entry.map(|entry| entry.pending_invite), Some(true));
+    }
+
+    /// An ad-hoc conference's text invitation is accepted at once too, as a
+    /// conference's; one to both channels is a text invitation first.
+    #[test]
+    fn a_conference_invitation_is_accepted_at_once() {
+        let friend = AgentKey::from(Uuid::from_u128(0xF11E));
+        let conference = Uuid::from_u128(0xC0F1);
+        let mut app = ingest_app(&[]);
+        ingest(
+            &mut app,
+            invitation(conference, friend, false, "hi all", InviteChannel::Both),
+        );
+        assert_eq!(
+            invitation_answers(&app),
+            vec![(ImSessionId::from(conference), false, true)]
+        );
+        let model = app.world().resource::<ConversationModel>();
+        assert!(
+            get(
+                model,
+                ConversationKey::Conference(ImSessionId::from(conference))
+            )
+            .is_some()
+        );
+    }
+
+    /// Our own invitation — OpenSim routes the line we opened a session with
+    /// back through one — opens the tab but is not answered: we are in that
+    /// session already, and the reference returns before accepting it.
+    #[test]
+    fn our_own_invitation_is_not_answered() {
+        let own = AgentKey::from(Uuid::from_u128(0x0C0));
+        let group = GroupKey::from(Uuid::from_u128(0x640B));
+        let mut app = ingest_app(&[]);
+        app.world_mut().resource_mut::<SlIdentity>().agent_id = Some(own);
+        ingest(
+            &mut app,
+            invitation(group.uuid(), own, true, "my line", InviteChannel::Text),
+        );
+        assert_eq!(invitation_answers(&app), Vec::new());
+        let model = app.world().resource::<ConversationModel>();
+        let entry = get(model, ConversationKey::Group(group));
+        assert_eq!(entry.map(|entry| entry.lines.len()), Some(0));
+    }
+
+    /// A voice-only invitation is a call, which this viewer cannot take yet:
+    /// it opens no tab and is not answered, as the reference leaves one while
+    /// voice is not working.
+    #[test]
+    fn a_voice_invitation_is_left_alone() {
+        let friend = AgentKey::from(Uuid::from_u128(0xF11E));
+        let group = GroupKey::from(Uuid::from_u128(0x640C));
+        let mut app = ingest_app(&[]);
+        ingest(
+            &mut app,
+            invitation(group.uuid(), friend, true, "", InviteChannel::Voice),
+        );
+        assert_eq!(invitation_answers(&app), Vec::new());
+        let model = app.world().resource::<ConversationModel>();
+        assert!(get(model, ConversationKey::Group(group)).is_none());
+    }
+
+    /// A group session a blocked resident started opens no tab and is not
+    /// answered either way: the reference neither joins nor leaves it, as the
+    /// group is still the user's.
+    #[test]
+    fn a_blocked_inviters_group_invitation_is_not_answered() {
+        let troll = AgentKey::from(Uuid::from_u128(TROLL));
+        let group = GroupKey::from(Uuid::from_u128(0x640D));
+        let mut app = ingest_app(&[troll]);
+        ingest(
+            &mut app,
+            invitation(group.uuid(), troll, true, "bait", InviteChannel::Text),
+        );
+        assert_eq!(invitation_answers(&app), Vec::new());
+        let model = app.world().resource::<ConversationModel>();
+        assert!(get(model, ConversationKey::Group(group)).is_none());
+    }
+
+    /// A blocked resident's ad-hoc conference is declined, never accepted.
+    #[test]
+    fn a_blocked_inviters_conference_is_declined() {
+        let troll = AgentKey::from(Uuid::from_u128(TROLL));
+        let conference = Uuid::from_u128(0xC0F2);
+        let mut app = ingest_app(&[troll]);
+        ingest(
+            &mut app,
+            invitation(conference, troll, false, "bait", InviteChannel::Text),
+        );
+        assert_eq!(
+            invitation_answers(&app),
+            vec![(ImSessionId::from(conference), false, false)]
+        );
     }
 
     /// A blocked resident's line in the **server backlog** is dropped too — the

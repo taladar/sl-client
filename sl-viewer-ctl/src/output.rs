@@ -482,9 +482,6 @@ fn conversation_lines(
         if conversation.unread > 0 {
             heading.push(format!("({} unread)", conversation.unread));
         }
-        if conversation.pending_invite {
-            heading.push("(invitation pending)".to_owned());
-        }
         writeln!(out, "{}", heading.join(" "))?;
         for line in &conversation.lines {
             let own = if line.own { "* " } else { "  " };

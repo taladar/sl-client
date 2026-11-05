@@ -480,10 +480,14 @@ viewer minted.
   `Event::ChatSessionForceClosed`, and a refused start (which names no
   `session_id`) decodes.
 - **A group session's start reply opens no conference** of the same id.
-- **An invitation's line is shown.** The conversations panel puts the line
-  an invitation carries into the tab it opens. It still waits for Accept or
-  Decline, where the reference accepts a text invitation at once
-  (`viewer-session-invitation-accepted-at-once`).
+- **An invitation's line is shown, and a text invitation is accepted at
+  once.** The conversations panel puts the line an invitation carries into
+  the tab it opens and accepts the invitation without a button, as the
+  reference does (`viewer-session-invitation-accepted-at-once`) — except our
+  own, a blocked resident's group session (left unanswered) and their ad-hoc
+  conference or one the ignore-conferences setting refuses (declined).
+  `Event::ConferenceInvited` names the channel it invites to; a voice-only
+  invitation is left alone until the viewer takes calls.
 - **The history fetch degrades on OpenSim** without a request: the
   capability is absent, so nothing is asked.
 

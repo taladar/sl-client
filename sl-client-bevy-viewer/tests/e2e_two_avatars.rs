@@ -824,6 +824,92 @@ mod test {
         Ok(())
     }
 
+    // ---- Chat-session invitations ------------------------------------------
+
+    /// The account that invites the viewer into a conference; it never logs in.
+    const HOST: &str = "Host";
+
+    /// The conference the host invites the viewer into.
+    const CONFERENCE: u128 = 0xC0F5_E55E;
+
+    /// **A text invitation is joined at once**
+    /// (`viewer-session-invitation-accepted-at-once`): an ad-hoc conference's
+    /// invitation shows the line it carries in the tab it opens, and the
+    /// viewer accepts it with no button pressed, so the grid's roster holds it
+    /// — as the reference does, and as Second Life needs before it sends the
+    /// session's roster and further lines as lines.
+    #[test]
+    fn a_conference_invitation_is_joined_without_a_click() -> Result<(), TestError> {
+        stage("conference_invitation", &["Alpha"])
+            .needs(Need::GridControl)
+            .configure_grid(|grid| grid.account(AccountConfig::new(FIRST_NAME, HOST, "password")))
+            .run(async |stage: &Stage| {
+                let alpha = &stage.viewer("Alpha")?;
+                let host = account_id(stage, HOST)?;
+                let own = account_id(stage, "Alpha")?;
+                let session = sl_proto::ImSessionId::from(Uuid::from_u128(CONFERENCE));
+                let agent = stage.agent("Alpha").await?;
+                agent
+                    .with_sim(|sim| {
+                        sim.open_chat_session(
+                            session,
+                            sl_proto::SimChatSessionKind::Conference,
+                            &[host],
+                        );
+                        sim.enqueue_chatterbox_invitation(&sl_proto::Event::ConferenceInvited {
+                            session_id: session.get(),
+                            from_agent_id: host,
+                            from_name: account(HOST),
+                            dialog: ImDialog::SessionConferenceStart,
+                            from_group: false,
+                            session_name: "Planning".to_owned(),
+                            message: "Join us?".to_owned(),
+                            channel: sl_proto::InviteChannel::Text,
+                            region_id: Uuid::nil(),
+                            position: RegionCoordinates::new(0.0, 0.0, 0.0),
+                            parent_estate_id: 1,
+                            timestamp: None,
+                            binary_bucket: Vec::new(),
+                        });
+                    })
+                    .await;
+                let _shown = alpha
+                    .expect_state(Probe::Conversations)
+                    .timeout(WAIT)
+                    .to_include(json!([{
+                        "conversation": { "kind": "conference", "id": session.get() },
+                        "lines": [{ "text": "Join us?" }],
+                    }]))
+                    .await?;
+                let joined = tokio::time::timeout(WAIT, async {
+                    loop {
+                        let in_roster = agent
+                            .with_sim(|sim| {
+                                sim.chat_session(session)
+                                    .is_some_and(|chat| chat.participants.contains(&own))
+                            })
+                            .await;
+                        if in_roster {
+                            return;
+                        }
+                        tokio::time::sleep(Duration::from_millis(100)).await;
+                    }
+                })
+                .await;
+                assert!(
+                    joined.is_ok(),
+                    "the grid's roster never held the invited viewer"
+                );
+                assert_eq!(
+                    logged(alpha, LogStream::Command, "AcceptChatInvite").await?,
+                    1,
+                    "the invitation is accepted once"
+                );
+                Ok(())
+            })?;
+        Ok(())
+    }
+
     /// File the friend `last` under the one contact set there is, from their
     /// profile: Friends ▸ the row ▸ Profile ▸ Add to Set… ▸ Add.
     async fn file_friend(viewer: &Viewer, stage: &Stage, last: &str) -> Result<(), BodyError> {
