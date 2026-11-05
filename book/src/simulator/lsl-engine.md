@@ -428,17 +428,19 @@ scripts-run percentage.
   (`Could not find script 'Nope'.` against OpenSim's `llGetScriptState: Can't
   find script 'Nope'`), and the engine says it after the slice; on OpenSim it
   reaches scripts as a shout. It costs the script a second on every grid.
-- **Second Life limits an object's error lines**: eight within fifteen
-  seconds pass, the next is `Too many errors... dropping further messages
-  until the flood stops`, and every line of the object is dropped for 34
-  seconds from it, after which the object starts afresh (both figures are
-  decisions inside what aditi was measured doing). Every line counts — a
-  refusal of any function, a fault's two lines. A rule list's complaints
-  (`llSetPrimitiveParams`, `llGetPrimitiveParams`, `llParticleSystem`) are
-  told the owner alone (`ScriptCtx::refuse_to_owner`, delivered through
-  `Host::say_to` on `DEBUG_CHANNEL`), let one line further and dropped
-  silently. Another object's lines are not affected, and OpenSim has no limit
-  and says every complaint in the open.
+- **Second Life limits an object's error lines**: eight within sixteen seconds
+  pass, the next is
+  `Too many errors... dropping further messages until the flood stops`, and
+  every line of the object is dropped for 34 seconds from it and until two
+  seconds passed with no line, after which the object starts afresh. Aditi's own
+  limit turns about a second either way from one run to the next, so the figures
+  are the choices that get the fewest measured lines wrong, and the replays name
+  the rest. Every line counts — a refusal of any function, a fault's two lines.
+  A rule list's complaints (`llSetPrimitiveParams`, `llGetPrimitiveParams`,
+  `llParticleSystem`) are told the owner alone (`ScriptCtx::refuse_to_owner`,
+  delivered through `Host::say_to` on `DEBUG_CHANNEL`), let one line further and
+  dropped silently. Another object's lines are not affected, and OpenSim has no
+  limit and says every complaint in the open.
 - **One run flag, read where it is kept.** `llGetScriptState(name)` asks the
   host which instance of the caller's prim is called `name`
   (`Host::script_named`) and reads that instance's run flag — the one the

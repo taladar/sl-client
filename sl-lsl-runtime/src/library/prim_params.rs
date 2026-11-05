@@ -250,6 +250,13 @@ pub(crate) const fn second_life_has(code: i32) -> bool {
     !rule_name(code).is_empty() && !matches!(code, CAST_SHADOWS | PROJECTOR)
 }
 
+/// Whether Second Life's setters take the rule `code`: every rule its rule
+/// lists have, and `PRIM_PROJECTOR`, which a set takes without a word and a
+/// get then calls an `unknown parameter` (`errors/flood-window`'s `P`).
+pub(crate) const fn second_life_sets(code: i32) -> bool {
+    second_life_has(code) || code == PROJECTOR
+}
+
 /// `value` in `[0, 1]`, as both grids clamp a colour component or an alpha.
 pub(crate) const fn unit(value: f32) -> f32 {
     value.clamp(0.0, 1.0)

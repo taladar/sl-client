@@ -332,17 +332,11 @@ fn params_round_trip_as_each_grid_stored_them() -> Result<(), String> {
                 0,
                 "llSetPrimitiveParams error running rule #1: unknown rule.".to_owned(),
             );
-            // A deviation: aditi dropped the probe's last three complaints,
-            // told the owner 18 seconds after the thirteenth, where the gate
-            // passes them (`server-lsl-flood-owner-lines-longer-limit`).
-            notes.extend(
-                [
-                    "llSetPrimitiveParams error running rule #1: unknown rule.",
-                    "llGetPrimitiveParams error: Param 0 error, unknown parameter",
-                    "llSetPrimitiveParams error running rule #1: unknown rule.",
-                ]
-                .map(str::to_owned),
-            );
+            // A deviation: aditi dropped the probe's last complaint, the
+            // projector's unknown parameter, 18 seconds after the one before,
+            // where the gate passes it — one of the limit's turns no count
+            // holds (`errors/flood-records`' P0 and P4 passed it).
+            notes.push("llGetPrimitiveParams error: Param 0 error, unknown parameter".to_owned());
         }
         assert_eq!(region.debug_lines(), notes, "{flavour:?}");
     }

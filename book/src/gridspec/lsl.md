@@ -1879,8 +1879,8 @@ back what was set.
 The fake grid's column holds offline: `vm/tests/prim_state.rs` replays each
 probe's transcripts against the runtime, flavour by flavour, the debug-channel
 lines through Second Life's flood limit ([Floods](#floods)). Two deviations:
-the limit passes the last three complaints of `prim/params`, which aditi
-dropped (`server-lsl-flood-owner-lines-longer-limit`), and both OpenSim engines
+the limit passes the last complaint of `prim/params`, which aditi dropped in
+one of the turns no count holds ([Floods](#floods)), and both OpenSim engines
 moved the prim of `pos-local-east-15` 6 m on 2026-11-05 where they had moved it
 10 m, as the runtime still does (`server-lsl-opensim-pos-local-moved-six`).
 
@@ -1922,7 +1922,7 @@ newer rules go by number, since OpenSim has no constants for them.
 | a fresh prim's `PRIM_MATERIAL` | 3 (wood) | the same | each flavour as its grid |
 | a fresh prim's `PRIM_POINT_LIGHT` intensity, `PRIM_TEXT` alpha | 0 and 1 | **1 and 0** | each flavour as its grid |
 | a fresh prim's `PRIM_ALLOW_UNSIT`, `PRIM_SCRIPTED_SIT_ONLY`, `PRIM_CLICK_ACTION`, `PRIM_REFLECTION_PROBE`, `PRIM_RENDER_MATERIAL`, `PRIM_SIT_FLAGS` | 1, 0, 0, off, `NULL_KEY`, 2 | nothing: each is `unsupported parameter` on the debug channel, set or get | each flavour as its grid |
-| `PRIM_PROJECTOR` (42), `PRIM_CAST_SHADOWS` (24), get | nothing, `llGetPrimitiveParams error: Param 0 error, unknown parameter` | nothing, silently; a set of 24 is `unsupported parameter` under YEngine and **never returns under XEngine** (left out there) | each flavour as its grid; XEngine's set of 24 returns, as YEngine's does |
+| `PRIM_PROJECTOR` (42), `PRIM_CAST_SHADOWS` (24), get | nothing, `llGetPrimitiveParams error: Param 0 error, unknown parameter`; a set of 42 is taken **silently** (`errors/flood-window`) | nothing, silently; a set of 24 is `unsupported parameter` under YEngine and **never returns under XEngine** (left out there) | each flavour as its grid; XEngine's set of 24 returns, as YEngine's does |
 | hollow 0.99 | **0.95** | kept, 0.99 | each flavour as its grid |
 | cut, twist, taper and shear past their ranges | clamped to `[0,1]`, `[−1,1]`, `[0,2]` and `[−0.5,0.5]` | the same | each flavour as its grid |
 | a cut whose begin is past its end (0.8, 0.2) | the begin pulled to 0.02 below the end: `<0.18, 0.2>` | the same | each flavour as its grid |
@@ -2212,9 +2212,15 @@ script and two complaints of `llSetPrimitiveParams`, and spaces ten missing
 sounds four seconds apart. `errors/flood-paths` times what a complaint costs,
 puts one complaint of each rule-list function after seven missing sounds, and
 pauses ten seconds after eight. `errors/owner-lines` has a script in another
-object listen while the five rule-list complaints are made. The first runs of
-the two flood probes asked for missing inventory items (`llGetInventoryCreator`)
-where they now ask for textures, since the runtime has no
+object listen while the five rule-list complaints are made.
+`errors/flood-window` and `errors/flood-repeat` put a ninth line 16 to 20
+seconds after eight, the eight in a row or a second apart, told the owner or
+said in the open, and keep a flood fed a line every 2.2 to 3.2 seconds;
+`errors/flood-epoch` makes a complaint every 1.5 seconds for ten minutes;
+`errors/flood-records` makes twelve 1.5 seconds apart with the script's own
+records between them or not. The first runs of the two flood probes asked
+for missing inventory items (`llGetInventoryCreator`) where they now ask for
+textures, since the runtime has no
 `llGetInventoryCreator` yet to replay them with; what only those runs measured
 is marked *first run*.
 
@@ -2223,12 +2229,12 @@ is marked *first run*.
 | a run of errors | the first **eight** pass, then `Too many errors... dropping further messages until the flood stops` and nothing more | every one passes | each flavour as its grid |
 | what counts | **every line** of the object: a missing sound, a missing texture, a fault's two lines and each rule-list complaint alike; four missing textures after a flood of sounds are dropped with it | — | each flavour as its grid |
 | whose flood it is | the **object's**: the second script in the same prim is dropped, the other object's error passes | — | each flavour as its grid |
-| spacing | a **rate**, not a count: ten lines four seconds apart all pass, and a ninth line ten seconds after eight passes (18 seconds after the first); nine lines in 8.3 seconds do not | — | counted over 15 seconds, a decision inside what was measured |
-| how long a flood lasts | from its first dropped line: still dropping 32 seconds in (*first run*), passing again 37 seconds in, whatever was dropped meanwhile (10 or 11 seconds before); and eight lines in a row pass 35 seconds after a flood began | — | 34 seconds, a decision inside what was measured |
-| a complaint of a rule list (`llSetPrimitiveParams`, `llGetPrimitiveParams`, `llParticleSystem`) | told the **owner alone**: no other avatar and no script hears it; counted like any line, but let **one line further** (nine a fifth of a second apart pass) and dropped **silently**, no notice | said as any other | each flavour as its grid |
+| spacing | a **rate**, not a count: ten lines four seconds apart all pass, and a ninth line ten seconds after eight passes (18 seconds after the first); nine lines in 8.3 seconds do not. Where it turns is **not repeatable** to a second: eight lines and a ninth 16 seconds after the first flooded once and passed three times, at 17 seconds the notice once and passed five times; twelve lines 1.5 seconds apart passed nine, eleven, nine, eleven and ten, and a script's own `llOwnerSay` lines between them did not change that | — | counted over 16 seconds, which gets the fewest of those lines wrong; the replays name the rest |
+| how long a flood lasts | from its first dropped line: still dropping 32 seconds in (*first run*), passing again 37 seconds in, whatever was dropped meanwhile (10 or 11 seconds before); and eight lines in a row pass 35 seconds after a flood began. **Never** while a line comes every 1.5 seconds (ten minutes); with one every 2.2, 2.7 and 3.2 seconds about 56, 36 and 49 seconds | — | 34 seconds, and on until two seconds pass with no line |
+| a complaint of a rule list (`llSetPrimitiveParams`, `llGetPrimitiveParams`, `llParticleSystem`) | told the **owner alone**: no other avatar and no script hears it; counted like any line, but the one in place of the notice **passes** (nine a fifth of a second apart pass) and the flood it starts drops the rest **silently** | said as any other | each flavour as its grid |
 | a complaint of `llSetPrimMediaParams` (and its face `PRIM_MEDIA error`) | said in the open, heard by scripts | the same | each flavour as its grid |
 | what a complaint costs the script | a missing sound **a second** (`llTriggerSound`), a missing texture a second on top of the call's own 0.2 (`llSetTexture`); a missing inventory item nothing (*first run*) | nothing for a sound or a texture (no complaint); a missing item (`llGetInventoryCreator`) a second (*first run*) | each flavour as its grid |
-| a long run of a rule list's complaints | `prim/params` passed thirteen in thirty seconds (twelve on another run) and dropped three more that came 18 seconds after the last; a fifteen-second count passes them | — | a deviation: the three pass (`server-lsl-flood-owner-lines-longer-limit`) |
+| a long run of a rule list's complaints | `prim/params` passed eleven in about twenty seconds and dropped its last, the projector's get, 18 seconds after them; `errors/flood-records`' copy of that pace passed every line both ways, so it is the limit's turn above | — | a deviation: the last line passes |
 
 ### The faulted script
 

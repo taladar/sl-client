@@ -29,8 +29,9 @@ use crate::vm::persistence::{
     CHANGED_REGION_START, OPENSIM_CHANGED_POSITION, RestoreError, SavedScript,
 };
 use crate::vm::report::{
-    Admission, Audience, DEBUG_CHANNEL, FLOOD_NOTICE, FLOOD_SECONDS, FLOOD_WINDOW_SECONDS,
-    FloodGate, FloodTicks, Speech, fault_lines, fault_reach, owner_lines, refusal_reach,
+    Admission, Audience, DEBUG_CHANNEL, FLOOD_GAP_SECONDS, FLOOD_NOTICE, FLOOD_SECONDS,
+    FLOOD_WINDOW_SECONDS, FloodGate, FloodTicks, Speech, fault_lines, fault_reach, owner_lines,
+    refusal_reach,
 };
 
 /// A `DEBUG_CHANNEL` line a slice leaves to say, before the flood gate.
@@ -766,6 +767,7 @@ impl Engine {
         let ticks = FloodTicks {
             window: ticks_for(FLOOD_WINDOW_SECONDS, self.config.step),
             flood: ticks_for(FLOOD_SECONDS, self.config.step),
+            gap: ticks_for(FLOOD_GAP_SECONDS, self.config.step),
         };
         for line in refused.chain(faulted) {
             let audience = match &line {

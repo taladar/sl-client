@@ -1,0 +1,45 @@
+grid: opensim-xengine
+date: 2026-11-05
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Default Region
+engine: XEngine
+settings: OpenSimDefaults.ini: [YEngine] MinTimerInterval=0.1; [XEngine] MinTimerInterval unset (LSL_Api default 0.5); ScriptDelayFactor=1.0, SensorMaxRange=96, SensorMaxResults=16, UseLlCastRayV3=false (defaults) on both; [YEngine] ScriptHeapSize=1024 KiB, ScriptStackSize=2048 KiB (defaults); OpenSim.ini [Network] OutboundDisallowForUserScriptsExcept=127.0.0.1:9000 (the simulator itself), [ScriptsHttpRequestModule] and llHTTPRequest limits at their defaults
+
+PROBE errors/flood-window rec=start region="Default Region" channel="OpenSim" version="OpenSim 0.9.2.1 Yeti Dev   36f6d16 (Unix/Mono)"
+PROBE errors/flood-window rec=phase name=P t=3.091000
+# debug-channel: from="Object" text="llSetPrimitiveParams: Error running rule #1: arg #0 - unsupported parameter"
+PROBE errors/flood-window rec=got got=""
+# debug-channel: from="Object" text="llSetPrimitiveParams: Error running rule #1: arg #0 - unsupported parameter"
+PROBE errors/flood-window rec=phase name=O16 t=45.534000
+PROBE errors/flood-window rec=single n=9 t=61.551998
+PROBE errors/flood-window rec=phase name=O17 t=102.193001
+PROBE errors/flood-window rec=single n=9 t=119.209000
+PROBE errors/flood-window rec=phase name=O18 t=159.848007
+PROBE errors/flood-window rec=single n=9 t=177.865997
+PROBE errors/flood-window rec=phase name=O19 t=218.509003
+PROBE errors/flood-window rec=single n=9 t=237.529007
+PROBE errors/flood-window rec=phase name=O20 t=278.171997
+PROBE errors/flood-window rec=single n=9 t=298.195007
+PROBE errors/flood-window rec=phase name=N16 t=338.842010
+PROBE errors/flood-window rec=single n=9 t=354.859009
+PROBE errors/flood-window rec=phase name=N17 t=394.903015
+PROBE errors/flood-window rec=single n=9 t=411.915985
+PROBE errors/flood-window rec=phase name=F t=451.954987
+PROBE errors/flood-window rec=single n=2101 t=457.359985
+PROBE errors/flood-window rec=single n=2102 t=460.563995
+PROBE errors/flood-window rec=single n=2103 t=463.766998
+PROBE errors/flood-window rec=single n=2104 t=466.970001
+PROBE errors/flood-window rec=single n=2105 t=470.173004
+PROBE errors/flood-window rec=single n=2106 t=473.377014
+PROBE errors/flood-window rec=single n=2107 t=476.579987
+PROBE errors/flood-window rec=single n=2108 t=479.782990
+PROBE errors/flood-window rec=single n=2109 t=482.987000
+PROBE errors/flood-window rec=single n=2110 t=486.190002
+PROBE errors/flood-window rec=single n=2111 t=489.393005
+PROBE errors/flood-window rec=single n=2112 t=492.596008
+PROBE errors/flood-window rec=single n=2113 t=495.799011
+PROBE errors/flood-window rec=single n=2114 t=499.002014
+PROBE errors/flood-window rec=single n=2115 t=502.204987
+PROBE errors/flood-window rec=end
+# debug-channel by=other: from="Object" text="llSetPrimitiveParams: Error running rule #1: arg #0 - unsupported parameter"
+# debug-channel by=other: from="Object" text="llSetPrimitiveParams: Error running rule #1: arg #0 - unsupported parameter"

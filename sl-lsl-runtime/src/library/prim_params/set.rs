@@ -17,11 +17,11 @@ use super::{
     CHANGED_SCALE, CHANGED_SHAPE, CHANGED_TEXTURE, CLICK_ACTION, COLLISION_SOUND, COLOR, DAMAGE,
     DESC, FLEXIBLE, FULLBRIGHT, GLOW, GLTF_BASE_COLOR, GLTF_EMISSIVE, GLTF_METALLIC_ROUGHNESS,
     GLTF_NORMAL, HEALTH, LINK_TARGET, MATERIAL, NAME, NORMAL, OMEGA, PHANTOM, PHYSICS,
-    PHYSICS_SHAPE_TYPE, POINT_LIGHT, POS_LOCAL, POSITION, REFLECTION_PROBE, RENDER_MATERIAL,
-    ROT_LOCAL, ROTATION, SCRIPTED_SIT_ONLY, SIT_FLAGS, SIT_TARGET, SIZE, SLICE, SPECULAR,
-    TEMP_ON_REZ, TEXGEN, TEXT, TEXTURE, TYPE, byte_rounded, byte_truncated, faces_set, is_child,
-    opensim_colour, opensim_glow, opensim_has, opensim_offset, opensim_rotation, rule_name,
-    second_life_has, unit,
+    PHYSICS_SHAPE_TYPE, POINT_LIGHT, POS_LOCAL, POSITION, PROJECTOR, REFLECTION_PROBE,
+    RENDER_MATERIAL, ROT_LOCAL, ROTATION, SCRIPTED_SIT_ONLY, SIT_FLAGS, SIT_TARGET, SIZE, SLICE,
+    SPECULAR, TEMP_ON_REZ, TEXGEN, TEXT, TEXTURE, TYPE, byte_rounded, byte_truncated, faces_set,
+    is_child, opensim_colour, opensim_glow, opensim_has, opensim_offset, opensim_rotation,
+    rule_name, second_life_sets, unit,
 };
 use crate::library::dotnet;
 use crate::value::{Element, NULL_KEY};
@@ -198,7 +198,7 @@ fn run(
         let known = if opensim_flavour {
             opensim_has(code)
         } else {
-            second_life_has(code)
+            second_life_sets(code)
         };
         if !known {
             unknown(ctx, reader);
@@ -1200,6 +1200,15 @@ fn rule(
             let volume = reader.float(ctx, Some("volume"))?;
             let sound = asset_named(ctx, &given, INVENTORY_SOUND);
             prim.sound.collision = sound.map(|sound| (sound, unit(volume)));
+        }
+        PROJECTOR => {
+            // Second Life takes a projector without a word and keeps
+            // nothing a get could read back (`errors/flood-window`'s `P`).
+            reader.need(4)?;
+            reader.name_or_key(ctx, Some("texture"))?;
+            reader.float(ctx, Some("fov"))?;
+            reader.float(ctx, Some("focus"))?;
+            reader.float(ctx, Some("ambiance"))?;
         }
         _ => {
             unknown(ctx, reader);

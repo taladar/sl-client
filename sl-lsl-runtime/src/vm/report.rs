@@ -28,21 +28,32 @@ pub const FLOOD_LINES: usize = 8;
 pub const FLOOD_NOTICE: &str = "Too many errors... dropping further messages until the flood stops";
 
 /// The window, in seconds, over which an object's error lines are counted.
-/// Aditi flooded on nine lines in 8.3 seconds and passed a ninth that came
-/// 17.1 seconds after the second (`errors/flood-paths`' `W`), and passed
-/// fifteen lines of `prim/effects` in under thirty; fifteen is a decision
-/// inside the measured range.
-pub const FLOOD_WINDOW_SECONDS: f64 = 15.0;
+/// Aditi's own turns about a second either way from one phase to the next:
+/// eight lines and a ninth 16 seconds after the first flooded in one phase
+/// and passed in the next three alike, and at 17 seconds the same
+/// (`errors/flood-window`, `errors/flood-repeat`); nine lines 1.5 seconds
+/// apart passed nine to eleven (`errors/flood-records`), and a script's own
+/// `llOwnerSay` lines did not change that. Sixteen gets the fewest of those
+/// lines wrong; the replays name the rest.
+pub const FLOOD_WINDOW_SECONDS: f64 = 16.0;
 
-/// How long a flood lasts, in seconds from the line that started it: every
-/// error line of the object is dropped meanwhile, and the object starts
-/// afresh after it. Aditi still dropped a line 32 seconds into a flood and
+/// How long a flood lasts at least, in seconds from the line that started
+/// it: every error line of the object is dropped meanwhile, and the object
+/// starts afresh after it once [`FLOOD_GAP_SECONDS`] passed with no line. Aditi still dropped a line 32 seconds into a flood and
 /// passed one 37 seconds in, ten and eleven seconds after the last line it
 /// had dropped (`errors/flood-kinds`' `A11`, run before and after its other
 /// refusals changed), and passed eight lines in a row starting 34.9 seconds
 /// after one (`errors/flood-paths`' `X2`): the length is the flood's, not a
-/// quiet's. Thirty-four is a decision inside the measured range.
+/// quiet's. Thirty-four is a decision inside the measured range; aditi kept
+/// two floods with a line every 2.2 and 3.2 seconds going 56 and 49 seconds,
+/// and one with a line every 2.7 seconds 36 (`errors/flood-repeat`).
 pub const FLOOD_SECONDS: f64 = 34.0;
+
+/// The quiet, in seconds since the object's previous error line, a flood
+/// needs before it may end: a complaint every 1.5 seconds kept one going
+/// for ten minutes (`errors/flood-epoch`), where one every 2.2 to 3.2
+/// seconds let it end (`errors/flood-repeat`'s `G2` to `G3`).
+pub const FLOOD_GAP_SECONDS: f64 = 2.0;
 
 /// The longest error line OpenSim's engines send, in characters; they cut
 /// anything longer (`XMRInstRun.SendScriptErrorMessage`,
@@ -288,15 +299,18 @@ pub(crate) enum Audience {
 struct Flood {
     /// The ticks of the lines passed within the window, oldest first.
     passed: Vec<Tick>,
-    /// The tick the object's flood ends, while it floods.
+    /// The tick the object's flood may end, while it floods.
     until: Option<Tick>,
+    /// The tick of the object's last line, passed or dropped.
+    last: Option<Tick>,
 }
 
 /// Second Life's flood limit on error lines, per object. A line said in the
 /// open passes while fewer than [`FLOOD_LINES`] passed within the last
 /// [`FLOOD_WINDOW_SECONDS`]; the one that would make more is replaced by
 /// [`FLOOD_NOTICE`], and every line of the object is dropped for
-/// [`FLOOD_SECONDS`], after which it starts afresh. A line told the owner
+/// [`FLOOD_SECONDS`] and until it has been quiet for [`FLOOD_GAP_SECONDS`],
+/// after which it starts afresh. A line told the owner
 /// alone is let one line deeper, and overflows silently: aditi passed nine
 /// such lines a fifth of a second apart, then nothing and no notice
 /// (`errors/flood-kinds`' `C`, `errors/flood-paths`' `S`), while one of them
@@ -316,6 +330,8 @@ pub(crate) struct FloodTicks {
     pub(crate) window: u64,
     /// The length of a flood.
     pub(crate) flood: u64,
+    /// The quiet a flood needs before it ends.
+    pub(crate) gap: u64,
 }
 
 impl FloodGate {
@@ -335,17 +351,25 @@ impl FloodGate {
         ticks: FloodTicks,
     ) -> Admission {
         let recent = |tick: &Tick| tick.after(ticks.window) > now;
-        self.objects.retain(|_, flood| match flood.until {
-            Some(until) => until > now,
-            None => flood.passed.iter().any(recent),
-        });
+        let flooding = |flood: &Flood| match flood.until {
+            Some(until) => {
+                until > now || flood.last.is_some_and(|last| last.after(ticks.gap) > now)
+            }
+            None => false,
+        };
+        self.objects
+            .retain(|_, flood| flooding(flood) || flood.passed.iter().any(recent));
         let flood = self.objects.entry(object.to_owned()).or_insert(Flood {
             passed: Vec::new(),
             until: None,
+            last: None,
         });
-        if flood.until.is_some() {
+        let still = flooding(flood);
+        flood.last = Some(now);
+        if still {
             return Admission::Drop;
         }
+        flood.until = None;
         flood.passed.retain(recent);
         let limit = match audience {
             Audience::Near => FLOOD_LINES,
