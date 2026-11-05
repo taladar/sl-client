@@ -428,12 +428,17 @@ scripts-run percentage.
   (`Could not find script 'Nope'.` against OpenSim's `llGetScriptState: Can't
   find script 'Nope'`), and the engine says it after the slice; on OpenSim it
   reaches scripts as a shout. It costs the script a second on every grid.
-- **Second Life limits an object's error lines**: eight in a run pass, the
-  ninth is `Too many errors... dropping further messages until the flood
-  stops`, the rest are dropped until the object has been quiet for twenty
-  seconds (aditi still dropped after ten and passed after thirty; twenty is a
-  decision inside that window). Another object's lines are not affected, and
-  OpenSim has no limit.
+- **Second Life limits an object's error lines**: eight within fifteen
+  seconds pass, the next is `Too many errors... dropping further messages
+  until the flood stops`, and every line of the object is dropped for 34
+  seconds from it, after which the object starts afresh (both figures are
+  decisions inside what aditi was measured doing). Every line counts — a
+  refusal of any function, a fault's two lines. A rule list's complaints
+  (`llSetPrimitiveParams`, `llGetPrimitiveParams`, `llParticleSystem`) are
+  told the owner alone (`ScriptCtx::refuse_to_owner`, delivered through
+  `Host::say_to` on `DEBUG_CHANNEL`), let one line further and dropped
+  silently. Another object's lines are not affected, and OpenSim has no limit
+  and says every complaint in the open.
 - **One run flag, read where it is kept.** `llGetScriptState(name)` asks the
   host which instance of the caller's prim is called `name`
   (`Host::script_named`) and reads that instance's run flag — the one the

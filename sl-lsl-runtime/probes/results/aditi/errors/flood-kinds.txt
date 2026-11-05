@@ -1,0 +1,98 @@
+grid: aditi
+date: 2026-11-05
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Mauve
+engine: Mono
+settings: Linden Lab's; a resident cannot set them
+
+# animations avatar=other playing=""
+PROBE errors/flood-kinds rec=start region="Mauve" channel="Luau" version="2026-11-04.41913513044"
+# animations avatar=owner playing=""
+PROBE errors/flood-kinds rec=phase name=A t=3.000347
+# debug-channel: from="Object" text="Could not find sound 'A1'."
+# debug-channel: from="Object" text="Could not find sound 'A2'."
+# debug-channel: from="Object" text="Could not find sound 'A3'."
+# debug-channel: from="Object" text="Could not find sound 'A4'."
+# debug-channel: from="Object" text="Could not find sound 'A5'."
+# debug-channel: from="Object" text="Could not find sound 'A6'."
+# debug-channel: from="Object" text="Could not find sound 'A7'."
+# debug-channel: from="Object" text="Could not find sound 'A8'."
+# debug-channel: from="Object" text="Too many errors... dropping further messages until the flood stops"
+PROBE errors/flood-kinds rec=single name="C1" t=23.111280
+PROBE errors/flood-kinds rec=single name="C2" t=28.111350
+PROBE errors/flood-kinds rec=single name="C3" t=33.111460
+PROBE errors/flood-kinds rec=single name="C4" t=38.111110
+PROBE errors/flood-kinds rec=single name="A11" t=49.311830
+# debug-channel: from="Object" text="Could not find sound 'A11'."
+PROBE errors/flood-kinds rec=phase name=B t=120.333600
+# debug-channel: from="Object" text="Could not find sound 'D1'."
+# debug-channel: from="Object" text="Could not find sound 'D2'."
+# debug-channel: from="Object" text="Could not find sound 'D3'."
+# debug-channel: from="Object" text="Could not find sound 'D4'."
+# debug-channel: from="Object" text="Could not find sound 'D5'."
+# debug-channel: from="Object" text="Could not find sound 'D6'."
+# debug-channel: from="Object" text="Could not find sound 'D7'."
+# debug-channel: from="Object" text="Could not find sound 'D8'."
+PROBE errors/flood-kinds rec=fault script=faulter step=before
+# debug-channel: from="Object" text="Too many errors... dropping further messages until the flood stops"
+PROBE errors/flood-kinds rec=single name="D9" t=130.444500
+PROBE errors/flood-kinds rec=phase name=C t=201.468500
+# debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1: unknown rule."
+# debug-channel: from="Object" text="llSetPrimitiveParams error running rule #2: unknown rule."
+# debug-channel: from="Object" text="llSetPrimitiveParams error running rule #3: unknown rule."
+# debug-channel: from="Object" text="llSetPrimitiveParams error running rule #4: unknown rule."
+# debug-channel: from="Object" text="llSetPrimitiveParams error running rule #5: unknown rule."
+# debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1 (PRIM_MATERIAL): bounds error; 8 is not in (0, 7)."
+# debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1 (PRIM_MATERIAL): bounds error; 9 is not in (0, 7)."
+# debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1 (PRIM_MATERIAL): bounds error; 10 is not in (0, 7)."
+# debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1 (PRIM_MATERIAL): bounds error; 11 is not in (0, 7)."
+PROBE errors/flood-kinds rec=phase name=D t=273.550700
+# debug-channel: from="Object" text="Could not find sound 'E1'."
+PROBE errors/flood-kinds rec=single name="E2" t=277.550800
+# debug-channel: from="Object" text="Could not find sound 'E2'."
+PROBE errors/flood-kinds rec=single name="E3" t=280.551000
+# debug-channel: from="Object" text="Could not find sound 'E3'."
+PROBE errors/flood-kinds rec=single name="E4" t=283.550700
+# debug-channel: from="Object" text="Could not find sound 'E4'."
+PROBE errors/flood-kinds rec=single name="E5" t=286.550700
+# debug-channel: from="Object" text="Could not find sound 'E5'."
+PROBE errors/flood-kinds rec=single name="E6" t=289.550800
+# debug-channel: from="Object" text="Could not find sound 'E6'."
+PROBE errors/flood-kinds rec=single name="E7" t=292.550900
+# debug-channel: from="Object" text="Could not find sound 'E7'."
+PROBE errors/flood-kinds rec=single name="E8" t=295.550700
+# debug-channel: from="Object" text="Could not find sound 'E8'."
+PROBE errors/flood-kinds rec=single name="E9" t=298.551100
+# debug-channel: from="Object" text="Could not find sound 'E9'."
+PROBE errors/flood-kinds rec=single name="E10" t=301.550800
+# debug-channel: from="Object" text="Could not find sound 'E10'."
+PROBE errors/flood-kinds rec=end
+# debug-channel by=other: from="Object" text="Could not find sound 'A1'."
+# debug-channel by=other: from="Object" text="Could not find sound 'A2'."
+# debug-channel by=other: from="Object" text="Could not find sound 'A3'."
+# debug-channel by=other: from="Object" text="Could not find sound 'A4'."
+# debug-channel by=other: from="Object" text="Could not find sound 'A5'."
+# debug-channel by=other: from="Object" text="Could not find sound 'A6'."
+# debug-channel by=other: from="Object" text="Could not find sound 'A7'."
+# debug-channel by=other: from="Object" text="Could not find sound 'A8'."
+# debug-channel by=other: from="Object" text="Too many errors... dropping further messages until the flood stops"
+# debug-channel by=other: from="Object" text="Could not find sound 'A11'."
+# debug-channel by=other: from="Object" text="Could not find sound 'D1'."
+# debug-channel by=other: from="Object" text="Could not find sound 'D2'."
+# debug-channel by=other: from="Object" text="Could not find sound 'D3'."
+# debug-channel by=other: from="Object" text="Could not find sound 'D4'."
+# debug-channel by=other: from="Object" text="Could not find sound 'D5'."
+# debug-channel by=other: from="Object" text="Could not find sound 'D6'."
+# debug-channel by=other: from="Object" text="Could not find sound 'D7'."
+# debug-channel by=other: from="Object" text="Could not find sound 'D8'."
+# debug-channel by=other: from="Object" text="Too many errors... dropping further messages until the flood stops"
+# debug-channel by=other: from="Object" text="Could not find sound 'E1'."
+# debug-channel by=other: from="Object" text="Could not find sound 'E2'."
+# debug-channel by=other: from="Object" text="Could not find sound 'E3'."
+# debug-channel by=other: from="Object" text="Could not find sound 'E4'."
+# debug-channel by=other: from="Object" text="Could not find sound 'E5'."
+# debug-channel by=other: from="Object" text="Could not find sound 'E6'."
+# debug-channel by=other: from="Object" text="Could not find sound 'E7'."
+# debug-channel by=other: from="Object" text="Could not find sound 'E8'."
+# debug-channel by=other: from="Object" text="Could not find sound 'E9'."
+# debug-channel by=other: from="Object" text="Could not find sound 'E10'."

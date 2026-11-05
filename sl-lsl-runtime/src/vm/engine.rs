@@ -29,9 +29,18 @@ use crate::vm::persistence::{
     CHANGED_REGION_START, OPENSIM_CHANGED_POSITION, RestoreError, SavedScript,
 };
 use crate::vm::report::{
-    Admission, DEBUG_CHANNEL, FLOOD_NOTICE, FLOOD_QUIET_SECONDS, FloodGate, Speech, fault_lines,
-    fault_reach, owner_lines, refusal_reach,
+    Admission, Audience, DEBUG_CHANNEL, FLOOD_NOTICE, FLOOD_SECONDS, FLOOD_WINDOW_SECONDS,
+    FloodGate, FloodTicks, Speech, fault_lines, fault_reach, owner_lines, refusal_reach,
 };
+
+/// A `DEBUG_CHANNEL` line a slice leaves to say, before the flood gate.
+enum Line {
+    /// Said in the open: the text, how far avatars hear it and how far
+    /// scripts do.
+    Said(String, ChatVolume, Option<ChatVolume>),
+    /// Told the script's owner alone.
+    ToOwner(String),
+}
 
 /// How many instructions one script may run per second of region time, as
 /// charged — a library call and a loop's back-edge cost more than one
@@ -723,13 +732,15 @@ impl Engine {
         }
         let refused = slice.refusals.iter().map(|warning| {
             if warning.shouted {
-                (
+                Line::Said(
                     warning.text.clone(),
                     ChatVolume::Shout,
                     Some(ChatVolume::Shout),
                 )
+            } else if warning.to_owner && !flavour.is_opensim() {
+                Line::ToOwner(warning.text.clone())
             } else {
-                (
+                Line::Said(
                     warning.text.clone(),
                     ChatVolume::Say,
                     Some(refusal_reach(flavour)),
@@ -744,37 +755,54 @@ impl Engine {
         let fault_lines = fault
             .map(|fault| fault_lines(flavour, fault, &at))
             .unwrap_or_default();
-        let faulted: Vec<(String, ChatVolume, Option<ChatVolume>)> = if to_owner {
-            let owner = host.owner(id);
-            for line in &fault_lines {
-                host.say_to(id, &owner, DEBUG_CHANNEL, line);
-            }
-            Vec::new()
+        let faulted: Vec<Line> = if to_owner {
+            fault_lines.into_iter().map(Line::ToOwner).collect()
         } else {
             fault_lines
                 .into_iter()
-                .map(|text| (text, ChatVolume::Say, fault_reach(flavour)))
+                .map(|text| Line::Said(text, ChatVolume::Say, fault_reach(flavour)))
                 .collect()
         };
-        let quiet = ticks_for(FLOOD_QUIET_SECONDS, self.config.step);
-        for (text, to_avatars, to_scripts) in refused.chain(faulted) {
-            let text = match flavour {
-                EngineFlavour::SecondLife => match self.floods.admit(&at.object, self.now, quiet) {
-                    Admission::Pass => text,
-                    Admission::Notice => FLOOD_NOTICE.to_owned(),
-                    Admission::Drop => continue,
-                },
-                EngineFlavour::YEngine | EngineFlavour::XEngine => text,
+        let ticks = FloodTicks {
+            window: ticks_for(FLOOD_WINDOW_SECONDS, self.config.step),
+            flood: ticks_for(FLOOD_SECONDS, self.config.step),
+        };
+        for line in refused.chain(faulted) {
+            let audience = match &line {
+                Line::Said(..) => Audience::Near,
+                Line::ToOwner(_) => Audience::Owner,
             };
-            host.say(
-                id,
-                &Speech {
-                    channel: DEBUG_CHANNEL,
-                    text,
-                    to_avatars,
-                    to_scripts,
-                },
-            );
+            let admission = match flavour {
+                EngineFlavour::SecondLife => {
+                    self.floods.admit(&at.object, audience, self.now, ticks)
+                }
+                EngineFlavour::YEngine | EngineFlavour::XEngine => Admission::Pass,
+            };
+            match (admission, line) {
+                (Admission::Drop, _) => {}
+                (Admission::Pass, Line::ToOwner(text)) => {
+                    let owner = host.owner(id);
+                    host.say_to(id, &owner, DEBUG_CHANNEL, &text);
+                }
+                (Admission::Pass, Line::Said(text, to_avatars, to_scripts)) => host.say(
+                    id,
+                    &Speech {
+                        channel: DEBUG_CHANNEL,
+                        text,
+                        to_avatars,
+                        to_scripts,
+                    },
+                ),
+                (Admission::Notice, _) => host.say(
+                    id,
+                    &Speech {
+                        channel: DEBUG_CHANNEL,
+                        text: FLOOD_NOTICE.to_owned(),
+                        to_avatars: ChatVolume::Say,
+                        to_scripts: fault_reach(flavour),
+                    },
+                ),
+            }
         }
     }
 

@@ -1473,6 +1473,22 @@ impl Host for RegionHost<'_> {
             self.deliveries.push(Delivery::Chat { agent, line });
             return;
         }
+        // On `DEBUG_CHANNEL` the avatar's viewer is sent it as a script error,
+        // as Second Life tells an owner a rule list's complaints
+        // (`errors/owner-lines`) and OpenSim an OSSL denial marked for the
+        // owner.
+        if ChatChannel(channel) == DEBUG_CHANNEL {
+            let line = Line {
+                source: ChatSource::Object(origin.prim),
+                from_name: origin.name.clone(),
+                owner_id: origin.object.owner_id,
+                chat_type: ChatType::DebugChannel,
+                channel: ChatChannel(channel),
+                position: self.position(caller),
+                message: text.to_owned(),
+            };
+            self.deliveries.push(Delivery::Chat { agent, line });
+        }
         // On another channel, the scripts of what the avatar wears.
         let to: Vec<CallerId> = self
             .world

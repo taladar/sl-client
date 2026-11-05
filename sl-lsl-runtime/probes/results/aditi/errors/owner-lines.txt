@@ -1,0 +1,30 @@
+grid: aditi
+date: 2026-11-05
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Mauve
+engine: Mono
+settings: Linden Lab's; a resident cannot set them
+
+PROBE errors/owner-lines rec=listening channel=2147483647
+PROBE errors/owner-lines rec=start region="Mauve" channel="Luau" version="2026-11-04.41913513044"
+# debug-channel: from="Object" text="Could not find sound 'no such sound'."
+PROBE errors/owner-lines rec=heard name="Object" msg="Could not find sound 'no such sound'."
+# animations avatar=owner playing=""
+# animations avatar=other playing=""
+PROBE errors/owner-lines rec=said step=1
+# debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1: unknown rule."
+PROBE errors/owner-lines rec=said step=2
+# debug-channel: from="Object" text="PSYS error: Rule 1 error, PSYS_PART_MAX_AGE needs float data."
+PROBE errors/owner-lines rec=said step=3
+# debug-channel: from="Object" text="llSetPrimMediaParams error: Malformed parameters near parameter #0, param=99.  No values have been set."
+PROBE errors/owner-lines rec=heard name="Object" msg="llSetPrimMediaParams error: Malformed parameters near parameter #0, param=99.  No values have been set."
+PROBE errors/owner-lines rec=said step=4
+# debug-channel: from="Object" text="PRIM_MEDIA error: face 9 on object e7ce0521-101f-5cee-f67b-520eed029714 not found"
+PROBE errors/owner-lines rec=heard name="Object" msg="PRIM_MEDIA error: face 9 on object e7ce0521-101f-5cee-f67b-520eed029714 not found"
+PROBE errors/owner-lines rec=said step=5
+# debug-channel: from="Object" text="llGetPrimitiveParams error: Param 0 error, unknown parameter"
+PROBE errors/owner-lines rec=said step=6
+PROBE errors/owner-lines rec=end
+# debug-channel by=other: from="Object" text="Could not find sound 'no such sound'."
+# debug-channel by=other: from="Object" text="llSetPrimMediaParams error: Malformed parameters near parameter #0, param=99.  No values have been set."
+# debug-channel by=other: from="Object" text="PRIM_MEDIA error: face 9 on object e7ce0521-101f-5cee-f67b-520eed029714 not found"

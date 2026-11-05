@@ -65,7 +65,7 @@ fn transcripts(name: &str) -> [(EngineFlavour, &'static str); 3] {
 
 /// The text of every `DEBUG_CHANNEL` line the runner noted as sent to the
 /// owner, in order.
-fn debug_notes(transcript: &str) -> Vec<String> {
+pub(super) fn debug_notes(transcript: &str) -> Vec<String> {
     transcript
         .lines()
         .filter_map(|line| line.strip_prefix("# debug-channel: "))
@@ -79,20 +79,39 @@ fn debug_notes(transcript: &str) -> Vec<String> {
         .collect()
 }
 
-/// `notes` as the runtime's flood gate passes them on `flavour`: on Second
-/// Life the first eight, then the notice (`errors/flood`). Aditi passed
-/// every line of `prim/params`, `prim/params-rules` and `prim/effects`,
-/// spaced by a forced delay or half a second, so this is a deviation of the
-/// gate's (`server-lsl-flood-gate-passes-spaced-lines`), not of the prim
-/// tranche.
-fn gated(notes: Vec<String>, flavour: EngineFlavour) -> Vec<String> {
-    let lines = usize::try_from(crate::vm::report::FLOOD_LINES).unwrap_or(usize::MAX);
-    if flavour.is_opensim() || notes.len() <= lines {
-        return notes;
-    }
-    let mut passed: Vec<String> = notes.into_iter().take(lines).collect();
-    passed.push(crate::vm::report::FLOOD_NOTICE.to_owned());
-    passed
+/// `lines` with the key in a media complaint (`PRIM_MEDIA error: face 9 on
+/// object <key> not found`) written as `<key>`: the grid's prim had its own.
+pub(super) fn unkeyed(lines: Vec<String>) -> Vec<String> {
+    const MARK: &str = " on object ";
+    lines
+        .into_iter()
+        .map(|line| match line.find(MARK) {
+            Some(at) => {
+                let start = at.saturating_add(MARK.len());
+                let end = start.saturating_add(36);
+                match (line.get(..start), line.get(end..)) {
+                    (Some(before), Some(after)) => format!("{before}<key>{after}"),
+                    _ => line,
+                }
+            }
+            None => line,
+        })
+        .collect()
+}
+
+/// `lines` without the fields the flood probes and `prim/params` name as
+/// measurements in their headers (`vary: t, cost`): a clock reading and what
+/// a call cost.
+pub(super) fn unvaried(lines: Vec<String>) -> Vec<String> {
+    lines
+        .into_iter()
+        .map(|line| {
+            line.split(' ')
+                .filter(|field| !field.starts_with("t=") && !field.starts_with("cost="))
+                .collect::<Vec<_>>()
+                .join(" ")
+        })
+        .collect()
 }
 
 /// The name of a `PROBE` line: its `rec` and its `label` or `code`.
@@ -290,7 +309,20 @@ fn params_round_trip_as_each_grid_stored_them() -> Result<(), String> {
         let mut region = region(flavour, &scripts, ground, &home)?;
         run_out(&mut region, 3000)?;
         let (ours, theirs) = compared(&region, transcript);
-        hold(&ours, &theirs, &[], &format!("{flavour:?}"));
+        // A deviation on OpenSim: both engines moved the prim 6 m on
+        // 2026-11-05 where they moved it 10 m on 2026-10-27, as the runtime
+        // still does (`server-lsl-opensim-pos-local-moved-six`).
+        let deviations: &[&str] = if flavour.is_opensim() {
+            &["position pos-local-east-15"]
+        } else {
+            &[]
+        };
+        hold(
+            &unvaried(ours),
+            &unvaried(theirs),
+            deviations,
+            &format!("{flavour:?}"),
+        );
         // The Shadows' refusal of rule 24 on Second Life is said before the
         // runner starts recording the debug channel, so the transcript lacks
         // it, though it counts towards the flood gate like any other line.
@@ -300,8 +332,19 @@ fn params_round_trip_as_each_grid_stored_them() -> Result<(), String> {
                 0,
                 "llSetPrimitiveParams error running rule #1: unknown rule.".to_owned(),
             );
+            // A deviation: aditi dropped the probe's last three complaints,
+            // told the owner 18 seconds after the thirteenth, where the gate
+            // passes them (`server-lsl-flood-owner-lines-longer-limit`).
+            notes.extend(
+                [
+                    "llSetPrimitiveParams error running rule #1: unknown rule.",
+                    "llGetPrimitiveParams error: Param 0 error, unknown parameter",
+                    "llSetPrimitiveParams error running rule #1: unknown rule.",
+                ]
+                .map(str::to_owned),
+            );
         }
-        assert_eq!(region.debug_lines(), gated(notes, flavour), "{flavour:?}");
+        assert_eq!(region.debug_lines(), notes, "{flavour:?}");
     }
     Ok(())
 }
@@ -324,11 +367,7 @@ fn params_rules_read_as_each_grid_read_them() -> Result<(), String> {
         run_out(&mut region, 400)?;
         let (ours, theirs) = compared(&region, transcript);
         hold(&ours, &theirs, &[], &format!("{flavour:?}"));
-        assert_eq!(
-            region.debug_lines(),
-            gated(debug_notes(transcript), flavour),
-            "{flavour:?}"
-        );
+        assert_eq!(region.debug_lines(), debug_notes(transcript), "{flavour:?}");
     }
     Ok(())
 }
@@ -347,11 +386,7 @@ fn faces_read_and_write_as_each_grid_did() -> Result<(), String> {
         run_out(&mut region, 400)?;
         let (ours, theirs) = compared(&region, transcript);
         hold(&ours, &theirs, &[], &format!("{flavour:?}"));
-        assert_eq!(
-            region.debug_lines(),
-            gated(debug_notes(transcript), flavour),
-            "{flavour:?}"
-        );
+        assert_eq!(region.debug_lines(), debug_notes(transcript), "{flavour:?}");
     }
     Ok(())
 }
@@ -398,11 +433,7 @@ fn identity_reads_as_each_grid_did() -> Result<(), String> {
             &[]
         };
         hold(&ours, &theirs, deviations, &format!("{flavour:?}"));
-        assert_eq!(
-            region.debug_lines(),
-            gated(debug_notes(transcript), flavour),
-            "{flavour:?}"
-        );
+        assert_eq!(region.debug_lines(), debug_notes(transcript), "{flavour:?}");
     }
     Ok(())
 }
@@ -431,11 +462,7 @@ fn placement_moves_as_each_grid_moved() -> Result<(), String> {
             ]
         };
         hold(&ours, &theirs, deviations, &format!("{flavour:?}"));
-        assert_eq!(
-            region.debug_lines(),
-            gated(debug_notes(transcript), flavour),
-            "{flavour:?}"
-        );
+        assert_eq!(region.debug_lines(), debug_notes(transcript), "{flavour:?}");
     }
     Ok(())
 }
@@ -457,11 +484,7 @@ fn setters_raise_changed_as_each_grid_did() -> Result<(), String> {
         run_out(&mut region, 1200)?;
         let (ours, theirs) = compared(&region, transcript);
         hold(&ours, &theirs, &[], &format!("{flavour:?}"));
-        assert_eq!(
-            region.debug_lines(),
-            gated(debug_notes(transcript), flavour),
-            "{flavour:?}"
-        );
+        assert_eq!(region.debug_lines(), debug_notes(transcript), "{flavour:?}");
     }
     Ok(())
 }
@@ -481,8 +504,8 @@ fn effects_complain_as_each_grid_did() -> Result<(), String> {
         let (ours, theirs) = compared(&region, transcript);
         hold(&ours, &theirs, &[], &format!("{flavour:?}"));
         assert_eq!(
-            region.debug_lines(),
-            gated(debug_notes(transcript), flavour),
+            unkeyed(region.debug_lines()),
+            unkeyed(debug_notes(transcript)),
             "{flavour:?}"
         );
     }

@@ -1877,11 +1877,12 @@ it reads back is the nearest 1/255 (0.5 reads 0.498039); Second Life reads
 back what was set.
 
 The fake grid's column holds offline: `vm/tests/prim_state.rs` replays each
-probe's transcripts against the runtime, flavour by flavour. One deviation runs
-through every table: the runtime's flood gate stops a script's debug-channel
-lines after eight, where aditi passed every line of `prim/params`,
-`prim/params-rules` and `prim/effects`, which came spaced
-(`server-lsl-flood-gate-passes-spaced-lines`).
+probe's transcripts against the runtime, flavour by flavour, the debug-channel
+lines through Second Life's flood limit ([Floods](#floods)). Two deviations:
+the limit passes the last three complaints of `prim/params`, which aditi
+dropped (`server-lsl-flood-owner-lines-longer-limit`), and both OpenSim engines
+moved the prim of `pos-local-east-15` 6 m on 2026-11-05 where they had moved it
+10 m, as the runtime still does (`server-lsl-opensim-pos-local-moved-six`).
 
 ### Placement
 
@@ -1993,7 +1994,7 @@ newer rules go by number, since OpenSim has no constants for them.
 | `llGetColor` or `llGetAlpha` of face 6 | white, 1 | **black, 0** | each flavour as its grid |
 | `llGetColor` of face −2 | the mean, as `ALL_SIDES` | black | each flavour as its grid |
 | `llSetAlpha` past 1 and below 0 | clamped | the same | each flavour as its grid |
-| `llSetTexture` of a name not in the inventory, `NULL_KEY` or `""` | not applied, `Could not find texture '…'.` (also for `NULL_KEY`) | a name or `""`: not applied, silently; **`NULL_KEY` is applied** | each flavour as its grid |
+| `llSetTexture` of a name not in the inventory, `NULL_KEY` or `""` | not applied, `Could not find texture '…'.` (also for `NULL_KEY`), which costs the script a second on top of the forced delay ([Floods](#floods)) | a name or `""`: not applied, silently; **`NULL_KEY` is applied** | each flavour as its grid |
 | `llGetTexture` of face 6 | `NULL_KEY` | the same | each flavour as its grid |
 | `llScaleTexture` past its range, of 0 | kept as given | the same | each flavour as its grid |
 | `llOffsetTexture` past ±1 | kept | clamped to ±1 | each flavour as its grid |
@@ -2131,7 +2132,7 @@ root) and B (its child) each printed every `changed` event they got.
 
 | what | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
-| a sound name not in the inventory, `NULL_KEY` or `""`, to `llPlaySound`, `llLoopSound`, its master and slave, `llTriggerSound`, `llPreloadSound` | `Could not find sound '…'.` | nothing, silently | each flavour as its grid |
+| a sound name not in the inventory, `NULL_KEY` or `""`, to `llPlaySound`, `llLoopSound`, its master and slave, `llTriggerSound`, `llPreloadSound` | `Could not find sound '…'.`, which costs the script a second ([Floods](#floods)) | nothing, silently | each flavour as its grid |
 | a sound key no asset has, a volume past 1 or below 0, `llCollisionSound` of a missing name, the radius, volume and queueing calls past their ranges, `llStopSound` with nothing playing | nothing | the same | each flavour as its grid |
 | `llParticleSystem` with a value of the wrong type | `PSYS error: Rule 1 error, PSYS_PART_MAX_AGE needs float data.` | nothing | each flavour as its grid |
 | … with a rule missing its value | nothing; the script carries on | **throws** (`IndexOutOfRangeException`): YEngine stops the script, XEngine ends the event | each flavour as its grid |
@@ -2205,14 +2206,29 @@ result that is not a finite number — and Mono hands such a result on as
 script's name to `llGetScriptState`, which costs the script a second on
 every grid), asks a second script in the same prim and a script in another
 object of the same owner's for one each after the tenth, then makes one more
-after 10, 30 and 60 seconds of quiet.
+after 10, 30 and 60 seconds of quiet. `errors/flood-kinds` (2026-11-05) floods
+with missing sounds and then asks for missing textures, a fault in a second
+script and two complaints of `llSetPrimitiveParams`, and spaces ten missing
+sounds four seconds apart. `errors/flood-paths` times what a complaint costs,
+puts one complaint of each rule-list function after seven missing sounds, and
+pauses ten seconds after eight. `errors/owner-lines` has a script in another
+object listen while the five rule-list complaints are made. The first runs of
+the two flood probes asked for missing inventory items (`llGetInventoryCreator`)
+where they now ask for textures, since the runtime has no
+`llGetInventoryCreator` yet to replay them with; what only those runs measured
+is marked *first run*.
 
 | | Second Life | OpenSim (both engines) | fake grid |
 | --- | --- | --- | --- |
-| a run of errors | the first **eight** pass, then `Too many errors... dropping further messages until the flood stops` and nothing more | every one passes | no scripts |
-| whose flood it is | the **object's**: the second script in the same prim is dropped, the other object's error passes | — | no scripts |
-| when errors pass again | dropped after 10 seconds of quiet, passed after 30 | — | no scripts |
-| a fault's two lines | count as two: a fourth fault within the window lost its `Math Error` to the notice | — | no scripts |
+| a run of errors | the first **eight** pass, then `Too many errors... dropping further messages until the flood stops` and nothing more | every one passes | each flavour as its grid |
+| what counts | **every line** of the object: a missing sound, a missing texture, a fault's two lines and each rule-list complaint alike; four missing textures after a flood of sounds are dropped with it | — | each flavour as its grid |
+| whose flood it is | the **object's**: the second script in the same prim is dropped, the other object's error passes | — | each flavour as its grid |
+| spacing | a **rate**, not a count: ten lines four seconds apart all pass, and a ninth line ten seconds after eight passes (18 seconds after the first); nine lines in 8.3 seconds do not | — | counted over 15 seconds, a decision inside what was measured |
+| how long a flood lasts | from its first dropped line: still dropping 32 seconds in (*first run*), passing again 37 seconds in, whatever was dropped meanwhile (10 or 11 seconds before); and eight lines in a row pass 35 seconds after a flood began | — | 34 seconds, a decision inside what was measured |
+| a complaint of a rule list (`llSetPrimitiveParams`, `llGetPrimitiveParams`, `llParticleSystem`) | told the **owner alone**: no other avatar and no script hears it; counted like any line, but let **one line further** (nine a fifth of a second apart pass) and dropped **silently**, no notice | said as any other | each flavour as its grid |
+| a complaint of `llSetPrimMediaParams` (and its face `PRIM_MEDIA error`) | said in the open, heard by scripts | the same | each flavour as its grid |
+| what a complaint costs the script | a missing sound **a second** (`llTriggerSound`), a missing texture a second on top of the call's own 0.2 (`llSetTexture`); a missing inventory item nothing (*first run*) | nothing for a sound or a texture (no complaint); a missing item (`llGetInventoryCreator`) a second (*first run*) | each flavour as its grid |
+| a long run of a rule list's complaints | `prim/params` passed thirteen in thirty seconds (twelve on another run) and dropped three more that came 18 seconds after the last; a fifteen-second count passes them | — | a deviation: the three pass (`server-lsl-flood-owner-lines-longer-limit`) |
 
 ### The faulted script
 

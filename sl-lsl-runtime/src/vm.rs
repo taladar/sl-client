@@ -109,5 +109,6 @@ pub use persistence::{
     CHANGED_REGION_START, DecodeError, OPENSIM_CHANGED_POSITION, RestoreError, SavedScript,
 };
 pub use report::{
-    DEBUG_CHANNEL, FLOOD_LINES, FLOOD_NOTICE, FLOOD_QUIET_SECONDS, Speech, Warning, Whereabouts,
+    DEBUG_CHANNEL, FLOOD_LINES, FLOOD_NOTICE, FLOOD_SECONDS, FLOOD_WINDOW_SECONDS, Speech, Warning,
+    Whereabouts,
 };

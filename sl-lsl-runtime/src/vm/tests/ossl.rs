@@ -503,7 +503,13 @@ fn a_denial_to_the_owner_goes_to_the_owner_alone() -> Result<(), String> {
     region.add(A, "Caller", 1, &caller("osGetScriptEngineName()"))?;
     region.tick()?;
     region.tick()?;
-    assert_eq!(region.debug_lines(), Vec::<String>::new());
+    assert!(
+        region
+            .host
+            .said
+            .iter()
+            .all(|(_, _, speech)| speech.channel != DEBUG_CHANNEL)
+    );
     let told: Vec<&(u64, CallerId, String, i32, String)> = region.host.said_to.iter().collect();
     assert_eq!(told.len(), 1);
     assert!(told.first().is_some_and(|(_, _, to, channel, text)| {

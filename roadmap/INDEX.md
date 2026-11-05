@@ -15,11 +15,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 333 |
 | blocked | 40 |
 | in-progress | 17 |
-| bugs | 39 |
-| done | 1489 |
+| bugs | 40 |
+| done | 1490 |
 | deferred | 30 |
 | wont-do | 24 |
-| **total** | **2100** |
+| **total** | **2102** |
 
 ## ideas (128)
 
@@ -1324,7 +1324,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (39)
+## bugs (40)
 
 ### protocol
 
@@ -1424,10 +1424,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### server
 
-- [`server-lsl-flood-gate-passes-spaced-lines`](bugs/server-lsl-flood-gate-passes-spaced-lines.md)
-  — Second Life's error flood gate drops lines aditi passed
+- [`server-lsl-flood-owner-lines-longer-limit`](bugs/server-lsl-flood-owner-lines-longer-limit.md)
+  — Second Life dropped prim/params' last complaints the flood gate passes
+- [`server-lsl-opensim-pos-local-moved-six`](bugs/server-lsl-opensim-pos-local-moved-six.md)
+  — OpenSim moved prim/params' PRIM_POS_LOCAL prim 6 m, where it moved it 10
 
-## done (1489)
+## done (1490)
 
 ### protocol
 
@@ -4480,6 +4482,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (done), `server-lsl-value-model` (done))
 - [`server-lsl-float-expression-precision`](done/server-lsl-float-expression-precision.md)
   — Round a float expression once, where Mono stores it, not at every operator
+- [`server-lsl-flood-gate-passes-spaced-lines`](done/server-lsl-flood-gate-passes-spaced-lines.md)
+  — Second Life's error flood gate drops lines aditi passed
 - [`server-lsl-lib-comms`](done/server-lsl-lib-comms.md) — Library tranche —
   chat, listens, dialogs and link messages (blocked by `server-lsl-vm-execution`
   (done), `server-world-chat-routing` (done), `protocol-sim-script-messages`

@@ -524,6 +524,18 @@ impl<'host> ScriptCtx<'host> {
         self.data.refusals.push(Warning {
             text,
             shouted: false,
+            to_owner: false,
+        });
+    }
+
+    /// Refuse the call's arguments with `text` as [`Self::refuse`] does, but
+    /// as a complaint Second Life tells the owner alone — a rule list's
+    /// (`errors/owner-lines`). OpenSim says it as any other refusal.
+    pub fn refuse_to_owner(&mut self, text: String) {
+        self.data.refusals.push(Warning {
+            text,
+            shouted: false,
+            to_owner: true,
         });
     }
 
@@ -534,6 +546,7 @@ impl<'host> ScriptCtx<'host> {
         self.data.refusals.push(Warning {
             text,
             shouted: true,
+            to_owner: false,
         });
     }
 

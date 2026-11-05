@@ -17,18 +17,32 @@ use crate::vm::flavour::EngineFlavour;
 /// listens on to hear its own.
 pub const DEBUG_CHANNEL: i32 = 0x7FFF_FFFF;
 
-/// How many error lines one object may say in a flood on Second Life before
-/// the rest are dropped: aditi passed eight and dropped the ninth
-/// (`errors/flood`, 2026-10-27).
-pub const FLOOD_LINES: u32 = 8;
+/// How many error lines one object may say in the open within
+/// [`FLOOD_WINDOW_SECONDS`] on Second Life: aditi passed eight a second apart
+/// and put the notice in place of the ninth (`errors/flood`,
+/// `errors/flood-kinds`, `errors/flood-paths`), whatever the lines were —
+/// refusals of any function and a fault's lines count alike.
+pub const FLOOD_LINES: usize = 8;
 
 /// The line Second Life says in place of the first one a flood drops.
 pub const FLOOD_NOTICE: &str = "Too many errors... dropping further messages until the flood stops";
 
-/// The quiet, in seconds, after which an object's flood is over and its error
-/// lines pass again. Aditi still dropped a line after 10 seconds of quiet and
-/// passed one after 30; twenty is a decision inside that measured window.
-pub const FLOOD_QUIET_SECONDS: f64 = 20.0;
+/// The window, in seconds, over which an object's error lines are counted.
+/// Aditi flooded on nine lines in 8.3 seconds and passed a ninth that came
+/// 17.1 seconds after the second (`errors/flood-paths`' `W`), and passed
+/// fifteen lines of `prim/effects` in under thirty; fifteen is a decision
+/// inside the measured range.
+pub const FLOOD_WINDOW_SECONDS: f64 = 15.0;
+
+/// How long a flood lasts, in seconds from the line that started it: every
+/// error line of the object is dropped meanwhile, and the object starts
+/// afresh after it. Aditi still dropped a line 32 seconds into a flood and
+/// passed one 37 seconds in, ten and eleven seconds after the last line it
+/// had dropped (`errors/flood-kinds`' `A11`, run before and after its other
+/// refusals changed), and passed eight lines in a row starting 34.9 seconds
+/// after one (`errors/flood-paths`' `X2`): the length is the flood's, not a
+/// quiet's. Thirty-four is a decision inside the measured range.
+pub const FLOOD_SECONDS: f64 = 34.0;
 
 /// The longest error line OpenSim's engines send, in characters; they cut
 /// anything longer (`XMRInstRun.SendScriptErrorMessage`,
@@ -45,6 +59,11 @@ pub struct Warning {
     /// `OSSLShoutError` does, rather than carried as the flavour carries a
     /// refusal (`refusal_reach`).
     pub shouted: bool,
+    /// Whether Second Life tells it the owner alone rather than saying it,
+    /// as it tells the complaints of a rule list — `llSetPrimitiveParams`,
+    /// `llGetPrimitiveParams`, `llParticleSystem`, `llSetPrimMediaParams` —
+    /// where OpenSim says them as any other (`errors/owner-lines`).
+    pub to_owner: bool,
 }
 
 /// A line of chat a script's object says, and how far it carries.
@@ -254,23 +273,49 @@ pub(crate) enum Admission {
     Drop,
 }
 
-/// One object's run of error lines.
+/// Who an error line is said to, as the flood gate tells them apart.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct Flood {
-    /// Lines in the run, passed or not.
-    lines: u32,
-    /// The tick of the last of them.
-    last: Tick,
+pub(crate) enum Audience {
+    /// Said in the open, to every avatar and script in range.
+    Near,
+    /// Told the owner alone, as Second Life tells a rule list's complaints
+    /// (`errors/owner-lines`).
+    Owner,
 }
 
-/// Second Life's flood limit on error lines, per object: [`FLOOD_LINES`]
-/// pass, the next is [`FLOOD_NOTICE`], the rest are dropped until the object
-/// has been quiet for [`FLOOD_QUIET_SECONDS`]. A dropped line keeps the
-/// flood going. Another object's lines are not affected.
+/// One object's recent error lines.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Flood {
+    /// The ticks of the lines passed within the window, oldest first.
+    passed: Vec<Tick>,
+    /// The tick the object's flood ends, while it floods.
+    until: Option<Tick>,
+}
+
+/// Second Life's flood limit on error lines, per object. A line said in the
+/// open passes while fewer than [`FLOOD_LINES`] passed within the last
+/// [`FLOOD_WINDOW_SECONDS`]; the one that would make more is replaced by
+/// [`FLOOD_NOTICE`], and every line of the object is dropped for
+/// [`FLOOD_SECONDS`], after which it starts afresh. A line told the owner
+/// alone is let one line deeper, and overflows silently: aditi passed nine
+/// such lines a fifth of a second apart, then nothing and no notice
+/// (`errors/flood-kinds`' `C`, `errors/flood-paths`' `S`), while one of them
+/// as the eighth line still made the next open one the notice
+/// (`errors/flood-paths`' `X1` to `X5`). Another object's lines are not
+/// affected.
 #[derive(Debug, Clone)]
 pub(crate) struct FloodGate {
-    /// The runs under way, by object key.
+    /// The objects that passed a line within the window or flood, by key.
     objects: BTreeMap<String, Flood>,
+}
+
+/// How long the flood gate's counts run, in ticks of the engine's step.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct FloodTicks {
+    /// The window lines are counted over.
+    pub(crate) window: u64,
+    /// The length of a flood.
+    pub(crate) flood: u64,
 }
 
 impl FloodGate {
@@ -281,21 +326,40 @@ impl FloodGate {
         }
     }
 
-    /// What to do with a line `object` says at `now`; a run ends after
-    /// `quiet` ticks without one.
-    pub(crate) fn admit(&mut self, object: &str, now: Tick, quiet: u64) -> Admission {
-        self.objects
-            .retain(|_, flood| flood.last.after(quiet) > now);
-        let flood = self.objects.entry(object.to_owned()).or_insert(Flood {
-            lines: 0,
-            last: now,
+    /// What to do with a line `object` says to `audience` at `now`.
+    pub(crate) fn admit(
+        &mut self,
+        object: &str,
+        audience: Audience,
+        now: Tick,
+        ticks: FloodTicks,
+    ) -> Admission {
+        let recent = |tick: &Tick| tick.after(ticks.window) > now;
+        self.objects.retain(|_, flood| match flood.until {
+            Some(until) => until > now,
+            None => flood.passed.iter().any(recent),
         });
-        flood.lines = flood.lines.saturating_add(1);
-        flood.last = now;
-        match flood.lines {
-            lines if lines <= FLOOD_LINES => Admission::Pass,
-            lines if lines == FLOOD_LINES.saturating_add(1) => Admission::Notice,
-            _ => Admission::Drop,
+        let flood = self.objects.entry(object.to_owned()).or_insert(Flood {
+            passed: Vec::new(),
+            until: None,
+        });
+        if flood.until.is_some() {
+            return Admission::Drop;
+        }
+        flood.passed.retain(recent);
+        let limit = match audience {
+            Audience::Near => FLOOD_LINES,
+            Audience::Owner => FLOOD_LINES.saturating_add(1),
+        };
+        if flood.passed.len() < limit {
+            flood.passed.push(now);
+            return Admission::Pass;
+        }
+        flood.passed.clear();
+        flood.until = Some(now.after(ticks.flood));
+        match audience {
+            Audience::Near => Admission::Notice,
+            Audience::Owner => Admission::Drop,
         }
     }
 }

@@ -552,8 +552,11 @@ pub fn ll_set_link_texture(
     let found = match found {
         Some(key) if opensim_flavour || key != NULL_KEY => key,
         _ => {
+            // Second Life's complaint costs the script a second, on top of
+            // the call's forced delay (`errors/flood-paths`' `cost`).
             if !opensim_flavour {
                 ctx.refuse(format!("Could not find texture '{texture}'."));
+                ctx.sleep(1.0);
             }
             return Ok(());
         }

@@ -1004,6 +1004,62 @@ default
         Ok(())
     }
 
+    /// A script that, asked on channel 7, gives `llSetPrimitiveParams` a rule
+    /// no grid has.
+    const UNKNOWN_RULE_SOURCE: &str = "default
+{
+    state_entry()
+    {
+        llListen(7, \"\", NULL_KEY, \"rule\");
+    }
+
+    listen(integer channel, string speaker, key id, string message)
+    {
+        llSetPrimitiveParams([999]);
+    }
+}
+";
+
+    /// Second Life tells a rule list's complaint to the owner alone
+    /// (`errors/owner-lines`): the owner's viewer is sent it as a script
+    /// error, wherever in the region it stands — here past a say's 20 m.
+    #[tokio::test]
+    async fn a_rule_lists_complaint_reaches_the_owners_viewer() -> Result<(), TestError> {
+        let region = region_of(&[ScriptedBox {
+            local_id: sl_proto::RegionLocalObjectId(0x700),
+            source: UNKNOWN_RULE_SOURCE.to_owned(),
+            experience: None,
+        }])?;
+        let mut scene = scene_with(
+            ImitatedGrid::SecondLife,
+            region,
+            RegionConfig {
+                heartbeat: HeartbeatConfig::stepped(Duration::from_millis(100)),
+                ..RegionConfig::default()
+            },
+            AccountConfig {
+                agent_id: Some(box_owner()),
+                ..AccountConfig::new("Test", "User", "password")
+            },
+        )
+        .await?;
+        scene.tick(2).await?;
+        scene.shout("rule").await?;
+        scene.tick(2).await?;
+        let said = scene
+            .next("the complaint", |seen| match seen {
+                Seen::Chat(ChatType::DebugChannel, message) => Some(message),
+                _other => None,
+            })
+            .await?;
+        scene.stop();
+        assert_eq!(
+            said,
+            "llSetPrimitiveParams error running rule #1: unknown rule."
+        );
+        Ok(())
+    }
+
     /// A script asking the simulator's version on channel 7 (a function
     /// OpenSim gates at threat level `High`), and saying it.
     const VERSION_SOURCE: &str = "default

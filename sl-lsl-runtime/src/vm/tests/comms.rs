@@ -204,14 +204,10 @@ impl Region {
         self.lines().iter().any(|line| line.contains(" rec=end"))
     }
 
-    /// The `DEBUG_CHANNEL` lines said, in order.
+    /// The `DEBUG_CHANNEL` lines the owner was sent, said in the open or
+    /// told the owner alone, in order.
     pub(super) fn debug_lines(&self) -> Vec<String> {
-        self.host
-            .said
-            .iter()
-            .filter(|(_, _, speech)| speech.channel == DEBUG_CHANNEL)
-            .map(|(_, _, speech)| speech.text.clone())
-            .collect()
+        self.host.debug.clone()
     }
 }
 

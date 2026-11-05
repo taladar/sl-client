@@ -1,0 +1,41 @@
+grid: opensim-xengine
+date: 2026-11-05
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Default Region
+engine: XEngine
+settings: OpenSimDefaults.ini: [YEngine] MinTimerInterval=0.1; [XEngine] MinTimerInterval unset (LSL_Api default 0.5); ScriptDelayFactor=1.0, SensorMaxRange=96, SensorMaxResults=16, UseLlCastRayV3=false (defaults) on both; [YEngine] ScriptHeapSize=1024 KiB, ScriptStackSize=2048 KiB (defaults); OpenSim.ini [Network] OutboundDisallowForUserScriptsExcept=127.0.0.1:9000 (the simulator itself), [ScriptsHttpRequestModule] and llHTTPRequest limits at their defaults
+
+PROBE errors/flood-kinds rec=start region="Default Region" channel="OpenSim" version="OpenSim 0.9.2.1 Yeti Dev   36f6d16 (Unix/Mono)"
+PROBE errors/flood-kinds rec=phase name=A t=3.005000
+PROBE errors/flood-kinds rec=single name="C1" t=8.808000
+PROBE errors/flood-kinds rec=single name="C2" t=13.815000
+PROBE errors/flood-kinds rec=single name="C3" t=18.820000
+PROBE errors/flood-kinds rec=single name="C4" t=23.825001
+PROBE errors/flood-kinds rec=single name="A11" t=34.035999
+PROBE errors/flood-kinds rec=phase name=B t=104.112000
+PROBE errors/flood-kinds rec=fault script=faulter step=before
+# debug-channel: from="Object" text="Integer division by Zero(script: Faulter event: link_message primID:2885389c-3c1c-48e5-b04c-2d94eb3fecf4 at <0, 0, 1.25>)"
+PROBE errors/flood-kinds rec=single name="D9" t=106.113998
+PROBE errors/flood-kinds rec=phase name=C t=176.186005
+# debug-channel: from="Object" text="llSetPrimitiveParams: Error running rule #1: arg #0 - unsupported parameter"
+# debug-channel: from="Object" text="llSetPrimitiveParams: Error running rule #2: arg #0 - unsupported parameter"
+# debug-channel: from="Object" text="llSetPrimitiveParams: Error running rule #3: arg #0 - unsupported parameter"
+# debug-channel: from="Object" text="llSetPrimitiveParams: Error running rule #4: arg #0 - unsupported parameter"
+# debug-channel: from="Object" text="llSetPrimitiveParams: Error running rule #5: arg #0 - unsupported parameter"
+PROBE errors/flood-kinds rec=phase name=D t=253.270004
+PROBE errors/flood-kinds rec=single name="E2" t=256.273987
+PROBE errors/flood-kinds rec=single name="E3" t=259.277008
+PROBE errors/flood-kinds rec=single name="E4" t=262.279999
+PROBE errors/flood-kinds rec=single name="E5" t=265.282990
+PROBE errors/flood-kinds rec=single name="E6" t=268.286987
+PROBE errors/flood-kinds rec=single name="E7" t=271.290009
+PROBE errors/flood-kinds rec=single name="E8" t=274.292999
+PROBE errors/flood-kinds rec=single name="E9" t=277.295990
+PROBE errors/flood-kinds rec=single name="E10" t=280.299988
+PROBE errors/flood-kinds rec=end
+# debug-channel by=other: from="Object" text="Integer division by Zero(script: Faulter event: link_message primID:2885389c-3c1c-48e5-b04c-2d94eb3fecf4 at <0, 0, 1.25>)"
+# debug-channel by=other: from="Object" text="llSetPrimitiveParams: Error running rule #1: arg #0 - unsupported parameter"
+# debug-channel by=other: from="Object" text="llSetPrimitiveParams: Error running rule #2: arg #0 - unsupported parameter"
+# debug-channel by=other: from="Object" text="llSetPrimitiveParams: Error running rule #3: arg #0 - unsupported parameter"
+# debug-channel by=other: from="Object" text="llSetPrimitiveParams: Error running rule #4: arg #0 - unsupported parameter"
+# debug-channel by=other: from="Object" text="llSetPrimitiveParams: Error running rule #5: arg #0 - unsupported parameter"

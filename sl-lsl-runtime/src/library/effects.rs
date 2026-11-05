@@ -31,11 +31,13 @@ const SOUND_SYNC: i32 = 4;
 
 /// The sound a sound argument names: a key, or the sound of that name in
 /// the prim. Second Life names one it cannot find on the debug channel —
-/// `NULL_KEY` and `""` among them — and OpenSim is silent (`prim/effects`).
+/// `NULL_KEY` and `""` among them — and the complaint costs the script a
+/// second (`errors/flood-paths`' `cost`); OpenSim is silent (`prim/effects`).
 fn sound_named(ctx: &mut ScriptCtx<'_>, given: &str) -> Option<String> {
     let found = asset_named(ctx, given, INVENTORY_SOUND).filter(|key| key != NULL_KEY);
     if found.is_none() && !ctx.flavour().is_opensim() {
         ctx.refuse(format!("Could not find sound '{given}'."));
+        ctx.sleep(1.0);
     }
     found
 }
@@ -529,7 +531,7 @@ fn particles_of(
                     ParticleKind::Key => "key",
                 };
                 let rule = index.saturating_add(1);
-                ctx.refuse(format!(
+                ctx.refuse_to_owner(format!(
                     "PSYS error: Rule {rule} error, {name} needs {wanted} data."
                 ));
             }

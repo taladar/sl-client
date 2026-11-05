@@ -20,6 +20,7 @@ use crate::value::Value;
 mod comms;
 mod contents;
 mod experiences;
+mod floods;
 mod identity;
 mod json;
 mod linking;
@@ -66,6 +67,8 @@ struct Recorder {
     stores: std::collections::BTreeMap<u64, LinksetData>,
     /// `(tick, caller, target, channel, text)` per `llRegionSayTo`.
     said_to: Vec<(u64, CallerId, String, i32, String)>,
+    /// Every `DEBUG_CHANNEL` line, said or told one avatar, in order.
+    debug: Vec<String>,
     /// `(tick, caller, message)` per instant message.
     messages: Vec<(u64, CallerId, InstantMessage)>,
     /// `(tick, caller, dialog)` per dialog or text box put.
@@ -215,6 +218,9 @@ impl Host for Recorder {
     }
 
     fn say(&mut self, caller: CallerId, speech: &Speech) {
+        if speech.channel == DEBUG_CHANNEL {
+            self.debug.push(speech.text.clone());
+        }
         self.said.push((self.now, caller, speech.clone()));
     }
 
@@ -223,6 +229,9 @@ impl Host for Recorder {
     }
 
     fn say_to(&mut self, caller: CallerId, target: &str, channel: i32, text: &str) {
+        if channel == DEBUG_CHANNEL {
+            self.debug.push(text.to_owned());
+        }
         self.said_to.push((
             self.now,
             caller,

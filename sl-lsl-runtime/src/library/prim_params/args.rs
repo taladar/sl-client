@@ -195,7 +195,7 @@ impl<'list> Reader<'list> {
                 given(element),
             )
         };
-        ctx.refuse(text);
+        ctx.refuse_to_owner(text);
         if self.opensim {
             ctx.sleep(1.0);
         }
@@ -221,7 +221,7 @@ impl<'list> Reader<'list> {
                 self.function, self.number, self.name,
             )
         };
-        ctx.refuse(text);
+        ctx.refuse_to_owner(text);
         if self.opensim {
             ctx.sleep(1.0);
         }
@@ -230,7 +230,7 @@ impl<'list> Reader<'list> {
     /// Second Life's `… warning running rule #1 (PRIM_TYPE_BOX): <detail>`:
     /// the rule carries on.
     pub(crate) fn warn(&self, ctx: &mut ScriptCtx<'_>, detail: &str) {
-        ctx.refuse(format!(
+        ctx.refuse_to_owner(format!(
             "{} warning running rule #{} ({}): {detail}",
             self.function, self.number, self.name,
         ));

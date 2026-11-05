@@ -221,13 +221,13 @@ fn run(
 /// `unknown rule.`, OpenSim's `unsupported parameter`.
 fn unknown(ctx: &mut ScriptCtx<'_>, reader: &Reader<'_>) {
     if ctx.flavour().is_opensim() {
-        ctx.refuse(format!(
+        ctx.refuse_to_owner(format!(
             "{}: Error running rule #{}: arg #0 - unsupported parameter",
             reader.function, reader.number,
         ));
         ctx.sleep(1.0);
     } else {
-        ctx.refuse(format!(
+        ctx.refuse_to_owner(format!(
             "{} error running rule #{}: unknown rule.",
             reader.function, reader.number,
         ));
@@ -591,14 +591,14 @@ fn read_type(
         shape::TYPE_SCULPT => "PRIM_TYPE_SCULPT",
         _ => {
             if opensim_flavour {
-                ctx.refuse(format!(
+                ctx.refuse_to_owner(format!(
                     "{}: Error running rule #{}: arg #0 - unsupported parameter",
                     reader.function,
                     reader.number.saturating_add(1),
                 ));
                 ctx.sleep(1.0);
             } else {
-                ctx.refuse(format!(
+                ctx.refuse_to_owner(format!(
                     "{} error running rule #{}: unknown rule.",
                     reader.function, reader.number,
                 ));

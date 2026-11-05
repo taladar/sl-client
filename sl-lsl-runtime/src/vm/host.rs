@@ -78,9 +78,10 @@ pub trait Host {
 
     /// `llRegionSayTo`: the script's object says `text` on `channel` to
     /// `target` alone, wherever in the region it is. An avatar on channel 0
-    /// gets it as chat from the object; on another channel the scripts of the
-    /// objects it wears are offered it; a prim's scripts are offered it on
-    /// any channel. The runtime has dropped a target that is no key,
+    /// gets it as chat from the object, and on `DEBUG_CHANNEL` as a script
+    /// error — how the engine tells an owner alone what went wrong; on
+    /// another channel the scripts of the objects it wears are offered it; a
+    /// prim's scripts are offered it on any channel. The runtime has dropped a target that is no key,
     /// `NULL_KEY` and the caller's own prim, and cut the text.
     fn say_to(&mut self, caller: CallerId, target: &str, channel: i32, text: &str);
 

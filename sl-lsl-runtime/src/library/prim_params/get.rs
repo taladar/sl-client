@@ -117,7 +117,7 @@ pub(crate) fn answer(
             Ended::End | Ended::Short => return Ok(out),
             Ended::NotACode => return Ok(Vec::new()),
             Ended::Unknown(index) => {
-                ctx.refuse(format!(
+                ctx.refuse_to_owner(format!(
                     "{function} error: Param {index} error, unknown parameter"
                 ));
                 return Ok(Vec::new());

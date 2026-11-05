@@ -2,6 +2,7 @@
 // script: Probe
 // order: 2
 // drive: none
+// vary: t
 //
 // What llGetPrimitiveParams reads back after llSetPrimitiveParams, rule by
 // rule, on each grid: each `rt` record sets one rule (or a few values of it)
@@ -19,7 +20,10 @@
 // as they were after each group. Setting PRIM_CAST_SHADOWS is tried by the
 // script in prim B (see there), because XEngine never comes back from it,
 // and is left out there.
-// Rule order, ALL_SIDES and errors are `prim/params-rules`.
+// Rule order, ALL_SIDES and errors are `prim/params-rules`. Each `try`
+// carries the script's clock, so that the debug-channel complaints between
+// them can be timed against Second Life's error flood limit
+// (errors/flood-paths).
 string ID = "prim/params";
 
 string PLYWOOD = "89556747-24cb-43ed-920b-47caed15465f";
@@ -48,7 +52,7 @@ begin()
 // Sets `set`, then prints what `get` reads.
 rt(string label, list set, list get)
 {
-    emit("try", " label=" + label);
+    emit("try", " label=" + label + " t=" + (string)llGetTime());
     llSetPrimitiveParams(set);
     emit("rt", " label=" + label + " got=" + q(llList2CSV(llGetPrimitiveParams(get))));
 }
