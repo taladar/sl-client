@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 129 |
-| ready | 333 |
-| blocked | 39 |
-| in-progress | 15 |
+| ready | 334 |
+| blocked | 38 |
+| in-progress | 14 |
 | bugs | 38 |
-| done | 1491 |
+| done | 1492 |
 | deferred | 30 |
 | wont-do | 24 |
 | **total** | **2099** |
@@ -329,7 +329,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-lsl-opensim-function-set`](ideas/gridspec-lsl-opensim-function-set.md)
   — Measure which library functions OpenSim's engines compile
 
-## ready (333)
+## ready (334)
 
 ### protocol
 
@@ -406,6 +406,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Face-nearest and avatar fine-alignment tools
 - [`viewer-avatar-debug-tools`](ready/viewer-avatar-debug-tools.md) — Avatar
   debug & maintenance tools (incl. Rebake)
+- [`viewer-avatar-moderation-actions`](ready/viewer-avatar-moderation-actions.md)
+  — Per-avatar parcel / estate moderation — the shared action layer (blocked by
+  `viewer-region-options-estate` (done))
 - [`viewer-avatar-skeleton-recovery`](ready/viewer-avatar-skeleton-recovery.md)
   — Undeform / reset skeleton for the own avatar
 - [`viewer-bake-cof-layer-order`](ready/viewer-bake-cof-layer-order.md) —
@@ -1143,13 +1146,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-sl-mfa-challenge`](ready/gridspec-sl-mfa-challenge.md) — Record
   Second Life's MFA challenge and whether a remembered mfa_hash gets past it
 
-## blocked (39)
+## blocked (38)
 
 ### viewer
 
-- [`viewer-avatar-moderation-actions`](blocked/viewer-avatar-moderation-actions.md)
-  — Per-avatar parcel / estate moderation — the shared action layer (blocked by
-  `viewer-region-options-estate`)
 - [`viewer-fs-bridge-protocol`](blocked/viewer-fs-bridge-protocol.md) —
   Firestorm LSL bridge — the viewer↔script protocol and what it exposes (blocked
   by `viewer-fs-bridge-lifecycle`)
@@ -1275,7 +1275,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-voice`](blocked/gridspec-voice.md) — Voice provisioning and
   signalling on each grid (blocked by `viewer-voice-audio`)
 
-## in-progress (15)
+## in-progress (14)
 
 ### viewer
 
@@ -1294,9 +1294,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Tune main-view shadow specialization + clustered lighting during rez
 - [`viewer-realtime-mirrors`](in-progress/viewer-realtime-mirrors.md) —
   Real-time mirrors (hero probes)
-- [`viewer-region-options-estate`](in-progress/viewer-region-options-estate.md)
-  — Region / Estate floater — estate tab (blocked by
-  `viewer-region-options-debug` (done))
 - [`viewer-render-context-matrix`](in-progress/viewer-render-context-matrix.md)
   — Render context matrix — subjects × eye, time of day, mirror, layering
   (blocked by `viewer-render-pixel-oracle` (done), `viewer-plugin-groups`
@@ -1418,7 +1415,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1491)
+## done (1492)
 
 ### protocol
 
@@ -3173,6 +3170,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   never teleported to
 - [`viewer-region-options-debug`](done/viewer-region-options-debug.md) — Region
   / Estate floater — region debug tab (blocked by `viewer-ui-widget-scaffold`
+  (done))
+- [`viewer-region-options-estate`](done/viewer-region-options-estate.md) —
+  Region / Estate floater — estate tab (blocked by `viewer-region-options-debug`
   (done))
 - [`viewer-region-options-general`](done/viewer-region-options-general.md) —
   Region / Estate floater — region (general) tab (blocked by

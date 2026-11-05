@@ -2,9 +2,10 @@
 id: viewer-region-options-estate
 title: Region / Estate floater — estate tab
 topic: viewer
-status: in-progress
+status: done
 origin: reference-viewer feature-cluster survey (2026-07); split from viewer-region-options
 blocked_by: [viewer-region-options-debug]
+refs: [gridspec-aditi-test-land]
 ---
 
 In progress (2026-07-28): the About Region **Estate**, **Covenant**, and
@@ -55,3 +56,47 @@ now exists in sl-proto for the Covenant tab's drop-a-notecard and Reset.
 
 `EstateFlags` is merged into `RegionFlags` (the reference's one flag space);
 the estate draft is a `RegionFlags`.
+
+## Done (2026-11-05)
+
+- **Covenant: set and Reset.** The Covenant tab is a drop target for one
+  notecard (a new generic `ItemDropTarget` / `ItemDropped` pair in
+  `sl-viewer-intents`, resolved by the inventory drag after the notecard
+  editor's own target), taken only while the agent may manage the estate.
+  `EstateChangeCovenant` is asked first; on OK the notecard is read through
+  its item (`FetchInventoryItemAsset`), as `loadInvItem` reads it, and only a
+  body that reads is set (`SetEstateCovenant`) and shown at once — a marked
+  Linden notecard has to decode (`ProblemImportingEstateCovenant`), plain
+  text is a version-0 notecard and passes, and a refused read names the
+  reference's notice (`MissingNotecardAssetID` / `NotAllowedToViewNotecard` /
+  `UnableToLoadNotecardAsset`). **Reset** asks the same confirmation and
+  sends the nil id. Nothing is sent when the covenant already is the one
+  asked for (`sendChangeCovenantID`), nor after the agent has left the region
+  the prompt was about.
+- **The covenant is read over the estate transfer** now
+  (`FetchEstateCovenantAsset`), as `getEstateAsset` reads it; the tab used to
+  ask `ViewerAsset`, which Second Life refuses for every notecard. A refused
+  read says so instead of "loading" for good, and the body is read once per
+  covenant rather than on every summary.
+- **Send Message To Region…** on the Region tab: the `MessageRegion` prompt,
+  then `SendRegionMessage` with what was typed.
+
+Left as it was: the estate tab's message stays an inline field beside its
+button rather than the reference's `MessageEstate` prompt, and Reset follows
+the managers' gate (the reference also enables it for a god without estate
+rights). The Second Life write paths are [[gridspec-aditi-test-land]]'s.
+
+### Verified
+
+`cargo test --release -p sl-viewer-places -p sl-viewer-inventory
+-p sl-viewer-intents` — the covenant read rule and the refusal notices, and
+the one-item drop rule (one item of the type, enabled, else refused).
+
+`cargo test --release -p sl-client-bevy-viewer --test e2e_windows covenant` —
+one fake-grid stage through the real binary: an estate whose covenant is set
+shows the stock covenant body read over the estate transfer; the seeded
+notecard dragged from the inventory onto the tab is confirmed, and the grid
+hears `estatechangecovenantid` with that notecard's asset while the tab shows
+its body; Reset, confirmed, sends the nil id and the tab says there is none;
+and the Region tab's prompt sends the typed text as `simulatormessage`'s last
+parameter.

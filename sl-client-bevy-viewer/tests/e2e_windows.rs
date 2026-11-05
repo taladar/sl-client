@@ -2308,6 +2308,136 @@ mod test {
         Ok(())
     }
 
+    // ---- About Region's covenant and region message ------------------------
+
+    /// The covenant the home region's estate starts with in
+    /// [`a_manager_sets_resets_the_covenant_and_messages_the_region`]; the grid
+    /// serves its stock covenant body for it.
+    const STAGE_COVENANT: u128 = 0x57A6_EC0F_0001;
+
+    /// **An estate manager sets, resets and reads the covenant, and messages
+    /// the region**: the covenant reads over the estate's own transfer, a
+    /// notecard dropped on the Covenant tab is confirmed, read through its item
+    /// and set, Reset clears it, and the Region tab's message prompt sends what
+    /// was typed to everyone in the region.
+    #[test]
+    fn a_manager_sets_resets_the_covenant_and_messages_the_region() -> Result<(), TestError> {
+        stage("estate_covenant_and_message")
+            .region(home())
+            .estate_manager("Alpha")
+            .run(async |stage: &Stage| {
+                let alpha = &stage.viewer("Alpha")?;
+                let agent = stage.agent("Alpha").await?;
+                agent
+                    .with_world(|world, _sim| {
+                        world.estate.covenant = Some(Uuid::from_u128(STAGE_COVENANT));
+                    })
+                    .await;
+                let mut heard = agent.events();
+
+                // The covenant the estate has, read over the estate transfer.
+                let _opened = alpha.menu_path(&REGION_ESTATE).await?;
+                let window = about_region(alpha, HOME_ID);
+                let _shown = alpha.expect(&window).timeout(WAIT).to_be_visible().await?;
+                let _tab = window
+                    .get(Locator::role(Role::Tab).name_key("about-region-tab-covenant"))
+                    .click()
+                    .await?;
+                let panel = window.test_id("about-region-tabs:panel:4");
+                let body = window.test_id("about-region-covenant-body");
+                let _read = alpha
+                    .expect(&body)
+                    .timeout(WAIT)
+                    .to_contain_text("Fake grid covenant: be excellent to each other.")
+                    .await?;
+
+                // A notecard dropped on the tab: asked, read, and set.
+                let (_id, name) = NOTECARD;
+                let inventory = inventory(alpha, name).await?;
+                item_known(alpha, "Notecards", name).await?;
+                let row = item_row(&inventory, name).timeout(WAIT);
+                let _listed = alpha.expect(&row).timeout(WAIT).to_be_visible().await?;
+                let _dropped = row.drag_to(&panel).await?;
+                acknowledge(alpha, "EstateChangeCovenant").await?;
+                let set_to = estate_command(&mut heard, "estatechangecovenantid").await?;
+                assert_eq!(
+                    set_to,
+                    vec![fixture_id(AssetType::Notecard).to_string()],
+                    "the covenant is the dropped notecard's asset"
+                );
+                let _shown = alpha
+                    .expect(&body)
+                    .timeout(WAIT)
+                    .to_contain_text("The fake grid's seeded notecard.")
+                    .await?;
+
+                // Reset: asked, and the covenant cleared. The inventory the
+                // notecard came from is closed first; it stands over the tab.
+                close_window(alpha, &inventory).await?;
+                let _reset = window
+                    .test_id("about-region-button:about-region-reset-covenant")
+                    .click()
+                    .await?;
+                acknowledge(alpha, "EstateChangeCovenant").await?;
+                let cleared = estate_command(&mut heard, "estatechangecovenantid").await?;
+                assert_eq!(
+                    cleared,
+                    vec![Uuid::nil().to_string()],
+                    "Reset sends the nil id"
+                );
+                let _none = alpha
+                    .expect(&body)
+                    .timeout(WAIT)
+                    .to_contain_text("There is no Covenant provided for this Estate.")
+                    .await?;
+
+                // The region message: typed into the prompt, sent on OK.
+                let _tab = window
+                    .get(Locator::role(Role::Tab).name_key("about-region-tab-region"))
+                    .click()
+                    .await?;
+                let _asked = window
+                    .test_id("about-region-button:about-region-message-region")
+                    .click()
+                    .await?;
+                let _prompt = alpha
+                    .expect_notification()
+                    .timeout(WAIT)
+                    .to_show("MessageRegion")
+                    .await?;
+                let _typed = alpha
+                    .ui()
+                    .test_id("toast-input:field")
+                    .fill("The region restarts at noon.")
+                    .await?;
+                let _ok = alpha.ui().test_id("toast-button:OK").click().await?;
+                let message = estate_command(&mut heard, "simulatormessage").await?;
+                assert_eq!(
+                    message.last().map(String::as_str),
+                    Some("The region restarts at noon."),
+                    "the message is the method's last parameter: {message:?}"
+                );
+                Ok(())
+            })?;
+        Ok(())
+    }
+
+    /// The parameters of the next estate command `method` the grid hears.
+    async fn estate_command(
+        heard: &mut broadcast::Receiver<ServerEvent>,
+        method: &str,
+    ) -> Result<Vec<String>, BodyError> {
+        grid_hears(heard, method, |event| match event {
+            ServerEvent::EstateOwnerRequest {
+                method: heard,
+                params,
+                ..
+            } if heard == method => Some(params.clone()),
+            _ => None,
+        })
+        .await
+    }
+
     // ---- About Region's access lists --------------------------------------
 
     /// A resident the home region's estate bans, who never logs in.

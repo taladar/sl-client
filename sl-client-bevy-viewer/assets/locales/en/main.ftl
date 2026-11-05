@@ -605,6 +605,7 @@ about-region-block-parcel-search = Block land show in search
 about-region-teleport-home-one = Teleport Home One Resident…
 about-region-teleport-home-all = Teleport Home All Residents…
 about-region-manage-telehub = Manage Telehub…
+about-region-message-region = Send Message To Region…
 
 # Debug tab.
 about-region-disable-scripts = Disable scripts
@@ -679,6 +680,9 @@ about-region-resale = Resale:
 about-region-subdivide = Subdivide:
 about-region-covenant-none = There is no Covenant provided for this Estate.
 about-region-covenant-loading = (loading covenant…)
+about-region-covenant-unavailable = (the covenant could not be loaded)
+about-region-reset-covenant = Reset
+about-region-covenant-help = Changes to the covenant will show on all parcels in the estate. Drop a notecard here to set it.
 about-region-resale-allowed = Land in this region may be resold.
 about-region-resale-blocked = Land in this region may not be resold.
 about-region-subdivide-allowed = Land in this region may be joined or subdivided.

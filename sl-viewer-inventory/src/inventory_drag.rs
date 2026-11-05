@@ -536,6 +536,8 @@ pub(crate) struct DropTargets<'w, 's> {
     contents_targets: Query<'w, 's, &'static ContentsDropTarget>,
     /// A notecard's body: embed the item in it.
     notecard_targets: Query<'w, 's, &'static crate::intents::NotecardDropTarget>,
+    /// A panel that takes one item of a type (the estate covenant's notecard).
+    item_targets: Query<'w, 's, &'static crate::intents::ItemDropTarget>,
 }
 
 /// What a drop into the **world** is resolved through, bundled as one
@@ -572,6 +574,8 @@ pub(crate) struct DragOutputs<'w, 's> {
     commands_bevy: Commands<'w, 's>,
     /// An item embedded into an open notecard.
     add_embedded: MessageWriter<'w, crate::inventory::AddEmbeddedItem>,
+    /// An item handed to a panel that takes one.
+    item_drops: MessageWriter<'w, crate::intents::ItemDropped>,
     /// The local-chat line a refused drop explains itself with.
     notices: MessageWriter<'w, LocalChatNotice>,
     /// The deep copies waiting for their folders to exist.
@@ -898,6 +902,7 @@ pub(crate) fn on_row_drag_end(
         pick_targets,
         contents_targets,
         notecard_targets,
+        item_targets,
     } = drop_targets;
     let WorldDrop {
         camera,
@@ -913,6 +918,7 @@ pub(crate) fn on_row_drag_end(
         mut contents_mutations,
         mut commands_bevy,
         mut add_embedded,
+        mut item_drops,
         mut notices,
         mut folder_copies,
     } = outputs;
@@ -1045,6 +1051,36 @@ pub(crate) fn on_row_drag_end(
                     at: Some(cursor),
                 });
             }
+        }
+        return;
+    }
+
+    // 2d. Over a panel that takes one item of a type (the estate covenant's
+    //     notecard): hand it the item when the drag is exactly one of those,
+    //     and swallow anything else, as the reference's `ACCEPT_NO` does.
+    let item_target = hover_map
+        .values()
+        .flat_map(|hits| hits.keys())
+        .find_map(|hovered| item_target_at(*hovered, &item_targets, &child_of));
+    if let Some((target, accepts)) = item_target {
+        let dragged: Vec<&ItemInfo> = sources
+            .iter()
+            .filter_map(|(source, _from_library)| match source {
+                MenuTarget::Item(item) => Some(item),
+                MenuTarget::Folder(_) => None,
+            })
+            .collect();
+        let folders = sources.len() != dragged.len();
+        match accepts.accepts_drag(&dragged).filter(|_item| !folders) {
+            Some(item) => {
+                debug!("inventory drop: onto a panel that takes it");
+                report_broken_links(broken, &mut notices);
+                item_drops.write(crate::intents::ItemDropped {
+                    target,
+                    item: item.clone(),
+                });
+            }
+            None => debug!("inventory drop: refused by the panel under the pointer"),
         }
         return;
     }
@@ -1319,6 +1355,25 @@ fn notecard_target_at(
     }
 }
 
+/// The node under `hovered` (itself or its nearest ancestor) that takes one
+/// dropped item ([`crate::intents::ItemDropTarget`]), with what it takes.
+fn item_target_at(
+    hovered: Entity,
+    item_targets: &Query<&crate::intents::ItemDropTarget>,
+    child_of: &Query<&ChildOf>,
+) -> Option<(Entity, crate::intents::ItemDropTarget)> {
+    let mut node = hovered;
+    loop {
+        if let Ok(target) = item_targets.get(node) {
+            return Some((node, *target));
+        }
+        match child_of.get(node) {
+            Ok(parent) => node = parent.parent(),
+            Err(_root) => return None,
+        }
+    }
+}
+
 /// Issue the commands for a drop onto an avatar: wear it on **yourself**
 /// (object → attach, wearable → wear), give it to anyone else. `sources` are
 /// the drag's rows as they act outside the list, links already resolved.
@@ -1388,6 +1443,9 @@ impl Plugin for InventoryDragPlugin {
             // The broken-link refusal a drop posts; idempotent with the chat
             // overlay's own registration, which renders it.
             .add_message::<LocalChatNotice>()
+            // The one-item drop a panel takes; idempotent with the taking
+            // panel's own registration, which reads it.
+            .add_message::<crate::intents::ItemDropped>()
             // Idempotent with the world tier's own init: whichever half of the
             // conversation is present alone still finds its side of it.
             .init_resource::<DragPickActive>()
@@ -1577,6 +1635,28 @@ mod tests {
                 next_owner: Permissions::empty(),
             },
         }
+    }
+
+    /// A one-item panel takes exactly one item of its type, and only while
+    /// enabled: two items, another type, or a disabled panel are refused.
+    #[test]
+    fn an_item_target_takes_one_item_of_its_type() {
+        let mut notecard = item(0);
+        notecard.inv_type = InventoryType::Notecard;
+        let object = item(0);
+        let target = crate::intents::ItemDropTarget {
+            accepts: InventoryType::Notecard,
+            enabled: true,
+        };
+        assert_eq!(target.accepts_drag(&[&notecard]), Some(&notecard));
+        assert_eq!(target.accepts_drag(&[&object]), None);
+        assert_eq!(target.accepts_drag(&[&notecard, &notecard]), None);
+        assert_eq!(target.accepts_drag(&[]), None);
+        let disabled = crate::intents::ItemDropTarget {
+            enabled: false,
+            ..target
+        };
+        assert_eq!(disabled.accepts_drag(&[&notecard]), None);
     }
 
     /// Own rows move; Library items copy; illegal destinations reject.

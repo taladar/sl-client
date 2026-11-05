@@ -105,6 +105,16 @@
 //! material checks Apply makes before anything is sent — is the
 //! `terrain_pbr` child module.
 //!
+//! # The covenant and the region message
+//!
+//! The Covenant tab reads the covenant over the estate's own UDP transfer
+//! ([`Command::FetchEstateCovenantAsset`]), as the reference's
+//! `getEstateAsset` does — Second Life's `ViewerAsset` refuses every notecard.
+//! An estate manager sets it by dropping a notecard on the tab (an
+//! [`ItemDropTarget`]) and clears it with **Reset**; the Region tab's **Send
+//! Message To Region…** asks for the text in a prompt. All three ask first,
+//! and the `estate_prompts` child module carries each to the wire.
+//!
 //! # The windows this one opens
 //!
 //! The Region tab's **Manage Telehub…** opens [`crate::telehub`], the estate
@@ -131,9 +141,9 @@ use bevy::ui::{Checked, InteractionDisabled};
 use bevy::ui_widgets::ValueChange;
 use bevy_flair::style::components::ClassList;
 use sl_client_bevy::{
-    AgentKey, Asset, AssetKey, AssetType, CAP_DISPATCH_REGION_INFO, Command, EstateAccessDelta,
-    EstateAccessKind, EstateAccessLists, EstateBan, EstateCovenant, EstateInfo, EstateInfoUpdate,
-    ExperienceInfo, ExperienceKey, GroupKey, LandArea, LandStatReportType, Maturity, OwnerKey,
+    AgentKey, CAP_DISPATCH_REGION_INFO, Command, EstateAccessDelta, EstateAccessKind,
+    EstateAccessLists, EstateBan, EstateCovenant, EstateInfo, EstateInfoUpdate, ExperienceInfo,
+    ExperienceKey, GroupKey, InventoryType, LandArea, LandStatReportType, Maturity, OwnerKey,
     ProductType, RegionDebugUpdate, RegionFlags, RegionIdentity, RegionInfoUpdate, RegionName,
     RegionTerrainUpdate, SlCapabilities, SlCommand, SlCurrentRegion, SlEvent, SlIdentity,
     SlRegionIdentity, SlRegionLimits, SlSessionEvent, TextureKey, Uuid,
@@ -141,6 +151,7 @@ use sl_client_bevy::{
 use sl_viewer_notices::experience_profile::{OpenExperienceProfile, maturity_key};
 use sl_viewer_notices::god_mode::AgentGodLevel;
 
+mod estate_prompts;
 mod terrain_pbr;
 
 use terrain_pbr::{
@@ -164,10 +175,13 @@ use crate::floater::{
     KeyedFloaters, host_floater,
 };
 use crate::i18n::{Translated, Translator};
+use estate_prompts::{EstatePrompts, RegionPrompt, RegionPromptRequest};
+
 use crate::intents::TexturePicked;
 use crate::intents::{AvatarPicked, OpenAvatarPicker};
 use crate::intents::{ExperiencePicked, ExperiencePickerFilter, OpenExperiencePicker};
 use crate::intents::{GroupPicked, OpenGroupPicker};
+use crate::intents::{ItemDropTarget, ItemDropped};
 use crate::inventory_properties::format_unix_date;
 use crate::land_environment::{
     AllowEnvironmentOverrideRequested, LandEnvironmentPlugin, LandEnvironmentSubject,
@@ -505,6 +519,9 @@ struct AboutRegionState {
     covenant_text: Option<String>,
     /// The covenant notecard asset id awaiting fetch.
     covenant_pending: Option<Uuid>,
+    /// Whether the grid refused the covenant notecard's read, so the tab says
+    /// so rather than "loading" for good.
+    covenant_unavailable: bool,
     /// The estate managers.
     managers: Vec<Uuid>,
     /// The allowed residents.
@@ -1009,7 +1026,7 @@ struct EstateHandles {
     message_field: Option<Entity>,
 }
 
-/// The Covenant tab's handles (read-only).
+/// The Covenant tab's handles.
 #[derive(Debug, Default)]
 struct CovenantHandles {
     /// The estate-name value node.
@@ -1030,6 +1047,9 @@ struct CovenantHandles {
     resale: Option<Entity>,
     /// The subdivide-clause value node.
     subdivide: Option<Entity>,
+    /// The tab's panel, which takes a dropped notecard as the new covenant
+    /// ([`ItemDropTarget`]).
+    drop_area: Option<Entity>,
 }
 
 /// The Access tab's table handles (one viewport + root per list).
@@ -1499,6 +1519,11 @@ enum AboutRegionAction {
     CancelRestart,
     /// Send the composed estate message.
     SendEstateMessage,
+    /// Ask for a message and send it to everyone in the region
+    /// (`estate_prompts`).
+    MessageRegion,
+    /// Clear the estate's covenant, once the user confirms (`estate_prompts`).
+    ResetCovenant,
     /// Open the avatar picker to kick a resident from the estate.
     KickEstate,
     /// Open the avatar picker to add an estate manager.
@@ -1576,6 +1601,9 @@ impl Plugin for AboutRegionPlugin {
             .init_resource::<ModifyRegionSupport>()
             .add_message::<crate::world_api::BoostTexture>()
             .add_message::<TexturePicked>()
+            .add_message::<ItemDropped>()
+            .add_message::<RegionPromptRequest>()
+            .init_resource::<EstatePrompts>()
             // Every capability map is folded in, window or no window: the
             // first comes at login, long before anybody opens the floater.
             .add_systems(
@@ -1657,6 +1685,24 @@ impl Plugin for AboutRegionPlugin {
                     .chain()
                     .after(refresh_on_region)
                     .before(layout_virtual_lists)
+                    .run_if(any_with_component::<AboutRegionState>),
+            )
+            // The actions that ask first: the covenant drop and Reset, and the
+            // region message. After the ingest, so a covenant set here is not
+            // overwritten by a summary read in the same frame.
+            .add_systems(
+                Update,
+                (
+                    estate_prompts::sync_covenant_drop_target,
+                    estate_prompts::take_covenant_drops,
+                    estate_prompts::start_region_prompts,
+                    estate_prompts::answer_region_prompts,
+                    estate_prompts::finish_covenant_loads,
+                )
+                    .chain()
+                    .after(ingest_about_region_events)
+                    .after(refresh_on_region)
+                    .before(update_covenant_tab)
                     .run_if(any_with_component::<AboutRegionState>),
             )
             .add_systems(
@@ -2032,6 +2078,15 @@ fn build_region_tab(commands: &mut Commands, panel: Entity, font_size: f32) -> R
         "about-region-manage-telehub",
         AboutRegionAction::ManageTelehub,
         8,
+        true,
+        font_size,
+    );
+    spawn_action_button(
+        commands,
+        actions,
+        "about-region-message-region",
+        AboutRegionAction::MessageRegion,
+        9,
         true,
         font_size,
     );
@@ -2414,9 +2469,16 @@ fn build_estate_tab(commands: &mut Commands, panel: Entity, font_size: f32) -> E
     handles
 }
 
-/// Build the Covenant tab (read-only).
+/// Build the Covenant tab: the covenant and the estate it binds, read-only, a
+/// **Reset**, and the whole panel a drop target for a notecard to set as the
+/// covenant (both for estate managers, `estate_prompts`).
 fn build_covenant_tab(commands: &mut Commands, panel: Entity, font_size: f32) -> CovenantHandles {
     let mut handles = CovenantHandles::default();
+    commands.entity(panel).insert(ItemDropTarget {
+        accepts: InventoryType::Notecard,
+        enabled: false,
+    });
+    handles.drop_area = Some(panel);
     let estate_row = spawn_labeled_row(commands, panel, "about-region-estate", font_size);
     handles.estate = Some(spawn_value_node(commands, estate_row, font_size));
     let owner_row = spawn_labeled_row(commands, panel, "about-region-estate-owner", font_size);
@@ -2425,7 +2487,28 @@ fn build_covenant_tab(commands: &mut Commands, panel: Entity, font_size: f32) ->
         owner_row,
         NameLinkSpec::new("about-region-loading", "about-region-none"),
     ));
-    handles.text = Some(spawn_value_block(commands, panel, font_size));
+    let body = spawn_value_block(commands, panel, font_size);
+    commands
+        .entity(body)
+        .insert(Name::new("about-region-covenant-body"));
+    handles.text = Some(body);
+    let reset_row = spawn_row(commands, panel);
+    spawn_action_button(
+        commands,
+        reset_row,
+        "about-region-reset-covenant",
+        AboutRegionAction::ResetCovenant,
+        1,
+        true,
+        font_size,
+    );
+    spawn_key_label(
+        commands,
+        reset_row,
+        "about-region-covenant-help",
+        DIM_LABEL_COLOR,
+        font_size,
+    );
     let ts_row = spawn_labeled_row(commands, panel, "about-region-last-modified", font_size);
     handles.timestamp = Some(spawn_value_node(commands, ts_row, font_size));
     let region_row = spawn_labeled_row(commands, panel, "about-region-region", font_size);
@@ -2846,13 +2929,26 @@ fn ingest_about_region_events(
                     dirty.estate_values = true;
                 }
                 SlSessionEvent::EstateCovenant(covenant) => {
+                    state.covenant_unavailable = false;
                     if let Some(id) = covenant.covenant_id {
-                        state.covenant_pending = Some(id);
-                        commands.write(SlCommand(Command::FetchAsset {
-                            asset_id: AssetKey::from(id),
-                            asset_type: AssetType::Notecard,
-                            byte_range: None,
-                        }));
+                        // Read over the estate's own transfer, as the
+                        // reference's `getEstateAsset` does: Second Life's
+                        // `ViewerAsset` refuses every notecard, and a covenant
+                        // is the estate's to hand out, not an item the agent
+                        // holds. Once per covenant: the summary comes again
+                        // after every change, and the body already shown (or
+                        // being read) is the one it names.
+                        let shown = state
+                            .covenant
+                            .as_ref()
+                            .and_then(|previous| previous.covenant_id)
+                            == Some(id)
+                            && (state.covenant_text.is_some() || state.covenant_pending.is_some());
+                        if !shown {
+                            state.covenant_text = None;
+                            state.covenant_pending = Some(id);
+                            commands.write(SlCommand(Command::FetchEstateCovenantAsset));
+                        }
                     } else {
                         state.covenant_text = None;
                         state.covenant_pending = None;
@@ -2903,11 +2999,20 @@ fn ingest_about_region_events(
                     }
                     state.set_access_lists(lists);
                 }
-                SlSessionEvent::AssetReceived(asset)
-                    if state.covenant_pending == Some(asset.id) =>
+                SlSessionEvent::EstateCovenantAssetReceived { data, .. }
+                    if state.covenant_pending.is_some() =>
                 {
                     state.covenant_pending = None;
-                    state.covenant_text = Some(decode_covenant(asset));
+                    state.covenant_text = Some(decode_covenant(data));
+                    dirty.covenant_values = true;
+                }
+                // The covenant read is the one transfer that names no item.
+                SlSessionEvent::TransferFailed {
+                    item: None, status, ..
+                } if state.covenant_pending.is_some() => {
+                    warn!(?status, "the grid refused the estate covenant's notecard");
+                    state.covenant_pending = None;
+                    state.covenant_unavailable = true;
                     dirty.covenant_values = true;
                 }
                 SlSessionEvent::RegionExperiences {
@@ -2985,15 +3090,13 @@ fn ingest_access_list(
     }
 }
 
-/// Decode the covenant notecard asset (empty on error).
-fn decode_covenant(asset: &Asset) -> String {
-    match sl_notecard::Notecard::decode(&asset.data) {
-        Ok(notecard) => notecard.text,
-        Err(error) => {
-            warn!("failed to decode covenant notecard {}: {error}", asset.id);
-            String::new()
-        }
-    }
+/// Decode the covenant notecard's body (empty on error), by the same rule a
+/// dropped covenant is read by ([`estate_prompts::read_covenant`]).
+fn decode_covenant(data: &[u8]) -> String {
+    estate_prompts::read_covenant(data).unwrap_or_else(|_notice| {
+        warn!("failed to decode the covenant notecard");
+        String::new()
+    })
 }
 
 /// Request a single agent's display name.
@@ -3437,6 +3540,8 @@ struct RegionActionOut<'w> {
     notifications: MessageWriter<'w, ShowNotification>,
     /// The Terrain tab's checked, confirmed and file-backed actions.
     terrain: MessageWriter<'w, RegionTerrainRequest>,
+    /// The actions that prompt first: Reset covenant, Message region.
+    prompts: MessageWriter<'w, RegionPromptRequest>,
 }
 
 /// Grey each window's write buttons and every editable control to follow the
@@ -3735,15 +3840,7 @@ fn update_covenant_tab(
         } else {
             set_name_link::<AgentKey>(&mut links, handles.estate_owner, NameTarget::Loading);
         }
-        set_value_node(
-            &mut texts,
-            handles.text,
-            &covenant_body(
-                state.covenant.as_ref(),
-                state.covenant_text.as_deref(),
-                &translator,
-            ),
-        );
+        set_value_node(&mut texts, handles.text, &covenant_body(state, &translator));
         set_value_node(
             &mut texts,
             handles.region,
@@ -4548,6 +4645,7 @@ fn on_about_region_action(
         mut reports,
         mut notifications,
         mut terrain,
+        mut prompts,
     } = out;
     if press.button != PointerButton::Primary {
         return;
@@ -4688,6 +4786,18 @@ fn on_about_region_action(
         }
         AboutRegionAction::KickEstate => {
             pickers.write(OpenAvatarPicker::one(press.entity, PICK_KICK));
+        }
+        AboutRegionAction::MessageRegion | AboutRegionAction::ResetCovenant => {
+            let prompt = if matches!(action, AboutRegionAction::MessageRegion) {
+                RegionPrompt::MessageRegion
+            } else {
+                RegionPrompt::ResetCovenant
+            };
+            prompts.write(RegionPromptRequest {
+                window,
+                region: state.region,
+                prompt,
+            });
         }
         // The three estate access lists take a multi-pick, as the reference's do
         // ("avatar picker yes multi-select"); a kick or a send-home is about one
@@ -5121,16 +5231,17 @@ fn subdivide_text(flags: Option<RegionFlags>, translator: &Translator) -> String
 }
 
 /// The covenant body text, or an appropriate placeholder.
-fn covenant_body(
-    covenant: Option<&EstateCovenant>,
-    text: Option<&str>,
-    translator: &Translator,
-) -> String {
-    if let Some(text) = text {
-        return text.to_owned();
+fn covenant_body(state: &AboutRegionState, translator: &Translator) -> String {
+    if let Some(text) = &state.covenant_text {
+        return text.clone();
     }
-    let has_covenant = covenant.is_some_and(|covenant| covenant.covenant_id.is_some());
-    if has_covenant {
+    let has_covenant = state
+        .covenant
+        .as_ref()
+        .is_some_and(|covenant| covenant.covenant_id.is_some());
+    if has_covenant && state.covenant_unavailable {
+        translator.get("about-region-covenant-unavailable")
+    } else if has_covenant {
         translator.get("about-region-covenant-loading")
     } else {
         translator.get("about-region-covenant-none")

@@ -2,7 +2,7 @@
 id: viewer-avatar-moderation-actions
 title: Per-avatar parcel / estate moderation — the shared action layer
 topic: viewer
-status: blocked
+status: ready
 origin: gap found (2026-08-21) while building viewer-radar-multi-select
 blocked_by: [viewer-region-options-estate]
 refs:
