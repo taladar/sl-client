@@ -1852,9 +1852,13 @@ fn text_muted(mutes: Option<&MuteModel>, id: Uuid, name: &str) -> bool {
 /// What an incoming conversation event is judged against, bundled as one
 /// [`SystemParam`](bevy::ecs::system::SystemParam): our own agent, the settings
 /// and friend roster the auto-reject reads, the object mirror the RLV owner-say
-/// gate reads, and the mute list the block filter reads.
+/// gate reads, the mute list the block filter reads, and the presence whose
+/// Do Not Disturb keeps a chat-session invitation out.
 #[derive(Debug, bevy::ecs::system::SystemParam)]
 pub(crate) struct ConversationFacts<'w> {
+    /// Our presence, so a chat-session invitation is dropped under Do Not
+    /// Disturb.
+    presence: Option<Res<'w, crate::social::PresenceState>>,
     /// Our own agent, so our own lines are recognised.
     identity: Res<'w, SlIdentity>,
     /// The settings the auto-reject and chat filters read.
@@ -2070,8 +2074,9 @@ pub(crate) fn ingest_conversation_events(
                     );
                 }
             }
-            // A text invitation opens the tab (and records its name) and is
-            // accepted at once, as the reference does
+            // A text invitation (dropped whole under Do Not Disturb) opens the
+            // tab (and records its name) and is accepted at once, as the
+            // reference does
             // (`LLViewerChatterBoxInvitation::post` → `chatterBoxInvitationCoro`):
             // until it is, Second Life hands every further line over as a
             // fresh invitation and sends no roster (`gridspec/chat.md`). The
@@ -2099,6 +2104,22 @@ pub(crate) fn ingest_conversation_events(
                     info!(
                         "conversations: voice invitation to {session_id} from {from_agent_id} \
                          not shown: no voice calls in this viewer yet"
+                    );
+                    continue;
+                }
+                // Under Do Not Disturb the reference returns before anything
+                // else (`LLViewerChatterBoxInvitation::post`): no line, no tab,
+                // no answer. Second Life keeps handing the session's later
+                // lines over as fresh invitations, so the first one after Do
+                // Not Disturb ends joins it.
+                if facts
+                    .presence
+                    .as_deref()
+                    .is_some_and(crate::social::PresenceState::is_do_not_disturb)
+                {
+                    info!(
+                        "conversations: invitation to {session_id} from {from_agent_id} \
+                         dropped under do-not-disturb"
                     );
                     continue;
                 }
@@ -4386,6 +4407,64 @@ mod tests {
         let model = app.world().resource::<ConversationModel>();
         let entry = get(model, ConversationKey::Group(group));
         assert_eq!(entry.map(|entry| entry.lines.len()), Some(0));
+    }
+
+    /// Under Do Not Disturb an invitation — a group's, a conference's, even
+    /// our own — opens no tab, shows no line and is not answered, as the
+    /// reference returns first thing; once Do Not Disturb is off, the next
+    /// one is joined.
+    #[test]
+    fn an_invitation_under_do_not_disturb_is_dropped() {
+        let friend = AgentKey::from(Uuid::from_u128(0xF11E));
+        let group = GroupKey::from(Uuid::from_u128(0x640E));
+        let conference = Uuid::from_u128(0xC0F3);
+        let mut app = ingest_app(&[]);
+        let mut presence = crate::social::PresenceState::default();
+        presence.set_do_not_disturb(true);
+        app.insert_resource(presence);
+        ingest(
+            &mut app,
+            invitation(group.uuid(), friend, true, "busy?", InviteChannel::Text),
+        );
+        assert_eq!(invitation_answers(&app), Vec::new());
+        ingest(
+            &mut app,
+            invitation(conference, friend, false, "hi all", InviteChannel::Both),
+        );
+        assert_eq!(invitation_answers(&app), Vec::new());
+        {
+            let model = app.world().resource::<ConversationModel>();
+            assert!(get(model, ConversationKey::Group(group)).is_none());
+            assert!(
+                get(
+                    model,
+                    ConversationKey::Conference(ImSessionId::from(conference))
+                )
+                .is_none()
+            );
+        }
+        app.world_mut()
+            .resource_mut::<crate::social::PresenceState>()
+            .set_do_not_disturb(false);
+        ingest(
+            &mut app,
+            invitation(
+                group.uuid(),
+                friend,
+                true,
+                "still there",
+                InviteChannel::Text,
+            ),
+        );
+        assert_eq!(
+            invitation_answers(&app),
+            vec![(ImSessionId::from(group.uuid()), true, true)]
+        );
+        let model = app.world().resource::<ConversationModel>();
+        let lines: Vec<&str> = get(model, ConversationKey::Group(group))
+            .map(|entry| entry.lines.iter().map(|line| line.body.as_str()).collect())
+            .unwrap_or_default();
+        assert_eq!(lines, vec!["still there"], "the dropped line never shows");
     }
 
     /// A voice-only invitation is a call, which this viewer cannot take yet:

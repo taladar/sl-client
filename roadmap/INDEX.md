@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 334 |
 | blocked | 38 |
 | in-progress | 14 |
-| bugs | 37 |
-| done | 1494 |
+| bugs | 36 |
+| done | 1495 |
 | deferred | 30 |
 | wont-do | 24 |
 | **total** | **2100** |
@@ -1317,7 +1317,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (37)
+## bugs (36)
 
 ### protocol
 
@@ -1380,9 +1380,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-retired-neighbour-stays-drawn`](bugs/viewer-retired-neighbour-stays-drawn.md)
   — A neighbour the simulator retired stays drawn — its ground, water and map
   tile outlive its circuit
-- [`viewer-session-invitation-under-do-not-disturb`](bugs/viewer-session-invitation-under-do-not-disturb.md)
-  — Under Do Not Disturb a group or conference invitation is shown and joined;
-  the reference ignores it
 - [`viewer-sliders-show-no-value`](bugs/viewer-sliders-show-no-value.md) — A
   slider shows no value, and no bounds or step either
 - [`viewer-terraform-parcel-refusal`](bugs/viewer-terraform-parcel-refusal.md) —
@@ -1413,7 +1410,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1494)
+## done (1495)
 
 ### protocol
 
@@ -3291,6 +3288,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-session-invitation-accepted-at-once`](done/viewer-session-invitation-accepted-at-once.md)
   — A group or conference invitation waits for Accept / Decline; the reference
   joins at once
+- [`viewer-session-invitation-under-do-not-disturb`](done/viewer-session-invitation-under-do-not-disturb.md)
+  — Under Do Not Disturb a group or conference invitation is shown and joined;
+  the reference ignores it
 - [`viewer-setting-write-rejected-wrong-type`](done/viewer-setting-write-rejected-wrong-type.md)
   — A settings write is silently rejected for the wrong integer type
 - [`viewer-settings-account-scope-persist`](done/viewer-settings-account-scope-persist.md)

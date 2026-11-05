@@ -487,7 +487,11 @@ viewer minted.
   own, a blocked resident's group session (left unanswered) and their ad-hoc
   conference or one the ignore-conferences setting refuses (declined).
   `Event::ConferenceInvited` names the channel it invites to; a voice-only
-  invitation is left alone until the viewer takes calls.
+  invitation is left alone until the viewer takes calls. Under Do Not Disturb
+  every invitation is dropped unanswered and its line unshown, as the
+  reference returns first thing
+  (`viewer-session-invitation-under-do-not-disturb`); the session's next line
+  after Do Not Disturb ends arrives as a fresh invitation and joins it.
 - **The history fetch degrades on OpenSim** without a request: the
   capability is absent, so nothing is asked.
 
