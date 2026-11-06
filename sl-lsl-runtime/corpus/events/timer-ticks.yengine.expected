@@ -1,0 +1,5 @@
+@6 print "timer 1"
+@11 print "timer 2"
+@16 print "timer 3"
+end state=default running=true queued=0
+global fired = integer 3

@@ -1246,6 +1246,53 @@ is.
   back by the script) and the `script-compile` census, which runs offline
   on both fake flavours.
 
+### As built: the transcript corpus
+
+The other side of the trait is a host that is no world at all.
+`sl-lsl-runtime/tests/script_corpus/` runs every script under
+`sl-lsl-runtime/corpus/<area>/<name>.lsl` in the VM against a recording host
+— one prim alone in a region, its owner present — for a fixed number of
+ticks, and sets the transcript of what it did against `<name>.expected`
+beside it. It is the cheapest test of the runtime: no grid, no network, no
+async runtime, the whole corpus in milliseconds.
+
+- **A transcript is behaviour, not internals.** One line per stimulus
+  (`@3 > touch by …`), one per host call that *does* something (`print`,
+  `say` with its channel and volume, `owner-say`, `set-position`,
+  `set-prim` with the `changed` bits it raised, `die`, …), each stamped with
+  its tick; then the script's state, run flag and queue length, and every
+  global's final value, floats in the shortest form that reads back as the
+  same `f32`. A query leaves no line: what the script does with its answer
+  does. So a case survives a rewrite of the VM.
+- **The header is the script's leading comments**: `// corpus:` says what
+  the case pins (required), `// flavours:` limits the engines
+  (`secondlife yengine xengine`, all three by default), `// ticks:` the run
+  (20), and `// at N: touch | chat <channel> <text> | link <num> <text>
+  <key> | changed <bits> | rez <param>` posts a stimulus before tick `N`. A
+  lowercase key it does not know fails the case; any other comment is the
+  case's notes, its `Oracle:` line among them.
+- **One expectation, or one per flavour.** A case whose engines agree keeps
+  one `<name>.expected`; one whose engines differ (a run-time error is
+  worded and handled three ways) keeps `<name>.<flavour>.expected` instead.
+- **`UPDATE_EXPECT=1 cargo test -p sl-lsl-runtime --test script_corpus`**
+  writes them, arranging the files by whether the flavours agreed and
+  removing what the other arrangement left. An expectation is a claim about
+  LSL: read what it wrote against the case's oracle before committing it.
+  An expectation with no script is a failure, so a renamed case cannot
+  leave its old transcript looking like coverage.
+
+The value model's rules each have a case — the casts out of and into a
+string, a key that is not a string, `f32` drift, boolean context, `list ==
+list` and `!=`, string comparison, the `+` overloads, the vector and
+rotation operators, integer wrap-around and the Math Errors — beside
+evaluation order as aditi showed it (operands right to left, arguments,
+list elements and vector components left to right, `&&` and `||` both
+sides), `llGetSubString`'s wrapping indices, and the event machinery the
+stimuli reach: timers, sleeps, state changes, touches, listens, link
+messages, `on_rez` and a setter's `changed`. Each names its oracle —
+PyOptimizer's `expr.suite`, the SL wiki, the aditi measurements above, or
+OpenSim's own `LSL_TypesTestLSLInteger` and `LSL_ApiListTests`.
+
 ## Out of scope
 
 - **Running Luau / SLua.** `sl-proto` models `ScriptLanguage::Luau`, but

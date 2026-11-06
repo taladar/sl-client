@@ -1,0 +1,8 @@
+@2 > chat channel=7 "hello"
+@2 print "heard 7 Corpus Resident: hello"
+@3 > chat channel=8 "wrong channel"
+@4 > chat channel=7 "stop"
+@4 print "heard 7 Corpus Resident: stop"
+@5 > chat channel=7 "after removal"
+end state=default running=true queued=0
+global handle = integer 1

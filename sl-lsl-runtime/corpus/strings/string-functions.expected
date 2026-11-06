@@ -1,0 +1,11 @@
+@1 print "5"
+@1 print "3"
+@1 print "-1"
+@1 print "MIXED mixed"
+@1 print "[padded]"
+@1 print "[padded  ]"
+@1 print "he--ld"
+@1 print "a|b|;|;|c"
+@1 print "a||b"
+@1 print "a%20b%26c a b"
+end state=default running=true queued=0

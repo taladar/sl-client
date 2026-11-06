@@ -1,0 +1,4 @@
+@1 print "asleep"
+@11 print "awake"
+@16 print "again"
+end state=default running=true queued=0

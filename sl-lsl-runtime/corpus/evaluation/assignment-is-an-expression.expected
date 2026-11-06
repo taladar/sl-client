@@ -1,0 +1,8 @@
+@1 print "14"
+@1 print "8"
+@1 print "4"
+@1 print "14"
+end state=default running=true queued=0
+global c = integer 1
+global e = integer 8
+global stored = integer 4

@@ -1,0 +1,7 @@
+@1 print "0"
+@1 print "1"
+@1 print "0"
+end state=default running=true queued=0
+global total = float 10.000002
+global big = float 16777216.0
+global stored = float 16777216.0

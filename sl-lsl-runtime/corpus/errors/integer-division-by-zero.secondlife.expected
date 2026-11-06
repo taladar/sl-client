@@ -1,0 +1,5 @@
+@1 print "before"
+@1 say channel=2147483647 volume=Say "Corpus Prim [script:corpus] Script run-time error"
+@1 say channel=2147483647 volume=Say "Math Error"
+end state=default running=false queued=0
+global reached = integer 0

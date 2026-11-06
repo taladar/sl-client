@@ -1,0 +1,7 @@
+@1 print "default entry"
+@2 > touch by 0a0a0a0a-0000-4000-8000-000000000001 at <128.0, 128.0, 21.0>
+@2 print "touched in default"
+@2 print "default exit"
+@2 left-state
+@2 print "other entry"
+end state=other running=true queued=0

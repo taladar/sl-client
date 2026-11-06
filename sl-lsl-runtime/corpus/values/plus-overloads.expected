@@ -1,0 +1,6 @@
+@1 print "start, 0, 1, 2, 3, 4"
+@1 print "1, 2"
+@1 print "1, 2"
+@1 print "12"
+end state=default running=true queued=0
+global built = list [string "start", integer 0, integer 1, integer 2, integer 3, integer 4]

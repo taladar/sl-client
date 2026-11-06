@@ -1,0 +1,6 @@
+@1 print "entry, start parameter 0, resets 0"
+@2 > rez 99
+@2 print "on_rez 99"
+@2 print "entry, start parameter 99, resets 0"
+end state=default running=true queued=0
+global resets = integer 0

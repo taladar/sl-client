@@ -1,0 +1,7 @@
+@1 print "-2147483648"
+@1 print "-2147483648"
+@1 print "-2"
+end state=default running=true queued=0
+global biggest = integer 2147483647
+global wrapped = integer -2147483648
+global negated = integer -2147483648

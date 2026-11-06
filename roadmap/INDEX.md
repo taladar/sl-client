@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 128 |
-| ready | 333 |
+| ready | 332 |
 | blocked | 40 |
 | in-progress | 17 |
 | bugs | 38 |
-| done | 1492 |
+| done | 1493 |
 | deferred | 30 |
 | wont-do | 24 |
 | **total** | **2102** |
@@ -325,7 +325,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-lsl-opensim-function-set`](ideas/gridspec-lsl-opensim-function-set.md)
   — Measure which library functions OpenSim's engines compile
 
-## ready (333)
+## ready (332)
 
 ### protocol
 
@@ -1048,9 +1048,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Run one script on both grids and diff what it did (blocked by
   `server-fake-grid-script-engine-wiring` (done),
   `gridspec-lsl-live-differential-runner` (done))
-- [`test-lsl-script-corpus`](ready/test-lsl-script-corpus.md) — An executable
-  LSL corpus that runs in cargo test with no grid (blocked by
-  `server-lsl-vm-execution` (done))
 
 ### repl
 
@@ -1422,7 +1419,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1492)
+## done (1493)
 
 ### protocol
 
@@ -4222,6 +4219,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — fetch the read-only Library tree
 - [`test-logout-clean`](done/test-logout-clean-request-logout-assert-clean-logoutreply-shutdown.md)
   — request logout, assert clean LogoutReply / shutdown
+- [`test-lsl-script-corpus`](done/test-lsl-script-corpus.md) — An executable LSL
+  corpus that runs in cargo test with no grid (blocked by
+  `server-lsl-vm-execution` (done))
 - [`test-map-blocks-items`](done/test-map-blocks-items-map-blocks-items-layer.md)
   — map blocks/items/layer
 - [`test-mesh-fetch-http`](done/test-mesh-fetch-http-http-caps-mesh-fetch-decode.md)

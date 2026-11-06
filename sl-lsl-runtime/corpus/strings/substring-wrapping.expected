@@ -1,0 +1,8 @@
+@1 print "abc"
+@1 print "fgh"
+@1 print "abgh"
+@1 print "ah"
+@1 print "defgh"
+@1 print ""
+@1 print "cdef"
+end state=default running=true queued=0

@@ -24,6 +24,12 @@ sl-viewer-ui-core/assets/fonts/OFL.txt -whitespace
 # LSL linter for the whole corpus tree.
 sl-lsl/tests/corpus/**/*.lsl skipchecks=lsl:::lslint;;;deliberately[[space]]invalid[[space]]differential-oracle[[space]]fixtures
 
+# The runtime's transcript corpus pins exactly what lslint warns about — list
+# == list, constant conditions, the legacy print, integer *= float, a cast of a
+# cast (which lslint cannot parse) — and is judged by its transcripts and by
+# sl-lsl-runtime's own compiler, which compiles each case as Second Life does.
+sl-lsl-runtime/corpus/**/*.lsl skipchecks=lsl:::lslint;;;semantics[[space]]fixtures[[space]]judged[[space]]by[[space]]their[[space]]transcripts
+
 # The land/ground probe measures what each grid answers llCloud, which lslint
 # rejects as deprecated; calling it is the measurement.
 sl-lsl-runtime/probes/land/ground.lsl skipchecks=lsl:::lslint;;;measures[[space]]the[[space]]deprecated[[space]]llCloud
