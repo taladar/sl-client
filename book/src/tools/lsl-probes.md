@@ -388,37 +388,43 @@ range of the prims.
 For each probe, in id order, the case rezzes a cube per prim against the
 region's reference primitive (prim A 1 m above it, the others `distance` east
 and `height` above it, the `bare` ones after the prim of the script that lists
-them). It puts the probe's notecards into prim A — each made in the owner's
-Trash, saved with its text and dropped into the prim (`# notecard`, with the
-name the grid gave it when that is another) — and each `object` into its prim
-(`# object`). It makes each other script in its prim under its name with
-`RezScript`, in save order, and uploads the source running, prefixed on
-OpenSim with the line that picks the engine (`//YEngine:` or `//XEngine:`),
-for the header's `target` (a script uploaded for `lsl2` is noted
-`# target:`). It answers each `waiting`
-record and notes what it did (`# touch`, `# chat by=other channel=7 text="…"`; a
-touch by the other avatar also says whether that avatar has an active group,
-`active_group=set|none`, which decides what `llDetectedGroup` answers and no
-script can read; every touch says the surface it sent, `surface=none` or
-`face=… uv=… st=… pos=… normal=… binormal=…` with `pos` in the region). It keeps
-the probe's owner-say lines from its prims, and every `DEBUG_CHANNEL` message
-they send as a `# debug-channel:` note (`# debug-channel by=other:` for what the
-other avatar is sent; an owner-say line that is not a probe line as
-`# owner-say:`), until `end` or three minutes (the header's `deadline`, if it
-has one), then derezzes the prims
-to the Trash — and so it does when the grid refuses one of a probe's rezzes,
-with the prims already rezzed, before the run fails. For a probe whose header
-asks (`stats`), it notes each statistic asked for as `# sim-stats <key>=…`
-whenever it changes. It also notes what the grid sent the two viewers meanwhile,
-about the avatars: a permission question from the probe's prims (`# question`,
-the mask, the object's name, how the owner's name was put), a dialog from them
-(`# dialog`, the message, the buttons in the order sent, the channel) and the
-reply (`# dialog-reply`, the index and how many bytes went), an instant message
-from an object (`# im`, the dialog, who the grid names as sender and what the
-message id is, as roles — `owner`, `other`, `probe`), any other line of the
-prims' chat an avatar hears (`# chat`, its type and length, `# owner-say:` for
-the owner's own), the sit response (`# sit`, seat position and rotation, camera
-offsets), a `ScriptControlChange` (`# script-control-change`), a follow camera
+them). On OpenSim that is the workspace's test object, the cube Default Region
+streams at `<120, 128, 26.25>` (`OPENSIM_TEST_OBJECT`), matched by position —
+the region holds other prims, some left right above it — and a run whose region
+does not stream it fails; on aditi it is the fixtures' build location. The run
+log names the anchor (`rezzing the probes' prims against this anchor`). It used
+to be whichever prim streamed first, which in most runs on 2026-11-05 was a
+child prim at its offset `<0, 0, 0>`, and put the probes' prims at the region's
+corner, under the ground. It puts the probe's notecards into prim A — each made
+in the owner's Trash, saved with its text and dropped into the prim
+(`# notecard`, with the name the grid gave it when that is another) — and each
+`object` into its prim (`# object`). It makes each other script in its prim
+under its name with `RezScript`, in save order, and uploads the source running,
+prefixed on OpenSim with the line that picks the engine (`//YEngine:` or
+`//XEngine:`), for the header's `target` (a script uploaded for `lsl2` is noted
+`# target:`). It answers each `waiting` record and notes what it did (`# touch`,
+`# chat by=other channel=7 text="…"`; a touch by the other avatar also says
+whether that avatar has an active group, `active_group=set|none`, which decides
+what `llDetectedGroup` answers and no script can read; every touch says the
+surface it sent, `surface=none` or `face=… uv=… st=… pos=… normal=… binormal=…`
+with `pos` in the region). It keeps the probe's owner-say lines from its prims,
+and every `DEBUG_CHANNEL` message they send as a `# debug-channel:` note
+(`# debug-channel by=other:` for what the other avatar is sent; an owner-say
+line that is not a probe line as `# owner-say:`), until `end` or three minutes
+(the header's `deadline`, if it has one), then derezzes the prims to the Trash —
+and so it does when the grid refuses one of a probe's rezzes, with the prims
+already rezzed, before the run fails. For a probe whose header asks (`stats`),
+it notes each statistic asked for as `# sim-stats <key>=…` whenever it changes.
+It also notes what the grid sent the two viewers meanwhile, about the avatars: a
+permission question from the probe's prims (`# question`, the mask, the object's
+name, how the owner's name was put), a dialog from them (`# dialog`, the
+message, the buttons in the order sent, the channel) and the reply
+(`# dialog-reply`, the index and how many bytes went), an instant message from
+an object (`# im`, the dialog, who the grid names as sender and what the message
+id is, as roles — `owner`, `other`, `probe`), any other line of the prims' chat
+an avatar hears (`# chat`, its type and length, `# owner-say:` for the owner's
+own), the sit response (`# sit`, seat position and rotation, camera offsets), a
+`ScriptControlChange` (`# script-control-change`), a follow camera
 (`# follow-cam`, the parameters by code, or `# follow-cam-clear`), an avatar's
 animation list when it changes (`# animations`, the built-in ones by name, each
 with `@probe` when the probe's prim is its source; an uploaded one is the
@@ -436,17 +442,16 @@ length beside it. A trip `away` is noted as `# away` and `# back`, with how each
 teleport went. An attach is noted as `# attach` and, once the region shows prim
 A worn, `# attached` with the point and whether it kept its key; a drop as
 `# drop` and `# dropped`; a re-rez as `# take`, `# taken` (how the grid
-announced the item), `# rez` and `# rezzed`; a restart as `# restart`, `#
-region-down` (what the owner was told as the region dropped it), `#
-region-up` and `# back` (whether the region brought every prim back), or `#
-restart sent=no` and why; a `response=none` says the region
-did not show it within twenty seconds. A line prim A prints before the update
-that names its new key is kept, not lost. A prim still worn when a probe ends is
-detached into the owner's inventory rather than derezzed. Names are never
-written: both avatars' names in anything a grid wrote become `<first>`,
-`<last>`, `<other-first>`, `<other-last>`. Every wait inside a run keeps what
-arrives during it, so a line printed while the case waits for a compile or a
-listing is not lost.
+announced the item), `# rez` and `# rezzed`; a restart as `# restart`,
+`# region-down` (what the owner was told as the region dropped it),
+`# region-up` and `# back` (whether the region brought every prim back), or
+`# restart sent=no` and why; a `response=none` says the region did not show it
+within twenty seconds. A line prim A prints before the update that names its new
+key is kept, not lost. A prim still worn when a probe ends is detached into the
+owner's inventory rather than derezzed. Names are never written: both avatars'
+names in anything a grid wrote become `<first>`, `<last>`, `<other-first>`,
+`<other-last>`. Every wait inside a run keeps what arrives during it, so a line
+printed while the case waits for a compile or a listing is not lost.
 
 A result file's header says where and how the run was made:
 

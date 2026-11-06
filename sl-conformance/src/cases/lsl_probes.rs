@@ -1050,7 +1050,7 @@ async fn run_corpus(ctx: &mut TestContext, xengine: bool) -> Result<(), TestFail
     let Some(reference) = reference else {
         if is_opensim(grid) {
             return Err(TestFailure::Assertion(
-                "no primitive appeared in the region's object stream".to_owned(),
+                "no prim to rez against appeared in the region's object stream (on OpenSim, the test object at support::OPENSIM_TEST_OBJECT)".to_owned(),
             ));
         }
         ctx.mark_partial("landing region streamed no primitive to place against");
@@ -1061,6 +1061,7 @@ async fn run_corpus(ctx: &mut TestContext, xengine: bool) -> Result<(), TestFail
         y: reference.y,
         z: reference.z + LIFT_M,
     };
+    tracing::info!(?reference, "rezzing the probes' prims against this anchor");
     let date = now_rfc3339()?.chars().take(10).collect::<String>();
     let cast = {
         let (session, other) = ctx.primary_and_secondary().ok_or_else(|| {

@@ -6,6 +6,7 @@ engine: XEngine
 settings: OpenSimDefaults.ini: [YEngine] MinTimerInterval=0.1; [XEngine] MinTimerInterval unset (LSL_Api default 0.5); ScriptDelayFactor=1.0, SensorMaxRange=96, SensorMaxResults=16, UseLlCastRayV3=false (defaults) on both; [YEngine] ScriptHeapSize=1024 KiB, ScriptStackSize=2048 KiB (defaults); OpenSim.ini [Network] OutboundDisallowForUserScriptsExcept=127.0.0.1:9000 (the simulator itself), [ScriptsHttpRequestModule] and llHTTPRequest limits at their defaults
 
 # skipped: script "Shadows" (skip-on: opensim-xengine)
+# chat type=say from="Object" length=14 text="Script running"
 PROBE prim/params rec=start region="Default Region" channel="OpenSim" version="OpenSim 0.9.2.1 Yeti Dev   36f6d16 (Unix/Mono)"
 PROBE prim/params rec=read label=fresh-type got="0, 0, <0.000000, 1.000000, 0.000000>, 0.000000, <0.000000, 0.000000, 0.000000>, <1.000000, 1.000000, 0.000000>, <0.000000, 0.000000, 0.000000>"
 PROBE prim/params rec=read label=fresh-color got="<1.000000, 1.000000, 1.000000>, 1.000000"
@@ -35,194 +36,197 @@ PROBE prim/params rec=read label=fresh-render-material got=""
 PROBE prim/params rec=read label=fresh-sit-flags got=""
 PROBE prim/params rec=read label=fresh-cast-shadows got=""
 PROBE prim/params rec=read label=fresh-temp-on-rez got="0"
-PROBE prim/params rec=try label=box-in-range t=0.024000
+PROBE prim/params rec=try label=box-in-range t=0.025000
 PROBE prim/params rec=rt label=box-in-range got="0, 32, <0.250000, 0.750000, 0.000000>, 0.500000, <0.000000, 0.500000, 0.000000>, <0.500000, 1.500000, 0.000000>, <0.250000, -0.250000, 0.000000>"
 PROBE prim/params rec=try label=box-past-range t=0.225000
 PROBE prim/params rec=rt label=box-past-range got="0, 0, <0.000000, 1.000000, 0.000000>, 0.990000, <-1.000000, 1.000000, 0.000000>, <2.000000, 0.000000, 0.000000>, <0.500000, -0.500000, 0.000000>"
-PROBE prim/params rec=try label=box-cut-reversed t=0.425000
+PROBE prim/params rec=try label=box-cut-reversed t=0.427000
 PROBE prim/params rec=rt label=box-cut-reversed got="0, 0, <0.180000, 0.200000, 0.000000>, 0.000000, <0.000000, 0.000000, 0.000000>, <1.000000, 1.000000, 0.000000>, <0.000000, 0.000000, 0.000000>"
-PROBE prim/params rec=try label=box-cut-tiny t=0.625000
+PROBE prim/params rec=try label=box-cut-tiny t=0.627000
 PROBE prim/params rec=rt label=box-cut-tiny got="0, 0, <0.490000, 0.510000, 0.000000>, 0.000000, <0.000000, 0.000000, 0.000000>, <1.000000, 1.000000, 0.000000>, <0.000000, 0.000000, 0.000000>"
-PROBE prim/params rec=try label=box-hollow-0.99 t=0.826000
+PROBE prim/params rec=try label=box-hollow-0.99 t=0.827000
 PROBE prim/params rec=rt label=box-hollow-0.99 got="0, 0, <0.000000, 1.000000, 0.000000>, 0.990000, <0.000000, 0.000000, 0.000000>, <1.000000, 1.000000, 0.000000>, <0.000000, 0.000000, 0.000000>"
-PROBE prim/params rec=try label=box-hole-unknown t=1.026000
+PROBE prim/params rec=try label=box-hole-unknown t=1.028000
 PROBE prim/params rec=rt label=box-hole-unknown got="0, 0, <0.000000, 1.000000, 0.000000>, 0.500000, <0.000000, 0.000000, 0.000000>, <1.000000, 1.000000, 0.000000>, <0.000000, 0.000000, 0.000000>"
-PROBE prim/params rec=try label=cylinder t=1.226000
+PROBE prim/params rec=try label=cylinder t=1.228000
 PROBE prim/params rec=rt label=cylinder got="1, 48, <0.000000, 1.000000, 0.000000>, 0.300000, <0.000000, 0.250000, 0.000000>, <1.000000, 0.500000, 0.000000>, <0.000000, 0.000000, 0.000000>"
-PROBE prim/params rec=try label=prism t=1.427000
+PROBE prim/params rec=try label=prism t=1.429000
 PROBE prim/params rec=rt label=prism got="2, 16, <0.000000, 1.000000, 0.000000>, 0.300000, <0.000000, 0.000000, 0.000000>, <0.000000, 0.000000, 0.000000>, <0.000000, 0.000000, 0.000000>"
-PROBE prim/params rec=try label=sphere-dimple t=1.627000
+PROBE prim/params rec=try label=sphere-dimple t=1.630000
 PROBE prim/params rec=rt label=sphere-dimple got="3, 0, <0.000000, 1.000000, 0.000000>, 0.000000, <0.000000, 0.000000, 0.000000>, <0.200000, 0.700000, 0.000000>"
-PROBE prim/params rec=try label=sphere-dimple-reversed t=1.828000
+PROBE prim/params rec=try label=sphere-dimple-reversed t=1.831000
 PROBE prim/params rec=rt label=sphere-dimple-reversed got="3, 0, <0.000000, 1.000000, 0.000000>, 0.000000, <0.000000, 0.000000, 0.000000>, <0.080000, 0.100000, 0.000000>"
-PROBE prim/params rec=try label=torus-in-range t=2.028000
+PROBE prim/params rec=try label=torus-in-range t=2.031000
 PROBE prim/params rec=rt label=torus-in-range got="4, 0, <0.000000, 1.000000, 0.000000>, 0.000000, <0.000000, 0.000000, 0.000000>, <1.000000, 0.250000, 0.000000>, <0.000000, 0.000000, 0.000000>, <0.000000, 1.000000, 0.000000>, <0.000000, 0.000000, 0.000000>, 1.000000, 1.000000, 0.000000"
-PROBE prim/params rec=try label=torus-past-range t=2.229000
+PROBE prim/params rec=try label=torus-past-range t=2.233000
 PROBE prim/params rec=rt label=torus-past-range got="4, 0, <0.000000, 1.000000, 0.000000>, 0.000000, <0.000000, 0.000000, 0.000000>, <1.000000, 0.010000, 0.000000>, <0.500000, 0.000000, 0.000000>, <0.000000, 1.000000, 0.000000>, <1.000000, 1.000000, 0.000000>, 2.000000, 1.000000, 0.950000"
-PROBE prim/params rec=try label=tube t=2.429000
+PROBE prim/params rec=try label=tube t=2.443000
 PROBE prim/params rec=rt label=tube got="5, 0, <0.000000, 1.000000, 0.000000>, 0.000000, <0.000000, 0.000000, 0.000000>, <1.000000, 0.500000, 0.000000>, <0.000000, 0.000000, 0.000000>, <0.000000, 1.000000, 0.000000>, <0.000000, 0.000000, 0.000000>, 1.000000, 1.000000, 0.000000"
-PROBE prim/params rec=try label=ring t=2.630000
+PROBE prim/params rec=try label=ring t=2.643000
 PROBE prim/params rec=rt label=ring got="6, 0, <0.000000, 1.000000, 0.000000>, 0.000000, <0.000000, 0.000000, 0.000000>, <1.000000, 0.500000, 0.000000>, <0.000000, 0.000000, 0.000000>, <0.000000, 1.000000, 0.000000>, <0.000000, 0.000000, 0.000000>, 1.000000, 1.000000, 0.000000"
-PROBE prim/params rec=try label=sculpt-sphere t=2.830000
+PROBE prim/params rec=try label=sculpt-sphere t=2.844000
 PROBE prim/params rec=rt label=sculpt-sphere got="7, 89556747-24cb-43ed-920b-47caed15465f, 1"
-PROBE prim/params rec=try label=sculpt-flags t=3.030000
+PROBE prim/params rec=try label=sculpt-flags t=3.044000
 PROBE prim/params rec=rt label=sculpt-flags got="7, 89556747-24cb-43ed-920b-47caed15465f, 194"
-PROBE prim/params rec=try label=sculpt-type-unknown t=3.231000
+PROBE prim/params rec=try label=sculpt-type-unknown t=3.245000
 PROBE prim/params rec=rt label=sculpt-type-unknown got="7, 89556747-24cb-43ed-920b-47caed15465f, 7"
-PROBE prim/params rec=try label=sculpt-not-a-key t=3.431000
+PROBE prim/params rec=try label=sculpt-not-a-key t=3.445000
 PROBE prim/params rec=rt label=sculpt-not-a-key got="7, 89556747-24cb-43ed-920b-47caed15465f, 7"
-PROBE prim/params rec=try label=type-unknown t=3.631000
+PROBE prim/params rec=try label=type-unknown t=3.648000
 # debug-channel: from="Object" text="llSetPrimitiveParams: Error running rule #2: arg #0 - unsupported parameter"
 PROBE prim/params rec=rt label=type-unknown got="7, 89556747-24cb-43ed-920b-47caed15465f, 7"
 PROBE prim/params rec=read label=box-again got="0, 0, <0.000000, 1.000000, 0.000000>, 0.000000, <0.000000, 0.000000, 0.000000>, <1.000000, 1.000000, 0.000000>, <0.000000, 0.000000, 0.000000>"
-PROBE prim/params rec=try label=color t=5.033000
+PROBE prim/params rec=try label=color t=5.049000
 PROBE prim/params rec=rt label=color got="<0.247059, 0.498039, 0.749020>, 0.498039"
-PROBE prim/params rec=try label=color-past-range t=5.233000
+PROBE prim/params rec=try label=color-past-range t=5.250000
 PROBE prim/params rec=rt label=color-past-range got="<1.000000, 0.000000, 0.498039>, 1.000000"
-PROBE prim/params rec=try label=color-alpha-negative t=5.433000
+PROBE prim/params rec=try label=color-alpha-negative t=5.452000
 PROBE prim/params rec=rt label=color-alpha-negative got="<1.000000, 1.000000, 1.000000>, 0.000000"
-PROBE prim/params rec=try label=color-fine t=5.634000
+PROBE prim/params rec=try label=color-fine t=5.653000
 PROBE prim/params rec=rt label=color-fine got="<0.000000, 0.329412, 0.996078>, 0.329412"
-PROBE prim/params rec=try label=texture t=6.034000
+PROBE prim/params rec=try label=texture t=6.054000
 PROBE prim/params rec=rt label=texture got="89556747-24cb-43ed-920b-47caed15465f, <2.000000, 3.000000, 0.000000>, <0.250008, -0.250008, 0.000000>, 1.570796"
-PROBE prim/params rec=try label=texture-past-range t=6.235000
+PROBE prim/params rec=try label=texture-past-range t=6.255000
 PROBE prim/params rec=rt label=texture-past-range got="89556747-24cb-43ed-920b-47caed15465f, <200.000000, -200.000000, 0.000000>, <1.000000, -1.000000, 0.000000>, 0.716753"
-PROBE prim/params rec=try label=texture-zero-repeats t=6.435000
+PROBE prim/params rec=try label=texture-zero-repeats t=6.459000
 PROBE prim/params rec=rt label=texture-zero-repeats got="89556747-24cb-43ed-920b-47caed15465f, <0.000000, 0.000000, 0.000000>, <0.000000, 0.000000, 0.000000>, 0.000000"
-PROBE prim/params rec=try label=texture-unknown-key t=6.635000
+PROBE prim/params rec=try label=texture-unknown-key t=6.660000
 PROBE prim/params rec=rt label=texture-unknown-key got="11111111-2222-3333-4444-555555555555, <1.000000, 1.000000, 0.000000>, <0.000000, 0.000000, 0.000000>, 0.000000"
-PROBE prim/params rec=try label=texture-null-key t=6.836000
+PROBE prim/params rec=try label=texture-null-key t=6.860000
 PROBE prim/params rec=rt label=texture-null-key got="11111111-2222-3333-4444-555555555555, <1.000000, 1.000000, 0.000000>, <0.000000, 0.000000, 0.000000>, 0.000000"
-PROBE prim/params rec=try label=texture-missing-name t=7.036000
+PROBE prim/params rec=try label=texture-missing-name t=7.061000
 PROBE prim/params rec=rt label=texture-missing-name got="11111111-2222-3333-4444-555555555555, <1.000000, 1.000000, 0.000000>, <0.000000, 0.000000, 0.000000>, 0.000000"
-PROBE prim/params rec=try label=bump-shiny t=7.436000
+PROBE prim/params rec=try label=bump-shiny t=7.463000
 PROBE prim/params rec=rt label=bump-shiny got="3, 5"
-PROBE prim/params rec=try label=bump-shiny-past-range t=7.637000
+PROBE prim/params rec=try label=bump-shiny-past-range t=7.663000
 PROBE prim/params rec=rt label=bump-shiny-past-range got="0, 8"
-PROBE prim/params rec=try label=fullbright t=8.037000
+PROBE prim/params rec=try label=fullbright t=8.064000
 PROBE prim/params rec=rt label=fullbright got="1"
-PROBE prim/params rec=try label=fullbright-two t=8.237000
+PROBE prim/params rec=try label=fullbright-two t=8.265000
 PROBE prim/params rec=rt label=fullbright-two got="1"
-PROBE prim/params rec=try label=glow t=8.638000
+PROBE prim/params rec=try label=glow t=8.668000
 PROBE prim/params rec=rt label=glow got="0.498039"
-PROBE prim/params rec=try label=glow-past-range t=8.838000
+PROBE prim/params rec=try label=glow-past-range t=8.869000
 PROBE prim/params rec=rt label=glow-past-range got="0.996078"
-PROBE prim/params rec=try label=glow-negative t=9.039000
+PROBE prim/params rec=try label=glow-negative t=9.073000
 PROBE prim/params rec=rt label=glow-negative got="0.003922"
-PROBE prim/params rec=try label=glow-fine t=9.239000
+PROBE prim/params rec=try label=glow-fine t=9.274000
 PROBE prim/params rec=rt label=glow-fine got="0.121569"
-PROBE prim/params rec=try label=texgen t=9.639000
+PROBE prim/params rec=try label=texgen t=9.675000
 PROBE prim/params rec=rt label=texgen got="1"
-PROBE prim/params rec=try label=texgen-unknown t=9.840000
+PROBE prim/params rec=try label=texgen-unknown t=9.878000
 PROBE prim/params rec=rt label=texgen-unknown got="0"
-PROBE prim/params rec=try label=material-glass t=10.240000
+PROBE prim/params rec=try label=material-glass t=10.282000
 PROBE prim/params rec=rt label=material-glass got="2"
-PROBE prim/params rec=try label=material-light t=10.440000
+PROBE prim/params rec=try label=material-light t=10.483000
 PROBE prim/params rec=rt label=material-light got="7"
-PROBE prim/params rec=try label=material-unknown t=10.641000
+PROBE prim/params rec=try label=material-unknown t=10.683000
 PROBE prim/params rec=rt label=material-unknown got="7"
-PROBE prim/params rec=try label=material-negative t=10.841000
+PROBE prim/params rec=try label=material-negative t=10.884000
 PROBE prim/params rec=rt label=material-negative got="7"
-PROBE prim/params rec=try label=light t=11.242000
+PROBE prim/params rec=try label=light t=11.288000
 PROBE prim/params rec=rt label=light got="1, <1.000000, 0.500000, 0.250000>, 0.500000, 10.000000, 0.750000"
-PROBE prim/params rec=try label=light-past-range t=11.442000
+PROBE prim/params rec=try label=light-past-range t=11.489000
 PROBE prim/params rec=rt label=light-past-range got="1, <1.000000, 0.000000, 0.500000>, 1.000000, 20.000000, 2.000000"
-PROBE prim/params rec=try label=light-negative t=11.642000
+PROBE prim/params rec=try label=light-negative t=11.689000
 PROBE prim/params rec=rt label=light-negative got="1, <1.000000, 1.000000, 1.000000>, 0.000000, 0.100000, 0.010000"
-PROBE prim/params rec=try label=light-off t=11.842000
+PROBE prim/params rec=try label=light-off t=11.889000
 PROBE prim/params rec=rt label=light-off got="0, <1.000000, 1.000000, 1.000000>, 0.000000, 0.100000, 0.010000"
-PROBE prim/params rec=try label=flexible t=12.043000
+PROBE prim/params rec=try label=flexible t=12.090000
 PROBE prim/params rec=rt label=flexible got="1, 2, 0.300000, 1.000000, 0.500000, 0.250000, <0.500000, 0.000000, -0.500000>"
-PROBE prim/params rec=try label=flexible-past-range t=12.243000
+PROBE prim/params rec=try label=flexible-past-range t=12.291000
 PROBE prim/params rec=rt label=flexible-past-range got="1, 5, 20.000000, -20.000000, 20.000000, 20.000000, <20.000000, -20.000000, 20.000000>"
-PROBE prim/params rec=try label=flexible-off t=12.444000
+PROBE prim/params rec=try label=flexible-off t=12.494000
 PROBE prim/params rec=rt label=flexible-off got="0, 2, 0.300000, 1.000000, 0.500000, 0.250000, <0.000000, 0.000000, 0.000000>"
-PROBE prim/params rec=try label=text t=12.644000
+PROBE prim/params rec=try label=text t=12.694000
 PROBE prim/params rec=rt label=text got="hello, <1.000000, 0.498039, 0.000000>, 0.501961"
-PROBE prim/params rec=try label=text-300 t=12.844000
+PROBE prim/params rec=try label=text-300 t=12.896000
 PROBE prim/params rec=rt label=text-300 got="01234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123, <1.000000, 0.000000, 0.498039>, 0.000000"
 PROBE prim/params rec=length label=text-300 got=254
-PROBE prim/params rec=try label=slice t=13.245000
+PROBE prim/params rec=try label=slice t=13.299000
 PROBE prim/params rec=rt label=slice got="<0.250000, 0.750000, 0.000000>"
-PROBE prim/params rec=try label=slice-reversed t=13.445000
+PROBE prim/params rec=try label=slice-reversed t=13.499000
 PROBE prim/params rec=rt label=slice-reversed got="<0.200000, 0.800020, 0.000000>"
-PROBE prim/params rec=try label=slice-past-range t=13.645000
+PROBE prim/params rec=try label=slice-past-range t=13.700000
 PROBE prim/params rec=rt label=slice-past-range got="<0.000000, 1.000000, 0.000000>"
-PROBE prim/params rec=try label=name t=14.046000
+PROBE prim/params rec=try label=name t=14.100000
 PROBE prim/params rec=rt label=name got="Probe prim"
-PROBE prim/params rec=try label=name-100 t=14.246000
+PROBE prim/params rec=try label=name-100 t=14.300000
 PROBE prim/params rec=rt label=name-100 got="0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
-PROBE prim/params rec=try label=desc-200 t=14.447000
+PROBE prim/params rec=try label=desc-200 t=14.501000
 PROBE prim/params rec=rt label=desc-200 got="0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456"
-PROBE prim/params rec=try label=desc-pipe t=14.647000
+PROBE prim/params rec=try label=desc-pipe t=14.702000
 PROBE prim/params rec=rt label=desc-pipe got="a|b"
-PROBE prim/params rec=try label=desc-newline t=14.847000
+PROBE prim/params rec=try label=desc-newline t=14.902000
 PROBE prim/params rec=rt label=desc-newline got="a\nb"
-PROBE prim/params rec=try label=name-empty t=15.048000
+PROBE prim/params rec=try label=name-empty t=15.103000
 PROBE prim/params rec=rt label=name-empty got=""
-PROBE prim/params rec=try label=phantom t=15.448000
+PROBE prim/params rec=try label=phantom t=15.504000
 PROBE prim/params rec=rt label=phantom got="1"
-PROBE prim/params rec=try label=phantom-off t=15.648000
+PROBE prim/params rec=try label=phantom-off t=15.705000
 PROBE prim/params rec=rt label=phantom-off got="0"
-PROBE prim/params rec=position label=position-east-15 moved=10
-PROBE prim/params rec=position label=pos-local-east-15 moved=6
-PROBE prim/params rec=try label=rot-local t=16.249001
+PROBE prim/params rec=position label=position-east-15 moved=10 at=<10.000000,0.000000,0.000000>
+PROBE prim/params rec=position label=back-after-position answered=1 at=<0.000000,0.000000,0.000000>
+PROBE prim/params rec=position label=pos-local-east-15 moved=10 at=<10.000000,0.000000,0.000000>
+PROBE prim/params rec=position label=back-after-pos-local answered=1 at=<0.000000,0.000000,0.000000>
+PROBE prim/params rec=try label=rot-local t=16.311001
 PROBE prim/params rec=rt label=rot-local got="<0.000000, 0.000000, 0.707107, 0.707107>"
-PROBE prim/params rec=try label=alpha-mode-mask t=16.650000
+PROBE prim/params rec=try label=alpha-mode-mask t=16.712000
 PROBE prim/params rec=rt label=alpha-mode-mask got="2, 100"
-PROBE prim/params rec=try label=alpha-mode-cutoff-past t=16.853001
+PROBE prim/params rec=try label=alpha-mode-cutoff-past t=16.927000
 # debug-channel: from="Object" text="llSetPrimitiveParams: Error running rule #1 -> PRIM_ALPHA_MODE: arg #2 - must be 0 to 255"
 PROBE prim/params rec=rt label=alpha-mode-cutoff-past got="2, 100"
-PROBE prim/params rec=try label=alpha-mode-unknown t=18.052999
+PROBE prim/params rec=try label=alpha-mode-unknown t=18.127001
 # debug-channel: from="Object" text="llSetPrimitiveParams: Error running rule #1 -> PRIM_ALPHA_MODE: arg #1 - must be 0 to 3"
 PROBE prim/params rec=rt label=alpha-mode-unknown got="2, 100"
-PROBE prim/params rec=try label=normal t=19.454000
+PROBE prim/params rec=try label=normal t=19.528000
 PROBE prim/params rec=rt label=normal got="89556747-24cb-43ed-920b-47caed15465f, <2.000000, 2.000000, 0.000000>, <0.500000, 0.500000, 0.000000>, 1.000000"
-PROBE prim/params rec=try label=normal-null t=19.655001
+PROBE prim/params rec=try label=normal-null t=19.732000
 PROBE prim/params rec=rt label=normal-null got="00000000-0000-0000-0000-000000000000, <1.000000, 1.000000, 0.000000>, <0.000000, 0.000000, 0.000000>, 0.000000"
-PROBE prim/params rec=try label=specular t=19.855000
+PROBE prim/params rec=try label=specular t=19.933001
 PROBE prim/params rec=rt label=specular got="89556747-24cb-43ed-920b-47caed15465f, <2.000000, 2.000000, 0.000000>, <0.500000, 0.500000, 0.000000>, 1.000000, <1.000000, 0.501961, 0.000000>, 100, 20"
-PROBE prim/params rec=try label=specular-past-range t=20.055000
+PROBE prim/params rec=try label=specular-past-range t=20.132999
 PROBE prim/params rec=rt label=specular-past-range got="89556747-24cb-43ed-920b-47caed15465f, <1.000000, 1.000000, 0.000000>, <0.000000, 0.000000, 0.000000>, 0.000000, <1.000000, 0.000000, 0.000000>, 255, 0"
-PROBE prim/params rec=try label=specular-null t=20.256001
+PROBE prim/params rec=try label=specular-null t=20.334000
 PROBE prim/params rec=rt label=specular-null got="00000000-0000-0000-0000-000000000000, <1.000000, 1.000000, 0.000000>, <0.000000, 0.000000, 0.000000>, 0.000000, <1.000000, 1.000000, 1.000000>, 51, 0"
-PROBE prim/params rec=try label=sit-target t=20.455999
+PROBE prim/params rec=try label=sit-target t=20.537001
 PROBE prim/params rec=rt label=sit-target got="1, <0.000000, 0.000000, 0.500000>, <0.000000, 0.000000, 0.707107, 0.707107>"
-PROBE prim/params rec=try label=sit-target-off t=20.656000
+PROBE prim/params rec=try label=sit-target-off t=20.737000
 PROBE prim/params rec=rt label=sit-target-off got="0, <0.000000, 0.000000, 0.000000>, <0.000000, 0.000000, 0.000000, 1.000000>"
-PROBE prim/params rec=try label=allow-unsit t=20.857000
+PROBE prim/params rec=try label=allow-unsit t=20.937000
 # debug-channel: from="Object" text="llSetPrimitiveParams: Error running rule #1: arg #0 - unsupported parameter"
 PROBE prim/params rec=rt label=allow-unsit got=""
 # debug-channel: from="Object" text="llSetPrimitiveParams: Error running rule #1: arg #0 - unsupported parameter"
-PROBE prim/params rec=try label=scripted-sit-only t=23.257000
+PROBE prim/params rec=try label=scripted-sit-only t=23.337999
 # debug-channel: from="Object" text="llSetPrimitiveParams: Error running rule #1: arg #0 - unsupported parameter"
 PROBE prim/params rec=rt label=scripted-sit-only got=""
 # debug-channel: from="Object" text="llSetPrimitiveParams: Error running rule #1: arg #0 - unsupported parameter"
-PROBE prim/params rec=try label=click-action-sit t=25.658001
+PROBE prim/params rec=try label=click-action-sit t=25.742001
 # debug-channel: from="Object" text="llSetPrimitiveParams: Error running rule #1: arg #0 - unsupported parameter"
 PROBE prim/params rec=rt label=click-action-sit got=""
-PROBE prim/params rec=try label=click-action-unknown t=26.858999
+PROBE prim/params rec=try label=click-action-unknown t=26.941999
 # debug-channel: from="Object" text="llSetPrimitiveParams: Error running rule #1: arg #0 - unsupported parameter"
 PROBE prim/params rec=rt label=click-action-unknown got=""
 # debug-channel: from="Object" text="llSetPrimitiveParams: Error running rule #1: arg #0 - unsupported parameter"
-PROBE prim/params rec=try label=sit-flags t=29.259001
+PROBE prim/params rec=try label=sit-flags t=29.343000
 # debug-channel: from="Object" text="llSetPrimitiveParams: Error running rule #1: arg #0 - unsupported parameter"
 PROBE prim/params rec=rt label=sit-flags got=""
 # debug-channel: from="Object" text="llSetPrimitiveParams: Error running rule #1: arg #0 - unsupported parameter"
-PROBE prim/params rec=try label=projector t=31.660000
+PROBE prim/params rec=try label=projector t=31.745001
 # debug-channel: from="Object" text="llSetPrimitiveParams: Error running rule #1: arg #0 - unsupported parameter"
 PROBE prim/params rec=rt label=projector got=""
 # debug-channel: from="Object" text="llSetPrimitiveParams: Error running rule #1: arg #0 - unsupported parameter"
-PROBE prim/params rec=try label=reflection-probe t=34.061001
+PROBE prim/params rec=try label=reflection-probe t=34.147999
 # debug-channel: from="Object" text="llSetPrimitiveParams: Error running rule #1: arg #0 - unsupported parameter"
 PROBE prim/params rec=rt label=reflection-probe got=""
 # debug-channel: from="Object" text="llSetPrimitiveParams: Error running rule #1: arg #0 - unsupported parameter"
-PROBE prim/params rec=try label=render-material-unknown t=36.462002
+PROBE prim/params rec=try label=render-material-unknown t=36.548000
 # debug-channel: from="Object" text="llSetPrimitiveParams: Error running rule #1: arg #0 - unsupported parameter"
 PROBE prim/params rec=rt label=render-material-unknown got=""
 # debug-channel: from="Object" text="llSetPrimitiveParams: Error running rule #1: arg #0 - unsupported parameter"
 PROBE prim/params rec=read label=gltf-base-color got=""
 PROBE prim/params rec=end
+# chat by=other type=say from="Object" length=14 text="Script running"
 # debug-channel by=other: from="Object" text="llSetPrimitiveParams: Error running rule #2: arg #0 - unsupported parameter"
 # debug-channel by=other: from="Object" text="llSetPrimitiveParams: Error running rule #1 -> PRIM_ALPHA_MODE: arg #2 - must be 0 to 255"
 # debug-channel by=other: from="Object" text="llSetPrimitiveParams: Error running rule #1 -> PRIM_ALPHA_MODE: arg #1 - must be 0 to 3"

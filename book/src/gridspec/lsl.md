@@ -1878,11 +1878,19 @@ back what was set.
 
 The fake grid's column holds offline: `vm/tests/prim_state.rs` replays each
 probe's transcripts against the runtime, flavour by flavour, the debug-channel
-lines through Second Life's flood limit ([Floods](#floods)). Two deviations:
-the limit passes the last complaint of `prim/params`, which aditi dropped in
-one of the turns no count holds ([Floods](#floods)), and both OpenSim engines
-moved the prim of `pos-local-east-15` 6 m on 2026-11-05 where they had moved it
-10 m, as the runtime still does (`server-lsl-opensim-pos-local-moved-six`).
+lines through Second Life's flood limit ([Floods](#floods)). One deviation:
+the limit drops the complaint of `prim/params`' `text-300`, which aditi passed
+in its two latest runs and dropped in the one before, at the same clock — one
+of the turns no count holds ([Floods](#floods)).
+
+`prim/params` prints where each of its moves leaves the prim (`at`, from where
+it started) and what each `llSetRegionPos` back answered. That is how a 6 m
+`pos-local-east-15` on OpenSim (2026-11-05) turned out to be the runner, not
+the grid: it had rezzed the prim at the region's corner, 20 m under the
+ground, so OpenSim lifted every move onto the terrain and capped the 10 m
+along a slope ([Placement](#placement)). The runner had taken a child prim's
+offset for the place to rez at; it now rezzes against a root prim of its own
+region only.
 
 ### Placement
 
@@ -2234,7 +2242,7 @@ is marked *first run*.
 | a complaint of a rule list (`llSetPrimitiveParams`, `llGetPrimitiveParams`, `llParticleSystem`) | told the **owner alone**: no other avatar and no script hears it; counted like any line, but the one in place of the notice **passes** (nine a fifth of a second apart pass) and the flood it starts drops the rest **silently** | said as any other | each flavour as its grid |
 | a complaint of `llSetPrimMediaParams` (and its face `PRIM_MEDIA error`) | said in the open, heard by scripts | the same | each flavour as its grid |
 | what a complaint costs the script | a missing sound **a second** (`llTriggerSound`), a missing texture a second on top of the call's own 0.2 (`llSetTexture`); a missing inventory item nothing (*first run*) | nothing for a sound or a texture (no complaint); a missing item (`llGetInventoryCreator`) a second (*first run*) | each flavour as its grid |
-| a long run of a rule list's complaints | `prim/params` passed eleven in about twenty seconds and dropped its last, the projector's get, 18 seconds after them; `errors/flood-records`' copy of that pace passed every line both ways, so it is the limit's turn above | — | a deviation: the last line passes |
+| a long run of a rule list's complaints | `prim/params` passed eleven in about twenty seconds, then dropped the twelfth (`text-300`'s, 30.16 seconds in) and the projector's get 14 seconds later in one run, and passed both at the same clock in the two runs after it; `errors/flood-records`' copy of that pace passed every line both ways, so it is the limit's turn above | — | a deviation: the twelfth is dropped, the projector's passes |
 
 ### The faulted script
 

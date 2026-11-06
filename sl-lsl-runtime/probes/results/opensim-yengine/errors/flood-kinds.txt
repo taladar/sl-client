@@ -1,39 +1,43 @@
 grid: opensim-yengine
-date: 2026-11-05
+date: 2026-11-06
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Default Region
 engine: YEngine
 settings: OpenSimDefaults.ini: [YEngine] MinTimerInterval=0.1; [XEngine] MinTimerInterval unset (LSL_Api default 0.5); ScriptDelayFactor=1.0, SensorMaxRange=96, SensorMaxResults=16, UseLlCastRayV3=false (defaults) on both; [YEngine] ScriptHeapSize=1024 KiB, ScriptStackSize=2048 KiB (defaults); OpenSim.ini [Network] OutboundDisallowForUserScriptsExcept=127.0.0.1:9000 (the simulator itself), [ScriptsHttpRequestModule] and llHTTPRequest limits at their defaults
 
+# chat type=say from="Object" length=14 text="Script running"
+# chat type=say from="Object" length=14 text="Script running"
 PROBE errors/flood-kinds rec=start region="Default Region" channel="OpenSim" version="OpenSim 0.9.2.1 Yeti Dev   36f6d16 (Unix/Mono)"
-PROBE errors/flood-kinds rec=phase name=A t=3.082000
-PROBE errors/flood-kinds rec=single name="C1" t=8.987000
-PROBE errors/flood-kinds rec=single name="C2" t=13.993000
-PROBE errors/flood-kinds rec=single name="C3" t=18.999001
-PROBE errors/flood-kinds rec=single name="C4" t=24.004999
-PROBE errors/flood-kinds rec=single name="A11" t=34.216999
-PROBE errors/flood-kinds rec=phase name=B t=104.292000
+PROBE errors/flood-kinds rec=phase name=A t=3.033000
+PROBE errors/flood-kinds rec=single name="C1" t=8.837000
+PROBE errors/flood-kinds rec=single name="C2" t=13.842000
+PROBE errors/flood-kinds rec=single name="C3" t=18.846001
+PROBE errors/flood-kinds rec=single name="C4" t=23.851000
+PROBE errors/flood-kinds rec=single name="A11" t=34.060001
+PROBE errors/flood-kinds rec=phase name=B t=104.122002
 PROBE errors/flood-kinds rec=fault script=faulter step=before
-# debug-channel: from="Object" text="YEngine: Division by Zero (script: Faulter event: link_message primID: a4c073a2-40d3-45fd-9eda-bcf012ee44e3 at: <0,0,1>) Script must be Reset to re-enable.\n"
-PROBE errors/flood-kinds rec=single name="D9" t=106.293999
-PROBE errors/flood-kinds rec=phase name=C t=176.371002
+# debug-channel: from="Object" text="YEngine: Division by Zero (script: Faulter event: link_message primID: 0316bc8a-ac60-4242-b731-e303d354a8ca at: <120,128,27>) Script must be Reset to re-enable.\n"
+PROBE errors/flood-kinds rec=single name="D9" t=106.124001
+PROBE errors/flood-kinds rec=phase name=C t=176.186005
 # debug-channel: from="Object" text="llSetPrimitiveParams: Error running rule #1: arg #0 - unsupported parameter"
 # debug-channel: from="Object" text="llSetPrimitiveParams: Error running rule #2: arg #0 - unsupported parameter"
 # debug-channel: from="Object" text="llSetPrimitiveParams: Error running rule #3: arg #0 - unsupported parameter"
 # debug-channel: from="Object" text="llSetPrimitiveParams: Error running rule #4: arg #0 - unsupported parameter"
 # debug-channel: from="Object" text="llSetPrimitiveParams: Error running rule #5: arg #0 - unsupported parameter"
-PROBE errors/flood-kinds rec=phase name=D t=248.449005
-PROBE errors/flood-kinds rec=single name="E2" t=251.453003
-PROBE errors/flood-kinds rec=single name="E3" t=254.455994
-PROBE errors/flood-kinds rec=single name="E4" t=257.459015
-PROBE errors/flood-kinds rec=single name="E5" t=260.462006
-PROBE errors/flood-kinds rec=single name="E6" t=263.466003
-PROBE errors/flood-kinds rec=single name="E7" t=266.468994
-PROBE errors/flood-kinds rec=single name="E8" t=269.472992
-PROBE errors/flood-kinds rec=single name="E9" t=272.476013
-PROBE errors/flood-kinds rec=single name="E10" t=275.480011
+PROBE errors/flood-kinds rec=phase name=D t=248.248993
+PROBE errors/flood-kinds rec=single name="E2" t=251.251999
+PROBE errors/flood-kinds rec=single name="E3" t=254.255005
+PROBE errors/flood-kinds rec=single name="E4" t=257.257996
+PROBE errors/flood-kinds rec=single name="E5" t=260.260010
+PROBE errors/flood-kinds rec=single name="E6" t=263.263000
+PROBE errors/flood-kinds rec=single name="E7" t=266.265991
+PROBE errors/flood-kinds rec=single name="E8" t=269.269012
+PROBE errors/flood-kinds rec=single name="E9" t=272.272003
+PROBE errors/flood-kinds rec=single name="E10" t=275.274994
 PROBE errors/flood-kinds rec=end
-# debug-channel by=other: from="Object" text="YEngine: Division by Zero (script: Faulter event: link_message primID: a4c073a2-40d3-45fd-9eda-bcf012ee44e3 at: <0,0,1>) Script must be Reset to re-enable.\n"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# debug-channel by=other: from="Object" text="YEngine: Division by Zero (script: Faulter event: link_message primID: 0316bc8a-ac60-4242-b731-e303d354a8ca at: <120,128,27>) Script must be Reset to re-enable.\n"
 # debug-channel by=other: from="Object" text="llSetPrimitiveParams: Error running rule #1: arg #0 - unsupported parameter"
 # debug-channel by=other: from="Object" text="llSetPrimitiveParams: Error running rule #2: arg #0 - unsupported parameter"
 # debug-channel by=other: from="Object" text="llSetPrimitiveParams: Error running rule #3: arg #0 - unsupported parameter"

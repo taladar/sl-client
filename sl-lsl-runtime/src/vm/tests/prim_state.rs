@@ -309,18 +309,10 @@ fn params_round_trip_as_each_grid_stored_them() -> Result<(), String> {
         let mut region = region(flavour, &scripts, ground, &home)?;
         run_out(&mut region, 3000)?;
         let (ours, theirs) = compared(&region, transcript);
-        // A deviation on OpenSim: both engines moved the prim 6 m on
-        // 2026-11-05 where they moved it 10 m on 2026-10-27, as the runtime
-        // still does (`server-lsl-opensim-pos-local-moved-six`).
-        let deviations: &[&str] = if flavour.is_opensim() {
-            &["position pos-local-east-15"]
-        } else {
-            &[]
-        };
         hold(
             &unvaried(ours),
             &unvaried(theirs),
-            deviations,
+            &[],
             &format!("{flavour:?}"),
         );
         // The Shadows' refusal of rule 24 on Second Life is said before the
@@ -332,11 +324,19 @@ fn params_round_trip_as_each_grid_stored_them() -> Result<(), String> {
                 0,
                 "llSetPrimitiveParams error running rule #1: unknown rule.".to_owned(),
             );
-            // A deviation: aditi dropped the probe's last complaint, the
-            // projector's unknown parameter, 18 seconds after the one before,
-            // where the gate passes it — one of the limit's turns no count
-            // holds (`errors/flood-records`' P0 and P4 passed it).
-            notes.push("llGetPrimitiveParams error: Param 0 error, unknown parameter".to_owned());
+            // A deviation: aditi passed the complaint of `text-300`, 30.16
+            // seconds in, in two later runs on 2026-11-05, where an earlier
+            // run that day dropped it (and the projector's after it) at the
+            // same clock — one of the limit's turns no count holds. The gate
+            // drops it.
+            let text_300 = "llSetPrimitiveParams error running rule #1 (PRIM_TEXT): bounds error; 2 is not in (0, 1).";
+            let before = notes.len();
+            notes.retain(|note| note != text_300);
+            assert_eq!(
+                before - notes.len(),
+                1,
+                "the text-300 deviation names no line"
+            );
         }
         assert_eq!(region.debug_lines(), notes, "{flavour:?}");
     }

@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 333 |
 | blocked | 40 |
 | in-progress | 17 |
-| bugs | 39 |
-| done | 1491 |
+| bugs | 38 |
+| done | 1492 |
 | deferred | 30 |
 | wont-do | 24 |
 | **total** | **2102** |
@@ -1324,7 +1324,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (39)
+## bugs (38)
 
 ### protocol
 
@@ -1422,12 +1422,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-### server
-
-- [`server-lsl-opensim-pos-local-moved-six`](bugs/server-lsl-opensim-pos-local-moved-six.md)
-  — OpenSim moved prim/params' PRIM_POS_LOCAL prim 6 m, where it moved it 10
-
-## done (1491)
+## done (1492)
 
 ### protocol
 
@@ -4533,6 +4528,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `gridspec-lsl-memory-limits` (done))
 - [`server-lsl-memory-sizes`](done/server-lsl-memory-sizes.md) — Measure Second
   Life's per-value memory costs and rotation arithmetic on aditi
+- [`server-lsl-opensim-pos-local-moved-six`](done/server-lsl-opensim-pos-local-moved-six.md)
+  — OpenSim moved prim/params' PRIM_POS_LOCAL prim 6 m, where it moved it 10
 - [`server-lsl-opensim-shared-lists`](done/server-lsl-opensim-shared-lists.md) —
   OpenSim's lists are shared objects — a change in place shows through every
   copy

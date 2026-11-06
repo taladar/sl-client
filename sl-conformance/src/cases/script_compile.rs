@@ -595,7 +595,7 @@ async fn census(ctx: &mut TestContext, metrics: &mut Metrics) -> Result<(), Test
     let Some(reference) = reference else {
         if content_is_ours(grid) {
             return Err(TestFailure::Assertion(
-                "no primitive appeared in the region's object stream".to_owned(),
+                "no prim to rez against appeared in the region's object stream (on OpenSim, the test object at support::OPENSIM_TEST_OBJECT)".to_owned(),
             ));
         }
         ctx.mark_partial("landing region streamed no primitive to place against");

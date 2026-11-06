@@ -57,6 +57,15 @@ rt(string label, list set, list get)
     emit("rt", " label=" + label + " got=" + q(llList2CSV(llGetPrimitiveParams(get))));
 }
 
+// A vector rounded to centimetres, so that a grid's float noise does not
+// read as a difference.
+string cm(vector v)
+{
+    return "<" + (string)(llRound(v.x * 100.0) / 100.0) + ","
+        + (string)(llRound(v.y * 100.0) / 100.0) + ","
+        + (string)(llRound(v.z * 100.0) / 100.0) + ">";
+}
+
 // Prints what `get` reads, setting nothing.
 read(string label, list get)
 {
@@ -237,15 +246,25 @@ default
         // Phantom, position, rotation.
         rt("phantom", [PRIM_PHANTOM, TRUE], [PRIM_PHANTOM]);
         rt("phantom-off", [PRIM_PHANTOM, FALSE], [PRIM_PHANTOM]);
+        // Each move prints where the prim then stands, from `home`, and each
+        // llSetRegionPos back what it answered and where it left the prim.
         vector home = llGetPos();
         llSetPrimitiveParams([PRIM_POSITION, home + <15.0, 0.0, 0.0>]);
         vector p = llGetPos();
-        emit("position", " label=position-east-15 moved=" + (string)llRound(p.x - home.x));
-        llSetRegionPos(home);
+        emit("position", " label=position-east-15 moved=" + (string)llRound(p.x - home.x)
+            + " at=" + cm(p - home));
+        integer back = llSetRegionPos(home);
+        p = llGetPos();
+        emit("position", " label=back-after-position answered=" + (string)back
+            + " at=" + cm(p - home));
         llSetPrimitiveParams([PRIM_POS_LOCAL, home + <15.0, 0.0, 0.0>]);
         p = llGetPos();
-        emit("position", " label=pos-local-east-15 moved=" + (string)llRound(p.x - home.x));
-        llSetRegionPos(home);
+        emit("position", " label=pos-local-east-15 moved=" + (string)llRound(p.x - home.x)
+            + " at=" + cm(p - home));
+        back = llSetRegionPos(home);
+        p = llGetPos();
+        emit("position", " label=back-after-pos-local answered=" + (string)back
+            + " at=" + cm(p - home));
         rt("rot-local", [PRIM_ROT_LOCAL, llEuler2Rot(<0.0, 0.0, PI_BY_TWO>)], [PRIM_ROT_LOCAL]);
         llSetPrimitiveParams([PRIM_ROT_LOCAL, ZERO_ROTATION]);
 

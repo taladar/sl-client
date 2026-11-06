@@ -185,6 +185,30 @@ pub const fn content_is_ours(grid: Grid) -> bool {
     is_opensim(grid) || is_fake(grid)
 }
 
+/// Where the workspace's test object stands in OpenSim's Default Region: the
+/// first cube of the row of nine at `y = 128`, which the cases rez against
+/// ([`settle_scene`]). The region holds other root prims besides — objects
+/// cases left behind, some right above it — so the anchor is matched by
+/// position, never taken as whatever streams first.
+pub const OPENSIM_TEST_OBJECT: Vector = Vector {
+    x: 120.0,
+    y: 128.0,
+    z: 26.25,
+};
+
+/// How far, in metres in any direction, a streamed prim may stand from
+/// [`OPENSIM_TEST_OBJECT`] and still be it. A probe's prim left behind stands
+/// 1.25 m above it.
+const TEST_OBJECT_RADIUS_M: f32 = 0.1;
+
+/// Whether a root prim at `position` is [`OPENSIM_TEST_OBJECT`].
+fn is_opensim_test_object(position: &Vector) -> bool {
+    let dx = position.x - OPENSIM_TEST_OBJECT.x;
+    let dy = position.y - OPENSIM_TEST_OBJECT.y;
+    let dz = position.z - OPENSIM_TEST_OBJECT.z;
+    dz.mul_add(dz, dx.mul_add(dx, dy * dy)) <= TEST_OBJECT_RADIUS_M * TEST_OBJECT_RADIUS_M
+}
+
 /// Assert `condition`, failing the test with `message` as a
 /// [`TestFailure::Assertion`] when it does not hold.
 ///
@@ -662,9 +686,15 @@ pub async fn wait_for_own_new_object(
 /// or after `window` overall.
 ///
 /// The anchor is grid-dependent. Where the region's contents are ours
-/// ([`content_is_ours`]) it is the first primitive streamed — the workspace's
-/// test object on OpenSim, a fixture on the fake grid — which is what the
-/// cases have always placed against. On Second Life the first primitive is
+/// ([`content_is_ours`]) it is what the cases have always placed against: on
+/// OpenSim the workspace's test object ([`OPENSIM_TEST_OBJECT`]), on the fake
+/// grid the first root primitive streamed from the agent's own region (a
+/// fixture). It is never whichever prim the region happens to stream first:
+/// two link sets left in Default Region streamed their children first, at
+/// their offset `<0, 0, 0>`, in most runs on 2026-11-05, and the probes'
+/// prims were rezzed at the region's corner, 20 m under the ground. A child
+/// prim's position is an offset from its root and a neighbour's prim stands
+/// in that region's coordinates, so neither is ever the anchor. On Second Life the first primitive is
 /// *anybody's*, anywhere in the region or in a neighbour, so a rez placed
 /// against it lands on whatever parcel that happens to be. There the anchor is
 /// **our own avatar**, which the login put on a parcel that allows building
@@ -757,8 +787,15 @@ pub async fn settle_scene_observing(
         {
             neighbour_object = Some(object.full_id);
         }
+        // Only a root prim of the agent's own region: a child prim's position
+        // is its offset from its root, and a neighbour's prim (streamed over
+        // a child circuit) stands at a position local to *that* region. On
+        // OpenSim, only the test object itself.
         let anchors = if content_is_ours(grid) {
             object.pcode == pcode::PRIMITIVE
+                && object.parent_id == RegionLocalObjectId(0)
+                && root.is_some_and(|root| root == object.circuit)
+                && (!is_opensim(grid) || is_opensim_test_object(&object.motion.position))
         } else {
             object.pcode == pcode::AVATAR && Some(object.full_id.uuid()) == own
         };

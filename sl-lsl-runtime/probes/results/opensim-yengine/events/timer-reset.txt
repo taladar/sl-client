@@ -1,21 +1,25 @@
 grid: opensim-yengine
-date: 2026-11-05
+date: 2026-11-06
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Default Region
 engine: YEngine
 settings: OpenSimDefaults.ini: [YEngine] MinTimerInterval=0.1; [XEngine] MinTimerInterval unset (LSL_Api default 0.5); ScriptDelayFactor=1.0, SensorMaxRange=96, SensorMaxResults=16, UseLlCastRayV3=false (defaults) on both; [YEngine] ScriptHeapSize=1024 KiB, ScriptStackSize=2048 KiB (defaults); OpenSim.ini [Network] OutboundDisallowForUserScriptsExcept=127.0.0.1:9000 (the simulator itself), [ScriptsHttpRequestModule] and llHTTPRequest limits at their defaults
 
+# chat type=say from="Object" length=14 text="Script running"
+# chat type=say from="Object" length=14 text="Script running"
 PROBE events/timer-reset rec=start region="Default Region" channel="OpenSim" version="OpenSim 0.9.2.1 Yeti Dev   36f6d16 (Unix/Mono)"
 PROBE events/timer-reset rec=round label=sleep-keep events="timer@0" tenths=10 took=1.000000 stray=0
-PROBE events/timer-reset rec=round label=sleep-reset events="timer@0" tenths=10 took=1.000000 stray=0
-PROBE events/timer-reset rec=round label=sleep-stop events="" tenths=10 took=0.999999 stray=0
+PROBE events/timer-reset rec=round label=sleep-reset events="timer@0" tenths=10 took=1.001000 stray=0
+PROBE events/timer-reset rec=round label=sleep-stop events="" tenths=10 took=1.000001 stray=0
 PROBE events/timer-reset rec=round label=color-keep events="changed2@0,timer@0" tenths=10 took=1.000000 stray=0
 PROBE events/timer-reset rec=round label=media-keep events="changed2048@0,timer@0" tenths=10 took=1.000000 stray=0
 PROBE events/timer-reset rec=round label=media-reset events="changed2048@0,timer@0" tenths=10 took=1.000000 stray=0
-PROBE events/timer-reset rec=round label=clear-keep events="changed2048@0,timer@0" tenths=10 took=1.000999 stray=0
+PROBE events/timer-reset rec=round label=clear-keep events="changed2048@0,timer@0" tenths=10 took=1.000000 stray=0
 PROBE events/timer-reset rec=round label=media-get events="" tenths=10 took=1.000000 stray=0
 PROBE events/timer-reset rec=round label=in-timer-keep events="timer@0" tenths=10 took=1.000000 stray=0
 PROBE events/timer-reset rec=round label=in-timer-reset events="timer@0" tenths=10 took=1.000000 stray=0
-PROBE events/timer-reset rec=round label=in-timer-media events="changed2048@0,timer@0" tenths=10 took=1.000999 stray=0
+PROBE events/timer-reset rec=round label=in-timer-media events="changed2048@0,timer@0" tenths=10 took=1.000000 stray=0
 PROBE events/timer-reset rec=round label=in-timer-media-keep events="changed2048@0,timer@0" tenths=10 took=1.000000 stray=0
 PROBE events/timer-reset rec=end
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"

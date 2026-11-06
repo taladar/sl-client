@@ -1,16 +1,17 @@
 grid: opensim-xengine
-date: 2026-11-05
+date: 2026-11-06
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Default Region
 engine: XEngine
 settings: OpenSimDefaults.ini: [YEngine] MinTimerInterval=0.1; [XEngine] MinTimerInterval unset (LSL_Api default 0.5); ScriptDelayFactor=1.0, SensorMaxRange=96, SensorMaxResults=16, UseLlCastRayV3=false (defaults) on both; [YEngine] ScriptHeapSize=1024 KiB, ScriptStackSize=2048 KiB (defaults); OpenSim.ini [Network] OutboundDisallowForUserScriptsExcept=127.0.0.1:9000 (the simulator itself), [ScriptsHttpRequestModule] and llHTTPRequest limits at their defaults
 
+# chat type=say from="Object" length=14 text="Script running"
 PROBE errors/flood-paths rec=start region="Default Region" channel="OpenSim" version="OpenSim 0.9.2.1 Yeti Dev   36f6d16 (Unix/Mono)"
-PROBE errors/flood-paths rec=phase name=T t=3.043000
+PROBE errors/flood-paths rec=phase name=T t=3.012000
 PROBE errors/flood-paths rec=cost call=sound cost=0.000000
 PROBE errors/flood-paths rec=cost call=texture cost=0.200000
 PROBE errors/flood-paths rec=material got=3
-PROBE errors/flood-paths rec=phase name=S t=38.879002
+PROBE errors/flood-paths rec=phase name=S t=38.844002
 # debug-channel: from="Object" text="llSetPrimitiveParams: Error running rule #1: arg #0 - unsupported parameter"
 # debug-channel: from="Object" text="llSetPrimitiveParams: Error running rule #2: arg #0 - unsupported parameter"
 # debug-channel: from="Object" text="llSetPrimitiveParams: Error running rule #3: arg #0 - unsupported parameter"
@@ -23,15 +24,16 @@ PROBE errors/flood-paths rec=phase name=S t=38.879002
 # debug-channel: from="Object" text="llSetPrimitiveParams: Error running rule #10: arg #0 - unsupported parameter"
 # debug-channel: from="Object" text="llSetPrimitiveParams: Error running rule #11: arg #0 - unsupported parameter"
 # debug-channel: from="Object" text="llSetPrimitiveParams: Error running rule #12: arg #0 - unsupported parameter"
-PROBE errors/flood-paths rec=phase name=X1 t=88.336998
+PROBE errors/flood-paths rec=phase name=X1 t=88.291000
 # debug-channel: from="Object" text="llSetPrimitiveParams: Error running rule #1: arg #0 - unsupported parameter"
-PROBE errors/flood-paths rec=phase name=X2 t=124.574997
-PROBE errors/flood-paths rec=phase name=X3 t=159.619003
-PROBE errors/flood-paths rec=phase name=X4 t=195.658005
-PROBE errors/flood-paths rec=phase name=X5 t=230.697006
-PROBE errors/flood-paths rec=phase name=W t=266.735992
-PROBE errors/flood-paths rec=single name="W9" t=276.747009
+PROBE errors/flood-paths rec=phase name=X2 t=124.526001
+PROBE errors/flood-paths rec=phase name=X3 t=159.550003
+PROBE errors/flood-paths rec=phase name=X4 t=195.625000
+PROBE errors/flood-paths rec=phase name=X5 t=230.662003
+PROBE errors/flood-paths rec=phase name=W t=266.699005
+PROBE errors/flood-paths rec=single name="W9" t=276.709015
 PROBE errors/flood-paths rec=end
+# chat by=other type=say from="Object" length=14 text="Script running"
 # debug-channel by=other: from="Object" text="llSetPrimitiveParams: Error running rule #1: arg #0 - unsupported parameter"
 # debug-channel by=other: from="Object" text="llSetPrimitiveParams: Error running rule #2: arg #0 - unsupported parameter"
 # debug-channel by=other: from="Object" text="llSetPrimitiveParams: Error running rule #3: arg #0 - unsupported parameter"
