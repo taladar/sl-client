@@ -10,9 +10,9 @@ use std::time::Duration;
 use sl_automation_proto::{
     AgentReadout, AutomationError, ConversationReadout, Deadline, DiagnosticsReadout,
     EnvironmentReadout, InventoryFolderReadout, InventoryRoot, Locator, LogEntry, LogPage,
-    LogStream, NotificationReadout, PROTOCOL_VERSION, Probe, ProbeReadout, QuiescenceReadout,
-    Request, RequestBody, ResponseBody, SelectedObject, StateCondition, StateObservation,
-    StatusReadout, UiNode, ViewerIdentity, ViewerMessage, WorldMapReadout,
+    LogStream, NotificationReadout, PROTOCOL_VERSION, ParcelMediaReadout, Probe, ProbeReadout,
+    QuiescenceReadout, Request, RequestBody, ResponseBody, SelectedObject, StateCondition,
+    StateObservation, StatusReadout, UiNode, ViewerIdentity, ViewerMessage, WorldMapReadout,
 };
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
@@ -653,6 +653,22 @@ impl Viewer {
             other => {
                 Err(self.unexpected("read world map", &ResponseBody::Readout { readout: other }))
             }
+        }
+    }
+
+    /// The agent parcel's legacy media: what the parcel states, and whether a
+    /// surface plays it on the faces wearing its texture.
+    ///
+    /// # Errors
+    ///
+    /// As [`read`](Self::read).
+    pub async fn parcel_media(&self) -> Result<ParcelMediaReadout, DriverError> {
+        match self.read(Probe::ParcelMedia).await? {
+            ProbeReadout::ParcelMedia(media) => Ok(media),
+            other => Err(self.unexpected(
+                "read parcel media",
+                &ResponseBody::Readout { readout: other },
+            )),
         }
     }
 

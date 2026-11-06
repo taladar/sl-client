@@ -76,7 +76,9 @@ What is missing is the middle:
   for a prim that only moved: [[server-world-update-scheduling]].)
 - The agent's position is "the position the session was opened at"
   (`driver.rs`'s `stands_on`). `ServerEvent::AgentUpdate` is never
-  consumed.
+  consumed. (Since 2026-11-06 the heartbeat's avatar controller walks, flies
+  and drops the agent from its `AgentUpdate` controls and keeps the session's
+  placement where it is: [[server-world-agent-movement]].)
 - `ServerEvent::Chat` is never consumed either: the fake grid hears local
   chat and drops it.
 - `ObjectGrab` / `ObjectGrabUpdate` / `ObjectDeGrab`, `ScriptDialogReply`

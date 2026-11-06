@@ -768,6 +768,7 @@ mod test {
             from_group: false,
             session_name: "Chat".to_owned(),
             message: "join us".to_owned(),
+            channel: sl_proto::InviteChannel::Text,
             region_id: uuid::Uuid::nil(),
             position: RegionCoordinates::new(1.0, 2.0, 3.0),
             parent_estate_id: 1,

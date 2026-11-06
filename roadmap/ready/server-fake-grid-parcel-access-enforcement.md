@@ -2,7 +2,7 @@
 id: server-fake-grid-parcel-access-enforcement
 title: Fake grid — enforce parcel access and push ban lines
 topic: server
-status: blocked
+status: ready
 origin: gridspec survey (2026-10-03)
 refs: [gridspec-survey, gridspec-sl-ban-line-trigger]
 blocked_by: [gridspec-parcel-access-and-ban-lines,

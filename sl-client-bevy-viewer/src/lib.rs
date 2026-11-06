@@ -39,6 +39,7 @@ pub(crate) use sl_viewer_people::add_friend;
 pub(crate) use sl_viewer_places::about_land;
 pub(crate) use sl_viewer_places::about_landmark;
 pub(crate) use sl_viewer_places::about_region;
+pub(crate) use sl_viewer_places::region_terrain_actions;
 pub(crate) use sl_viewer_places::telehub;
 pub(crate) use sl_viewer_places::top_objects;
 pub(crate) use sl_viewer_world_avatar::animations;
@@ -93,6 +94,8 @@ pub(crate) const REGISTRARS: &[fn(&mut crate::settings::ViewerSettings)] = &[
     crate::environment::register_settings,
     crate::experience_log::register_settings,
     crate::experiences_floater::register_settings,
+    crate::web_floater::register_settings,
+    crate::region_terrain_actions::register_settings,
 ];
 
 // The leaf toolkit (geometry math, render leaves, small models) is its own
@@ -244,6 +247,7 @@ pub(crate) use sl_viewer_world_view::input_context;
 pub(crate) use sl_viewer_world_view::media_controls;
 pub(crate) use sl_viewer_world_view::media_prim;
 pub(crate) use sl_viewer_world_view::nearby_media;
+pub(crate) use sl_viewer_world_view::parcel_media;
 mod menu_bar;
 mod menu_search;
 pub(crate) use sl_viewer_asset_editors::notecard_render;

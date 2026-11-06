@@ -716,6 +716,200 @@ mod test {
         Ok(())
     }
 
+    // ---- Calling-card offers -----------------------------------------------
+
+    /// The template a calling-card offer's card reports as.
+    const CALLING_CARD_OFFER: &str = "OfferCallingCard";
+
+    /// The account that offers its calling card: one the grid knows, so its
+    /// name resolves, and that never logs in.
+    const CARDER: &str = "Carder";
+
+    /// Offer viewer `label` the calling card of `from`, under `transaction`,
+    /// from the grid.
+    async fn offer_calling_card(
+        stage: &Stage,
+        label: &str,
+        from: AgentKey,
+        transaction: sl_proto::TransactionId,
+    ) -> Result<(), BodyError> {
+        let agent = stage.agent(label).await?;
+        let now = agent.now();
+        agent
+            .with_sim(|sim| sim.send_offer_calling_card(from, transaction, now))
+            .await
+            .map_err(|error| format!("offering the calling card: {error}"))?;
+        Ok(())
+    }
+
+    /// **Calling-card offers** (`viewer-calling-card-offer-unanswered`): an
+    /// offer raises a card naming its sender once the name resolves; Accept
+    /// files the card in a folder and Decline turns it down, each reaching
+    /// the grid under the offer's transaction. While Unavailable, an offer
+    /// raises no card: it is declined at once and the sender hears the busy
+    /// reply, as the reference does.
+    #[test]
+    fn a_calling_card_offer_is_asked_about_and_declined_while_unavailable() -> Result<(), TestError>
+    {
+        stage("calling_card_offers", &["Alpha"])
+            .needs(Need::GridControl)
+            .configure_grid(|grid| grid.account(AccountConfig::new(FIRST_NAME, CARDER, "password")))
+            .run(async |stage: &Stage| {
+                let alpha = &stage.viewer("Alpha")?;
+                let carder = account_id(stage, CARDER)?;
+                let mut heard = stage.agent("Alpha").await?.events();
+                let transaction = |n: u128| sl_proto::TransactionId::from(Uuid::from_u128(n));
+
+                // Accepted: filed in a folder of the viewer's inventory.
+                offer_calling_card(stage, "Alpha", carder, transaction(0xca_0001)).await?;
+                let _shown = alpha
+                    .expect_notification()
+                    .timeout(WAIT)
+                    .to_show(CALLING_CARD_OFFER)
+                    .await?;
+                let lead = offer_card(alpha)
+                    .get(Locator::role(Role::Text).name_containing("offering their calling card"));
+                let _named = alpha
+                    .expect(&lead)
+                    .timeout(WAIT)
+                    .to_contain_text(CARDER)
+                    .await?;
+                answer_offer(alpha, "Accept").await?;
+                let accepted = grid_hears(&mut heard, "calling-card accept", |event| {
+                    matches!(event, ServerEvent::CallingCardAccepted { transaction: t, .. }
+                        if *t == transaction(0xca_0001))
+                })
+                .await?;
+                assert!(
+                    matches!(accepted, ServerEvent::CallingCardAccepted { folder, .. }
+                        if !folder.uuid().is_nil()),
+                    "the card is filed in a real folder: {accepted:?}"
+                );
+
+                // Declined from the card.
+                offer_calling_card(stage, "Alpha", carder, transaction(0xca_0002)).await?;
+                let _asked = alpha
+                    .expect(&offer_card(alpha))
+                    .timeout(WAIT)
+                    .to_be_visible()
+                    .await?;
+                answer_offer(alpha, "Decline").await?;
+                let _declined = grid_hears(&mut heard, "calling-card decline", |event| {
+                    matches!(event, ServerEvent::CallingCardDeclined { transaction: t }
+                        if *t == transaction(0xca_0002))
+                })
+                .await?;
+
+                // Unavailable: declined at once, with the busy reply, and no
+                // card.
+                let _on = alpha.menu_path(&UNAVAILABLE).await?;
+                offer_calling_card(stage, "Alpha", carder, transaction(0xca_0003)).await?;
+                let _declined =
+                    grid_hears(&mut heard, "calling-card decline while busy", |event| {
+                        matches!(event, ServerEvent::CallingCardDeclined { transaction: t }
+                        if *t == transaction(0xca_0003))
+                    })
+                    .await?;
+                let _replied = grid_hears(&mut heard, "busy reply to the offerer", |event| {
+                    busy_reply_to(event, carder).is_some()
+                })
+                .await?;
+                assert_eq!(
+                    offer_card(alpha).count().await?,
+                    0,
+                    "an offer declined for Do Not Disturb raises no card"
+                );
+                Ok(())
+            })?;
+        Ok(())
+    }
+
+    // ---- Chat-session invitations ------------------------------------------
+
+    /// The account that invites the viewer into a conference; it never logs in.
+    const HOST: &str = "Host";
+
+    /// The conference the host invites the viewer into.
+    const CONFERENCE: u128 = 0xC0F5_E55E;
+
+    /// **A text invitation is joined at once**
+    /// (`viewer-session-invitation-accepted-at-once`): an ad-hoc conference's
+    /// invitation shows the line it carries in the tab it opens, and the
+    /// viewer accepts it with no button pressed, so the grid's roster holds it
+    /// — as the reference does, and as Second Life needs before it sends the
+    /// session's roster and further lines as lines.
+    #[test]
+    fn a_conference_invitation_is_joined_without_a_click() -> Result<(), TestError> {
+        stage("conference_invitation", &["Alpha"])
+            .needs(Need::GridControl)
+            .configure_grid(|grid| grid.account(AccountConfig::new(FIRST_NAME, HOST, "password")))
+            .run(async |stage: &Stage| {
+                let alpha = &stage.viewer("Alpha")?;
+                let host = account_id(stage, HOST)?;
+                let own = account_id(stage, "Alpha")?;
+                let session = sl_proto::ImSessionId::from(Uuid::from_u128(CONFERENCE));
+                let agent = stage.agent("Alpha").await?;
+                agent
+                    .with_sim(|sim| {
+                        sim.open_chat_session(
+                            session,
+                            sl_proto::SimChatSessionKind::Conference,
+                            &[host],
+                        );
+                        sim.enqueue_chatterbox_invitation(&sl_proto::Event::ConferenceInvited {
+                            session_id: session.get(),
+                            from_agent_id: host,
+                            from_name: account(HOST),
+                            dialog: ImDialog::SessionConferenceStart,
+                            from_group: false,
+                            session_name: "Planning".to_owned(),
+                            message: "Join us?".to_owned(),
+                            channel: sl_proto::InviteChannel::Text,
+                            region_id: Uuid::nil(),
+                            position: RegionCoordinates::new(0.0, 0.0, 0.0),
+                            parent_estate_id: 1,
+                            timestamp: None,
+                            binary_bucket: Vec::new(),
+                        });
+                    })
+                    .await;
+                let _shown = alpha
+                    .expect_state(Probe::Conversations)
+                    .timeout(WAIT)
+                    .to_include(json!([{
+                        "conversation": { "kind": "conference", "id": session.get() },
+                        "lines": [{ "text": "Join us?" }],
+                    }]))
+                    .await?;
+                let joined = tokio::time::timeout(WAIT, async {
+                    loop {
+                        let in_roster = agent
+                            .with_sim(|sim| {
+                                sim.chat_session(session)
+                                    .is_some_and(|chat| chat.participants.contains(&own))
+                            })
+                            .await;
+                        if in_roster {
+                            return;
+                        }
+                        tokio::time::sleep(Duration::from_millis(100)).await;
+                    }
+                })
+                .await;
+                assert!(
+                    joined.is_ok(),
+                    "the grid's roster never held the invited viewer"
+                );
+                assert_eq!(
+                    logged(alpha, LogStream::Command, "AcceptChatInvite").await?,
+                    1,
+                    "the invitation is accepted once"
+                );
+                Ok(())
+            })?;
+        Ok(())
+    }
+
     /// File the friend `last` under the one contact set there is, from their
     /// profile: Friends ▸ the row ▸ Profile ▸ Add to Set… ▸ Add.
     async fn file_friend(viewer: &Viewer, stage: &Stage, last: &str) -> Result<(), BodyError> {

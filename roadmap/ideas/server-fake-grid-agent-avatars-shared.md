@@ -19,8 +19,10 @@ this). A real simulator sends every avatar in the region to every agent: the
 avatar's `ObjectUpdate` (with its name values), its `AvatarAppearance`, its
 `AvatarAnimation`, and a `KillObject` when it leaves. The fake grid already
 publishes region writes to every session's watcher; an arriving or leaving
-agent is one more such write. Where the avatar stands is the login point
-until [[server-world-agent-movement]] moves it.
+agent is one more such write. Where the avatar stands is the region's avatar
+controller's ([[server-world-agent-movement]], since 2026-11-06), which sends
+its terse updates to the agent's own session alone today: the others are
+this task's to tell, at the same cadence.
 
 `logout-seated` ([[gridspec-logout]]) is the first conformance case waiting
 on this: both live grids send an observer the `KillObject` of an avatar that

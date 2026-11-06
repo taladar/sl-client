@@ -12,6 +12,9 @@
 //!   the window that saved;
 //! - the Build window's material controls grey on a prim the agent may not
 //!   modify, and stay live on one it may;
+//! - each object's contents open in a window of their own: each lists its own
+//!   object, a pick in one is not a pick in the other, a double-click opens
+//!   the notecard out of its own object, and closing one leaves the other;
 //! - About Region's Experiences tab pins the estate's default experience to
 //!   the Key list with no Remove, two About Region windows on two regions each
 //!   get a picker of their own and only the one that asked takes the pick, and
@@ -33,6 +36,12 @@
 //!   cancelled;
 //! - About Region's Access tab shows a ban's banner, which only the
 //!   `EstateAccess` capability tells;
+//! - About Region's Terrain tab lets the region's owner download and upload
+//!   its RAW heightmap through the file chooser, bake after confirming, and
+//!   asks before applying an inverted elevation range — and greys the owner's
+//!   buttons for an estate manager who does not own the region; on a region
+//!   whose slots are materials it switches to its PBR variant and writes the
+//!   materials and their transforms;
 //! - the balance shows each grid's currency symbol, a Second Life payment
 //!   reply raises a payment notice and OpenSim's message box the system tip.
 
@@ -926,6 +935,185 @@ mod test {
         Ok(())
     }
 
+    // ---- One Object Contents window per object ----------------------------
+
+    /// A prim whose contents the test opens: region-local id, grid-wide key,
+    /// name, where it stands, and the notecard it holds (item id, name).
+    type Holder = (u32, u128, &'static str, f32, (u128, &'static str));
+
+    /// The two prims whose contents the test opens.
+    const HOLDERS: [Holder; 2] = [
+        (
+            0x57A7,
+            0x57A6_0C0A,
+            "Holder A",
+            126.0,
+            (0x57A6_1C0A, "Note In A"),
+        ),
+        (
+            0x57A8,
+            0x57A6_0C0B,
+            "Holder B",
+            130.0,
+            (0x57A6_1C0B, "Note In B"),
+        ),
+    ];
+
+    /// Put the [`HOLDERS`] in the region, each holding its one notecard, and
+    /// show them.
+    async fn rez_holders(stage: &Stage, label: &str) -> Result<(), BodyError> {
+        let agent = stage.agent(label).await?;
+        let owner = stage.agent_id(label)?;
+        let now = agent.now();
+        let mut prims = Vec::new();
+        let mut contents = Vec::new();
+        for (local_id, key, name, x, (item, item_name)) in HOLDERS {
+            let object = ObjectKey::from(Uuid::from_u128(key));
+            let mut prim = sl_fake_grid::world::box_prim(
+                RegionLocalObjectId(local_id),
+                object,
+                owner,
+                sl_proto::Vector {
+                    x,
+                    y: 124.0,
+                    z: 25.5,
+                },
+                sl_proto::Vector {
+                    x: 1.0,
+                    y: 1.0,
+                    z: 1.0,
+                },
+            );
+            let mut properties = sl_fake_grid::world::default_object_properties(&prim);
+            properties.name = name.to_owned();
+            prim.properties = Some(properties);
+            prims.push(prim);
+            let notecard = sl_proto::TaskInventoryItem {
+                item_id: InventoryKey::from(Uuid::from_u128(item)),
+                parent_task: object,
+                asset_id: Some(AssetKey::from(fixture_id(AssetType::Notecard))),
+                asset_type: AssetType::Notecard,
+                inv_type: InventoryType::Notecard,
+                name: item_name.to_owned(),
+                ..sl_fake_grid::scenario::stock_script_item()
+            };
+            contents.push((local_id, notecard));
+        }
+        agent
+            .with_world(|world, sim| {
+                world.objects.extend(prims.iter().cloned());
+                for (local_id, notecard) in contents {
+                    let _stated = world.objects.set_contents(
+                        RegionLocalObjectId(local_id),
+                        sl_fake_grid::world::TaskInventory::stated(1, vec![notecard]),
+                    );
+                }
+                sl_fake_grid::world::send_objects(sim, &prims, now)
+            })
+            .await
+            .map_err(|error| format!("showing the holders: {error}"))?;
+        Ok(())
+    }
+
+    /// Open the contents of the holder `name` from its pie, and return its
+    /// window once its notecard is listed.
+    async fn open_contents(
+        alpha: &Viewer,
+        (key, name, note): (u128, &str, &str),
+    ) -> Result<UiLocator, BodyError> {
+        let object = alpha.world().object_named(name).timeout(WAIT);
+        let _pie = object.open_pie().await?;
+        let _open = alpha
+            .pie_slice(Locator::role(Role::MenuItem).name_key("pie-object-open"))
+            .await?;
+        let window = alpha
+            .ui()
+            .window(&format!("object-contents#{}", Uuid::from_u128(key)));
+        let _listed = alpha
+            .expect(&contents_row(&window, note))
+            .timeout(WAIT)
+            .to_be_visible()
+            .await?;
+        Ok(window)
+    }
+
+    /// The row of `window`'s list naming `note`.
+    fn contents_row(window: &UiLocator, note: &str) -> UiLocator {
+        window.get(Locator::role(Role::ListItem).name_containing(note))
+    }
+
+    /// Whether the row of `window`'s list naming `note` is selected.
+    async fn row_selected(window: &UiLocator, note: &str) -> Result<bool, BodyError> {
+        Ok(contents_row(window, note)
+            .node()
+            .await?
+            .has_state(NodeState::Selected))
+    }
+
+    /// **One window per object** (`viewer-key-object-contents`): two objects'
+    /// Open slices open two windows, each listing its own object; a row picked
+    /// in one is not picked in the other; a double-click opens the notecard
+    /// out of the object whose window it was in; and closing one window leaves
+    /// the other.
+    #[test]
+    fn each_object_lists_its_contents_in_a_window_of_its_own() -> Result<(), TestError> {
+        stage("contents_window_per_object")
+            .region(home())
+            .needs(Need::GridControl)
+            .run(async |stage: &Stage| {
+                let alpha = &stage.viewer("Alpha")?;
+                rez_holders(stage, "Alpha").await?;
+                let [
+                    (_, key_a, name_a, _, (item_a, note_a)),
+                    (_, key_b, name_b, _, (_, note_b)),
+                ] = HOLDERS;
+
+                let first = open_contents(alpha, (key_a, name_a, note_a)).await?;
+                // Out of the way: the second holder's pie opens where the
+                // first window landed.
+                let _moved = first
+                    .test_id("floater-title-bar")
+                    .drag_by(750.0, 0.0)
+                    .await?;
+                let second = open_contents(alpha, (key_b, name_b, note_b)).await?;
+                let _both = alpha.expect(&first).to_be_visible().await?;
+                // Each lists its own object, and only that.
+                let strays = (
+                    contents_row(&first, note_b).count().await?,
+                    contents_row(&second, note_a).count().await?,
+                );
+                assert_eq!(strays, (0, 0), "a window lists the other object's contents");
+
+                // A pick in one window is that window's alone.
+                let _picked = contents_row(&second, note_b).click().await?;
+                let _picked = contents_row(&first, note_a).click().await?;
+                assert!(
+                    row_selected(&first, note_a).await?,
+                    "the click did not pick the row"
+                );
+                assert!(
+                    row_selected(&second, note_b).await?,
+                    "a pick in the first window cleared the second's"
+                );
+
+                // A double-click opens the notecard out of its own object.
+                let _opened = contents_row(&first, note_a).double_click().await?;
+                let editor = alpha.ui().window(&format!(
+                    "notecard-editor#{}/{}",
+                    Uuid::from_u128(key_a),
+                    Uuid::from_u128(item_a)
+                ));
+                let _shown = alpha.expect(&editor).timeout(WAIT).to_be_visible().await?;
+                close_window(alpha, &editor).await?;
+
+                close_window(alpha, &first).await?;
+                let _left = alpha.expect(&second).to_be_visible().await?;
+                close_window(alpha, &second).await?;
+                Ok(())
+            })?;
+        Ok(())
+    }
+
     // ---- About Region's experiences and their pickers ---------------------
 
     /// The Region / Estate window's menu path.
@@ -1030,6 +1218,303 @@ mod test {
                     Ok(())
                 })?;
         }
+        Ok(())
+    }
+
+    /// Open the Region / Estate window on the region the agent is in — the
+    /// region `id` — on its Terrain tab.
+    async fn terrain_tab(alpha: &Viewer, id: u128) -> Result<UiLocator, BodyError> {
+        let _opened = alpha.menu_path(&REGION_ESTATE).await?;
+        let window = about_region(alpha, id);
+        let _shown = alpha.expect(&window).timeout(WAIT).to_be_visible().await?;
+        let _tab = window
+            .get(Locator::role(Role::Tab).name_key("about-region-tab-terrain"))
+            .click()
+            .await?;
+        Ok(window)
+    }
+
+    /// One of the Terrain tab's owner-only buttons, by its label key.
+    fn terrain_button(window: &UiLocator, key: &str) -> UiLocator {
+        window.test_id(&format!("about-region-button:about-region-terrain-{key}"))
+    }
+
+    /// Wait for the modal notice `template`, then dismiss it with its OK — a
+    /// modal alert refuses every other click while it is up.
+    async fn acknowledge(alpha: &Viewer, template: &str) -> Result<(), BodyError> {
+        let _notice = alpha
+            .expect_notification()
+            .timeout(WAIT)
+            .to_show(template)
+            .await?;
+        let ok = alpha.ui().test_id("toast-button:OK");
+        let _ok = ok.click().await?;
+        let _gone = alpha.expect(&ok).to_be_detached().await?;
+        Ok(())
+    }
+
+    /// A throwaway directory under the system temp dir, unique to this run.
+    fn scratch_dir(label: &str) -> Result<std::path::PathBuf, BodyError> {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)?
+            .as_nanos();
+        let dir =
+            std::env::temp_dir().join(format!("sl-e2e-{label}-{}-{nanos}", std::process::id()));
+        fs_err::create_dir_all(&dir)?;
+        Ok(dir)
+    }
+
+    /// **The Terrain tab's owner actions** (`viewer-region-options-terrain`):
+    /// the region's owner downloads its heightmap to the file a save chooser
+    /// names, uploads a file back (the grid receives exactly its bytes, under
+    /// the file's own name), bakes after confirming, and an Apply whose
+    /// elevation range is inverted asks first and sends once it is waved
+    /// through.
+    #[test]
+    fn the_region_owner_transfers_raw_terrain_and_confirms_bake() -> Result<(), TestError> {
+        stage("terrain_owner_actions")
+            .region(home())
+            .estate_manager("Alpha")
+            .needs(Need::GridControl)
+            .run(async |stage: &Stage| {
+                let alpha = &stage.viewer("Alpha")?;
+                let mut heard = stage.agent("Alpha").await?.events();
+                let window = terrain_tab(alpha, HOME_ID).await?;
+                let dir = scratch_dir("terrain-raw")?;
+
+                // Download: a save chooser, and the file written where it says.
+                let download = terrain_button(&window, "download-raw");
+                let _open = alpha
+                    .expect(&download)
+                    .timeout(WAIT)
+                    .to_be_enabled()
+                    .await?;
+                let _asked = download.click().await?;
+                let saved = dir.join("island.raw");
+                let dialog = alpha.answer_file_dialog(Some(&saved)).await?;
+                assert_eq!(dialog.purpose, "about-region-terrain-raw-download");
+                acknowledge(alpha, "FinishedRawDownload").await?;
+                let raw = fs_err::read(&saved)?;
+                assert!(
+                    !raw.is_empty() && raw.len() % 13 == 0,
+                    "a RAW heightmap is 13 bytes a sample: {} bytes",
+                    raw.len()
+                );
+
+                // Upload: a changed copy, received byte for byte under its own
+                // name — never the local directory.
+                let mut changed = raw.clone();
+                if let Some(height) = changed.first_mut() {
+                    *height = height.wrapping_add(40);
+                }
+                let upload_file = dir.join("hills.raw");
+                fs_err::write(&upload_file, &changed)?;
+                let _asked = terrain_button(&window, "upload-raw").click().await?;
+                let dialog = alpha.answer_file_dialog(Some(&upload_file)).await?;
+                assert_eq!(dialog.purpose, "about-region-terrain-raw-upload");
+                acknowledge(alpha, "RawUploadStarted").await?;
+                let (filename, received) =
+                    grid_hears(&mut heard, "terrain RAW upload", |event| match event {
+                        ServerEvent::XferReceived { filename, data, .. } => {
+                            Some((filename.clone(), data.clone()))
+                        }
+                        _ => None,
+                    })
+                    .await?;
+                assert_eq!(filename, "hills.raw", "only the file's own name");
+                assert!(received == changed, "the grid holds the uploaded bytes");
+
+                // Bake: asked first, sent on OK.
+                let _asked = terrain_button(&window, "bake").click().await?;
+                acknowledge(alpha, "ConfirmBakeTerrain").await?;
+                grid_hears(&mut heard, "terrain bake", |event| {
+                    matches!(event, ServerEvent::TerrainBakeRequested).then_some(())
+                })
+                .await?;
+
+                // An inverted range: the first corner's low above its high.
+                let low = window.test_id("about-region-corner-low:field").nth(0);
+                let _typed = low.fill("70").await?;
+                low.press("Enter").await?;
+                let high = window.test_id("about-region-corner-high:field").nth(0);
+                let _typed = high.fill("10").await?;
+                high.press("Enter").await?;
+                // The Region, Debug and Terrain tabs each have an Apply, built
+                // in that order.
+                let _applied = window
+                    .test_id("about-region-button:about-region-apply")
+                    .nth(2)
+                    .click()
+                    .await?;
+                let _asked = alpha
+                    .expect_notification()
+                    .timeout(WAIT)
+                    .to_show("ConfirmTextureHeights")
+                    .await?;
+                let _yes = alpha.ui().test_id("toast-button:Yes").click().await?;
+                let corner = grid_hears(&mut heard, "elevation ranges", |event| match event {
+                    ServerEvent::EstateOwnerRequest { method, params, .. }
+                        if method == "textureheights" =>
+                    {
+                        params.first().cloned()
+                    }
+                    _ => None,
+                })
+                .await?;
+                let numbers: Vec<f32> = corner
+                    .split_whitespace()
+                    .filter_map(|word| word.parse().ok())
+                    .collect();
+                assert_eq!(numbers, [0.0, 70.0, 10.0], "corner 0 as typed: {corner}");
+                fs_err::remove_dir_all(&dir)?;
+                Ok(())
+            })?;
+        Ok(())
+    }
+
+    /// [`home`] with PBR terrain: all four detail slots name the material
+    /// [`MATERIAL_B_ASSET`], which the scenario serves.
+    fn pbr_terrain_home() -> RegionConfig {
+        let mut region = home();
+        region.terrain.composition.detail_textures = [Uuid::from_u128(MATERIAL_B_ASSET); 4];
+        region
+    }
+
+    /// **The Terrain tab's PBR variant** (`viewer-region-options-terrain`): on
+    /// a region whose detail slots are materials, the tab finds that out from
+    /// what decodes, ticks "PBR Metallic Roughness", shows the material
+    /// swatches and the Transforms section in place of the texture swatches —
+    /// and an Apply sends the materials in the `texturedetail` slots and the
+    /// edited transform over `ModifyRegion`.
+    #[test]
+    fn a_pbr_terrain_region_edits_its_materials_and_transforms() -> Result<(), TestError> {
+        stage("terrain_pbr_variant")
+            .region(pbr_terrain_home())
+            .estate_manager("Alpha")
+            .configure_grid(|grid| grid.imitates(ImitatedGrid::SecondLife))
+            .needs(Need::GridControl)
+            .run(async |stage: &Stage| {
+                let alpha = &stage.viewer("Alpha")?;
+                let agent = stage.agent("Alpha").await?;
+                let mut heard = agent.events();
+                let window = terrain_tab(alpha, HOME_ID).await?;
+                let _pbr = alpha
+                    .expect(&window.test_id("about-region-terrain-pbr:checkbox"))
+                    .timeout(WAIT)
+                    .to_be_checked()
+                    .await?;
+                let material = window
+                    .test_id("about-region-terrain-material:texture-swatch")
+                    .nth(0);
+                let _shown = alpha.expect(&material).to_be_visible().await?;
+                let texture = window
+                    .test_id("about-region-terrain-detail:texture-swatch")
+                    .nth(0);
+                let _hidden = alpha.expect(&texture).to_be_hidden().await?;
+
+                // The first material's scale u, the first transform field, on
+                // the Transforms sub-tab only a materials region shows.
+                let _tab = window
+                    .get(Locator::role(Role::Tab).name_key("about-region-terrain-transforms-tab"))
+                    .click()
+                    .await?;
+                let scale_u = window
+                    .test_id("about-region-terrain-transform:field")
+                    .nth(0);
+                let _shown = alpha.expect(&scale_u).to_be_visible().await?;
+                let _typed = scale_u.fill("4").await?;
+                scale_u.press("Enter").await?;
+                let _applied = window
+                    .test_id("about-region-button:about-region-apply")
+                    .nth(2)
+                    .click()
+                    .await?;
+                let slot = grid_hears(&mut heard, "material slots", |event| match event {
+                    ServerEvent::EstateOwnerRequest { method, params, .. }
+                        if method == "texturedetail" =>
+                    {
+                        params.first().cloned()
+                    }
+                    _ => None,
+                })
+                .await?;
+                assert_eq!(
+                    slot,
+                    format!("0 {}", Uuid::from_u128(MATERIAL_B_ASSET)),
+                    "the material goes in the slot"
+                );
+                let written = tokio::time::timeout(WAIT, async {
+                    loop {
+                        let scale = agent
+                            .with_world(|world, _sim| {
+                                world
+                                    .terrain_material_overrides
+                                    .0
+                                    .first()
+                                    .and_then(|slot| slot.get("ti"))
+                                    .and_then(|infos| infos.as_array()?.first().cloned())
+                                    .and_then(|info| info.get("s").cloned())
+                            })
+                            .await;
+                        if let Some(scale) = scale {
+                            return scale;
+                        }
+                        tokio::time::sleep(Duration::from_millis(200)).await;
+                    }
+                })
+                .await
+                .map_err(|_elapsed| "the grid never stored the transform")?;
+                let scale: Vec<f32> = written
+                    .as_array()
+                    .unwrap_or_default()
+                    .iter()
+                    .filter_map(|value| value.as_f32())
+                    .collect();
+                assert_eq!(scale, [4.0, 1.0], "the edited scale u, v untouched");
+                Ok(())
+            })?;
+        Ok(())
+    }
+
+    /// **The owner's buttons are the owner's**: a second estate manager, who
+    /// does not own the region, sees Download / Upload RAW and Bake greyed
+    /// while the tab's Apply stays live — as the reference's `owner_or_god`.
+    /// The region is on textures, so the PBR switch is off and there is no
+    /// Transforms tab.
+    #[test]
+    fn a_manager_who_does_not_own_the_region_cannot_transfer_terrain() -> Result<(), TestError> {
+        stage("terrain_owner_actions_manager")
+            .viewer("Beta")
+            .region(home())
+            // The first estate manager is the grid's estate owner.
+            .estate_manager("Alpha")
+            .estate_manager("Beta")
+            .run(async |stage: &Stage| {
+                let beta = &stage.viewer("Beta")?;
+                let window = terrain_tab(beta, HOME_ID).await?;
+                let apply = window
+                    .test_id("about-region-button:about-region-apply")
+                    .nth(2);
+                let _live = beta.expect(&apply).timeout(WAIT).to_be_enabled().await?;
+                // A textures region: the PBR switch off, no Transforms tab.
+                let _textures = beta
+                    .expect(&window.test_id("about-region-terrain-pbr:checkbox"))
+                    .to_be_unchecked()
+                    .await?;
+                let _no_transforms = beta
+                    .expect(&window.get(
+                        Locator::role(Role::Tab).name_key("about-region-terrain-transforms-tab"),
+                    ))
+                    .to_be_hidden()
+                    .await?;
+                for key in ["download-raw", "upload-raw", "bake"] {
+                    let _greyed = beta
+                        .expect(&terrain_button(&window, key))
+                        .to_be_disabled()
+                        .await?;
+                }
+                Ok(())
+            })?;
         Ok(())
     }
 
@@ -1821,6 +2306,136 @@ mod test {
                 })?;
         }
         Ok(())
+    }
+
+    // ---- About Region's covenant and region message ------------------------
+
+    /// The covenant the home region's estate starts with in
+    /// [`a_manager_sets_resets_the_covenant_and_messages_the_region`]; the grid
+    /// serves its stock covenant body for it.
+    const STAGE_COVENANT: u128 = 0x57A6_EC0F_0001;
+
+    /// **An estate manager sets, resets and reads the covenant, and messages
+    /// the region**: the covenant reads over the estate's own transfer, a
+    /// notecard dropped on the Covenant tab is confirmed, read through its item
+    /// and set, Reset clears it, and the Region tab's message prompt sends what
+    /// was typed to everyone in the region.
+    #[test]
+    fn a_manager_sets_resets_the_covenant_and_messages_the_region() -> Result<(), TestError> {
+        stage("estate_covenant_and_message")
+            .region(home())
+            .estate_manager("Alpha")
+            .run(async |stage: &Stage| {
+                let alpha = &stage.viewer("Alpha")?;
+                let agent = stage.agent("Alpha").await?;
+                agent
+                    .with_world(|world, _sim| {
+                        world.estate.covenant = Some(Uuid::from_u128(STAGE_COVENANT));
+                    })
+                    .await;
+                let mut heard = agent.events();
+
+                // The covenant the estate has, read over the estate transfer.
+                let _opened = alpha.menu_path(&REGION_ESTATE).await?;
+                let window = about_region(alpha, HOME_ID);
+                let _shown = alpha.expect(&window).timeout(WAIT).to_be_visible().await?;
+                let _tab = window
+                    .get(Locator::role(Role::Tab).name_key("about-region-tab-covenant"))
+                    .click()
+                    .await?;
+                let panel = window.test_id("about-region-tabs:panel:4");
+                let body = window.test_id("about-region-covenant-body");
+                let _read = alpha
+                    .expect(&body)
+                    .timeout(WAIT)
+                    .to_contain_text("Fake grid covenant: be excellent to each other.")
+                    .await?;
+
+                // A notecard dropped on the tab: asked, read, and set.
+                let (_id, name) = NOTECARD;
+                let inventory = inventory(alpha, name).await?;
+                item_known(alpha, "Notecards", name).await?;
+                let row = item_row(&inventory, name).timeout(WAIT);
+                let _listed = alpha.expect(&row).timeout(WAIT).to_be_visible().await?;
+                let _dropped = row.drag_to(&panel).await?;
+                acknowledge(alpha, "EstateChangeCovenant").await?;
+                let set_to = estate_command(&mut heard, "estatechangecovenantid").await?;
+                assert_eq!(
+                    set_to,
+                    vec![fixture_id(AssetType::Notecard).to_string()],
+                    "the covenant is the dropped notecard's asset"
+                );
+                let _shown = alpha
+                    .expect(&body)
+                    .timeout(WAIT)
+                    .to_contain_text("The fake grid's seeded notecard.")
+                    .await?;
+
+                // Reset: asked, and the covenant cleared. The inventory the
+                // notecard came from is closed first; it stands over the tab.
+                close_window(alpha, &inventory).await?;
+                let _reset = window
+                    .test_id("about-region-button:about-region-reset-covenant")
+                    .click()
+                    .await?;
+                acknowledge(alpha, "EstateChangeCovenant").await?;
+                let cleared = estate_command(&mut heard, "estatechangecovenantid").await?;
+                assert_eq!(
+                    cleared,
+                    vec![Uuid::nil().to_string()],
+                    "Reset sends the nil id"
+                );
+                let _none = alpha
+                    .expect(&body)
+                    .timeout(WAIT)
+                    .to_contain_text("There is no Covenant provided for this Estate.")
+                    .await?;
+
+                // The region message: typed into the prompt, sent on OK.
+                let _tab = window
+                    .get(Locator::role(Role::Tab).name_key("about-region-tab-region"))
+                    .click()
+                    .await?;
+                let _asked = window
+                    .test_id("about-region-button:about-region-message-region")
+                    .click()
+                    .await?;
+                let _prompt = alpha
+                    .expect_notification()
+                    .timeout(WAIT)
+                    .to_show("MessageRegion")
+                    .await?;
+                let _typed = alpha
+                    .ui()
+                    .test_id("toast-input:field")
+                    .fill("The region restarts at noon.")
+                    .await?;
+                let _ok = alpha.ui().test_id("toast-button:OK").click().await?;
+                let message = estate_command(&mut heard, "simulatormessage").await?;
+                assert_eq!(
+                    message.last().map(String::as_str),
+                    Some("The region restarts at noon."),
+                    "the message is the method's last parameter: {message:?}"
+                );
+                Ok(())
+            })?;
+        Ok(())
+    }
+
+    /// The parameters of the next estate command `method` the grid hears.
+    async fn estate_command(
+        heard: &mut broadcast::Receiver<ServerEvent>,
+        method: &str,
+    ) -> Result<Vec<String>, BodyError> {
+        grid_hears(heard, method, |event| match event {
+            ServerEvent::EstateOwnerRequest {
+                method: heard,
+                params,
+                ..
+            } if heard == method => Some(params.clone()),
+            _ => None,
+        })
+        .await
     }
 
     // ---- About Region's access lists --------------------------------------

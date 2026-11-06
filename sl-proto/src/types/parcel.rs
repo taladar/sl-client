@@ -1021,6 +1021,29 @@ impl ParcelMediaCommand {
             other => Self::Other(other),
         }
     }
+
+    /// The wire `Command` code of this command — the inverse of
+    /// [`from_u32`](Self::from_u32).
+    #[must_use]
+    pub const fn to_u32(self) -> u32 {
+        match self {
+            Self::Stop => 0,
+            Self::Pause => 1,
+            Self::Play => 2,
+            Self::Loop => 3,
+            Self::Texture => 4,
+            Self::Url => 5,
+            Self::Time => 6,
+            Self::Agent => 7,
+            Self::Unload => 8,
+            Self::AutoAlign => 9,
+            Self::Type => 10,
+            Self::Size => 11,
+            Self::Desc => 12,
+            Self::LoopSet => 13,
+            Self::Other(code) => code,
+        }
+    }
 }
 
 /// The parcel's media settings, parsed from a `ParcelMediaUpdate` and surfaced

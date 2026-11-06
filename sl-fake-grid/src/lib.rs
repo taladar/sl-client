@@ -34,6 +34,7 @@ pub mod login_sections;
 mod map_tiles;
 pub mod marker;
 pub mod messages;
+pub mod movement;
 pub mod neighbours;
 mod notecards;
 mod object_edits;
@@ -100,6 +101,7 @@ pub use marker::{
     neighbour_marker_region,
 };
 pub use messages::{AwayAutoResponse, ImPolicy, Lures, Statement};
+pub use movement::{MovementPolicy, Posture, UpdateCadence};
 pub use neighbours::NeighbourPolicy;
 pub use relays::{
     EffectsSent, EffectsVetting, OPENSIM_GAZE_RANGE_M, OPENSIM_SOUND_RANGE_M, RelayPolicy,
@@ -126,5 +128,5 @@ pub use voice::VoiceBackend;
 pub use world::{
     AVATAR_CENTRE_ABOVE_GROUND_M, AvatarIdentity, ParcelAccessLists, ParcelListing, RegionChange,
     RegionUpdate, RegionWorld, SceneFixtures, TaskInventory, avatar_prim, box_prim,
-    default_object_properties, prim_from_shape, region_limits, region_wide_parcel,
+    default_object_properties, prim_from_shape, rect_parcel, region_limits, region_wide_parcel,
 };

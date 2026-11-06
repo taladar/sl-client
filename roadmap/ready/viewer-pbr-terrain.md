@@ -57,3 +57,10 @@ read and write the overrides (`Event::TerrainMaterialOverrides`,
 `TerrainMaterialOverridesWritten`); the reference reads them after every
 region handshake where `ModifyRegion` is granted, which this task should do
 too. Second Life answers four `undef` overrides for none.
+
+## The region floater side is done (viewer-region-options-terrain, 2026-11-05)
+
+About Region's Terrain tab already tells a materials region from a textures
+one (any decoded texture, else any decoded material), edits the four
+materials and their transforms, reads the overrides over `ModifyRegion` once
+per region and writes them on Apply. What is left here is drawing them.

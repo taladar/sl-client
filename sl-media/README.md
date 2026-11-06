@@ -21,7 +21,7 @@ extension) that decides which engine a media URL is handed to.
 
 Design notes live in the workspace roadmap
 (`roadmap/in-progress/viewer-media-prim-browser.md`,
-`roadmap/in-progress/viewer-video-playback.md`): input crosses the
+`roadmap/done/viewer-video-playback.md`): input crosses the
 boundary portably (Windows virtual-key codes + committed text, never
 native key blobs), frames cross as CPU BGRA buffers (zero-copy stays
 deferred headroom), and playback controls (play / pause / seek / volume)

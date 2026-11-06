@@ -405,7 +405,7 @@ pub(crate) fn answer_estate_request(
                 world.estate.name.clone_from(name);
             }
             if let Some(flags) = number(params, 1) {
-                world.estate.flags = sl_proto::RegionFlags::from_legacy(flags);
+                world.set_estate_flags(sl_proto::RegionFlags::from_legacy(flags));
             }
             if let Some(sun) = number(params, 2) {
                 world.estate.sun_position = sun;

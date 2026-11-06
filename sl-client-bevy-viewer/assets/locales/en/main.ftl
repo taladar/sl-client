@@ -70,10 +70,6 @@ conversations-you = You
 # The "someone is typing" status line under a transcript.
 conversations-typing-one = { $name } is typing…
 conversations-typing-many = Several people are typing…
-# The pending-invite bar shown until a group / conference invite is accepted.
-conversations-invite-prompt = You're invited to this conversation.
-conversations-invite-accept = Accept
-conversations-invite-decline = Decline
 
 ## The People / Contacts surface (viewer-social-people-panel), hosted as a pinned
 ## tab inside the Conversations floater: the Friends list plus a Groups
@@ -605,6 +601,7 @@ about-region-block-parcel-search = Block land show in search
 about-region-teleport-home-one = Teleport Home One Resident…
 about-region-teleport-home-all = Teleport Home All Residents…
 about-region-manage-telehub = Manage Telehub…
+about-region-message-region = Send Message To Region…
 
 # Debug tab.
 about-region-disable-scripts = Disable scripts
@@ -621,12 +618,27 @@ about-region-water-height = Water height:
 about-region-terrain-raise = Terrain raise limit:
 about-region-terrain-lower = Terrain lower limit:
 about-region-terrain-textures = Terrain textures
+about-region-terrain-materials = Terrain materials
+about-region-terrain-pbr = PBR Metallic Roughness
+about-region-terrain-transforms = Material transforms
+about-region-terrain-elevation-tab = Elevation
+about-region-terrain-transforms-tab = Transforms
+about-region-terrain-scale-u = Scale u
+about-region-terrain-scale-v = Scale v
+about-region-terrain-rotation = Rotation
+about-region-terrain-offset-u = Offset u
+about-region-terrain-offset-v = Offset v
 about-region-terrain-tex-1 = 1 (low):
 about-region-terrain-tex-2 = 2:
 about-region-terrain-tex-3 = 3:
 about-region-terrain-tex-4 = 4 (high):
 about-region-terrain-elevation = Elevation ranges (low = start, high = range)
 about-region-terrain-bake = Bake Terrain
+about-region-terrain-download-raw = Download RAW terrain...
+about-region-terrain-upload-raw = Upload RAW terrain...
+about-region-terrain-download-raw-title = Save the region's terrain as a RAW file
+about-region-terrain-upload-raw-title = Upload a RAW file as the region's terrain
+about-region-terrain-raw-filter = RAW File
 about-region-corner-sw-low = SW low
 about-region-corner-sw-high = high
 about-region-corner-se-low = SE low
@@ -664,6 +676,9 @@ about-region-resale = Resale:
 about-region-subdivide = Subdivide:
 about-region-covenant-none = There is no Covenant provided for this Estate.
 about-region-covenant-loading = (loading covenant…)
+about-region-covenant-unavailable = (the covenant could not be loaded)
+about-region-reset-covenant = Reset
+about-region-covenant-help = Changes to the covenant will show on all parcels in the estate. Drop a notecard here to set it.
 about-region-resale-allowed = Land in this region may be resold.
 about-region-resale-blocked = Land in this region may not be resold.
 about-region-subdivide-allowed = Land in this region may be joined or subdivided.
@@ -1033,6 +1048,7 @@ nearby-media-col-playing = On
 nearby-media-col-name = Name
 # The list's name for the parcel's music stream row.
 nearby-media-parcel-audio = Parcel Streaming Audio
+nearby-media-parcel-media = Parcel Streaming Media
 # A media face with neither a title nor a URL.
 nearby-media-empty = <empty>
 # Appended to the name of media that is playing.
@@ -2664,7 +2680,6 @@ notification-image-upload-resized = The texture you are uploading has been resiz
 notification-image-empty-alpha-layer = The image you are trying to upload contains an empty, or almost empty alpha channel (transparency information). This is almost always not desired and should be stripped off. Adding an alpha channel to an image will lead to textures flipping on top of each other at different camera angles, and it makes rendering slower. So, unless you really need this texture to have an empty / almost empty alpha channel, consider stripping it out.
 notification-click-action-pay-unavailable = Clicking this object pays it, and this viewer has no pay dialog yet. Nothing was paid.
 notification-click-action-buy-unavailable = Clicking this object buys it, and this viewer cannot buy objects yet. Nothing was bought.
-notification-click-action-play-unavailable = Clicking this object plays the parcel's media, and this viewer does not play parcel media yet.
 
 ## IM & chat (viewer-notification-catalogue-im-chat). Bodies follow
 ## the reference notifications.xml with the standard trims (KB URLs,
@@ -3886,7 +3901,8 @@ experience-permission-short-unknown = Unknown ({ $permission })
 
 # The offers & invites toasts (viewer-dialog-offers-invites): the accept /
 # decline cards the grid throws at the user over IM — an inventory offer, a
-# teleport offer / lure, a friendship offer, and a group-membership invitation.
+# teleport offer / lure, a friendship offer, a group-membership invitation, and
+# a calling-card offer.
 offer-inventory-heading = Inventory Offer
 offer-inventory-from = { $name } has given you an item:
 offer-teleport-heading = Teleport Offer
@@ -3902,6 +3918,9 @@ offer-friendship-from = { $name } is offering to be your friend.
 offer-group-heading = Group Invitation
 offer-group-from = { $name } has invited you to join a group:
 offer-group-fee = There is a fee of L$ { $fee } to join this group.
+offer-calling-card-heading = Calling Card Offer
+offer-calling-card-from = { $name } is offering their calling card.
+offer-calling-card-detail = This will add a bookmark in your inventory so you can quickly IM this resident.
 offer-button-accept = Accept
 offer-button-decline = Decline
 offer-button-teleport = Teleport
@@ -4195,6 +4214,8 @@ preferences-row-collision-sounds = Play collision sounds
 preferences-section-streaming = Streaming
 preferences-row-music-autoplay = Play the parcel's music stream automatically
 preferences-row-media-autoplay = Auto-play media on objects
+preferences-row-parcel-media-autoplay = Auto-play parcel media
+preferences-row-scripted-media = Allow scripts to play parcel media
 preferences-section-audio-device = Output device
 preferences-row-output-device = Output device
 preferences-audio-device-default = System default
@@ -5368,6 +5389,8 @@ setting-desc-LogTimestampDate = Include the date in logged timestamps
 setting-desc-LogTimestampSeconds = Include seconds in logged timestamps
 setting-desc-LoginStartLocation = The default login start location: last, home, or uri:Region&x&y&z
 setting-desc-MediaAutoPlayEnabled = Start media-on-a-prim faces marked auto-play without a click
+setting-desc-ParcelMediaAutoPlayEnable = Start the parcel's media by itself a few seconds after arriving, while its screen is in view
+setting-desc-PermAllowScriptedMedia = Let a script start the parcel's media (stopping and pausing it are always allowed)
 setting-desc-MediaSoundsEarLocation = Where the ears are: 0 the camera position, 1 the avatar position
 setting-desc-MiniMapAutoCenter = Ease a panned minimap back to centre
 setting-desc-MiniMapChatRing = Show chat-distance rings on the minimap
@@ -5444,6 +5467,7 @@ setting-desc-RadarReportDrawRangeLeave = Report avatars leaving draw distance
 setting-desc-RadarReportSimRangeEnter = Report avatars entering the region
 setting-desc-RadarReportSimRangeLeave = Report avatars leaving the region
 setting-desc-RadioLandBrushAction = The land tool's picked action: 0 = select land, 1..=6 = the flatten / raise / lower / smooth / roughen / revert brushes
+setting-desc-RegionCheckTextureHeights = Ask before applying terrain elevation ranges where a corner's low value is above its high one
 setting-desc-RejectAllGroupInvitesMode = Reject every incoming group invitation
 setting-desc-RejectFriendshipRequestsMode = Reject every incoming friendship request
 setting-desc-RejectFriendshipRequestsResponse = The automatic reply sent to a rejected friendship request
@@ -5516,6 +5540,7 @@ setting-desc-UiScale = The UI scale factor (1.0 = native size)
 setting-desc-UiSkin = The UI skin (a directory under assets/skins)
 setting-desc-UiSkinTheme = The skin's theme overlay; empty for the skin's own base
 setting-desc-UseLegacyIMLogNames = Name transcript files with the legacy resident-name scheme
+setting-desc-WebContentWindowLimit = Most web browser windows open at once; opening another closes the oldest (0 = no limit)
 setting-desc-WorldMapScale = World-map zoom, in pixels per 256 m region (1-256)
 setting-desc-WorldMapShowAdultEvents = Show Adult event markers on the world map
 setting-desc-WorldMapShowEvents = Show event markers on the world map

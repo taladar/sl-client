@@ -4398,6 +4398,7 @@ pub(crate) fn chatterbox_invitation_from_llsd(body: &Llsd) -> Option<Event> {
                 .unwrap_or(false),
             session_name: string_member(body, "session_name"),
             message: string_member(params, "message"),
+            channel: invite_channel_from_llsd(body),
             region_id: uuid_member_lenient(params, "region_id"),
             position: llsd_position(params),
             parent_estate_id: u32_member(params, "parent_estate_id"),
@@ -4420,6 +4421,7 @@ pub(crate) fn chatterbox_invitation_from_llsd(body: &Llsd) -> Option<Event> {
             .unwrap_or(false),
         session_name: string_member(body, "session_name"),
         message: String::new(),
+        channel: invite_channel_from_llsd(body),
         region_id: Uuid::nil(),
         position: RegionCoordinates::new(0.0, 0.0, 0.0),
         parent_estate_id: 0,
@@ -7023,7 +7025,10 @@ pub(crate) fn offline_message_to_record(im: &InstantMessage) -> Llsd {
 /// Serializes an [`Event::ConferenceInvited`] as a `ChatterBoxInvitation` event
 /// body (inverse of `chatterbox_invitation_from_llsd`). `session_name` sits at
 /// the top level and the bucket nests under `message_params.data`, matching the
-/// shape the parser reads.
+/// shape the parser reads. A text invitation carries the `instantmessage`
+/// sub-map, a voice one an (empty) `voice` sub-map; a voice-only invitation
+/// names its session and inviter at the top level, where the reference reads
+/// them for a voice call (`llimview.cpp`, `LLViewerChatterBoxInvitation`).
 #[must_use]
 pub fn chatterbox_invitation_to_llsd(event: &Event) -> Llsd {
     let Event::ConferenceInvited {
@@ -7034,6 +7039,7 @@ pub fn chatterbox_invitation_to_llsd(event: &Event) -> Llsd {
         from_group,
         session_name,
         message,
+        channel,
         region_id,
         position,
         parent_estate_id,
@@ -7062,10 +7068,26 @@ pub fn chatterbox_invitation_to_llsd(event: &Event) -> Llsd {
             llsd_map(vec![("binary_bucket", Llsd::Binary(binary_bucket.clone()))]),
         ),
     ]);
-    llsd_map(vec![
-        ("session_name", Llsd::String(session_name.clone())),
-        ("instantmessage", llsd_map(vec![("message_params", params)])),
-    ])
+    let mut body = vec![("session_name", Llsd::String(session_name.clone()))];
+    match channel {
+        InviteChannel::Text => {
+            body.push(("instantmessage", llsd_map(vec![("message_params", params)])));
+        }
+        InviteChannel::Both => {
+            body.push(("instantmessage", llsd_map(vec![("message_params", params)])));
+            body.push(("voice", llsd_map(Vec::new())));
+        }
+        InviteChannel::Voice => {
+            body.extend([
+                ("session_id", Llsd::Uuid(*session_id)),
+                ("from_id", Llsd::Uuid(from_agent_id.uuid())),
+                ("from_name", Llsd::String(from_name.clone())),
+                ("from_group", Llsd::Boolean(*from_group)),
+                ("voice", llsd_map(Vec::new())),
+            ]);
+        }
+    }
+    llsd_map(body)
 }
 
 /// Serializes an [`Event::GroupMemberships`] as the CAPS event-queue
@@ -8418,6 +8440,8 @@ pub(crate) fn full_update_block(object: &Object) -> ObjectUpdateObjectDataBlock 
 #[cfg(test)]
 mod caps_serializer_tests {
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+
+    use super::InviteChannel;
 
     use crate::types::{AssetType, InventoryListing, InventoryListingChildren, Maturity, MuteType};
     use pretty_assertions::{assert_eq, assert_ne};
@@ -9805,6 +9829,7 @@ mod caps_serializer_tests {
             from_group: true,
             session_name: "The Group".to_owned(),
             message: "join us".to_owned(),
+            channel: InviteChannel::Text,
             region_id: Uuid::from_u128(0xb3),
             position: RegionCoordinates::new(12.0, 34.0, 56.0),
             parent_estate_id: 2,
@@ -9815,6 +9840,50 @@ mod caps_serializer_tests {
             chatterbox_invitation_from_llsd(&chatterbox_invitation_to_llsd(&event)),
             Some(event)
         );
+    }
+
+    /// A voice invitation keeps its channel through the body: one to both
+    /// channels with the text fields, a voice-only one with just the session
+    /// and inviter, which is all a voice body carries.
+    #[test]
+    fn chatterbox_voice_invitation_round_trips() {
+        let both = Event::ConferenceInvited {
+            session_id: Uuid::from_u128(0xc1),
+            from_agent_id: AgentKey::from(Uuid::from_u128(0xc2)),
+            from_name: "Inviter Resident".to_owned(),
+            dialog: ImDialog::SessionConferenceStart,
+            from_group: false,
+            session_name: "A Chat".to_owned(),
+            message: "talk?".to_owned(),
+            channel: InviteChannel::Both,
+            region_id: Uuid::from_u128(0xc3),
+            position: RegionCoordinates::new(1.0, 2.0, 3.0),
+            parent_estate_id: 1,
+            timestamp: Some(1_700_002_000),
+            binary_bucket: Vec::new(),
+        };
+        assert_eq!(
+            chatterbox_invitation_from_llsd(&chatterbox_invitation_to_llsd(&both)),
+            Some(both)
+        );
+        let voice = Event::ConferenceInvited {
+            session_id: Uuid::from_u128(0xd1),
+            from_agent_id: AgentKey::from(Uuid::from_u128(0xd2)),
+            from_name: "Caller Resident".to_owned(),
+            dialog: ImDialog::SessionConferenceStart,
+            from_group: true,
+            session_name: "The Group".to_owned(),
+            message: String::new(),
+            channel: InviteChannel::Voice,
+            region_id: Uuid::nil(),
+            position: RegionCoordinates::new(0.0, 0.0, 0.0),
+            parent_estate_id: 0,
+            timestamp: None,
+            binary_bucket: Vec::new(),
+        };
+        let body = chatterbox_invitation_to_llsd(&voice);
+        assert!(body.get("instantmessage").is_none());
+        assert_eq!(chatterbox_invitation_from_llsd(&body), Some(voice));
     }
 
     #[test]

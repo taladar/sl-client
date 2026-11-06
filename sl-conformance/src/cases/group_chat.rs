@@ -51,8 +51,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use sl_client_tokio::{
     AgentKey, AnyMessage, ChatLifecycleView, ChatSessionAgentUpdate, ChatSessionInfo,
     ChatSessionKind, Command, Diagnostic, Event, GroupKey, GroupMembership, ImDialog, ImSessionId,
-    InstantMessage, RegionCoordinates, Reliability, ServerHistoryMessage, SessionTransition, Uuid,
-    Vector,
+    InstantMessage, InviteChannel, RegionCoordinates, Reliability, ServerHistoryMessage,
+    SessionTransition, Uuid, Vector,
 };
 use sl_wire::Llsd;
 use sl_wire::messages::{
@@ -897,6 +897,8 @@ struct Invitation {
     session_name: String,
     /// The text it carries.
     message: String,
+    /// Which channel(s) it invites to.
+    channel: InviteChannel,
     /// The region it states.
     region_id: Uuid,
     /// The place it states.
@@ -979,6 +981,7 @@ fn fold(got: &mut Got, event: &Event) -> Option<()> {
             from_group,
             session_name,
             message,
+            channel,
             region_id,
             position,
             parent_estate_id,
@@ -992,6 +995,7 @@ fn fold(got: &mut Got, event: &Event) -> Option<()> {
             from_group: *from_group,
             session_name: session_name.clone(),
             message: message.clone(),
+            channel: *channel,
             region_id: *region_id,
             position: *position,
             estate: *parent_estate_id,
@@ -1295,8 +1299,9 @@ impl Scene {
     /// An invitation as a metric states it.
     fn invitation_text(&self, invitation: &Invitation) -> String {
         format!(
-            "invitation {:?} to {}{}, from {}, {}, session name {}, {}, {}, estate {}, {}, {}, text {}",
+            "invitation {:?} ({:?}) to {}{}, from {}, {}, session name {}, {}, {}, estate {}, {}, {}, text {}",
             invitation.dialog,
+            invitation.channel,
             self.id_text(invitation.session_id),
             if invitation.from_group {
                 " (a group's)"

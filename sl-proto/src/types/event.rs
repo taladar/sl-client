@@ -68,8 +68,8 @@ use uuid::Uuid;
 use crate::bookkeeping_ids::{InventoryCallbackId, TransactionId, TransferId, XferId};
 use crate::scoped_id::{CircuitId, ScopedObjectId, ScopedParcelId};
 use crate::{
-    ChatSessionAgentUpdate, ChatSessionInfo, ChatSessionKind, FriendPresence, MessageCursor,
-    NearbyHistoryLine, ServerHistoryMessage, SessionMessage,
+    ChatSessionAgentUpdate, ChatSessionInfo, ChatSessionKind, FriendPresence, InviteChannel,
+    MessageCursor, NearbyHistoryLine, ServerHistoryMessage, SessionMessage,
 };
 
 /// How the agent came to be in the region an [`Event::AgentArrived`] reports —
@@ -1377,6 +1377,10 @@ pub enum Event {
         session_name: String,
         /// The accompanying message text.
         message: String,
+        /// Which channel(s) the invitation is to: an `instantmessage` body is a
+        /// text invitation (the reference joins it at once), a `voice` body a
+        /// voice call (the reference asks the user).
+        channel: InviteChannel,
         /// The source region's id (nil if not provided — OpenSim sends nil).
         region_id: Uuid,
         /// The inviting agent's region-local position, in metres.

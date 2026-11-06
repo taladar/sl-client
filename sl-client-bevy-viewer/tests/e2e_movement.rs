@@ -1,6 +1,6 @@
-//! End-to-end test for the viewer's own avatar being moved by a grid that
-//! moves avatars — a live one, through the automation driver alone, on both
-//! backends ([[gridspec-agent-movement]]).
+//! End-to-end test for the viewer's own avatar being moved by the grid,
+//! through the automation driver alone, on both backends
+//! ([[gridspec-agent-movement]]).
 //!
 //! The simulator moves the avatar; the viewer states which keys are held and,
 //! on Second Life, says when the avatar's landing and pre-jump animations have
@@ -15,11 +15,12 @@
 //!   reported finished;
 //! - and the forward key walks it again afterwards, past the jump's landing.
 //!
-//! The fake grid decodes an `AgentUpdate` and moves nothing
-//! ([[server-world-agent-movement]]), so this needs a live grid:
-//! `SL_E2E_GRID=opensim` or `SL_E2E_GRID=aditi`, under `--profile live`.
-//! On the local OpenSim it also needs a start clear of the test content the
-//! default spot stands among, which lets an avatar walk 1.2 m:
+//! It runs on the fake grid, whose avatar controller moves the avatar to each
+//! flavour's measurements (`sl_fake_grid::movement`) — the Second Life flavour
+//! holding the pre-jump for the viewer's `FINISH_ANIM` as Second Life does —
+//! and on a live one: `SL_E2E_GRID=opensim` or `SL_E2E_GRID=aditi`, under
+//! `--profile live`. On the local OpenSim it needs a start clear of the test
+//! content the default spot stands among, which lets an avatar walk 1.2 m:
 //! `SL_E2E_START='uri:Northeast Region&70&180&26'`.
 
 #[cfg(test)]
@@ -27,7 +28,7 @@ mod test {
     use core::time::Duration;
 
     use sl_automation_proto::AgentReadout;
-    use sl_e2e::{BodyError, Need, Stage, StageBuilder};
+    use sl_e2e::{BodyError, Stage, StageBuilder};
     use sl_viewer_driver::Viewer;
 
     /// A failed stage, or a test that could not set one up.
@@ -122,7 +123,7 @@ mod test {
         Ok(gone.max(ground_distance(to, from)))
     }
 
-    /// **Walking and jumping on a live grid**: the forward key walks the
+    /// **Walking and jumping**: the forward key walks the
     /// avatar from where the login put it, a tap of the jump key takes it off
     /// the ground, and the forward key walks it again once it is down.
     #[test]
@@ -130,9 +131,6 @@ mod test {
         StageBuilder::new("movement")
             .viewer_binary(VIEWER)
             .viewer("Alpha")
-            .needs(Need::LiveGrid(
-                "a grid that moves an avatar: the fake grid ignores AgentUpdate",
-            ))
             .run(async |stage: &Stage| {
                 let alpha = &stage.viewer("Alpha")?;
 

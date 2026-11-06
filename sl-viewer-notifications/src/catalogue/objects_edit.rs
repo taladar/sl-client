@@ -2868,18 +2868,4 @@ pub(crate) const ENTRIES: &[NotificationTemplate] = &[
         form: NO_FORM,
         input: None,
     },
-    NotificationTemplate {
-        name: "ClickActionPlayUnavailable",
-        kind: NotificationKind::Tip,
-        message_key: "notification-click-action-play-unavailable",
-        title_key: None,
-        priority: NotificationPriority::Normal,
-        persist: false,
-        log_to_chat: false,
-        unique: true,
-        ignore: NotificationIgnore::None,
-        ignore_key: None,
-        form: NO_FORM,
-        input: None,
-    },
 ];

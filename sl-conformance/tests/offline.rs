@@ -104,6 +104,7 @@ mod test {
         teleport_lure_offline => "teleport-lure-offline" [fake_sl, fake_opensim],
         teleport_lure_rated => "teleport-lure-rated" [fake_sl],
         region_crossing => "region-crossing" [fake_sl, fake_opensim],
+        agent_movement => "agent-movement" [fake_sl, fake_opensim],
         neighbour_child_circuits => "neighbour-child-circuits" [fake_sl, fake_opensim],
         draw_distance => "draw-distance" [fake_sl, fake_opensim],
         avatar_appearance_npc => "avatar-appearance-npc" [fake_sl, fake_opensim],

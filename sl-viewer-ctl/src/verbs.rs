@@ -178,6 +178,7 @@ pub(crate) async fn run<W: Write>(
         }
         Verb::Environment => Outcome::Environment(viewer.environment().await?),
         Verb::WorldMap => Outcome::WorldMap(viewer.world_map().await?),
+        Verb::ParcelMedia => Outcome::ParcelMedia(viewer.parcel_media().await?),
         Verb::Setting { key, value } => {
             let value = match value {
                 Some(text) => {

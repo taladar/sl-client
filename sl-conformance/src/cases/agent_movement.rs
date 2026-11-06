@@ -34,9 +34,8 @@
 //! when told to, stops when let go, leaves the ground when told to fly and
 //! comes back down. Everything else is recorded.
 //!
-//! Live grids only. The fake grid decodes an `AgentUpdate` and moves nothing
-//! (`server-world-agent-movement`), so there is nothing offline to hold to
-//! these answers yet.
+//! It runs against both fake flavours too, whose avatar controller
+//! (`sl_fake_grid::movement`) is built to these answers.
 
 use std::collections::BTreeSet;
 use std::time::{Duration, Instant};
@@ -147,7 +146,7 @@ impl GridTest for AgentMovement {
     }
 
     fn grids(&self) -> &'static [Grid] {
-        &[Grid::Opensim, Grid::Aditi]
+        &[Grid::Opensim, Grid::Aditi, Grid::FakeSl, Grid::FakeOpensim]
     }
 
     fn start_location(&self, grid: Grid) -> &'static str {

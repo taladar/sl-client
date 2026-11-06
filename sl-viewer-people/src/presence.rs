@@ -587,7 +587,7 @@ fn bool_setting(settings: Option<&ViewerSettings>, name: &str) -> bool {
 /// override from the smallest contact set they are filed under that carries one,
 /// else the configured global text — or `None` when that is empty (a user who
 /// blanked the field wants no reply sent).
-fn reply_text(
+pub(crate) fn reply_text(
     settings: Option<&ViewerSettings>,
     sets: Option<&ContactSets>,
     sender: sl_client_bevy::AgentKey,

@@ -89,15 +89,13 @@ pub struct TranscriptLine {
     pub text: String,
 }
 
-/// One conversation: its transcript and whether it waits on the user.
+/// One conversation: its transcript and how much of it is unread.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ConversationReadout {
     /// Which conversation this is.
     pub conversation: ConversationRef,
     /// Lines that arrived while it was not the one shown.
     pub unread: u32,
-    /// Whether it is an invitation the user has not accepted yet.
-    pub pending_invite: bool,
     /// The lines of this session, oldest first. Lines recalled from an earlier
     /// session's log are not among them.
     pub lines: Vec<TranscriptLine>,
@@ -291,6 +289,28 @@ pub struct WorldMapReadout {
     pub tiles_pending: usize,
     /// How many tiles the server does not have, or failed to send.
     pub tiles_absent: usize,
+}
+
+/// The agent parcel's legacy whole-parcel media, as the viewer's player holds
+/// it: what the parcel states, and whether a surface plays it on the faces
+/// wearing its texture.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ParcelMediaReadout {
+    /// The media URL, while the parcel has media that could play.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    /// The declared MIME type (empty when unset or when there is no media).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub media_type: String,
+    /// The texture the media replaces.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub texture: Option<Uuid>,
+    /// The engine a live surface runs on (`"web"` or `"video"`), `None` while
+    /// nothing plays.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub engine: Option<String>,
+    /// How many faces wear the media now.
+    pub faces: usize,
 }
 
 /// A region the world map knows.
@@ -581,6 +601,7 @@ mod tests {
     use serde::Serialize;
     use serde::de::DeserializeOwned;
 
+    use super::ParcelMediaReadout;
     use super::{
         AgentReadout, CameraView, ChatKind, ClockTime, ConversationReadout, ConversationRef,
         DiagnosticLine, DiagnosticsReadout, EnvironmentReadout, InventoryEntry,
@@ -606,7 +627,6 @@ mod tests {
         let nearby = ConversationReadout {
             conversation: ConversationRef::Nearby,
             unread: 2,
-            pending_invite: false,
             lines: vec![
                 TranscriptLine {
                     own: false,
@@ -635,7 +655,6 @@ mod tests {
             round_trip(&ConversationReadout {
                 conversation,
                 unread: 0,
-                pending_invite: true,
                 lines: vec![TranscriptLine {
                     own: true,
                     speaker: "You".to_owned(),
@@ -793,6 +812,24 @@ mod tests {
             nothing,
             r#"{"tiles_ready":0,"tiles_pending":0,"tiles_absent":0}"#
         );
+        Ok(())
+    }
+
+    #[test]
+    fn parcel_media_round_trips() -> Result<(), serde_json::Error> {
+        let json = round_trip(&ParcelMediaReadout {
+            url: Some("https://video.example/feature.mp4".to_owned()),
+            media_type: "video/mp4".to_owned(),
+            texture: Some(uuid::Uuid::from_u128(0x5C2E)),
+            engine: Some("video".to_owned()),
+            faces: 3,
+        })?;
+        assert_eq!(
+            json,
+            r#"{"url":"https://video.example/feature.mp4","media_type":"video/mp4","texture":"00000000-0000-0000-0000-000000005c2e","engine":"video","faces":3}"#
+        );
+        let nothing = round_trip(&ParcelMediaReadout::default())?;
+        assert_eq!(nothing, r#"{"faces":0}"#);
         Ok(())
     }
 

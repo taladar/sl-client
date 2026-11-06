@@ -8,6 +8,21 @@
 //! writing an [`OpenWebBrowser`] message (other floaters route links here). Runs in
 //! the **shared** (trusted-UI) request context so web logins persist across
 //! pages, unlike in-world media surfaces which are isolated.
+//!
+//! # One window per page, as the reference keeps them
+//!
+//! `LLFloaterWebContent` is a keyed instance, not a singleton and not a tab
+//! strip: `LLWeb::loadURLInternal` gives every page a fresh id, so a menu
+//! entry, a chat link and a script's `llLoadURL` each open a window of their
+//! own, and `matchesKey` reuses a window only when a page *names* one (a
+//! `target="name"` link). `WebContentWindowLimit` (5) caps how many are open,
+//! closing the least recently opened. This module does the same: an
+//! [`OpenWebBrowser`] carries a [`WebTarget`], a window is keyed by it
+//! ([`web_window_key`]), a page's popup opens through the same message with
+//! the target the page named (routed for every embedded view by
+//! [`crate::browser_widget`]), and [`SETTING_WEB_WINDOW_LIMIT`] is the cap.
+//! Every window has its own embedded view, so its own history, address and
+//! title; closing one ends its view and leaves the others alone.
 
 use bevy::input::keyboard::KeyboardInput;
 use bevy::input_focus::{FocusedInput, InputFocus};
@@ -17,30 +32,44 @@ use bevy::ui_widgets::Activate;
 use bevy_flair::style::components::ClassList;
 
 use crate::browser_widget::{
-    BrowserView, BrowserViewSpec, SurfaceTrust, ValidatedMediaUrl, spawn_browser_view,
+    BrowserPopupSystems, BrowserView, BrowserViewSpec, SurfaceTrust, ValidatedMediaUrl,
+    spawn_browser_view,
 };
 use crate::media_engine::{MediaEngineSystems, MediaSurfaces};
 use sl_cef::SurfaceStatus;
-use sl_viewer_intents::OpenWebBrowser;
+use sl_settings::SettingValue;
+use sl_viewer_intents::{OpenWebBrowser, WebTarget};
 use sl_viewer_platform::system_browser::{ExternalUrl, normalize_web_url, open_in_system_browser};
+use sl_viewer_settings::ViewerSettings;
 use sl_viewer_ui_core::glyph;
 use sl_viewer_ui_core::i18n::Translated;
 use sl_viewer_ui_core::skin::{DISABLED_TEXT_CLASS, role_class, set_state_class_on, text_role};
 use sl_viewer_ui_core::skin_palette::SkinPalette;
-use sl_viewer_ui_core::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
-use sl_viewer_ui_core::ui_element::UiAction;
+use sl_viewer_ui_core::ui::{UiPanelShown, column, row};
 use sl_viewer_ui_core::ui_font::UiFont;
 use sl_viewer_ui_core::ui_spawn::{self, ButtonKind, ButtonSpec, UiLabel};
 use sl_viewer_ui_core::ui_text::set_editor_text;
-use sl_viewer_ui_widgets::floater::{FloaterCaps, FloaterSpec, spawn_floater};
+use sl_viewer_ui_widgets::floater::{
+    FloaterCaps, FloaterCommand, FloaterHandle, FloaterHost, FloaterKey, FloaterOp, FloaterSpec,
+    FloaterSystems, KeyedFloaterOpen, KeyedFloaters,
+};
 use sl_viewer_ui_widgets::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 
-/// The [`UiAction`] element name of the floater's toolbar.
-pub const WEB_BROWSER_ELEMENT: &str = "web-browser";
-
-/// The web-browser floater's stable [`sl_viewer_ui_widgets::floater::Floater::id`], the key
-/// the openers (menu bar) look the panel up by.
+/// The web-browser floater's [`sl_viewer_ui_widgets::floater::Floater::id`] —
+/// the **kind** every browser window shares; which window is which comes from
+/// its [`FloaterKey`] ([`web_window_key`]).
 pub const WEB_FLOATER_ID: &str = "web-browser";
+
+/// The settings section the browser's settings persist under.
+const WEB_SETTINGS_SECTION: &[&str] = &["media"];
+
+/// How many web browser windows may be open at once; opening one more closes
+/// the least recently opened. 0 is no limit. The reference's
+/// `WebContentWindowLimit`, under its name and with its default.
+pub const SETTING_WEB_WINDOW_LIMIT: &str = "WebContentWindowLimit";
+
+/// [`SETTING_WEB_WINDOW_LIMIT`]'s default — the reference's.
+const DEFAULT_WEB_WINDOW_LIMIT: u32 = 5;
 
 /// The page a fresh floater opens on.
 const DEFAULT_HOME_URL: &str = "https://secondlife.com/";
@@ -51,16 +80,31 @@ const WEB_FONT_SIZE: f32 = 13.0;
 /// The status line — the muted role.
 const STATUS_COLOR: Color = SkinPalette::FALLBACK.text_muted;
 
-/// The floater's entities.
-#[derive(Debug, Resource)]
-pub struct WebFloaterUi {
-    /// The floater root (open/close via [`UiPanelShown`]).
-    root: Entity,
+/// One browser window's own parts, on its floater root: what the toolbar,
+/// the address bar and the status sync reach *their* window's view through.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct WebWindow {
     /// The title-bar text (bound to the page title).
     title_text: Entity,
     /// The content the status is drawn into.
     parts: WebContentParts,
+    /// When the window was opened, in [`WebWindowSeq`] order — the limit
+    /// closes the lowest.
+    opened: u64,
 }
+
+impl WebWindow {
+    /// The window's embedded browser view.
+    #[must_use]
+    pub const fn view(&self) -> Entity {
+        self.parts.view
+    }
+}
+
+/// The next window's sequence number: both the order windows were opened in
+/// (for the limit) and what makes a [`WebTarget::New`] key unique.
+#[derive(Debug, Default, Resource)]
+struct WebWindowSeq(u64);
 
 /// The web floater's content entities: what [`spawn_web_content`] returns
 /// and [`draw_web_status`] draws a status snapshot into. Shared by the live
@@ -90,17 +134,39 @@ pub struct WebFloaterPlugin;
 impl Plugin for WebFloaterPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<OpenWebBrowser>()
-            .add_systems(
-                Startup,
-                spawn_web_floater.after(UiScaffoldSystems::SpawnRoot),
-            )
+            .add_message::<FloaterCommand>()
+            .init_resource::<WebWindowSeq>()
             .add_systems(
                 Update,
-                (open_web_browser, handle_web_actions, sync_web_floater)
+                (open_web_browser, sync_web_floater)
                     .chain()
-                    .after(MediaEngineSystems::Pump),
+                    .after(MediaEngineSystems::Pump)
+                    // A page's popup opens its window in the frame it arrives.
+                    .after(BrowserPopupSystems)
+                    // A link clicked inside another window both raises that
+                    // window and opens this one; opening after the command
+                    // pass keeps the new window on top (`FloaterSystems`).
+                    .after(FloaterSystems::Commands),
             );
     }
+}
+
+/// Register the browser's settings — the window limit.
+pub fn register_settings(settings: &mut ViewerSettings) {
+    settings.register_in(
+        WEB_SETTINGS_SECTION,
+        SETTING_WEB_WINDOW_LIMIT,
+        SettingValue::U32(DEFAULT_WEB_WINDOW_LIMIT),
+        "setting-desc-WebContentWindowLimit",
+    );
+}
+
+/// The window limit as configured, or `None` for no limit (a 0).
+fn window_limit(settings: Option<&ViewerSettings>) -> Option<usize> {
+    let limit = settings
+        .and_then(|settings| settings.store().get_u32(SETTING_WEB_WINDOW_LIMIT).ok())
+        .unwrap_or(DEFAULT_WEB_WINDOW_LIMIT);
+    usize::try_from(limit).ok().filter(|limit| *limit > 0)
 }
 
 /// The web floater's [`FloaterSpec`] — shared with the `FLOATERS`
@@ -123,22 +189,169 @@ pub fn web_floater_spec() -> FloaterSpec {
     }
 }
 
-/// Startup: build the floater — toolbar, browser view, status row.
-fn spawn_web_floater(mut commands: Commands, root: Res<UiRoot>) {
-    let handle = spawn_floater(&mut commands, root.0, web_floater_spec());
+/// The key a page opening in `target` finds its window under: a named target
+/// always the same window, a new one a key no other window has (`seq` is the
+/// sequence number the window would be opened under).
+///
+/// The two are prefixed apart so a page cannot name a target that collides
+/// with a fresh window's key.
+#[must_use]
+pub fn web_window_key(target: &WebTarget, seq: u64) -> FloaterKey {
+    match target {
+        WebTarget::New => FloaterKey::subject(&format!("new-{seq}")),
+        WebTarget::Named(name) => FloaterKey::subject(&format!("target-{name}")),
+    }
+}
+
+/// A window opened this frame, whose content is built once every request has
+/// been read — so a second request for the same named target in the same
+/// frame changes the page it opens on instead of opening a second window.
+#[derive(Debug)]
+struct FreshWindow {
+    /// The key it was opened under.
+    key: FloaterKey,
+    /// Its chrome.
+    handle: FloaterHandle,
+    /// The page it opens on.
+    url: ValidatedMediaUrl,
+    /// Its place in the open order.
+    opened: u64,
+}
+
+/// Open a page per [`OpenWebBrowser`] message (menu, links, popups): in the
+/// window its target names when that window is up, else in a new window —
+/// closing the least recently opened first when the limit is reached.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the open path needs the keyed manager, the windows and views it may reuse, the \
+              settings for the limit, the close it may issue and the commands that build a new \
+              window; bundling them would only rename the list"
+)]
+fn open_web_browser(
+    mut requests: MessageReader<OpenWebBrowser>,
+    mut floaters: KeyedFloaters,
+    mut seq: ResMut<WebWindowSeq>,
+    windows: Query<(Entity, &WebWindow)>,
+    mut views: Query<&mut BrowserView>,
+    surfaces: Option<NonSend<MediaSurfaces>>,
+    settings: Option<Res<ViewerSettings>>,
+    mut closes: MessageWriter<FloaterCommand>,
+    mut commands: Commands,
+) {
+    let mut fresh: Vec<FreshWindow> = Vec::new();
+    let mut closing: Vec<Entity> = Vec::new();
+    let limit = window_limit(settings.as_deref());
+    for request in requests.read() {
+        let url = match &request.url {
+            Some(text) => match validated_web_url(text) {
+                Ok(url) => Some(url),
+                // Refused and logged: there is no page to open a window on.
+                Err(_refused) => continue,
+            },
+            None => None,
+        };
+        let key = web_window_key(&request.target, seq.0);
+        if let Some(window) = fresh.iter_mut().find(|window| window.key == key) {
+            if let Some(url) = url {
+                window.url = url;
+            }
+            continue;
+        }
+        if floaters.instance(WEB_FLOATER_ID, &key).is_none()
+            && let Some(limit) = limit
+        {
+            make_room(limit, &windows, &fresh, &mut closing, &mut closes);
+        }
+        match floaters.open(web_floater_spec(), key.clone()) {
+            KeyedFloaterOpen::Spawned(handle) => {
+                fresh.push(FreshWindow {
+                    key,
+                    handle,
+                    url: url.unwrap_or_else(home_url),
+                    opened: seq.0,
+                });
+                seq.0 = seq.0.wrapping_add(1);
+            }
+            KeyedFloaterOpen::Existing(root) => {
+                if let Some(url) = url
+                    && let Ok((_root, window)) = windows.get(root)
+                    && let Ok(mut view) = views.get_mut(window.parts.view)
+                {
+                    navigate(&mut view, surfaces.as_deref(), url);
+                }
+            }
+        }
+    }
+    for window in fresh {
+        build_web_window(&mut commands, window);
+    }
+}
+
+/// Close the least recently opened windows until one more fits under
+/// `limit`. Windows opened this frame count, and are the newest.
+fn make_room(
+    limit: usize,
+    windows: &Query<(Entity, &WebWindow)>,
+    fresh: &[FreshWindow],
+    closing: &mut Vec<Entity>,
+    closes: &mut MessageWriter<FloaterCommand>,
+) {
+    let mut open: Vec<(u64, Entity)> = windows
+        .iter()
+        .map(|(root, window)| (window.opened, root))
+        .chain(
+            fresh
+                .iter()
+                .map(|window| (window.opened, window.handle.root)),
+        )
+        .filter(|(_opened, root)| !closing.contains(root))
+        .collect();
+    open.sort_unstable();
+    let excess = open.len().saturating_add(1).saturating_sub(limit);
+    for (_opened, root) in open.into_iter().take(excess) {
+        closes.write(FloaterCommand {
+            floater: root,
+            op: FloaterOp::CloseNow,
+        });
+        closing.push(root);
+    }
+}
+
+/// Point `view` at `url`: navigate its surface when it has one, or change the
+/// page it will open on when its surface is not created yet (a window opened
+/// a frame ago, still waiting for its first layout).
+fn navigate(view: &mut BrowserView, surfaces: Option<&MediaSurfaces>, url: ValidatedMediaUrl) {
+    match view.surface {
+        Some(id) => {
+            if let Some(slot) = surfaces.and_then(|surfaces| surfaces.get(id)) {
+                slot.surface.navigate(&url);
+            }
+        }
+        None => view.initial_url = url,
+    }
+}
+
+/// The home page a window opened without a URL shows.
+fn home_url() -> ValidatedMediaUrl {
+    validated_web_url(DEFAULT_HOME_URL).unwrap_or_else(|_refused| ValidatedMediaUrl::blank())
+}
+
+/// Build a just-opened window's content and give it its [`WebWindow`].
+fn build_web_window(commands: &mut Commands, window: FreshWindow) {
+    let FreshWindow {
+        handle,
+        url,
+        opened,
+        ..
+    } = window;
     commands
         .entity(handle.title_text)
         .insert(Translated::new("web-floater-title"));
-    let parts = spawn_web_content(
-        &mut commands,
-        handle.content,
-        WEB_FONT_SIZE,
-        validated_web_url(DEFAULT_HOME_URL).unwrap_or_else(|_refused| ValidatedMediaUrl::blank()),
-    );
-    commands.insert_resource(WebFloaterUi {
-        root: handle.root,
+    let parts = spawn_web_content(commands, handle.content, WEB_FONT_SIZE, url);
+    commands.entity(handle.root).insert(WebWindow {
         title_text: handle.title_text,
         parts,
+        opened,
     });
 }
 
@@ -301,8 +514,8 @@ fn spawn_web_content(
     }
 }
 
-/// One glyph toolbar button emitting a [`UiAction`]; returns the label entity
-/// (recoloured for enablement), at `font_size`.
+/// One glyph toolbar button acting on the view of the window it is in;
+/// returns the label entity (recoloured for enablement), at `font_size`.
 fn spawn_toolbar_button(
     commands: &mut Commands,
     parent: Entity,
@@ -324,14 +537,48 @@ fn spawn_toolbar_button(
         .font_size(font_size),
     );
     commands.entity(spawned.button).observe(
-        move |_activate: On<Activate>, mut actions: MessageWriter<UiAction>| {
-            actions.write(UiAction {
-                element: WEB_BROWSER_ELEMENT,
-                action,
-            });
+        move |activate: On<Activate>,
+              host: FloaterHost,
+              windows: Query<&WebWindow>,
+              views: Query<&BrowserView>,
+              surfaces: Option<NonSend<MediaSurfaces>>| {
+            let slot = host
+                .of(activate.entity)
+                .and_then(|root| windows.get(root).ok())
+                .and_then(|window| views.get(window.parts.view).ok())
+                .and_then(|view| view.surface)
+                .and_then(|id| surfaces.as_deref()?.get(id));
+            if let Some(slot) = slot {
+                toolbar_action(action, &*slot.surface, &slot.status);
+            }
         },
     );
     spawned.label
+}
+
+/// Carry out the toolbar button `action` on one window's surface.
+fn toolbar_action(action: &str, surface: &dyn sl_cef::MediaSurface, status: &SurfaceStatus) {
+    match action {
+        "back" => surface.go_back(),
+        "forward" => surface.go_forward(),
+        "reload-or-stop" => {
+            if status.loading {
+                surface.stop();
+            } else {
+                surface.reload();
+            }
+        }
+        // The page's *current* URL, which the page chose by navigating:
+        // remote data, filtered at the sink like any other.
+        "open-external" => {
+            if let Ok(url) = ExternalUrl::parse(&status.url).inspect_err(|error| {
+                warn!("web page not opened in the system browser: {error}");
+            }) {
+                open_in_system_browser(&url);
+            }
+        }
+        _ => {}
+    }
 }
 
 /// The Fluent key naming the toolbar button that reports `action`.
@@ -345,21 +592,20 @@ fn toolbar_button_name_key(action: &'static str) -> &'static str {
     }
 }
 
-/// `Enter` in the address field navigates the view to the typed URL.
+/// `Enter` in the address field navigates its window's view to the typed URL.
 fn on_address_key(
     event: On<FocusedInput<KeyboardInput>>,
     editors: Query<&EditableText>,
-    ui: Option<Res<WebFloaterUi>>,
-    views: Query<&BrowserView>,
-    surfaces: NonSend<MediaSurfaces>,
+    host: FloaterHost,
+    windows: Query<&WebWindow>,
+    mut views: Query<&mut BrowserView>,
+    surfaces: Option<NonSend<MediaSurfaces>>,
 ) {
     if !event.input.state.is_pressed() || event.input.key_code != KeyCode::Enter {
         return;
     }
-    let Some(ui) = ui else {
-        return;
-    };
-    let Ok(editor) = editors.get(ui.parts.address) else {
+    let field = event.focused_entity;
+    let Ok(editor) = editors.get(field) else {
         return;
     };
     let Some(url) = normalize_web_url(&editor.value().to_string()) else {
@@ -368,10 +614,10 @@ fn on_address_key(
     let Ok(url) = validated_web_url(&url) else {
         return;
     };
-    if let Ok(view) = views.get(ui.parts.view)
-        && let Some(slot) = view.surface.and_then(|id| surfaces.get(id))
+    if let Some(window) = host.of(field).and_then(|root| windows.get(root).ok())
+        && let Ok(mut view) = views.get_mut(window.parts.view)
     {
-        slot.surface.navigate(&url);
+        navigate(&mut view, surfaces.as_deref(), url);
     }
 }
 
@@ -387,79 +633,10 @@ fn validated_web_url(text: &str) -> Result<ValidatedMediaUrl, sl_cef::MediaUrlEr
         .inspect_err(|error| warn!("web floater did not open a URL: {error}"))
 }
 
-/// Open the floater on an [`OpenWebBrowser`] message (menu, other floaters).
-fn open_web_browser(
-    mut requests: MessageReader<OpenWebBrowser>,
-    ui: Option<Res<WebFloaterUi>>,
-    mut panels: Query<&mut UiPanelShown>,
-    views: Query<&BrowserView>,
-    surfaces: NonSend<MediaSurfaces>,
-) {
-    let Some(ui) = ui else {
-        return;
-    };
-    for request in requests.read() {
-        if let Ok(mut shown) = panels.get_mut(ui.root) {
-            shown.0 = true;
-        }
-        if let Some(url) = &request.url
-            && let Ok(url) = validated_web_url(url)
-            && let Ok(view) = views.get(ui.parts.view)
-            && let Some(slot) = view.surface.and_then(|id| surfaces.get(id))
-        {
-            slot.surface.navigate(&url);
-        }
-    }
-}
-
-/// Route the toolbar's [`UiAction`]s to the view's surface.
-fn handle_web_actions(
-    mut actions: MessageReader<UiAction>,
-    ui: Option<Res<WebFloaterUi>>,
-    views: Query<&BrowserView>,
-    surfaces: NonSend<MediaSurfaces>,
-) {
-    let Some(ui) = ui else {
-        return;
-    };
-    for action in actions.read() {
-        if action.element != WEB_BROWSER_ELEMENT {
-            continue;
-        }
-        let Ok(view) = views.get(ui.parts.view) else {
-            continue;
-        };
-        let Some(slot) = view.surface.and_then(|id| surfaces.get(id)) else {
-            continue;
-        };
-        match action.action {
-            "back" => slot.surface.go_back(),
-            "forward" => slot.surface.go_forward(),
-            "reload-or-stop" => {
-                if slot.status.loading {
-                    slot.surface.stop();
-                } else {
-                    slot.surface.reload();
-                }
-            }
-            // The page's *current* URL, which the page chose by navigating:
-            // remote data, filtered at the sink like any other.
-            "open-external" => {
-                if let Ok(url) = ExternalUrl::parse(&slot.status.url).inspect_err(|error| {
-                    warn!("web page not opened in the system browser: {error}");
-                }) {
-                    open_in_system_browser(&url);
-                }
-            }
-            _ => {}
-        }
-    }
-}
-
-/// The floater's chrome, bundled as one
+/// A browser window's chrome, bundled as one
 /// [`SystemParam`](bevy::ecs::system::SystemParam) — one query per piece
-/// updated, plus the shown flag that says whether to update any of it and the
-/// two text contexts a rewritten address bar is re-laid-out through.
+/// updated, plus the two text contexts a rewritten address bar is
+/// re-laid-out through.
 #[derive(bevy::ecs::system::SystemParam)]
 struct WebChrome<'w, 's> {
     /// The status row and the button glyphs.
@@ -470,57 +647,52 @@ struct WebChrome<'w, 's> {
     editors: Query<'w, 's, &'static mut EditableText>,
     /// The secure lock, shown only for a secure page.
     visibilities: Query<'w, 's, &'static mut Visibility>,
-    /// Whether the floater is shown at all — a hidden one is left alone.
-    panels: Query<'w, 's, &'static UiPanelShown>,
     /// The font context a rewritten address bar is re-laid-out through.
     font_cx: ResMut<'w, FontCx>,
     /// Its layout context.
     layout_cx: ResMut<'w, LayoutCx>,
 }
 
-/// Mirror the view's status into the chrome: title, address (unless being
-/// edited), back/forward enablement, stop-vs-reload glyph, the secure lock,
-/// and the status row. Also routes a page's popup request into this same
-/// view (popups are suppressed engine-side).
+/// Mirror each shown window's view status into its chrome: title, address
+/// (unless being edited), back/forward enablement, stop-vs-reload glyph, the
+/// secure lock, and the status row. A page's popup is the browser widget's to
+/// route (`browser_widget::route_browser_popups`), as for every other view.
 fn sync_web_floater(
-    ui: Option<Res<WebFloaterUi>>,
+    windows: Query<(&WebWindow, &UiPanelShown)>,
     views: Query<&BrowserView>,
-    surfaces: NonSend<MediaSurfaces>,
+    surfaces: Option<NonSend<MediaSurfaces>>,
     focus: Res<InputFocus>,
     mut chrome: WebChrome,
 ) {
-    let Some(ui) = ui else {
+    let Some(surfaces) = surfaces else {
         return;
     };
-    if !chrome.panels.get(ui.root).is_ok_and(|shown| shown.0) {
-        return;
-    }
-    let Ok(view) = views.get(ui.parts.view) else {
-        return;
-    };
-    let Some(slot) = view.surface.and_then(|id| surfaces.get(id)) else {
-        return;
-    };
-    // A popup request is the *page's* choice of URL, not the user's.
-    if let Some(popup) = slot.surface.take_popup_request()
-        && let Ok(popup) = validated_web_url(&popup)
-    {
-        slot.surface.navigate(&popup);
-    }
-    let status = &slot.status;
-
-    if let Ok(mut title) = chrome.texts.get_mut(ui.title_text) {
-        let want = if status.title.is_empty() {
-            &status.url
-        } else {
-            &status.title
-        };
-        if title.0 != *want {
-            title.0.clone_from(want);
+    for (window, shown) in &windows {
+        if !shown.0 {
+            continue;
         }
+        let Some(slot) = views
+            .get(window.parts.view)
+            .ok()
+            .and_then(|view| view.surface)
+            .and_then(|id| surfaces.get(id))
+        else {
+            continue;
+        };
+        let status = &slot.status;
+        if let Ok(mut title) = chrome.texts.get_mut(window.title_text) {
+            let want = if status.title.is_empty() {
+                &status.url
+            } else {
+                &status.title
+            };
+            if title.0 != *want {
+                title.0.clone_from(want);
+            }
+        }
+        let editing_address = focus.get() == Some(window.parts.address);
+        draw_web_status(&window.parts, status, editing_address, &mut chrome);
     }
-    let editing_address = focus.get() == Some(ui.parts.address);
-    draw_web_status(&ui.parts, status, editing_address, &mut chrome);
 }
 
 /// Draw one status snapshot into the content's chrome: the address (unless
@@ -592,9 +764,152 @@ fn draw_web_status(
 
 #[cfg(test)]
 mod tests {
+    use bevy::input_focus::InputFocus;
+    use bevy::prelude::*;
     use pretty_assertions::assert_eq;
+    use sl_viewer_intents::{OpenWebBrowser, WebTarget};
+    use sl_viewer_ui_core::ui::UiRoot;
+    use sl_viewer_ui_widgets::floater::{Floater, FloaterPlugin};
 
-    use super::normalize_web_url;
+    use super::{WebFloaterPlugin, WebWindow, normalize_web_url};
+    use crate::media_engine::MediaSurfaces;
+
+    /// A headless app with the floater manager and the browser windows, and
+    /// an empty surface table: no engine, so every view stays waiting for its
+    /// surface — the keying, not the page, is under test.
+    fn browser_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<UiScale>()
+            .init_resource::<InputFocus>()
+            .init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<bevy::text::FontCx>()
+            .init_resource::<bevy::text::LayoutCx>()
+            .insert_non_send(MediaSurfaces::default())
+            .add_plugins((FloaterPlugin, WebFloaterPlugin));
+        sl_viewer_ui_core::i18n::install_untranslated(&mut app);
+        let root = app.world_mut().spawn(Node::default()).id();
+        app.insert_resource(UiRoot(root));
+        app.update();
+        app
+    }
+
+    /// Ask for `url` in `target`, as a link or the menu does, and let the
+    /// open (and any close it asks for) land.
+    fn open(app: &mut App, url: Option<&str>, target: WebTarget) {
+        app.world_mut().write_message(OpenWebBrowser {
+            url: url.map(str::to_owned),
+            target,
+        });
+        app.update();
+        app.update();
+    }
+
+    /// Every browser window's key, in the order the windows were opened.
+    fn windows(app: &mut App) -> Vec<String> {
+        let mut query = app.world_mut().query::<(&Floater, &WebWindow)>();
+        let mut found: Vec<(u64, String)> = query
+            .iter(app.world())
+            .map(|(floater, window)| {
+                (
+                    window.opened,
+                    floater
+                        .key()
+                        .map(|key| key.as_str().to_owned())
+                        .unwrap_or_default(),
+                )
+            })
+            .collect();
+        found.sort();
+        found.into_iter().map(|(_opened, key)| key).collect()
+    }
+
+    /// The page each window's view opens on, in open order.
+    fn pages(app: &mut App) -> Vec<String> {
+        let mut query = app.world_mut().query::<&WebWindow>();
+        let mut views: Vec<(u64, Entity)> = query
+            .iter(app.world())
+            .map(|window| (window.opened, window.view()))
+            .collect();
+        views.sort();
+        views
+            .into_iter()
+            .filter_map(|(_opened, view)| {
+                app.world()
+                    .get::<crate::browser_widget::BrowserView>(view)
+                    .map(|view| view.initial_url.as_str().to_owned())
+            })
+            .collect()
+    }
+
+    /// Two pages from two openers (the menu, a chat link) are two windows —
+    /// the second no longer replaces the first's page.
+    #[test]
+    fn two_pages_open_two_windows() {
+        let mut app = browser_app();
+        open(&mut app, None, WebTarget::New);
+        open(&mut app, Some("https://example.com/a"), WebTarget::New);
+        assert_eq!(windows(&mut app), ["new-0", "new-1"]);
+        assert_eq!(
+            pages(&mut app),
+            ["https://secondlife.com/", "https://example.com/a"]
+        );
+    }
+
+    /// A page that names its window lands in that window every time, and
+    /// navigates it rather than opening another.
+    #[test]
+    fn a_named_target_reuses_its_window() {
+        let mut app = browser_app();
+        let help = || WebTarget::Named(String::from("help"));
+        open(&mut app, Some("https://example.com/a"), help());
+        open(&mut app, Some("https://example.com/b"), help());
+        assert_eq!(windows(&mut app), ["target-help"]);
+        assert_eq!(pages(&mut app), ["https://example.com/b"]);
+    }
+
+    /// Two requests for one named window in the same frame open it once, on
+    /// the later page.
+    #[test]
+    fn one_frame_two_requests_for_one_name_open_one_window() {
+        let mut app = browser_app();
+        for page in ["https://example.com/a", "https://example.com/b"] {
+            app.world_mut().write_message(OpenWebBrowser {
+                url: Some(page.to_owned()),
+                target: WebTarget::Named(String::from("help")),
+            });
+        }
+        app.update();
+        app.update();
+        assert_eq!(windows(&mut app), ["target-help"]);
+        assert_eq!(pages(&mut app), ["https://example.com/b"]);
+    }
+
+    /// Past the reference's limit of five, opening a window closes the least
+    /// recently opened one.
+    #[test]
+    fn the_sixth_window_closes_the_oldest() {
+        let mut app = browser_app();
+        for page in 0..6 {
+            open(
+                &mut app,
+                Some(&format!("https://example.com/{page}")),
+                WebTarget::New,
+            );
+        }
+        assert_eq!(
+            windows(&mut app),
+            ["new-1", "new-2", "new-3", "new-4", "new-5"]
+        );
+    }
+
+    /// A URL outside the media scheme allowlist opens no window at all.
+    #[test]
+    fn a_refused_url_opens_no_window() {
+        let mut app = browser_app();
+        open(&mut app, Some("file:///etc/passwd"), WebTarget::New);
+        assert_eq!(windows(&mut app), Vec::<String>::new());
+    }
 
     #[test]
     fn bare_hosts_get_https() {

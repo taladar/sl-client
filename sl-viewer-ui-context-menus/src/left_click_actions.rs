@@ -13,14 +13,16 @@
 //! - **Zoom** — the camera frames the picked prim ([`FrameObject`]), the
 //!   reference's `CLICK_ACTION_ZOOM`, which fits the prim's bounding box to the
 //!   view.
-//! - **Open media** — the parcel's media URL in the web browser, the
-//!   reference's `handle_click_action_open_media` once no media plays on the
-//!   face (none ever does here: parcel media is not played yet,
-//!   `viewer-video-playback`).
-//! - **Pay**, **buy** and **play** have nothing behind them yet — no pay
-//!   dialog, no buy floater (`viewer-money-economy-ui`) and no parcel media
-//!   player — so each says so in a notification rather than doing nothing or
-//!   touching, which is what the reference would not do either.
+//! - **Play** — the parcel's media pauses while it plays, resumes while paused
+//!   and starts otherwise ([`ParcelMediaControl::Toggle`]), the reference's
+//!   `handle_click_action_play`.
+//! - **Open media** — on a face showing the parcel's media, the same as *play*;
+//!   anywhere else, the parcel's media URL in the web browser — the reference's
+//!   `handle_click_action_open_media`.
+//! - **Pay** and **buy** have nothing behind them yet — no pay dialog, no buy
+//!   floater (`viewer-money-economy-ui`) — so each says so in a notification
+//!   rather than doing nothing or touching, which is what the reference would
+//!   not do either.
 
 use bevy::prelude::*;
 use sl_client_bevy::{Command, SlAgentParcel, SlCommand};
@@ -29,18 +31,17 @@ use crate::edit_contents::OpenObjectContents;
 use crate::intents::OpenWebBrowser;
 use crate::notifications::ShowNotification;
 use crate::object_menu::{SeatPoses, sit_here_offset};
-use crate::objects::ObjectRayHit;
-use crate::world_api::{ClickActionRequest, ClickedAction, FrameObject, ObjectState};
+use crate::objects::{FaceTextureDebug, ObjectRayHit, PrimFaceEntity};
+use crate::world_api::{
+    ClickActionRequest, ClickedAction, FrameObject, ObjectState, ParcelMediaControl,
+    ParcelMediaShown,
+};
 
 /// The notification a pay click action raises while there is no pay dialog.
 pub const PAY_UNAVAILABLE: &str = "ClickActionPayUnavailable";
 
 /// The notification a buy click action raises while there is no buy floater.
 pub const BUY_UNAVAILABLE: &str = "ClickActionBuyUnavailable";
-
-/// The notification a play click action raises while parcel media does not
-/// play.
-pub const PLAY_UNAVAILABLE: &str = "ClickActionPlayUnavailable";
 
 /// Register the click-action answer (called from the object menu's plugin).
 pub(crate) fn build(app: &mut App) {
@@ -49,6 +50,7 @@ pub(crate) fn build(app: &mut App) {
         .add_message::<OpenWebBrowser>()
         .add_message::<OpenObjectContents>()
         .add_message::<ShowNotification>()
+        .add_message::<ParcelMediaControl>()
         .add_systems(Update, carry_out_click_actions);
 }
 
@@ -66,6 +68,41 @@ struct ClickActionOut<'w> {
     browser: MessageWriter<'w, OpenWebBrowser>,
     /// The notification an action with nothing behind it raises.
     notify: MessageWriter<'w, ShowNotification>,
+    /// The parcel media player a play click drives.
+    parcel_media: MessageWriter<'w, ParcelMediaControl>,
+}
+
+/// Whether the face a click struck is showing the parcel's media, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): what the parcel media player
+/// paints over, and the faces' textures.
+#[derive(bevy::ecs::system::SystemParam)]
+struct ParcelMediaFaces<'w, 's> {
+    /// The texture the live parcel media replaces.
+    shown: Option<Res<'w, ParcelMediaShown>>,
+    /// Each face's index and texture.
+    faces: Query<'w, 's, (&'static PrimFaceEntity, &'static FaceTextureDebug)>,
+}
+
+impl ParcelMediaFaces<'_, '_> {
+    /// Whether face `face_index` of the clicked prim wears the texture the live
+    /// parcel media is painted over — the reference's
+    /// `getMediaImplFromTextureID` on the face's texture.
+    fn shows_media(&self, state: &ObjectState, request: &ClickActionRequest) -> bool {
+        let Some(texture) = self.shown.as_ref().and_then(|shown| shown.texture) else {
+            return false;
+        };
+        let Ok(face) = u16::try_from(request.surface.face_index) else {
+            return false;
+        };
+        state
+            .face_entities_by_key(request.summary.picked_full)
+            .into_iter()
+            .flatten()
+            .filter_map(|entity| self.faces.get(*entity).ok())
+            .any(|(entity_face, FaceTextureDebug(tf))| {
+                entity_face.face_id.get() == face && tf.texture_id == texture
+            })
+    }
 }
 
 /// Carry out each left click's click action. See the
@@ -76,6 +113,7 @@ fn carry_out_click_actions(
     parcel: Option<Res<SlAgentParcel>>,
     seats: SeatPoses,
     globals: Query<&GlobalTransform>,
+    media_faces: ParcelMediaFaces,
     mut out: ClickActionOut,
 ) {
     for request in requests.read() {
@@ -115,15 +153,17 @@ fn carry_out_click_actions(
                     passes_through: vec![tracked.entity],
                 });
             }
+            ClickedAction::OpenMedia if media_faces.shows_media(&state, request) => {
+                out.parcel_media.write(ParcelMediaControl::Toggle);
+            }
             ClickedAction::OpenMedia => {
                 let url = parcel
                     .as_ref()
                     .and_then(|parcel| parcel.current.as_ref())
                     .and_then(|parcel| parcel.media_url.as_ref());
                 if let Some(url) = url {
-                    out.browser.write(OpenWebBrowser {
-                        url: Some(url.to_string()),
-                    });
+                    out.browser
+                        .write(OpenWebBrowser::new_window(Some(url.to_string())));
                 } else {
                     info!("left click: open media, but the parcel has no media URL");
                 }
@@ -135,7 +175,7 @@ fn carry_out_click_actions(
                 out.notify.write(ShowNotification::new(BUY_UNAVAILABLE));
             }
             ClickedAction::Play => {
-                out.notify.write(ShowNotification::new(PLAY_UNAVAILABLE));
+                out.parcel_media.write(ParcelMediaControl::Toggle);
             }
         }
     }

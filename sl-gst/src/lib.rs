@@ -10,7 +10,7 @@
 //! open-codec-only, while GStreamer picks up the **system's** decoders.
 //!
 //! We deliberately ship no encumbered decoder (see
-//! `roadmap/in-progress/viewer-video-playback.md`): H.264 / AAC come from the
+//! `roadmap/done/viewer-video-playback.md`): H.264 / AAC come from the
 //! user's platform plugins (VA-API, libav, Media Foundation, VideoToolbox) or
 //! not at all — and when they are absent the failure is loud and useful: the
 //! surface's [`sl_media::SurfaceStatus::load_error`] carries GStreamer's

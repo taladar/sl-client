@@ -1022,21 +1022,7 @@ fn apply_media_material(
         .map(|(_face, FaceTextureDebug(tf))| texture_face_uv_transform(tf))
         .unwrap_or_default();
     active.applied_uv = uv_transform;
-    let material = paint.materials.add(inert_face_material(StandardMaterial {
-        base_color: Color::WHITE,
-        base_color_texture: Some(slot.image.clone()),
-        // Media renders fullbright in the reference viewer.
-        unlit: true,
-        uv_transform,
-        ..default()
-    }));
-    // Drop the ids of materials this face has already stopped wearing (the
-    // engine's own prune only runs on a surface resize, which need never
-    // happen), then record the new one. `get`, not `get_mut`: a prune must not
-    // mark a live material changed and re-prepare it for nothing.
-    slot.touch_materials
-        .retain(|worn| paint.materials.get(*worn).is_some());
-    slot.touch_materials.push(material.id());
+    let material = media_material(paint.materials, slot, uv_transform);
     let Ok(mut entity_commands) = paint.commands.get_entity(entity) else {
         return;
     };
@@ -1052,6 +1038,33 @@ fn apply_media_material(
     active.face_entity = entity;
     active.material = material.clone();
     entity_commands.insert(MeshMaterial3d(material));
+}
+
+/// The unlit material that shows `slot`'s image on a face placed by
+/// `uv_transform`, registered with the slot so each new frame touches it — the
+/// one way a media surface is put on a face, for prim media and parcel media
+/// alike.
+pub(crate) fn media_material(
+    materials: &mut Assets<FaceMaterial>,
+    slot: &mut sl_viewer_media::media_engine::MediaSlot,
+    uv_transform: bevy::math::Affine2,
+) -> Handle<FaceMaterial> {
+    let material = materials.add(inert_face_material(StandardMaterial {
+        base_color: Color::WHITE,
+        base_color_texture: Some(slot.image.clone()),
+        // Media renders fullbright in the reference viewer.
+        unlit: true,
+        uv_transform,
+        ..default()
+    }));
+    // Drop the ids of materials no face wears any more (the engine's own prune
+    // only runs on a surface resize, which need never happen), then record the
+    // new one. `get`, not `get_mut`: a prune must not mark a live material
+    // changed and re-prepare it for nothing.
+    slot.touch_materials
+        .retain(|worn| materials.get(*worn).is_some());
+    slot.touch_materials.push(material.id());
+    material
 }
 
 /// Marks a face entity currently showing a live media surface, carrying its
@@ -1526,7 +1539,7 @@ fn release_media_focus_on_escape(
 /// land, so this is where that data stops being arbitrary: a `file://` URL is
 /// one GStreamer's `uridecodebin` would open and CEF would render, on the
 /// machine of whoever walks past the prim.
-fn validated_media_url(url: &url::Url) -> Option<ValidatedMediaUrl> {
+pub(crate) fn validated_media_url(url: &url::Url) -> Option<ValidatedMediaUrl> {
     ValidatedMediaUrl::from_url(url)
         .inspect_err(|error| warn!("media URL not opened: {error}"))
         .ok()

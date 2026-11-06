@@ -35,3 +35,13 @@ voice calls / IM sessions (`VoiceCallsFriendsOnly`, privacy tab) — and
 per-type call auto-reject toggles: reject group calls
 (`VoiceCallsRejectGroup`), ad-hoc/conference calls, and P2P calls
 (the `VoiceCallsReject*` family on the sound tab).
+
+## Voice invitations are left alone until this lands (2026-11-05)
+
+Since [[viewer-session-invitation-accepted-at-once]] the conversations panel
+accepts a *text* chat-session invitation at once and **ignores a voice-only
+one** (`Event::ConferenceInvited::channel == InviteChannel::Voice`, logged at
+info), which is what the reference does while voice is not working. The
+incoming-call prompt this task builds is where such an invitation should go.
+Accepting it is `Command::AcceptChatInvite` plus the voice join, and declining
+it is `DeclineChatInvite` (or `decline p2p voice` for a P2P call).

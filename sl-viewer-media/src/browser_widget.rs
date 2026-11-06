@@ -24,6 +24,11 @@
 //!   forwards no press, release, hover or keystroke, and never takes focus.
 //!   Scrolling and the mouse-leave notice stay live: a page the agent may not
 //!   *drive* is still one they must be able to *read* to the bottom.
+//! - **A link that opens a window** — `target="name"`, `target="_blank"`, a
+//!   clicked `window.open` — is suppressed by the engine and left on the
+//!   surface as a [`PopupRequest`]; `route_browser_popups` takes it from every
+//!   view, whichever panel holds it, and routes it the way the reference's
+//!   `LLMediaCtrl` routes `MEDIA_EVENT_CLICK_LINK_HREF` (`popup_route`).
 
 use bevy::input::keyboard::KeyboardInput;
 use bevy::input_focus::{FocusCause, FocusedInput, InputFocus};
@@ -34,7 +39,10 @@ use sl_viewer_ui_core::semantic::{Role, Semantic, SemanticValue};
 use crate::media_engine::{MediaEngine, MediaEngineSystems, MediaSurfaceId, MediaSurfaces};
 use crate::media_ime::{MediaIme, MediaImePlugin, MediaImeSystems};
 use crate::media_keys::{current_modifiers, is_printable_text, vk_for_key_code};
-use sl_cef::{KeyInput, MouseButton as MediaMouseButton, SurfaceConfig};
+use sl_cef::{KeyInput, MouseButton as MediaMouseButton, PopupRequest, SurfaceConfig};
+use sl_viewer_intents::{DispatchSlurl, OpenWebBrowser, WebTarget};
+use sl_viewer_platform::system_browser::{ExternalUrl, open_in_system_browser};
+use sl_viewer_platform::url_linkify::{LinkTarget, TextRun, linkify};
 // Re-exported: they are part of this widget's public API
 // ([`BrowserViewSpec`]), so a caller spawning a view need not also depend on
 // the engine crate.
@@ -86,6 +94,12 @@ struct BrowserViewIndex(std::collections::HashMap<Entity, MediaSurfaceId>);
 #[derive(Resource, Default)]
 struct FocusedBrowserView(Option<Entity>);
 
+/// The system that turns the views' popup requests into messages
+/// (`route_browser_popups`): a reader that wants a popup's window in the
+/// same frame orders itself after it.
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct BrowserPopupSystems;
+
 /// The embedded-browser widget plugin.
 #[derive(Debug)]
 pub struct BrowserWidgetPlugin;
@@ -97,6 +111,8 @@ impl Plugin for BrowserWidgetPlugin {
         }
         app.init_resource::<BrowserViewIndex>()
             .init_resource::<FocusedBrowserView>()
+            .add_message::<OpenWebBrowser>()
+            .add_message::<DispatchSlurl>()
             .add_systems(
                 Update,
                 (
@@ -107,6 +123,12 @@ impl Plugin for BrowserWidgetPlugin {
                     describe_browser_views,
                 )
                     .chain()
+                    .after(MediaEngineSystems::Pump),
+            )
+            .add_systems(
+                Update,
+                route_browser_popups
+                    .in_set(BrowserPopupSystems)
                     .after(MediaEngineSystems::Pump),
             )
             .add_systems(
@@ -196,6 +218,78 @@ fn describe_browser_views(
                     .insert(AccessibleLabel(status.title.clone()));
             }
             _ => {}
+        }
+    }
+}
+
+/// Where a page's popup goes ([`popup_route`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum PopupRoute {
+    /// A SLURL: to the SLURL dispatcher, as a clicked link.
+    Slurl(String),
+    /// `target="_external"`: to the system browser.
+    External(String),
+    /// Anything else: to a web browser window.
+    Window(OpenWebBrowser),
+}
+
+/// Route one popup the way the reference's `LLMediaCtrl` routes
+/// `MEDIA_EVENT_CLICK_LINK_HREF`: a SLURL (`secondlife://…`, a
+/// `maps.secondlife.com` link) is dispatched rather than browsed
+/// (`LLURLDispatcher::dispatch` first), and the rest goes to `LLWeb::loadURL`
+/// with the page's target — `_external` to the system browser, `_internal`
+/// (like `_blank` or no target) to a new window, any other name to that name's
+/// window.
+fn popup_route(popup: PopupRequest) -> PopupRoute {
+    let slurl = matches!(
+        linkify(&popup.url).first(),
+        Some(TextRun::Link(link)) if !matches!(link.target, LinkTarget::Web { .. })
+    );
+    if slurl {
+        return PopupRoute::Slurl(popup.url);
+    }
+    let target = match popup.target.as_deref() {
+        Some("_external") => return PopupRoute::External(popup.url),
+        None | Some("_internal") => WebTarget::New,
+        Some(name) => WebTarget::Named(name.to_owned()),
+    };
+    PopupRoute::Window(OpenWebBrowser {
+        url: Some(popup.url),
+        target,
+    })
+}
+
+/// Take every view's popup request and route it ([`popup_route`]) — the
+/// search tab's, a profile's, the media preview's and a browser window's
+/// alike. The URL is the page's choice, not the agent's: the browser window
+/// and the dispatcher validate it as they would any link.
+fn route_browser_popups(
+    views: Query<&BrowserView>,
+    surfaces: Option<NonSend<MediaSurfaces>>,
+    mut windows: MessageWriter<OpenWebBrowser>,
+    mut slurls: MessageWriter<DispatchSlurl>,
+) {
+    let Some(surfaces) = surfaces else {
+        return;
+    };
+    for view in &views {
+        let Some(slot) = view.surface.and_then(|id| surfaces.get(id)) else {
+            continue;
+        };
+        let Some(popup) = slot.surface.take_popup_request() else {
+            continue;
+        };
+        match popup_route(popup) {
+            PopupRoute::Slurl(url) => {
+                slurls.write(DispatchSlurl { url });
+            }
+            PopupRoute::External(url) => match ExternalUrl::parse(&url) {
+                Ok(url) => open_in_system_browser(&url),
+                Err(error) => warn!("page popup {url} not opened externally: {error}"),
+            },
+            PopupRoute::Window(request) => {
+                windows.write(request);
+            }
         }
     }
 }
@@ -640,7 +734,10 @@ pub fn spawn_browser_specimen(
 
 #[cfg(test)]
 mod tests {
-    use super::{BrowserViewSpec, SurfaceTrust, ValidatedMediaUrl, spawn_browser_view};
+    use super::{
+        BrowserViewSpec, OpenWebBrowser, PopupRequest, PopupRoute, SurfaceTrust, ValidatedMediaUrl,
+        WebTarget, popup_route, spawn_browser_view,
+    };
     use bevy::camera::NormalizedRenderTarget;
     use bevy::input_focus::InputFocus;
     use bevy::picking::backend::HitData;
@@ -740,5 +837,59 @@ mod tests {
             "a disabled view refuses the focus the click would have given it"
         );
         Ok(())
+    }
+
+    /// The route a popup to `url` with the page's `target` takes.
+    fn route(url: &str, target: &str) -> PopupRoute {
+        popup_route(PopupRequest::new(url.to_owned(), target))
+    }
+
+    /// A web link opens a browser window: a new one for no target, `_blank`
+    /// or the reference's `_internal`, the named one for any other name.
+    #[test]
+    fn a_web_popup_opens_a_window_by_its_target() {
+        let page = "https://example.com/page";
+        for target in ["", "_blank", "_internal"] {
+            assert_eq!(
+                route(page, target),
+                PopupRoute::Window(OpenWebBrowser::new_window(Some(page.to_owned()))),
+                "target {target:?}"
+            );
+        }
+        assert_eq!(
+            route(page, "stagewin"),
+            PopupRoute::Window(OpenWebBrowser {
+                url: Some(page.to_owned()),
+                target: WebTarget::Named("stagewin".to_owned()),
+            })
+        );
+    }
+
+    /// `_external` sends the page to the system browser, as `LLWeb::loadURL`
+    /// does.
+    #[test]
+    fn an_external_target_goes_to_the_system_browser() {
+        let page = "https://example.com/page";
+        assert_eq!(
+            route(page, "_external"),
+            PopupRoute::External(page.to_owned())
+        );
+    }
+
+    /// A SLURL is dispatched, not browsed, whatever its target — including
+    /// the `maps.secondlife.com` web form of a location.
+    #[test]
+    fn a_slurl_popup_is_dispatched() {
+        for url in [
+            "secondlife:///app/agent/3d6181b0-6a4b-97ef-18d8-722652995cf1/about",
+            "secondlife://Ahern/128/128/24",
+            "https://maps.secondlife.com/secondlife/Ahern/128/128/24",
+        ] {
+            assert_eq!(
+                route(url, "stagewin"),
+                PopupRoute::Slurl(url.to_owned()),
+                "{url}"
+            );
+        }
     }
 }

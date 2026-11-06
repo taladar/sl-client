@@ -40,7 +40,7 @@ day installs one.
 | a parcel with no environment of its own | `environment` holds `is_default` (true), `parcel_id`, `region_id`, `track_altitudes` — **no day cycle** | the same | the same, both flavours |
 | a set by someone without rights | `success: false`, message `You do not have permission to modify this parcel.Failed to change the environment on this parcel.` | `success: false`, message `No permission to change parcel environment` | taken: the fake grid enforces no land rights |
 | a set by the owner, the reply | not measured | **`{success: true}` and nothing else** | `FakeOpensim` the same; `FakeSl` the stored environment |
-| a set by the owner while the estate does not allow parcel environments | not measured | accepted and stored, but a read still answers `is_default` | `FakeOpensim` serves it regardless (`server-fake-grid-parcel-on-movement`) |
+| a set by the owner while the estate does not allow parcel environments | not measured | accepted and stored, but a read still answers `is_default` | `FakeOpensim` the same (the estate's `ALLOW_ENVIRONMENT_OVERRIDE`); `FakeSl` serves it |
 | a set by the owner once the estate allows them | not measured | served: `parcel_id` the parcel's, the day sent, the length set | served |
 | a reset, the reply | not measured | `{messageID, regionID, success: true}` | `FakeOpensim` the same; `FakeSl` the inheriting answer |
 | a single-track set (`trackno`) | supported by the reference viewer | refused: `Environment Track not supported` (from the source, `EnvironmentModule.SetExtEnvironmentSettings`) | applied to the whole day |
@@ -73,4 +73,7 @@ as the capability is missing, which neither login needed.
   with the estate allowing parcel environments
   (`RegionAllowEnvironmentOverride`). Both grids reported version -1 for a
   parcel without one; aditi's region allowed the override, the local OpenSim
-  estate did not.
+  estate did not. The fake grid's parcels say -1 too, until a scene gives one
+  an environment of its own (`RegionFixture::give_parcel_environment`), and
+  allow the override only where the scene does
+  (`SceneFixtures::allow_parcel_environments`).

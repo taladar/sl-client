@@ -380,9 +380,7 @@ fn spawn_load_url_card(
         move |_activate: On<Activate>,
               mut browsers: MessageWriter<OpenWebBrowser>,
               mut resolves: MessageWriter<ResolveNotification>| {
-            browsers.write(OpenWebBrowser {
-                url: Some(url.clone()),
-            });
+            browsers.write(OpenWebBrowser::new_window(Some(url.clone())));
             resolves.write(ResolveNotification::chose(root, LoadUrlAnswer::Load));
         },
     );

@@ -252,6 +252,10 @@ pub enum Verb {
     /// many tiles are drawable, pending and absent. The map asks the grid
     /// only while its window is open.
     WorldMap,
+    /// Print the agent parcel's legacy whole-parcel media: its URL, type and
+    /// replaced texture, the engine a live surface runs on, and how many faces
+    /// wear it.
+    ParcelMedia,
     /// Answer the file dialog the viewer waits on — an Import's, a bulk
     /// import's — with a file or a folder, or cancel it; waits for one to be
     /// asked for. Only a `--headless` viewer waits; a windowed one shows the

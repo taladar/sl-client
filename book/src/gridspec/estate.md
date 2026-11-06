@@ -103,6 +103,12 @@ Second Life is unmeasured; its fake flavour answers as OpenSim does.
 | the summary after | names the new covenant, with a time | the same |
 | A clears it (the nil id) | nobody is told anything | the same |
 
+The body is the estate's to hand out, not an item: the viewer reads it over the
+estate's own UDP transfer, as the reference's `getEstateAsset` does, never over
+`ViewerAsset` (which Second Life refuses for every notecard). A covenant set by
+dropping a notecard is read through that notecard's item first, and only a body
+that reads is set.
+
 ## Freeze and eject
 
 | behaviour | OpenSim | fake grid |

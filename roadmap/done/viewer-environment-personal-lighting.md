@@ -2,7 +2,7 @@
 id: viewer-environment-personal-lighting
 title: Personal lighting — local environment override
 topic: viewer
-status: in-progress
+status: done
 origin: Vintage-parity coverage audit (2026-07-22)
 blocked_by: [viewer-ui-widget-scaffold]
 refs: [viewer-phototools, viewer-environment-fixed-editor]
@@ -160,7 +160,8 @@ the local layer still wins over a parcel).
 `cargo test --release -p sl-proto --lib` — the two new angle round-trip tests
 green.
 
-Not verified live: the window's layout, the colour and texture pickers, the fade
-and the parcel layer were not driven against a grid. The parcel layer is the one
-worth driving — it is the only part whose behaviour depends on what a grid
-actually sends, and OpenSim's Default Region has parcels to walk between.
+Driven since in the real viewer on the fake grid: the window, the pickers, the
+trackball and the fade by [[test-e2e-sweep-environment]], and the parcel layer
+— walking onto a parcel with its own environment and off it again, with a
+pinned preset winning over both — by [[test-e2e-environment-parcel-layer]]
+(2026-11-06), once the fake grid moved avatars.

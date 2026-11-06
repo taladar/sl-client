@@ -52,6 +52,16 @@ pub(crate) struct SimState {
     pub(crate) animation_policy: crate::animations::AnimationPolicy,
     /// The agent's animation set ([`crate::animations`]).
     pub(crate) animations: crate::animations::AnimationSet,
+    /// How the region moves the agent's avatar where the live grids disagree
+    /// ([`crate::ImitatedGrid::movement_policy`]).
+    pub(crate) movement_policy: crate::movement::MovementPolicy,
+    /// Whether a parcel's own environment is served only while the estate
+    /// allows parcel environments
+    /// ([`crate::ImitatedGrid::parcel_environments_need_estate`]).
+    pub(crate) parcel_environments_need_estate: bool,
+    /// What the agent's viewer holds and how its avatar is moving
+    /// ([`crate::movement`]), stepped by the region's heartbeat.
+    pub(crate) motion: crate::movement::Motion,
     /// How the region answers the estate where the live grids disagree
     /// ([`crate::ImitatedGrid::estate_policy`]).
     pub(crate) estate_policy: crate::imitates::EstatePolicy,
@@ -355,6 +365,7 @@ impl SharedSim {
             if let ServerEvent::AgentUpdate(update) = &event {
                 state.camera_at = Some(update.camera.center.clone());
             }
+            let _moved = state.motion.hear(&event);
             // The greeting goes out as soon as the circuit is open, as a real
             // simulator does on `UseCircuitCode`: the viewer waits for the
             // `RegionHandshake` before it sends `CompleteAgentMovement`, and
@@ -467,6 +478,14 @@ impl SharedSim {
                 // Its avatar is given its region-local id as it arrives.
                 let mut world = state.world.lock();
                 let _avatar = world.arrive_avatar(state.avatar.agent_id);
+                // The arrival tells the agent of the parcel it stands on; the
+                // movement controller pushes the next one it walks onto.
+                let arrival = state.sim.arrival_position().position;
+                state.motion = crate::movement::Motion::arriving(
+                    world
+                        .parcel_at(arrival.x(), arrival.y())
+                        .map(|parcel| parcel.local_id),
+                );
                 push_arrival_world(
                     &world,
                     Ground {
@@ -1411,11 +1430,9 @@ const NOT_STANDING_SEQUENCE_ID: i32 = -10000;
 /// Whether this session's avatar is standing on `parcel` — who a changed
 /// parcel's record is pushed to.
 ///
-/// The position is the one the session was opened at, since the fake grid
-/// tracks no movement: an avatar that walked across a parcel line since it
-/// arrived is still counted where it landed. That is a limit of the grid, not
-/// of the push — the alternative, telling the whole region, would make a test
-/// of "who is told" pass for the wrong reason.
+/// The position is where the region's avatar controller last put the avatar
+/// ([`crate::movement`]), which every move — a walk, a teleport, a stand —
+/// keeps in the session's placement.
 fn stands_on(state: &SimState, parcel: sl_proto::RegionLocalParcelId) -> bool {
     let placement = state.sim.arrival_position().position;
     state

@@ -26,12 +26,12 @@
 //! 8. **Distance**: A moves away in three steps — past a whisper's reach,
 //!    past a say's, past a shout's — and its own lines, its typing and the
 //!    script's lines are asked again at each; and, at the first, whether it
-//!    is the avatars or their cameras a grid measures between.
+//!    is the avatars or their cameras a grid measures between. A flies
+//!    there on every grid (a telehub would catch a teleport on a live one).
 //!
 //! The script is the instrument of legs 6 and 7 and of the script's part of
 //! leg 8: it says what it is told to on a channel and says when it has. A
-//! grid that runs no scripts is asked the rest, and moves A by teleport where
-//! a live grid has it fly (a telehub catches a teleport there).
+//! grid that runs no scripts is asked the rest.
 //!
 //! What each live grid answered is stated as a [`Measured`] and written up in
 //! `book/src/gridspec/chat.md`; every run is held to it.
@@ -43,8 +43,8 @@ use std::time::{Duration, Instant};
 
 use sl_client_tokio::{
     AgentKey, Camera, ChatAudible, ChatChannel, ChatMessage, ChatSource, ChatType, Command,
-    ControlFlags, Event, Object, ParcelInfo, RegionCoordinates, RegionHandle, RestoreItem,
-    RezScriptParams, ScriptTarget, ScriptUploadLocation, Uuid, Vector,
+    ControlFlags, Event, Object, ParcelInfo, RegionCoordinates, RestoreItem, RezScriptParams,
+    ScriptTarget, ScriptUploadLocation, Uuid, Vector,
 };
 
 use crate::cases::effects_sounds::{distance, vector_text};
@@ -129,8 +129,6 @@ struct Step {
     word: &'static str,
     /// The least A has to be above B, in metres: what a flight climbs to.
     least: f32,
-    /// How far above B a teleport puts A, in metres.
-    placed: f32,
     /// The distances between the two avatars the step's answers hold for, in
     /// metres: past one type's reach and short of the next one's.
     band: (f32, f32),
@@ -142,19 +140,16 @@ const STEPS: [Step; 3] = [
     Step {
         word: "nearby",
         least: 11.0,
-        placed: 15.0,
         band: (10.5, 19.5),
     },
     Step {
         word: "further",
         least: 35.0,
-        placed: 36.0,
         band: (20.5, 95.0),
     },
     Step {
         word: "far",
         least: 120.0,
-        placed: 121.0,
         band: (100.5, 400.0),
     },
 ];
@@ -1807,16 +1802,12 @@ struct Census<'a> {
     b: &'a mut Session,
     /// The ids, names and places the metrics name.
     scene: Scene,
-    /// The region both stand in.
-    home: RegionHandle,
     /// How long the acting avatar listens after a gesture.
     quiet: Duration,
     /// How long the queue of the other one is then read for.
     drain: Duration,
     /// How many lines the census has said.
     said: u32,
-    /// Whether A is moved by teleport rather than by flying.
-    teleports: bool,
 }
 
 impl Census<'_> {
@@ -2295,47 +2286,10 @@ impl Census<'_> {
         Ok(())
     }
 
-    /// Puts A `placed` metres above B by teleport.
-    async fn place(&mut self, placed: f32) -> Result<(), TestFailure> {
-        let target = Vector {
-            x: self.scene.b_at.x,
-            y: self.scene.b_at.y,
-            z: self.scene.b_at.z + placed,
-        };
-        self.a
-            .send(Command::Teleport {
-                region_handle: self.home,
-                position: RegionCoordinates::new(target.x, target.y, target.z),
-                look_at: Vector {
-                    x: 1.0,
-                    y: 0.0,
-                    z: 0.0,
-                },
-            })
-            .await?;
-        let landing = self
-            .a
-            .wait_for(REGION_TIMEOUT, |event| match event {
-                Event::TeleportLocal { position, .. } => Some(*position),
-                _ => None,
-            })
-            .await?;
-        self.scene.a_at = Vector {
-            x: landing.x(),
-            y: landing.y(),
-            z: landing.z(),
-        };
-        Ok(())
-    }
-
-    /// Moves A to `step` of its way up — flying, or by teleport where the
-    /// grid moves no avatar — and holds the distance to the step's band.
+    /// Flies A to `step` of its way up and holds the distance to the step's
+    /// band.
     async fn move_to(&mut self, step: &Step) -> Result<f32, TestFailure> {
-        if self.teleports {
-            self.place(step.placed).await?;
-        } else {
-            self.rise(step.least).await?;
-        }
+        self.rise(step.least).await?;
         let at = self.scene.a_at.clone();
         self.camera(Who::A, &at).await?;
         self.follow(Duration::from_secs(1)).await?;
@@ -2645,9 +2599,7 @@ async fn script_legs(census: &mut Census<'_>, metrics: &mut Metrics) -> Result<(
 /// script's lines are asked again at each.
 async fn distance_legs(census: &mut Census<'_>, metrics: &mut Metrics) -> Result<(), TestFailure> {
     let scripted = census.scene.prim.is_some();
-    if !census.teleports {
-        census.step_aside().await?;
-    }
+    census.step_aside().await?;
     for (index, step) in STEPS.iter().enumerate() {
         let apart = census.move_to(step).await?;
         let word = step.word;
@@ -2804,11 +2756,9 @@ async fn census(
         a,
         b,
         scene,
-        home,
         quiet: run.pace.quiet,
         drain,
         said: 0,
-        teleports: grid.is_fake(),
     };
     // A viewer's camera is where its avatar is; a session's is wherever it
     // was last put.

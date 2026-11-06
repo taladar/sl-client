@@ -23,7 +23,7 @@ use gstreamer::prelude::*;
 use gstreamer_video::VideoFrameExt as _;
 use sl_media::{
     AudioSink, FrameView, KeyInput, MediaError, MediaSurface, Modifiers, MouseButton,
-    PlaybackState, PlaybackStatus, SurfaceConfig, SurfaceStatus, ValidatedMediaUrl,
+    PlaybackState, PlaybackStatus, PopupRequest, SurfaceConfig, SurfaceStatus, ValidatedMediaUrl,
 };
 use tracing::{debug, warn};
 
@@ -682,7 +682,7 @@ impl MediaSurface for GstMediaSurface {
         lock_shared(&self.inner.shared).status.clone()
     }
 
-    fn take_popup_request(&self) -> Option<String> {
+    fn take_popup_request(&self) -> Option<PopupRequest> {
         None
     }
 

@@ -2,7 +2,7 @@
 id: server-world-agent-movement
 title: The agent never moves — AgentUpdate is decoded and ignored
 topic: server
-status: ready
+status: done
 origin: LSL-on-the-fake-grid audit (2026-09-20)
 points: 8
 blocked_by: [server-world-heartbeat, gridspec-neighbours-crossing,
@@ -92,3 +92,60 @@ and `target_legs`' 40 m sit) on the fake flavours once an avatar moves, with
 Second Life's reach edge (`SECOND_LIFE_PLAIN_REACH_M`, 8.4 m between the 7.5 m
 answered and 9.3 m not) held by them, and the drop to the ground after a
 stand.
+
+## As built (2026-11-06)
+
+`sl_fake_grid::movement`, run by the heartbeat as its third step for every
+root agent in the region, in session order: each tick folds the latest
+`AgentUpdate` controls and body rotation (and `SetAlwaysRun`) into a
+`Motion`, advances it by exactly the step, writes the result into the
+session's placement (so chat range, the parcel an edit is pushed to and
+everything else that reads it follow the avatar), moves what the agent wears
+with it, and reports it in an `ImprovedTerseObjectUpdate` when one is due.
+
+- **The controller**: walk, run, crouch and crouched walk, fly, climb,
+  descend, jump, fall, land; `STOP`, `SIT_ON_GROUND` and `STAND_UP`; ground
+  clamping on the heightfield at `AVATAR_CENTRE_ABOVE_GROUND_M`; the region's
+  edge stops a walk. A seated agent is left alone, and one stood up above the
+  ground drops to it.
+- **Per flavour** (`ImitatedGrid::movement_policy`, a row of the module
+  table): every measured speed; a gravity derived from each grid's jump
+  (`v² / 2h`), which also lands a 420 m fall in the measured time once the
+  measured fastest fall is reached; coming to rest over 0.6 s or 0.3 s;
+  Second Life's holds (a pre-jump and a hard landing wait for the viewer's
+  `FINISH_ANIM`) against OpenSim's timed ones; and the update cadence —
+  every tick, or every two seconds, for a walk; nothing, or three a second,
+  for a steady flight; one and a half a second, or nothing, at rest — with
+  any change of motion reported in the tick it happens. Zero acceleration,
+  the ground's plane under a standing avatar and `0 0 0 1` in the air.
+- **The animation set follows the motion**: the set's default is the
+  locomotion built-in (`AnimationSet::set_default`), stated to the agent when
+  it changes, one at a time as OpenSim states it.
+- `agent-movement` runs offline against both flavours, and `sit-stand` runs
+  every leg there, its far walks and its 40 m flight included. `e2e_movement`
+  runs on the fake grid (the Second Life flavour, so the viewer's
+  `FINISH_ANIM` for its pre-jump is exercised) as well as on a live one.
+
+Acceptance, held by tests: `holding_forward_walks_the_step_times_the_speed`
+(the position after N ticks is `N × step × walk speed`, on both flavours);
+the viewer walks (`e2e_movement`, `e2e_environment`'s parcel layer); chat
+range and parcel entry follow the avatar
+(`walking_over_a_parcel_line_pushes_each_parcel`, and the parcel push of
+[[server-fake-grid-parcel-on-movement]]).
+
+### Not done — and why
+
+- **Other sessions do not see the avatar move**: residents are not shown to
+  each other at all yet ([[server-fake-grid-agent-avatars-shared]]); the
+  terse updates go to the agent's own session.
+- **No walking over a region border**: a border is a crossing, which this
+  controller does not start; it stops the avatar at the edge.
+- **No prims to stand on or bump into**: the ground is the heightfield alone
+  ([[server-world-collision-and-physics]]).
+- **Second Life's arrival hold** (one login of three held in `land` until a
+  `FINISH_ANIM`) is not imitated: what makes an arrival held was not
+  measured.
+- **Second Life's extra animation assets** beside the built-ins, and its
+  inexact report of a turn, are not imitated; OpenSim's one built-in at a
+  time is, on both flavours.
+- **Swimming and mouselook steering** were not measured.

@@ -11,8 +11,8 @@ use std::collections::VecDeque;
 use bevy::prelude::*;
 use sl_client_bevy::{
     AgentKey, AssetUpdateLocation, Command, ExperienceKey, ImSessionId, InventoryFolderKey,
-    InventoryKey, ObjectKey, RestoreItem, ScopedObjectId, ScriptLanguage, ScriptTarget,
-    ScriptUploadLocation, SettingsKind, TaskInventoryKey, Uuid,
+    InventoryKey, InventoryType, ItemInfo, ObjectKey, RestoreItem, ScopedObjectId, ScriptLanguage,
+    ScriptTarget, ScriptUploadLocation, SettingsKind, TaskInventoryKey, Uuid,
 };
 
 /// A description of an item added to a prim's contents, for the pending-add
@@ -382,6 +382,42 @@ pub struct SettingsPicked {
 pub struct NotecardDropTarget {
     /// Whether the notecard currently shown accepts an added embedded item.
     pub editable: bool,
+}
+
+/// Marks a UI node as taking **one** dropped inventory item of the
+/// [`accepts`](Self::accepts) type while [`enabled`](Self::enabled) — the
+/// reference's `ACCEPT_YES_COPY_SINGLE` panels, such as the estate covenant's
+/// notecard drop. `crate::inventory_drag` walks up from the hovered node to find
+/// it and answers with an [`ItemDropped`] naming the node; a drag of several
+/// items, of another type, or onto a disabled target is swallowed, as the
+/// reference's `ACCEPT_NO` is.
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ItemDropTarget {
+    /// The one inventory type the target takes.
+    pub accepts: InventoryType,
+    /// Whether it takes one now (the agent's rights, say).
+    pub enabled: bool,
+}
+
+impl ItemDropTarget {
+    /// The item of `dragged` this target takes, if it takes the drag at all:
+    /// exactly one item, of the accepted type, while enabled.
+    #[must_use]
+    pub fn accepts_drag<'a>(&self, dragged: &[&'a ItemInfo]) -> Option<&'a ItemInfo> {
+        match dragged {
+            [item] if self.enabled && item.inv_type == self.accepts => Some(item),
+            _ => None,
+        }
+    }
+}
+
+/// An inventory item dropped onto an [`ItemDropTarget`] that took it.
+#[derive(Message, Debug, Clone)]
+pub struct ItemDropped {
+    /// The node carrying the [`ItemDropTarget`].
+    pub target: Entity,
+    /// The dropped item (a link already resolved to what it points at).
+    pub item: ItemInfo,
 }
 
 /// Where the script being edited lives — the agent's own inventory, or an

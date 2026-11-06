@@ -32,6 +32,12 @@
 //! - **Group invitation** ([`ImDialog::GroupInvitation`]): "{inviter} has invited
 //!   you to join a group", the invite message, any membership fee, with **Join**
 //!   (accept the invitation) and **Decline**.
+//! - **Calling-card offer** ([`SlSessionEvent::CallingCardOffered`], its own
+//!   `OfferCallingCard` message rather than an IM): "{agent} is offering their
+//!   calling card", with **Accept** (file it in Calling Cards) and **Decline**.
+//!   As in the reference, one from a muted sender or one that arrives under Do
+//!   Not Disturb is declined at once rather than held, and the offer waits for
+//!   its sender's name before it is shown.
 //!
 //! Each card **sticks** ([`NotificationKind::Alert`]) until the user answers it.
 //! The close **×** declines conservatively (never silently accepting), sending
@@ -141,6 +147,13 @@ const FRIENDSHIP_OFFER_TEMPLATE: &str = "OfferFriendship";
 /// reference `JoinGroup` notification.
 const GROUP_INVITE_TEMPLATE: &str = "JoinGroup";
 
+/// The template sentinel a calling-card offer card reports as, named for the
+/// reference `OfferCallingCard` notification.
+const CALLING_CARD_TEMPLATE: &str = "OfferCallingCard";
+
+/// The element id the calling-card offer gallery specimen reports under.
+const CALLING_CARD_ELEMENT: &str = "calling-card-offer-toast";
+
 /// The element id the inventory-offer gallery specimen and its inert actions
 /// report under.
 const INVENTORY_OFFER_ELEMENT: &str = "inventory-offer-toast";
@@ -217,6 +230,13 @@ const FRIEND_ACCENT: Color = Color::srgb(0.92, 0.56, 0.74);
 /// The group-invitation accent — a gold.
 const GROUP_ACCENT: Color = Color::srgb(0.86, 0.72, 0.36);
 
+/// The calling-card offer accent — a teal, a card to keep.
+const CALLING_CARD_ACCENT: Color = Color::srgb(0.38, 0.78, 0.74);
+
+/// The calling-card offer heading glyph (a card index, the inventory's own
+/// calling-card glyph).
+const CALLING_CARD_GLYPH: &str = "\u{1f4c7}";
+
 /// The inventory-offer heading glyph (a wrapped gift).
 const GIFT_GLYPH: &str = "\u{1f381}";
 
@@ -239,8 +259,9 @@ impl Plugin for OffersInvitesPlugin {
     /// toast channel.
     fn build(&self, app: &mut App) {
         app.init_resource::<DeferredOffers>()
+            .init_resource::<PendingCallingCards>()
             .add_systems(Startup, register_offers_settings)
-            .add_systems(Update, ingest_offers_invites);
+            .add_systems(Update, (ingest_offers_invites, ingest_calling_card_offers));
     }
 }
 
@@ -1205,10 +1226,7 @@ fn spawn_friendship_card(
               inventory: Res<InventoryModel>,
               mut sl: MessageWriter<SlCommand>,
               mut resolves: MessageWriter<ResolveNotification>| {
-            if let Some(calling_card_folder) = inventory
-                .folder_by_type(FolderType::CallingCard)
-                .or_else(|| inventory.folder_by_type(FolderType::RootInventory))
-            {
+            if let Some(calling_card_folder) = calling_card_folder(&inventory) {
                 sl.write(SlCommand(Command::AcceptFriendship {
                     transaction_id,
                     friend_id,
@@ -1242,6 +1260,313 @@ fn spawn_friendship_card(
         );
     }
     Some(built)
+}
+
+/// A calling card another resident offered us (`OfferCallingCard`), as the
+/// session reported it: who offers it, and the transaction to answer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct CallingCardOffer {
+    /// The resident offering their card.
+    from: AgentKey,
+    /// The offer's transaction, echoed by the accept or decline.
+    transaction: TransactionId,
+}
+
+/// Calling-card offers whose sender's name has not resolved yet, oldest first.
+///
+/// The card names the sender, and the offer carries only an id. The reference
+/// reads the name off the sender's avatar object and drops an offer from
+/// anyone not in view with a warning (`process_offer_callingcard`); here the
+/// name is asked of the name cache, which knows every resident it has heard
+/// of, and the offer waits for the answer — so an offer from someone out of
+/// view is shown rather than lost.
+#[derive(Resource, Debug, Default)]
+struct PendingCallingCards {
+    /// The offers waiting for their sender's name.
+    waiting: Vec<CallingCardOffer>,
+}
+
+/// What becomes of a calling-card offer ([`judge_calling_card`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum CallingCardVerdict {
+    /// Declined at once: the sender is muted, or Do Not Disturb is on.
+    Decline,
+    /// Kept until the sender's name resolves.
+    Wait,
+    /// Asked about, on a card naming the sender.
+    Ask {
+        /// The sender's name as the card shows it.
+        name: String,
+    },
+}
+
+/// Judge a calling-card offer as the reference does
+/// (`process_offer_callingcard`): one from a resident whose text chat is
+/// muted, or one that arrives while Do Not Disturb is on, is declined at once;
+/// anything else asks, once the sender has a name to ask with.
+///
+/// `shown` is the sender's name as surfaces draw it and `legacy` their grid
+/// name, which a by-name mute matches. A mute by id needs no name, so a muted
+/// sender is declined even while their name is still unknown.
+fn judge_calling_card(
+    from: AgentKey,
+    shown: Option<&str>,
+    legacy: Option<&str>,
+    busy: bool,
+    mutes: Option<&MuteList>,
+) -> CallingCardVerdict {
+    let muted =
+        mutes.is_some_and(|mutes| mutes.text_muted(from.uuid(), legacy.unwrap_or_default()));
+    if busy || muted {
+        return CallingCardVerdict::Decline;
+    }
+    match shown {
+        Some(name) => CallingCardVerdict::Ask {
+            name: name.to_owned(),
+        },
+        None => CallingCardVerdict::Wait,
+    }
+}
+
+/// The replies that turn a calling-card offer down: the decline, and — when Do
+/// Not Disturb is on and a reply is configured — the busy reply to the sender,
+/// as the reference's decline sends it (`send_do_not_disturb_message`).
+fn calling_card_decline(offer: CallingCardOffer, busy_reply: Option<String>) -> Vec<Command> {
+    let mut replies = vec![Command::DeclineCallingCard(offer.transaction)];
+    if let Some(message) = busy_reply {
+        replies.push(Command::AutoResponse {
+            to_agent_id: offer.from,
+            message,
+        });
+    }
+    replies
+}
+
+/// The Do Not Disturb reply owed to `sender` by a declined calling card:
+/// `None` unless the mode is on and its reply is not blanked.
+fn calling_card_busy_reply(
+    presence: Option<&crate::social::PresenceState>,
+    settings: Option<&crate::settings::ViewerSettings>,
+    sets: Option<&crate::contact_sets::ContactSets>,
+    sender: AgentKey,
+) -> Option<String> {
+    if !presence.is_some_and(crate::social::PresenceState::is_do_not_disturb) {
+        return None;
+    }
+    crate::presence::reply_text(
+        settings,
+        sets,
+        sender,
+        crate::presence::ReplyMode::DoNotDisturb,
+    )
+}
+
+/// What a calling-card offer's decline reads besides the offer, bundled as
+/// one [`SystemParam`](bevy::ecs::system::SystemParam): the presence that
+/// says whether a busy reply is owed, and the settings and contact sets that
+/// hold its text.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct BusyReplyFacts<'w> {
+    /// Our presence — Do Not Disturb.
+    presence: Option<Res<'w, crate::social::PresenceState>>,
+    /// The configured busy reply.
+    settings: Option<Res<'w, crate::settings::ViewerSettings>>,
+    /// A contact set's own busy reply for the sender.
+    sets: Option<Res<'w, crate::contact_sets::ContactSets>>,
+}
+
+impl BusyReplyFacts<'_> {
+    /// The busy reply owed to `sender`, if any ([`calling_card_busy_reply`]).
+    fn reply_to(&self, sender: AgentKey) -> Option<String> {
+        calling_card_busy_reply(
+            self.presence.as_deref(),
+            self.settings.as_deref(),
+            self.sets.as_deref(),
+            sender,
+        )
+    }
+}
+
+/// Who a calling-card offer is from, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the offers still waiting
+/// for a name, the name cache that answers them, and the mute list that
+/// declines a blocked sender.
+#[derive(bevy::ecs::system::SystemParam)]
+struct CallingCardSenders<'w> {
+    /// The offers waiting for their sender's name.
+    pending: ResMut<'w, PendingCallingCards>,
+    /// The name cache a sender's name is read from and asked of.
+    avatars: Option<ResMut<'w, crate::world_api::AvatarState>>,
+    /// The mute list.
+    mutes: Option<Res<'w, crate::social::MuteModel>>,
+}
+
+/// Read calling-card offers off the event stream and answer each as
+/// [`judge_calling_card`] decides: decline it, raise its card, or ask the name
+/// cache for its sender and look again next frame.
+fn ingest_calling_card_offers(
+    mut events: MessageReader<SlEvent>,
+    mut sinks: OfferSinks,
+    translator: Translator,
+    busy_facts: BusyReplyFacts,
+    senders: CallingCardSenders,
+    mut sl: MessageWriter<SlCommand>,
+) {
+    let CallingCardSenders {
+        mut pending,
+        mut avatars,
+        mutes,
+    } = senders;
+    for event in events.read() {
+        if let SlSessionEvent::CallingCardOffered {
+            offering_agent,
+            transaction,
+        } = &event.0
+        {
+            pending.waiting.push(CallingCardOffer {
+                from: *offering_agent,
+                transaction: *transaction,
+            });
+        }
+    }
+    if pending.waiting.is_empty() {
+        return;
+    }
+    let Some(channel) = sinks.channel.as_deref().copied() else {
+        return;
+    };
+    let busy = busy_facts
+        .presence
+        .as_deref()
+        .is_some_and(crate::social::PresenceState::is_do_not_disturb);
+    let mutes = mutes.as_deref().map(crate::social::MuteModel::list);
+    let mut still_waiting = Vec::new();
+    for offer in std::mem::take(&mut pending.waiting) {
+        let record = avatars
+            .as_deref()
+            .and_then(|avatars| avatars.name_record(offer.from));
+        let verdict = judge_calling_card(
+            offer.from,
+            record.and_then(crate::world_api::NameRecord::preferred_name),
+            record.and_then(|record| record.legacy.as_deref()),
+            busy,
+            mutes,
+        );
+        match verdict {
+            CallingCardVerdict::Decline => {
+                info!(
+                    "offers: calling card from {} declined ({})",
+                    offer.from,
+                    if busy { "do not disturb" } else { "muted" }
+                );
+                for reply in calling_card_decline(offer, busy_facts.reply_to(offer.from)) {
+                    sl.write(SlCommand(reply));
+                }
+            }
+            CallingCardVerdict::Wait => {
+                if let Some(avatars) = avatars.as_deref_mut() {
+                    avatars.request_name(offer.from);
+                } else {
+                    warn!(
+                        "offers: calling card from {} waits for a name, but there is no name cache",
+                        offer.from
+                    );
+                }
+                still_waiting.push(offer);
+            }
+            CallingCardVerdict::Ask { name } => {
+                let built = spawn_calling_card_card(&mut sinks.commands, &translator, offer, &name);
+                adopt_offer_card(&mut sinks.commands, &channel, &mut sinks.manager, built);
+            }
+        }
+    }
+    pending.waiting = still_waiting;
+}
+
+/// Build and wire a **calling-card offer** card. Accept files the card in the
+/// Calling Cards folder (the agent root when there is none), Decline and the
+/// close × turn it down — with the busy reply, should Do Not Disturb have come
+/// on since the card was raised.
+fn spawn_calling_card_card(
+    commands: &mut Commands,
+    translator: &Translator,
+    offer: CallingCardOffer,
+    name: &str,
+) -> BuiltOffer {
+    let lead = translator.format(
+        "offer-calling-card-from",
+        &TransArgs::new().text("name", name),
+    );
+    let content = OfferContent {
+        accent: CALLING_CARD_ACCENT,
+        glyph: CALLING_CARD_GLYPH.to_owned(),
+        heading: translator.get("offer-calling-card-heading"),
+        lines: vec![lead.clone(), translator.get("offer-calling-card-detail")],
+        accept_label: translator.get("offer-button-accept"),
+        decline_label: translator.get("offer-button-decline"),
+        block_label: None,
+    };
+    let card = build_offer_card(commands, &content);
+    let built = BuiltOffer {
+        card,
+        content,
+        template: CALLING_CARD_TEMPLATE,
+        history: lead,
+    };
+
+    let root = card.root;
+
+    // Accept: file the card, then fetch the folder it lands in.
+    commands.entity(card.accept).observe(
+        move |_activate: On<Activate>,
+              inventory: Res<InventoryModel>,
+              mut sl: MessageWriter<SlCommand>,
+              mut resolves: MessageWriter<ResolveNotification>| {
+            match calling_card_folder(&inventory) {
+                Some(calling_card_folder) => {
+                    sl.write(SlCommand(Command::AcceptCallingCard {
+                        transaction_id: offer.transaction,
+                        calling_card_folder,
+                    }));
+                    sl.write(SlCommand(Command::FetchInventoryFolders(vec![
+                        calling_card_folder,
+                    ])));
+                }
+                None => warn!(
+                    "offers: no inventory folder to file {}'s calling card in, so it was not accepted",
+                    offer.from
+                ),
+            }
+            resolves.write(ResolveNotification::chose(root, OfferAnswer::Accept));
+        },
+    );
+
+    // Decline (and the conservative close ×).
+    for (button, answer) in [
+        (card.decline, Some(OfferAnswer::Decline)),
+        (card.close, None),
+    ] {
+        commands.entity(button).observe(
+            move |_activate: On<Activate>,
+                  busy_facts: BusyReplyFacts,
+                  mut sl: MessageWriter<SlCommand>,
+                  mut resolves: MessageWriter<ResolveNotification>| {
+                for reply in calling_card_decline(offer, busy_facts.reply_to(offer.from)) {
+                    sl.write(SlCommand(reply));
+                }
+                resolves.write(ResolveNotification::answered(root, answer));
+            },
+        );
+    }
+    built
+}
+
+/// The folder an accepted calling card is filed in: Calling Cards, else the
+/// agent root, else `None` while the inventory has not loaded.
+fn calling_card_folder(inventory: &InventoryModel) -> Option<InventoryFolderKey> {
+    inventory
+        .folder_by_type(FolderType::CallingCard)
+        .or_else(|| inventory.folder_by_type(FolderType::RootInventory))
 }
 
 /// Build and wire a **group-membership invitation** card. Join accepts the
@@ -1531,6 +1856,32 @@ pub fn spawn_group_invite_specimen(
     card.root
 }
 
+/// The gallery / `ui_test` specimen (calling-card offer).
+pub fn spawn_calling_card_offer_specimen(
+    commands: &mut Commands,
+    parent: Entity,
+    cx: ElementCx,
+) -> Entity {
+    let content = OfferContent {
+        accent: CALLING_CARD_ACCENT,
+        glyph: CALLING_CARD_GLYPH.to_owned(),
+        heading: cx.text("Calling Card Offer"),
+        lines: vec![
+            cx.text("Neighbour Resident is offering their calling card."),
+            cx.text(
+                "This will add a bookmark in your inventory so you can quickly IM this resident.",
+            ),
+        ],
+        accept_label: cx.text("Accept"),
+        decline_label: cx.text("Decline"),
+        block_label: None,
+    };
+    let card = build_offer_card(commands, &content);
+    commands.entity(card.root).insert(ChildOf(parent));
+    wire_specimen_actions(commands, &card, CALLING_CARD_ELEMENT);
+    card.root
+}
+
 /// Wire a specimen card's buttons to inert [`UiAction`]s (the registry rule: a
 /// specimen reaches no session), keyed by the given element id.
 fn wire_specimen_actions(commands: &mut Commands, card: &OfferCard, element: &'static str) {
@@ -1554,9 +1905,11 @@ fn wire_specimen_actions(commands: &mut Commands, card: &OfferCard, element: &'s
 #[cfg(test)]
 mod tests {
     use super::{
-        BuiltOffer, MutedOffer, decline_command, discard_command, lure_rating_key, muted_offer,
-        offer_class, spawn_friendship_card, spawn_group_invite_card, spawn_inventory_offer_card,
-        spawn_lure_card, spawn_teleport_request_card, teleport_request_answer,
+        BuiltOffer, CallingCardOffer, CallingCardVerdict, MutedOffer, calling_card_busy_reply,
+        calling_card_decline, decline_command, discard_command, judge_calling_card,
+        lure_rating_key, muted_offer, offer_class, spawn_calling_card_card, spawn_friendship_card,
+        spawn_group_invite_card, spawn_inventory_offer_card, spawn_lure_card,
+        spawn_teleport_request_card, teleport_request_answer,
     };
     use crate::auto_reject::{OfferClass, RejectKind};
     use crate::i18n::{Translator, install_untranslated};
@@ -1568,8 +1921,8 @@ mod tests {
     use bevy::ui_widgets::Activate;
     use pretty_assertions::assert_eq;
     use sl_client_bevy::{
-        AgentKey, Command, FriendKey, GroupKey, ImDialog, InstantMessage, RegionCoordinates,
-        SlCommand, TransactionId, Uuid,
+        AgentKey, Command, FolderInfo, FolderState, FolderType, FriendKey, GroupKey, ImDialog,
+        InstantMessage, InventoryFolderKey, RegionCoordinates, SlCommand, TransactionId, Uuid,
     };
 
     /// A card builder, as the five `spawn_*_card` functions are.
@@ -1954,6 +2307,278 @@ mod tests {
             ),
             "a kept friendship offer is declined over the capability"
         );
+    }
+
+    /// A calling-card offer, from `from`, under transaction `0xca`.
+    fn card_offer(from: u128) -> CallingCardOffer {
+        CallingCardOffer {
+            from: AgentKey::from(Uuid::from_u128(from)),
+            transaction: TransactionId::from(Uuid::from_u128(0xca)),
+        }
+    }
+
+    /// Build a calling-card card for `offer` over `inventory`, click the
+    /// button named `button`, and return the answer its resolve chose and the
+    /// commands it sent.
+    fn click_calling_card(
+        offer: CallingCardOffer,
+        inventory: InventoryModel,
+        button: &str,
+    ) -> Result<(Option<String>, Vec<Command>), String> {
+        let mut app = App::new();
+        app.add_message::<ResolveNotification>()
+            .add_message::<SlCommand>()
+            .insert_resource(inventory);
+        install_untranslated(&mut app);
+        app.world_mut()
+            .run_system_once(move |mut commands: Commands, translator: Translator| {
+                let _built =
+                    spawn_calling_card_card(&mut commands, &translator, offer, "Card Resident");
+            })
+            .map_err(|error| error.to_string())?;
+        let mut named = app.world_mut().query::<(Entity, &Name)>();
+        let entity = named
+            .iter(app.world())
+            .find(|(_entity, name)| name.as_str() == button)
+            .map(|(entity, _name)| entity)
+            .ok_or_else(|| format!("no button named {button}"))?;
+        app.world_mut().trigger(Activate {
+            entity,
+            button: None,
+        });
+        let resolves = app.world().resource::<Messages<ResolveNotification>>();
+        let answer = resolves
+            .get_cursor()
+            .read(resolves)
+            .last()
+            .ok_or_else(|| format!("{button} resolved nothing"))?
+            .button
+            .as_deref()
+            .map(ToOwned::to_owned);
+        let sent = app.world().resource::<Messages<SlCommand>>();
+        let commands = sent
+            .get_cursor()
+            .read(sent)
+            .map(|command| command.0.clone())
+            .collect();
+        Ok((answer, commands))
+    }
+
+    /// An inventory with the given system folders, each id its own number.
+    fn inventory_with(folders: &[(u128, FolderType)]) -> InventoryModel {
+        let mut inventory = InventoryModel::default();
+        let infos: Vec<FolderInfo> = folders
+            .iter()
+            .map(|&(id, folder_type)| FolderInfo {
+                folder_id: InventoryFolderKey::from(Uuid::from_u128(id)),
+                parent_id: (folder_type != FolderType::RootInventory)
+                    .then(|| InventoryFolderKey::from(Uuid::from_u128(1))),
+                name: format!("{folder_type:?}"),
+                folder_type,
+                version: 1,
+                state: FolderState::Unknown,
+            })
+            .collect();
+        inventory.merge_folders(&infos, false);
+        inventory
+    }
+
+    /// **The filed bug.** An offered calling card is asked about: Accept files
+    /// it in Calling Cards and fetches that folder, Decline and the close ×
+    /// decline it, and each records its answer as the other offers do.
+    #[test]
+    fn an_offered_calling_card_is_accepted_or_declined_from_its_card() -> Result<(), String> {
+        let offer = card_offer(0x6009);
+        let cards = InventoryFolderKey::from(Uuid::from_u128(2));
+        let inventory =
+            || inventory_with(&[(1, FolderType::RootInventory), (2, FolderType::CallingCard)]);
+        let (answer, sent) = click_calling_card(offer, inventory(), "offer-invite-action:Accept")?;
+        assert_eq!(answer.as_deref(), Some("Accept"));
+        assert!(
+            matches!(
+                sent.as_slice(),
+                [
+                    Command::AcceptCallingCard { transaction_id, calling_card_folder },
+                    Command::FetchInventoryFolders(fetched),
+                ] if *transaction_id == offer.transaction
+                    && *calling_card_folder == cards
+                    && fetched.as_slice() == [cards]
+            ),
+            "accept files the card in Calling Cards: {sent:?}"
+        );
+        for (button, expected) in [
+            ("offer-invite-action:Decline", Some("Decline")),
+            ("offer-invite-close", None),
+        ] {
+            let (answer, sent) = click_calling_card(offer, inventory(), button)?;
+            assert_eq!(answer.as_deref(), expected, "{button}");
+            assert!(
+                matches!(
+                    sent.as_slice(),
+                    [Command::DeclineCallingCard(transaction)] if *transaction == offer.transaction
+                ),
+                "{button} declines the offer and says nothing else: {sent:?}"
+            );
+        }
+        // No Calling Cards folder: the agent root takes it; no inventory at
+        // all: nothing is sent, rather than a nil folder.
+        let (_answer, sent) = click_calling_card(
+            offer,
+            inventory_with(&[(1, FolderType::RootInventory)]),
+            "offer-invite-action:Accept",
+        )?;
+        assert!(
+            matches!(
+                sent.first(),
+                Some(Command::AcceptCallingCard { calling_card_folder, .. })
+                    if *calling_card_folder == InventoryFolderKey::from(Uuid::from_u128(1))
+            ),
+            "the root stands in for a missing Calling Cards folder: {sent:?}"
+        );
+        let (_answer, sent) = click_calling_card(
+            offer,
+            InventoryModel::default(),
+            "offer-invite-action:Accept",
+        )?;
+        assert!(sent.is_empty(), "nothing to file into: {sent:?}");
+        Ok(())
+    }
+
+    /// An offer is declined at once under Do Not Disturb or from a sender
+    /// whose text chat is muted — by id even before their name is known, or by
+    /// their grid name — waits while the sender has no name, and is otherwise
+    /// asked about under the name surfaces draw.
+    #[test]
+    fn a_calling_card_offer_is_judged_as_the_reference_judges_it() {
+        use sl_client_bevy::{MuteEntry, MuteFlags, MuteList, MuteType};
+        let troll = AgentKey::from(Uuid::from_u128(0x71));
+        let stranger = AgentKey::from(Uuid::from_u128(0x72));
+        let chatty = AgentKey::from(Uuid::from_u128(0x73));
+        let mut mutes = MuteList::new();
+        mutes.note_mute(MuteEntry {
+            id: troll.uuid(),
+            name: "Troll Resident".to_owned(),
+            mute_type: MuteType::Agent,
+            flags: MuteFlags::default(),
+        });
+        mutes.note_mute(MuteEntry {
+            id: Uuid::nil(),
+            name: "Named Spammer".to_owned(),
+            mute_type: MuteType::ByName,
+            flags: MuteFlags::default(),
+        });
+        mutes.note_mute(MuteEntry {
+            id: chatty.uuid(),
+            name: "Chatty Resident".to_owned(),
+            mute_type: MuteType::Agent,
+            flags: MuteFlags(MuteFlags::ALLOW_TEXT_CHAT),
+        });
+        let mutes = Some(&mutes);
+        let ask = |name: &str| CallingCardVerdict::Ask {
+            name: name.to_owned(),
+        };
+        assert_eq!(
+            judge_calling_card(troll, None, None, false, mutes),
+            CallingCardVerdict::Decline
+        );
+        assert_eq!(
+            judge_calling_card(
+                stranger,
+                Some("Spam Display"),
+                Some("named spammer"),
+                false,
+                mutes
+            ),
+            CallingCardVerdict::Decline
+        );
+        assert_eq!(
+            judge_calling_card(stranger, None, None, true, mutes),
+            CallingCardVerdict::Decline
+        );
+        assert_eq!(
+            judge_calling_card(stranger, None, None, false, mutes),
+            CallingCardVerdict::Wait
+        );
+        assert_eq!(
+            judge_calling_card(
+                stranger,
+                Some("Friendly Display"),
+                Some("Stranger Resident"),
+                false,
+                mutes
+            ),
+            ask("Friendly Display")
+        );
+        assert_eq!(
+            judge_calling_card(
+                chatty,
+                Some("Chatty Resident"),
+                Some("Chatty Resident"),
+                false,
+                mutes
+            ),
+            ask("Chatty Resident")
+        );
+        assert_eq!(
+            judge_calling_card(stranger, Some("Anyone"), None, false, None),
+            ask("Anyone")
+        );
+    }
+
+    /// A decline under Do Not Disturb carries the busy reply to the sender,
+    /// and only then.
+    #[test]
+    fn a_calling_card_declined_while_busy_sends_the_busy_reply()
+    -> Result<(), crate::contact_sets::ContactSetRefusal> {
+        let offer = card_offer(0x6009);
+        assert!(matches!(
+            calling_card_decline(offer, None).as_slice(),
+            [Command::DeclineCallingCard(transaction)] if *transaction == offer.transaction
+        ));
+        let replies = calling_card_decline(offer, Some("Busy right now".to_owned()));
+        assert!(
+            matches!(
+                replies.as_slice(),
+                [
+                    Command::DeclineCallingCard(transaction),
+                    Command::AutoResponse { to_agent_id, message },
+                ] if *transaction == offer.transaction
+                    && *to_agent_id == offer.from
+                    && message == "Busy right now"
+            ),
+            "{replies:?}"
+        );
+        let mut presence = crate::social::PresenceState::default();
+        assert_eq!(
+            calling_card_busy_reply(Some(&presence), None, None, offer.from),
+            None
+        );
+        presence.set_do_not_disturb(true);
+        let mut sets = crate::contact_sets::ContactSets::default();
+        // No settings store and no contact set reply: nothing to send.
+        assert_eq!(
+            calling_card_busy_reply(Some(&presence), None, Some(&sets), offer.from),
+            None
+        );
+        sets.create_set("Partner")?;
+        sets.add_member("Partner", offer.from, "Alpha Resident")?;
+        sets.set_autoresponse(
+            "Partner",
+            crate::contact_sets::SetAutoresponseMode::Busy,
+            true,
+            "back in five minutes",
+        )?;
+        assert_eq!(
+            calling_card_busy_reply(Some(&presence), None, Some(&sets), offer.from).as_deref(),
+            Some("back in five minutes")
+        );
+        presence.set_do_not_disturb(false);
+        assert_eq!(
+            calling_card_busy_reply(Some(&presence), None, Some(&sets), offer.from),
+            None,
+            "no busy reply once Do Not Disturb is off"
+        );
+        Ok(())
     }
 
     /// A rejected group invitation is declined for the inviting group, and an

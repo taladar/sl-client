@@ -20,17 +20,17 @@ use super::conversions::{
     group_member, group_members_from_caps_llsd, group_membership, group_memberships_from_caps_llsd,
     group_names, group_notice, group_profile, group_role, group_title, group_vote_history_item,
     index_into, instant_message, inventory_descendents_from_llsd, inventory_folder, inventory_item,
-    inventory_item_from_create, inventory_offer_bucket, invite_channel_from_llsd,
-    land_products_from_llsd, land_stat_reply_from_caps_llsd, map_block_batch, map_item, map_layer,
-    map_region_info, money_balance, nav_mesh_status_from_llsd, neighbor_info,
-    object_from_full_update, object_properties, offline_messages_from_llsd,
-    open_region_info_from_llsd, pack_uuids, packages_of, parcel_info, parcel_info_from_llsd,
-    parcel_object_owners_from_caps_llsd, parse_lure_region_handle, parse_mute_list,
-    parse_task_inventory, parse_uuid_string, pick_info, places_reply_from_caps_llsd,
-    region_identity, region_limits, required_voice_version_from_llsd, script_dialog,
-    script_permission_request, script_running_from_caps_llsd, server_appearance_update_from_llsd,
-    session_history_from_llsd, set_display_name_reply_from_llsd, sim_console_response_from_llsd,
-    skeleton_folder, teleport_failed_from_caps_llsd, teleport_finish_from_llsd, trimmed_string,
+    inventory_item_from_create, inventory_offer_bucket, land_products_from_llsd,
+    land_stat_reply_from_caps_llsd, map_block_batch, map_item, map_layer, map_region_info,
+    money_balance, nav_mesh_status_from_llsd, neighbor_info, object_from_full_update,
+    object_properties, offline_messages_from_llsd, open_region_info_from_llsd, pack_uuids,
+    packages_of, parcel_info, parcel_info_from_llsd, parcel_object_owners_from_caps_llsd,
+    parse_lure_region_handle, parse_mute_list, parse_task_inventory, parse_uuid_string, pick_info,
+    places_reply_from_caps_llsd, region_identity, region_limits, required_voice_version_from_llsd,
+    script_dialog, script_permission_request, script_running_from_caps_llsd,
+    server_appearance_update_from_llsd, session_history_from_llsd,
+    set_display_name_reply_from_llsd, sim_console_response_from_llsd, skeleton_folder,
+    teleport_failed_from_caps_llsd, teleport_finish_from_llsd, trimmed_string,
     voice_channel_info_from_llsd, windlight_refresh_from_llsd,
 };
 use super::transfers::Transfers;
@@ -1452,6 +1452,7 @@ impl Session {
                         from_agent_id,
                         from_group,
                         session_name,
+                        channel,
                         ..
                     } = &event
                     {
@@ -1469,7 +1470,7 @@ impl Session {
                             PendingInvite {
                                 inviter: *from_agent_id,
                                 session_name: session_name.clone(),
-                                channel: invite_channel_from_llsd(body),
+                                channel: *channel,
                             },
                             now,
                         );

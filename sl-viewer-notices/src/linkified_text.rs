@@ -348,9 +348,7 @@ fn dispatch_web_links(
             continue;
         };
         if *trusted {
-            browsers.write(OpenWebBrowser {
-                url: Some(event.url.clone()),
-            });
+            browsers.write(OpenWebBrowser::new_window(Some(event.url.clone())));
         } else if let Ok(url) = ExternalUrl::parse(&event.url)
             .inspect_err(|error| warn!("link not opened in the system browser: {error}"))
         {

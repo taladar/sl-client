@@ -123,9 +123,8 @@ pub struct StageBuilder {
 /// command-line switches a test may turn, and nothing it may not.
 #[derive(Debug, Clone, Default)]
 struct ViewerSetup {
-    /// Whether the web (CEF) engine may start: off unless a test asks, since
-    /// Chromium is a second process tree per viewer.
-    web_media: bool,
+    /// Which media engines may start.
+    media: StageMedia,
     /// The skin to wear for the run, overriding the stored choice as
     /// `--skin` does.
     skin: Option<String>,
@@ -135,6 +134,16 @@ struct ViewerSetup {
     /// Whether each viewer process opens a window a person can follow the
     /// run in, as `--watch` does (`SL_E2E_WATCH`).
     watch: bool,
+}
+
+/// Which media engines a stage viewer may start — each off unless a test asks.
+#[derive(Debug, Clone, Copy, Default)]
+struct StageMedia {
+    /// The web (CEF) engine: Chromium is a second process tree per viewer.
+    web: bool,
+    /// The video (GStreamer) engine, so a stage plays no stream it did not
+    /// mean to.
+    video: bool,
 }
 
 impl core::fmt::Debug for StageBuilder {
@@ -252,7 +261,16 @@ impl StageBuilder {
     /// window and media on a prim load nothing until a test asks for it.
     #[must_use]
     pub const fn web_media(mut self) -> Self {
-        self.setup.web_media = true;
+        self.setup.media.web = true;
+        self
+    }
+
+    /// Let every viewer start the video (GStreamer) engine, which a stage
+    /// viewer otherwise runs without: media on a prim with a direct video URL
+    /// and the parcel's media play nothing until a test asks for it.
+    #[must_use]
+    pub const fn video_media(mut self) -> Self {
+        self.setup.media.video = true;
         self
     }
 
@@ -1225,8 +1243,11 @@ impl Stage {
             "--automation-socket".to_owned(),
             socket.display().to_string(),
         ]);
-        if !self.setup.web_media {
+        if !self.setup.media.web {
             launch = launch.args(["--disable-web-media".to_owned()]);
+        }
+        if !self.setup.media.video {
+            launch = launch.args(["--disable-video-media".to_owned()]);
         }
         if self.setup.watch {
             launch = launch.args(["--watch".to_owned()]);
@@ -1877,13 +1898,10 @@ fn in_process_viewer(
     };
     options.storage = Storage::Directories(ViewerPaths::under(state));
     options.audio_device = false;
-    options.media = if setup.web_media {
-        MediaRuntime {
-            web: true,
-            ..MediaRuntime::OFF
-        }
-    } else {
-        MediaRuntime::OFF
+    options.media = MediaRuntime {
+        web: setup.media.web,
+        video: setup.media.video,
+        ..MediaRuntime::OFF
     };
     if let Some(skin) = &setup.skin {
         options.skin.selection = SkinSelection {

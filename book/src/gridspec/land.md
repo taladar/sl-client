@@ -84,10 +84,10 @@ walks the avatar over a parcel line and back and records what comes.
 | behaviour | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
 | on arrival | pushed, sequence 0 | pushed, sequence 0 | pushed, sequence 0, both flavours |
-| on crossing a parcel line | pushed, 1.4 s into a 16 m flight | pushed, 1.0 s into an 8 m flight | not pushed: the fake grid simulates no movement (`server-fake-grid-parcel-on-movement`) |
-| the push's sequence id | **counts up** for the session: 0 on arrival, then 1, 2, … | always 0 | always 0 (the count belongs with the movement push) |
+| on crossing a parcel line | pushed, 1.4 s into a 16 m flight | pushed, 1.0 s into an 8 m flight | pushed in the step the avatar controller puts the avatar over the line |
+| the push's sequence id | **counts up** for the session: 0 on arrival, then 1, 2, … | always 0 | each flavour's (`ParcelPolicy::counts_unsolicited_pushes`) |
 | the push's result and snap | `Single`, no snap | `Single`, no snap | the same |
-| crossing back | pushed again | pushed again | — |
+| crossing back | pushed again | pushed again | pushed again |
 
 Second Life's push ids are small positive numbers, so a client that numbers
 its own `ParcelPropertiesRequest`s upward from 1 cannot tell the answer to its
@@ -96,6 +96,11 @@ its own ids negative (`SELECTED_PARCEL_SEQ_ID` -10000 and below); so does this
 viewer since 2026-10-05 — About Land counts down from -100000, the land tool
 from -10000. The session finds the agent's parcel from its position and the
 pushed parcels' bitmaps, not from the sequence id.
+
+The case itself is live only for now: it divides its line off the region on
+OpenSim, and the fake grid answers no divide
+(`server-fake-grid-parcel-divide-join`). The fake grid's pushes are held by
+`walking_over_a_parcel_line_pushes_each_parcel` in its own client tests.
 
 ## Parcel info
 

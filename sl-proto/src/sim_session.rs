@@ -161,6 +161,8 @@ use sl_wire::messages::{
 };
 use sl_wire::messages::{
     ParcelAccessListReply, ParcelAccessListReplyDataBlock, ParcelAccessListReplyListBlock,
+    ParcelMediaCommandMessage, ParcelMediaCommandMessageCommandBlockBlock, ParcelMediaUpdate,
+    ParcelMediaUpdateDataBlockBlock, ParcelMediaUpdateDataBlockExtendedBlock,
     RegionInfo as RegionInfoMessage, RegionInfoAgentDataBlock, RegionInfoCombatSettingsBlock,
     RegionInfoRegionInfo2Block, RegionInfoRegionInfo3Block, RegionInfoRegionInfo5Block,
     RegionInfoRegionInfoBlock,
@@ -924,6 +926,16 @@ pub enum TransferRequestSource {
 /// The size of one `ParcelOverlay` chunk: a simulator splits the region's
 /// per-4 m-cell ownership map into 1024-byte pieces (four for a 256 m region).
 pub const PARCEL_OVERLAY_CHUNK_BYTES: usize = 1024;
+
+/// What a read of a parcel's environment answers with
+/// ([`SimSession::set_serves_parcel_environments`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ParcelEnvironments {
+    /// The parcel's own environment, where one is stored.
+    Served,
+    /// `is_default` for every parcel, whatever is stored.
+    Inherited,
+}
 
 /// The decoded camera/control state carried by a client `AgentUpdate`, surfaced
 /// as [`ServerEvent::AgentUpdate`]. The simulator uses this to move the agent
@@ -3512,6 +3524,10 @@ pub struct SimSession {
     /// verdict in place of the settings now in force; see
     /// [`SimSession::set_bare_environment_replies`].
     bare_environment_replies: bool,
+    /// Whether a parcel's own environment is served, or every parcel read
+    /// answers `is_default`; see
+    /// [`SimSession::set_serves_parcel_environments`].
+    parcel_environments: ParcelEnvironments,
     /// [`SimSession::set_withholds_logout_reply`].
     withholds_logout_reply: bool,
     /// What a root agent is told when its circuit times out; see
@@ -3938,6 +3954,7 @@ impl SimSession {
             parcel_dialect: crate::ParcelLlsdDialect::SecondLife,
             inventory_dialect: crate::InventoryDialect::SecondLife,
             bare_environment_replies: false,
+            parcel_environments: ParcelEnvironments::Served,
             withholds_logout_reply: false,
             timeout_kick: None,
             baked_outfit: None,
@@ -4771,6 +4788,19 @@ impl SimSession {
         self.environments.insert(environment.parcel_id, environment);
     }
 
+    /// Sets whether a parcel's own environment is served (default `true`).
+    /// Off, a read of any parcel answers `is_default` with no day, whatever
+    /// is stored for it — what OpenSim does while its estate does not allow
+    /// parcel environments (`RegionAllowEnvironmentOverride`); the stored
+    /// environment comes back when it is turned on again.
+    pub const fn set_serves_parcel_environments(&mut self, serves: bool) {
+        self.parcel_environments = if serves {
+            ParcelEnvironments::Served
+        } else {
+            ParcelEnvironments::Inherited
+        };
+    }
+
     /// Sets whether an `ExtEnvironment` PUT or DELETE is answered with a bare
     /// verdict — OpenSim's `{success: true}` for a set, the region and message
     /// ids beside it for a reset — in place of the settings now in force
@@ -4906,7 +4936,10 @@ impl SimSession {
     /// own environment, or — for a parcel that has none — the `is_default`
     /// body both grids answer with, which carries no day cycle.
     pub(crate) fn environment_body(&self, parcel_id: i32) -> Llsd {
-        if parcel_id == -1 || self.environments.contains_key(&parcel_id) {
+        if parcel_id == -1
+            || (self.parcel_environments == ParcelEnvironments::Served
+                && self.environments.contains_key(&parcel_id))
+        {
             return crate::session::environment_to_llsd(&self.environment(parcel_id));
         }
         let region = self.environment(-1);
@@ -6306,6 +6339,74 @@ impl SimSession {
                     pass_to_agent: control.pass_to_agent,
                 })
                 .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends the client a `ParcelMediaUpdate`: the agent parcel's media URL,
+    /// replaced texture, type, size or looping changed (an owner's edit, or a
+    /// script's `llParcelMediaCommandList` URL / texture / type / size). The
+    /// inverse of [`Event::ParcelMediaUpdate`](crate::Event::ParcelMediaUpdate).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
+    /// if the message fails to encode.
+    pub fn send_parcel_media_update(
+        &mut self,
+        media: &crate::ParcelMediaUpdateInfo,
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::ParcelMediaUpdate(ParcelMediaUpdate {
+            data_block: ParcelMediaUpdateDataBlockBlock {
+                media_url: with_nul(&sl_wire::optional_url_to_wire(media.media_url.as_ref())),
+                media_id: media
+                    .media_id
+                    .map_or_else(Uuid::nil, |texture| texture.uuid()),
+                media_auto_scale: u8::from(media.media_auto_scale),
+            },
+            data_block_extended: ParcelMediaUpdateDataBlockExtendedBlock {
+                media_type: with_nul(&media.media_type),
+                media_desc: with_nul(&media.media_desc),
+                media_width: media.media_width.unwrap_or(0),
+                media_height: media.media_height.unwrap_or(0),
+                media_loop: u8::from(media.media_loop),
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends the client a `ParcelMediaCommandMessage` — a script's
+    /// `llParcelMediaCommandList` play / pause / stop / seek reaching the viewers
+    /// on the parcel. `flags` carries one bit per `PARCEL_MEDIA_COMMAND_*` the
+    /// script named; `time` is the seek target in seconds. The inverse of
+    /// [`Event::ParcelMediaCommand`](crate::Event::ParcelMediaCommand).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
+    /// if the message fails to encode.
+    pub fn send_parcel_media_command(
+        &mut self,
+        flags: u32,
+        command: crate::ParcelMediaCommand,
+        time: f32,
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::ParcelMediaCommandMessage(ParcelMediaCommandMessage {
+            command_block: ParcelMediaCommandMessageCommandBlockBlock {
+                flags,
+                command: command.to_u32(),
+                time,
+            },
         });
         self.send(&message, Reliability::Reliable, now)?;
         Ok(())

@@ -565,6 +565,38 @@ pub(crate) const CONTRACTS: &[ElementContract] = &[
         ],
     },
     ElementContract {
+        element: "calling-card-offer-toast",
+        nodes: &[
+            NodeContract::new(
+                "offer-invite-action:Accept",
+                &[
+                    Row::emits(Gesture::PrimaryClick, &["accept"]),
+                    Row::emits(Gesture::DoubleClick, &["accept", "accept"]),
+                    Row::emits(Gesture::Enter, &["accept"]),
+                    Row::emits(Gesture::Space, &["accept"]),
+                ],
+            ),
+            NodeContract::new(
+                "offer-invite-action:Decline",
+                &[
+                    Row::emits(Gesture::PrimaryClick, &["decline"]),
+                    Row::emits(Gesture::DoubleClick, &["decline", "decline"]),
+                    Row::emits(Gesture::Enter, &["decline"]),
+                    Row::emits(Gesture::Space, &["decline"]),
+                ],
+            ),
+            NodeContract::new(
+                "offer-invite-close",
+                &[
+                    Row::emits(Gesture::PrimaryClick, &["close"]),
+                    Row::emits(Gesture::DoubleClick, &["close", "close"]),
+                    Row::emits(Gesture::Enter, &["close"]),
+                    Row::emits(Gesture::Space, &["close"]),
+                ],
+            ),
+        ],
+    },
+    ElementContract {
         element: "checkbox-states",
         nodes: &[
             NodeContract::new(GALLERY_RESTING, &GALLERY_RESTING_ROWS),

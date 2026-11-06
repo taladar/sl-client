@@ -306,8 +306,9 @@ pub const FLOATERS: &[FloaterElement] = &[
     },
     FloaterElement {
         id: "object-contents",
-        summary: "Object Contents: the selected prim's task-inventory list with its drop target \
-                  and the open / remove actions.",
+        summary: "Object Contents: a picked object's task-inventory list with its drop target, \
+                  the double-click open and the copy actions. One window per object, so two \
+                  objects' contents can be side by side.",
         spec: crate::edit_contents::object_contents_floater_spec,
         content: crate::edit_contents::spawn_object_contents_specimen,
     },
@@ -492,7 +493,8 @@ pub const FLOATERS: &[FloaterElement] = &[
     FloaterElement {
         id: "web-browser",
         summary: "Web Browser: the navigation toolbar, the embedded browser view and the status \
-                  row — where a script's `llLoadURL` and a profile's web tab land.",
+                  row — where a script's `llLoadURL` and a profile's web tab land. One window per \
+                  page, as the reference opens them, so its geometry is not persisted.",
         spec: crate::web_floater::web_floater_spec,
         content: crate::web_floater::spawn_web_floater_specimen,
     },

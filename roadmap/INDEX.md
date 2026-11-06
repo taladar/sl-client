@@ -11,17 +11,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 128 |
-| ready | 332 |
-| blocked | 40 |
-| in-progress | 17 |
-| bugs | 38 |
-| done | 1493 |
+| ideas | 129 |
+| ready | 331 |
+| blocked | 36 |
+| in-progress | 11 |
+| bugs | 36 |
+| done | 1508 |
 | deferred | 30 |
 | wont-do | 24 |
-| **total** | **2102** |
+| **total** | **2105** |
 
-## ideas (128)
+## ideas (129)
 
 ### protocol
 
@@ -92,6 +92,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — open the grid's marketplace storefront
 - [`viewer-material-asset-authoring`](ideas/viewer-material-asset-authoring.md)
   — Create and upload GLTF material assets
+- [`viewer-media-served-mime-probe`](ideas/viewer-media-served-mime-probe.md) —
+  Probe the served MIME type before dispatching media to an engine
 - [`viewer-minimap-collision-parcels`](ideas/viewer-minimap-collision-parcels.md)
   — Minimap collision-parcel ("banned from here") fill
 - [`viewer-minimized-floaters-move-to-a-shelf`](ideas/viewer-minimized-floaters-move-to-a-shelf.md)
@@ -276,7 +278,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   server
 - [`server-lsl-lib-avatar-control`](ideas/server-lsl-lib-avatar-control.md) —
   Library tranche — avatars, animation, sitting, controls and camera (blocked by
-  `server-lsl-vm-execution` (done), `server-world-agent-movement`,
+  `server-lsl-vm-execution` (done), `server-world-agent-movement` (done),
   `server-world-sit-and-attach` (done), `gridspec-lsl-avatar-control` (done))
 - [`server-lsl-lib-detection-sensors`](ideas/server-lsl-lib-detection-sensors.md)
   — Library tranche — the detected block, sensors and raycasts (blocked by
@@ -288,7 +290,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `gridspec-lsl-http-url` (done))
 - [`server-lsl-lib-land-region-env`](ideas/server-lsl-lib-land-region-env.md) —
   Library tranche — parcel, region, estate and environment queries (blocked by
-  `server-lsl-vm-execution` (done), `server-world-agent-movement`,
+  `server-lsl-vm-execution` (done), `server-world-agent-movement` (done),
   `gridspec-lsl-land-region-env` (done))
 - [`server-lsl-lib-physics-vehicles`](ideas/server-lsl-lib-physics-vehicles.md)
   — Library tranche — status flags, forces, targets and vehicles (blocked by
@@ -325,7 +327,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-lsl-opensim-function-set`](ideas/gridspec-lsl-opensim-function-set.md)
   — Measure which library functions OpenSim's engines compile
 
-## ready (332)
+## ready (331)
 
 ### protocol
 
@@ -402,6 +404,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Face-nearest and avatar fine-alignment tools
 - [`viewer-avatar-debug-tools`](ready/viewer-avatar-debug-tools.md) — Avatar
   debug & maintenance tools (incl. Rebake)
+- [`viewer-avatar-moderation-actions`](ready/viewer-avatar-moderation-actions.md)
+  — Per-avatar parcel / estate moderation — the shared action layer (blocked by
+  `viewer-region-options-estate` (done))
 - [`viewer-avatar-skeleton-recovery`](ready/viewer-avatar-skeleton-recovery.md)
   — Undeform / reset skeleton for the own avatar
 - [`viewer-bake-cof-layer-order`](ready/viewer-bake-cof-layer-order.md) —
@@ -641,10 +646,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-inventory-thumbnails`](ready/viewer-inventory-thumbnails.md) —
   Inventory thumbnails — view & edit (blocked by `viewer-ui-texture-picker`
   (done))
-- [`viewer-key-object-contents`](ready/viewer-key-object-contents.md) — One
-  Object Contents window per object
-- [`viewer-key-web-browser`](ready/viewer-key-web-browser.md) — Decide whether
-  the web browser is many windows or one with tabs
 - [`viewer-land-holdings`](ready/viewer-land-holdings.md) — My land holdings
   floater (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-land-transactions`](ready/viewer-land-transactions.md) — Land sale &
@@ -996,6 +997,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-usb-route-map-display`](ready/viewer-usb-route-map-display.md) — USB
   route display on the minimap & world map (blocked by `viewer-minimap` (done),
   `viewer-world-map-floater` (done))
+- [`viewer-video-recording`](ready/viewer-video-recording.md) — In-viewer video
+  recording (machinima capture) (blocked by `viewer-ui-widget-scaffold` (done),
+  `viewer-video-playback` (done))
 - [`viewer-viewer-effect-render`](ready/viewer-viewer-effect-render.md) — Render
   inbound ViewerEffects (beams, spheres)
 - [`viewer-voice-audio`](ready/viewer-voice-audio.md) — Voice audio transport
@@ -1100,21 +1104,19 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-fake-grid-object-update-forms`](ready/server-fake-grid-object-update-forms.md)
   — Fake grid — send compressed, terse and cached object updates as each grid
   does (blocked by `gridspec-object-update-stream` (done))
+- [`server-fake-grid-parcel-access-enforcement`](ready/server-fake-grid-parcel-access-enforcement.md)
+  — Fake grid — enforce parcel access and push ban lines (blocked by
+  `gridspec-parcel-access-and-ban-lines` (done),
+  `server-fake-grid-parcel-on-movement` (done), `server-world-agent-movement`
+  (done))
 - [`server-fake-grid-parcel-divide-join`](ready/server-fake-grid-parcel-divide-join.md)
   — Fake grid — divide and join parcels
-- [`server-fake-grid-parcel-on-movement`](ready/server-fake-grid-parcel-on-movement.md)
-  — Fake grid — push the parcel an agent walks onto, and serve parcel
-  environments
 - [`server-fake-grid-scripted-avatars`](ready/server-fake-grid-scripted-avatars.md)
   — Scripted avatars — a client that grants, pays, sits and answers (blocked by
   `server-fake-grid-script-engine-wiring` (done))
 - [`server-fake-grid-terraform`](ready/server-fake-grid-terraform.md) — Fake
   grid — terraforming, undo and bake (blocked by `gridspec-terrain-editing`
   (done))
-- [`server-world-agent-movement`](ready/server-world-agent-movement.md) — The
-  agent never moves — AgentUpdate is decoded and ignored (blocked by
-  `server-world-heartbeat` (done), `gridspec-neighbours-crossing` (done),
-  `gridspec-agent-movement` (done))
 - [`server-world-changed-object-crossing`](ready/server-world-changed-object-crossing.md)
   — Measure and raise changed() when an unworn object crosses a region border
   (blocked by `gridspec-neighbours-crossing` (done))
@@ -1133,13 +1135,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-sl-mfa-challenge`](ready/gridspec-sl-mfa-challenge.md) — Record
   Second Life's MFA challenge and whether a remembered mfa_hash gets past it
 
-## blocked (40)
+## blocked (36)
 
 ### viewer
 
-- [`viewer-avatar-moderation-actions`](blocked/viewer-avatar-moderation-actions.md)
-  — Per-avatar parcel / estate moderation — the shared action layer (blocked by
-  `viewer-region-options-estate`)
 - [`viewer-fs-bridge-protocol`](blocked/viewer-fs-bridge-protocol.md) —
   Firestorm LSL bridge — the viewer↔script protocol and what it exposes (blocked
   by `viewer-fs-bridge-lifecycle`)
@@ -1214,9 +1213,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-usb-route-following`](blocked/viewer-usb-route-following.md) — USB
   route following — advancing waypoint beacons (blocked by
   `viewer-usb-route-map-display`, `viewer-beacons-beam-render` (done))
-- [`viewer-video-recording`](blocked/viewer-video-recording.md) — In-viewer
-  video recording (machinima capture) (blocked by `viewer-ui-widget-scaffold`
-  (done), `viewer-video-playback`)
 - [`viewer-vintage-bottom-bar`](blocked/viewer-vintage-bottom-bar.md) — Classic
   (Vintage) bottom-bar arrangement (blocked by `viewer-animation-overrider`,
   `viewer-toolbar-customization`)
@@ -1229,9 +1225,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### test
 
-- [`test-e2e-environment-parcel-layer`](blocked/test-e2e-environment-parcel-layer.md)
-  — End-to-end test of the parcel environment layer when walking between parcels
-  (blocked by `server-fake-grid-parcel-on-movement`)
 - [`test-fake-grid-lsl-offline-cases`](blocked/test-fake-grid-lsl-offline-cases.md)
   — Move the script and chat conformance cases offline (blocked by
   `server-fake-grid-scripted-scenario`)
@@ -1245,10 +1238,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### server
 
-- [`server-fake-grid-parcel-access-enforcement`](blocked/server-fake-grid-parcel-access-enforcement.md)
-  — Fake grid — enforce parcel access and push ban lines (blocked by
-  `gridspec-parcel-access-and-ban-lines` (done),
-  `server-fake-grid-parcel-on-movement`, `server-world-agent-movement`)
 - [`server-fake-grid-profiles`](blocked/server-fake-grid-profiles.md) — Fake
   grid — profiles, picks, classifieds and notes with each grid's quirks (blocked
   by `gridspec-profiles` (done), `protocol-sim-profile-messages`)
@@ -1271,7 +1260,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-voice`](blocked/gridspec-voice.md) — Voice provisioning and
   signalling on each grid (blocked by `viewer-voice-audio`)
 
-## in-progress (17)
+## in-progress (11)
 
 ### viewer
 
@@ -1283,21 +1272,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   position)
 - [`viewer-avatar-ground-from-collision-plane`](in-progress/viewer-avatar-ground-from-collision-plane.md)
   — Avatar ground probe from the simulator's collision plane (drop the raycast)
-- [`viewer-environment-personal-lighting`](in-progress/viewer-environment-personal-lighting.md)
-  — Personal lighting — local environment override (blocked by
-  `viewer-ui-widget-scaffold` (done))
-- [`viewer-keyed-floater-audit`](in-progress/viewer-keyed-floater-audit.md) —
-  Audit the other per-subject singletons onto the keyed-floater scaffold
 - [`viewer-perf-pbr-shadow-cluster-rez`](in-progress/viewer-perf-pbr-shadow-cluster-rez.md)
   — Tune main-view shadow specialization + clustered lighting during rez
 - [`viewer-realtime-mirrors`](in-progress/viewer-realtime-mirrors.md) —
   Real-time mirrors (hero probes)
-- [`viewer-region-options-estate`](in-progress/viewer-region-options-estate.md)
-  — Region / Estate floater — estate tab (blocked by
-  `viewer-region-options-debug` (done))
-- [`viewer-region-options-terrain`](in-progress/viewer-region-options-terrain.md)
-  — Region / Estate floater — terrain tab (blocked by
-  `viewer-region-options-debug` (done))
 - [`viewer-render-context-matrix`](in-progress/viewer-render-context-matrix.md)
   — Render context matrix — subjects × eye, time of day, mirror, layering
   (blocked by `viewer-render-pixel-oracle` (done), `viewer-plugin-groups`
@@ -1310,18 +1288,13 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Upstream PR — parley: honour the emoji presentation selector (VS16)
 - [`viewer-ui-text-renderability-axis`](in-progress/viewer-ui-text-renderability-axis.md)
   — Upstream issue — font selection cannot see glyph-format renderability
-- [`viewer-ui-virtual-trackball`](in-progress/viewer-ui-virtual-trackball.md) —
-  Virtual trackball widget (sun / moon direction) (blocked by
-  `viewer-ui-widget-scaffold` (done))
-- [`viewer-video-playback`](in-progress/viewer-video-playback.md) — Video
-  playback backend (a second media engine, not the browser)
 
 ### chat
 
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (38)
+## bugs (36)
 
 ### protocol
 
@@ -1348,8 +1321,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   stale
 - [`viewer-automation-ground-reveal-eye-under-terrain`](bugs/viewer-automation-ground-reveal-eye-under-terrain.md)
   — A ground reveal can put the camera under higher ground beside the point
-- [`viewer-calling-card-offer-unanswered`](bugs/viewer-calling-card-offer-unanswered.md)
-  — A calling card offered to us is never shown or answered
 - [`viewer-camera-framing-ends-inside-the-framed-object`](bugs/viewer-camera-framing-ends-inside-the-framed-object.md)
   — A framing glide can carry the camera inside the object it frames
 - [`viewer-day-cycle-strip-click-mirrored-rtl`](bugs/viewer-day-cycle-strip-click-mirrored-rtl.md)
@@ -1386,9 +1357,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-retired-neighbour-stays-drawn`](bugs/viewer-retired-neighbour-stays-drawn.md)
   — A neighbour the simulator retired stays drawn — its ground, water and map
   tile outlive its circuit
-- [`viewer-session-invitation-accepted-at-once`](bugs/viewer-session-invitation-accepted-at-once.md)
-  — A group or conference invitation waits for Accept / Decline; the reference
-  joins at once
 - [`viewer-sliders-show-no-value`](bugs/viewer-sliders-show-no-value.md) — A
   slider shows no value, and no bounds or step either
 - [`viewer-terraform-parcel-refusal`](bugs/viewer-terraform-parcel-refusal.md) —
@@ -1419,7 +1387,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1493)
+## done (1508)
 
 ### protocol
 
@@ -2050,6 +2018,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-bom-mesh-alpha-feet-through-boots`](done/viewer-bom-mesh-alpha-feet-through-boots.md)
   — BoM mesh body feet render through mesh boots (bake alpha ignored on BoM
   faces)
+- [`viewer-browser-view-popups-dropped`](done/viewer-browser-view-popups-dropped.md)
+  — A target= link in any embedded browser but the browser window does nothing
 - [`viewer-build-floater-interaction-tests`](done/viewer-build-floater-interaction-tests.md)
   — The build floater — reflect, edit, commit (blocked by
   `viewer-ui-keyboard-text-harness` (done), `viewer-world-test-harness` (done))
@@ -2071,6 +2041,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-build-undo-redo`](done/viewer-build-undo-redo.md) — Object-edit
   undo/redo stack (blocked by `viewer-transform-gizmos` (done),
   `viewer-prim-parameter-editing` (done))
+- [`viewer-calling-card-offer-unanswered`](done/viewer-calling-card-offer-unanswered.md)
+  — A calling card offered to us is never shown or answered
 - [`viewer-camera-collision`](done/viewer-camera-collision.md) — Camera
   collision (blocked by `viewer-camera-third-person-orbit` (done))
 - [`viewer-camera-flycam`](done/viewer-camera-flycam.md) — Flycam mode
@@ -2223,6 +2195,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (done))
 - [`viewer-environment-not-refetched-on-region-info`](done/viewer-environment-not-refetched-on-region-info.md)
   — An estate's sky change never reaches a viewer that is already standing there
+- [`viewer-environment-personal-lighting`](done/viewer-environment-personal-lighting.md)
+  — Personal lighting — local environment override (blocked by
+  `viewer-ui-widget-scaffold` (done))
 - [`viewer-environment-settings-index`](done/viewer-environment-settings-index.md)
   — Settings assets by name — the inventory index the Library Environments
   folder needs
@@ -2437,10 +2412,16 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   colour-picker window per field, like the texture picker
 - [`viewer-key-material-editor`](done/viewer-key-material-editor.md) — One
   material-editor window per material item
+- [`viewer-key-object-contents`](done/viewer-key-object-contents.md) — One
+  Object Contents window per object
 - [`viewer-key-texture-preview`](done/viewer-key-texture-preview.md) — One
   texture-preview window per texture
 - [`viewer-key-wearable-editor`](done/viewer-key-wearable-editor.md) — One
   wearable-editor window per bodypart / clothing item
+- [`viewer-key-web-browser`](done/viewer-key-web-browser.md) — Decide whether
+  the web browser is many windows or one with tabs
+- [`viewer-keyed-floater-audit`](done/viewer-keyed-floater-audit.md) — Audit the
+  other per-subject singletons onto the keyed-floater scaffold
 - [`viewer-land-context-menu`](done/viewer-land-context-menu.md) — Land /
   terrain context pie menu entries (blocked by `viewer-ui-radial-menu` (done))
 - [`viewer-left-click-click-actions`](done/viewer-left-click-click-actions.md) —
@@ -3167,8 +3148,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-region-options-debug`](done/viewer-region-options-debug.md) — Region
   / Estate floater — region debug tab (blocked by `viewer-ui-widget-scaffold`
   (done))
+- [`viewer-region-options-estate`](done/viewer-region-options-estate.md) —
+  Region / Estate floater — estate tab (blocked by `viewer-region-options-debug`
+  (done))
 - [`viewer-region-options-general`](done/viewer-region-options-general.md) —
   Region / Estate floater — region (general) tab (blocked by
+  `viewer-region-options-debug` (done))
+- [`viewer-region-options-terrain`](done/viewer-region-options-terrain.md) —
+  Region / Estate floater — terrain tab (blocked by
   `viewer-region-options-debug` (done))
 - [`viewer-region-push-discards-pending-edits`](done/viewer-region-push-discards-pending-edits.md)
   — A region push throws away the estate manager's unapplied edits
@@ -3278,6 +3265,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-self-closing-widget-leaks-its-press`](done/viewer-self-closing-widget-leaks-its-press.md)
   — A widget that closes on a press hands that press to the world, which
   deselects
+- [`viewer-session-invitation-accepted-at-once`](done/viewer-session-invitation-accepted-at-once.md)
+  — A group or conference invitation waits for Accept / Decline; the reference
+  joins at once
+- [`viewer-session-invitation-under-do-not-disturb`](done/viewer-session-invitation-under-do-not-disturb.md)
+  — Under Do Not Disturb a group or conference invitation is shown and joined;
+  the reference ignores it
 - [`viewer-setting-write-rejected-wrong-type`](done/viewer-setting-write-rejected-wrong-type.md)
   — A settings write is silently rejected for the wrong integer type
 - [`viewer-settings-account-scope-persist`](done/viewer-settings-account-scope-persist.md)
@@ -3561,6 +3554,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-texture-picker`](done/viewer-ui-texture-picker.md) — Texture
   picker floater — choose a texture from inventory (blocked by
   `viewer-ui-widget-scaffold` (done))
+- [`viewer-ui-virtual-trackball`](done/viewer-ui-virtual-trackball.md) — Virtual
+  trackball widget (sun / moon direction) (blocked by
+  `viewer-ui-widget-scaffold` (done))
 - [`viewer-ui-virtualized-list`](done/viewer-ui-virtualized-list.md) —
   Virtualized (windowed-recycling) list (blocked by `viewer-ui-widget-scaffold`
   (done))
@@ -3587,6 +3583,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — An item the viewer just uploaded is not in its own inventory
 - [`viewer-url-linkification`](done/viewer-url-linkification.md) — URLs in chat
   & other text contexts (blocked by `viewer-ui-text-foundation` (done))
+- [`viewer-video-playback`](done/viewer-video-playback.md) — Video playback
+  backend (a second media engine, not the browser)
 - [`viewer-vintage-skin`](done/viewer-vintage-skin.md) — Ship a Vintage-alike
   skin (blocked by `viewer-skin-light-surface-roles` (done),
   `viewer-skin-image-backed-widgets` (done))
@@ -4004,6 +4002,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   GetDisplayNames
 - [`test-draw-distance`](done/test-draw-distance-set-draw-distance-confirm-no-error-and-any-echoed-state.md)
   — set draw distance; confirm no error and any echoed state
+- [`test-e2e-environment-parcel-layer`](done/test-e2e-environment-parcel-layer.md)
+  — End-to-end test of the parcel environment layer when walking between parcels
+  (blocked by `server-fake-grid-parcel-on-movement` (done),
+  `server-world-agent-movement` (done))
 - [`test-e2e-ground-double-click-fails-under-suite-load`](done/test-e2e-ground-double-click-fails-under-suite-load.md)
   — The ground double-click e2e test flies its camera by frames and failed once
   in the full suite
@@ -4454,6 +4456,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   grid — serve each flavour's LSL syntax document and advertise its id
 - [`server-fake-grid-object-undo`](done/server-fake-grid-object-undo.md) — Fake
   grid — keep an object's edit history for Undo / Redo
+- [`server-fake-grid-parcel-on-movement`](done/server-fake-grid-parcel-on-movement.md)
+  — Fake grid — push the parcel an agent walks onto, and serve parcel
+  environments
 - [`server-fake-grid-script-compile-on-upload`](done/server-fake-grid-script-compile-on-upload.md)
   — A script upload is accepted and never compiled (blocked by
   `server-lsl-compiler-ir` (done), `gridspec-lsl-compile` (done))
@@ -4550,6 +4555,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-lsl-vm-execution`](done/server-lsl-vm-execution.md) — The script VM —
   suspendable execution in per-tick slices (blocked by `server-lsl-compiler-ir`
   (done))
+- [`server-world-agent-movement`](done/server-world-agent-movement.md) — The
+  agent never moves — AgentUpdate is decoded and ignored (blocked by
+  `server-world-heartbeat` (done), `gridspec-neighbours-crossing` (done),
+  `gridspec-agent-movement` (done))
 - [`server-world-changed-raisers`](done/server-world-changed-raisers.md) — Raise
   changed() from every grid-side cause, with the right bit (blocked by
   `server-fake-grid-script-engine-wiring` (done), `gridspec-lsl-events` (done))

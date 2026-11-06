@@ -2,7 +2,7 @@
 id: server-fake-grid-parcel-on-movement
 title: Fake grid — push the parcel an agent walks onto, and serve parcel environments
 topic: server
-status: ready
+status: done
 origin: test-e2e-sweep-environment (2026-10-01)
 points: 5
 refs: [test-e2e-environment-parcel-layer, viewer-environment-personal-lighting]
@@ -57,3 +57,32 @@ serves:
   unmeasured.
 - A parcel with no environment of its own already answers `is_default` with no
   day on both flavours, and `environment` holds them to it.
+
+## As built (2026-11-06)
+
+- **The push**: the movement controller ([[server-world-agent-movement]])
+  checks the parcel under the avatar every tick and pushes a new one to the
+  agent's session, under the unsolicited 0 on OpenSim and under a count kept
+  per session on Second Life (`ParcelPolicy::counts_unsolicited_pushes`; the
+  arrival stays 0). A teleport within the region that lands on another
+  parcel is pushed the same way. OpenSim's second of delay is not imitated:
+  the push goes out in the step the avatar is over the line.
+- **Parcel environments**: `RegionFixture::give_parcel_environment` serves an
+  environment for one parcel and puts its version on the parcel's record;
+  `SceneFixtures::allow_parcel_environments` sets the estate's
+  `ALLOW_ENVIRONMENT_OVERRIDE`, which every parcel record then carries as
+  `region_allow_environment_override` (an estate change by an estate manager
+  re-stamps them). The OpenSim flavour serves a parcel's environment only
+  while the flag is set — read per request, so a change mid-session counts —
+  and answers `is_default` otherwise
+  (`ImitatedGrid::parcel_environments_need_estate`,
+  `SimSession::set_serves_parcel_environments`). A parcel without an
+  environment says version -1, as both grids do.
+- **Teeth**: `walking_over_a_parcel_line_pushes_each_parcel` walks a client
+  over a line and back on each flavour (0, 0 against 1, 2), and
+  `a_parcel_environment_is_served_while_the_estate_allows_it` reads a
+  parcel's environment with the estate allowing it and not.
+
+Not done: `parcel-crossing` on the fake flavours. It divides its line off the
+region, which the fake grid cannot do yet; noted in
+[[server-fake-grid-parcel-divide-join]].
