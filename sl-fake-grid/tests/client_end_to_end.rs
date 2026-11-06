@@ -2948,9 +2948,13 @@ mod test {
             .await
             .ok_or("destination session missing")?;
         assert!(dest.with_sim(|sim| sim.is_root_agent()).await);
-        assert_eq!(
-            dest.with_sim(|sim| sim.arrival_position().position).await,
-            RegionCoordinates::new(64.0, 32.0, 25.0)
+        // Where the request asked, stood on the ground: the region's avatar
+        // controller puts an avatar asked for below the ground back on it.
+        let arrived = dest.with_sim(|sim| sim.arrival_position().position).await;
+        assert_eq!((arrived.x(), arrived.y()), (64.0, 32.0));
+        assert!(
+            (arrived.z() - (25.0 + sl_fake_grid::AVATAR_CENTRE_ABOVE_GROUND_M)).abs() < 1e-3,
+            "{arrived:?}"
         );
 
         // The new session talks: a simulator chat line reaches the client
@@ -3238,12 +3242,14 @@ mod test {
         assert_eq!(notice.to_seq, destination.session_seq().await);
 
         assert!(destination.with_sim(|sim| sim.is_root_agent()).await);
-        assert_eq!(
-            destination
-                .with_sim(|sim| sim.arrival_position().position)
-                .await,
-            landing
-        );
+        // Where the crossing landed it, or already come down onto the ground
+        // from the few centimetres above it, as the region's avatar controller
+        // drops an avatar.
+        let arrived = destination
+            .with_sim(|sim| sim.arrival_position().position)
+            .await;
+        assert_eq!((arrived.x(), arrived.y()), (landing.x(), landing.y()));
+        assert!(arrived.z() <= landing.z(), "{arrived:?}");
         assert!(
             !source.is_closed(),
             "the region walked out of keeps streaming as a child, unlike a teleport's source"
@@ -3911,13 +3917,18 @@ mod test {
         );
         let destination = after.first().ok_or("no destination session")?;
         assert!(destination.with_sim(|sim| sim.is_root_agent()).await);
+        // Where the request asked, not where the child was built — and come
+        // down onto the ground from the few centimetres above it the request
+        // named, as the region's avatar controller drops an avatar.
+        let arrived = destination
+            .with_sim(|sim| sim.arrival_position().position)
+            .await;
         assert_eq!(
-            destination
-                .with_sim(|sim| sim.arrival_position().position)
-                .await,
-            landing,
+            (arrived.x(), arrived.y()),
+            (landing.x(), landing.y()),
             "the arrival is where the request asked, not where the child was built"
         );
+        assert!(arrived.z() <= landing.z(), "{arrived:?}");
         Ok(())
     }
 
@@ -4551,10 +4562,11 @@ mod test {
             .agent_by_seq(notice.to_seq)
             .await
             .ok_or("destination session missing")?;
-        assert_eq!(
-            dest.with_sim(|sim| sim.arrival_position().position).await,
-            RegionCoordinates::new(12.0, 34.0, 56.0)
-        );
+        // There, or already falling from it: the region's avatar controller
+        // drops an avatar that arrives in the air.
+        let arrived = dest.with_sim(|sim| sim.arrival_position().position).await;
+        assert_eq!((arrived.x(), arrived.y()), (12.0, 34.0));
+        assert!(arrived.z() <= 56.0, "{arrived:?}");
         Ok(())
     }
 
@@ -4908,10 +4920,11 @@ mod test {
             .agent_by_seq(notice.to_seq)
             .await
             .ok_or("destination session missing")?;
-        assert_eq!(
-            dest.with_sim(|sim| sim.arrival_position().position).await,
-            RegionCoordinates::new(40.0, 50.0, 60.0)
-        );
+        // There, or already falling from it: the region's avatar controller
+        // drops an avatar that arrives in the air.
+        let arrived = dest.with_sim(|sim| sim.arrival_position().position).await;
+        assert_eq!((arrived.x(), arrived.y()), (40.0, 50.0));
+        assert!(arrived.z() <= 60.0, "{arrived:?}");
         Ok(())
     }
 
@@ -7837,6 +7850,164 @@ mod test {
             .err()
             .ok_or("a version-3 document was accepted")?;
         assert!(reason.contains("version"), "{reason}");
+        Ok(())
+    }
+
+    /// A region split down `x = 136` into West (1), where the login lands,
+    /// and East (2); the estate allows parcel environments when
+    /// `environments` says so, and East has one of its own, `east_sky`.
+    fn two_parcels(
+        environments: bool,
+        east_sky: Option<sl_proto::EnvironmentSettings>,
+    ) -> RegionConfig {
+        use sl_proto::{AgentKey, OwnerKey, ParcelKey, RegionLocalParcelId};
+        let owner = OwnerKey::Agent(AgentKey::from(uuid::Uuid::from_u128(0x0E)));
+        let mut fixture = sl_fake_grid::RegionFixture::new();
+        if environments {
+            fixture.world.allow_parcel_environments();
+        }
+        for (id, name, west, east) in [(1, "West", 0.0, 136.0), (2, "East", 136.0, 256.0)] {
+            fixture.world.add_parcel(
+                sl_fake_grid::rect_parcel(
+                    RegionLocalParcelId(id),
+                    owner,
+                    name,
+                    west,
+                    0.0,
+                    east,
+                    256.0,
+                ),
+                ParcelKey::from(uuid::Uuid::from_u128(0xA0 + u128::from(id.unsigned_abs()))),
+                0.0,
+            );
+        }
+        if let Some(sky) = east_sky {
+            fixture.give_parcel_environment(RegionLocalParcelId(2), sky);
+        }
+        fixture.into_region(RegionConfig::default())
+    }
+
+    /// **The region walks an avatar, and pushes each parcel it walks onto.**
+    ///
+    /// The forward key, held, walks the client's avatar east over the parcel
+    /// line — its own updates say so — and the region pushes East; the back
+    /// key walks it home, and West is pushed again. Under the unsolicited
+    /// sequence id every time on OpenSim, counted up for the session on
+    /// Second Life (`book/src/gridspec/land.md` § the pushes).
+    #[tokio::test]
+    async fn walking_over_a_parcel_line_pushes_each_parcel() -> Result<(), TestError> {
+        use sl_proto::ControlFlags;
+        for (imitates, pushes) in [
+            (ImitatedGrid::OpenSim, [0, 0]),
+            (ImitatedGrid::SecondLife, [1, 2]),
+        ] {
+            let mut running =
+                start_configured(vec![two_parcels(false, None)], None, imitates).await?;
+            let avatar = running.agent.agent_id().uuid();
+            let mut furthest = 0.0_f32;
+            running
+                .commands
+                .send(Command::SetControls(ControlFlags::AT_POS))
+                .await?;
+            let east = running
+                .wait_for(|event| match event {
+                    Event::ObjectUpdated(object) | Event::ObjectAdded(object)
+                        if object.full_id.uuid() == avatar =>
+                    {
+                        furthest = furthest.max(object.motion.position.x);
+                        None
+                    }
+                    Event::ParcelProperties(parcel) if parcel.local_id.0 == 2 => {
+                        Some(parcel.sequence_id)
+                    }
+                    _ => None,
+                })
+                .await?;
+            running
+                .commands
+                .send(Command::SetControls(ControlFlags::AT_NEG))
+                .await?;
+            let west = running
+                .wait_for(|event| match event {
+                    Event::ParcelProperties(parcel) if parcel.local_id.0 == 1 => {
+                        Some(parcel.sequence_id)
+                    }
+                    _ => None,
+                })
+                .await?;
+            running
+                .commands
+                .send(Command::SetControls(ControlFlags::empty()))
+                .await?;
+            assert_eq!([east, west], pushes, "{imitates:?}");
+            assert!(
+                furthest > 130.0,
+                "{imitates:?}: the avatar's updates reached {furthest}"
+            );
+            let stands = running
+                .agent
+                .with_sim(|sim| sim.arrival_position().position)
+                .await;
+            assert!(
+                stands.x() < 136.0,
+                "{imitates:?}: home again, at {stands:?}"
+            );
+        }
+        Ok(())
+    }
+
+    /// **A parcel's own environment is served while the estate allows it**,
+    /// and on OpenSim only then: a read of East answers its sky where the
+    /// estate allows parcel environments, `is_default` with no day where it
+    /// does not; its record names the environment's version either way.
+    #[tokio::test]
+    async fn a_parcel_environment_is_served_while_the_estate_allows_it() -> Result<(), TestError> {
+        let mut sky = sl_proto::EnvironmentSettings::default_region();
+        "East Parcel Day".clone_into(&mut sky.day_cycle.name);
+        sky.env_version = 3;
+        for (imitates, allowed, served) in [
+            (ImitatedGrid::OpenSim, true, true),
+            (ImitatedGrid::OpenSim, false, false),
+            (ImitatedGrid::SecondLife, false, true),
+        ] {
+            let mut running = start_configured(
+                vec![two_parcels(allowed, Some(sky.clone()))],
+                None,
+                imitates,
+            )
+            .await?;
+            let east = running
+                .agent
+                .with_world(|world, _sim| {
+                    world
+                        .parcel_by_local_id(sl_proto::RegionLocalParcelId(2))
+                        .cloned()
+                })
+                .await
+                .ok_or("no East parcel")?;
+            assert_eq!(east.parcel_environment_version, 3, "{imitates:?}");
+            assert_eq!(
+                east.region_allow_environment_override, allowed,
+                "{imitates:?}"
+            );
+            running
+                .commands
+                .send(Command::RequestEnvironment { parcel_id: Some(2) })
+                .await?;
+            let answer = running
+                .wait_for(|event| match event {
+                    Event::Environment(settings) if settings.parcel_id == 2 => {
+                        Some(settings.day_cycle.name.clone())
+                    }
+                    _ => None,
+                })
+                .await?;
+            assert_eq!(
+                answer == "East Parcel Day",
+                served,
+                "{imitates:?}, allowed {allowed}: {answer:?}"
+            );
+        }
         Ok(())
     }
 }

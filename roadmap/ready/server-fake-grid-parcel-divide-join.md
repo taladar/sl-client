@@ -33,3 +33,13 @@ Second Life is unmeasured. `book/src/gridspec/land.md` § Dividing and joining.
 run against either fake flavour until this lands: add it to the offline list
 for both (`sl-conformance/src/fake.rs`) here, with the fake grid's land rules
 (`sl-fake-grid/src/land_sales.rs`) already in place.
+
+## From server-fake-grid-parcel-on-movement (2026-11-06)
+
+The fake grid now walks an avatar and pushes each parcel it walks onto, with
+each flavour's sequence ids, but `parcel-crossing` still cannot run offline:
+it divides its line off the region on OpenSim and needs a line on the start
+region, which the shared fake grid's catalogue does not have. Once a divide
+works, add `Grid::FakeSl` / `Grid::FakeOpensim` to its `grids()` and
+`"parcel-crossing"` to `OFFLINE_CASES`, so its `CROSSING_PUSH` holds the
+fake flavours too.

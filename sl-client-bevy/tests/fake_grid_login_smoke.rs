@@ -85,11 +85,6 @@ mod test {
             Self::start_requesting(channel, region, None)
         }
 
-        /// [`start`](Self::start) against a grid imitating `imitates`.
-        fn start_imitating(channel: &str, imitates: ImitatedGrid) -> Result<Self, TestError> {
-            Self::start_with(channel, RegionConfig::default(), None, imitates)
-        }
-
         /// [`start_in`](Self::start_in), with the plugin's seed requests
         /// asking for `requested` instead of the client's own list.
         fn start_requesting(
@@ -540,8 +535,22 @@ mod test {
     #[test]
     fn bevy_client_fetches_the_environment_a_bare_reply_left_out() -> Result<(), TestError> {
         const DAY_LENGTH: i32 = 7_200;
-        let mut harness =
-            Harness::start_imitating("sl-fake-grid-bevy-environment", ImitatedGrid::OpenSim)?;
+        // OpenSim serves a parcel's own environment only while the estate
+        // allows parcel environments, so the stock region here does.
+        let mut world = sl_fake_grid::scenario::default_world();
+        world.allow_parcel_environments();
+        let region = sl_fake_grid::RegionFixture {
+            world,
+            assets: sl_fake_grid::scenario::default_assets(),
+            ..sl_fake_grid::RegionFixture::new()
+        }
+        .into_region(RegionConfig::default());
+        let mut harness = Harness::start_with(
+            "sl-fake-grid-bevy-environment",
+            region,
+            None,
+            ImitatedGrid::OpenSim,
+        )?;
         harness.step_until("the capability map", |app| {
             app.world()
                 .resource::<Recorded>()

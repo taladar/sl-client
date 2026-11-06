@@ -16,14 +16,17 @@
 //!    the instances are brought in line with what the prims hold, every
 //!    runnable one runs its share of the tick, and what they said and did
 //!    reaches the region;
-//! 3. when the imitated grid's statistics are due, every root agent in the
+//! 3. every root agent's avatar moves one step (`movement::advance`): what
+//!    its viewer's held keys ask for, kept on the ground, reported back at
+//!    the imitated grid's cadence, and the parcel it walks onto pushed;
+//! 4. when the imitated grid's statistics are due, every root agent in the
 //!    region is sent a `SimStats` whose time dilation says whether the steps
 //!    kept up with the grid's clock ([`TimeDilation`]), with the region's
 //!    active scripts and the share of them that ran.
 //!
-//! The rest of the work the loop exists for — movement and physics, and
-//! handing the tick's changes to an update scheduler — slots in beside the
-//! script slice as each of them is built.
+//! The rest of the work the loop exists for — physics, and handing the tick's
+//! changes to an update scheduler — slots in beside these as each of them is
+//! built.
 //!
 //! # The step
 //!
@@ -219,6 +222,7 @@ pub(crate) async fn beat(core: &GridCore, index: usize) -> Option<Tick> {
     pulse.number = pulse.number.saturating_add(1);
     let number = pulse.number;
     let _scripts = crate::scripts::run_tick(core, index).await;
+    move_agents(core, index, heartbeat.config.step, now).await;
     let since = number.saturating_sub(pulse.stats_tick);
     let stats = if since >= heartbeat.ticks_per_stats {
         let dilation = match heartbeat.config.mode {
@@ -245,6 +249,36 @@ pub(crate) async fn beat(core: &GridCore, index: usize) -> Option<Tick> {
     Some(tick)
 }
 
+/// Moves every root agent's avatar in the region at `index` by one `step`
+/// ([`crate::movement`]), in session order, each session locked in turn.
+async fn move_agents(core: &GridCore, index: usize, step: Duration, now: Instant) {
+    for shared in sessions_in_order(core).await {
+        if shared.is_closed() {
+            continue;
+        }
+        shared
+            .with_state(|state| {
+                if state.region == index {
+                    crate::movement::advance(state, step, now);
+                }
+            })
+            .await;
+    }
+}
+
+/// The grid's sessions in session order, the table read and let go.
+async fn sessions_in_order(core: &GridCore) -> Vec<crate::driver::SharedSim> {
+    let mut sessions: Vec<_> = core
+        .sessions
+        .lock()
+        .await
+        .iter()
+        .map(|(seq, shared)| (*seq, shared.clone()))
+        .collect();
+    sessions.sort_unstable_by_key(|(seq, _)| *seq);
+    sessions.into_iter().map(|(_, shared)| shared).collect()
+}
+
 /// Sends the region's statistics to every root agent in the region at
 /// `index`, in session order, and counts them.
 async fn send_stats(core: &GridCore, index: usize, dilation: TimeDilation, now: Instant) -> usize {
@@ -264,16 +298,8 @@ async fn send_stats(core: &GridCore, index: usize, dilation: TimeDilation, now: 
             scripts_run_percent: Some(percent),
         },
     );
-    let mut sessions: Vec<_> = core
-        .sessions
-        .lock()
-        .await
-        .iter()
-        .map(|(seq, shared)| (*seq, shared.clone()))
-        .collect();
-    sessions.sort_unstable_by_key(|(seq, _)| *seq);
     let mut sent_to = 0_usize;
-    for (_, shared) in sessions {
+    for shared in sessions_in_order(core).await {
         if shared.is_closed() {
             continue;
         }

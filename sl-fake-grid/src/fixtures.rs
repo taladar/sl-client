@@ -26,7 +26,9 @@ pub mod scenarios;
 
 use std::sync::Arc;
 
-use sl_proto::{EnvironmentSettings, InMemoryAssetSource, ObjectMediaState, SimSession};
+use sl_proto::{
+    EnvironmentSettings, InMemoryAssetSource, ObjectMediaState, RegionLocalParcelId, SimSession,
+};
 use sl_types::key::ObjectKey;
 use sl_wire::LegacyMaterial;
 
@@ -74,6 +76,12 @@ pub struct RegionFixture {
     /// The region's environment (day cycle, day length, sky altitudes), or
     /// `None` for the session's stock four-hour day.
     pub environment: Option<EnvironmentSettings>,
+    /// The environments parcels have of their own, each naming its parcel in
+    /// its `parcel_id`; served over `ExtEnvironment` for that parcel in place
+    /// of the `is_default` answer. Add one with
+    /// [`give_parcel_environment`](Self::give_parcel_environment), which also
+    /// tells the parcel's record.
+    pub parcel_environments: Vec<EnvironmentSettings>,
     /// The region's ground.
     pub terrain: TerrainFixture,
     /// What happens to a session in this region because **time passed**
@@ -90,6 +98,24 @@ impl RegionFixture {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Gives the parcel `parcel` an environment of its own: `environment`
+    /// served for it, and the parcel's record carrying its version, which is
+    /// what a viewer reads to decide whether to ask. Whether the region
+    /// serves it is the estate's ([`SceneFixtures::allow_parcel_environments`]).
+    pub fn give_parcel_environment(
+        &mut self,
+        parcel: RegionLocalParcelId,
+        mut environment: EnvironmentSettings,
+    ) {
+        environment.parcel_id = parcel.0;
+        if let Some(record) = self.world.parcel_mut(parcel) {
+            record.parcel_environment_version = environment.env_version;
+        }
+        self.parcel_environments
+            .retain(|other| other.parcel_id != environment.parcel_id);
+        self.parcel_environments.push(environment);
     }
 
     /// The fixture as a [`Scenario`]: the world as it is, the assets plus
@@ -111,6 +137,7 @@ impl RegionFixture {
         let materials = self.materials;
         let media = self.media;
         let environment = self.environment;
+        let parcel_environments = self.parcel_environments;
         // Start from the stock asset store, not an empty one. It carries the
         // built-in library textures every viewer asks any grid for -- the sun
         // and moon discs, the cloud, water normals, the default prim texture,
@@ -167,6 +194,9 @@ impl RegionFixture {
                 }
                 if let Some(environment) = environment.clone() {
                     sim.set_environment(stamped_for(environment, sim.region_id()));
+                }
+                for environment in &parcel_environments {
+                    sim.set_environment(stamped_for(environment.clone(), sim.region_id()));
                 }
             }),
             // The identity half of the stock seeding, for the same reason the

@@ -123,6 +123,17 @@ impl AnimationSet {
         .collect()
     }
 
+    /// Puts the avatar in the posture `anim_id`: the set's default, kept
+    /// under its sequence number so a statement lists one locomotion state at
+    /// a time. Returns whether the set changed.
+    pub fn set_default(&mut self, anim_id: Uuid) -> bool {
+        if self.default.anim_id == anim_id {
+            return false;
+        }
+        self.default.anim_id = anim_id;
+        true
+    }
+
     /// Whether `anim_id` is in the set.
     fn holds(&self, anim_id: Uuid) -> bool {
         self.default.anim_id == anim_id || self.started.iter().any(|entry| entry.anim_id == anim_id)

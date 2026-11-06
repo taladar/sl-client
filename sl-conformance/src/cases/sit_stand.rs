@@ -30,10 +30,8 @@
 //! - **neighbour** — a sit on an object of a neighbouring region, where one
 //!   was in view when the avatar arrived.
 //!
-//! On a fake grid every leg but far runs, and target from where the avatar
-//! stands rather than from further off: the fake grid moves no avatar
-//! (`server-world-agent-movement`), so the walks and flights those legs make
-//! go nowhere there.
+//! Every leg runs on a fake grid as on a live one: its avatar controller
+//! walks and flies the avatar (`sl_fake_grid::movement`).
 
 use std::collections::BTreeSet;
 use std::time::{Duration, Instant};
@@ -1228,7 +1226,7 @@ async fn near_legs(
 }
 
 /// The legs that move the avatar away from the seat and ask for it from
-/// there: live grids only, the fake grid moving no avatar.
+/// there.
 async fn far_legs(
     session: &mut Session,
     watch: &mut Watch,
@@ -1260,15 +1258,14 @@ async fn far_legs(
     Ok(())
 }
 
-/// The legs that give the seat a sit target, ask for it — from where the last
-/// far leg left the avatar on a live grid, from beside it on a fake one — let
-/// the second avatar ask for the taken target, and teleport the avatar from
-/// the seat: from 40 m off on a live grid, from where it stands on a fake one.
+/// The legs that give the seat a sit target, ask for it from where the last
+/// far leg left the avatar, let the second avatar ask for the taken target,
+/// and teleport the avatar from the seat, asked from 40 m off.
 async fn target_legs(
     session: &mut Session,
     watch: &mut Watch,
     mut second: Option<&mut Second<'_>>,
-    (seat, moves): (&Object, bool),
+    seat: &Object,
     metrics: &mut Metrics,
     found: &mut Found,
 ) -> Result<(), TestFailure> {
@@ -1306,20 +1303,12 @@ async fn target_legs(
         stood.record("target_stand", seat_at, metrics);
     }
 
-    // The target from further off where the avatar can be moved, and a
-    // teleport asked from the seat.
-    let attempt = if moves {
-        move_to(session, watch, seat_at, FAR_TARGET_M, Gait::Flying).await?;
-        let leg = format!("target_{FAR_TARGET_M:.0}m");
-        let attempt = try_sit(session, watch, seat.full_id, Some(seat_at), ANSWER_BUDGET).await?;
-        attempt.record(&leg, metrics);
-        found.far_target = Some(attempt.answered());
-        attempt
-    } else {
-        let attempt = try_sit(session, watch, seat.full_id, Some(seat_at), ANSWER_BUDGET).await?;
-        attempt.record("target_again", metrics);
-        attempt
-    };
+    // The target from further off, and a teleport asked from the seat.
+    move_to(session, watch, seat_at, FAR_TARGET_M, Gait::Flying).await?;
+    let leg = format!("target_{FAR_TARGET_M:.0}m");
+    let attempt = try_sit(session, watch, seat.full_id, Some(seat_at), ANSWER_BUDGET).await?;
+    attempt.record(&leg, metrics);
+    found.far_target = Some(attempt.answered());
     if attempt.seated.is_none() {
         return Ok(());
     }
@@ -1462,7 +1451,6 @@ async fn set_up(ctx: &mut TestContext, guard: &mut DeleteOnDrop) -> Result<Setup
 
 /// Runs every leg against the seat.
 async fn drive(ctx: &mut TestContext, setup: &Setup, found: &mut Found) -> Result<(), TestFailure> {
-    let grid = ctx.grid();
     let mut metrics = Metrics::default();
     let (sitter, sitter_at) = setup.sitter.clone();
     let mut watch = Watch::new(sitter, None, Some(sitter_at));
@@ -1499,15 +1487,12 @@ async fn drive(ctx: &mut TestContext, setup: &Setup, found: &mut Found) -> Resul
         )
         .await?;
         if found.near.as_ref().is_some_and(Attempt::answered) {
-            let moves = !is_fake(grid);
-            if moves {
-                far_legs(session, &mut watch, &setup.seat, &mut metrics, found).await?;
-            }
+            far_legs(session, &mut watch, &setup.seat, &mut metrics, found).await?;
             target_legs(
                 session,
                 &mut watch,
                 second.as_mut(),
-                (&setup.seat, moves),
+                &setup.seat,
                 &mut metrics,
                 found,
             )

@@ -20,11 +20,11 @@ of its own avatar and every statement of its animation set:
   them read a walk as anything from 2.7 to 3.1 m/s, which is the slope and
   not the grid.
 
-The case holds both live grids to very little — the avatar walks when told
-to, and comes down when it stops flying — and records the rest. The fake
-grid decodes an `AgentUpdate` and moves nothing, so the last column says
-only that throughout; the avatar controller is the roadmap's
-`server-world-agent-movement`, which is built to this chapter.
+The case holds every grid to very little — the avatar walks when told to,
+and comes down when it stops flying — and records the rest. The last column
+is the fake grid's avatar controller (`sl_fake_grid::movement`, stepped by
+the region's heartbeat), built to this chapter with each flavour's numbers;
+the case runs against both fake flavours.
 
 ## Speeds
 
@@ -35,31 +35,31 @@ within five on Second Life, whose ground was not level.
 
 | control | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
-| forward (`AT_POS`) | 3.20 m/s (3.17 to 3.26 over three runs) | 3.145 m/s | does not move |
-| backward (`AT_NEG`) | 3.2 m/s, the same as forward | 3.145 m/s | does not move |
-| sideways (`LEFT_POS`, `LEFT_NEG`) | 3.0 to 3.2 m/s | 3.14 m/s | does not move |
-| forward with always-run on (`SetAlwaysRun`) | 5.13 m/s; backward the same | 5.10 m/s; backward the same | does not move |
-| forward with the `FAST_AT` bit | 3.2 m/s: the bit changes nothing | 3.14 m/s: the same | does not move |
-| the `NUDGE_AT_POS` bit, held | 3.2 m/s for as long as it is held, with the walk animation | 3.14 m/s, the same | does not move |
-| forward while crouching (`UP_NEG` on the ground) | 2.0 to 2.1 m/s | 3.14 m/s: a crouch changes the animation and not the speed | does not move |
-| level flight (`FLY` and `AT_POS`) | 16.0 m/s | 12.58 m/s | does not move |
-| level flight with `FAST_AT` | 15.9 m/s: nothing | 12.58 m/s: nothing | does not move |
-| climbing (`FLY` and `UP_POS`) | 15.9 to 16.0 m/s | 16.36 m/s | does not move |
-| descending (`FLY` and `UP_NEG`) | 22.8 m/s | 16.35 m/s | does not move |
+| forward (`AT_POS`) | 3.20 m/s (3.17 to 3.26 over three runs) | 3.145 m/s | each flavour's walk: 3.20 or 3.145 m/s |
+| backward (`AT_NEG`) | 3.2 m/s, the same as forward | 3.145 m/s | the same as forward |
+| sideways (`LEFT_POS`, `LEFT_NEG`) | 3.0 to 3.2 m/s | 3.14 m/s | the same as forward |
+| forward with always-run on (`SetAlwaysRun`) | 5.13 m/s; backward the same | 5.10 m/s; backward the same | each flavour's run: 5.13 or 5.10 m/s |
+| forward with the `FAST_AT` bit | 3.2 m/s: the bit changes nothing | 3.14 m/s: the same | a walk: the bit changes nothing |
+| the `NUDGE_AT_POS` bit, held | 3.2 m/s for as long as it is held, with the walk animation | 3.14 m/s, the same | a walk for as long as it is held |
+| forward while crouching (`UP_NEG` on the ground) | 2.0 to 2.1 m/s | 3.14 m/s: a crouch changes the animation and not the speed | 2.05 m/s on the Second Life flavour, a walk on the OpenSim one |
+| level flight (`FLY` and `AT_POS`) | 16.0 m/s | 12.58 m/s | 16.0 or 12.58 m/s |
+| level flight with `FAST_AT` | 15.9 m/s: nothing | 12.58 m/s: nothing | nothing |
+| climbing (`FLY` and `UP_POS`) | 15.9 to 16.0 m/s | 16.36 m/s | 16.0 or 16.36 m/s |
+| descending (`FLY` and `UP_NEG`) | 22.8 m/s | 16.35 m/s | 22.8 or 16.35 m/s |
 | a ceiling | none in a thirty-second climb to 520 m: the same speed in every five-second window | none in the same climb | none |
-| falling (flight let go at about 420 m) | 52.8 m/s fastest reported, 387 m in 10.6 to 11.1 s | 50.1 m/s, 425 m in 12.0 s | does not move |
+| falling (flight let go at about 420 m) | 52.8 m/s fastest reported, 387 m in 10.6 to 11.1 s | 50.1 m/s, 425 m in 12.0 s | 52.8 or 50.1 m/s fastest, under the pull that makes each flavour's jump as high as it was |
 
 ## Starting, stopping and turning
 
 | behaviour | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
-| a control stated once, with nothing after it but the client's once-a-second `AgentUpdate` | the avatar walks for as long as the control stands (six seconds measured) | the same | does not move |
+| a control stated once, with nothing after it but the client's once-a-second `AgentUpdate` | the avatar walks for as long as the control stands (six seconds measured) | the same | the same |
 | a control re-stated a hundred times a second | the same speed, the same rate of updates back, and no alert | the same | accepts it |
-| letting go of a walk | at rest within half a second, 0.9 to 1.0 m further on | at rest within 0.3 s, 0.6 m further on | does not move |
-| letting go of a run | 1.6 to 2.2 m further on | 0.55 to 0.65 m further on | does not move |
-| letting go of level flight | 0.7 m further on | no further report: the next update is the avatar at rest | does not move |
-| letting go of a climb | 0.1 to 0.7 m higher | 1.9 m higher | does not move |
-| a turn on the spot (a new body rotation, no control) | reported back over several updates, and not exactly: four and five degrees short twice, and 78° short once | reported back in one update, to the hundredth of a degree | does not move |
+| letting go of a walk | at rest within half a second, 0.9 to 1.0 m further on | at rest within 0.3 s, 0.6 m further on | at rest within 0.6 or 0.3 s, 0.8 or 0.3 m further on |
+| letting go of a run | 1.6 to 2.2 m further on | 0.55 to 0.65 m further on | at rest over the same time, 1.5 or 0.8 m further on |
+| letting go of level flight | 0.7 m further on | no further report: the next update is the avatar at rest | at rest within one step |
+| letting go of a climb | 0.1 to 0.7 m higher | 1.9 m higher | at rest at once |
+| a turn on the spot (a new body rotation, no control) | reported back over several updates, and not exactly: four and five degrees short twice, and 78° short once | reported back in one update, to the hundredth of a degree | reported back in the step it is stated, exactly |
 
 ## Jumping, landing and `FINISH_ANIM`
 
@@ -70,13 +70,13 @@ same animations on its own clock and never reads the bit.
 
 | behaviour | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
-| the jump key (`UP_POS` on the ground), nothing else said | `pre_jump` joins the animation set and the avatar **never leaves the ground**: it was still there, and still in `pre_jump`, after 5 s on one avatar and 18 s on the other, with the key held throughout | off the ground 0.05 to 0.09 s after the key | does not move |
-| the same, with `FINISH_ANIM` sent as `pre_jump` appears | off the ground 0.36 to 0.6 s after the key | the same 0.05 to 0.09 s: the bit changes nothing | does not move |
-| the jump | 7.3 to 8.9 m/s upwards at the first report, 3.97 to 3.99 m high, down again 1.9 to 2.3 s after the key is let go | 9.86 m/s, 5.57 m high, down after 2.4 to 2.7 s | does not move |
-| the animations of a jump | `pre_jump`, `jump`, then `land` for a moment (0.05 s) or not at all | `pre_jump` for 0.2 to 0.3 s, `jump`, `land` for 0.36 s, `stand` | none |
-| the forward key as the avatar comes down from a jump, the landing not reported finished | moves it within 0.4 to 0.7 s: this landing is not held | moves it within 0.3 s | does not move |
-| a fall from 390 m, then the forward key | the avatar **stays where it landed** for the eight seconds it was left there, and walks 0.45 s after a `FINISH_ANIM` | `standup` for 1.1 s, then `stand`; the forward key moves it 0.2 s later, with nothing sent | does not move |
-| an arrival | one login of three — the one routed to its region's landing point — listed `land` and kept it: the avatar stood through four seconds of the forward key and walked at the first `FINISH_ANIM`, 24 s after arriving. The other two, at the spot the avatar had logged out at, were not held (one listed `land` for a second, the other never) | `falldown`, `land`, `stand` within 2.5 s of arriving on hilly ground; never held | does not move |
+| the jump key (`UP_POS` on the ground), nothing else said | `pre_jump` joins the animation set and the avatar **never leaves the ground**: it was still there, and still in `pre_jump`, after 5 s on one avatar and 18 s on the other, with the key held throughout | off the ground 0.05 to 0.09 s after the key | `pre_jump`, held for the bit on the Second Life flavour; off the ground in the next step on the OpenSim one |
+| the same, with `FINISH_ANIM` sent as `pre_jump` appears | off the ground 0.36 to 0.6 s after the key | the same 0.05 to 0.09 s: the bit changes nothing | off the ground in the step after the bit |
+| the jump | 7.3 to 8.9 m/s upwards at the first report, 3.97 to 3.99 m high, down again 1.9 to 2.3 s after the key is let go | 9.86 m/s, 5.57 m high, down after 2.4 to 2.7 s | 8.1 or 9.86 m/s upwards, about 4 or 5.6 m high |
+| the animations of a jump | `pre_jump`, `jump`, then `land` for a moment (0.05 s) or not at all | `pre_jump` for 0.2 to 0.3 s, `jump`, `land` for 0.36 s, `stand` | `pre_jump`, `jump`, `land` for 0.1 or 0.4 s, `stand` |
+| the forward key as the avatar comes down from a jump, the landing not reported finished | moves it within 0.4 to 0.7 s: this landing is not held | moves it within 0.3 s | moves it once `land` is over: a jump's landing is not held |
+| a fall from 390 m, then the forward key | the avatar **stays where it landed** for the eight seconds it was left there, and walks 0.45 s after a `FINISH_ANIM` | `standup` for 1.1 s, then `stand`; the forward key moves it 0.2 s later, with nothing sent | a hard landing (over 20 m/s): `standup`, held for the bit on the Second Life flavour and for 1.1 s on the OpenSim one |
+| an arrival | one login of three — the one routed to its region's landing point — listed `land` and kept it: the avatar stood through four seconds of the forward key and walked at the first `FINISH_ANIM`, 24 s after arriving. The other two, at the spot the avatar had logged out at, were not held (one listed `land` for a second, the other never) | `falldown`, `land`, `stand` within 2.5 s of arriving on hilly ground; never held | never held |
 
 The landing point is the same thing that stopped the `region-crossing` case
 on 2026-10-07, where ninety seconds of the forward key moved an avatar two
@@ -91,14 +91,14 @@ Over a whole run OpenSim sent one full `ObjectUpdate` of the avatar among
 
 | behaviour | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
-| an avatar at rest | 1.4 to 1.6 updates a second | one update, then nothing: a single report in fifteen seconds | the arrival's update only |
-| walking | eight to sixteen a second | on level ground one at the start and then **one every 1.9 to 2.3 s**; five to eleven a second on a slope, where the velocity changes | none |
-| climbing or flying at a steady speed | **none**: two updates as a thirty-second climb began and the next when it ended, 450 m higher | about 2.8 a second | none |
-| the velocity | the avatar's, and what its positions show | the same | zero |
+| an avatar at rest | 1.4 to 1.6 updates a second | one update, then nothing: a single report in fifteen seconds | every 0.7 s on the Second Life flavour; nothing after the arrival on the OpenSim one |
+| walking | eight to sixteen a second | on level ground one at the start and then **one every 1.9 to 2.3 s**; five to eleven a second on a slope, where the velocity changes | every 0.1 s, or every 2 s, and on every change of motion |
+| climbing or flying at a steady speed | **none**: two updates as a thirty-second climb began and the next when it ended, 450 m higher | about 2.8 a second | none, or every 0.36 s |
+| the velocity | the avatar's, and what its positions show | the same | the avatar's |
 | the acceleration | zero in every update, falling included | the same | zero |
-| the collision plane, on the ground | the ground's normal and its offset | the same: `0 0 1 25` on level ground at 25 m | the stock plane |
-| the collision plane, in the air | `0 0 0 1` | `0 0 0 1` | the stock plane |
-| the animation set | the locomotion state and two to five assets beside it that are no built-in, changing from one statement to the next; on both avatars a fall, its landing, a hover and level flight were stated *only* as such assets, while `walk`, `run`, `stand`, `crouch`, `pre_jump`, `jump`, `land`, `hover_up` and `hover_down` came as the built-ins | exactly one built-in at a time: `stand`, `walk`, `run`, `crouch`, `crouchwalk`, `pre_jump`, `jump`, `land`, `hover`, `hover_up`, `hover_down`, `fly`, `falldown`, `standup` | none |
+| the collision plane, on the ground | the ground's normal and its offset | the same: `0 0 1 25` on level ground at 25 m | the ground's normal and its offset |
+| the collision plane, in the air | `0 0 0 1` | `0 0 0 1` | `0 0 0 1` |
+| the animation set | the locomotion state and two to five assets beside it that are no built-in, changing from one statement to the next; on both avatars a fall, its landing, a hover and level flight were stated *only* as such assets, while `walk`, `run`, `stand`, `crouch`, `pre_jump`, `jump`, `land`, `hover_up` and `hover_down` came as the built-ins | exactly one built-in at a time: `stand`, `walk`, `run`, `crouch`, `crouchwalk`, `pre_jump`, `jump`, `land`, `hover`, `hover_up`, `hover_down`, `fly`, `falldown`, `standup` | one built-in at a time, the locomotion state, on both flavours |
 
 ## Sitting
 
@@ -117,9 +117,8 @@ script has given the cube a sit target
 (`llSitTarget(<0, 0, 1>, llEuler2Rot(<0, 0, PI_BY_TWO>))`), from two it
 flies to; the second asks for the seat while the first is on it. Distances
 are along the ground, from the avatar to the cube's centre. The case holds
-every grid it can put the question to — the live ones, and each fake
-flavour for every leg but the walks and flights, the fake grid moving no
-avatar — to the rows marked †.
+every grid it can put the question to — the live ones and each fake
+flavour — to the rows marked †.
 
 ### The answer
 
@@ -152,7 +151,7 @@ the avatar's own object update does.
 
 | behaviour | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
-| a scriptless seat from further off † | answered, and the avatar seated at once, from 3.6, 4.2, 4.3, 6.6, 6.8, 7.3 and 7.5 m; **not answered at all** from 9.3, 10.0, 10.1, 12.6, 12.9, 13.1, 15.3, 15.7, 15.9, 20.5, 21.1, 21.3 and 24.8 m — no response, no alert, and the avatar stays where it is | answered, and the avatar seated at once, from every distance tried: 4.1 to 20.9 m | each flavour's, Second Life's edge put at 8.4 m; the case's walks are live-only, the fake grid moving no avatar |
+| a scriptless seat from further off † | answered, and the avatar seated at once, from 3.6, 4.2, 4.3, 6.6, 6.8, 7.3 and 7.5 m; **not answered at all** from 9.3, 10.0, 10.1, 12.6, 12.9, 13.1, 15.3, 15.7, 15.9, 20.5, 21.1, 21.3 and 24.8 m — no response, no alert, and the avatar stays where it is | answered, and the avatar seated at once, from every distance tried: 4.1 to 20.9 m | each flavour's, Second Life's edge put at 8.4 m and the case walking there as on the live grids |
 | a seat with a sit target from further off † | answered and seated at once from 20.5, 21.1, 21.3, 24.8, 44.5, 45.0, 50.9 and 52.0 m | the same from 40.0 m | from anywhere, on both |
 | a sit on an object the region does not have † | the named alert `SitFailNotSameRegion` ("Try moving closer. Can't sit on object because it is not in the same region as you."), 0.17 s later | **nothing**: the simulator logs "Sit requested on unknown object" | each flavour's |
 | a sit on an object in a neighbouring region | the same alert, from that region — measured earlier (see [World](../content/world.md)); no neighbour's object was in view of these runs | the same words as an alert **with no name**, 0.02 s later | not modelled |
@@ -168,7 +167,7 @@ have ended, and the avatar had come down up to eleven metres from there.
 | --- | --- | --- | --- |
 | `SIT_ON_GROUND` | `sit_ground_constrained` joins the animation set; the avatar stays its own root and is reported once or not at all | the animation set becomes `sit_ground_constrained`; no update of the avatar | nothing |
 | a sit on the cube from there | answered as from standing | answered as from standing, a `stand` stated first | answered |
-| `STAND_UP` from a seat † | the avatar is its own root again 0.2 s later, **0.34 m in front of where it sat and at the same height**, and drops to the ground from there; the same for both avatars, with a sit target and without | free 5 to 15 ms later, **0.65 m in front and 0.57 m above**, then drops; `sit` then `stand` | each flavour's placement, and no drop: nothing moves an avatar there |
+| `STAND_UP` from a seat † | the avatar is its own root again 0.2 s later, **0.34 m in front of where it sat and at the same height**, and drops to the ground from there; the same for both avatars, with a sit target and without | free 5 to 15 ms later, **0.65 m in front and 0.57 m above**, then drops; `sit` then `stand` | each flavour's placement, then the drop to the ground |
 | a teleport within the region, asked from a seat † | a `TeleportLocal` and the avatar free of the seat (in the sandbox, at the landing point every teleport there is sent to) | a `TeleportLocal` to the spot asked for, and the avatar free | the avatar free, the seat's scripts told |
 | a logout from a seat | [Session → Logout](session.md) | the same | — |
 
@@ -228,7 +227,10 @@ have ended, and the avatar had come down up to eleven metres from there.
   and a landing within a second of a jump input. The measurement is why
   each half of that matters — without the bit a Second Life avatar does not
   jump and does not get up from a fall — and it was written before this was
-  measured; nothing in it changed.
+  measured. One thing changed since: the reference never sends a pre-jump's
+  withheld bit, so a tap still down when the pre-jump runs out leaves a Second
+  Life avatar in `pre_jump` for good. This viewer owes it and sends it on the
+  first frame the key is up — a landing's withheld bit is still dropped.
 - **A client that plays no animations has to send the bit itself**:
   `Command::FinishAnimation` (`Session::finish_animation`). The conformance
   cases that walk an avatar on Second Life are such clients.
@@ -241,12 +243,13 @@ have ended, and the avatar had come down up to eleven metres from there.
   and a zero acceleration. The viewer's dead-reckoner extrapolates from the
   last velocity for as long as the circuit is alive and tapers only when
   the circuit itself has gone quiet, as the reference's does.
-- `e2e_movement` drives the viewer on a live grid
+- `e2e_movement` drives the viewer on the fake grid and on a live one
   (`SL_E2E_GRID=opensim|aditi`): the forward key walks the avatar from where
   the login put it, a tap of the jump key takes it off the ground, and the
   forward key walks it again afterwards. It reads the position the grid
-  reports, so on Second Life it passes only if the viewer's `FINISH_ANIM`s
-  went out. On OpenSim it needs a start clear of the test content
+  reports, so on Second Life — and on the fake grid's Second Life flavour,
+  which holds a pre-jump the same way — it passes only if the viewer's
+  `FINISH_ANIM`s went out. On OpenSim it needs a start clear of the test content
   (`SL_E2E_START='uri:Northeast Region&70&180&26'`): the default spot let
   the avatar walk 1.2 m.
 

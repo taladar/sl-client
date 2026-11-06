@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 130 |
-| ready | 335 |
-| blocked | 37 |
-| in-progress | 13 |
+| ready | 334 |
+| blocked | 35 |
+| in-progress | 11 |
 | bugs | 36 |
-| done | 1496 |
+| done | 1501 |
 | deferred | 30 |
 | wont-do | 24 |
 | **total** | **2101** |
@@ -278,7 +278,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   server
 - [`server-lsl-lib-avatar-control`](ideas/server-lsl-lib-avatar-control.md) —
   Library tranche — avatars, animation, sitting, controls and camera (blocked by
-  `server-lsl-vm-execution` (done), `server-world-agent-movement`,
+  `server-lsl-vm-execution` (done), `server-world-agent-movement` (done),
   `server-world-sit-and-attach` (done), `gridspec-lsl-avatar-control` (done))
 - [`server-lsl-lib-detection-sensors`](ideas/server-lsl-lib-detection-sensors.md)
   — Library tranche — the detected block, sensors and raycasts (blocked by
@@ -290,7 +290,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `gridspec-lsl-http-url` (done))
 - [`server-lsl-lib-land-region-env`](ideas/server-lsl-lib-land-region-env.md) —
   Library tranche — parcel, region, estate and environment queries (blocked by
-  `server-lsl-vm-execution` (done), `server-world-agent-movement`,
+  `server-lsl-vm-execution` (done), `server-world-agent-movement` (done),
   `gridspec-lsl-land-region-env` (done))
 - [`server-lsl-lib-physics-vehicles`](ideas/server-lsl-lib-physics-vehicles.md)
   — Library tranche — status flags, forces, targets and vehicles (blocked by
@@ -331,7 +331,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-lsl-opensim-function-set`](ideas/gridspec-lsl-opensim-function-set.md)
   — Measure which library functions OpenSim's engines compile
 
-## ready (335)
+## ready (334)
 
 ### protocol
 
@@ -1111,11 +1111,13 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-fake-grid-object-update-forms`](ready/server-fake-grid-object-update-forms.md)
   — Fake grid — send compressed, terse and cached object updates as each grid
   does (blocked by `gridspec-object-update-stream` (done))
+- [`server-fake-grid-parcel-access-enforcement`](ready/server-fake-grid-parcel-access-enforcement.md)
+  — Fake grid — enforce parcel access and push ban lines (blocked by
+  `gridspec-parcel-access-and-ban-lines` (done),
+  `server-fake-grid-parcel-on-movement` (done), `server-world-agent-movement`
+  (done))
 - [`server-fake-grid-parcel-divide-join`](ready/server-fake-grid-parcel-divide-join.md)
   — Fake grid — divide and join parcels
-- [`server-fake-grid-parcel-on-movement`](ready/server-fake-grid-parcel-on-movement.md)
-  — Fake grid — push the parcel an agent walks onto, and serve parcel
-  environments
 - [`server-fake-grid-scripted-avatars`](ready/server-fake-grid-scripted-avatars.md)
   — Scripted avatars — a client that grants, pays, sits and answers (blocked by
   `server-fake-grid-script-engine-wiring` (done))
@@ -1125,10 +1127,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-fake-grid-terraform`](ready/server-fake-grid-terraform.md) — Fake
   grid — terraforming, undo and bake (blocked by `gridspec-terrain-editing`
   (done))
-- [`server-world-agent-movement`](ready/server-world-agent-movement.md) — The
-  agent never moves — AgentUpdate is decoded and ignored (blocked by
-  `server-world-heartbeat` (done), `gridspec-neighbours-crossing` (done),
-  `gridspec-agent-movement` (done))
 - [`server-world-changed-object-crossing`](ready/server-world-changed-object-crossing.md)
   — Measure and raise changed() when an unworn object crosses a region border
   (blocked by `gridspec-neighbours-crossing` (done))
@@ -1151,7 +1149,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-sl-mfa-challenge`](ready/gridspec-sl-mfa-challenge.md) — Record
   Second Life's MFA challenge and whether a remembered mfa_hash gets past it
 
-## blocked (37)
+## blocked (35)
 
 ### viewer
 
@@ -1241,9 +1239,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### test
 
-- [`test-e2e-environment-parcel-layer`](blocked/test-e2e-environment-parcel-layer.md)
-  — End-to-end test of the parcel environment layer when walking between parcels
-  (blocked by `server-fake-grid-parcel-on-movement`)
 - [`test-fake-grid-lsl-offline-cases`](blocked/test-fake-grid-lsl-offline-cases.md)
   — Move the script and chat conformance cases offline (blocked by
   `server-fake-grid-scripted-scenario`)
@@ -1257,10 +1252,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### server
 
-- [`server-fake-grid-parcel-access-enforcement`](blocked/server-fake-grid-parcel-access-enforcement.md)
-  — Fake grid — enforce parcel access and push ban lines (blocked by
-  `gridspec-parcel-access-and-ban-lines` (done),
-  `server-fake-grid-parcel-on-movement`, `server-world-agent-movement`)
 - [`server-fake-grid-profiles`](blocked/server-fake-grid-profiles.md) — Fake
   grid — profiles, picks, classifieds and notes with each grid's quirks (blocked
   by `gridspec-profiles` (done), `protocol-sim-profile-messages`)
@@ -1277,7 +1268,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-voice`](blocked/gridspec-voice.md) — Voice provisioning and
   signalling on each grid (blocked by `viewer-voice-audio`)
 
-## in-progress (13)
+## in-progress (11)
 
 ### viewer
 
@@ -1289,9 +1280,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   position)
 - [`viewer-avatar-ground-from-collision-plane`](in-progress/viewer-avatar-ground-from-collision-plane.md)
   — Avatar ground probe from the simulator's collision plane (drop the raycast)
-- [`viewer-environment-personal-lighting`](in-progress/viewer-environment-personal-lighting.md)
-  — Personal lighting — local environment override (blocked by
-  `viewer-ui-widget-scaffold` (done))
 - [`viewer-perf-pbr-shadow-cluster-rez`](in-progress/viewer-perf-pbr-shadow-cluster-rez.md)
   — Tune main-view shadow specialization + clustered lighting during rez
 - [`viewer-realtime-mirrors`](in-progress/viewer-realtime-mirrors.md) —
@@ -1308,9 +1296,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Upstream PR — parley: honour the emoji presentation selector (VS16)
 - [`viewer-ui-text-renderability-axis`](in-progress/viewer-ui-text-renderability-axis.md)
   — Upstream issue — font selection cannot see glyph-format renderability
-- [`viewer-ui-virtual-trackball`](in-progress/viewer-ui-virtual-trackball.md) —
-  Virtual trackball widget (sun / moon direction) (blocked by
-  `viewer-ui-widget-scaffold` (done))
 
 ### chat
 
@@ -1410,7 +1395,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1496)
+## done (1501)
 
 ### protocol
 
@@ -2218,6 +2203,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (done))
 - [`viewer-environment-not-refetched-on-region-info`](done/viewer-environment-not-refetched-on-region-info.md)
   — An estate's sky change never reaches a viewer that is already standing there
+- [`viewer-environment-personal-lighting`](done/viewer-environment-personal-lighting.md)
+  — Personal lighting — local environment override (blocked by
+  `viewer-ui-widget-scaffold` (done))
 - [`viewer-environment-settings-index`](done/viewer-environment-settings-index.md)
   — Settings assets by name — the inventory index the Library Environments
   folder needs
@@ -3574,6 +3562,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-texture-picker`](done/viewer-ui-texture-picker.md) — Texture
   picker floater — choose a texture from inventory (blocked by
   `viewer-ui-widget-scaffold` (done))
+- [`viewer-ui-virtual-trackball`](done/viewer-ui-virtual-trackball.md) — Virtual
+  trackball widget (sun / moon direction) (blocked by
+  `viewer-ui-widget-scaffold` (done))
 - [`viewer-ui-virtualized-list`](done/viewer-ui-virtualized-list.md) —
   Virtualized (windowed-recycling) list (blocked by `viewer-ui-widget-scaffold`
   (done))
@@ -4019,6 +4010,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   GetDisplayNames
 - [`test-draw-distance`](done/test-draw-distance-set-draw-distance-confirm-no-error-and-any-echoed-state.md)
   — set draw distance; confirm no error and any echoed state
+- [`test-e2e-environment-parcel-layer`](done/test-e2e-environment-parcel-layer.md)
+  — End-to-end test of the parcel environment layer when walking between parcels
+  (blocked by `server-fake-grid-parcel-on-movement` (done),
+  `server-world-agent-movement` (done))
 - [`test-e2e-ground-double-click-fails-under-suite-load`](done/test-e2e-ground-double-click-fails-under-suite-load.md)
   — The ground double-click e2e test flies its camera by frames and failed once
   in the full suite
@@ -4466,6 +4461,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   grid — serve each flavour's LSL syntax document and advertise its id
 - [`server-fake-grid-object-undo`](done/server-fake-grid-object-undo.md) — Fake
   grid — keep an object's edit history for Undo / Redo
+- [`server-fake-grid-parcel-on-movement`](done/server-fake-grid-parcel-on-movement.md)
+  — Fake grid — push the parcel an agent walks onto, and serve parcel
+  environments
 - [`server-fake-grid-script-compile-on-upload`](done/server-fake-grid-script-compile-on-upload.md)
   — A script upload is accepted and never compiled (blocked by
   `server-lsl-compiler-ir` (done), `gridspec-lsl-compile` (done))
@@ -4549,6 +4547,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-lsl-vm-execution`](done/server-lsl-vm-execution.md) — The script VM —
   suspendable execution in per-tick slices (blocked by `server-lsl-compiler-ir`
   (done))
+- [`server-world-agent-movement`](done/server-world-agent-movement.md) — The
+  agent never moves — AgentUpdate is decoded and ignored (blocked by
+  `server-world-heartbeat` (done), `gridspec-neighbours-crossing` (done),
+  `gridspec-agent-movement` (done))
 - [`server-world-changed-raisers`](done/server-world-changed-raisers.md) — Raise
   changed() from every grid-side cause, with the right bit (blocked by
   `server-fake-grid-script-engine-wiring` (done), `gridspec-lsl-events` (done))

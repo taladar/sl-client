@@ -411,6 +411,19 @@ impl ImitatedGrid {
         }
     }
 
+    /// Whether a parcel's own environment is served only while the estate
+    /// allows parcel environments, and answered `is_default` otherwise.
+    ///
+    /// OpenSim stores a parcel environment whatever the estate says and
+    /// serves it only while `RegionAllowEnvironmentOverride` is on (measured
+    /// by `environment`, 2026-10-05, `book/src/gridspec/environment.md`).
+    /// Second Life is unmeasured — the aditi test avatars may change no land
+    /// — and serves what it has.
+    #[must_use]
+    pub const fn parcel_environments_need_estate(self) -> bool {
+        matches!(self, Self::OpenSim)
+    }
+
     /// What this grid answers an accepted `ExtEnvironment` set or reset with.
     ///
     /// OpenSim sends a bare verdict: `{success: true}` to a PUT, the region and message ids
@@ -447,6 +460,7 @@ impl ImitatedGrid {
                 list_update_sets_use_flag: false,
                 empty_list_placeholder_names_its_list: false,
                 land_change_reaches_region: false,
+                counts_unsolicited_pushes: true,
                 not_for_sale_told: Some("Unable to buy, this parcel is not for sale."),
                 deed_refused_told: Some("Unable to deed parcel to group."),
                 abandon_marks_abandoned: true,
@@ -466,6 +480,7 @@ impl ImitatedGrid {
                 list_update_sets_use_flag: true,
                 empty_list_placeholder_names_its_list: true,
                 land_change_reaches_region: true,
+                counts_unsolicited_pushes: false,
                 not_for_sale_told: None,
                 deed_refused_told: None,
                 abandon_marks_abandoned: false,
@@ -783,6 +798,64 @@ impl ImitatedGrid {
                 restates_unchanged: true,
                 names_sources: false,
                 empty_physical_block: false,
+            },
+        }
+    }
+    /// How this grid moves an avatar when its viewer holds a key — measured
+    /// by `agent-movement` on aditi and the local OpenSim (2026-10-08,
+    /// `book/src/gridspec/movement.md`).
+    ///
+    /// The speeds are the measured steady paces. The gravity is what makes
+    /// the measured jump as high as it was (`v² / 2h`: 8.1 m/s to 4 m on
+    /// Second Life, 9.86 m/s to 5.57 m on OpenSim), which also brings a
+    /// 420 m fall down in the measured eleven or twelve seconds once the
+    /// fastest fall is reached. A walk let go comes to rest over the time
+    /// each grid took: Second Life half a second or so and a metre on,
+    /// OpenSim 0.3 s and 0.6 m.
+    #[must_use]
+    pub const fn movement_policy(self) -> crate::movement::MovementPolicy {
+        match self {
+            Self::SecondLife => crate::movement::MovementPolicy {
+                walk_speed: 3.2,
+                run_speed: 5.13,
+                crouch_walk_speed: 2.05,
+                fly_speed: 16.0,
+                climb_speed: 16.0,
+                descent_speed: 22.8,
+                jump_speed: 8.1,
+                gravity: 8.24,
+                terminal_fall_speed: 52.8,
+                ground_stop: Duration::from_millis(600),
+                air_stop: Duration::from_millis(100),
+                hard_landing_speed: 20.0,
+                timed_holds: None,
+                soft_landing: Duration::from_millis(100),
+                cadence: crate::movement::UpdateCadence {
+                    walking: Some(Duration::from_millis(100)),
+                    airborne: None,
+                    at_rest: Some(Duration::from_millis(700)),
+                },
+            },
+            Self::OpenSim => crate::movement::MovementPolicy {
+                walk_speed: 3.145,
+                run_speed: 5.10,
+                crouch_walk_speed: 3.145,
+                fly_speed: 12.58,
+                climb_speed: 16.36,
+                descent_speed: 16.35,
+                jump_speed: 9.86,
+                gravity: 8.73,
+                terminal_fall_speed: 50.1,
+                ground_stop: Duration::from_millis(300),
+                air_stop: Duration::ZERO,
+                hard_landing_speed: 20.0,
+                timed_holds: Some(Duration::from_millis(1_100)),
+                soft_landing: Duration::from_millis(400),
+                cadence: crate::movement::UpdateCadence {
+                    walking: Some(Duration::from_secs(2)),
+                    airborne: Some(Duration::from_millis(360)),
+                    at_rest: None,
+                },
             },
         }
     }
@@ -2884,6 +2957,12 @@ pub struct ParcelPolicy {
     /// owner's change — the test avatars own no land there — and keeps the
     /// occupants-only reading.
     pub land_change_reaches_region: bool,
+    /// Whether the parcel an agent walks onto is pushed under a sequence id
+    /// counted up for the session — 1 for its first crossing, 2 for the next —
+    /// as Second Life pushes it, rather than under the unsolicited 0 every
+    /// time, as OpenSim does (`parcel-crossing`, 2026-10-05,
+    /// `book/src/gridspec/land.md`). The arrival's push is 0 on both.
+    pub counts_unsolicited_pushes: bool,
     /// What a buyer is told when it buys land that is not for sale: Second
     /// Life alerts and re-sends the overlay, OpenSim says nothing (both
     /// measured by `land-transactions`, 2026-10-17).

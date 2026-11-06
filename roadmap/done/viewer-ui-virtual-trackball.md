@@ -2,7 +2,7 @@
 id: viewer-ui-virtual-trackball
 title: Virtual trackball widget (sun / moon direction)
 topic: viewer
-status: in-progress
+status: done
 origin: viewer-environment-personal-lighting (2026-09-09)
 blocked_by: [viewer-ui-widget-scaffold]
 refs: [viewer-environment-personal-lighting, viewer-environment-fixed-editor, viewer-phototools]
@@ -134,7 +134,8 @@ survive, and the truth is better — the drag keeps aiming for the part of its
 travel that is still on the disc, and only stops when it leaves, so the control
 ends up off both the pole and the horizon.
 
-Not verified live: the two tabbed editors and the Personal Lighting window were
-not driven against a grid. Nothing here depends on what a grid sends — the
-control edits a sky already in hand — so what a live run adds is a person's eye
-on the layout.
+Driven since in the real viewer by [[test-e2e-sweep-environment]]: Personal
+Lighting's sun trackball aimed overhead by a click and nudged by an arrow key,
+and every trackball of the three windows driven by the keyboard through the
+real focus and input stack by its preview harness. Nothing here depends on
+what a grid sends — the control edits a sky already in hand.

@@ -18,7 +18,10 @@
 //!   a settings asset and refuses a bulk import;
 //! - Personal Lighting's sliders, colour picker and sun trackball edit the
 //!   local sky, a preset picked under a transition time cross-fades, and
-//!   Reset hands the sky back.
+//!   Reset hands the sky back;
+//! - a parcel's own environment drawn over the region's while the avatar
+//!   stands on it, walking there and back, and a pinned preset winning over
+//!   both.
 
 #[cfg(test)]
 mod test {
@@ -1039,6 +1042,157 @@ mod test {
                 .await?;
             Ok(())
         })?;
+        Ok(())
+    }
+
+    // ---- The parcel layer -------------------------------------------------
+
+    /// The sky frame the East parcel's own environment draws.
+    const PARCEL_SKY: &str = "East Parcel Sky";
+
+    /// How many frames a movement key is held at a time: short enough to be
+    /// answered at any frame rate, repeated until the walk gets there.
+    const STEP_FRAMES: u32 = 30;
+
+    /// A region split down `x = 136` into West, where the login lands at the
+    /// centre facing east, and East, whose own environment draws
+    /// [`PARCEL_SKY`]; the estate allows parcel environments.
+    fn two_parcel_region() -> RegionConfig {
+        use sl_proto::{AgentKey, EnvironmentSettings, OwnerKey, ParcelKey, RegionLocalParcelId};
+        let owner = OwnerKey::Agent(AgentKey::from(Uuid::from_u128(0x0E)));
+        let mut fixture = sl_fake_grid::RegionFixture {
+            world: sl_fake_grid::scenario::default_world(),
+            ..sl_fake_grid::RegionFixture::new()
+        };
+        fixture.world.parcels.clear();
+        fixture.world.listings.clear();
+        fixture.world.allow_parcel_environments();
+        for (id, name, west, east) in [(1, "West", 0.0, 136.0), (2, "East", 136.0, 256.0)] {
+            fixture.world.add_parcel(
+                sl_fake_grid::rect_parcel(
+                    RegionLocalParcelId(id),
+                    owner,
+                    name,
+                    west,
+                    0.0,
+                    east,
+                    256.0,
+                ),
+                ParcelKey::from(Uuid::from_u128(0xA0 + u128::from(id.unsigned_abs()))),
+                0.0,
+            );
+        }
+        let mut parcel = EnvironmentSettings::default_region();
+        let mut sky = SkySettings::legacy_windlight_default(PARCEL_SKY);
+        PARCEL_SKY.clone_into(&mut sky.name);
+        parcel.day_cycle.sky_frames = [(PARCEL_SKY.to_owned(), sky)].into_iter().collect();
+        for keyframe in parcel.day_cycle.sky_tracks.iter_mut().flatten() {
+            PARCEL_SKY.clone_into(&mut keyframe.name);
+        }
+        "East Parcel Day".clone_into(&mut parcel.day_cycle.name);
+        parcel.env_version = 3;
+        fixture.give_parcel_environment(RegionLocalParcelId(2), parcel);
+        fixture.into_region(RegionConfig::default())
+    }
+
+    /// Where the grid last reported the viewer's own avatar, east-west.
+    async fn east_of(alpha: &Viewer) -> Result<f32, BodyError> {
+        let [x, _y, _z] = alpha
+            .agent()
+            .await?
+            .position
+            .ok_or("the viewer reports no position")?;
+        Ok(x)
+    }
+
+    /// Where a walk is going: what the viewer reports once it gets there.
+    #[derive(Debug, Clone, Copy)]
+    enum Goal<'a> {
+        /// The viewer draws the sky of this name.
+        Sky(&'a str),
+        /// The avatar stands east of this many metres.
+        EastOf(f32),
+    }
+
+    /// Whether the viewer reports `goal`.
+    async fn reached(alpha: &Viewer, goal: Goal<'_>) -> Result<bool, BodyError> {
+        Ok(match goal {
+            Goal::Sky(name) => sky_name(alpha).await? == name,
+            Goal::EastOf(x) => east_of(alpha).await? > x,
+        })
+    }
+
+    /// Hold `key`, a few frames at a time, until the viewer reports `goal` or
+    /// [`WAIT`] has passed.
+    async fn walk_until(alpha: &Viewer, key: &str, goal: Goal<'_>) -> Result<(), BodyError> {
+        let walked = tokio::time::timeout(WAIT, async {
+            loop {
+                if reached(alpha, goal).await? {
+                    return Ok::<(), BodyError>(());
+                }
+                alpha.hold(key, STEP_FRAMES).await?;
+            }
+        })
+        .await;
+        walked
+            .map_err(|_elapsed| -> BodyError { format!("the walk never got to {goal:?}").into() })?
+    }
+
+    /// The name of the sky the viewer draws.
+    async fn sky_name(alpha: &Viewer) -> Result<String, BodyError> {
+        Ok(drawn_sky(alpha).await?.name)
+    }
+
+    /// **A parcel's own environment, walked onto and off**: the region pushes
+    /// East as the avatar walks over the line, the viewer asks for East's
+    /// environment and draws its sky over the region's; walking back home
+    /// drops it at once and the region's sky is drawn again; and a preset
+    /// pinned in World ▸ Environment ▸ Legacy wins over both, walked across the line
+    /// again ([[test-e2e-environment-parcel-layer]]).
+    #[test]
+    fn a_parcel_environment_is_drawn_while_the_avatar_stands_on_it() -> Result<(), TestError> {
+        stage("environment_parcel_layer")
+            .region(two_parcel_region())
+            .run(async |stage: &Stage| {
+                let alpha = &stage.viewer("Alpha")?;
+                let region_sky = sky_until(alpha, "the region's sky", |sky| sky.name != PARCEL_SKY)
+                    .await?
+                    .name;
+
+                walk_until(alpha, "ArrowUp", Goal::Sky(PARCEL_SKY)).await?;
+                assert!(
+                    east_of(alpha).await? > 130.0,
+                    "the parcel's sky came with the walk"
+                );
+
+                walk_until(alpha, "ArrowDown", Goal::Sky(&region_sky)).await?;
+                assert!(
+                    east_of(alpha).await? < 140.0,
+                    "the region's sky came with the walk home"
+                );
+
+                let _midday = alpha
+                    .menu_path(&[
+                        "menu-bar-world",
+                        "menu-bar-environment",
+                        "menu-bar-legacy",
+                        "menu-bar-midday",
+                    ])
+                    .await?;
+                environment_at(alpha, "/local_sky", json!(true)).await?;
+                let pinned = drawn_sky(alpha).await?.name;
+                assert_ne!(pinned, PARCEL_SKY);
+                walk_until(alpha, "ArrowUp", Goal::EastOf(140.0)).await?;
+                // Long enough for East's environment to have come back, had
+                // it been going to win.
+                tokio::time::sleep(Duration::from_secs(3)).await;
+                assert_eq!(
+                    sky_name(alpha).await?,
+                    pinned,
+                    "the pinned preset stays over East"
+                );
+                Ok(())
+            })?;
         Ok(())
     }
 }

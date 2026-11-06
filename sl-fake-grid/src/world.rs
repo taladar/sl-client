@@ -60,7 +60,7 @@ const OVERLAY_SOUTH_LINE: u8 = 0x80;
 pub(crate) const REAL_TIME_DILATION: u16 = 0xFFFF;
 /// The sequence id of an unsolicited agent-parcel push (what OpenSim's
 /// `SendLandUpdateToClient` sends).
-const UNSOLICITED_SEQUENCE_ID: i32 = 0;
+pub(crate) const UNSOLICITED_SEQUENCE_ID: i32 = 0;
 
 /// The most objects one `KillObject` names: its block count is a byte.
 const MOST_KILLS_A_MESSAGE: usize = 255;
@@ -1122,13 +1122,49 @@ impl SceneFixtures {
     ///
     /// The one call every fixture makes, so no parcel is ever pushed without
     /// the identity three of its request surfaces need.
-    pub fn add_parcel(&mut self, parcel: ParcelInfo, parcel_id: ParcelKey, dwell: f32) {
+    ///
+    /// The record takes the estate's word on parcel environments
+    /// ([`parcel_environments_allowed`](Self::parcel_environments_allowed)).
+    pub fn add_parcel(&mut self, mut parcel: ParcelInfo, parcel_id: ParcelKey, dwell: f32) {
         self.listings.push(ParcelListing {
             local_id: parcel.local_id,
             parcel_id,
             dwell,
         });
+        parcel.region_allow_environment_override = self.parcel_environments_allowed();
         self.parcels.push(parcel);
+    }
+
+    /// Whether the estate lets a parcel have an environment of its own: its
+    /// `ALLOW_ENVIRONMENT_OVERRIDE` flag, which the parcel records carry as
+    /// `region_allow_environment_override`. OpenSim serves a parcel's own
+    /// environment only while it is set, and answers `is_default` otherwise
+    /// (`book/src/gridspec/environment.md`).
+    #[must_use]
+    pub const fn parcel_environments_allowed(&self) -> bool {
+        self.estate
+            .flags
+            .contains(sl_proto::RegionFlags::ALLOW_ENVIRONMENT_OVERRIDE)
+    }
+
+    /// Lets the region's parcels have environments of their own, as an
+    /// estate that allows parcel environment overrides does.
+    pub fn allow_parcel_environments(&mut self) {
+        self.set_estate_flags(
+            self.estate
+                .flags
+                .with(sl_proto::RegionFlags::ALLOW_ENVIRONMENT_OVERRIDE, true),
+        );
+    }
+
+    /// Sets the estate's flags, and has every parcel record say what they
+    /// now say of parcel environments.
+    pub fn set_estate_flags(&mut self, flags: sl_proto::RegionFlags) {
+        self.estate.flags = flags;
+        let allowed = self.parcel_environments_allowed();
+        for parcel in &mut self.parcels {
+            parcel.region_allow_environment_override = allowed;
+        }
     }
 
     /// The listing of the parcel with the given region-local id.
@@ -1569,7 +1605,10 @@ pub fn region_wide_parcel(
         region_deny_transacted: false,
         region_deny_age_unverified: false,
         region_allow_access_override: false,
-        parcel_environment_version: 0,
+        // No environment of its own: both grids report -1 for such a parcel
+        // (`book/src/gridspec/environment.md`), which is what a viewer reads
+        // as nothing to ask for.
+        parcel_environment_version: -1,
         region_allow_environment_override: false,
         see_avs: None,
         any_av_sounds: None,

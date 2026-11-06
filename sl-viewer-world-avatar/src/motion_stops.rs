@@ -16,6 +16,13 @@
 //!    a pre-jump can stall a quick jump. OpenSim ends them on its own timer and
 //!    never reads the bit.
 //!
+//! The reference withholds a pre-jump's finish while the jump key is still
+//! held and never sends it afterwards, so a tap still down when the pre-jump
+//! runs out stalls the jump on Second Life — the case its own comment warns of,
+//! and a frequent one when the pre-jump has no asset and runs out at once. Here
+//! a withheld pre-jump finish stays owed and goes out on the first frame the
+//! key is up.
+//!
 //! When a motion runs out is decided by the playback clock
 //! (`AnimationPlayback::take_run_out`); this module only turns the report into
 //! commands.
@@ -65,6 +72,25 @@ fn releases_hold(name: &str, ascend_held: bool, since_jump_input: Option<f32>) -
     !ascend_held && !(LANDING_ANIMATIONS.contains(&name) && recent_jump)
 }
 
+/// Whether the end of the holding animation `name` withholds a finish that is
+/// still owed once the ascend key is let go: a pre-jump's, the one whose
+/// finish the simulator needs before it lets the avatar off the ground.
+fn owes_finish_on_release(name: &str, ascend_held: bool) -> bool {
+    name == "pre_jump" && ascend_held
+}
+
+/// What [`request_own_motion_stops`] remembers about the jump key between
+/// frames.
+#[derive(Debug, Default)]
+pub(crate) struct JumpKey {
+    /// When the ascend key last drove a grounded avatar, in seconds of the
+    /// app's clock.
+    last_input: Option<f32>,
+    /// Whether a pre-jump's finish was withheld for a held key and is still
+    /// to be sent once the key is up.
+    pre_jump_owed: bool,
+}
+
 /// Send the stop, and where it applies the finish, for each of the own
 /// avatar's animations that ran out this frame.
 ///
@@ -82,7 +108,7 @@ pub(crate) fn request_own_motion_stops(
     manager: Res<AnimationManager>,
     mut playback: ResMut<AnimationPlayback>,
     mut writer: MessageWriter<SlCommand>,
-    mut last_jump_input: Local<Option<f32>>,
+    mut jump_key: Local<JumpKey>,
 ) {
     let now = time.elapsed_secs();
     let advertised = controls.advertised();
@@ -90,13 +116,18 @@ pub(crate) fn request_own_motion_stops(
     // The reference stamps a jump input whenever the ascend key drives a
     // grounded avatar (`LLAgent::moveUp`); flying ascends are not jumps.
     if ascend_held && !advertised.contains(ControlFlags::FLY) {
-        *last_jump_input = Some(now);
+        jump_key.last_input = Some(now);
     }
     let Some(own) = identity.agent_id else {
         return;
     };
-    let since_jump_input = last_jump_input.map(|at| now - at);
-    let mut release = false;
+    let since_jump_input = jump_key.last_input.map(|at| now - at);
+    // A pre-jump finish withheld while the key was down goes out once it is up.
+    let mut release = jump_key.pre_jump_owed && !ascend_held;
+    if release {
+        debug!("the jump key is up; releasing the withheld pre-jump hold");
+        jump_key.pre_jump_owed = false;
+    }
     for report in playback.take_run_out(own, now, &manager) {
         let id = match report {
             RunOut::Played(id) => {
@@ -111,17 +142,23 @@ pub(crate) fn request_own_motion_stops(
                     continue;
                 };
                 warn!(
-                    "own avatar's `{name}` animation has no playable asset; releasing the \
-                     simulator's movement hold without playing it"
+                    "own avatar's `{name}` animation has no playable asset; taking it as run \
+                     out without playing it"
                 );
                 id
             }
         };
-        if let Some(name) = holding_animation(id)
-            && releases_hold(name, ascend_held, since_jump_input)
-        {
+        let Some(name) = holding_animation(id) else {
+            continue;
+        };
+        if releases_hold(name, ascend_held, since_jump_input) {
             debug!("own avatar's `{name}` animation finished; releasing the movement hold");
             release = true;
+        } else if owes_finish_on_release(name, ascend_held) {
+            debug!(
+                "own avatar's `{name}` animation finished with the jump key down; owing the finish"
+            );
+            jump_key.pre_jump_owed = true;
         }
     }
     if release {
@@ -131,7 +168,7 @@ pub(crate) fn request_own_motion_stops(
 
 #[cfg(test)]
 mod tests {
-    use super::{HOLDING_ANIMATIONS, holding_animation, releases_hold};
+    use super::{HOLDING_ANIMATIONS, holding_animation, owes_finish_on_release, releases_hold};
     use pretty_assertions::assert_eq;
 
     /// Every movement-holding name resolves to a registry built-in, so none of
@@ -162,6 +199,17 @@ mod tests {
             assert!(releases_hold(name, false, None), "{name}");
             assert!(!releases_hold(name, true, None), "{name}");
         }
+    }
+
+    /// Only a pre-jump withheld for a held key owes its finish for later: a
+    /// landing's withheld finish is dropped, as the reference drops it.
+    #[test]
+    fn only_a_withheld_pre_jump_owes_its_finish() {
+        assert!(owes_finish_on_release("pre_jump", true));
+        assert!(!owes_finish_on_release("pre_jump", false));
+        assert!(!owes_finish_on_release("land", true));
+        assert!(!owes_finish_on_release("medium_land", true));
+        assert!(!owes_finish_on_release("standup", true));
     }
 
     /// A recent jump input withholds a landing's finish, but not a pre-jump's:

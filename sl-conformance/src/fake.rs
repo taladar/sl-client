@@ -213,6 +213,7 @@ pub const OFFLINE_CASES: &[&str] = &[
     "estate-access",
     "logout-clean",
     "sit-stand",
+    "agent-movement",
     "avatar-presence",
     "friends-presence",
     "groups",

@@ -450,6 +450,7 @@ pub fn catalogue() -> RegionFixture {
         materials: vec![(LEGACY_MATERIAL, legacy_material())],
         media: vec![(media_object(), media_state())],
         environment: None::<EnvironmentSettings>,
+        parcel_environments: Vec::new(),
         terrain: crate::TerrainFixture::default(),
         // The catalogue is a still life: it states where everything is, and a
         // test that wants one of them to move states that itself.
