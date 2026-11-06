@@ -4,9 +4,11 @@
 //! (`book/src/gridspec/land.md` § Transactions, 2026-10-17).
 //!
 //! The rules here are the parcel's alone; [`crate::parcel_edits`] answers the
-//! messages, pushes the changed record and re-sends the overlay. Nothing here
-//! moves money: the fake grid keeps no ledger (`server-fake-grid-money-ledger`),
-//! so a sale and a pass are free, as a stock OpenSim's are.
+//! messages, pushes the changed record and re-sends the overlay; a pass is
+//! sold by [`crate::money`], which charges for it where the grid keeps
+//! balances. Nothing here moves money: a parcel's purchase is free on both
+//! flavours, as a stock OpenSim's is (unmeasured on Second Life, whose land
+//! helper refuses every purchase on aditi).
 
 use sl_proto::{ParcelAccessEntry, ParcelAccessFlags, ParcelFlags, ParcelInfo, ParcelStatus};
 use sl_types::key::{AgentKey, GroupKey, OwnerKey};

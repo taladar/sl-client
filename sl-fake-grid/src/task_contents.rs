@@ -488,7 +488,7 @@ pub(crate) fn task_item_from(
 /// The agent inventory item a prim's `held` item becomes in `folder`: a new
 /// item under a new id, naming the same asset and keeping the name it had in
 /// the prim.
-fn agent_item_from(
+pub(crate) fn agent_item_from(
     held: &TaskInventoryItem,
     folder: InventoryFolderKey,
     mint: &dyn Fn() -> uuid::Uuid,

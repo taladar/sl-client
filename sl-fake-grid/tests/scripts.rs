@@ -56,6 +56,8 @@ mod test {
         Updated(Box<sl_client_tokio::Object>),
         /// An alert's text.
         Alert(String),
+        /// A balance reply.
+        Money(Box<sl_proto::MoneyBalance>),
         /// A message of the object-update stream: its form and the objects
         /// it named.
         Stream(
@@ -174,6 +176,7 @@ mod test {
                     } => Seen::Sat(sit_position, sit_rotation),
                     Event::ScriptPermissionRequest(question) => Seen::Question(question),
                     Event::AlertMessage { message, .. } => Seen::Alert(message),
+                    Event::MoneyBalance(balance) => Seen::Money(Box::new(balance)),
                     Event::ObjectStreamBatch(batch) => Seen::Stream(
                         batch.form,
                         batch.entries.iter().map(|entry| entry.local_id).collect(),
@@ -2670,5 +2673,240 @@ default
     #[tokio::test]
     async fn a_script_dresses_its_prim_on_opensim() -> Result<(), TestError> {
         a_script_dresses_its_prim(ImitatedGrid::OpenSim).await
+    }
+
+    /// A script that, granted `PERMISSION_DEBIT` by its owner, pays on
+    /// channel 7: `self` its owner L$ 1, `nobody` a key that is nobody's,
+    /// `much` its owner more than anybody holds — saying each
+    /// `transaction_result` to its owner.
+    const PAYING_SOURCE: &str = "default
+{
+    state_entry()
+    {
+        llListen(7, \"\", NULL_KEY, \"\");
+    }
+
+    listen(integer channel, string speaker, key id, string message)
+    {
+        if (message == \"ask\")
+        {
+            llRequestPermissions(llGetOwner(), PERMISSION_DEBIT);
+        }
+        else if (message == \"self\")
+        {
+            llTransferLindenDollars(llGetOwner(), 1);
+        }
+        else if (message == \"nobody\")
+        {
+            llTransferLindenDollars(\"6a0b4c3e-0000-4000-8000-00000000beef\", 1);
+        }
+        else if (message == \"much\")
+        {
+            llTransferLindenDollars(llGetOwner(), 1000000000);
+        }
+    }
+
+    transaction_result(key id, integer success, string data)
+    {
+        llOwnerSay(\"result \" + (string)success + \" \" + data);
+    }
+}
+";
+
+    /// What the owner heard until the region fell quiet, sorted: each
+    /// `transaction_result` the script said, and each balance reply as its
+    /// type, whether it succeeded and its description, the owner's key put
+    /// as `<owner>`.
+    async fn paid_out(scene: &mut Scene) -> Vec<String> {
+        let owner = box_owner().uuid().to_string();
+        let mut heard = Vec::new();
+        while let Ok(Some(seen)) = tokio::time::timeout(QUIET, scene.seen.recv()).await {
+            match seen {
+                Seen::Chat(_, message) if message.starts_with("result ") => {
+                    heard.push(message.replace(&owner, "<owner>"));
+                }
+                Seen::Money(balance) => heard.push(format!(
+                    "balance {} {} {:?}",
+                    balance
+                        .transaction
+                        .as_ref()
+                        .map_or(0, |transaction| transaction.transaction_type),
+                    if balance.success { "ok" } else { "failed" },
+                    balance.description
+                )),
+                _other => {}
+            }
+        }
+        heard.sort();
+        heard
+    }
+
+    /// A script's payment moves L$ through the grid's ledger as each grid
+    /// was measured to (`book/src/gridspec/lsl.md` § Giving money): on Second
+    /// Life a payment to its owner is two balance replies of type 5009, one to
+    /// nobody and one beyond the balance a failed reply and a refusal; on
+    /// OpenSim nothing moves, nobody is told, and only the payee that is
+    /// nobody's is refused.
+    async fn a_script_pays_out(imitated: ImitatedGrid) -> Result<(), TestError> {
+        let region = region_of(&[ScriptedBox {
+            local_id: sl_proto::RegionLocalObjectId(0x900),
+            source: PAYING_SOURCE.to_owned(),
+            experience: None,
+        }])?;
+        let mut scene = scene_with(
+            imitated,
+            region,
+            RegionConfig {
+                heartbeat: HeartbeatConfig::stepped(Duration::from_millis(100)),
+                ..RegionConfig::default()
+            },
+            AccountConfig {
+                agent_id: Some(box_owner()),
+                ..AccountConfig::new("Test", "User", "password")
+            },
+        )
+        .await?;
+        scene.tick(2).await?;
+        let question = scene.ask("ask").await?;
+        scene.answer(&question, question.permissions).await?;
+        scene.tick(2).await?;
+        let second_life = imitated == ImitatedGrid::SecondLife;
+
+        scene.shout("self").await?;
+        scene.tick(3).await?;
+        let paid = paid_out(&mut scene).await;
+        let expected = if second_life {
+            lines(&[
+                "balance 5009 ok \"Test User paid you L$1.\"",
+                "balance 5009 ok \"You paid Test User L$1.\"",
+                "result 1 <owner>,1",
+            ])
+        } else {
+            lines(&["result 1 <owner>,1"])
+        };
+        assert_eq!(paid, expected, "a payment to the owner");
+
+        scene.shout("nobody").await?;
+        scene.tick(3).await?;
+        let paid = paid_out(&mut scene).await;
+        let mut expected = lines(&["result 0 LINDENDOLLAR_ENTITYDOESNOTEXIST"]);
+        if second_life {
+            expected.insert(
+                0,
+                format!("balance 5009 failed {:?}", sl_fake_grid::money::NOBODY_TEXT),
+            );
+        }
+        assert_eq!(paid, expected, "a payment to nobody");
+
+        scene.shout("much").await?;
+        scene.tick(3).await?;
+        let paid = paid_out(&mut scene).await;
+        let expected = if second_life {
+            lines(&[
+                "balance 5009 failed \"Insufficient funds.\"",
+                "result 0 LINDENDOLLAR_INSUFFICIENTFUNDS",
+            ])
+        } else {
+            lines(&["result 1 <owner>,1000000000"])
+        };
+        assert_eq!(paid, expected, "a payment beyond the balance");
+        scene.stop();
+        Ok(())
+    }
+
+    /// On a grid imitating Second Life.
+    #[tokio::test]
+    async fn a_script_pays_out_on_second_life() -> Result<(), TestError> {
+        a_script_pays_out(ImitatedGrid::SecondLife).await
+    }
+
+    /// On a grid imitating OpenSim.
+    #[tokio::test]
+    async fn a_script_pays_out_on_opensim() -> Result<(), TestError> {
+        a_script_pays_out(ImitatedGrid::OpenSim).await
+    }
+
+    /// A script that shouts each `changed(CHANGED_OWNER)` it hears.
+    const OWNER_WATCH_SOURCE: &str = "default
+{
+    changed(integer change)
+    {
+        if (change & CHANGED_OWNER)
+        {
+            llShout(0, \"owner changed\");
+        }
+    }
+}
+";
+
+    /// A scripted box of somebody else's, set for sale as the original for
+    /// L$ 0, is bought by the client: it is the client's, and its script
+    /// hears `changed(CHANGED_OWNER)` once on Second Life and three times on
+    /// OpenSim (`events/changed-owner`).
+    async fn a_bought_original_tells_its_scripts(imitated: ImitatedGrid) -> Result<(), TestError> {
+        let ware = sl_proto::RegionLocalObjectId(0x910);
+        let mut region = region_of(&[ScriptedBox {
+            local_id: ware,
+            source: OWNER_WATCH_SOURCE.to_owned(),
+            experience: None,
+        }])?;
+        let mut object = region
+            .world
+            .objects
+            .get_mut(ware)
+            .ok_or("the box is not in the region")?;
+        let mut properties = sl_fake_grid::world::default_object_properties(&object);
+        properties.sale_type = sl_proto::SaleType::Original.to_code();
+        properties.sale_price = Some(sl_types::money::LindenAmount(0));
+        object.properties = Some(properties);
+        drop(object);
+        let mut scene = scene_of(imitated, region).await?;
+        scene.tick(2).await?;
+        let _quiet = said_lines(&mut scene).await;
+
+        scene
+            .send(
+                Command::BuyObject {
+                    group_id: sl_types::key::GroupKey::from(uuid::Uuid::nil()),
+                    category_id: uuid::Uuid::nil(),
+                    objects: vec![sl_proto::ObjectBuyItem {
+                        local_id: ware,
+                        sale_type: sl_proto::SaleType::Original,
+                        sale_price: sl_types::money::LindenAmount(0),
+                    }],
+                },
+                |event| matches!(event, ServerEvent::BuyObject { .. }),
+            )
+            .await?;
+        scene.tick(3).await?;
+        let said = said_lines(&mut scene).await;
+        let times = if imitated == ImitatedGrid::SecondLife {
+            1
+        } else {
+            3
+        };
+        assert_eq!(said, vec!["owner changed".to_owned(); times]);
+        let owner = scene
+            .agent
+            .with_world(|world, _sim| world.properties_of(ware).map(|properties| properties.owner))
+            .await;
+        assert_eq!(
+            owner,
+            Some(sl_types::key::OwnerKey::Agent(scene.agent.agent_id()))
+        );
+        scene.stop();
+        Ok(())
+    }
+
+    /// On a grid imitating Second Life.
+    #[tokio::test]
+    async fn a_bought_original_tells_its_scripts_on_second_life() -> Result<(), TestError> {
+        a_bought_original_tells_its_scripts(ImitatedGrid::SecondLife).await
+    }
+
+    /// On a grid imitating OpenSim.
+    #[tokio::test]
+    async fn a_bought_original_tells_its_scripts_on_opensim() -> Result<(), TestError> {
+        a_bought_original_tells_its_scripts(ImitatedGrid::OpenSim).await
     }
 }

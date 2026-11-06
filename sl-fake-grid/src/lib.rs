@@ -34,6 +34,7 @@ pub mod login_sections;
 mod map_tiles;
 pub mod marker;
 pub mod messages;
+pub mod money;
 pub mod movement;
 pub mod neighbours;
 mod notecards;

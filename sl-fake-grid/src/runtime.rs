@@ -553,9 +553,12 @@ pub(crate) struct GridCore {
     pub(crate) display_name_style: sl_proto::DisplayNameStyle,
     /// The land products `ProductInfoRequest` lists.
     pub(crate) land_products: Vec<sl_proto::LandProduct>,
-    /// What an agent has for uploads at login
-    /// ([`ImitatedGrid::upload_funds`]).
-    pub(crate) upload_funds: Option<i64>,
+    /// Every account's balance, where the grid keeps them, starting at
+    /// [`ImitatedGrid::upload_funds`] ([`crate::money`]).
+    pub(crate) ledger: parking_lot::Mutex<crate::money::Ledger>,
+    /// How a payment and a purchase are answered
+    /// ([`ImitatedGrid::money_policy`]).
+    pub(crate) money_policy: crate::money::MoneyPolicy,
     /// The grid's asset host, where the imitated grid has one
     /// ([`ImitatedGrid::asset_host`]): the one surface every session is
     /// granted, served by a listener of its own.
@@ -917,7 +920,7 @@ impl GridCore {
         sim.set_secure_session_id(ids.secure_session_id);
         sim.set_region_id(region.region_id);
         sim.set_update_completion_names_item(self.update_completion_item.names_item());
-        sim.set_money_balance(self.upload_funds);
+        sim.set_money_balance(self.ledger.lock().balance(account.agent_id));
         sim.set_parcel_dialect(self.parcel_policy.wire_types);
         sim.set_inventory_dialect(self.inventory_dialect);
         sim.set_withholds_logout_reply(matches!(
@@ -1262,6 +1265,10 @@ impl GridCore {
             prepared.shared.clone(),
         ));
         tokio::spawn(crate::groups::run_groups_responder(
+            Arc::clone(self),
+            prepared.shared.clone(),
+        ));
+        tokio::spawn(crate::money::run_money_responder(
             Arc::clone(self),
             prepared.shared.clone(),
         ));
@@ -2477,7 +2484,10 @@ impl FakeGridBuilder {
             new_file: self.imitates.new_file_policy(),
             display_name_style: self.imitates.display_name_style(),
             land_products: self.imitates.land_products(),
-            upload_funds: self.imitates.upload_funds(),
+            ledger: parking_lot::Mutex::new(crate::money::Ledger::new(
+                self.imitates.upload_funds(),
+            )),
+            money_policy: self.imitates.money_policy(),
             asset_host,
             map_policy: self.imitates.map_policy(),
             environment_change_reply: self.imitates.environment_change_reply(),

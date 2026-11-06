@@ -183,6 +183,9 @@ pub const OFFLINE_CASES: &[&str] = &[
     "asset-upload",
     "upload-http",
     "economy-data",
+    "money-balance",
+    "money-transfer",
+    "money",
     "parcel-info-dwell",
     "agent-alert",
     "chat-self-echo",
@@ -250,6 +253,12 @@ pub const SINGLE_FLAVOUR: &[(&str, Grid, &str)] = &[
         Grid::FakeOpensim,
         "its last leg reads back the asset a take authored, which only OpenSim \
          lets a viewer do; a Second-Life-flavoured grid withholds it, as aditi does",
+    ),
+    (
+        "money-transfer",
+        Grid::FakeSl,
+        "OpenSim's stock money module drops every transfer, so there the case \
+         can only find the echo missing and mark itself partial",
     ),
     (
         "teleport-lure-rated",

@@ -79,12 +79,13 @@
 //! `touch`, and after it every scripted prim's touch flags are brought in line
 //! with what its scripts handle; `llPassTouches` is the prim's setting there.
 //!
-//! # Not yet wired
+//! # Money
 //!
-//! - The grid keeps no money balances: `llGiveMoney` moves nothing,
-//!   `llTransferLindenDollars` refuses only a payee with no account, and a
-//!   payment to an object raises no `money` event
-//!   (`server-fake-grid-money-ledger`).
+//! `llGiveMoney` and `llTransferLindenDollars` pay out of the grid's ledger
+//! ([`crate::money`]), the owner and the payee told by balance replies of type
+//! `5009` delivered after the tick; a payment to a prim raises its scripts'
+//! `money` there too. Where the grid keeps no balances (OpenSim's stock money
+//! module) nothing moves.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -974,6 +975,13 @@ enum Delivery {
         /// What it hears.
         sound: Box<HeardSound>,
     },
+    /// A balance reply for a payment a script made, wherever its avatar is.
+    Balance {
+        /// The avatar.
+        agent: AgentKey,
+        /// The reply.
+        balance: Box<sl_proto::MoneyBalance>,
+    },
 }
 
 /// A sound an avatar is sent (`llPlaySound`, `llTriggerSound`,
@@ -1028,6 +1036,55 @@ struct Origin {
 }
 
 impl RegionHost<'_> {
+    /// The prim's owner pays `payment` out of the grid's ledger
+    /// ([`crate::money::pay_from_object`]): both sides told when it moved, the
+    /// owner told of a refusal. Where the grid keeps no balances nothing moves
+    /// and only a payee with no account is refused, as OpenSim's stock money
+    /// module does.
+    fn pay_out(&mut self, caller: CallerId, payment: &Payment) -> Result<(), MoneyRefusal> {
+        let payee = uuid::Uuid::parse_str(&payment.to).ok();
+        let Some(origin) = self.origin(caller) else {
+            return Err(MoneyRefusal::NoSuchEntity);
+        };
+        let owner = AgentKey::from(origin.object.owner_id);
+        let paid = crate::money::pay_from_object(
+            self.core,
+            owner,
+            payee.unwrap_or_else(uuid::Uuid::nil),
+            payment.amount,
+            &origin.name,
+        );
+        match paid {
+            crate::money::ObjectPayment::Moved(replies) => {
+                let (payee_reply, owner_reply) = *replies;
+                for reply in [payee_reply, owner_reply] {
+                    self.deliveries.push(Delivery::Balance {
+                        agent: reply.agent_id,
+                        balance: Box::new(reply),
+                    });
+                }
+                Ok(())
+            }
+            crate::money::ObjectPayment::Refused(reply, refusal) => {
+                self.deliveries.push(Delivery::Balance {
+                    agent: owner,
+                    balance: reply,
+                });
+                Err(refusal)
+            }
+            crate::money::ObjectPayment::Unkept => {
+                let known = payee
+                    .and_then(|key| self.core.account_by_agent(AgentKey::from(key)))
+                    .is_some();
+                if known {
+                    Ok(())
+                } else {
+                    Err(MoneyRefusal::NoSuchEntity)
+                }
+            }
+        }
+    }
+
     /// The slot of `caller`.
     fn slot(&self, caller: CallerId) -> Option<&Slot> {
         self.world.script_instances.slots.get(&caller)
@@ -1828,27 +1885,13 @@ impl Host for RegionHost<'_> {
     }
 
     fn give_money(&mut self, caller: CallerId, payment: &Payment) {
-        // The grid keeps no balances yet (`server-fake-grid-money-ledger`).
-        tracing::info!(
-            ?caller,
-            to = payment.to,
-            amount = payment.amount,
-            "a script paid out money, which the fake grid does not move"
-        );
+        // `llGiveMoney` says nothing of a refusal; the owner's failed balance
+        // reply is all there is of one.
+        let _paid = self.pay_out(caller, payment);
     }
 
-    fn transfer_money(&mut self, _caller: CallerId, payment: &Payment) -> Result<(), MoneyRefusal> {
-        // Only a payee with no account is refused: the grid keeps no balances
-        // to refuse an owner short of the amount (`server-fake-grid-money-ledger`).
-        let known = uuid::Uuid::parse_str(&payment.to)
-            .ok()
-            .and_then(|key| self.core.account_by_agent(AgentKey::from(key)))
-            .is_some();
-        if known {
-            Ok(())
-        } else {
-            Err(MoneyRefusal::NoSuchEntity)
-        }
+    fn transfer_money(&mut self, caller: CallerId, payment: &Payment) -> Result<(), MoneyRefusal> {
+        self.pay_out(caller, payment)
     }
 
     fn set_pay_price(&mut self, caller: CallerId, layout: PayPrice) {
@@ -2756,7 +2799,8 @@ async fn deliver(core: &GridCore, index: usize, deliveries: Vec<Delivery>) {
             | Delivery::LoadUrl { agent, .. }
             | Delivery::MapDestination { agent, .. }
             | Delivery::Message { agent, .. }
-            | Delivery::Sound { agent, .. } => *agent,
+            | Delivery::Sound { agent, .. }
+            | Delivery::Balance { agent, .. } => *agent,
         };
         let Some(shared) = core.root_session_of(agent).await else {
             tracing::debug!(%agent, "a script spoke to an avatar no longer in world");
@@ -2765,7 +2809,12 @@ async fn deliver(core: &GridCore, index: usize, deliveries: Vec<Delivery>) {
         let sent = shared
             .with_state(|state| {
                 let now = shared.now();
-                if state.region != index && !matches!(delivery, Delivery::Message { .. }) {
+                if state.region != index
+                    && !matches!(
+                        delivery,
+                        Delivery::Message { .. } | Delivery::Balance { .. }
+                    )
+                {
                     return Ok(());
                 }
                 send(&mut state.sim, &delivery, now)
@@ -2798,6 +2847,7 @@ fn send(sim: &mut SimSession, delivery: &Delivery, now: Instant) -> Result<(), s
         }
         Delivery::Message { message, .. } => sim.send_instant_message(message, now),
         Delivery::Sound { sound, .. } => send_sound(sim, sound, now),
+        Delivery::Balance { balance, .. } => sim.send_money_balance_reply(balance, now),
     }
 }
 
@@ -2942,13 +2992,16 @@ pub(crate) fn answer_script_command(
             Some(vec![world.say(line)])
         }
         // What a script set with `llSetPayPrice`, as the grid answers it; a
-        // prim no script set a layout for is not answered.
+        // prim no script set a layout for answers the default one.
         ServerEvent::RequestPayPrice { object_id } => {
             let flavour = world.script_instances.flavour();
+            let present = world.local_id_of(*object_id).is_some();
             if let Some(layout) = world
                 .script_instances
                 .pay_price(*object_id)
-                .and_then(|layout| layout.reply(flavour))
+                .unwrap_or_default()
+                .reply(flavour)
+                .filter(|_layout| present)
                 && let Err(error) =
                     sim.send_pay_price_reply(*object_id, layout.price, &layout.buttons, now)
             {

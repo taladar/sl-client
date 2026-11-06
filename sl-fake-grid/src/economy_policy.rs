@@ -3,8 +3,9 @@
 //!
 //! Pure functions over an [`EconomyConfig`] — the HTTP glue in
 //! `economy_endpoint` only parses, calls, and serialises. Nothing here moves
-//! a balance: the fake grid has no money ledger, so a purchase is observable
-//! only as an [`EconomyEvent`] on [`FakeGrid::economy_events`](crate::FakeGrid::economy_events).
+//! a balance: a helper purchase (of L$, of land) is observable only as an
+//! [`EconomyEvent`] on [`FakeGrid::economy_events`](crate::FakeGrid::economy_events);
+//! the balances the grid keeps are its ledger's ([`crate::money`]).
 //!
 //! The config also carries the **UDP** side of the same policy: the price list
 //! and region object budget an `EconomyDataRequest` is answered with

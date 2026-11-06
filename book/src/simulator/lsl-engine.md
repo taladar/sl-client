@@ -1228,10 +1228,14 @@ is.
   world holds the grid's wall clock (`SceneFixtures::wall`), where a script's
   date is to start before its ticks move it, so what a script draws and reads
   follows from the seed and the ticks ([determinism](determinism.md)).
-- **Not wired yet**: the grid keeps no balances (`llGiveMoney` moves
-  nothing, `llTransferLindenDollars` refuses only a payee with no account, a
-  payment to an object raises no `money`), which is
-  `server-fake-grid-money-ledger`'s; and the inventory half of wearing — the
+- **Money** goes through the grid's ledger (`sl_fake_grid::money`):
+  `llGiveMoney` and `llTransferLindenDollars` pay the payee out of the owner's
+  balance, both told by balance replies of type `5009` sent after the tick, a
+  refusal told to the owner by a failed one; a viewer's payment to a prim is
+  judged by its pay layout and raises `money` in its scripts; a bought
+  original raises `changed(CHANGED_OWNER)` as its grid does. On the OpenSim
+  flavour nothing moves, as the stock money module moves nothing.
+- **Not wired yet**: the inventory half of wearing — the
   item a wear from the world makes and a drop removes, a wear from the
   inventory, and what a region move carries — is
   `fake-grid-own-attachments-and-region-moves`'s.

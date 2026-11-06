@@ -15,7 +15,7 @@
 // what it holds after. Last the other avatar pays the prim back L$ 2, what
 // the two gifts gave it. A transfer's step ends at its transaction_result or
 // after eight seconds; the result's data is printed with the keys in it put
-// as roles.
+// as roles and its separators as the grid wrote them.
 string ID = "money/debit";
 
 integer step;
@@ -67,29 +67,21 @@ string who(key id)
     return "someone";
 }
 
-// Whether text is a key's form: 36 characters with the four dashes where a
-// key has them. A key's truth is no test: OpenSim takes any text for true.
-integer is_key(string text)
+// A transaction_result's data with each key in it put as its role, the rest
+// left as the grid wrote it: a list round trip (llCSV2List, llList2CSV) would
+// write its own ", " between the items whatever separator the grid used.
+string swap(string data, key id)
 {
-    return llStringLength(text) == 36 && llGetSubString(text, 8, 8) == "-"
-        && llGetSubString(text, 13, 13) == "-" && llGetSubString(text, 18, 18) == "-"
-        && llGetSubString(text, 23, 23) == "-";
+    if (id == NULL_KEY)
+    {
+        return data;
+    }
+    return llDumpList2String(llParseStringKeepNulls(data, [(string)id], []), who(id));
 }
 
-// A transaction_result's data with each item that is a key put as its role.
 string roles(string data)
 {
-    list items = llCSV2List(data);
-    integer i;
-    for (i = 0; i < llGetListLength(items); i++)
-    {
-        string item = llList2String(items, i);
-        if (is_key(item))
-        {
-            items = llListReplaceList(items, [who((key)item)], i, i);
-        }
-    }
-    return llList2CSV(items);
+    return swap(swap(swap(swap(data, llGetOwner()), other), llGetKey()), handle);
 }
 
 held(string why)

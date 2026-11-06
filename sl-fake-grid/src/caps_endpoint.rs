@@ -71,6 +71,7 @@ pub(crate) async fn dispatch_caps(
                 caps,
                 world,
                 parcel_environments_need_estate,
+                avatar,
                 ..
             } = &mut *guard;
             // Whether a parcel's own environment is served is the estate's
@@ -79,7 +80,35 @@ pub(crate) async fn dispatch_caps(
             sim.set_serves_parcel_environments(
                 !*parcel_environments_need_estate || world.lock().parcel_environments_allowed(),
             );
+            // The balance an upload states and charges is the grid's ledger's:
+            // written in before the request, and what it charged taken out of
+            // the ledger after.
+            let agent = avatar.agent_id;
+            let held = core.ledger.lock().balance(agent);
+            sim.set_money_balance(held);
             let dispatch = caps.dispatch(sim, &request);
+            if let (Some(before), Some(after)) = (held, sim.money_balance())
+                && before != after
+            {
+                core.ledger
+                    .lock()
+                    .charge(agent, before.saturating_sub(after));
+                // Second Life follows a charged upload with the new balance,
+                // told as a plain balance poll's answer is.
+                let told = sl_proto::MoneyBalance {
+                    agent_id: agent,
+                    transaction_id: uuid::Uuid::nil(),
+                    success: true,
+                    balance: core.ledger.lock().stated(agent),
+                    square_meters_credit: sl_proto::LandArea(0),
+                    square_meters_committed: sl_proto::LandArea(0),
+                    description: String::new(),
+                    transaction: None,
+                };
+                if let Err(error) = sim.send_money_balance_reply(&told, shared.now()) {
+                    tracing::warn!("telling an upload's charge failed: {error}");
+                }
+            }
             let outcome = shared.flush_locked(&mut guard);
             drop(guard);
             shared.finish_flush(outcome).await;

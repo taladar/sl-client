@@ -1534,22 +1534,17 @@ const fn each(second_life: Answer, opensim: Answer) -> Measured<Answer> {
 /// The questions neither fake flavour is held to, by the end of the metric's
 /// name:
 ///
-/// - what an upload was **charged** and whether a balance is answered at
-///   all: the fake grid answers no balance request (that is the money
-///   ledger's work, `gridspec-money`);
-/// - somebody who **cannot pay**: with no ledger nobody can give their L$
-///   away. The refusal itself is `sl-proto`'s to test, and is;
+/// - whether somebody short of L$ **can pay** for a texture: the local
+///   OpenSim's `EconomyData` states an upload price of L$ 7, its own
+///   configuration, where the fake OpenSim states the stock money module's
+///   free uploads (`economy-data` holds each flavour to its price list);
 /// - a **mesh**'s cost data and what is made of its bytes
-///   (`server-fake-grid-mesh-upload-cost`);
+///   (`server-fake-grid-mesh-upload-cost`), the refusal of a pauper's mesh
+///   included;
 /// - a thumbnail **read back** from the item: the fake grid's inventory has
 ///   no place for one yet.
 const NOT_IMITATED: &[&str] = &[
-    "_charged",
-    "balance_answered",
     "pauper_can_pay",
-    "step1_pauper",
-    "upload_pauper",
-    "upload_pauper_told",
     "step1_pauper_mesh",
     "step1_mesh",
     "step1_mesh_no_physics",
@@ -1557,15 +1552,11 @@ const NOT_IMITATED: &[&str] = &[
     "thumbnail_item_read_back",
 ];
 
-/// What a Second-Life-flavoured fake grid is not held to besides: the
-/// balance Second Life pushes after it charged one (the ledger's again), and
-/// its verifier's words for an animation it cannot read, which are a Python
+/// What a Second-Life-flavoured fake grid is not held to besides: its
+/// verifier's words for an animation it cannot read, which are a Python
 /// interpreter's.
-const NOT_IMITATED_AS_SECOND_LIFE: &[&str] = &[
-    "_told",
-    "upload_animation_cut_short",
-    "upload_animation_nothing",
-];
+const NOT_IMITATED_AS_SECOND_LIFE: &[&str] =
+    &["upload_animation_cut_short", "upload_animation_nothing"];
 
 /// A census of the upload capabilities as HTTP.
 #[derive(Debug)]

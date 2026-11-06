@@ -244,7 +244,7 @@ owns as `land_parcel` in `fixtures.aditi.toml` runs the rest.
 | abandon land it does not hold | refused, nothing said | refused, nothing said | both |
 | deed land it does not hold | refused: alert "Unable to deed parcel to group." | refused, nothing said | as its grid |
 | reclaim land as a resident | refused, nothing said | refused, nothing said | both |
-| buy a pass to land that names a pass price but has the pass list off | **sold**: alert "You purchased a pass." and a balance reply, type `5006` (`LandPassSale`), L$ 10 from B to the parcel's group | refused, nothing said | as its grid, without the charge |
+| buy a pass to land that names a pass price but has the pass list off | **sold**: alert "You purchased a pass." and a balance reply, type `5006` (`LandPassSale`), L$ 10 from B to the parcel's group | refused, nothing said | as its grid: the pass price paid to the parcel's owner (to nobody, for a group's), and the reply's description "You paid *owner* L$10 for a land access pass." |
 | a second pass while the first has time left | sold again (aditi's sandbox, twice in an hour) | refused: agent alert "/You already have a pass valid for 59.87 minutes" | `FakeOpensim` the same |
 
 A refused purchase on Second Life also re-sends the overlay, and the alerts

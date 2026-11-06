@@ -19,7 +19,17 @@ holds both grids to these answers as `Measured` constants.
 
 The local OpenSim runs the stock `BetaGridLikeMoneyModule`
 (`[Economy] economymodule`), which keeps no balances and moves no money: it is
-what an OpenSim grid without a money server does. A grid with a money server
+what an OpenSim grid without a money server does.
+
+The fake grid keeps a ledger of every account's balance for as long as it runs
+(`sl_fake_grid::money`): its Second Life flavour starts each account at
+L$ 10 000 and answers every leg below as aditi did; its OpenSim flavour keeps
+no balances and answers as the stock module does. Both are held to the census
+offline (`money`, with `money-balance` and, on the Second Life flavour,
+`money-transfer`). A pass to a parcel is charged there too
+([Land § Transactions](land.md#transactions)); money held by a group is not
+modelled, and a gift to a group, a payment to or a purchase of a group's object
+is refused as one to nobody. A grid with a money server
 (`Gloebit`, `DTL/NSL`) answers through that server instead and is not
 measured here.
 
@@ -27,8 +37,8 @@ measured here.
 
 | behaviour | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
-| `MoneyBalanceRequest` answered | `MoneyBalanceReply`, success, the account's balance, nil transaction id, no `TransactionInfo` block, empty description | the same, with a balance of **0** | the same, with the balance the session keeps (debited by its upload and group fees) |
-| told to the other avatar | nothing | nothing | — |
+| `MoneyBalanceRequest` answered | `MoneyBalanceReply`, success, the account's balance, nil transaction id, no `TransactionInfo` block, empty description | the same, with a balance of **0** | as its grid: the account's balance in the grid's ledger (L$ 10 000 to start, moved by uploads, fees, gifts, payments and purchases), or 0 |
+| told to the other avatar | nothing | nothing | nothing |
 
 ## Gifts
 
@@ -37,11 +47,11 @@ census's own description.
 
 | A or B gives | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
-| another avatar L$ 1 | payer and payee each get a `MoneyBalanceReply` with a fresh transaction id, the new balance and a `TransactionInfo` block (type `5001`, source, destination, amount, the sender's description as `ItemDescription`); payer's description "You paid *payee* L$1.", payee's "*payer* paid you L$1." | **nothing**, to either side: the transfer is dropped | nothing |
+| another avatar L$ 1 | payer and payee each get a `MoneyBalanceReply` with a fresh transaction id, the new balance and a `TransactionInfo` block (type `5001`, source, destination, amount, the sender's description as `ItemDescription`); payer's description "You paid *payee* L$1.", payee's "*payer* paid you L$1." | **nothing**, to either side: the transfer is dropped | as its grid |
 | another avatar L$ 0 | nothing, to either side | nothing | nothing |
-| itself L$ 1 | two replies, both naming A as source and destination: "You paid *A* L$1." and "*A* paid you L$1." | nothing | nothing |
-| an id that is nobody's | a reply that **failed**, the transaction block naming the id, "There has been a problem transferring L$. This error has been logged and reported." | nothing | nothing |
-| more than it holds | a reply that failed, "Insufficient funds." | nothing | nothing |
+| itself L$ 1 | two replies, both naming A as source and destination: "You paid *A* L$1." and "*A* paid you L$1." | nothing | as its grid |
+| an id that is nobody's | a reply that **failed**, the transaction block naming the id, "There has been a problem transferring L$. This error has been logged and reported." | nothing | as its grid |
+| more than it holds | a reply that failed, "Insufficient funds." | nothing | as its grid |
 
 Second Life writes the other side's name in the description itself; the
 reference does not show that description when the `TransactionInfo` block is
@@ -57,12 +67,12 @@ to its owner.
 
 | behaviour | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
-| pay buttons of a cube with no script | `PayPriceReply`: default `-2` (`PAY_DEFAULT`), buttons `1, 5, 10, 20` | default `-2`, buttons `-2, -2, -2, -2` | **no answer** |
-| pay buttons after `llSetPayPrice(7, [3, 5, PAY_HIDE, PAY_DEFAULT])` | default `7`, buttons `3, 5, -1, 20`: a `PAY_DEFAULT` button is answered with its default | default `7`, buttons `3, 5, -1, -2`: as the script set them | no answer |
-| paying a cube with no script | **taken**: B pays the owner, both are told as for a gift but with type `5008` | nothing | nothing |
-| paying the scripted cube | the same, and the script's `money` event fires with B and the amount | nothing; the script hears nothing | nothing |
-| paying it with type `5001` (a gift) | taken as type **`5008`**: the grid writes the type itself | nothing | nothing |
-| the owner paying its own cube | two replies, A to A, and the `money` event with A | nothing | nothing |
+| pay buttons of a cube with no script | `PayPriceReply`: default `-2` (`PAY_DEFAULT`), buttons `1, 5, 10, 20` | default `-2`, buttons `-2, -2, -2, -2` | as its grid |
+| pay buttons after `llSetPayPrice(7, [3, 5, PAY_HIDE, PAY_DEFAULT])` | default `7`, buttons `3, 5, -1, 20`: a `PAY_DEFAULT` button is answered with its default | default `7`, buttons `3, 5, -1, -2`: as the script set them | as its grid |
+| paying a cube with no script | **taken**: B pays the owner, both are told as for a gift but with type `5008` | nothing | as its grid |
+| paying the scripted cube | the same, and the script's `money` event fires with B and the amount | nothing; the script hears nothing | as its grid |
+| paying it with type `5001` (a gift) | taken as type **`5008`**: the grid writes the type itself | nothing | as its grid |
+| the owner paying its own cube | two replies, A to A, and the `money` event with A | nothing | as its grid |
 
 So the pay buttons are the one money answer OpenSim gives, and it hands back
 the layout as the script set it, where Second Life has already put the
@@ -79,16 +89,16 @@ owner's rights with `ObjectPermissions`.
 
 | B buys | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
-| a cube not for sale | nothing | agent alert "/Object Object is not for sale" | nothing |
-| a copy for L$ 0, the next owner may not copy | **sold**: the item, its next-owner mask without copy | sold, the same | nothing |
-| a copy for L$ 0 | sold: a balance reply to each side (type `5000`, `TRANS_OBJECT_SALE`, L$ 0, `ItemDescription` the object's name; "You paid *A* L$0 for Object." to B, an empty description to A) and the item to B (`UpdateCreateInventoryItem`) in the folder it named | sold: the item, no balance reply | nothing |
-| a copy for L$ 1 | sold, the same with L$ 1; A's description "*B* paid you L$1 for Object." | **refused**: a message box (`IM_MESSAGEBOX`, from nobody, no name) "Buying anything for a price other than zero is not implemented" | nothing |
-| at a price the sale does not name | refused: alert "Sale of Object cancelled.  Price does not match expected." | L$ 0: agent alert "/Object Object price does not match selected price"; anything else: the message box | nothing |
-| as a kind of sale the object is not set to | refused: alert "Sale of Object cancelled.  Sell type (copy,original,contents) does not match expected." | L$ 0: agent alert "/Object Object sell type does not match selected type"; anything else: the message box | nothing |
-| the contents (a script) for L$ 0 | sold: the balance replies, and a `BulkUpdateInventory` with a new folder named after the object in B's *Objects* folder | sold: no balance reply; the folder and its item arrive as unasked `InventoryDescendents` — of B's root folder, then of the new folder, with the script in it | nothing |
-| one item of the contents (`BuyObjectInventory`) | refused: alert keyed `InventoryNotForSale` | nothing: OpenSim has no handler | nothing |
-| the original for L$ 0 | sold: alert keyed `NowOwnObject` ("You are now the owner of object Object"), the balance replies; the cube stays where it is, B's, not for sale | sold, nothing said; the same | nothing |
-| the original for L$ 1 | sold, the same with L$ 1 | refused: the message box; the cube stays A's and for sale | nothing |
+| a cube not for sale | nothing | agent alert "/Object Object is not for sale" | as its grid |
+| a copy for L$ 0, the next owner may not copy | **sold**: the item, its next-owner mask without copy | sold, the same | as its grid |
+| a copy for L$ 0 | sold: a balance reply to each side (type `5000`, `TRANS_OBJECT_SALE`, L$ 0, `ItemDescription` the object's name; "You paid *A* L$0 for Object." to B, an empty description to A) and the item to B (`UpdateCreateInventoryItem`) in the folder it named | sold: the item, no balance reply | as its grid |
+| a copy for L$ 1 | sold, the same with L$ 1; A's description "*B* paid you L$1 for Object." | **refused**: a message box (`IM_MESSAGEBOX`, from nobody, no name) "Buying anything for a price other than zero is not implemented" | as its grid |
+| at a price the sale does not name | refused: alert "Sale of Object cancelled.  Price does not match expected." | L$ 0: agent alert "/Object Object price does not match selected price"; anything else: the message box | as its grid |
+| as a kind of sale the object is not set to | refused: alert "Sale of Object cancelled.  Sell type (copy,original,contents) does not match expected." | L$ 0: agent alert "/Object Object sell type does not match selected type"; anything else: the message box | as its grid |
+| the contents (a script) for L$ 0 | sold: the balance replies, and a `BulkUpdateInventory` with a new folder named after the object in B's *Objects* folder | sold: no balance reply; the folder and its item arrive as unasked `InventoryDescendents` — of B's root folder, then of the new folder, with the script in it | as its grid |
+| one item of the contents (`BuyObjectInventory`) | refused: alert keyed `InventoryNotForSale` | nothing: OpenSim has no handler | as its grid |
+| the original for L$ 0 | sold: alert keyed `NowOwnObject` ("You are now the owner of object Object"), the balance replies; the cube stays where it is, B's, not for sale | sold, nothing said; the same | as its grid |
+| the original for L$ 1 | sold, the same with L$ 1 | refused: the message box; the cube stays A's and for sale | as its grid |
 
 OpenSim's stock money module refuses every price but L$ 0 before it looks at
 the object, so a purchase at the wrong price or of the wrong kind is told the

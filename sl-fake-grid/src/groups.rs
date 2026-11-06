@@ -448,6 +448,11 @@ pub struct GroupConfig {
 }
 
 impl GroupStore {
+    /// The name of the group `id`, where the grid has it.
+    pub(crate) fn name_of(&self, id: GroupKey) -> Option<&str> {
+        self.groups.get(&id).map(|group| group.name.as_str())
+    }
+
     /// A grid's groups, holding `stock` — each founded by its founder with
     /// its members in it, each group's two role ids minted by `mint`.
     pub(crate) fn with_groups(
@@ -641,16 +646,12 @@ async fn tell_standing(core: &GridCore, agent: AgentKey) {
 
 /// Sends `agent` two balance updates that state a transaction failed, as
 /// Second Life follows a leave and an ejection with.
-fn send_failed_balances(sim: &mut SimSession, agent: AgentKey, now: Instant) {
+fn send_failed_balances(core: &GridCore, sim: &mut SimSession, agent: AgentKey, now: Instant) {
     let failed = MoneyBalance {
         agent_id: agent,
         transaction_id: Uuid::nil(),
         success: false,
-        balance: LindenAmount(
-            sim.money_balance()
-                .and_then(|balance| u64::try_from(balance).ok())
-                .unwrap_or(0),
-        ),
+        balance: core.ledger.lock().stated(agent),
         square_meters_credit: LandArea(0),
         square_meters_committed: LandArea(0),
         description: String::new(),
@@ -733,11 +734,6 @@ async fn answer(core: &Arc<GridCore>, shared: &SharedSim, agent: AgentKey, event
             shared
                 .with_sim(|sim| send_memberships(core, sim, agent, now))
                 .await;
-        }
-        ServerEvent::ClientMessage(message) => {
-            if let sl_proto::AnyMessage::MoneyBalanceRequest(request) = *message {
-                answer_balance(shared, agent, request.money_data.transaction_id).await;
-            }
         }
         ServerEvent::CreateGroup { params } => found(core, shared, agent, &params).await,
         ServerEvent::JoinGroup { group_id } => join(core, shared, agent, group_id).await,
@@ -1002,31 +998,6 @@ fn alert(sim: &mut SimSession, text: &str, now: Instant) {
     warn_on(sim.send_alert_message(text, &[], &[], now), "an alert");
 }
 
-/// Answers a `MoneyBalanceRequest` with the balance the session keeps, or
-/// none.
-async fn answer_balance(shared: &SharedSim, agent: AgentKey, transaction_id: Uuid) {
-    let now = shared.now();
-    shared
-        .with_sim(|sim| {
-            let balance = MoneyBalance {
-                agent_id: agent,
-                transaction_id,
-                success: true,
-                balance: LindenAmount(
-                    sim.money_balance()
-                        .and_then(|balance| u64::try_from(balance).ok())
-                        .unwrap_or(0),
-                ),
-                square_meters_credit: LandArea(0),
-                square_meters_committed: LandArea(0),
-                description: String::new(),
-                transaction: None,
-            };
-            warn_on(sim.send_money_balance_reply(&balance, now), "a balance");
-        })
-        .await;
-}
-
 /// An avatar founded a group.
 async fn found(
     core: &Arc<GridCore>,
@@ -1055,19 +1026,15 @@ async fn found(
                 "a founding",
             );
             if policy.founding_fee > 0 {
-                state.sim.charge_money(policy.founding_fee);
+                core.ledger
+                    .lock()
+                    .charge(agent, i64::from(policy.founding_fee));
                 let fee = LindenAmount(u64::try_from(policy.founding_fee).unwrap_or(0));
                 let paid = MoneyBalance {
                     agent_id: agent,
                     transaction_id: Uuid::nil(),
                     success: true,
-                    balance: LindenAmount(
-                        state
-                            .sim
-                            .money_balance()
-                            .and_then(|balance| u64::try_from(balance).ok())
-                            .unwrap_or(0),
-                    ),
+                    balance: core.ledger.lock().stated(agent),
                     square_meters_credit: LandArea(0),
                     square_meters_committed: LandArea(0),
                     description: format!("You paid Governor Linden L${}.", policy.founding_fee),
@@ -1190,7 +1157,7 @@ fn tell_out(
         if !emptied {
             state.sim.enqueue_agent_drop_group(group);
         }
-        send_failed_balances(&mut state.sim, agent, now);
+        send_failed_balances(core, &mut state.sim, agent, now);
     } else {
         warn_on(state.sim.send_agent_drop_group(group, now), "a drop");
         send_active(state, now);
@@ -1319,7 +1286,7 @@ async fn eject(
             "an ejection",
         );
         if policy.told_by_alerts {
-            send_failed_balances(&mut state.sim, member, now);
+            send_failed_balances(core, &mut state.sim, member, now);
         } else {
             tell_out(core, state, member, group_id, members == 0, now);
         }

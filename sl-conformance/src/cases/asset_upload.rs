@@ -144,9 +144,7 @@ impl GridTest for AssetUpload {
             // first and decline the run rather than reaching the grid's own
             // refusal — a case that quietly empties the test avatar's purse is
             // worse than one that says why it did not run.
-            // The fake grid answers no balance request (it keeps no ledger),
-            // so there is nothing to check a fee against there.
-            let balance_before = if cost > 0 && !grid.is_fake() {
+            let balance_before = if cost > 0 {
                 let balance = current_balance(ctx.primary()).await?;
                 if balance < cost {
                     ctx.mark_partial(&format!(

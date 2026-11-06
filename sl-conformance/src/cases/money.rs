@@ -56,7 +56,7 @@ use crate::cases::asset_upload::current_balance;
 use crate::cases::groups::names_of;
 use crate::cases::land_transactions::{region_named, teleport};
 use crate::cases::object_edit::hex;
-use crate::cases::object_rez_derez::{Answer, Folders, REZ_LIFT_M, SETTLE_IDLE, SETTLE_WINDOW};
+use crate::cases::object_rez_derez::{Answer, Folders, Pace, REZ_LIFT_M, SETTLE_WINDOW};
 use crate::cases::task_inventory::{OPENSIM_START, hold_to_measured, listing, login_folders};
 use crate::context::{Session, TestContext, TestFailure};
 use crate::grid::Grid;
@@ -67,6 +67,9 @@ use crate::support::{REGION_TIMEOUT, is_opensim, settle_scene, wait_for_own_new_
 
 /// How long both avatars are listened to after a leg's request.
 const WINDOW: Duration = Duration::from_secs(8);
+
+/// [`WINDOW`] on a loopback grid, which answers within a heartbeat or two.
+const FAKE_WINDOW: Duration = Duration::from_secs(1);
 
 /// How long a cube may take to appear, and a script to be made and saved.
 const STEP: Duration = Duration::from_secs(30);
@@ -548,7 +551,7 @@ impl GridTest for Money {
     }
 
     fn grids(&self) -> &'static [Grid] {
-        &[Grid::Opensim, Grid::Aditi]
+        &[Grid::Opensim, Grid::Aditi, Grid::FakeSl, Grid::FakeOpensim]
     }
 
     fn accounts(&self) -> u8 {
@@ -967,6 +970,8 @@ struct Census<'s> {
     scene: Scene,
     /// How many diagnostics each session had shown when last looked at.
     seen: (usize, usize),
+    /// How long both avatars are listened to after a request.
+    window: Duration,
     /// The objects A saw before its cubes, none of which is one.
     objects_seen: HashSet<ScopedObjectId>,
     /// Where the first cube goes.
@@ -996,8 +1001,10 @@ impl Census<'_> {
     /// taken for the next leg's answer.
     async fn settle(&mut self) -> Result<(), TestFailure> {
         let scene = self.scene.clone();
-        let (got_a, got_b) =
-            tokio::join!(watch(&scene, self.a, WINDOW), watch(&scene, self.b, WINDOW));
+        let (got_a, got_b) = tokio::join!(
+            watch(&scene, self.a, self.window),
+            watch(&scene, self.b, self.window)
+        );
         let (_got_a, got_b) = (got_a?, got_b?);
         self.b_items.extend(got_b.items);
         self.b_folders.extend(got_b.folders);
@@ -1020,8 +1027,10 @@ impl Census<'_> {
             self.session(who).send(command).await?;
         }
         let scene = self.scene.clone();
-        let (got_a, got_b) =
-            tokio::join!(watch(&scene, self.a, WINDOW), watch(&scene, self.b, WINDOW));
+        let (got_a, got_b) = tokio::join!(
+            watch(&scene, self.a, self.window),
+            watch(&scene, self.b, self.window)
+        );
         let (got_a, got_b) = (got_a?, got_b?);
         let (unread_a, seen_a) = unread_since(self.a, self.seen.0);
         let (unread_b, seen_b) = unread_since(self.b, self.seen.1);
@@ -1253,9 +1262,10 @@ impl Census<'_> {
             })
             .await?;
         let scene = self.scene.clone();
+        let window = self.window;
         let answer = self
             .a
-            .wait_for(WINDOW, |event| match event {
+            .wait_for(window, |event| match event {
                 Event::ObjectPropertiesFamily { properties }
                     if properties.object_id == object_id =>
                 {
@@ -1317,7 +1327,9 @@ async fn census(
     // The longest first, so a legacy name is not half-replaced by its first
     // name.
     names.sort_by_key(|(name, _word)| std::cmp::Reverse(name.len()));
-    if !is_opensim(grid) {
+    // The fake grid has no build location: both avatars log in where the
+    // census builds.
+    if !is_opensim(grid) && !grid.is_fake() {
         let (region, point) = somewhere.ok_or_else(|| {
             TestFailure::State("money needs a build_location in the fixtures".to_owned())
         })?;
@@ -1337,8 +1349,14 @@ async fn census(
             }
         }
     }
-    let (objects_seen, anchor) =
-        settle_scene(a, grid, build_point, SETTLE_WINDOW, SETTLE_IDLE).await?;
+    let (objects_seen, anchor) = settle_scene(
+        a,
+        grid,
+        build_point,
+        SETTLE_WINDOW,
+        Pace::of(grid).settle_idle,
+    )
+    .await?;
     let anchor = anchor.ok_or_else(|| {
         TestFailure::Assertion("the arrival streamed nothing to place a cube against".to_owned())
     })?;
@@ -1358,6 +1376,7 @@ async fn census(
             names,
         },
         seen: (0, 0),
+        window: if grid.is_fake() { FAKE_WINDOW } else { WINDOW },
         objects_seen,
         cube_at: Vector {
             x: anchor.x,

@@ -147,42 +147,8 @@ pub(crate) fn answer_parcel_edit(
             land_sales::reclaim(parcel, estate_owner);
             return Some(hands_changed(world, *local_id, agent, sim, now));
         }
-        // A pass writes a timed entry on the allow list, replacing the
-        // buyer's own; nothing else about the parcel changes, so nothing is
-        // pushed.
-        ServerEvent::BuyParcelPass { local_id } => {
-            let Some(parcel) = world.parcel_by_local_id(*local_id).cloned() else {
-                return Some(Vec::new());
-            };
-            let allowed = world
-                .access_list(*local_id, ParcelAccessScope::Access)
-                .to_vec();
-            match land_sales::sell_pass(
-                &parcel,
-                &allowed,
-                agent.agent_id,
-                world.wall.unix_seconds_i32(),
-                policy,
-            ) {
-                land_sales::PassAnswer::Sold { entry, told } => {
-                    let held = world.access_list_mut(*local_id, ParcelAccessScope::Access);
-                    held.retain(|kept| kept.id != entry.id);
-                    held.push(entry);
-                    if let Some(told) = told {
-                        tell(sim, told, now);
-                    }
-                }
-                land_sales::PassAnswer::Refused(told) => {
-                    if let Some(told) = told
-                        && let Err(error) =
-                            sim.send_agent_alert_message(agent.agent_id, false, &told, now)
-                    {
-                        tracing::warn!("refusing a pass failed: {error}");
-                    }
-                }
-            }
-            return Some(Vec::new());
-        }
+        // A pass is sold by the money responder, which charges for it
+        // ([`crate::money`]).
         // A return takes the objects out of the world. A real grid also files
         // each one into its owner's Lost and Found; the fake grid has one
         // agent's inventory to file into and no owner but that agent, so what

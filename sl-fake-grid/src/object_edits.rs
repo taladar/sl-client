@@ -724,7 +724,7 @@ fn offset_by(position: &Vector, offset: &Vector) -> Vector {
 /// session, whether or not it holds the object selected: a resident looking
 /// at a prim somebody else renames keeps the old name until they select it
 /// again.
-fn edit_properties(
+pub(crate) fn edit_properties(
     world: &mut SceneFixtures,
     local_id: RegionLocalObjectId,
     answer: Option<(&mut SimSession, Instant)>,
@@ -1114,7 +1114,7 @@ pub(crate) fn push_terse(sim: &mut SimSession, object: &Object, now: Instant) {
 
 /// Streams one object to the client, logging a send failure rather than
 /// failing the edit.
-fn push_object(sim: &mut SimSession, object: &Object, now: Instant) {
+pub(crate) fn push_object(sim: &mut SimSession, object: &Object, now: Instant) {
     if let Err(error) = crate::world::send_objects(sim, std::slice::from_ref(object), now) {
         tracing::warn!("streaming an edited object failed: {error}");
     }
@@ -1122,7 +1122,7 @@ fn push_object(sim: &mut SimSession, object: &Object, now: Instant) {
 
 /// Sends one object's full properties to the client, logging a send failure
 /// rather than failing the edit.
-fn push_properties(sim: &mut SimSession, properties: &ObjectProperties, now: Instant) {
+pub(crate) fn push_properties(sim: &mut SimSession, properties: &ObjectProperties, now: Instant) {
     if let Err(error) = sim.send_object_properties(properties, now) {
         tracing::warn!("sending an object's properties failed: {error}");
     }

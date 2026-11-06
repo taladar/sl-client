@@ -17,7 +17,8 @@ Context: [context/server.md](../context/server.md).
 cause it could reach, except an owner change by a deed to a group: the aditi
 test accounts are in no group, so the probe could not deed. A purchase's
 `CHANGED_OWNER` is measured (once on Second Life, three times on OpenSim) and
-handed to [[server-fake-grid-money-ledger]]. A deed has not been measured.
+raised on the fake grid since [[server-fake-grid-money-ledger]] (2026-11-06).
+A deed has not been measured.
 
 ## Scope
 

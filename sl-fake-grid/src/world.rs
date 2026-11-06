@@ -3940,6 +3940,57 @@ fn derez(
     changes
 }
 
+/// Files a copy of the linkset whose root is `root` as an item of `owner`'s in
+/// `folder`, backed as a take of a copy backs it — every prim with its record,
+/// its contents and its scripts' state, which stay running in the region — and
+/// returns the item, the object's own masks on it. A purchase of a copy is
+/// what files one ([`crate::money`]); `None` when the region has no such
+/// object.
+pub(crate) fn file_linkset_copy(
+    world: &mut SceneFixtures,
+    assets: &crate::assets::GridAssets,
+    root: RegionLocalObjectId,
+    (folder, owner): (InventoryFolderKey, AgentKey),
+    object_assets: crate::assets::ObjectAssetPolicy,
+    mint: &dyn Fn() -> uuid::Uuid,
+    now: Instant,
+) -> Option<InventoryItem> {
+    let mut linkset = vec![world.object_by_local_id(root)?];
+    linkset.extend(
+        crate::link_sets::children_in_order(world, root)
+            .into_iter()
+            .filter_map(|child| world.object_by_local_id(child)),
+    );
+    for member in &mut linkset {
+        if let Some(record) = world.properties_of(member.local_id) {
+            member.properties = Some(record);
+        }
+    }
+    let contents: Vec<TaskInventory> = linkset
+        .iter()
+        .map(|member| {
+            world
+                .objects
+                .contents(member.local_id)
+                .cloned()
+                .unwrap_or_default()
+        })
+        .collect();
+    let scripts: Vec<BTreeMap<InventoryKey, sl_lsl_runtime::vm::SavedScript>> = linkset
+        .iter()
+        .map(|member| world.script_instances.save_prim(member.full_id, false))
+        .collect();
+    let item = taken_item(
+        &linkset,
+        folder,
+        owner,
+        mint,
+        (object_assets, world.rez.taken_item_masks),
+    );
+    store_taken_asset(assets, &item, &linkset, (&contents, scripts), now);
+    Some(item)
+}
+
 /// What an agent is told when its object went out of the world at `at`, filed
 /// under the name `name`.
 fn off_world_notice(

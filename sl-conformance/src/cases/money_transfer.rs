@@ -56,7 +56,7 @@ impl GridTest for MoneyTransfer {
     }
 
     fn grids(&self) -> &'static [Grid] {
-        &[Grid::Opensim, Grid::Aditi]
+        &[Grid::Opensim, Grid::Aditi, Grid::FakeSl]
     }
 
     fn accounts(&self) -> u8 {

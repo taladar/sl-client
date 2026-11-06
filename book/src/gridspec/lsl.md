@@ -1339,7 +1339,7 @@ agree on every row but the last but one.
 
 | the script calls | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
-| nothing yet | default `-2`, buttons `1, 5, 10, 20` | default `-2`, buttons `-2, -2, -2, -2` | no scripts |
+| nothing yet | default `-2`, buttons `1, 5, 10, 20` | default `-2`, buttons `-2, -2, -2, -2` | as its grid, a prim with no script too |
 | `llSetPayPrice(PAY_DEFAULT, [PAY_DEFAULT ×4])` | the same as nothing | the same as nothing | no scripts |
 | `(25, [1, 5, 10, 20])`, `(PAY_HIDE, [PAY_HIDE ×4])`, `(-5, [-7, -3, -1000, 3])`, `(2000000000, [1000000, 99999, 1, 2])` | as set: no grid checks a price's sign or size | as set | no scripts |
 | `(0, [0, 0, 0, 0])` | as set, every amount `0` | **no answer at all**: `LLClientView.SendPayPrice` sends nothing for a layout of zeros | no scripts |
@@ -1360,20 +1360,27 @@ The other avatar touches first, so the script learns its key; the runner
 grants `PERMISSION_DEBIT` when asked. `transaction_result`'s data is
 printed with each key in it put as a role.
 
+Both grids write a transfer's data as the payee's key and the amount with
+**no space** between them (`"<key>,1"`): measured again on 2026-11-06 once the
+probe put the roles in by plain text replacement. Its first version read the
+data as a list and wrote it back (`llCSV2List`, `llList2CSV`), which writes
+`", "` whatever the grid sent. OpenSim's source says the same:
+`LSL_Api.llTransferLindenDollars` writes `destination + "," + amount`.
+
 | the script calls | Second Life | OpenSim (both engines) | fake grid |
 | --- | --- | --- | --- |
-| `llGiveMoney(other, 1)` before any grant | returns `0`; `Script trying to debit L$ from owner but PERMISSION_DEBIT permission not set!` on `DEBUG_CHANNEL` | returns `0`, nothing said | no scripts |
-| `llTransferLindenDollars(other, 1)` before any grant | a handle (not `NULL_KEY`); `transaction_result(handle, FALSE, "MISSING_PERMISSION_DEBIT")` | the same | no scripts |
+| `llGiveMoney(other, 1)` before any grant | returns `0`; `Script trying to debit L$ from owner but PERMISSION_DEBIT permission not set!` on `DEBUG_CHANNEL` | returns `0`, nothing said | as its grid |
+| `llTransferLindenDollars(other, 1)` before any grant | a handle (not `NULL_KEY`); `transaction_result(handle, FALSE, "MISSING_PERMISSION_DEBIT")` | the same | as its grid |
 | asking the owner for `PERMISSION_DEBIT` | an ordinary question, mask `2` | the same | the viewer's money-caution card |
-| `llGiveMoney(other, 1)`, granted | returns `0`, no `transaction_result`; L$ 1 moves: the owner's balance reply −1, the other's +1, both of type **`5009`** (`TRANS_OBJECT_PAYS`), the object's name as the item, "You paid *other* L$1." and "*owner* paid you L$1." | returns `0`; nothing moves, no balance reply | no scripts |
-| `llTransferLindenDollars(other, 1)`, granted | `transaction_result(handle, TRUE, "<other's key>, 1")` and the same two balance replies | `TRUE`, `"<other's key>, 1"` — and nothing moves | no scripts |
-| … to the owner itself | `TRUE`, `"<owner>, 1"`; two balance replies to the owner, no change | `TRUE` | no scripts |
-| … to `NULL_KEY` | `FALSE`, `INVALID_DESTINATION` | `FALSE`, `LINDENDOLLAR_ENTITYDOESNOTEXIST` | no scripts |
-| … to the prim's own key, to a key that names nobody | `FALSE`, `LINDENDOLLAR_ENTITYDOESNOTEXIST`, and a **failed** balance reply to the owner naming that key, "There has been a problem transferring L$. This error has been logged and reported." | `FALSE`, `LINDENDOLLAR_ENTITYDOESNOTEXIST` | no scripts |
-| … of L$ 0 or L$ −1 | `FALSE`, `INVALID_AMOUNT` | the same | no scripts |
-| … of more than the owner holds (L$ 1 000 000 000) | `FALSE`, `LINDENDOLLAR_INSUFFICIENTFUNDS`, and a failed reply "Insufficient funds." | **`TRUE`**, `"<other's key>, 1000000000"`: the stock module refuses nothing | no scripts |
-| `llGiveMoney(other, 0)`, `llGiveMoney(other, -1)` | returns `0`; `Invalid amount for llGiveMoney().` on `DEBUG_CHANNEL` for each | returns `0`, nothing said | no scripts |
-| asking the **other** avatar for `PERMISSION_DEBIT` | no question; `Script asking non-owner for run time permissions only owner can grant` on `DEBUG_CHANNEL`, no `run_time_permissions`, the owner's grant kept | **put to the other avatar like any question**; granted, the script holds `DEBIT` with the other avatar as the granter | no scripts |
+| `llGiveMoney(other, 1)`, granted | returns `0`, no `transaction_result`; L$ 1 moves: the owner's balance reply −1, the other's +1, both of type **`5009`** (`TRANS_OBJECT_PAYS`), the object's name as the item, "You paid *other* L$1." and "*owner* paid you L$1." | returns `0`; nothing moves, no balance reply | as its grid |
+| `llTransferLindenDollars(other, 1)`, granted | `transaction_result(handle, TRUE, "<other's key>,1")` and the same two balance replies | `TRUE`, `"<other's key>,1"` — and nothing moves | as its grid |
+| … to the owner itself | `TRUE`, `"<owner>,1"`; two balance replies to the owner, no change | `TRUE` | as its grid |
+| … to `NULL_KEY` | `FALSE`, `INVALID_DESTINATION` | `FALSE`, `LINDENDOLLAR_ENTITYDOESNOTEXIST` | as its grid |
+| … to the prim's own key, to a key that names nobody | `FALSE`, `LINDENDOLLAR_ENTITYDOESNOTEXIST`, and a **failed** balance reply to the owner naming that key, "There has been a problem transferring L$. This error has been logged and reported." | `FALSE`, `LINDENDOLLAR_ENTITYDOESNOTEXIST` | as its grid |
+| … of L$ 0 or L$ −1 | `FALSE`, `INVALID_AMOUNT` | the same | as its grid |
+| … of more than the owner holds (L$ 1 000 000 000) | `FALSE`, `LINDENDOLLAR_INSUFFICIENTFUNDS`, and a failed reply "Insufficient funds." | **`TRUE`**, `"<other's key>,1000000000"`: the stock module refuses nothing | as its grid |
+| `llGiveMoney(other, 0)`, `llGiveMoney(other, -1)` | returns `0`; `Invalid amount for llGiveMoney().` on `DEBUG_CHANNEL` for each | returns `0`, nothing said | as its grid |
+| asking the **other** avatar for `PERMISSION_DEBIT` | no question; `Script asking non-owner for run time permissions only owner can grant` on `DEBUG_CHANNEL`, no `run_time_permissions`, the owner's grant kept | **put to the other avatar like any question**; granted, the script holds `DEBIT` with the other avatar as the granter | as its grid |
 
 A balance reply comes on its own time, often after the
 `transaction_result` and sometimes after the script's next call, so a
@@ -1388,16 +1395,16 @@ avatars as for a gift, but of type `5008`, the object's name as the item
 
 | the payment | Second Life | OpenSim (both engines) | fake grid |
 | --- | --- | --- | --- |
-| the owner, L$ 1 | taken; `money(owner, 1)` in **both** scripts; two balance replies to the owner, no change | nothing: no `money` event, no balance reply (the stock module drops every payment) | no scripts |
-| the other avatar, L$ 1 | taken, the other −1 and the owner +1; `money(other, 1)` in both scripts, in either order | nothing | no scripts |
-| L$ 0 | nothing at all | nothing | no scripts |
-| L$ 7 under price `5`, buttons `1, 2, 3, 4` | taken: a shown price field takes any amount | nothing | no scripts |
-| L$ 7 or L$ 5 under price `5`, every button hidden | both taken | nothing | no scripts |
-| L$ 2 under price `PAY_HIDE`, buttons `1, 2, 3, 4` | taken: the amount is a button's | nothing | no scripts |
-| L$ 7 under the same | **refused silently**: no event, no reply, no alert | nothing | no scripts |
-| L$ 1 when the price and every button are hidden | refused: the payer is alerted "Payment stopped:  the price paid does not match any of the pay buttons set for this object" | nothing | no scripts |
-| L$ 1 while Till is in a state without a `money` event | taken; only Second till's `money` runs | nothing | no scripts |
-| L$ 1 to the prim once no script in it has a `money` event (Till in that state, Second till removed) | taken all the same | nothing | no scripts |
+| the owner, L$ 1 | taken; `money(owner, 1)` in **both** scripts; two balance replies to the owner, no change | nothing: no `money` event, no balance reply (the stock module drops every payment) | as its grid |
+| the other avatar, L$ 1 | taken, the other −1 and the owner +1; `money(other, 1)` in both scripts, in either order | nothing | as its grid |
+| L$ 0 | nothing at all | nothing | as its grid |
+| L$ 7 under price `5`, buttons `1, 2, 3, 4` | taken: a shown price field takes any amount | nothing | as its grid |
+| L$ 7 or L$ 5 under price `5`, every button hidden | both taken | nothing | as its grid |
+| L$ 2 under price `PAY_HIDE`, buttons `1, 2, 3, 4` | taken: the amount is a button's | nothing | as its grid |
+| L$ 7 under the same | **refused silently**: no event, no reply, no alert | nothing | as its grid |
+| L$ 1 when the price and every button are hidden | refused: the payer is alerted "Payment stopped:  the price paid does not match any of the pay buttons set for this object" | nothing | as its grid |
+| L$ 1 while Till is in a state without a `money` event | taken; only Second till's `money` runs | nothing | as its grid |
+| L$ 1 to the prim once no script in it has a `money` event (Till in that state, Second till removed) | taken all the same | nothing | as its grid |
 
 So Second Life checks the amount only when the price field is hidden: then
 it must be one of the buttons, and a payment with no button to match is
@@ -2131,7 +2138,7 @@ root) and B (its child) each printed every `changed` event they got.
 
 | an owner or a region change | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
-| the other avatar buys the original for L$ 0 | **one** `CHANGED_OWNER`, the new owner read at once; the buyer is told `You are now the owner of object Object`, and both get a balance reply of type 5000 | **three** `CHANGED_OWNER` | no purchase (`server-fake-grid-money-ledger`) |
+| the other avatar buys the original for L$ 0 | **one** `CHANGED_OWNER`, the new owner read at once; the buyer is told `You are now the owner of object Object`, and both get a balance reply of type 5000 | **three** `CHANGED_OWNER` | as its grid (`sl_fake_grid::money`) |
 | worn, its wearer teleports to another region and back | `CHANGED_REGION \| CHANGED_TELEPORT` on arrival, each way, and nothing else | YEngine: 32768 as it leaves, then `CHANGED_REGION \| CHANGED_TELEPORT` on arrival, each way; **XEngine runs `state_entry` again** in the object on each arrival, so the script loses its globals and nothing it held of the trip survives | worn objects do not travel (`fake-grid-own-attachments-and-region-moves`) |
 
 ### Sound, particles, texture animation and media

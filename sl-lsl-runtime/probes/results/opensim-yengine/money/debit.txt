@@ -1,5 +1,5 @@
 grid: opensim-yengine
-date: 2026-10-26
+date: 2026-11-06
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Default Region
 engine: YEngine
@@ -24,9 +24,9 @@ PROBE money/debit rec=held step=2 why=answer perms=2 granter=owner
 PROBE money/debit rec=give step=3 to=other amount=1 result=0
 PROBE money/debit rec=timeout step=3
 PROBE money/debit rec=transfer step=4 to=other amount=1 handle_null=0
-PROBE money/debit rec=result step=4 id=handle success=1 data="other, 1"
+PROBE money/debit rec=result step=4 id=handle success=1 data="other,1"
 PROBE money/debit rec=transfer step=5 to=owner amount=1 handle_null=0
-PROBE money/debit rec=result step=5 id=handle success=1 data="owner, 1"
+PROBE money/debit rec=result step=5 id=handle success=1 data="owner,1"
 PROBE money/debit rec=transfer step=6 to=none amount=1 handle_null=0
 PROBE money/debit rec=result step=6 id=handle success=0 data="LINDENDOLLAR_ENTITYDOESNOTEXIST"
 PROBE money/debit rec=transfer step=7 to=prim amount=1 handle_null=0
@@ -38,7 +38,7 @@ PROBE money/debit rec=result step=9 id=handle success=0 data="INVALID_AMOUNT"
 PROBE money/debit rec=transfer step=10 to=other amount=-1 handle_null=0
 PROBE money/debit rec=result step=10 id=handle success=0 data="INVALID_AMOUNT"
 PROBE money/debit rec=transfer step=11 to=other amount=1000000000 handle_null=0
-PROBE money/debit rec=result step=11 id=handle success=1 data="other, 1000000000"
+PROBE money/debit rec=result step=11 id=handle success=1 data="other,1000000000"
 PROBE money/debit rec=give step=12 to=other amount=0 result=0
 PROBE money/debit rec=give step=12 to=other amount=-1 result=0
 PROBE money/debit rec=timeout step=12

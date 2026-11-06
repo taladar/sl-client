@@ -2,7 +2,7 @@
 id: server-fake-grid-money-ledger
 title: Fake grid — a money ledger: balances, transfers, buying and paying
 topic: server
-status: ready
+status: done
 origin: gridspec survey (2026-10-03)
 refs: [gridspec-survey]
 blocked_by: [gridspec-money, gridspec-land-transactions]
@@ -99,3 +99,62 @@ and **three times** on OpenSim (both engines). Second Life tells the buyer
 of type 5000 ("You paid <seller> L$0 for Object."). Raise it with
 `scripts::raise_changed_in` in every prim of the bought set when a purchase
 lands (`changes.rs` holds the bit constants).
+
+## Done (2026-11-06)
+
+The grid keeps a ledger (`sl_fake_grid::money`, a `Ledger` on `GridCore`):
+every account starts at `ImitatedGrid::upload_funds` (L$ 10 000 on Second
+Life; none kept on OpenSim) and keeps what moved it for as long as the grid
+runs. A per-session money responder answers `MoneyBalanceRequest` (moved out
+of `groups.rs`), `MoneyTransferRequest`, `ObjectBuy`, `BuyObjectInventory` and
+`ParcelBuyPass`; `ImitatedGrid::money_policy` holds what the ledger alone does
+not say. A session's own `SimSession` balance is written from the ledger
+before every capability request and its charge read back after, and a charged
+upload is followed by the new balance, as Second Life does. A founding fee is
+the ledger's too.
+
+- **Gifts and payments**, Second Life: moved, both sides told with a fresh
+  transaction id and the `TransactionInfo` block; to nobody and beyond the
+  balance a failed reply to the payer; a payment to a prim taken as `5008`
+  whatever type it named, judged by `PayPrice::takes` (dropped, or refused with
+  `PAYMENT_STOPPED`), raising `money` in every script of the prim. OpenSim:
+  dropped.
+- **Pay buttons** of a prim no script set: the default layout, per flavour.
+- **Purchases** as the census measured them, per flavour: Second Life sells at
+  any price, refuses the wrong kind and then the wrong price by alert, tells
+  both sides with type `5000` and the original's buyer `NowOwnObject`; OpenSim
+  refuses any price but L$ 0 by message box and at L$ 0 not-for-sale, price and
+  kind by agent alert. A copy is an item backed as a take of a copy is
+  (`world::file_linkset_copy`), the contents a new folder (over the event queue
+  on Second Life, as unasked descendents of the root and the folder on
+  OpenSim), the original changes hands with the next owner's masks and raises
+  `CHANGED_OWNER` once / three times. One item of the contents is refused with
+  `InventoryNotForSale` on Second Life, unanswered on OpenSim.
+- **Scripts**: `llGiveMoney` / `llTransferLindenDollars` pay out of the owner's
+  balance, both told by type `5009` replies delivered after the tick (a new
+  `Delivery::Balance`), a payee that is nobody's or beyond the balance refused
+  with the failed reply; nothing moves on OpenSim.
+- **A land pass** (now sold by the money responder rather than
+  `parcel_edits`) is paid to the parcel's owner on Second Life, "You paid
+  *owner* L$10 for a land access pass." in a type `5006` reply.
+
+Held by the `money`, `money-balance` (both flavours) and `money-transfer`
+(Second Life flavour) conformance cases, now offline; `upload-http` and
+`asset-upload` now hold the fake grid to the balance and the charge too.
+`tests/scripts.rs` adds `a_script_pays_out` and
+`a_bought_original_tells_its_scripts` on both flavours, and
+`tests/client_end_to_end.rs` `a_pass_is_paid_for_on_second_life`. Book:
+`gridspec/economy.md`, `land.md`, `lsl.md` (the money tables and the
+bought-original row) and `simulator/lsl-engine.md`.
+
+Not done, each unmeasured or another task's:
+
+- **A parcel's purchase is still free** on both flavours: aditi's land helper
+  refuses every purchase, so Second Life's charge for land was never measured
+  (`book/src/gridspec/land.md` § Transactions).
+- **Money held by a group**: a gift to a group, or a payment to or purchase
+  of a group's object, is refused as one to nobody; a pass to a group's parcel
+  is paid to nobody. Unmeasured.
+- **The viewer** has no pay dialog or buy floater yet
+  (`viewer-money-economy-ui`); its payment notices, measured against aditi,
+  read the same replies the fake grid now sends.

@@ -7887,6 +7887,88 @@ mod test {
         fixture.into_region(RegionConfig::default())
     }
 
+    /// **A pass is paid for on Second Life.** A parcel of somebody else's that
+    /// sells an hour's pass for L$ 10 sells one to the client: "You purchased a
+    /// pass.", and a balance reply of type `5006` from the buyer to the
+    /// parcel's owner, L$ 10 off the buyer's L$ 10 000
+    /// (`book/src/gridspec/land.md` § Transactions).
+    #[tokio::test]
+    async fn a_pass_is_paid_for_on_second_life() -> Result<(), TestError> {
+        use sl_proto::{AgentKey, OwnerKey, ParcelKey, RegionLocalParcelId};
+        let owner = OwnerKey::Agent(AgentKey::from(uuid::Uuid::from_u128(0x0E)));
+        let mut fixture = sl_fake_grid::RegionFixture::new();
+        let mut parcel = sl_fake_grid::rect_parcel(
+            RegionLocalParcelId(1),
+            owner,
+            "Gated",
+            0.0,
+            0.0,
+            256.0,
+            256.0,
+        );
+        parcel.pass_price = sl_types::money::LindenAmount(10);
+        parcel.pass_hours = 1.0;
+        fixture
+            .world
+            .add_parcel(parcel, ParcelKey::from(uuid::Uuid::from_u128(0xA1)), 0.0);
+        let mut running = start_configured(
+            vec![fixture.into_region(RegionConfig::default())],
+            None,
+            ImitatedGrid::SecondLife,
+        )
+        .await?;
+        running
+            .commands
+            .send(Command::BuyParcelPass {
+                local_id: sl_client_tokio::ScopedParcelId::new(
+                    running.circuit,
+                    RegionLocalParcelId(1),
+                ),
+            })
+            .await?;
+        let mut told = None;
+        let mut paid = None;
+        running
+            .wait_until("the pass and its charge", |event| {
+                match event {
+                    Event::AlertMessage { message, .. } => told = Some(message.clone()),
+                    Event::MoneyBalance(balance) if balance.transaction.is_some() => {
+                        paid = Some(balance.clone());
+                    }
+                    _ => {}
+                }
+                told.is_some() && paid.is_some()
+            })
+            .await?;
+        assert_eq!(told.as_deref(), Some("You purchased a pass."));
+        let paid = paid.ok_or("no balance reply")?;
+        let transaction = paid.transaction.ok_or("no transaction")?;
+        assert_eq!(
+            (
+                paid.success,
+                paid.balance.0,
+                transaction.transaction_type,
+                transaction.source,
+                transaction.dest,
+                transaction.amount.0
+            ),
+            (
+                true,
+                9_990,
+                5006,
+                OwnerKey::Agent(running.agent.agent_id()),
+                owner,
+                10
+            )
+        );
+        assert!(
+            paid.description.ends_with("L$10 for a land access pass."),
+            "{:?}",
+            paid.description
+        );
+        Ok(())
+    }
+
     /// **The region walks an avatar, and pushes each parcel it walks onto.**
     ///
     /// The forward key, held, walks the client's avatar east over the parcel

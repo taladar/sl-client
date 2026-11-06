@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 129 |
-| ready | 331 |
+| ready | 330 |
 | blocked | 36 |
 | in-progress | 11 |
 | bugs | 36 |
-| done | 1508 |
+| done | 1509 |
 | deferred | 30 |
 | wont-do | 24 |
 | **total** | **2105** |
@@ -327,7 +327,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-lsl-opensim-function-set`](ideas/gridspec-lsl-opensim-function-set.md)
   — Measure which library functions OpenSim's engines compile
 
-## ready (331)
+## ready (330)
 
 ### protocol
 
@@ -1088,9 +1088,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-fake-grid-mesh-upload-cost`](ready/server-fake-grid-mesh-upload-cost.md)
   — Fake grid — mesh upload costing and refusals (blocked by
   `gridspec-asset-upload` (done))
-- [`server-fake-grid-money-ledger`](ready/server-fake-grid-money-ledger.md) —
-  Fake grid — a money ledger: balances, transfers, buying and paying (blocked by
-  `gridspec-money` (done), `gridspec-land-transactions` (done))
 - [`server-fake-grid-mute-list`](ready/server-fake-grid-mute-list.md) — Fake
   grid — mute list storage, the Xfer file and each grid's empty-list reply
   (blocked by `gridspec-mute-list` (done))
@@ -1245,7 +1242,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A scripts scenario — one prim per scripted behaviour (blocked by
   `server-fake-grid-script-engine-wiring` (done), `server-lsl-lib-prim-state`
   (done), `server-lsl-lib-detection-sensors`, `server-lsl-lib-avatar-control`,
-  `server-fake-grid-money-ledger`, `server-lsl-lib-task-inventory`,
+  `server-fake-grid-money-ledger` (done), `server-lsl-lib-task-inventory`,
   `server-lsl-lib-physics-vehicles`)
 - [`server-lsl-forced-delays-per-flavour`](blocked/server-lsl-forced-delays-per-flavour.md)
   — Charge each grid flavour's measured forced delays and throttles, not the
@@ -1387,7 +1384,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1508)
+## done (1509)
 
 ### protocol
 
@@ -4454,6 +4451,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   send
 - [`server-fake-grid-lsl-syntax`](done/server-fake-grid-lsl-syntax.md) — Fake
   grid — serve each flavour's LSL syntax document and advertise its id
+- [`server-fake-grid-money-ledger`](done/server-fake-grid-money-ledger.md) —
+  Fake grid — a money ledger: balances, transfers, buying and paying (blocked by
+  `gridspec-money` (done), `gridspec-land-transactions` (done))
 - [`server-fake-grid-object-undo`](done/server-fake-grid-object-undo.md) — Fake
   grid — keep an object's edit history for Undo / Redo
 - [`server-fake-grid-parcel-on-movement`](done/server-fake-grid-parcel-on-movement.md)

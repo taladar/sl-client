@@ -238,8 +238,10 @@ pub fn ll_transfer_linden_dollars(
             amount,
         };
         match ctx.host().transfer_money(caller, &payment) {
-            Ok(()) if opensim => (true, format!("{},{amount}", payment.to)),
-            Ok(()) => (true, format!("{}, {amount}", payment.to)),
+            // Both grids write the payee and the amount with no space between
+            // (`money/debit`, aditi 2026-11-06; OpenSim's
+            // `LSL_Api.llTransferLindenDollars`).
+            Ok(()) => (true, format!("{},{amount}", payment.to)),
             Err(refusal) => (false, refusal.code().to_owned()),
         }
     };

@@ -96,7 +96,8 @@
 //! | where the asset capabilities are ([`asset_host`](ImitatedGrid::asset_host)) | a host of their own, all four its bare root | the simulator's, a token each |
 //! | how an asset capability reads a `Range` and answers what it cannot serve ([`asset_http_policy`](ImitatedGrid::asset_http_policy)) | a suffix is the last bytes, several ranges a multipart body, `bytes=0-0` one byte; an entity tag and a date stated, the date honoured with `304`; a `POST` refused | a suffix is the first eleven bytes, several ranges and `bytes=0-0` the whole asset, a backwards range one byte; nothing stated for a cache; a `POST` answered as a `GET`; a request that names no asset `400` |
 //! | what `NewFileAgentInventory` takes, charges and refuses ([`new_file_policy`](ImitatedGrid::new_file_policy)) | a texture or snapshot, a sound, an animation, a body part, clothing and a mesh, each at a price; the other classes refused by name; the stated cost held to the bytes; the bytes validated; a balance stated, and an upload it does not cover refused; an uploader that serves once | every class, free and unvalidated; a class with no name of its own filed as a texture; an object that is no model answered as stored, stored nowhere, and the uploader stuck from then on |
-//! | whether an agent has a balance for uploads ([`upload_funds`](ImitatedGrid::upload_funds)) | L$ 10 000 a session | none kept |
+//! | what an account holds ([`upload_funds`](ImitatedGrid::upload_funds)) | L$ 10 000 to start, kept by the grid's ledger: moved by uploads, fees, gifts, payments and purchases | none kept: every transfer dropped |
+//! | a payment and a purchase ([`money_policy`](ImitatedGrid::money_policy)) | taken at any price, refused by alert; `NowOwnObject` for an original; `CHANGED_OWNER` once; one item of the contents refused | any price but L$ 0 refused by message box, at L$ 0 by agent alert; `CHANGED_OWNER` three times; one item of the contents not answered |
 //! | a thumbnail and a postcard over HTTP (`InventoryThumbnailUpload`, `SendPostcard`, in [`withheld_capabilities`](ImitatedGrid::withheld_capabilities)) | granted | not granted |
 //! | a prim's contents and a script's experience over HTTP (`RequestTaskInventory`, `GetMetadata`, in [`withheld_capabilities`](ImitatedGrid::withheld_capabilities)) | granted | not granted: the listing is UDP and `Xfer` alone |
 //! | the land products a land row's `ProductSKU` is named by ([`land_products`](ImitatedGrid::land_products)) | `ProductInfoRequest` granted, listing the 26 products aditi lists | not granted |
@@ -1978,18 +1979,49 @@ impl ImitatedGrid {
         }
     }
 
-    /// The L$ an agent of this grid has for uploads when it logs in, where
-    /// the grid states a balance in its upload answers at all.
+    /// The L$ an account of this grid holds before anything moves it, or
+    /// `None` for a grid that keeps no balances.
     ///
-    /// This is not a money ledger — nothing but an upload reads or moves it,
-    /// and it starts over with every login. It is here because Second Life
-    /// states the balance in the first answer of every upload and refuses
-    /// one it does not cover, and a viewer has to be shown both.
+    /// The grid's ledger ([`crate::money`]) starts every account here and
+    /// keeps what moves it for as long as the grid runs: an upload's price, a
+    /// founding fee, a gift, a payment, a purchase. Second Life states the
+    /// balance in the first answer of every upload and refuses one it does not
+    /// cover; OpenSim's stock money module keeps none, and every balance reads
+    /// zero.
     #[must_use]
     pub const fn upload_funds(self) -> Option<i64> {
         match self {
             Self::SecondLife => Some(SECOND_LIFE_UPLOAD_FUNDS),
             Self::OpenSim => None,
+        }
+    }
+
+    /// How this grid answers a payment and a purchase where its ledger alone
+    /// does not say — measured by the `money` conformance census on aditi and
+    /// the local OpenSim (2026-10-18, `book/src/gridspec/economy.md`) and the
+    /// `events/changed-owner` probe, and tabulated in [`crate::money`].
+    ///
+    /// Second Life sells at any price, refuses the wrong kind of sale and then
+    /// the wrong price by alert, tells the buyer of an original by an alert
+    /// keyed `NowOwnObject`, raises `changed(CHANGED_OWNER)` once and refuses
+    /// one item of the contents. OpenSim's stock module refuses any price but
+    /// L$ 0 by message box, at L$ 0 an object not for sale, the wrong price and
+    /// then the wrong kind by agent alert, raises `CHANGED_OWNER` three times
+    /// and does not answer a purchase of one item of the contents.
+    #[must_use]
+    pub const fn money_policy(self) -> crate::money::MoneyPolicy {
+        use crate::money::{MoneyPolicy, Purchases};
+        match self {
+            Self::SecondLife => MoneyPolicy {
+                purchases: Purchases::Charged,
+                owner_changed_raised: 1,
+                refuses_contents_item: true,
+            },
+            Self::OpenSim => MoneyPolicy {
+                purchases: Purchases::FreeOnly,
+                owner_changed_raised: 3,
+                refuses_contents_item: false,
+            },
         }
     }
 
@@ -2268,8 +2300,8 @@ pub const OPENSIM_REFUSED_CAPABILITIES: &[&str] = &[
     "VoiceSignalingRequest",
 ];
 
-/// The L$ an agent of a Second-Life-flavoured grid starts a session with for
-/// uploads ([`ImitatedGrid::upload_funds`]).
+/// The L$ an account of a Second-Life-flavoured grid starts with
+/// ([`ImitatedGrid::upload_funds`]).
 pub const SECOND_LIFE_UPLOAD_FUNDS: i64 = 10_000;
 
 /// `max-agent-groups` on a stock OpenSim grid: its login service's
