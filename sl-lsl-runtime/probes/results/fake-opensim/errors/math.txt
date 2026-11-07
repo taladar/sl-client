@@ -1,0 +1,95 @@
+grid: fake-opensim
+date: 2026-11-07
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Fake Region
+engine: sl-lsl-runtime imitating YEngine
+settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
+
+# chat type=say from="Object" length=14 text="Script running"
+PROBE errors/math rec=start region="Fake Region" channel="OpenSim" version="sl-fake-grid 0.1.0"
+PROBE errors/math rec=listening channel=2147483647 dist=19
+PROBE errors/math rec=listening channel=2147483647 dist=21
+PROBE errors/math rec=case script="Math 1" case=int-div step=before
+# debug-channel: from="Faulty prim" text="YEngine: Division by Zero (script: Math 1 event: link_message primID: 8d8b4ca6-378e-3453-cf51-088fe7105cfb at: <128,124,26>) Script must be Reset to re-enable.\n"
+PROBE errors/math rec=case script="Math 2" case=int-mod step=before
+# debug-channel: from="Faulty prim" text="YEngine: Division by Zero (script: Math 2 event: link_message primID: 8d8b4ca6-378e-3453-cf51-088fe7105cfb at: <128,124,26>) Script must be Reset to re-enable.\n"
+PROBE errors/math rec=case script="Math 3" case=float-div step=before
+# debug-channel: from="Faulty prim" text="YEngine: Division by Zero (script: Math 3 event: link_message primID: 8d8b4ca6-378e-3453-cf51-088fe7105cfb at: <128,124,26>) Script must be Reset to re-enable.\n"
+PROBE errors/math rec=case script="Math 4" case=vector-div step=before
+# debug-channel: from="Faulty prim" text="YEngine: Vector division by zero (script: Math 4 event: link_message primID: 8d8b4ca6-378e-3453-cf51-088fe7105cfb at: <128,124,26>) Script must be Reset to re-enable.\n"
+PROBE errors/math rec=case script="Math 5" case=rotation-div step=before
+PROBE errors/math rec=case script="Math 5" case=rotation-div step=after result="<0.00000, 0.00000, 0.00000, 0.00000>"
+PROBE errors/math rec=case script="Math 6" case=int-min-div step=before
+PROBE errors/math rec=case script="Math 6" case=int-min-div step=after result="-2147483648"
+PROBE errors/math rec=case script="Math 7" case=int-min-mod step=before
+PROBE errors/math rec=case script="Math 7" case=int-min-mod step=after result="0"
+PROBE errors/math rec=case script="Math 8" case=sqrt-negative step=before
+PROBE errors/math rec=case script="Math 8" case=sqrt-negative step=after result="NaN"
+PROBE errors/math rec=case script="Math 9" case=float-overflow step=before
+PROBE errors/math rec=case script="Math 9" case=float-overflow step=after result="Infinity"
+PROBE errors/math rec=case script="Math 10" case=modpow-zero step=before
+# owner-say: from="Faulty prim" text="[YEngine]: Exception while running 96e2a27c-f396-0b1e-cfc4-3b566f802088"
+# owner-say: from="Faulty prim" text="DivideByZeroException: Attempted to divide by zero."
+# owner-say: from="Faulty prim" text="Prim: <Faulty prim>, Script: <Math 10>, Location: Fake Region <128,124,26>"
+# owner-say: from="Faulty prim" text="Script must be Reset to re-enable."
+PROBE errors/math rec=case script="Math 11" case=log-zero step=before
+PROBE errors/math rec=case script="Math 11" case=log-zero step=after result="-Infinity NaN"
+PROBE errors/math rec=case script="Math 12" case=acos-out-of-range step=before
+PROBE errors/math rec=case script="Math 12" case=acos-out-of-range step=after result="NaN NaN"
+PROBE errors/math rec=case script="Math 13" case=pow-nan step=before
+PROBE errors/math rec=case script="Math 13" case=pow-nan step=after result="NaN Infinity"
+PROBE errors/math rec=case script="Math 14" case=inf-nan-casts step=before
+PROBE errors/math rec=case script="Math 14" case=inf-nan-casts step=after result="Infinity -2147483648 NaN -2147483648"
+PROBE errors/math rec=case script="Math 15" case=zero-normalise step=before
+PROBE errors/math rec=case script="Math 15" case=zero-normalise step=after result="<0.00000, 0.00000, 0.00000> <0.00000, 0.00000, 0.00000> <0.00000, 0.00000, 0.00000, 0.50000>"
+PROBE errors/math rec=script-state when=after-faults script="Math 1" running=1
+PROBE errors/math rec=script-state when=after-faults script="Math 2" running=1
+PROBE errors/math rec=script-state when=after-faults script="Math 3" running=1
+PROBE errors/math rec=script-state when=after-faults script="Math 4" running=1
+PROBE errors/math rec=script-state when=after-faults script="Math 5" running=1
+PROBE errors/math rec=script-state when=after-faults script="Math 6" running=1
+PROBE errors/math rec=script-state when=after-faults script="Math 7" running=1
+PROBE errors/math rec=script-state when=after-faults script="Math 8" running=1
+PROBE errors/math rec=script-state when=after-faults script="Math 9" running=1
+PROBE errors/math rec=script-state when=after-faults script="Math 10" running=1
+PROBE errors/math rec=script-state when=after-faults script="Math 11" running=1
+PROBE errors/math rec=script-state when=after-faults script="Math 12" running=1
+PROBE errors/math rec=script-state when=after-faults script="Math 13" running=1
+PROBE errors/math rec=script-state when=after-faults script="Math 14" running=1
+PROBE errors/math rec=script-state when=after-faults script="Math 15" running=1
+PROBE errors/math rec=revive script="Math 1" how=reset-then-run
+PROBE errors/math rec=revive script="Math 2" how=run-then-reset
+PROBE errors/math rec=ping when=after-revive
+PROBE errors/math rec=answer script="Math 1"
+PROBE errors/math rec=answer script="Math 2"
+PROBE errors/math rec=answer script="Math 5"
+PROBE errors/math rec=answer script="Math 6"
+PROBE errors/math rec=answer script="Math 7"
+PROBE errors/math rec=answer script="Math 8"
+PROBE errors/math rec=answer script="Math 9"
+PROBE errors/math rec=answer script="Math 11"
+PROBE errors/math rec=answer script="Math 12"
+PROBE errors/math rec=answer script="Math 13"
+PROBE errors/math rec=answer script="Math 14"
+PROBE errors/math rec=answer script="Math 15"
+PROBE errors/math rec=script-state when=after-revive script="Math 1" running=1
+PROBE errors/math rec=script-state when=after-revive script="Math 2" running=1
+PROBE errors/math rec=script-state when=after-revive script="Math 3" running=1
+PROBE errors/math rec=script-state when=after-revive script="Math 4" running=1
+PROBE errors/math rec=script-state when=after-revive script="Math 5" running=1
+PROBE errors/math rec=script-state when=after-revive script="Math 6" running=1
+PROBE errors/math rec=script-state when=after-revive script="Math 7" running=1
+PROBE errors/math rec=script-state when=after-revive script="Math 8" running=1
+PROBE errors/math rec=script-state when=after-revive script="Math 9" running=1
+PROBE errors/math rec=script-state when=after-revive script="Math 10" running=1
+PROBE errors/math rec=script-state when=after-revive script="Math 11" running=1
+PROBE errors/math rec=script-state when=after-revive script="Math 12" running=1
+PROBE errors/math rec=script-state when=after-revive script="Math 13" running=1
+PROBE errors/math rec=script-state when=after-revive script="Math 14" running=1
+PROBE errors/math rec=script-state when=after-revive script="Math 15" running=1
+PROBE errors/math rec=end
+# chat by=other type=say from="Object" length=14 text="Script running"
+# debug-channel by=other: from="Faulty prim" text="YEngine: Division by Zero (script: Math 1 event: link_message primID: 8d8b4ca6-378e-3453-cf51-088fe7105cfb at: <128,124,26>) Script must be Reset to re-enable.\n"
+# debug-channel by=other: from="Faulty prim" text="YEngine: Division by Zero (script: Math 2 event: link_message primID: 8d8b4ca6-378e-3453-cf51-088fe7105cfb at: <128,124,26>) Script must be Reset to re-enable.\n"
+# debug-channel by=other: from="Faulty prim" text="YEngine: Division by Zero (script: Math 3 event: link_message primID: 8d8b4ca6-378e-3453-cf51-088fe7105cfb at: <128,124,26>) Script must be Reset to re-enable.\n"
+# debug-channel by=other: from="Faulty prim" text="YEngine: Vector division by zero (script: Math 4 event: link_message primID: 8d8b4ca6-378e-3453-cf51-088fe7105cfb at: <128,124,26>) Script must be Reset to re-enable.\n"

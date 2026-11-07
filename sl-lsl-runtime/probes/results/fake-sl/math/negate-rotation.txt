@@ -1,0 +1,11 @@
+grid: fake-sl
+date: 2026-11-07
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Fake Region
+engine: sl-lsl-runtime imitating Mono
+settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
+
+PROBE math/negate-rotation rec=start region="Fake Region" channel="Second Life Server" version="sl-fake-grid 0.1.0"
+PROBE math/negate-rotation rec=negate case=rotation value="<-1.00000, -2.00000, -3.00000, -4.00000>"
+PROBE math/negate-rotation rec=negate case=vector value="<-1.00000, -0.00000, -0.00000>"
+PROBE math/negate-rotation rec=end

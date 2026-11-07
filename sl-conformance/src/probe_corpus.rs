@@ -30,7 +30,29 @@ pub enum CorpusError {
     /// A results grid that is not one of [`GRIDS`].
     #[error("`{0}` is not a results grid (one of {GRIDS:?})")]
     UnknownGrid(String),
+    /// The accepted differences could not be read.
+    #[error("{0}")]
+    Accepted(#[from] crate::accepted::LoadError),
 }
+
+/// The probes `sl-conformance differential` runs when it is named none: the
+/// ones chosen to bite where a unit test cannot check honestly, because the
+/// expectation and the implementation could share one misunderstanding —
+/// the rotation helpers (an axis-order mistake gives plausible numbers),
+/// list and string functions at negative indices, `llSetPos`' reach, the
+/// order of events around a state change and a sensor's results, the
+/// forced delays and the chat throttle.
+pub const DIFFERENTIAL_SUITE: &[&str] = &[
+    "math/rotations",
+    "math/functions",
+    "strings/functions",
+    "prim/placement",
+    "events/state-change",
+    "events/order",
+    "detection/sensor",
+    "throttle/delays",
+    "throttle/chat",
+];
 
 /// The inventory name of a single-script probe's script.
 const SINGLE_SCRIPT_NAME: &str = "Probe";
@@ -330,6 +352,7 @@ pub fn compare_results(
     } else {
         grids.to_vec()
     };
+    let accepted = crate::accepted::load(root)?;
     let mut lines = Vec::new();
     for probe in select(load_corpus(root)?, selected)? {
         let mut runs = Vec::new();
@@ -351,21 +374,58 @@ pub fn compare_results(
         let mut others = 0_usize;
         for (grid, right) in runs {
             others = others.saturating_add(1);
-            let comparison = compare(&left, &right, &tolerance);
-            let differences = comparison.differences.len();
-            lines.push(format!(
-                "== {}: {baseline} | {grid} — {}",
-                probe.id,
-                if comparison.agrees() {
-                    "agree".to_owned()
-                } else {
-                    format!("{differences} difference(s)")
+            let mut comparison = compare(&left, &right, &tolerance);
+            let entries: Vec<&crate::accepted::Accepted> = accepted
+                .iter()
+                .filter(|entry| entry.applies(&probe.id, baseline, grid))
+                .collect();
+            let mut covered: Vec<String> = Vec::new();
+            if let Some(whole) = entries.iter().find(|entry| entry.covers_all()) {
+                if !comparison.agrees() {
+                    covered.push(format!(
+                        "accepted    the whole comparison — {}",
+                        whole.why()
+                    ));
                 }
-            ));
+                comparison.differences.clear();
+                comparison.incomplete.clear();
+            }
+            let (kept, taken): (Vec<_>, Vec<_>) = comparison
+                .differences
+                .drain(..)
+                .partition(|difference| !entries.iter().any(|entry| entry.covers(difference)));
+            comparison.differences = kept;
+            for difference in &taken {
+                let why = entries
+                    .iter()
+                    .find(|entry| entry.covers(difference))
+                    .map(|entry| entry.why())
+                    .unwrap_or_default();
+                let shown = sl_lsl_runtime::probe::compare::Comparison {
+                    differences: vec![difference.clone()],
+                    ..sl_lsl_runtime::probe::compare::Comparison::default()
+                }
+                .lines(baseline, grid);
+                for line in shown {
+                    let line = line
+                        .trim_start_matches(|c: char| c.is_alphabetic())
+                        .trim_start();
+                    covered.push(format!("accepted    {line} — {why}"));
+                }
+            }
+            let differences = comparison.differences.len();
+            let summary = match (comparison.agrees(), covered.len()) {
+                (true, 0) => "agree".to_owned(),
+                (true, accepted) => format!("agree but for {accepted} accepted"),
+                (false, 0) => format!("{differences} difference(s)"),
+                (false, accepted) => format!("{differences} difference(s), {accepted} accepted"),
+            };
+            lines.push(format!("== {}: {baseline} | {grid} — {summary}", probe.id));
             lines.extend(
                 comparison
                     .lines(baseline, grid)
                     .into_iter()
+                    .chain(covered)
                     .map(|line| format!("  {line}")),
             );
         }
@@ -381,6 +441,94 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     use super::{CorpusError, corpus_root, load_corpus, percent_decoded, select};
+
+    #[test]
+    fn the_differential_suite_names_probes_of_the_corpus() -> Result<(), String> {
+        let probes = load_corpus(&corpus_root()).map_err(|error| error.to_string())?;
+        for id in super::DIFFERENTIAL_SUITE {
+            assert!(
+                probes.iter().any(|probe| probe.id == *id),
+                "the differential suite names {id}, which the corpus does not hold"
+            );
+        }
+        Ok(())
+    }
+
+    /// Every accepted difference names a probe of the corpus and two results
+    /// grids, gives a reason, and still covers a difference of the committed
+    /// results — an entry nothing differs on any more is stale, and would
+    /// hide the next difference of its kind.
+    #[test]
+    fn every_accepted_difference_still_covers_one() -> Result<(), String> {
+        let root = corpus_root();
+        let probes = load_corpus(&root).map_err(|error| error.to_string())?;
+        let accepted = crate::accepted::load(&root).map_err(|error| error.to_string())?;
+        for entry in &accepted {
+            let probe = probes
+                .iter()
+                .find(|probe| probe.id == entry.probe)
+                .ok_or_else(|| format!("{} is not a probe of the corpus", entry.probe))?;
+            for grid in &entry.between {
+                assert!(
+                    super::GRIDS.contains(&grid.as_str()),
+                    "{}: {grid} is not a results grid",
+                    entry.probe
+                );
+            }
+            assert!(
+                !entry.reason.trim().is_empty(),
+                "{}: no reason",
+                entry.probe
+            );
+            // A known defect's task is open: once it is done, the defect is
+            // gone and so is the entry.
+            if let Some(task) = &entry.task {
+                let roadmap = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../roadmap");
+                let open = [
+                    "ideas",
+                    "ready",
+                    "blocked",
+                    "in-progress",
+                    "bugs",
+                    "deferred",
+                ]
+                .iter()
+                .any(|status| roadmap.join(status).join(format!("{task}.md")).is_file());
+                assert!(open, "{}: {task} is not an open roadmap task", entry.probe);
+            }
+            let [left, right] = &entry.between;
+            let read = |grid: &str| -> Result<Option<super::ResultFile>, String> {
+                let path = super::result_path(&root, grid, &entry.probe);
+                if !path.is_file() {
+                    return Ok(None);
+                }
+                let text = fs_err::read_to_string(&path).map_err(|error| error.to_string())?;
+                super::ResultFile::parse(&text).map(Some)
+            };
+            let (Some(left_file), Some(right_file)) = (read(left)?, read(right)?) else {
+                return Err(format!(
+                    "{}: no results of {left} and {right} to accept a difference between",
+                    entry.probe
+                ));
+            };
+            let comparison = super::compare(&left_file, &right_file, &probe.tolerance());
+            let covers = if entry.covers_all() {
+                !comparison.agrees()
+            } else {
+                comparison
+                    .differences
+                    .iter()
+                    .any(|difference| entry.covers(difference))
+            };
+            assert!(
+                covers,
+                "{} between {left} and {right}: the accepted difference {:?} {:?} {:?} no \
+                 longer differs",
+                entry.probe, entry.record, entry.fields, entry.field
+            );
+        }
+        Ok(())
+    }
 
     #[test]
     fn a_notecard_name_is_percent_decoded_from_its_file_name() {

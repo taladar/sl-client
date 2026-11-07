@@ -1,0 +1,124 @@
+grid: fake-opensim
+date: 2026-11-07
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Fake Region
+engine: sl-lsl-runtime imitating YEngine
+settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
+
+PROBE errors/flood-records rec=start region="Fake Region" channel="OpenSim" version="sl-fake-grid 0.1.0"
+PROBE errors/flood-records rec=phase name=Q t=3.000000
+PROBE errors/flood-records rec=phase name=R t=92.218000
+PROBE errors/flood-records rec=record n=1 i=1 t=92.218000
+PROBE errors/flood-records rec=record n=2 i=1 t=93.945000
+PROBE errors/flood-records rec=record n=3 i=1 t=95.673000
+PROBE errors/flood-records rec=record n=4 i=1 t=97.400000
+PROBE errors/flood-records rec=record n=5 i=1 t=99.127000
+PROBE errors/flood-records rec=record n=6 i=1 t=100.855000
+PROBE errors/flood-records rec=record n=7 i=1 t=102.582000
+PROBE errors/flood-records rec=record n=8 i=1 t=104.309000
+PROBE errors/flood-records rec=record n=9 i=1 t=106.036000
+PROBE errors/flood-records rec=record n=10 i=1 t=107.764000
+PROBE errors/flood-records rec=record n=11 i=1 t=109.491000
+PROBE errors/flood-records rec=record n=12 i=1 t=111.218000
+PROBE errors/flood-records rec=phase name=X t=181.436000
+PROBE errors/flood-records rec=record n=1 i=1 t=181.436000
+PROBE errors/flood-records rec=record n=1 i=2 t=181.436000
+PROBE errors/flood-records rec=record n=1 i=3 t=181.436000
+PROBE errors/flood-records rec=record n=2 i=1 t=183.164000
+PROBE errors/flood-records rec=record n=2 i=2 t=183.164000
+PROBE errors/flood-records rec=record n=2 i=3 t=183.164000
+PROBE errors/flood-records rec=record n=3 i=1 t=184.891000
+PROBE errors/flood-records rec=record n=3 i=2 t=184.891000
+PROBE errors/flood-records rec=record n=3 i=3 t=184.891000
+PROBE errors/flood-records rec=record n=4 i=1 t=186.618000
+PROBE errors/flood-records rec=record n=4 i=2 t=186.618000
+PROBE errors/flood-records rec=record n=4 i=3 t=186.618000
+PROBE errors/flood-records rec=record n=5 i=1 t=188.345000
+PROBE errors/flood-records rec=record n=5 i=2 t=188.345000
+PROBE errors/flood-records rec=record n=5 i=3 t=188.345000
+PROBE errors/flood-records rec=record n=6 i=1 t=190.073000
+PROBE errors/flood-records rec=record n=6 i=2 t=190.073000
+PROBE errors/flood-records rec=record n=6 i=3 t=190.073000
+PROBE errors/flood-records rec=record n=7 i=1 t=191.800000
+PROBE errors/flood-records rec=record n=7 i=2 t=191.800000
+PROBE errors/flood-records rec=record n=7 i=3 t=191.800000
+PROBE errors/flood-records rec=record n=8 i=1 t=193.527000
+PROBE errors/flood-records rec=record n=8 i=2 t=193.527000
+PROBE errors/flood-records rec=record n=8 i=3 t=193.527000
+PROBE errors/flood-records rec=record n=9 i=1 t=195.255000
+PROBE errors/flood-records rec=record n=9 i=2 t=195.255000
+PROBE errors/flood-records rec=record n=9 i=3 t=195.255000
+PROBE errors/flood-records rec=record n=10 i=1 t=196.982000
+PROBE errors/flood-records rec=record n=10 i=2 t=196.982000
+PROBE errors/flood-records rec=record n=10 i=3 t=196.982000
+PROBE errors/flood-records rec=record n=11 i=1 t=198.709000
+PROBE errors/flood-records rec=record n=11 i=2 t=198.709000
+PROBE errors/flood-records rec=record n=11 i=3 t=198.709000
+PROBE errors/flood-records rec=record n=12 i=1 t=200.436000
+PROBE errors/flood-records rec=record n=12 i=2 t=200.436000
+PROBE errors/flood-records rec=record n=12 i=3 t=200.436000
+PROBE errors/flood-records rec=phase name=Q t=270.655000
+PROBE errors/flood-records rec=phase name=R t=359.873000
+PROBE errors/flood-records rec=record n=1 i=1 t=359.873000
+PROBE errors/flood-records rec=record n=2 i=1 t=361.600000
+PROBE errors/flood-records rec=record n=3 i=1 t=363.327000
+PROBE errors/flood-records rec=record n=4 i=1 t=365.055000
+PROBE errors/flood-records rec=record n=5 i=1 t=366.782000
+PROBE errors/flood-records rec=record n=6 i=1 t=368.509000
+PROBE errors/flood-records rec=record n=7 i=1 t=370.236000
+PROBE errors/flood-records rec=record n=8 i=1 t=371.964000
+PROBE errors/flood-records rec=record n=9 i=1 t=373.691000
+PROBE errors/flood-records rec=record n=10 i=1 t=375.418000
+PROBE errors/flood-records rec=record n=11 i=1 t=377.145000
+PROBE errors/flood-records rec=record n=12 i=1 t=378.873000
+PROBE errors/flood-records rec=phase name=P0 t=449.091000
+PROBE errors/flood-records rec=phase name=P4 t=559.709000
+PROBE errors/flood-records rec=record n=1 i=1 t=559.709000
+PROBE errors/flood-records rec=record n=1 i=2 t=559.709000
+PROBE errors/flood-records rec=record n=1 i=3 t=559.709000
+PROBE errors/flood-records rec=record n=1 i=4 t=559.709000
+PROBE errors/flood-records rec=record n=2 i=1 t=561.927000
+PROBE errors/flood-records rec=record n=2 i=2 t=561.927000
+PROBE errors/flood-records rec=record n=2 i=3 t=561.927000
+PROBE errors/flood-records rec=record n=2 i=4 t=561.927000
+PROBE errors/flood-records rec=record n=3 i=1 t=564.145000
+PROBE errors/flood-records rec=record n=3 i=2 t=564.145000
+PROBE errors/flood-records rec=record n=3 i=3 t=564.145000
+PROBE errors/flood-records rec=record n=3 i=4 t=564.145000
+PROBE errors/flood-records rec=record n=4 i=1 t=566.364000
+PROBE errors/flood-records rec=record n=4 i=2 t=566.364000
+PROBE errors/flood-records rec=record n=4 i=3 t=566.364000
+PROBE errors/flood-records rec=record n=4 i=4 t=566.364000
+PROBE errors/flood-records rec=record n=5 i=1 t=568.582000
+PROBE errors/flood-records rec=record n=5 i=2 t=568.582000
+PROBE errors/flood-records rec=record n=5 i=3 t=568.582000
+PROBE errors/flood-records rec=record n=5 i=4 t=568.582000
+PROBE errors/flood-records rec=record n=6 i=1 t=570.800000
+PROBE errors/flood-records rec=record n=6 i=2 t=570.800000
+PROBE errors/flood-records rec=record n=6 i=3 t=570.800000
+PROBE errors/flood-records rec=record n=6 i=4 t=570.800000
+PROBE errors/flood-records rec=record n=7 i=1 t=573.018000
+PROBE errors/flood-records rec=record n=7 i=2 t=573.018000
+PROBE errors/flood-records rec=record n=7 i=3 t=573.018000
+PROBE errors/flood-records rec=record n=7 i=4 t=573.018000
+PROBE errors/flood-records rec=record n=8 i=1 t=575.236000
+PROBE errors/flood-records rec=record n=8 i=2 t=575.236000
+PROBE errors/flood-records rec=record n=8 i=3 t=575.236000
+PROBE errors/flood-records rec=record n=8 i=4 t=575.236000
+PROBE errors/flood-records rec=record n=9 i=1 t=577.455000
+PROBE errors/flood-records rec=record n=9 i=2 t=577.455000
+PROBE errors/flood-records rec=record n=9 i=3 t=577.455000
+PROBE errors/flood-records rec=record n=9 i=4 t=577.455000
+PROBE errors/flood-records rec=record n=10 i=1 t=579.673000
+PROBE errors/flood-records rec=record n=10 i=2 t=579.673000
+PROBE errors/flood-records rec=record n=10 i=3 t=579.673000
+PROBE errors/flood-records rec=record n=10 i=4 t=579.673000
+PROBE errors/flood-records rec=record n=11 i=1 t=581.891000
+PROBE errors/flood-records rec=record n=11 i=2 t=581.891000
+PROBE errors/flood-records rec=record n=11 i=3 t=581.891000
+PROBE errors/flood-records rec=record n=11 i=4 t=581.891000
+PROBE errors/flood-records rec=record n=12 i=1 t=600.109000
+PROBE errors/flood-records rec=record n=12 i=2 t=600.109000
+PROBE errors/flood-records rec=record n=12 i=3 t=600.109000
+PROBE errors/flood-records rec=record n=12 i=4 t=600.109000
+PROBE errors/flood-records rec=end

@@ -1,0 +1,23 @@
+grid: fake-opensim
+date: 2026-11-07
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: unknown (no start record)
+engine: sl-lsl-runtime imitating YEngine
+settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
+complete: no
+
+# compile error in "Probe": "(98,15) Error: no function `llGetExperienceDetails`"
+# compile error in "Probe": "(133,4) Error: no function `llRequestExperiencePermissions`"
+# compile error in "Probe": "(144,22) Error: no function `llAgentInExperience`"
+# compile error in "Probe": "(186,31) Error: no function `llGetExperienceErrorMessage`"
+# compile error in "Probe": "(196,31) Error: no function `llCreateKeyValue`"
+# compile error in "Probe": "(197,29) Error: no function `llReadKeyValue`"
+# compile error in "Probe": "(198,31) Error: no function `llUpdateKeyValue`"
+# compile error in "Probe": "(199,31) Error: no function `llDeleteKeyValue`"
+# compile error in "Probe": "(200,33) Error: no function `llKeyCountKeyValue`"
+# compile error in "Probe": "(201,29) Error: no function `llKeysKeyValue`"
+# compile error in "Probe": "(202,33) Error: no function `llDataSizeKeyValue`"
+# compile error in "Probe": "(212,22) Error: no function `llAgentInExperience`"
+# compile error in "Probe": "(273,4) Error: `experience_permissions` is not an event"
+# compile error in "Probe": "(282,4) Error: `experience_permissions_denied` is not an event"
+# compile error in "Probe": "(287,27) Error: no function `llGetExperienceErrorMessage`"

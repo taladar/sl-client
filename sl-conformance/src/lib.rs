@@ -36,6 +36,7 @@
 //!   timeout, so a panicking or hung case fails only itself.
 //! - [`cases`] — the concrete test implementations.
 
+pub mod accepted;
 pub mod cases;
 pub mod circuit;
 pub mod context;

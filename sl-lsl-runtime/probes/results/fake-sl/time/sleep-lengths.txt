@@ -1,0 +1,16 @@
+grid: fake-sl
+date: 2026-11-07
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Fake Region
+engine: sl-lsl-runtime imitating Mono
+settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
+
+PROBE time/sleep-lengths rec=start region="Fake Region" channel="Second Life Server" version="sl-fake-grid 0.1.0"
+PROBE time/sleep-lengths rec=sleep asked=0.000000 mean=0.000000 smallest=0.000000 largest=0.000000 script_mean=0.000000 unit=ms
+PROBE time/sleep-lengths rec=sleep asked=0.001000 mean=22.222000 smallest=22.222000 largest=22.223000 script_mean=22.222220 unit=ms
+PROBE time/sleep-lengths rec=sleep asked=0.010000 mean=22.222000 smallest=22.222000 largest=22.223000 script_mean=22.222220 unit=ms
+PROBE time/sleep-lengths rec=sleep asked=0.020000 mean=22.222000 smallest=22.222000 largest=22.223000 script_mean=22.222220 unit=ms
+PROBE time/sleep-lengths rec=sleep asked=0.050000 mean=66.666000 smallest=66.666000 largest=66.667000 script_mean=66.666660 unit=ms
+PROBE time/sleep-lengths rec=sleep asked=0.100000 mean=111.111000 smallest=111.111000 largest=111.112000 script_mean=111.111100 unit=ms
+PROBE time/sleep-lengths rec=sleep asked=0.250000 mean=266.666000 smallest=266.666000 largest=266.667000 script_mean=266.666700 unit=ms
+PROBE time/sleep-lengths rec=end

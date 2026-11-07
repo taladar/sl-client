@@ -33,15 +33,36 @@ const fn offer_delay(opensim: bool) -> f32 {
     if opensim { 3.0 } else { 2.0 }
 }
 
+/// OpenSim's `llGiveInventoryList` delay for all but an offer to an avatar:
+/// a refusal's, and a gift to a prim's.
+const OPENSIM_LIST_REFUSED: f32 = 0.1;
+
 /// `REZ_FLAG_TEMP`.
 const REZ_FLAG_TEMP: i32 = 0x1;
 
 /// `DEREZ_DIE`.
 const DEREZ_DIE: i32 = 0;
 
+/// A rez that rezzes nothing: OpenSim's `doObjectRez` returns before its
+/// `ScriptSleep`, so the call takes no forced delay there.
+const fn rezzed_nothing(ctx: &mut ScriptCtx<'_>) {
+    if ctx.flavour().is_opensim() {
+        ctx.delay(0.0);
+    }
+}
+
 /// The object item and the place an `llRez*` call names, checked: [`None`]
 /// when nothing is to be rezzed, with what the flavour says about it said.
 fn checked_rez(ctx: &mut ScriptCtx<'_>, item: &str, position: &Vector) -> Option<()> {
+    let checked = check_rez(ctx, item, position);
+    if checked.is_none() {
+        rezzed_nothing(ctx);
+    }
+    checked
+}
+
+/// [`checked_rez`]'s checks.
+fn check_rez(ctx: &mut ScriptCtx<'_>, item: &str, position: &Vector) -> Option<()> {
     let caller = ctx.caller();
     let here = ctx.host().placement(caller).position;
     let distance = ((position.x - here.x).powi(2)
@@ -60,8 +81,8 @@ fn checked_rez(ctx: &mut ScriptCtx<'_>, item: &str, position: &Vector) -> Option
             ctx.refuse(format!("llRez(AtRoot/Object): Can't find object '{item}'"));
         } else {
             ctx.refuse(format!("Could not find object '{item}'."));
+            ctx.error_pause();
         }
-        ctx.sleep(1.0);
         return None;
     };
     if found.kind != INVENTORY_OBJECT {
@@ -80,7 +101,6 @@ fn not_an_object(ctx: &mut ScriptCtx<'_>) {
             "llRez(AtRoot/Object): Can't create requested object; object is missing from database"
                 .to_owned(),
         );
-        ctx.sleep(1.0);
     }
 }
 
@@ -92,6 +112,7 @@ fn rez_with(ctx: &mut ScriptCtx<'_>, rez: &Rez) -> String {
         Ok(key) => key,
         Err(_refused) => {
             not_an_object(ctx);
+            rezzed_nothing(ctx);
             NULL_KEY.to_owned()
         }
     }
@@ -443,9 +464,9 @@ fn offer_message(ctx: &mut ScriptCtx<'_>, what: &str, folder: bool) -> String {
 /// contents (a name it holds already becomes `Gift 1`, a script arrives
 /// stopped, `changed(CHANGED_INVENTORY)` there), or as an offer to an avatar,
 /// marked offline, which holds the script 2 s on Second Life and 3 s on
-/// OpenSim. A missing name is refused: on Second Life
-/// `Unable to give inventory: 'No item named 'Nope'.'.`, on OpenSim with a
-/// second's sleep.
+/// OpenSim, where a gift to a prim takes the 3 s too. A missing name is
+/// refused: on Second Life `Unable to give inventory: 'No item named
+/// 'Nope'.'.`, on OpenSim with a second's sleep and none of its own.
 ///
 /// # Errors
 ///
@@ -461,7 +482,7 @@ pub fn ll_give_inventory(
             "llGiveInventory: Can't parse destination key '{}'",
             destination.0
         ));
-        ctx.sleep(1.0);
+        ctx.delay(0.0);
         return Ok(());
     }
     if named(ctx, &name).is_none() {
@@ -469,7 +490,7 @@ pub fn ll_give_inventory(
             ctx.refuse(format!(
                 "llGiveInventory: Can't find inventory object '{name}'"
             ));
-            ctx.sleep(1.0);
+            ctx.delay(0.0);
         } else {
             ctx.refuse(format!(
                 "Unable to give inventory: 'No item named '{name}'.'."
@@ -492,13 +513,13 @@ pub fn ll_give_inventory(
         offline: true,
     };
     if ctx.host().offer_items(caller, &offer) {
-        ctx.sleep(offer_delay(opensim));
+        ctx.delay(offer_delay(opensim));
     } else if opensim {
         ctx.refuse(format!(
             "llGiveInventory: Can't find destination '{}'",
             offer.agent
         ));
-        ctx.sleep(1.0);
+        ctx.delay(0.0);
     }
     Ok(())
 }
@@ -507,7 +528,8 @@ pub fn ll_give_inventory(
 /// holds to `destination` — into a prim's contents one by one, no folder;
 /// to an avatar as an offer of a folder named `folder`, not marked offline.
 /// OpenSim refuses a destination that is neither, and a list none of whose
-/// items the prim holds.
+/// items the prim holds; its forced delay is 0.1 s but for an offer to an
+/// avatar, and none for an empty list.
 ///
 /// # Errors
 ///
@@ -518,10 +540,13 @@ pub fn ll_give_inventory_list(
     folder: String,
     inventory: Vec<Element>,
 ) -> Result<(), CallError> {
+    let opensim = ctx.flavour().is_opensim();
     if inventory.is_empty() {
+        if opensim {
+            ctx.delay(0.0);
+        }
         return Ok(());
     }
-    let opensim = ctx.flavour().is_opensim();
     let caller = ctx.caller();
     let held = ctx.host().contents(caller);
     let items: Vec<String> = inventory
@@ -537,12 +562,15 @@ pub fn ll_give_inventory_list(
     if items.is_empty() {
         if opensim {
             ctx.refuse("llGiveInventoryList: Unable to give list, no items found".to_owned());
-            ctx.sleep(1.0);
+            ctx.delay(OPENSIM_LIST_REFUSED);
         }
         return Ok(());
     }
     if to_prim {
         let _given = ctx.host().give_to_prim(caller, &destination.0, &items);
+        if opensim {
+            ctx.delay(OPENSIM_LIST_REFUSED);
+        }
         return Ok(());
     }
     let message = offer_message(ctx, &folder, true);
@@ -555,7 +583,7 @@ pub fn ll_give_inventory_list(
     };
     if !ctx.host().offer_items(caller, &offer) && opensim {
         ctx.refuse("llGiveInventoryList: Unable to give list, destination not found".to_owned());
-        ctx.sleep(1.0);
+        ctx.delay(OPENSIM_LIST_REFUSED);
     }
     Ok(())
 }
@@ -582,12 +610,15 @@ pub fn ll_remote_load_script_pin(
     let caller = ctx.caller();
     let here = ctx.host().whereabouts(caller);
     if here.prim.eq_ignore_ascii_case(&target.0) {
+        if opensim {
+            ctx.delay(0.0);
+        }
         return Ok(());
     }
     if named(ctx, &name).is_none_or(|item| item.kind != INVENTORY_SCRIPT) {
         if opensim {
             ctx.refuse(format!("llRemoteLoadScriptPin: Can't find script '{name}'"));
-            ctx.sleep(1.0);
+            ctx.delay(0.0);
         }
         return Ok(());
     }

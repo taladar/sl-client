@@ -1,0 +1,17 @@
+grid: fake-opensim
+date: 2026-11-07
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Fake Region
+engine: sl-lsl-runtime imitating YEngine
+settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
+
+PROBE time/timer-floor rec=start region="Fake Region" channel="OpenSim" version="sl-fake-grid 0.1.0"
+PROBE time/timer-floor rec=interval asked=0.001000 fired=28 first=0.109000 smallest=0.109000 largest=0.110000 mean=0.109111
+PROBE time/timer-floor rec=interval asked=0.010000 fired=28 first=0.109000 smallest=0.109000 largest=0.110000 mean=0.109111
+PROBE time/timer-floor rec=interval asked=0.020000 fired=28 first=0.109000 smallest=0.109000 largest=0.110000 mean=0.109111
+PROBE time/timer-floor rec=interval asked=0.050000 fired=28 first=0.109000 smallest=0.109000 largest=0.110000 mean=0.109111
+PROBE time/timer-floor rec=interval asked=0.100000 fired=28 first=0.109000 smallest=0.109000 largest=0.110000 mean=0.109111
+PROBE time/timer-floor rec=interval asked=0.200000 fired=14 first=0.200000 smallest=0.218000 largest=0.219000 mean=0.218154
+PROBE time/timer-floor rec=interval asked=0.500000 fired=6 first=0.509000 smallest=0.509000 largest=0.510000 mean=0.509200
+PROBE time/timer-floor rec=interval asked=-1.000000 fired=28 first=0.109000 smallest=0.109000 largest=0.110000 mean=0.109111
+PROBE time/timer-floor rec=end

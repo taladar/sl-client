@@ -61,6 +61,7 @@ pub mod comms;
 pub mod contents;
 mod context;
 mod cost;
+pub(crate) mod delays;
 mod detected;
 pub mod economy;
 mod engine;

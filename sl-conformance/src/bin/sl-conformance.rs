@@ -65,6 +65,7 @@ async fn dispatch(options: Options) -> Result<(), Error> {
         Subcommand::Run(args) => run(args).await,
         Subcommand::RunOffline(args) => run_offline(args.grid).await,
         Subcommand::CompareProbes(args) => compare_probes(&args),
+        Subcommand::Differential(args) => differential(args).await,
         Subcommand::List(args) => {
             list(args.grid);
             Ok(())
@@ -94,6 +95,56 @@ fn compare_probes(args: &CompareProbesArgs) -> Result<(), Error> {
         print_line(&line);
     }
     Ok(())
+}
+
+/// Run the probes `args` names — the differential suite without any — on a
+/// live grid and on the fake flavour imitating it, then print what differs
+/// between the two runs' transcripts beyond the tolerance model and the
+/// accepted differences.
+///
+/// # Errors
+///
+/// Returns [`Error::NotApplicable`] for a grid that is not a live one, and
+/// the errors of either run and of the comparison.
+async fn differential(args: DifferentialArgs) -> Result<(), Error> {
+    let twin = args.grid.fake_twin().ok_or_else(|| Error::NotApplicable {
+        test: "differential".to_owned(),
+        grid: args.grid,
+    })?;
+    let probes: Vec<String> = if args.probes.is_empty() {
+        sl_conformance::probe_corpus::DIFFERENTIAL_SUITE
+            .iter()
+            .map(|probe| (*probe).to_owned())
+            .collect()
+    } else {
+        args.probes.clone()
+    };
+    for grid in [args.grid, twin] {
+        let live = grid == args.grid;
+        run(RunArgs {
+            grid,
+            avatar: live.then(|| args.avatar.clone()).flatten(),
+            secondary: live.then(|| args.secondary.clone()).flatten(),
+            tertiary: None,
+            credentials: live.then(|| args.credentials.clone()).flatten(),
+            fixtures: live.then(|| args.fixtures.clone()).flatten(),
+            force: false,
+            timeout: args.timeout,
+            probe: probes.clone(),
+            test: "lsl-probes".to_owned(),
+        })
+        .await?;
+    }
+    let results = |grid: Grid| match grid {
+        Grid::Opensim => "opensim-yengine",
+        Grid::Aditi => "aditi",
+        Grid::FakeSl => "fake-sl",
+        Grid::FakeOpensim => "fake-opensim",
+    };
+    compare_probes(&CompareProbesArgs {
+        grid: vec![results(args.grid).to_owned(), results(twin).to_owned()],
+        probes,
+    })
 }
 
 /// List the registered tests, optionally filtered to one grid.
@@ -643,6 +694,10 @@ fn write_record(
 ///
 /// Returns [`Error::Log`] if the subscriber cannot be installed.
 fn init_logging(log_file: &Path) -> Result<(), Error> {
+    // A `differential` run makes two runs in one process.
+    if tracing::dispatcher::has_been_set() {
+        return Ok(());
+    }
     let directory = log_file
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
@@ -726,6 +781,10 @@ enum Subcommand {
     /// the fields a probe marks as measurements, the order of unordered
     /// records). No login.
     CompareProbes(CompareProbesArgs),
+    /// Run LSL probes on a live grid and on the fake flavour imitating it,
+    /// and print what differs between the two transcripts: the named
+    /// probes, or the differential suite.
+    Differential(DifferentialArgs),
     /// List the registered tests.
     List(ListArgs),
     /// Generate the man page.
@@ -800,6 +859,31 @@ struct CompareProbesArgs {
     #[clap(long, value_name = "RESULTS_GRID")]
     grid: Vec<String>,
     /// The probe ids to compare; without any, every probe.
+    probes: Vec<String>,
+}
+
+/// Arguments for the `differential` subcommand.
+#[derive(clap::Args, Debug)]
+struct DifferentialArgs {
+    /// The live grid; the fake flavour imitating it is the other run.
+    #[clap(long, value_enum, default_value = "opensim")]
+    grid: Grid,
+    /// The primary avatar name in the live grid's credentials file.
+    #[clap(long)]
+    avatar: Option<String>,
+    /// The secondary avatar name in the live grid's credentials file.
+    #[clap(long)]
+    secondary: Option<String>,
+    /// The live grid's credentials TOML file.
+    #[clap(long)]
+    credentials: Option<PathBuf>,
+    /// The live grid's fixtures TOML file.
+    #[clap(long)]
+    fixtures: Option<PathBuf>,
+    /// Override each run's timeout, in seconds.
+    #[clap(long, value_name = "SECONDS")]
+    timeout: Option<u64>,
+    /// The probe ids to run; without any, the differential suite.
     probes: Vec<String>,
 }
 

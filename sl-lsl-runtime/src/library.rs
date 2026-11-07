@@ -91,11 +91,9 @@ pub trait PureCtx {
     fn flavour(&self) -> EngineFlavour;
 
     /// Refuse the call's arguments with `text` on `DEBUG_CHANNEL`; the call
-    /// carries on and returns its answer.
+    /// carries on and returns its answer. On OpenSim it costs the script a
+    /// second ([`ScriptCtx::refuse`]).
     fn refuse(&mut self, text: String);
-
-    /// Suspend the script for `seconds` once the call returns.
-    fn sleep(&mut self, seconds: f32);
 
     /// The list object handed as argument `argument` now holds `list`: the
     /// function changed it in place, as some of OpenSim's library does
@@ -114,10 +112,6 @@ impl PureCtx for ScriptCtx<'_> {
 
     fn refuse(&mut self, text: String) {
         ScriptCtx::refuse(self, text);
-    }
-
-    fn sleep(&mut self, seconds: f32) {
-        ScriptCtx::sleep(self, seconds);
     }
 
     fn write_back(&mut self, argument: usize, list: Vec<Element>) {
@@ -143,7 +137,7 @@ pub(crate) mod bare {
         pub(crate) flavour: EngineFlavour,
         /// What the calls refused, in order.
         pub(crate) refusals: Vec<String>,
-        /// The seconds the calls asked to sleep, in all.
+        /// The seconds the calls' refusals cost, in all.
         pub(crate) slept: f32,
         /// The argument the last call changed in place, and to what.
         pub(crate) written_back: Option<(usize, Vec<Element>)>,
@@ -171,10 +165,9 @@ pub(crate) mod bare {
 
         fn refuse(&mut self, text: String) {
             self.refusals.push(text);
-        }
-
-        fn sleep(&mut self, seconds: f32) {
-            self.slept += seconds;
+            if self.flavour.is_opensim() {
+                self.slept += 1.0;
+            }
         }
 
         fn write_back(&mut self, argument: usize, list: Vec<Element>) {

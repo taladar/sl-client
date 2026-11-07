@@ -1,0 +1,14 @@
+grid: fake-opensim
+date: 2026-11-07
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Fake Region
+engine: sl-lsl-runtime imitating YEngine
+settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
+
+PROBE events/detected-cleared rec=start region="Fake Region" channel="OpenSim" version="sl-fake-grid 0.1.0"
+PROBE events/detected-cleared rec=waiting drive=touch
+# touch surface=none
+PROBE events/detected-cleared rec=touch key_is_owner=1 key_is_null=0 name_empty=0 name_is_null_key=0 type=1 face=-1 link=0
+PROBE events/detected-cleared rec=link_message key_is_owner=0 key_is_null=0 name_empty=0 name_is_null_key=1 type=0 face=0 link=0
+PROBE events/detected-cleared rec=timer key_is_owner=0 key_is_null=0 name_empty=0 name_is_null_key=1 type=0 face=0 link=0
+PROBE events/detected-cleared rec=end

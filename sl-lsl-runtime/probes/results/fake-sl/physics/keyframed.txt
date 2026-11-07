@@ -1,0 +1,25 @@
+grid: fake-sl
+date: 2026-11-07
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Fake Region
+engine: sl-lsl-runtime imitating Mono
+settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
+complete: no
+
+PROBE physics/keyframed rec=start region="Fake Region" channel="Second Life Server" version="sl-fake-grid 0.1.0"
+PROBE physics/keyframed rec=shape shape_type=0
+PROBE physics/keyframed rec=try label=fresh-shape
+# debug-channel: from="Object" text="Object [script:Probe] Script run-time error"
+# debug-channel: from="Object" text="llSetKeyframedMotion is not implemented by this grid"
+PROBE physics/keyframed rec=try label=types-swapped
+# debug-channel: from="Object" text="Object [script:Swapped] Script run-time error"
+# debug-channel: from="Object" text="llSetKeyframedMotion is not implemented by this grid"
+PROBE physics/keyframed rec=try label=translation-only-three
+# debug-channel: from="Object" text="Object [script:Mismatched] Script run-time error"
+# debug-channel: from="Object" text="llSetKeyframedMotion is not implemented by this grid"
+# debug-channel by=other: from="Object" text="Object [script:Probe] Script run-time error"
+# debug-channel by=other: from="Object" text="llSetKeyframedMotion is not implemented by this grid"
+# debug-channel by=other: from="Object" text="Object [script:Swapped] Script run-time error"
+# debug-channel by=other: from="Object" text="llSetKeyframedMotion is not implemented by this grid"
+# debug-channel by=other: from="Object" text="Object [script:Mismatched] Script run-time error"
+# debug-channel by=other: from="Object" text="llSetKeyframedMotion is not implemented by this grid"

@@ -132,22 +132,16 @@ fn math_rotations_print_what_aditi_printed() -> Result<(), String> {
 }
 
 /// `math/rotations` lines that part on OpenSim for the value model, not the
-/// library: the operators `vector * rotation` and `vector / rotation` are
-/// Second Life's on every flavour (OpenSim normalises first and uses another
-/// formula — book `gridspec/lsl.md` § Rotations), unary minus keeps a zero's
-/// sign here, a negative zero prints without its sign there, and a double
+/// library: unary minus keeps a zero's sign here, a negative zero prints
+/// without its sign there, and a double
 /// prints a sixth decimal a float rounds away (`90.000001`, `-140.000004`;
 /// `llRot2Axis(<1, 2, 3, 4>)`'s `y` is 0.53452248 in either, which a float
 /// prints `0.534523` and a double `0.534522`).
-const OPENSIM_ROTATIONS_IN_DOUBLE: [(&str, &str); 16] = [
+const OPENSIM_ROTATIONS_IN_DOUBLE: [(&str, &str); 12] = [
     ("euler2rot-back", "y90"),
     ("euler2rot-back", "gimbal-up"),
     ("euler2rot-back", "gimbal-down"),
     ("euler2rot-back", "past-a-turn"),
-    ("rotate", "x-by-twice-identity"),
-    ("rotate", "x-by-1234"),
-    ("rotate", "x-by-zero"),
-    ("unrotate", "x-by-1234"),
     ("axis-angle", "z-450"),
     ("axis-angle", "z-minus-90"),
     ("rot2euler", "negative-identity"),

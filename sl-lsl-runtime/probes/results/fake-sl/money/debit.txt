@@ -1,0 +1,69 @@
+grid: fake-sl
+date: 2026-11-07
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Fake Region
+engine: sl-lsl-runtime imitating Mono
+settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
+
+PROBE money/debit rec=start region="Fake Region" channel="Second Life Server" version="sl-fake-grid 0.1.0"
+PROBE money/debit rec=held step=0 why=fresh perms=0 granter=none
+PROBE money/debit rec=waiting drive=touch by=other
+# touch by=other active_group=none surface=none
+PROBE money/debit rec=touch by=other
+PROBE money/debit rec=give step=1 to=other amount=1 result=0
+PROBE money/debit rec=transfer step=1 to=other amount=1 handle_null=0
+# debug-channel: from="Object" text="Script trying to debit L$ from owner but PERMISSION_DEBIT permission not set!"
+PROBE money/debit rec=result step=1 id=handle success=0 data="MISSING_PERMISSION_DEBIT"
+# question permissions=2 object="Object" owner="<first> <last>" experience=none
+PROBE money/debit rec=timeout step=1
+PROBE money/debit rec=waiting drive=answer grant=2
+# debug-channel by=other: from="Object" text="Script trying to debit L$ from owner but PERMISSION_DEBIT permission not set!"
+# answer grant=2
+PROBE money/debit rec=answer step=2 perms=2
+# money-balance success=1 change=-1 type=5009 source=owner dest=other amount=1 item="Object" description="You paid <other-first> <last> L$1."
+PROBE money/debit rec=held step=2 why=answer perms=2 granter=owner
+PROBE money/debit rec=give step=3 to=other amount=1 result=0
+PROBE money/debit rec=timeout step=3
+# money-balance success=1 change=-1 type=5009 source=owner dest=other amount=1 item="Object" description="You paid <other-first> <last> L$1."
+PROBE money/debit rec=transfer step=4 to=other amount=1 handle_null=0
+# money-balance success=1 change=0 type=5009 source=owner dest=owner amount=1 item="Object" description="<first> <last> paid you L$1."
+PROBE money/debit rec=result step=4 id=handle success=1 data="other,1"
+# money-balance success=1 change=0 type=5009 source=owner dest=owner amount=1 item="Object" description="You paid <first> <last> L$1."
+PROBE money/debit rec=transfer step=5 to=owner amount=1 handle_null=0
+# money-balance success=0 change=0 type=5009 source=owner dest=probe amount=1 item="Object" description="There has been a problem transferring L$. This error has been logged and reported."
+PROBE money/debit rec=result step=5 id=handle success=1 data="owner,1"
+PROBE money/debit rec=transfer step=6 to=none amount=1 handle_null=0
+PROBE money/debit rec=result step=6 id=handle success=0 data="INVALID_DESTINATION"
+PROBE money/debit rec=transfer step=7 to=prim amount=1 handle_null=0
+PROBE money/debit rec=result step=7 id=handle success=0 data="LINDENDOLLAR_ENTITYDOESNOTEXIST"
+# money-balance success=0 change=0 type=5009 source=owner dest=someone amount=1 item="Object" description="There has been a problem transferring L$. This error has been logged and reported."
+PROBE money/debit rec=transfer step=8 to=someone amount=1 handle_null=0
+PROBE money/debit rec=result step=8 id=handle success=0 data="LINDENDOLLAR_ENTITYDOESNOTEXIST"
+PROBE money/debit rec=transfer step=9 to=other amount=0 handle_null=0
+# money-balance success=0 change=0 type=5009 source=owner dest=other amount=1000000000 item="Object" description="Insufficient funds."
+PROBE money/debit rec=result step=9 id=handle success=0 data="INVALID_AMOUNT"
+PROBE money/debit rec=transfer step=10 to=other amount=-1 handle_null=0
+PROBE money/debit rec=result step=10 id=handle success=0 data="INVALID_AMOUNT"
+PROBE money/debit rec=transfer step=11 to=other amount=1000000000 handle_null=0
+PROBE money/debit rec=result step=11 id=handle success=0 data="LINDENDOLLAR_INSUFFICIENTFUNDS"
+PROBE money/debit rec=give step=12 to=other amount=0 result=0
+PROBE money/debit rec=give step=12 to=other amount=-1 result=0
+# debug-channel: from="Object" text="Invalid amount for llGiveMoney()."
+# debug-channel: from="Object" text="Invalid amount for llGiveMoney()."
+PROBE money/debit rec=timeout step=12
+PROBE money/debit rec=waiting drive=answer by=other grant=2
+# money-balance by=other success=1 change=1 type=5009 source=owner dest=other amount=1 item="Object" description="<first> <last> paid you L$1."
+# money-balance by=other success=1 change=1 type=5009 source=owner dest=other amount=1 item="Object" description="<first> <last> paid you L$1."
+# debug-channel by=other: from="Object" text="Invalid amount for llGiveMoney()."
+# debug-channel by=other: from="Object" text="Invalid amount for llGiveMoney()."
+# debug-channel by=other: from="Object" text="Script asking non-owner for run time permissions only owner can grant"
+# debug-channel: from="Object" text="Script asking non-owner for run time permissions only owner can grant"
+# answer by=other grant=2 question=none
+PROBE money/debit rec=held step=13 why=no-answer perms=2 granter=owner
+PROBE money/debit rec=waiting drive=pay by=other amount=2
+# pay by=other amount=2 prim=A
+# money-balance success=1 change=2 type=5008 source=other dest=owner amount=2 item="" description="<other-first> <last> paid you L$2."
+PROBE money/debit rec=money step=14 payer=other amount=2
+# money-balance by=other success=1 change=-2 type=5008 source=other dest=owner amount=2 item="" description="You paid <first> <last> L$2."
+PROBE money/debit rec=timeout step=14
+PROBE money/debit rec=end

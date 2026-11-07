@@ -1,0 +1,21 @@
+grid: fake-sl
+date: 2026-11-07
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Fake Region
+engine: sl-lsl-runtime imitating Mono
+settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
+
+PROBE events/timer-reset rec=start region="Fake Region" channel="Second Life Server" version="sl-fake-grid 0.1.0"
+PROBE events/timer-reset rec=round label=sleep-keep events="timer@0" tenths=10 took=1.022222 stray=1
+PROBE events/timer-reset rec=round label=sleep-reset events="timer@0" tenths=10 took=1.022223 stray=0
+PROBE events/timer-reset rec=round label=sleep-stop events="" tenths=10 took=1.022222 stray=0
+PROBE events/timer-reset rec=round label=color-keep events="timer@0,changed2@0" tenths=10 took=1.022223 stray=0
+PROBE events/timer-reset rec=round label=media-keep events="timer@0,changed2048@0" tenths=10 took=1.022223 stray=0
+PROBE events/timer-reset rec=round label=media-reset events="timer@0,changed2048@0" tenths=10 took=1.022221 stray=0
+PROBE events/timer-reset rec=round label=clear-keep events="timer@0,changed2048@0" tenths=10 took=1.022224 stray=0
+PROBE events/timer-reset rec=round label=media-get events="" tenths=10 took=1.022221 stray=0
+PROBE events/timer-reset rec=round label=in-timer-keep events="timer@0" tenths=10 took=1.022224 stray=0
+PROBE events/timer-reset rec=round label=in-timer-reset events="timer@30" tenths=10 took=1.022221 stray=0
+PROBE events/timer-reset rec=round label=in-timer-media events="changed2048@0,timer@10" tenths=10 took=1.022224 stray=0
+PROBE events/timer-reset rec=round label=in-timer-media-keep events="changed2048@0,timer@0" tenths=10 took=1.022224 stray=0
+PROBE events/timer-reset rec=end

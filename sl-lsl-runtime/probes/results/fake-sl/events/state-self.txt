@@ -1,0 +1,15 @@
+grid: fake-sl
+date: 2026-11-07
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Fake Region
+engine: sl-lsl-runtime imitating Mono
+settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
+
+PROBE events/state-self rec=start region="Fake Region" channel="Second Life Server" version="sl-fake-grid 0.1.0"
+PROBE events/state-self rec=self step=before
+PROBE events/state-self rec=self step=after entries=1 exits=0
+PROBE events/state-self rec=function step=before
+PROBE events/state-self rec=caller step=after-call
+PROBE events/state-self rec=exit state=default exits=1
+PROBE events/state-self rec=entered state=two exits=1
+PROBE events/state-self rec=end

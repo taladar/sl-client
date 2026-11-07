@@ -130,23 +130,30 @@ enum Vm {
     YEngine,
     /// OpenSim's XEngine.
     XEngine,
+    /// The fake grid's engine imitating Second Life's.
+    FakeSl,
+    /// The fake grid's engine imitating OpenSim's YEngine: the fake grid
+    /// runs one OpenSim engine, so it has no XEngine twin.
+    FakeOpensim,
 }
 
 impl Vm {
-    /// The engine a case runs on `grid`.
+    /// The engine a case runs on `grid` — XEngine with `xengine`, on OpenSim.
     const fn on(grid: Grid, xengine: bool) -> Self {
-        match (is_opensim(grid), xengine) {
-            (false, _) => Self::Mono,
-            (true, false) => Self::YEngine,
-            (true, true) => Self::XEngine,
+        match (grid, xengine) {
+            (Grid::Aditi, _) => Self::Mono,
+            (Grid::Opensim, false) => Self::YEngine,
+            (Grid::Opensim, true) => Self::XEngine,
+            (Grid::FakeSl, _) => Self::FakeSl,
+            (Grid::FakeOpensim, _) => Self::FakeOpensim,
         }
     }
 
     /// The first line that picks this engine for a script on OpenSim.
     const fn source_prefix(self) -> &'static str {
         match self {
-            Self::Mono => "",
-            Self::YEngine => "//YEngine:\n",
+            Self::Mono | Self::FakeSl => "",
+            Self::YEngine | Self::FakeOpensim => "//YEngine:\n",
             Self::XEngine => "//XEngine:\n",
         }
     }
@@ -157,6 +164,8 @@ impl Vm {
             Self::Mono => "Mono",
             Self::YEngine => "YEngine",
             Self::XEngine => "XEngine",
+            Self::FakeSl => "sl-lsl-runtime imitating Mono",
+            Self::FakeOpensim => "sl-lsl-runtime imitating YEngine",
         }
     }
 
@@ -166,9 +175,42 @@ impl Vm {
             Self::Mono => "aditi",
             Self::YEngine => "opensim-yengine",
             Self::XEngine => "opensim-xengine",
+            Self::FakeSl => "fake-sl",
+            Self::FakeOpensim => "fake-opensim",
         }
     }
+
+    /// The live engine this one imitates: itself for a live one.
+    const fn imitates(self) -> Self {
+        match self {
+            Self::FakeSl => Self::Mono,
+            Self::FakeOpensim => Self::YEngine,
+            live @ (Self::Mono | Self::YEngine | Self::XEngine) => live,
+        }
+    }
+
+    /// Whether `script` is left out on this engine: where its header says
+    /// so, for this engine or the one it imitates — a fake grid's transcript
+    /// is set against the live grid's, so it leaves out what that left out.
+    fn skips(self, script: &ProbeScript) -> bool {
+        script.header.skipped_on(self.results_grid())
+            || script.header.skipped_on(self.imitates().results_grid())
+    }
 }
+
+/// Where the probes' prims stand on the fake grid: south of the arrival
+/// point, clear of the catalogue's row, so both avatars stand within chat
+/// range of them.
+const FAKE_BUILD_POSITION: Vector = Vector {
+    x: 128.0,
+    y: 124.0,
+    z: 25.0,
+};
+
+/// The fake grid's engine settings, as a result header states them.
+const FAKE_SETTINGS: &str = "sl-fake-grid's: each flavour's measured timer floor, \
+                             ScriptDelayFactor=1.0, the stock [OSSL] settings, \
+                             llHTTPRequest answered by the injected responder";
 
 /// Runs the corpus under Second Life's Mono or OpenSim's YEngine.
 #[derive(Debug)]
@@ -184,7 +226,7 @@ impl GridTest for LslProbes {
     }
 
     fn grids(&self) -> &'static [Grid] {
-        &[Grid::Opensim, Grid::Aditi]
+        &[Grid::Opensim, Grid::Aditi, Grid::FakeSl, Grid::FakeOpensim]
     }
 
     fn accounts(&self) -> u8 {
@@ -860,11 +902,14 @@ impl Transcript {
             self.heard("", chat);
             return None;
         }
+        // A probe may print what the grid told it of an avatar (an OSSL
+        // avatar list, a name lookup): the avatars' names are placeholders
+        // in its lines as in the notes.
         let Ok(parsed) = Line::parse(line) else {
-            self.body.push(line.to_owned());
+            self.body.push(self.cast.scrub(line));
             return None;
         };
-        self.body.push(shown_line(line, &parsed));
+        self.body.push(self.cast.scrub(&shown_line(line, &parsed)));
         if parsed.rec == "start" && self.region.is_none() {
             self.region = parsed.field("region").map(str::to_owned);
         }
@@ -946,8 +991,12 @@ fn quote(text: &str) -> String {
 async fn run_corpus(ctx: &mut TestContext, xengine: bool) -> Result<(), TestFailure> {
     let grid = ctx.grid();
     let engine = Vm::on(grid, xengine);
-    let build_position = ctx.build_position();
-    let settings = if is_opensim(grid) {
+    let build_position = ctx
+        .build_position()
+        .or_else(|| grid.is_fake().then_some(FAKE_BUILD_POSITION));
+    let settings = if grid.is_fake() {
+        FAKE_SETTINGS.to_owned()
+    } else if is_opensim(grid) {
         ctx.lsl_settings().map_or_else(
             || "not given to the runner (no `lsl_settings` fixture)".to_owned(),
             str::to_owned,
@@ -1379,11 +1428,11 @@ async fn run_probe(
         if script.header.object.is_some() {
             continue;
         }
-        if script.header.skipped_on(engine.results_grid()) {
+        if engine.skips(script) {
             watch.transcript.body.push(format!(
                 "# skipped: script {} (skip-on: {})",
                 quote(&script.name),
-                engine.results_grid()
+                engine.imitates().results_grid()
             ));
             continue;
         }
@@ -2459,12 +2508,14 @@ async fn restart(
     transcript: &mut Transcript,
     seconds: u32,
 ) -> Result<(), TestFailure> {
-    let Some(estate) = avatars.estate else {
+    // On the fake grid the owner is an estate manager and asks itself.
+    let owner_asks = avatars.estate.is_none() && avatars.comeback.grid.is_fake();
+    if avatars.estate.is_none() && !owner_asks {
         transcript
             .body
             .push("# restart sent=no reason=\"the credentials name no estate owner\"".to_owned());
         return Ok(());
-    };
+    }
     let scheduled = i32::try_from(seconds).map_err(|_overflow| {
         TestFailure::Assertion(format!("{}: a restart in {seconds} s", probe.id))
     })?;
@@ -2472,12 +2523,28 @@ async fn restart(
         .session
         .region_handle()
         .ok_or_else(|| TestFailure::State("the owner is in no region".to_owned()))?;
-    let mut manager = estate.login().await?;
-    manager.wait_for_region(REGION_TIMEOUT).await?;
+    let mut manager = match avatars.estate {
+        Some(estate) => {
+            let mut manager = estate.login().await?;
+            manager.wait_for_region(REGION_TIMEOUT).await?;
+            Some(manager)
+        }
+        None => None,
+    };
     transcript.body.push(format!("# restart seconds={seconds}"));
-    manager
-        .send(Command::RestartRegion { seconds: scheduled })
-        .await?;
+    match manager.as_mut() {
+        Some(manager) => {
+            manager
+                .send(Command::RestartRegion { seconds: scheduled })
+                .await?;
+        }
+        None => {
+            avatars
+                .session
+                .send(Command::RestartRegion { seconds: scheduled })
+                .await?;
+        }
+    }
     // The owner hears the notices, then the region going down.
     let down_within = Duration::from_secs(u64::from(seconds)).saturating_add(DOWN_GRACE);
     let id = probe.id.clone();
@@ -3133,11 +3200,11 @@ async fn put_object(
         .await?;
     let mut compiled = true;
     for script in packed.scripts {
-        if script.header.skipped_on(packed.engine.results_grid()) {
+        if packed.engine.skips(script) {
             watch.transcript.body.push(format!(
                 "# skipped: script {} (skip-on: {})",
                 quote(&script.name),
-                packed.engine.results_grid()
+                packed.engine.imitates().results_grid()
             ));
             continue;
         }

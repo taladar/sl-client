@@ -20,6 +20,7 @@ use crate::library::text::Text;
 use crate::library::{CallError, Key};
 use crate::value::Element;
 use crate::vm::comms::{cut_bytes, is_somebody};
+use crate::vm::delays::CHANNEL_ZERO_DELAY;
 use crate::vm::{
     DEBUG_CHANNEL, Dialog, EngineFlavour, InstantMessage, LinkMessage, ListenFilter, LoadUrl,
     MapDestination, ScriptCtx, Speech, TEXT_BOX_BUTTON, TooManyListens,
@@ -99,23 +100,46 @@ pub fn ll_whisper(ctx: &mut ScriptCtx<'_>, channel: i32, text: String) -> Result
     Ok(())
 }
 
-/// `llSay`: say `text` on `channel` within 20 m.
+/// OpenSim's channel-0 chat throttle on an `llSay` or `llShout` on
+/// `channel` ([`crate::vm::delays::SayThrottle`]): past it the call sleeps
+/// two seconds before the line is said. Whether the call returns now, to be
+/// made again when the script wakes (XEngine, whose thread sleeps first);
+/// YEngine says the line and then sleeps. Second Life has no throttle.
+fn waits_for_throttle(ctx: &mut ScriptCtx<'_>, channel: i32) -> bool {
+    if !ctx.flavour().is_opensim() || ctx.woke() {
+        return false;
+    }
+    let now = ctx.region_time();
+    if !ctx.say_throttle().say(channel, now) {
+        return false;
+    }
+    ctx.delay_first(CHANNEL_ZERO_DELAY);
+    ctx.flavour() == EngineFlavour::XEngine
+}
+
+/// `llSay`: say `text` on `channel` within 20 m, past OpenSim's channel-0
+/// throttle (`waits_for_throttle`).
 ///
 /// # Errors
 ///
 /// None; the signature is the library's.
 pub fn ll_say(ctx: &mut ScriptCtx<'_>, channel: i32, text: String) -> Result<(), CallError> {
-    speak(ctx, channel, &text, ChatVolume::Say);
+    if !waits_for_throttle(ctx, channel) {
+        speak(ctx, channel, &text, ChatVolume::Say);
+    }
     Ok(())
 }
 
-/// `llShout`: say `text` on `channel` within 100 m.
+/// `llShout`: say `text` on `channel` within 100 m, past OpenSim's channel-0
+/// throttle (`waits_for_throttle`).
 ///
 /// # Errors
 ///
 /// None; the signature is the library's.
 pub fn ll_shout(ctx: &mut ScriptCtx<'_>, channel: i32, text: String) -> Result<(), CallError> {
-    speak(ctx, channel, &text, ChatVolume::Shout);
+    if !waits_for_throttle(ctx, channel) {
+        speak(ctx, channel, &text, ChatVolume::Shout);
+    }
     Ok(())
 }
 
@@ -195,8 +219,8 @@ pub fn ll_owner_say(ctx: &mut ScriptCtx<'_>, text: String) -> Result<(), CallErr
 
 /// `llInstantMessage`: send `text` to the avatar `user`, wherever it is, cut
 /// to 1023 bytes. `NULL_KEY` and a string that is no key are refused in each
-/// grid's words; a key that is nobody's is nothing. The two seconds it costs
-/// are charged either way.
+/// grid's words, which costs OpenSim's second besides; a key that is nobody's
+/// is nothing. The two seconds it costs are charged either way.
 ///
 /// # Errors
 ///
@@ -298,6 +322,8 @@ fn put(ctx: &mut ScriptCtx<'_>, dialog: Dialog) {
 /// one of more than 512 bytes but shows the dialog, the message cut to 511
 /// bytes and every label to 23, and shows a button that is not a string as
 /// its text. No buttons is one, `OK` on Second Life and `Ok` on OpenSim.
+/// Each of OpenSim's complaints costs its second, and a refusal returns
+/// before the call's own sleep.
 ///
 /// # Errors
 ///
@@ -369,6 +395,15 @@ fn second_life_dialog(
     })
 }
 
+/// Refuse with OpenSim's `text` (`LSL_Api.Error`), which costs its second;
+/// with `returns`, the call returns there, before its own sleep.
+fn opensim_refuse(ctx: &mut ScriptCtx<'_>, text: &str, returns: bool) {
+    ctx.refuse(text.to_owned());
+    if returns {
+        ctx.delay(0.0);
+    }
+}
+
 /// OpenSim's `llDialog` (`LSL_Api.llDialog`, then the `ScriptDialog`'s
 /// fields): the dialog, or [`None`] with the refusal said.
 fn opensim_dialog(
@@ -379,7 +414,7 @@ fn opensim_dialog(
     channel: i32,
 ) -> Option<Dialog> {
     if !dotnet::is_uuid(&avatar.0) {
-        ctx.refuse("llDialog: First parameter must be a key".to_owned());
+        opensim_refuse(ctx, "llDialog: First parameter must be a key", true);
         return None;
     }
     if buttons.is_empty() {
@@ -388,13 +423,13 @@ fn opensim_dialog(
         ctx.write_back(2, vec![Element::String("Ok".to_owned())]);
     }
     if buttons.len() > MAX_BUTTONS {
-        ctx.refuse("llDialog: No more than 12 buttons can be shown".to_owned());
+        opensim_refuse(ctx, "llDialog: No more than 12 buttons can be shown", true);
         return None;
     }
     if message.is_empty() {
-        ctx.refuse("llDialog: Empty message".to_owned());
+        opensim_refuse(ctx, "llDialog: Empty message", false);
     } else if message.len() > OPENSIM_MESSAGE_BYTES {
-        ctx.refuse("llDialog: Message longer than 512 bytes".to_owned());
+        opensim_refuse(ctx, "llDialog: Message longer than 512 bytes", false);
     }
     let labels: Vec<String> = if buttons.is_empty() {
         vec!["Ok".to_owned()]
@@ -402,7 +437,7 @@ fn opensim_dialog(
         buttons.iter().map(element_to_string).collect()
     };
     if labels.iter().any(String::is_empty) {
-        ctx.refuse("llDialog: Button label cannot be blank".to_owned());
+        opensim_refuse(ctx, "llDialog: Button label cannot be blank", true);
         return None;
     }
     Some(Dialog {
@@ -420,7 +455,8 @@ fn opensim_dialog(
 /// whose text is said back on `channel` — a dialog with the one button
 /// [`TEXT_BOX_BUTTON`]. An empty message and a long one (512 characters or
 /// more on Second Life, more than 512 bytes on OpenSim) are refused in each
-/// grid's words, and nothing is shown.
+/// grid's words, and nothing is shown. Each of OpenSim's refusals costs its
+/// second and none of the call's own.
 ///
 /// # Errors
 ///
@@ -444,11 +480,15 @@ pub fn ll_text_box(
         (true | false, false) => None,
     };
     if opensim && !dotnet::is_uuid(&avatar.0) {
-        ctx.refuse("llTextBox: First parameter must be a key".to_owned());
+        opensim_refuse(ctx, "llTextBox: First parameter must be a key", true);
         return Ok(());
     }
     if let Some(refusal) = refusal {
-        ctx.refuse(format!("llTextBox: {refusal}"));
+        if opensim {
+            opensim_refuse(ctx, &format!("llTextBox: {refusal}"), true);
+        } else {
+            ctx.refuse(format!("llTextBox: {refusal}"));
+        }
         return Ok(());
     }
     put(
@@ -486,10 +526,14 @@ fn uri_scheme(url: &str) -> Option<String> {
     Some(scheme)
 }
 
+/// OpenSim's `llLoadURL` delay after refusing the URL, in place of its own.
+const LOAD_URL_REFUSED: f32 = 0.2;
+
 /// `llLoadURL`: offer the avatar `avatar` the page `url`, with `message`.
 /// OpenSim refuses a URL that is not `http` or `https` (`Invalid url schema`)
-/// or no URL at all (`Invalid url`); Second Life's check is not measured, so
-/// its flavour passes every URL on for the viewer to judge.
+/// or no URL at all (`Invalid url`), each with its second and 0.2 s in place
+/// of the call's 10 s; Second Life's check is not measured, so its flavour
+/// passes every URL on for the viewer to judge.
 ///
 /// # Errors
 ///
@@ -504,11 +548,13 @@ pub fn ll_load_url(
         match uri_scheme(&url).as_deref() {
             Some("http" | "https") => {}
             Some(_) => {
-                ctx.refuse("llLoadURL: Invalid url schema".to_owned());
+                opensim_refuse(ctx, "llLoadURL: Invalid url schema", false);
+                ctx.delay(LOAD_URL_REFUSED);
                 return Ok(());
             }
             None => {
-                ctx.refuse("llLoadURL: Invalid url".to_owned());
+                opensim_refuse(ctx, "llLoadURL: Invalid url", false);
+                ctx.delay(LOAD_URL_REFUSED);
                 return Ok(());
             }
         }
@@ -527,7 +573,8 @@ pub fn ll_load_url(
 
 /// `llMapDestination`: open a world map at `position` in the region
 /// `region`, for the avatar whose touch the script is handling or, outside a
-/// touch, the one wearing the object; otherwise nothing.
+/// touch, the one wearing the object; otherwise nothing — which OpenSim
+/// returns before its sleep.
 ///
 /// # Errors
 ///
@@ -551,6 +598,8 @@ pub fn ll_map_destination(
             look_at,
         };
         ctx.host().map_destination(caller, &destination);
+    } else if ctx.flavour().is_opensim() {
+        ctx.delay(0.0);
     }
     Ok(())
 }

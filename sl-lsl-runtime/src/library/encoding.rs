@@ -373,7 +373,6 @@ pub fn ll_base64_to_string<C: PureCtx>(ctx: &mut C, text: String) -> Result<Stri
             String::from_utf8_lossy(&bytes).into_owned()
         } else {
             ctx.refuse("llBase64ToString: Error decoding string".to_owned());
-            ctx.sleep(1.0);
             String::new()
         });
     }

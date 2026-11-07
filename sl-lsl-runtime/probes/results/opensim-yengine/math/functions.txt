@@ -1,5 +1,5 @@
 grid: opensim-yengine
-date: 2026-10-27
+date: 2026-11-07
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Default Region
 engine: YEngine
@@ -97,9 +97,9 @@ PROBE math/functions rec=modpow case=2,3,-7 value="1"
 PROBE math/functions rec=modpow case=7,1000000007,1000000007 value="-291172004"
 PROBE math/functions rec=modpow case=int-max,int-max,int-max-1 value="-8"
 PROBE math/functions rec=modpow case=3,int-max,65537 value="-32769"
-PROBE math/functions rec=frand case=one draws=2000 below_zero=0 above_zero=1 zeros=0 min=0.000874 max=0.999712
-PROBE math/functions rec=frand case=minus-one draws=2000 below_zero=1 above_zero=0 zeros=0 min=-0.998909 max=-0.000086
+PROBE math/functions rec=frand case=one draws=2000 below_zero=0 above_zero=1 zeros=0 min=0.000061 max=0.999440
+PROBE math/functions rec=frand case=minus-one draws=2000 below_zero=1 above_zero=0 zeros=0 min=-0.998739 max=-0.001023
 PROBE math/functions rec=frand case=zero draws=2000 below_zero=0 above_zero=0 zeros=2000 min=0.000000 max=0.000000
-PROBE math/functions rec=frand case=1e30 draws=2000 below_zero=0 above_zero=1 zeros=0 min=2585077659499400000000000000.000000 max=999716529156881000000000000000.000000
+PROBE math/functions rec=frand case=1e30 draws=2000 below_zero=0 above_zero=1 zeros=0 min=824976247188159000000000000.000000 max=999946006108050000000000000000.000000
 PROBE math/functions rec=end
 # chat by=other type=say from="Object" length=14 text="Script running"

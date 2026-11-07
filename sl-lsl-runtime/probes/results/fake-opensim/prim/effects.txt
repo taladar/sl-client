@@ -1,0 +1,56 @@
+grid: fake-opensim
+date: 2026-11-07
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Fake Region
+engine: sl-lsl-runtime imitating YEngine
+settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
+
+# chat type=say from="Object" length=14 text="Script running"
+PROBE prim/effects rec=try label=particles-missing-value
+# owner-say: from="Object" text="[YEngine]: Exception while running c29287f4-e7aa-fab8-c527-b42fb916014d"
+# owner-say: from="Object" text="IndexOutOfRangeException: Index was outside the bounds of the array."
+# owner-say: from="Object" text="Prim: <Object>, Script: <Missing>, Location: Fake Region <130,124,26>"
+# owner-say: from="Object" text="Script must be Reset to re-enable."
+PROBE prim/effects rec=start region="Fake Region" channel="OpenSim" version="sl-fake-grid 0.1.0"
+PROBE prim/effects rec=try label=play-missing-name
+PROBE prim/effects rec=try label=play-unknown-key
+PROBE prim/effects rec=try label=play-null-key
+PROBE prim/effects rec=try label=play-empty
+PROBE prim/effects rec=try label=play-volume-2
+PROBE prim/effects rec=try label=play-volume-negative
+PROBE prim/effects rec=try label=loop-missing-name
+PROBE prim/effects rec=try label=loop-master-missing-name
+PROBE prim/effects rec=try label=loop-slave-missing-name
+PROBE prim/effects rec=try label=trigger-missing-name
+PROBE prim/effects rec=try label=trigger-limited-upside-down
+PROBE prim/effects rec=try label=preload-missing-name
+PROBE prim/effects rec=try label=collision-sound-missing-name
+PROBE prim/effects rec=try label=sound-radius-negative
+PROBE prim/effects rec=try label=sound-radius-large
+PROBE prim/effects rec=try label=adjust-volume-2
+PROBE prim/effects rec=try label=sound-queueing
+PROBE prim/effects rec=try label=stop-nothing-playing
+PROBE prim/effects rec=try label=particles-unknown-rule
+PROBE prim/effects rec=try label=particles-wrong-type
+PROBE prim/effects rec=try label=particles-missing-texture
+PROBE prim/effects rec=try label=particles-age-past-range
+PROBE prim/effects rec=try label=particles-empty
+PROBE prim/effects rec=try label=link-particles-3
+PROBE prim/effects rec=try label=texture-anim-zero-frames
+PROBE prim/effects rec=try label=texture-anim-negative-rate
+PROBE prim/effects rec=try label=texture-anim-face-9
+PROBE prim/effects rec=try label=texture-anim-without-on
+PROBE prim/effects rec=try label=media-face-9
+PROBE prim/effects rec=media label=face-9 status=1003
+PROBE prim/effects rec=try label=media-long-url
+PROBE prim/effects rec=media label=long-url status=0 length=1109
+PROBE prim/effects rec=try label=media-unknown-rule
+PROBE prim/effects rec=media label=unknown-rule status=1000
+PROBE prim/effects rec=try label=media-width-past-max
+PROBE prim/effects rec=media label=width-past-max status=0 got=5000
+PROBE prim/effects rec=media label=get-face-9 count=0
+PROBE prim/effects rec=media label=get-unknown-rule got="1000"
+PROBE prim/effects rec=media label=clear status=0
+PROBE prim/effects rec=media label=clear-face-9 status=1003
+PROBE prim/effects rec=end
+# chat by=other type=say from="Object" length=14 text="Script running"

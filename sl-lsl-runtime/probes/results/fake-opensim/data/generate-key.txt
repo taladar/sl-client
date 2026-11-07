@@ -1,0 +1,13 @@
+grid: fake-opensim
+date: 2026-11-07
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Fake Region
+engine: sl-lsl-runtime imitating YEngine
+settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
+
+PROBE data/generate-key rec=start region="Fake Region" channel="OpenSim" version="sl-fake-grid 0.1.0"
+PROBE data/generate-key rec=shape count=200 length=36 upper=0 invalid=0 repeats=0
+PROBE data/generate-key rec=digits version="4" variant="89ab"
+PROBE data/generate-key rec=fixed mask="........-....-4...-....-............"
+PROBE data/generate-key rec=pair differ=1
+PROBE data/generate-key rec=end

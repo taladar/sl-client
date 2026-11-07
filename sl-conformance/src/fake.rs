@@ -240,6 +240,20 @@ pub const OFFLINE_CASES: &[&str] = &[
     "script-compile",
 ];
 
+/// The cases that run on the fake grid through the runner alone
+/// (`sl-conformance run --grid fake-sl|fake-opensim <case>`), never in
+/// `cargo test`, each with the reason.
+///
+/// A case belongs here when it is too long for the test suite, not when it
+/// fails there: the fake grid runs in real time, and a case whose live run
+/// takes an hour takes one here too.
+pub const RUNNER_ONLY: &[(&str, &str)] = &[(
+    "lsl-probes",
+    "the probe corpus runs in real time, about an hour a flavour; its fake \
+     transcripts are written by the runner and compared with the live grids' \
+     (`compare-probes`), and `cargo test` replays the probes in the VM instead",
+)];
+
 /// The offline cases meaningful on **one** fake flavour only, each with the
 /// reason — every other case in [`OFFLINE_CASES`] declares both.
 ///
@@ -690,7 +704,7 @@ pub async fn run_case(test: &dyn GridTest, flavour: Grid) -> Result<FakeRun, Tes
 
 #[cfg(test)]
 mod tests {
-    use super::{ACCOUNTS, OFFLINE_CASES, SINGLE_FLAVOUR, credentials_for};
+    use super::{ACCOUNTS, OFFLINE_CASES, RUNNER_ONLY, SINGLE_FLAVOUR, credentials_for};
     use crate::grid::Grid;
     use crate::registry::find;
     use pretty_assertions::assert_eq;
@@ -721,7 +735,8 @@ mod tests {
 
     /// The offline list and the registry agree: every name resolves, every one
     /// of them declares a fake grid, and no case declares a fake grid without
-    /// being listed. A list that drifted either way would silently stop running
+    /// being listed — offline, or as one the runner alone takes there
+    /// ([`RUNNER_ONLY`]). A list that drifted either way would silently stop running
     /// a case the pre-commit suite believes it runs.
     ///
     /// *A* fake grid, not a particular one: which flavours a case declares is
@@ -737,11 +752,22 @@ mod tests {
                 "the offline case {name} does not declare any fake grid"
             );
         }
+        for (name, _reason) in RUNNER_ONLY {
+            assert!(
+                !OFFLINE_CASES.contains(name),
+                "{name} is both an offline case and one the runner alone takes"
+            );
+        }
         for test in crate::registry::registry() {
+            let listed = OFFLINE_CASES.contains(&test.name())
+                || RUNNER_ONLY
+                    .iter()
+                    .any(|(name, _reason)| *name == test.name());
             assert_eq!(
                 test.grids().iter().any(|grid| grid.is_fake()),
-                OFFLINE_CASES.contains(&test.name()),
-                "{} declares a fake grid but is not in OFFLINE_CASES (or the reverse)",
+                listed,
+                "{} declares a fake grid but is not in OFFLINE_CASES or RUNNER_ONLY (or the \
+                 reverse)",
                 test.name()
             );
         }

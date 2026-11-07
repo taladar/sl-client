@@ -1,0 +1,102 @@
+grid: fake-opensim
+date: 2026-11-07
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Fake Region
+engine: sl-lsl-runtime imitating YEngine
+settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
+
+PROBE errors/flood-repeat rec=start region="Fake Region" channel="OpenSim" version="sl-fake-grid 0.1.0"
+PROBE errors/flood-repeat rec=phase name=B16 run=1 t=3.000000
+PROBE errors/flood-repeat rec=single n=9 t=19.018000
+PROBE errors/flood-repeat rec=phase name=S16 run=1 t=59.673000
+PROBE errors/flood-repeat rec=single n=9 t=75.673000
+PROBE errors/flood-repeat rec=phase name=N16 run=1 t=116.327000
+PROBE errors/flood-repeat rec=single n=9 t=132.327000
+PROBE errors/flood-repeat rec=phase name=B17 run=1 t=172.327000
+PROBE errors/flood-repeat rec=single n=9 t=189.327000
+PROBE errors/flood-repeat rec=phase name=S17 run=1 t=229.982000
+PROBE errors/flood-repeat rec=single n=9 t=246.982000
+PROBE errors/flood-repeat rec=phase name=N17 run=1 t=287.636000
+PROBE errors/flood-repeat rec=single n=9 t=304.636000
+PROBE errors/flood-repeat rec=phase name=B16 run=2 t=344.636000
+PROBE errors/flood-repeat rec=single n=9 t=360.636000
+PROBE errors/flood-repeat rec=phase name=S16 run=2 t=401.291000
+PROBE errors/flood-repeat rec=single n=9 t=417.291000
+PROBE errors/flood-repeat rec=phase name=N16 run=2 t=457.945000
+PROBE errors/flood-repeat rec=single n=9 t=473.945000
+PROBE errors/flood-repeat rec=phase name=B17 run=2 t=513.945000
+PROBE errors/flood-repeat rec=single n=9 t=530.945000
+PROBE errors/flood-repeat rec=phase name=S17 run=2 t=571.600000
+PROBE errors/flood-repeat rec=single n=9 t=588.600000
+PROBE errors/flood-repeat rec=phase name=N17 run=2 t=629.255000
+PROBE errors/flood-repeat rec=single n=9 t=646.255000
+PROBE errors/flood-repeat rec=phase name=G2 run=3 t=686.255000
+PROBE errors/flood-repeat rec=single n=1 t=690.873000
+PROBE errors/flood-repeat rec=single n=2 t=693.091000
+PROBE errors/flood-repeat rec=single n=3 t=695.309000
+PROBE errors/flood-repeat rec=single n=4 t=697.527000
+PROBE errors/flood-repeat rec=single n=5 t=699.745000
+PROBE errors/flood-repeat rec=single n=6 t=701.964000
+PROBE errors/flood-repeat rec=single n=7 t=704.182000
+PROBE errors/flood-repeat rec=single n=8 t=706.400000
+PROBE errors/flood-repeat rec=single n=9 t=708.618000
+PROBE errors/flood-repeat rec=single n=10 t=710.836000
+PROBE errors/flood-repeat rec=single n=11 t=713.055000
+PROBE errors/flood-repeat rec=single n=12 t=715.273000
+PROBE errors/flood-repeat rec=single n=13 t=717.491000
+PROBE errors/flood-repeat rec=single n=14 t=719.709000
+PROBE errors/flood-repeat rec=single n=15 t=721.927000
+PROBE errors/flood-repeat rec=single n=16 t=724.145000
+PROBE errors/flood-repeat rec=single n=17 t=726.364000
+PROBE errors/flood-repeat rec=single n=18 t=728.582000
+PROBE errors/flood-repeat rec=single n=19 t=730.800000
+PROBE errors/flood-repeat rec=single n=20 t=733.018000
+PROBE errors/flood-repeat rec=single n=21 t=735.236000
+PROBE errors/flood-repeat rec=single n=22 t=737.455000
+PROBE errors/flood-repeat rec=single n=23 t=739.673000
+PROBE errors/flood-repeat rec=single n=24 t=741.891000
+PROBE errors/flood-repeat rec=single n=25 t=744.109000
+PROBE errors/flood-repeat rec=single n=26 t=746.327000
+PROBE errors/flood-repeat rec=phase name=G25 run=3 t=786.545000
+PROBE errors/flood-repeat rec=single n=1 t=791.673000
+PROBE errors/flood-repeat rec=single n=2 t=794.400000
+PROBE errors/flood-repeat rec=single n=3 t=797.127000
+PROBE errors/flood-repeat rec=single n=4 t=799.855000
+PROBE errors/flood-repeat rec=single n=5 t=802.582000
+PROBE errors/flood-repeat rec=single n=6 t=805.309000
+PROBE errors/flood-repeat rec=single n=7 t=808.036000
+PROBE errors/flood-repeat rec=single n=8 t=810.764000
+PROBE errors/flood-repeat rec=single n=9 t=813.491000
+PROBE errors/flood-repeat rec=single n=10 t=816.218000
+PROBE errors/flood-repeat rec=single n=11 t=818.945000
+PROBE errors/flood-repeat rec=single n=12 t=821.673000
+PROBE errors/flood-repeat rec=single n=13 t=824.400000
+PROBE errors/flood-repeat rec=single n=14 t=827.127000
+PROBE errors/flood-repeat rec=single n=15 t=829.855000
+PROBE errors/flood-repeat rec=single n=16 t=832.582000
+PROBE errors/flood-repeat rec=single n=17 t=835.309000
+PROBE errors/flood-repeat rec=single n=18 t=838.036000
+PROBE errors/flood-repeat rec=single n=19 t=840.764000
+PROBE errors/flood-repeat rec=single n=20 t=843.491000
+PROBE errors/flood-repeat rec=single n=21 t=846.218000
+PROBE errors/flood-repeat rec=single n=22 t=848.945000
+PROBE errors/flood-repeat rec=phase name=G3 run=3 t=889.164000
+PROBE errors/flood-repeat rec=single n=1 t=894.782000
+PROBE errors/flood-repeat rec=single n=2 t=898.000000
+PROBE errors/flood-repeat rec=single n=3 t=901.218000
+PROBE errors/flood-repeat rec=single n=4 t=904.436000
+PROBE errors/flood-repeat rec=single n=5 t=907.655000
+PROBE errors/flood-repeat rec=single n=6 t=910.873000
+PROBE errors/flood-repeat rec=single n=7 t=914.091000
+PROBE errors/flood-repeat rec=single n=8 t=917.309000
+PROBE errors/flood-repeat rec=single n=9 t=920.527000
+PROBE errors/flood-repeat rec=single n=10 t=923.745000
+PROBE errors/flood-repeat rec=single n=11 t=926.964000
+PROBE errors/flood-repeat rec=single n=12 t=930.182000
+PROBE errors/flood-repeat rec=single n=13 t=933.400000
+PROBE errors/flood-repeat rec=single n=14 t=936.618000
+PROBE errors/flood-repeat rec=single n=15 t=939.836000
+PROBE errors/flood-repeat rec=single n=16 t=943.055000
+PROBE errors/flood-repeat rec=single n=17 t=946.273000
+PROBE errors/flood-repeat rec=single n=18 t=949.491000
+PROBE errors/flood-repeat rec=end

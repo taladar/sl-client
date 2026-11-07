@@ -1,0 +1,42 @@
+grid: fake-opensim
+date: 2026-11-07
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: unknown (no start record)
+engine: sl-lsl-runtime imitating YEngine
+settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
+complete: no
+
+# compile error in "Probe": "(39,15) Error: no function `llGetEnvironment`"
+# compile error in "Probe": "(59,22) Error: no function `llGetSimStats`"
+# compile error in "Probe": "(66,34) Error: no variable `ENVIRONMENT_DAYINFO` in scope here"
+# compile error in "Probe": "(68,12) Error: no variable `SKY_AMBIENT` in scope here"
+# compile error in "Probe": "(68,25) Error: no variable `SKY_TEXTURE_DEFAULTS` in scope here"
+# compile error in "Probe": "(68,47) Error: no variable `SKY_CLOUDS` in scope here"
+# compile error in "Probe": "(68,59) Error: no variable `SKY_DOME` in scope here"
+# compile error in "Probe": "(68,69) Error: no variable `SKY_GAMMA` in scope here"
+# compile error in "Probe": "(69,12) Error: no variable `SKY_GLOW` in scope here"
+# compile error in "Probe": "(69,22) Error: no variable `SKY_LIGHT` in scope here"
+# compile error in "Probe": "(69,33) Error: no variable `SKY_MOON` in scope here"
+# compile error in "Probe": "(69,43) Error: no variable `SKY_PLANET` in scope here"
+# compile error in "Probe": "(69,55) Error: no variable `SKY_REFRACTION` in scope here"
+# compile error in "Probe": "(70,12) Error: no variable `SKY_STAR_BRIGHTNESS` in scope here"
+# compile error in "Probe": "(70,33) Error: no variable `SKY_SUN` in scope here"
+# compile error in "Probe": "(70,42) Error: no variable `SKY_TRACKS` in scope here"
+# compile error in "Probe": "(70,54) Error: no variable `SKY_CLOUD_TEXTURE` in scope here"
+# compile error in "Probe": "(71,12) Error: no variable `SKY_MOON_TEXTURE` in scope here"
+# compile error in "Probe": "(71,30) Error: no variable `SKY_SUN_TEXTURE` in scope here"
+# compile error in "Probe": "(71,47) Error: no variable `SKY_BLUE` in scope here"
+# compile error in "Probe": "(71,57) Error: no variable `SKY_HAZE` in scope here"
+# compile error in "Probe": "(72,12) Error: no variable `SKY_REFLECTION_PROBE_AMBIANCE` in scope here"
+# compile error in "Probe": "(72,43) Error: no variable `WATER_BLUR_MULTIPLIER` in scope here"
+# compile error in "Probe": "(72,66) Error: no variable `WATER_FOG` in scope here"
+# compile error in "Probe": "(73,12) Error: no variable `WATER_FRESNEL` in scope here"
+# compile error in "Probe": "(73,27) Error: no variable `WATER_TEXTURE_DEFAULTS` in scope here"
+# compile error in "Probe": "(73,51) Error: no variable `WATER_NORMAL_SCALE` in scope here"
+# compile error in "Probe": "(74,12) Error: no variable `WATER_REFRACTION` in scope here"
+# compile error in "Probe": "(74,30) Error: no variable `WATER_WAVE_DIRECTION` in scope here"
+# compile error in "Probe": "(74,52) Error: no variable `WATER_NORMAL_TEXTURE` in scope here"
+# compile error in "Probe": "(82,54) Error: no variable `SKY_AMBIENT` in scope here"
+# compile error in "Probe": "(83,53) Error: no variable `ENVIRONMENT_DAYINFO` in scope here"
+# compile error in "Probe": "(84,28) Error: no function `llGetRegionTimeOfDay`"
+# compile error in "Probe": "(88,19) Error: no function `llGetClosestNavPoint`"

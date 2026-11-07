@@ -37,7 +37,7 @@ fn sound_named(ctx: &mut ScriptCtx<'_>, given: &str) -> Option<String> {
     let found = asset_named(ctx, given, INVENTORY_SOUND).filter(|key| key != NULL_KEY);
     if found.is_none() && !ctx.flavour().is_opensim() {
         ctx.refuse(format!("Could not find sound '{given}'."));
-        ctx.sleep(1.0);
+        ctx.error_pause();
     }
     found
 }
@@ -213,7 +213,8 @@ pub fn ll_stop_sound(ctx: &mut ScriptCtx<'_>) -> Result<(), CallError> {
     Ok(())
 }
 
-/// `llPreloadSound`: has the viewers in earshot fetch `sound`.
+/// `llPreloadSound`: has the viewers in earshot fetch `sound`. OpenSim
+/// takes no sleep for a sound it cannot find.
 ///
 /// # Errors
 ///
@@ -221,6 +222,8 @@ pub fn ll_stop_sound(ctx: &mut ScriptCtx<'_>) -> Result<(), CallError> {
 pub fn ll_preload_sound(ctx: &mut ScriptCtx<'_>, sound: String) -> Result<(), CallError> {
     if let Some(sound) = sound_named(ctx, &sound) {
         cue(ctx, &SoundCue::Preload { sound });
+    } else if ctx.flavour().is_opensim() {
+        ctx.delay(0.0);
     }
     Ok(())
 }

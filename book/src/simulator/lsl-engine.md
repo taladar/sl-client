@@ -371,10 +371,27 @@ scripts-run percentage.
   heartbeat picks. 130 shares is aditi's: 128 busy scripts each kept the rate
   of one, 256 ran at half (book: gridspec `lsl.md`, § *How many scripts a
   region runs*).
-- **Sleeping** (`llSleep`, and the table's forced delay after any call that
-  has one) is `wake = now + ceil(seconds / step)`, the seconds rounded to
-  whole microseconds first so `0.2` as an `f32` — a hair above a fifth — is
-  not taken for one more tick. Not positive is no sleep.
+- **Sleeping** (`llSleep`, and a call's forced delay) is
+  `wake = now + ceil(seconds / step)`, the seconds rounded to whole
+  microseconds first so `0.2` as an `f32` — a hair above a fifth — is not
+  taken for one more tick. Not positive is no sleep.
+- **Forced delays are each flavour's** (`vm::delays`): the keyword file's
+  `sleep` where the grid agrees, the grid's own where it does not (Second
+  Life's `llTextBox` takes none; OpenSim's `llModPow` a second, `llLoadURL`
+  ten, the link-media calls one, `llGetPrimitiveParams` none — its
+  `ScriptSleep`s as its source states them). A call whose delay depends on how
+  it went says so (`ScriptCtx::delay`): OpenSim's calls that return before
+  their `ScriptSleep` take none, `llGiveInventory` to an avatar takes 2 s or
+  3 s. Every refusal on OpenSim is `LSL_Api.Error`, which costs a second of its
+  own (`ScriptCtx::refuse` charges it; `error_pause` for the few Second Life
+  complaints that cost one too). OpenSim scales the forced delay — not
+  `llSleep`, not the error's second — by the region's `ScriptDelayFactor`
+  (`EngineConfig::script_delay_factor`) and drops one under 10 ms. Its
+  channel-0 chat throttle sleeps an `llSay` or `llShout` two seconds past
+  eleven lines in a second (`delays::SayThrottle`); XEngine, whose thread
+  blocks there, sleeps before the line is said — the call returns having done
+  nothing and is made again on waking (`ScriptCtx::delay_first`) — and YEngine
+  after.
 - **Stopping is not resetting.** `set_running(false)` keeps the globals, the
   state and a handler in progress, and empties the queue; a stopped script is
   offered no events (`Posted::Stopped`), and a restarted one carries on
@@ -547,9 +564,11 @@ observable as the handlers, so each is a named rule with a test.
   `touch` and one `touch_end` on aditi (`events/merging`); a collision in the
   next tick is an event of its own.
 - **The reference's queue is ranked** (`events/order`): an event waits
-  behind every queued event of a lower rank — a touch behind the rest, a
-  `changed` behind the touches — whenever each was raised. `Never` and
-  `WhileQueued` keep one rank, first in, first out, as OpenSim does.
+  behind every queued event of a lower rank raised while the same handler
+  ran — a touch behind the rest, a `changed` behind the touches — and
+  behind every event raised before that handler began (`Queued::batch`
+  counts the handlers begun). `Never` and `WhileQueued` keep one rank,
+  first in, first out, as OpenSim does.
 - **The detected block travels with the event.** A host posts a detection
   event (`touch*`, `collision*`, `sensor`) with `post_detected` and a list of
   `Detected` records, and the count parameter is the list's length. The block

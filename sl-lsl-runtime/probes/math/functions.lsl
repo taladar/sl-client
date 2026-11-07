@@ -1,5 +1,6 @@
 // probe: math/functions
 // drive: none
+// vary: min, max
 //
 // The maths functions and integer operators at their edges, where a grid
 // may answer differently: llRound at halves, llFloor / llCeil / llRound /

@@ -1,0 +1,17 @@
+grid: fake-opensim
+date: 2026-11-07
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Fake Region
+engine: sl-lsl-runtime imitating YEngine
+settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
+
+PROBE land/day-cycle rec=start region="Fake Region" channel="OpenSim" version="sl-fake-grid 0.1.0"
+PROBE land/day-cycle rec=day length=14400 offset=57600 region_length=14400 region_offset=57600
+PROBE land/day-cycle rec=body which=sun scope=parcel sun="<-0.67527, 0.00000, -0.73757>" length=1.000 rot_length=1.000 dot_fwd=1.000 dot_left=0.000 dot_up=0.000
+PROBE land/day-cycle rec=body which=sun scope=region sun="<-0.67527, 0.00000, -0.73757>" length=1.000 rot_length=1.000 dot_fwd=1.000 dot_left=0.000 dot_up=0.000
+PROBE land/day-cycle rec=body which=moon scope=parcel moon="<0.67527, 0.00000, 0.73757>" length=1.000 rot_length=1.000 dot_fwd=1.000 dot_left=0.000 dot_up=0.000
+PROBE land/day-cycle rec=body which=moon scope=region moon="<0.67527, 0.00000, 0.73757>" length=1.000 rot_length=1.000 dot_fwd=1.000 dot_left=0.000 dot_up=0.000
+PROBE land/day-cycle rec=agree sun=1 moon=1 sun_dot_moon=-1.000
+PROBE land/day-cycle rec=time time_of_day=9101.752000 within_day=1 fraction=0.632
+PROBE land/day-cycle rec=time-later advanced=1 time_of_day=9103.770000
+PROBE land/day-cycle rec=end

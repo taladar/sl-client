@@ -1,0 +1,10 @@
+grid: fake-opensim
+date: 2026-11-07
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: unknown (no start record)
+engine: sl-lsl-runtime imitating YEngine
+settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
+complete: no
+
+# notecard "Lines" bytes=14
+# compile error in "Child": "(16,56) Error: no function `llGetStartString`"

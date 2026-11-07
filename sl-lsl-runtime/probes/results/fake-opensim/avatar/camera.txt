@@ -1,0 +1,33 @@
+grid: fake-opensim
+date: 2026-11-07
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Fake Region
+engine: sl-lsl-runtime imitating YEngine
+settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
+
+# question permissions=3072 object="Object" owner="<first> <last>" experience=none
+PROBE avatar/camera rec=start region="Fake Region" channel="OpenSim" version="sl-fake-grid 0.1.0"
+PROBE avatar/camera rec=waiting drive=answer grant=3072
+PROBE avatar/camera rec=asked step=1 seated=0 mask=3072
+# answer grant=3072
+PROBE avatar/camera rec=held step=1 why=answer answer=3072 perms=3072
+PROBE avatar/camera rec=waiting drive=sit
+# sit sit_position=<0.000, 0.000, 0.500> sit_rotation=<0.000, 0.000, 0.000, 1.000> camera_eye=<0.000, 0.000, 0.000> camera_at=<0.000, 0.000, 0.000> force_mouselook=0 autopilot=1
+# follow-cam object=probe 0=20 2=0 3=0 4=1 7=5 8=30 9=0.5 12=1 18=128 19=124 20=28.95 21=1
+PROBE avatar/camera rec=seat step=2 seated=1
+PROBE avatar/camera rec=asked step=3 seated=1 mask=3072
+PROBE avatar/camera rec=held step=3 why=answer answer=3072 perms=3072
+PROBE avatar/camera rec=set step=4 which=in-range
+# follow-cam object=probe 0=-200 6=9 7=100 8=400 10=-1
+PROBE avatar/camera rec=set step=5 which=out-of-range
+# follow-cam-clear object=probe
+PROBE avatar/camera rec=cleared step=6
+PROBE avatar/camera rec=track step=7 pos_zero=0 rot_identity=0
+PROBE avatar/camera rec=waiting drive=stand
+# stand
+# animations avatar=owner playing="falldown"
+PROBE avatar/camera rec=seat step=7 seated=0
+PROBE avatar/camera rec=held step=7 why=after-stand answer=-1 perms=1024
+PROBE avatar/camera rec=end
+# animations avatar=owner playing="land"
+# animations avatar=owner playing="stand"

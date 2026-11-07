@@ -1,0 +1,24 @@
+grid: fake-opensim
+date: 2026-11-07
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Fake Region
+engine: sl-lsl-runtime imitating YEngine
+settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
+complete: no
+
+PROBE events/changed-worn rec=start region="Fake Region" channel="OpenSim" version="sl-fake-grid 0.1.0"
+PROBE events/changed-worn rec=waiting drive=attach point=5
+# attach point=5
+# attached point=5 key=same
+PROBE events/changed-worn rec=changed step=1 bits=32768 home=1
+PROBE events/changed-worn rec=changed step=1 bits=32768 home=1
+PROBE events/changed-worn rec=attached attached=5
+PROBE events/changed-worn rec=waiting drive=away seconds=15
+# teleport-started flags=0x10
+# away arrived seconds=15
+# animations avatar=owner playing="stand"
+# animations avatar=owner playing="falldown"
+# animations avatar=owner playing="land"
+# animations avatar=owner playing="stand"
+# teleport-started flags=0x10
+# back arrived

@@ -1,0 +1,129 @@
+grid: fake-opensim
+date: 2026-11-07
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Fake Region
+engine: sl-lsl-runtime imitating YEngine
+settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
+
+PROBE ossl/strings rec=start region="Fake Region" channel="OpenSim" version="sl-fake-grid 0.1.0"
+PROBE ossl/strings rec=trigger step=1
+PROBE ossl/strings rec=search case=ascii len=11,5 index=6,6 last=6,6 starts=0,0 ends=1,1
+PROBE ossl/strings rec=search case=ascii-case len=11,5 index=-1,6 last=-1,6 starts=0,0 ends=0,1
+PROBE ossl/strings rec=search case=repeat len=6,2 index=1,1 last=4,4 starts=0,0 ends=1,1
+PROBE ossl/strings rec=search case=absent len=3,1 index=-1,-1 last=-1,-1 starts=0,0 ends=0,0
+PROBE ossl/strings rec=search case=empty-source len=0,1 index=-1,-1 last=-1,-1 starts=0,0 ends=0,0
+PROBE ossl/strings rec=search case=empty-value len=3,0 index=-1,-1 last=-1,-1 starts=0,0 ends=0,0
+PROBE ossl/strings rec=search case=whole len=3,3 index=0,0 last=0,0 starts=1,1 ends=1,1
+PROBE ossl/strings rec=search case=longer len=2,3 index=-1,-1 last=-1,-1 starts=0,0 ends=0,0
+PROBE ossl/strings rec=search case=accent len=4,4 index=-1,-1 last=-1,-1 starts=0,0 ends=0,0
+PROBE ossl/strings rec=search case=accent-back len=4,4 index=-1,-1 last=-1,-1 starts=0,0 ends=0,0
+PROBE ossl/strings rec=search case=combining len=5,4 index=0,0 last=0,0 starts=1,1 ends=1,1
+PROBE ossl/strings rec=search case=combining-back len=4,5 index=0,0 last=0,0 starts=1,1 ends=1,1
+PROBE ossl/strings rec=search case=accent-case len=5,5 index=-1,0 last=-1,0 starts=0,1 ends=0,1
+PROBE ossl/strings rec=search case=ae len=3,4 index=0,0 last=0,0 starts=1,1 ends=1,1
+PROBE ossl/strings rec=search case=ae-back len=4,3 index=0,0 last=0,0 starts=1,1 ends=1,1
+PROBE ossl/strings rec=search case=ae-half len=1,1 index=0,0 last=0,0 starts=1,1 ends=0,0
+PROBE ossl/strings rec=search case=fi len=3,4 index=0,0 last=0,0 starts=1,1 ends=1,1
+PROBE ossl/strings rec=search case=fi-back len=4,3 index=0,0 last=0,0 starts=1,1 ends=1,1
+PROBE ossl/strings rec=search case=ff-inside len=5,1 index=1,1 last=1,1 starts=0,0 ends=0,0
+PROBE ossl/strings rec=search case=sharp-s len=6,7 index=-1,-1 last=-1,-1 starts=0,0 ends=0,0
+PROBE ossl/strings rec=search case=sharp-s-back len=7,6 index=-1,0 last=-1,0 starts=0,1 ends=0,1
+PROBE ossl/strings rec=search case=capital-sharp-s len=1,1 index=-1,-1 last=-1,-1 starts=0,0 ends=0,0
+PROBE ossl/strings rec=search case=dz len=1,2 index=0,0 last=0,0 starts=1,1 ends=0,0
+PROBE ossl/strings rec=search case=noncharacter len=3,2 index=0,0 last=0,0 starts=1,1 ends=1,1
+PROBE ossl/strings rec=search case=noncharacter-back len=2,3 index=0,0 last=0,0 starts=1,1 ends=1,1
+PROBE ossl/strings rec=search case=noncharacter-only len=3,1 index=0,0 last=2,2 starts=1,1 ends=0,0
+PROBE ossl/strings rec=search case=noncharacter-tail len=4,1 index=2,2 last=2,2 starts=0,0 ends=1,1
+PROBE ossl/strings rec=search case=nul len=3,2 index=0,0 last=0,0 starts=1,1 ends=1,1
+PROBE ossl/strings rec=search case=soft-hyphen len=3,2 index=-1,-1 last=-1,-1 starts=0,0 ends=0,0
+PROBE ossl/strings rec=search case=hyphen len=5,4 index=-1,-1 last=-1,-1 starts=0,0 ends=0,0
+PROBE ossl/strings rec=search case=dotted-capital-i len=1,1 index=-1,0 last=-1,0 starts=0,1 ends=0,1
+PROBE ossl/strings rec=search case=dotless-i len=1,1 index=-1,-1 last=-1,-1 starts=0,0 ends=0,0
+PROBE ossl/strings rec=search case=final-sigma len=1,1 index=-1,-1 last=-1,-1 starts=0,0 ends=0,0
+PROBE ossl/strings rec=search case=sigma len=1,1 index=-1,0 last=-1,0 starts=0,1 ends=0,1
+PROBE ossl/strings rec=search case=cyrillic len=3,3 index=-1,0 last=-1,0 starts=0,1 ends=0,1
+PROBE ossl/strings rec=search case=emoji len=4,2 index=1,1 last=1,1 starts=0,0 ends=0,0
+PROBE ossl/strings rec=search case=emoji-twice len=4,2 index=0,0 last=2,2 starts=1,1 ends=1,1
+PROBE ossl/strings rec=search case=fullwidth len=1,1 index=-1,-1 last=-1,-1 starts=0,0 ends=0,0
+PROBE ossl/strings rec=search case=hiragana-katakana len=1,1 index=-1,-1 last=-1,-1 starts=0,0 ends=0,0
+PROBE ossl/strings rec=search case=half-width-kana len=1,1 index=-1,-1 last=-1,-1 starts=0,0 ends=0,0
+PROBE ossl/strings rec=search case=prolonged len=2,2 index=-1,-1 last=-1,-1 starts=0,0 ends=0,0
+PROBE ossl/strings rec=search case=iteration len=2,2 index=-1,-1 last=-1,-1 starts=0,0 ends=0,0
+PROBE ossl/strings rec=search case=hangul len=1,1 index=0,0 last=0,0 starts=1,1 ends=1,1
+PROBE ossl/strings rec=index-range case=ascii start=0 count=0 index=1,1
+PROBE ossl/strings rec=index-range case=ascii start=2 count=3 index=-1,-1
+PROBE ossl/strings rec=index-range case=ascii start=3 count=0 index=4,4
+PROBE ossl/strings rec=index-range case=ascii start=-5 count=4 index=1,1
+PROBE ossl/strings rec=index-range case=ascii start=8 count=5 index=-1,-1
+PROBE ossl/strings rec=index-range case=ascii start=9 count=1 index=-1,-1
+PROBE ossl/strings rec=index-range case=ascii start=4 count=20 index=-1,4
+PROBE ossl/strings rec=index-range case=ascii start=5 count=2 index=-1,-1
+PROBE ossl/strings rec=index-range case=accents start=1 count=0 index=-1,5
+PROBE ossl/strings rec=index-range case=accents start=2 count=6 index=-1,-1
+PROBE ossl/strings rec=last-range case=ascii start=4 count=0 last=1,1
+PROBE ossl/strings rec=last-range case=ascii start=5 count=2 last=4,4
+PROBE ossl/strings rec=last-range case=ascii start=6 count=0 last=4,4
+PROBE ossl/strings rec=last-range case=ascii start=8 count=3 last=-1,-1
+PROBE ossl/strings rec=last-range case=ascii start=7 count=1 last=-1,-1
+PROBE ossl/strings rec=last-range case=ascii start=9 count=0 last=-1,-1
+PROBE ossl/strings rec=last-range case=ascii start=12 count=1 last=-1,-1
+PROBE ossl/strings rec=last-range case=one start=0 count=0 last=0,0
+PROBE ossl/strings rec=last-range case=one start=-3 count=0 last=0,0
+PROBE ossl/strings rec=last-range case=accents start=6 count=0 last=-1,-1
+PROBE ossl/strings rec=searched
+PROBE ossl/strings rec=trigger step=2
+PROBE ossl/strings rec=sort case=local list="1, 2, 3" types=111
+PROBE ossl/strings rec=sort case=global list="1, 2, 3" types=111
+PROBE ossl/strings rec=sort case=descending list="3, 2, 1" types=111
+PROBE ossl/strings rec=sort case=ascending-two list="3, 2, 1" types=111
+PROBE ossl/strings rec=sort case=mixed list="-1, B, 1.500000, a, 2, <1.000000, 0.000000, 0.000000>, b, 3, <0.000000, 0.000000, 2.000000>" types=132315315
+PROBE ossl/strings rec=sort case=mixed-descending list="3, b, 1.500000, a, 2, <0.000000, 0.000000, 2.000000>, B, -1, <1.000000, 0.000000, 0.000000>" types=132315315
+PROBE ossl/strings rec=sort case=keys list="a, b, c" types=333
+PROBE ossl/strings rec=sort case=stride list="a, 3, b, 1, c, 2" types=313131
+PROBE ossl/strings rec=sort case=stride-uneven list="b, 1, a" types=313
+PROBE ossl/strings rec=sort case=stride-whole list="2, 1" types=11
+PROBE ossl/strings rec=sort case=stride-zero list="1, 2" types=11
+PROBE ossl/strings rec=sort case=empty list="" types=
+PROBE ossl/strings rec=sort case=copied-original list="1, 2, 3" types=111
+PROBE ossl/strings rec=sort case=copied-copy list="1, 2, 3" types=111
+PROBE ossl/strings rec=sort case=copy-sorted-original list="1, 2, 3" types=111
+PROBE ossl/strings rec=sort case=copy-sorted-copy list="1, 2, 3" types=111
+PROBE ossl/strings rec=sort case=parameter-inside list="1, 2, 3" types=111
+PROBE ossl/strings rec=sort case=parameter-after list="1, 2, 3" types=111
+PROBE ossl/strings rec=sort case=expression list="3, 1, 2" types=111
+PROBE ossl/strings rec=sorted
+PROBE ossl/strings rec=trigger step=3
+PROBE ossl/strings rec=call fn=osStringLastIndexOf start=0
+# owner-say: from="Object" text="[YEngine]: Exception while running 0a69a7dc-cb91-e78c-cb48-4fcee408a743"
+# owner-say: from="Object" text="ArgumentOutOfRangeException: Count must be positive and count must refer to a location within the string/array/collection."
+# owner-say: from="Object" text="Parameter name: count"
+# owner-say: from="Object" text="Prim: <Object>, Script: <Strings>, Location: Fake Region <128,124,26>"
+# owner-say: from="Object" text="Script must be Reset to re-enable."
+PROBE ossl/strings rec=trigger step=4
+PROBE ossl/strings rec=sub-string-index case=ae index=0
+PROBE ossl/strings rec=sub-string-index case=ae-after-ascii index=-1
+PROBE ossl/strings rec=sub-string-index case=ae-after-ascii-short index=-1
+PROBE ossl/strings rec=sub-string-index case=ae-back index=1
+PROBE ossl/strings rec=sub-string-index case=combining index=0
+PROBE ossl/strings rec=sub-string-index case=base-of-combining index=3
+PROBE ossl/strings rec=sub-string-index case=sharp-s index=4
+PROBE ossl/strings rec=sub-string-index case=noncharacter index=0
+PROBE ossl/strings rec=sub-string-index case=case index=-1
+PROBE ossl/strings rec=parse case=ae count=1 parts="a"
+PROBE ossl/strings rec=parse case=ae-kept count=3 parts="%7C%7C"
+PROBE ossl/strings rec=parse case=ae-spacer count=2 parts="1%7Cae"
+PROBE ossl/strings rec=parse case=noncharacter count=4 parts="%7C%7C%7C"
+PROBE ossl/strings rec=parse case=combining count=2 parts="%CC%81%20%7C%20x"
+PROBE ossl/strings rec=parse case=first-wins count=2 parts="a%7Cb"
+PROBE ossl/strings rec=parsed
+PROBE ossl/strings rec=trigger step=5
+PROBE ossl/strings rec=call fn=llParseString2List
+# owner-say: from="Object" text="[YEngine]: Exception while running 175042dd-5f5a-4fc7-c2fd-0bfbafbfea98"
+# owner-say: from="Object" text="ArgumentOutOfRangeException: Index was out of range. Must be non-negative and less than the size of the collection."
+# owner-say: from="Object" text="Parameter name: startIndex"
+# owner-say: from="Object" text="Prim: <Object>, Script: <Parser>, Location: Fake Region <128,124,26>"
+# owner-say: from="Object" text="Script must be Reset to re-enable."
+PROBE ossl/strings rec=script-state script="Strings" running=1
+PROBE ossl/strings rec=script-state script="Parser" running=1
+PROBE ossl/strings rec=ping
+PROBE ossl/strings rec=end

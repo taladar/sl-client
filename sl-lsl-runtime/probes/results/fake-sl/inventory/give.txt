@@ -1,0 +1,49 @@
+grid: fake-sl
+date: 2026-11-07
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Fake Region
+engine: sl-lsl-runtime imitating Mono
+settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
+
+# notecard "Gift" bytes=7
+PROBE inventory/give rec=start region="Fake Region" channel="Second Life Server" version="sl-fake-grid 0.1.0"
+PROBE inventory/give rec=found n=1
+PROBE inventory/give rec=try label=give-notecard
+PROBE inventory/give rec=called label=give-notecard delay=0.000000
+PROBE inventory/give rec=receiver-changed change=1 items="Gift:7|Receiver:10:1"
+PROBE inventory/give rec=try label=give-notecard-again
+PROBE inventory/give rec=called label=give-notecard-again delay=0.000000
+PROBE inventory/give rec=receiver-changed change=1 items="Gift:7|Gift 1:7|Receiver:10:1"
+PROBE inventory/give rec=try label=give-script
+PROBE inventory/give rec=called label=give-script delay=0.000000
+PROBE inventory/give rec=receiver-changed change=1 items="Gift:7|Gift 1:7|Passed:10:0|Receiver:10:1"
+PROBE inventory/give rec=try label=give-none
+PROBE inventory/give rec=called label=give-none delay=0.000000
+# debug-channel: from="Object" text="Unable to give inventory: 'No item named 'Nope'.'."
+# im dialog=9 from=owner id=someone name="Object" offline=1 length=64 message="'Gift'  ( http://slurl.com/secondlife/Fake%20Region/128/124/…" bucket=1
+PROBE inventory/give rec=try label=give-owner
+PROBE inventory/give rec=called label=give-owner delay=2.022223
+# im dialog=9 from=owner id=someone name="Object" offline=0 length=72 message="'Probe folder'  ( http://slurl.com/secondlife/Fake%20Region/…" bucket=1
+PROBE inventory/give rec=try label=give-list-owner
+PROBE inventory/give rec=called label=give-list-owner delay=3.022222
+PROBE inventory/give rec=try label=give-list-prim
+PROBE inventory/give rec=receiver-changed change=1 items="Gift:7|Gift 1:7|Gift 2:7|Passed:10:0|Receiver:10:1"
+PROBE inventory/give rec=called label=give-list-prim delay=3.022223
+PROBE inventory/give rec=try label=remote-load
+PROBE inventory/give rec=receiver-changed change=1 items="Gift:7|Gift 1:7|Gift 2:7|Loaded:10:0|Passed:10:0|Receiver:10:1"
+PROBE inventory/give rec=loaded param=77 in=Receiver
+PROBE inventory/give rec=called label=remote-load delay=3.022221
+PROBE inventory/give rec=try label=remote-load-wrong-pin
+# debug-channel: from="Object" text="Task 'Object' trying to illegally load script onto task 'Receiver'!"
+PROBE inventory/give rec=called label=remote-load-wrong-pin delay=3.022223
+PROBE inventory/give rec=try label=remote-load-stopped
+PROBE inventory/give rec=receiver-changed change=1 items="Gift:7|Gift 1:7|Gift 2:7|Loaded:10:0|Passed:10:0|Receiver:10:1"
+PROBE inventory/give rec=called label=remote-load-stopped delay=3.022223
+PROBE inventory/give rec=waiting drive=touch by=other
+# debug-channel by=other: from="Object" text="Unable to give inventory: 'No item named 'Nope'.'."
+# debug-channel by=other: from="Object" text="Task 'Object' trying to illegally load script onto task 'Receiver'!"
+# touch by=other active_group=none surface=none
+PROBE inventory/give rec=try label=give-other
+PROBE inventory/give rec=called label=give-other delay=2.022223
+PROBE inventory/give rec=end
+# im by=other dialog=9 from=owner id=someone name="Object" offline=1 length=64 message="'Gift'  ( http://slurl.com/secondlife/Fake%20Region/128/124/…" bucket=1

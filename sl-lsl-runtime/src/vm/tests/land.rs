@@ -50,6 +50,8 @@ pub(super) fn parcel(flags: u32, owner: &str) -> Parcel {
         capacity: (0, 0),
         counts: (PrimCounts::default(), PrimCounts::default()),
         prim_owners: Vec::new(),
+        passes: Vec::new(),
+        bans: Vec::new(),
     }
 }
 

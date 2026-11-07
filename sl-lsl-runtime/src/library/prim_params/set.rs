@@ -225,7 +225,6 @@ fn unknown(ctx: &mut ScriptCtx<'_>, reader: &Reader<'_>) {
             "{}: Error running rule #{}: arg #0 - unsupported parameter",
             reader.function, reader.number,
         ));
-        ctx.sleep(1.0);
     } else {
         ctx.refuse_to_owner(format!(
             "{} error running rule #{}: unknown rule.",
@@ -596,7 +595,6 @@ fn read_type(
                     reader.function,
                     reader.number.saturating_add(1),
                 ));
-                ctx.sleep(1.0);
             } else {
                 ctx.refuse_to_owner(format!(
                     "{} error running rule #{}: unknown rule.",

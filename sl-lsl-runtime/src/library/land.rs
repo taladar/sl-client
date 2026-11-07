@@ -348,8 +348,9 @@ pub fn ll_script_danger(ctx: &mut ScriptCtx<'_>, at: Vector) -> Result<i32, Call
 }
 
 /// `llParcelMediaQuery`: the parcel's media settings asked for — `[]` on
-/// land the script's owner does not own, on both grids; on its own land the
-/// URL, texture, type, size, description and loop each code asks for.
+/// land the script's owner does not own, on both grids, which OpenSim
+/// returns before its sleep; on its own land the URL, texture, type, size,
+/// description and loop each code asks for.
 ///
 /// # Errors
 ///
@@ -359,10 +360,7 @@ pub fn ll_parcel_media_query(
     codes: Vec<Element>,
 ) -> Result<Vec<Element>, CallError> {
     let at = here(ctx);
-    let Some(parcel) = parcel_of(ctx, &at) else {
-        return Ok(Vec::new());
-    };
-    if !owns(ctx, &parcel) {
+    if !owns_here(ctx, &at) {
         return Ok(Vec::new());
     }
     let caller = ctx.caller();
@@ -390,7 +388,8 @@ pub fn ll_parcel_media_query(
 /// tell the avatars on it to play, stop, pause, unload or seek it; nothing on
 /// anybody else's land. The command is sent as both grids send it, to the
 /// avatar `PARCEL_MEDIA_COMMAND_AGENT` names or to every avatar on the
-/// parcel.
+/// parcel. Both grids hold the script two seconds, but OpenSim not on land
+/// it does not own.
 ///
 /// # Errors
 ///
@@ -400,10 +399,7 @@ pub fn ll_parcel_media_command_list(
     commands: Vec<Element>,
 ) -> Result<(), CallError> {
     let at = here(ctx);
-    let Some(parcel) = parcel_of(ctx, &at) else {
-        return Ok(());
-    };
-    if !owns(ctx, &parcel) {
+    if !owns_here(ctx, &at) {
         return Ok(());
     }
     let caller = ctx.caller();
@@ -482,9 +478,18 @@ pub fn ll_parcel_media_command_list(
             time,
         },
     );
-    // Both grids hold the script two seconds.
-    ctx.sleep(2.0);
     Ok(())
+}
+
+/// Whether the script's owner owns the parcel at `at`. OpenSim's calls that
+/// ask return before their sleep when not, so the call takes no forced delay
+/// there.
+fn owns_here(ctx: &mut ScriptCtx<'_>, at: &Vector) -> bool {
+    let owned = parcel_of(ctx, at).is_some_and(|parcel| owns(ctx, &parcel));
+    if !owned && ctx.flavour().is_opensim() {
+        ctx.delay(0.0);
+    }
+    owned
 }
 
 /// `llGetParcelMusicURL`: the parcel's stream.
@@ -514,13 +519,17 @@ fn change_own_land(ctx: &mut ScriptCtx<'_>, change: &LandChange) -> bool {
     ctx.host().change_land(caller, &at, change)
 }
 
-/// `llSetParcelMusicURL`: the parcel's stream, on the owner's land.
+/// `llSetParcelMusicURL`: the parcel's stream, on the owner's land; OpenSim
+/// takes no sleep on anybody else's.
 ///
 /// # Errors
 ///
 /// None; the signature is the library's.
 pub fn ll_set_parcel_music_url(ctx: &mut ScriptCtx<'_>, url: String) -> Result<(), CallError> {
-    let _set = change_own_land(ctx, &LandChange::MusicUrl(url));
+    let at = here(ctx);
+    if owns_here(ctx, &at) {
+        let _set = change_own_land(ctx, &LandChange::MusicUrl(url));
+    }
     Ok(())
 }
 
@@ -538,7 +547,44 @@ pub fn ll_eject_from_land(ctx: &mut ScriptCtx<'_>, agent: Key) -> Result<(), Cal
     Ok(())
 }
 
-/// `llAddToLandPassList`: a pass to the owner's parcel for `hours`.
+/// Whether OpenSim keeps the entry `agent` already has on the owner's
+/// parcel's ban list (`ban`) or access list rather than the one for `hours`:
+/// an entry for good, or one lasting longer than the new one would. It then
+/// changes nothing and returns before its sleep. Second Life replaces it.
+fn opensim_keeps(ctx: &mut ScriptCtx<'_>, agent: &str, hours: f32, ban: bool) -> bool {
+    if !ctx.flavour().is_opensim() {
+        return false;
+    }
+    let Some(agent) = crate::library::dotnet::canonical_uuid(agent) else {
+        return false;
+    };
+    let at = here(ctx);
+    let Some(parcel) = parcel_of(ctx, &at) else {
+        return false;
+    };
+    if !owns(ctx, &parcel) {
+        return false;
+    }
+    let list = if ban { &parcel.bans } else { &parcel.passes };
+    let Some(held) = list
+        .iter()
+        .find(|entry| entry.agent.eq_ignore_ascii_case(&agent))
+    else {
+        return false;
+    };
+    // `Util.UnixTimeSinceEpoch() + (int)(3600.0 * hours)`, 0 for none.
+    let expires = if hours == 0.0 {
+        0
+    } else {
+        (ctx.unix_micros() / 1_000_000)
+            .saturating_add(i64::from(crate::num::float_to_int(hours * 3600.0)))
+    };
+    held.expires == 0 || (expires != 0 && expires < held.expires)
+}
+
+/// `llAddToLandPassList`: a pass to the owner's parcel for `hours` (0: for
+/// good). OpenSim keeps a pass already there for good or for longer, and then
+/// takes no sleep.
 ///
 /// # Errors
 ///
@@ -548,12 +594,17 @@ pub fn ll_add_to_land_pass_list(
     agent: Key,
     hours: f32,
 ) -> Result<(), CallError> {
+    if opensim_keeps(ctx, &agent.0, hours, false) {
+        ctx.delay(0.0);
+        return Ok(());
+    }
     let _added = change_own_land(ctx, &LandChange::Pass(agent.0, hours));
     Ok(())
 }
 
 /// `llAddToLandBanList`: a ban from the owner's parcel for `hours` (0: for
-/// good).
+/// good). OpenSim keeps a ban already there for good or for longer, and then
+/// takes no sleep.
 ///
 /// # Errors
 ///
@@ -563,6 +614,10 @@ pub fn ll_add_to_land_ban_list(
     agent: Key,
     hours: f32,
 ) -> Result<(), CallError> {
+    if opensim_keeps(ctx, &agent.0, hours, true) {
+        ctx.delay(0.0);
+        return Ok(());
+    }
     let _added = change_own_land(ctx, &LandChange::Ban(agent.0, hours));
     Ok(())
 }
@@ -1413,7 +1468,7 @@ pub fn os_get_region_map_texture(
         .map_texture(caller, name)
         .unwrap_or_else(|| crate::value::NULL_KEY.to_owned());
     if !blank {
-        ctx.sleep(1.0);
+        ctx.delay(1.0);
     }
     Ok(Key(texture))
 }

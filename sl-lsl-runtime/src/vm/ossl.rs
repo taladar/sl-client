@@ -485,5 +485,5 @@ pub(crate) fn admit(builtin: &Builtin, ctx: &mut ScriptCtx<'_>) -> Result<Admitt
 /// the script a second; the call carries on.
 pub(crate) fn warn(ctx: &mut ScriptCtx<'_>, text: String) {
     ctx.shout_error(text);
-    ctx.sleep(1.0);
+    ctx.error_pause();
 }

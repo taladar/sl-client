@@ -1,0 +1,121 @@
+grid: fake-sl
+date: 2026-11-07
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Fake Region
+engine: sl-lsl-runtime imitating Mono
+settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
+complete: no
+
+# object "Worker" scripts=1
+PROBE vm/region-budget rec=start region="Fake Region" channel="Second Life Server" version="sl-fake-grid 0.1.0"
+# sim-stats active_scripts=3.0044684
+# sim-stats scripts_run=100
+# sim-stats script_ms=0
+# sim-stats time_dilation=0.9997868
+# sim-stats active_scripts=3.069386
+# sim-stats time_dilation=0.99966425
+# sim-stats active_scripts=3.1300704
+# sim-stats time_dilation=1
+# sim-stats active_scripts=3.1867979
+# sim-stats time_dilation=0.9999824
+PROBE vm/region-budget rec=stage scripts=1 rezzed=1 reported=1 slowest=489160 fastest=489160 mean=489160 total=489160 real_slowest=489160 real_mean=489160 dilation=1.000000
+# sim-stats active_scripts=3.3375912
+# sim-stats time_dilation=1
+# sim-stats active_scripts=4.2610407
+# sim-stats time_dilation=0.9998332
+# sim-stats active_scripts=5.2221546
+# sim-stats time_dilation=0.7037436
+# sim-stats active_scripts=6.120595
+# sim-stats time_dilation=0.58428556
+# sim-stats active_scripts=6.9515724
+# sim-stats time_dilation=0.6029829
+PROBE vm/region-budget rec=stage scripts=16 rezzed=16 reported=16 slowest=489160 fastest=489160 mean=489160 total=7826560 real_slowest=489160 real_mean=489160 dilation=1.000000
+# sim-stats active_scripts=7.072067
+# sim-stats time_dilation=0.99946445
+# sim-stats active_scripts=8.169696
+# sim-stats time_dilation=1
+# sim-stats active_scripts=10.326256
+# sim-stats active_scripts=13.516837
+# sim-stats active_scripts=17.004425
+# sim-stats time_dilation=0.7938315
+# sim-stats active_scripts=20.26459
+# sim-stats time_dilation=0.15198228
+# sim-stats active_scripts=23.312162
+# sim-stats time_dilation=0.15233289
+# sim-stats active_scripts=25.733677
+# sim-stats time_dilation=0.29232726
+# sim-stats active_scripts=25.60579
+# sim-stats time_dilation=1
+PROBE vm/region-budget rec=stage scripts=64 rezzed=64 reported=64 slowest=489160 fastest=489160 mean=489160 total=31306240 real_slowest=489160 real_mean=489160 dilation=1.000000
+# sim-stats active_scripts=24.662811
+# sim-stats time_dilation=0.9999895
+# sim-stats active_scripts=24.954885
+# sim-stats time_dilation=1
+# sim-stats active_scripts=26.359673
+# sim-stats time_dilation=0.9997982
+# sim-stats active_scripts=28.837524
+# sim-stats time_dilation=1
+# sim-stats active_scripts=32.297974
+# sim-stats active_scripts=36.684494
+# sim-stats active_scripts=41.941364
+# sim-stats time_dilation=0.9999553
+# sim-stats active_scripts=47.71048
+# sim-stats time_dilation=0.99958754
+# sim-stats active_scripts=53.141712
+# sim-stats time_dilation=0.104452975
+# sim-stats active_scripts=58.218777
+# sim-stats time_dilation=0.07102897
+# sim-stats active_scripts=62.89106
+# sim-stats time_dilation=0.07418635
+# sim-stats active_scripts=65.3828
+# sim-stats time_dilation=1
+# sim-stats active_scripts=65.07501
+# sim-stats time_dilation=0.9994362
+PROBE vm/region-budget rec=stage scripts=128 rezzed=128 reported=128 slowest=489160 fastest=489160 mean=489160 total=62612480 real_slowest=489160 real_mean=489160 dilation=1.000000
+# sim-stats active_scripts=62.156216
+# sim-stats time_dilation=1
+# sim-stats active_scripts=58.931644
+# sim-stats time_dilation=0.99996924
+# sim-stats active_scripts=57.087852
+# sim-stats time_dilation=0.9995722
+# sim-stats active_scripts=56.50192
+# sim-stats time_dilation=0.9998048
+# sim-stats active_scripts=57.112366
+# sim-stats time_dilation=1
+# sim-stats active_scripts=58.832928
+# sim-stats time_dilation=0.99989414
+# sim-stats active_scripts=61.588028
+# sim-stats time_dilation=0.99973375
+# sim-stats active_scripts=65.325584
+# sim-stats time_dilation=1
+# sim-stats active_scripts=69.95342
+# sim-stats time_dilation=0.99997133
+# sim-stats active_scripts=75.4536
+# sim-stats time_dilation=1
+# sim-stats active_scripts=81.71724
+# sim-stats active_scripts=88.74733
+# sim-stats time_dilation=0.9996119
+# sim-stats active_scripts=96.452255
+# sim-stats time_dilation=0.9997718
+# sim-stats active_scripts=104.81725
+# sim-stats time_dilation=0.9999711
+# sim-stats active_scripts=113.78239
+# sim-stats time_dilation=1
+# sim-stats active_scripts=123.14839
+# sim-stats time_dilation=0.99951506
+# sim-stats active_scripts=132.00716
+# sim-stats scripts_run=50.78125
+# sim-stats time_dilation=0.090276614
+# sim-stats active_scripts=140.28824
+# sim-stats time_dilation=0.048697844
+# sim-stats active_scripts=148.02266
+# sim-stats scripts_run=100
+# sim-stats time_dilation=0.0648011
+# sim-stats active_scripts=153.74475
+# sim-stats time_dilation=1
+# sim-stats active_scripts=156.45668
+# sim-stats active_scripts=156.35405
+# sim-stats time_dilation=0.9996024
+# sim-stats active_scripts=153.64555
+# sim-stats time_dilation=1
+# sim-stats active_scripts=148.48085

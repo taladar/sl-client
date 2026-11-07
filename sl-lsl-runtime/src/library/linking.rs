@@ -32,8 +32,8 @@ fn may_change_links(ctx: &mut ScriptCtx<'_>, second_life: &str, opensim: &str) -
 /// `llCreateLink`: link the object `target` names with the script's own —
 /// the script's the root when `parent` is true, `target`'s when false
 /// (`prim/link`: the target became the root and the script's prim link 2).
-/// Both prims hear `changed(CHANGED_LINK)`; the forced second of sleep is the
-/// table's.
+/// Both prims hear `changed(CHANGED_LINK)`; the forced delay is the table's
+/// (a second on OpenSim), which OpenSim takes only for a link it made.
 ///
 /// Refused without `PERMISSION_CHANGE_LINKS`, on Second Life with
 /// `Script trying to link but PERMISSION_CHANGE_LINKS permission not set!`
@@ -47,22 +47,33 @@ fn may_change_links(ctx: &mut ScriptCtx<'_>, second_life: &str, opensim: &str) -
 ///
 /// None; the signature is the library's.
 pub fn ll_create_link(ctx: &mut ScriptCtx<'_>, target: Key, parent: i32) -> Result<(), CallError> {
-    if ctx.flavour().is_opensim() && !dotnet::is_uuid(&target.0) {
-        return Ok(());
+    let opensim = ctx.flavour().is_opensim();
+    let linked = linked(ctx, &target, parent);
+    if !linked && opensim {
+        ctx.delay(0.0);
+    }
+    Ok(())
+}
+
+/// [`ll_create_link`]'s link: whether it was made, with each refusal said.
+fn linked(ctx: &mut ScriptCtx<'_>, target: &Key, parent: i32) -> bool {
+    let opensim = ctx.flavour().is_opensim();
+    if opensim && !dotnet::is_uuid(&target.0) {
+        return false;
     }
     if !may_change_links(
         ctx,
         "Script trying to link but PERMISSION_CHANGE_LINKS permission not set!",
         "llCreateLink: PERMISSION_CHANGE_LINKS permission not set",
     ) {
-        return Ok(());
+        return false;
     }
     let caller = ctx.caller();
     let linked = ctx.host().create_link(caller, &target.0, parent != 0);
-    if linked.is_err() && !ctx.flavour().is_opensim() {
+    if linked.is_err() && !opensim {
         ctx.refuse("Script trying to link but target is invalid.".to_owned());
     }
-    Ok(())
+    linked.is_ok()
 }
 
 /// `llBreakLink`: take the prim numbered `link` out of the script's linkset

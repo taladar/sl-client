@@ -185,7 +185,6 @@ pub fn ll_get_inventory_creator(ctx: &mut ScriptCtx<'_>, name: String) -> Result
     }
     if ctx.flavour().is_opensim() {
         ctx.refuse("llGetInventoryCreator: Can't find item ''".to_owned());
-        ctx.sleep(1.0);
         return Ok(Key(String::new()));
     }
     no_item(ctx, &name);
@@ -302,15 +301,15 @@ pub fn ll_get_script_name(ctx: &mut ScriptCtx<'_>) -> Result<String, CallError> 
 }
 
 /// Refuses a script name the prim does not hold, as `call` is refused in
-/// the flavour's words, with the second it costs on both grids.
+/// the flavour's words, with the second it costs on both grids (OpenSim's
+/// is every refusal's).
 fn no_script(ctx: &mut ScriptCtx<'_>, call: &str, name: &str) {
-    let refusal = if ctx.flavour().is_opensim() {
-        format!("{call}: Can't find script '{name}'")
+    if ctx.flavour().is_opensim() {
+        ctx.refuse(format!("{call}: Can't find script '{name}'"));
     } else {
-        format!("Could not find script '{name}'.")
-    };
-    ctx.refuse(refusal);
-    ctx.sleep(1.0);
+        ctx.refuse(format!("Could not find script '{name}'."));
+        ctx.error_pause();
+    }
 }
 
 /// `llSetScriptState`: set the run flag of the script `name` of the prim,

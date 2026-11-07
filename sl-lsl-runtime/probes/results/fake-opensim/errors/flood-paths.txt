@@ -1,0 +1,47 @@
+grid: fake-opensim
+date: 2026-11-07
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Fake Region
+engine: sl-lsl-runtime imitating YEngine
+settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
+
+PROBE errors/flood-paths rec=start region="Fake Region" channel="OpenSim" version="sl-fake-grid 0.1.0"
+PROBE errors/flood-paths rec=phase name=T t=3.000000
+PROBE errors/flood-paths rec=cost call=sound cost=0.000000
+PROBE errors/flood-paths rec=cost call=texture cost=0.218000
+PROBE errors/flood-paths rec=material got=3
+PROBE errors/flood-paths rec=phase name=S t=38.873000
+# debug-channel: from="Object" text="llSetPrimitiveParams: Error running rule #1: arg #0 - unsupported parameter"
+# debug-channel: from="Object" text="llSetPrimitiveParams: Error running rule #2: arg #0 - unsupported parameter"
+# debug-channel: from="Object" text="llSetPrimitiveParams: Error running rule #3: arg #0 - unsupported parameter"
+# debug-channel: from="Object" text="llSetPrimitiveParams: Error running rule #4: arg #0 - unsupported parameter"
+# debug-channel: from="Object" text="llSetPrimitiveParams: Error running rule #5: arg #0 - unsupported parameter"
+# debug-channel: from="Object" text="llSetPrimitiveParams: Error running rule #6: arg #0 - unsupported parameter"
+# debug-channel: from="Object" text="llSetPrimitiveParams: Error running rule #7: arg #0 - unsupported parameter"
+# debug-channel: from="Object" text="llSetPrimitiveParams: Error running rule #8: arg #0 - unsupported parameter"
+# debug-channel: from="Object" text="llSetPrimitiveParams: Error running rule #9: arg #0 - unsupported parameter"
+# debug-channel: from="Object" text="llSetPrimitiveParams: Error running rule #10: arg #0 - unsupported parameter"
+# debug-channel: from="Object" text="llSetPrimitiveParams: Error running rule #11: arg #0 - unsupported parameter"
+# debug-channel: from="Object" text="llSetPrimitiveParams: Error running rule #12: arg #0 - unsupported parameter"
+PROBE errors/flood-paths rec=phase name=X1 t=88.491000
+# debug-channel: from="Object" text="llSetPrimitiveParams: Error running rule #1: arg #0 - unsupported parameter"
+PROBE errors/flood-paths rec=phase name=X2 t=124.709000
+PROBE errors/flood-paths rec=phase name=X3 t=159.709000
+PROBE errors/flood-paths rec=phase name=X4 t=195.727000
+PROBE errors/flood-paths rec=phase name=X5 t=230.727000
+PROBE errors/flood-paths rec=phase name=W t=266.745000
+PROBE errors/flood-paths rec=single name="W9" t=276.745000
+PROBE errors/flood-paths rec=end
+# debug-channel by=other: from="Object" text="llSetPrimitiveParams: Error running rule #1: arg #0 - unsupported parameter"
+# debug-channel by=other: from="Object" text="llSetPrimitiveParams: Error running rule #2: arg #0 - unsupported parameter"
+# debug-channel by=other: from="Object" text="llSetPrimitiveParams: Error running rule #3: arg #0 - unsupported parameter"
+# debug-channel by=other: from="Object" text="llSetPrimitiveParams: Error running rule #4: arg #0 - unsupported parameter"
+# debug-channel by=other: from="Object" text="llSetPrimitiveParams: Error running rule #5: arg #0 - unsupported parameter"
+# debug-channel by=other: from="Object" text="llSetPrimitiveParams: Error running rule #6: arg #0 - unsupported parameter"
+# debug-channel by=other: from="Object" text="llSetPrimitiveParams: Error running rule #7: arg #0 - unsupported parameter"
+# debug-channel by=other: from="Object" text="llSetPrimitiveParams: Error running rule #8: arg #0 - unsupported parameter"
+# debug-channel by=other: from="Object" text="llSetPrimitiveParams: Error running rule #9: arg #0 - unsupported parameter"
+# debug-channel by=other: from="Object" text="llSetPrimitiveParams: Error running rule #10: arg #0 - unsupported parameter"
+# debug-channel by=other: from="Object" text="llSetPrimitiveParams: Error running rule #11: arg #0 - unsupported parameter"
+# debug-channel by=other: from="Object" text="llSetPrimitiveParams: Error running rule #12: arg #0 - unsupported parameter"
+# debug-channel by=other: from="Object" text="llSetPrimitiveParams: Error running rule #1: arg #0 - unsupported parameter"

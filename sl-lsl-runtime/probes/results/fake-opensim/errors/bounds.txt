@@ -1,0 +1,92 @@
+grid: fake-opensim
+date: 2026-11-07
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Fake Region
+engine: sl-lsl-runtime imitating YEngine
+settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
+
+# chat type=say from="Object" length=14 text="Script running"
+# chat type=say from="Object" length=14 text="Script running"
+PROBE errors/bounds rec=start region="Fake Region" channel="OpenSim" version="sl-fake-grid 0.1.0"
+PROBE errors/bounds rec=case script="Bounds 1" case=list-read-past-end step=before
+PROBE errors/bounds rec=case script="Bounds 1" case=list-read-past-end step=after result="|0|0.000000||<0.00000, 0.00000, 0.00000>|<0.00000, 0.00000, 0.00000, 1.00000>|0"
+PROBE errors/bounds rec=case script="Bounds 2" case=list-read-before-start step=before
+PROBE errors/bounds rec=case script="Bounds 2" case=list-read-before-start step=after result="|0|0.000000||<0.00000, 0.00000, 0.00000>|<0.00000, 0.00000, 0.00000, 1.00000>|0"
+PROBE errors/bounds rec=case script="Bounds 3" case=list-read-other-type step=before
+PROBE errors/bounds rec=case script="Bounds 3" case=list-read-other-type step=after result="<1.00000, 2.00000, 3.00000>|<1.00000, 2.00000, 3.00000, 4.00000>|16|2|1.000000||0|7"
+PROBE errors/bounds rec=case script="Bounds 4" case=list2list-ranges step=before
+PROBE errors/bounds rec=case script="Bounds 4" case=list2list-ranges step=after result="[][a, b, e, f][a, b, c, d, e, f][b, c, d, e, f][a, b, c, d, e, f]"
+PROBE errors/bounds rec=case script="Bounds 5" case=deletesublist-ranges step=before
+PROBE errors/bounds rec=case script="Bounds 5" case=deletesublist-ranges step=after result="[a, b, c, d, e, f][c, d][][][]"
+PROBE errors/bounds rec=case script="Bounds 6" case=replacelist-ranges step=before
+PROBE errors/bounds rec=case script="Bounds 6" case=replacelist-ranges step=after result="[a, b, c, d, e, f, x][a, b, c, d, e, f][c, d, x][a, b, c, d, e, f, x]"
+PROBE errors/bounds rec=case script="Bounds 7" case=insertlist-at step=before
+PROBE errors/bounds rec=case script="Bounds 7" case=insertlist-at step=after result="[a, b, c, d, e, f, x][x, a, b, c, d, e, f][a, b, c, d, e, f, x][a, b, c, d, e, x, f]"
+PROBE errors/bounds rec=case script="Bounds 8" case=strided-stride-zero step=before
+PROBE errors/bounds rec=case script="Bounds 8" case=strided-stride-zero step=after result="[a, b, c, d, e, f]"
+PROBE errors/bounds rec=case script="Bounds 9" case=strided-odd step=before
+# owner-say: from="Object" text="[YEngine]: Exception while running c11cd4db-8e2a-bcc1-cf99-625717f1f9f8"
+# owner-say: from="Object" text="IndexOutOfRangeException: Index was outside the bounds of the array."
+# owner-say: from="Object" text="Prim: <Object>, Script: <Bounds 9>, Location: Fake Region <128,124,26>"
+# owner-say: from="Object" text="Script must be Reset to re-enable."
+PROBE errors/bounds rec=case script="Bounds 10" case=sort-stride-zero step=before
+PROBE errors/bounds rec=case script="Bounds 10" case=sort-stride-zero step=after result="[a, b, c, d, e, f]"
+PROBE errors/bounds rec=case script="Bounds 11" case=sort-odd step=before
+PROBE errors/bounds rec=case script="Bounds 11" case=sort-odd step=after result="[a, b, c, d, e, f][a, b, c, d, e, f][a, b, c, d, e, f]"
+PROBE errors/bounds rec=case script="Bounds 12" case=randomize-odd step=before
+PROBE errors/bounds rec=case script="Bounds 12" case=randomize-odd step=after result="6|6|6"
+PROBE errors/bounds rec=case script="Bounds 13" case=statistics-odd step=before
+# owner-say: from="Object" text="[YEngine]: Exception while running cfe4e1ef-bb9e-c790-ca1c-13e567941e1f"
+# owner-say: from="Object" text="IndexOutOfRangeException: Index was outside the bounds of the array."
+# owner-say: from="Object" text="Prim: <Object>, Script: <Bounds 13>, Location: Fake Region <128,124,26>"
+# owner-say: from="Object" text="Script must be Reset to re-enable."
+PROBE errors/bounds rec=case script="Bounds 14" case=findlist-empty step=before
+PROBE errors/bounds rec=case script="Bounds 14" case=findlist-empty step=after result="-1|-1|-1"
+PROBE errors/bounds rec=case script="Bounds 15" case=substring-ranges step=before
+PROBE errors/bounds rec=case script="Bounds 15" case=substring-ranges step=after result="|abcdef|abef|abcdf|abcdef|cd"
+PROBE errors/bounds rec=case script="Bounds 16" case=insertstring-at step=before
+# owner-say: from="Object" text="[YEngine]: Exception while running 1de8ab6d-b402-d679-c738-7df6ee3a6d95"
+# owner-say: from="Object" text="IndexOutOfRangeException: Index was outside the bounds of the array."
+# owner-say: from="Object" text="Prim: <Object>, Script: <Bounds 16>, Location: Fake Region <128,124,26>"
+# owner-say: from="Object" text="Script must be Reset to re-enable."
+PROBE errors/bounds rec=case script="Bounds 17" case=parse-limits step=before
+PROBE errors/bounds rec=case script="Bounds 17" case=parse-limits step=after result="[a, b, c, d, e, f, g, h, i, j][abc][a, b]"
+PROBE errors/bounds rec=case script="Bounds 18" case=ord-char-out-of-range step=before
+PROBE errors/bounds rec=case script="Bounds 18" case=ord-char-out-of-range step=after result="0|0|\"�\"|\"�\"|\"\""
+PROBE errors/bounds rec=script-state when=after-faults script="Bounds 1" running=1
+PROBE errors/bounds rec=script-state when=after-faults script="Bounds 2" running=1
+PROBE errors/bounds rec=script-state when=after-faults script="Bounds 3" running=1
+PROBE errors/bounds rec=script-state when=after-faults script="Bounds 4" running=1
+PROBE errors/bounds rec=script-state when=after-faults script="Bounds 5" running=1
+PROBE errors/bounds rec=script-state when=after-faults script="Bounds 6" running=1
+PROBE errors/bounds rec=script-state when=after-faults script="Bounds 7" running=1
+PROBE errors/bounds rec=script-state when=after-faults script="Bounds 8" running=1
+PROBE errors/bounds rec=script-state when=after-faults script="Bounds 9" running=1
+PROBE errors/bounds rec=script-state when=after-faults script="Bounds 10" running=1
+PROBE errors/bounds rec=script-state when=after-faults script="Bounds 11" running=1
+PROBE errors/bounds rec=script-state when=after-faults script="Bounds 12" running=1
+PROBE errors/bounds rec=script-state when=after-faults script="Bounds 13" running=1
+PROBE errors/bounds rec=script-state when=after-faults script="Bounds 14" running=1
+PROBE errors/bounds rec=script-state when=after-faults script="Bounds 15" running=1
+PROBE errors/bounds rec=script-state when=after-faults script="Bounds 16" running=1
+PROBE errors/bounds rec=script-state when=after-faults script="Bounds 17" running=1
+PROBE errors/bounds rec=script-state when=after-faults script="Bounds 18" running=1
+PROBE errors/bounds rec=ping when=after-faults
+PROBE errors/bounds rec=answer script="Bounds 1"
+PROBE errors/bounds rec=answer script="Bounds 2"
+PROBE errors/bounds rec=answer script="Bounds 3"
+PROBE errors/bounds rec=answer script="Bounds 4"
+PROBE errors/bounds rec=answer script="Bounds 5"
+PROBE errors/bounds rec=answer script="Bounds 6"
+PROBE errors/bounds rec=answer script="Bounds 7"
+PROBE errors/bounds rec=answer script="Bounds 8"
+PROBE errors/bounds rec=answer script="Bounds 10"
+PROBE errors/bounds rec=answer script="Bounds 11"
+PROBE errors/bounds rec=answer script="Bounds 12"
+PROBE errors/bounds rec=answer script="Bounds 14"
+PROBE errors/bounds rec=answer script="Bounds 15"
+PROBE errors/bounds rec=answer script="Bounds 17"
+PROBE errors/bounds rec=answer script="Bounds 18"
+PROBE errors/bounds rec=end
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"

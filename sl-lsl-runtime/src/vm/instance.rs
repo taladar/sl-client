@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use core::time::Duration;
 
-use sl_lsl::ast::TypeName;
+use sl_lsl::ast::{BinaryOp, TypeName};
 use sl_types::lsl::{Rotation, Vector};
 
 use crate::bytecode::{Body, CodeOffset, Component, FunctionId, Instr, Program, StateId};
@@ -17,6 +17,7 @@ use crate::value::{Element, Value};
 use crate::vm::comms::Listens;
 use crate::vm::context::{Peers, Raised, Request, ScriptCtx, ScriptData, Tick};
 use crate::vm::cost;
+use crate::vm::delays;
 use crate::vm::detected::{Detected, MAX_DETECTED, is_detection_event};
 use crate::vm::fault::{Fault, RuntimeError};
 use crate::vm::flavour::EngineFlavour;
@@ -401,6 +402,12 @@ const SLEEPS_FIRST: [&str; 6] = [
     "llSetPrimMediaParams",
 ];
 
+/// The library functions that decide as they run whether to take a delay
+/// before what they do (XEngine blocks its thread in `ScriptSleep` there):
+/// OpenSim's chat throttle sleeps an `llSay` or `llShout` before the line is
+/// said ([`delays::SayThrottle`]).
+const DECIDES_SLEEP_FIRST: [&str; 2] = ["llSay", "llShout"];
+
 /// An event waiting for its handler.
 #[derive(Debug, Clone)]
 struct Queued {
@@ -414,6 +421,10 @@ struct Queued {
     detected: Option<Vec<Detected>>,
     /// The tick it was posted in, which decides whether a later one merges.
     posted: Tick,
+    /// How many handlers the script had begun when it was posted: the
+    /// events raised while one handler ran are ranked among themselves, and
+    /// wait behind every event raised before it began.
+    batch: u64,
 }
 
 /// What executing one instruction leads to.
@@ -455,6 +466,9 @@ pub struct Instance {
     held: bool,
     /// Events waiting for their handlers, oldest first.
     queue: VecDeque<Queued>,
+    /// How many event handlers the script has begun, which numbers the
+    /// batch an event posted now joins ([`Queued::batch`]).
+    begun: u64,
     /// The body in progress, if any.
     activity: Option<Activity>,
     /// A state change requested by the body in progress, carried out when
@@ -806,7 +820,20 @@ impl Machine<'_> {
                 let left = pop_operand(stack)?;
                 let right = pop_operand(stack)?;
                 let in_place = objects::appends_in_place(self.memory.flavour(), op, &left, &right);
-                let result = operand::binary(op, left, right)?;
+                let result = match (self.memory.flavour().is_opensim(), op, &left, &right) {
+                    // OpenSim's own formula for a vector by a rotation.
+                    (
+                        true,
+                        BinaryOp::Mul | BinaryOp::Div,
+                        Operand::Value(Value::Vector(vector)),
+                        Operand::Value(Value::Rotation(rotation)),
+                    ) => Operand::Value(Value::Vector(crate::ops::opensim_rotate(
+                        vector,
+                        rotation,
+                        op == BinaryOp::Div,
+                    ))),
+                    _ => operand::binary(op, left, right)?,
+                };
                 if let Operand::Value(value) = &result {
                     *used = used.saturating_add(cost::operator(op, value));
                     self.memory.made(value)?;
@@ -862,19 +889,34 @@ impl Machine<'_> {
             }
             Instr::CallBuiltin(id) => {
                 let descriptor = id.descriptor();
-                let forced = f64::from(descriptor.sleep);
+                let flavour = self.peers.flavour();
+                let factor = self.peers.delay_factor();
+                let forced = delays::scaled(flavour, delays::forced(flavour, descriptor), factor);
                 let sleeps_first = forced > 0.0
-                    && self.peers.flavour() == EngineFlavour::XEngine
+                    && flavour == EngineFlavour::XEngine
                     && SLEEPS_FIRST.contains(&descriptor.name);
-                if sleeps_first && !*slept_first {
+                let woke = core::mem::take(slept_first);
+                if sleeps_first && !woke {
                     // The delay first; the call runs again from the top when
                     // the script wakes, its arguments still on the stack.
                     *slept_first = true;
                     frame.pc = frame.pc.saturating_sub(1);
                     return Ok(Flow::Sleep(forced));
                 }
-                *slept_first = false;
                 let after = if sleeps_first { 0.0 } else { forced };
+                // A call that may decide to sleep first keeps its arguments,
+                // to be made again with them once the script wakes.
+                let replay = (flavour == EngineFlavour::XEngine
+                    && !woke
+                    && DECIDES_SLEEP_FIRST.contains(&descriptor.name))
+                .then(|| {
+                    stack
+                        .len()
+                        .checked_sub(descriptor.args.len())
+                        .and_then(|at| stack.get(at..))
+                        .map(<[Operand]>::to_vec)
+                })
+                .flatten();
                 let (args, arg_objects): (Vec<Value>, Vec<Option<ListId>>) =
                     pop_n_held(stack, descriptor.args.len())?
                         .into_iter()
@@ -890,7 +932,8 @@ impl Machine<'_> {
                     &mut *self.data,
                     self.peers,
                     (&mut *self.memory, *held),
-                );
+                )
+                .woken(woke);
                 let called = match ossl::admit(descriptor, &mut ctx)? {
                     Admitted::Run => library::call(id, &mut ctx, args),
                     Admitted::Skip(value) => Ok(Called {
@@ -899,6 +942,7 @@ impl Machine<'_> {
                     }),
                 };
                 let request = ctx.take_request();
+                let (delay, pauses, first) = ctx.take_delays();
                 let written_back = ctx.take_written_back();
                 let returned = ctx.take_returned();
                 // A change the function made in place stands even when the
@@ -927,6 +971,23 @@ impl Machine<'_> {
                         returned.and_then(|argument| arg_objects.get(argument).copied().flatten());
                     stack.push(objects::operand(value, object));
                 }
+                if let (Some(seconds), Some(replay)) = (first, replay) {
+                    // XEngine's thread sleeps before the call does what it
+                    // decided to: it is made again, from the top, on waking.
+                    stack.extend(replay);
+                    *slept_first = true;
+                    if let Some(frame) = frames.last_mut() {
+                        frame.pc = frame.pc.saturating_sub(1);
+                    }
+                    return Ok(Flow::Sleep(delays::scaled(
+                        flavour,
+                        f64::from(seconds),
+                        factor,
+                    )));
+                }
+                let after = delay.map_or(after, |seconds| {
+                    delays::scaled(flavour, f64::from(seconds), factor)
+                }) + f64::from(pauses);
                 return Ok(match request {
                     Some(Request::Reset) => Flow::Reset,
                     Some(Request::Die) => Flow::Died,
@@ -1063,6 +1124,7 @@ impl Instance {
             running: true,
             held: false,
             queue: VecDeque::new(),
+            begun: 0,
             activity: None,
             pending_state: None,
             wake: Tick::default(),
@@ -1322,6 +1384,7 @@ impl Instance {
         self.data = ScriptData {
             start_parameter: self.data.start_parameter,
             start_string: core::mem::take(&mut self.data.start_string),
+            say_throttle: self.data.say_throttle,
             ..ScriptData::default()
         };
         self.globals = self
@@ -1507,16 +1570,20 @@ impl Instance {
             args,
             detected,
             posted: arrival.tick,
+            batch: self.begun,
         };
         if first {
             self.queue.push_front(queued);
         } else {
+            // Ranked among the events raised while the same handler ran;
+            // behind every one raised before it began (`events/order`: a
+            // link message the next handler sends comes after a `changed`
+            // raised during the last).
             let rank = arrival.coalescing.rank(event.name);
-            match self
-                .queue
-                .iter()
-                .position(|waiting| arrival.coalescing.rank(waiting.event.name) > rank)
-            {
+            let batch = self.begun;
+            match self.queue.iter().position(|waiting| {
+                waiting.batch == batch && arrival.coalescing.rank(waiting.event.name) > rank
+            }) {
                 Some(ahead_of) => self.queue.insert(ahead_of, queued),
                 None => self.queue.push_back(queued),
             }
@@ -1676,6 +1743,9 @@ impl Instance {
         peers: Peers<'_>,
     ) -> Slice {
         let mut used = 0_u32;
+        self.data
+            .say_throttle
+            .start(crate::vm::context::region_time(now, step));
         let outcome = self.run_body(caller, now, step, budget, host, peers, &mut used);
         Slice {
             outcome,
@@ -1838,6 +1908,7 @@ impl Instance {
         else {
             return Ok(());
         };
+        self.begun = self.begun.wrapping_add(1);
         // An event with no detected block clears the last one: a `timer`
         // after a touch reads nothing (aditi, 2026-09-28).
         self.data.detected = detected.unwrap_or_default();

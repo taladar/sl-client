@@ -196,9 +196,6 @@ impl<'list> Reader<'list> {
             )
         };
         ctx.refuse_to_owner(text);
-        if self.opensim {
-            ctx.sleep(1.0);
-        }
         Stop::Refused
     }
 
@@ -222,9 +219,6 @@ impl<'list> Reader<'list> {
             )
         };
         ctx.refuse_to_owner(text);
-        if self.opensim {
-            ctx.sleep(1.0);
-        }
     }
 
     /// Second Life's `… warning running rule #1 (PRIM_TYPE_BOX): <detail>`:

@@ -1,0 +1,37 @@
+grid: fake-opensim
+date: 2026-11-07
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Fake Region
+engine: sl-lsl-runtime imitating YEngine
+settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
+
+PROBE comms/listen-limit rec=start region="Fake Region" channel="OpenSim" version="sl-fake-grid 0.1.0"
+PROBE comms/listen-limit rec=duplicate same=1 first_positive=1 second_positive=1
+PROBE comms/listen-limit rec=opening n=60
+PROBE comms/listen-limit rec=opened n=60 handle_positive=1
+PROBE comms/listen-limit rec=opening n=61
+PROBE comms/listen-limit rec=opened n=61 handle_positive=1
+PROBE comms/listen-limit rec=opening n=62
+PROBE comms/listen-limit rec=opened n=62 handle_positive=1
+PROBE comms/listen-limit rec=opening n=63
+PROBE comms/listen-limit rec=opened n=63 handle_positive=1
+PROBE comms/listen-limit rec=opening n=64
+PROBE comms/listen-limit rec=opened n=64 handle_positive=1
+PROBE comms/listen-limit rec=opening n=65
+PROBE comms/listen-limit rec=opened n=65 handle_positive=0
+PROBE comms/listen-limit rec=opening n=66
+PROBE comms/listen-limit rec=opened n=66 handle_positive=0
+PROBE comms/listen-limit rec=opening n=67
+PROBE comms/listen-limit rec=opened n=67 handle_positive=0
+PROBE comms/listen-limit rec=opening n=68
+PROBE comms/listen-limit rec=opened n=68 handle_positive=0
+PROBE comms/listen-limit rec=opening n=69
+PROBE comms/listen-limit rec=opened n=69 handle_positive=0
+PROBE comms/listen-limit rec=opening n=70
+PROBE comms/listen-limit rec=opened n=70 handle_positive=0
+PROBE comms/listen-limit rec=reopened handle_positive=0
+PROBE comms/listen-limit rec=removed-unknown
+PROBE comms/listen-limit rec=filled held=70
+PROBE comms/listen-limit rec=filler running=1
+PROBE comms/listen-limit rec=pong text="held 70"
+PROBE comms/listen-limit rec=end

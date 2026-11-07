@@ -1,0 +1,64 @@
+grid: fake-sl
+date: 2026-11-07
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Fake Region
+engine: sl-lsl-runtime imitating Mono
+settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
+complete: no
+
+PROBE prim/changed rec=start region="Fake Region" channel="Second Life Server" version="sl-fake-grid 0.1.0"
+PROBE prim/changed rec=try label=color
+PROBE prim/changed rec=changed label=color bits=COLOR events=1
+PROBE prim/changed rec=try label=color-same
+PROBE prim/changed rec=changed label=color-same bits=COLOR events=1
+PROBE prim/changed rec=try label=alpha
+PROBE prim/changed rec=changed label=alpha bits=COLOR events=1
+PROBE prim/changed rec=try label=alpha-same
+PROBE prim/changed rec=changed label=alpha-same bits=COLOR events=1
+PROBE prim/changed rec=try label=texture
+PROBE prim/changed rec=changed label=texture bits=none events=0
+PROBE prim/changed rec=try label=texture-same
+PROBE prim/changed rec=changed label=texture-same bits=none events=0
+PROBE prim/changed rec=try label=scale-texture
+PROBE prim/changed rec=changed label=scale-texture bits=none events=0
+PROBE prim/changed rec=try label=offset-texture
+PROBE prim/changed rec=changed label=offset-texture bits=none events=0
+PROBE prim/changed rec=try label=rotate-texture
+PROBE prim/changed rec=changed label=rotate-texture bits=none events=0
+PROBE prim/changed rec=try label=scale
+PROBE prim/changed rec=changed label=scale bits=SCALE events=1
+PROBE prim/changed rec=try label=scale-same
+PROBE prim/changed rec=changed label=scale-same bits=none events=0
+PROBE prim/changed rec=try label=position
+PROBE prim/changed rec=changed label=position bits=none events=0
+PROBE prim/changed rec=try label=rotation
+PROBE prim/changed rec=changed label=rotation bits=none events=0
+PROBE prim/changed rec=try label=shape
+PROBE prim/changed rec=changed label=shape bits=SHAPE events=1
+PROBE prim/changed rec=try label=size
+PROBE prim/changed rec=changed label=size bits=SCALE events=1
+PROBE prim/changed rec=try label=glow
+PROBE prim/changed rec=changed label=glow bits=none events=0
+PROBE prim/changed rec=try label=fullbright
+PROBE prim/changed rec=changed label=fullbright bits=none events=0
+PROBE prim/changed rec=try label=bump-shiny
+PROBE prim/changed rec=changed label=bump-shiny bits=none events=0
+PROBE prim/changed rec=try label=texgen
+PROBE prim/changed rec=changed label=texgen bits=none events=0
+PROBE prim/changed rec=try label=text
+PROBE prim/changed rec=changed label=text bits=none events=0
+PROBE prim/changed rec=try label=name
+PROBE prim/changed rec=changed label=name bits=none events=0
+PROBE prim/changed rec=try label=desc
+PROBE prim/changed rec=changed label=desc bits=none events=0
+PROBE prim/changed rec=try label=light
+PROBE prim/changed rec=changed label=light bits=none events=0
+PROBE prim/changed rec=try label=flexible
+PROBE prim/changed rec=changed label=flexible bits=none events=0
+PROBE prim/changed rec=try label=material
+PROBE prim/changed rec=changed label=material bits=none events=0
+PROBE prim/changed rec=try label=phantom
+# debug-channel: from="Probe prim" text="Probe prim [script:Probe] Script run-time error"
+# debug-channel: from="Probe prim" text="llSetStatus is not implemented by this grid"
+# debug-channel by=other: from="Probe prim" text="Probe prim [script:Probe] Script run-time error"
+# debug-channel by=other: from="Probe prim" text="llSetStatus is not implemented by this grid"

@@ -1,0 +1,66 @@
+grid: fake-sl
+date: 2026-11-07
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Fake Region
+engine: sl-lsl-runtime imitating Mono
+settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
+
+PROBE vm/call-cost-strings rec=start region="Fake Region" channel="Second Life Server" version="sl-fake-grid 0.1.0"
+PROBE vm/call-cost-strings rec=rate fn=none size=1 calls=618490 seconds=1.511111 per_second=409295
+PROBE vm/call-cost-strings rec=rate fn=llStringLength size=1 calls=84530 seconds=1.511111 per_second=55939
+PROBE vm/call-cost-strings rec=rate fn=llGetSubString size=1 calls=39230 seconds=1.511111 per_second=25961
+PROBE vm/call-cost-strings rec=rate fn=llSubStringIndex size=1 calls=53710 seconds=1.511111 per_second=35543
+PROBE vm/call-cost-strings rec=rate fn=llParseString2List size=1 calls=10060 seconds=1.511111 per_second=6657
+PROBE vm/call-cost-strings rec=rate fn=llToUpper size=1 calls=91140 seconds=1.511111 per_second=60313
+PROBE vm/call-cost-strings rec=rate fn=llStringToBase64 size=1 calls=42010 seconds=1.511111 per_second=27801
+PROBE vm/call-cost-strings rec=rate fn=llMD5String size=1 calls=6230 seconds=1.511111 per_second=4123
+PROBE vm/call-cost-strings rec=rate fn=llSHA1String size=1 calls=5580 seconds=1.511111 per_second=3693
+PROBE vm/call-cost-strings rec=rate fn=llEscapeURL size=1 calls=20690 seconds=1.511111 per_second=13692
+PROBE vm/call-cost-strings rec=rate fn=string-plus size=1 calls=114360 seconds=1.511111 per_second=75679
+PROBE vm/call-cost-strings rec=rate fn=llInsertString size=1 calls=27250 seconds=1.511111 per_second=18033
+PROBE vm/call-cost-strings rec=rate fn=llDeleteSubString size=1 calls=43290 seconds=1.511111 per_second=28648
+PROBE vm/call-cost-strings rec=rate fn=llStringTrim size=1 calls=37100 seconds=1.511111 per_second=24551
+PROBE vm/call-cost-strings rec=rate fn=none size=10 calls=618330 seconds=1.511111 per_second=409189
+PROBE vm/call-cost-strings rec=rate fn=llStringLength size=10 calls=46150 seconds=1.511111 per_second=30540
+PROBE vm/call-cost-strings rec=rate fn=llGetSubString size=10 calls=29510 seconds=1.511111 per_second=19529
+PROBE vm/call-cost-strings rec=rate fn=llSubStringIndex size=10 calls=34760 seconds=1.511111 per_second=23003
+PROBE vm/call-cost-strings rec=rate fn=llParseString2List size=10 calls=3320 seconds=1.511111 per_second=2197
+PROBE vm/call-cost-strings rec=rate fn=llToUpper size=10 calls=69050 seconds=1.511111 per_second=45695
+PROBE vm/call-cost-strings rec=rate fn=llStringToBase64 size=10 calls=28300 seconds=1.511111 per_second=18728
+PROBE vm/call-cost-strings rec=rate fn=llMD5String size=10 calls=6220 seconds=1.511111 per_second=4116
+PROBE vm/call-cost-strings rec=rate fn=llSHA1String size=10 calls=4880 seconds=1.511111 per_second=3229
+PROBE vm/call-cost-strings rec=rate fn=llEscapeURL size=10 calls=10150 seconds=1.511111 per_second=6717
+PROBE vm/call-cost-strings rec=rate fn=string-plus size=10 calls=109870 seconds=1.511111 per_second=72708
+PROBE vm/call-cost-strings rec=rate fn=llInsertString size=10 calls=14880 seconds=1.511111 per_second=9847
+PROBE vm/call-cost-strings rec=rate fn=llDeleteSubString size=10 calls=18060 seconds=1.511111 per_second=11951
+PROBE vm/call-cost-strings rec=rate fn=llStringTrim size=10 calls=19000 seconds=1.511111 per_second=12574
+PROBE vm/call-cost-strings rec=rate fn=none size=100 calls=617220 seconds=1.511111 per_second=408454
+PROBE vm/call-cost-strings rec=rate fn=llStringLength size=100 calls=14990 seconds=1.511111 per_second=9920
+PROBE vm/call-cost-strings rec=rate fn=llGetSubString size=100 calls=12260 seconds=1.511111 per_second=8113
+PROBE vm/call-cost-strings rec=rate fn=llSubStringIndex size=100 calls=12750 seconds=1.511111 per_second=8438
+PROBE vm/call-cost-strings rec=rate fn=llParseString2List size=100 calls=310 seconds=1.511111 per_second=205
+PROBE vm/call-cost-strings rec=rate fn=llToUpper size=100 calls=16860 seconds=1.511111 per_second=11157
+PROBE vm/call-cost-strings rec=rate fn=llStringToBase64 size=100 calls=5430 seconds=1.511111 per_second=3593
+PROBE vm/call-cost-strings rec=rate fn=llMD5String size=100 calls=4600 seconds=1.511111 per_second=3044
+PROBE vm/call-cost-strings rec=rate fn=llSHA1String size=100 calls=4320 seconds=1.511111 per_second=2859
+PROBE vm/call-cost-strings rec=rate fn=llEscapeURL size=100 calls=1450 seconds=1.511111 per_second=960
+PROBE vm/call-cost-strings rec=rate fn=string-plus size=100 calls=36970 seconds=1.511111 per_second=24465
+PROBE vm/call-cost-strings rec=rate fn=llInsertString size=100 calls=3230 seconds=1.511111 per_second=2138
+PROBE vm/call-cost-strings rec=rate fn=llDeleteSubString size=100 calls=3310 seconds=1.511111 per_second=2190
+PROBE vm/call-cost-strings rec=rate fn=llStringTrim size=100 calls=3220 seconds=1.511111 per_second=2131
+PROBE vm/call-cost-strings rec=rate fn=none size=1000 calls=616290 seconds=1.511111 per_second=407839
+PROBE vm/call-cost-strings rec=rate fn=llStringLength size=1000 calls=2250 seconds=1.511111 per_second=1489
+PROBE vm/call-cost-strings rec=rate fn=llGetSubString size=1000 calls=2000 seconds=1.511111 per_second=1324
+PROBE vm/call-cost-strings rec=rate fn=llSubStringIndex size=1000 calls=1970 seconds=1.511111 per_second=1304
+PROBE vm/call-cost-strings rec=rate fn=llParseString2List size=1000 calls=80 seconds=1.533333 per_second=52
+PROBE vm/call-cost-strings rec=rate fn=llToUpper size=1000 calls=2970 seconds=1.511111 per_second=1965
+PROBE vm/call-cost-strings rec=rate fn=llStringToBase64 size=1000 calls=640 seconds=1.511111 per_second=424
+PROBE vm/call-cost-strings rec=rate fn=llMD5String size=1000 calls=1570 seconds=1.511111 per_second=1039
+PROBE vm/call-cost-strings rec=rate fn=llSHA1String size=1000 calls=1780 seconds=1.511111 per_second=1178
+PROBE vm/call-cost-strings rec=rate fn=llEscapeURL size=1000 calls=210 seconds=1.511111 per_second=139
+PROBE vm/call-cost-strings rec=rate fn=string-plus size=1000 calls=7100 seconds=1.511111 per_second=4699
+PROBE vm/call-cost-strings rec=rate fn=llInsertString size=1000 calls=400 seconds=1.511111 per_second=265
+PROBE vm/call-cost-strings rec=rate fn=llDeleteSubString size=1000 calls=380 seconds=1.511111 per_second=251
+PROBE vm/call-cost-strings rec=rate fn=llStringTrim size=1000 calls=390 seconds=1.533333 per_second=254
+PROBE vm/call-cost-strings rec=rate fn=none size=0 calls=618030 seconds=1.511111 per_second=408990
+PROBE vm/call-cost-strings rec=end

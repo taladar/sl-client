@@ -1,0 +1,41 @@
+grid: fake-opensim
+date: 2026-11-07
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Fake Region
+engine: sl-lsl-runtime imitating YEngine
+settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
+
+PROBE errors/flood-kinds rec=start region="Fake Region" channel="OpenSim" version="sl-fake-grid 0.1.0"
+PROBE errors/flood-kinds rec=phase name=A t=3.000000
+PROBE errors/flood-kinds rec=single name="C1" t=8.873000
+PROBE errors/flood-kinds rec=single name="C2" t=13.891000
+PROBE errors/flood-kinds rec=single name="C3" t=18.909000
+PROBE errors/flood-kinds rec=single name="C4" t=23.927000
+PROBE errors/flood-kinds rec=single name="A11" t=34.145000
+PROBE errors/flood-kinds rec=phase name=B t=104.145000
+PROBE errors/flood-kinds rec=fault script=faulter step=before
+# debug-channel: from="Object" text="YEngine: Division by Zero (script: Faulter event: link_message primID: d084ed5a-dd9a-7d26-cebd-6bb1c1a2c05c at: <128,124,26>) Script must be Reset to re-enable.\n"
+PROBE errors/flood-kinds rec=single name="D9" t=106.145000
+PROBE errors/flood-kinds rec=phase name=C t=176.145000
+# debug-channel: from="Object" text="llSetPrimitiveParams: Error running rule #1: arg #0 - unsupported parameter"
+# debug-channel: from="Object" text="llSetPrimitiveParams: Error running rule #2: arg #0 - unsupported parameter"
+# debug-channel: from="Object" text="llSetPrimitiveParams: Error running rule #3: arg #0 - unsupported parameter"
+# debug-channel: from="Object" text="llSetPrimitiveParams: Error running rule #4: arg #0 - unsupported parameter"
+# debug-channel: from="Object" text="llSetPrimitiveParams: Error running rule #5: arg #0 - unsupported parameter"
+PROBE errors/flood-kinds rec=phase name=D t=253.327000
+PROBE errors/flood-kinds rec=single name="E2" t=256.327000
+PROBE errors/flood-kinds rec=single name="E3" t=259.345000
+PROBE errors/flood-kinds rec=single name="E4" t=262.364000
+PROBE errors/flood-kinds rec=single name="E5" t=265.382000
+PROBE errors/flood-kinds rec=single name="E6" t=268.400000
+PROBE errors/flood-kinds rec=single name="E7" t=271.418000
+PROBE errors/flood-kinds rec=single name="E8" t=274.436000
+PROBE errors/flood-kinds rec=single name="E9" t=277.455000
+PROBE errors/flood-kinds rec=single name="E10" t=280.473000
+PROBE errors/flood-kinds rec=end
+# debug-channel by=other: from="Object" text="YEngine: Division by Zero (script: Faulter event: link_message primID: d084ed5a-dd9a-7d26-cebd-6bb1c1a2c05c at: <128,124,26>) Script must be Reset to re-enable.\n"
+# debug-channel by=other: from="Object" text="llSetPrimitiveParams: Error running rule #1: arg #0 - unsupported parameter"
+# debug-channel by=other: from="Object" text="llSetPrimitiveParams: Error running rule #2: arg #0 - unsupported parameter"
+# debug-channel by=other: from="Object" text="llSetPrimitiveParams: Error running rule #3: arg #0 - unsupported parameter"
+# debug-channel by=other: from="Object" text="llSetPrimitiveParams: Error running rule #4: arg #0 - unsupported parameter"
+# debug-channel by=other: from="Object" text="llSetPrimitiveParams: Error running rule #5: arg #0 - unsupported parameter"

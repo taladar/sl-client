@@ -1,0 +1,46 @@
+grid: fake-sl
+date: 2026-11-07
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Fake Region
+engine: sl-lsl-runtime imitating Mono
+settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
+
+# notecard "Notes" bytes=14
+# object "Child" scripts=1
+PROBE inventory/rez rec=start region="Fake Region" channel="Second Life Server" version="sl-fake-grid 0.1.0"
+PROBE inventory/rez rec=try label=plain
+PROBE inventory/rez rec=called case=plain delay=0.111111
+PROBE inventory/rez rec=object-rez case=plain order=1
+PROBE inventory/rez rec=entry case=plain order=2 start=42
+PROBE inventory/rez rec=done case=plain events=2
+PROBE inventory/rez rec=try label=at-root
+PROBE inventory/rez rec=called case=at-root delay=0.111111
+PROBE inventory/rez rec=object-rez case=at-root order=1
+PROBE inventory/rez rec=entry case=at-root order=2 start=-7
+PROBE inventory/rez rec=done case=at-root events=2
+PROBE inventory/rez rec=try label=rotation
+PROBE inventory/rez rec=called case=rotation delay=0.111111
+PROBE inventory/rez rec=object-rez case=rotation order=1
+PROBE inventory/rez rec=entry case=rotation order=2 start=0
+PROBE inventory/rez rec=done case=rotation events=2
+PROBE inventory/rez rec=try label=velocity
+PROBE inventory/rez rec=called case=velocity delay=0.111111
+PROBE inventory/rez rec=object-rez case=velocity order=1
+PROBE inventory/rez rec=entry case=velocity order=2 start=1
+PROBE inventory/rez rec=done case=velocity events=2
+PROBE inventory/rez rec=try label=far
+PROBE inventory/rez rec=called case=far delay=0.111111
+PROBE inventory/rez rec=done case=far events=0
+PROBE inventory/rez rec=try label=missing
+# debug-channel: from="Object" text="Could not find object 'Nope'."
+PROBE inventory/rez rec=called case=missing delay=1.111111
+PROBE inventory/rez rec=done case=missing events=0
+PROBE inventory/rez rec=try label=notecard
+PROBE inventory/rez rec=called case=notecard delay=0.111111
+PROBE inventory/rez rec=done case=notecard events=0
+PROBE inventory/rez rec=try label=burst
+PROBE inventory/rez rec=called case=burst calls=20 seconds=2.222221
+PROBE inventory/rez rec=done case=burst events=0
+PROBE inventory/rez rec=burst object_rez=20 reports=0 distinct=20
+PROBE inventory/rez rec=end
+# debug-channel by=other: from="Object" text="Could not find object 'Nope'."

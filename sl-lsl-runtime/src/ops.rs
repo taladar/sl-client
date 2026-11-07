@@ -395,6 +395,38 @@ pub(crate) const fn conjugate(rotation: &Rotation) -> Rotation {
     }
 }
 
+/// OpenSim's `vector * rotation` (`LSL_Types.Vector3.operator *`), and its
+/// `vector / rotation` with `inverse` (the rotation's `s` negated):
+/// `v + 2 q × (q × v + s v)` in double, which agrees with Second Life's
+/// [`rotate`] for a unit rotation only — by `<0, 0, 0, 2>` it leaves the
+/// vector as it is where Second Life scales it by four, and by
+/// `<0, 0, 0, 0>` too (`math/rotations`).
+pub(crate) fn opensim_rotate(vector: &Vector, rotation: &Rotation, inverse: bool) -> Vector {
+    let (vx, vy, vz) = (
+        f64::from(vector.x),
+        f64::from(vector.y),
+        f64::from(vector.z),
+    );
+    let (x, y, z) = (
+        f64::from(rotation.x),
+        f64::from(rotation.y),
+        f64::from(rotation.z),
+    );
+    let s = if inverse {
+        -f64::from(rotation.s)
+    } else {
+        f64::from(rotation.s)
+    };
+    let rx = s * vx + y * vz - z * vy;
+    let ry = s * vy + z * vx - x * vz;
+    let rz = s * vz + x * vy - y * vx;
+    Vector {
+        x: to_f32(2.0_f64.mul_add(rz * y - ry * z, vx)),
+        y: to_f32(2.0_f64.mul_add(rx * z - rz * x, vy)),
+        z: to_f32(2.0_f64.mul_add(ry * x - rx * y, vz)),
+    }
+}
+
 /// `vector * rotation`: the vector rotated by the rotation, `q v q*`,
 /// expanded and evaluated in `f64` from the `f32` components, then rounded
 /// to `f32` (PyOptimizer's `mul`) — what Mono does with it too

@@ -7,6 +7,7 @@ use core::time::Duration;
 use crate::value::Element;
 use crate::vm::comms::{LinkMessage, Listens};
 use crate::vm::contents::Control;
+use crate::vm::delays::SayThrottle;
 use crate::vm::detected::Detected;
 use crate::vm::economy::TransactionResult;
 use crate::vm::experiences::{ExperienceError, ExperienceQuestion};
@@ -191,6 +192,8 @@ pub(crate) struct ScriptData {
     /// The avatar controls the script took (`llTakeControls`), which a reset
     /// drops and a state change keeps.
     pub(crate) controls: Option<TakenControls>,
+    /// OpenSim's channel-0 chat throttle, which a reset keeps.
+    pub(crate) say_throttle: SayThrottle,
 }
 
 /// An avatar's controls a script took.
@@ -247,6 +250,9 @@ pub(crate) struct Peers<'run> {
     flavour: EngineFlavour,
     /// The region's `[OSSL]` configuration; [`None`] for the stock one.
     ossl: Option<&'run Settings>,
+    /// The region's `ScriptDelayFactor` (OpenSim's), which scales every
+    /// forced delay.
+    delay_factor: f64,
 }
 
 impl<'run> Peers<'run> {
@@ -256,20 +262,28 @@ impl<'run> Peers<'run> {
         instances: None,
         flavour: EngineFlavour::SecondLife,
         ossl: None,
+        delay_factor: 1.0,
     };
 
     /// The instances of an engine imitating `flavour` under the `[OSSL]`
-    /// configuration `ossl`, less the one running.
+    /// configuration `ossl` and the `ScriptDelayFactor` `delay_factor`, less
+    /// the one running.
     pub(crate) const fn of(
         instances: &'run BTreeMap<CallerId, Instance>,
         flavour: EngineFlavour,
-        ossl: &'run Settings,
+        (ossl, delay_factor): (&'run Settings, f64),
     ) -> Self {
         Self {
             instances: Some(instances),
             flavour,
             ossl: Some(ossl),
+            delay_factor,
         }
+    }
+
+    /// The region's `ScriptDelayFactor`.
+    pub(crate) const fn delay_factor(self) -> f64 {
+        self.delay_factor
     }
 
     /// The flavour the region imitates.
@@ -327,6 +341,17 @@ pub struct ScriptCtx<'host> {
     /// The argument whose own list the function returned, as OpenSim's
     /// library hands back the very object it was given in some cases.
     returned: Option<usize>,
+    /// This call's forced delay, where how it went decides it rather than the
+    /// flavour's table ([`Self::delay`]).
+    delay: Option<f32>,
+    /// The seconds the grid's error reports cost the script in this call
+    /// ([`Self::error_pause`]).
+    pauses: f32,
+    /// The delay the call takes before it does anything, asked for this
+    /// time ([`Self::delay_first`]).
+    first: Option<f32>,
+    /// The call is being made again after the delay it took first.
+    woke: bool,
 }
 
 impl<'host> ScriptCtx<'host> {
@@ -352,7 +377,19 @@ impl<'host> ScriptCtx<'host> {
             stack,
             written_back: None,
             returned: None,
+            delay: None,
+            pauses: 0.0,
+            first: None,
+            woke: false,
         }
+    }
+
+    /// The call is being made again after the delay it asked to take first
+    /// ([`Self::delay_first`]).
+    #[must_use]
+    pub(crate) const fn woken(mut self, woke: bool) -> Self {
+        self.woke = woke;
+        self
     }
 
     /// The calling instance.
@@ -785,24 +822,31 @@ impl<'host> ScriptCtx<'host> {
     /// Refuse the call's arguments with `text`, worded for the
     /// [`Self::flavour`]: the engine says it on `DEBUG_CHANNEL` once the
     /// slice is over, through the same flood limit as a run-time error. The
-    /// call itself carries on and returns its answer.
+    /// call itself carries on and returns its answer. On OpenSim it is
+    /// `LSL_Api.Error`, which costs the script a second
+    /// ([`Self::error_pause`]); Second Life charges only the few complaints
+    /// that say so.
     pub fn refuse(&mut self, text: String) {
-        self.data.refusals.push(Warning {
-            text,
-            shouted: false,
-            to_owner: false,
-        });
+        self.refuse_as(text, false);
     }
 
     /// Refuse the call's arguments with `text` as [`Self::refuse`] does, but
     /// as a complaint Second Life tells the owner alone — a rule list's
     /// (`errors/owner-lines`). OpenSim says it as any other refusal.
     pub fn refuse_to_owner(&mut self, text: String) {
+        self.refuse_as(text, true);
+    }
+
+    /// [`Self::refuse`], to the owner alone with `to_owner`.
+    fn refuse_as(&mut self, text: String, to_owner: bool) {
         self.data.refusals.push(Warning {
             text,
             shouted: false,
-            to_owner: true,
+            to_owner,
         });
+        if self.flavour().is_opensim() {
+            self.error_pause();
+        }
     }
 
     /// Shout `text` on `DEBUG_CHANNEL` once the slice is over, to avatars
@@ -828,8 +872,59 @@ impl<'host> ScriptCtx<'host> {
         self.host.standing(self.caller)
     }
 
-    /// Suspend the script for `seconds` once the function returns. A
-    /// duration that is not positive (or is NaN) does not suspend.
+    /// This call's forced delay is `seconds` this time, not the flavour's
+    /// (`vm::delays`): an outcome the grid times differently —
+    /// OpenSim's calls that return before their `ScriptSleep`, which is 0,
+    /// and `llGiveInventory`'s pause for an avatar. OpenSim scales it by the
+    /// region's `ScriptDelayFactor`, as it does the table's.
+    pub const fn delay(&mut self, seconds: f32) {
+        self.delay = Some(seconds);
+    }
+
+    /// The grid's report of an error costs the script a second of its own,
+    /// beside the call's forced delay and never scaled: every error of
+    /// OpenSim's library (`LSL_Api.Error`, which [`Self::refuse`] charges
+    /// itself, and `OSSLShoutError`) and the few complaints Second Life
+    /// charges (`errors/flood-paths`' `cost`). Each report costs its second.
+    pub fn error_pause(&mut self) {
+        self.pauses += 1.0;
+    }
+
+    /// Take this call's forced delay of `seconds` before it does anything,
+    /// as XEngine does when a call sleeps before its effect: the function
+    /// returns having done nothing, and the VM makes the call again, with the
+    /// same arguments, once the script wakes — [`Self::woke`] then says so.
+    /// Under any other flavour it is [`Self::delay`].
+    pub fn delay_first(&mut self, seconds: f32) {
+        if self.flavour() == EngineFlavour::XEngine {
+            self.first = Some(seconds);
+        } else {
+            self.delay(seconds);
+        }
+    }
+
+    /// Whether the call is being made again after the delay it took first
+    /// ([`Self::delay_first`]).
+    #[must_use]
+    pub const fn woke(&self) -> bool {
+        self.woke
+    }
+
+    /// What the call's delays came to: the forced delay it set, if it set
+    /// one, the seconds of its error reports, and the delay it asked to take
+    /// first.
+    pub(crate) const fn take_delays(&mut self) -> (Option<f32>, f32, Option<f32>) {
+        (self.delay.take(), self.pauses, self.first.take())
+    }
+
+    /// OpenSim's channel-0 chat throttle of the script.
+    pub(crate) const fn say_throttle(&mut self) -> &mut SayThrottle {
+        &mut self.data.say_throttle
+    }
+
+    /// Suspend the script for `seconds` once the function returns
+    /// (`llSleep`), never scaled. A duration that is not positive (or is NaN)
+    /// does not suspend.
     pub const fn sleep(&mut self, seconds: f32) {
         if self.request.is_none() || matches!(self.request, Some(Request::Sleep(_))) {
             self.request = Some(Request::Sleep(seconds));

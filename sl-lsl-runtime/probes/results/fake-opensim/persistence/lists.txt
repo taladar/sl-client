@@ -1,0 +1,26 @@
+grid: fake-opensim
+date: 2026-11-07
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Fake Region
+engine: sl-lsl-runtime imitating YEngine
+settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
+
+PROBE persistence/lists rec=start region="Fake Region" channel="OpenSim" version="sl-fake-grid 0.1.0"
+PROBE persistence/lists rec=waiting drive=restart seconds=15
+# restart seconds=15
+# agent-alert modal=0 text="/Region will restart in 15 seconds"
+PROBE persistence/lists rec=woke name=F value="3, -1, -1, -1, -1"
+# region-down response=none
+PROBE persistence/lists rec=timeout awaited=region_start
+PROBE persistence/lists rec=after name=D value="2, -1, -1, -1, -1"
+PROBE persistence/lists rec=after name=E value="2, -1, -1, -1, -1"
+PROBE persistence/lists rec=waiting drive=rerez
+# agent-alert by=other modal=0 text="/Region will restart in 15 seconds"
+# take
+# taken announced=update-create-inventory-item
+# rez
+# rezzed key=new
+PROBE persistence/lists rec=rerez name=A value="1, -1, -1, -1, -1"
+PROBE persistence/lists rec=rerez name=B value="1, -1, -1, -1, -1"
+PROBE persistence/lists rec=rerez name=C value="1"
+PROBE persistence/lists rec=end

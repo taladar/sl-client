@@ -107,13 +107,13 @@ pub fn ll_get_owner(ctx: &mut ScriptCtx<'_>) -> Result<Key, CallError> {
 /// None; the signature is the library's.
 pub fn ll_get_script_state(ctx: &mut ScriptCtx<'_>, name: String) -> Result<i32, CallError> {
     let Some(running) = ctx.script_running(&name) else {
-        let refusal = if ctx.flavour().is_opensim() {
-            format!("llGetScriptState: Can't find script '{name}'")
+        // Both grids charge a second; OpenSim's is every refusal's.
+        if ctx.flavour().is_opensim() {
+            ctx.refuse(format!("llGetScriptState: Can't find script '{name}'"));
         } else {
-            format!("Could not find script '{name}'.")
-        };
-        ctx.refuse(refusal);
-        ctx.sleep(1.0);
+            ctx.refuse(format!("Could not find script '{name}'."));
+            ctx.error_pause();
+        }
         return Ok(0);
     };
     Ok(i32::from(running))

@@ -1,0 +1,10 @@
+grid: fake-opensim
+date: 2026-11-07
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Fake Region
+engine: sl-lsl-runtime imitating YEngine
+settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
+
+PROBE events/timer-no-stack rec=start region="Fake Region" channel="OpenSim" version="sl-fake-grid 0.1.0"
+PROBE events/timer-no-stack rec=timers period=0.100000 slept_until=2.018000 first_after_wake=0.000000 gaps="0.000000, 0.055000, 0.109000, 0.109000, 0.109000, 0.109000, 0.109000, 0.109000"
+PROBE events/timer-no-stack rec=end

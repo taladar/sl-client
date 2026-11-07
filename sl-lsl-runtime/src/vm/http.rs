@@ -344,8 +344,12 @@ fn cut(text: &str, max: usize) -> String {
 
 /// A prim's `llHTTPRequest` throttle, kept by the host for the prim.
 ///
-/// Second Life allows 25 requests in 20 s and counts the refused ones too,
-/// so a script that keeps retrying stays refused until it is quiet for 20 s.
+/// Second Life allows 25 requests in 20 s, a refused one counted with the
+/// rest; once it refuses one, the prim is shut out until 20 s pass without a
+/// request — a refused one starts the 20 s again (`throttle/http-window`:
+/// refused after 5, 10 and 15 s of quiet and accepted after 20, where a
+/// window of the last 20 s alone would have let one through after 10). The
+/// refused request exactly 20 s back still counts then, so 24 go through.
 /// OpenSim's bucket (`ScriptsHttpRequests.CheckThrottle`) starts with two of
 /// its burst of three after the first request and refills one a second; it
 /// lets a request through whenever it holds more than nothing, so the time a
@@ -353,8 +357,11 @@ fn cut(text: &str, max: usize) -> String {
 /// through. That sliver is a microsecond per request here.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Throttle {
-    /// Second Life: the region times of every request in the window.
+    /// Second Life: the region times of every request in the window, the
+    /// refused ones too.
     attempts: VecDeque<Duration>,
+    /// Second Life: the last request refused, while the prim is shut out.
+    shut: Option<Duration>,
     /// OpenSim: the bucket's tokens and when it was last looked at, once the
     /// first request was made.
     bucket: Option<(f64, Duration)>,
@@ -391,15 +398,25 @@ impl Throttle {
             self.bucket = Some((tokens, at));
             admitted
         } else {
-            while self
-                .attempts
-                .front()
-                .is_some_and(|first| at.saturating_sub(*first) >= SECOND_LIFE_WINDOW)
-            {
+            // A microsecond either way stands for Second Life's own clock,
+            // which counts frames: 900 ticks of 1/45 s, in whole nanoseconds,
+            // fall a hair short of the 20 s they are there.
+            let slack = Duration::from_micros(1);
+            while self.attempts.front().is_some_and(|first| {
+                at.saturating_sub(*first) > SECOND_LIFE_WINDOW.saturating_add(slack)
+            }) {
                 let _gone = self.attempts.pop_front();
             }
-            let admitted = self.attempts.len() < SECOND_LIFE_ALLOWANCE;
+            if let Some(last) = self.shut
+                && at.saturating_add(slack).saturating_sub(last) >= SECOND_LIFE_WINDOW
+            {
+                self.shut = None;
+            }
+            let admitted = self.shut.is_none() && self.attempts.len() < SECOND_LIFE_ALLOWANCE;
             self.attempts.push_back(at);
+            if !admitted {
+                self.shut = Some(at);
+            }
             admitted
         }
     }

@@ -1,0 +1,45 @@
+grid: fake-opensim
+date: 2026-11-07
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Fake Region
+engine: sl-lsl-runtime imitating YEngine
+settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
+
+PROBE errors/flood-window rec=start region="Fake Region" channel="OpenSim" version="sl-fake-grid 0.1.0"
+PROBE errors/flood-window rec=phase name=P t=3.000000
+# debug-channel: from="Object" text="llSetPrimitiveParams: Error running rule #1: arg #0 - unsupported parameter"
+PROBE errors/flood-window rec=got got=""
+# debug-channel: from="Object" text="llSetPrimitiveParams: Error running rule #1: arg #0 - unsupported parameter"
+PROBE errors/flood-window rec=phase name=O16 t=45.436000
+PROBE errors/flood-window rec=single n=9 t=61.436000
+PROBE errors/flood-window rec=phase name=O17 t=102.091000
+PROBE errors/flood-window rec=single n=9 t=119.109000
+PROBE errors/flood-window rec=phase name=O18 t=159.764000
+PROBE errors/flood-window rec=single n=9 t=177.782000
+PROBE errors/flood-window rec=phase name=O19 t=218.436000
+PROBE errors/flood-window rec=single n=9 t=237.436000
+PROBE errors/flood-window rec=phase name=O20 t=278.091000
+PROBE errors/flood-window rec=single n=9 t=298.109000
+PROBE errors/flood-window rec=phase name=N16 t=338.764000
+PROBE errors/flood-window rec=single n=9 t=354.764000
+PROBE errors/flood-window rec=phase name=N17 t=394.764000
+PROBE errors/flood-window rec=single n=9 t=411.764000
+PROBE errors/flood-window rec=phase name=F t=451.764000
+PROBE errors/flood-window rec=single n=2101 t=457.382000
+PROBE errors/flood-window rec=single n=2102 t=460.600000
+PROBE errors/flood-window rec=single n=2103 t=463.818000
+PROBE errors/flood-window rec=single n=2104 t=467.036000
+PROBE errors/flood-window rec=single n=2105 t=470.255000
+PROBE errors/flood-window rec=single n=2106 t=473.473000
+PROBE errors/flood-window rec=single n=2107 t=476.691000
+PROBE errors/flood-window rec=single n=2108 t=479.909000
+PROBE errors/flood-window rec=single n=2109 t=483.127000
+PROBE errors/flood-window rec=single n=2110 t=486.345000
+PROBE errors/flood-window rec=single n=2111 t=489.564000
+PROBE errors/flood-window rec=single n=2112 t=492.782000
+PROBE errors/flood-window rec=single n=2113 t=496.000000
+PROBE errors/flood-window rec=single n=2114 t=499.218000
+PROBE errors/flood-window rec=single n=2115 t=502.436000
+PROBE errors/flood-window rec=end
+# debug-channel by=other: from="Object" text="llSetPrimitiveParams: Error running rule #1: arg #0 - unsupported parameter"
+# debug-channel by=other: from="Object" text="llSetPrimitiveParams: Error running rule #1: arg #0 - unsupported parameter"

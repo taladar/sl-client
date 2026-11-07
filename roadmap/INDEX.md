@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 123 |
-| ready | 333 |
+| ready | 332 |
 | blocked | 35 |
 | in-progress | 11 |
-| bugs | 36 |
-| done | 1515 |
+| bugs | 38 |
+| done | 1517 |
 | deferred | 30 |
 | wont-do | 24 |
-| **total** | **2107** |
+| **total** | **2110** |
 
 ## ideas (123)
 
@@ -303,7 +303,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-lsl-opensim-function-set`](ideas/gridspec-lsl-opensim-function-set.md)
   — Measure which library functions OpenSim's engines compile
 
-## ready (333)
+## ready (332)
 
 ### protocol
 
@@ -1024,10 +1024,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-handover-distant-and-vehicle-aditi`](ready/test-handover-distant-and-vehicle-aditi.md)
   — Live-test distant teleport (world_reset) and vehicle corner crossings, incl.
   on aditi
-- [`test-lsl-differential-opensim`](ready/test-lsl-differential-opensim.md) —
-  Run one script on both grids and diff what it did (blocked by
-  `server-fake-grid-script-engine-wiring` (done),
-  `gridspec-lsl-live-differential-runner` (done))
+- [`test-lsl-differential-corpus-triage`](ready/test-lsl-differential-corpus-triage.md)
+  — Triage every probe's differences between each grid and its fake flavour
 
 ### repl
 
@@ -1090,13 +1088,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-fake-grid-terraform`](ready/server-fake-grid-terraform.md) — Fake
   grid — terraforming, undo and bake (blocked by `gridspec-terrain-editing`
   (done))
-- [`server-lsl-forced-delays-per-flavour`](ready/server-lsl-forced-delays-per-flavour.md)
-  — Charge each grid flavour's measured forced delays and throttles, not the
-  keyword file's (blocked by `gridspec-lsl-throttles` (done),
-  `server-lsl-lib-comms` (done), `server-lsl-lib-http-url` (done),
-  `server-lsl-lib-task-inventory` (done), `server-lsl-lib-math-rotations`
-  (done), `server-lsl-lib-land-region-env` (done), `server-lsl-lib-prim-state`
-  (done), `server-fake-grid-script-engine-wiring` (done))
 - [`server-lsl-lib-ossl-avatars`](ready/server-lsl-lib-ossl-avatars.md) —
   Library tranche — OpenSim's NPC and avatar functions (blocked by
   `server-lsl-lib-avatar-control` (done))
@@ -1274,7 +1265,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (36)
+## bugs (38)
 
 ### protocol
 
@@ -1367,7 +1358,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1515)
+### server
+
+- [`server-lsl-event-raise-timing`](bugs/server-lsl-event-raise-timing.md) —
+  Raise each event when each grid raises it, not when the tick is over
+- [`server-lsl-sl-placement-lag`](bugs/server-lsl-sl-placement-lag.md) — Imitate
+  Second Life's late bounding box and its stop above the ground
+
+## done (1517)
 
 ### protocol
 
@@ -4201,6 +4199,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — fetch the read-only Library tree
 - [`test-logout-clean`](done/test-logout-clean-request-logout-assert-clean-logoutreply-shutdown.md)
   — request logout, assert clean LogoutReply / shutdown
+- [`test-lsl-differential-opensim`](done/test-lsl-differential-opensim.md) — Run
+  one script on both grids and diff what it did (blocked by
+  `server-fake-grid-script-engine-wiring` (done),
+  `gridspec-lsl-live-differential-runner` (done))
 - [`test-lsl-script-corpus`](done/test-lsl-script-corpus.md) — An executable LSL
   corpus that runs in cargo test with no grid (blocked by
   `server-lsl-vm-execution` (done))
@@ -4467,6 +4469,13 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Second Life's error flood gate drops lines aditi passed
 - [`server-lsl-flood-owner-lines-longer-limit`](done/server-lsl-flood-owner-lines-longer-limit.md)
   — Second Life dropped prim/params' last complaints the flood gate passes
+- [`server-lsl-forced-delays-per-flavour`](done/server-lsl-forced-delays-per-flavour.md)
+  — Charge each grid flavour's measured forced delays and throttles, not the
+  keyword file's (blocked by `gridspec-lsl-throttles` (done),
+  `server-lsl-lib-comms` (done), `server-lsl-lib-http-url` (done),
+  `server-lsl-lib-task-inventory` (done), `server-lsl-lib-math-rotations`
+  (done), `server-lsl-lib-land-region-env` (done), `server-lsl-lib-prim-state`
+  (done), `server-fake-grid-script-engine-wiring` (done))
 - [`server-lsl-lib-avatar-control`](done/server-lsl-lib-avatar-control.md) —
   Library tranche — avatars, animation, sitting, controls and camera (blocked by
   `server-lsl-vm-execution` (done), `server-world-agent-movement` (done),

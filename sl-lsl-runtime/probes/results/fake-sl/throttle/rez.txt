@@ -1,0 +1,23 @@
+grid: fake-sl
+date: 2026-11-07
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Fake Region
+engine: sl-lsl-runtime imitating Mono
+settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
+
+# object "Spark" scripts=1
+PROBE throttle/rez rec=start region="Fake Region" channel="Second Life Server" version="sl-fake-grid 0.1.0"
+PROBE throttle/rez rec=wave wave=0 calls=50 seconds=5.556000 slowest=0.111000 per_second=9
+PROBE throttle/rez rec=seen after_wave=0 so_far=50
+PROBE throttle/rez rec=wave wave=1 calls=50 seconds=5.556000 slowest=0.111000 per_second=9
+PROBE throttle/rez rec=seen after_wave=1 so_far=100
+PROBE throttle/rez rec=wave wave=2 calls=50 seconds=5.556000 slowest=0.111000 per_second=9
+PROBE throttle/rez rec=seen after_wave=2 so_far=150
+PROBE throttle/rez rec=wave wave=3 calls=50 seconds=5.556000 slowest=0.111000 per_second=9
+PROBE throttle/rez rec=seen after_wave=3 so_far=200
+PROBE throttle/rez rec=wave wave=4 calls=50 seconds=5.556000 slowest=0.111000 per_second=9
+PROBE throttle/rez rec=seen after_wave=4 so_far=250
+PROBE throttle/rez rec=wave wave=5 calls=50 seconds=5.556000 slowest=0.111000 per_second=9
+PROBE throttle/rez rec=seen after_wave=5 so_far=300
+PROBE throttle/rez rec=total calls=300 rezzed=300
+PROBE throttle/rez rec=end

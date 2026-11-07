@@ -80,7 +80,7 @@ pub const SCRIPT_INSTRUCTIONS_PER_SECOND: u64 = 260_000_000;
 pub const REGION_SCRIPT_SHARES: u64 = 130;
 
 /// A region's scheduling parameters.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct EngineConfig {
     /// The length of one tick.
     pub step: Duration,
@@ -94,6 +94,11 @@ pub struct EngineConfig {
     /// and reach of a run-time error, what becomes of the faulted script,
     /// the flood limit.
     pub flavour: EngineFlavour,
+    /// OpenSim's `ScriptDelayFactor` (`[XEngine]` / `[YEngine]`, 1.0 by
+    /// default), which scales every forced delay of a library call — not
+    /// `llSleep`, nor the second an error costs. Second Life has none, and
+    /// its flavour ignores it.
+    pub script_delay_factor: f64,
 }
 
 impl EngineConfig {
@@ -118,6 +123,7 @@ impl EngineConfig {
             region_budget,
             coalescing: Coalescing::Reference,
             flavour: EngineFlavour::SecondLife,
+            script_delay_factor: 1.0,
         }
     }
 }
@@ -1174,7 +1180,10 @@ impl Engine {
                     Peers::of(
                         &self.instances,
                         self.config.flavour,
-                        self.ossl.as_deref().unwrap_or_else(|| stock_ossl()),
+                        (
+                            self.ossl.as_deref().unwrap_or_else(|| stock_ossl()),
+                            self.config.script_delay_factor,
+                        ),
                     ),
                 );
                 self.report(id, &slice, host);

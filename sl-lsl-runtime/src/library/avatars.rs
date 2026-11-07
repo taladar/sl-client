@@ -33,6 +33,9 @@ const DATA_RATING: i32 = 4;
 /// `DATA_PAYINFO`.
 const DATA_PAYINFO: i32 = 8;
 
+/// OpenSim's `DATA_USERLEVEL`, which has no constant.
+const DATA_USERLEVEL: i32 = 7;
+
 /// Second Life's complaint for an animation call without its permission.
 const NO_ANIMATION_PERMISSION: &str =
     "Script trying to trigger animations but PERMISSION_TRIGGER_ANIMATION permission not set";
@@ -172,6 +175,8 @@ pub fn ll_name2_key(ctx: &mut ScriptCtx<'_>, name: String) -> Result<Key, CallEr
 /// `llRequestAgentData`: one fact of any avatar of the grid, over
 /// `dataserver` — online, name, birth date, rating (always zeroes) and payment
 /// information; nothing for a key no account has or a fact that is none.
+/// OpenSim answers a fact it does not know (`DATA_USERLEVEL`, 7, aside) with
+/// an empty key at once, before its sleep.
 ///
 /// # Errors
 ///
@@ -181,6 +186,15 @@ pub fn ll_request_agent_data(
     agent: Key,
     data: i32,
 ) -> Result<Key, CallError> {
+    if ctx.flavour().is_opensim()
+        && !matches!(
+            data,
+            DATA_ONLINE | DATA_NAME | DATA_BORN | DATA_RATING | DATA_USERLEVEL | DATA_PAYINFO
+        )
+    {
+        ctx.delay(0.0);
+        return Ok(Key(String::new()));
+    }
     let caller = ctx.caller();
     let record = ctx.host().agent_record(caller, &agent.0);
     let id = ctx.fresh_key();
@@ -195,7 +209,6 @@ pub fn ll_request_agent_data(
     if let Some(answer) = answer {
         ctx.raise_dataserver(id.clone(), answer);
     }
-    ctx.sleep(0.1);
     Ok(Key(id))
 }
 
@@ -214,13 +227,24 @@ pub fn ll_request_display_name(ctx: &mut ScriptCtx<'_>, agent: Key) -> Result<Ke
     Ok(Key(id))
 }
 
-/// `llRequestUsername`: an avatar's user name over `dataserver`.
+/// `llRequestUsername`: an avatar's user name over `dataserver`. OpenSim
+/// answers an avatar in the region at once, without its sleep, and a key that
+/// is none or `NULL_KEY` with an empty key.
 ///
 /// # Errors
 ///
 /// None; the signature is the library's.
 pub fn ll_request_username(ctx: &mut ScriptCtx<'_>, agent: Key) -> Result<Key, CallError> {
     let caller = ctx.caller();
+    if ctx.flavour().is_opensim() {
+        if !crate::library::dotnet::is_uuid(&agent.0) || agent.0 == NULL_KEY {
+            ctx.delay(0.0);
+            return Ok(Key(String::new()));
+        }
+        if ctx.host().agent(caller, &agent.0).is_some() {
+            ctx.delay(0.0);
+        }
+    }
     let record = ctx.host().agent_record(caller, &agent.0);
     let id = ctx.fresh_key();
     if let Some(record) = record {
@@ -230,14 +254,30 @@ pub fn ll_request_username(ctx: &mut ScriptCtx<'_>, agent: Key) -> Result<Key, C
 }
 
 /// `llRequestUserKey`: the key of the avatar of the grid with the user name
-/// `name`, over `dataserver`; `NULL_KEY` for none.
+/// `name`, over `dataserver`; `NULL_KEY` for none. OpenSim returns `NULL_KEY`
+/// for a name of fewer than two parts without asking, and answers an avatar
+/// in the region at once; neither takes its sleep.
 ///
 /// # Errors
 ///
 /// None; the signature is the library's.
 pub fn ll_request_user_key(ctx: &mut ScriptCtx<'_>, name: String) -> Result<Key, CallError> {
     let caller = ctx.caller();
+    let opensim = ctx.flavour().is_opensim();
+    if opensim
+        && name
+            .split([' ', '.'])
+            .filter(|part| !part.trim().is_empty())
+            .count()
+            < 2
+    {
+        ctx.delay(0.0);
+        return Ok(Key(NULL_KEY.to_owned()));
+    }
     let found = ctx.host().agent_named(caller, &name);
+    if opensim && found.as_ref().is_some_and(|(_, here)| *here) {
+        ctx.delay(0.0);
+    }
     let id = ctx.fresh_key();
     ctx.raise_dataserver(
         id.clone(),
@@ -660,7 +700,8 @@ pub fn ll_teleport_agent_global_coords(
 }
 
 /// `llTeleportAgentHome`: send the avatar home — one on the land of the
-/// script's owner, as both grids allow it with no permission.
+/// script's owner, as both grids allow it with no permission. It holds the
+/// script 5 s; OpenSim not for an avatar that is not in the region.
 ///
 /// # Errors
 ///
@@ -673,11 +714,15 @@ pub fn ll_teleport_agent_home(ctx: &mut ScriptCtx<'_>, agent: Key) -> Result<(),
         .host()
         .parcel_at(caller, here.x, here.y)
         .is_some_and(|parcel| parcel.owner == owner);
-    if on_owners_land && ctx.host().agent(caller, &agent.0).is_some() {
+    let present = ctx.host().agent(caller, &agent.0).is_some();
+    if on_owners_land && present {
         ctx.host()
             .teleport_agent(caller, &agent.0, &Destination::Home);
     }
-    ctx.sleep(5.0);
+    // OpenSim returns before its sleep for an avatar not in the region.
+    if !present && ctx.flavour().is_opensim() {
+        ctx.delay(0.0);
+    }
     Ok(())
 }
 

@@ -1,0 +1,44 @@
+grid: fake-opensim
+date: 2026-11-07
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Fake Region
+engine: sl-lsl-runtime imitating YEngine
+settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
+
+# skipped: script "Narrow" (skip-on: opensim-yengine)
+# skipped: script "Wide" (skip-on: opensim-yengine)
+# skipped: script "Limited" (skip-on: opensim-yengine)
+# skipped: script "Narrow LSO" (skip-on: opensim-yengine)
+# skipped: script "Wide LSO" (skip-on: opensim-yengine)
+PROBE memory/recursion rec=start region="Fake Region" channel="OpenSim" version="sl-fake-grid 0.1.0"
+PROBE memory/recursion rec=recurse script="Narrow"
+# debug-channel: from="Object" text="llGetScriptState: Can't find script 'Narrow'"
+# debug-channel: from="Object" text="llGetScriptState: Can't find script 'Narrow'"
+PROBE memory/recursion rec=reached script="Narrow" depth="" running=0
+PROBE memory/recursion rec=recurse script="Wide"
+# debug-channel: from="Object" text="llGetScriptState: Can't find script 'Wide'"
+# debug-channel: from="Object" text="llGetScriptState: Can't find script 'Wide'"
+PROBE memory/recursion rec=reached script="Wide" depth="" running=0
+PROBE memory/recursion rec=recurse script="Limited"
+# debug-channel: from="Object" text="llGetScriptState: Can't find script 'Limited'"
+# debug-channel: from="Object" text="llGetScriptState: Can't find script 'Limited'"
+PROBE memory/recursion rec=reached script="Limited" depth="" running=0
+PROBE memory/recursion rec=recurse script="Narrow LSO"
+# debug-channel: from="Object" text="llGetScriptState: Can't find script 'Narrow LSO'"
+# debug-channel: from="Object" text="llGetScriptState: Can't find script 'Narrow LSO'"
+PROBE memory/recursion rec=reached script="Narrow LSO" depth="" running=0
+PROBE memory/recursion rec=recurse script="Wide LSO"
+# debug-channel: from="Object" text="llGetScriptState: Can't find script 'Wide LSO'"
+# debug-channel: from="Object" text="llGetScriptState: Can't find script 'Wide LSO'"
+PROBE memory/recursion rec=reached script="Wide LSO" depth="" running=0
+PROBE memory/recursion rec=end
+# debug-channel by=other: from="Object" text="llGetScriptState: Can't find script 'Narrow'"
+# debug-channel by=other: from="Object" text="llGetScriptState: Can't find script 'Narrow'"
+# debug-channel by=other: from="Object" text="llGetScriptState: Can't find script 'Wide'"
+# debug-channel by=other: from="Object" text="llGetScriptState: Can't find script 'Wide'"
+# debug-channel by=other: from="Object" text="llGetScriptState: Can't find script 'Limited'"
+# debug-channel by=other: from="Object" text="llGetScriptState: Can't find script 'Limited'"
+# debug-channel by=other: from="Object" text="llGetScriptState: Can't find script 'Narrow LSO'"
+# debug-channel by=other: from="Object" text="llGetScriptState: Can't find script 'Narrow LSO'"
+# debug-channel by=other: from="Object" text="llGetScriptState: Can't find script 'Wide LSO'"
+# debug-channel by=other: from="Object" text="llGetScriptState: Can't find script 'Wide LSO'"

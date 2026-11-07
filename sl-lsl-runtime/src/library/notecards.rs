@@ -94,7 +94,8 @@ fn cut_units(text: &str, limit: usize) -> String {
 fn no_notecard(ctx: &mut ScriptCtx<'_>, call: &str, name: &str) -> Key {
     if ctx.flavour().is_opensim() {
         ctx.refuse(format!("{call}: Can't find notecard '{name}'"));
-        ctx.sleep(1.0);
+        // It returns before its own `ScriptSleep`.
+        ctx.delay(0.0);
         return Key(NULL_KEY.to_owned());
     }
     ctx.refuse(format!("Could not find notecard '{name}'."));
@@ -187,7 +188,7 @@ pub fn ll_get_notecard_line_sync(
 /// `osGetNotecard*` functions do (`OSSLShoutError`).
 fn not_found(ctx: &mut ScriptCtx<'_>, name: &str) {
     ctx.shout_error(format!("Notecard '{name}' could not be found."));
-    ctx.sleep(1.0);
+    ctx.error_pause();
 }
 
 /// `osGetNotecardLine`: line `line` of the notecard `name` at once, read

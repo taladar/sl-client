@@ -1,0 +1,27 @@
+grid: fake-sl
+date: 2026-11-07
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Fake Region
+engine: sl-lsl-runtime imitating Mono
+settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
+
+PROBE comms/owner-away rec=start region="Fake Region" channel="Second Life Server" version="sl-fake-grid 0.1.0"
+# chat type=direct from="Object" length=18 text="region-say-to here"
+PROBE comms/owner-away rec=here agent_size_zero=0 details=1
+# im dialog=19 from=owner id=probe name="Object" offline=0 length=7 message="im here" bucket=0
+# owner-say: from="Object" text="owner-say here"
+PROBE comms/owner-away rec=waiting drive=away seconds=20
+# teleport-started flags=0x10
+# away arrived seconds=20
+# animations avatar=owner playing="stand@other-object"
+# animations avatar=owner playing="falldown@other-object"
+# im dialog=19 from=owner id=probe name="Object" offline=0 length=7 message="im away" bucket=0
+# owner-say: from="Object" text="owner-say away"
+# animations avatar=owner playing="land@other-object"
+# animations avatar=owner playing="stand@other-object"
+# teleport-started flags=0x10
+# back arrived
+PROBE comms/owner-away rec=gone after_polls=2 agent_size_zero=1 details=0
+PROBE comms/owner-away rec=sent-away
+PROBE comms/owner-away rec=returned agent_size_zero=0 details=1
+PROBE comms/owner-away rec=end

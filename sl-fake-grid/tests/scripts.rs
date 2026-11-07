@@ -7,8 +7,9 @@
 //! its standing stops it, and a question refused or left unanswered is
 //! answered as Second Life answers it; and a region's `[OSSL]` settings gate
 //! a function to gods; and a viewer's edits and contents changes raise
-//! `changed` as each grid raises it — each step driven by a real client, the
-//! region ticked one step at a time.
+//! `changed` as each grid raises it; and a call holds its script as long as
+//! its grid's does — each step driven by a real client, the region ticked one
+//! step at a time.
 
 #[cfg(test)]
 mod test {
@@ -3568,5 +3569,74 @@ default
     async fn a_script_animates_and_takes_the_controls_of_an_avatar_on_opensim()
     -> Result<(), TestError> {
         a_script_animates_and_takes_the_controls_of_an_avatar(ImitatedGrid::OpenSim).await
+    }
+
+    /// The timing box's script: how long `llModPow` and `llTextBox` hold it,
+    /// and how long thirteen `llSay` lines on channel 0 in a row take, each
+    /// to a tenth of a second.
+    const DELAYS_SOURCE: &str = "string tenth(float seconds)
+{
+    return (string)(llRound(seconds * 10.0) / 10.0);
+}
+
+default
+{
+    state_entry()
+    {
+        float before = llGetTime();
+        llModPow(2, 10, 1000);
+        float modpow = llGetTime() - before;
+        before = llGetTime();
+        llTextBox(llGetOwner(), \"timing\", -7402);
+        float textbox = llGetTime() - before;
+        before = llGetTime();
+        integer i;
+        for (i = 0; i < 13; ++i)
+        {
+            llSay(0, \"line \" + (string)i);
+        }
+        float flood = llGetTime() - before;
+        llShout(0, \"delays modpow=\" + tenth(modpow) + \" textbox=\" + tenth(textbox)
+            + \" flood=\" + tenth(flood));
+    }
+}
+";
+
+    /// A script on the fake grid is held as long as its grid holds it
+    /// (`throttle/delays`, `throttle/chat`): `llModPow` a second on OpenSim and
+    /// nothing on Second Life, `llTextBox` the other way round, and OpenSim's
+    /// twelfth line on channel 0 within a second two seconds more.
+    async fn a_script_is_held_as_its_grid_holds_it(
+        imitated: ImitatedGrid,
+    ) -> Result<(), TestError> {
+        let region = region_of(&[ScriptedBox {
+            local_id: COUNTER,
+            source: DELAYS_SOURCE.to_owned(),
+            experience: None,
+        }])?;
+        let mut scene = scene_of(imitated, region).await?;
+        // A tenth of a second a tick: the four seconds OpenSim takes, and
+        // the start.
+        scene.tick(60).await?;
+        let expected = if imitated == ImitatedGrid::OpenSim {
+            "delays modpow=1.000000 textbox=1.000000 flood=2.000000"
+        } else {
+            "delays modpow=0.000000 textbox=0.000000 flood=0.000000"
+        };
+        assert_eq!(scene.line("delays ").await?, expected);
+        scene.stop();
+        Ok(())
+    }
+
+    /// On a grid imitating Second Life.
+    #[tokio::test]
+    async fn a_script_is_held_as_second_life_holds_it() -> Result<(), TestError> {
+        a_script_is_held_as_its_grid_holds_it(ImitatedGrid::SecondLife).await
+    }
+
+    /// On a grid imitating OpenSim.
+    #[tokio::test]
+    async fn a_script_is_held_as_opensim_holds_it() -> Result<(), TestError> {
+        a_script_is_held_as_its_grid_holds_it(ImitatedGrid::OpenSim).await
     }
 }

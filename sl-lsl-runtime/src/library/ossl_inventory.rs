@@ -139,7 +139,7 @@ pub fn os_get_rezzing_object(ctx: &mut ScriptCtx<'_>) -> Result<Key, CallError> 
 pub fn os_die(ctx: &mut ScriptCtx<'_>, object: Key) -> Result<(), CallError> {
     let Some(target) = crate::library::dotnet::canonical_uuid(&object.0) else {
         ctx.shout_error("osDie() cannot delete objects with invalid UUIDs".to_owned());
-        ctx.sleep(1.0);
+        ctx.error_pause();
         return Ok(());
     };
     let caller = ctx.caller();

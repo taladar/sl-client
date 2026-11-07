@@ -34,3 +34,11 @@ dialect and gated by `vm::ossl::admit` already:
 Port each from `OSSL_Api.cs`, register it in `library/registry.rs`, move its
 scope line to `in`, and drop the written-in answers of `ossl/available` and
 `ossl/errors` (`osGetGender`, `osIsNpc`, …) in `vm/tests/ossl.rs`.
+
+## From server-lsl-forced-delays-per-flavour (2026-11-07)
+
+`osNpcSay`, `osNpcSayTo` and `osNpcShout` call `LSL_Api.ThrottleSay(channel,
+2000)`: the script's channel-0 chat throttle, `vm::delays::SayThrottle`, which
+`llSay` / `llShout` go through (`library/comms.rs`, `waits_for_throttle`).
+`osTeleportAgent` sleeps 0.5 s on a refusal and 5 s on a teleport, and
+`osMessageAttachments` a penalty of its own; say them with `ScriptCtx::delay`.

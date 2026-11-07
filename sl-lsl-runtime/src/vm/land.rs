@@ -69,6 +69,19 @@ pub struct Parcel {
     pub counts: (PrimCounts, PrimCounts),
     /// Each owner of prims on it, with how many.
     pub prim_owners: Vec<(String, i32)>,
+    /// Its access list: the avatars given a pass.
+    pub passes: Vec<AccessEntry>,
+    /// Its ban list.
+    pub bans: Vec<AccessEntry>,
+}
+
+/// One avatar on a parcel's access or ban list.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AccessEntry {
+    /// The avatar's key.
+    pub agent: String,
+    /// When the entry lapses, in seconds since the epoch; 0 for never.
+    pub expires: i64,
 }
 
 /// The region a script is in, as the library reads it.

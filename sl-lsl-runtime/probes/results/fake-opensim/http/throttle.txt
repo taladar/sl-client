@@ -1,0 +1,16 @@
+grid: fake-opensim
+date: 2026-11-07
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Fake Region
+engine: sl-lsl-runtime imitating YEngine
+settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
+
+PROBE http/throttle rec=start region="Fake Region" channel="OpenSim" version="sl-fake-grid 0.1.0"
+PROBE http/throttle rec=url granted=1
+PROBE http/throttle rec=burst which=first sent=30 accepted=4 refused=26 first_refused=4
+PROBE http/throttle rec=burst which=quiet sent=5 accepted=0 refused=5 first_refused=0
+PROBE http/throttle rec=answers status=200 count=4
+PROBE http/throttle rec=arrived count=4
+PROBE http/throttle rec=late request=set
+PROBE http/throttle rec=late-response status=200 body="ok"
+PROBE http/throttle rec=end

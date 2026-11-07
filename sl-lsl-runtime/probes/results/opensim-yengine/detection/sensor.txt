@@ -1,9 +1,9 @@
 grid: opensim-yengine
-date: 2026-10-25
+date: 2026-11-07
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Default Region
 engine: YEngine
-settings: OpenSimDefaults.ini: [YEngine] MinTimerInterval=0.1; [XEngine] MinTimerInterval unset (LSL_Api default 0.5); ScriptDelayFactor=1.0, SensorMaxRange=96, SensorMaxResults=16, UseLlCastRayV3=false (defaults) on both
+settings: OpenSimDefaults.ini: [YEngine] MinTimerInterval=0.1; [XEngine] MinTimerInterval unset (LSL_Api default 0.5); ScriptDelayFactor=1.0, SensorMaxRange=96, SensorMaxResults=16, UseLlCastRayV3=false (defaults) on both; [YEngine] ScriptHeapSize=1024 KiB, ScriptStackSize=2048 KiB (defaults); OpenSim.ini [Network] OutboundDisallowForUserScriptsExcept=127.0.0.1:9000 (the simulator itself), [ScriptsHttpRequestModule] and llHTTPRequest limits at their defaults
 
 # chat type=say from="Object" length=14 text="Script running"
 # chat type=say from="Object" length=14 text="Script running"
@@ -49,11 +49,11 @@ PROBE detection/sensor rec=found step=ours i=14 dist=11.000000 type=4 owned=1 na
 PROBE detection/sensor rec=found step=ours i=15 dist=11.717000 type=4 owned=0 name=ours self=0
 PROBE detection/sensor rec=sweep step=agents name="" key="" type=1 range=96.000000 arc=3.142000
 PROBE detection/sensor rec=swept step=agents event=sensor num=2
-PROBE detection/sensor rec=agent step=agents key_is_owner=1 type=1 owner_is_self=1 name_is_key2name=1 agent_dist=9.707000
-PROBE detection/sensor rec=agent step=agents key_is_owner=0 type=1 owner_is_self=1 name_is_key2name=1 agent_dist=10.101000
+PROBE detection/sensor rec=agent step=agents key_is_owner=0 type=1 owner_is_self=1 name_is_key2name=1 agent_dist=9.705000
+PROBE detection/sensor rec=agent step=agents key_is_owner=1 type=1 owner_is_self=1 name_is_key2name=1 agent_dist=10.019000
 PROBE detection/sensor rec=sweep step=owner-legacy name="@owner" key="" type=1 range=96.000000 arc=3.142000
 PROBE detection/sensor rec=swept step=owner-legacy event=sensor num=1
-PROBE detection/sensor rec=agent step=owner-legacy key_is_owner=1 type=1 owner_is_self=1 name_is_key2name=1 agent_dist=9.707000
+PROBE detection/sensor rec=agent step=owner-legacy key_is_owner=1 type=1 owner_is_self=1 name_is_key2name=1 agent_dist=10.019000
 PROBE detection/sensor rec=sweep step=owner-username name="@username" key="" type=16 range=96.000000 arc=3.142000
 PROBE detection/sensor rec=swept step=owner-username event=no_sensor num=0
 PROBE detection/sensor rec=sweep step=scripted name="" key="" type=8 range=96.000000 arc=3.142000
@@ -168,24 +168,24 @@ PROBE detection/sensor rec=removed after_phase=1
 PROBE detection/sensor rec=fired phase=2 event=1 num=1 found=target-b t=0.000000
 PROBE detection/sensor rec=phase phase=2 events=1
 PROBE detection/sensor rec=repeat phase=3 call="llSensorRepeat nothing every 0.5 s"
-PROBE detection/sensor rec=fired phase=3 event=1 num=0 found=none t=0.501000
+PROBE detection/sensor rec=fired phase=3 event=1 num=0 found=none t=0.500000
 PROBE detection/sensor rec=fired phase=3 event=2 num=0 found=none t=1.001000
-PROBE detection/sensor rec=fired phase=3 event=3 num=0 found=none t=1.502000
+PROBE detection/sensor rec=fired phase=3 event=3 num=0 found=none t=1.501000
 PROBE detection/sensor rec=fired phase=3 event=4 num=0 found=none t=2.002000
 PROBE detection/sensor rec=fired phase=3 event=5 num=0 found=none t=2.503000
 PROBE detection/sensor rec=phase phase=3 events=5
 PROBE detection/sensor rec=removed after_phase=3
 PROBE detection/sensor rec=phase phase=4 events=0
 PROBE detection/sensor rec=repeat phase=5 call="llSensorRepeat Target B every 0.01 s"
-PROBE detection/sensor rec=rate phase=5 events=19 per_second=9.486000
+PROBE detection/sensor rec=rate phase=5 events=19 per_second=9.481000
 PROBE detection/sensor rec=removed after_phase=5
 PROBE detection/sensor rec=fired phase=6 event=1 num=1 found=target-b t=0.000000
 PROBE detection/sensor rec=phase phase=6 events=1
 PROBE detection/sensor rec=repeat phase=7 call="llSensorRepeat Target B every 1 s, then llSensor Target X"
 PROBE detection/sensor rec=fired phase=7 event=1 num=0 found=none t=0.000000
 PROBE detection/sensor rec=fired phase=7 event=2 num=1 found=target-b t=1.001000
-PROBE detection/sensor rec=fired phase=7 event=3 num=1 found=target-b t=2.002000
-PROBE detection/sensor rec=fired phase=7 event=4 num=1 found=target-b t=3.003000
+PROBE detection/sensor rec=fired phase=7 event=3 num=1 found=target-b t=2.003000
+PROBE detection/sensor rec=fired phase=7 event=4 num=1 found=target-b t=3.004000
 PROBE detection/sensor rec=phase phase=7 events=4
 PROBE detection/sensor rec=removed after_phase=7
 PROBE detection/sensor rec=phase phase=8 events=0

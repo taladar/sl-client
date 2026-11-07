@@ -6,7 +6,7 @@
 
 use sl_lsl_runtime::Element;
 use sl_lsl_runtime::vm::land::{
-    Environment, LandChange, Parcel, ParcelMedia, PrimCounts, Region, SimData,
+    AccessEntry, Environment, LandChange, Parcel, ParcelMedia, PrimCounts, Region, SimData,
 };
 use sl_proto::{
     AgentKey, Maturity, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelInfo,
@@ -140,7 +140,25 @@ impl RegionHost<'_> {
             capacity: (info.max_prims, info.total_prims),
             counts: (Self::counts_of(info, false), Self::counts_of(info, true)),
             prim_owners: Vec::new(),
+            passes: self.access_entries(info.local_id, ParcelAccessScope::Access),
+            bans: self.access_entries(info.local_id, ParcelAccessScope::Ban),
         })
+    }
+
+    /// One of the parcel `local_id`'s access lists, as the runtime reads it.
+    fn access_entries(
+        &self,
+        local_id: RegionLocalParcelId,
+        scope: ParcelAccessScope,
+    ) -> Vec<AccessEntry> {
+        self.world
+            .access_list(local_id, scope)
+            .iter()
+            .map(|entry| AccessEntry {
+                agent: entry.id.to_string(),
+                expires: i64::from(entry.time),
+            })
+            .collect()
     }
 
     /// The region, as the runtime reads it.

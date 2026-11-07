@@ -565,8 +565,9 @@ pub fn ll_http_request(
             Ok(asked) => asked,
             Err(line) => {
                 ctx.refuse(format!("llHTTPRequest: {line}"));
+                // The one refusal that also takes a `ScriptSleep`.
                 if line.ends_with("is an invalid flag") {
-                    ctx.sleep(0.2);
+                    ctx.delay(0.2);
                 }
                 return Ok(Key(String::new()));
             }

@@ -1,0 +1,364 @@
+# The differences between two grids' runs of a probe that are known and
+# accepted (`sl-conformance compare-probes` lists them as `accepted`, apart
+# from the findings). An entry without a `task` is a deliberate difference;
+# with one, a known defect that roadmap task removes. The format is in the
+# book's `tools/lsl-probes.md`, § Accepted differences.
+#
+# The entries below cover the differential suite (`sl-conformance
+# differential`): every difference it shows is fixed or listed here. The
+# rest of the corpus is triaged in `test-lsl-differential-corpus-triage`.
+
+# --- math ---------------------------------------------------------------
+
+[[difference]]
+probe = "math/rotations"
+between = ["opensim-yengine", "fake-opensim"]
+record = "euler2rot-back"
+fields = { case = "past-a-turn" }
+field = "value"
+reason = "OpenSim's rotation functions compute in double and print the sixth decimal a float rounds away; the runtime's values are floats on every flavour"
+
+[[difference]]
+probe = "math/rotations"
+between = ["aditi", "fake-sl"]
+record = "euler2rot-back"
+fields = { case = "xyz30-45-60" }
+field = "value"
+reason = "llEuler2Rot's last bits: the runtime takes PyOptimizer's double form, within three units in the last place of aditi's, as no arrangement of Linden's code tried matches them"
+
+[[difference]]
+probe = "math/functions"
+between = ["opensim-yengine", "fake-opensim"]
+record = "pow"
+fields = { case = "1e30^2" }
+field = "value"
+reason = "OpenSim's floats are doubles, so 1e60 is a number there; the runtime's values are floats on every flavour, and the square overflows to Infinity"
+
+[[difference]]
+probe = "math/functions"
+between = ["opensim-yengine", "fake-opensim"]
+record = "pow"
+fields = { case = "1e-6^-7" }
+field = "value"
+reason = "OpenSim's floats are doubles, so 1e42 is a number there; the runtime's values are floats on every flavour"
+
+[[difference]]
+probe = "math/functions"
+between = ["opensim-yengine", "fake-opensim"]
+record = "tan"
+fields = { case = "pi/2" }
+field = "value"
+reason = "OpenSim takes the tangent of PI_BY_TWO in double and prints its digits; a float keeps seven"
+
+[[difference]]
+probe = "math/functions"
+between = ["opensim-yengine", "fake-opensim"]
+record = "tan"
+fields = { case = "1e30" }
+field = "value"
+reason = "OpenSim's 1e30 is a double, the runtime's a float a little apart from it, and the tangent of either is a different number"
+
+# --- strings ------------------------------------------------------------
+
+[[difference]]
+probe = "strings/functions"
+between = ["aditi", "fake-sl"]
+record = "base64-integer"
+fields = { case = "junk" }
+field = "value"
+reason = "Second Life answers llBase64ToInteger of text with no Base64 at its front with a different number each run (15204949, then 12523626): not a defined value; the runtime answers 0"
+
+# --- prim placement -----------------------------------------------------
+
+[[difference]]
+probe = "prim/placement"
+between = ["opensim-yengine", "fake-opensim"]
+record = "home"
+field = "ground_below"
+reason = "The fake region's ground under the build position is its own terrain's, not the local OpenSim's"
+
+[[difference]]
+probe = "prim/placement"
+between = ["aditi", "fake-sl"]
+record = "home"
+field = "ground_below"
+reason = "The fake region's ground under the build position is its own terrain's, not aditi's"
+
+[[difference]]
+probe = "prim/placement"
+between = ["opensim-yengine", "fake-opensim"]
+record = "move"
+fields = { label = "setpos-down-20" }
+field = "moved"
+reason = "The move ends on the ground, which lies as far below the build position as the fake region's terrain puts it"
+
+[[difference]]
+probe = "prim/placement"
+between = ["opensim-yengine", "fake-opensim"]
+record = "move"
+fields = { label = "regionpos-down-20" }
+field = "moved"
+reason = "The move ends on the ground, which lies as far below the build position as the fake region's terrain puts it"
+
+[[difference]]
+probe = "prim/placement"
+between = ["opensim-yengine", "fake-opensim"]
+record = "move"
+fields = { label = "regionpos-4000" }
+field = "moved"
+reason = "A move to 4000 m is measured from the build height, which the fake region's terrain sets"
+
+[[difference]]
+probe = "prim/placement"
+between = ["aditi", "fake-sl"]
+record = "move"
+fields = { label = "setpos-down-20" }
+field = "moved"
+reason = "The move ends at the fake region's ground, and Second Life stops it 4 cm above its own"
+task = "server-lsl-sl-placement-lag"
+
+[[difference]]
+probe = "prim/placement"
+between = ["aditi", "fake-sl"]
+record = "move"
+fields = { label = "regionpos-down-20" }
+field = "moved"
+reason = "The move ends at the fake region's ground, and Second Life stops it 4 cm above its own"
+task = "server-lsl-sl-placement-lag"
+
+[[difference]]
+probe = "prim/placement"
+between = ["aditi", "fake-sl"]
+record = "move"
+fields = { label = "regionpos-4000" }
+field = "moved"
+reason = "A move to 4000 m is measured from the build height, which the fake region's terrain sets"
+
+[[difference]]
+probe = "prim/placement"
+between = ["aditi", "fake-sl"]
+record = "box"
+fields = { label = "half", when = "at-once" }
+reason = "Second Life's bounding box follows a scale late: in the event that set it, the box of the scale before"
+task = "server-lsl-sl-placement-lag"
+
+[[difference]]
+probe = "prim/placement"
+between = ["aditi", "fake-sl"]
+record = "box"
+fields = { label = "flat", when = "at-once" }
+reason = "Second Life's bounding box follows a scale late: in the event that set it, the box of the scale before"
+task = "server-lsl-sl-placement-lag"
+
+# --- events -------------------------------------------------------------
+
+[[difference]]
+probe = "events/state-change"
+between = ["opensim-yengine", "fake-opensim"]
+record = "default"
+field = "heard"
+reason = "Over loopback the runner saves the talker and the probe in the same frame, so the talker's sixth line falls in the tick of the probe's third timer and is heard after it; on a grid the probe follows the talker by round trips of a tenth of a second and more (the VM replay hears six so)"
+
+[[difference]]
+probe = "events/state-change"
+between = ["aditi", "fake-sl"]
+record = "default"
+field = "heard"
+reason = "Over loopback the runner saves the talker and the probe in the same frame, so the talker's sixth line falls in the tick of the probe's third timer and is heard after it; on a grid the probe follows the talker by round trips of a tenth of a second and more (the VM replay hears six so)"
+
+[[difference]]
+probe = "events/order"
+between = ["opensim-yengine", "fake-opensim"]
+record = "order"
+fields = { round = "2" }
+field = "events"
+reason = "OpenSim raises CHANGED_COLOR inside llSetColor, ahead of the link message the helper sends after it; the fake grid raises it when the tick is over"
+task = "server-lsl-event-raise-timing"
+
+[[difference]]
+probe = "events/order"
+between = ["opensim-yengine", "fake-opensim"]
+record = "order"
+fields = { round = "4" }
+field = "events"
+reason = "OpenSim answers llSensor inside the call, ahead of the helper's link message; the fake grid sweeps when the tick is over"
+task = "server-lsl-event-raise-timing"
+
+[[difference]]
+probe = "events/order"
+between = ["aditi", "fake-sl"]
+record = "order"
+fields = { round = "4" }
+field = "events"
+reason = "Second Life delivers the talker's line before the helper's link message and answers llSensor after the 0.3 s timer; the fake grid delivers link messages first and sweeps at the next tick"
+task = "server-lsl-event-raise-timing"
+
+# --- detection ----------------------------------------------------------
+#
+# Both grids' regions held other residents' objects and avatars around the
+# build position, which fill the sweeps and their caps; the fake region
+# holds the probe's prims alone (`vm::tests::sensing` holds each rule to the
+# probe's own row instead).
+
+[[difference]]
+probe = "detection/sensor"
+between = ["opensim-yengine", "fake-opensim"]
+record = "found"
+reason = "Each sweep's results are the region's objects: other residents' on the local OpenSim, the probe's own alone on the fake grid"
+
+[[difference]]
+probe = "detection/sensor"
+between = ["aditi", "fake-sl"]
+record = "found"
+reason = "Each sweep's results are the region's objects: other residents' on aditi, the probe's own alone on the fake grid"
+
+[[difference]]
+probe = "detection/sensor"
+between = ["aditi", "fake-sl"]
+record = "agent"
+reason = "A third avatar stood in aditi's region"
+
+[[difference]]
+probe = "detection/sensor"
+between = ["opensim-yengine", "fake-opensim"]
+record = "swept"
+fields = { step = "scripted" }
+field = "num"
+reason = "Other residents' objects in range on the local OpenSim"
+
+[[difference]]
+probe = "detection/sensor"
+between = ["opensim-yengine", "fake-opensim"]
+record = "swept"
+fields = { step = "active" }
+field = "num"
+reason = "Other residents' objects in range on the local OpenSim"
+
+[[difference]]
+probe = "detection/sensor"
+between = ["opensim-yengine", "fake-opensim"]
+record = "swept"
+fields = { step = "range-3" }
+field = "num"
+reason = "Other residents' objects in range on the local OpenSim"
+
+[[difference]]
+probe = "detection/sensor"
+between = ["opensim-yengine", "fake-opensim"]
+record = "swept"
+fields = { step = "range-3.2" }
+field = "num"
+reason = "Other residents' objects in range on the local OpenSim"
+
+[[difference]]
+probe = "detection/sensor"
+between = ["opensim-yengine", "fake-opensim"]
+record = "swept"
+fields = { step = "range-3.4" }
+field = "num"
+reason = "Other residents' objects in range on the local OpenSim"
+
+[[difference]]
+probe = "detection/sensor"
+between = ["opensim-yengine", "fake-opensim"]
+record = "swept"
+fields = { step = "range-4.1" }
+field = "num"
+reason = "Other residents' objects in range on the local OpenSim"
+
+[[difference]]
+probe = "detection/sensor"
+between = ["opensim-yengine", "fake-opensim"]
+record = "swept"
+fields = { step = "arc-quarter" }
+field = "num"
+reason = "Other residents' objects in range on the local OpenSim"
+
+[[difference]]
+probe = "detection/sensor"
+between = ["opensim-yengine", "fake-opensim"]
+record = "swept"
+fields = { step = "arc-wide" }
+field = "num"
+reason = "Other residents' objects in range on the local OpenSim"
+
+[[difference]]
+probe = "detection/sensor"
+between = ["aditi", "fake-sl"]
+record = "swept"
+fields = { step = "all" }
+field = "num"
+reason = "Other residents' objects on aditi fill the sweep to its cap of 32"
+
+[[difference]]
+probe = "detection/sensor"
+between = ["aditi", "fake-sl"]
+record = "swept"
+fields = { step = "scripted" }
+field = "num"
+reason = "Other residents' objects on aditi fill the sweep to its cap of 32"
+
+[[difference]]
+probe = "detection/sensor"
+between = ["aditi", "fake-sl"]
+record = "swept"
+fields = { step = "active" }
+field = "num"
+reason = "Other residents' objects on aditi fill the sweep to its cap of 32"
+
+[[difference]]
+probe = "detection/sensor"
+between = ["aditi", "fake-sl"]
+record = "swept"
+fields = { step = "agents" }
+field = "num"
+reason = "A third avatar stood in aditi's region"
+
+[[difference]]
+probe = "detection/sensor"
+between = ["aditi", "fake-sl"]
+record = "swept"
+fields = { step = "passive" }
+reason = "Other residents' unscripted objects on aditi; the fake region has no bare prim of nobody's, and holds an idle scripted prim active, never passive"
+
+[[difference]]
+probe = "detection/sensor"
+between = ["aditi", "fake-sl"]
+record = "swept"
+fields = { step = "passive-scripted" }
+reason = "On aditi an idle scripted prim drifts between active and passive, and Target B was passive then; the fake grid holds it active, never drifting"
+
+[[difference]]
+probe = "detection/sensor"
+between = ["aditi", "fake-sl"]
+record = "fired"
+fields = { phase = "1" }
+reason = "On aditi Target B had drifted out of SCRIPTED by the repeating phases (no_sensor every time, in two runs of two); the fake grid holds it scripted, never drifting"
+
+[[difference]]
+probe = "detection/sensor"
+between = ["aditi", "fake-sl"]
+record = "fired"
+fields = { phase = "9" }
+reason = "On aditi Target B had drifted out of SCRIPTED by the repeating phases (no_sensor every time, in two runs of two); the fake grid holds it scripted, never drifting"
+
+[[difference]]
+probe = "detection/sensor"
+between = ["opensim-yengine", "fake-opensim"]
+record = "fired"
+fields = { phase = "2", event = "1" }
+reason = "OpenSim sweeps on its 100 ms command loop: a sweep within a pass of the probe's 2.6 s timer lands on either side of it, and one after it arrives once the repeat is removed; the fake grid's sweeps fall a tick later each, past the timer"
+
+[[difference]]
+probe = "detection/sensor"
+between = ["opensim-yengine", "fake-opensim"]
+record = "fired"
+fields = { phase = "3", event = "5" }
+reason = "OpenSim sweeps on its 100 ms command loop, whose phase against the call puts the first sweep 0.5 to 0.6 s in; the fake grid takes 0.6, after which a fifth sweep no longer fits before the 2.6 s timer"
+
+[[difference]]
+probe = "detection/sensor"
+between = ["opensim-yengine", "fake-opensim"]
+record = "fired"
+fields = { phase = "6", event = "1" }
+reason = "OpenSim sweeps on its 100 ms command loop: a sweep within a pass of the probe's timer lands on either side of it, and one after it arrives once the repeat is removed"

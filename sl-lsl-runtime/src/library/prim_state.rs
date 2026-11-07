@@ -556,7 +556,7 @@ pub fn ll_set_link_texture(
             // the call's forced delay (`errors/flood-paths`' `cost`).
             if !opensim_flavour {
                 ctx.refuse(format!("Could not find texture '{texture}'."));
-                ctx.sleep(1.0);
+                ctx.error_pause();
             }
             return Ok(());
         }

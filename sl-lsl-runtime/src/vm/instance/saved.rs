@@ -141,6 +141,7 @@ pub(crate) fn restore(
         running: saved.running,
         held: saved.held,
         queue,
+        begun: 0,
         activity,
         pending_state,
         wake: if asleep == 0 {
@@ -180,6 +181,8 @@ pub(crate) fn restore(
             // Controls are the avatar's, taken again by a script that wants
             // them after a take, a rez or a restart.
             controls: None,
+            // OpenSim's `LSL_Api` is made anew for the restored script.
+            say_throttle: crate::vm::delays::SayThrottle::default(),
         },
         reset_when_idle: false,
         overdraft: 0,
@@ -223,6 +226,7 @@ fn queued(
         args: saved.args.clone(),
         detected: saved.detected.clone(),
         posted,
+        batch: 0,
     })
 }
 

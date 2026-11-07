@@ -1,0 +1,14 @@
+grid: fake-opensim
+date: 2026-11-07
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Fake Region
+engine: sl-lsl-runtime imitating YEngine
+settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
+complete: no
+
+PROBE throttle/email rec=start region="Fake Region" channel="OpenSim" version="sl-fake-grid 0.1.0"
+PROBE throttle/email rec=mailbox found=1
+# debug-channel: from="Object" text="YEngine: llEmail is not implemented by this grid (script: Sender event: listen primID: b09cd110-69c9-4759-c9c9-86d1548e2397 at: <128,124,26>) Script must be Reset to re-enable.\n"
+# debug-channel: from="Object" text="YEngine: llGetNextEmail is not implemented by this grid (script: Mailbox event: timer primID: 4f91a8a2-65fd-3a10-c5db-1da171f24464 at: <131,124,26>) Script must be Reset to re-enable.\n"
+# debug-channel by=other: from="Object" text="YEngine: llEmail is not implemented by this grid (script: Sender event: listen primID: b09cd110-69c9-4759-c9c9-86d1548e2397 at: <128,124,26>) Script must be Reset to re-enable.\n"
+# debug-channel by=other: from="Object" text="YEngine: llGetNextEmail is not implemented by this grid (script: Mailbox event: timer primID: 4f91a8a2-65fd-3a10-c5db-1da171f24464 at: <131,124,26>) Script must be Reset to re-enable.\n"

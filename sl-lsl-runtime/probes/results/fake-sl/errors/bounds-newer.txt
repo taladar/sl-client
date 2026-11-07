@@ -1,0 +1,26 @@
+grid: fake-sl
+date: 2026-11-07
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Fake Region
+engine: sl-lsl-runtime imitating Mono
+settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
+
+PROBE errors/bounds-newer rec=start region="Fake Region" channel="Second Life Server" version="sl-fake-grid 0.1.0"
+PROBE errors/bounds-newer rec=case script="Bounds 1" case=replace-empty-pattern step=before
+PROBE errors/bounds-newer rec=case script="Bounds 1" case=replace-empty-pattern step=after result="abcdef|abxdef|abxdef"
+PROBE errors/bounds-newer rec=case script="Bounds 2" case=slice-stride-zero step=before
+PROBE errors/bounds-newer rec=case script="Bounds 2" case=slice-stride-zero step=after result="[]"
+PROBE errors/bounds-newer rec=case script="Bounds 3" case=findstrided-stride-zero step=before
+PROBE errors/bounds-newer rec=case script="Bounds 3" case=findstrided-stride-zero step=after result="0"
+PROBE errors/bounds-newer rec=case script="Bounds 4" case=sortstrided-stride-zero step=before
+PROBE errors/bounds-newer rec=case script="Bounds 4" case=sortstrided-stride-zero step=after result="[a, b, c, d, e, f]"
+PROBE errors/bounds-newer rec=script-state when=after-faults script="Bounds 1" running=1
+PROBE errors/bounds-newer rec=script-state when=after-faults script="Bounds 2" running=1
+PROBE errors/bounds-newer rec=script-state when=after-faults script="Bounds 3" running=1
+PROBE errors/bounds-newer rec=script-state when=after-faults script="Bounds 4" running=1
+PROBE errors/bounds-newer rec=ping when=after-faults
+PROBE errors/bounds-newer rec=answer script="Bounds 1"
+PROBE errors/bounds-newer rec=answer script="Bounds 2"
+PROBE errors/bounds-newer rec=answer script="Bounds 3"
+PROBE errors/bounds-newer rec=answer script="Bounds 4"
+PROBE errors/bounds-newer rec=end

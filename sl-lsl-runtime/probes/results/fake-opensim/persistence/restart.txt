@@ -1,0 +1,25 @@
+grid: fake-opensim
+date: 2026-11-07
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Fake Region
+engine: sl-lsl-runtime imitating YEngine
+settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
+
+# question permissions=1040 object="Object" owner="<first> <last>" experience=none
+PROBE persistence/restart rec=stopped_entry
+PROBE persistence/restart rec=start region="Fake Region" channel="OpenSim" version="sl-fake-grid 0.1.0"
+PROBE persistence/restart rec=waiting drive=answer grant=1040
+# answer grant=1040
+PROBE persistence/restart rec=event seq=1 type=run_time_permissions perms=1040
+PROBE persistence/restart rec=before state=kept gi=42 gf=2.500000 gs="kept" gk_is_owner=1 gv="<1.00000, 2.00000, 3.00000>" gr="<0.00000, 0.00000, 0.70711, 0.70711>" gl="1, two, 3.000000" perms=1040 perms_key_is_owner=1 stopped_state=0 script_time=0.000000 timer=1 key_same=1
+PROBE persistence/restart rec=waiting drive=restart seconds=15
+# restart seconds=15
+# agent-alert modal=0 text="/Region will restart in 15 seconds"
+PROBE persistence/restart rec=woke script_time=60.018000 wall=60 key_same=1
+PROBE persistence/restart rec=event seq=2 type=link_message number=1 text="queued"
+PROBE persistence/restart rec=event seq=3 type=link_message number=2 text="queued"
+PROBE persistence/restart rec=event seq=4 type=link_message number=3 text="queued"
+# region-down response=none
+PROBE persistence/restart rec=timeout awaited=region_start
+PROBE persistence/restart rec=end
+# agent-alert by=other modal=0 text="/Region will restart in 15 seconds"

@@ -1,0 +1,27 @@
+grid: fake-sl
+date: 2026-11-07
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Fake Region
+engine: sl-lsl-runtime imitating Mono
+settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
+
+PROBE comms/link-messages rec=start region="Fake Region" channel="Second Life Server" version="sl-fake-grid 0.1.0"
+PROBE comms/link-messages rec=prim link_number=0 prims=1
+PROBE comms/link-messages rec=sent target=-4
+PROBE comms/link-messages rec=sent target=-1
+PROBE comms/link-messages rec=sent target=-2
+PROBE comms/link-messages rec=sent target=-3
+PROBE comms/link-messages rec=sent target=1
+PROBE comms/link-messages rec=sent target=0
+PROBE comms/link-messages rec=sent target=1
+PROBE comms/link-messages rec=sent target=2
+PROBE comms/link-messages rec=got script=Receiver target=-4 sender=0 text_length=0 id=""
+PROBE comms/link-messages rec=got script=Receiver target=-1 sender=0 text_length=0 id=""
+PROBE comms/link-messages rec=got script=Receiver target=0 sender=0 text_length=0 id=""
+PROBE comms/link-messages rec=sent target=-4 payload=odd
+PROBE comms/link-messages rec=got script=Sender target=-4 sender=0 text_length=0 id=""
+PROBE comms/link-messages rec=got script=Sender target=-1 sender=0 text_length=0 id=""
+PROBE comms/link-messages rec=got script=Sender target=0 sender=0 text_length=0 id=""
+PROBE comms/link-messages rec=got script=Sender target=-4 sender=0 text_length=3000 id="not a key"
+PROBE comms/link-messages rec=got script=Receiver target=-4 sender=0 text_length=3000 id="not a key"
+PROBE comms/link-messages rec=end

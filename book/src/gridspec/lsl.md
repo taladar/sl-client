@@ -551,11 +551,11 @@ sensor answer, and the runner touches the prim.
 
 | what was raised while the script slept, in that order | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
-| a link message, then a colour change, in one handler | link, `changed` | the same | no scripts |
-| a colour change, then a link message | **link, `changed`**: the `changed` comes after | `changed`, link: in the order raised | no scripts |
-| link, colour, link, colour, 0.3 s apart | link, link, **one** `changed` | link, `changed`, link, `changed` | no scripts |
-| link and colour, the sensor's answer, the talker's line, a 0.3 s timer, a touch at about a second | the line, link, timer, sensor, `touch_start`, `touch_end`, `changed` | sensor, link, `changed`, the line, timer, `touch_start`, `touch_end` | no scripts |
-| a touch at about a second, link and colour at 2.5 s, the line at 3 s, a timer at 3.5 s | link, the line, timer, `touch_start`, `touch_end`, `changed` | `touch_start`, `touch_end`, link, `changed`, the line, timer | no scripts |
+| a link message, then a colour change, in one handler | link, `changed` | the same | each flavour as its grid |
+| a colour change, then a link message | **link, `changed`**: the `changed` comes after | `changed`, link: in the order raised | link, `changed` on both flavours: the fake grid raises the `changed` once the tick is over, after the link message |
+| link, colour, link, colour, 0.3 s apart | link, link, **one** `changed` | link, `changed`, link, `changed` | each flavour as its grid |
+| link and colour, the sensor's answer, the talker's line, a 0.3 s timer, a touch at about a second | the line, link, timer, sensor, `touch_start`, `touch_end`, `changed` | sensor, link, `changed`, the line, timer, `touch_start`, `touch_end` | link, sensor, the line, timer, then as Second Life (Second Life); link, `changed`, sensor, then as OpenSim (OpenSim): a link message reaches its script in the tick it was sent, a sweep is answered at the next |
+| a touch at about a second, link and colour at 2.5 s, the line at 3 s, a timer at 3.5 s | link, the line, timer, `touch_start`, `touch_end`, `changed` | `touch_start`, `touch_end`, link, `changed`, the line, timer | each flavour as its grid |
 
 OpenSim's queue is first in, first out across every type, on both engines.
 Second Life's is not: a touch and a `changed` raised while the script slept
@@ -567,10 +567,16 @@ and the helper's link message after the talker's line).
 
 The fake grid's engine queues by that rule on a Second-Life-flavoured region
 (`Coalescing::Reference`): a touch waits behind every other kind of event
-queued with it, and a `changed` behind the touches too; an OpenSim-flavoured
-one is first in, first out. The rows above stay unasked offline until the
-colour changes and the sensor that raise them do
-(`server-world-changed-raisers`, `server-lsl-lib-detection-sensors`).
+raised while the same handler ran, and a `changed` behind the touches too;
+an event raised while a later handler runs waits behind them all. That is
+what makes the probe's fence work on aditi: the second fence, sent by the
+first fence's handler, comes after the round's `changed` — ranked against
+every queued event whenever raised, the `changed` and the touches would
+wait behind each round's fences for ever. An OpenSim-flavoured region is
+first in, first out. Where the fake grid still parts from the grids is when
+an event is raised, not where it waits: OpenSim raises a `changed` inside
+the setter and answers `llSensor` inside the call, and Second Life delivers
+chat ahead of a link message (`server-lsl-event-raise-timing`).
 
 ### A timer that falls due while the script is busy
 
@@ -2392,9 +2398,9 @@ rotation.
 | `llEuler2Rot(<400°, −200°, 1000°>)` | `<−0.549, 0.747, 0.153, 0.342>` | the **negation**, `<0.549, −0.747, −0.153, −0.342>` — the same rotation | no scripts |
 | `llRot2Euler` back from it, and from `<30°, 45°, 60°>` | `<−140, 20, 100>`; `<30, 45.00001, 60.00001>` | `<−140.000004, 19.999999, 99.999993>`; exact | no scripts |
 | the gimbal: `<10°, 90°, 20°>` and `<10°, −90°, 20°>` back | `<0, 90, 30>` and `<0, −90, 10>`: x folded into z | the same, `±90.000001` | no scripts |
-| `vector * rotation` by `<0, 0, 0, 2>` | `<4, 0, 0>`: **scaled by the square of the length** — no normalising | `<1, 0, 0>`: normalised first | no scripts |
-| `vector * rotation`, `vector / rotation` by `<1, 2, 3, 4>` | `<4, 28, −10>`, `<4, −20, 22>` | `<−25, 28, −10>`, `<−25, −20, 22>`: a different formula, which agrees only for unit rotations | no scripts |
-| `vector * <0, 0, 0, 0>` | `ZERO_VECTOR` | the vector unchanged | no scripts |
+| `vector * rotation` by `<0, 0, 0, 2>` | `<4, 0, 0>`: **scaled by the square of the length** — no normalising | `<1, 0, 0>`: normalised first | each flavour as its grid |
+| `vector * rotation`, `vector / rotation` by `<1, 2, 3, 4>` | `<4, 28, −10>`, `<4, −20, 22>` | `<−25, 28, −10>`, `<−25, −20, 22>`: a different formula, `v + 2q×(q×v + s·v)`, which agrees only for unit rotations | each flavour as its grid (found by `sl-conformance differential`, 2026-11-07) |
+| `vector * <0, 0, 0, 0>` | `ZERO_VECTOR` | the vector unchanged | each flavour as its grid |
 | `llAxisAngle2Rot` of a zero axis, of a `1e-7` axis, by 90° | `<0, 0, 0, 1>`, `<0, 0, 0, 1>` | `<0, 0, 0, 0.707107>` (not a unit rotation); `<0, 0, 0.707, 0.707>`: the tiny axis normalised | no scripts |
 | `llAxisAngle2Rot` of an axis of length 2; by 450° | the axis normalised; the negated rotation of 90° | the same | no scripts |
 | `llVecNorm(<0, 0, 1e-7>)` | `ZERO_VECTOR`: too short | `<0, 0, 1>` | no scripts |
@@ -2705,7 +2711,7 @@ box with its script, a removal sent to the viewer).
 | 11 m from the rezzer | nothing, silently | nothing, silently, and no forced delay | each flavour as its grid |
 | a name that is not there | `Could not find object 'Nope'.`, 1.1 s | `llRez(AtRoot/Object): Can't find object 'Nope'`, 1 s | each flavour as its grid |
 | a notecard's name | nothing, silently | `Can't create requested object; object is missing from database`, 1 s | each flavour as its grid |
-| the forced delay | 0.1–0.2 s (frame-bound) | 0.1 s | 0.1 s, the keyword file's, on both flavours (`server-lsl-forced-delays-per-flavour`) |
+| the forced delay | 0.1–0.2 s (frame-bound) | 0.1 s | 0.1 s on both flavours |
 | twenty in a row | all twenty rezzed, in 3.1 s; no throttle | all twenty, in 2 s | all twenty, a tick apart |
 | `llRezObjectWithParams` | the start parameter and string arrive; a 1100-byte string arrives as 1018 characters; an unknown rule is `Error running rule #2: unknown rule id 999.` and rezzes nothing | does not compile | as Second Life, the physical rules read and checked and changing nothing; OpenSim's dialect refuses it |
 | `llDerezObject(child, DEREZ_DIE)` | 1, then 0 for the same child and for `NULL_KEY` | does not compile | each flavour as its grid |
@@ -2758,27 +2764,27 @@ either grid.
 
 | call | documented | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- | --- |
-| `llRegionSay`, `llSetColor`, `llSetScale`, `llSetLinkPrimitiveParamsFast` | 0 | 0 (a frame once) | 0 | no scripts |
-| `llSetPos`, `llSetRot`, `llSetLocalRot` | 0.2 | 0.2–0.22 | 0.2 | `llSetPos` 0.2; the others no scripts |
-| `llSetTexture`, `llSetLinkTexture`, `llScaleTexture`, `llOffsetTexture`, `llRotateTexture` | 0.2 | 0.2–0.22; one `llSetTexture` took 0.47 | 0.2 | no scripts |
-| `llSetPrimitiveParams`, `llSetLinkPrimitiveParams` | 0.2 | 0.2–0.22 | 0.2 | no scripts |
-| `llSetRemoteScriptAccessPin` | 0.2 | 0.2 | **0** | no scripts |
-| `llAdjustSoundVolume`, `llRequestAgentData` | 0.1 | 0.11 | 0.1 | no scripts |
-| `llXorBase64Strings` | 0.3 | 0.31 | 0.3 | no scripts |
-| `llGetRegionFlags`, `llRequestUsername`, `llRequestDisplayName` | 0 | 0 | 0 | no scripts |
-| `llModPow` | 0 | 0 | **1.0** | no scripts |
-| `llRequestSimulatorData` | 1.0 | 1.0 | 1.0 | no scripts |
-| `llGetParcelPrimOwners`, without the land's rights | 2.0 | 2.0 | 2.0 | no scripts |
-| `llParcelMediaQuery`, without the land's rights | 2.0 | 2.0 | **0**: it returns before the sleep | no scripts |
-| `llGetPrimMediaParams`, `llClearPrimMedia` | 1.0 | 1.0 | 1.0 | no scripts |
-| `llMapDestination`, outside a touch and not worn (it does nothing) | 1.0 | 1.0 | **0**: it returns before the sleep | no scripts |
-| `llInstantMessage` | 2.0 | 2.0 | 2.0 | no scripts |
-| `llDialog` | 1.0 | 1.0 | 1.0 | no scripts |
-| `llTextBox` | 1.0 | **0** | 1.0 | no scripts |
-| `llLoadURL` | 0.1 | 0.11 | **10.0** | no scripts |
-| `llEmail` | 20.0 | 20.0 | 1.0: the email module is off (below) | no scripts |
-| `llRezObject` ([Rezzing](#rezzing)) | 0.1 | 0.1–0.2 | 0.1 | no scripts |
-| `llGiveInventory` to an avatar ([Giving](#giving)) | 0 | 2 | 3 | no scripts |
+| `llRegionSay`, `llSetColor`, `llSetScale`, `llSetLinkPrimitiveParamsFast` | 0 | 0 (a frame once) | 0 | 0 |
+| `llSetPos`, `llSetRot`, `llSetLocalRot` | 0.2 | 0.2–0.22 | 0.2 | 0.2 |
+| `llSetTexture`, `llSetLinkTexture`, `llScaleTexture`, `llOffsetTexture`, `llRotateTexture` | 0.2 | 0.2–0.22; one `llSetTexture` took 0.47 | 0.2 | 0.2 |
+| `llSetPrimitiveParams`, `llSetLinkPrimitiveParams` | 0.2 | 0.2–0.22 | 0.2 | 0.2 |
+| `llSetRemoteScriptAccessPin` | 0.2 | 0.2 | **0** | each flavour as its grid |
+| `llAdjustSoundVolume`, `llRequestAgentData` | 0.1 | 0.11 | 0.1 | 0.1 |
+| `llXorBase64Strings` | 0.3 | 0.31 | 0.3 | 0.3 |
+| `llGetRegionFlags`, `llRequestUsername`, `llRequestDisplayName` | 0 | 0 | 0 | 0; OpenSim's `llRequestUsername` 0.1 for an avatar not in the region, as its source |
+| `llModPow` | 0 | 0 | **1.0** | each flavour as its grid |
+| `llRequestSimulatorData` | 1.0 | 1.0 | 1.0 | 1.0 |
+| `llGetParcelPrimOwners`, without the land's rights | 2.0 | 2.0 | 2.0 | 2.0 |
+| `llParcelMediaQuery`, without the land's rights | 2.0 | 2.0 | **0**: it returns before the sleep | each flavour as its grid |
+| `llGetPrimMediaParams`, `llClearPrimMedia` | 1.0 | 1.0 | 1.0 | 1.0 |
+| `llMapDestination`, outside a touch and not worn (it does nothing) | 1.0 | 1.0 | **0**: it returns before the sleep | each flavour as its grid |
+| `llInstantMessage` | 2.0 | 2.0 | 2.0 | 2.0 |
+| `llDialog` | 1.0 | 1.0 | 1.0 | 1.0 |
+| `llTextBox` | 1.0 | **0** | 1.0 | each flavour as its grid |
+| `llLoadURL` | 0.1 | 0.11 | **10.0** | each flavour as its grid |
+| `llEmail` | 20.0 | 20.0 | 1.0: the email module is off (below) | not run yet (`server-lsl-lib-email-xmlrpc`) |
+| `llRezObject` ([Rezzing](#rezzing)) | 0.1 | 0.1–0.2 | 0.1 | 0.1; on OpenSim none for a rez that rezzes nothing |
+| `llGiveInventory` to an avatar ([Giving](#giving)) | 0 | 2 | 3 | each flavour as its grid; OpenSim's 3 s for a gift to a prim too |
 
 **OpenSim sleeps a script for a second whenever a library call reports an
 error.** Its `LSL_Api.Error`, which every such message goes through, ends
@@ -2795,7 +2801,7 @@ prim B asks for its mail every two seconds.
 
 | what | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
-| the forced delay | 20.0 s | 1 s, the error's (`llEmail: Email module not configured`; the module is off by default) | no scripts |
+| the forced delay | 20.0 s | 1 s, the error's (`llEmail: Email module not configured`; the module is off by default) | not run yet (`server-lsl-lib-email-xmlrpc`) |
 | to `<key>@lsl.aditi.lindenlab.com` | arrives about 2 s after the send, while the sender still sleeps | — | no scripts |
 | to `<key>@lsl.secondlife.com` | never arrives (not within 80 s): from the beta grid that is the main grid's domain | — | no scripts |
 | the `email` event | the sender `<sender's key>@lsl.aditi.lindenlab.com`; the body six lines, three of headers (`Object-Name: Object`, the region, the position), a blank line, then the message; nothing more waiting | `llGetNextEmail: Email module not configured` | no scripts |
@@ -2807,8 +2813,8 @@ seconds apart, of an object that dies as it is rezzed.
 
 | what | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
-| 300 calls | all 300 rezzed; **no throttle** | all 300 | no scripts |
-| the rate | about 6.3 a second (7.8–8.0 s a wave); the slowest call 0.4 s | 10 a second, 0.1 s each | no scripts |
+| 300 calls | all 300 rezzed; **no throttle** | all 300 | all 300; no throttle |
+| the rate | about 6.3 a second (7.8–8.0 s a wave); the slowest call 0.4 s | 10 a second, 0.1 s each | 0.1 s each, a call's forced delay |
 
 ### Raycasts without pause
 
@@ -2818,8 +2824,8 @@ corner to corner at prim A's height, asking for 256 hits and phantoms.
 
 | what | Second Life | OpenSim YEngine | OpenSim XEngine | fake grid |
 | --- | --- | --- | --- | --- |
-| the cheap ray | 11 552 rays, 1090 a second; **no `RCERR_*`** | 136, 14 a second | 317, 32 a second | no scripts |
-| the expensive ray | 454 rays, 45 a second; no `RCERR_*` | 142, 14 a second | 283, 28 a second | no scripts |
+| the cheap ray | 11 552 rays, 1090 a second; **no `RCERR_*`** | 136, 14 a second | 317, 32 a second | no `RCERR_*`; as many as the script's instruction budget runs, on every flavour |
+| the expensive ray | 454 rays, 45 a second; no `RCERR_*` | 142, 14 a second | 283, 28 a second | the same |
 
 ### Chat without pause
 
@@ -2830,8 +2836,8 @@ a burst of 200 in a row and ten waves of 40 a second apart.
 
 | what | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
-| 25 `llSay` on channel 0 | all heard, in 0.33 s; no call sleeps | all heard, in 4 s: **the 12th and the 24th call sleep 2 s** — more than eleven lines on channel 0 within a second (`llSay`, `llShout`) | no scripts |
-| `llRegionSay`, `llSay`, `llRegionSayTo` on other channels, 600 each | all heard; **no throttle**; a call takes at most a frame | all heard; no throttle; no call sleeps | no scripts |
+| 25 `llSay` on channel 0 | all heard, in 0.33 s; no call sleeps | all heard, in 4 s: **the 12th and the 24th call sleep 2 s** — more than eleven lines on channel 0 within a second (`llSay`, `llShout`) | each flavour as its grid: XEngine sleeps before the line is said, YEngine after |
+| `llRegionSay`, `llSay`, `llRegionSayTo` on other channels, 600 each | all heard; **no throttle**; a call takes at most a frame | all heard; no throttle; no call sleeps | each flavour as its grid |
 
 ### HTTP requests: how the throttle lets go
 
@@ -2842,14 +2848,15 @@ of silences, and a burst after the first that is accepted.
 
 | what | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
-| the burst | 25 accepted | 4 | no scripts |
-| a request every 0.5 s for 40 s after it | **every one refused**: a refused request counts as one, so asking keeps the throttle shut | every second one accepted: one a second | no scripts |
-| silence, then one request | refused after 5, 10 and 15 s of silence, **accepted after 20** | accepted after 5 s | no scripts |
-| a burst after the silence | 25 again (the one and 24 more): the whole allowance | 4 | no scripts |
+| the burst | 25 accepted | 4 | each flavour as its grid |
+| a request every 0.5 s for 40 s after it | **every one refused**: a refused request counts as one, so asking keeps the throttle shut | every second one accepted: one a second | each flavour as its grid |
+| silence, then one request | refused after 5, 10 and 15 s of silence, **accepted after 20** | accepted after 5 s | each flavour as its grid |
+| a burst after the silence | 24 (the one and 23 more): the refused request 20 s back still counts | 4 | each flavour as its grid |
 
 So Second Life's limit is 25 requests in 20 seconds, counting the refused
-ones, and a script that retries at once stays shut out for as long as it
-keeps trying. OpenSim's is a bucket of 3 that fills by one a second
+ones, and once it refuses one a script stays shut out until it has been
+quiet for 20 seconds; one that retries at once stays shut out for as long as
+it keeps trying. OpenSim's is a bucket of 3 that fills by one a second
 (`PrimRequestsBurst`, `PrimRequestsPerSec`), which refusals do not drain.
 
 ### What the viewer does with it

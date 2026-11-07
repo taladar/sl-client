@@ -1,0 +1,44 @@
+grid: fake-opensim
+date: 2026-11-07
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Fake Region
+engine: sl-lsl-runtime imitating YEngine
+settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
+
+PROBE money/pay rec=start region="Fake Region" channel="OpenSim" version="sl-fake-grid 0.1.0"
+PROBE money/pay rec=waiting drive=pay amount=1
+# pay amount=1 prim=A
+PROBE money/pay rec=waiting drive=pay by=other amount=1
+# pay by=other amount=1 prim=A
+PROBE money/pay rec=waiting drive=pay by=other amount=0
+# pay by=other amount=0 prim=A
+PROBE money/pay rec=set step=4 price=5 buttons="1, 2, 3, 4"
+PROBE money/pay rec=waiting drive=pay by=other amount=7
+# pay by=other amount=7 prim=A
+PROBE money/pay rec=set step=5 price=-1 buttons="-1, -1, -1, -1"
+PROBE money/pay rec=waiting drive=pay by=other amount=1
+# pay by=other amount=1 prim=A
+PROBE money/pay rec=set step=6 price=-1 buttons="1, 2, 3, 4"
+PROBE money/pay rec=waiting drive=pay by=other amount=7
+# pay by=other amount=7 prim=A
+PROBE money/pay rec=waiting drive=pay by=other amount=2
+# pay by=other amount=2 prim=A
+PROBE money/pay rec=set step=8 price=5 buttons="-1, -1, -1, -1"
+PROBE money/pay rec=waiting drive=pay by=other amount=7
+# pay by=other amount=7 prim=A
+PROBE money/pay rec=waiting drive=pay by=other amount=5
+# pay by=other amount=5 prim=A
+PROBE money/pay rec=set step=10 price=-2 buttons="-2, -2, -2, -2"
+PROBE money/pay rec=state step=10 state=closed
+PROBE money/pay rec=waiting drive=pay by=other amount=1
+# pay by=other amount=1 prim=A
+PROBE money/pay rec=waiting drive=pay amount=1
+PROBE money/pay rec=removed script=second
+# pay amount=1 prim=A
+PROBE money/pay rec=state step=11 state=default
+# question permissions=2 object="Object" owner="<first> <last>" experience=none
+PROBE money/pay rec=waiting drive=answer grant=2
+# answer grant=2
+PROBE money/pay rec=granted step=12 perms=2
+PROBE money/pay rec=refund step=12 amount=0
+PROBE money/pay rec=end

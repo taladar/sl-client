@@ -949,7 +949,8 @@ fn the_say_functions_say_as_far_as_they_carry_and_region_say_refuses_channel_0()
                 flavour,
             )?,
         );
-        let _reports = run(&mut engine, &mut host, 1);
+        // OpenSim's refusal of channel 0 costs the script a second.
+        let _reports = run(&mut engine, &mut host, 11);
         let said: Vec<(i32, &str, Option<ChatVolume>)> = host
             .said
             .iter()
@@ -1032,8 +1033,10 @@ fn an_instant_message_is_cut_costs_two_seconds_and_refuses_no_key() -> Result<()
                 .collect::<Vec<_>>(),
             vec![(1, OWNER, 1023)]
         );
-        // Two seconds each, at ten ticks to the second.
-        assert_eq!(host.from(A), vec![(41, "done")]);
+        // Two seconds each, at ten ticks to the second, and OpenSim's
+        // refusal a second more (`LSL_Api.Error`).
+        let done = if flavour.is_opensim() { 51 } else { 41 };
+        assert_eq!(host.from(A), vec![(done, "done")]);
         let refusal = if flavour.is_opensim() {
             "llInstantMessage: An invalid key  was passed to llInstantMessage"
         } else {
@@ -1124,7 +1127,8 @@ fn load_url_checks_the_url_on_opensim_only() -> Result<(), String> {
                 flavour,
             )?,
         );
-        let _reports = run(&mut engine, &mut host, 10);
+        // OpenSim's refusals cost 1.2 s each (the error's second and 0.2 s).
+        let _reports = run(&mut engine, &mut host, 30);
         let urls: Vec<&str> = host
             .offers
             .iter()

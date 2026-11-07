@@ -314,7 +314,8 @@ fn a_delink_without_the_permission_is_refused() -> Result<(), String> {
             linked: Some(three(1)),
             ..Recorder::default()
         };
-        let _engine = started(source, flavour, &mut host, 2)?;
+        // OpenSim's first refusal costs the script a second.
+        let _engine = started(source, flavour, &mut host, 12)?;
         assert_eq!(debug_lines(&host), refused, "{flavour:?}");
         assert_eq!(host.broken_links, Vec::new());
         assert_eq!(host.broken_all, Vec::new());

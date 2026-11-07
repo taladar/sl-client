@@ -1,0 +1,10 @@
+grid: fake-opensim
+date: 2026-11-07
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: unknown (no start record)
+engine: sl-lsl-runtime imitating YEngine
+settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
+complete: no
+
+# compile error in "Probe": "(70,19) Error: no function `llGetClosestNavPoint`"
+# compile error in "Probe": "(99,20) Error: no function `llGetClosestNavPoint`"

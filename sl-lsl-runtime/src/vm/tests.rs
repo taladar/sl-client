@@ -41,6 +41,7 @@ mod prim_state;
 mod sensing;
 mod sitting;
 mod strings;
+mod throttles;
 mod timers;
 
 /// A tenth of a second: ten ticks to the second, so `llSleep(2.0)` is twenty.
@@ -2692,6 +2693,44 @@ fn second_life_runs_touches_after_the_rest_and_changed_last() -> Result<(), Stri
     assert_eq!(
         queue_order(Coalescing::Never)?,
         vec!["touch_start", "changed", "link 1", "touch_end", "link 2"]
+    );
+    Ok(())
+}
+
+#[test]
+fn a_changed_waits_behind_its_own_handlers_events_alone() -> Result<(), String> {
+    // `events/order` round 1 (aditi, 2026-10-25): a link message and a
+    // colour change raised while the handler slept, then the fence it sends
+    // itself; the fence's handler sends a second fence. The `changed` waits
+    // behind the link message and the first fence, raised with it, but not
+    // behind the second, raised while a later handler ran.
+    let mut engine = engine();
+    let mut host = Recorder::default();
+    let _none = engine.add(
+        A,
+        program(
+            "default {
+                state_entry() { llSleep(1.0); }
+                link_message(integer sender, integer num, string text, key id) {
+                    print(\"link \" + (string)num);
+                    if (num == 900) llSleep(1.0);
+                }
+                changed(integer change) { print(\"changed\"); }
+            }",
+        )?,
+    );
+    // Ten ticks to the second: all three raised in the first handler's
+    // sleep, the second fence in the first fence's.
+    let _reports = run(&mut engine, &mut host, 2);
+    let _posted = link(&mut engine, A, 1, "")?;
+    let _posted = engine.changed(A, 2);
+    let _posted = link(&mut engine, A, 900, "")?;
+    let _reports = run(&mut engine, &mut host, 14);
+    let _posted = link(&mut engine, A, 901, "")?;
+    let _reports = run(&mut engine, &mut host, 30);
+    assert_eq!(
+        host.texts(A),
+        vec!["link 1", "link 900", "changed", "link 901"]
     );
     Ok(())
 }

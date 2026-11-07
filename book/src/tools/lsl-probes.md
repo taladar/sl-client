@@ -370,7 +370,21 @@ sl-conformance run --grid aditi lsl-probes
 sl-conformance run --grid opensim lsl-probes
 # OpenSim, XEngine
 sl-conformance run --grid opensim lsl-probes-xengine
+# the fake grid, imitating each
+sl-conformance run --grid fake-sl lsl-probes
+sl-conformance run --grid fake-opensim lsl-probes
 ```
+
+The fake grid runs in the runner's own process, as for every case, and its
+transcripts go to `results/fake-sl/` and `results/fake-opensim/`. It runs one
+OpenSim engine, so `fake-opensim` is set against `opensim-yengine` and has no
+XEngine twin. The probes' prims stand south of the arrival point, clear of the
+catalogue, the owner restarts the region itself (it is an estate manager
+there), and a script a header skips on the live grid is skipped on its fake
+twin too, so the two transcripts compare. It takes the corpus's real time —
+the fake grid ticks at its live grid's frame — so it is a runner case only
+(`fake::RUNNER_ONLY`), never part of `cargo test`, where the probes are
+replayed in the VM instead.
 
 `--probe <id>` (repeatable) runs only the probes it names and writes only
 their files:
@@ -525,6 +539,65 @@ Each row names the record with the fields both runs agree on, then the
 field and the two values. Nothing yet needs a tolerance for merging (a
 grid coalescing what another sends apart): that is the frame timing no
 probe should depend on (above).
+
+### Accepted differences
+
+A difference that is understood is recorded in `probes/accepted.toml`, so it
+is a finding once and a record after that:
+
+```toml
+[[difference]]
+probe = "math/rotations"
+between = ["opensim-yengine", "fake-opensim"]
+record = "euler2rot-back"
+fields = { case = "past-a-turn" }
+field = "value"
+reason = "OpenSim computes in double; the fake grid's values are floats"
+```
+
+`record` names the record (every record of the comparison when absent),
+`fields` the values that pick it out, `field` the field that differs (any
+difference of the record, a record only one run printed included, when
+absent). An entry without a `task` is a **deliberate** difference; with one,
+a known defect that roadmap task removes. `compare-probes` lists what an
+entry covers as `accepted`, with its reason, apart from the findings; a test
+fails an entry that no longer covers anything, and one whose `task` is not an
+open roadmap task (once the task is done, the defect is gone and so is the
+entry).
+
+Most of what a fake flavour shows against its grid falls into a few kinds,
+each recorded so: the live region's other residents' objects and avatars,
+which fill a sensor's sweeps (the fake region holds the probe's prims alone);
+the fake region's own terrain and build height; OpenSim's doubles against the
+runtime's floats; values a grid gives differently each run
+(`llBase64ToInteger` of junk on Second Life); and races a grid loses either
+way, such as a sensor sweep on OpenSim's 100 ms command loop against the
+probe's timer. A measurement that is random by nature (`llFrand`'s least and
+greatest draw) is a `vary` field of its probe instead.
+
+A live run is only as clean as its region: a cancelled run leaves its prims
+behind at the build position, still running their scripts, and the next run
+sweeps them, hears them and measures from them. Delete them before trusting
+a live result that suddenly finds objects at distance 0.
+
+### One script on both grids
+
+`sl-conformance differential` runs probes on a live grid and on the fake
+flavour imitating it, then prints the comparison of the two runs:
+
+```sh
+# the differential suite, on the local OpenSim and on fake-opensim
+sl-conformance differential
+# named probes, on aditi and on fake-sl
+sl-conformance differential --grid aditi math/rotations prim/placement
+```
+
+Without probe names it runs the differential suite
+(`probe_corpus::DIFFERENTIAL_SUITE`): the probes where an expectation and an
+implementation could share one misunderstanding — the rotation helpers,
+negative list and string indices, `llSetPos`' reach, event order around a
+state change, a sensor's results, the forced delays and the chat throttle.
+Against the local OpenSim it needs nobody at the keyboard.
 
 A probe can also be run by hand: drop its scripts into prims in `order`,
 under their `script` names (prefixed on OpenSim with the engine line), and

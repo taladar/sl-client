@@ -50,7 +50,7 @@ fn transcripts(name: &str) -> [(EngineFlavour, &'static str); 3] {
 }
 
 /// A region of `flavour` as the probes met it, the scripts in prim 1.
-fn http_stage(
+pub(super) fn http_stage(
     flavour: EngineFlavour,
     scripts: &[(CallerId, &str, &str)],
 ) -> Result<Region, String> {
@@ -85,7 +85,7 @@ fn http_stage(
 }
 
 /// `line` without the fields named in `vary`.
-fn without(line: &str, vary: &[&str]) -> String {
+pub(super) fn without(line: &str, vary: &[&str]) -> String {
     let mut out = Vec::new();
     let mut rest = line;
     while !rest.is_empty() {
@@ -122,7 +122,7 @@ fn field_end(rest: &str) -> usize {
 /// Run `region` for `seconds` and hold it to `transcript` but for `vary`, the
 /// lines named in `deviations` (each a line of ours and the grid's that must
 /// differ), and — with `unordered` — the order of the `rec=answers` lines.
-fn hold(
+pub(super) fn hold(
     region: &mut Region,
     flavour: EngineFlavour,
     transcript: &str,

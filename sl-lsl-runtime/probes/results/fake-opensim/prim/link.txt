@@ -1,0 +1,11 @@
+grid: fake-opensim
+date: 2026-11-07
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Fake Region
+engine: sl-lsl-runtime imitating YEngine
+settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
+complete: no
+
+PROBE prim/link rec=start region="Fake Region" channel="OpenSim" version="sl-fake-grid 0.1.0"
+# debug-channel: from="Object" text="YEngine: llGetOwnerKey is not implemented by this grid (script: Child event: listen primID: fb6ba424-7c7c-ddde-c509-95ed97c293e5 at: <130,124,26>) Script must be Reset to re-enable.\n"
+# debug-channel by=other: from="Object" text="YEngine: llGetOwnerKey is not implemented by this grid (script: Child event: listen primID: fb6ba424-7c7c-ddde-c509-95ed97c293e5 at: <130,124,26>) Script must be Reset to re-enable.\n"

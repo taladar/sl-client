@@ -1,0 +1,70 @@
+grid: fake-opensim
+date: 2026-11-07
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Fake Region
+engine: sl-lsl-runtime imitating YEngine
+settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
+
+# owner-say: from="Object" text="[YEngine]: Exception while running 913283bd-a122-9ed7-cb2a-3fcddd498e2a"
+# owner-say: from="Object" text="NullReferenceException: Object reference not set to an instance of an object"
+# owner-say: from="Object" text="Prim: <Object>, Script: <Outside flags>, Location: Fake Region <128,124,26>"
+# owner-say: from="Object" text="Script must be Reset to re-enable."
+PROBE land/parcel rec=outside call=llGetParcelDetails length=1 area="0" id_set=1 same_as_west_edge=0
+PROBE land/parcel rec=outside call=llGetLandOwnerAt nil=1 empty=0
+PROBE land/parcel rec=outside call=llScriptDanger answer=1
+PROBE land/parcel rec=outside call=llGetParcelMaxPrims answer=0
+PROBE land/parcel rec=outside call=llGetParcelPrimCount answer=0
+PROBE land/parcel rec=start region="Fake Region" channel="OpenSim" version="sl-fake-grid 0.1.0"
+PROBE land/parcel rec=flags value=536870987 set="ALLOW_FLY,ALLOW_SCRIPTS,ALLOW_LANDMARK,ALLOW_CREATE_OBJECTS" other_bits=536870912
+PROBE land/parcel rec=details at=here codes="-1" length=1 got="integer:\"0\""
+PROBE land/parcel rec=details at=here codes="0" length=1 got="string:\"Fake Grid Catalogue\""
+PROBE land/parcel rec=details at=here codes="1" length=1 got="string:\"\""
+PROBE land/parcel rec=details at=here codes="2" length=1 got="key:set"
+PROBE land/parcel rec=details at=here codes="3" length=1 got="key:nil"
+PROBE land/parcel rec=details at=here codes="4" length=1 got="integer:\"65536\""
+PROBE land/parcel rec=details at=here codes="5" length=1 got="key:set"
+PROBE land/parcel rec=details at=here codes="6" length=1 got="integer:\"1\""
+PROBE land/parcel rec=details at=here codes="7" length=1 got="integer:\"1\""
+PROBE land/parcel rec=details at=here codes="8" length=1 got="integer:\"1\""
+PROBE land/parcel rec=details at=here codes="9" length=1 got="integer:\"0\""
+PROBE land/parcel rec=details at=here codes="10" length=1 got="integer:\"0\""
+PROBE land/parcel rec=details at=here codes="11" length=1 got="integer:\"0\""
+PROBE land/parcel rec=details at=here codes="12" length=1 got="integer:\"0\""
+PROBE land/parcel rec=details at=here codes="13" length=1 got="integer:\"0\""
+PROBE land/parcel rec=details at=here codes="14" length=1 got="integer:\"0\""
+PROBE land/parcel rec=details at=here codes="15" length=1 got="integer:\"0\""
+PROBE land/parcel rec=details at=here codes="64" length=1 got="integer:\"42\""
+PROBE land/parcel rec=details at=here codes="99" length=1 got="integer:\"0\""
+PROBE land/parcel rec=details at=here codes="0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13" length=14 got="string:\"Fake Grid Catalogue\",string:\"\",key:set,key:nil,integer:\"65536\",key:set,integer:\"1\",integer:\"1\",integer:\"1\",integer:\"0\",integer:\"0\",integer:\"0\",integer:\"0\",integer:\"0\""
+PROBE land/parcel rec=details at=here codes="5, 99, 2, 2" length=4 got="key:set,integer:\"0\",key:set,key:set"
+PROBE land/parcel rec=details at=here codes="" length=0 got=""
+PROBE land/parcel rec=same-parcel ground=1
+PROBE land/parcel rec=max-prims parcel=15000 sim_wide=15000
+PROBE land/parcel rec=prim-count category=-1 count="0/0"
+PROBE land/parcel rec=prim-count category=0 count="0/0"
+PROBE land/parcel rec=prim-count category=1 count="0/0"
+PROBE land/parcel rec=prim-count category=2 count="0/0"
+PROBE land/parcel rec=prim-count category=3 count="0/0"
+PROBE land/parcel rec=prim-count category=4 count="0/0"
+PROBE land/parcel rec=prim-count category=5 count="0/0"
+PROBE land/parcel rec=prim-count category=6 count="0/0"
+PROBE land/parcel rec=prim-owners empty=1 owner_counted=absent used=0
+PROBE land/parcel rec=land-owner at=here owner=set parcel_owner=set
+PROBE land/parcel rec=over-my-land of=owner answer=0 of_nil=0
+PROBE land/parcel rec=script-danger here=1 west_edge=1
+PROBE land/parcel rec=media-query code=5 length=0 got=""
+PROBE land/parcel rec=media-query code=4 length=0 got=""
+PROBE land/parcel rec=media-query code=10 length=0 got=""
+PROBE land/parcel rec=media-query code=11 length=0 got=""
+PROBE land/parcel rec=media-query code=12 length=0 got=""
+PROBE land/parcel rec=media-query code=13 length=0 got=""
+PROBE land/parcel rec=media-query code=9 length=0 got=""
+PROBE land/parcel rec=media-query code=3 length=0 got=""
+PROBE land/parcel rec=media-query code=6 length=0 got=""
+PROBE land/parcel rec=media-query code=99 length=0 got=""
+PROBE land/parcel rec=media-query code=all length=0 got=""
+PROBE land/parcel rec=music step=read url=""
+PROBE land/parcel rec=music step=set url="" changed=0
+PROBE land/parcel rec=details at=high codes="4, 5" length=2 got="integer:\"65536\",key:set"
+PROBE land/parcel rec=details at=low codes="4, 5" length=2 got="integer:\"65536\",key:set"
+PROBE land/parcel rec=end

@@ -1,0 +1,26 @@
+grid: fake-sl
+date: 2026-11-07
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Fake Region
+engine: sl-lsl-runtime imitating Mono
+settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
+
+PROBE http/throttle rec=start region="Fake Region" channel="Second Life Server" version="sl-fake-grid 0.1.0"
+PROBE http/throttle rec=url granted=1
+PROBE http/throttle rec=burst which=first sent=30 accepted=25 refused=5 first_refused=25
+PROBE http/throttle rec=burst which=quiet sent=5 accepted=0 refused=5 first_refused=0
+# debug-channel: from="Object" text="Too many HTTP requests too fast."
+# debug-channel: from="Object" text="Too many HTTP requests too fast."
+# debug-channel: from="Object" text="Too many HTTP requests too fast."
+# debug-channel: from="Object" text="Too many HTTP requests too fast."
+# debug-channel: from="Object" text="Too many HTTP requests too fast."
+PROBE http/throttle rec=answers status=200 count=25
+PROBE http/throttle rec=arrived count=25
+PROBE http/throttle rec=late request=set
+PROBE http/throttle rec=late-response status=200 body="ok"
+PROBE http/throttle rec=end
+# debug-channel by=other: from="Object" text="Too many HTTP requests too fast."
+# debug-channel by=other: from="Object" text="Too many HTTP requests too fast."
+# debug-channel by=other: from="Object" text="Too many HTTP requests too fast."
+# debug-channel by=other: from="Object" text="Too many HTTP requests too fast."
+# debug-channel by=other: from="Object" text="Too many HTTP requests too fast."

@@ -403,7 +403,7 @@ pub fn os_preload_sound(
     let preloaded = single(ctx, link).is_some() && os_sound(ctx, &sound).is_some();
     os_cue(ctx, link, |sound| SoundCue::Preload { sound }, &sound);
     if preloaded {
-        ctx.sleep(1.0);
+        ctx.delay(1.0);
     }
     Ok(())
 }
