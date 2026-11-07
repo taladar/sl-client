@@ -14,12 +14,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ideas | 129 |
 | ready | 330 |
 | blocked | 37 |
-| in-progress | 11 |
+| in-progress | 10 |
 | bugs | 36 |
-| done | 1511 |
+| done | 1513 |
 | deferred | 30 |
 | wont-do | 24 |
-| **total** | **2108** |
+| **total** | **2109** |
 
 ## ideas (129)
 
@@ -1259,7 +1259,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-voice`](blocked/gridspec-voice.md) — Voice provisioning and
   signalling on each grid (blocked by `viewer-voice-audio`)
 
-## in-progress (11)
+## in-progress (10)
 
 ### viewer
 
@@ -1287,11 +1287,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Upstream PR — parley: honour the emoji presentation selector (VS16)
 - [`viewer-ui-text-renderability-axis`](in-progress/viewer-ui-text-renderability-axis.md)
   — Upstream issue — font selection cannot see glyph-format renderability
-
-### chat
-
-- [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
-  — Server-side group / session chat history ("fetch history")
 
 ## bugs (36)
 
@@ -1386,7 +1381,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1511)
+## done (1513)
 
 ### protocol
 
@@ -3796,6 +3791,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Per-session voice-channel state (signalling only)
 - [`chat-b9`](done/chat-b9-optional-local-chat-log-files-runtime-all-text-chat.md)
   — Optional local chat-log files (runtime, all text chat)
+- [`chat-group-history-server-side`](done/chat-group-history-server-side.md) —
+  Server-side group / session chat history ("fetch history")
+- [`chat-invitation-line-transcript-gaps`](done/chat-invitation-line-transcript-gaps.md)
+  — A conference invitation's line is not transcribed, and a group one is under
+  Do Not Disturb
 
 ### permission
 

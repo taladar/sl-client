@@ -527,13 +527,18 @@ impl ChatSession {
         }
     }
 
-    /// Logs an inbound message and, unless it is our own echo (`own_agent` equals
-    /// the sender), bumps the unread counter. Offline-IM replays ride this same
-    /// path, carrying their original wire timestamp.
+    /// Logs an inbound message and bumps the unread counter. Our own echo
+    /// (`own_agent` equals the sender) is dropped: Second Life hands a group
+    /// or conference line back to the agent that said it, and
+    /// [`log_outbound`](Self::log_outbound) logged it when it was sent, so a
+    /// second entry would show it twice in a history page (and put the ring a
+    /// line ahead of the transcript the page continues into). Offline-IM
+    /// replays ride this same path, carrying their original wire timestamp.
     pub(crate) fn log_inbound(&mut self, message: SessionMessage, own_agent: Option<AgentKey>) {
-        if own_agent != Some(message.sender) {
-            self.unread = self.unread.saturating_add(1);
+        if own_agent == Some(message.sender) {
+            return;
         }
+        self.unread = self.unread.saturating_add(1);
         self.push_history(message);
     }
 
@@ -772,6 +777,24 @@ mod server_history_tests {
             text: text.to_owned(),
             timestamp,
         }
+    }
+
+    /// A line we said is logged once, when it is sent: Second Life's echo of
+    /// it neither adds a second entry nor counts as unread, while a line from
+    /// anybody else does both.
+    #[test]
+    fn our_own_echo_is_logged_once() {
+        let now = Instant::now();
+        let mut session = ChatSession::new(now);
+        let own = AgentKey::from(Uuid::from_u128(0xC4));
+        let other = AgentKey::from(Uuid::from_u128(0xC5));
+        session.log_outbound(ring_message(own, "mine", None));
+        session.log_inbound(ring_message(own, "mine", None), Some(own));
+        assert_eq!(session.history.len(), 1);
+        assert_eq!(session.unread, 0);
+        session.log_inbound(ring_message(other, "theirs", None), Some(own));
+        assert_eq!(session.history.len(), 2);
+        assert_eq!(session.unread, 1);
     }
 
     /// The message that triggered a lazy-open fetch arrives both live (with

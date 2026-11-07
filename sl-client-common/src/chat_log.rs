@@ -501,6 +501,33 @@ impl ChatLog {
         );
     }
 
+    /// Writes the line an invitation carried to `kind`'s transcript, once the
+    /// application has shown it (the `TranscribeInvitationLine` command). A
+    /// conference is filed under its roster as `session` knows it, as its
+    /// later lines are; a direct session (no grid invites to one) under the
+    /// sender.
+    pub fn log_invitation_line(
+        &mut self,
+        session: &Session,
+        kind: ChatSessionKind,
+        from_agent: AgentKey,
+        from_name: &str,
+        message: &str,
+    ) {
+        match kind {
+            ChatSessionKind::Group { group_id } => {
+                self.log_group(group_id, from_agent, from_name, message);
+            }
+            ChatSessionKind::Conference { id } => {
+                let roster: BTreeSet<AgentKey> = session.participants(kind).collect();
+                self.log_conference(id, &roster, from_agent, from_name, message);
+            }
+            ChatSessionKind::Direct { .. } => {
+                self.log_inbound_im(from_agent, from_name, message, None);
+            }
+        }
+    }
+
     /// Observes one inbound [`Event`](sl_proto::Event), writing the matching
     /// transcript line(s) when that type's logging is enabled. The conference
     /// roster and the mute list are pulled from `session` (the sans-IO
@@ -548,6 +575,11 @@ impl ChatLog {
                     im.timestamp,
                 );
             }
+            // Our own line, handed back by the grid, was written when it was
+            // sent (the driver's send path), so its echo is not written again.
+            sl_proto::Event::GroupSessionMessage { from_agent_id, .. }
+            | sl_proto::Event::ConferenceSessionMessage { from_agent_id, .. }
+                if self.own_id == Some(*from_agent_id) => {}
             sl_proto::Event::GroupSessionMessage {
                 group_id,
                 from_agent_id,
@@ -585,6 +617,10 @@ impl ChatLog {
             sl_proto::Event::GroupProfileReceived(profile) => {
                 self.note_group_name(profile.group_id, &profile.name);
             }
+            // The line an invitation carries is written only when the
+            // application shows it ([`Self::log_invitation_line`]): whether it
+            // is shown turns on Do Not Disturb and the ignore-ad-hoc policy,
+            // which only the application knows.
             sl_proto::Event::ConferenceInvited {
                 session_id,
                 from_group,
@@ -727,10 +763,15 @@ mod tests {
     use super::ChatLog;
     use pretty_assertions::assert_eq;
     use sl_proto::{
-        AgentKey, ChatLogConfig, ChatSessionKind, GroupKey, LoggedChatType, MessageCursor,
+        AgentKey, ChatLogConfig, ChatSessionKind, Event, GroupKey, ImDialog, ImSessionId,
+        InstantMessage, InviteChannel, LoggedChatType, LoginParams, LoginRequest, MessageCursor,
+        RegionCoordinates, Session, StartLocation,
     };
     use std::collections::BTreeSet;
     use uuid::Uuid;
+
+    /// What a test that builds a [`Session`] returns.
+    type TestError = Box<dyn core::error::Error>;
 
     /// A configuration that logs IMs (the output directory is supplied separately
     /// to [`ChatLog::new`]).
@@ -1084,5 +1125,184 @@ mod tests {
             Some(own),
         );
         assert_eq!(log.read_nearby_older_page(0, 0, 10).is_none(), true);
+    }
+
+    /// A bare session (no live circuit): `observe_event` reads only its mute
+    /// list and chat-session registry.
+    fn session() -> Result<Session, TestError> {
+        let request = LoginRequest::new(
+            "Me",
+            "Resident",
+            "",
+            StartLocation::Last,
+            "sl-client-chatlog-test",
+            "0",
+        );
+        let login_uri = url::Url::parse("http://127.0.0.1:9000/")?;
+        Ok(Session::new(LoginParams { login_uri, request }))
+    }
+
+    /// A configuration that logs group chat, for a log of `own`'s account in
+    /// `dir` that already knows `group` as "My Group".
+    fn group_log(dir: &std::path::Path, own: AgentKey, group: GroupKey) -> ChatLog {
+        let config = ChatLogConfig {
+            enabled: [LoggedChatType::Group].into_iter().collect(),
+            ..ChatLogConfig::default()
+        };
+        let mut log = ChatLog::new(
+            config,
+            Some(dir.to_path_buf()),
+            "Me Resident".to_owned(),
+            Some(own),
+        );
+        log.note_group_name(group, "My Group");
+        log
+    }
+
+    /// An invitation to `group`'s session from `from`, carrying `message`.
+    fn group_invitation(
+        group: GroupKey,
+        from: AgentKey,
+        message: &str,
+        channel: InviteChannel,
+    ) -> Event {
+        Event::ConferenceInvited {
+            session_id: group.uuid(),
+            from_agent_id: from,
+            from_name: "Alice Resident".to_owned(),
+            dialog: ImDialog::SessionGroupStart,
+            from_group: true,
+            session_name: "My Group".to_owned(),
+            message: message.to_owned(),
+            channel,
+            region_id: Uuid::nil(),
+            position: RegionCoordinates::new(0.0, 0.0, 0.0),
+            parent_estate_id: 1,
+            timestamp: None,
+            binary_bucket: Vec::new(),
+        }
+    }
+
+    /// A line `from` said in `group`'s session.
+    fn group_line(group: GroupKey, from: AgentKey, message: &str) -> Event {
+        Event::GroupSessionMessage {
+            group_id: group,
+            from_agent_id: from,
+            from_name: "Alice Resident".to_owned(),
+            message: message.to_owned(),
+            im: Box::new(InstantMessage {
+                from_agent_id: from,
+                from_agent_name: "Alice Resident".to_owned(),
+                to_agent_id: AgentKey::from(Uuid::nil()),
+                dialog: ImDialog::SessionSend,
+                from_group: false,
+                region_id: None,
+                position: RegionCoordinates::new(0.0, 0.0, 0.0),
+                offline: false,
+                timestamp: None,
+                id: group.uuid(),
+                parent_estate_id: 1,
+                message: message.to_owned(),
+                binary_bucket: Vec::new(),
+            }),
+        }
+    }
+
+    /// The group transcript's text, empty when none was written.
+    fn group_transcript(dir: &std::path::Path) -> String {
+        fs_err::read_to_string(dir.join("My Group (group).txt")).unwrap_or_default()
+    }
+
+    /// An invitation alone writes nothing: whether its line is shown (and so
+    /// written) is the application's call. Told to, the log writes it, and a
+    /// later session line follows it.
+    #[test]
+    fn an_invitations_line_is_written_when_told() -> Result<(), TestError> {
+        let dir = temp_dir("group-invitation-line");
+        let own = AgentKey::from(Uuid::from_u128(1));
+        let alice = AgentKey::from(Uuid::from_u128(2));
+        let group = GroupKey::from(Uuid::from_u128(9));
+        let session = session()?;
+        let mut log = group_log(&dir, own, group);
+        log.observe_event(
+            &session,
+            &group_invitation(group, alice, "opening line", InviteChannel::Text),
+        );
+        assert_eq!(group_transcript(&dir), "");
+        log.log_invitation_line(
+            &session,
+            ChatSessionKind::Group { group_id: group },
+            alice,
+            "Alice Resident",
+            "opening line",
+        );
+        log.observe_event(&session, &group_line(group, alice, "second line"));
+        let transcript = group_transcript(&dir);
+        let lines: Vec<&str> = transcript.lines().collect();
+        assert_eq!(lines.len(), 2, "{transcript}");
+        assert_eq!(
+            lines
+                .first()
+                .is_some_and(|line| line.ends_with("Alice Resident: opening line")),
+            true,
+            "{transcript}"
+        );
+        Ok(())
+    }
+
+    /// A conference invitation's line goes to the conference's transcript,
+    /// named for the session while no roster is known.
+    #[test]
+    fn a_conference_invitations_line_is_written_when_told() -> Result<(), TestError> {
+        let dir = temp_dir("conference-invitation-line");
+        let own = AgentKey::from(Uuid::from_u128(1));
+        let alice = AgentKey::from(Uuid::from_u128(2));
+        let id = ImSessionId::from(Uuid::from_u128(0x77));
+        let session = session()?;
+        let config = ChatLogConfig {
+            enabled: [LoggedChatType::Conference].into_iter().collect(),
+            ..ChatLogConfig::default()
+        };
+        let mut log = ChatLog::new(
+            config,
+            Some(dir.clone()),
+            "Me Resident".to_owned(),
+            Some(own),
+        );
+        log.log_invitation_line(
+            &session,
+            ChatSessionKind::Conference { id },
+            alice,
+            "Alice Resident",
+            "come in",
+        );
+        let file = dir.join(format!("Ad-hoc Conference {}.txt", id.get()));
+        let transcript = fs_err::read_to_string(&file).unwrap_or_default();
+        assert_eq!(
+            transcript.contains("Alice Resident: come in"),
+            true,
+            "{transcript}"
+        );
+        Ok(())
+    }
+
+    /// Our own line is written once, when it is sent: the grid's echo of it
+    /// (a session line on Second Life, an invitation on OpenSim) is not
+    /// written again.
+    #[test]
+    fn our_own_echo_is_written_once() -> Result<(), TestError> {
+        let dir = temp_dir("group-own-echo");
+        let own = AgentKey::from(Uuid::from_u128(1));
+        let group = GroupKey::from(Uuid::from_u128(9));
+        let session = session()?;
+        let mut log = group_log(&dir, own, group);
+        log.log_group(group, own, "Me Resident", "mine");
+        log.observe_event(&session, &group_line(group, own, "mine"));
+        log.observe_event(
+            &session,
+            &group_invitation(group, own, "mine", InviteChannel::Text),
+        );
+        assert_eq!(group_transcript(&dir).lines().count(), 1);
+        Ok(())
     }
 }

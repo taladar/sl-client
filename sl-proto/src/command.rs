@@ -2909,6 +2909,28 @@ pub enum Command {
         /// The maximum number of messages in the page.
         limit: usize,
     },
+    /// Write the line an invitation carried (the
+    /// [`message`](crate::Event::ConferenceInvited) of a
+    /// [`ConferenceInvited`](crate::Event::ConferenceInvited)) to `session`'s
+    /// transcript. Until the agent has joined a group session or an ad-hoc
+    /// conference, the grid hands its lines over as invitations, and the
+    /// reference writes each one it shows (`LLIMMgr::addMessage` from
+    /// `LLViewerChatterBoxInvitation::post`) and none it drops — under Do Not
+    /// Disturb, from a blocked inviter, or a conference the ignore-ad-hoc
+    /// policy declines. Those are the application's decisions, so the runtime
+    /// writes an invitation's line only when told to, once the line is shown.
+    /// Consumed by the runtime shell's `ChatLog` (nothing goes on the wire); a
+    /// no-op while that kind of chat is not logged.
+    TranscribeInvitationLine {
+        /// The session the line was said in.
+        session: ChatSessionKind,
+        /// Who said it (the inviter).
+        from_agent_id: AgentKey,
+        /// The name the invitation gave them.
+        from_name: String,
+        /// The line.
+        message: String,
+    },
     /// Query one bounded, newest-first page of **nearby (local) chat** history
     /// from the on-disk transcript. The runtime replies with
     /// [`Event::NearbyChatHistoryPage`](crate::Event::NearbyChatHistoryPage); no
@@ -3522,6 +3544,7 @@ impl Command {
             Self::LeaveSessionVoice { .. } => "LeaveSessionVoice",
             Self::QueryChatSessions => "QueryChatSessions",
             Self::QueryChatHistoryPage { .. } => "QueryChatHistoryPage",
+            Self::TranscribeInvitationLine { .. } => "TranscribeInvitationLine",
             Self::QueryNearbyChatHistoryPage { .. } => "QueryNearbyChatHistoryPage",
             Self::FetchSessionHistory { .. } => "FetchSessionHistory",
             Self::QueryFriends => "QueryFriends",

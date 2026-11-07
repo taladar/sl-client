@@ -6425,6 +6425,20 @@ fn all_specs() -> Vec<CommandSpec> {
             },
         },
         CommandSpec {
+            name: "transcribe_invitation_line",
+            usage: "<direct|group|conference> <id> <from_agent_id> <from_name> <message>",
+            // Writes a `conference_invited` event's line to the session's
+            // transcript, as a viewer does once it shows the line.
+            build: |args, ctx| {
+                Ok(Command::TranscribeInvitationLine {
+                    session: build_chat_session_kind(args, ctx, 0)?,
+                    from_agent_id: args.req_agent(ctx, "from_agent_id", 2)?,
+                    from_name: args.req_str(ctx, "from_name", 3)?,
+                    message: args.req_str(ctx, "message", 4)?,
+                })
+            },
+        },
+        CommandSpec {
             name: "fetch_session_history",
             usage: "<group|conference> <id>",
             // Explicit server-backlog fetch (`ChatSessionRequest` "fetch

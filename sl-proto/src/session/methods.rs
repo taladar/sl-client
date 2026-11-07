@@ -7745,9 +7745,9 @@ impl Session {
     }
 
     /// Logs an inbound conversation message into `kind`'s history, opening the
-    /// session if needed, and bumps its unread count unless the message is our
-    /// own echo. Shared by the 1:1, group, and conference inbound arms and the
-    /// offline-IM drain.
+    /// session if needed, and bumps its unread count; our own echo is not
+    /// logged, its send was. Shared by the 1:1, group, and conference inbound
+    /// arms and the offline-IM drain.
     ///
     /// A line from a sender whose text chat [`Session::mutes`] blocks is not
     /// logged and opens no session: neither grid holds such a line back

@@ -3241,6 +3241,9 @@ impl Client {
                         Some(Command::SetChatLogConfig(config)) => {
                             chat_log.set_config(*config);
                         }
+                        Some(Command::TranscribeInvitationLine { session, from_agent_id, from_name, message }) => {
+                            chat_log.log_invitation_line(&self.session, session, from_agent_id, &from_name, &message);
+                        }
                         Some(Command::SetDiagnostics(enabled)) => {
                             self.session.set_diagnostics(enabled);
                         }

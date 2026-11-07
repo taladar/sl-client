@@ -40,18 +40,22 @@
 //!   resident's;
 //! - a block is kept by the grid across a relog and the radar unblocks it
 //!   (live);
-//! - a profile shows its avatar online with its groups (live).
+//! - a profile shows its avatar online with its groups (live);
+//! - a group tab draws a line recalled from the viewer's transcript, one
+//!   fetched from the grid's history and a live one each in its own colour;
+//!   a third viewer keeps the group session populated (live).
 
 #[cfg(test)]
 mod test {
     use core::time::Duration;
+    use std::collections::BTreeSet;
     use std::path::Path;
     use std::time::Instant;
 
     use pretty_assertions::assert_eq;
     use serde_json::json;
     use sl_automation_proto::{Locator, LogStream, NodeVisibility, Probe, Role};
-    use sl_e2e::{BodyError, FIRST_NAME, Need, Stage, StageBuilder};
+    use sl_e2e::{BodyError, FIRST_NAME, Grid, Need, Stage, StageBuilder};
     use sl_fake_grid::fixtures::scenarios;
     use sl_fake_grid::scenario::{STOCK_PARCEL_LOCAL_ID, STOCK_PARCEL_NAME};
     use sl_fake_grid::{AccountConfig, AvatarIdentity, ImitatedGrid, NpcFixture, RegionConfig};
@@ -2613,6 +2617,226 @@ mod test {
                         .timeout(LIVE_WAIT)
                         .to_be_visible()
                         .await?;
+                }
+                Ok(())
+            })?;
+        Ok(())
+    }
+
+    /// The grey a group line recalled from the viewer's own transcript is
+    /// drawn in (the skins' `--chat-recall`).
+    const RECALL_INK: &str = "#808080";
+
+    /// The muted green of a group line only the grid's history holds (the
+    /// skins' `--chat-server-history`).
+    const SERVER_HISTORY_INK: &str = "#5e8261";
+
+    /// The label of the Groups tab's "no group" row, in the stage's English.
+    const NO_GROUP_ROW: &str = "(none)";
+
+    /// The groups `viewer` lists on its Groups tab, once it lists one.
+    async fn listed_groups(viewer: &Viewer) -> Result<BTreeSet<String>, BodyError> {
+        let window = people_tab(viewer, "people-groups-tab").await?;
+        let rows = window.test_id("groups-row-name");
+        tokio::time::timeout(LIVE_WAIT, async {
+            loop {
+                let names: BTreeSet<String> = rows
+                    .nodes()
+                    .await?
+                    .into_iter()
+                    .filter_map(|node| node.name)
+                    .filter(|name| !name.is_empty() && name != NO_GROUP_ROW)
+                    .collect();
+                if !names.is_empty() {
+                    return Ok::<_, BodyError>(names);
+                }
+                tokio::time::sleep(Duration::from_millis(500)).await;
+            }
+        })
+        .await
+        .map_err(|_elapsed| "the Groups tab never listed a group")?
+    }
+
+    /// What the groups census names the group it founds and measures in
+    /// (`gs census <word>`), on every grid the test avatars log in to.
+    const CENSUS_GROUP_PREFIX: &str = "gs census ";
+
+    /// The census group, which every one of `viewers`' avatars is in. The
+    /// avatars share leftover groups of earlier runs too, so the stage picks
+    /// the census group by name, and refuses when there is not exactly one,
+    /// so it never speaks in a group nobody chose for it.
+    async fn shared_group(viewers: &[&Viewer]) -> Result<String, BodyError> {
+        let mut shared: Option<BTreeSet<String>> = None;
+        for viewer in viewers {
+            let listed = listed_groups(viewer).await?;
+            shared = Some(match shared {
+                Some(so_far) => so_far.intersection(&listed).cloned().collect(),
+                None => listed,
+            });
+        }
+        let shared: Vec<String> = shared
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|name| name.starts_with(CENSUS_GROUP_PREFIX))
+            .collect();
+        match shared.as_slice() {
+            [one] => Ok(one.clone()),
+            _ => Err(format!(
+                "the two avatars must share exactly one census group \
+                 (\"{CENSUS_GROUP_PREFIX}…\"); they share {shared:?}"
+            )
+            .into()),
+        }
+    }
+
+    /// Of the nodes `locator` names, the one that is drawn: a conversation's
+    /// pane is laid out away while another tab is shown, and keeps its nodes.
+    /// The tab can be listed a frame before its pane is built, so this waits
+    /// for one to be attached first.
+    async fn drawn_one(viewer: &Viewer, locator: &UiLocator) -> Result<UiLocator, BodyError> {
+        let nodes = viewer
+            .expect(locator)
+            .timeout(LIVE_WAIT)
+            .to_be_attached()
+            .await?;
+        let index = nodes
+            .iter()
+            .position(|node| node.visibility == NodeVisibility::Visible)
+            .ok_or_else(|| format!("none of {nodes:#?} is drawn"))?;
+        Ok(locator.nth(u32::try_from(index)?))
+    }
+
+    /// Show the conversation tab of `group` in `viewer`'s Conversations
+    /// window, once there is one; the window.
+    async fn group_tab(viewer: &Viewer, group: &str) -> Result<UiLocator, BodyError> {
+        let window = viewer.open_floater("conversations").await?;
+        let tab = window.get(Locator::role(Role::Tab).name_containing(group));
+        let _shown = tab.timeout(LIVE_WAIT).click().await?;
+        Ok(window)
+    }
+
+    /// `viewer` opens `group`'s chat from its Groups tab, as a person does:
+    /// the row, then IM.
+    async fn open_group_chat(viewer: &Viewer, group: &str) -> Result<(), BodyError> {
+        let window = people_tab(viewer, "people-groups-tab").await?;
+        let _picked = window
+            .get(Locator::test_id("groups-row-name").named(group))
+            .click()
+            .await?;
+        let _im = window.button_key("groups-action-im").click().await?;
+        Ok(())
+    }
+
+    /// `viewer` says `line` in `group`'s open chat.
+    async fn say_in_group(viewer: &Viewer, group: &str, line: &str) -> Result<(), BodyError> {
+        let window = group_tab(viewer, group).await?;
+        let field = drawn_one(viewer, &window.test_id("conversations-im-input:field")).await?;
+        let _typed = field.fill(line).await?;
+        field.press("Enter").await?;
+        Ok(())
+    }
+
+    /// The colour `viewer` draws the transcript text holding `line` in, on
+    /// `group`'s tab, once `accept` takes it: the history bands land after
+    /// the live line that opened the tab, whichever reply comes first.
+    async fn group_line_ink(
+        viewer: &Viewer,
+        group: &str,
+        line: &str,
+        accept: impl Fn(&str) -> bool + Send + Sync,
+    ) -> Result<String, BodyError> {
+        let window = group_tab(viewer, group).await?;
+        let text = window.get(Locator::role(Role::Text).name_containing(line));
+        let mut last = None;
+        let deadline = Instant::now()
+            .checked_add(LIVE_WAIT)
+            .ok_or("the wait overflows the clock")?;
+        while Instant::now() < deadline {
+            let shown = viewer
+                .expect(&text)
+                .timeout(LIVE_WAIT)
+                .to_be_attached()
+                .await?;
+            if let [node] = shown.as_slice()
+                && let Some(ink) = &node.color
+                && accept(ink)
+            {
+                return Ok(ink.clone());
+            }
+            last = Some(
+                shown
+                    .iter()
+                    .map(|node| (node.name.clone(), node.color.clone()))
+                    .collect::<Vec<_>>(),
+            );
+            tokio::time::sleep(Duration::from_millis(500)).await;
+        }
+        Err(format!("{line:?} was never drawn as wanted: last {last:?}").into())
+    }
+
+    /// **Group chat history, live**: in the census group, Beta says a line
+    /// Alpha hears, another while Alpha is logged out, and a third once Alpha
+    /// is back, which opens Alpha's group tab. Gamma stays in the session
+    /// throughout: Second Life neither broadcasts nor keeps a line said to a
+    /// session with one participant left ("You are the only participant in
+    /// this IM session"). The tab draws
+    /// the first from Alpha's own transcript in grey and, on Second Life, the
+    /// second from the grid's `fetch history` in muted green; the third is a
+    /// live line, in neither. OpenSim has no history to fetch, so nothing on
+    /// it is green (`book/src/gridspec/chat.md` § Server history).
+    #[test]
+    fn a_live_group_tab_draws_recalled_fetched_and_live_lines_apart() -> Result<(), TestError> {
+        stage("live_group_history", &["Alpha", "Beta", "Gamma"])
+            .needs(Need::LiveGrid(
+                "a grid with group chat (server-fake-grid-group-chat)",
+            ))
+            .run(async |stage: &Stage| {
+                let alpha = &stage.viewer("Alpha")?;
+                let beta = &stage.viewer("Beta")?;
+                let gamma = &stage.viewer("Gamma")?;
+                let group = shared_group(&[alpha, beta, gamma]).await?;
+                // A run's own lines: an earlier run's are in both transcripts.
+                let run = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)?
+                    .as_secs();
+                let recalled = format!("recalled line {run}");
+                let fetched = format!("fetched line {run}");
+                let live = format!("live line {run}");
+
+                open_group_chat(beta, &group).await?;
+                say_in_group(beta, &group, &recalled).await?;
+                let _heard = group_line_ink(alpha, &group, &recalled, |_ink| true).await?;
+                let _joined = group_line_ink(gamma, &group, &recalled, |_ink| true).await?;
+
+                stage.log_out_viewer("Alpha").await?;
+                say_in_group(beta, &group, &fetched).await?;
+                let alpha = &stage.log_in_again("Alpha").await?;
+                say_in_group(beta, &group, &live).await?;
+
+                let live_ink = group_line_ink(alpha, &group, &live, |_ink| true).await?;
+                assert!(
+                    live_ink != RECALL_INK && live_ink != SERVER_HISTORY_INK,
+                    "the live line is in no history band: {live_ink}"
+                );
+                let _grey =
+                    group_line_ink(alpha, &group, &recalled, |ink| ink == RECALL_INK).await?;
+                if stage.on_grid() == Grid::Aditi {
+                    let _green =
+                        group_line_ink(alpha, &group, &fetched, |ink| ink == SERVER_HISTORY_INK)
+                            .await?;
+                } else {
+                    let window = group_tab(alpha, &group).await?;
+                    let green: Vec<_> = window
+                        .role(Role::Text)
+                        .nodes()
+                        .await?
+                        .into_iter()
+                        .filter(|node| node.color.as_deref() == Some(SERVER_HISTORY_INK))
+                        .collect();
+                    assert!(
+                        green.is_empty(),
+                        "nothing is fetched on OpenSim: {green:#?}"
+                    );
                 }
                 Ok(())
             })?;

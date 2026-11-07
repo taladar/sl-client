@@ -1321,9 +1321,37 @@ impl Stage {
     /// not log out, [`StageError::Stranded`] when the grid keeps its session,
     /// and as the stage's start when the new session does not come up.
     pub async fn relog(&self, label: &str) -> Result<Viewer, StageError> {
-        let viewer = self.stage_viewer(label)?;
         tracing::info!("stage {}: relogging viewer {label}", self.name);
+        self.log_out_viewer(label).await?;
+        self.log_in_again(label).await
+    }
+
+    /// The first half of [`relog`](Self::relog): log viewer `label` out and
+    /// leave it out, for what has to happen while its account is away (a
+    /// line said to a session it is no longer in). Its directories are kept;
+    /// [`log_in_again`](Self::log_in_again) brings it back, and the teardown
+    /// passes over a viewer left out.
+    ///
+    /// # Errors
+    ///
+    /// As [`relog`](Self::relog)'s logout.
+    pub async fn log_out_viewer(&self, label: &str) -> Result<(), StageError> {
+        let viewer = self.stage_viewer(label)?;
         self.log_out(viewer).await?;
+        tracing::info!("stage {}: viewer {label} is logged out", self.name);
+        Ok(())
+    }
+
+    /// The second half of [`relog`](Self::relog): log viewer `label`, which
+    /// [`log_out_viewer`](Self::log_out_viewer) logged out, back in where the
+    /// stage's viewers start, and wait for it as the stage's start waits.
+    ///
+    /// # Errors
+    ///
+    /// [`StageError::UnknownViewer`], and as the stage's start when the new
+    /// session does not come up.
+    pub async fn log_in_again(&self, label: &str) -> Result<Viewer, StageError> {
+        let viewer = self.stage_viewer(label)?;
         self.start_session(viewer).await?;
         let driver = viewer.driver()?;
         arrive(driver.clone(), self.arrival(), self.settle()).await?;
@@ -1922,7 +1950,8 @@ fn in_process_viewer(
     options.skin.watch = setup.watch_skins;
     options.render_overrides = Some(RenderOverrides::default());
     options.avatar_overrides = Some(AvatarOverrides::default());
-    options.content.fetch_server_chat_history = false;
+    // Server chat history stays at the viewer's default (on), as a resident
+    // runs it: a stage on Second Life is where its band is checked.
     options.automation = Automation::InProcess;
     options.log_label = Some(log_label);
     let mut viewer = ViewerAppBuilder::from_options(options)

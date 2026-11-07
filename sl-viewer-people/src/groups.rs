@@ -1010,6 +1010,7 @@ fn populate_group_rows(
                     ..default()
                 },
                 Pickable::IGNORE,
+                Name::new("groups-row-name"),
                 ChildOf(row_entity),
             ))
             .id();

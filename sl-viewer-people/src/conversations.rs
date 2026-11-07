@@ -77,9 +77,9 @@ use sl_automation_proto::{
     ChatKind, ConversationReadout, ConversationRef, SpeakerKind, TranscriptLine as ReadoutLine,
 };
 use sl_client_bevy::{
-    AgentKey, ChatAudible, ChatSource, ChatType, Command, GroupKey, ImDialog, ImSessionId,
-    InviteChannel, MessageCursor, ObjectKey, SlCommand, SlEvent, SlIdentity, SlSessionEvent, Uuid,
-    chat_text_muted,
+    AgentKey, ChatAudible, ChatSessionKind, ChatSource, ChatType, Command, GroupKey, ImDialog,
+    ImSessionId, InviteChannel, MessageCursor, ObjectKey, SlCommand, SlEvent, SlIdentity,
+    SlSessionEvent, Uuid, chat_text_muted,
 };
 
 use crate::chat_input::{ChatInputSpec, ChatInputSubmit, spawn_chat_input};
@@ -2150,6 +2150,12 @@ pub(crate) fn ingest_conversation_events(
                     if let Some((from, name, line)) = carried {
                         avatars.note_legacy_name(from, name);
                         model.push_remote(ConversationKey::Group(group), from, name, line);
+                        sl.write(SlCommand(transcribe_invitation_line(
+                            ChatSessionKind::Group { group_id: group },
+                            from,
+                            name,
+                            line,
+                        )));
                     }
                     let _index = model.ensure(ConversationKey::Group(group));
                 } else {
@@ -2182,6 +2188,12 @@ pub(crate) fn ingest_conversation_events(
                     if let Some((from, name, line)) = carried {
                         avatars.note_legacy_name(from, name);
                         model.push_remote(ConversationKey::Conference(id), from, name, line);
+                        sl.write(SlCommand(transcribe_invitation_line(
+                            ChatSessionKind::Conference { id },
+                            from,
+                            name,
+                            line,
+                        )));
                     }
                     let _index = model.ensure(ConversationKey::Conference(id));
                 }
@@ -2326,6 +2338,24 @@ fn speaker_name(avatars: &crate::world_api::AvatarState, sender: AgentKey) -> St
     avatars
         .shown_name_of(sender)
         .map_or_else(|| short_id(sender.uuid()), ToOwned::to_owned)
+}
+
+/// The command that writes an invitation's line to the session's transcript,
+/// sent once the line is shown: the runtime does not write it on its own,
+/// because whether it is shown (Do Not Disturb, a blocked inviter, the
+/// ignore-ad-hoc policy) is decided here.
+fn transcribe_invitation_line(
+    session: ChatSessionKind,
+    from: AgentKey,
+    name: &str,
+    line: &str,
+) -> Command {
+    Command::TranscribeInvitationLine {
+        session,
+        from_agent_id: from,
+        from_name: name.to_owned(),
+        message: line.to_owned(),
+    }
 }
 
 /// Build a recalled transcript line for a keyed-session history message: our
@@ -2909,7 +2939,8 @@ fn refresh_conversations(
             // live chat; live lines take the user-tunable per-speaker colour of
             // the colors & skins tab. `None` marks a live line — coloured by
             // speaker at render time — while a `Some(band)` line keeps its band.
-            let server_band = filter_server_band(&entry.recall, &entry.server_history);
+            let server_band =
+                filter_server_band(&entry.recall, &entry.lines, &entry.server_history);
             let banded_lines = entry
                 .recall
                 .iter()
@@ -3002,12 +3033,16 @@ fn spawn_transcript_line(
 }
 
 /// The server-history lines to render: `server` minus any line whose
-/// `(speaker, body)` pair already appears in the grey `recall` band — the same
-/// conversation recalled from the local transcript and fetched from the server
-/// would otherwise show twice. Order-independent (pure filtering), so it is
-/// correct whichever of the two replies landed first.
+/// `(speaker, body)` pair the tab already shows, in the grey `recall` band or
+/// among the `live` lines. The backlog is the session's lines so far, so it
+/// holds what the local transcript recalled and what this session heard
+/// live — above all the line that opened the session, which arrives inside
+/// the invitation (no session ring to de-duplicate it against) and is fetched
+/// again on joining; each would otherwise show twice. Order-independent (pure
+/// filtering), so it is correct whichever reply landed first.
 fn filter_server_band<'history>(
     recall: &[TranscriptLine],
+    live: &VecDeque<TranscriptLine>,
     server: &'history [TranscriptLine],
 ) -> Vec<&'history TranscriptLine> {
     server
@@ -3015,9 +3050,28 @@ fn filter_server_band<'history>(
         .filter(|line| {
             !recall
                 .iter()
-                .any(|recalled| recalled.speaker == line.speaker && recalled.body == line.body)
+                .chain(live)
+                .any(|shown| shown.body == line.body && same_speaker(shown, line))
         })
         .collect()
+}
+
+/// Whether two transcript lines are by the same speaker. The bands name a
+/// speaker differently (a recalled or live line by the name the viewer
+/// shows, a fetched one by the legacy name the server sent), so an avatar is
+/// matched by its key, our own lines match each other, and only a line with
+/// no usable key (an object, a system line, an unresolved recalled sender)
+/// falls back to the name.
+fn same_speaker(one: &TranscriptLine, other: &TranscriptLine) -> bool {
+    match (&one.speaker_link, &other.speaker_link) {
+        (SpeakerLink::Own, SpeakerLink::Own) => true,
+        (SpeakerLink::Agent(one_key), SpeakerLink::Agent(other_key))
+            if !one_key.uuid().is_nil() && !other_key.uuid().is_nil() =>
+        {
+            one_key == other_key
+        }
+        _other => one.own == other.own && one.speaker == other.speaker,
+    }
 }
 
 /// The "X is typing…" / "several are typing…" status for a typing set, or `None`
@@ -3206,6 +3260,7 @@ mod tests {
         ObjectKey, RegionCoordinates, ServerHistoryMessage, SlCommand, SlEvent, SlIdentity,
         SlSessionEvent, Uuid,
     };
+    use std::collections::VecDeque;
 
     /// The automation readout is the live transcript of every tab, in tab
     /// order: how nearby lines were said and who said them, the grid's echo of
@@ -3893,7 +3948,8 @@ mod tests {
             ],
         );
         let bodies = get(&model, key).map(|entry| {
-            let server_band = super::filter_server_band(&entry.recall, &entry.server_history);
+            let server_band =
+                super::filter_server_band(&entry.recall, &entry.lines, &entry.server_history);
             entry
                 .recall
                 .iter()
@@ -3924,13 +3980,62 @@ mod tests {
             plain_line("Avatar Other", "shared line"),
             plain_line("Avatar Past", "unique line"),
         ];
-        let filtered: Vec<&str> = super::filter_server_band(&recall, &server)
+        let filtered: Vec<&str> = super::filter_server_band(&recall, &VecDeque::new(), &server)
             .into_iter()
             .map(|line| line.body.as_str())
             .collect();
         assert_eq!(filtered, vec!["shared line", "unique line"]);
         // Against an empty recall (the fetch answered first), nothing filters.
-        assert_eq!(super::filter_server_band(&[], &server).len(), 3);
+        assert_eq!(
+            super::filter_server_band(&[], &VecDeque::new(), &server).len(),
+            3
+        );
+    }
+
+    /// A backlog line the tab already shows live is not drawn again: the line
+    /// that opened a group session arrives inside the invitation and comes
+    /// back in the history fetched on joining. Our own line, live or fetched,
+    /// is matched as our own.
+    #[test]
+    fn filter_server_band_drops_lines_already_live() {
+        let mut own = plain_line("", "my line");
+        own.own = true;
+        let live: VecDeque<TranscriptLine> =
+            [plain_line("Avatar Past", "opening line"), own.clone()]
+                .into_iter()
+                .collect();
+        let server = vec![
+            plain_line("Avatar Past", "earlier line"),
+            plain_line("Avatar Past", "opening line"),
+            own,
+        ];
+        let filtered: Vec<&str> = super::filter_server_band(&[], &live, &server)
+            .into_iter()
+            .map(|line| line.body.as_str())
+            .collect();
+        assert_eq!(filtered, vec!["earlier line"]);
+    }
+
+    /// A recalled line names its avatar as the viewer shows it, a fetched one
+    /// by the legacy name the server sent: the key, not the name, says they
+    /// are one speaker. Two avatars with one name stay apart.
+    #[test]
+    fn filter_server_band_matches_an_avatar_by_key() {
+        let speaker = AgentKey::from(Uuid::from_u128(0xA7));
+        let namesake = AgentKey::from(Uuid::from_u128(0xA8));
+        let mut recalled = plain_line("Shown Name", "same words");
+        recalled.speaker_link = SpeakerLink::Agent(speaker);
+        let mut fetched = plain_line("legacy.name Resident", "same words");
+        fetched.speaker_link = SpeakerLink::Agent(speaker);
+        let mut other = plain_line("Shown Name", "same words");
+        other.speaker_link = SpeakerLink::Agent(namesake);
+        let server = vec![fetched, other];
+        let filtered: Vec<SpeakerLink> =
+            super::filter_server_band(&[recalled], &VecDeque::new(), &server)
+                .into_iter()
+                .map(|line| line.speaker_link)
+                .collect();
+        assert_eq!(filtered, vec![SpeakerLink::Agent(namesake)]);
     }
 
     /// The tab-key ↔ session-kind mapping round-trips for every keyed tab, and
@@ -4334,6 +4439,21 @@ mod tests {
             .collect()
     }
 
+    /// The invitation lines the last update asked the runtime to transcribe,
+    /// as `(session, line)`.
+    fn transcribed(app: &App) -> Vec<(ChatSessionKind, String)> {
+        app.world()
+            .resource::<Messages<SlCommand>>()
+            .iter_current_update_messages()
+            .filter_map(|command| match &command.0 {
+                Command::TranscribeInvitationLine {
+                    session, message, ..
+                } => Some((*session, message.clone())),
+                _ => None,
+            })
+            .collect()
+    }
+
     /// A text invitation to a group is joined at once, as the reference does
     /// (Second Life sends no roster and hands every further line over as a
     /// fresh invitation until it is): the tab shows the line it carries, and
@@ -4363,6 +4483,14 @@ mod tests {
             .map(|entry| entry.lines.iter().map(|line| line.body.as_str()).collect())
             .unwrap_or_default();
         assert_eq!(lines, vec!["first line"]);
+        assert_eq!(
+            transcribed(&app),
+            vec![(
+                ChatSessionKind::Group { group_id: group },
+                "first line".to_owned()
+            )],
+            "the shown line goes to the transcript"
+        );
     }
 
     /// An ad-hoc conference's text invitation is accepted at once too, as a
@@ -4379,6 +4507,15 @@ mod tests {
         assert_eq!(
             invitation_answers(&app),
             vec![(ImSessionId::from(conference), false, true)]
+        );
+        assert_eq!(
+            transcribed(&app),
+            vec![(
+                ChatSessionKind::Conference {
+                    id: ImSessionId::from(conference)
+                },
+                "hi all".to_owned()
+            )]
         );
         let model = app.world().resource::<ConversationModel>();
         assert!(
@@ -4404,6 +4541,7 @@ mod tests {
             invitation(group.uuid(), own, true, "my line", InviteChannel::Text),
         );
         assert_eq!(invitation_answers(&app), Vec::new());
+        assert_eq!(transcribed(&app), Vec::new(), "the send wrote it");
         let model = app.world().resource::<ConversationModel>();
         let entry = get(model, ConversationKey::Group(group));
         assert_eq!(entry.map(|entry| entry.lines.len()), Some(0));
@@ -4427,11 +4565,21 @@ mod tests {
             invitation(group.uuid(), friend, true, "busy?", InviteChannel::Text),
         );
         assert_eq!(invitation_answers(&app), Vec::new());
+        assert_eq!(
+            transcribed(&app),
+            Vec::new(),
+            "a dropped line is not written"
+        );
         ingest(
             &mut app,
             invitation(conference, friend, false, "hi all", InviteChannel::Both),
         );
         assert_eq!(invitation_answers(&app), Vec::new());
+        assert_eq!(
+            transcribed(&app),
+            Vec::new(),
+            "a dropped line is not written"
+        );
         {
             let model = app.world().resource::<ConversationModel>();
             assert!(get(model, ConversationKey::Group(group)).is_none());
@@ -4480,6 +4628,7 @@ mod tests {
             invitation(group.uuid(), friend, true, "", InviteChannel::Voice),
         );
         assert_eq!(invitation_answers(&app), Vec::new());
+        assert_eq!(transcribed(&app), Vec::new());
         let model = app.world().resource::<ConversationModel>();
         assert!(get(model, ConversationKey::Group(group)).is_none());
     }
@@ -4497,6 +4646,7 @@ mod tests {
             invitation(group.uuid(), troll, true, "bait", InviteChannel::Text),
         );
         assert_eq!(invitation_answers(&app), Vec::new());
+        assert_eq!(transcribed(&app), Vec::new());
         let model = app.world().resource::<ConversationModel>();
         assert!(get(model, ConversationKey::Group(group)).is_none());
     }
@@ -4515,6 +4665,8 @@ mod tests {
             invitation_answers(&app),
             vec![(ImSessionId::from(conference), false, false)]
         );
+        // The ignore-ad-hoc policy takes this same exit.
+        assert_eq!(transcribed(&app), Vec::new());
     }
 
     /// A blocked resident's line in the **server backlog** is dropped too — the
