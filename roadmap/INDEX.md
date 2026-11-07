@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 330 |
 | blocked | 37 |
 | in-progress | 10 |
-| bugs | 36 |
-| done | 1513 |
+| bugs | 35 |
+| done | 1514 |
 | deferred | 30 |
 | wont-do | 24 |
 | **total** | **2109** |
@@ -1288,7 +1288,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-text-renderability-axis`](in-progress/viewer-ui-text-renderability-axis.md)
   — Upstream issue — font selection cannot see glyph-format renderability
 
-## bugs (36)
+## bugs (35)
 
 ### protocol
 
@@ -1310,9 +1310,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`prim-path-curve-byte-ignores-reference-mask`](bugs/prim-path-curve-byte-ignores-reference-mask.md)
   — PathCurve::from_byte matches the exact byte where the reference masks 0xf0
-- [`viewer-about-land-list-save-leaves-flags-stale`](bugs/viewer-about-land-list-save-leaves-flags-stale.md)
-  — Saving an allow or ban list on OpenSim leaves About Land's access flags
-  stale
 - [`viewer-automation-ground-reveal-eye-under-terrain`](bugs/viewer-automation-ground-reveal-eye-under-terrain.md)
   — A ground reveal can put the camera under higher ground beside the point
 - [`viewer-camera-framing-ends-inside-the-framed-object`](bugs/viewer-camera-framing-ends-inside-the-framed-object.md)
@@ -1381,7 +1378,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1513)
+## done (1514)
 
 ### protocol
 
@@ -1701,6 +1698,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-about-floater`](done/viewer-about-floater.md) — About floater —
   version, system info, credits, licenses (blocked by
   `viewer-ui-widget-scaffold` (done))
+- [`viewer-about-land-list-save-leaves-flags-stale`](done/viewer-about-land-list-save-leaves-flags-stale.md)
+  — Saving an allow or ban list on OpenSim leaves About Land's access flags
+  stale
 - [`viewer-about-land-options-tab`](done/viewer-about-land-options-tab.md) —
   About Land floater — Options tab
 - [`viewer-about-landmark-floater`](done/viewer-about-landmark-floater.md) —

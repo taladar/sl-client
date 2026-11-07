@@ -2010,6 +2010,30 @@ struct LandActionFacts<'w, 's> {
     tallies: ResMut<'w, OwnerTallyQueue>,
 }
 
+/// What an access-list edit needs to commit, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): our own agent (for the
+/// parcel's scoped id), the shared request ids (for the parcel read-back) and
+/// the command stream.
+#[derive(bevy::ecs::system::SystemParam)]
+struct AccessListWriter<'w> {
+    /// Our own agent, whose circuit scopes the parcel id.
+    identity: Res<'w, SlIdentity>,
+    /// The shared About Land request ids.
+    sequence: ResMut<'w, LandSequence>,
+    /// The session command stream.
+    commands: MessageWriter<'w, SlCommand>,
+}
+
+impl<'w> AccessListWriter<'w> {
+    /// The sinks a list save writes to.
+    fn sinks(&mut self) -> AccessListSinks<'_, 'w, '_> {
+        AccessListSinks {
+            sequence: &mut self.sequence,
+            commands: &mut self.commands,
+        }
+    }
+}
+
 /// The three pickers an About Land action opens, bundled as one
 /// [`SystemParam`](bevy::ecs::system::SystemParam).
 #[derive(bevy::ecs::system::SystemParam)]
@@ -3619,8 +3643,7 @@ fn on_remove_access(
     rows: Query<&VirtualRow>,
     mut windows: Query<(&AllowView, &BanView, &mut AboutLandState)>,
     host: FloaterHost,
-    identity: Res<SlIdentity>,
-    mut commands: MessageWriter<SlCommand>,
+    mut writer: AccessListWriter,
 ) {
     if press.button != PointerButton::Primary {
         return;
@@ -3647,10 +3670,10 @@ fn on_remove_access(
         AccessScope::Allow => allow.rows.get(index).map(|entry| entry.id),
         AccessScope::Ban => ban.rows.get(index).map(|entry| entry.id),
     };
-    let (Some(id), Some(scoped)) = (id, state.scoped(&identity)) else {
+    let (Some(id), Some(scoped)) = (id, state.scoped(&writer.identity)) else {
         return;
     };
-    remove_access_entry(&mut state, button.scope, id, scoped, &mut commands);
+    remove_access_entry(&mut state, button.scope, id, scoped, writer.sinks());
 }
 
 /// Fold a combo pick into the draft.
@@ -3738,8 +3761,7 @@ fn apply_avatar_picks(
     actions: Query<&AboutLandAction>,
     parents: Query<&ChildOf>,
     floaters: Query<(Entity, &Floater)>,
-    identity: Res<SlIdentity>,
-    mut commands: MessageWriter<SlCommand>,
+    mut writer: AccessListWriter,
 ) {
     let frame: Vec<AvatarPicked> = picked.read().cloned().collect();
     if frame.is_empty() {
@@ -3760,12 +3782,16 @@ fn apply_avatar_picks(
         if !state.can_edit {
             continue;
         }
-        let Some(scoped) = state.scoped(&identity) else {
+        let Some(scoped) = state.scoped(&writer.identity) else {
             continue;
         };
-        for chosen in &event.picks {
-            add_access_entry(&mut state, scope, chosen.agent, scoped, &mut commands);
-        }
+        add_access_entries(
+            &mut state,
+            scope,
+            event.picks.iter().map(|chosen| chosen.agent),
+            scoped,
+            writer.sinks(),
+        );
     }
 }
 
@@ -3875,32 +3901,42 @@ fn commit_draft(
     ))));
 }
 
-/// Append an agent to an access list and commit it.
-fn add_access_entry(
+/// Append agents to an access list and commit it, once for the whole pick.
+///
+/// Agents already on the list are skipped; a pick that adds nobody sends
+/// nothing.
+fn add_access_entries(
     state: &mut AboutLandState,
     scope: AccessScope,
-    agent: AgentKey,
+    agents: impl IntoIterator<Item = AgentKey>,
     scoped: ScopedParcelId,
-    commands: &mut MessageWriter<SlCommand>,
+    sinks: AccessListSinks<'_, '_, '_>,
 ) {
     if !state.can_edit {
         return;
     }
-    let id = agent.0.0;
     let list = match scope {
         AccessScope::Allow => &mut state.access_allow,
         AccessScope::Ban => &mut state.access_ban,
     };
-    if list.iter().any(|entry| entry.id == id) {
+    let mut added = false;
+    for agent in agents {
+        let id = agent.0.0;
+        if list.iter().any(|entry| entry.id == id) {
+            continue;
+        }
+        list.push(ParcelAccessEntry {
+            id,
+            time: 0,
+            flags: ParcelAccessFlags::NONE,
+        });
+        added = true;
+    }
+    if !added {
         return;
     }
-    list.push(ParcelAccessEntry {
-        id,
-        time: 0,
-        flags: ParcelAccessFlags::NONE,
-    });
     bump_access_revision(state, scope);
-    send_access_list(state, scope, scoped, commands);
+    send_access_list(state, scope, scoped, sinks);
 }
 
 /// Remove an agent from an access list and commit it.
@@ -3909,7 +3945,7 @@ fn remove_access_entry(
     scope: AccessScope,
     id: Uuid,
     scoped: ScopedParcelId,
-    commands: &mut MessageWriter<SlCommand>,
+    sinks: AccessListSinks<'_, '_, '_>,
 ) {
     if !state.can_edit {
         return;
@@ -3920,7 +3956,16 @@ fn remove_access_entry(
     };
     list.retain(|entry| entry.id != id);
     bump_access_revision(state, scope);
-    send_access_list(state, scope, scoped, commands);
+    send_access_list(state, scope, scoped, sinks);
+}
+
+/// Where a list save writes: the request sequence for its read-back, and the
+/// command stream.
+struct AccessListSinks<'s, 'w, 'c> {
+    /// The shared About Land request ids, for the parcel read-back.
+    sequence: &'s mut LandSequence,
+    /// The session command stream.
+    commands: &'c mut MessageWriter<'w, SlCommand>,
 }
 
 /// Fold one `ParcelAccessListReply` packet into the accumulated list, returning
@@ -3966,13 +4011,30 @@ const fn bump_access_revision(state: &mut AboutLandState, scope: AccessScope) {
     }
 }
 
-/// Send the current allow / ban list for `scope` to the grid.
+/// Send the current allow / ban list for `scope` to the grid, then read the
+/// parcel back.
+///
+/// The read-back is for the parcel's flags. OpenSim switches
+/// `USE_ACCESS_LIST` / `USE_BAN_LIST` on when a non-empty list is saved and
+/// off when it is emptied (`LandObject.UpdateAccessList`), answers the update
+/// with nothing and pushes no parcel (`parcel-access-list`,
+/// `book/src/gridspec/land.md` § The lists). Without the read, the Access
+/// tab's boxes kept the old flag and the next **Apply** on any tab re-asserted
+/// it — re-opening a parcel the list had just closed.
+///
+/// Addressed by a point inside the parcel, since OpenSim ignores
+/// `ParcelPropertiesRequestByID`; its handlers for the two messages are
+/// synchronous, so the read is answered after the list is applied. The reply
+/// carries a fresh sequence id that no window awaits, so it reaches the window
+/// as a record of its bound parcel and merges like any push
+/// ([`AboutLandState::merge_parcel`]). On Second Life it is a harmless re-read.
 fn send_access_list(
     state: &AboutLandState,
     scope: AccessScope,
     scoped: ScopedParcelId,
-    commands: &mut MessageWriter<SlCommand>,
+    sinks: AccessListSinks<'_, '_, '_>,
 ) {
+    let AccessListSinks { sequence, commands } = sinks;
     let entries = match scope {
         AccessScope::Allow => state.access_allow.clone(),
         AccessScope::Ban => state.access_ban.clone(),
@@ -3981,6 +4043,17 @@ fn send_access_list(
         local_id: scoped,
         scope: scope.wire(),
         entries,
+    }));
+    let Some((x, y)) = state.parcel.as_ref().and_then(ParcelInfo::point_inside) else {
+        return;
+    };
+    commands.write(SlCommand(Command::RequestParcelProperties {
+        west: x,
+        south: y,
+        east: x,
+        north: y,
+        sequence_id: sequence.next(),
+        snap_selection: false,
     }));
 }
 
@@ -4628,7 +4701,10 @@ fn set_check_marker(commands: &mut Commands, entity: Entity, is_ticked: bool, on
 
 #[cfg(test)]
 mod tests {
-    use super::{AboutLandState, LandSequence, ParcelUpdate, TallyStatus, merge_access_reply};
+    use super::{
+        AboutLandState, CheckKind, LandSequence, ParcelFlags, ParcelUpdate, TallyStatus,
+        merge_access_reply,
+    };
     use pretty_assertions::{assert_eq, assert_ne};
     use sl_client_bevy::{ParcelAccessEntry, ParcelAccessFlags, Uuid};
 
@@ -4766,6 +4842,36 @@ mod tests {
             state.draft.description, "Theirs",
             "an Apply now carries their change forward instead of reverting it"
         );
+    }
+
+    /// The flags merge per checkbox: the access-list bit OpenSim flips when a
+    /// list is saved reaches the Access tab's box even while this resident has
+    /// another box ticked and not yet applied — and that tick survives.
+    #[test]
+    fn a_flipped_list_flag_reaches_the_form_beside_a_pending_tick() {
+        let opened = ParcelUpdate {
+            parcel_flags: ParcelFlags::ALLOW_FLY,
+            ..ParcelUpdate::default()
+        };
+        let mut state = AboutLandState {
+            draft: opened.clone(),
+            seeded: Some(opened),
+            ..AboutLandState::default()
+        };
+        state.draft.parcel_flags = state.draft.parcel_flags.union(ParcelFlags::DENY_ANONYMOUS);
+
+        assert!(state.merge_update(ParcelUpdate {
+            parcel_flags: ParcelFlags::ALLOW_FLY.union(ParcelFlags::USE_ACCESS_LIST),
+            ..ParcelUpdate::default()
+        }));
+        assert_eq!(
+            state.draft.parcel_flags,
+            ParcelFlags::ALLOW_FLY
+                .union(ParcelFlags::DENY_ANONYMOUS)
+                .union(ParcelFlags::USE_ACCESS_LIST),
+            "the grid's list flag and this resident's tick both stand"
+        );
+        assert!(!CheckKind::FlagInverted(ParcelFlags::USE_ACCESS_LIST).checked(&state));
     }
 
     /// About Land's request ids never meet the grid's own pushes: Second Life

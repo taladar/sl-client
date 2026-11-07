@@ -1713,6 +1713,15 @@ mod test {
     /// by its parcel, so it is found by its title (the parcel's name) and
     /// addressed by its test id from then on.
     async fn about_land(viewer: &Viewer) -> Result<UiLocator, BodyError> {
+        Ok(about_land_on(viewer, "about-land-tab-general").await?.0)
+    }
+
+    /// [`about_land`], on the tab `tab_key`, with the window's instance key
+    /// (what the floaters it opens are keyed under).
+    async fn about_land_on(
+        viewer: &Viewer,
+        tab_key: &str,
+    ) -> Result<(UiLocator, String), BodyError> {
         let _opened = viewer
             .menu_path(&["menu-bar-world", "menu-bar-about-land"])
             .await?;
@@ -1722,17 +1731,19 @@ mod test {
             .timeout(WAIT)
             .node()
             .await?;
-        let window = viewer.ui().test_id(
-            titled
-                .test_id
-                .as_deref()
-                .ok_or("an About Land window with no test id")?,
-        );
-        let _general = window
-            .get(Locator::role(Role::Tab).name_key("about-land-tab-general"))
+        let test_id = titled
+            .test_id
+            .ok_or("an About Land window with no test id")?;
+        let instance = test_id
+            .strip_prefix("floater:about-land#")
+            .ok_or_else(|| format!("an About Land window keyed oddly: {test_id}"))?
+            .to_owned();
+        let window = viewer.ui().test_id(&test_id);
+        let _tab = window
+            .get(Locator::role(Role::Tab).name_key(tab_key))
             .click()
             .await?;
-        Ok(window)
+        Ok((window, instance))
     }
 
     /// **An open window follows a push**: Alpha watches the parcel's About
@@ -1785,6 +1796,82 @@ mod test {
                     .timeout(WAIT)
                     .to_have_text(RENAMED)
                     .await?;
+                Ok(())
+            })?;
+        Ok(())
+    }
+
+    /// **A list save re-reads the parcel's flags**: on OpenSim, saving an
+    /// allow list with somebody on it closes the parcel by itself (the
+    /// `USE_ACCESS_LIST` flag goes on), and emptying it opens it again —
+    /// with no push to say so. Beta, who owns the parcel, adds Alpha to the
+    /// allowed list and the Access tab's "anyone can visit" box clears;
+    /// removing Alpha ticks it again.
+    #[test]
+    fn an_allow_list_save_moves_the_anyone_can_visit_box() -> Result<(), TestError> {
+        stage("about_land_list_flags", &["Alpha", "Beta"])
+            .needs(Need::GridControl)
+            .needs(Need::OpenSim(
+                "saving an access list switches the parcel's list flag",
+            ))
+            .run(async |stage: &Stage| {
+                let beta = &stage.viewer("Beta")?;
+                let owner = stage.agent_id("Beta")?;
+                let allowed = stage.agent_id("Alpha")?;
+                let agent = stage.agent("Beta").await?;
+                let now = agent.now();
+                agent
+                    .with_world(|world, sim| {
+                        let parcel = world
+                            .parcel_mut(STOCK_PARCEL_LOCAL_ID)
+                            .ok_or_else(|| "the stock parcel is missing".to_owned())?;
+                        parcel.owner = OwnerKey::Agent(owner);
+                        let record = parcel.clone();
+                        sim.send_parcel_properties(&record, now)
+                            .map_err(|error| format!("telling Beta it owns the parcel: {error}"))
+                    })
+                    .await?;
+                let (access, instance) = about_land_on(beta, "about-land-tab-access").await?;
+                let public = access.test_id("about-land-access-public:checkbox");
+                let _open = beta.expect(&public).timeout(WAIT).to_be_checked().await?;
+                let _editable = beta.expect(&public).timeout(WAIT).to_be_enabled().await?;
+
+                // The allowed list's Add comes first; the banned list's second.
+                let _add = access
+                    .test_id("about-land-button:about-land-add")
+                    .nth(0)
+                    .click()
+                    .await?;
+                let picker = beta.ui().window(&format!(
+                    "avatar-picker#about-land/{instance}/about-land-allow"
+                ));
+                // A pasted key is looked up by id, which the grid answers
+                // without a name search.
+                let _typed = picker
+                    .test_id("avatar-picker-search:field")
+                    .fill(&allowed.uuid().to_string())
+                    .await?;
+                let _go = picker
+                    .test_id("avatar-picker:avatar-picker-go")
+                    .click()
+                    .await?;
+                let _row = picker
+                    .test_id("avatar-picker-row")
+                    .timeout(WAIT)
+                    .click()
+                    .await?;
+                let _ok = picker
+                    .test_id("avatar-picker:avatar-picker-ok")
+                    .click()
+                    .await?;
+                let _closed = beta.expect(&public).timeout(WAIT).to_be_unchecked().await?;
+
+                let _removed = access
+                    .test_id("about-land-button:remove-access")
+                    .timeout(WAIT)
+                    .click()
+                    .await?;
+                let _reopened = beta.expect(&public).timeout(WAIT).to_be_checked().await?;
                 Ok(())
             })?;
         Ok(())

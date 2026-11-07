@@ -287,13 +287,6 @@ merge_unedited! {
     /// field as the region stood when the floater last read it — reverting
     /// whatever another manager saved in between, and losing their own pending
     /// edits the moment the simulator pushes that save to the region.
-    #[expect(
-        clippy::float_cmp,
-        reason = "the question is whether a value moved at all, not whether two \
-                  computations agree to a tolerance: both sides come from the same \
-                  decode of the same wire field, so a difference of any size is a \
-                  real edit and must be kept"
-    )]
     RegionInfoUpdate {
         block_terraform,
         block_fly,
@@ -394,13 +387,6 @@ merge_unedited! {
     ///
     /// An array is merged **whole**: retyping one corner makes all four that
     /// manager's, since a partial array has no meaning to compare against.
-    #[expect(
-        clippy::float_cmp,
-        reason = "the question is whether a value moved at all, not whether two \
-                  computations agree to a tolerance: both sides come from the same \
-                  decode of the same wire field, so a difference of any size is a \
-                  real edit and must be kept"
-    )]
     RegionTerrainUpdate {
         water_height,
         terrain_raise_limit,

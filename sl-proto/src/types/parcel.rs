@@ -463,6 +463,19 @@ impl ParcelInfo {
         bitmap_contains_point(&self.bitmap, x, y)
     }
 
+    /// A region-local point `(x, y)` (metres) that lies on this parcel — the
+    /// centre of the first 4×4 m block its bitmap marks — or `None` when the
+    /// bitmap marks none.
+    ///
+    /// The parcel's bounding box will not do for this: an L-shaped parcel's
+    /// box corners, and even its centre, can lie on a neighbour. It is what a
+    /// re-read of a known parcel is addressed by on OpenSim, which answers the
+    /// rectangle form of `ParcelPropertiesRequest` but ignores the by-id one.
+    #[must_use]
+    pub fn point_inside(&self) -> Option<(f32, f32)> {
+        bitmap_first_block_centre(&self.bitmap)
+    }
+
     /// Anyone may create (rez) objects here — a public rez zone.
     #[must_use]
     pub const fn create_objects(&self) -> bool {
@@ -565,6 +578,34 @@ fn bitmap_contains_point(bitmap: &[u8], x: f32, y: f32) -> bool {
     bitmap
         .get(bit / 8)
         .is_some_and(|byte| byte & (1_u8 << (bit % 8)) != 0)
+}
+
+/// The centre `(x, y)` (metres) of the first block a membership `bitmap` marks,
+/// scanning row-major from the region's south-west corner; `None` when it marks
+/// none. The core of [`ParcelInfo::point_inside`].
+fn bitmap_first_block_centre(bitmap: &[u8]) -> Option<(f32, f32)> {
+    /// Metres along each edge of one parcel bitmap block.
+    const BLOCK_METRES: f32 = 4.0;
+    let edge = bitmap.len().saturating_mul(8).isqrt();
+    if edge == 0 {
+        return None;
+    }
+    let (byte_index, byte) = bitmap
+        .iter()
+        .enumerate()
+        .find(|&(_index, byte)| *byte != 0)?;
+    let bit_in_byte = usize::try_from(byte.trailing_zeros()).ok()?;
+    let bit = byte_index.saturating_mul(8).saturating_add(bit_in_byte);
+    let (block_x, block_y) = (bit.checked_rem(edge)?, bit.checked_div(edge)?);
+    if block_y >= edge {
+        // A bit past the last full row of a bitmap whose length is no square.
+        return None;
+    }
+    let metres = |block: usize| -> Option<f32> {
+        let block = f32::from(u16::try_from(block).ok()?);
+        Some(block.mul_add(BLOCK_METRES, BLOCK_METRES / 2.0))
+    };
+    Some((metres(block_x)?, metres(block_y)?))
 }
 
 /// The parcel-bitmap block index `⌊coord / block⌋` for a region-local `coord`
@@ -1350,16 +1391,9 @@ merge_unedited! {
     /// [`ParcelInfo::to_update`]), so a form populated once at open re-asserts
     /// every field as it stood then — silently undoing whatever another
     /// resident changed in between.
-    #[expect(
-        clippy::float_cmp,
-        reason = "the question is whether a value moved at all, not whether two \
-                  computations agree to a tolerance: both sides come from the same \
-                  decode of the same wire field, so a difference of any size is a \
-                  real edit and must be kept"
-    )]
     ParcelUpdate {
         local_id,
-        parcel_flags,
+        parcel_flags by crate::types::merge::merge_unedited_bits,
         sale_price,
         name,
         description,
@@ -1787,7 +1821,7 @@ mod tests {
 
     use pretty_assertions::assert_eq;
 
-    use super::{ParcelCollision, ParcelUpdate, bitmap_contains_point};
+    use super::{ParcelCollision, ParcelUpdate, bitmap_contains_point, bitmap_first_block_centre};
 
     /// The three ban-line sequence ids are the reference viewer's, and every
     /// other id — an arrival's `0`, a crossing's small count, a selection's
@@ -1859,6 +1893,24 @@ mod tests {
         assert!(!bitmap_contains_point(&bitmap, 256.0, 0.0));
         // An empty bitmap has a zero edge and owns nothing.
         assert!(!bitmap_contains_point(&[], 0.0, 0.0));
+    }
+
+    /// A point inside is the centre of the first owned block, it lies on the
+    /// parcel, and an empty bitmap has none.
+    #[test]
+    fn the_point_inside_is_the_first_owned_blocks_centre() {
+        let bitmap = one_block_bitmap(1, 5);
+        assert_eq!(bitmap_first_block_centre(&bitmap), Some((6.0, 22.0)));
+        assert!(bitmap_contains_point(&bitmap, 6.0, 22.0));
+        // Two blocks: the row-major first wins, wherever it sits in its byte.
+        let mut two = one_block_bitmap(7, 9);
+        let later = one_block_bitmap(3, 40);
+        for (byte, other) in two.iter_mut().zip(later) {
+            *byte |= other;
+        }
+        assert_eq!(bitmap_first_block_centre(&two), Some((30.0, 38.0)));
+        assert_eq!(bitmap_first_block_centre(&[0_u8; 512]), None);
+        assert_eq!(bitmap_first_block_centre(&[]), None);
     }
 
     /// The blocks-per-edge is derived from the bitmap length, so a smaller region
