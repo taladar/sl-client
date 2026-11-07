@@ -2132,7 +2132,7 @@ root) and B (its child) each printed every `changed` event they got.
 | an owner or a region change | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
 | the other avatar buys the original for L$ 0 | **one** `CHANGED_OWNER`, the new owner read at once; the buyer is told `You are now the owner of object Object`, and both get a balance reply of type 5000 | **three** `CHANGED_OWNER` | no purchase (`server-fake-grid-money-ledger`) |
-| worn, its wearer teleports to another region and back | `CHANGED_REGION \| CHANGED_TELEPORT` on arrival, each way, and nothing else | YEngine: 32768 as it leaves, then `CHANGED_REGION \| CHANGED_TELEPORT` on arrival, each way; **XEngine runs `state_entry` again** in the object on each arrival, so the script loses its globals and nothing it held of the trip survives | worn objects do not travel (`fake-grid-own-attachments-and-region-moves`) |
+| worn, its wearer teleports to another region and back | `CHANGED_REGION \| CHANGED_TELEPORT` on arrival, each way, and nothing else | YEngine: 32768 as it leaves, then `CHANGED_REGION \| CHANGED_TELEPORT` on arrival, each way; **XEngine runs `state_entry` again** in the object on each arrival, so the script loses its globals and nothing it held of the trip survives | each flavour as its grid |
 
 ### Sound, particles, texture animation and media
 

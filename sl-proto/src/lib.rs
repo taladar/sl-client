@@ -178,7 +178,7 @@ pub use sim_session::{
     FlowMirrorStatus, KeptMessage, MoneyTransferOrder, ObjectGrabMoved, ObjectGrabbed,
     ObjectMediaState, ObjectReleased, PARCEL_OVERLAY_CHUNK_BYTES, RegionTelemetry, RejectionReason,
     SESSION_FLOW_COVERAGE, ScriptDialogAnswer, ServerEvent, SimChatSession, SimChatSessionKind,
-    SimParcel, SimSession, SitTransform, TerrainStream, TransferRequestSource,
+    SimParcel, SimSession, SitTransform, TerrainStream, TransferRequestSource, UpdateOwner,
     UpdatedInventoryItem, UserRightsEntry, WindFeed, coarse_location, teleport_strings,
 };
 pub use sim_voice::{

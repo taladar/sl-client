@@ -39,8 +39,8 @@
 //! What each live grid answered is stated as a [`Measured`] and written up in
 //! `book/src/gridspec/avatars.md` § Animations; every run is held to it.
 //!
-//! `2av`, `[both]`, legs 1 to 7 offline on both fake flavours: there B is
-//! shown nobody, so only A's own column is held.
+//! `2av`, `[both]`, legs 1 to 7 offline on both fake flavours, A's own column
+//! and B's both held there: only the script's leg is live alone.
 
 use std::collections::{BTreeMap, HashSet};
 use std::time::{Duration, Instant};
@@ -349,10 +349,9 @@ const MEASURED: &[(&str, Measured<Answer>)] = &[
     ("typing_on_set", each(Answer::Any, Answer::Text("stand"))),
 ];
 
-/// What each grid was measured to state of A to B, and of a script's
-/// animation: held on the live grids only, since a fake grid shows B nobody
-/// and runs no script.
-const MEASURED_LIVE: &[(&str, Measured<Answer>)] = &[
+/// What each grid was measured to state of A to B in the legs a viewer
+/// drives: every run, live or fake, is held to it.
+const MEASURED_SEEN: &[(&str, Measured<Answer>)] = &[
     ("after_reset_seen", both(Answer::Text("-dance1"))),
     (
         "after_reset_seen_restated",
@@ -390,33 +389,11 @@ const MEASURED_LIVE: &[(&str, Measured<Answer>)] = &[
         "before_reset_seen_set",
         each(Answer::Any, Answer::Text("dance1+stand")),
     ),
-    ("cube_deleted_own", both(Answer::Text("nothing"))),
-    (
-        "cube_deleted_own_restated",
-        each(Answer::Any, Answer::Flag(false)),
-    ),
-    ("cube_deleted_seen", both(Answer::Text("nothing"))),
-    (
-        "cube_deleted_seen_restated",
-        each(Answer::Any, Answer::Flag(false)),
-    ),
-    (
-        "cube_deleted_seen_set",
-        each(Answer::Any, Answer::Text("dance2+stand")),
-    ),
-    (
-        "cube_deleted_set",
-        each(Answer::Any, Answer::Text("dance2@cube+stand")),
-    ),
     ("idle_seen", both(Answer::Text("nothing"))),
     ("idle_seen_is_own", each(Answer::Any, Answer::Flag(true))),
     ("idle_seen_order", each(Answer::Any, Answer::Text("stand"))),
     ("idle_seen_restated", each(Answer::Any, Answer::Flag(false))),
     ("idle_seen_set", each(Answer::Any, Answer::Text("stand"))),
-    (
-        "idle_seen_sources",
-        each(Answer::Text("only the first entry's"), Answer::Text("none")),
-    ),
     ("idle_seen_statements", each(Answer::Any, Answer::Count(0))),
     ("one_shot_left_seen", both(Answer::Text("+clap"))),
     (
@@ -531,6 +508,120 @@ const MEASURED_LIVE: &[(&str, Measured<Answer>)] = &[
     (
         "reset_seen_set",
         each(Answer::Any, Answer::Text("dance1+stand")),
+    ),
+    ("stop_again_seen", both(Answer::Text("nothing"))),
+    (
+        "stop_again_seen_restated",
+        each(Answer::Any, Answer::Flag(true)),
+    ),
+    (
+        "stop_again_seen_set",
+        each(Answer::Any, Answer::Text("stand")),
+    ),
+    ("stop_dance_seen", both(Answer::Text("-dance1"))),
+    (
+        "stop_dance_seen_restated",
+        each(Answer::Any, Answer::Flag(false)),
+    ),
+    (
+        "stop_dance_seen_set",
+        each(Answer::Any, Answer::Text("stand")),
+    ),
+    ("stop_made_up_seen", both(Answer::Text("-made-up"))),
+    (
+        "stop_made_up_seen_restated",
+        each(Answer::Any, Answer::Flag(false)),
+    ),
+    (
+        "stop_made_up_seen_set",
+        each(Answer::Any, Answer::Text("stand")),
+    ),
+    ("stop_seen", both(Answer::Text("-clap"))),
+    ("stop_seen_restated", each(Answer::Any, Answer::Flag(false))),
+    ("stop_seen_set", each(Answer::Any, Answer::Text("stand"))),
+    (
+        "stop_stand_seen",
+        each(Answer::Any, Answer::Text("nothing")),
+    ),
+    (
+        "stop_stand_seen_restated",
+        each(Answer::Any, Answer::Flag(true)),
+    ),
+    (
+        "stop_stand_seen_set",
+        each(Answer::Any, Answer::Text("stand")),
+    ),
+    ("stop_walk_seen", both(Answer::Text("-walk"))),
+    (
+        "stop_walk_seen_restated",
+        each(Answer::Any, Answer::Flag(false)),
+    ),
+    (
+        "stop_walk_seen_set",
+        each(Answer::Any, Answer::Text("stand")),
+    ),
+    (
+        "swap_seen",
+        both(Answer::Text("+dance1 -clap -express_laugh")),
+    ),
+    ("swap_seen_restated", each(Answer::Any, Answer::Flag(false))),
+    (
+        "swap_seen_sequence",
+        each(Answer::Any, Answer::Text("above the others")),
+    ),
+    (
+        "swap_seen_set",
+        each(Answer::Any, Answer::Text("dance1+stand")),
+    ),
+    ("swap_sequence_own_and_seen", both(Answer::Text("the same"))),
+    ("typing_off_seen", both(Answer::Text("nothing"))),
+    (
+        "typing_off_seen_restated",
+        each(Answer::Any, Answer::Flag(false)),
+    ),
+    (
+        "typing_off_seen_set",
+        each(Answer::Any, Answer::Text("stand")),
+    ),
+    ("typing_on_seen", both(Answer::Text("nothing"))),
+    (
+        "typing_on_seen_restated",
+        each(Answer::Any, Answer::Flag(false)),
+    ),
+    (
+        "typing_on_seen_set",
+        each(Answer::Any, Answer::Text("stand")),
+    ),
+];
+
+/// What each grid was measured to state of a script's animation, and the one
+/// answer of B's that a set of one entry cannot give: held on the live grids
+/// only. A fake grid runs no script, and its avatar wears no overrider, so
+/// its idle set is `stand` alone — whose one source is both "one per entry"
+/// and "only the first entry's". Second Life's answer came from an
+/// overrider's set of several.
+const MEASURED_LIVE: &[(&str, Measured<Answer>)] = &[
+    (
+        "idle_seen_sources",
+        each(Answer::Text("only the first entry's"), Answer::Text("none")),
+    ),
+    ("cube_deleted_own", both(Answer::Text("nothing"))),
+    (
+        "cube_deleted_own_restated",
+        each(Answer::Any, Answer::Flag(false)),
+    ),
+    ("cube_deleted_seen", both(Answer::Text("nothing"))),
+    (
+        "cube_deleted_seen_restated",
+        each(Answer::Any, Answer::Flag(false)),
+    ),
+    (
+        "cube_deleted_seen_set",
+        each(Answer::Any, Answer::Text("dance2+stand")),
+    ),
+    (
+        "cube_deleted_set",
+        each(Answer::Any, Answer::Text("dance2@cube+stand")),
     ),
     ("script_ask_own", both(Answer::Text("nothing"))),
     (
@@ -669,89 +760,6 @@ const MEASURED_LIVE: &[(&str, Measured<Answer>)] = &[
         "script_stopped_by_agent_set",
         each(Answer::Any, Answer::Text("stand")),
     ),
-    ("stop_again_seen", both(Answer::Text("nothing"))),
-    (
-        "stop_again_seen_restated",
-        each(Answer::Any, Answer::Flag(true)),
-    ),
-    (
-        "stop_again_seen_set",
-        each(Answer::Any, Answer::Text("stand")),
-    ),
-    ("stop_dance_seen", both(Answer::Text("-dance1"))),
-    (
-        "stop_dance_seen_restated",
-        each(Answer::Any, Answer::Flag(false)),
-    ),
-    (
-        "stop_dance_seen_set",
-        each(Answer::Any, Answer::Text("stand")),
-    ),
-    ("stop_made_up_seen", both(Answer::Text("-made-up"))),
-    (
-        "stop_made_up_seen_restated",
-        each(Answer::Any, Answer::Flag(false)),
-    ),
-    (
-        "stop_made_up_seen_set",
-        each(Answer::Any, Answer::Text("stand")),
-    ),
-    ("stop_seen", both(Answer::Text("-clap"))),
-    ("stop_seen_restated", each(Answer::Any, Answer::Flag(false))),
-    ("stop_seen_set", each(Answer::Any, Answer::Text("stand"))),
-    (
-        "stop_stand_seen",
-        each(Answer::Any, Answer::Text("nothing")),
-    ),
-    (
-        "stop_stand_seen_restated",
-        each(Answer::Any, Answer::Flag(true)),
-    ),
-    (
-        "stop_stand_seen_set",
-        each(Answer::Any, Answer::Text("stand")),
-    ),
-    ("stop_walk_seen", both(Answer::Text("-walk"))),
-    (
-        "stop_walk_seen_restated",
-        each(Answer::Any, Answer::Flag(false)),
-    ),
-    (
-        "stop_walk_seen_set",
-        each(Answer::Any, Answer::Text("stand")),
-    ),
-    (
-        "swap_seen",
-        both(Answer::Text("+dance1 -clap -express_laugh")),
-    ),
-    ("swap_seen_restated", each(Answer::Any, Answer::Flag(false))),
-    (
-        "swap_seen_sequence",
-        each(Answer::Any, Answer::Text("above the others")),
-    ),
-    (
-        "swap_seen_set",
-        each(Answer::Any, Answer::Text("dance1+stand")),
-    ),
-    ("swap_sequence_own_and_seen", both(Answer::Text("the same"))),
-    ("typing_off_seen", both(Answer::Text("nothing"))),
-    (
-        "typing_off_seen_restated",
-        each(Answer::Any, Answer::Flag(false)),
-    ),
-    (
-        "typing_off_seen_set",
-        each(Answer::Any, Answer::Text("stand")),
-    ),
-    ("typing_on_seen", both(Answer::Text("nothing"))),
-    (
-        "typing_on_seen_restated",
-        each(Answer::Any, Answer::Flag(false)),
-    ),
-    (
-        "typing_on_seen_set",
-        each(Answer::Any, Answer::Text("stand")),
-    ),
 ];
 
 /// The animation census.
@@ -807,6 +815,7 @@ impl GridTest for Animations {
             outcome
                 .and(cleanup)
                 .and_then(|()| hold_to_measured(grid, &metrics, MEASURED, SOURCE))
+                .and_then(|()| hold_to_measured(grid, &metrics, MEASURED_SEEN, SOURCE))
                 .and_then(|()| {
                     if grid.is_fake() {
                         Ok(())

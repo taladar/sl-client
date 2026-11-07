@@ -65,6 +65,47 @@ impl AnimationPolicy {
     }
 }
 
+/// An avatar's set as the region's **other** viewers are told it: the same
+/// entries under the same sequence numbers as its own viewer is told, with
+/// the sources and the physical block of a statement to somebody else.
+///
+/// Second Life names only the first entry's source, and that one nil, and
+/// carries one empty `PhysicalAvatarEventList` block; OpenSim names none and
+/// carries none (`animations`, 2026-10-19, `book/src/gridspec/avatars.md`
+/// § Animations). The source list is positional, so Second Life's one block
+/// is the default's.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Observed {
+    /// The entries, in statement order, their own sources unread.
+    pub animations: Vec<PlayingAnimation>,
+    /// The `AnimationSourceList`, block for block.
+    pub sources: Vec<ObjectKey>,
+    /// The `PhysicalAvatarEventList`, block for block.
+    pub physical_events: Vec<Vec<u8>>,
+}
+
+impl Observed {
+    /// Sends this statement of `agent`'s set down `sim`.
+    ///
+    /// # Errors
+    ///
+    /// As [`SimSession::send_avatar_animation_statement`].
+    pub fn send(
+        &self,
+        agent: AgentKey,
+        sim: &mut SimSession,
+        now: Instant,
+    ) -> Result<(), sl_proto::Error> {
+        sim.send_avatar_animation_statement(
+            agent,
+            &self.animations,
+            &self.sources,
+            &self.physical_events,
+            now,
+        )
+    }
+}
+
 /// One entry of the set.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Entry {
@@ -123,6 +164,27 @@ impl AnimationSet {
         .collect()
     }
 
+    /// The set as the region's other viewers are told it under `policy`
+    /// ([`Observed`]).
+    #[must_use]
+    pub fn observed(&self, policy: AnimationPolicy, agent: AgentKey) -> Observed {
+        let mut animations = self.playing(policy, agent);
+        for entry in &mut animations {
+            entry.source_id = None;
+        }
+        Observed {
+            animations,
+            // The grid that names sources to the agent itself names the
+            // default's alone to anybody else.
+            sources: if policy.names_sources {
+                vec![ObjectKey::from(Uuid::nil())]
+            } else {
+                Vec::new()
+            },
+            physical_events: policy.physical_events(),
+        }
+    }
+
     /// Puts the avatar in the posture `anim_id`: the set's default, kept
     /// under its sequence number so a statement lists one locomotion state at
     /// a time. Returns whether the set changed.
@@ -175,10 +237,10 @@ impl AnimationSet {
 }
 
 /// Answers a viewer's `AgentAnimation`: folds it into `set` and states the set
-/// back to the agent when the grid would. Other sessions are not told: the
-/// fake grid shows no resident to another
-/// (`server-fake-grid-agent-avatars-shared`). Anything else is not this
-/// module's, and `false` says so.
+/// back to the agent when the grid would. What the region's other viewers are
+/// to be told, the same statement in their shape, is returned for the caller
+/// to publish; [`None`] when the agent was told nothing — every statement the
+/// agent is sent, the others are sent too — or the event is not this module's.
 pub(crate) fn answer(
     set: &mut AnimationSet,
     policy: AnimationPolicy,
@@ -186,22 +248,23 @@ pub(crate) fn answer(
     sim: &mut SimSession,
     event: &ServerEvent,
     now: Instant,
-) -> bool {
+) -> Option<Observed> {
     let ServerEvent::AgentAnimation { animations, .. } = event else {
-        return false;
+        return None;
     };
     let changed = set.apply(animations);
-    if (changed || policy.restates_unchanged)
-        && let Err(error) = sim.send_avatar_animation_with_events(
-            agent,
-            &set.playing(policy, agent),
-            &policy.physical_events(),
-            now,
-        )
-    {
+    if !changed && !policy.restates_unchanged {
+        return None;
+    }
+    if let Err(error) = sim.send_avatar_animation_with_events(
+        agent,
+        &set.playing(policy, agent),
+        &policy.physical_events(),
+        now,
+    ) {
         tracing::warn!("stating the agent's animations failed: {error}");
     }
-    true
+    Some(set.observed(policy, agent))
 }
 
 #[cfg(test)]

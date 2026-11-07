@@ -632,3 +632,61 @@ fn script_time_is_kept_through_a_take_but_not_on_xengine() -> Result<(), String>
     assert_eq!(script_time_after_rerez(EngineFlavour::XEngine)?, "0.200000");
     Ok(())
 }
+
+/// A worn object's script that travels with its wearer keeps what it held and
+/// hears `changed(CHANGED_REGION | CHANGED_TELEPORT)` on Second Life and
+/// YEngine; XEngine runs it again from `state_entry`, its globals lost
+/// (`events/changed-worn`, 2026-11-03).
+#[test]
+fn a_travelling_script_hears_its_arrival_as_its_engine_tells_it() -> Result<(), String> {
+    const SOURCE: &str = r#"integer g = 1;
+default
+{
+    state_entry()
+    {
+        print("entry " + (string)g);
+    }
+
+    link_message(integer sender, integer number, string text, key id)
+    {
+        g = number;
+    }
+
+    changed(integer change)
+    {
+        print("changed " + (string)change + " " + (string)g);
+    }
+}
+"#;
+    let change = crate::vm::CHANGED_REGION | crate::vm::CHANGED_TELEPORT;
+    for (flavour, expected) in [
+        (EngineFlavour::SecondLife, "changed 768 5"),
+        (EngineFlavour::YEngine, "changed 768 5"),
+        (EngineFlavour::XEngine, "entry 1"),
+    ] {
+        let mut engine = region(flavour);
+        let mut host = Recorder::default();
+        let _none = engine.add(A, program_for(SOURCE, flavour)?);
+        let _reports = run(&mut engine, &mut host, 2);
+        let _posted = link(&mut engine, A, 5, "")?;
+        let _reports = run(&mut engine, &mut host, 2);
+        let saved = engine.take(A).ok_or("no script to take")?;
+        let arrived = engine.now().0;
+        let _posted = engine
+            .travel_saved(
+                A,
+                program_for(SOURCE, flavour)?,
+                &saved,
+                Duration::ZERO,
+                change,
+            )
+            .map_err(|error| error.to_string())?;
+        let _reports = run(&mut engine, &mut host, 4);
+        assert_eq!(
+            texts_since(&host, A, arrived),
+            vec![expected.to_owned()],
+            "{flavour:?}"
+        );
+    }
+    Ok(())
+}

@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 129 |
-| ready | 331 |
-| blocked | 36 |
+| ready | 330 |
+| blocked | 37 |
 | in-progress | 11 |
 | bugs | 36 |
-| done | 1508 |
+| done | 1511 |
 | deferred | 30 |
 | wont-do | 24 |
-| **total** | **2105** |
+| **total** | **2108** |
 
 ## ideas (129)
 
@@ -255,9 +255,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   cross-region estate state
 - [`server-experience-service`](ideas/server-experience-service.md) — Experience
   service — records, permissions, key-value store
-- [`server-fake-grid-agent-avatars-shared`](ideas/server-fake-grid-agent-avatars-shared.md)
-  — Fake grid — logged-in agents see each other's avatars (blocked by
-  `gridspec-avatar-presence` (done), `gridspec-animations` (done))
 - [`server-fake-grid-dynamic-textures`](ideas/server-fake-grid-dynamic-textures.md)
   — Dynamic textures — render a drawing list to a texture on the fake grid
 - [`server-fake-grid-opensim-arrival-bakes`](ideas/server-fake-grid-opensim-arrival-bakes.md)
@@ -322,12 +319,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### gridspec
 
+- [`gridspec-friend-edit-rights`](ideas/gridspec-friend-edit-rights.md) —
+  Measure a friend's edit right in use
 - [`gridspec-lsl-in-experience`](ideas/gridspec-lsl-in-experience.md) — LSL
   behaviour on Second Life for a script saved into an experience
 - [`gridspec-lsl-opensim-function-set`](ideas/gridspec-lsl-opensim-function-set.md)
   — Measure which library functions OpenSim's engines compile
 
-## ready (331)
+## ready (330)
 
 ### protocol
 
@@ -1029,9 +1028,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### test
 
-- [`fake-grid-own-attachments-and-region-moves`](ready/fake-grid-own-attachments-and-region-moves.md)
-  — Fake grid — the agent's own attachments, the COF, and region moves (blocked
-  by `gridspec-outfits-wearables` (done), `gridspec-attachments` (done))
 - [`test-asset-save-mutation-survey`](ready/test-asset-save-mutation-survey.md)
   — Does a grid hand back the asset you saved?
 - [`test-assets-gesture-codec`](ready/test-assets-gesture-codec.md) — Read and
@@ -1135,7 +1131,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-sl-mfa-challenge`](ready/gridspec-sl-mfa-challenge.md) — Record
   Second Life's MFA challenge and whether a remembered mfa_hash gets past it
 
-## blocked (36)
+## blocked (37)
 
 ### viewer
 
@@ -1238,6 +1234,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### server
 
+- [`server-fake-grid-friend-edit-rights`](blocked/server-fake-grid-friend-edit-rights.md)
+  — Fake grid — a friend's edit right lets it edit the granter's objects
+  (blocked by `gridspec-friend-edit-rights`)
 - [`server-fake-grid-profiles`](blocked/server-fake-grid-profiles.md) — Fake
   grid — profiles, picks, classifieds and notes with each grid's quirks (blocked
   by `gridspec-profiles` (done), `protocol-sim-profile-messages`)
@@ -1387,7 +1386,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1508)
+## done (1511)
 
 ### protocol
 
@@ -3923,6 +3922,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### test
 
+- [`fake-grid-own-attachments-and-region-moves`](done/fake-grid-own-attachments-and-region-moves.md)
+  — Fake grid — the agent's own attachments, the COF, and region moves (blocked
+  by `gridspec-outfits-wearables` (done), `gridspec-attachments` (done))
 - [`test-agent-alert`](done/test-agent-alert-observe-agentalertmessage-alertmessage.md)
   — observe AgentAlertMessage / AlertMessage
 - [`test-ais3-folder-lifecycle`](done/test-ais3-folder-lifecycle-create-rename-move-remove-purge-a-folder-caps-ais3-on-sl-gat.md)
@@ -4432,8 +4434,13 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`server-bake-service`](done/server-bake-service.md) — Server-side appearance
   bake service (blocked by `gridspec-appearance-baking` (done))
+- [`server-fake-grid-agent-avatars-shared`](done/server-fake-grid-agent-avatars-shared.md)
+  — Fake grid — logged-in agents see each other's avatars (blocked by
+  `gridspec-avatar-presence` (done), `gridspec-animations` (done))
 - [`server-fake-grid-agent-experiences`](done/server-fake-grid-agent-experiences.md)
   — Fake grid — the agent's own five experience lists
+- [`server-fake-grid-attachment-resources`](done/server-fake-grid-attachment-resources.md)
+  — Fake grid — list what is worn in the attachment resources answer
 - [`server-fake-grid-friends-presence`](done/server-fake-grid-friends-presence.md)
   — Fake grid — a mutable friendship store with rights, presence fan-out and
   calling cards (blocked by `gridspec-friends-presence` (done))

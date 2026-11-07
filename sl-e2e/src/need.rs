@@ -32,7 +32,8 @@ pub enum Need {
     /// side of it is a server task still to do.
     LiveGrid(&'static str),
     /// What only OpenSim does, described: a simulator feature Second Life
-    /// leaves out, such as the viewer-side bake upload.
+    /// leaves out, such as the viewer-side bake upload. The fake grid provides
+    /// it imitating OpenSim, which a stage that needs it starts it as.
     OpenSim(&'static str),
 }
 
@@ -43,7 +44,7 @@ impl Need {
         match self {
             Self::GridControl | Self::DictatedGrid(_) | Self::Content(_) => !grid.is_live(),
             Self::LiveGrid(_) => grid.is_live(),
-            Self::OpenSim(_) => matches!(grid, Grid::OpenSim),
+            Self::OpenSim(_) => matches!(grid, Grid::OpenSim | Grid::Fake),
         }
     }
 }
@@ -124,7 +125,8 @@ mod tests {
             unmet(&opensim, 1, Grid::Aditi, Some(3)).as_deref(),
             Some("it needs OpenSim: the viewer's own bake upload")
         );
-        assert!(unmet(&opensim, 1, Grid::Fake, None).is_some());
+        // The fake grid shows it, imitating OpenSim for the stage.
+        assert_eq!(unmet(&opensim, 1, Grid::Fake, None), None);
     }
 
     /// A test with no needs runs on a live grid while it has an account per

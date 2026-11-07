@@ -49,6 +49,14 @@ pub use codec::DecodeError;
 /// is raised once the region is back up after a restart.
 pub const CHANGED_REGION_START: i32 = 0x400;
 
+/// `CHANGED_REGION`: the bit of the `changed` a worn object's scripts are
+/// raised as it arrives in another region with its wearer.
+pub const CHANGED_REGION: i32 = 0x100;
+
+/// `CHANGED_TELEPORT`: the bit raised with [`CHANGED_REGION`] when the
+/// wearer arrived by a teleport.
+pub const CHANGED_TELEPORT: i32 = 0x200;
+
 /// The bit OpenSim raises in a `changed` of its own before
 /// [`CHANGED_REGION_START`] after a restart — its `CHANGED_POSITION`, which
 /// Second Life has no constant for (`persistence/restart`, both engines,

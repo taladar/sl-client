@@ -1186,9 +1186,9 @@ is.
   `llAttachToAvatar` and a drop keep the object's ids and raise `attach`, on
   OpenSim after its own `changed(32768)`; a drop lapses
   `PERMISSION_TAKE_CONTROLS`. A worn object stands, hears and speaks where
-  its wearer does, and is sent to its wearer's viewer alone: residents are
-  not shown to each other on the fake grid. Each avatar has a region-local
-  id of its own in each region, a new one when it comes back.
+  its wearer does, and is sent to every viewer its wearer is shown to — a
+  HUD to its wearer's alone. Each avatar has a region-local id of its own in
+  each region, a new one when it comes back.
 - **Touches** are the region's too (`sl_fake_grid::touches`,
   `server-world-touch-and-grab`): `ObjectGrab`, `ObjectGrabUpdate` and
   `ObjectDeGrab` become `touch_start`, `touch` and `touch_end` as the
@@ -1231,10 +1231,11 @@ is.
 - **Not wired yet**: the grid keeps no balances (`llGiveMoney` moves
   nothing, `llTransferLindenDollars` refuses only a payee with no account, a
   payment to an object raises no `money`), which is
-  `server-fake-grid-money-ledger`'s; and the inventory half of wearing — the
-  item a wear from the world makes and a drop removes, a wear from the
-  inventory, and what a region move carries — is
-  `fake-grid-own-attachments-and-region-moves`'s.
+  `server-fake-grid-money-ledger`'s. A wear by a script files a new item for
+  its object — its id minted in the region, the item filed by its wearer's
+  session — and a worn object's scripts travel with it from region to region,
+  hearing `changed(CHANGED_REGION | CHANGED_TELEPORT)` as their engine raises
+  it (`sl_fake_grid::attachments`).
 - **Held by** `sl-fake-grid/tests/scripts.rs` (the life of a script, its
   state through a restart and a take, the experience questions, the OSSL
   gate, a scripted seat, a taken target, Second Life's reach, a wear and a

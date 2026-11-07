@@ -654,9 +654,10 @@ over a small generic `xmlrpc` module):
   flavour (and an OpenSim-flavoured grid's `SimulatorFeatures`
   `OpenSimExtras` says it a second time), so a viewer's world map
   loads tiles from the fake grid. Every configured region gets a stock
-  zoom-1 tile (an embedded JPEG); `FakeGridBuilder::map_tile` registers
-  others. A tile the grid does not have is answered as the imitated
-  grid's tile server answers one: `403` with an `AccessDenied` document on
+  tile (an embedded JPEG) at every zoom from 1 to 8, on the tile that
+  covers it; `FakeGridBuilder::map_tile` registers others. A tile the grid
+  does not have is answered as the imitated grid's tile server answers one:
+  `403` with an `AccessDenied` document on
   the Second Life flavour, OpenSim's tile of plain water on the OpenSim
   one. Only a Second Life flavoured grid sends `Cache-Control`, `ETag` and
   `Last-Modified` with a tile; OpenSim sends none of them.
@@ -707,11 +708,12 @@ Each request is answered as the imitated grid answers it
   characters), ignoring case, then the entry at cell `(0, 0)` that ends a
   search on both grids. The OpenSim flavour sends its alert for a short
   search and for one that matched nothing.
-- **`MapItemRequest`** — for agent locations, the one item both grids send
-  for a region with nobody to show: a count of zero, on the region's corner
-  (Second Life) or a metre in (OpenSim). The grid's residents are not shown
-  to each other, so there is never anybody to count. Any other type gets no
-  reply, since the grid has no telehubs, land for sale or events — except
+- **`MapItemRequest`** — for agent locations, the region's residents but
+  the asker, as each flavour draws them: a count per 64 m square at its
+  corner (Second Life) or an item each at its whole metre (OpenSim); with
+  nobody to show, the one item both grids send then, a count of zero on the
+  region's corner (Second Life) or a metre in (OpenSim). Any other type gets
+  no reply, since the grid has no telehubs, land for sale or events — except
   that the OpenSim flavour answers any request naming the agent's own
   region with its agent locations, as OpenSim does.
 - **`MapLayerRequest`** — a reply with no layers (Second Life) or OpenSim's
@@ -1799,11 +1801,13 @@ never re-fetched it. Run the viewer with
 
 ## NPCs: other avatars as content
 
-The grid rezzes only the arriving agent's own avatar and has no
-inter-session broadcast, so a second logged-in avatar is invisible to the
-first. Everything a viewer does with *other* people — the body, the bakes,
-the name tag, the playing animation, the attachment that follows a wearer
-— is therefore scripted content: an `fixtures::NpcFixture` on
+Two logged-in avatars in one region see each other: each region keeps its
+residents (`world::Resident`), and every viewer is sent the others' bodies,
+appearances, animations, movement and departures as a live grid sends them
+([Grid Behaviour → Avatars](../gridspec/avatars.md)). A test that wants
+*other* people without logging a second viewer in — a body, bakes, a name
+tag, a playing animation, an attachment that follows a wearer, somebody
+seated — scripts them as content instead: an `fixtures::NpcFixture` on
 `SceneFixtures::npcs`.
 
 ```text
@@ -1867,6 +1871,27 @@ region-local. `NpcFixture::seated_on` is the whole of it, and both
 viewers' scene dumps report the composed region position
 (`catalogue::seated_npc_position()`), which is what makes the seated path
 comparable rather than merely visible.
+
+## Attachments, the outfit and the inventory
+
+An agent wears what its viewer wears (`attachments.rs`, measured in
+[Grid Behaviour → Appearance](../gridspec/appearance.md)): an item from its
+inventory, an object from the world, a script's object, each under its
+`AttachItemID`; a detach, a take-off by the item and a drop answer as the
+flavour's grid answers them, and what comes off is saved into its item. What
+is worn travels with a teleport or a crossing under the same full ids and the
+destination's local ids, its scripts with it, and a login puts back on what
+the account last wore.
+
+An account's inventory outlives its session (`inventory::Inventories`): a
+logout, or the kick a second login gives the session still in world, keeps
+it — the items it made, the Current Outfit Folder as it wrote it, and the
+outfit it last stated — and the next login starts from it; a teleport or a
+crossing hands it to the session arrived in. Each session mints its ids from a
+range of its own (`SimSession::seed_serials`), so nothing one session made is
+overwritten by the next. `AccountConfig::dressed` dresses an account in a pair
+of pants and a pair of shoes over its body parts, for a test that needs a
+clothing layer to copy or wear.
 
 ## The ground: terrain, wind and clouds
 
@@ -2082,8 +2107,8 @@ flavour's rule (`ImitatedGrid::neighbour_policy`, measured in
   seconds, as `draw-distance` does;
 - the **OpenSim** flavour holds every region a square around the avatar
   touches (the draw distance plus 64 m, held between 96 m and 255 m), and
-  retires and announces at once. The avatar is where it last arrived: the
-  grid tracks no walking.
+  retires and announces at once, around where the region's avatar
+  controller has the avatar standing.
 
 Until an `AgentUpdate` says otherwise an agent is taken to see 256 m, the
 reference viewer's default, which reaches every adjacent region under
@@ -2279,12 +2304,12 @@ The region's **coarse locations** go out on a timer with its statistics and
 its time (`ArrivalPolicy::coarse_interval`, measured in
 [Grid Behaviour → Avatars](../gridspec/avatars.md)): every 1.333 s as
 Second Life sends them or every 4.545 s as OpenSim does, listing the scene's
-NPCs and then the agent itself with `You` on its own entry. A position is
-rounded into its entry on a Second-Life-flavoured grid and cut off on an
-OpenSim-flavoured one (`sl_proto::CoarseRounding`), which also states a
-height above 1,024 m as zero. The agent's entry is where it last arrived:
-the grid tracks no walking. Nothing goes down a child circuit yet, where
-both live grids send the neighbour's own list.
+NPCs, the region's other residents and then the agent itself with `You` on
+its own entry. A position is rounded into its entry on a Second-Life-flavoured
+grid and cut off on an OpenSim-flavoured one (`sl_proto::CoarseRounding`),
+which also states a height above 1,024 m as zero. A child circuit is sent the
+neighbour's own list, with no entry for the agent and no `You`, as both live
+grids send it.
 
 A **ridden** crossing is the interesting case, because the vehicle is
 handed over too and everything about it is renumbered. An object keeps its

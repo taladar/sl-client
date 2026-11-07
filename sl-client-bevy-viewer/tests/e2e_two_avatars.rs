@@ -1,11 +1,13 @@
 //! End-to-end tests for what two residents see of each other
 //! ([[test-e2e-sweep-two-avatars]]).
 //!
-//! On the fake grid two stage viewers do not see each other's avatars and
-//! their IMs are not relayed, so the other resident is played by the grid:
-//! a friend account that never logs in, a catalogue NPC, or a message the
-//! test sends through the viewer's own session. What only a real grid
-//! relays runs there (`SL_E2E_GRID=opensim|aditi`) and skips here:
+//! Two stage viewers share one fake-grid region: each sees the other's
+//! avatar, and IMs, typing, offers and bakes are relayed between them. A
+//! resident who never needs a viewer of their own is played by the grid: a
+//! friend account that never logs in, a catalogue NPC, or a message the test
+//! sends through the viewer's own session. Tests marked (live) still need a
+//! real grid (`SL_E2E_GRID=opensim|aditi`) and skip here, each naming the
+//! fake-grid task that lifts it:
 //!
 //! - a friend's edit-objects right asks before it is granted, Cancel sends
 //!   nothing, and every toggle — and a right the friend grants — reaches the
@@ -28,14 +30,17 @@
 //! - two residents befriend each other with a message and trade rights
 //!   (live);
 //! - a teleport offer is declined without a word to the offerer, and a second
-//!   one is taken (live);
+//!   one is taken;
 //! - two editors of one prim: what the loser is told (live);
 //! - the world map knows the region it is opened in, draws its tiles and
 //!   counts the other resident there, and its search finds the region as
-//!   each grid matches names (live);
+//!   each grid matches names;
 //! - the region states back the complexity the viewer reports, in the radar's
 //!   Reported column and on the name tag, and on Second Life states the other
-//!   resident's (live).
+//!   resident's;
+//! - a block is kept by the grid across a relog and the radar unblocks it
+//!   (live);
+//! - a profile shows its avatar online with its groups (live).
 
 #[cfg(test)]
 mod test {
@@ -1492,7 +1497,9 @@ mod test {
                     "the arrival raised the radar sound"
                 );
 
-                // A resident the neighbour region knows only coarsely.
+                // A resident the neighbour region knows only coarsely: its
+                // periodic coarse feed lists them from now on, the first
+                // update sent at once.
                 let faraway = account_id(stage, FARAWAY)?;
                 let own = stage.agent_id("Alpha")?;
                 let child = stage
@@ -1505,17 +1512,14 @@ mod test {
                 let now = child.now();
                 child
                     .with_sim(|sim| {
-                        sim.send_coarse_location_update(
-                            &[CoarseLocation {
-                                agent_id: faraway,
-                                x: 20,
-                                y: 128,
-                                z: 24,
-                            }],
-                            None,
-                            None,
-                            now,
-                        )
+                        let listed = vec![CoarseLocation {
+                            agent_id: faraway,
+                            x: 20,
+                            y: 128,
+                            z: 24,
+                        }];
+                        sim.set_coarse_others(listed.clone());
+                        sim.send_coarse_location_update(&listed, None, None, now)
                     })
                     .await
                     .map_err(|error| format!("the neighbour's coarse update: {error}"))?;
@@ -2118,15 +2122,17 @@ mod test {
         Ok(())
     }
 
-    // ---- Live grids -------------------------------------------------------
+    // ---- Two viewers ------------------------------------------------------
 
-    /// What only a live grid does yet: two viewers seeing each other. Their
-    /// messages reach each other on the fake grid too since
-    /// `server-fake-grid-im-relay`; their avatars do not.
-    const RELAYED: Need = Need::LiveGrid(
-        "two viewers that see each other's avatars and reach each other \
-         (server-fake-grid-agent-avatars-shared)",
-    );
+    /// Whether the grid the stage runs on behaves as Second Life: aditi, and
+    /// the fake grid, which imitates Second Life unless a stage says
+    /// otherwise.
+    fn second_life() -> bool {
+        matches!(
+            std::env::var("SL_E2E_GRID").as_deref(),
+            Ok("aditi" | "fake") | Err(_)
+        )
+    }
 
     /// How long a live grid may take to tell one viewer what another did.
     const LIVE_WAIT: Duration = Duration::from_secs(120);
@@ -2291,7 +2297,9 @@ mod test {
     #[test]
     fn a_live_block_is_kept_by_the_grid_and_the_radar_unblocks_it() -> Result<(), TestError> {
         stage("live_block", &["Alpha", "Beta"])
-            .needs(RELAYED)
+            .needs(Need::LiveGrid(
+                "a grid that keeps the mute list across a relog (server-fake-grid-mute-list)",
+            ))
             .run(async |stage: &Stage| {
                 let alpha = &stage.viewer("Alpha")?;
                 let beta = &stage.viewer("Beta")?;
@@ -2450,39 +2458,37 @@ mod test {
     /// offers again, Beta presses Teleport, and arrives beside Alpha.
     #[test]
     fn a_live_teleport_offer_is_declined_in_silence_and_then_taken() -> Result<(), TestError> {
-        stage("live_lure", &["Alpha", "Beta"])
-            .needs(RELAYED)
-            .run(async |stage: &Stage| {
-                let alpha = &stage.viewer("Alpha")?;
-                let beta = &stage.viewer("Beta")?;
-                gather(stage, alpha, beta).await?;
-                let beta_name = shown_name(stage, alpha, "Beta").await?;
-                let home = alpha.agent().await?.region.and_then(|region| region.name);
+        stage("live_lure", &["Alpha", "Beta"]).run(async |stage: &Stage| {
+            let alpha = &stage.viewer("Alpha")?;
+            let beta = &stage.viewer("Beta")?;
+            gather(stage, alpha, beta).await?;
+            let beta_name = shown_name(stage, alpha, "Beta").await?;
+            let home = alpha.agent().await?.region.and_then(|region| region.name);
 
-                offer_teleport_from_radar(alpha, beta, &beta_name).await?;
-                let rated = offer_card(beta)
-                    .get(Locator::role(Role::Text).name_containing(RATING_LINE))
-                    .count()
-                    .await?;
-                let states_a_rating = std::env::var("SL_E2E_GRID").as_deref() == Ok("aditi");
-                assert_eq!(
-                    rated,
-                    usize::from(states_a_rating),
-                    "the card shows a rating exactly when the grid's offers state one"
-                );
-                let told_before = teleport_notices(alpha).await?;
-                answer_offer(beta, "Decline").await?;
-                tokio::time::sleep(DECLINE_WATCH).await;
-                assert_eq!(
-                    teleport_notices(alpha).await?,
-                    told_before,
-                    "the offerer is told nothing of a declined offer"
-                );
+            offer_teleport_from_radar(alpha, beta, &beta_name).await?;
+            let rated = offer_card(beta)
+                .get(Locator::role(Role::Text).name_containing(RATING_LINE))
+                .count()
+                .await?;
+            let states_a_rating = second_life();
+            assert_eq!(
+                rated,
+                usize::from(states_a_rating),
+                "the card shows a rating exactly when the grid's offers state one"
+            );
+            let told_before = teleport_notices(alpha).await?;
+            answer_offer(beta, "Decline").await?;
+            tokio::time::sleep(DECLINE_WATCH).await;
+            assert_eq!(
+                teleport_notices(alpha).await?,
+                told_before,
+                "the offerer is told nothing of a declined offer"
+            );
 
-                offer_teleport_from_radar(alpha, beta, &beta_name).await?;
-                take_offered_teleport(beta, home).await?;
-                Ok(())
-            })?;
+            offer_teleport_from_radar(alpha, beta, &beta_name).await?;
+            take_offered_teleport(beta, home).await?;
+            Ok(())
+        })?;
         Ok(())
     }
 
@@ -2497,69 +2503,75 @@ mod test {
     fn the_live_world_map_knows_the_region_and_who_is_in_it() -> Result<(), TestError> {
         /// The item type of agent locations.
         const AGENT_LOCATIONS: u32 = 6;
-        stage("live_world_map", &["Alpha", "Beta"])
-            .needs(RELAYED)
-            .run(async |stage: &Stage| {
-                let alpha = &stage.viewer("Alpha")?;
-                let beta = &stage.viewer("Beta")?;
-                gather(stage, alpha, beta).await?;
-                let here = alpha.agent().await?.region.ok_or("Alpha is in no region")?;
-                let name = here.name.clone().ok_or("Alpha's region has no name")?;
-                let cell = [
-                    u32::try_from(here.handle >> 32)? / 256,
-                    u32::try_from(here.handle & 0xFFFF_FFFF)? / 256,
-                ];
-                let _opened = alpha
-                    .menu_path(&["menu-bar-world", "menu-bar-world-map"])
-                    .await?;
-                let known = tokio::time::timeout(LIVE_WAIT, async {
-                    loop {
-                        let map = alpha.world_map().await?;
-                        let named = map
-                            .regions
-                            .iter()
-                            .any(|region| region.grid == cell && region.name == name);
-                        let somebody = map.items.iter().any(|layer| {
-                            layer.grid == cell
-                                && layer.kind == AGENT_LOCATIONS
-                                && layer.items.iter().any(|item| item.drawn && item.extra >= 1)
-                        });
-                        if named && somebody && map.tiles_ready > 0 {
-                            return Ok::<_, BodyError>(map);
-                        }
-                        tokio::time::sleep(Duration::from_secs(1)).await;
+        stage("live_world_map", &["Alpha", "Beta"]).run(async |stage: &Stage| {
+            let alpha = &stage.viewer("Alpha")?;
+            let beta = &stage.viewer("Beta")?;
+            gather(stage, alpha, beta).await?;
+            let here = alpha.agent().await?.region.ok_or("Alpha is in no region")?;
+            let name = here.name.clone().ok_or("Alpha's region has no name")?;
+            let cell = [
+                u32::try_from(here.handle >> 32)? / 256,
+                u32::try_from(here.handle & 0xFFFF_FFFF)? / 256,
+            ];
+            let _opened = alpha
+                .menu_path(&["menu-bar-world", "menu-bar-world-map"])
+                .await?;
+            let last = std::sync::Mutex::new((false, false, 0_usize));
+            let known = tokio::time::timeout(LIVE_WAIT, async {
+                loop {
+                    let map = alpha.world_map().await?;
+                    let named = map
+                        .regions
+                        .iter()
+                        .any(|region| region.grid == cell && region.name == name);
+                    let somebody = map.items.iter().any(|layer| {
+                        layer.grid == cell
+                            && layer.kind == AGENT_LOCATIONS
+                            && layer.items.iter().any(|item| item.drawn && item.extra >= 1)
+                    });
+                    if let Ok(mut last) = last.lock() {
+                        *last = (named, somebody, map.tiles_ready);
                     }
-                })
-                .await
-                .map_err(
-                    |_elapsed| "the world map never came to know its own region, a tile and Beta",
-                )??;
-                assert!(
-                    known.tile_server.is_some(),
-                    "tiles are drawn from a tile server the grid named"
-                );
+                    if named && somebody && map.tiles_ready > 0 {
+                        return Ok::<_, BodyError>(map);
+                    }
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                }
+            })
+            .await
+            .map_err(|_elapsed| {
+                format!(
+                    "the world map never came to know its own region, a tile and Beta: \
+                         (named, somebody, tiles ready) last read {:?}",
+                    last.lock().map(|last| *last).ok()
+                )
+            })??;
+            assert!(
+                known.tile_server.is_some(),
+                "tiles are drawn from a tile server the grid named"
+            );
 
-                let map = alpha.ui().window("worldmap");
-                let start: String = name.chars().take(4).collect();
-                let mut searches = vec![start];
-                if std::env::var("SL_E2E_GRID").as_deref() == Ok("opensim") {
-                    let skipped = name.chars().count().saturating_sub(4);
-                    searches.push(name.chars().skip(skipped).collect());
-                }
-                for text in searches {
-                    let _typed = map
-                        .test_id("worldmap:search")
-                        .role(Role::Textbox)
-                        .fill(&text)
-                        .await?;
-                    let _listed = alpha
-                        .expect(&map.get(Locator::role(Role::ListItem).named(&name)))
-                        .timeout(LIVE_WAIT)
-                        .to_be_visible()
-                        .await?;
-                }
-                Ok(())
-            })?;
+            let map = alpha.ui().window("worldmap");
+            let start: String = name.chars().take(4).collect();
+            let mut searches = vec![start];
+            if std::env::var("SL_E2E_GRID").as_deref() == Ok("opensim") {
+                let skipped = name.chars().count().saturating_sub(4);
+                searches.push(name.chars().skip(skipped).collect());
+            }
+            for text in searches {
+                let _typed = map
+                    .test_id("worldmap:search")
+                    .role(Role::Textbox)
+                    .fill(&text)
+                    .await?;
+                let _listed = alpha
+                    .expect(&map.get(Locator::role(Role::ListItem).named(&name)))
+                    .timeout(LIVE_WAIT)
+                    .to_be_visible()
+                    .await?;
+            }
+            Ok(())
+        })?;
         Ok(())
     }
 
@@ -2571,7 +2583,9 @@ mod test {
     #[test]
     fn a_live_profile_shows_its_avatar_online_with_its_groups() -> Result<(), TestError> {
         stage("live_profile", &["Alpha", "Beta"])
-            .needs(RELAYED)
+            .needs(Need::LiveGrid(
+                "a grid that serves a resident's profile (server-fake-grid-profiles)",
+            ))
             .run(async |stage: &Stage| {
                 let alpha = &stage.viewer("Alpha")?;
                 let beta = &stage.viewer("Beta")?;
@@ -2620,7 +2634,10 @@ mod test {
     #[test]
     fn two_residents_befriend_trade_rights_and_contest_one_prim() -> Result<(), TestError> {
         stage("live_friendship", &["Alpha", "Beta"])
-            .needs(RELAYED)
+            .needs(Need::LiveGrid(
+                "a friend's edit right letting it edit the granter's prim \
+                 (server-fake-grid-friend-edit-rights)",
+            ))
             .run(async |stage: &Stage| {
                 let alpha = &stage.viewer("Alpha")?;
                 let beta = &stage.viewer("Beta")?;
@@ -2908,46 +2925,44 @@ mod test {
     /// Beta hears Alpha's typing animation.
     #[test]
     fn a_resident_sees_another_type() -> Result<(), TestError> {
-        stage("live_typing", &["Alpha", "Beta"])
-            .needs(RELAYED)
-            .run(async |stage: &Stage| {
-                let alpha = &stage.viewer("Alpha")?;
-                let beta = &stage.viewer("Beta")?;
-                gather(stage, alpha, beta).await?;
-                let alpha_name = shown_name(stage, beta, "Alpha").await?;
-                open_radar(beta).await?;
-                let row = radar_row(beta, &alpha_name);
-                let _seen = beta.expect(&row).timeout(LIVE_WAIT).to_be_visible().await?;
-                let bar = alpha.ui().test_id("nearby-chat-bar").role(Role::Textbox);
-                let _typed = bar.fill("a thought in progress").await?;
-                let _typing = beta
-                    .expect(&row)
-                    .timeout(LIVE_WAIT)
-                    .to_contain_text("T")
-                    .await?;
-                let alpha_id = stage.agent_id("Alpha")?.uuid().to_string();
-                let animated = tokio::time::timeout(LIVE_WAIT, async {
-                    loop {
-                        let heard = beta
-                            .events_from_start()
-                            .read(&[LogStream::Event])
-                            .await?
-                            .iter()
-                            .any(|entry| {
-                                entry.kind == "AvatarAnimation"
-                                    && entry.detail.contains(&alpha_id)
-                                    && entry.detail.contains(&TYPE_ANIMATION.to_string())
-                            });
-                        if heard {
-                            return Ok::<_, BodyError>(());
-                        }
+        stage("live_typing", &["Alpha", "Beta"]).run(async |stage: &Stage| {
+            let alpha = &stage.viewer("Alpha")?;
+            let beta = &stage.viewer("Beta")?;
+            gather(stage, alpha, beta).await?;
+            let alpha_name = shown_name(stage, beta, "Alpha").await?;
+            open_radar(beta).await?;
+            let row = radar_row(beta, &alpha_name);
+            let _seen = beta.expect(&row).timeout(LIVE_WAIT).to_be_visible().await?;
+            let bar = alpha.ui().test_id("nearby-chat-bar").role(Role::Textbox);
+            let _typed = bar.fill("a thought in progress").await?;
+            let _typing = beta
+                .expect(&row)
+                .timeout(LIVE_WAIT)
+                .to_contain_text("T")
+                .await?;
+            let alpha_id = stage.agent_id("Alpha")?.uuid().to_string();
+            let animated = tokio::time::timeout(LIVE_WAIT, async {
+                loop {
+                    let heard = beta
+                        .events_from_start()
+                        .read(&[LogStream::Event])
+                        .await?
+                        .iter()
+                        .any(|entry| {
+                            entry.kind == "AvatarAnimation"
+                                && entry.detail.contains(&alpha_id)
+                                && entry.detail.contains(&TYPE_ANIMATION.to_string())
+                        });
+                    if heard {
+                        return Ok::<_, BodyError>(());
                     }
-                })
-                .await;
-                let _cleared = bar.fill("").await?;
-                animated.map_err(|_elapsed| "Beta never heard Alpha's typing animation")??;
-                Ok(())
-            })?;
+                }
+            })
+            .await;
+            let _cleared = bar.fill("").await?;
+            animated.map_err(|_elapsed| "Beta never heard Alpha's typing animation")??;
+            Ok(())
+        })?;
         Ok(())
     }
 
@@ -2957,7 +2972,6 @@ mod test {
     #[test]
     fn another_viewer_sees_the_published_bake() -> Result<(), TestError> {
         stage("live_bake", &["Alpha", "Beta"])
-            .needs(RELAYED)
             .needs(Need::OpenSim("the viewer bakes and uploads its own avatar"))
             .run(async |stage: &Stage| {
                 let alpha = &stage.viewer("Alpha")?;
@@ -3001,40 +3015,38 @@ mod test {
     #[test]
     fn a_live_region_states_each_avatars_complexity_where_it_grants_render_info()
     -> Result<(), TestError> {
-        stage("live_render_info", &["Alpha", "Beta"])
-            .needs(RELAYED)
-            .run(async |stage: &Stage| {
-                let alpha = &stage.viewer("Alpha")?;
-                let beta = &stage.viewer("Beta")?;
-                gather(stage, alpha, beta).await?;
-                let beta_name = shown_name(stage, alpha, "Beta").await?;
-                let states = std::env::var("SL_E2E_GRID").as_deref() == Ok("aditi");
-                let (cost, reported) = radar_complexity(
-                    alpha,
-                    &beta_name,
-                    if states { RENDER_INFO_WAIT } else { WAIT },
-                    |cost, reported| !cost.is_empty() && !reported.is_empty(),
-                )
+        stage("live_render_info", &["Alpha", "Beta"]).run(async |stage: &Stage| {
+            let alpha = &stage.viewer("Alpha")?;
+            let beta = &stage.viewer("Beta")?;
+            gather(stage, alpha, beta).await?;
+            let beta_name = shown_name(stage, alpha, "Beta").await?;
+            let states = second_life();
+            let (cost, reported) = radar_complexity(
+                alpha,
+                &beta_name,
+                if states { RENDER_INFO_WAIT } else { WAIT },
+                |cost, reported| !cost.is_empty() && !reported.is_empty(),
+            )
+            .await?;
+            assert!(!cost.is_empty(), "Alpha never measured Beta");
+            if !states {
+                assert_eq!(reported, "", "a grid without render info states nothing");
+                return Ok(());
+            }
+            assert!(
+                reported.parse::<u32>().is_ok_and(|weight| weight > 0),
+                "the region states Beta's complexity (ours {cost}, stated {reported:?})"
+            );
+            let _all = alpha
+                .set_setting(COMPLEXITY_WHEN_LIMITED_ONLY, json!(false))
                 .await?;
-                assert!(!cost.is_empty(), "Alpha never measured Beta");
-                if !states {
-                    assert_eq!(reported, "", "a grid without render info states nothing");
-                    return Ok(());
-                }
-                assert!(
-                    reported.parse::<u32>().is_ok_and(|weight| weight > 0),
-                    "the region states Beta's complexity (ours {cost}, stated {reported:?})"
-                );
-                let _all = alpha
-                    .set_setting(COMPLEXITY_WHEN_LIMITED_ONLY, json!(false))
-                    .await?;
-                let tag = tag_with(alpha, &beta_name, "(reported ").await?;
-                assert!(
-                    tag.contains("(reported "),
-                    "Beta's name tag states the region's figure: {tag:?}"
-                );
-                Ok(())
-            })?;
+            let tag = tag_with(alpha, &beta_name, "(reported ").await?;
+            assert!(
+                tag.contains("(reported "),
+                "Beta's name tag states the region's figure: {tag:?}"
+            );
+            Ok(())
+        })?;
         Ok(())
     }
 }

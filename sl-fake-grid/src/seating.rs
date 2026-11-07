@@ -328,10 +328,14 @@ pub(crate) fn stand_all_on(
 
 /// `agent` left the region: it is stood up, and what it wore leaves with
 /// it, scripts and all. What the region's sessions are to be told.
+///
+/// The avatar's own `KillObject` goes first, as both live grids send it
+/// (`avatar-presence`, 2026-10-08): its seat's sitters and its worn
+/// objects' kills follow.
 pub(crate) fn leave(world: &mut SceneFixtures, agent: AgentKey) -> Vec<RegionChange> {
     let _stood = stand(world, agent);
-    world.depart_avatar(agent);
-    world
+    let shown = world.depart_avatar(agent);
+    let worn: Vec<RegionChange> = world
         .objects
         .worn_by(agent)
         .into_iter()
@@ -339,6 +343,11 @@ pub(crate) fn leave(world: &mut SceneFixtures, agent: AgentKey) -> Vec<RegionCha
             let _off = world.objects.take_off(root);
             crate::scripts::remove_linkset(world, root)
         })
+        .collect();
+    shown
+        .map(|local_id| RegionChange::ResidentLeft { agent, local_id })
+        .into_iter()
+        .chain(worn)
         .collect()
 }
 
@@ -359,16 +368,17 @@ pub(crate) fn sitters_of(world: &SceneFixtures, root: RegionLocalObjectId) -> Ve
 const DEFAULT_POINT: u8 = 6;
 
 /// Puts the root `root` on `agent`'s `point` — `0` for the point it was last
-/// worn on, or the right hand — turned by `rotation` on it, standing at `at`:
-/// the same object under the same ids, parented to the avatar with the point
-/// in its state, as both grids re-send it. Its scripts are told. The records
-/// sent, the root first, or [`None`] for a root that is not here or is worn
-/// already.
+/// worn on, or the right hand — turned by `rotation` on it, standing at `at`,
+/// worn as `item`: the same object under the same ids, parented to the avatar
+/// with the point in its state and its `AttachItemID` among its name-values,
+/// as both grids re-send it. Its scripts are told. The records sent, the root
+/// first, or [`None`] for a root that is not here or is worn already.
 pub(crate) fn wear(
     world: &mut SceneFixtures,
     (agent, at): (AgentKey, &Vector),
     root: RegionLocalObjectId,
     (point, rotation): (u8, Option<Rotation>),
+    item: crate::scene_store::WornItem,
 ) -> Option<Vec<Object>> {
     if world.objects.attached_to(root).is_some() {
         return None;
@@ -390,6 +400,7 @@ pub(crate) fn wear(
         if let Some(rotation) = rotation {
             worn.motion.rotation = rotation;
         }
+        worn.name_value = crate::attachments::name_values(item, worn.full_id);
     }
     let _worn = world.objects.wear(
         root,
@@ -397,6 +408,7 @@ pub(crate) fn wear(
             agent,
             point,
             at: at.clone(),
+            item,
         },
     );
     crate::scripts::raise_attach(world, root, Some(agent));
@@ -413,13 +425,13 @@ fn linkset_records(world: &SceneFixtures, root: RegionLocalObjectId) -> Vec<Obje
 
 /// Puts the worn root `root` of `agent`'s back in the world where its wearer
 /// stands, under the same ids; its scripts are told, and lose the controls
-/// the wearer granted them. The records, the root first, or [`None`] for a
-/// root `agent` does not wear.
+/// the wearer granted them. The records, the root first, and what it was
+/// worn as, or [`None`] for a root `agent` does not wear.
 pub(crate) fn drop_off(
     world: &mut SceneFixtures,
     agent: AgentKey,
     root: RegionLocalObjectId,
-) -> Option<Vec<Object>> {
+) -> Option<(Vec<Object>, crate::scene_store::WornItem)> {
     if world
         .objects
         .attached_to(root)
@@ -433,36 +445,24 @@ pub(crate) fn drop_off(
         dropped.parent_id = RegionLocalObjectId(0);
         dropped.state = 0;
         dropped.motion.position = attached.at;
+        dropped.name_value = String::new();
     }
     crate::scripts::raise_attach(world, root, None);
     crate::scripts::lapse(world, root, agent, PERMISSION_TAKE_CONTROLS);
-    Some(linkset_records(world, root))
+    Some((linkset_records(world, root), attached.item))
 }
 
-/// Takes the worn root `root` off its wearer, leaving it where it was worn,
-/// for a take into the inventory to file: its record as a take files it,
-/// standing where its wearer stood. `false` for a root nobody wears.
-pub(crate) fn unwear_for_take(world: &mut SceneFixtures, root: RegionLocalObjectId) -> bool {
-    let Some(attached) = world.objects.take_off(root) else {
-        return false;
-    };
-    if let Some(mut taken) = world.object_mut(root) {
-        taken.parent_id = RegionLocalObjectId(0);
-        taken.state = 0;
-        taken.motion.position = attached.at;
-    }
-    true
-}
-
-/// Whether `object` may be sent to `agent`'s viewer: everything but another
-/// avatar's attachment. Residents are not shown to each other on the fake
-/// grid, so a viewer has no avatar to hang it off: it would wait on a parent
-/// that never comes, asking for it again and again.
+/// Whether `object` may be sent to `agent`'s viewer: everything but an
+/// attachment of another avatar's that is on its wearer's screen (a HUD,
+/// which nobody else ever sees) or whose wearer the region does not show
+/// ([`SceneFixtures::resident`]) — a viewer with no avatar to hang it off
+/// would wait on a parent that never comes, asking for it again and again.
 #[must_use]
 pub(crate) fn shown_to(world: &SceneFixtures, object: &Object, agent: AgentKey) -> bool {
     let root = world.root_of(object.local_id);
-    world
-        .objects
-        .attached_to(root)
-        .is_none_or(|attached| attached.agent == agent)
+    world.objects.attached_to(root).is_none_or(|attached| {
+        attached.agent == agent
+            || (!sl_proto::AttachmentPoint::from_code(attached.point).is_hud()
+                && world.resident(attached.agent).is_some())
+    })
 }

@@ -221,8 +221,18 @@ struct Arriving {
     saved: Option<SavedScript>,
     /// How long its object was away.
     away: Duration,
-    /// The start parameter its object was rezzed with.
-    start_parameter: i32,
+    /// How its object came: rezzed, or worn by an avatar that brought it.
+    how: ArrivedBy,
+}
+
+/// How an arriving script's object came into the region.
+#[derive(Debug, Clone, Copy)]
+enum ArrivedBy {
+    /// Rezzed out of an inventory, with this start parameter: `on_rez`.
+    Rez(i32),
+    /// Worn by an avatar that walked or teleported in: `changed` with these
+    /// bits ([`Engine::travel_saved`]), or nothing for 0 — a move put back.
+    Travel(i32),
 }
 
 impl Default for RegionScripts {
@@ -423,7 +433,29 @@ impl RegionScripts {
             Arriving {
                 saved,
                 away,
-                start_parameter,
+                how: ArrivedBy::Rez(start_parameter),
+            },
+        );
+    }
+
+    /// The script `item` arrives in `prim`, a worn object its wearer brought
+    /// into the region `away` after it left the last one: the next reconcile
+    /// brings it back from `saved` and raises `changed(change)` in it as its
+    /// engine does ([`Engine::travel_saved`]).
+    pub(crate) fn travel(
+        &mut self,
+        prim: ObjectKey,
+        item: InventoryKey,
+        saved: Option<SavedScript>,
+        away: Duration,
+        change: i32,
+    ) {
+        let _previous = self.arriving.insert(
+            (prim, item),
+            Arriving {
+                saved,
+                away,
+                how: ArrivedBy::Travel(change),
             },
         );
     }
@@ -611,14 +643,24 @@ impl RegionScripts {
         let arriving = self.arriving.remove(&(slot.prim, slot.item));
         let restored = arriving.as_ref().and_then(|arriving| {
             let saved = arriving.saved.as_ref()?;
-            match self.engine.rez_saved(
-                id,
-                Arc::clone(&program),
-                saved,
-                arriving.away,
-                arriving.start_parameter,
-            ) {
-                Ok(_posted) => Some(()),
+            let restored = match arriving.how {
+                ArrivedBy::Rez(start_parameter) => self
+                    .engine
+                    .rez_saved(
+                        id,
+                        Arc::clone(&program),
+                        saved,
+                        arriving.away,
+                        start_parameter,
+                    )
+                    .map(|_posted| ()),
+                ArrivedBy::Travel(change) => self
+                    .engine
+                    .travel_saved(id, Arc::clone(&program), saved, arriving.away, change)
+                    .map(|_posted| ()),
+            };
+            match restored {
+                Ok(()) => Some(()),
                 Err(error) => {
                     tracing::warn!(
                         prim = %slot.prim,
@@ -635,14 +677,25 @@ impl RegionScripts {
             if let Some(instance) = self.engine.instance_mut(id) {
                 instance.set_running(running);
             }
-            if let Some(arriving) = arriving
-                && let Err(error) = self.engine.rez(id, arriving.start_parameter)
+            if let Some(Arriving {
+                how: ArrivedBy::Rez(start_parameter),
+                ..
+            }) = arriving
+                && let Err(error) = self.engine.rez(id, start_parameter)
             {
                 tracing::warn!(?id, %error, "on_rez could not be raised");
             }
         }
         let _was = self.by_item.insert((slot.prim, slot.item), id);
         let _old = self.slots.insert(id, slot);
+    }
+
+    /// A new id out of the region's seeded draw: the item a script's wear
+    /// files its object as, minted where no session's minter reaches.
+    pub(crate) fn mint_id(&mut self) -> uuid::Uuid {
+        let high = (u64::from(self.draw()) << 32) | u64::from(self.draw());
+        let low = (u64::from(self.draw()) << 32) | u64::from(self.draw());
+        uuid::Uuid::from_u128((u128::from(high) << 64) | u128::from(low))
     }
 
     /// The next 32 bits of the region's seeded draw (xorshift64).
@@ -708,6 +761,7 @@ pub(crate) fn reconcile(world: &mut SceneFixtures, assets: &crate::assets::GridA
         let _layout = scripts.pay_prices.remove(&key);
     }
     for local_id in world.objects.take_changed_contents() {
+        world.objects.settle_inventory_flag(local_id);
         let Some(prim) = world.objects.get(local_id).map(|object| object.full_id) else {
             continue;
         };
@@ -892,7 +946,8 @@ enum Effect {
         /// The prim.
         prim: RegionLocalObjectId,
     },
-    /// The root is put on its owner (`llAttachToAvatar`).
+    /// The root is put on its owner (`llAttachToAvatar`, or as a temporary
+    /// attachment `llAttachToAvatarTemp`).
     Attach {
         /// The root.
         root: RegionLocalObjectId,
@@ -900,6 +955,8 @@ enum Effect {
         wearer: (AgentKey, Vector),
         /// The point; 0 for the one it was last worn on.
         point: u8,
+        /// Whether it is a temporary attachment, filed as no item.
+        temporary: bool,
     },
     /// The worn root is taken off into its wearer's inventory
     /// (`llDetachFromAvatar`).
@@ -2074,6 +2131,24 @@ impl Host for RegionHost<'_> {
             root: origin.root,
             wearer,
             point: u8::try_from(point).unwrap_or(0),
+            temporary: false,
+        });
+    }
+
+    fn attach_temp(&mut self, caller: CallerId, point: i32) {
+        let Some(origin) = self.origin(caller) else {
+            return;
+        };
+        let owner = origin.object.owner_id.to_string();
+        let Some(present) = self.present(&owner) else {
+            return;
+        };
+        let wearer = (present.agent, present.position.clone());
+        self.effects.push(Effect::Attach {
+            root: origin.root,
+            wearer,
+            point: u8::try_from(point).unwrap_or(0),
+            temporary: true,
         });
     }
 
@@ -2467,6 +2542,7 @@ pub(crate) async fn run_tick(core: &GridCore, index: usize) -> Option<TickReport
         }));
     }
     if !scripted {
+        crate::attachments::finish_leaving(&mut region.world.lock(), &core.assets, (core.clock)());
         return None;
     }
     let present = presence(core, index).await;
@@ -2475,6 +2551,8 @@ pub(crate) async fn run_tick(core: &GridCore, index: usize) -> Option<TickReport
         crate::updates::begin(&mut world);
         let (report, changes, deliveries) = tick_locked(core, index, &mut world, &present);
         let changes = crate::updates::finish(&mut world, changes);
+        // What came off before this tick has had its turn, and leaves.
+        crate::attachments::finish_leaving(&mut world, &core.assets, (core.clock)());
         drop(world);
         (report, changes, deliveries)
     };
@@ -2588,15 +2666,30 @@ fn tick_locked(
                     });
                 }
             }
+            // A temporary attachment is worn as no item and shown at once;
+            // any other is filed as a new item by its wearer's session first,
+            // which then shows it ([`RegionChange::FileWorn`]).
             Effect::Attach {
                 root,
                 wearer: (agent, at),
                 point,
+                temporary,
             } => {
+                let item = if temporary {
+                    crate::scene_store::WornItem::Temporary
+                } else {
+                    crate::scene_store::WornItem::Item(InventoryKey::from(
+                        world.script_instances.mint_id(),
+                    ))
+                };
                 if let Some(objects) =
-                    crate::seating::wear(world, (agent, &at), root, (point, None))
+                    crate::seating::wear(world, (agent, &at), root, (point, None), item)
                 {
-                    changes.push(RegionChange::Worn { agent, objects });
+                    changes.push(if temporary {
+                        RegionChange::Worn { agent, objects }
+                    } else {
+                        RegionChange::FileWorn { agent, root }
+                    });
                 }
             }
             Effect::Detach { root, agent } => {

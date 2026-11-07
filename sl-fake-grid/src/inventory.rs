@@ -273,3 +273,69 @@ impl UploadAnnouncements {
         }
     }
 }
+
+/// What an account's session holds of it that outlives the session: its
+/// inventory and the outfit the region holds — what a login starts from.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct Kept {
+    /// The inventory tree.
+    tree: sl_proto::SimInventoryTree,
+    /// The outfit as the last `AgentIsNowWearing` stated it, which OpenSim
+    /// answers an `AgentWearablesRequest` with at the next login too
+    /// (`outfits`, 2026-10-20).
+    wearables: Vec<sl_proto::Wearable>,
+}
+
+impl Kept {
+    /// What `sim` holds now.
+    pub(crate) fn of(sim: &sl_proto::SimSession) -> Self {
+        Self {
+            tree: sim.agent_inventory().clone(),
+            wearables: sim.agent_wearables().1.to_vec(),
+        }
+    }
+
+    /// Puts it into `sim`.
+    pub(crate) fn restore(self, sim: &mut sl_proto::SimSession) {
+        *sim.agent_inventory_mut() = self.tree;
+        sim.set_agent_wearables(self.wearables);
+    }
+}
+
+/// Every account's inventory, and the outfit the region holds, as its last
+/// session left them: what a login starts from, as a grid's inventory service
+/// keeps it. Grid-wide, since an inventory outlives the session — the items a
+/// session made and the links it wrote into the Current Outfit Folder are
+/// there at the next login.
+///
+/// A session's own is its own while it runs; a teleport or a crossing hands
+/// it to the session the agent arrives in ([`hand_over`]), and a logout — or
+/// the kick a second login gives it — puts it back here.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct Inventories(
+    std::sync::Arc<parking_lot::Mutex<std::collections::HashMap<sl_proto::AgentKey, Kept>>>,
+);
+
+impl Inventories {
+    /// Keeps what `sim` holds as `agent`'s.
+    pub(crate) fn keep(&self, agent: sl_proto::AgentKey, sim: &sl_proto::SimSession) {
+        let _before = self.0.lock().insert(agent, Kept::of(sim));
+    }
+
+    /// What `agent`'s last session left, if one ever did.
+    pub(crate) fn get(&self, agent: sl_proto::AgentKey) -> Option<Kept> {
+        self.0.lock().get(&agent).cloned()
+    }
+}
+
+/// Hands `source`'s inventory, and the outfit it holds, to `destination`, the
+/// session its agent is about to arrive in: what a teleport and a crossing
+/// carry, so that what the agent made or wrote before the move is still there
+/// after it.
+pub(crate) async fn hand_over(
+    source: &crate::driver::SharedSim,
+    destination: &crate::driver::SharedSim,
+) {
+    let kept = source.with_sim(|sim| Kept::of(sim)).await;
+    destination.with_sim(|sim| kept.restore(sim)).await;
+}

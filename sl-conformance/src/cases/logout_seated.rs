@@ -486,9 +486,7 @@ impl GridTest for LogoutSeated {
     }
 
     fn grids(&self) -> &'static [Grid] {
-        // Not the fake grid: its residents are not shown to each other, so
-        // there is no observer to send the removal to.
-        &[Grid::Opensim, Grid::Aditi]
+        &[Grid::Opensim, Grid::Aditi, Grid::FakeSl, Grid::FakeOpensim]
     }
 
     fn accounts(&self) -> u8 {

@@ -4,7 +4,7 @@ title: Fake grid — divide and join parcels
 topic: server
 status: ready
 origin: gridspec survey (2026-10-03)
-refs: [gridspec-survey]
+refs: [gridspec-survey, server-fake-grid-agent-avatars-shared]
 ---
 
 Context: [context/server.md](../context/server.md).
@@ -43,3 +43,11 @@ region, which the shared fake grid's catalogue does not have. Once a divide
 works, add `Grid::FakeSl` / `Grid::FakeOpensim` to its `grids()` and
 `"parcel-crossing"` to `OFFLINE_CASES`, so its `CROSSING_PUSH` holds the
 fake flavours too.
+
+## From server-fake-grid-agent-avatars-shared (2026-11-06)
+
+`parcel-privacy` is the next case waiting on a divide: the fake grid hides a
+resident on a parcel whose `SeeAVs` is off on `FakeOpensim`
+(`PresencePolicy`), but the case chops a corner off the region's parcel to
+make one, so it is OpenSim-only. Once a divide is answered, add it to the
+offline list for `FakeOpensim`.

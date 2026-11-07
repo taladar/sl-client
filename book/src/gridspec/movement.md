@@ -130,7 +130,7 @@ flavour — to the rows marked †.
 | the object the response names | the cube asked for | the same | the same |
 | the camera offsets and `ForceMouselook` | zero and unset: the script sets none | the same | zero and unset |
 | the animation set once seated | no built-in: three to five assets that are none (`gridspec-animations`); on 2026-10-24 (`avatar/sit`, [LSL scripts](lsl.md#sitting)) the built-in `sit` beside three of those, with a sit target and without | `sit` | none |
-| what an observer is sent | the avatar as a child of the seat, at the same offset | the same | residents are not shown to each other |
+| what an observer is sent | the avatar as a child of the seat, at the same offset | the same | the same |
 
 ### Where the avatar is put
 

@@ -380,6 +380,7 @@ fn tell(
             object.update_flags &= !prim_flags::SCRIPTED;
         }
     }
+    world.objects.settle_inventory_flag(local_id);
     let resent =
         policy.resends == PrimResent::EveryWrite || matches!(write, Write::Script | Write::Remove);
     if resent && let Some(object) = world.object_by_local_id(local_id) {

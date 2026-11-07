@@ -36,3 +36,9 @@ classified refused on Second Life with "Invalid price for listing,
 classified not published." and L$50 charged; OpenSim's classified delete
 failing with "/Error deleting classified"; a pick's `User` (the parcel's
 owner on Second Life, its name on OpenSim) and position.
+
+## From server-fake-grid-agent-avatars-shared (2026-11-07)
+
+`e2e_two_avatars`' `a_live_profile_shows_its_avatar_online_with_its_groups`
+runs on the fake grid but for this: take its `Need::LiveGrid` off once a
+profile is served.

@@ -215,7 +215,13 @@ fn bad_credentials(core: &GridCore) -> LoginFailure {
 /// must not refuse the login that follows. They are ended all the same, since
 /// the new login is about to be given neighbours of its own.
 async fn kick_live_sessions(core: &Arc<GridCore>, agent_id: sl_proto::AgentKey) -> bool {
-    let in_world = core.root_session_of(agent_id).await.is_some();
+    let root = core.root_session_of(agent_id).await;
+    let in_world = root.is_some();
+    // What the session in world held is what the next one starts from.
+    if let Some(root) = root {
+        root.with_sim(|sim| core.inventories.keep(agent_id, sim))
+            .await;
+    }
     let kick = sl_proto::Kick {
         agent: agent_id,
         reason: core.login_refusals.second_login_kick_reason.to_owned(),

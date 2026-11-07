@@ -211,6 +211,10 @@ pub fn default_assets() -> sl_proto::InMemoryAssetSource {
     for (id, wearable) in sl_test_assets::builtin::library_wearables() {
         let _previous = assets.insert(AssetKey::from(id), wearable);
     }
+    // What a dressed account wears over its body parts ([`dress`]).
+    for worn in sl_test_assets::inventory::worn_clothing() {
+        let _previous = assets.insert(AssetKey::from(worn.asset_id), worn.body);
+    }
     // The assets Second Life's placeholder wearables reply names, which it
     // serves as wearables of their types (`outfits` and `asset-fetch-http`,
     // aditi): a stand-in of each type under each id.
@@ -658,6 +662,55 @@ pub fn stock_parcel_id() -> ParcelKey {
     ParcelKey::from(uuid::Uuid::from_u128(PARCEL))
 }
 
+/// The first item id the clothing a dressed account wears takes, one per slot
+/// above it.
+const WORN_CLOTHING_ITEM_BASE: u128 = 0x5EED_C107_1000_0000_0000_0000_0000_0000;
+
+/// The first id its Current Outfit Folder links take, one per slot above it.
+const WORN_CLOTHING_LINK_BASE: u128 = 0x5EED_C107_2000_0000_0000_0000_0000_0000;
+
+/// Dresses the session's agent in clothing over its body parts — a pair of
+/// pants and a pair of shoes ([`sl_test_assets::inventory::worn_clothing`]): each an
+/// item in the Clothing folder, linked from the Current Outfit Folder under
+/// the reference's order token (`@` and the slot's code × 100 + its index),
+/// and named in the outfit the region holds — what a live account that wears
+/// two clothing layers has (`outfits`, 2026-10-20).
+pub(crate) fn dress(sim: &mut SimSession) {
+    let cof_folder = folder_key(
+        AGENT_SYSTEM_FOLDER_BASE
+            .saturating_add(u128::try_from(FOLDER_TYPE_CURRENT_OUTFIT).unwrap_or(0)),
+    );
+    let mut worn = sim.agent_wearables().1.to_vec();
+    for clothing in sl_test_assets::inventory::worn_clothing() {
+        let slot = u128::from(clothing.wearable_type.to_code());
+        let item_id = InventoryKey::from(uuid::Uuid::from_u128(
+            WORN_CLOTHING_ITEM_BASE.saturating_add(slot),
+        ));
+        let mut item = stock_item(0, folder_key(AGENT_CLOTHING), clothing.name);
+        item.item_id = item_id;
+        item.asset_id = clothing.asset_id;
+        item.item_type = narrow_class(AssetType::Clothing.to_code());
+        item.inv_type = narrow_class(InventoryType::Wearable.to_code());
+        item.flags = u32::from(clothing.wearable_type.to_code());
+        sim.agent_inventory_mut().insert_item(item);
+        let mut link = stock_item(0, cof_folder, clothing.name);
+        link.item_id = InventoryKey::from(uuid::Uuid::from_u128(
+            WORN_CLOTHING_LINK_BASE.saturating_add(slot),
+        ));
+        link.asset_id = item_id.uuid();
+        link.item_type = ASSET_TYPE_LINK;
+        link.inv_type = ASSET_TYPE_LINK;
+        link.description = format!("@{}", slot.saturating_mul(100));
+        sim.agent_inventory_mut().insert_item(link);
+        worn.push(Wearable {
+            item_id,
+            asset_id: Some(clothing.asset_id),
+            wearable_type: clothing.wearable_type,
+        });
+    }
+    sim.set_agent_wearables(worn);
+}
+
 /// Seeds the stock fixtures on a fresh session: agent inventory (root →
 /// Clothing, and one item per writable asset class), a library, one
 /// region-wide parcel, and the parcel's estate-wide **voice channel** (its
@@ -986,12 +1039,14 @@ mod test {
         // Four terrain solids, seven environment textures, the prim texture,
         // two avatar sentinels, fifteen bump maps, two viewer textures, two
         // water plane textures, five wearable layer textures, four body parts,
-        // the four wearables Second Life's placeholder outfit names and
-        // twelve UI sounds — the library — plus one body per seeded
-        // inventory class and the stock scripted object's two scripts, and
-        // nothing else: a stock scenario's store is the library and what its
-        // own items name, not a fixture dump.
-        let library = 4 + 7 + 1 + 2 + 15 + 2 + 2 + 5 + 4 + 4 + sl_proto::BUILTIN_UI_SOUNDS.len();
+        // the four wearables Second Life's placeholder outfit names, the
+        // two clothing layers a dressed account wears and twelve UI sounds —
+        // the library — plus one body per seeded inventory class and the stock
+        // scripted object's two scripts, and nothing else: a stock scenario's
+        // store is the library and what its own items name, not a fixture
+        // dump.
+        let library =
+            4 + 7 + 1 + 2 + 15 + 2 + 2 + 5 + 4 + 4 + 2 + sl_proto::BUILTIN_UI_SOUNDS.len();
         let seeded = sl_test_assets::inventory::seeded_assets()?.len();
         assert_eq!(assets.len(), library + seeded + 2);
         Ok(())

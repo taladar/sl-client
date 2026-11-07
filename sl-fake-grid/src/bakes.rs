@@ -287,8 +287,13 @@ impl OutfitVersions {
 
 /// Answers a viewer's `AgentCachedTexture` and `AgentSetAppearance` as the
 /// grid `policy` names would, and keeps the outfit version an
-/// `IncrementCOFVersion` of `agent`'s moved to. Anything else is not this
-/// module's, and `false` says so.
+/// `IncrementCOFVersion` of `agent`'s moved to.
+///
+/// What the region's other viewers are to be sent of a publish is returned:
+/// OpenSim sends every viewer but the publisher the published bakes and
+/// parameters as they were sent, with no `AppearanceData` block, a hover
+/// block and no attachments (`appearance-baking`, 2026-10-19,
+/// `book/src/gridspec/appearance.md` § Baking). [`None`] for anything else.
 pub(crate) fn answer(
     published: &mut PublishedBakes,
     versions: (&OutfitVersions, AgentKey),
@@ -296,12 +301,12 @@ pub(crate) fn answer(
     sim: &mut SimSession,
     event: &ServerEvent,
     now: Instant,
-) -> bool {
+) -> Option<AvatarAppearance> {
     match event {
         ServerEvent::CurrentOutfitVersionIncremented { version } => {
             let (versions, agent) = versions;
             versions.set(agent, *version);
-            true
+            None
         }
         ServerEvent::CachedTexturesRequested { serial, slots } => {
             if policy.answers_cache_queries()
@@ -310,23 +315,36 @@ pub(crate) fn answer(
             {
                 tracing::warn!("answering a cached-texture query failed: {error}");
             }
-            true
+            None
         }
         ServerEvent::AppearanceSet {
             texture_entry,
+            visual_params,
             wearable_cache,
             ..
         } => {
-            // OpenSim shows the publish to every other viewer and never to
-            // the publisher; the fake grid shows no resident to another
-            // (`server-fake-grid-agent-avatars-shared`), so keeping it is all
-            // there is to do.
-            if policy.keeps_published_appearance() {
-                published.keep(texture_entry, wearable_cache);
+            if !policy.keeps_published_appearance() {
+                return None;
             }
-            true
+            published.keep(texture_entry, wearable_cache);
+            let (_versions, agent) = versions;
+            Some(policy.applied(AvatarAppearance {
+                avatar_id: agent,
+                is_trial: false,
+                texture_entry: decode_texture_entry(texture_entry, avatar_texture::COUNT),
+                visual_params: visual_params.clone(),
+                appearance_version: None,
+                cof_version: None,
+                appearance_flags: None,
+                hover_height: Some(sl_types::lsl::Vector {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                }),
+                attachments: Vec::new(),
+            }))
         }
-        _ => false,
+        _ => None,
     }
 }
 

@@ -41,7 +41,7 @@ for, the one the grid last stated (*current*) — never as a number.
 | its `AppearanceData` block (**held**) | version 1, the COF version the login named, flags 0 | no block | as the flavour's grid |
 | an `AppearanceHover` block (**held**) | yes | yes | yes |
 | the baked slots | all eleven baked but the skirt, which holds the default placeholder (the test avatars wear no skirt) | every slot the default placeholder: nothing has ever baked these avatars on the local grid | `FakeSl`: the outfit's bakes, the slots nothing feeds the default; `FakeOpensim`: the fixture's solid bakes |
-| B's of A (**held** live) | one, with the same bakes as A's own | one or two, the same bakes | — (B is shown nobody) |
+| B's of A (**held**) | one, with the same bakes as A's own | one or two, the same bakes | one, the record A is sent |
 
 ### The appearance service
 
@@ -74,7 +74,7 @@ request.
 | behaviour | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
 | version 0 (**held**) | `400`: `success` false, `code` 1, `error` "Cof Version Mismatch: asked != current", `expected` the current version, `observed` and `cof_version` the one asked; nothing sent to either viewer | no capability | as the flavour's grid |
-| the version expected (**held**) | `200`: `success` true, `error` undef, `cof_version` the one asked; an `AvatarAppearance` at that version to A and to B | no capability | the same, to A |
+| the version expected (**held**) | `200`: `success` true, `error` undef, `cof_version` the one asked; an `AvatarAppearance` at that version to A and to B | no capability | the same |
 | the same version again (**held**) | accepted and stated again, exactly as the first time | no capability | the same |
 | five ahead of it (**held**) | refused as version 0 is | no capability | the same |
 | our client's request at 0 (**held**) | read as `success` false with the expected version | no capability | the same |
@@ -108,9 +108,9 @@ published back.
 | behaviour | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
 | what A is told (**held**) | nothing | **nothing**: OpenSim sends the appearance to every other viewer only | nothing |
-| what B is told (**held** live) | nothing | the publish, verbatim: no block, the plywood on every slot | — |
+| what B is told (**held**) | nothing | the publish, verbatim: no block, the plywood on every slot | as the flavour's grid |
 | it is kept (**held**) | no | yes, for the session (see [Across a login](#across-a-login)); an earlier run's publish was seen again at the next run's login, which is why the case publishes A's arrival appearance back | kept for the cache on `FakeOpensim`, per session |
-| the arrival appearance published back (**held** live) | — | B is sent the arrival bakes again | — |
+| the arrival appearance published back (**held**) | — | B is sent the arrival bakes again | as the flavour's grid |
 
 Second Life's central-bake regions ignore the message; the reference never
 sends it there (`LLAgent::sendAgentSetAppearance` returns on a region with a
@@ -125,7 +125,7 @@ under the ids the publish named.
 | --- | --- | --- | --- |
 | the new login's `cof_version` (**held**) | the version the grid last stated: the folder's, not the session's | absent | the same; `FakeSl` keeps each account's version across logins |
 | A's own arrival appearance (**held**: told, block, hover) | as at the first arrival | no block, the **default placeholder** on every slot, not the publish | as the flavour's grid, but `FakeOpensim` names its fixture bakes |
-| B's of A (**held** live) | as A's own | the same as A's own | — |
+| B's of A (**held**) | as A's own | the same as A's own | as A's own |
 | the published ids asked again (**held**) | never answered | eleven entries, **no hits** | the same |
 
 OpenSim's cache is the avatar's `WearableCacheItems` in the region's memory;
@@ -165,14 +165,14 @@ number.
 
 | behaviour | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
-| a worn item's object (**held**, as A and B see it) | a new object, parented to the avatar, on the point asked, with the same local id for both viewers | the same | not modelled: the fake grid drops every attach message |
-| its name-values (**held**) | `AttachItemID` only, naming the worn item, to both viewers | the same | — |
-| its `OwnerID` (**held**) | **nil**, to both viewers | nil | — |
-| its update flags (**held**) | A: `0x1002093c`; B: `0x10020810` — B is told the owner may modify it | A: the same; B: `0x00020810` | — |
-| a HUD's object (**held**) | sent to A only; B is never sent it | the same | — |
-| a HUD taken off (**held**) | B is sent a `KillObject` for the object it never saw | no kill to B | — |
-| a script's temporary attachment (`llAttachToAvatarTemp`) (**held**) | `AttachItemID` is the **object's own id**; no item is made | the same | — |
-| the agent's `AvatarAppearance` after a wear (**held**) | sent again, its attachment list naming what is worn | not sent | — |
+| a worn item's object (**held**, as A and B see it) | a new object, parented to the avatar, on the point asked, with the same local id for both viewers | the same | the same |
+| its name-values (**held**) | `AttachItemID` only, naming the worn item, to both viewers | the same | the same |
+| its `OwnerID` (**held**) | **nil**, to both viewers | nil | nil: an update states the owner of a sound alone (`UpdateOwner`) |
+| its update flags (**held**) | A: `0x1002093c`; B: `0x10020810` — B is told the owner may modify it | A: the same; B: `0x00020810` | as the flavour's grid, for any prim: a stranger is told it may transfer it, on `FakeSl` that its owner may modify it, and an empty prim says so (`FLAGS_INVENTORY_EMPTY`) |
+| a HUD's object (**held**) | sent to A only; B is never sent it | the same | the same |
+| a HUD taken off (**held**) | B is sent a `KillObject` for the object it never saw | no kill to B | as the flavour's grid |
+| a script's temporary attachment (`llAttachToAvatarTemp`) (**held**) | `AttachItemID` is the **object's own id**; no item is made | the same | the same |
+| the agent's `AvatarAppearance` after a wear (**held**) | sent again, its attachment list naming what is worn | not sent | as the flavour's grid; `FakeSl` sends none after a HUD, as Second Life sent none |
 
 The temporary attachment's own id is what the reference's
 `LLViewerObject::isTempAttachment` tests, and what `Object::is_temp_attachment`
@@ -184,12 +184,12 @@ tests here.
 
 | behaviour | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
-| a free point, *replace* (**held**) | worn; no inventory message | the same | — |
-| a second item *added* to it (**held**) | both worn | the same | — |
-| a third *replacing* them (**held**) | **one** of the two (the first worn) is killed and its item restated; the other stays | **both** are killed and restated | — |
-| an item already worn, again on another point (**held**) | ignored: it stays where it was | the same | — |
-| an item nobody has (**held**) | an alert, "Attempt to rez an object failed." (`RezAttemptFailed`) | nothing | — |
-| several at once (`RezMultipleAttachmentsFromInv`, added) (**held**) | all worn | the same | — |
+| a free point, *replace* (**held**) | worn; no inventory message | the same | the same |
+| a second item *added* to it (**held**) | both worn | the same | the same |
+| a third *replacing* them (**held**) | **one** of the two (the first worn) is killed and its item restated; the other stays | **both** are killed and restated | as the flavour's grid |
+| an item already worn, again on another point (**held**) | ignored: it stays where it was | the same | the same |
+| an item nobody has (**held**) | an alert, "Attempt to rez an object failed." (`RezAttemptFailed`) | nothing | as the flavour's grid |
+| several at once (`RezMultipleAttachmentsFromInv`, added) (**held**) | all worn | the same | the same |
 
 OpenSim's *replace* takes off everything on the point under `[Attachments]
 WearReplacesAll`, true by default (`AttachmentsModule.AttachObjectInternal`);
@@ -204,31 +204,31 @@ datagram. It packs four too since 2026-10-20.
 
 | behaviour | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
-| `ObjectDetach` by the object (**held**) | killed for both viewers; the item restated, on the event queue (`BulkUpdateInventory`) | killed; the item restated over UDP (`UpdateCreateInventoryItem`) | — |
-| `DetachAttachmentIntoInv` by the item (**held**) | killed; **no** inventory message | the same | — |
-| two in one `ObjectDetach` (**held**) | both killed; one item restated | the same, over UDP | — |
-| a drop (`ObjectDrop`) (**held**) | sent again **unattached under the same ids**, no kill; the item **removed** from the inventory | the same | — |
-| a dropped object (**held**) | no name-values; `OwnerID` nil | the same | — |
+| `ObjectDetach` by the object (**held**) | killed for both viewers; the item restated, on the event queue (`BulkUpdateInventory`) | killed; the item restated over UDP (`UpdateCreateInventoryItem`) | as the flavour's grid; what came off is saved into the item |
+| `DetachAttachmentIntoInv` by the item (**held**) | killed; **no** inventory message | the same | the same |
+| two in one `ObjectDetach` (**held**) | both killed; one item restated | the same, over UDP | as the flavour's grid: the last named |
+| a drop (`ObjectDrop`) (**held**) | sent again **unattached under the same ids**, no kill; the item **removed** from the inventory | the same | the same |
+| a dropped object (**held**) | no name-values; `OwnerID` nil | the same | the same |
 
 ### From the world, and by a script
 
 | behaviour | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
-| `ObjectAttach` of a rezzed cube (**held**) | sent again attached under the **same ids**; a new item announced over UDP, which its `AttachItemID` names | the same | — |
-| taken off again (**held**) | killed; the item restated on the event queue | killed; the item restated over UDP | — |
-| a probe asking for `PERMISSION_ATTACH` (**held**) | a `ScriptQuestion` for 32; granted, `run_time_permissions(32)` | the same | — |
-| `llAttachToAvatar` (**held**) | as `ObjectAttach`: same ids, an item made; the script's `attach` event names A and `llGetAttached` the point | the same | — |
-| `llAttachToAvatarTemp` (**held**) | same ids, **no** item; `AttachItemID` its own id | the same | — |
-| `llDetachFromAvatar` of a temporary attachment (**held**) | killed and gone: not sent back into the world, no item | the same | — |
-| `llDetachFromAvatar` of the other (**held**) | killed; the item restated on the event queue | the same, over UDP | — |
+| `ObjectAttach` of a rezzed cube (**held**) | sent again attached under the **same ids**; a new item announced over UDP, which its `AttachItemID` names | the same | the same |
+| taken off again (**held**) | killed; the item restated on the event queue | killed; the item restated over UDP | as the flavour's grid |
+| a probe asking for `PERMISSION_ATTACH` (**held**) | a `ScriptQuestion` for 32; granted, `run_time_permissions(32)` | the same | the same |
+| `llAttachToAvatar` (**held**) | as `ObjectAttach`: same ids, an item made; the script's `attach` event names A and `llGetAttached` the point | the same | the same; the item's id is minted in the region and its wearer's session files it |
+| `llAttachToAvatarTemp` (**held**) | same ids, **no** item; `AttachItemID` its own id | the same | the same |
+| `llDetachFromAvatar` of a temporary attachment (**held**) | killed and gone: not sent back into the world, no item | the same | the same |
+| `llDetachFromAvatar` of the other (**held**) | killed; the item restated on the event queue | the same, over UDP | as the flavour's grid |
 
 ### The limit
 
 | behaviour | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
-| the login's `attachment_limit` (**held**) | 38 (the `Base` package) | no benefits | — |
-| `SimulatorFeatures` `MaxAgentAttachments` (**held**) | 38 | 38 (`Constants.MaxAgentAttachments`) | — |
-| one more than the limit, in one compound message (**held**) | 38 worn, the last one refused **without a word** | the same | — |
+| the login's `attachment_limit` (**held**) | 38 (the `Base` package) | no benefits | as the flavour's grid |
+| `SimulatorFeatures` `MaxAgentAttachments` (**held**) | 38 | 38 (`Constants.MaxAgentAttachments`) | 38 |
+| one more than the limit, in one compound message (**held**) | 38 worn, the last one refused **without a word** | the same | the same |
 
 ### Across a teleport and a login
 
@@ -240,17 +240,30 @@ back, with `cube1` worn, B staying behind; then a new login with it worn.
 
 | behaviour | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
-| the attachment in the destination (**held**) | sent anew, the **same full id**, a **new local id**, parented to the avatar's new local id | the same | — |
-| the region left, before the arrival (**held**) | kills A's avatar for A, never the attachment | kills nothing | — |
-| B, left behind (**held**) | sent a kill of A's avatar, **none** of its attachments | sent nothing | — |
-| back in the region left (**held**) | a new local id again; B is not sent A (the telehub is out of its sight) | the local id it had in the region it came from, kept; B is sent it again | — |
-| a new login with an item worn (**held**) | the grid puts it back on unasked, with everything else A wore | the same | — |
-| the agent's `AvatarAppearance` at the arrival (**held**) | lists it | sent, listing nothing | — |
+| the attachment in the destination (**held**) | sent anew, the **same full id**, a **new local id**, parented to the avatar's new local id | the same | the same, its scripts carried with what they held (a crossing too) |
+| the region left, before the arrival (**held**) | kills A's avatar for A, never the attachment | kills nothing | as the flavour's grid |
+| B, left behind (**held**) | sent a kill of A's avatar, **none** of its attachments | sent nothing | as the flavour's grid |
+| back in the region left (**held** but B) | a new local id again; B is not sent A (the telehub is out of its sight) | the local id it had in the region it came from, kept; B is sent it again | a new local id on `FakeSl`, the one it had on `FakeOpensim`; B is sent A again on both: a fake region has no telehub |
+| a new login with an item worn (**held**) | the grid puts it back on unasked, with everything else A wore | the same | the same |
+| the agent's `AvatarAppearance` at the arrival (**held**) | lists it | sent, listing nothing | as the flavour's grid |
 
 So a viewer keys an attachment by region and local id, and drops an avatar's
 attachments with the avatar: a Second Life region never kills them on its own.
 Neither grid needs the viewer to re-wear the Current Outfit Folder's
 attachments at a login.
+
+### What the fake grid does (attachments)
+
+`sl-fake-grid` wears, takes off and carries attachments as the tables say
+(`attachments.rs`, `AttachmentPolicy`): the `attachments` census runs offline
+on both flavours and holds every answer but the two that turn on aditi's
+telehub. A worn object is the region's (`AttachedTo`, with the item it is worn
+as); a teleport or a crossing packs what is worn out of the region left and
+puts it back on in the region arrived in, its scripts with it — they hear
+`CHANGED_REGION` (and `CHANGED_TELEPORT`) as their engine raises it, and
+YEngine's own 32768 as they leave. What an account wears is put back on at
+its next login, and its inventory outlives the session: a logout, or the kick
+a second login gives the last one, leaves it where the next login finds it.
 
 ### Not measured (attachments)
 
@@ -259,8 +272,10 @@ attachments at a login.
 - A HUD's scripts and touches; another avatar's view of a scripted
   attachment's chat.
 - A wear while the agent is still arriving, and two wears of one item racing.
-- What the fake grid answers: it models none of it
-  (`fake-grid-own-attachments-and-region-moves`).
+- The `attach(NULL_KEY)` a take-off into the inventory raises: what was
+  measured is a drop's. The fake grid raises it in the object's scripts as it
+  comes off, keeps the object — killed for every viewer — through the
+  region's next tick for them to answer, then saves it into its item.
 
 ## Outfits
 
@@ -279,10 +294,10 @@ by its role in the census, never by its slot.
 | behaviour | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
 | the login's `cof_version` (**held**) | named; the skeleton lists the folder at that version, and the folder's own listing states it too | absent; the skeleton lists the folder | as the flavour's grid |
-| what the folder holds (**held**) | links only: the four body parts, the clothing, the attachments | links only: the four body parts and the clothing | a link per seeded body part |
-| a clothing link's description (**held**) | every one the reference's order token, `@` and `type × 100 + index` | the same (written by viewers that keep the convention) | — |
-| a listing of the folder (**held**) | its own links (AIS3, `InventoryAPIv3`) | its links **and every link's target item** (`FetchInventoryDescendents2`) | — |
-| how AIS3 states a link (**held**) | `linked_id` names the target; **no `asset_id`** | no AIS3 | `linked_id`, as Second Life |
+| what the folder holds (**held**) | links only: the four body parts, the clothing, the attachments | links only: the four body parts and the clothing | a link per seeded body part, and per layer of a dressed account's clothing |
+| a clothing link's description (**held**) | every one the reference's order token, `@` and `type × 100 + index` | the same (written by viewers that keep the convention) | the same |
+| a listing of the folder (**held**) | its own links (AIS3, `InventoryAPIv3`) | its links **and every link's target item** (`FetchInventoryDescendents2`) | as the flavour's grid |
+| how AIS3 states a link (**held**) | `linked_id` names the target; **no `asset_id`**, no flags, permissions or sale; a link just made adds `_broken` and `_embedded` | no AIS3 | as Second Life |
 
 The reference reads an AIS3 link's `linked_id` into the link's asset id
 (`LLInventoryItem::fromLLSD`). Our parser read only `asset_id`, so every link
@@ -296,7 +311,7 @@ reads `linked_id` since.
 
 | behaviour | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
-| an `AgentWearablesUpdate` before one is asked for, at a login (**held**) | none | none | — |
+| an `AgentWearablesUpdate` before one is asked for, at a login (**held**) | none | none | none |
 | the answer (**held**) | four **placeholder items**, wearable types 1 to 4 (skin, hair, eyes, shirt) — the ids the reference sends in its own dummy `AgentIsNowWearing`, "the same as returned by the modified sim" — each naming one of four fixed assets; **no shape** | the outfit: the folder's wearables, each with its asset | `FakeSl`: the four placeholders and their assets; `FakeOpensim`: the outfit it holds |
 | after any change below (**held**) | the same four, whatever is worn | the outfit as the last `AgentIsNowWearing` stated it | as the flavour's grid |
 
@@ -317,13 +332,13 @@ item's link removed, then a bake.
 
 | behaviour | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
-| a link made (**held**) | over AIS3, `201`; `_updated_category_versions` states the folder one version on; the link is listed with its description as written | over UDP (`LinkInventoryItem`), an `UpdateCreateInventoryItem` back; the folder one version on | the link refused (`FakeSl`) or ignored (`FakeOpensim`): the fake grid does not take a write into the folder yet |
-| a link removed (**held**) | over AIS3, `200`; one version on | over UDP (`RemoveInventoryItem`), nothing back; one version on | — |
-| what A is told of either (**held**) | nothing: no `AgentWearablesUpdate`, no appearance, no inventory message | an inventory message for the link made, nothing else | — |
-| a UDP `LinkInventoryItem` into the folder (**held**) | **refused**: the `AlertMessage` "Cannot create requested inventory.", nothing made, the folder unchanged | made, as above | not taken |
-| the link's description rewritten (AIS3 `PATCH` / UDP `UpdateInventoryItem`) (**held**) | kept, the folder one version on | the same | — |
-| a folder link (`AT_LINK_FOLDER`) to an outfit folder (**held**) | made and listed as type 25 | the same | — |
-| a new login with the change made (**held**) | the folder kept as left, the login's `cof_version` the folder's | the folder kept as left | — |
+| a link made (**held**) | over AIS3, `201`; `_updated_category_versions` states the folder one version on; the link is listed with its description as written | over UDP (`LinkInventoryItem`), an `UpdateCreateInventoryItem` back; the folder one version on | as the flavour's grid |
+| a link removed (**held**) | over AIS3, `200`; one version on | over UDP (`RemoveInventoryItem`), nothing back; one version on | as the flavour's grid |
+| what A is told of either (**held**) | nothing: no `AgentWearablesUpdate`, no appearance, no inventory message | an inventory message for the link made, nothing else | as the flavour's grid |
+| a UDP `LinkInventoryItem` into the folder (**held**) | **refused**: the `AlertMessage` "Cannot create requested inventory.", nothing made, the folder unchanged | made, as above | as the flavour's grid |
+| the link's description rewritten (AIS3 `PATCH` / UDP `UpdateInventoryItem`) (**held**) | kept, the folder one version on | the same | the same |
+| a folder link (`AT_LINK_FOLDER`) to an outfit folder (**held**) | made and listed as type 25 | the same | the same |
+| a new login with the change made (**held**) | the folder kept as left, the login's `cof_version` the folder's | the folder kept as left | the same: an account's inventory outlives its session |
 
 ### The bake's version
 
@@ -332,7 +347,7 @@ names a version of the outfit, and on Second Life that is not the folder's.
 
 | behaviour | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
-| the version a bake expects after changes to the folder | the one of the last `IncrementCOFVersion`: behind the folder's own version by however many writes followed it | no capability | — |
+| the version a bake expects after changes to the folder | the one of the last `IncrementCOFVersion`: behind the folder's own version by however many writes followed it | no capability | as the flavour's grid |
 | `IncrementCOFVersion` (**held**) | answers the folder's version plus one, and moves the folder's own version with it | no capability | — |
 | a bake at the version it answered (**held**) | accepted | no capability | — |
 | a refused bake's dump of the outfit (`cof_raw`, `debug_cof`) | the outfit of the **last accepted bake**, not the folder as it stands | no capability | — |
@@ -352,7 +367,7 @@ The legacy road: the whole outfit stated, the shape's copy in the shape's slot.
 | what A is told (**held**) | nothing | nothing | nothing |
 | the folder (**held**) | untouched | untouched | untouched |
 | the next answer to `AgentWearablesRequest` (**held**) | the placeholders | names the copy | as the flavour's grid |
-| a new login (**held**) | the placeholders | names the copy: the outfit is kept | — |
+| a new login (**held**) | the placeholders | names the copy: the outfit is kept | as the flavour's grid |
 
 ### Layer order
 
@@ -362,12 +377,23 @@ in each order.
 
 | behaviour | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
-| the slot's layers as the bake lists them (**held**) | in the order of their tokens: the layer, then the first copy, then the second; with the tokens swapped, the second before the first | no capability | — |
+| the slot's layers as the bake lists them (**held**) | in the order of their tokens: the layer, then the first copy, then the second; with the tokens swapped, the second before the first | no capability | as Second Life: `FakeSl` bakes the folder's outfit, in token order |
 | the slot's layers in the answer after `AgentIsNowWearing` (**held**) | the placeholders | **as sent**, in either order | `FakeOpensim`: as sent |
 
 The reference sorts a slot's links by their description's token
 (`LLAppearanceMgr` `sortItemsByActualDescription`); the order a folder lists
 them in says nothing. Our viewer orders the folder's wearables the same way.
+
+### What the fake grid does (outfits)
+
+The folder takes every write both grids take, as the flavour takes it, and
+keeps it across a login with the rest of the inventory; `FakeOpensim` keeps
+the outfit the last `AgentIsNowWearing` stated as well. `FakeSl`'s bake
+service bakes the folder's outfit, each slot's layers in token order. The
+`outfits` census runs offline on both flavours and holds every answer, its
+accounts dressed (`AccountConfig::dressed`) in a pair of pants and a pair of
+shoes over their body parts — two clothing layers, as the live test avatars
+wear, on slots Second Life's placeholder wearables leave alone.
 
 ### Not measured (outfits)
 
@@ -376,5 +402,3 @@ them in says nothing. Our viewer orders the folder's wearables the same way.
   own contents.
 - A body part replaced by a different asset, where a bake would show it.
 - Two viewers of one account changing the folder at once.
-- What the fake grid answers a write into the folder: it takes none yet
-  (`fake-grid-own-attachments-and-region-moves` carries this model).

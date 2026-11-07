@@ -2,10 +2,10 @@
 id: server-fake-grid-agent-avatars-shared
 title: Fake grid — logged-in agents see each other's avatars
 topic: server
-status: ideas
+status: done
 origin: test-e2e-live-verify-sweep (2026-09-30)
 refs: [test-e2e-sweep-two-avatars, server-world-agent-movement, gridspec-logout,
-  server-world-sit-and-attach]
+  server-world-sit-and-attach, fake-grid-own-attachments-and-region-moves]
 blocked_by: [gridspec-avatar-presence, gridspec-animations]
 ---
 
@@ -101,3 +101,58 @@ is told of an avatar's appearance:
 
 Add the `appearance-baking` census's `*_seen_*` keys to the held fake columns
 once this is built.
+
+## Done (2026-11-07)
+
+Each region keeps its residents (`world::Resident`): what its other viewers
+are shown of each agent — body, appearance, animations, where it stands —
+from the arrival to the departure, and new `RegionChange`s carry what
+happens to it (`ResidentArrived`, `ResidentShown`, `ResidentMoved`,
+`ResidentAnimated`, `ResidentAppearance`, `ResidentLeft`); each session's
+watcher streams them (`driver::stream_resident`).
+
+- **Arrival**: a newcomer's burst sends everybody already there after the
+  NPCs, however far off; the newcomer is introduced to the others —
+  object, appearance, animations, then what it wears (never a HUD;
+  `seating::shown_to` now shows another resident's attachments).
+- **Movement**: every terse update the avatar controller sends an agent of
+  itself goes to the others at the same cadence; a posture change's
+  statement too. A sit, a stand (viewer, script or `seat_on`) and a
+  teleport within the region re-send the object.
+- **Animations**: every statement the agent is sent, the others are sent
+  under the same numbers in the observer's shape (`animations::Observed`:
+  Second Life one nil source and one empty physical block, OpenSim none),
+  over a new `SimSession::send_avatar_animation_statement`.
+- **Appearance**: Second Life's record after each accepted bake; OpenSim's
+  publish relayed as sent, to the others only.
+- **Departure**: a logout (the reaper, via `seating::leave`) and a walk over
+  a border (`crossing`) kill it for the others; a teleport away kills it as
+  the finish goes out on Second Life and not at all on OpenSim, as the
+  `attachments` census held them
+  ([[fake-grid-own-attachments-and-region-moves]]).
+- **Coarse feed**: the NPCs, the other residents and the agent, refreshed
+  on every resident change. A child circuit now gets its region's own feed
+  (`SimSession::start_child_coarse_feed`; a demoted root keeps its feed
+  without its own entry) and its residents as full objects.
+- **Parcel privacy**: `PresencePolicy::hides_on_private_parcels`, on
+  `FakeOpensim` only (Second Life unmeasured): killed for viewers off the
+  parcel as it steps in, introduced again as it or they cross the line.
+- **World map**: agent locations from every region's roster
+  (`MapPolicy::agent_items`): OpenSim an item each at its whole metre,
+  Second Life a count per 64 m square (inside the measured 11 to 128 m).
+- **Conformance**: `avatar-presence` runs whole offline (its `is_fake`
+  branch dropped); `logout-seated` joined the offline list; the
+  `animations` and `appearance-baking` seen keys are held on the fake
+  flavours, but for `idle_seen_sources`, which a one-entry set cannot
+  answer.
+- **Tests**: `client_end_to_end` — residents shown to each other (arrival
+  both ways, an animation in the observer's shape, the logout's kill), a
+  walking resident moved and listed coarsely, a resident next door shown
+  down the child circuit and killed here, a private parcel hiding its
+  resident on OpenSim only; `world_map` unit test of the items.
+
+Not imitated: the timings (everything goes in the breath that caused
+it); Second Life's repeats of an
+idle avatar's animations and of an arrival's appearance; OpenSim's
+two-minute map cache for another region. `parcel-privacy` waits on a
+parcel divide ([[server-fake-grid-parcel-divide-join]]).

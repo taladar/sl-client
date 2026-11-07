@@ -149,11 +149,37 @@ impl BakeService {
     /// Bakes `sim`'s agent's outfit — what it wears, resolved out of `assets`
     /// — naming each slot's bake, or `None` when there are no character assets
     /// or the agent wears nothing the store holds.
+    ///
+    /// The outfit is the Current Outfit Folder's, as Second Life bakes it: the
+    /// wearables its links name, each slot's layers in the order of their
+    /// links' tokens and each described by its link's
+    /// (`outfits`, 2026-10-20, `book/src/gridspec/appearance.md` § Layer
+    /// order). A folder that links no wearable leaves the outfit the agent
+    /// last stated (`AgentIsNowWearing`).
     #[must_use]
     pub(crate) fn bake(&self, sim: &SimSession, assets: &GridAssets) -> Option<BakedOutfit> {
         let character = self.character.as_ref()?;
         let agent = sim.agent_id()?.uuid();
-        let (_serial, worn) = sim.agent_wearables();
+        let from_folder = folder_outfit(sim.agent_inventory());
+        let worn: Vec<sl_proto::Wearable> = if from_folder.is_empty() {
+            sim.agent_wearables().1.to_vec()
+        } else {
+            from_folder
+                .iter()
+                .map(|(wearable, _token)| *wearable)
+                .collect()
+        };
+        let worn = worn.as_slice();
+        let described = |item: &sl_proto::InventoryItem| {
+            let mut item = item.clone();
+            if let Some((_wearable, token)) = from_folder
+                .iter()
+                .find(|(wearable, _token)| wearable.item_id == item.item_id)
+            {
+                item.description.clone_from(token);
+            }
+            item
+        };
         let parsed: Vec<(WearableAsset, String, Uuid)> = worn
             .iter()
             .filter_map(|wearable| {
@@ -226,7 +252,7 @@ impl BakeService {
             .iter()
             .filter_map(|wearable| {
                 Some(BakedItem {
-                    item: inventory.item(wearable.item_id)?.clone(),
+                    item: described(inventory.item(wearable.item_id)?),
                     agent,
                     wearable: worn_item(wearable.item_id),
                 })
@@ -314,6 +340,54 @@ fn bake_id(region: BakeRegion, texture_ids: &[Uuid], visual_params: &[u8]) -> Uu
     }
     context.consume(visual_params);
     Uuid::from_bytes(context.compute().0)
+}
+
+/// The outfit the Current Outfit Folder of `inventory` holds: each wearable
+/// its links name, with the description of the link that names it, by slot
+/// and within a slot by the number of the link's order token (`@` and the
+/// slot's code × 100 + the layer's index), as the reference sorts them
+/// (`LLAppearanceMgr` `sortItemsByActualDescription`). A link without a token
+/// goes after those with one, in the folder's order.
+fn folder_outfit(inventory: &sl_proto::SimInventoryTree) -> Vec<(sl_proto::Wearable, String)> {
+    let mut outfit: Vec<(u8, u32, usize, sl_proto::Wearable, String)> = inventory
+        .current_outfit_items()
+        .into_iter()
+        .enumerate()
+        .filter_map(|(order, link)| {
+            let target = inventory.item(InventoryKey::from(link.asset_id))?;
+            let wearable_type = sl_proto::WearableType::from_code(
+                u8::try_from(target.flags & 0xFF).unwrap_or(u8::MAX),
+            );
+            let is_wearable = matches!(
+                sl_proto::AssetType::from_code(i32::from(target.item_type)),
+                sl_proto::AssetType::Clothing | sl_proto::AssetType::Bodypart
+            );
+            if !is_wearable {
+                return None;
+            }
+            let token = link
+                .description
+                .strip_prefix('@')
+                .and_then(|digits| digits.parse::<u32>().ok())
+                .unwrap_or(u32::MAX);
+            Some((
+                wearable_type.to_code(),
+                token,
+                order,
+                sl_proto::Wearable {
+                    item_id: target.item_id,
+                    asset_id: Some(target.asset_id),
+                    wearable_type,
+                },
+                link.description.clone(),
+            ))
+        })
+        .collect();
+    outfit.sort_by_key(|(slot, token, order, _wearable, _description)| (*slot, *token, *order));
+    outfit
+        .into_iter()
+        .map(|(_slot, _token, _order, wearable, description)| (wearable, description))
+        .collect()
 }
 
 #[cfg(test)]

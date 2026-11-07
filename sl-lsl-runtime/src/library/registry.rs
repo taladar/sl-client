@@ -202,6 +202,7 @@ crate::registry! {
         LlForceMouselook => sitting::ll_force_mouselook,
         LlGetAttached => sitting::ll_get_attached,
         LlAttachToAvatar => sitting::ll_attach_to_avatar,
+        LlAttachToAvatarTemp => sitting::ll_attach_to_avatar_temp,
         LlDetachFromAvatar => sitting::ll_detach_from_avatar,
         LlGetPos => sitting::ll_get_pos,
         LlGetLocalPos => sitting::ll_get_local_pos,

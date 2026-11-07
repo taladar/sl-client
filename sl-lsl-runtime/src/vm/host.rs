@@ -295,6 +295,14 @@ pub trait Host {
     /// was last worn on.
     fn attach(&mut self, caller: CallerId, point: i32);
 
+    /// `llAttachToAvatarTemp`: wear `caller`'s object on its owner's `point`
+    /// as [`attach`](Self::attach) does, but filed as no item — its
+    /// `AttachItemID` its own id — and gone when it comes off. A host that
+    /// keeps no inventory wears it as any other.
+    fn attach_temp(&mut self, caller: CallerId, point: i32) {
+        self.attach(caller, point);
+    }
+
     /// `llDetachFromAvatar`: take `caller`'s worn object off, back into its
     /// wearer's inventory.
     fn detach(&mut self, caller: CallerId);

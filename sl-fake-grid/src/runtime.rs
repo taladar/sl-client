@@ -469,6 +469,12 @@ pub(crate) struct GridCore {
     /// ([`crate::bakes::OutfitVersions`]): shared with every session, which
     /// stores an `IncrementCOFVersion` into it, and read at each login.
     pub(crate) outfit_versions: crate::bakes::OutfitVersions,
+    /// What every account wears as its last session left it, which a login
+    /// puts back on ([`crate::attachments::WornOutfits`]).
+    pub(crate) worn_outfits: crate::attachments::WornOutfits,
+    /// Every account's inventory as its last session left it
+    /// ([`crate::inventory::Inventories`]).
+    pub(crate) inventories: crate::inventory::Inventories,
     /// Each account's active gestures ([`crate::notecards::ActiveGestures`]):
     /// shared with every session, which files its activations into it, and
     /// read at each login.
@@ -644,6 +650,9 @@ pub(crate) struct GridCore {
     /// The world-map region catalogue every session answers map requests
     /// from, derived once from [`regions`](Self::regions) at start.
     map: Arc<[sl_proto::MapRegionInfo]>,
+    /// Every region's world by its handle, for the one answer a session gives
+    /// about regions not its own: who stands where on the world map.
+    worlds: Arc<[(RegionHandle, crate::world::RegionWorld)]>,
     /// Live sessions by sequence number.
     pub(crate) sessions: Mutex<HashMap<u64, SharedSim>>,
     /// Mints session sequence numbers.
@@ -811,6 +820,9 @@ impl GridCore {
         let region = self.region(region_index).ok_or(Error::UnknownRegion {
             region: region_index.to_string(),
         })?;
+        // The inventory as the account's last session left it: logged out, or
+        // kicked by this login.
+        let inventory = self.inventories.get(account.agent_id);
         let prepared = self
             .prepare_region_session(account, region_index, ids, None, SessionRole::Root)
             .await?;
@@ -825,6 +837,14 @@ impl GridCore {
         ));
         {
             let mut state = prepared.shared.state.lock().await;
+            // A login puts back on what the account last wore, as both grids
+            // do; a teleport or a crossing carries it instead.
+            state.rewear_on_arrival = true;
+            // What it made, the outfit folder as it wrote it, and the outfit
+            // as it last stated it.
+            if let Some(kept) = inventory {
+                kept.restore(&mut state.sim);
+            }
             // Every account, not only the agent's own: a grid's people service
             // names anyone with an account — a friend in the buddy list, say.
             for known in &self.accounts {
@@ -969,6 +989,15 @@ impl GridCore {
         sim.set_link_tuning(self.circuit_policy.link, now);
         sim.set_timeout_kick(self.circuit_policy.timeout_kick.map(str::to_owned));
         sim.set_short_zero_tails(self.circuit_policy.short_zero_tails);
+        // Every session mints its ids from a range of its own: an item one
+        // session copies stays in the inventory the next one starts from.
+        sim.seed_serials(self.minter.uuid().as_u128() & SERIAL_BASE_MASK);
+        // A worn or a dropped object states no owner, and nothing does without
+        // a sound (`attachments`, 2026-10-20).
+        sim.set_update_owner(self.imitated.attachment_policy().update_owner);
+        sim.set_owner_modify_to_others(
+            self.imitated.attachment_policy().others_told_owner_modifies,
+        );
         sim.set_bare_environment_replies(matches!(
             self.environment_change_reply,
             crate::imitates::EnvironmentChangeReply::Bare
@@ -1021,6 +1050,9 @@ impl GridCore {
             ..environment
         });
         (region.scenario.setup)(&mut sim, now);
+        if account.config.dressed {
+            crate::scenario::dress(&mut sim);
+        }
         // The identity half of the seeding, run here because here is the first
         // place that knows who logged in: the scenario's `setup` above ran
         // against a session whose circuit is not open, so `SimSession::agent_id`
@@ -1177,6 +1209,8 @@ impl GridCore {
             own_appearance_owed: false,
             published_bakes: crate::bakes::PublishedBakes::default(),
             outfit_versions: self.outfit_versions.clone(),
+            worn_outfits: self.worn_outfits.clone(),
+            inventories: self.inventories.clone(),
             active_gestures: self.active_gestures.clone(),
             groups: self
                 .groups
@@ -1210,6 +1244,8 @@ impl GridCore {
             avatar,
             selection: crate::object_edits::Selection::new(),
             camera_at: None,
+            hidden: std::collections::BTreeSet::new(),
+            rewear_on_arrival: false,
             arrived_at: None,
             seq,
             region: region_index,
@@ -1218,6 +1254,7 @@ impl GridCore {
             seed_url: seed_url.clone(),
             udp_addr,
             map: Arc::clone(&self.map),
+            worlds: Arc::clone(&self.worlds),
             timeline: region.scenario.timeline.steps.clone(),
             timeline_cursor: 0,
             timeline_generation: 0,
@@ -1427,12 +1464,20 @@ async fn reap_closed_session(core: Arc<GridCore>, seq: u64, shared: SharedSim) {
         }
     }
     // Gone from the region: off its seat, and what it wore taken out with
-    // it, as a logout takes them on both grids.
+    // it, as a logout takes them on both grids — unless the agent stands in
+    // the region again under a newer session, as it does after a login that
+    // never logged the last one out.
     let (region, agent) = {
         let state = shared.state.lock().await;
         (state.region, state.avatar.agent_id)
     };
-    if let Some(entry) = core.region(region) {
+    let back_again = match core.root_session_of(agent).await {
+        Some(newer) if !Arc::ptr_eq(&newer.state, &shared.state) => {
+            newer.state.lock().await.region == region
+        }
+        _other => false,
+    };
+    if !back_again && let Some(entry) = core.region(region) {
         let changes = crate::seating::leave(&mut entry.world.lock(), agent);
         for change in changes {
             // A region nobody is left in has nobody to tell.
@@ -1444,6 +1489,22 @@ async fn reap_closed_session(core: Arc<GridCore>, seq: u64, shared: SharedSim) {
     }
     core.remove_session(seq).await;
 }
+
+/// The bits of a session's serial base a minted id supplies: all but the low
+/// 32, which the session counts up through.
+const SERIAL_BASE_MASK: u128 = !0xFFFF_FFFF;
+
+/// Where the region at `index` in the grid's table starts minting
+/// region-local ids: the first region where its scene leaves off, every later
+/// one a million ids further on.
+fn region_id_base(index: usize) -> RegionLocalObjectId {
+    let index = u32::try_from(index).unwrap_or(u32::MAX);
+    RegionLocalObjectId(index.saturating_mul(REGION_ID_SPAN))
+}
+
+/// How many region-local ids apart two regions of a grid start minting
+/// ([`region_id_base`]).
+const REGION_ID_SPAN: u32 = 1 << 20;
 
 /// Derives the `get_grid_info` document: the login URI doubles as the
 /// economy helper URI (the helper scripts live next to the login endpoint).
@@ -2289,7 +2350,8 @@ impl FakeGridBuilder {
         let regions = self
             .regions
             .into_iter()
-            .map(|config| {
+            .enumerate()
+            .map(|(index, config)| {
                 let region_id = config.region_id.unwrap_or_else(|| minter.uuid());
                 let scenario = config
                     .scenario
@@ -2312,6 +2374,12 @@ impl FakeGridBuilder {
                 fixtures.contents = self.imitates.contents_policy();
                 fixtures.changes = self.imitates.change_policy();
                 fixtures.relays = self.imitates.relay_policy();
+                fixtures.presence = self.imitates.presence_policy();
+                fixtures.attachments = self.imitates.attachment_policy();
+                // Each region mints from a range of its own, as a live grid's
+                // regions do not share one: an object that moves between two
+                // is not handed the number it had in the other by chance.
+                fixtures.mint_above(region_id_base(index));
                 fixtures.scripts = self.imitates.script_compile_policy();
                 fixtures.chat = self.imitates.chat_policy();
                 fixtures.region_info = self.imitates.region_info_policy();
@@ -2361,6 +2429,10 @@ impl FakeGridBuilder {
         // region table never changes after start, so it is built once here
         // rather than per login.
         let map: Arc<[sl_proto::MapRegionInfo]> = crate::world_map::catalogue(&regions).into();
+        let worlds: Arc<[(RegionHandle, crate::world::RegionWorld)]> = regions
+            .iter()
+            .map(|region| (region.handle(), Arc::clone(&region.world)))
+            .collect();
         let accounts: Vec<Account> = self
             .accounts
             .into_iter()
@@ -2442,6 +2514,8 @@ impl FakeGridBuilder {
             groups: parking_lot::Mutex::new(groups),
             homes: crate::agent_requests::Homes::default(),
             outfit_versions: crate::bakes::OutfitVersions::default(),
+            worn_outfits: crate::attachments::WornOutfits::default(),
+            inventories: crate::inventory::Inventories::default(),
             active_gestures: crate::notecards::ActiveGestures::default(),
             groups_policy,
             estate_owner,
@@ -2529,6 +2603,7 @@ impl FakeGridBuilder {
             region_protocols: self.imitates.region_protocol_bits() | bakes.region_protocol_bits(),
             map_tiles,
             map,
+            worlds,
             sessions: Mutex::new(HashMap::new()),
             next_session: AtomicU64::new(1),
             shutdown_tx,
@@ -3243,14 +3318,16 @@ impl FakeAgent {
                 (offset.clone(), unturned.clone()),
                 on_target,
             );
-            crate::world::push_seated_avatar(
-                &world,
+            if let Some(change) = crate::world::push_seated_avatar(
+                &mut world,
                 &state.avatar,
                 seat,
                 (offset, unturned),
                 &mut state.sim,
                 now,
-            );
+            ) {
+                state.publish(change);
+            }
             drop(world);
         }
         let outcome = self.shared.flush_locked(&mut guard);

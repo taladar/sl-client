@@ -55,6 +55,9 @@ pub mod prim_flags {
     pub const OBJECT_MOVE: u32 = 1 << 8;
     /// The object is phantom — no collisions (`FLAGS_PHANTOM`).
     pub const PHANTOM: u32 = 1 << 10;
+    /// The prim's contents are empty (`FLAGS_INVENTORY_EMPTY`): both grids
+    /// set it on a prim that holds nothing (`attachments`, 2026-10-20).
+    pub const INVENTORY_EMPTY: u32 = 1 << 11;
     /// The object is listed in parcel search (`FLAGS_INCLUDE_IN_SEARCH`), what
     /// an `ObjectIncludeInSearch` sets.
     pub const INCLUDE_IN_SEARCH: u32 = 1 << 15;

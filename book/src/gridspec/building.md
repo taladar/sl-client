@@ -322,7 +322,8 @@ move.** Its handler asks nobody's permission.
 ### With no right over it
 
 What the stranger's update flags say it may do with the cube: transfer and
-"the owner may modify" on Second Life, transfer on OpenSim.
+"the owner may modify" on Second Life, transfer on OpenSim. The fake grid
+states each flavour's, for every prim.
 
 | attempt | Second Life | OpenSim |
 | --- | --- | --- |

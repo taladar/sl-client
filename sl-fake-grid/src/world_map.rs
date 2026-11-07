@@ -16,10 +16,11 @@
 //!
 //! What this grid has nothing to say about is left unanswered, as both live
 //! grids leave it: it has no telehubs, no land for sale and no events, and a
-//! request for those items gets no reply. And its residents are not shown to
-//! each other (`server-fake-grid-agent-avatars-shared`), so a region's agent
-//! locations are always the one item both grids send for a region with
-//! nobody to show.
+//! request for those items gets no reply. A region's agent locations are its
+//! residents but the asker, as the flavour's grid makes items of them
+//! ([`AgentItems`]), or the one item both grids send for a region with nobody
+//! to show. Both are answered as the region stands: OpenSim's habit of
+//! keeping another region's answer for two minutes is not imitated.
 //!
 //! [`crate::map_tiles`] is the other half, and a different protocol: the JPEG
 //! tiles a modern viewer fetches over HTTP. This module is the legacy UDP
@@ -31,10 +32,11 @@ use sl_proto::{
     MapBlockBatch, MapBlockRecord, MapItem, MapItemType, MapLayer, MapRegionInfo, MapRequestFlags,
     RegionHandle, ServerEvent, SimSession,
 };
-use sl_types::key::TextureKey;
+use sl_types::key::{AgentKey, TextureKey};
+use sl_types::lsl::Vector;
 use sl_types::map::{GlobalCoordinates, GridCoordinates, GridRectangle};
 
-use crate::imitates::{DotName, EmptyCells, MapLayerAnswer, MapPolicy, NameMatch};
+use crate::imitates::{AgentItems, DotName, EmptyCells, MapLayerAnswer, MapPolicy, NameMatch};
 use crate::runtime::RegionEntry;
 
 /// The width and height, in metres, of every region a fake grid serves.
@@ -78,12 +80,16 @@ fn block_for(entry: &RegionEntry) -> MapRegionInfo {
     }
 }
 
+/// Who stands where in a region, by its handle: each resident and its
+/// position in the region ([`crate::world::SceneFixtures::residents`]).
+pub(crate) type Roster<'a> = &'a dyn Fn(RegionHandle) -> Vec<(AgentKey, Vector)>;
+
 /// Answers one world-map request from `map`, the grid's whole region
 /// catalogue, as `policy`'s grid does. `here` is the region handle of the
-/// session answering.
+/// session answering, and `roster` who stands where in each region.
 pub(crate) fn answer_map_request(
     policy: &MapPolicy,
-    map: &[MapRegionInfo],
+    (map, roster): (&[MapRegionInfo], Roster<'_>),
     here: RegionHandle,
     sim: &mut SimSession,
     event: &ServerEvent,
@@ -125,7 +131,14 @@ pub(crate) fn answer_map_request(
             region_handle,
             flags,
         } => {
-            for (kind, items) in item_answer(policy, map, here, *item_type, *region_handle) {
+            let asker = sim.agent_id();
+            for (kind, items) in item_answer(
+                policy,
+                map,
+                (here, asker, roster),
+                *item_type,
+                *region_handle,
+            ) {
                 if let Err(error) = sim.send_map_item_reply(*flags, kind, &items, now) {
                     tracing::warn!("answering a map item request failed: {error}");
                 }
@@ -310,12 +323,13 @@ fn name_answer(
 /// The replies to a `MapItemRequest`: each a type and its items.
 ///
 /// Only agent locations are ever answered, since this grid has no other
-/// item, and with the one item both grids send for a region with nobody to
-/// show. A region the grid does not have is not answered about on either.
+/// item: the region's residents but the asker ([`agent_items`]), or the one
+/// item both grids send for a region with nobody to show. A region the grid
+/// does not have is not answered about on either.
 fn item_answer(
     policy: &MapPolicy,
     map: &[MapRegionInfo],
-    here: RegionHandle,
+    (here, asker, roster): (RegionHandle, Option<AgentKey>, Roster<'_>),
     item_type: MapItemType,
     region_handle: RegionHandle,
 ) -> Vec<(MapItemType, Vec<MapItem>)> {
@@ -330,10 +344,75 @@ fn item_answer(
     if !agents {
         return Vec::new();
     }
+    let others: Vec<Vector> = roster(target)
+        .into_iter()
+        .filter(|(agent, _at)| Some(*agent) != asker)
+        .map(|(_agent, at)| at)
+        .collect();
+    let items = agent_items(policy, target, &others);
     vec![(
         MapItemType::AgentLocations,
-        vec![empty_region_dot(policy, target)],
+        if items.is_empty() {
+            vec![empty_region_dot(policy, target)]
+        } else {
+            items
+        },
     )]
+}
+
+/// The agent-location items of `region`'s avatars standing at `others`, as
+/// `policy`'s grid makes them ([`AgentItems`]); none for nobody.
+fn agent_items(policy: &MapPolicy, region: RegionHandle, others: &[Vector]) -> Vec<MapItem> {
+    let item = |(x, y): (u8, u8), extra: i32| MapItem {
+        position: GlobalCoordinates::from_grid_and_region(
+            GridCoordinates::from(region),
+            sl_types::map::RegionCoordinates::new(f32::from(x), f32::from(y), 0.0),
+        ),
+        id: None,
+        extra,
+        extra2: 0,
+        name: dot_name(policy, region),
+    };
+    match policy.agent_items {
+        AgentItems::EachAtWholeMetres => others
+            .iter()
+            .map(|at| item((whole_metre(at.x), whole_metre(at.y)), 1))
+            .collect(),
+        AgentItems::CountedPerCell { cell_m } => {
+            let corner = |value: f32| {
+                let whole = whole_metre(value);
+                whole.saturating_sub(whole.checked_rem(cell_m).unwrap_or(0))
+            };
+            let mut counts: std::collections::BTreeMap<(u8, u8), i32> =
+                std::collections::BTreeMap::new();
+            for at in others {
+                let count = counts.entry((corner(at.x), corner(at.y))).or_insert(0);
+                *count = count.saturating_add(1);
+            }
+            counts
+                .into_iter()
+                .map(|(spot, count)| item(spot, count))
+                .collect()
+        }
+    }
+}
+
+/// `value`, a position along one of a region's axes, cut down to a whole
+/// metre and held inside the region.
+fn whole_metre(value: f32) -> u8 {
+    (0..=u8::MAX)
+        .rev()
+        .find(|whole| f32::from(*whole) <= value)
+        .unwrap_or(0)
+}
+
+/// What an agent-location item of `region` is called, as `policy`'s grid
+/// names one.
+fn dot_name(policy: &MapPolicy, region: RegionHandle) -> String {
+    match policy.agent_dot_name {
+        DotName::Uuid => uuid::Uuid::from_u128(u128::from(region.0)).to_string(),
+        DotName::Hash => format!("{:032x}", region.0),
+    }
 }
 
 /// The agent-location item of a region with nobody to show: an `Extra` of
@@ -348,10 +427,7 @@ fn empty_region_dot(policy: &MapPolicy, region: RegionHandle) -> MapItem {
         id: None,
         extra: 0,
         extra2: 0,
-        name: match policy.agent_dot_name {
-            DotName::Uuid => uuid::Uuid::from_u128(u128::from(region.0)).to_string(),
-            DotName::Hash => format!("{:032x}", region.0),
-        },
+        name: dot_name(policy, region),
     }
 }
 
@@ -407,7 +483,8 @@ mod test {
     use sl_proto::{
         MapBlockKind, MapItemType, MapRegionInfo, MapRequestFlags, Maturity, RegionHandle,
     };
-    use sl_types::key::TextureKey;
+    use sl_types::key::{AgentKey, TextureKey};
+    use sl_types::lsl::Vector;
     use sl_types::map::{GridCoordinates, GridRectangleLike as _, RegionName};
 
     use super::{
@@ -608,6 +685,7 @@ mod test {
     /// OpenSim sends it for any type asked of the agent's own region by name.
     #[test]
     fn an_empty_region_has_one_dot_that_counts_nobody() -> Result<(), String> {
+        let nobody = |_region: RegionHandle| Vec::new();
         let here = RegionHandle::from_grid(1000, 1000);
         let east = RegionHandle::from_grid(1001, 1000);
         for (grid, inset) in [
@@ -616,8 +694,13 @@ mod test {
         ] {
             let policy = grid.map_policy();
             for handle in [RegionHandle(0), here, east] {
-                let answer =
-                    item_answer(&policy, &pair(), here, MapItemType::AgentLocations, handle);
+                let answer = item_answer(
+                    &policy,
+                    &pair(),
+                    (here, None, &nobody),
+                    MapItemType::AgentLocations,
+                    handle,
+                );
                 let (kind, items) = answer.first().ok_or("agent locations are answered")?;
                 assert_eq!(*kind, MapItemType::AgentLocations);
                 let item = items.first().ok_or("one item")?;
@@ -632,7 +715,7 @@ mod test {
                 item_answer(
                     &policy,
                     &pair(),
-                    here,
+                    (here, None, &nobody),
                     MapItemType::AgentLocations,
                     RegionHandle::from_grid(100, 100)
                 )
@@ -643,7 +726,7 @@ mod test {
                 item_answer(
                     &policy,
                     &pair(),
-                    here,
+                    (here, None, &nobody),
                     MapItemType::Telehub,
                     RegionHandle(0)
                 )
@@ -654,7 +737,7 @@ mod test {
             item_answer(
                 &grid.map_policy(),
                 &pair(),
-                here,
+                (here, None, &nobody),
                 MapItemType::Telehub,
                 handle,
             )
@@ -663,6 +746,62 @@ mod test {
         assert_eq!(named(ImitatedGrid::SecondLife, here), 0);
         assert_eq!(named(ImitatedGrid::OpenSim, here), 1);
         assert_eq!(named(ImitatedGrid::OpenSim, east), 0);
+        Ok(())
+    }
+
+    /// A region's residents but the asker are its agent locations: one item
+    /// each at its whole metre with an `Extra` of one on OpenSim, a count per
+    /// square at its corner on Second Life.
+    #[test]
+    fn residents_are_dots_as_each_grid_draws_them() -> Result<(), String> {
+        let here = RegionHandle::from_grid(1000, 1000);
+        let agent = |n: u128| AgentKey::from(uuid::Uuid::from_u128(n));
+        let at = |x: f32, y: f32| Vector { x, y, z: 25.0 };
+        let roster = move |region: RegionHandle| {
+            if region == here {
+                vec![
+                    (agent(1), at(8.4, 10.9)),
+                    (agent(2), at(9.0, 12.0)),
+                    (agent(3), at(128.0, 128.0)),
+                ]
+            } else {
+                Vec::new()
+            }
+        };
+        let dots = |grid: ImitatedGrid, asker: u128| -> Result<Vec<(f64, f64, i32)>, String> {
+            let answer = item_answer(
+                &grid.map_policy(),
+                &pair(),
+                (here, Some(agent(asker)), &roster),
+                MapItemType::AgentLocations,
+                RegionHandle(0),
+            );
+            let (_kind, items) = answer.first().ok_or("agent locations are answered")?;
+            Ok(items
+                .iter()
+                .map(|item| {
+                    (
+                        item.position.x() - 256_000.0,
+                        item.position.y() - 256_000.0,
+                        item.extra,
+                    )
+                })
+                .collect())
+        };
+        assert_eq!(
+            dots(ImitatedGrid::OpenSim, 1)?,
+            vec![(9.0, 12.0, 1), (128.0, 128.0, 1)],
+            "the asker is not counted"
+        );
+        assert_eq!(
+            dots(ImitatedGrid::SecondLife, 3)?,
+            vec![(0.0, 0.0, 2)],
+            "two near the corner are one item counting both"
+        );
+        assert_eq!(
+            dots(ImitatedGrid::SecondLife, 1)?,
+            vec![(0.0, 0.0, 1), (128.0, 128.0, 1)]
+        );
         Ok(())
     }
 

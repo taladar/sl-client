@@ -259,7 +259,16 @@ pub(crate) async fn teleport_session(
                         z: landing.z(),
                     },
                 );
-                crate::world::send_objects(&mut state.sim, &[avatar], now)
+                let sent =
+                    crate::world::send_objects(&mut state.sim, core::slice::from_ref(&avatar), now);
+                // The region's other viewers are shown it where it landed.
+                let mut world = state.world.lock();
+                if let Some(shown) = world.reshow_resident(state.avatar.agent_id, &avatar) {
+                    state.publish(shown);
+                }
+                drop(world);
+                crate::driver::refresh_privacy(state, now);
+                sent
             })
             .await?;
         return Ok(TeleportOutcome::Local);
@@ -432,6 +441,30 @@ pub(crate) async fn teleport_session(
         return Ok(TeleportOutcome::Refused);
     }
 
+    // What the agent wears goes with it, under the same full ids; and the
+    // region it leaves kills its avatar — for the agent itself before it
+    // arrives and for the viewers left behind, never what it wears — where
+    // the grid kills it, and tells nobody anything where it does not
+    // (`attachments`, 2026-10-20).
+    crate::attachments::carry(core, source, (agent_id, true), request.region).await;
+    crate::inventory::hand_over(source, &dest).await;
+    source
+        .with_state(|state| {
+            let mut world = state.world.lock();
+            let kills = world.attachments.teleport_kills_avatar;
+            let shown = world.hide_resident(agent_id);
+            if kills && let Some(local_id) = shown {
+                if let Err(error) = state.sim.send_kill_object(&[local_id], source.now()) {
+                    tracing::warn!("killing the departing avatar failed: {error}");
+                }
+                state.publish(crate::world::RegionChange::ResidentLeft {
+                    agent: agent_id,
+                    local_id,
+                });
+            }
+            drop(world);
+        })
+        .await;
     source
         .with_sim(|sim| {
             // The destination is **not** announced first. `TransferAgent_V2`
@@ -470,6 +503,7 @@ pub(crate) async fn teleport_session(
             core.remove_session(dest_seq).await;
             dest.with_sim(SimSession::abandon).await;
         }
+        crate::attachments::bring_back(core, source, agent_id, request.region).await;
         if let Err(error) = source
             .with_sim(|sim| {
                 send_failure(

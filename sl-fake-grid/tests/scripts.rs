@@ -62,6 +62,8 @@ mod test {
             sl_proto::ObjectUpdateForm,
             Vec<sl_proto::RegionLocalObjectId>,
         ),
+        /// What the agent's scripted attachments use.
+        Resources(Box<sl_proto::AttachmentResourcesReport>),
     }
 
     /// A logged-in client in a stepped catalogue region.
@@ -174,6 +176,7 @@ mod test {
                     } => Seen::Sat(sit_position, sit_rotation),
                     Event::ScriptPermissionRequest(question) => Seen::Question(question),
                     Event::AlertMessage { message, .. } => Seen::Alert(message),
+                    Event::AttachmentResources(report) => Seen::Resources(report),
                     Event::ObjectStreamBatch(batch) => Seen::Stream(
                         batch.form,
                         batch.entries.iter().map(|entry| entry.local_id).collect(),
@@ -1553,6 +1556,163 @@ default
         );
         scene.stop();
         Ok(())
+    }
+
+    /// Worn from the ground and taken off into the inventory: killed for the
+    /// client at once, and its script hears `attach(NULL_KEY)` — on OpenSim
+    /// after its own `changed(32768)` — in the tick it has before it leaves
+    /// the region.
+    async fn an_object_taken_off_hears_it_before_it_leaves(
+        imitated: ImitatedGrid,
+    ) -> Result<(), TestError> {
+        let mut scene = seat_scene(imitated, WORN_SOURCE).await?;
+        scene
+            .commands
+            .send(Command::AttachObject {
+                local_id: sl_client_tokio::ScopedObjectId::new(scene.circuit, SEAT),
+                attachment_point: sl_proto::AttachmentPoint::LeftHand,
+                mode: sl_proto::AttachmentMode::Add,
+                rotation: sl_types::lsl::Rotation {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                    s: 1.0,
+                },
+            })
+            .await?;
+        let _worn = scene
+            .next("the worn object", |seen| match seen {
+                Seen::Updated(object)
+                    if object.local_id == SEAT && object.attachment_point_id().is_some() =>
+                {
+                    Some(object)
+                }
+                _other => None,
+            })
+            .await?;
+        scene.tick(6).await?;
+        assert_eq!(
+            scene.lines(worn_lines(imitated, true).len()).await?,
+            worn_lines(imitated, true)
+        );
+        scene
+            .commands
+            .send(Command::DetachObjects {
+                local_ids: vec![sl_client_tokio::ScopedObjectId::new(scene.circuit, SEAT)],
+            })
+            .await?;
+        scene
+            .next("the kill", |seen| match seen {
+                Seen::Removed(local_id) if local_id == SEAT => Some(()),
+                _other => None,
+            })
+            .await?;
+        scene.tick(4).await?;
+        assert_eq!(
+            scene.lines(worn_lines(imitated, false).len()).await?,
+            worn_lines(imitated, false)
+        );
+        scene.stop();
+        Ok(())
+    }
+
+    /// What a scripted object worn is reported using (`AttachmentResources`):
+    /// listed under its point by its LSL constant, with a Mono script's
+    /// memory on Second Life and none on OpenSim, the summary summing it; and
+    /// nothing once it is taken off (`avatar-render-info`, 2026-10-21).
+    async fn a_worn_scripted_object_is_reported_using_its_scripts(
+        imitated: ImitatedGrid,
+    ) -> Result<(), TestError> {
+        let mut scene = seat_scene(imitated, WORN_SOURCE).await?;
+        scene
+            .commands
+            .send(Command::AttachObject {
+                local_id: sl_client_tokio::ScopedObjectId::new(scene.circuit, SEAT),
+                attachment_point: sl_proto::AttachmentPoint::LeftHand,
+                mode: sl_proto::AttachmentMode::Add,
+                rotation: sl_types::lsl::Rotation {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                    s: 1.0,
+                },
+            })
+            .await?;
+        scene.tick(2).await?;
+        scene
+            .commands
+            .send(Command::RequestAttachmentResources)
+            .await?;
+        let report = scene
+            .next("the attachment resources", |seen| match seen {
+                Seen::Resources(report) => Some(report),
+                _other => None,
+            })
+            .await?;
+        let location = report.attachments.first().ok_or("nothing reported")?;
+        assert_eq!(location.location, "ATTACH_LHAND", "{imitated:?}");
+        let object = location.objects.first().ok_or("no object at the point")?;
+        assert_eq!(object.id, seat_key().uuid(), "{imitated:?}");
+        let memory = match imitated {
+            ImitatedGrid::SecondLife => Some(0x0001_0000),
+            ImitatedGrid::OpenSim => None,
+        };
+        assert_eq!(object.resources.memory, memory, "{imitated:?}");
+        let used = report
+            .summary
+            .used
+            .iter()
+            .find(|amount| amount.resource_type == "memory")
+            .map(|amount| amount.amount);
+        assert_eq!(used, Some(memory.unwrap_or(0)), "{imitated:?}");
+
+        scene
+            .commands
+            .send(Command::DetachObjects {
+                local_ids: vec![sl_client_tokio::ScopedObjectId::new(scene.circuit, SEAT)],
+            })
+            .await?;
+        scene.tick(2).await?;
+        scene
+            .commands
+            .send(Command::RequestAttachmentResources)
+            .await?;
+        let report = scene
+            .next("the attachment resources after", |seen| match seen {
+                Seen::Resources(report) => Some(report),
+                _other => None,
+            })
+            .await?;
+        assert!(report.attachments.is_empty(), "{imitated:?}: {report:?}");
+        scene.stop();
+        Ok(())
+    }
+
+    /// On a grid imitating Second Life.
+    #[tokio::test]
+    async fn a_worn_scripted_object_is_reported_using_its_scripts_on_second_life()
+    -> Result<(), TestError> {
+        a_worn_scripted_object_is_reported_using_its_scripts(ImitatedGrid::SecondLife).await
+    }
+
+    /// On a grid imitating OpenSim.
+    #[tokio::test]
+    async fn a_worn_scripted_object_is_reported_using_its_scripts_on_opensim()
+    -> Result<(), TestError> {
+        a_worn_scripted_object_is_reported_using_its_scripts(ImitatedGrid::OpenSim).await
+    }
+
+    /// On a grid imitating Second Life.
+    #[tokio::test]
+    async fn an_object_taken_off_hears_it_before_it_leaves_on_second_life() -> Result<(), TestError>
+    {
+        an_object_taken_off_hears_it_before_it_leaves(ImitatedGrid::SecondLife).await
+    }
+
+    /// On a grid imitating OpenSim.
+    #[tokio::test]
+    async fn an_object_taken_off_hears_it_before_it_leaves_on_opensim() -> Result<(), TestError> {
+        an_object_taken_off_hears_it_before_it_leaves(ImitatedGrid::OpenSim).await
     }
 
     /// On a grid imitating Second Life.

@@ -125,3 +125,11 @@ already right and only the allowed call is missing. Port each from `OSSL_Api.cs`
 then holds; `ossl/available` and `ossl/errors` stop needing the answers their
 replay writes in for it (`vm/tests/ossl.rs`). The 3: `osRequestSecureURL`,
 `osRequestURL`, `osSetContentType`.
+
+## From server-fake-grid-attachment-resources (2026-11-07)
+
+The fake grid's `AttachmentResources` report counts every worn object's URLs
+as none (`attachments::resources_report`): once a script can hold a URL,
+count the ones a worn object's scripts hold (`urls` per object and in
+`summary.used`, both grids), and put `avatar-render-info`'s scripted cube
+legs on the offline flavours.

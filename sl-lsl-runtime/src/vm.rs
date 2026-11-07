@@ -106,7 +106,8 @@ pub(crate) use memory::{Memory, Stack};
 pub use ossl::{Allowed, Simulator, Standing, Thrown};
 pub use permissions::{Permissions, Question};
 pub use persistence::{
-    CHANGED_REGION_START, DecodeError, OPENSIM_CHANGED_POSITION, RestoreError, SavedScript,
+    CHANGED_REGION, CHANGED_REGION_START, CHANGED_TELEPORT, DecodeError, OPENSIM_CHANGED_POSITION,
+    RestoreError, SavedScript,
 };
 pub use report::{
     DEBUG_CHANNEL, FLOOD_GAP_SECONDS, FLOOD_LINES, FLOOD_NOTICE, FLOOD_SECONDS,

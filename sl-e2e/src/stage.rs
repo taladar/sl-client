@@ -660,6 +660,15 @@ async fn start_fake_grid(builder: &StageBuilder) -> Result<(FakeGrid, String), S
             account
         });
     }
+    // A stage that needs what only OpenSim does is shown it by a grid that
+    // imitates OpenSim; its own configuration may say more.
+    if builder
+        .needs
+        .iter()
+        .any(|need| matches!(need, Need::OpenSim(_)))
+    {
+        grid = grid.imitates(sl_fake_grid::ImitatedGrid::OpenSim);
+    }
     if let Some(hook) = &builder.grid {
         grid = hook(grid);
     }
