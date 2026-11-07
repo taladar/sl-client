@@ -2,7 +2,7 @@
 //! contents (`server-world-changed-raisers`) — `llAllowInventoryDrop`.
 //!
 //! The rest of the contents family — reading, giving and removing items — is
-//! `server-lsl-lib-task-inventory`'s.
+//! [`super::inventory`]'s and [`super::rezzing`]'s.
 
 use crate::library::CallError;
 use crate::vm::ScriptCtx;

@@ -2,7 +2,7 @@
 id: server-lsl-lib-task-inventory
 title: Library tranche — task inventory, giving, rezzing and notecards
 topic: server
-status: ideas
+status: done
 origin: LSL-on-the-fake-grid audit (2026-09-20)
 blocked_by: [server-lsl-vm-execution, server-fake-grid-script-engine-wiring,
   gridspec-lsl-task-inventory]
@@ -125,3 +125,38 @@ A viewer's writes into a prim's contents raise `CHANGED_INVENTORY` there
 Life and `CHANGED_INVENTORY` on OpenSim, and `llGiveInventory` into a prim
 `CHANGED_INVENTORY` in the receiver on both (`book/src/gridspec/lsl.md` §
 Giving); `llAllowInventoryDrop` is done.
+
+## Done (2026-11-07)
+
+The 26 `ll*` functions of the tranche and the 15 OpenSim functions that shadow
+them run (`sl-lsl-runtime/src/library/{inventory,notecards,rezzing,
+ossl_inventory}.rs`, the types in `vm/contents.rs`), behind twelve new `Host`
+methods; `llResetOtherScript` and `llSetScriptState` are engine-side controls
+applied after the slice (`Raised::Control`), YEngine's reset of a running script
+waiting until it has run what it queued (`Instance::reset_when_idle`). The five
+`inventory/*` probes replay against all three transcripts
+(`vm/tests/inventory.rs`), with two named deviations (XEngine reads a stopped
+script loaded over a running one as running; `child_first`, which needs
+`llGetTimestamp`, is left out). OpenSim's dialect refuses the six newer
+functions and their constants, as both engines do. `vm/tests/persistence.rs`
+now stops its script with `llSetScriptState`.
+
+The fake grid (`sl-fake-grid/src/scripts/task_inventory.rs`) writes into
+contents at once and tells viewers after the tick; rezzes the linkset the item
+was taken as (a drop into a prim carries the taken linkset), its scripts
+restored with the start parameter and string; tells the rezzer the tick after
+the child ran `on_rez`; starts a remotely loaded script stopped and runs it
+after the next tick; reads notecards with `sl-notecard` and remembers which it
+read. `tests/scripts.rs` drives it end to end on both flavours. Giving to an
+avatar holds the script 2 s on Second Life and 3 s on OpenSim here already.
+
+Left open:
+
+- Filing an object's offer when it is accepted (Second Life) or at the offer
+  (OpenSim), and lifting the `inventory-offers` census's `object_` exemption:
+  [[test-fake-grid-lsl-offline-cases]].
+- `STATUS_DIE_AT_EDGE` is handed to the host per flavour but the fake grid keeps
+  no status flags, and a rezzed object keeps no velocity:
+  [[server-lsl-lib-physics-vehicles]].
+- The start string is not saved with a take (`SavedScript` has no field for it).
+- `llDerezObject`'s other modes than `DEREZ_DIE` answer 0, unmeasured.

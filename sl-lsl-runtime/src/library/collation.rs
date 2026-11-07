@@ -145,6 +145,15 @@ pub(crate) fn ends_with(source: &[u16], value: &[u16], case: Case) -> bool {
     last >= 0 && Collator::new(case).compare(source, last, length.saturating_sub(last), value) == 0
 }
 
+/// `String.Compare(first, second, StringComparison.CurrentCulture)`: how
+/// `first` sorts against `second` — what `ArrayList.Sort` of strings orders
+/// by (`llGetInventoryName`'s order on OpenSim).
+pub(crate) fn compare(first: &[u16], second: &[u16]) -> core::cmp::Ordering {
+    Collator::new(Case::Sensitive)
+        .compare(first, 0, len(first), second)
+        .cmp(&0)
+}
+
 /// The length of `text` as .NET's `int`.
 fn len(text: &[u16]) -> i32 {
     i32::try_from(text.len()).unwrap_or(i32::MAX)

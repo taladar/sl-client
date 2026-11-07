@@ -18,9 +18,8 @@ use super::*;
 /// link message 100 it sets every global, goes into `kept`, starts a
 /// one-second timer and a listen on 7 and asks the owner for 1040; granted,
 /// it prints what it holds, sends itself three link messages and sleeps
-/// eight seconds. The probe stops `Stopped` with `llSetScriptState`, which
-/// this VM does not run yet (`server-lsl-lib-task-inventory`); the tests stop
-/// it as the host would, through the contents' Running checkbox.
+/// eight seconds. Going into `kept`, it stops `Stopped` with
+/// `llSetScriptState`.
 fn probe() -> String {
     format!(
         r#"integer gi;
@@ -72,6 +71,7 @@ state kept
 {{
     state_entry()
     {{
+        llSetScriptState("Stopped", FALSE);
         llListen(7, "", NULL_KEY, "");
         llSetTimerEvent(1.0);
         llRequestPermissions("{OWNER}", 1040);
@@ -170,10 +170,6 @@ fn asleep(flavour: EngineFlavour) -> Result<(Engine, Recorder), String> {
     let _reports = run(&mut engine, &mut host, 2);
     assert_eq!(link(&mut engine, A, 100, "")?, Some(Posted::Queued));
     let _reports = run(&mut engine, &mut host, 2);
-    engine
-        .instance_mut(B)
-        .ok_or("no stopped script")?
-        .set_running(false);
     assert_eq!(host.questions.len(), 1, "the probe asked the owner");
     assert_eq!(engine.answer(A, OWNER, 1040), Ok(Some(Posted::Queued)));
     let _reports = run(&mut engine, &mut host, 20);

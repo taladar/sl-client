@@ -20,9 +20,10 @@ use sl_lsl_runtime::vm::comms::{
 use sl_lsl_runtime::vm::prim::{ObjectDetails, Prim, SoundCue};
 use sl_lsl_runtime::vm::seating::{Placement, Seat};
 use sl_lsl_runtime::vm::{
-    Admission, CallerId, ExperienceDetails, ExperienceError, ExperienceQuestion, Host,
-    KeyValueStore, LinksetData, LinksetId, MoneyRefusal, PayPrice, Payment, Question,
-    ScriptExperience, Simulator, SitRefusal, Speech, Standing, Whereabouts,
+    Admission, CallerId, ExperienceDetails, ExperienceError, ExperienceQuestion, Host, Item,
+    KeyValueStore, LinksetData, LinksetId, Masks, MoneyRefusal, Offer, PayPrice, Payment, Question,
+    RemoteLoad, Rez, RezRefusal, ScriptExperience, Simulator, SitRefusal, Speech, Standing,
+    Whereabouts,
 };
 use sl_lsl_runtime::{NULL_KEY, Value, ZERO_VECTOR};
 use sl_types::lsl::{Rotation, Vector};
@@ -128,6 +129,8 @@ pub(crate) struct CorpusHost {
     key_values: BTreeMap<String, KeyValueStore>,
     /// The script, as `llGetScriptState` can name it.
     script: CallerId,
+    /// The prim's HTTP throttle; no corpus script sends a request.
+    throttle: sl_lsl_runtime::vm::http::Throttle,
 }
 
 impl CorpusHost {
@@ -153,6 +156,7 @@ impl CorpusHost {
             seat: Seat::default(),
             key_values: BTreeMap::new(),
             script,
+            throttle: sl_lsl_runtime::vm::http::Throttle::default(),
         }
     }
 
@@ -516,5 +520,291 @@ impl Host for CorpusHost {
 
     fn agent_ip(&self, _agent: &str) -> String {
         String::new()
+    }
+
+    fn contents(&self, _caller: CallerId) -> Vec<Item> {
+        vec![Item {
+            name: SCRIPT_NAME.to_owned(),
+            kind: 10,
+            item: ITEM.to_owned(),
+            asset: NULL_KEY.to_owned(),
+            creator: OWNER.to_owned(),
+            last_owner: NULL_KEY.to_owned(),
+            masks: Masks::full(),
+            description: String::new(),
+            acquired: 0,
+        }]
+    }
+
+    fn remove_item(&mut self, _caller: CallerId, name: &str, changed: &[i32]) -> bool {
+        self.line(format_args!("remove-item {name} {changed:?}"));
+        name == SCRIPT_NAME
+    }
+
+    fn give_to_prim(&mut self, _caller: CallerId, target: &str, items: &[String]) -> bool {
+        self.line(format_args!("give-to-prim {target} {items:?}"));
+        target == PRIM
+    }
+
+    fn offer_items(&mut self, _caller: CallerId, offer: &Offer) -> bool {
+        self.line(format_args!("offer {offer:?}"));
+        offer.agent == OWNER
+    }
+
+    fn set_remote_pin(&mut self, _caller: CallerId, pin: i32) {
+        self.line(format_args!("set-remote-pin {pin}"));
+    }
+
+    fn remote_pin(&self, _prim: &str) -> Option<(i32, String)> {
+        None
+    }
+
+    fn load_script(&mut self, _caller: CallerId, load: &RemoteLoad) {
+        self.line(format_args!("load-script {load:?}"));
+    }
+
+    fn rez(&mut self, _caller: CallerId, rez: &Rez) -> Result<String, RezRefusal> {
+        self.line(format_args!("rez {rez:?}"));
+        Err(RezRefusal::Missing)
+    }
+
+    fn derez(&mut self, _caller: CallerId, object: &str) -> bool {
+        self.line(format_args!("derez {object}"));
+        false
+    }
+
+    fn notecard_text(&mut self, _asset: &str) -> Option<String> {
+        None
+    }
+
+    fn notecard_read(&self, _asset: &str) -> Option<String> {
+        None
+    }
+
+    fn make_notecard(
+        &mut self,
+        _caller: CallerId,
+        name: &str,
+        _description: &str,
+        text: &str,
+        changed: &[i32],
+    ) {
+        self.line(format_args!("make-notecard {name} {text:?} {changed:?}"));
+    }
+
+    fn epoch_micros(&self) -> i64 {
+        1_793_059_200_000_000
+    }
+
+    fn local_offset(&self, _unix: i64) -> i32 {
+        0
+    }
+
+    fn day_offset(&self, _caller: CallerId) -> f32 {
+        57_600.0
+    }
+
+    fn parcel_at(
+        &self,
+        _caller: CallerId,
+        _x: f32,
+        _y: f32,
+    ) -> Option<sl_lsl_runtime::vm::land::Parcel> {
+        None
+    }
+
+    fn region(&self, _caller: CallerId) -> sl_lsl_runtime::vm::land::Region {
+        sl_lsl_runtime::vm::land::Region::default()
+    }
+
+    fn sim_data(
+        &self,
+        _caller: CallerId,
+        _name: &str,
+    ) -> Option<sl_lsl_runtime::vm::land::SimData> {
+        None
+    }
+
+    fn ground(&self, _caller: CallerId, _x: f32, _y: f32) -> f32 {
+        GROUND
+    }
+
+    fn wind(&self, _caller: CallerId, _position: &Vector) -> Vector {
+        Vector {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        }
+    }
+
+    fn environment(
+        &self,
+        _caller: CallerId,
+        _position: Option<&Vector>,
+        _unix: i64,
+    ) -> sl_lsl_runtime::vm::land::Environment {
+        sl_lsl_runtime::vm::land::Environment {
+            day_length: 14_400.0,
+            day_offset: 57_600.0,
+            sun: Rotation {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+                s: 1.0,
+            },
+            moon: Rotation {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+                s: 1.0,
+            },
+        }
+    }
+
+    fn change_land(
+        &mut self,
+        _caller: CallerId,
+        _position: &Vector,
+        _change: &sl_lsl_runtime::vm::land::LandChange,
+    ) -> bool {
+        false
+    }
+
+    fn parcel_media(
+        &self,
+        _caller: CallerId,
+        _position: &Vector,
+    ) -> sl_lsl_runtime::vm::land::ParcelMedia {
+        sl_lsl_runtime::vm::land::ParcelMedia::default()
+    }
+
+    fn sim_stats(&self, _caller: CallerId) -> Vec<f32> {
+        Vec::new()
+    }
+
+    fn environment_rule(
+        &self,
+        _caller: CallerId,
+        _position: &Vector,
+        _rule: i32,
+    ) -> Option<Vec<sl_lsl_runtime::value::Element>> {
+        None
+    }
+
+    fn map_texture(&self, _caller: CallerId, _region: &str) -> Option<String> {
+        None
+    }
+
+    fn send_http(&mut self, _caller: CallerId, _request: &sl_lsl_runtime::vm::http::Outbound) {}
+
+    fn request_url(&mut self, _caller: CallerId, _key: &str, _secure: bool) -> Option<String> {
+        None
+    }
+
+    fn release_url(&mut self, _caller: CallerId, _url: &str) {}
+
+    fn free_urls(&self, _caller: CallerId) -> i32 {
+        0
+    }
+
+    fn answer_http(
+        &mut self,
+        _caller: CallerId,
+        _request: &str,
+        _answered: sl_lsl_runtime::vm::http::Answered,
+    ) {
+    }
+
+    fn http_throttle(&mut self, _caller: CallerId) -> &mut sl_lsl_runtime::vm::http::Throttle {
+        &mut self.throttle
+    }
+
+    fn url_authority(&self, _caller: CallerId) -> String {
+        String::new()
+    }
+
+    fn agent(&self, _caller: CallerId, _agent: &str) -> Option<sl_lsl_runtime::vm::avatars::Agent> {
+        None
+    }
+
+    fn agent_record(
+        &self,
+        _caller: CallerId,
+        _agent: &str,
+    ) -> Option<sl_lsl_runtime::vm::avatars::AgentRecord> {
+        None
+    }
+
+    fn agent_named(&self, _caller: CallerId, _name: &str) -> Option<(String, bool)> {
+        None
+    }
+
+    fn animate(&mut self, _caller: CallerId, _agent: &str, _animation: &str, _start: bool) {}
+
+    fn set_animation_override(
+        &mut self,
+        _caller: CallerId,
+        _agent: &str,
+        _state: &str,
+        _animation: Option<(&str, &str)>,
+    ) {
+    }
+
+    fn animation_override(&self, _caller: CallerId, _agent: &str, _state: &str) -> Option<String> {
+        None
+    }
+
+    fn object_animate(&mut self, _caller: CallerId, _name: &str, _animation: &str, _start: bool) {}
+
+    fn object_animations(&self, _caller: CallerId) -> Vec<String> {
+        Vec::new()
+    }
+
+    fn control_changes(
+        &mut self,
+        _caller: CallerId,
+        _agent: &str,
+        _changes: &[sl_lsl_runtime::vm::avatars::ControlChange],
+        _taken: Option<i32>,
+    ) {
+    }
+
+    fn set_camera(
+        &mut self,
+        _caller: CallerId,
+        _agent: &str,
+        _rules: &[sl_lsl_runtime::vm::avatars::CameraRule],
+    ) {
+    }
+
+    fn clear_camera(&mut self, _caller: CallerId, _agent: &str) {}
+
+    fn camera(&self, _caller: CallerId, _agent: &str) -> Option<(Vector, sl_types::lsl::Rotation)> {
+        None
+    }
+
+    fn teleport_agent(
+        &mut self,
+        _caller: CallerId,
+        _agent: &str,
+        _destination: &sl_lsl_runtime::vm::avatars::Destination,
+    ) {
+    }
+
+    fn attached_list(&self, _caller: CallerId, _agent: &str) -> Option<Vec<String>> {
+        None
+    }
+
+    fn sense(&self, _caller: CallerId) -> Vec<sl_lsl_runtime::vm::sensing::Sensed> {
+        Vec::new()
+    }
+
+    fn cast_ray(
+        &self,
+        _caller: CallerId,
+        _start: &Vector,
+        _end: &Vector,
+    ) -> Vec<sl_lsl_runtime::vm::sensing::RayHit> {
+        Vec::new()
     }
 }

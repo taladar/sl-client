@@ -2,7 +2,7 @@
 id: server-lsl-lib-http-url
 title: Library tranche — outbound HTTP and in-world URLs
 topic: server
-status: ideas
+status: done
 origin: LSL-on-the-fake-grid audit (2026-09-20)
 blocked_by: [server-lsl-vm-execution, server-world-determinism-contract,
   gridspec-lsl-http-url]
@@ -125,3 +125,46 @@ already right and only the allowed call is missing. Port each from `OSSL_Api.cs`
 then holds; `ossl/available` and `ossl/errors` stop needing the answers their
 replay writes in for it (`vm/tests/ossl.rs`). The 3: `osRequestSecureURL`,
 `osRequestURL`, `osSetContentType`.
+
+## Done (2026-11-07)
+
+`vm/http.rs` holds each grid's URL surface — the URL it grants, what it
+answers itself (Second Life's `HEAD` 400 and `OPTIONS` 200), the headers it
+adds to an arriving request and which `llGetHTTPHeader` gives, the 2048-byte
+cut, the content types, the 415 for an unmet `HTTP_ACCEPT`, the timeouts, the
+404 of a released URL, the answer body's cut and metadata — and the per-prim
+throttle (Second Life's 25 in 20 s counting refusals, OpenSim's bucket of 3 at
+1 a second). `library/http.rs` has `llHTTPRequest` with both grids' option
+readings, refusals (positions, texts, OpenSim's empty key), headers (the
+`X-SecondLife-*` set, the user agent, OpenSim's inverted pragma and its
+capitalised methods, the dropped `GET` body or 499), Second Life's
+`HTTP_EXTENDED_ERROR` problem reports, the URL functions, `llHTTPResponse`,
+`llGetHTTPHeader`, `llSetContentType`, and OpenSim's `osRequestURL`,
+`osRequestSecureURL` and `osSetContentType`; OpenSim's dialect refuses the
+three newer options. Second Life raises an `http_response` in every script of
+the prim. The fake grid (`script_http.rs`, `scripts/http.rs`) grants URLs on
+its HTTP service and routes requests between scripts, from outside and back,
+at region ticks; a request off the grid goes to the scenario's
+`HttpResponder` (`NoResponder` by default: 499, never a hang; `TableResponder`
+for canned answers). Held by `vm/tests/http.rs` — all four `http/*` probes
+replayed on the three flavours, `http/url` with the test playing the runner's
+`fetch` — and, end to end, `a_script_serves_its_url_and_sends_requests` in
+`sl-fake-grid/tests/scripts.rs`.
+
+## Left open
+
+- **No real-network responder.** The opt-in responder for developing against
+  a live service is not built; a scenario can only mount canned answers.
+- **Secure URLs are always denied**: the fake grid runs no HTTPS listener (as
+  the local OpenSim), so a Second Life-flavoured script never gets one.
+- **A URL is released at a reset or when its script leaves**, not at a state
+  change, which was not measured.
+- **Not imitated**: Second Life's raw `HTTP/1.1 400` text as a `HEAD`'s body,
+  its proxy's `Unknown Host` page; OpenSim's per-owner throttle bucket beside
+  the per-prim one.
+- **`owner_name`** is varied in the `http/outbound` replay: the probe compares
+  the header with `llKey2Name(llGetOwner())`, and `llKey2Name` is not in the
+  library yet.
+- **Worn objects' URLs** in the fake grid's `AttachmentResources` report
+  (the note above from `server-fake-grid-attachment-resources`) are still
+  counted as none: that report is the other worktree's, not merged yet.

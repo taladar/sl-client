@@ -4,9 +4,9 @@ use std::collections::BTreeMap;
 
 use core::time::Duration;
 
-use crate::num::ticks_for;
 use crate::value::Element;
 use crate::vm::comms::{LinkMessage, Listens};
+use crate::vm::contents::Control;
 use crate::vm::detected::Detected;
 use crate::vm::economy::TransactionResult;
 use crate::vm::experiences::{ExperienceError, ExperienceQuestion};
@@ -61,6 +61,36 @@ pub enum Raised {
         /// Why, an `XP_ERROR_*` code.
         reason: ExperienceError,
     },
+    /// `http_request(id, method, body)` in the calling script: the answer to
+    /// `llRequestURL`, `URL_REQUEST_GRANTED` with the URL or
+    /// `URL_REQUEST_DENIED`.
+    UrlAnswer {
+        /// The key the request returned.
+        id: String,
+        /// `URL_REQUEST_GRANTED` or `URL_REQUEST_DENIED`.
+        method: &'static str,
+        /// The URL, or nothing.
+        body: String,
+    },
+    /// `http_response(id, status, metadata, body)` in the calling script at
+    /// once: Second Life's problem report for a request `llHTTPRequest`
+    /// refused under `HTTP_EXTENDED_ERROR`.
+    HttpResponse {
+        /// The request's key.
+        id: String,
+        /// The status.
+        status: i32,
+        /// The body.
+        body: String,
+    },
+    /// `llSetScriptState` or `llResetOtherScript` of another script of the
+    /// caller's prim.
+    Control {
+        /// The script.
+        target: CallerId,
+        /// What is done to it.
+        control: Control,
+    },
 }
 use crate::vm::memory::{Memory, Stack};
 
@@ -79,13 +109,35 @@ impl Tick {
     }
 }
 
-/// A repeating timer (`llSetTimerEvent`), counted in ticks.
+/// A repeating timer (`llSetTimerEvent`), in region time: the time since the
+/// region's tick 0, which is the tick times the step.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Timer {
-    /// Ticks between two `timer` events; at least one.
-    pub(crate) interval: u64,
-    /// The tick the next `timer` event is due at.
-    pub(crate) next: Tick,
+    /// The time between two `timer` events, at least the flavour's floor.
+    pub(crate) interval: Duration,
+    /// The region time the next `timer` event is due at; it falls due at the
+    /// first tick at or after it.
+    pub(crate) next: Duration,
+    /// Whether an event has fallen due since the timer was set: XEngine keeps
+    /// the phase of its first.
+    pub(crate) fired: bool,
+}
+
+/// The region time at the start of tick `now`: the ticks times the step.
+pub(crate) fn region_time(now: Tick, step: Duration) -> Duration {
+    let nanos = u128::from(now.0).saturating_mul(step.as_nanos());
+    Duration::from_nanos(u64::try_from(nanos).unwrap_or(u64::MAX))
+}
+
+/// The shortest interval `flavour` runs a timer at: two of Second Life's
+/// frames (0.044 s, `time/timer-floor`), OpenSim's `MinTimerInterval` (0.1 s
+/// for YEngine, 0.5 s for XEngine at their defaults).
+fn timer_floor(flavour: EngineFlavour) -> f64 {
+    match flavour {
+        EngineFlavour::SecondLife => 2.0 / 45.0,
+        EngineFlavour::YEngine => 0.1,
+        EngineFlavour::XEngine => 0.5,
+    }
 }
 
 /// The parts of an instance a library function may read or write: the
@@ -103,6 +155,18 @@ pub(crate) struct ScriptData {
     pub(crate) drop_queued_timer: bool,
     /// `llGetStartParameter`: what the object was rezzed with.
     pub(crate) start_parameter: i32,
+    /// `llGetStartString`: what the object was rezzed with
+    /// (`REZ_PARAM_STRING`).
+    pub(crate) start_string: String,
+    /// One-shot sweeps asked for (`llSensor`) and not yet swept: at most one
+    /// on Second Life, where each replaces the last; every one on OpenSim.
+    pub(crate) sweeps: Vec<crate::vm::sensing::Query>,
+    /// The repeating sweep (`llSensorRepeat`), which a state change ends.
+    pub(crate) repeat: Option<crate::vm::sensing::Repeat>,
+    /// The repeating sweep was just removed on a flavour whose remove also
+    /// takes a sweep's event still queued (Second Life); the instance drops
+    /// it after the call.
+    pub(crate) drop_queued_sensor: bool,
     /// What library calls said refusing their arguments, worded for the
     /// flavour, waiting for the engine to say them on `DEBUG_CHANNEL`.
     pub(crate) refusals: Vec<Warning>,
@@ -121,6 +185,38 @@ pub(crate) struct ScriptData {
     /// time moves only in whole simulator frames, so a tick count is the
     /// reference's shape, not an approximation of it.
     pub(crate) script_ticks: u64,
+    /// The script's HTTP state: its URLs, the requests it is waiting on and
+    /// the ones that arrived at its URLs, which a reset drops.
+    pub(crate) http: HttpState,
+    /// The avatar controls the script took (`llTakeControls`), which a reset
+    /// drops and a state change keeps.
+    pub(crate) controls: Option<TakenControls>,
+}
+
+/// An avatar's controls a script took.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct TakenControls {
+    /// The avatar.
+    pub(crate) agent: String,
+    /// What the last `ScriptControlChange` stated.
+    pub(crate) held: crate::vm::avatars::Held,
+    /// The events' state.
+    pub(crate) events: crate::vm::avatars::Controls,
+}
+
+/// What a script holds of HTTP (`server-lsl-lib-http-url`).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct HttpState {
+    /// The URLs granted to it and not released.
+    pub(crate) urls: Vec<String>,
+    /// Each request it sent and has had no answer to, with the longest body
+    /// it takes.
+    pub(crate) pending: BTreeMap<String, usize>,
+    /// Each request that arrived at one of its URLs and is not answered.
+    pub(crate) inbound: BTreeMap<String, crate::vm::http::Inbound>,
+    /// The `Content-Type` the answer to an arrived request is served with,
+    /// where `llSetContentType` or `osSetContentType` set one.
+    pub(crate) content_types: BTreeMap<String, String>,
 }
 
 /// A control-flow effect a library function asks the VM for. The VM acts on
@@ -282,30 +378,120 @@ impl<'host> ScriptCtx<'host> {
         self.data.detected.get(usize::try_from(index).ok()?)
     }
 
-    /// Start, restart or (with a duration that is not positive) stop the
-    /// script's repeating timer: the first `timer` event is due `seconds`
-    /// from now, rounded up to a whole tick and at least one, and one every
-    /// `seconds` after.
+    /// Start, restart or stop the script's repeating timer: the first
+    /// `timer` event is due `seconds` from now and one every `seconds` after,
+    /// never more often than the flavour's floor (`time/timer-floor`). Zero
+    /// stops it on every grid; a negative interval stops it on Second Life
+    /// and runs it at the floor on OpenSim.
     pub fn set_timer(&mut self, seconds: f32) {
-        let interval = ticks_for(f64::from(seconds), self.step);
-        self.data.timer = (interval > 0).then(|| Timer {
-            interval,
-            next: self.now.after(interval),
+        let flavour = self.flavour();
+        let floor = timer_floor(flavour);
+        let seconds = f64::from(seconds);
+        let interval = if seconds.is_nan() || seconds == 0.0 {
+            None
+        } else if seconds < 0.0 {
+            flavour.is_opensim().then_some(floor)
+        } else {
+            Some(seconds.max(floor))
+        };
+        let now = region_time(self.now, self.step);
+        self.data.timer = interval.map(|seconds| {
+            // Whole microseconds first, as a sleep's: 0.3 as an `f32` is a
+            // hair above 0.3 s and must not be read as a tick more.
+            let interval =
+                Duration::try_from_secs_f64((seconds * 1e6).round() / 1e6).unwrap_or(Duration::MAX);
+            Timer {
+                interval,
+                next: now.saturating_add(interval),
+                fired: false,
+            }
         });
         // A stop takes the `timer` already queued with it on Second Life and
         // on YEngine (OpenSim's `CancelScriptEvent`), not on XEngine, whose
         // cancel leaves its queue alone; setting another interval leaves it
         // on all three (`events/timer-reset`, 2026-11-05).
-        if interval == 0 && self.flavour() != EngineFlavour::XEngine {
+        if interval.is_none() && flavour != EngineFlavour::XEngine {
             self.data.drop_queued_timer = true;
         }
+    }
+
+    /// `llSensor`: sweep once with `query`, at the next tick. Second Life
+    /// keeps one asked-for sweep, the last, and ends a repeating one; OpenSim
+    /// sweeps for each and leaves the repeat running (`events/merging`,
+    /// `detection/sensor`).
+    pub fn sense_once(&mut self, query: crate::vm::sensing::Query) {
+        if self.flavour().is_opensim() {
+            self.data.sweeps.push(query);
+        } else {
+            self.data.sweeps = vec![query];
+            self.data.repeat = None;
+        }
+    }
+
+    /// `llSensorRepeat`: sweep with `query` every `seconds`, the first one
+    /// interval in — on OpenSim a tenth of a second later — never more often
+    /// than every 0.05 s on Second Life and 0.1 s on OpenSim. An interval of
+    /// 0 sweeps once at once on Second Life and not at all on OpenSim.
+    pub fn sense_repeat(&mut self, query: crate::vm::sensing::Query, seconds: f32) {
+        let opensim = self.flavour().is_opensim();
+        let seconds = f64::from(seconds);
+        if seconds <= 0.0 || seconds.is_nan() {
+            self.data.repeat = None;
+            if !opensim {
+                self.data.sweeps = vec![query];
+            }
+            return;
+        }
+        let floor = if opensim { 0.1 } else { 0.05 };
+        let interval = Duration::try_from_secs_f64((seconds.max(floor) * 1e6).round() / 1e6)
+            .unwrap_or(Duration::MAX);
+        let first = if opensim {
+            interval.saturating_add(Duration::from_millis(100))
+        } else {
+            interval
+        };
+        self.data.repeat = Some(crate::vm::sensing::Repeat {
+            query,
+            interval,
+            next: region_time(self.now, self.step).saturating_add(first),
+        });
+    }
+
+    /// `llSensorRemove`: end the repeating sweep. Second Life drops a sweep's
+    /// event still queued; OpenSim delivers it.
+    pub fn sense_remove(&mut self) {
+        self.data.repeat = None;
+        if !self.flavour().is_opensim() {
+            self.data.drop_queued_sensor = true;
+        }
+    }
+
+    /// The region's calendar time now, in microseconds since the UNIX epoch:
+    /// its time at tick 0 and the ticks since.
+    pub fn unix_micros(&mut self) -> i64 {
+        let since = region_time(self.now, self.step).as_micros();
+        self.host
+            .epoch_micros()
+            .saturating_add(i64::try_from(since).unwrap_or(i64::MAX))
+    }
+
+    /// The length of a tick: one over the region's frame rate.
+    #[must_use]
+    pub const fn step(&self) -> Duration {
+        self.step
     }
 
     /// `llGetTime`: the script's time, in seconds.
     #[must_use]
     pub fn script_time(&self) -> f32 {
         let ticks = u32::try_from(self.data.script_ticks).unwrap_or(u32::MAX);
-        crate::num::to_f32(self.step.saturating_mul(ticks).as_secs_f64())
+        let seconds = self.step.saturating_mul(ticks).as_secs_f64();
+        // OpenSim rounds it to the millisecond (`Math.Round(…, 3)`).
+        crate::num::to_f32(if self.flavour().is_opensim() {
+            (seconds * 1000.0).round() / 1000.0
+        } else {
+            seconds
+        })
     }
 
     /// `llResetTime`: the script's time starts again from zero.
@@ -326,8 +512,48 @@ impl<'host> ScriptCtx<'host> {
     pub fn script_running(&mut self, name: &str) -> Option<bool> {
         match self.host.script_named(self.caller, name)? {
             id if id == self.caller => Some(true),
-            id => Some(self.peers.is_running(id).unwrap_or(false)),
+            id => Some(
+                self.pending_run(id)
+                    .unwrap_or_else(|| self.peers.is_running(id).unwrap_or(false)),
+            ),
         }
+    }
+
+    /// The run flag an earlier call of this slice set for the script `id`
+    /// and the engine has yet to apply, if one did: what the script reads
+    /// from the moment of the call.
+    fn pending_run(&self, id: CallerId) -> Option<bool> {
+        self.data
+            .raised
+            .iter()
+            .rev()
+            .find_map(|raised| match raised {
+                Raised::Control {
+                    target,
+                    control: Control::Run(running),
+                } if *target == id => Some(*running),
+                _ => None,
+            })
+    }
+
+    /// The script called `name` in the caller's prim, or [`None`] when the
+    /// prim has no script by that name.
+    #[must_use]
+    pub fn script_named(&self, name: &str) -> Option<CallerId> {
+        self.host.script_named(self.caller, name)
+    }
+
+    /// Do `control` to the script `target` of the caller's prim once the
+    /// slice is over, as the flavour's engine does it to another script; a
+    /// run flag set reads back at once ([`Self::script_running`]).
+    pub fn control_script(&mut self, target: CallerId, control: Control) {
+        self.data.raised.push(Raised::Control { target, control });
+    }
+
+    /// `llGetStartString`.
+    #[must_use]
+    pub fn start_string(&self) -> &str {
+        &self.data.start_string
     }
 
     /// The grid's engine the region imitates, for a function whose answer or
@@ -475,6 +701,46 @@ impl<'host> ScriptCtx<'host> {
         self.data
             .raised
             .push(Raised::ExperienceDenied { agent, reason });
+    }
+
+    /// The avatar controls the script took.
+    pub(crate) const fn controls(&mut self) -> &mut Option<TakenControls> {
+        &mut self.data.controls
+    }
+
+    /// Drop `bits` of what the script holds of its granter, as a lapse does
+    /// (`llReleaseControls` drops `PERMISSION_TAKE_CONTROLS`).
+    pub fn revoke_permissions(&mut self, bits: i32) {
+        if let Some(granter) = self.data.permissions.granter().map(str::to_owned) {
+            self.data.permissions.revoke(&granter, bits);
+        }
+    }
+
+    /// The script's HTTP state.
+    pub(crate) const fn http(&mut self) -> &mut HttpState {
+        &mut self.data.http
+    }
+
+    /// The region time of the call: the tick times the step.
+    #[must_use]
+    pub fn region_time(&self) -> Duration {
+        region_time(self.now, self.step)
+    }
+
+    /// Raise `http_request(id, method, body)` in the script once the slice is
+    /// over: `llRequestURL`'s answer.
+    pub fn raise_url_answer(&mut self, id: String, method: &'static str, body: String) {
+        self.data
+            .raised
+            .push(Raised::UrlAnswer { id, method, body });
+    }
+
+    /// Raise `http_response(id, status, [], body)` in the script once the
+    /// slice is over.
+    pub fn raise_http_response(&mut self, id: String, status: i32, body: String) {
+        self.data
+            .raised
+            .push(Raised::HttpResponse { id, status, body });
     }
 
     /// Raise `dataserver(id, data)` in the script once the slice is over.

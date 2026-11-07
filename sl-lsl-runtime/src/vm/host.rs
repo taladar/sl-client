@@ -4,17 +4,20 @@ use sl_types::lsl::Vector;
 
 use crate::library::BuiltinId;
 use crate::vm::comms::{Dialog, InstantMessage, InvalidLinkTarget, Links, LoadUrl, MapDestination};
+use crate::vm::contents::{Item, Offer, RemoteLoad, Rez, RezRefusal};
 use crate::vm::economy::{MoneyRefusal, PayPrice, Payment};
 use crate::vm::experiences::{
     Admission, ExperienceDetails, ExperienceError, ExperienceQuestion, KeyValueStore,
     ScriptExperience, SitRefusal,
 };
+use crate::vm::land::{Environment, LandChange, Parcel, ParcelMedia, Region, SimData};
 use crate::vm::linkset_data::{LinksetData, LinksetId};
 use crate::vm::ossl::{Simulator, Standing};
 use crate::vm::permissions::Question;
 use crate::vm::prim::{ObjectDetails, Prim, SoundCue};
 use crate::vm::report::{Speech, Whereabouts};
 use crate::vm::seating::{Placement, Seat};
+use crate::vm::sensing::{RayHit, Sensed};
 
 /// Which script instance is calling, as the host knows it.
 ///
@@ -389,4 +392,279 @@ pub trait Host {
     /// The address `agent` connects from, as `osGetAgentIP` gives it to a
     /// god: the IP alone, no port; empty when `agent` is not in the region.
     fn agent_ip(&self, agent: &str) -> String;
+
+    /// Every item of `caller`'s prim, in any order: the library orders a
+    /// listing as its flavour does.
+    fn contents(&self, caller: CallerId) -> Vec<Item>;
+
+    /// `llRemoveInventory`: take the item named `name` out of `caller`'s
+    /// prim, advancing its contents serial so a viewer's Contents tab
+    /// refreshes, and raise `changed(bits)` in the prim's scripts once per
+    /// element of `changed` — nothing on Second Life, `CHANGED_INVENTORY` on
+    /// OpenSim. `false` when the prim holds no such item. A script removed
+    /// loses its instance, the caller's own included.
+    fn remove_item(&mut self, caller: CallerId, name: &str, changed: &[i32]) -> bool;
+
+    /// `llGiveInventory` and `llGiveInventoryList` to a prim: copy the items
+    /// named `items`, all of them in `caller`'s prim, into the prim keyed
+    /// `target`, each under its name or the first `name N` the target does
+    /// not hold, a script arriving stopped, and raise
+    /// `changed(CHANGED_INVENTORY)` in the target's scripts — on both grids.
+    /// `false` when the region has no prim keyed `target`, or `caller`'s
+    /// owner may not drop into it.
+    fn give_to_prim(&mut self, caller: CallerId, target: &str, items: &[String]) -> bool;
+
+    /// `llGiveInventory` and `llGiveInventoryList` to an avatar: put `offer`
+    /// to it, whether or not it is in the region, and file the items in its
+    /// inventory when it accepts. `false` when the key is nobody's.
+    fn offer_items(&mut self, caller: CallerId, offer: &Offer) -> bool;
+
+    /// `llSetRemoteScriptAccessPin`: the pin a script of another prim of the
+    /// same owner must give to load a script into `caller`'s prim; 0 for
+    /// none. The prim's, so a reset leaves it.
+    fn set_remote_pin(&mut self, caller: CallerId, pin: i32);
+
+    /// The remote script access pin of the prim keyed `prim` and its owner,
+    /// or [`None`] when the region has no such prim.
+    fn remote_pin(&self, prim: &str) -> Option<(i32, String)>;
+
+    /// `llRemoteLoadScriptPin`: copy the script `load` names out of
+    /// `caller`'s prim into the prim [`RemoteLoad::target`] names, replacing
+    /// a script of that name, and start it with the start parameter, running
+    /// or not — afresh, with no `on_rez`. The library has checked the pin.
+    fn load_script(&mut self, caller: CallerId, load: &RemoteLoad);
+
+    /// `llRezObject`, `llRezAtRoot`, `llRezObjectWithParams`: put the object
+    /// `rez` names out of `caller`'s prim into the region, its scripts
+    /// brought back as they were taken and told of the rez with `on_rez`, and
+    /// answer the key of its root. Once the object's scripts have run their
+    /// `on_rez`, the host tells the rezzer with
+    /// [`Engine::object_rezzed`](crate::vm::Engine::object_rezzed) — which is
+    /// why the rezzer's `object_rez` arrives first on both grids though the
+    /// child's `on_rez` ran before it.
+    ///
+    /// # Errors
+    ///
+    /// [`RezRefusal`] when nothing is rezzed.
+    fn rez(&mut self, caller: CallerId, rez: &Rez) -> Result<String, RezRefusal>;
+
+    /// `llDerezObject(id, DEREZ_DIE)`: take the object keyed `object` out of
+    /// the region, as `llDie` would, once control is back with the grid —
+    /// only an object `caller`'s object rezzed. Whether it goes.
+    fn derez(&mut self, caller: CallerId, object: &str) -> bool;
+
+    /// The text of the notecard whose asset is keyed `asset`, read now, after
+    /// which the region holds it read — what Second Life's
+    /// `llGetNotecardLineSync` reads; [`None`] when there is no such
+    /// notecard.
+    fn notecard_text(&mut self, asset: &str) -> Option<String>;
+
+    /// The text of the notecard keyed `asset` if the region has read it
+    /// already ([`Self::notecard_text`]), else [`None`].
+    fn notecard_read(&self, asset: &str) -> Option<String>;
+
+    /// The parcel of `caller`'s region at `(x, y)`, or [`None`] where the
+    /// region has none — every point outside it: how a position off the
+    /// region is read is the library's.
+    fn parcel_at(&self, caller: CallerId, x: f32, y: f32) -> Option<Parcel>;
+
+    /// The region `caller` is in.
+    fn region(&self, caller: CallerId) -> Region;
+
+    /// What `llRequestSimulatorData` reads of the grid's region called
+    /// `name`, matched without regard to case; [`None`] for a name no region
+    /// of the grid has.
+    fn sim_data(&self, caller: CallerId, name: &str) -> Option<SimData>;
+
+    /// The ground's height at `(x, y)` of `caller`'s region, which lies
+    /// within it, between the heightfield's points as the grid interpolates.
+    fn ground(&self, caller: CallerId, x: f32, y: f32) -> f32;
+
+    /// The wind at `position` of `caller`'s region.
+    fn wind(&self, caller: CallerId, position: &Vector) -> Vector;
+
+    /// The environment over `position` of `caller`'s region — the parcel's,
+    /// or for [`None`] the region's — at UNIX time `unix`: its day and how the
+    /// sun and the moon are turned then.
+    fn environment(&self, caller: CallerId, position: Option<&Vector>, unix: i64) -> Environment;
+
+    /// Make `change` to the parcel at `position` or to the estate, which the
+    /// library has checked `caller`'s owner may make; whether it was made.
+    fn change_land(&mut self, caller: CallerId, position: &Vector, change: &LandChange) -> bool;
+
+    /// The media of the parcel at `position` of `caller`'s region.
+    fn parcel_media(&self, caller: CallerId, position: &Vector) -> ParcelMedia;
+
+    /// The region's statistics in `SIM_STAT_*` order (0–26), as its
+    /// `SimStats` reports them.
+    fn sim_stats(&self, caller: CallerId) -> Vec<f32>;
+
+    /// The values `llGetEnvironment`'s `SKY_*` or `WATER_*` rule `rule` reads
+    /// of the environment over `position`, in the rule's order — the shape of
+    /// the grid's settings record is the host's — or [`None`] for a rule that
+    /// is none.
+    fn environment_rule(
+        &self,
+        caller: CallerId,
+        position: &Vector,
+        rule: i32,
+    ) -> Option<Vec<crate::value::Element>>;
+
+    /// `llHTTPRequest`: send `request`, checked and with every header it
+    /// goes out with, from `caller`'s prim. The host hands the answer back
+    /// later with [`crate::vm::Engine::http_response`] — a host that sends
+    /// nothing off the grid answers with a stated failure, never silence.
+    fn send_http(&mut self, caller: CallerId, request: &crate::vm::http::Outbound);
+
+    /// `llRequestURL`, `llRequestSecureURL`: a URL for `caller`, keyed `key`
+    /// ([`crate::vm::http::granted_url`] spells it), or [`None`] when none
+    /// is granted (no URL left, no HTTPS listener).
+    fn request_url(&mut self, caller: CallerId, key: &str, secure: bool) -> Option<String>;
+
+    /// `llReleaseURL`: `url`, if it is `caller`'s, is free again.
+    fn release_url(&mut self, caller: CallerId, url: &str);
+
+    /// `llGetFreeURLs`: how many more URLs `caller`'s land allows.
+    fn free_urls(&self, caller: CallerId) -> i32;
+
+    /// `llHTTPResponse`: send `answered` back for the request `request` that
+    /// arrived at one of `caller`'s URLs.
+    fn answer_http(&mut self, caller: CallerId, request: &str, answered: crate::vm::http::Answered);
+
+    /// The `llHTTPRequest` throttle of `caller`'s prim, kept by the host for
+    /// the prim.
+    fn http_throttle(&mut self, caller: CallerId) -> &mut crate::vm::http::Throttle;
+
+    /// The `host:port` the grid's script URLs are reached at: the one address
+    /// on the simulator's own network a script's request may go to.
+    fn url_authority(&self, caller: CallerId) -> String;
+
+    /// The avatar `agent` if it is in the region (`llGetAgentSize`,
+    /// `llGetAgentInfo`, `llGetAnimation`, the names).
+    fn agent(&self, caller: CallerId, agent: &str) -> Option<crate::vm::avatars::Agent>;
+
+    /// Any avatar of the grid, by key (`llRequestAgentData`,
+    /// `llRequestDisplayName`, `llRequestUsername`), or [`None`] for a key no
+    /// account has.
+    fn agent_record(
+        &self,
+        caller: CallerId,
+        agent: &str,
+    ) -> Option<crate::vm::avatars::AgentRecord>;
+
+    /// The key of the avatar of the grid named `name` — a legacy name or a
+    /// user name — and whether it is in the region (`llName2Key`,
+    /// `llRequestUserKey`); [`None`] when no account has that name.
+    fn agent_named(&self, caller: CallerId, name: &str) -> Option<(String, bool)>;
+
+    /// `llStartAnimation` (`start`) or `llStopAnimation` of the animation
+    /// asset `animation` on `agent`, which granted the script.
+    fn animate(&mut self, caller: CallerId, agent: &str, animation: &str, start: bool);
+
+    /// `llSetAnimationOverride`: `agent`'s movement state `state` played as
+    /// `animation` (its name as the script gave it, and its asset), or with
+    /// [`None`] as it plays by default (`llResetAnimationOverride`).
+    fn set_animation_override(
+        &mut self,
+        caller: CallerId,
+        agent: &str,
+        state: &str,
+        animation: Option<(&str, &str)>,
+    );
+
+    /// `llGetAnimationOverride`: the name of what overrides `agent`'s
+    /// movement state `state`, or [`None`] when nothing does.
+    fn animation_override(&self, caller: CallerId, agent: &str, state: &str) -> Option<String>;
+
+    /// `llStartObjectAnimation` (`start`) or `llStopObjectAnimation` of the
+    /// animation named `name` (asset `animation`) on `caller`'s object.
+    fn object_animate(&mut self, caller: CallerId, name: &str, animation: &str, start: bool);
+
+    /// `llGetObjectAnimationNames`: what `caller`'s object plays.
+    fn object_animations(&self, caller: CallerId) -> Vec<String>;
+
+    /// `llTakeControls`, `llReleaseControls`: send `agent`'s viewer
+    /// `changes`, and route its keys to the script — `taken` controls of it,
+    /// or none with [`None`] — through [`crate::vm::Engine::controls`].
+    fn control_changes(
+        &mut self,
+        caller: CallerId,
+        agent: &str,
+        changes: &[crate::vm::avatars::ControlChange],
+        taken: Option<i32>,
+    );
+
+    /// `llSetCameraParams`: send `agent`'s viewer the follow-camera
+    /// properties `rules` of `caller`'s object.
+    fn set_camera(
+        &mut self,
+        caller: CallerId,
+        agent: &str,
+        rules: &[crate::vm::avatars::CameraRule],
+    );
+
+    /// `llClearCameraParams`: clear them.
+    fn clear_camera(&mut self, caller: CallerId, agent: &str);
+
+    /// Where `agent`'s camera is and how it is turned (`llGetCameraPos`,
+    /// `llGetCameraRot`), or [`None`] when it is not in the region.
+    fn camera(&self, caller: CallerId, agent: &str) -> Option<(Vector, sl_types::lsl::Rotation)>;
+
+    /// `llTeleportAgent` and its family: send `agent` to `destination`.
+    fn teleport_agent(
+        &mut self,
+        caller: CallerId,
+        agent: &str,
+        destination: &crate::vm::avatars::Destination,
+    );
+
+    /// `llGetAttachedList`: the keys of the objects `agent` wears that a
+    /// script may see, or [`None`] when it is not in the region.
+    fn attached_list(&self, caller: CallerId, agent: &str) -> Option<Vec<String>>;
+
+    /// The key of the map texture of the grid's region named, or keyed,
+    /// `region` — of the caller's own region for an empty `region` — or
+    /// [`None`] for a region the grid does not know (`osGetMapTexture`,
+    /// `osGetRegionMapTexture`).
+    fn map_texture(&self, caller: CallerId, region: &str) -> Option<String>;
+
+    /// `osMakeNotecard`: write a notecard of `text` into `caller`'s prim
+    /// under `name`, or the first `name N` the prim does not hold, described
+    /// `description`, its owner the prim's owner and its creator too, and
+    /// raise `changed(bits)` in the prim's scripts once per element of
+    /// `changed`.
+    fn make_notecard(
+        &mut self,
+        caller: CallerId,
+        name: &str,
+        description: &str,
+        text: &str,
+        changed: &[i32],
+    );
+
+    /// The region's calendar time at its tick 0, in microseconds since the
+    /// UNIX epoch: what every date a script reads counts on from by its
+    /// ticks, so it follows from the seed and the ticks and never from the
+    /// machine (`book/src/simulator/determinism.md`).
+    fn epoch_micros(&self) -> i64;
+
+    /// The offset from UTC, in seconds, of the time zone the simulator's host
+    /// keeps at UNIX time `unix` — what OpenSim's `DateTime.Now` reads
+    /// (`llGetWallclock`, `llGetTimeOfDay`).
+    fn local_offset(&self, unix: i64) -> i32;
+
+    /// The offset in seconds of the day cycle of the environment over
+    /// `caller`'s prim (OpenSim's `DayOffset`, which its apparent time adds).
+    fn day_offset(&self, caller: CallerId) -> f32;
+
+    /// Every object and avatar of the region `caller` is in, as a sweep
+    /// weighs it — an object by its root — in any order: which a sweep
+    /// returns, and in what order, is the library's.
+    fn sense(&self, caller: CallerId) -> Vec<Sensed>;
+
+    /// Every surface the segment from `start` to `end` crosses, cut where it
+    /// leaves the region, nearest `start` first: prims (where it enters them,
+    /// or leaves one it starts inside), avatars and the ground. Which a
+    /// script is told of is the library's.
+    fn cast_ray(&self, caller: CallerId, start: &Vector, end: &Vector) -> Vec<RayHit>;
 }

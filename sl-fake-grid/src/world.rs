@@ -3353,7 +3353,7 @@ fn rez_from_inventory(
     };
     world.objects.extend(rezzed.iter().cloned());
     if let Some(taken) = taken {
-        restore_contents(world, &rezzed, taken, now);
+        restore_contents(world, &rezzed, taken, (0, ""), now);
     }
     if let Err(error) = send_objects(sim, &rezzed, now) {
         tracing::warn!("streaming an object rezzed from inventory failed: {error}");
@@ -3379,12 +3379,14 @@ fn rez_from_inventory(
 /// of `taken`'s prims) what it held when it was taken: its contents, under its
 /// new key, and its scripts, which the region's engine brings back from what
 /// they saved — the time away counted as the engine counts it — and tells of
-/// the rez with `on_rez(0)`, the start parameter of an object rezzed from an
-/// avatar's inventory.
+/// the rez with `on_rez(start_parameter)`, giving them `start_string`: 0 and
+/// nothing for an object rezzed from an avatar's inventory, what the script
+/// asked for one a script rezzed.
 fn restore_contents(
     world: &mut SceneFixtures,
     rezzed: &[Object],
     taken: crate::assets::TakenLinkset,
+    (start_parameter, start_string): (i32, &str),
     now: Instant,
 ) {
     let away = now.saturating_duration_since(taken.taken_at);
@@ -3403,9 +3405,13 @@ fn restore_contents(
             .collect();
         let mut saved = prim.scripts;
         for item in scripts {
-            world
-                .script_instances
-                .arrive(object.full_id, item, saved.remove(&item), away, 0);
+            world.script_instances.arrive(
+                object.full_id,
+                item,
+                saved.remove(&item),
+                away,
+                (start_parameter, start_string),
+            );
         }
         if world
             .objects
@@ -3418,6 +3424,84 @@ fn restore_contents(
             );
         }
     }
+}
+
+/// Where and how a script puts an object out of its prim's contents.
+pub(crate) struct ScriptRez<'a> {
+    /// Where the root goes.
+    pub(crate) position: Vector,
+    /// How the root is turned.
+    pub(crate) rotation: Rotation,
+    /// What the object's scripts are given for `on_rez` and
+    /// `llGetStartParameter`.
+    pub(crate) start_parameter: i32,
+    /// What they are given for `llGetStartString`.
+    pub(crate) start_string: &'a str,
+    /// Whether the object is temporary.
+    pub(crate) temporary: bool,
+}
+
+/// A script's rez of the object item `item` of a prim's contents
+/// (`llRezObject` and its family): the linkset the item was taken as, put
+/// back with its contents and its scripts as they were saved, or for an item
+/// no take made (a fixture's) its published body; the root placed and turned
+/// as `how` says. The prims rezzed, root first, already in the region; their
+/// scripts arrive at the next reconcile. [`None`] when the item's object is
+/// nowhere to be had.
+pub(crate) fn script_rez(
+    world: &mut SceneFixtures,
+    assets: &crate::assets::GridAssets,
+    region_handle: sl_wire::RegionHandle,
+    mint: &dyn Fn() -> uuid::Uuid,
+    item: &TaskInventoryItem,
+    how: &ScriptRez<'_>,
+    now: Instant,
+) -> Option<Vec<Object>> {
+    let filed = crate::task_contents::agent_item_from(
+        item,
+        InventoryFolderKey::from(uuid::Uuid::nil()),
+        mint,
+    );
+    let taken = assets
+        .taken_linkset(item.item_id)
+        .filter(|linkset| !linkset.prims.is_empty());
+    let mut rezzed = match &taken {
+        Some(linkset) => rez_taken_linkset(
+            world,
+            region_handle,
+            mint,
+            &linkset.objects(),
+            &filed,
+            Some(&how.position),
+        ),
+        None => {
+            let bytes = taken_object_body(assets, &filed)?;
+            rez_asset_body(
+                world,
+                region_handle,
+                mint,
+                &bytes,
+                &filed,
+                Some(&how.position),
+            )?
+        }
+    };
+    let root = rezzed.first_mut()?;
+    root.motion.rotation = how.rotation.clone();
+    if how.temporary {
+        root.update_flags |= prim_flags::TEMPORARY_ON_REZ;
+    }
+    world.objects.extend(rezzed.iter().cloned());
+    if let Some(taken) = taken {
+        restore_contents(
+            world,
+            &rezzed,
+            taken,
+            (how.start_parameter, how.start_string),
+            now,
+        );
+    }
+    Some(rezzed)
 }
 
 /// The objects a rez puts back when this grid is the one that **took** them:

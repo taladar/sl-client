@@ -22,6 +22,9 @@
 //! [`status`], and a test prints the counts and fails if a function falls
 //! back from the committed baseline (`library/coverage.txt`).
 
+pub mod avatars;
+pub mod calendar;
+pub mod clocks;
 pub(crate) mod collation;
 pub mod comms;
 pub mod contents;
@@ -33,19 +36,26 @@ pub mod effects;
 pub mod encoding;
 pub mod experiences;
 mod generated;
+pub mod http;
+pub mod inventory;
 pub mod json_text;
+pub mod land;
 pub mod linking;
 pub mod linkset;
 pub mod lists;
 pub mod math;
 pub mod money_permissions;
+pub mod notecards;
 pub mod ossl;
+pub mod ossl_inventory;
 pub mod ossl_prim;
 pub(crate) mod prim_params;
 pub mod prim_state;
 mod range;
 mod registry;
+pub mod rezzing;
 pub mod rotations;
+pub mod sensors;
 pub mod sitting;
 pub mod strings;
 pub mod table;
@@ -215,6 +225,8 @@ mod tests {
     struct Unreached {
         /// The one linkset's store, never written by these tests.
         store: LinksetData,
+        /// The prim's HTTP throttle, never asked by these tests.
+        throttle: crate::vm::http::Throttle,
     }
 
     impl Host for Unreached {
@@ -283,6 +295,288 @@ mod tests {
 
         fn agent_ip(&self, _agent: &str) -> String {
             String::new()
+        }
+
+        fn contents(&self, _caller: CallerId) -> Vec<crate::vm::Item> {
+            Vec::new()
+        }
+
+        fn remove_item(&mut self, _caller: CallerId, _name: &str, _changed: &[i32]) -> bool {
+            false
+        }
+
+        fn give_to_prim(&mut self, _caller: CallerId, _target: &str, _items: &[String]) -> bool {
+            false
+        }
+
+        fn offer_items(&mut self, _caller: CallerId, _offer: &crate::vm::Offer) -> bool {
+            false
+        }
+
+        fn set_remote_pin(&mut self, _caller: CallerId, _pin: i32) {}
+
+        fn remote_pin(&self, _prim: &str) -> Option<(i32, String)> {
+            None
+        }
+
+        fn load_script(&mut self, _caller: CallerId, _load: &crate::vm::RemoteLoad) {}
+
+        fn rez(
+            &mut self,
+            _caller: CallerId,
+            _rez: &crate::vm::Rez,
+        ) -> Result<String, crate::vm::RezRefusal> {
+            Err(crate::vm::RezRefusal::Missing)
+        }
+
+        fn derez(&mut self, _caller: CallerId, _object: &str) -> bool {
+            false
+        }
+
+        fn notecard_text(&mut self, _asset: &str) -> Option<String> {
+            None
+        }
+
+        fn notecard_read(&self, _asset: &str) -> Option<String> {
+            None
+        }
+
+        fn make_notecard(
+            &mut self,
+            _caller: CallerId,
+            _name: &str,
+            _description: &str,
+            _text: &str,
+            _changed: &[i32],
+        ) {
+        }
+
+        fn epoch_micros(&self) -> i64 {
+            0
+        }
+
+        fn local_offset(&self, _unix: i64) -> i32 {
+            0
+        }
+
+        fn day_offset(&self, _caller: CallerId) -> f32 {
+            57_600.0
+        }
+
+        fn parcel_at(
+            &self,
+            _caller: CallerId,
+            _x: f32,
+            _y: f32,
+        ) -> Option<crate::vm::land::Parcel> {
+            None
+        }
+
+        fn region(&self, _caller: CallerId) -> crate::vm::land::Region {
+            crate::vm::land::Region::default()
+        }
+
+        fn sim_data(&self, _caller: CallerId, _name: &str) -> Option<crate::vm::land::SimData> {
+            None
+        }
+
+        fn ground(&self, _caller: CallerId, _x: f32, _y: f32) -> f32 {
+            0.0
+        }
+
+        fn wind(&self, _caller: CallerId, _position: &Vector) -> Vector {
+            Vector {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            }
+        }
+
+        fn environment(
+            &self,
+            _caller: CallerId,
+            _position: Option<&Vector>,
+            _unix: i64,
+        ) -> crate::vm::land::Environment {
+            crate::vm::land::Environment {
+                day_length: 14_400.0,
+                day_offset: 57_600.0,
+                sun: Rotation {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                    s: 1.0,
+                },
+                moon: Rotation {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                    s: 1.0,
+                },
+            }
+        }
+
+        fn change_land(
+            &mut self,
+            _caller: CallerId,
+            _position: &Vector,
+            _change: &crate::vm::land::LandChange,
+        ) -> bool {
+            false
+        }
+
+        fn parcel_media(
+            &self,
+            _caller: CallerId,
+            _position: &Vector,
+        ) -> crate::vm::land::ParcelMedia {
+            crate::vm::land::ParcelMedia::default()
+        }
+
+        fn sim_stats(&self, _caller: CallerId) -> Vec<f32> {
+            Vec::new()
+        }
+
+        fn environment_rule(
+            &self,
+            _caller: CallerId,
+            _position: &Vector,
+            _rule: i32,
+        ) -> Option<Vec<crate::value::Element>> {
+            None
+        }
+
+        fn map_texture(&self, _caller: CallerId, _region: &str) -> Option<String> {
+            None
+        }
+
+        fn send_http(&mut self, _caller: CallerId, _request: &crate::vm::http::Outbound) {}
+
+        fn request_url(&mut self, _caller: CallerId, _key: &str, _secure: bool) -> Option<String> {
+            None
+        }
+
+        fn release_url(&mut self, _caller: CallerId, _url: &str) {}
+
+        fn free_urls(&self, _caller: CallerId) -> i32 {
+            0
+        }
+
+        fn answer_http(
+            &mut self,
+            _caller: CallerId,
+            _request: &str,
+            _answered: crate::vm::http::Answered,
+        ) {
+        }
+
+        fn http_throttle(&mut self, _caller: CallerId) -> &mut crate::vm::http::Throttle {
+            &mut self.throttle
+        }
+
+        fn url_authority(&self, _caller: CallerId) -> String {
+            String::new()
+        }
+
+        fn agent(&self, _caller: CallerId, _agent: &str) -> Option<crate::vm::avatars::Agent> {
+            None
+        }
+
+        fn agent_record(
+            &self,
+            _caller: CallerId,
+            _agent: &str,
+        ) -> Option<crate::vm::avatars::AgentRecord> {
+            None
+        }
+
+        fn agent_named(&self, _caller: CallerId, _name: &str) -> Option<(String, bool)> {
+            None
+        }
+
+        fn animate(&mut self, _caller: CallerId, _agent: &str, _animation: &str, _start: bool) {}
+
+        fn set_animation_override(
+            &mut self,
+            _caller: CallerId,
+            _agent: &str,
+            _state: &str,
+            _animation: Option<(&str, &str)>,
+        ) {
+        }
+
+        fn animation_override(
+            &self,
+            _caller: CallerId,
+            _agent: &str,
+            _state: &str,
+        ) -> Option<String> {
+            None
+        }
+
+        fn object_animate(
+            &mut self,
+            _caller: CallerId,
+            _name: &str,
+            _animation: &str,
+            _start: bool,
+        ) {
+        }
+
+        fn object_animations(&self, _caller: CallerId) -> Vec<String> {
+            Vec::new()
+        }
+
+        fn control_changes(
+            &mut self,
+            _caller: CallerId,
+            _agent: &str,
+            _changes: &[crate::vm::avatars::ControlChange],
+            _taken: Option<i32>,
+        ) {
+        }
+
+        fn set_camera(
+            &mut self,
+            _caller: CallerId,
+            _agent: &str,
+            _rules: &[crate::vm::avatars::CameraRule],
+        ) {
+        }
+
+        fn clear_camera(&mut self, _caller: CallerId, _agent: &str) {}
+
+        fn camera(
+            &self,
+            _caller: CallerId,
+            _agent: &str,
+        ) -> Option<(Vector, sl_types::lsl::Rotation)> {
+            None
+        }
+
+        fn teleport_agent(
+            &mut self,
+            _caller: CallerId,
+            _agent: &str,
+            _destination: &crate::vm::avatars::Destination,
+        ) {
+        }
+
+        fn attached_list(&self, _caller: CallerId, _agent: &str) -> Option<Vec<String>> {
+            None
+        }
+
+        fn sense(&self, _caller: CallerId) -> Vec<crate::vm::sensing::Sensed> {
+            Vec::new()
+        }
+
+        fn cast_ray(
+            &self,
+            _caller: CallerId,
+            _start: &Vector,
+            _end: &Vector,
+        ) -> Vec<crate::vm::sensing::RayHit> {
+            Vec::new()
         }
 
         fn print(&mut self, _caller: CallerId, _text: &str) {}

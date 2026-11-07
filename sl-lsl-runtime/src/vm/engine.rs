@@ -14,6 +14,7 @@ use crate::library::{Event, event};
 use crate::num::ticks_for;
 use crate::value::Value;
 use crate::vm::comms::Heard;
+use crate::vm::contents::Control;
 use crate::vm::context::{Peers, Raised, Tick};
 use crate::vm::detected::Detected;
 use crate::vm::experiences::ExperienceError;
@@ -503,6 +504,27 @@ impl Engine {
         }
     }
 
+    /// The object the instance `id`'s script rezzed (`llRezObject` and its
+    /// family) is in the region and its scripts have run their `on_rez`:
+    /// raise `object_rez(object)` in the rezzer. The host calls this a tick
+    /// after it brought the child's scripts in, which is why the rezzer
+    /// hears of the rez after the child ran (`inventory/rez`).
+    ///
+    /// # Errors
+    ///
+    /// None in practice: `object_rez` takes one key.
+    pub fn object_rezzed(
+        &mut self,
+        id: CallerId,
+        object: &str,
+    ) -> Result<Option<Posted>, PostError> {
+        self.post(
+            id,
+            lifecycle("object_rez"),
+            vec![Value::Key(object.to_owned())],
+        )
+    }
+
     /// `payer` paid the prim the instance `id` is in `amount` L$, and the
     /// grid took it: raise `money(payer, amount)`. The host offers every
     /// script of the prim the payment; one whose state has no `money` handler
@@ -522,6 +544,144 @@ impl Engine {
             lifecycle("money"),
             vec![Value::Key(payer.to_owned()), Value::Integer(amount)],
         )
+    }
+
+    /// The answer to the request `request` the instance `id` sent
+    /// (`llHTTPRequest`) came back: `http_response(request, status, metadata,
+    /// body)`, the body cut at the request's `HTTP_BODY_MAXLENGTH` as its
+    /// flavour cuts it — on Second Life in every script of the prim, the
+    /// others of which `prim` names; on OpenSim in the sender alone. [`None`]
+    /// when there is no such instance, or it is not waiting on that request
+    /// (a reset forgot it).
+    ///
+    /// # Errors
+    ///
+    /// None in practice: `http_response` takes a key, an integer, a list and
+    /// a string.
+    pub fn http_response(
+        &mut self,
+        id: CallerId,
+        request: &str,
+        status: i32,
+        body: &str,
+        prim: &[CallerId],
+    ) -> Result<Option<Posted>, PostError> {
+        let flavour = self.config.flavour;
+        let Some(max) = self
+            .instances
+            .get_mut(&id)
+            .and_then(|instance| instance.data_mut().http.pending.remove(request))
+        else {
+            return Ok(None);
+        };
+        let (body, metadata) = crate::vm::http::response_body(flavour, body, max);
+        let args = vec![
+            Value::Key(request.to_owned()),
+            Value::Integer(status),
+            Value::List(
+                metadata
+                    .into_iter()
+                    .map(crate::value::Element::Integer)
+                    .collect(),
+            ),
+            Value::String(body),
+        ];
+        if flavour == EngineFlavour::SecondLife {
+            for other in prim.iter().filter(|other| **other != id) {
+                let _posted = self.post(*other, lifecycle("http_response"), args.clone())?;
+            }
+        }
+        self.post(id, lifecycle("http_response"), args)
+    }
+
+    /// A request arrived at one of the instance `id`'s URLs, the grid's URL
+    /// surface having handed it on ([`crate::vm::http::arrive`]):
+    /// `http_request(request, method, body)`, its headers kept for
+    /// `llGetHTTPHeader` and `llHTTPResponse` until it is answered. [`None`]
+    /// when there is no such instance.
+    ///
+    /// # Errors
+    ///
+    /// None in practice: `http_request` takes a key and two strings.
+    pub fn http_request(
+        &mut self,
+        id: CallerId,
+        request: &str,
+        inbound: crate::vm::http::Inbound,
+    ) -> Result<Option<Posted>, PostError> {
+        let Some(instance) = self.instances.get_mut(&id) else {
+            return Ok(None);
+        };
+        let args = vec![
+            Value::Key(request.to_owned()),
+            Value::String(inbound.method.clone()),
+            Value::String(inbound.body.clone()),
+        ];
+        let _previous = instance
+            .data_mut()
+            .http
+            .inbound
+            .insert(request.to_owned(), inbound);
+        self.post(id, lifecycle("http_request"), args)
+    }
+
+    /// The keys `held` down at this tick by the avatar whose controls the
+    /// instance `id` took: `control(agent, level, edge)` when the hold
+    /// changed, or as its flavour repeats a hold. [`None`] when there is no
+    /// such instance, it took no controls of `agent`, or nothing is raised.
+    ///
+    /// # Errors
+    ///
+    /// None in practice: `control` takes a key and two integers.
+    pub fn controls(
+        &mut self,
+        id: CallerId,
+        agent: &str,
+        held: i32,
+    ) -> Result<Option<Posted>, PostError> {
+        let flavour = self.config.flavour;
+        let Some(raised) = self.instances.get_mut(&id).and_then(|instance| {
+            let taken = instance.data_mut().controls.as_mut()?;
+            if taken.agent != agent {
+                return None;
+            }
+            taken.events.tick(flavour, held)
+        }) else {
+            return Ok(None);
+        };
+        let (level, edge) = raised;
+        self.post(
+            id,
+            lifecycle("control"),
+            vec![
+                Value::Key(agent.to_owned()),
+                Value::Integer(level),
+                Value::Integer(edge),
+            ],
+        )
+    }
+
+    /// The avatar and controls the instance `id` holds taken: what a host
+    /// routes the avatar's keys to, releasing them when it no longer does (a
+    /// reset drops them).
+    #[must_use]
+    pub fn taken_controls(&self, id: CallerId) -> Option<(&str, i32)> {
+        self.instances.get(&id).and_then(|instance| {
+            instance
+                .data()
+                .controls
+                .as_ref()
+                .map(|taken| (taken.agent.as_str(), taken.events.taken))
+        })
+    }
+
+    /// The URLs the instance `id` holds: what a host keeps granted to it,
+    /// releasing the rest (a reset drops them all).
+    #[must_use]
+    pub fn urls(&self, id: CallerId) -> &[String] {
+        self.instances
+            .get(&id)
+            .map_or(&[], |instance| instance.data().http.urls.as_slice())
     }
 
     /// The object the instance `id` is in was taken into inventory: the
@@ -829,6 +989,14 @@ impl Engine {
         let links = host.links(id);
         for raised in &slice.raised {
             let (event, args, reached) = match raised {
+                Raised::Control { target, control } => {
+                    if *target == id {
+                        apply_control(instance, *control, flavour);
+                    } else if let Some(peer) = self.instances.get_mut(target) {
+                        apply_control(peer, *control, flavour);
+                    }
+                    continue;
+                }
                 Raised::Linkset(change) => (
                     lifecycle("linkset_data"),
                     vec![
@@ -859,6 +1027,43 @@ impl Engine {
                     lifecycle("run_time_permissions"),
                     vec![Value::Integer(*mask)],
                     vec![id],
+                ),
+                Raised::UrlAnswer {
+                    id: handle,
+                    method,
+                    body,
+                } => (
+                    lifecycle("http_request"),
+                    vec![
+                        Value::Key(handle.clone()),
+                        Value::String((*method).to_owned()),
+                        Value::String(body.clone()),
+                    ],
+                    vec![id],
+                ),
+                Raised::HttpResponse {
+                    id: handle,
+                    status,
+                    body,
+                } => (
+                    lifecycle("http_response"),
+                    vec![
+                        Value::Key(handle.clone()),
+                        Value::Integer(*status),
+                        Value::List(Vec::new()),
+                        Value::String(body.clone()),
+                    ],
+                    // Second Life raises it in every script of the prim.
+                    core::iter::once(id)
+                        .chain(
+                            host.prim_scripts(&host.whereabouts(id).prim)
+                                .unwrap_or_default()
+                                .into_iter()
+                                .filter(|other| {
+                                    *other != id && flavour == EngineFlavour::SecondLife
+                                }),
+                        )
+                        .collect(),
                 ),
                 Raised::Dataserver { id: handle, data } => (
                     lifecycle("dataserver"),
@@ -934,6 +1139,7 @@ impl Engine {
         if !timers_last {
             self.post_due_timers(now);
         }
+        self.post_due_sweeps(now, host);
         let mut region_left = self.config.region_budget;
         for id in order {
             // Out of the map while it runs, so the others can be lent to it.
@@ -999,9 +1205,41 @@ impl Engine {
     fn post_due_timers(&mut self, now: Tick) {
         let arrival = self.arrival();
         let flavour = self.config.flavour;
+        let step = self.config.step;
         for instance in self.instances.values_mut() {
-            if instance.timer_due(now, flavour) {
+            if instance.timer_due(now, step, flavour) {
                 let _posted = instance.post(arrival, lifecycle("timer"), Vec::new());
+            }
+        }
+    }
+
+    /// Sweep for every script whose sensor is due at `now`, and post what each
+    /// sweep found: `sensor` with the detected block, `no_sensor`, or — on
+    /// Second Life, for a range of 0 or less — nothing.
+    fn post_due_sweeps(&mut self, now: Tick, host: &dyn Host) {
+        let step = self.config.step;
+        let flavour = self.config.flavour;
+        let due: Vec<(CallerId, Vec<crate::vm::sensing::Query>)> = self
+            .instances
+            .iter_mut()
+            .map(|(id, instance)| (*id, instance.sweeps_due(now, step)))
+            .filter(|(_, queries)| !queries.is_empty())
+            .collect();
+        for (id, queries) in due {
+            let sweeper = sweeper_of(id, host);
+            let candidates = host.sense(id);
+            for query in queries {
+                let Some(found) = crate::vm::sensing::sweep(&query, &sweeper, &candidates, flavour)
+                else {
+                    continue;
+                };
+                let posted = if found.is_empty() {
+                    self.post(id, lifecycle("no_sensor"), Vec::new())
+                } else {
+                    self.post_detected(id, lifecycle("sensor"), found)
+                };
+                // A sweep's events take what the table says they take.
+                let _posted = posted;
             }
         }
     }
@@ -1018,6 +1256,52 @@ impl Engine {
             }
         }
         self.active += (f64::from(running) - self.active) * weight;
+    }
+}
+
+/// Do `control` to `instance`, another script's `llSetScriptState` or
+/// `llResetOtherScript`, as `flavour`'s engine does it
+/// (`inventory/listing`): a run flag is set on every grid; a reset of a
+/// stopped script does nothing on Second Life, where started again it carries
+/// on without `state_entry`, and resets it on OpenSim, where started again it
+/// runs `state_entry`; a reset of a running script drops what it had queued
+/// on Second Life and XEngine, and on YEngine comes after it.
+fn apply_control(instance: &mut Instance, control: Control, flavour: EngineFlavour) {
+    match control {
+        Control::Run(running) => instance.set_running_as(running, flavour),
+        Control::Reset => match flavour {
+            EngineFlavour::SecondLife => {
+                if instance.is_running() || instance.is_held() {
+                    instance.reset();
+                }
+            }
+            EngineFlavour::YEngine => {
+                if instance.is_running() {
+                    instance.reset_when_idle();
+                } else {
+                    instance.reset();
+                }
+            }
+            EngineFlavour::XEngine => instance.reset(),
+        },
+    }
+}
+
+/// Where the script `id`'s prim is, as a sweep measures from it.
+fn sweeper_of(id: CallerId, host: &dyn Host) -> crate::vm::sensing::Sweeper {
+    let at = host.whereabouts(id);
+    let rotation = host
+        .prim(id, &at.prim)
+        .map_or(crate::value::ZERO_ROTATION, |prim| prim.rotation);
+    let group = host.object_details(id, &at.object).map_or_else(
+        || crate::value::NULL_KEY.to_owned(),
+        |details| details.group,
+    );
+    crate::vm::sensing::Sweeper {
+        position: host.placement(id).position,
+        rotation,
+        root: at.object,
+        group,
     }
 }
 

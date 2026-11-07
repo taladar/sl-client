@@ -214,7 +214,7 @@ pub fn ll_unescape_url<C: PureCtx>(ctx: &mut C, text: String) -> Result<String, 
 }
 
 /// `Uri.UnescapeDataString`: see [`ll_unescape_url`].
-fn os_unescape(text: &str) -> String {
+pub(crate) fn os_unescape(text: &str) -> String {
     let source = text.as_bytes();
     let escape = |at: usize| -> Option<u8> {
         if source.get(at) != Some(&b'%') {

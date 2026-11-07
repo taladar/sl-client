@@ -11,17 +11,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 129 |
-| ready | 330 |
-| blocked | 36 |
+| ideas | 123 |
+| ready | 333 |
+| blocked | 35 |
 | in-progress | 11 |
 | bugs | 36 |
-| done | 1509 |
+| done | 1515 |
 | deferred | 30 |
 | wont-do | 24 |
-| **total** | **2105** |
+| **total** | **2107** |
 
-## ideas (129)
+## ideas (123)
 
 ### protocol
 
@@ -276,34 +276,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   service — per-agent trees and the library
 - [`server-login-service`](ideas/server-login-service.md) — Standalone login
   server
-- [`server-lsl-lib-avatar-control`](ideas/server-lsl-lib-avatar-control.md) —
-  Library tranche — avatars, animation, sitting, controls and camera (blocked by
-  `server-lsl-vm-execution` (done), `server-world-agent-movement` (done),
-  `server-world-sit-and-attach` (done), `gridspec-lsl-avatar-control` (done))
-- [`server-lsl-lib-detection-sensors`](ideas/server-lsl-lib-detection-sensors.md)
-  — Library tranche — the detected block, sensors and raycasts (blocked by
-  `server-lsl-state-and-events` (done), `server-world-ecs-store` (done),
-  `server-world-touch-and-grab` (done), `gridspec-lsl-detection-sensors` (done))
-- [`server-lsl-lib-http-url`](ideas/server-lsl-lib-http-url.md) — Library
-  tranche — outbound HTTP and in-world URLs (blocked by
-  `server-lsl-vm-execution` (done), `server-world-determinism-contract` (done),
-  `gridspec-lsl-http-url` (done))
-- [`server-lsl-lib-land-region-env`](ideas/server-lsl-lib-land-region-env.md) —
-  Library tranche — parcel, region, estate and environment queries (blocked by
-  `server-lsl-vm-execution` (done), `server-world-agent-movement` (done),
-  `gridspec-lsl-land-region-env` (done))
 - [`server-lsl-lib-physics-vehicles`](ideas/server-lsl-lib-physics-vehicles.md)
   — Library tranche — status flags, forces, targets and vehicles (blocked by
   `server-lsl-vm-execution` (done), `server-world-collision-and-physics`,
   `gridspec-lsl-physics-vehicles` (done))
-- [`server-lsl-lib-task-inventory`](ideas/server-lsl-lib-task-inventory.md) —
-  Library tranche — task inventory, giving, rezzing and notecards (blocked by
-  `server-lsl-vm-execution` (done), `server-fake-grid-script-engine-wiring`
-  (done), `gridspec-lsl-task-inventory` (done))
-- [`server-lsl-lib-time-timers`](ideas/server-lsl-lib-time-timers.md) — Library
-  tranche — time, timers and sleeping, on a tick clock (blocked by
-  `server-lsl-vm-execution` (done), `server-world-determinism-contract` (done),
-  `gridspec-lsl-time-timers` (done))
 - [`server-map-service`](ideas/server-map-service.md) — Map service — tiles and
   map items
 - [`server-message-routing`](ideas/server-message-routing.md) — Global message
@@ -327,7 +303,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-lsl-opensim-function-set`](ideas/gridspec-lsl-opensim-function-set.md)
   — Measure which library functions OpenSim's engines compile
 
-## ready (330)
+## ready (333)
 
 ### protocol
 
@@ -1114,6 +1090,19 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-fake-grid-terraform`](ready/server-fake-grid-terraform.md) — Fake
   grid — terraforming, undo and bake (blocked by `gridspec-terrain-editing`
   (done))
+- [`server-lsl-forced-delays-per-flavour`](ready/server-lsl-forced-delays-per-flavour.md)
+  — Charge each grid flavour's measured forced delays and throttles, not the
+  keyword file's (blocked by `gridspec-lsl-throttles` (done),
+  `server-lsl-lib-comms` (done), `server-lsl-lib-http-url` (done),
+  `server-lsl-lib-task-inventory` (done), `server-lsl-lib-math-rotations`
+  (done), `server-lsl-lib-land-region-env` (done), `server-lsl-lib-prim-state`
+  (done), `server-fake-grid-script-engine-wiring` (done))
+- [`server-lsl-lib-ossl-avatars`](ready/server-lsl-lib-ossl-avatars.md) —
+  Library tranche — OpenSim's NPC and avatar functions (blocked by
+  `server-lsl-lib-avatar-control` (done))
+- [`server-lsl-lib-ossl-land-writers`](ready/server-lsl-lib-ossl-land-writers.md)
+  — Library tranche — OpenSim's land, terrain, wind and environment writers
+  (blocked by `server-lsl-lib-land-region-env` (done))
 - [`server-world-changed-object-crossing`](ready/server-world-changed-object-crossing.md)
   — Measure and raise changed() when an unworn object crosses a region border
   (blocked by `gridspec-neighbours-crossing` (done))
@@ -1132,7 +1121,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-sl-mfa-challenge`](ready/gridspec-sl-mfa-challenge.md) — Record
   Second Life's MFA challenge and whether a remembered mfa_hash gets past it
 
-## blocked (36)
+## blocked (35)
 
 ### viewer
 
@@ -1241,16 +1230,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-fake-grid-scripted-scenario`](blocked/server-fake-grid-scripted-scenario.md)
   — A scripts scenario — one prim per scripted behaviour (blocked by
   `server-fake-grid-script-engine-wiring` (done), `server-lsl-lib-prim-state`
-  (done), `server-lsl-lib-detection-sensors`, `server-lsl-lib-avatar-control`,
-  `server-fake-grid-money-ledger` (done), `server-lsl-lib-task-inventory`,
+  (done), `server-lsl-lib-detection-sensors` (done),
+  `server-lsl-lib-avatar-control` (done), `server-fake-grid-money-ledger`
+  (done), `server-lsl-lib-task-inventory` (done),
   `server-lsl-lib-physics-vehicles`)
-- [`server-lsl-forced-delays-per-flavour`](blocked/server-lsl-forced-delays-per-flavour.md)
-  — Charge each grid flavour's measured forced delays and throttles, not the
-  keyword file's (blocked by `gridspec-lsl-throttles` (done),
-  `server-lsl-lib-comms` (done), `server-lsl-lib-http-url`,
-  `server-lsl-lib-task-inventory`, `server-lsl-lib-math-rotations` (done),
-  `server-lsl-lib-land-region-env`, `server-lsl-lib-prim-state` (done),
-  `server-fake-grid-script-engine-wiring` (done))
 
 ### gridspec
 
@@ -1384,7 +1367,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1509)
+## done (1515)
 
 ### protocol
 
@@ -4484,18 +4467,34 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Second Life's error flood gate drops lines aditi passed
 - [`server-lsl-flood-owner-lines-longer-limit`](done/server-lsl-flood-owner-lines-longer-limit.md)
   — Second Life dropped prim/params' last complaints the flood gate passes
+- [`server-lsl-lib-avatar-control`](done/server-lsl-lib-avatar-control.md) —
+  Library tranche — avatars, animation, sitting, controls and camera (blocked by
+  `server-lsl-vm-execution` (done), `server-world-agent-movement` (done),
+  `server-world-sit-and-attach` (done), `gridspec-lsl-avatar-control` (done))
 - [`server-lsl-lib-comms`](done/server-lsl-lib-comms.md) — Library tranche —
   chat, listens, dialogs and link messages (blocked by `server-lsl-vm-execution`
   (done), `server-world-chat-routing` (done), `protocol-sim-script-messages`
   (done), `gridspec-lsl-comms` (done))
+- [`server-lsl-lib-detection-sensors`](done/server-lsl-lib-detection-sensors.md)
+  — Library tranche — the detected block, sensors and raycasts (blocked by
+  `server-lsl-state-and-events` (done), `server-world-ecs-store` (done),
+  `server-world-touch-and-grab` (done), `gridspec-lsl-detection-sensors` (done))
 - [`server-lsl-lib-experience`](done/server-lsl-lib-experience.md) — Library
   tranche — experiences and the experience key-value store (blocked by
   `server-lsl-vm-execution` (done), `server-lsl-lib-money-permissions` (done),
   `gridspec-lsl-experience` (done))
+- [`server-lsl-lib-http-url`](done/server-lsl-lib-http-url.md) — Library tranche
+  — outbound HTTP and in-world URLs (blocked by `server-lsl-vm-execution`
+  (done), `server-world-determinism-contract` (done), `gridspec-lsl-http-url`
+  (done))
 - [`server-lsl-lib-json-linkset-data`](done/server-lsl-lib-json-linkset-data.md)
   — Library tranche — llJson* and the linkset data store (blocked by
   `server-lsl-vm-execution` (done), `server-lsl-library-surface-table` (done),
   `gridspec-lsl-json-linkset-data` (done))
+- [`server-lsl-lib-land-region-env`](done/server-lsl-lib-land-region-env.md) —
+  Library tranche — parcel, region, estate and environment queries (blocked by
+  `server-lsl-vm-execution` (done), `server-world-agent-movement` (done),
+  `gridspec-lsl-land-region-env` (done))
 - [`server-lsl-lib-math-rotations`](done/server-lsl-lib-math-rotations.md) —
   Library tranche — maths, vectors and rotations (blocked by
   `server-lsl-vm-execution` (done), `server-lsl-library-surface-table` (done),
@@ -4515,6 +4514,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Library tranche — strings, lists, encoding and hashing (blocked by
   `server-lsl-vm-execution` (done), `server-lsl-library-surface-table` (done),
   `gridspec-lsl-strings-math` (done))
+- [`server-lsl-lib-task-inventory`](done/server-lsl-lib-task-inventory.md) —
+  Library tranche — task inventory, giving, rezzing and notecards (blocked by
+  `server-lsl-vm-execution` (done), `server-fake-grid-script-engine-wiring`
+  (done), `gridspec-lsl-task-inventory` (done))
+- [`server-lsl-lib-time-timers`](done/server-lsl-lib-time-timers.md) — Library
+  tranche — time, timers and sleeping, on a tick clock (blocked by
+  `server-lsl-vm-execution` (done), `server-world-determinism-contract` (done),
+  `gridspec-lsl-time-timers` (done))
 - [`server-lsl-library-surface-table`](done/server-lsl-library-surface-table.md)
   — One generated table for the library, and a coverage harness over it (blocked
   by `server-lsl-architecture` (done))

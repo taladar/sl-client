@@ -17,12 +17,17 @@ use sl_types::chat::ChatVolume;
 use crate::library::{BuiltinId, Event, event};
 use crate::value::Value;
 
+mod avatars;
+mod clocks;
 mod comms;
 mod contents;
 mod experiences;
 mod floods;
+mod http;
 mod identity;
+mod inventory;
 mod json;
+mod land;
 mod linking;
 mod linkset;
 mod math;
@@ -33,6 +38,7 @@ mod persistence;
 mod placement;
 mod precision;
 mod prim_state;
+mod sensing;
 mod sitting;
 mod strings;
 mod timers;
@@ -40,8 +46,130 @@ mod timers;
 /// A tenth of a second: ten ticks to the second, so `llSleep(2.0)` is twenty.
 const STEP: Duration = Duration::from_millis(100);
 
+/// A camera rule's value as the runner notes it: as short as it reads.
+fn camera_number(value: f32) -> String {
+    let text = format!("{value}");
+    text.strip_suffix(".0")
+        .map_or_else(|| text.clone(), str::to_owned)
+}
+
+/// An avatar of a test region and what scripts did to it.
+#[derive(Debug, Clone)]
+pub(super) struct TestAvatar {
+    /// What a script reads of it, but for what it plays.
+    pub(super) agent: crate::vm::avatars::Agent,
+    /// What scripts started on it, by asset.
+    pub(super) started: Vec<String>,
+    /// Its animation overrides, by state: the name given and the asset.
+    pub(super) overrides: std::collections::BTreeMap<String, (String, String)>,
+    /// Where its camera is and how it is turned.
+    pub(super) camera: (sl_types::lsl::Vector, sl_types::lsl::Rotation),
+}
+
+impl TestAvatar {
+    /// A standing avatar named `First Last`.
+    pub(super) fn standing(legacy_name: &str) -> Self {
+        let username = legacy_name.replace(' ', ".").to_lowercase();
+        Self {
+            agent: crate::vm::avatars::Agent {
+                legacy_name: legacy_name.to_owned(),
+                display_name: legacy_name.to_owned(),
+                username,
+                size: sl_types::lsl::Vector {
+                    x: 0.45,
+                    y: 0.6,
+                    z: 1.9,
+                },
+                info: 0,
+                language: "en-us".to_owned(),
+                state: "Standing".to_owned(),
+                animations: Vec::new(),
+            },
+            started: Vec::new(),
+            overrides: std::collections::BTreeMap::new(),
+            camera: (
+                sl_types::lsl::Vector {
+                    x: 128.0,
+                    y: 124.0,
+                    z: 27.0,
+                },
+                // Looking north, as a camera behind an avatar facing north.
+                sl_types::lsl::Rotation {
+                    x: 0.0,
+                    y: 0.0,
+                    z: core::f32::consts::FRAC_1_SQRT_2,
+                    s: core::f32::consts::FRAC_1_SQRT_2,
+                },
+            ),
+        }
+    }
+
+    /// What plays on it: its state's animation (overridden or not) and what
+    /// scripts started.
+    fn playing(&self) -> Vec<String> {
+        let state = self.overrides.get(&self.agent.state).map_or_else(
+            || {
+                sl_anim::registry::builtin_animation_by_name(crate::vm::avatars::default_animation(
+                    &self.agent.state,
+                ))
+                .map(|builtin| builtin.id.to_string())
+                .unwrap_or_default()
+            },
+            |(_, asset)| asset.clone(),
+        );
+        core::iter::once(state)
+            .chain(self.started.iter().cloned())
+            .collect()
+    }
+}
+
+/// A request waiting on a script's answer in a test region: the sender (a
+/// script and its request's key, or [`None`] from outside), the method, and
+/// the tick it arrived.
+pub(super) type Waiting = (Option<(CallerId, String)>, String, u64);
+
+/// The HTTP of a test region: the URLs granted, and the requests and
+/// answers waiting to be routed after the tick
+/// ([`comms::Region::route_http`]).
+#[derive(Debug, Default)]
+pub(super) struct HttpDesk {
+    /// The flavour URLs are spelled for.
+    pub(super) flavour: EngineFlavour,
+    /// The `host:port` a URL is reached at.
+    pub(super) authority: String,
+    /// The `host:port` a secure URL is reached at.
+    pub(super) secure_authority: String,
+    /// Whether no secure URL is granted (no HTTPS listener).
+    pub(super) no_secure: bool,
+    /// How many URLs the land allows.
+    pub(super) allowance: i32,
+    /// The address an arriving request comes from.
+    pub(super) remote: String,
+    /// The URLs granted, by key: the script and the URL.
+    pub(super) urls: std::collections::BTreeMap<String, (CallerId, String)>,
+    /// Requests sent and not yet routed.
+    pub(super) sent: Vec<(CallerId, crate::vm::http::Outbound)>,
+    /// Answers given and not yet routed: the answering script, the request.
+    pub(super) answered: Vec<(CallerId, String, crate::vm::http::Answered)>,
+    /// Requests that reached a script and are not answered, by their key:
+    /// the sender (a script and its request, or [`None`] from outside), the
+    /// method, and the tick they arrived.
+    pub(super) waiting: std::collections::BTreeMap<String, Waiting>,
+    /// Answers to requests from outside, in order: the request's path and
+    /// what came back.
+    pub(super) fetched: Vec<(String, crate::vm::http::Answered)>,
+    /// How many requests have arrived, for their keys.
+    pub(super) arrivals: u64,
+    /// Each prim's throttle, by number.
+    pub(super) throttles: std::collections::BTreeMap<u64, crate::vm::http::Throttle>,
+}
+
 /// A host that records what scripts print, with the tick they printed at.
 #[derive(Debug, Default)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "each flag rigs one independent answer of the host"
+)]
 struct Recorder {
     /// The tick being run.
     now: u64,
@@ -126,6 +254,20 @@ struct Recorder {
     standing: Standing,
     /// The simulator and grid.
     simulator: Simulator,
+    /// The region's map texture (`osGetMapTexture`), if one is rigged.
+    map_texture: Option<String>,
+    /// The HTTP the scripts did: URLs, requests and answers, which the
+    /// region routes between them after each tick.
+    http: HttpDesk,
+    /// The avatars in the region, by key, and what the scripts did to them.
+    avatars: std::collections::BTreeMap<String, TestAvatar>,
+    /// What the scripts sent avatars' viewers, in the runner's words
+    /// (`# script-control-change …`, `# follow-cam …`).
+    avatar_notes: Vec<String>,
+    /// The avatar whose controls each script took.
+    controls_taken: std::collections::BTreeMap<CallerId, String>,
+    /// Each scripted teleport: the avatar and where to.
+    teleports: Vec<(String, crate::vm::avatars::Destination)>,
     /// The ground's height everywhere in the region.
     ground: f32,
     /// Each avatar's address, by key.
@@ -187,6 +329,74 @@ struct Recorder {
     /// Whether a prim's last owner reads as its owner (OpenSim) rather than
     /// `NULL_KEY` (Second Life, for a prim nobody else owned).
     last_owner_is_owner: bool,
+    /// Each prim's contents, by number. A prim listed here names its
+    /// scripts by them (`llGetScriptState`); one not listed holds nothing,
+    /// and its scripts are named by [`Self::scripts`].
+    contents: std::collections::BTreeMap<u64, Vec<crate::vm::Item>>,
+    /// The inventory name of each script instance of a prim listed in
+    /// [`Self::contents`].
+    names: std::collections::BTreeMap<CallerId, String>,
+    /// The text of each notecard, by its asset key.
+    notecards: std::collections::BTreeMap<String, String>,
+    /// The notecards the region has read, by asset key.
+    notecards_read: std::collections::BTreeSet<String>,
+    /// `(caller, name, changed)` per item removed.
+    removed: Vec<(CallerId, String, Vec<i32>)>,
+    /// `(caller, target, items)` per give into a prim.
+    gifts: Vec<(CallerId, String, Vec<String>)>,
+    /// `(caller, offer)` per offer put to an avatar.
+    offers_made: Vec<(CallerId, crate::vm::Offer)>,
+    /// Each prim's remote script access pin, by number.
+    pins: std::collections::BTreeMap<u64, i32>,
+    /// `(caller, load)` per script loaded into another prim, which the test's
+    /// region starts.
+    loads: Vec<(CallerId, crate::vm::RemoteLoad)>,
+    /// `(caller, rez, key)` per object rezzed, which the test's region puts
+    /// in place: the key is the new prim's, numbered from 100.
+    rezzes: Vec<(CallerId, crate::vm::Rez, String)>,
+    /// The number of the last prim a rez made.
+    last_rezzed: u64,
+    /// The prims rezzed and still there, by key, with the prim of the script
+    /// that rezzed each.
+    rezzed: std::collections::BTreeMap<String, u64>,
+    /// The key of the object that rezzed each prim, by key.
+    rezzers: std::collections::BTreeMap<String, String>,
+    /// The parcel everywhere in the region; no parcel when unset.
+    parcel: Option<crate::vm::land::Parcel>,
+    /// The region.
+    region: crate::vm::land::Region,
+    /// What `llRequestSimulatorData` reads of the grid's regions, by name in
+    /// lower case.
+    sims: std::collections::BTreeMap<String, crate::vm::land::SimData>,
+    /// The wind everywhere; still air when unset.
+    wind: Option<sl_types::lsl::Vector>,
+    /// The changes made to the land, in order.
+    land_changes: Vec<crate::vm::land::LandChange>,
+    /// The region's statistics.
+    sim_stats: Vec<f32>,
+    /// The parcel at the region's west edge, where it is not [`Self::parcel`].
+    edge_parcel: Option<crate::vm::land::Parcel>,
+    /// The ground's height at the region's west, east, south and north edges,
+    /// where it is not [`Self::ground`].
+    edges: Option<[f32; 4]>,
+    /// Each prim's name as an error line and an offer give it, by number;
+    /// `Faulty prim` when not listed.
+    prim_names: std::collections::BTreeMap<u64, String>,
+    /// The region and the position every prim's whereabouts give; the local
+    /// grid's when unset.
+    at: Option<(String, sl_types::lsl::Vector)>,
+    /// Whether a script loaded over one of its name raises two
+    /// `CHANGED_INVENTORY`, the remove and the add, as OpenSim's
+    /// `RezScriptFromPrim` does; one when not.
+    replace_raises_twice: bool,
+    /// The region's calendar time at tick 0, in microseconds since the epoch.
+    epoch_micros: i64,
+    /// The offset from UTC of the simulator host's time zone, in seconds.
+    local_offset: i32,
+    /// Every object and avatar a sweep weighs.
+    sensed: Vec<crate::vm::sensing::Sensed>,
+    /// What every ray hits, nearest its start first.
+    ray_hits: Vec<crate::vm::sensing::RayHit>,
 }
 
 /// The owner of every object a [`Recorder`] has, unless it says otherwise.
@@ -213,8 +423,22 @@ impl Host for Recorder {
         true
     }
 
-    fn script_named(&self, _caller: CallerId, name: &str) -> Option<CallerId> {
-        self.scripts.get(name).copied()
+    fn script_named(&self, caller: CallerId, name: &str) -> Option<CallerId> {
+        let prim = self.prim_of(caller);
+        let Some(items) = self.contents.get(&prim) else {
+            return self.scripts.get(name).copied();
+        };
+        let _item = items
+            .iter()
+            .find(|item| item.name == name && item.kind == crate::vm::contents::INVENTORY_SCRIPT)?;
+        // A script with no instance reads as stopped: it gets an id no
+        // instance has.
+        Some(
+            self.names
+                .iter()
+                .find(|(id, script)| script.as_str() == name && self.prim_of(**id) == prim)
+                .map_or(CallerId(u64::MAX), |(id, _)| *id),
+        )
     }
 
     fn say(&mut self, caller: CallerId, speech: &Speech) {
@@ -333,19 +557,30 @@ impl Host for Recorder {
                 .cloned()
                 .unwrap_or_else(|| "object-a".to_owned()),
             prim: self.prim_key(self.prim_of(caller)),
-            name: "Faulty prim".to_owned(),
-            script: self
-                .scripts
-                .iter()
-                .find(|(_, id)| **id == caller)
-                .map_or_else(|| format!("Script {}", caller.0), |(name, _)| name.clone()),
+            name: self
+                .prim_names
+                .get(&self.prim_of(caller))
+                .cloned()
+                .unwrap_or_else(|| "Faulty prim".to_owned()),
+            script: self.names.get(&caller).cloned().unwrap_or_else(|| {
+                self.scripts
+                    .iter()
+                    .find(|(_, id)| **id == caller)
+                    .map_or_else(|| format!("Script {}", caller.0), |(name, _)| name.clone())
+            }),
             item: "d9cbb4b7-206e-45c2-8c9a-7429643962ac".to_owned(),
-            region: "Default Region".to_owned(),
-            position: sl_types::lsl::Vector {
-                x: 120.0,
-                y: 128.0,
-                z: 27.5,
-            },
+            region: self
+                .at
+                .as_ref()
+                .map_or_else(|| "Default Region".to_owned(), |(region, _)| region.clone()),
+            position: self.at.as_ref().map_or(
+                sl_types::lsl::Vector {
+                    x: 120.0,
+                    y: 128.0,
+                    z: 27.5,
+                },
+                |(_, position)| position.clone(),
+            ),
         }
     }
 
@@ -694,7 +929,11 @@ impl Host for Recorder {
             costs: self.detail_costs.unwrap_or((1.0, 0.05, 1.0, 0.5)),
             selected: (0, 0),
             rez_time: String::new(),
-            rezzer: OWNER.to_owned(),
+            rezzer: self
+                .rezzers
+                .get(key)
+                .cloned()
+                .unwrap_or_else(|| OWNER.to_owned()),
             masks: [i32::MAX, i32::MAX, 0, 0, 532_480],
             hover_height: 0.0,
             body_shape: -1.0,
@@ -709,6 +948,508 @@ impl Host for Recorder {
     fn sound(&mut self, caller: CallerId, prim: &str, cue: &crate::vm::prim::SoundCue) {
         self.sounds.push((caller, prim.to_owned(), cue.clone()));
     }
+
+    fn contents(&self, caller: CallerId) -> Vec<crate::vm::Item> {
+        self.contents
+            .get(&self.prim_of(caller))
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    fn remove_item(&mut self, caller: CallerId, name: &str, changed: &[i32]) -> bool {
+        let prim = self.prim_of(caller);
+        let Some(items) = self.contents.get_mut(&prim) else {
+            return false;
+        };
+        let before = items.len();
+        items.retain(|item| item.name != name);
+        if items.len() == before {
+            return false;
+        }
+        let key = self.prim_key(prim);
+        for bits in changed {
+            self.changes.push((key.clone(), *bits));
+        }
+        self.removed
+            .push((caller, name.to_owned(), changed.to_vec()));
+        true
+    }
+
+    fn give_to_prim(&mut self, caller: CallerId, target: &str, items: &[String]) -> bool {
+        let Some(to) = self.prim_numbered(target) else {
+            return false;
+        };
+        let from = self.contents(caller);
+        for name in items {
+            let Some(mut item) = from.iter().find(|item| &item.name == name).cloned() else {
+                continue;
+            };
+            let held = self.contents.entry(to).or_default();
+            item.name = free_name(held, &item.name);
+            held.push(item);
+            self.changes.push((target.to_owned(), 1));
+        }
+        self.gifts.push((caller, target.to_owned(), items.to_vec()));
+        true
+    }
+
+    fn offer_items(&mut self, caller: CallerId, offer: &crate::vm::Offer) -> bool {
+        if offer.agent == crate::value::NULL_KEY || self.away.contains(&offer.agent) {
+            return false;
+        }
+        self.offers_made.push((caller, offer.clone()));
+        true
+    }
+
+    fn set_remote_pin(&mut self, caller: CallerId, pin: i32) {
+        let _was = self.pins.insert(self.prim_of(caller), pin);
+    }
+
+    fn remote_pin(&self, prim: &str) -> Option<(i32, String)> {
+        let number = self.prim_numbered(prim)?;
+        Some((
+            self.pins.get(&number).copied().unwrap_or(0),
+            self.owner.clone().unwrap_or_else(|| OWNER.to_owned()),
+        ))
+    }
+
+    fn load_script(&mut self, caller: CallerId, load: &crate::vm::RemoteLoad) {
+        let Some(to) = self.prim_numbered(&load.target) else {
+            return;
+        };
+        let Some(item) = self
+            .contents(caller)
+            .into_iter()
+            .find(|item| item.name == load.script)
+        else {
+            return;
+        };
+        let held = self.contents.entry(to).or_default();
+        let before = held.len();
+        held.retain(|other| other.name != load.script);
+        let replaced = held.len() < before;
+        held.push(item);
+        if replaced && self.replace_raises_twice {
+            self.changes.push((load.target.clone(), 1));
+        }
+        self.changes.push((load.target.clone(), 1));
+        self.loads.push((caller, load.clone()));
+    }
+
+    fn rez(
+        &mut self,
+        caller: CallerId,
+        rez: &crate::vm::Rez,
+    ) -> Result<String, crate::vm::RezRefusal> {
+        self.last_rezzed = self.last_rezzed.max(99).saturating_add(1);
+        let number = self.last_rezzed;
+        let key = format!("00000000-0000-4000-8000-{number:012}");
+        let _key = self.prim_keys.insert(number, key.clone());
+        let _rezzer = self.rezzed.insert(key.clone(), self.prim_of(caller));
+        let rezzer = self.prim_key(self.prim_of(caller));
+        let _by = self.rezzers.insert(key.clone(), rezzer);
+        self.rezzes.push((caller, rez.clone(), key.clone()));
+        Ok(key)
+    }
+
+    fn derez(&mut self, caller: CallerId, object: &str) -> bool {
+        let rezzer = self.prim_of(caller);
+        if self.rezzed.get(object) != Some(&rezzer) {
+            return false;
+        }
+        let _gone = self.rezzed.remove(object);
+        true
+    }
+
+    fn notecard_text(&mut self, asset: &str) -> Option<String> {
+        let text = self.notecards.get(asset).cloned()?;
+        let _read = self.notecards_read.insert(asset.to_owned());
+        Some(text)
+    }
+
+    fn notecard_read(&self, asset: &str) -> Option<String> {
+        self.notecards_read
+            .contains(asset)
+            .then(|| self.notecards.get(asset).cloned())
+            .flatten()
+    }
+
+    fn make_notecard(
+        &mut self,
+        caller: CallerId,
+        name: &str,
+        description: &str,
+        text: &str,
+        changed: &[i32],
+    ) {
+        let prim = self.prim_of(caller);
+        let asset = format!("0e0e0e0e-0000-4000-8000-{:012}", self.notecards.len());
+        let _was = self.notecards.insert(asset.clone(), text.to_owned());
+        let owner = self.owner.clone().unwrap_or_else(|| OWNER.to_owned());
+        let held = self.contents.entry(prim).or_default();
+        let item = crate::vm::Item {
+            name: free_name(held, name),
+            kind: crate::vm::contents::INVENTORY_NOTECARD,
+            item: asset.replace("0e0e0e0e", "0f0f0f0f"),
+            asset,
+            creator: owner,
+            last_owner: crate::value::NULL_KEY.to_owned(),
+            masks: crate::vm::Masks::full(),
+            description: description.to_owned(),
+            acquired: 0,
+        };
+        held.push(item);
+        let key = self.prim_key(prim);
+        for bits in changed {
+            self.changes.push((key.clone(), *bits));
+        }
+    }
+
+    fn epoch_micros(&self) -> i64 {
+        self.epoch_micros
+    }
+
+    fn local_offset(&self, _unix: i64) -> i32 {
+        self.local_offset
+    }
+
+    fn day_offset(&self, _caller: CallerId) -> f32 {
+        57_600.0
+    }
+
+    fn sense(&self, _caller: CallerId) -> Vec<crate::vm::sensing::Sensed> {
+        self.sensed.clone()
+    }
+
+    fn parcel_at(&self, _caller: CallerId, x: f32, y: f32) -> Option<crate::vm::land::Parcel> {
+        let (width, depth) = (256.0, 256.0);
+        if x < 0.0 || y < 0.0 || x >= width || y >= depth {
+            return None;
+        }
+        if x < 1.0
+            && let Some(edge) = &self.edge_parcel
+        {
+            return Some(edge.clone());
+        }
+        self.parcel.clone()
+    }
+
+    fn region(&self, _caller: CallerId) -> crate::vm::land::Region {
+        self.region.clone()
+    }
+
+    fn sim_data(&self, _caller: CallerId, name: &str) -> Option<crate::vm::land::SimData> {
+        self.sims.get(&name.to_lowercase()).cloned()
+    }
+
+    fn ground(&self, _caller: CallerId, x: f32, y: f32) -> f32 {
+        match self.edges {
+            Some([west, _, _, _]) if x < 0.5 => west,
+            Some([_, east, _, _]) if x > 255.5 => east,
+            Some([_, _, south, _]) if y < 0.5 => south,
+            Some([_, _, _, north]) if y > 255.5 => north,
+            _ => self.ground,
+        }
+    }
+
+    fn wind(&self, _caller: CallerId, _position: &sl_types::lsl::Vector) -> sl_types::lsl::Vector {
+        self.wind.clone().unwrap_or(crate::value::ZERO_VECTOR)
+    }
+
+    fn environment(
+        &self,
+        _caller: CallerId,
+        _position: Option<&sl_types::lsl::Vector>,
+        unix: i64,
+    ) -> crate::vm::land::Environment {
+        // The default day: the sun turned about y by the day's fraction.
+        let into = unix.saturating_add(57_600).rem_euclid(14_400);
+        let fraction = f32::from(u16::try_from(into).unwrap_or(0)) / 14_400.0;
+        let angle = fraction * core::f32::consts::TAU;
+        let (sin, cos) = (angle / 2.0).sin_cos();
+        crate::vm::land::Environment {
+            day_length: 14_400.0,
+            day_offset: 57_600.0,
+            sun: sl_types::lsl::Rotation {
+                x: 0.0,
+                y: -sin,
+                z: 0.0,
+                s: cos,
+            },
+            moon: sl_types::lsl::Rotation {
+                x: 0.0,
+                y: cos,
+                z: 0.0,
+                s: sin,
+            },
+        }
+    }
+
+    fn change_land(
+        &mut self,
+        _caller: CallerId,
+        _position: &sl_types::lsl::Vector,
+        change: &crate::vm::land::LandChange,
+    ) -> bool {
+        if let (crate::vm::land::LandChange::MusicUrl(url), Some(parcel)) =
+            (change, self.parcel.as_mut())
+        {
+            parcel.music_url.clone_from(url);
+        }
+        self.land_changes.push(change.clone());
+        true
+    }
+
+    fn parcel_media(
+        &self,
+        _caller: CallerId,
+        _position: &sl_types::lsl::Vector,
+    ) -> crate::vm::land::ParcelMedia {
+        crate::vm::land::ParcelMedia::default()
+    }
+
+    fn sim_stats(&self, _caller: CallerId) -> Vec<f32> {
+        self.sim_stats.clone()
+    }
+
+    fn environment_rule(
+        &self,
+        _caller: CallerId,
+        _position: &sl_types::lsl::Vector,
+        rule: i32,
+    ) -> Option<Vec<crate::value::Element>> {
+        (rule == 0).then(|| {
+            vec![crate::value::Element::Vector(sl_types::lsl::Vector {
+                x: 0.35,
+                y: 0.35,
+                z: 0.35,
+            })]
+        })
+    }
+
+    fn map_texture(&self, _caller: CallerId, region: &str) -> Option<String> {
+        region
+            .is_empty()
+            .then(|| self.map_texture.clone())
+            .flatten()
+    }
+
+    fn send_http(&mut self, caller: CallerId, request: &crate::vm::http::Outbound) {
+        self.http.sent.push((caller, request.clone()));
+    }
+
+    fn request_url(&mut self, caller: CallerId, key: &str, secure: bool) -> Option<String> {
+        if (secure && self.http.no_secure) || self.free_urls(caller) <= 0 {
+            return None;
+        }
+        let authority = if secure {
+            self.http.secure_authority.clone()
+        } else {
+            self.http.authority.clone()
+        };
+        let url = crate::vm::http::granted_url(self.http.flavour, &authority, key, secure);
+        let _previous = self.http.urls.insert(key.to_owned(), (caller, url.clone()));
+        Some(url)
+    }
+
+    fn release_url(&mut self, caller: CallerId, url: &str) {
+        self.http
+            .urls
+            .retain(|_, (holder, held)| !(*holder == caller && held == url));
+    }
+
+    fn free_urls(&self, _caller: CallerId) -> i32 {
+        self.http
+            .allowance
+            .saturating_sub(i32::try_from(self.http.urls.len()).unwrap_or(i32::MAX))
+    }
+
+    fn answer_http(
+        &mut self,
+        caller: CallerId,
+        request: &str,
+        answered: crate::vm::http::Answered,
+    ) {
+        self.http
+            .answered
+            .push((caller, request.to_owned(), answered));
+    }
+
+    fn http_throttle(&mut self, caller: CallerId) -> &mut crate::vm::http::Throttle {
+        let prim = self.prim_of(caller);
+        self.http.throttles.entry(prim).or_default()
+    }
+
+    fn url_authority(&self, _caller: CallerId) -> String {
+        self.http.authority.clone()
+    }
+
+    fn agent(&self, _caller: CallerId, agent: &str) -> Option<crate::vm::avatars::Agent> {
+        self.avatars
+            .get(agent)
+            .map(|avatar| crate::vm::avatars::Agent {
+                animations: avatar.playing(),
+                ..avatar.agent.clone()
+            })
+    }
+
+    fn agent_record(
+        &self,
+        _caller: CallerId,
+        agent: &str,
+    ) -> Option<crate::vm::avatars::AgentRecord> {
+        self.avatars
+            .get(agent)
+            .map(|avatar| crate::vm::avatars::AgentRecord {
+                online: true,
+                legacy_name: avatar.agent.legacy_name.clone(),
+                display_name: avatar.agent.display_name.clone(),
+                username: avatar.agent.username.clone(),
+                born: "2026-01-01".to_owned(),
+                payment: 0,
+            })
+    }
+
+    fn agent_named(&self, _caller: CallerId, name: &str) -> Option<(String, bool)> {
+        self.avatars
+            .iter()
+            .find(|(_, avatar)| {
+                avatar.agent.legacy_name.eq_ignore_ascii_case(name)
+                    || avatar.agent.username.eq_ignore_ascii_case(name)
+            })
+            .map(|(key, _)| (key.clone(), true))
+    }
+
+    fn animate(&mut self, _caller: CallerId, agent: &str, animation: &str, start: bool) {
+        if let Some(avatar) = self.avatars.get_mut(agent) {
+            avatar.started.retain(|held| held != animation);
+            if start {
+                avatar.started.push(animation.to_owned());
+            }
+        }
+    }
+
+    fn set_animation_override(
+        &mut self,
+        _caller: CallerId,
+        agent: &str,
+        state: &str,
+        animation: Option<(&str, &str)>,
+    ) {
+        if let Some(avatar) = self.avatars.get_mut(agent) {
+            match animation {
+                Some((name, asset)) => {
+                    let _previous = avatar
+                        .overrides
+                        .insert(state.to_owned(), (name.to_owned(), asset.to_owned()));
+                }
+                None => {
+                    let _gone = avatar.overrides.remove(state);
+                }
+            }
+        }
+    }
+
+    fn animation_override(&self, _caller: CallerId, agent: &str, state: &str) -> Option<String> {
+        self.avatars
+            .get(agent)?
+            .overrides
+            .get(state)
+            .map(|(name, _)| name.clone())
+    }
+
+    fn object_animate(&mut self, _caller: CallerId, _name: &str, _animation: &str, _start: bool) {}
+
+    fn object_animations(&self, _caller: CallerId) -> Vec<String> {
+        Vec::new()
+    }
+
+    fn control_changes(
+        &mut self,
+        caller: CallerId,
+        agent: &str,
+        changes: &[crate::vm::avatars::ControlChange],
+        taken: Option<i32>,
+    ) {
+        for change in changes {
+            self.avatar_notes.push(format!(
+                "# script-control-change action={} controls={} pass_to_agent={}",
+                if change.take { "take" } else { "release" },
+                change.controls,
+                u8::from(change.pass_to_agent)
+            ));
+        }
+        match taken {
+            Some(_) => {
+                let _previous = self.controls_taken.insert(caller, agent.to_owned());
+            }
+            None => {
+                let _gone = self.controls_taken.remove(&caller);
+            }
+        }
+    }
+
+    fn set_camera(
+        &mut self,
+        _caller: CallerId,
+        _agent: &str,
+        rules: &[crate::vm::avatars::CameraRule],
+    ) {
+        let rules: Vec<String> = rules
+            .iter()
+            .map(|rule| format!("{}={}", rule.property, camera_number(rule.value)))
+            .collect();
+        self.avatar_notes
+            .push(format!("# follow-cam object=probe {}", rules.join(" ")));
+    }
+
+    fn clear_camera(&mut self, _caller: CallerId, _agent: &str) {
+        self.avatar_notes
+            .push("# follow-cam-clear object=probe".to_owned());
+    }
+
+    fn camera(
+        &self,
+        _caller: CallerId,
+        agent: &str,
+    ) -> Option<(sl_types::lsl::Vector, sl_types::lsl::Rotation)> {
+        self.avatars.get(agent).map(|avatar| avatar.camera.clone())
+    }
+
+    fn teleport_agent(
+        &mut self,
+        _caller: CallerId,
+        agent: &str,
+        destination: &crate::vm::avatars::Destination,
+    ) {
+        self.teleports.push((agent.to_owned(), destination.clone()));
+    }
+
+    fn attached_list(&self, _caller: CallerId, agent: &str) -> Option<Vec<String>> {
+        self.avatars.get(agent).map(|_| Vec::new())
+    }
+
+    fn cast_ray(
+        &self,
+        _caller: CallerId,
+        _start: &sl_types::lsl::Vector,
+        _end: &sl_types::lsl::Vector,
+    ) -> Vec<crate::vm::sensing::RayHit> {
+        self.ray_hits.clone()
+    }
+}
+
+/// `name`, or the first `name N` no item of `held` has, as both grids name
+/// a second copy.
+fn free_name(held: &[crate::vm::Item], name: &str) -> String {
+    let taken = |candidate: &str| held.iter().any(|item| item.name == candidate);
+    if !taken(name) {
+        return name.to_owned();
+    }
+    (1_u32..)
+        .map(|number| format!("{name} {number}"))
+        .find(|candidate| !taken(candidate))
+        .unwrap_or_else(|| name.to_owned())
 }
 
 impl Recorder {
@@ -722,6 +1463,14 @@ impl Recorder {
             Some(false) => Admission::Blocked,
             None => Admission::Undecided,
         }
+    }
+
+    /// The number of the prim keyed `key`.
+    fn prim_numbered(&self, key: &str) -> Option<u64> {
+        self.prim_keys
+            .iter()
+            .find(|(_, prim)| prim.as_str() == key)
+            .map(|(number, _)| *number)
     }
 
     /// The prim `caller` is in.

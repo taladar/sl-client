@@ -195,8 +195,12 @@ nor experiences: none of the `llLinksetData*` functions, `LINKSETDATA_*`
 constants or the `linkset_data` event, and none of the fourteen experience
 functions (`llClearExperiencePermissions` and `llGetExperienceList` among
 them), the `XP_ERROR_*` constants, `llSitOnLink`'s `SIT_*` results or the two
-`experience_permissions*` events. Which of the rest of the library OpenSim
-lacks is unmeasured, so the rest compiles. OpenSim's own families — OSSL,
+`experience_permissions*` events, nor the six task-inventory functions Second
+Life added after OpenSim's library was written (`llGetStartString`,
+`llGetInventoryDesc`, `llGetInventoryAcquireTime`, `llGetNotecardLineSync`,
+`llRezObjectWithParams`, `llDerezObject`) with their `REZ_*`, `DEREZ_*` and
+`NAK` constants. Which of the rest of the library OpenSim lacks is
+unmeasured, so the rest compiles. OpenSim's own families — OSSL,
 LightShare and MOD — and the constants only its document lists compile in
 that dialect alone; Second Life knows none of them (`Name not defined within
 scope`, [§ OSSL](../gridspec/lsl.md#ossl)). Some of OpenSim's functions are
@@ -517,10 +521,21 @@ observable as the handlers, so each is a named rule with a test.
   and `state_exit` are the VM's own and cannot be posted.
 - **The queue holds `MAX_QUEUED` (64) events**; one more is dropped
   (`Posted::QueueFull`).
-- **A timer never stacks.** `llSetTimerEvent` is counted in ticks, rounded
-  up and at least one; `Engine::tick` posts `timer` first when it falls due,
+- **A timer never stacks.** `llSetTimerEvent` keeps its interval and its
+  next due time in region time (the ticks times the step), the interval no
+  shorter than the flavour's floor — two of Second Life's frames, OpenSim's
+  `MinTimerInterval` — and a negative one stopping the timer on Second Life
+  and running it at the floor on OpenSim; it falls due at the first tick at or
+  after its due time. `Engine::tick` posts `timer` first when it falls due,
   and a `timer` already waiting in the queue absorbs the next
-  (`Posted::AlreadyQueued`). A reset stops it; a state change does not.
+  (`Posted::AlreadyQueued`). The next due time is each grid's: Second Life
+  keeps the phase, YEngine counts from the event, XEngine keeps the phase of
+  its first (`time/timer-phase`). A reset stops it; a state change does not.
+- **A sensor sweeps at the next tick.** `llSensor` asks for a sweep (Second
+  Life keeps the last one asked for, OpenSim every one) and `llSensorRepeat`
+  sets one going; `Engine::tick` sweeps, after the timers, for every script
+  whose sweep is due, and posts `sensor` with the detected block or
+  `no_sensor`. A state change ends a repeating sweep.
 - **Touches and collisions coalesce** (under the `Reference` policy
   below). A detection event posted in the same tick as a queued one of the
   same kind merges into it (`Posted::Merged`): the detected lists join,
@@ -657,10 +672,7 @@ and YEngine, so the `on_rez` or `changed` raised in it is dropped
 state, and is the only way. No grid raises a `changed` for a rez, and none
 runs `state_entry` or `on_rez` after a restart. Second Life's restart is not
 measured — neither test avatar holds estate rights on aditi — so its row is
-the take's rule and the one constant Linden Lab documents. Two things the
-probes measured waits on a function this VM does not run yet: the stopped
-script the probes stop with `llSetScriptState`
-(`server-lsl-lib-task-inventory`); the tests stop it as a host does. A
+the take's rule and the one constant Linden Lab documents. A
 script's time (`llGetTime`) is saved with it (saved form 4): it counts on
 through a take and a restart on Second Life and YEngine, the time away not
 counted, and starts again on XEngine.
@@ -920,15 +932,20 @@ scope of 236` as this was written):
   `osSetProjectionParams` (a projector, the light's image on the wire),
   `osParticleSystem` and `osLinkParticleSystem`, the `os*Sound*` family by
   link number, `osCollisionSound`, and `osClearObjectAnimations` (0: nothing
-  on the fake grid starts an object animation yet).
+  on the fake grid starts an object animation yet). With the task-inventory
+  tranche came its 15: the inventory readers by name or item key
+  (`osGetInventoryDesc`, `osGetInventoryItemKey`, `osGetInventoryLastOwner`,
+  `osGetInventoryName`), the synchronous notecard readers (`osGetNotecard`,
+  `osGetNotecardLine`, `osGetNumberOfNotecardLines`), `osMakeNotecard`,
+  `osGetRezzingObject`, `osDie` (of the caller's own object, or one it
+  rezzed), `osResetAllScripts`, `osGetLastChangedEventKey` and the loaded
+  OAR's data (`osLoadedCreation*`, empty: the fake grid loads no OAR).
 - **Later, with the tranche of the `ll*` functions they shadow** — the NPC
   family, avatar animation, attachment, teleport and sitting functions
   (`server-lsl-lib-avatar-control`, which has the NPC fixtures to answer
-  them); `osGetAgents` and `osGetAvatarList` (detection); the parcel, estate,
-  environment, wind, sun and terrain writers and LightShare
-  (`server-lsl-lib-land-region-env`); the apparent time and the wallclock
-  (`server-lsl-lib-time-timers`); notecards, inventory and the rezzing object
-  (`server-lsl-lib-task-inventory`); inertia and object teleports
+  them); the parcel, estate, environment, wind, sun and terrain writers,
+  the region statistics, notice and restart and LightShare
+  (`server-lsl-lib-ossl-land-writers`); inertia and object teleports
   (`server-lsl-lib-physics-vehicles`); URLs (`server-lsl-lib-http-url`). A
   task of its own takes the dynamic textures every OpenSim sign is drawn with
   (`server-fake-grid-dynamic-textures`).
@@ -1016,6 +1033,42 @@ prim lent as the runtime's `vm::prim::Prim` and handed back with the
 `changed` it raises — `set_region_position`, `linkset_of`, `object_details`
 (any object or avatar by key), `inventory_key` (a texture or sound named
 rather than keyed) and `sound` (a sound played once, triggered or preloaded).
+The task-inventory tranche (`server-lsl-lib-task-inventory`) added
+`contents` (the prim's items, in any order — the listing's order is the
+library's), `remove_item`, `give_to_prim` and `offer_items`,
+`set_remote_pin`, `remote_pin` and `load_script`, `rez` and `derez`,
+`notecard_text` and `notecard_read` (the region's notecard cache, which
+`llGetNotecardLineSync` reads) and `make_notecard` (`osMakeNotecard`). The
+time tranche (`server-lsl-lib-time-timers`) added
+`epoch_micros` — the region's calendar time at its tick 0, which every date a
+script reads counts on from by the ticks — `local_offset` (the zone OpenSim's
+host keeps) and `day_offset` (OpenSim's apparent time). The detection tranche
+(`server-lsl-lib-detection-sensors`) added `sense` (every object and avatar a
+sweep weighs) and `cast_ray` (every surface a segment crosses), whose filtering
+by each grid's rules is `vm::sensing`'s. The land tranche
+(`server-lsl-lib-land-region-env`) added `parcel_at`, `region`, `sim_data`,
+`ground`, `wind`, `environment`, `parcel_media`, `sim_stats`,
+`environment_rule` and `map_texture` — plain `vm::land` records of what is
+there, which code of `llGetParcelDetails` or key of `llGetEnv` reads which
+field being the library's — and `change_land`, which applies a `LandChange`
+the library has checked the script's owner may make (`llScriptDanger` reads
+the parcel's flags through `parcel_at` now).
+The HTTP tranche (`server-lsl-lib-http-url`) added `send_http` (a checked
+`vm::http::Outbound`, every header it goes out with; the answer comes back
+through `Engine::http_response`), `request_url`, `release_url`, `free_urls`,
+`answer_http`, `http_throttle` (the prim's, kept by the host) and
+`url_authority` (the one address on the simulator's network a script may
+reach); a request arriving at a URL reaches the script through
+`Engine::http_request`, after `vm::http::arrive` has judged it as the grid's
+URL surface does.
+The avatar tranche (`server-lsl-lib-avatar-control`) added `agent` (a
+`vm::avatars::Agent` of an avatar in the region), `agent_record` and
+`agent_named` (any account), `animate`, `set_animation_override` and
+`animation_override`, `object_animate` and `object_animations`,
+`control_changes` (the `ScriptControlChange` blocks `vm::avatars::take` and
+`release` shaped, and the controls to route through `Engine::controls`),
+`set_camera`, `clear_camera` and `camera`, `teleport_agent` and
+`attached_list`.
 The methods the first tranches need — chat and listens, identity, position,
 hover text, and the seeded randomness and clock the determinism rule requires —
 are enough to fix its shape:
@@ -1228,6 +1281,66 @@ is.
   world holds the grid's wall clock (`SceneFixtures::wall`), where a script's
   date is to start before its ticks move it, so what a script draws and reads
   follows from the seed and the ticks ([determinism](determinism.md)).
+- **Clocks and sensing** (`server-lsl-lib-time-timers`,
+  `server-lsl-lib-detection-sensors`). The region's calendar time at tick 0
+  is read off its wall clock at its first tick; its host keeps UTC. A sweep
+  weighs every unworn object by its root and every avatar present; a ray meets
+  a prim as its box (its scale, turned as it is turned), an avatar as an
+  average avatar's box, and the ground by its heightfield, cut at the region's
+  edge (`sl_fake_grid::scripts::sensing`).
+- **Avatars** (`sl_fake_grid::scripts::avatars`,
+  `server-lsl-lib-avatar-control`). A script reads the avatars present at the
+  tick's start — their account names, a default shape's size, the posture the
+  movement controller holds them in (or `Sitting` on a seat), the animations
+  their set plays and their viewer's camera from its last `AgentUpdate`. An
+  animation a script starts or stops joins the avatar's animation set and is
+  stated to its viewer after the tick; overriding `Standing` changes what the
+  set stands as. A script that took controls hears, before each tick, the keys
+  its avatar's viewer holds (`Engine::controls`), and its viewer is sent the
+  flavour's `ScriptControlChange`s; the follow camera goes out as
+  `SetFollowCamProperties` naming the script's prim. Scripted teleports and
+  object animations are not modelled yet: the call does nothing and the fake
+  grid's log says so.
+- **HTTP** (`sl_fake_grid::script_http`, `sl_fake_grid::scripts::http`,
+  `server-lsl-lib-http-url`). A URL is granted on the grid's own HTTP service
+  in its flavour's form; a request to it — from outside, or from any script
+  of the grid — reaches the holding script at its region's next tick, and the
+  answer goes back at the sender's next tick, or after the flavour's wait in
+  ticks as its timeout. A request to any other address never leaves the
+  process: the grid's `HttpResponder` answers it, by default `NoResponder`'s
+  499 and a line saying so; a scenario mounts a `TableResponder` of canned
+  answers (`FakeGridBuilder::http_responder`). The URLs a script stops holding
+  — released, or dropped by a reset — are released after the tick.
+- **Land, region and environment** (`sl_fake_grid::scripts::land`,
+  `server-lsl-lib-land-region-env`). A script reads the parcel records the
+  region keeps (their directory listing's id and dwell beside them), the
+  region's limits and estate as an estate manager last left them, the
+  neighbours the grid runs beside it, the heightfield its viewers are sent, the
+  terrain fixture's uniform wind and the region's own day cycle (both grids'
+  default day without one). A change is made at once: a stream set, a pass or
+  ban written into the parcel's access list (what the access-list reply then
+  answers), the estate's lists, and the parcel's media — the avatars on the
+  parcel sent its record again, or the media update and command. The fake grid
+  sends nobody off a parcel yet, so `llEjectFromLand` changes nothing, and it
+  keeps no prim counts by owner, so `llGetParcelPrimOwners` is `[]` on both
+  flavours.
+- **Task inventory** (`sl_fake_grid::scripts::task_inventory`,
+  `server-lsl-lib-task-inventory`). A script's write into a prim's contents
+  happens at once, so the same event reads it back, and advances the serial;
+  the region's viewers are told after the tick as each grid tells them of a
+  write (the prim again, the record to those who hold it selected), and the
+  `changed` the library chose follows. A give into a prim copies under a free
+  name, a script stopped; a give to an avatar is the `TaskInventoryOffered`
+  instant message both grids send. `llRezObject` and its family put back the
+  linkset the object item was taken as — an object dropped into a prim carries
+  its taken linkset with it — its scripts arriving at the next reconcile as
+  they were saved, with the start parameter and string, and the rezzer is told
+  (`Engine::object_rezzed`) after the tick in which they ran `on_rez`, before
+  what they said is heard. A script loaded with `llRemoteLoadScriptPin` starts
+  stopped and runs once the tick after the one it landed in is over, so the
+  prim's scripts read it stopped when they hear of it. Notecards are read out
+  of the asset store with `sl-notecard`, and the region remembers which it
+  has read.
 - **Money** goes through the grid's ledger (`sl_fake_grid::money`):
   `llGiveMoney` and `llTransferLindenDollars` pay the payee out of the owner's
   balance, both told by balance replies of type `5009` sent after the tick, a

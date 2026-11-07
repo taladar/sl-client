@@ -144,7 +144,7 @@ impl LoginSections {
         // moves, with Pacific time, which is the grids' own clock.
         success.login_flags = Some(LoginFlags {
             ever_logged_in: true,
-            daylight_savings: pacific_daylight_saving(now),
+            daylight_savings: sl_lsl_runtime::library::calendar::pacific_daylight_saving(now),
             gendered: true,
             stipend_since_login: "N".to_owned(),
         });
@@ -221,45 +221,11 @@ fn categories(entries: &[(i32, &str)]) -> Vec<LoginCategory> {
         .collect()
 }
 
-/// Whether US Pacific daylight-saving time is in effect at UNIX time `now`:
-/// from 02:00 local on the second Sunday of March (10:00 UTC) to 02:00 local
-/// on the first Sunday of November (09:00 UTC).
-fn pacific_daylight_saving(now: i64) -> bool {
-    let Ok(at) = ::time::OffsetDateTime::from_unix_timestamp(now) else {
-        return false;
-    };
-    let year = at.year();
-    let start = nth_sunday(year, ::time::Month::March, 2).map(|day| day.with_hms(10, 0, 0));
-    let end = nth_sunday(year, ::time::Month::November, 1).map(|day| day.with_hms(9, 0, 0));
-    match (start, end) {
-        (Some(Ok(start)), Some(Ok(end))) => {
-            let at = ::time::PrimitiveDateTime::new(at.date(), at.time());
-            start <= at && at < end
-        }
-        _unrepresentable => false,
-    }
-}
-
-/// The `nth` Sunday (1-based) of `month` in `year`.
-fn nth_sunday(year: i32, month: ::time::Month, nth: u8) -> Option<::time::Date> {
-    ::time::Date::from_calendar_date(year, month, 1)
-        .ok()
-        .and_then(|first| {
-            let offset = first.weekday().number_days_from_sunday();
-            let first_sunday = if offset == 0 {
-                1
-            } else {
-                8_u8.checked_sub(offset)?
-            };
-            let day = first_sunday.checked_add(nth.checked_sub(1)?.checked_mul(7)?)?;
-            ::time::Date::from_calendar_date(year, month, day).ok()
-        })
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{LoginSections, pacific_daylight_saving};
+    use super::LoginSections;
     use pretty_assertions::assert_eq;
+    use sl_lsl_runtime::library::calendar::pacific_daylight_saving;
     use sl_types::key::AgentKey;
     use sl_wire::{LoginList, LoginSuccess};
     use uuid::Uuid;

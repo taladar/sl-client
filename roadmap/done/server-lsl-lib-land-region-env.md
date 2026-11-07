@@ -2,7 +2,7 @@
 id: server-lsl-lib-land-region-env
 title: Library tranche — parcel, region, estate and environment queries
 topic: server
-status: ideas
+status: done
 origin: LSL-on-the-fake-grid audit (2026-09-20)
 blocked_by: [server-lsl-vm-execution, server-world-agent-movement,
   gridspec-lsl-land-region-env]
@@ -117,3 +117,48 @@ replay writes in for it (`vm/tests/ossl.rs`). The 35: `lsClearWindlightScene`,
 `osSetSunParam`, `osSetTerrainHeight`, `osSetTerrainTexture`,
 `osSetTerrainTextureHeight`, `osSetWindParam`, `osSunSetParam`,
 `osTerrainFlush`, `osTerrainSetHeight`, `osWindActiveModelPluginName`.
+
+## Done (2026-11-07)
+
+The tranche runs on both flavours. `vm/land.rs` holds the records a host lends
+(`Parcel`, `Region`, `SimData`, `Environment`, `ParcelMedia`) and the
+`LandChange` it applies; `library/land.rs` every function above with each
+grid's codes, keys, refusals and edges — `llGetEnv`'s two key sets,
+`PARCEL_DETAILS_*` 7–13 and 64 per grid, Second Life's edge parcel and
+OpenSim's `NullReferenceException` outside the region, the masked region
+flags, `llRequestSimulatorData`'s release, unknown and empty names, the
+environment rules and their texture refusal, `llGetSimStats`'s unknown codes —
+and the write half behind the rule that a script changes only land its owner
+owns (or, for the estate, manages). The OpenSim dialect refuses the four
+Second Life-only functions and the environment constants. The fake grid
+(`sl-fake-grid/src/scripts/land.rs`) answers from its parcel records and
+listings, region limits and estate, neighbours, heightfield, terrain wind and
+day cycle, and applies a change at once: the parcel's stream (its record sent
+again to the avatars on it), passes and bans in its access lists, the estate's
+lists, and the parcel's media with its update and command. OpenSim's readers
+over the same state are in too: `osGetParcelDwell`, `osGetCurrentSunHour`,
+`osGetMapTexture`, `osGetRegionMapTexture`, `osWindActiveModelPluginName`,
+`osSetParcelMusicURL`, `osSetParcelMediaURL`. Held by `vm/tests/land.rs` (the
+five `land/*` replays line for line, but for the deviations named there) and,
+end to end, `a_prim_reads_its_land_and_region` in
+`sl-fake-grid/tests/scripts.rs`.
+
+## Left open
+
+- **The other 28 OSSL land functions** — terrain, water, sun, wind, the
+  environment and LightShare writers, parcel join and split, region stats,
+  notices and restart — are [[server-lsl-lib-ossl-land-writers]].
+- **`llGetRegionTimeDilation` is a constant `1.0`.** The heartbeat does not
+  measure an overloaded region yet, so the acceptance row about tracking one is
+  not met.
+- **`llEjectFromLand` changes nothing**: the fake grid sends nobody off a
+  parcel. **`llGetParcelPrimOwners` is `[]` on both flavours**: it keeps no
+  prim counts by owner (OpenSim answers the list).
+- **`llGetSimStats`** reports the frame rate and the avatars; every time the
+  fake grid does not measure is `0.0`.
+- **The ban-list write is not checked end to end** against a viewer's
+  access-list reply, though both read the same list.
+- **`llSetDamage` and `llGetHealth` are stubs** (the stub notice), the combat
+  surface out of scope.
+- Measured quirks not imitated: Second Life's ground a hair above the clamped
+  edge beyond the region, and its parcel and region suns read a moment apart.

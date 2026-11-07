@@ -94,6 +94,7 @@ use std::time::{Duration, Instant};
 use sl_lsl_runtime::Dialect;
 use sl_lsl_runtime::bytecode::Program;
 use sl_lsl_runtime::library::BuiltinId;
+use sl_lsl_runtime::vm::land::{Environment, LandChange, Parcel, ParcelMedia, Region, SimData};
 use sl_lsl_runtime::vm::{
     Admission, Allowed, CallerId, Dialog, Engine, EngineConfig, EngineFlavour, ExperienceDetails,
     ExperienceError, ExperienceQuestion, Heard, Host, InstantMessage, InvalidLinkTarget,
@@ -122,6 +123,12 @@ use crate::world::{AvatarIdentity, RegionChange, RegionUpdate, SceneFixtures};
 /// numbers start at one, so no session's watcher takes it for its own.
 pub const REGION_SOURCE: u64 = 0;
 
+mod avatars;
+pub(crate) mod http;
+mod land;
+mod sensing;
+mod task_inventory;
+
 /// The address [`Host::agent_ip`] gives for an agent in the region: every
 /// circuit of the fake grid is a loopback one.
 const LOOPBACK_ADDRESS: &str = "127.0.0.1";
@@ -135,8 +142,12 @@ const PHYSICS_ENGINE_TYPE: &str = "ubODE";
 const PHYSICS_ENGINE_NAME: &str = "ubODE 1.0-0.13.2";
 
 /// The length of a day of a region's environment, in seconds, as both grids
-/// default it.
-const DEFAULT_DAY_LENGTH: f32 = 14_400.0;
+/// default it where the region keeps no environment of its own.
+const DEFAULT_DAY_LENGTH: i32 = 14_400;
+
+/// The offset of a region's day cycle, in seconds, as OpenSim's default
+/// environment sets it (`ViewerEnvironment`'s `DayOffset`).
+const DEFAULT_DAY_OFFSET: i32 = 57_600;
 
 /// The edge of a region, in metres.
 const REGION_EDGE_M: u32 = 256;
@@ -212,6 +223,32 @@ pub struct RegionScripts {
     /// The experience questions put and not yet answered, by the script and
     /// the avatar asked: the experience, and the tick the question went out.
     experience_questions: BTreeMap<(CallerId, AgentKey), (ExperienceKey, Tick)>,
+    /// The object a script rezzed, by its root, with the root of the object
+    /// whose script rezzed it (`OBJECT_REZZER_KEY`, `llDerezObject`).
+    pub(crate) rezzers: BTreeMap<ObjectKey, ObjectKey>,
+    /// Rezzers to tell of the object they rezzed (`object_rez`), with the
+    /// ticks each has waited: told after the tick in which the object's
+    /// scripts ran their `on_rez`, before what they said is heard.
+    pub(crate) rezzes_waiting: Vec<(CallerId, ObjectKey, u8)>,
+    /// Scripts a load put in a prim (`llRemoteLoadScriptPin`), to start, with
+    /// whether they run and the ticks each has waited: started once the tick
+    /// after the one they landed in is over, so the prim's scripts hear of
+    /// the new item first and read it stopped.
+    pub(crate) starting: Vec<(ObjectKey, InventoryKey, bool, u8)>,
+    /// Each prim's remote script access pin, by key
+    /// (`llSetRemoteScriptAccessPin`).
+    pub(crate) pins: BTreeMap<ObjectKey, i32>,
+    /// The notecards the region has read, by asset: what Second Life's
+    /// `llGetNotecardLineSync` reads.
+    pub(crate) notecards_read: BTreeSet<AssetKey>,
+    /// The region's calendar time at its tick 0, in microseconds since the
+    /// epoch, read off the region's wall clock at its first tick: what a
+    /// script's dates count on from by the ticks.
+    epoch_micros: Option<i64>,
+    /// The scripts' HTTP in the region ([`http::RegionHttp`]).
+    http: http::RegionHttp,
+    /// What scripts hold of the region's avatars ([`avatars::RegionAvatars`]).
+    avatars: avatars::RegionAvatars,
 }
 
 /// A script arriving in the region with the object it is in.
@@ -224,6 +261,12 @@ struct Arriving {
     away: Duration,
     /// The start parameter its object was rezzed with.
     start_parameter: i32,
+    /// The start string its object was rezzed with.
+    start_string: String,
+    /// Whether it came with a rez, which raises `on_rez`, rather than a load
+    /// into its prim, which starts it afresh with its start parameter and no
+    /// `on_rez`.
+    rezzed: bool,
 }
 
 impl Default for RegionScripts {
@@ -262,6 +305,14 @@ impl RegionScripts {
             last_load: (0, 0),
             arriving: BTreeMap::new(),
             experience_questions: BTreeMap::new(),
+            rezzers: BTreeMap::new(),
+            rezzes_waiting: Vec::new(),
+            starting: Vec::new(),
+            pins: BTreeMap::new(),
+            notecards_read: BTreeSet::new(),
+            epoch_micros: None,
+            http: http::RegionHttp::default(),
+            avatars: avatars::RegionAvatars::default(),
         }
     }
 
@@ -360,9 +411,10 @@ impl RegionScripts {
         let Some(id) = self.instance_of(prim, item) else {
             return false;
         };
+        let flavour = self.flavour();
         self.engine
             .instance_mut(id)
-            .map(|instance| instance.set_running(running))
+            .map(|instance| instance.set_running_as(running, flavour))
             .is_some()
     }
 
@@ -410,14 +462,15 @@ impl RegionScripts {
 
     /// The script `item` arrives in `prim` with a rez, `away` after its
     /// object was taken: the next reconcile brings it back from `saved`, or
-    /// starts it afresh, and raises `on_rez(start_parameter)` in it.
+    /// starts it afresh, gives it the start string and raises
+    /// `on_rez(start_parameter)` in it.
     pub(crate) fn arrive(
         &mut self,
         prim: ObjectKey,
         item: InventoryKey,
         saved: Option<SavedScript>,
         away: Duration,
-        start_parameter: i32,
+        (start_parameter, start_string): (i32, &str),
     ) {
         let _previous = self.arriving.insert(
             (prim, item),
@@ -425,8 +478,35 @@ impl RegionScripts {
                 saved,
                 away,
                 start_parameter,
+                start_string: start_string.to_owned(),
+                rezzed: true,
             },
         );
+    }
+
+    /// The script `item` was loaded into `prim` (`llRemoteLoadScriptPin`):
+    /// the next reconcile starts it afresh with `start_parameter`, stopped,
+    /// and once the tick after is over it runs if `running`.
+    pub(crate) fn load_script(
+        &mut self,
+        prim: ObjectKey,
+        item: InventoryKey,
+        start_parameter: i32,
+        running: bool,
+    ) {
+        let _previous = self.arriving.insert(
+            (prim, item),
+            Arriving {
+                saved: None,
+                away: Duration::ZERO,
+                start_parameter,
+                start_string: String::new(),
+                rezzed: false,
+            },
+        );
+        self.starting
+            .retain(|(at, script, _, _)| (*at, *script) != (prim, item));
+        self.starting.push((prim, item, running, 0));
     }
 
     /// The region goes down and comes back `down` later: every script is
@@ -635,12 +715,23 @@ impl RegionScripts {
             let _replaced = self.engine.add(id, program);
             if let Some(instance) = self.engine.instance_mut(id) {
                 instance.set_running(running);
+                if let Some(arriving) = &arriving
+                    && !arriving.rezzed
+                {
+                    instance.set_start_parameter(arriving.start_parameter);
+                }
             }
-            if let Some(arriving) = arriving
+            if let Some(arriving) = &arriving
+                && arriving.rezzed
                 && let Err(error) = self.engine.rez(id, arriving.start_parameter)
             {
                 tracing::warn!(?id, %error, "on_rez could not be raised");
             }
+        }
+        if let Some(arriving) = arriving
+            && let Some(instance) = self.engine.instance_mut(id)
+        {
+            instance.set_start_string(arriving.start_string);
         }
         let _was = self.by_item.insert((slot.prim, slot.item), id);
         let _old = self.slots.insert(id, slot);
@@ -824,6 +915,16 @@ struct Present {
     active_god: bool,
     /// Where it stands in the region.
     position: Vector,
+    /// The controls its viewer holds down, as `CONTROL_*` bits.
+    controls: i32,
+    /// Its movement state as `llGetAnimation` names it.
+    state: &'static str,
+    /// The `AGENT_*` bits its posture sets.
+    posture_info: i32,
+    /// The animations playing on it, by asset key.
+    animations: Vec<String>,
+    /// Its viewer's camera, once it has said where it is.
+    camera: Option<sl_proto::Camera>,
 }
 
 /// What a tick's scripts did that the region applies under its lock, once
@@ -910,6 +1011,18 @@ enum Effect {
         /// Its wearer.
         agent: AgentKey,
     },
+    /// A script wrote into the prim's contents: the region's sessions are
+    /// told as its grid tells them of a script's write.
+    Told {
+        /// The prim.
+        prim: RegionLocalObjectId,
+        /// Whether a script landed or left, which OpenSim sends the prim again
+        /// for.
+        script: bool,
+    },
+    /// The prims a script rezzed, root first, already in the region: the
+    /// region's sessions are sent them.
+    Rezzed(Vec<Object>),
     /// An experience's permission question was put to an avatar: its
     /// answer, or its timeout, is waited for.
     Asked {
@@ -982,6 +1095,59 @@ enum Delivery {
         /// The reply.
         balance: Box<sl_proto::MoneyBalance>,
     },
+    /// The parcel the avatar stands on, changed by a script
+    /// (`llSetParcelMusicURL`).
+    Parcel {
+        /// The avatar.
+        agent: AgentKey,
+        /// The parcel as it now is.
+        parcel: Box<sl_proto::ParcelInfo>,
+    },
+    /// An animation started or stopped on the avatar
+    /// (`llStartAnimation`, `llStopAnimation`).
+    Animate {
+        /// The avatar.
+        agent: AgentKey,
+        /// The animation's asset.
+        animation: uuid::Uuid,
+        /// Whether it starts.
+        start: bool,
+    },
+    /// What the avatar stands as (`llSetAnimationOverride` of `Standing`).
+    StandAs {
+        /// The avatar.
+        agent: AgentKey,
+        /// The animation.
+        animation: uuid::Uuid,
+    },
+    /// The avatar's controls taken or released (`llTakeControls`,
+    /// `llReleaseControls`).
+    Controls {
+        /// The avatar.
+        agent: AgentKey,
+        /// The `ScriptControlChange` blocks, in order.
+        changes: Vec<sl_lsl_runtime::vm::avatars::ControlChange>,
+    },
+    /// The avatar's follow camera set, or cleared with no rules
+    /// (`llSetCameraParams`, `llClearCameraParams`).
+    FollowCam {
+        /// The avatar.
+        agent: AgentKey,
+        /// The prim whose script set it.
+        object: ObjectKey,
+        /// The properties, or [`None`] to clear them.
+        rules: Option<Vec<sl_lsl_runtime::vm::avatars::CameraRule>>,
+    },
+    /// The media of the parcel the avatar stands on, changed or commanded by
+    /// a script (`llParcelMediaCommandList`).
+    Media {
+        /// The avatar.
+        agent: AgentKey,
+        /// The media as it now is, when it changed.
+        update: Option<Box<sl_proto::ParcelMediaUpdateInfo>>,
+        /// The command's flag bits, the command and the time it seeks to.
+        command: Option<(u32, sl_proto::ParcelMediaCommand, f32)>,
+    },
 }
 
 /// A sound an avatar is sent (`llPlaySound`, `llTriggerSound`,
@@ -1035,6 +1201,10 @@ struct Origin {
     name: String,
 }
 
+#[expect(
+    clippy::multiple_inherent_impl,
+    reason = "the host's methods are split by library tranche across the `scripts` modules"
+)]
 impl RegionHost<'_> {
     /// The prim's owner pays `payment` out of the grid's ledger
     /// ([`crate::money::pay_from_object`]): both sides told when it moved, the
@@ -1329,7 +1499,13 @@ impl RegionHost<'_> {
             },
             selected: (0, count(crate::seating::sitters_of(self.world, root).len())),
             rez_time: String::new(),
-            rezzer: uuid::Uuid::nil().to_string(),
+            // The object a script rezzed names it; any other, nobody.
+            rezzer: self
+                .world
+                .objects
+                .get(root)
+                .and_then(|prim| self.world.script_instances.rezzers.get(&prim.full_id))
+                .map_or_else(|| uuid::Uuid::nil().to_string(), ToString::to_string),
             masks: [
                 mask(masks.base),
                 mask(masks.owner),
@@ -2437,7 +2613,7 @@ impl Host for RegionHost<'_> {
     }
 
     fn day_length(&self, _caller: CallerId) -> f32 {
-        DEFAULT_DAY_LENGTH
+        self.day().0
     }
 
     fn prim_scripts(&self, prim: &str) -> Option<Vec<CallerId>> {
@@ -2449,6 +2625,259 @@ impl Host for RegionHost<'_> {
     fn agent_ip(&self, agent: &str) -> String {
         self.present(agent)
             .map_or_else(String::new, |_present| LOOPBACK_ADDRESS.to_owned())
+    }
+
+    fn contents(&self, caller: CallerId) -> Vec<sl_lsl_runtime::vm::Item> {
+        self.contents_of(caller)
+    }
+
+    fn remove_item(&mut self, caller: CallerId, name: &str, changed: &[i32]) -> bool {
+        self.remove_from(caller, name, changed)
+    }
+
+    fn give_to_prim(&mut self, caller: CallerId, target: &str, items: &[String]) -> bool {
+        self.give_into(caller, target, items)
+    }
+
+    fn offer_items(&mut self, caller: CallerId, offer: &sl_lsl_runtime::vm::Offer) -> bool {
+        self.offer_to(caller, offer)
+    }
+
+    fn set_remote_pin(&mut self, caller: CallerId, pin: i32) {
+        self.set_pin(caller, pin);
+    }
+
+    fn remote_pin(&self, prim: &str) -> Option<(i32, String)> {
+        self.pin_of(prim)
+    }
+
+    fn load_script(&mut self, caller: CallerId, load: &sl_lsl_runtime::vm::RemoteLoad) {
+        self.load_into(caller, load);
+    }
+
+    fn rez(
+        &mut self,
+        caller: CallerId,
+        rez: &sl_lsl_runtime::vm::Rez,
+    ) -> Result<String, sl_lsl_runtime::vm::RezRefusal> {
+        self.rez_from(caller, rez)
+    }
+
+    fn derez(&mut self, caller: CallerId, object: &str) -> bool {
+        self.derez_of(caller, object)
+    }
+
+    fn notecard_text(&mut self, asset: &str) -> Option<String> {
+        self.read_notecard(asset)
+    }
+
+    fn notecard_read(&self, asset: &str) -> Option<String> {
+        self.notecard_if_read(asset)
+    }
+
+    fn parcel_at(&self, _caller: CallerId, x: f32, y: f32) -> Option<Parcel> {
+        self.parcel_record(x, y)
+    }
+
+    fn region(&self, _caller: CallerId) -> Region {
+        self.region_record()
+    }
+
+    fn sim_data(&self, _caller: CallerId, name: &str) -> Option<SimData> {
+        self.sim_record(name)
+    }
+
+    fn ground(&self, _caller: CallerId, x: f32, y: f32) -> f32 {
+        self.ground_at(x, y)
+    }
+
+    fn wind(&self, _caller: CallerId, _position: &Vector) -> Vector {
+        self.wind_at()
+    }
+
+    fn environment(&self, _caller: CallerId, _position: Option<&Vector>, unix: i64) -> Environment {
+        self.environment_at(unix)
+    }
+
+    fn change_land(&mut self, _caller: CallerId, position: &Vector, change: &LandChange) -> bool {
+        self.land_change(position, change)
+    }
+
+    fn parcel_media(&self, _caller: CallerId, position: &Vector) -> ParcelMedia {
+        self.media_of(position)
+    }
+
+    fn sim_stats(&self, _caller: CallerId) -> Vec<f32> {
+        self.stats()
+    }
+
+    fn environment_rule(
+        &self,
+        _caller: CallerId,
+        _position: &Vector,
+        rule: i32,
+    ) -> Option<Vec<sl_lsl_runtime::Element>> {
+        self.environment_values(rule)
+    }
+
+    fn map_texture(&self, _caller: CallerId, region: &str) -> Option<String> {
+        self.map_texture_of(region)
+    }
+
+    fn send_http(&mut self, caller: CallerId, request: &sl_lsl_runtime::vm::http::Outbound) {
+        self.send_http_of(caller, request);
+    }
+
+    fn request_url(&mut self, caller: CallerId, key: &str, secure: bool) -> Option<String> {
+        self.request_url_of(caller, key, secure)
+    }
+
+    fn release_url(&mut self, caller: CallerId, url: &str) {
+        self.release_url_of(caller, url);
+    }
+
+    fn free_urls(&self, _caller: CallerId) -> i32 {
+        self.free_urls_of()
+    }
+
+    fn answer_http(
+        &mut self,
+        _caller: CallerId,
+        request: &str,
+        answered: sl_lsl_runtime::vm::http::Answered,
+    ) {
+        self.answer_http_of(request, answered);
+    }
+
+    fn http_throttle(&mut self, caller: CallerId) -> &mut sl_lsl_runtime::vm::http::Throttle {
+        self.throttle_of(caller)
+    }
+
+    fn url_authority(&self, _caller: CallerId) -> String {
+        http::authority(self.core)
+    }
+
+    fn agent(&self, _caller: CallerId, agent: &str) -> Option<sl_lsl_runtime::vm::avatars::Agent> {
+        self.agent_of(agent)
+    }
+
+    fn agent_record(
+        &self,
+        _caller: CallerId,
+        agent: &str,
+    ) -> Option<sl_lsl_runtime::vm::avatars::AgentRecord> {
+        self.agent_record_of(agent)
+    }
+
+    fn agent_named(&self, _caller: CallerId, name: &str) -> Option<(String, bool)> {
+        self.agent_called(name)
+    }
+
+    fn animate(&mut self, _caller: CallerId, agent: &str, animation: &str, start: bool) {
+        self.animate_agent(agent, animation, start);
+    }
+
+    fn set_animation_override(
+        &mut self,
+        _caller: CallerId,
+        agent: &str,
+        state: &str,
+        animation: Option<(&str, &str)>,
+    ) {
+        self.override_animation(agent, state, animation);
+    }
+
+    fn animation_override(&self, _caller: CallerId, agent: &str, state: &str) -> Option<String> {
+        self.override_of(agent, state)
+    }
+
+    fn object_animate(&mut self, caller: CallerId, name: &str, _animation: &str, _start: bool) {
+        // The fake grid plays no animesh from a script yet: say so, rather
+        // than pretend it played.
+        self.refuse_unmodelled(caller, &format!("llStartObjectAnimation(\"{name}\")"));
+    }
+
+    fn object_animations(&self, _caller: CallerId) -> Vec<String> {
+        Vec::new()
+    }
+
+    fn control_changes(
+        &mut self,
+        caller: CallerId,
+        agent: &str,
+        changes: &[sl_lsl_runtime::vm::avatars::ControlChange],
+        taken: Option<i32>,
+    ) {
+        self.change_controls(caller, agent, changes, taken);
+    }
+
+    fn set_camera(
+        &mut self,
+        caller: CallerId,
+        agent: &str,
+        rules: &[sl_lsl_runtime::vm::avatars::CameraRule],
+    ) {
+        self.follow_camera(caller, agent, Some(rules));
+    }
+
+    fn clear_camera(&mut self, caller: CallerId, agent: &str) {
+        self.follow_camera(caller, agent, None);
+    }
+
+    fn camera(&self, _caller: CallerId, agent: &str) -> Option<(Vector, sl_types::lsl::Rotation)> {
+        self.camera_of_agent(agent)
+    }
+
+    fn teleport_agent(
+        &mut self,
+        caller: CallerId,
+        agent: &str,
+        _destination: &sl_lsl_runtime::vm::avatars::Destination,
+    ) {
+        // A scripted teleport needs the grid's teleport machinery, which runs
+        // outside a region's tick: not modelled yet, and said so.
+        self.refuse_unmodelled(caller, &format!("a scripted teleport of {agent}"));
+    }
+
+    fn attached_list(&self, _caller: CallerId, agent: &str) -> Option<Vec<String>> {
+        self.attached_of(agent)
+    }
+
+    fn make_notecard(
+        &mut self,
+        caller: CallerId,
+        name: &str,
+        description: &str,
+        text: &str,
+        changed: &[i32],
+    ) {
+        self.make_notecard_in(caller, (name, description, text), changed);
+    }
+
+    fn epoch_micros(&self) -> i64 {
+        self.world.script_instances.epoch_micros.unwrap_or(0)
+    }
+
+    fn local_offset(&self, _unix: i64) -> i32 {
+        // The fake grid's simulator host keeps UTC.
+        0
+    }
+
+    fn day_offset(&self, _caller: CallerId) -> f32 {
+        self.day().1
+    }
+
+    fn sense(&self, _caller: CallerId) -> Vec<sl_lsl_runtime::vm::sensing::Sensed> {
+        self.sensed()
+    }
+
+    fn cast_ray(
+        &self,
+        caller: CallerId,
+        start: &Vector,
+        end: &Vector,
+    ) -> Vec<sl_lsl_runtime::vm::sensing::RayHit> {
+        self.ray_hits(caller, start, end)
     }
 }
 
@@ -2477,6 +2906,16 @@ async fn presence(core: &GridCore, index: usize) -> Vec<Present> {
                         blocked,
                         active_god: state.god_mode.told >= crate::god_powers::GOD_LEVEL_FLOOR,
                         position: crate::chat::agent_position(&state.sim),
+                        controls: i32::from_ne_bytes(state.motion.controls().bits().to_ne_bytes()),
+                        state: state.motion.posture().state_name(),
+                        posture_info: state.motion.posture().agent_info(),
+                        animations: state
+                            .animations
+                            .playing(state.animation_policy, state.avatar.agent_id)
+                            .iter()
+                            .map(|playing| playing.anim_id.to_string())
+                            .collect(),
+                        camera: state.motion.camera().cloned(),
                     }
                 })
             })
@@ -2545,6 +2984,18 @@ fn tick_locked(
     // A touch held open is due its `touch` before the scripts run.
     let agents: Vec<AgentKey> = present.iter().map(|present| present.agent).collect();
     crate::touches::tick(world, config.step, &agents);
+    if world.script_instances.epoch_micros.is_none() {
+        // Where the region's ticks started: its wall clock now, less the
+        // ticks already run.
+        let wall = i64::try_from(world.wall.unix_micros()).unwrap_or(i64::MAX);
+        let ran = ticks_as_micros(world.script_instances.engine.now(), config.step);
+        world.script_instances.epoch_micros = Some(wall.saturating_sub(ran));
+    }
+    http::hand_in(core, index, &mut world.script_instances);
+    {
+        let scripts = &mut world.script_instances;
+        avatars::hand_in_controls(&mut scripts.engine, &mut scripts.avatars, present);
+    }
     let mut engine = core::mem::replace(&mut world.script_instances.engine, Engine::new(config));
     let mut host = RegionHost {
         core,
@@ -2561,6 +3012,8 @@ fn tick_locked(
     drop(host);
     world.script_instances.engine = engine;
     world.script_instances.last_load = (report.runnable, report.served);
+    http::hand_out(core, index, &mut world.script_instances);
+    tell_rezzers(world);
     let mut changes = Vec::new();
     for effect in effects {
         match effect {
@@ -2645,6 +3098,16 @@ fn tick_locked(
             Effect::Detach { root, agent } => {
                 changes.push(RegionChange::TakeOff { agent, root });
             }
+            Effect::Told { prim, script } => {
+                changes.extend(crate::task_contents::told_by_script(world, prim, script));
+            }
+            Effect::Rezzed(objects) => {
+                changes.extend(
+                    objects
+                        .into_iter()
+                        .map(|object| RegionChange::Rezzed(Box::new(object))),
+                );
+            }
             Effect::Asked {
                 id,
                 agent,
@@ -2660,10 +3123,59 @@ fn tick_locked(
     world
         .script_instances
         .time_out_experience_questions(report.tick, config.step);
+    start_loaded(world);
     // What the tick started, saved over or moved to another state may take
     // touches now, or no longer.
     changes.extend(crate::touches::refresh_flags(world));
     (report, changes, deliveries)
+}
+
+/// `ticks` ticks of `step`, in microseconds.
+fn ticks_as_micros(ticks: Tick, step: Duration) -> i64 {
+    i64::try_from(u128::from(ticks.0).saturating_mul(step.as_micros())).unwrap_or(i64::MAX)
+}
+
+/// Tells each rezzer whose object's scripts ran their `on_rez` in the tick
+/// just run of the object it rezzed (`object_rez`): after the tick, before
+/// what the object's scripts said is heard, so on both grids the rezzer hears
+/// of the rez first though the child ran before it (`inventory/rez`).
+fn tell_rezzers(world: &mut SceneFixtures) {
+    let scripts = &mut world.script_instances;
+    let mut waiting = core::mem::take(&mut scripts.rezzes_waiting);
+    waiting.retain_mut(|(rezzer, object, waited)| {
+        if *waited == 0 {
+            *waited = 1;
+            return true;
+        }
+        let key = object.uuid().to_string();
+        if let Err(error) = scripts.engine.object_rezzed(*rezzer, &key) {
+            tracing::warn!(?rezzer, %error, "object_rez could not be raised");
+        }
+        false
+    });
+    scripts.rezzes_waiting = waiting;
+}
+
+/// Starts each script a load put in a prim once the tick after the one it
+/// landed in is over, if it is to run.
+fn start_loaded(world: &mut SceneFixtures) {
+    let mut starting = core::mem::take(&mut world.script_instances.starting);
+    starting.retain_mut(|(prim, item, running, waited)| {
+        if *waited == 0 {
+            *waited = 1;
+            return true;
+        }
+        if *running {
+            let _started = world.script_instances.set_running(*prim, *item, true);
+            if let Some(local_id) = world.local_id_of(*prim)
+                && let Some(contents) = world.objects.contents_mut(local_id)
+            {
+                let _was = contents.running.insert(*item);
+            }
+        }
+        false
+    });
+    world.script_instances.starting = starting;
 }
 
 /// The scripts in the linkset whose root is `root`, prim by prim in link
@@ -2800,7 +3312,13 @@ async fn deliver(core: &GridCore, index: usize, deliveries: Vec<Delivery>) {
             | Delivery::MapDestination { agent, .. }
             | Delivery::Message { agent, .. }
             | Delivery::Sound { agent, .. }
-            | Delivery::Balance { agent, .. } => *agent,
+            | Delivery::Balance { agent, .. }
+            | Delivery::Parcel { agent, .. }
+            | Delivery::Media { agent, .. }
+            | Delivery::Animate { agent, .. }
+            | Delivery::StandAs { agent, .. }
+            | Delivery::Controls { agent, .. }
+            | Delivery::FollowCam { agent, .. } => *agent,
         };
         let Some(shared) = core.root_session_of(agent).await else {
             tracing::debug!(%agent, "a script spoke to an avatar no longer in world");
@@ -2817,13 +3335,47 @@ async fn deliver(core: &GridCore, index: usize, deliveries: Vec<Delivery>) {
                 {
                     return Ok(());
                 }
-                send(&mut state.sim, &delivery, now)
+                match &delivery {
+                    Delivery::Animate {
+                        animation, start, ..
+                    } => {
+                        if state
+                            .animations
+                            .apply(&[(sl_proto::AnimationKey::from(*animation), *start)])
+                        {
+                            state_animations(state, now)?;
+                        }
+                        Ok(())
+                    }
+                    Delivery::StandAs { animation, .. } => {
+                        if state.animations.set_default(*animation) {
+                            state_animations(state, now)?;
+                        }
+                        Ok(())
+                    }
+                    _ => send(&mut state.sim, &delivery, now),
+                }
             })
             .await;
         if let Err(error) = sent {
             tracing::warn!(%agent, %error, "sending what a script said failed");
         }
     }
+}
+
+/// States the agent's animation set to its viewer, as a change to it is.
+fn state_animations(
+    state: &mut crate::driver::SimState,
+    now: Instant,
+) -> Result<(), sl_proto::Error> {
+    let agent = state.avatar.agent_id;
+    let playing = state.animations.playing(state.animation_policy, agent);
+    state.sim.send_avatar_animation_with_events(
+        agent,
+        &playing,
+        &state.animation_policy.physical_events(),
+        now,
+    )
 }
 
 /// Sends one `delivery` down `sim`.
@@ -2848,6 +3400,54 @@ fn send(sim: &mut SimSession, delivery: &Delivery, now: Instant) -> Result<(), s
         Delivery::Message { message, .. } => sim.send_instant_message(message, now),
         Delivery::Sound { sound, .. } => send_sound(sim, sound, now),
         Delivery::Balance { balance, .. } => sim.send_money_balance_reply(balance, now),
+        Delivery::Controls { changes, .. } => {
+            let controls: Vec<sl_proto::ScriptControl> = changes
+                .iter()
+                .map(|change| sl_proto::ScriptControl {
+                    action: if change.take {
+                        sl_proto::ScriptControlAction::Take
+                    } else {
+                        sl_proto::ScriptControlAction::Release
+                    },
+                    controls: sl_proto::ControlFlags::from_bits(change.controls),
+                    pass_to_agent: change.pass_to_agent,
+                })
+                .collect();
+            sim.send_script_control_change(&controls, now)
+        }
+        Delivery::FollowCam { object, rules, .. } => match rules {
+            Some(rules) => {
+                let properties: Vec<sl_proto::FollowCamPropertyValue> = rules
+                    .iter()
+                    .map(|rule| sl_proto::FollowCamPropertyValue {
+                        property: sl_proto::FollowCamProperty::from_i32(rule.property),
+                        value: rule.value,
+                    })
+                    .collect();
+                sim.send_set_follow_cam_properties(*object, &properties, now)
+            }
+            None => sim.send_clear_follow_cam_properties(*object, now),
+        },
+        // Sent with the session's animation set, above.
+        Delivery::Animate { .. } | Delivery::StandAs { .. } => Ok(()),
+        Delivery::Parcel { parcel, .. } => {
+            // Both grids push a changed parcel down the event queue.
+            sim.enqueue_parcel_properties(parcel);
+            Ok(())
+        }
+        Delivery::Media {
+            update, command, ..
+        } => {
+            if let Some(update) = update {
+                sim.send_parcel_media_update(update, now)?;
+            }
+            match command {
+                Some((flags, command, time)) => {
+                    sim.send_parcel_media_command(*flags, *command, *time, now)
+                }
+                None => Ok(()),
+            }
+        }
     }
 }
 

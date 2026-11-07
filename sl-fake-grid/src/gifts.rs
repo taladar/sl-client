@@ -32,9 +32,10 @@
 //! rebuilt at each login. A gift to an avatar that is away is therefore held
 //! by the grid (`Gifts`) and filed when its next session is prepared.
 //!
-//! Not modelled: an object's gift (`TaskInventoryOffered`), since no script
-//! the fake grid runs can give one yet (`llGiveInventory` is
-//! `server-lsl-lib-task-inventory`'s).
+//! An object's gift (`TaskInventoryOffered`, `llGiveInventory` to an avatar)
+//! is offered by the script engine (`crate::scripts`), not here; filing it
+//! when it is accepted, as Second Life does, or at the offer, as OpenSim does,
+//! is `test-fake-grid-lsl-offline-cases`'s.
 
 use std::collections::HashMap;
 use std::sync::Arc;

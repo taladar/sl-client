@@ -27,21 +27,26 @@ aditi's Mauve (`sim_channel` `Luau`, `2026-07-24.30110090421`); OpenSim is
 column. The permission bits are LSL's: `TAKE_CONTROLS` 4,
 `TRIGGER_ANIMATION` 16, `TRACK_CAMERA` 1024, `CONTROL_CAMERA` 2048,
 `OVERRIDE_ANIMATIONS` 32768.
+The fake grid column is held by `sl-lsl-runtime`'s `vm/tests/avatars.rs` and
+`vm/tests/money.rs`, which replay `avatar/animation`, `avatar/controls`,
+`avatar/camera` and `avatar/permissions` line for line with the runner's
+answers, sits and held keys, and by `sl-fake-grid/tests/scripts.rs` end to end,
+a script dancing the client's avatar and hearing its forward key.
 
 ### Asking for permissions
 
 | behaviour | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
-| `llTakeControls`, `llStartAnimation`, `llSetCameraParams` before any grant | a `DEBUG_CHANNEL` complaint each — `Script trying to take controls from owner but PERMISSION_TAKE_CONTROLS permission not set!`, `Script trying to trigger animations but PERMISSION_TRIGGER_ANIMATION permission not set`, `Script trying to set camera parameters but PERMISSION_CONTROL_CAMERA permission not set!` — and the script runs on | nothing at all | no scripts |
-| `llGetCameraPos` before any grant | `ZERO_VECTOR`, no complaint | the same | no scripts |
+| `llTakeControls`, `llStartAnimation`, `llSetCameraParams` before any grant | a `DEBUG_CHANNEL` complaint each — `Script trying to take controls from owner but PERMISSION_TAKE_CONTROLS permission not set!`, `Script trying to trigger animations but PERMISSION_TRIGGER_ANIMATION permission not set`, `Script trying to set camera parameters but PERMISSION_CONTROL_CAMERA permission not set!` — and the script runs on | nothing at all | each flavour as its grid |
+| `llGetCameraPos` before any grant | `ZERO_VECTOR`, no complaint | the same | each flavour as its grid |
 | the question | a `ScriptQuestion` with the mask as asked, the object's name, its owner's legacy name (`First Last`) and no experience | the same | the same, as a test sends it (`e2e_script_permissions`) |
 | the answer granting all that was asked | `run_time_permissions` with the mask; `llGetPermissions` the mask, `llGetPermissionsKey` the owner | the same | the viewer's card answers with the mask asked, on both flavours |
 | the answer granting part of it (16 of 1044) | the part: 16 | the same | — |
 | the answer denying (0) | `run_time_permissions(0)`; the permissions key stays the owner | the same | the card's *No* answers 0, on both flavours |
 | the answer granting **more** than was asked (1044 for a question of 16) | **1044**: no grid masks the answer by the question | the same (`handleScriptAnswer` stores the answer as it came) | — |
-| `llRequestPermissions(owner, 0)` | **nothing**: no question, no `run_time_permissions`, the permissions held unchanged | **releases**: `run_time_permissions(0)` at once, nothing held, the key `NULL_KEY` | no scripts |
-| `CONTROL_CAMERA` asked by an object the avatar neither wears nor sits on | **refused unasked**: `Camera control currently only supported for attachments and objects on which you are sitting.` on `DEBUG_CHANNEL`, no question, no `run_time_permissions` — and the same for any mask that holds `CONTROL_CAMERA` | asked like any other; granted | no scripts |
-| a question to the other avatar | the same question, put to that avatar's viewer; granted, the key is that avatar's | the same | no scripts |
+| `llRequestPermissions(owner, 0)` | **nothing**: no question, no `run_time_permissions`, the permissions held unchanged | **releases**: `run_time_permissions(0)` at once, nothing held, the key `NULL_KEY` | each flavour as its grid |
+| `CONTROL_CAMERA` asked by an object the avatar neither wears nor sits on | **refused unasked**: `Camera control currently only supported for attachments and objects on which you are sitting.` on `DEBUG_CHANNEL`, no question, no `run_time_permissions` — and the same for any mask that holds `CONTROL_CAMERA` | asked like any other; granted | each flavour as its grid |
+| a question to the other avatar | the same question, put to that avatar's viewer; granted, the key is that avatar's | the same | each flavour as its grid |
 
 ### Sitting
 
@@ -54,7 +59,7 @@ the script's view of it.
 | --- | --- | --- | --- |
 | the sit response's `SitPosition` for the target `<0, 0, 0.5>` | `<0, 0, 0.85>` — the target raised by 0.35 m | `<0, 0, 0.5>` — the target as set | the same, per flavour (`tests/scripts.rs`) |
 | its rotation and camera offsets | the target's rotation; the eye and focus offsets as the script set them | the same | the same |
-| `changed` once seated | `CHANGED_LINK`; `llAvatarOnSitTarget` the sitter, `llGetNumberOfPrims` 2, the last link the sitter, `llGetObjectPrimCount` 1, `llGetAgentSize` of the sitter not zero | the same | the same, but `llGetAgentSize` (`server-lsl-lib-avatar-control`) |
+| `changed` once seated | `CHANGED_LINK`; `llAvatarOnSitTarget` the sitter, `llGetNumberOfPrims` 2, the last link the sitter, `llGetObjectPrimCount` 1, `llGetAgentSize` of the sitter not zero | the same | the same; `llGetAgentSize` a default shape's 0.45 × 0.6 × 1.9 m |
 | `llGetLinkKey(llGetNumberOfPrims())` on the lone prim, nobody seated | `NULL_KEY` | the prim's own key | each flavour's |
 | the avatar-control permissions asked of the seated avatar (`TAKE_CONTROLS`, `TRIGGER_ANIMATION`, `TRACK_CAMERA`, `CONTROL_CAMERA`) | granted at once, no question — to the owner and to another avatar alike | the same (`implicitPerms` for a sitting agent) | the same |
 | what is held after `llUnSit` or standing up | 1040: `TAKE_CONTROLS` and `CONTROL_CAMERA` are dropped, `TRIGGER_ANIMATION` and `TRACK_CAMERA` kept, the key unchanged | the same | the same |
@@ -69,38 +74,38 @@ runner holds each down for a second (`Command::SetControls`).
 
 | behaviour | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
-| the `ScriptControlChange` for `llTakeControls(CONTROL_FWD \| CONTROL_ROT_LEFT, TRUE, FALSE)` | a release of **every** control (`0xFFFFFFFF`; a later take releases what the last took), then a take of `0x80101` — the two keys and the nudge-forward bit `0x80000` — not passed to the agent | a release of the two keys, passed and not, then a take of `0x101` not passed | no scripts (`send_script_control_change` exists) |
-| the `control` events of one press | one with `level` and `edge` the key, one with `level` 0 and `edge` the key on release | the same | no scripts |
-| events between, while the key is held a second | 21–23 (a measurement: a frame's) | 1 | no scripts |
+| the `ScriptControlChange` for `llTakeControls(CONTROL_FWD \| CONTROL_ROT_LEFT, TRUE, FALSE)` | a release of **every** control (`0xFFFFFFFF`; a later take releases what the last took), then a take of `0x80101` — the two keys and the nudge-forward bit `0x80000` — not passed to the agent | a release of the two keys, passed and not, then a take of `0x101` not passed | each flavour as its grid |
+| the `control` events of one press | one with `level` and `edge` the key, one with `level` 0 and `edge` the key on release | the same | each flavour as its grid |
+| events between, while the key is held a second | 21–23 (a measurement: a frame's) | 1 | every second frame on Second Life (22 in a second's hold at 45 frames a second), once on OpenSim |
 | a key the script did not take (back) | no event; the avatar walks | the same | — |
-| `llTakeControls(CONTROL_ROT_LEFT, FALSE, TRUE)` (accept off) | a take of every control **but** turn-left (`0xFFFFFEFF`), passed to the agent; no event for turn-left | a take of turn-left (`0x100`), passed; no event | no scripts |
-| `llReleaseControls` | a release of what was taken; `TAKE_CONTROLS` is dropped from the permissions | no `ScriptControlChange`; `TAKE_CONTROLS` dropped likewise | no scripts |
-| `llTakeControls` after that | a `DEBUG_CHANNEL` complaint (two for the one call), nothing taken | nothing, silently | no scripts |
+| `llTakeControls(CONTROL_ROT_LEFT, FALSE, TRUE)` (accept off) | a take of every control **but** turn-left (`0xFFFFFEFF`), passed to the agent; no event for turn-left | a take of turn-left (`0x100`), passed; no event | each flavour as its grid |
+| `llReleaseControls` | a release of what was taken; `TAKE_CONTROLS` is dropped from the permissions | no `ScriptControlChange`; `TAKE_CONTROLS` dropped likewise | each flavour as its grid |
+| `llTakeControls` after that | a `DEBUG_CHANNEL` complaint (two for the one call), nothing taken | nothing, silently | each flavour as its grid |
 
 ### Camera
 
 | behaviour | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
-| `CONTROL_CAMERA` and `TRACK_CAMERA` asked of the owner standing | refused unasked (above); nothing held | asked; granted | no scripts |
-| the same, seated on the prim | granted, no question | the same | no scripts |
-| `llSetCameraParams` with a flag, floats and vectors | one `SetFollowCamProperties` naming the prim, the rules **in the script's order**, each vector rule split into its three codes (`CAMERA_FOCUS_OFFSET` as 2, 3, 4; `CAMERA_FOCUS` as 18, 19, 20) | the same parameters, **sorted by code** | no scripts (`send_set_follow_cam_properties` exists) |
+| `CONTROL_CAMERA` and `TRACK_CAMERA` asked of the owner standing | refused unasked (above); nothing held | asked; granted | each flavour as its grid |
+| the same, seated on the prim | granted, no question | the same | each flavour as its grid |
+| `llSetCameraParams` with a flag, floats and vectors | one `SetFollowCamProperties` naming the prim, the rules **in the script's order**, each vector rule split into its three codes (`CAMERA_FOCUS_OFFSET` as 2, 3, 4; `CAMERA_FOCUS` as 18, 19, 20) | the same parameters, **sorted by code** | each flavour as its grid |
 | values out of their documented ranges (distance 100, pitch −200, behindness angle 400, focus lag 9, position threshold −1) | sent as given: **no clamping** | the same | — |
 | `llClearCameraParams` | a `ClearFollowCamProperties` naming the prim | the same | — |
-| `llGetCameraPos` with `TRACK_CAMERA` | not `ZERO_VECTOR` | the same | no scripts |
-| what is held after the owner stands | 1024: only `TRACK_CAMERA` | the same | no scripts |
+| `llGetCameraPos` with `TRACK_CAMERA` | not `ZERO_VECTOR` | the same | the viewer's camera, from its last `AgentUpdate` |
+| what is held after the owner stands | 1024: only `TRACK_CAMERA` | the same | each flavour as its grid |
 
 ### Animations
 
 | behaviour | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
-| `TRIGGER_ANIMATION` and `OVERRIDE_ANIMATIONS` asked of the owner by an unattached prim | asked (32784); granted | the same | no scripts |
+| `TRIGGER_ANIMATION` and `OVERRIDE_ANIMATIONS` asked of the owner by an unattached prim | asked (32784); granted | the same | each flavour as its grid |
 | `llStartAnimation("dance1")` | an `AvatarAnimation` adding `dance1`, sourced from the prim; `llGetAnimationList` has it, `llGetAnimation` still `Standing` | the same | `Action::AnimateAvatar` plays a list |
 | who is told the source | the animated avatar's own viewer; another viewer has `dance1` with no source | the same | — |
 | `llStopAnimation("dance1")` | gone from both | the same | — |
-| `llStartAnimation` of a name the prim does not hold and no built-in has | `Could not find animation 'no such animation'` on `DEBUG_CHANNEL` | nothing | no scripts |
-| `llSetAnimationOverride("Standing", "dance1")` — a built-in's name, the prim holding no animation | accepted: the standing animation becomes `dance1`, `llGetAnimationOverride("Standing")` says `dance1` | the same (`DefaultAvatarAnimations` names it) | no scripts |
-| `llGetAnimationOverride("Standing")` after `llResetAnimationOverride("ALL")` | `stand` | `Standing` | no scripts |
-| the other avatar, after it granted `TRIGGER_ANIMATION` | danced and stopped like the owner | the same | no scripts |
+| `llStartAnimation` of a name the prim does not hold and no built-in has | `Could not find animation 'no such animation'` on `DEBUG_CHANNEL` | nothing | each flavour as its grid |
+| `llSetAnimationOverride("Standing", "dance1")` — a built-in's name, the prim holding no animation | accepted: the standing animation becomes `dance1`, `llGetAnimationOverride("Standing")` says `dance1` | the same (`DefaultAvatarAnimations` names it) | each flavour as its grid |
+| `llGetAnimationOverride("Standing")` after `llResetAnimationOverride("ALL")` | `stand` | `Standing` | each flavour as its grid |
+| the other avatar, after it granted `TRIGGER_ANIMATION` | danced and stopped like the owner | the same | each flavour as its grid |
 
 ### What the viewer does with it
 
@@ -243,52 +248,56 @@ every row** (500 rays took YEngine 33 s and XEngine 21 s), so OpenSim is one
 column again. Both regions held other residents' objects, so a sweep's
 answer has strangers in it; the probe prints whether the owner owns each.
 Second Life was run three times: rows that changed between runs say so.
+The fake grid column is held by `sl-lsl-runtime`'s `vm/tests/sensing.rs` on
+the probe's row with nobody else's objects in it (the transcripts' strangers
+cannot be placed again), and by `sl-fake-grid/tests/scripts.rs` end to end;
+the fake grid meets a ray with a prim's box and the ground's heightfield.
 
 ### Sensors: what a sweep returns
 
 | behaviour | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
-| the most one sweep returns | **32** | 16 (`SensorMaxResults`) | no scripts |
-| the order | nearest first, by the distance between the prims' centres, strangers and the probe's own mixed | the same | no scripts |
-| the order the targets were rezzed in (far end first) | irrelevant: distance alone | the same | no scripts |
-| the scanning prim itself | never returned | the same | no scripts |
-| a target exactly at the range (3 m, range 3.0) | **left out**: in range means nearer than it | **returned**: within it means up to it | no scripts |
-| a target whose centre is 3.5 m away and whose near face is 3.25 m (range 3.4) | left out: the centre counts, not the bounds | the same | no scripts |
-| a target 100 m straight up, asked for with a range of 200 | not found: the range is held to 96 | the same (`SensorMaxRange`) | no scripts |
-| a range of 0, or −1 | **no event at all**: neither `sensor` nor `no_sensor` within five seconds | `no_sensor` | no scripts |
-| an arc of `PI / 4` | what lies within 45° of the prim's forward (east) axis: the target 3.5 m straight up is left out | the same | no scripts |
-| an arc of 0 | **no arc**: everything in range, the target straight up included | only what lies exactly on the axis | no scripts |
-| an arc of −1 | everything in range, as for 0 | **nothing**: `no_sensor` | no scripts |
-| an arc of 4.0 (more than `PI`) | everything in range, as `PI` | the same | no scripts |
-| a name filter (`"Target B"`), a key filter, both | the prims that match; a key with another name matches nothing (`no_sensor`) | the same | no scripts |
-| nothing matches | `no_sensor` | the same | no scripts |
-| `llDetectedType` of an idle scripted prim, of a bare prim | 12 (`PASSIVE \| SCRIPTED`), 4 (`PASSIVE`) | the same | no scripts |
-| `llDetectedPos`, `llDetectedRot`, `llDetectedVel`, `llDetectedOwner`, `llDetectedGroup` of a prim | its centre, rotation and velocity; its owner; 1 (the same group as the scanner, neither having one) | the same | no scripts |
-| `llDetectedLinkNumber`, `llDetectedGrab`, the `llDetectedTouch*` in `sensor` | 0, `ZERO_VECTOR`, the `TOUCH_INVALID_*` values | the same | no scripts |
-| `llDetectedKey` one past the last result | `NULL_KEY` | not `NULL_KEY` (an empty key) | no scripts |
+| the most one sweep returns | **32** | 16 (`SensorMaxResults`) | each flavour as its grid |
+| the order | nearest first, by the distance between the prims' centres, strangers and the probe's own mixed | the same | each flavour as its grid |
+| the order the targets were rezzed in (far end first) | irrelevant: distance alone | the same | each flavour as its grid |
+| the scanning prim itself | never returned | the same | each flavour as its grid |
+| a target exactly at the range (3 m, range 3.0) | **left out**: in range means nearer than it | **returned**: within it means up to it | each flavour as its grid |
+| a target whose centre is 3.5 m away and whose near face is 3.25 m (range 3.4) | left out: the centre counts, not the bounds | the same | each flavour as its grid |
+| a target 100 m straight up, asked for with a range of 200 | not found: the range is held to 96 | the same (`SensorMaxRange`) | each flavour as its grid |
+| a range of 0, or −1 | **no event at all**: neither `sensor` nor `no_sensor` within five seconds | `no_sensor` | each flavour as its grid |
+| an arc of `PI / 4` | what lies within 45° of the prim's forward (east) axis: the target 3.5 m straight up is left out | the same | each flavour as its grid |
+| an arc of 0 | **no arc**: everything in range, the target straight up included | only what lies exactly on the axis | each flavour as its grid |
+| an arc of −1 | everything in range, as for 0 | **nothing**: `no_sensor` | each flavour as its grid |
+| an arc of 4.0 (more than `PI`) | everything in range, as `PI` | the same | each flavour as its grid |
+| a name filter (`"Target B"`), a key filter, both | the prims that match; a key with another name matches nothing (`no_sensor`) | the same | each flavour as its grid |
+| nothing matches | `no_sensor` | the same | each flavour as its grid |
+| `llDetectedType` of an idle scripted prim, of a bare prim | 12 (`PASSIVE \| SCRIPTED`), 4 (`PASSIVE`) | the same | each flavour as its grid |
+| `llDetectedPos`, `llDetectedRot`, `llDetectedVel`, `llDetectedOwner`, `llDetectedGroup` of a prim | its centre, rotation and velocity; its owner; 1 (the same group as the scanner, neither having one) | the same | each flavour as its grid |
+| `llDetectedLinkNumber`, `llDetectedGrab`, the `llDetectedTouch*` in `sensor` | 0, `ZERO_VECTOR`, the `TOUCH_INVALID_*` values | the same | each flavour as its grid |
+| `llDetectedKey` one past the last result | `NULL_KEY` | not `NULL_KEY` (an empty key) | each flavour as its grid |
 
 ### Sensors: the type mask
 
 | behaviour | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
-| `ACTIVE \| PASSIVE \| SCRIPTED` | **scripted objects only**: `SCRIPTED` narrows the mask, so not one bare prim of eighteen is returned, though a ray hits them | **the union**: bare and scripted prims alike | no scripts |
-| `PASSIVE` alone | the bare prims and other unscripted objects — and some idle scripted ones (below) | the bare prims, never a scripted one | no scripts |
-| `SCRIPTED` alone, `ACTIVE` alone | scripted objects — but **not every idle scripted prim**: of the five targets, whose scripts set the name and do nothing more, one or two were missing each run, and a different one each time (Target B in two runs, Target W in one); the one `SCRIPTED` missed, `PASSIVE` found. `llDetectedType` says 12 for all of them in every sweep | every scripted prim, either way: OpenSim counts a scripted prim as active | no scripts |
-| a repeating sweep for Target B with `SCRIPTED`, later in the run | `no_sensor` every time, in two runs of two: by then Target B was not among the scripted | found every time | no scripts |
-| `AGENT` | every avatar in range, `llDetectedType` 3 (`AGENT \| ACTIVE`), 35 with a scripted attachment worn; `llDetectedOwner` the avatar itself; `llDetectedName` its `llKey2Name` | the two avatars, type 1 (`AGENT`) | no scripts |
-| `AGENT_BY_LEGACY_NAME` with the owner's legacy name | the owner alone | the same | no scripts |
-| `AGENT_BY_USERNAME` with `llGetUsername(owner)` | the owner alone | **nobody**: `no_sensor` | no scripts |
+| `ACTIVE \| PASSIVE \| SCRIPTED` | **scripted objects only**: `SCRIPTED` narrows the mask, so not one bare prim of eighteen is returned, though a ray hits them | **the union**: bare and scripted prims alike | each flavour as its grid |
+| `PASSIVE` alone | the bare prims and other unscripted objects — and some idle scripted ones (below) | the bare prims, never a scripted one | the bare prims alone on both flavours |
+| `SCRIPTED` alone, `ACTIVE` alone | scripted objects — but **not every idle scripted prim**: of the five targets, whose scripts set the name and do nothing more, one or two were missing each run, and a different one each time (Target B in two runs, Target W in one); the one `SCRIPTED` missed, `PASSIVE` found. `llDetectedType` says 12 for all of them in every sweep | every scripted prim, either way: OpenSim counts a scripted prim as active | every scripted object, on both flavours: the fake grid holds an idle scripted prim active, never drifting |
+| a repeating sweep for Target B with `SCRIPTED`, later in the run | `no_sensor` every time, in two runs of two: by then Target B was not among the scripted | found every time | found every time: no drift |
+| `AGENT` | every avatar in range, `llDetectedType` 3 (`AGENT \| ACTIVE`), 35 with a scripted attachment worn; `llDetectedOwner` the avatar itself; `llDetectedName` its `llKey2Name` | the two avatars, type 1 (`AGENT`) | each flavour as its grid |
+| `AGENT_BY_LEGACY_NAME` with the owner's legacy name | the owner alone | the same | each flavour as its grid |
+| `AGENT_BY_USERNAME` with `llGetUsername(owner)` | the owner alone | **nobody**: `no_sensor` | each flavour as its grid |
 
 ### Repeating sensors
 
 | behaviour | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
-| `llSensorRepeat` every 0.5 s, for 2.6 s | 5 sweeps, the first after 0.51 s, then every 0.51 s | 4, the first after **0.6 s**, then every 0.5 s | no scripts |
-| one that finds nothing | `no_sensor` every interval | the same | no scripts |
-| after `llSensorRemove` | nothing | one sweep already queued arrives at once, then nothing | no scripts |
-| every 0.01 s | 17–22 sweeps a second (a measurement) | 9.5 a second: about one every 0.1 s | no scripts |
-| every 0.0 s | **one** sweep, at once, then none | **none**: an interval of 0 is no repeat | no scripts |
-| `llSensor` while a 1 s repeat runs | the `llSensor`'s answer, then **nothing more**: the one sweep replaced the repeat | the `llSensor`'s answer, and the repeat runs on every second | no scripts |
+| `llSensorRepeat` every 0.5 s, for 2.6 s | 5 sweeps, the first after 0.51 s, then every 0.51 s | 4, the first after **0.6 s**, then every 0.5 s | each flavour as its grid: the first sweep an interval in, a tenth of a second later on OpenSim |
+| one that finds nothing | `no_sensor` every interval | the same | each flavour as its grid |
+| after `llSensorRemove` | nothing | one sweep already queued arrives at once, then nothing | each flavour as its grid |
+| every 0.01 s | 17–22 sweeps a second (a measurement) | 9.5 a second: about one every 0.1 s | every 0.05 s on Second Life, every 0.1 s on OpenSim |
+| every 0.0 s | **one** sweep, at once, then none | **none**: an interval of 0 is no repeat | each flavour as its grid |
+| `llSensor` while a 1 s repeat runs | the `llSensor`'s answer, then **nothing more**: the one sweep replaced the repeat | the `llSensor`'s answer, and the repeat runs on every second | each flavour as its grid |
 
 ### Raycasts
 
@@ -299,25 +308,25 @@ hits, nearest the start first, and a status last.
 
 | behaviour | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
-| no options | `[wall's key, <4.75, 0, 0> (as a vector), 1]` — one hit, the face it entered | the same hit, but the position is a **string** (`"<124.75, 128, 27.5>"`, region coordinates) | no scripts |
-| `RC_MAX_HITS 4` | the wall and the bare prim; status 2 | the wall, the bare prim and **two hits on land 51.7 m out** — past the ray's 15 m end, at the ray's height, the same point twice; status 4 | no scripts |
-| `RC_DETECT_PHANTOM TRUE` | the ghost as well, between them | the same, and land | no scripts |
-| `RC_DATA_FLAGS` with `RC_GET_NORMAL \| RC_GET_ROOT_KEY \| RC_GET_LINK_NUM` | each hit `[key, link, position, normal]`: the link 0 (an unlinked prim), the key the prim's own, the normal `<-1, 0, 0>` | each hit `[key, position (a string), link, normal]` — the link **after** the position; land's normal the terrain's slope | no scripts |
-| `RC_REJECT_TYPES RC_REJECT_NONPHYSICAL` | nothing: status 0 | the three land hits alone | no scripts |
-| `RC_REJECT_TYPES RC_REJECT_PHYSICAL` | the wall and the bare prim | the same, and land | no scripts |
-| a ray from prim A's centre | **not** prim A: the wall and the bare prim | prim A first, at its east face, then the rest | no scripts |
-| `RC_REJECT_TYPES 0x20000000` (`RC_REJECT_HOST`) | refused: `Invalid filter settings for llCastRay.` on `DEBUG_CHANNEL`, and an **empty list** | accepted; prim A left out | no scripts |
-| a ray from inside the wall | not the wall: the bare prim alone | the wall (where it leaves it), then the rest | no scripts |
-| a ray from the far end back | the bare prim's and the wall's far faces, nearest the start first | the same, and prim A | no scripts |
-| a ray straight down to height 0 | land, where the ground is; `RC_REJECT_LAND` leaves nothing | the same | no scripts |
-| a ray from prim A's top down to the owner | prim A (entered from outside), the owner, land; `RC_REJECT_AGENTS` drops the owner | the owner, the other avatar standing by it, land twice | no scripts |
-| a ray of length 0 | `[0]` | the same | no scripts |
-| a ray whose end lies outside the region | cast as far as the region: the wall, the bare prim, land twice further out | the same, with OpenSim's land hits | no scripts |
-| `RC_MAX_HITS 0` | `You must request at least one result from llCastRay.`, an empty list | treated as 1 | no scripts |
-| `RC_MAX_HITS -1`, `RC_MAX_HITS 300` | `Error. No more than 256 hits can be return by llCastRay.`, an empty list | −1: `[0]`; 300: every hit | no scripts |
-| an option that does not exist (`99, 1`) | `Invalid filter settings.`, an empty list | ignored: the plain answer | no scripts |
-| `RC_MAX_HITS` with no value after it | `Syntax error in llCastRay call. Incorrect number of elements in param list.`, an empty list | an `IndexOutOfRangeException` in the engine that **stops the script** (YEngine: `Script must be Reset to re-enable.`) | no scripts |
-| 500 rays in a row | all answered, about 640 a second; no `RCERR_*` | all answered, 15–24 a second; no `RCERR_*` | no scripts |
+| no options | `[wall's key, <4.75, 0, 0> (as a vector), 1]` — one hit, the face it entered | the same hit, but the position is a **string** (`"<124.75, 128, 27.5>"`, region coordinates) | each flavour as its grid |
+| `RC_MAX_HITS 4` | the wall and the bare prim; status 2 | the wall, the bare prim and **two hits on land 51.7 m out** — past the ray's 15 m end, at the ray's height, the same point twice; status 4 | the wall and the bare prim on both flavours: OpenSim's land hits past the ray's end are a bug of its V1 cast, not imitated |
+| `RC_DETECT_PHANTOM TRUE` | the ghost as well, between them | the same, and land | the ghost as well, on both flavours, and no land past the end |
+| `RC_DATA_FLAGS` with `RC_GET_NORMAL \| RC_GET_ROOT_KEY \| RC_GET_LINK_NUM` | each hit `[key, link, position, normal]`: the link 0 (an unlinked prim), the key the prim's own, the normal `<-1, 0, 0>` | each hit `[key, position (a string), link, normal]` — the link **after** the position; land's normal the terrain's slope | each flavour as its grid |
+| `RC_REJECT_TYPES RC_REJECT_NONPHYSICAL` | nothing: status 0 | the three land hits alone | nothing on both flavours (no land past the end) |
+| `RC_REJECT_TYPES RC_REJECT_PHYSICAL` | the wall and the bare prim | the same, and land | each flavour as its grid |
+| a ray from prim A's centre | **not** prim A: the wall and the bare prim | prim A first, at its east face, then the rest | each flavour as its grid |
+| `RC_REJECT_TYPES 0x20000000` (`RC_REJECT_HOST`) | refused: `Invalid filter settings for llCastRay.` on `DEBUG_CHANNEL`, and an **empty list** | accepted; prim A left out | each flavour as its grid |
+| a ray from inside the wall | not the wall: the bare prim alone | the wall (where it leaves it), then the rest | each flavour as its grid |
+| a ray from the far end back | the bare prim's and the wall's far faces, nearest the start first | the same, and prim A | each flavour as its grid |
+| a ray straight down to height 0 | land, where the ground is; `RC_REJECT_LAND` leaves nothing | the same | each flavour as its grid |
+| a ray from prim A's top down to the owner | prim A (entered from outside), the owner, land; `RC_REJECT_AGENTS` drops the owner | the owner, the other avatar standing by it, land twice | each flavour's filtering of the same hits; a prim meets a ray as its box, an avatar as an average avatar's box |
+| a ray of length 0 | `[0]` | the same | each flavour as its grid |
+| a ray whose end lies outside the region | cast as far as the region: the wall, the bare prim, land twice further out | the same, with OpenSim's land hits | cast as far as the region; no land past the end on OpenSim |
+| `RC_MAX_HITS 0` | `You must request at least one result from llCastRay.`, an empty list | treated as 1 | each flavour as its grid |
+| `RC_MAX_HITS -1`, `RC_MAX_HITS 300` | `Error. No more than 256 hits can be return by llCastRay.`, an empty list | −1: `[0]`; 300: every hit | each flavour as its grid |
+| an option that does not exist (`99, 1`) | `Invalid filter settings.`, an empty list | ignored: the plain answer | each flavour as its grid |
+| `RC_MAX_HITS` with no value after it | `Syntax error in llCastRay call. Incorrect number of elements in param list.`, an empty list | an `IndexOutOfRangeException` in the engine that **stops the script** (YEngine: `Script must be Reset to re-enable.`) | each flavour as its grid |
+| 500 rays in a row | all answered, about 640 a second; no `RCERR_*` | all answered, 15–24 a second; no `RCERR_*` | all answered at once: no throttle |
 
 ### Touches: where the touch landed
 
@@ -747,6 +756,12 @@ by default (`OutboundDisallowForUserScripts`), its own included, so the
 local grid lets them reach `127.0.0.1:9000` alone
 (`OutboundDisallowForUserScriptsExcept`, stated in each result's
 `settings`); every other llHTTPRequest limit is at its default.
+The fake grid column is held by `sl-lsl-runtime`'s `vm/tests/http.rs`, which
+replays the four probes through a test region whose URL surface is
+`vm::http`'s — the fake grid's own — and by `sl-fake-grid/tests/scripts.rs`
+end to end, a real HTTP client sending to a script's URL on the fake grid's
+HTTP service. Nothing leaves the process: a request to an address that is not
+one of the grid's URLs is answered by the scenario's responder.
 
 ### What arrives at the URL
 
@@ -755,21 +770,21 @@ What `llGetHTTPHeader` gives the receiving script of a plain
 
 | behaviour | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
-| the URL `llRequestURL` grants | `http://<simhost>:12046/cap/<key>`, no slash at the end | `http://127.0.0.1:9000/lslhttp/<key>/`, **with** one — so `<url>/path` arrives as `//path` | no scripts |
-| `x-path-info`, `x-query-string` | the path; the query **as sent** (`b=two%20words`) | the path; the query **decoded** (`b=two words`) | no scripts |
-| `x-script-url` | the URL granted | the URL without its closing slash | no scripts |
-| `x-remote-ip` | set | set (`127.…` for the script's own request) | no scripts |
-| `x-secondlife-shard` | `Testing` (aditi) | `OpenSim` (the `[Network] shard` setting) | no scripts |
-| `x-secondlife-object-name`, `-object-key`, `-owner-key` | the object's name and key, the owner's key | the same | no scripts |
-| `x-secondlife-owner-name` | the owner's legacy name (`First Last`) | the same | no scripts |
-| `x-secondlife-region` | `Mauve (255744, 257792)`: the name and the region's corner in metres | `Default Region (256000, 256000)`, the same form | no scripts |
-| `x-secondlife-local-position`, `-local-rotation`, `-local-velocity` | the object's, in parentheses — `(52.000000, 62.000000, 34.594490)` — which a cast to `vector` or `rotation` does not read | the same | no scripts |
-| `user-agent` of a script's request | `Second-Life-LSL/<sim version> (https://secondlife.com)` | **none** (`user_agent` is unset by default) | no scripts |
-| `content-type` of a script's request | not given to the script | `text/plain;charset=utf-8`, or the `HTTP_MIMETYPE` | no scripts |
-| `pragma` of a script's request | not given to the script | **inverted**: none by default, `no-cache` with `HTTP_PRAGMA_NO_CACHE, FALSE` (`ScriptsHttpRequests.cs` adds the header when the flag is off) | no scripts |
-| a custom header (`HTTP_CUSTOM_HEADER`, or the runner's `X-Probe`) | **not given to the script**: `llGetHTTPHeader` answers the `x-*` headers above and `user-agent` only | given | no scripts |
-| `host`, `accept`, `via`, `x-forwarded-for`, `content-length` | not given | not given | no scripts |
-| a request body over 2048 bytes (3000 sent, from a script or from outside) | **cut to 2048** | all 3000 | no scripts |
+| the URL `llRequestURL` grants | `http://<simhost>:12046/cap/<key>`, no slash at the end | `http://127.0.0.1:9000/lslhttp/<key>/`, **with** one — so `<url>/path` arrives as `//path` | each flavour's form, on the fake grid's own HTTP service (`http://127.0.0.1:<port>/…`) |
+| `x-path-info`, `x-query-string` | the path; the query **as sent** (`b=two%20words`) | the path; the query **decoded** (`b=two words`) | each flavour as its grid |
+| `x-script-url` | the URL granted | the URL without its closing slash | each flavour as its grid |
+| `x-remote-ip` | set | set (`127.…` for the script's own request) | `127.0.0.1`: every request comes over loopback |
+| `x-secondlife-shard` | `Testing` (aditi) | `OpenSim` (the `[Network] shard` setting) | `Production` on the Second Life flavour, `OpenSim` |
+| `x-secondlife-object-name`, `-object-key`, `-owner-key` | the object's name and key, the owner's key | the same | each flavour as its grid |
+| `x-secondlife-owner-name` | the owner's legacy name (`First Last`) | the same | each flavour as its grid |
+| `x-secondlife-region` | `Mauve (255744, 257792)`: the name and the region's corner in metres | `Default Region (256000, 256000)`, the same form | each flavour as its grid, the fake region's name and corner |
+| `x-secondlife-local-position`, `-local-rotation`, `-local-velocity` | the object's, in parentheses — `(52.000000, 62.000000, 34.594490)` — which a cast to `vector` or `rotation` does not read | the same | each flavour as its grid |
+| `user-agent` of a script's request | `Second-Life-LSL/<sim version> (https://secondlife.com)` | **none** (`user_agent` is unset by default) | each flavour as its grid, with the fake grid's simulator version |
+| `content-type` of a script's request | not given to the script | `text/plain;charset=utf-8`, or the `HTTP_MIMETYPE` | each flavour as its grid |
+| `pragma` of a script's request | not given to the script | **inverted**: none by default, `no-cache` with `HTTP_PRAGMA_NO_CACHE, FALSE` (`ScriptsHttpRequests.cs` adds the header when the flag is off) | each flavour as its grid |
+| a custom header (`HTTP_CUSTOM_HEADER`, or the runner's `X-Probe`) | **not given to the script**: `llGetHTTPHeader` answers the `x-*` headers above and `user-agent` only | given | each flavour as its grid |
+| `host`, `accept`, `via`, `x-forwarded-for`, `content-length` | not given | not given | each flavour as its grid |
+| a request body over 2048 bytes (3000 sent, from a script or from outside) | **cut to 2048** | all 3000 | each flavour as its grid |
 
 ### What `llHTTPRequest` accepts
 
@@ -779,35 +794,35 @@ A refusal is `NULL_KEY` from `llHTTPRequest` and a line on
 
 | request | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
-| `GET`, `POST`, `PUT`, `DELETE`, `PATCH` | sent; the method arrives as given | the same | no scripts |
-| `HEAD` | sent; the URL answers **400** with the raw `HTTP/1.1 400 Bad Request…` as the body, and the script never hears it | sent; the script hears it, the answer is 200 with no body | no scripts |
-| `OPTIONS`, `get` (lower case), `FOO` | refused: `HTTP method <name> is unsupported` | sent as given; the script hears it | no scripts |
-| `GET` with a body | sent; the body is dropped (the script reads 0 bytes) | **499**, `Cannot send a content-body with this verb-type.` | no scripts |
-| `HTTP_CUSTOM_HEADER` `X-Probe` | accepted (a key, a 200); whether it went out no script can see, since `llGetHTTPHeader` does not give it | accepted; arrives | no scripts |
-| `HTTP_CUSTOM_HEADER` `Host`, `User-Agent`, `Accept` | refused: `HTTP_CUSTOM_HEADER value is an invalid header` | refused: `llHTTPRequest: Name is invalid as a custom header at parameter 1` | no scripts |
-| `HTTP_CUSTOM_HEADER` `X-SecondLife-Shard` | refused, the same | **sent**, and the shard arrives as the grid's own, not the script's | no scripts |
-| `HTTP_BODY_MAXLENGTH` 16385 | refused: `HTTP_BODY_MAXLENGTH value is invalid` | accepted | no scripts |
-| an unknown option (99) | refused: `HTTP parameter key 1 is not recognized` | refused: `llHTTPRequest: Parameter 0 is an invalid flag` | no scripts |
-| `not a url`, `ftp://…` | refused: `URL passed to llHTTPRequest is not valid` | refused: `llHTTPRequest: Invalid url`, `… Invalid url schema` | no scripts |
-| `http://127.0.0.1:1/` | refused, the same `not valid` | refused: `llHttpRequest: Request to http://127.0.0.1:1/ disallowed by filter` | no scripts |
-| a host that does not resolve (`.invalid`) | **502**, an HTML `Unknown Host` page from the grid's proxy | **499**, `Error: NameResolutionFailure` | no scripts |
+| `GET`, `POST`, `PUT`, `DELETE`, `PATCH` | sent; the method arrives as given | the same | each flavour as its grid |
+| `HEAD` | sent; the URL answers **400** with the raw `HTTP/1.1 400 Bad Request…` as the body, and the script never hears it | sent; the script hears it, the answer is 200 with no body | each flavour as its grid, but Second Life's 400 comes with no body |
+| `OPTIONS`, `get` (lower case), `FOO` | refused: `HTTP method <name> is unsupported` | sent as given; the script hears it | each flavour as its grid |
+| `GET` with a body | sent; the body is dropped (the script reads 0 bytes) | **499**, `Cannot send a content-body with this verb-type.` | each flavour as its grid |
+| `HTTP_CUSTOM_HEADER` `X-Probe` | accepted (a key, a 200); whether it went out no script can see, since `llGetHTTPHeader` does not give it | accepted; arrives | each flavour as its grid |
+| `HTTP_CUSTOM_HEADER` `Host`, `User-Agent`, `Accept` | refused: `HTTP_CUSTOM_HEADER value is an invalid header` | refused: `llHTTPRequest: Name is invalid as a custom header at parameter 1` | each flavour as its grid |
+| `HTTP_CUSTOM_HEADER` `X-SecondLife-Shard` | refused, the same | **sent**, and the shard arrives as the grid's own, not the script's | each flavour as its grid |
+| `HTTP_BODY_MAXLENGTH` 16385 | refused: `HTTP_BODY_MAXLENGTH value is invalid` | accepted | each flavour as its grid |
+| an unknown option (99) | refused: `HTTP parameter key 1 is not recognized` | refused: `llHTTPRequest: Parameter 0 is an invalid flag` | each flavour as its grid |
+| `not a url`, `ftp://…` | refused: `URL passed to llHTTPRequest is not valid` | refused: `llHTTPRequest: Invalid url`, `… Invalid url schema` | each flavour as its grid |
+| `http://127.0.0.1:1/` | refused, the same `not valid` | refused: `llHttpRequest: Request to http://127.0.0.1:1/ disallowed by filter` | each flavour as its grid: a private address is refused unless it is the fake grid's own |
+| a host that does not resolve (`.invalid`) | **502**, an HTML `Unknown Host` page from the grid's proxy | **499**, `Error: NameResolutionFailure` | never sent: every address off the grid is answered by the scenario's responder — by default **499** and a line saying nothing answers it |
 
 ### What comes back
 
 | behaviour | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
-| the status `llHTTPResponse` gives (201, 404, 500, 418) | arrives as given, to a script and outside | the same | no scripts |
-| an answer of 3000 bytes, no `HTTP_BODY_MAXLENGTH` | 2048 bytes, metadata `[0, 2048]` (`HTTP_BODY_TRUNCATED` at 2048) | 2048 bytes, **empty metadata** | no scripts |
-| — `HTTP_BODY_MAXLENGTH` 16384 | all 3000, empty metadata | the same | no scripts |
-| — `HTTP_BODY_MAXLENGTH` 100 | 100 bytes, metadata `[0, 100]` | 100 bytes, empty metadata | no scripts |
-| an answer of 5000 bytes, fetched from outside | all of it | the same | no scripts |
-| `Content-Type` outside, by default | `text/plain; charset=utf-8` | `text/plain` | no scripts |
-| — after `llSetContentType(CONTENT_TYPE_JSON)` | `application/json; charset=utf-8` | **`text/plain`**: the call has no effect | no scripts |
-| — after `llSetContentType(CONTENT_TYPE_HTML)` | `text/plain; charset=utf-8`: HTML is served only to the owner's own viewer | `text/plain` | no scripts |
-| `HEAD` from outside | **400**, the script never hears it | 200, the script hears it | no scripts |
-| `OPTIONS` from outside | 200, `text/plain`, `OK` — **answered by the simulator**, the script never hears it | the script hears it and answers | no scripts |
-| a request the script never answers | **504**, `Timed out waiting for response from internal server.`, after 26 s | **500**, `Script timeout`, after 25 s | no scripts |
-| a request to a released URL | 404, `cap not found: '<key>'` | 404, an HTML `Page not found` | no scripts |
+| the status `llHTTPResponse` gives (201, 404, 500, 418) | arrives as given, to a script and outside | the same | each flavour as its grid |
+| an answer of 3000 bytes, no `HTTP_BODY_MAXLENGTH` | 2048 bytes, metadata `[0, 2048]` (`HTTP_BODY_TRUNCATED` at 2048) | 2048 bytes, **empty metadata** | each flavour as its grid |
+| — `HTTP_BODY_MAXLENGTH` 16384 | all 3000, empty metadata | the same | each flavour as its grid |
+| — `HTTP_BODY_MAXLENGTH` 100 | 100 bytes, metadata `[0, 100]` | 100 bytes, empty metadata | each flavour as its grid |
+| an answer of 5000 bytes, fetched from outside | all of it | the same | each flavour as its grid |
+| `Content-Type` outside, by default | `text/plain; charset=utf-8` | `text/plain` | each flavour as its grid |
+| — after `llSetContentType(CONTENT_TYPE_JSON)` | `application/json; charset=utf-8` | **`text/plain`**: the call has no effect | each flavour as its grid |
+| — after `llSetContentType(CONTENT_TYPE_HTML)` | `text/plain; charset=utf-8`: HTML is served only to the owner's own viewer | `text/plain` | each flavour as its grid: no owner's viewer is served HTML |
+| `HEAD` from outside | **400**, the script never hears it | 200, the script hears it | each flavour as its grid |
+| `OPTIONS` from outside | 200, `text/plain`, `OK` — **answered by the simulator**, the script never hears it | the script hears it and answers | each flavour as its grid |
+| a request the script never answers | **504**, `Timed out waiting for response from internal server.`, after 26 s | **500**, `Script timeout`, after 25 s | each flavour as its grid, the wait counted in the region's ticks |
+| a request to a released URL | 404, `cap not found: '<key>'` | 404, an HTML `Page not found` | each flavour as its grid |
 
 ### The user agent, `Accept` and the extended error
 
@@ -823,30 +838,30 @@ calls a script error.
 
 | request | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
-| `HTTP_USER_AGENT, "probe-agent/1.0"` | sent; the `user-agent` arrives as the default with the value **appended** after a space: `Second-Life-LSL/<sim version> (https://secondlife.com) probe-agent/1.0` | does not compile | no scripts |
-| — given twice | sent; only the **last** is appended | — | no scripts |
-| — with a space (`probe agent`) | refused: `HTTP_USER_AGENT 'probe agent' is invalid` | — | no scripts |
-| — empty | refused: `HTTP_USER_AGENT '' is invalid` | — | no scripts |
-| — 306 characters | refused, the same, the whole value quoted | — | no scripts |
-| `HTTP_ACCEPT, "application/json"`, answered `text/plain` | sent; the script hears the request and answers, but what comes back is **415**, `Unsupported or unknown Content-Type.` — the simulator replaces the answer | — | no scripts |
-| — answered after `llSetContentType(CONTENT_TYPE_JSON)` | 200, the script's answer | — | no scripts |
-| `HTTP_ACCEPT, "text/plain"` | 200 | — | no scripts |
-| `HTTP_ACCEPT` of two types (`application/json, text/plain`) | refused: `HTTP_ACCEPT: value '…' is invalid.` — one type only | — | no scripts |
-| — `*/*` | refused: `HTTP_ACCEPT: Unsupported mime type '*/*'` | — | no scripts |
-| — empty | refused: `HTTP_ACCEPT: value '' is invalid.` | — | no scripts |
-| `accept` as the receiving script reads it | empty whatever was asked: `llGetHTTPHeader` does not give it | — | no scripts |
-| `HTTP_EXTENDED_ERROR, TRUE`, a request that succeeds or one answered 404 | unchanged: 200 or 404 with the script's body | — | no scripts |
-| — with a request `llHTTPRequest` refuses | **a key**, the same line on `DEBUG_CHANNEL`, and an `http_response` at once whose body is an RFC 7807 JSON object: `detail`, `status`, `title`, `type` (`http://wiki.secondlife.com/wiki/llHTTPRequest`), the status the answer's own | — | no scripts |
-| — not a URL, `ftp://…`, `http://127.0.0.1:1/` | **471**, `llHTTPRequest URL is invalid.`, detail `URL passed to llHTTPRequest is not valid` | — | no scripts |
-| — an unknown option (99) after the flag | **472**, `llHTTPRequest parameter error.`, `Parameter key in position 2 is not recognized.` (the line on `DEBUG_CHANNEL` says `key 2` too, where without the flag it said `key 1`) | — | no scripts |
-| — the unknown option **before** the flag | refused as without it, `NULL_KEY`: the list is read in order and stops at the first bad option | — | no scripts |
-| — a user agent with a space | 472, `Invalid user agent probe agent in position 2` | — | no scripts |
-| — `HTTP_CUSTOM_HEADER` `Host` | **473**, `Invalid custom header in position 2` | — | no scripts |
-| — `HTTP_BODY_MAXLENGTH` 16385 | 472, `Maximum body length must be in the rage (0, 16384] in position 2` (sic) | — | no scripts |
-| — method `FOO` | **405**, `Unrecognized HTTP Method.`, `HTTP method FOO is unsupported at position 2.` | — | no scripts |
-| — a host that does not resolve | 502 with the proxy's HTML `Unknown Host` page, as without the flag: the request was sent, so there is no problem report | — | no scripts |
-| — an `HTTP_ACCEPT` the answer does not meet | 415 with the plain `Unsupported or unknown Content-Type.`, as without the flag | — | no scripts |
-| `HTTP_EXTENDED_ERROR, FALSE` with a URL that is not one | `NULL_KEY`, as with no flag | — | no scripts |
+| `HTTP_USER_AGENT, "probe-agent/1.0"` | sent; the `user-agent` arrives as the default with the value **appended** after a space: `Second-Life-LSL/<sim version> (https://secondlife.com) probe-agent/1.0` | does not compile | each flavour as its grid |
+| — given twice | sent; only the **last** is appended | — | each flavour as its grid |
+| — with a space (`probe agent`) | refused: `HTTP_USER_AGENT 'probe agent' is invalid` | — | each flavour as its grid |
+| — empty | refused: `HTTP_USER_AGENT '' is invalid` | — | each flavour as its grid |
+| — 306 characters | refused, the same, the whole value quoted | — | each flavour as its grid |
+| `HTTP_ACCEPT, "application/json"`, answered `text/plain` | sent; the script hears the request and answers, but what comes back is **415**, `Unsupported or unknown Content-Type.` — the simulator replaces the answer | — | each flavour as its grid |
+| — answered after `llSetContentType(CONTENT_TYPE_JSON)` | 200, the script's answer | — | each flavour as its grid |
+| `HTTP_ACCEPT, "text/plain"` | 200 | — | each flavour as its grid |
+| `HTTP_ACCEPT` of two types (`application/json, text/plain`) | refused: `HTTP_ACCEPT: value '…' is invalid.` — one type only | — | each flavour as its grid |
+| — `*/*` | refused: `HTTP_ACCEPT: Unsupported mime type '*/*'` | — | each flavour as its grid |
+| — empty | refused: `HTTP_ACCEPT: value '' is invalid.` | — | each flavour as its grid |
+| `accept` as the receiving script reads it | empty whatever was asked: `llGetHTTPHeader` does not give it | — | each flavour as its grid |
+| `HTTP_EXTENDED_ERROR, TRUE`, a request that succeeds or one answered 404 | unchanged: 200 or 404 with the script's body | — | each flavour as its grid |
+| — with a request `llHTTPRequest` refuses | **a key**, the same line on `DEBUG_CHANNEL`, and an `http_response` at once whose body is an RFC 7807 JSON object: `detail`, `status`, `title`, `type` (`http://wiki.secondlife.com/wiki/llHTTPRequest`), the status the answer's own | — | each flavour as its grid |
+| — not a URL, `ftp://…`, `http://127.0.0.1:1/` | **471**, `llHTTPRequest URL is invalid.`, detail `URL passed to llHTTPRequest is not valid` | — | each flavour as its grid |
+| — an unknown option (99) after the flag | **472**, `llHTTPRequest parameter error.`, `Parameter key in position 2 is not recognized.` (the line on `DEBUG_CHANNEL` says `key 2` too, where without the flag it said `key 1`) | — | each flavour as its grid |
+| — the unknown option **before** the flag | refused as without it, `NULL_KEY`: the list is read in order and stops at the first bad option | — | each flavour as its grid |
+| — a user agent with a space | 472, `Invalid user agent probe agent in position 2` | — | each flavour as its grid |
+| — `HTTP_CUSTOM_HEADER` `Host` | **473**, `Invalid custom header in position 2` | — | each flavour as its grid |
+| — `HTTP_BODY_MAXLENGTH` 16385 | 472, `Maximum body length must be in the rage (0, 16384] in position 2` (sic) | — | each flavour as its grid |
+| — method `FOO` | **405**, `Unrecognized HTTP Method.`, `HTTP method FOO is unsupported at position 2.` | — | each flavour as its grid |
+| — a host that does not resolve | 502 with the proxy's HTML `Unknown Host` page, as without the flag: the request was sent, so there is no problem report | — | the scenario's responder answers, as above |
+| — an `HTTP_ACCEPT` the answer does not meet | 415 with the plain `Unsupported or unknown Content-Type.`, as without the flag | — | each flavour as its grid |
+| `HTTP_EXTENDED_ERROR, FALSE` with a URL that is not one | `NULL_KEY`, as with no flag | — | each flavour as its grid |
 
 A prim's complaints on `DEBUG_CHANNEL` are cut off when they come fast:
 eleven refusals in about thirty seconds, most 1.2 s apart, ended in `Too many
@@ -858,10 +873,10 @@ each refusal for that reason.
 
 | behaviour | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
-| `llGetFreeURLs` before any | 7851 in Mauve's sandbox parcel (the parcel's and region's allowance, shared with everyone there) | 100 | no scripts |
-| `llRequestURL` | `URL_REQUEST_GRANTED`; the `http_request` id is the key the call returned; one URL fewer | the same | no scripts |
-| `llRequestSecureURL` | granted: `https://<simhost>:12043/cap/<key>` | **`URL_REQUEST_DENIED`**, no reason: the local simulator runs no HTTPS listener | no scripts |
-| `llReleaseURL` | the URL is free again at once | the same | no scripts |
+| `llGetFreeURLs` before any | 7851 in Mauve's sandbox parcel (the parcel's and region's allowance, shared with everyone there) | 100 | the region's prim allowance on Second Life (the land's allowance is its URLs'), 100 on OpenSim |
+| `llRequestURL` | `URL_REQUEST_GRANTED`; the `http_request` id is the key the call returned; one URL fewer | the same | each flavour as its grid |
+| `llRequestSecureURL` | granted: `https://<simhost>:12043/cap/<key>` | **`URL_REQUEST_DENIED`**, no reason: the local simulator runs no HTTPS listener | **denied** on both flavours: the fake grid runs no HTTPS listener |
+| `llReleaseURL` | the URL is free again at once | the same | each flavour as its grid |
 
 ### The throttle
 
@@ -870,10 +885,10 @@ each refusal for that reason.
 
 | behaviour | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
-| the first 30 | **25** accepted, the next 5 refused (`NULL_KEY`), each with `Too many HTTP requests too fast.` on `DEBUG_CHANNEL` | **4** accepted (a burst of 3 and one more — `PrimRequestsBurst` 3, `PrimRequestsPerSec` 1), 26 refused, **no message** | no scripts |
-| five more with `HTTP_VERBOSE_THROTTLE, FALSE` | all refused, silently | all refused, silently | no scripts |
-| what came back for the accepted ones | 200 each; nothing for a refused one (no 499) | the same | no scripts |
-| one more request 40 s later | accepted, 200 | the same | no scripts |
+| the first 30 | **25** accepted, the next 5 refused (`NULL_KEY`), each with `Too many HTTP requests too fast.` on `DEBUG_CHANNEL` | **4** accepted (a burst of 3 and one more — `PrimRequestsBurst` 3, `PrimRequestsPerSec` 1), 26 refused, **no message** | each flavour as its grid; OpenSim's bucket is the prim's alone, not its owner's too |
+| five more with `HTTP_VERBOSE_THROTTLE, FALSE` | all refused, silently | all refused, silently | each flavour as its grid |
+| what came back for the accepted ones | 200 each; nothing for a refused one (no 499) | the same | each flavour as its grid |
+| one more request 40 s later | accepted, 200 | the same | each flavour as its grid |
 
 How the throttle lets go again, and why a script that retries at once stays
 shut out on Second Life, is in
@@ -1058,6 +1073,10 @@ group-owned mainland parcel of 14 176 m² our avatars do not own; OpenSim is
 the Default Region, one parcel of the whole region, owned by the estate
 owner rather than the probe's owner. So the heights, counts and names in the
 transcripts are the land's; the tables hold what the calls do with them.
+The fake grid column is held by `sl-lsl-runtime`'s `vm/tests/land.rs`, which
+replays the probes in a region stated as each grid's land was, and by
+`sl-fake-grid/tests/scripts.rs` end to end over the fake grid's own parcels,
+heightfield and environment.
 OpenSim lacks `llGetSimStats`, `llGetEnvironment`, `llGetRegionTimeOfDay`
 and `llGetClosestNavPoint`, and every `ENVIRONMENT_*`, `SKY_*` and `WATER_*`
 constant: `land/sl-only` holds them so the other probes compile there, and
@@ -1069,23 +1088,23 @@ constant/function/variable llGetEnvironment(vector,list)`; XEngine:
 
 | key | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
-| `sim_channel`, `sim_version` | `Luau`, the release (`2026-07-24.30110090421`) | `OpenSim`, the version string with build and platform (`OpenSim 0.9.2.1 Yeti Dev   36f6d16 (Unix/Mono)`) | no scripts |
-| `estate_id`, `estate_name` | `1`, `mainland` | the estate's (`101`, `My Estate`) | no scripts |
-| `region_product_name`, `region_product_sku` | `Mainland / Full Region`, `023` | `""` (the region type, empty here), always `OpenSim` | no scripts |
-| `region_max_prims`, `region_object_bonus` | the land capacity with the bonus (`22510`), the bonus (`10`) | the object capacity (`15000`), the bonus (`1`) | no scripts |
-| `agent_limit` | `55` | the region setting (`40`) | no scripts |
-| `whisper_range`, `chat_range`, `shout_range` | `10`, `20`, `100` | the same (the configured distances) | no scripts |
-| `dynamic_pathfinding` | `enabled` | always `0` | no scripts |
-| `region_cpu_ratio`, `region_idle` | `1`, `0` | always `1`, always `0` | no scripts |
-| `region_start_time` | Unix seconds | the same | no scripts |
-| `frame_number` | counts 45 a second, as `llGetRegionFPS` | counts **11 a second**, while `llGetRegionFPS` says 55 | no scripts |
-| `region_up_time` | `""` | seconds since start | no scripts |
-| `simulator_hostname` | the host's name (`simhost-….aditi.secondlife.io`), as `llGetSimulatorHostname` | the external host name configured for scripts (`127.0.0.1`), as `llGetSimulatorHostname` | no scripts |
-| `agent_reserved`, `agent_unused` | `5`, `""` | `""` | no scripts |
-| `region_rating`, `grid`, `region_name` | `ADULT`, `aditi`, `Mauve` | `""` | no scripts |
+| `sim_channel`, `sim_version` | `Luau`, the release (`2026-07-24.30110090421`) | `OpenSim`, the version string with build and platform (`OpenSim 0.9.2.1 Yeti Dev   36f6d16 (Unix/Mono)`) | the fake grid's own: `Second Life Server` or `OpenSim`, and the region's simulator version |
+| `estate_id`, `estate_name` | `1`, `mainland` | the estate's (`101`, `My Estate`) | the region's estate |
+| `region_product_name`, `region_product_sku` | `Mainland / Full Region`, `023` | `""` (the region type, empty here), always `OpenSim` | the region's product name and SKU; always `OpenSim` for the SKU on the OpenSim flavour |
+| `region_max_prims`, `region_object_bonus` | the land capacity with the bonus (`22510`), the bonus (`10`) | the object capacity (`15000`), the bonus (`1`) | the region's object capacity and its bonus |
+| `agent_limit` | `55` | the region setting (`40`) | the region's limit |
+| `whisper_range`, `chat_range`, `shout_range` | `10`, `20`, `100` | the same (the configured distances) | `10`, `20`, `100` |
+| `dynamic_pathfinding` | `enabled` | always `0` | each flavour as its grid |
+| `region_cpu_ratio`, `region_idle` | `1`, `0` | always `1`, always `0` | `1`, `0` |
+| `region_start_time` | Unix seconds | the same | when the region's scripts first ran, in Unix seconds |
+| `frame_number` | counts 45 a second, as `llGetRegionFPS` | counts **11 a second**, while `llGetRegionFPS` says 55 | each flavour as its grid: the region's tick, a fifth of it on OpenSim |
+| `region_up_time` | `""` | seconds since start | each flavour as its grid |
+| `simulator_hostname` | the host's name (`simhost-….aditi.secondlife.io`), as `llGetSimulatorHostname` | the external host name configured for scripts (`127.0.0.1`), as `llGetSimulatorHostname` | `127.0.0.1` on both flavours, as `llGetSimulatorHostname` |
+| `agent_reserved`, `agent_unused` | `5`, `""` | `""` | each flavour as its grid |
+| `region_rating`, `grid`, `region_name` | `ADULT`, `aditi`, `Mauve` | `""` | each flavour as its grid, the region's own |
 | `allow_damage_adjust`, `damage_limit` | `1`, `0` | `""` | no scripts |
-| `restrict_pushobject`, `estate_owner`, `region_corner`, `region_idle_timeout`, `agent_avatar_limit`, a made-up key, `""` | `""` | `""` | no scripts |
-| a key in capitals (`SIM_CHANNEL`, `Sim_Version`) | `""`: the key is case-sensitive | **answered**: OpenSim lowers the key first | no scripts |
+| `restrict_pushobject`, `estate_owner`, `region_corner`, `region_idle_timeout`, `agent_avatar_limit`, a made-up key, `""` | `""` | `""` | `""` |
+| a key in capitals (`SIM_CHANNEL`, `Sim_Version`) | `""`: the key is case-sensitive | **answered**: OpenSim lowers the key first | each flavour as its grid |
 
 ### Parcel queries
 
@@ -1097,89 +1116,92 @@ naming a constant of one grid does not compile on the other.
 
 | call | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
-| `llGetParcelDetails` 0–6: name, description, owner, group, area, id, see-avatars | the parcel's (the owner of group land is its group); see-avatars `0` | the same, the group `NULL_KEY` | no scripts |
-| — 7, 8 | the prim capacity (`78532`) and the prims used | `0`, `0` | no scripts |
-| — 9, 10 | the landing point and look-at, vectors | integer `0` | no scripts |
-| — 11 (`TP_ROUTING`), 12 (`FLAGS`), 13 (`SCRIPT_DANGER`) | `1`, the parcel flags, `1` | integer `0` | no scripts |
-| — 64 | nothing, and a `DEBUG_CHANNEL` error | the dwell (`56`) | no scripts |
-| — any other code (-1, 14, 15, 99) | **left out**, and `llGetParcelDetails error: Unknown parameter '99'` on `DEBUG_CHANNEL` | **integer `0`** in its place, silently | no scripts |
-| — several codes | one element per code, in the order asked, repeats repeated | the same | no scripts |
-| — no codes | `[]` | the same | no scripts |
-| — a position above the region (z 5000) or under the ground (z −100) | the parcel below or above it | the same | no scripts |
-| — a position outside the region (10 m west) | **the parcel at the edge it is clamped to** (the same id) | **one element**, `0`: no parcel | no scripts |
-| `llGetParcelFlags` | the parcel's flags, with `PF_ALLOW_VOICE_CHAT` (`0x20000000`) beside the named ones | the same with `PF_ALLOW_DEED_TO_GROUP` (`0x2000`) too | no scripts |
-| — outside the region | the edge parcel's flags | **throws**: a `NullReferenceException` that stops the script (`Script must be Reset to re-enable.`) | no scripts |
-| `llGetParcelMaxPrims`, parcel and region-wide | the region's capacity both times (`22510`): mainland pools it | the same (`15000`) | no scripts |
-| — outside the region | an answer (`11650`, a parcel's) | `0` | no scripts |
-| `llGetParcelPrimCount`, total / owner / group / other, parcel and region-wide | counts; region-wide larger | counts; the **region-wide owner and other counts are `0`** while the parcel's are not | no scripts |
-| — selected (4), temporary (5) | counts | `0` | no scripts |
-| — a category that is none (−1, 6) | `0` | `0` | no scripts |
-| — outside the region | a parcel's count | `0` | no scripts |
-| `llGetParcelPrimOwners` of land the script's owner does not own | `[]` | **the list**: each owner and its count | no scripts |
-| `llGetLandOwnerAt` | the parcel's owner (its group for group land) | the same | no scripts |
-| — outside the region | an owner, not `NULL_KEY` | `NULL_KEY` | no scripts |
-| `llOverMyLand` of the owner on land it does not own; of `NULL_KEY` | `0`; `0` | the same | no scripts |
-| `llScriptDanger` | `1`: damage or push on this public sandbox | `0` | no scripts |
-| — outside the region | `1` | `1` | no scripts |
-| `llParcelMediaQuery`, any code or several, on land the owner does not own | `[]` | `[]` | no scripts |
-| `llGetParcelMusicURL` | the stream (none here: `""`) | the same | no scripts |
-| `llSetParcelMusicURL` on land the owner does not own | ignored: the URL is unchanged, and nothing is said | the same | no scripts |
+| `llGetParcelDetails` 0–6: name, description, owner, group, area, id, see-avatars | the parcel's (the owner of group land is its group); see-avatars `0` | the same, the group `NULL_KEY` | each flavour as its grid, over the parcel the fake grid keeps (its record and its directory listing's id) |
+| — 7, 8 | the prim capacity (`78532`) and the prims used | `0`, `0` | each flavour as its grid |
+| — 9, 10 | the landing point and look-at, vectors | integer `0` | each flavour as its grid |
+| — 11 (`TP_ROUTING`), 12 (`FLAGS`), 13 (`SCRIPT_DANGER`) | `1`, the parcel flags, `1` | integer `0` | each flavour as its grid |
+| — 64 | nothing, and a `DEBUG_CHANNEL` error | the dwell (`56`) | each flavour as its grid: the listing's dwell |
+| — any other code (-1, 14, 15, 99) | **left out**, and `llGetParcelDetails error: Unknown parameter '99'` on `DEBUG_CHANNEL` | **integer `0`** in its place, silently | each flavour as its grid |
+| — several codes | one element per code, in the order asked, repeats repeated | the same | each flavour as its grid |
+| — no codes | `[]` | the same | each flavour as its grid |
+| — a position above the region (z 5000) or under the ground (z −100) | the parcel below or above it | the same | each flavour as its grid |
+| — a position outside the region (10 m west) | **the parcel at the edge it is clamped to** (the same id) | **one element**, `0`: no parcel | each flavour as its grid |
+| `llGetParcelFlags` | the parcel's flags, with `PF_ALLOW_VOICE_CHAT` (`0x20000000`) beside the named ones | the same with `PF_ALLOW_DEED_TO_GROUP` (`0x2000`) too | the parcel's flags as the fake grid keeps them |
+| — outside the region | the edge parcel's flags | **throws**: a `NullReferenceException` that stops the script (`Script must be Reset to re-enable.`) | each flavour as its grid |
+| `llGetParcelMaxPrims`, parcel and region-wide | the region's capacity both times (`22510`): mainland pools it | the same (`15000`) | the parcel's and the region's capacity as its record states them |
+| — outside the region | an answer (`11650`, a parcel's) | `0` | each flavour as its grid |
+| `llGetParcelPrimCount`, total / owner / group / other, parcel and region-wide | counts; region-wide larger | counts; the **region-wide owner and other counts are `0`** while the parcel's are not | each flavour as its grid, over the parcel record's counts (region-wide only the total) |
+| — selected (4), temporary (5) | counts | `0` | each flavour as its grid; temporary always `0` |
+| — a category that is none (−1, 6) | `0` | `0` | `0` |
+| — outside the region | a parcel's count | `0` | each flavour as its grid |
+| `llGetParcelPrimOwners` of land the script's owner does not own | `[]` | **the list**: each owner and its count | `[]` on both flavours: the fake grid keeps no counts by owner |
+| `llGetLandOwnerAt` | the parcel's owner (its group for group land) | the same | each flavour as its grid |
+| — outside the region | an owner, not `NULL_KEY` | `NULL_KEY` | each flavour as its grid |
+| `llOverMyLand` of the owner on land it does not own; of `NULL_KEY` | `0`; `0` | the same | each flavour as its grid |
+| `llScriptDanger` | `1`: damage or push on this public sandbox | `0` | each flavour as its grid, from the parcel's flags |
+| — outside the region | `1` | `1` | each flavour as its grid |
+| `llParcelMediaQuery`, any code or several, on land the owner does not own | `[]` | `[]` | `[]`; on the owner's land, the parcel's media |
+| `llGetParcelMusicURL` | the stream (none here: `""`) | the same | the parcel's stream |
+| `llSetParcelMusicURL` on land the owner does not own | ignored: the URL is unchanged, and nothing is said | the same | ignored; on the owner's land the stream is set and the parcel sent again to the avatars on it |
 
 ### Region queries
 
 | call | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
-| `llGetRegionCorner` | the region's corner in metres, a multiple of 256 | the same | no scripts |
-| `llGetRegionFlags` | only the documented `REGION_FLAG_*` bits (`ALLOW_DIRECT_TELEPORT` here) | **the raw region flags**: `0x14000006` here, the reference's `REGION_FLAGS_DEFAULT` (landmark, set home, parcel changes, voice), none of them a `REGION_FLAG_*` | no scripts |
-| `llGetRegionFPS`, `llGetRegionTimeDilation` | about 45, about 0.99 | about 55, 1.0 | no scripts |
-| `llGetRegionAgentCount` | the avatars in the region | the same | no scripts |
-| `llGetAgentList` with `AGENT_LIST_PARCEL` (1), `_PARCEL_OWNER` (2), `_REGION` (4) | the avatars in the scope, the owner among them | the same | no scripts |
-| — any other scope (0, 8) | `["INVALID_SCOPE"]` | the same | no scripts |
-| `llEdgeOfWorld` from inside, along x or y | `1` where no region adjoins (Mauve has none on any side) | `1` where none does (west and south of the Default Region), `0` towards East and North | no scripts |
-| — a direction with an upward part | `1` (as every direction on Mauve) | `1` straight up; with a level part, as that part says | no scripts |
-| — a direction of zero length | `1` | `1` | no scripts |
-| — from a position outside the region | `0` | `1` | no scripts |
-| `llRequestSimulatorData`, `DATA_SIM_POS` (5) of the own region | the corner, `<255744,257792,0>`: integers, no spaces | **`<1000.000000, 1000.000000, 0.000000>`: the grid coordinates in regions** — the own region's branch reads `RegionInfo.RegionLocX`, which counts regions | no scripts |
-| — of the own region's name in lower case | the same as the name: names are case-insensitive | **the corner in metres** (`<256000.000000, …>`): the name is not the region's own, so the grid service answers | no scripts |
-| — `DATA_SIM_STATUS` (6), `DATA_SIM_RATING` (7) | `up`, `ADULT` | `up`, `PG` | no scripts |
-| — `DATA_SIM_RELEASE` (128) | **no request**: `NULL_KEY` | `OpenSim` | no scripts |
-| — an unknown code (99) | `NULL_KEY` | `NULL_KEY` | no scripts |
-| — a region no grid has | status `unknown`; the position is **never answered** | `unknown` to both | no scripts |
-| — the empty name | status **`crashed`** | `unknown` | no scripts |
+| `llGetRegionCorner` | the region's corner in metres, a multiple of 256 | the same | the region's corner, from its grid coordinates |
+| `llGetRegionFlags` | only the documented `REGION_FLAG_*` bits (`ALLOW_DIRECT_TELEPORT` here) | **the raw region flags**: `0x14000006` here, the reference's `REGION_FLAGS_DEFAULT` (landmark, set home, parcel changes, voice), none of them a `REGION_FLAG_*` | each flavour as its grid, over the region's flags |
+| `llGetRegionFPS`, `llGetRegionTimeDilation` | about 45, about 0.99 | about 55, 1.0 | one over the tick (45, 55), `1.0` |
+| `llGetRegionAgentCount` | the avatars in the region | the same | the avatars in the region |
+| `llGetAgentList` with `AGENT_LIST_PARCEL` (1), `_PARCEL_OWNER` (2), `_REGION` (4) | the avatars in the scope, the owner among them | the same | each flavour as its grid |
+| — any other scope (0, 8) | `["INVALID_SCOPE"]` | the same | each flavour as its grid |
+| `llEdgeOfWorld` from inside, along x or y | `1` where no region adjoins (Mauve has none on any side) | `1` where none does (west and south of the Default Region), `0` towards East and North | each flavour as its grid, over the regions the fake grid runs beside it |
+| — a direction with an upward part | `1` (as every direction on Mauve) | `1` straight up; with a level part, as that part says | each flavour as its grid |
+| — a direction of zero length | `1` | `1` | `1` |
+| — from a position outside the region | `0` | `1` | each flavour as its grid |
+| `llRequestSimulatorData`, `DATA_SIM_POS` (5) of the own region | the corner, `<255744,257792,0>`: integers, no spaces | **`<1000.000000, 1000.000000, 0.000000>`: the grid coordinates in regions** — the own region's branch reads `RegionInfo.RegionLocX`, which counts regions | each flavour as its grid |
+| — of the own region's name in lower case | the same as the name: names are case-insensitive | **the corner in metres** (`<256000.000000, …>`): the name is not the region's own, so the grid service answers | each flavour as its grid |
+| — `DATA_SIM_STATUS` (6), `DATA_SIM_RATING` (7) | `up`, `ADULT` | `up`, `PG` | `up`, the region's rating |
+| — `DATA_SIM_RELEASE` (128) | **no request**: `NULL_KEY` | `OpenSim` | each flavour as its grid |
+| — an unknown code (99) | `NULL_KEY` | `NULL_KEY` | `NULL_KEY` |
+| — a region no grid has | status `unknown`; the position is **never answered** | `unknown` to both | each flavour as its grid |
+| — the empty name | status **`crashed`** | `unknown` | each flavour as its grid |
 
 ### Ground and weather
 
 | call | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
-| `llGround` | the terrain under the offset; a vertical offset changes nothing | the same | no scripts |
-| — an offset out of the region | the height at the region edge it is clamped to (constant beyond the edge, within 0.04 m of the height at the edge itself) | the height at the edge, exactly | no scripts |
-| `llGroundNormal`, `llGroundSlope`, `llGroundContour` on level ground | `<0,0,1>`, zero, zero | the same | no scripts |
-| `llWater` | the region's water height (20), wherever the offset points | the same | no scripts |
-| `llWind` | level (z 0), a few m/s, different 100 m away | level, about 1 m/s, different 100 m away | no scripts |
-| `llCloud` | `0.0` | `0.0` | no scripts |
+| `llGround` | the terrain under the offset; a vertical offset changes nothing | the same | the region's heightfield, the one its viewers are sent |
+| — an offset out of the region | the height at the region edge it is clamped to (constant beyond the edge, within 0.04 m of the height at the edge itself) | the height at the edge, exactly | the height at the edge, exactly, on both flavours |
+| `llGroundNormal`, `llGroundSlope`, `llGroundContour` on level ground | `<0,0,1>`, zero, zero | the same | each flavour as its grid, from the heightfield |
+| `llWater` | the region's water height (20), wherever the offset points | the same | the region's water height |
+| `llWind` | level (z 0), a few m/s, different 100 m away | level, about 1 m/s, different 100 m away | the terrain fixture's wind, level and the same everywhere; still air in a region with none |
+| `llCloud` | `0.0` | `0.0` | `0.0` |
 
 ### Day cycle and environment
 
 | call | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
-| `llGetDayLength`, `llGetDayOffset` and the region's | `14400`, `57600`, the parcel's the region's | the same | no scripts |
-| `llGetTimeOfDay` | seconds into the day, below the day length, advancing | the same | no scripts |
-| `llGetSunDirection`, `llGetMoonDirection` and the region's | unit vectors in the x–z plane, the moon opposite the sun, the parcel's the region's | the same | no scripts |
-| `llGetSunRotation`, `llGetMoonRotation` and the region's | unit rotations whose forward axis is the direction | the same | no scripts |
-| `llGetRegionTimeOfDay` | the region's time of day, the parcel's here | none | no scripts |
-| `llGetEnvironment`, `ENVIRONMENT_DAYINFO` | `[day length, offset, time of day]` | none | no scripts |
-| — each `SKY_*` and `WATER_*` rule | the setting's values (`SKY_AMBIENT` one vector, `SKY_CLOUDS` eight values, …) | none | no scripts |
-| — `SKY_CLOUD_TEXTURE`, `SKY_MOON_TEXTURE`, `SKY_SUN_TEXTURE`, `WATER_NORMAL_TEXTURE` | `[]`, and `llGetEnvironment Error running rule #1 (SKY_SUN_TEXTURE): Attempt to read unreadable value..` on `DEBUG_CHANNEL`: the textures are not the script owner's | none | no scripts |
-| — an unknown rule | `[]`, `unknown rule id 999.` | none | no scripts |
-| — above the region (z 3000), outside it (10 m west) | answered: the same sky, the same day info | none | no scripts |
-| `llGetSimStats`, codes 0–26 | a float each; unknown codes (−1, 27) `0.0` and `Unknown stat.` on `DEBUG_CHANNEL` | none | no scripts |
-| `llGetClosestNavPoint` | the nearest point of the navmesh, a few metres away | none | no scripts |
+| `llGetDayLength`, `llGetDayOffset` and the region's | `14400`, `57600`, the parcel's the region's | the same | the region's environment's, `14400` and `57600` without one |
+| `llGetTimeOfDay` | seconds into the day, below the day length, advancing | the same | each flavour as its grid |
+| `llGetSunDirection`, `llGetMoonDirection` and the region's | unit vectors in the x–z plane, the moon opposite the sun, the parcel's the region's | the same | from the region's day cycle at the time; without one, a sun turned about the north axis through the day |
+| `llGetSunRotation`, `llGetMoonRotation` and the region's | unit rotations whose forward axis is the direction | the same | the same |
+| `llGetRegionTimeOfDay` | the region's time of day, the parcel's here | none | each flavour as its grid |
+| `llGetEnvironment`, `ENVIRONMENT_DAYINFO` | `[day length, offset, time of day]` | none | each flavour as its grid |
+| — each `SKY_*` and `WATER_*` rule | the setting's values (`SKY_AMBIENT` one vector, `SKY_CLOUDS` eight values, …) | none | the region's sky and water at midday of its cycle, the stock region's without one |
+| — `SKY_CLOUD_TEXTURE`, `SKY_MOON_TEXTURE`, `SKY_SUN_TEXTURE`, `WATER_NORMAL_TEXTURE` | `[]`, and `llGetEnvironment Error running rule #1 (SKY_SUN_TEXTURE): Attempt to read unreadable value..` on `DEBUG_CHANNEL`: the textures are not the script owner's | none | each flavour as its grid |
+| — an unknown rule | `[]`, `unknown rule id 999.` | none | each flavour as its grid |
+| — above the region (z 3000), outside it (10 m west) | answered: the same sky, the same day info | none | each flavour as its grid |
+| `llGetSimStats`, codes 0–26 | a float each; unknown codes (−1, 27) `0.0` and `Unknown stat.` on `DEBUG_CHANNEL` | none | the frame rate (1) and the avatars (10); `0.0` for every time the fake grid does not measure; unknown codes as Second Life |
+| `llGetClosestNavPoint` | the nearest point of the navmesh, a few metres away | none | the point on the ground below: no navmesh, all ground walkable |
 
 ### What the viewer does with it
 
 Nothing directly: these calls read the region a viewer is also told about
 (parcel properties, region handshake, the environment), and none of them
-sends the viewer anything.
+sends the viewer anything. Of the writers, the fake grid sends the avatars on
+the parcel its record again when `llSetParcelMusicURL` changes it (down the
+event queue, as a parcel edit is), and a `ParcelMediaUpdate` and a
+`ParcelMediaCommandMessage` for `llParcelMediaCommandList`.
 
 ## Memory and limits
 
@@ -2630,75 +2652,79 @@ cube with its scripts saved in it running, taken and dropped into the prim
 ([The LSL probe corpus](../tools/lsl-probes.md)). A rezzed child reports on a
 channel, since only the probe's own prims' owner-says are kept, and dies.
 YEngine and XEngine agree but where a row says otherwise.
+The fake grid column is what the replays of the five probes in
+`sl-lsl-runtime`'s `vm/tests/inventory.rs` hold the runtime to, and
+`sl-fake-grid/tests/scripts.rs` the region (a notecard read, a rez of a taken
+box with its script, a removal sent to the viewer).
 
 ### Reading the inventory
 
 | what | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
-| the order of `llGetInventoryName` | by name, case folded, **digits as numbers**: `9`, `10`, `_under`, `aaa Helper`, `alpha`, `Beta`, `Box`, `Probe`, `Zed` | by name, case folded, culture order: `_under`, `10`, `9`, `aaa Helper`, `alpha`, … | no scripts |
-| a name made with an accent (`élan`, `CreateInventoryItem` over UDP) | the accented character dropped: `lan` | **a hex dump of the bytes**: `C3 A9 6C 61 6E 00 …..lan.` | no scripts |
-| a name in another case (`ALPHA`) | not found: the lookup is exact | not found | no scripts |
-| `llGetInventoryName` of −1, past the end, of type `INVENTORY_ALL` at 100, of a type that is none | `""` | `""`, but −1 **throws** (`ArgumentOutOfRangeException`; YEngine stops the script) | no scripts |
-| a missing name's type, key, creator, masks | −1, `NULL_KEY`, `NULL_KEY`, 0 each; `No item named '…'.` for every call but the type, so six lines for one name and then the flood limit | −1, `NULL_KEY`, `""`, −1 each; one line, `llGetInventoryCreator: Can't find item ''` | no scripts |
-| key, creator, masks of the owner's full-permission items | the asset key, the owner, base and owner `0x7FFFFFFF`, group and everyone 0, next owner `0x7FFFFFFF`; the object's next-owner mask `532480` (move, modify, copy, transfer) | the same | no scripts |
-| `llSetInventoryPermMask` | does nothing, says nothing | does nothing, says nothing | no scripts |
-| `llScriptDanger` at the prim | 1 (Mauve) | 0 | no scripts |
-| a script that is not there: `llGetScriptState`, `llResetOtherScript`, `llSetScriptState` | 0, and silent here only because the missing item's six lines above had set off the object's [flood limit](#floods); alone, `Could not find script 'nope'.` ([Run-time errors](#what-is-said-and-to-whom)) | 0, and `llGetScriptState: Can't find script 'nope'` (and the like) on the debug channel | no scripts |
-| a link message to a stopped script | lost | lost | no scripts |
-| `llResetOtherScript` of a stopped script, then `llSetScriptState(…, TRUE)` | stays stopped through the reset; started, it **carries on without `state_entry`** | stays stopped; started, it runs `state_entry` | no scripts |
-| `llResetOtherScript` of a running script with a link message queued | the message is lost with the reset | YEngine delivers it first, then the reset; XEngine loses it | no scripts |
-| `llRemoveInventory` | removes, **no `changed`** in the prim; a missing name is silent | removes and raises `changed(CHANGED_INVENTORY)`; a missing name is silent | no scripts |
+| the order of `llGetInventoryName` | by name, case folded, **digits as numbers**: `9`, `10`, `_under`, `aaa Helper`, `alpha`, `Beta`, `Box`, `Probe`, `Zed` | by name, case folded, culture order: `_under`, `10`, `9`, `aaa Helper`, `alpha`, … | each flavour as its grid |
+| a name made with an accent (`élan`, `CreateInventoryItem` over UDP) | the accented character dropped: `lan` | **a hex dump of the bytes**: `C3 A9 6C 61 6E 00 …..lan.` | the name as the grid stored it; the fake grid keeps what the viewer sent |
+| a name in another case (`ALPHA`) | not found: the lookup is exact | not found | each flavour as its grid |
+| `llGetInventoryName` of −1, past the end, of type `INVENTORY_ALL` at 100, of a type that is none | `""` | `""`, but −1 **throws** (`ArgumentOutOfRangeException`; YEngine stops the script) | each flavour as its grid |
+| a missing name's type, key, creator, masks | −1, `NULL_KEY`, `NULL_KEY`, 0 each; `No item named '…'.` for every call but the type, so six lines for one name and then the flood limit | −1, `NULL_KEY`, `""`, −1 each; one line, `llGetInventoryCreator: Can't find item ''` | each flavour as its grid |
+| key, creator, masks of the owner's full-permission items | the asset key, the owner, base and owner `0x7FFFFFFF`, group and everyone 0, next owner `0x7FFFFFFF`; the object's next-owner mask `532480` (move, modify, copy, transfer) | the same | each flavour as its grid |
+| `llSetInventoryPermMask` | does nothing, says nothing | does nothing, says nothing | each flavour as its grid |
+| `llScriptDanger` at the prim | 1 (Mauve) | 0 | each flavour by its grid's rule over the region's parcel flags |
+| a script that is not there: `llGetScriptState`, `llResetOtherScript`, `llSetScriptState` | 0, and silent here only because the missing item's six lines above had set off the object's [flood limit](#floods); alone, `Could not find script 'nope'.` ([Run-time errors](#what-is-said-and-to-whom)) | 0, and `llGetScriptState: Can't find script 'nope'` (and the like) on the debug channel | each flavour as its grid |
+| a link message to a stopped script | lost | lost | each flavour as its grid |
+| `llResetOtherScript` of a stopped script, then `llSetScriptState(…, TRUE)` | stays stopped through the reset; started, it **carries on without `state_entry`** | stays stopped; started, it runs `state_entry` | each flavour as its grid |
+| `llResetOtherScript` of a running script with a link message queued | the message is lost with the reset | YEngine delivers it first, then the reset; XEngine loses it | each flavour as its grid |
+| `llRemoveInventory` | removes, **no `changed`** in the prim; a missing name is silent | removes and raises `changed(CHANGED_INVENTORY)`; a missing name is silent | each flavour as its grid |
 
 ### Notecards
 
 | what | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
-| `llGetNumberOfNotecardLines` of ten lines and a final newline | **11**: the newline starts an empty last line | 10 | no scripts |
-| of an empty notecard | 1, line 0 `""` | 0, line 0 `EOF` | no scripts |
-| line −1 | `EOF` | `""` | no scripts |
-| a line's limit | **1024 bytes**, cut at a character: 1100 ASCII → 1024 characters, 600 two-byte → 512 | **255 characters** whatever their bytes | no scripts |
-| a line with an emoji | counts it one character | two (UTF-16) | no scripts |
-| spaces at both ends, a tab | kept | kept | no scripts |
-| by the asset key (`llGetInventoryKey`) | read | read | no scripts |
-| a notecard that is not there, a script, `""` | `Could not find notecard '…'.`; the key is a request that never answers | `llGetNotecardLine: Can't find notecard '…'`, `NULL_KEY`, and the call sleeps 1 s | no scripts |
-| the call's forced delay, the answer | 0.1 s; the answer one frame later | 0.1 s; at once | no scripts |
-| ten requests at once | answered in order | answered in order | no scripts |
-| `llGetNotecardLineSync` | `NAK` before the notecard was read, its lines after; −1 `EOF`, past the end `""`; a missing notecard `NAK` and an error | does not compile | no scripts |
+| `llGetNumberOfNotecardLines` of ten lines and a final newline | **11**: the newline starts an empty last line | 10 | each flavour as its grid |
+| of an empty notecard | 1, line 0 `""` | 0, line 0 `EOF` | each flavour as its grid |
+| line −1 | `EOF` | `""` | each flavour as its grid |
+| a line's limit | **1024 bytes**, cut at a character: 1100 ASCII → 1024 characters, 600 two-byte → 512 | **255 characters** whatever their bytes | each flavour as its grid |
+| a line with an emoji | counts it one character | two (UTF-16) | each flavour as its grid |
+| spaces at both ends, a tab | kept | kept | each flavour as its grid |
+| by the asset key (`llGetInventoryKey`) | read | read | each flavour as its grid |
+| a notecard that is not there, a script, `""` | `Could not find notecard '…'.`; the key is a request that never answers | `llGetNotecardLine: Can't find notecard '…'`, `NULL_KEY`, and the call sleeps 1 s | each flavour as its grid |
+| the call's forced delay, the answer | 0.1 s; the answer one frame later | 0.1 s; at once | 0.1 s; the answer queued at the call, so it runs once the delay is over |
+| ten requests at once | answered in order | answered in order | each flavour as its grid |
+| `llGetNotecardLineSync` | `NAK` before the notecard was read, its lines after; −1 `EOF`, past the end `""`; a missing notecard `NAK` and an error | does not compile | each flavour as its grid |
 
 ### Rezzing
 
 | what | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
-| the order | the rezzer's `object_rez` **arrives first**, though the child's `on_rez` ran before it by the clock | the same | no scripts |
-| the child's script | `on_rez` only, the state as it was taken | YEngine `on_rez` only; **XEngine runs `state_entry` too**, before `on_rez` (it resets the script) | no scripts |
-| start parameter, `llGetStartParameter`, `OBJECT_REZZER_KEY` | as passed, both; the rezzer | the same | no scripts |
-| `llRezAtRoot` of one prim | as `llRezObject` | the same | no scripts |
-| a rotation that is not unit length | normalised | normalised | no scripts |
-| a velocity, the child not physical | 0 | 0 | no scripts |
-| `STATUS_DIE_AT_EDGE` of the child | 0 | **1** | no scripts |
-| 11 m from the rezzer | nothing, silently | nothing, silently, and no forced delay | no scripts |
-| a name that is not there | `Could not find object 'Nope'.`, 1.1 s | `llRez(AtRoot/Object): Can't find object 'Nope'`, 1 s | no scripts |
-| a notecard's name | nothing, silently | `Can't create requested object; object is missing from database`, 1 s | no scripts |
-| the forced delay | 0.1–0.2 s (frame-bound) | 0.1 s | no scripts |
-| twenty in a row | all twenty rezzed, in 3.1 s; no throttle | all twenty, in 2 s | no scripts |
-| `llRezObjectWithParams` | the start parameter and string arrive; a 1100-byte string arrives as 1018 characters; an unknown rule is `Error running rule #2: unknown rule id 999.` and rezzes nothing | does not compile | no scripts |
-| `llDerezObject(child, DEREZ_DIE)` | 1, then 0 for the same child and for `NULL_KEY` | does not compile | no scripts |
-| `llGetInventoryDesc`, `llGetInventoryAcquireTime` | the item's description (`(No Description)` for a taken object, `""` for a script); `YYYY-MM-DDThh:mm:ssZ`; a missing name `""` and an error | do not compile | no scripts |
+| the order | the rezzer's `object_rez` **arrives first**, though the child's `on_rez` ran before it by the clock | the same | each flavour as its grid: the rezzer is told the tick after the child's scripts ran their `on_rez`, before what they said is heard |
+| the child's script | `on_rez` only, the state as it was taken | YEngine `on_rez` only; **XEngine runs `state_entry` too**, before `on_rez` (it resets the script) | each flavour as its grid |
+| start parameter, `llGetStartParameter`, `OBJECT_REZZER_KEY` | as passed, both; the rezzer | the same | each flavour as its grid |
+| `llRezAtRoot` of one prim | as `llRezObject` | the same | each flavour as its grid |
+| a rotation that is not unit length | normalised | normalised | each flavour as its grid |
+| a velocity, the child not physical | 0 | 0 | 0: the fake grid has no physics |
+| `STATUS_DIE_AT_EDGE` of the child | 0 | **1** | each flavour hands the rez its grid's flag; the fake grid keeps no status flags yet (`server-lsl-lib-physics-vehicles`) |
+| 11 m from the rezzer | nothing, silently | nothing, silently, and no forced delay | each flavour as its grid |
+| a name that is not there | `Could not find object 'Nope'.`, 1.1 s | `llRez(AtRoot/Object): Can't find object 'Nope'`, 1 s | each flavour as its grid |
+| a notecard's name | nothing, silently | `Can't create requested object; object is missing from database`, 1 s | each flavour as its grid |
+| the forced delay | 0.1–0.2 s (frame-bound) | 0.1 s | 0.1 s, the keyword file's, on both flavours (`server-lsl-forced-delays-per-flavour`) |
+| twenty in a row | all twenty rezzed, in 3.1 s; no throttle | all twenty, in 2 s | all twenty, a tick apart |
+| `llRezObjectWithParams` | the start parameter and string arrive; a 1100-byte string arrives as 1018 characters; an unknown rule is `Error running rule #2: unknown rule id 999.` and rezzes nothing | does not compile | as Second Life, the physical rules read and checked and changing nothing; OpenSim's dialect refuses it |
+| `llDerezObject(child, DEREZ_DIE)` | 1, then 0 for the same child and for `NULL_KEY` | does not compile | each flavour as its grid |
+| `llGetInventoryDesc`, `llGetInventoryAcquireTime` | the item's description (`(No Description)` for a taken object, `""` for a script); `YYYY-MM-DDThh:mm:ssZ`; a missing name `""` and an error | do not compile | each flavour as its grid |
 
 ### Giving
 
 | what | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
-| a notecard to a prim of the same owner | arrives; `changed(CHANGED_INVENTORY)` there | the same | no scripts |
-| a name the prim holds already | arrives as `Gift 1` (then `Gift 2`) | the same | no scripts |
-| a script | arrives **not running** | the same | no scripts |
-| a name that is not there | `Unable to give inventory: 'No item named 'Nope'.'.` | `llGiveInventory: Can't find inventory object 'Nope'`, 1 s | no scripts |
-| to an avatar | an offer (`TaskInventoryOffered`, dialog 9) under the object owner's id, with the object's name, the item and the place, marked **offline**; 2 s | the same, the place as region and position; 3 s | no scripts |
-| `llGiveInventoryList` to an avatar | an offer of a folder, not offline; 3 s | the same; 3 s | no scripts |
-| `llGiveInventoryList` to a prim | the items arrive one by one, no folder (`Gift 2`); 3 s | the same; 0.1 s | no scripts |
-| `llRemoteLoadScriptPin` with the pin | the script arrives and runs with its start parameter; 3 s | the same | no scripts |
-| with a wrong pin | `Task 'Object' trying to illegally load script onto task 'Receiver'!`; 3 s | nothing, silently; 3 s | no scripts |
-| not running, over a script of that name | replaces it, stopped | YEngine stopped; XEngine **reads as running**, though it prints nothing | no scripts |
+| a notecard to a prim of the same owner | arrives; `changed(CHANGED_INVENTORY)` there | the same | each flavour as its grid |
+| a name the prim holds already | arrives as `Gift 1` (then `Gift 2`) | the same | each flavour as its grid |
+| a script | arrives **not running** | the same | each flavour as its grid |
+| a name that is not there | `Unable to give inventory: 'No item named 'Nope'.'.` | `llGiveInventory: Can't find inventory object 'Nope'`, 1 s | each flavour as its grid |
+| to an avatar | an offer (`TaskInventoryOffered`, dialog 9) under the object owner's id, with the object's name, the item and the place, marked **offline**; 2 s | the same, the place as region and position; 3 s | each flavour's offer, sent as both grids send it; the fake grid files nothing on an accept yet (`test-fake-grid-lsl-offline-cases`) |
+| `llGiveInventoryList` to an avatar | an offer of a folder, not offline; 3 s | the same; 3 s | each flavour as its grid |
+| `llGiveInventoryList` to a prim | the items arrive one by one, no folder (`Gift 2`); 3 s | the same; 0.1 s | each flavour as its grid |
+| `llRemoteLoadScriptPin` with the pin | the script arrives and runs with its start parameter; 3 s | the same | each flavour as its grid |
+| with a wrong pin | `Task 'Object' trying to illegally load script onto task 'Receiver'!`; 3 s | nothing, silently; 3 s | each flavour as its grid |
+| not running, over a script of that name | replaces it, stopped | YEngine stopped; XEngine **reads as running**, though it prints nothing | stopped on all three; XEngine's reading is not imitated |
 
 ### What the viewer does with it
 
@@ -2844,7 +2870,10 @@ Measured on 2026-10-28 by the probes `time/timer-floor`, `time/timer-phase`,
 `time/sleep-negative` and `time/reset-mid-sleep`, on the same grids, beside
 the corpus's first `time/get-time-frames`, `time/sleep-while-stopped` and
 `events/timer-no-stack` ([The queue, the timer and a state
-change](#the-queue-the-timer-and-a-state-change)). A probe times a timer by
+change](#the-queue-the-timer-and-a-state-change)). The fake grid column is
+what `sl-lsl-runtime`'s `vm/tests/clocks.rs` holds the runtime to, each probe
+run at its grid's frame rate (45 and 55 ticks a second) with the timings that
+carry a rule held within a frame or two. A probe times a timer by
 `llGetTime`, which on Second Life moves in frames of 0.0219–0.0227 s, and a
 sleep by the microseconds of `llGetTimestamp` as well. The local OpenSim
 runs with the default `MinTimerInterval` of each engine: 0.1 s for YEngine
@@ -2857,10 +2886,10 @@ own).
 
 | asked | Second Life | OpenSim YEngine | OpenSim XEngine | fake grid |
 | --- | --- | --- | --- | --- |
-| 0.001, 0.01, 0.02 s | an event **every second frame**, 0.044 s (68 in three seconds); the first a frame or two after the set | every 0.1 s | every 0.5 s | no scripts |
-| 0.05 s | every two or three frames, 0.050 s on average: the rate is kept to the frame | every 0.1 s | every 0.5 s | no scripts |
-| 0.1, 0.2, 0.5 s | the interval, each event on a frame (0.089–0.112 s apart for 0.1) | the interval | 0.5 s for each | no scripts |
-| -1.0 s | **no event**: a negative interval stops the timer, as 0 does | **the floor**, every 0.1 s | the floor, every 0.5 s | no scripts |
+| 0.001, 0.01, 0.02 s | an event **every second frame**, 0.044 s (68 in three seconds); the first a frame or two after the set | every 0.1 s | every 0.5 s | each flavour's floor: two frames on Second Life, `MinTimerInterval` on OpenSim |
+| 0.05 s | every two or three frames, 0.050 s on average: the rate is kept to the frame | every 0.1 s | every 0.5 s | each flavour as its grid: the due times kept to the microsecond, an event at the first tick at or after each |
+| 0.1, 0.2, 0.5 s | the interval, each event on a frame (0.089–0.112 s apart for 0.1) | the interval | 0.5 s for each | each flavour as its grid |
+| -1.0 s | **no event**: a negative interval stops the timer, as 0 does | **the floor**, every 0.1 s | the floor, every 0.5 s | each flavour as its grid |
 
 ### Drift and phase
 
@@ -2869,8 +2898,8 @@ timer whose handler sleeps 0.3 s, then 0.7 s.
 
 | what | Second Life | OpenSim YEngine | OpenSim XEngine | fake grid |
 | --- | --- | --- | --- | --- |
-| 1.0 s, ten events | the tenth at 10.009 s: **the phase is kept**, each event on the frame nearest its due time | the tenth at 10.084 s: each gap 1.002–1.010 s, **the error adds up** — the next event is counted from when this one ran | the first at 1.077 s, then every 1.000 s: the phase of the first is kept | no scripts |
-| 0.5 s, the handler sleeping 0.3 s | events at 0.5 s steps (gaps 0.489 and 0.511 by turns): **the phase is kept** | gaps of 0.501–0.516 s, adding up | gaps of 0.500 s | no scripts |
+| 1.0 s, ten events | the tenth at 10.009 s: **the phase is kept**, each event on the frame nearest its due time | the tenth at 10.084 s: each gap 1.002–1.010 s, **the error adds up** — the next event is counted from when this one ran | the first at 1.077 s, then every 1.000 s: the phase of the first is kept | Second Life's and XEngine's phase kept; YEngine's next counted from each event, which on a tick clock adds no error of its own |
+| 0.5 s, the handler sleeping 0.3 s | events at 0.5 s steps (gaps 0.489 and 0.511 by turns): **the phase is kept** | gaps of 0.501–0.516 s, adding up | gaps of 0.500 s | each flavour as its grid |
 | 0.5 s, the handler sleeping 0.7 s | **0.755 s apart**: the next event two or three frames after the handler ends, not on the next 0.5 s step | 0.701–0.736 s apart: as the handler ends | 0.700 s apart: as the handler ends | Second Life's a tick after the handler ends (`events/timer-reset`); OpenSim's as it ends |
 
 A timer never stacks on any grid (`events/timer-no-stack`): a handler longer
@@ -2882,10 +2911,10 @@ than the interval delays the next event, and no event is made up for later.
 
 | case | Second Life | OpenSim (both engines) | fake grid |
 | --- | --- | --- | --- |
-| 2.0, and 2.0 again a second in | at 3.0: **setting it again restarts the count** | the same | no scripts |
-| 2.0, and 1.5 a second in | at 2.56 | at 2.50–2.52 | no scripts |
-| 1.0, and 2.0 half a second in | at 2.51 | the same | no scripts |
-| 1.0, 0.0 and 1.0 at once | at 1.0 | the same | no scripts |
+| 2.0, and 2.0 again a second in | at 3.0: **setting it again restarts the count** | the same | each flavour as its grid |
+| 2.0, and 1.5 a second in | at 2.56 | at 2.50–2.52 | each flavour as its grid |
+| 1.0, and 2.0 half a second in | at 2.51 | the same | each flavour as its grid |
+| 1.0, 0.0 and 1.0 at once | at 1.0 | the same | each flavour as its grid |
 | 1.0, a 2 s sleep in which it falls due, then 3.0 | at 2.0: **the event already due still runs**, the new set does not drop it | the same | each flavour as its grid |
 | 1.0, the same sleep, then 0.0 | **no event**: stopping the timer drops the one already due | YEngine the same; **XEngine runs it** | each flavour as its grid |
 
@@ -2895,14 +2924,14 @@ than the interval delays the next event, and no event is made up for later.
 
 | clock | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
-| `llGetTimestamp` | `2026-10-28T09:27:36.407385Z`: 27 characters, **six** fraction digits | `2026-10-28T08:53:45.6802820Z`: 28 characters, **seven** (.NET's `fffffff`) | no scripts |
-| `llGetDate` | the timestamp's date, UTC | the same | no scripts |
-| `llGetUnixTime` | the timestamp's second | the same | no scripts |
-| `llGetGMTclock` | the second of the UTC day, **a whole number** (`34056.000000`) | the same second **with its fraction** | no scripts |
-| `llGetWallclock` | the second of the day in **Pacific time** (7 h behind UTC in October's daylight time), a whole number | the second of the day in **the simulator host's own time zone** (here an hour ahead of UTC), with its fraction | no scripts |
-| `llGetTimeOfDay` | the UTC second of the day modulo four hours, to the millisecond (`5256.452` at `34056`) | the host's local second of the day modulo four hours | no scripts |
-| `llGetAndResetTime` | the time since the last reset (0.511 s after a 0.5 s sleep), and `llGetTime` after it exactly 0 | the same (0.500–0.501 s) | no scripts |
-| `llGetTime` against the timestamp, five busy seconds | 4.956 s against 5.0005 s: two frames behind, with `llGetRegionTimeDilation` 1.0 and `llGetRegionFPS` 45 | equal to the millisecond; `llGetRegionFPS` 55 | no scripts |
+| `llGetTimestamp` | `2026-10-28T09:27:36.407385Z`: 27 characters, **six** fraction digits | `2026-10-28T08:53:45.6802820Z`: 28 characters, **seven** (.NET's `fffffff`) | each flavour's digits, from the region's calendar time at its first tick and the ticks since |
+| `llGetDate` | the timestamp's date, UTC | the same | each flavour as its grid |
+| `llGetUnixTime` | the timestamp's second | the same | each flavour as its grid |
+| `llGetGMTclock` | the second of the UTC day, **a whole number** (`34056.000000`) | the same second **with its fraction** | each flavour's shape |
+| `llGetWallclock` | the second of the day in **Pacific time** (7 h behind UTC in October's daylight time), a whole number | the second of the day in **the simulator host's own time zone** (here an hour ahead of UTC), with its fraction | Pacific time on Second Life; on OpenSim the host's zone, which on the fake grid is UTC |
+| `llGetTimeOfDay` | the UTC second of the day modulo four hours, to the millisecond (`5256.452` at `34056`) | the host's local second of the day modulo four hours | each flavour's, the fake grid's host keeping UTC |
+| `llGetAndResetTime` | the time since the last reset (0.511 s after a 0.5 s sleep), and `llGetTime` after it exactly 0 | the same (0.500–0.501 s) | each flavour as its grid |
+| `llGetTime` against the timestamp, five busy seconds | 4.956 s against 5.0005 s: two frames behind, with `llGetRegionTimeDilation` 1.0 and `llGetRegionFPS` 45 | equal to the millisecond; `llGetRegionFPS` 55 | equal on both: one tick of script time a tick of calendar time; dilation 1.0, `llGetRegionFPS` one over the tick |
 
 `llGetTime` itself counts in frames on Second Life and in milliseconds on
 OpenSim (`time/get-time-frames`; OpenSim rounds it to three places).
@@ -2914,10 +2943,10 @@ by the timestamp.
 
 | asked | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
-| 0 | no wait, mostly (0.003 ms); one of five took a frame | no wait (0.02–0.06 ms) | no scripts |
-| 0.001, 0.01, 0.02 s | **one frame**, 22 ms | the time asked, plus 0.03–0.1 ms | no scripts |
-| 0.05, 0.1, 0.25 s | **rounded up to whole frames**: 66.8 ms (three), 111 ms (five), 267 ms (twelve) | the time asked | no scripts |
-| -1.0 s | no wait; the event goes on | YEngine no wait; **XEngine throws** an `ArgumentOutOfRangeException` from its `WaitHandle.WaitOne`, shouted on `DEBUG_CHANNEL` as a stack trace (heard by the other avatar too), which ends the event; the script runs on and throws again at the next | no scripts |
+| 0 | no wait, mostly (0.003 ms); one of five took a frame | no wait (0.02–0.06 ms) | no wait |
+| 0.001, 0.01, 0.02 s | **one frame**, 22 ms | the time asked, plus 0.03–0.1 ms | one tick, rounded up, on both flavours |
+| 0.05, 0.1, 0.25 s | **rounded up to whole frames**: 66.8 ms (three), 111 ms (five), 267 ms (twelve) | the time asked | whole ticks, rounded up, on both flavours |
+| -1.0 s | no wait; the event goes on | YEngine no wait; **XEngine throws** an `ArgumentOutOfRangeException` from its `WaitHandle.WaitOne`, shouted on `DEBUG_CHANNEL` as a stack trace (heard by the other avatar too), which ends the event; the script runs on and throws again at the next | each flavour as its grid, XEngine's exception in its words |
 
 ### Stopping and resetting a script that sleeps
 
@@ -2926,11 +2955,11 @@ interrupted one second in.
 
 | what | Second Life | OpenSim YEngine | OpenSim XEngine | fake grid |
 | --- | --- | --- | --- | --- |
-| `llResetOtherScript` mid-sleep | **at once**: `state_entry` within a frame of the reset, the sleep abandoned | the same | the same | no scripts |
-| stopped a second in, restarted a second later, pinged a second after that | the sleep runs to its end (5 s), then the ping is answered | the same | **the sleeping event is abandoned**: it never wakes, and the ping is answered at once (3 s) | no scripts |
-| reset after that | `state_entry` at once, and the next ping answered | the same | the same | no scripts |
-| `llGetTime` of a script stopped three seconds and restarted | 5.0 a second after the restart: **a stopped script's clock runs on** | the same | the same | no scripts |
-| a sleep stopped and restarted after it would have ended (`time/sleep-while-stopped`) | wakes within a frame of the restart | the same | never wakes | no scripts |
+| `llResetOtherScript` mid-sleep | **at once**: `state_entry` within a frame of the reset, the sleep abandoned | the same | the same | each flavour as its grid |
+| stopped a second in, restarted a second later, pinged a second after that | the sleep runs to its end (5 s), then the ping is answered | the same | **the sleeping event is abandoned**: it never wakes, and the ping is answered at once (3 s) | each flavour as its grid |
+| reset after that | `state_entry` at once, and the next ping answered | the same | the same | each flavour as its grid |
+| `llGetTime` of a script stopped three seconds and restarted | 5.0 a second after the restart: **a stopped script's clock runs on** | the same | the same | each flavour as its grid |
+| a sleep stopped and restarted after it would have ended (`time/sleep-while-stopped`) | wakes within a frame of the restart | the same | never wakes | each flavour as its grid |
 
 ### What the viewer does with it
 

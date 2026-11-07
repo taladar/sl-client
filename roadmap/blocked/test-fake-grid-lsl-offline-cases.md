@@ -78,3 +78,11 @@ to 9 run on both fake flavours and are held to `MEASURED_SCRIPTED`. The
 conformance fake grid now ticks at the imitated grid's own frame
 (`ImitatedGrid::frame_step`, 45 and 55 a second), which a census that counts
 what a region raises a frame needs.
+
+## From server-lsl-lib-task-inventory (2026-11-07)
+
+A script's `llGiveInventory` and `llGiveInventoryList` to an avatar send the
+`TaskInventoryOffered` offer both grids send (`scripts::task_inventory`), but
+nothing is filed: the accept (`TaskInventoryAccepted`) is not answered on
+Second Life and nothing is filed at the offer on OpenSim. That is this task's,
+with the census's `object_` exemption.

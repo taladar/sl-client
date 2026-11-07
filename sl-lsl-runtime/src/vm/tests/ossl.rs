@@ -7,9 +7,9 @@
 //!
 //! What the probes call of a tranche not written yet is answered where they
 //! call it, with what the grid answered: the avatar's gender and health, the
-//! rezzing object, the link number, the inventory item, the map texture,
-//! the wind and LightShare's water colour, the apparent time and the
-//! wallclock (each as its transcript has it), `llGetTime` (the `elapsed` the
+//! link number, the map texture, the wind and LightShare's water colour, the
+//! apparent time and the wallclock (each as its transcript has it, for they
+//! read the moment the probe ran), `llGetTime` (the `elapsed` the
 //! probe prints is compared as present, not as a number), what a listener
 //! reads of where the speaker is, and `llResetOtherScript`, which the test
 //! does for the leader. Keys minted on either side compare as keys.
@@ -116,18 +116,9 @@ fn available_answers_as_each_engine_did() -> Result<(), String> {
         let rigged = source
             .replace("osGetGender(owner)", "\"female\"")
             .replace("osGetHealth(owner)", "100.0")
-            .replace("osGetRezzingObject()", "((key)NULL_KEY)")
-            .replace("osWindActiveModelPluginName()", "\"SimpleRandomWind\"")
             .replace("osGetWindParam(\"SimpleRandomWind\", \"strength\")", "1.0")
             .replace("osIsNpc(owner)", "0")
             .replace("osGetLinkNumber(llGetObjectName())", "-1")
-            .replace(
-                "(string)osGetMapTexture()",
-                &format!(
-                    "\"{}\"",
-                    printed(transcript, "osGetMapTexture", "map_texture")
-                ),
-            )
             .replace(
                 "osGetApparentTimeString(TRUE)",
                 &printed(transcript, "osGetApparentTimeString", "apparent"),
@@ -138,11 +129,25 @@ fn available_answers_as_each_engine_did() -> Result<(), String> {
                     "\"{}\"",
                     printed(transcript, "osGetPSTWallclock", "wallclock")
                 ),
-            )
-            .replace("osGetInventoryItemKey(\"nope\")", "((key)NULL_KEY)");
+            );
         let mut region = Region::new(flavour);
         region.host.simulator = local_opensim();
+        region.host.map_texture = Some(printed(transcript, "osGetMapTexture", "map_texture"));
         let added = region.add(A, "Probe", 1, &rigged);
+        // The probe's prim was rezzed by its owner, an avatar in the region:
+        // `osGetRezzingObject` answers `NULL_KEY` for it.
+        let own = region.host.prim_key(1);
+        let owner =
+            region
+                .host
+                .object_details(A, &own)
+                .map(|prim| crate::vm::prim::ObjectDetails {
+                    avatar: true,
+                    ..prim
+                });
+        if let Some(owner) = owner {
+            let _owner = region.host.details.insert(super::OWNER.to_owned(), owner);
+        }
         if !flavour.is_opensim() {
             assert!(transcript.contains("# compile error in \"Probe\""));
             assert!(added.is_err(), "Second Life compiled ossl/available");
@@ -416,17 +421,15 @@ fn an_allow_line_overrides_the_threat_level_both_ways() -> Result<(), String> {
     assert!(said.first().is_some_and(|line| {
         line.starts_with("YEngine: OSSL Permission Error: osGetAgents permission denied. (script:")
     }));
-    // An estate owner is on it: the call passes its check, and reaches a
-    // function the grid has not written yet.
+    // An estate owner is on it: the call passes its check and runs (no
+    // avatar is in this test's region).
     let owner = Standing {
         roles: vec![Allowed::EstateOwner],
         ..Standing::default()
     };
-    let (_, said) = called("llGetListLength(osGetAgents())", config(list), owner)?;
-    assert!(
-        said.first()
-            .is_some_and(|line| line.contains("osGetAgents is not implemented"))
-    );
+    let (printed, said) = called("llGetListLength(osGetAgents())", config(list), owner)?;
+    assert_eq!(printed, vec!["got 0".to_owned()]);
+    assert!(said.is_empty(), "{said:?}");
     // The estate owner is no estate manager.
     let manager_only = "Allow_osGetAgents = ESTATE_MANAGER";
     let both = Standing {

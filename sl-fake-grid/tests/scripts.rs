@@ -58,6 +58,8 @@ mod test {
         Alert(String),
         /// A balance reply.
         Money(Box<sl_proto::MoneyBalance>),
+        /// The music stream of a parcel the client was sent.
+        Music(Option<String>),
         /// A message of the object-update stream: its form and the objects
         /// it named.
         Stream(
@@ -177,6 +179,9 @@ mod test {
                     Event::ScriptPermissionRequest(question) => Seen::Question(question),
                     Event::AlertMessage { message, .. } => Seen::Alert(message),
                     Event::MoneyBalance(balance) => Seen::Money(Box::new(balance)),
+                    Event::ParcelProperties(parcel) => {
+                        Seen::Music(parcel.music_url.as_ref().map(ToString::to_string))
+                    }
                     Event::ObjectStreamBatch(batch) => Seen::Stream(
                         batch.form,
                         batch.entries.iter().map(|entry| entry.local_id).collect(),
@@ -2908,5 +2913,660 @@ default
     #[tokio::test]
     async fn a_bought_original_tells_its_scripts_on_opensim() -> Result<(), TestError> {
         a_bought_original_tells_its_scripts(ImitatedGrid::OpenSim).await
+    }
+
+    /// The rezzer of [`a_prim_reads_rezzes_from_and_changes_its_contents`]:
+    /// on channel 7 it reads its notecard, rezzes its child or removes the
+    /// notecard, and says what came of each.
+    const REZZER_SOURCE: &str = "default
+{
+    state_entry()
+    {
+        llListen(7, \"\", NULL_KEY, \"\");
+        llListen(-5, \"\", NULL_KEY, \"\");
+    }
+
+    listen(integer channel, string name, key id, string message)
+    {
+        if (channel == -5)
+        {
+            llShout(0, \"heard \" + message);
+        }
+        else if (message == \"read\")
+        {
+            llGetNumberOfNotecardLines(\"Lines\");
+            llGetNotecardLine(\"Lines\", 0);
+            llGetNotecardLine(\"Lines\", 1);
+        }
+        else if (message == \"rez\")
+        {
+            llRezObject(llGetInventoryName(INVENTORY_OBJECT, 0), llGetPos() + <0.0, 0.0, 1.0>, ZERO_VECTOR, ZERO_ROTATION, 42);
+        }
+        else if (message == \"remove\")
+        {
+            llRemoveInventory(\"Lines\");
+            llShout(0, \"notecards \" + (string)llGetInventoryNumber(INVENTORY_NOTECARD));
+        }
+    }
+
+    dataserver(key request, string data)
+    {
+        llShout(0, \"data \" + data);
+    }
+
+    object_rez(key child)
+    {
+        string rezzer = llList2String(llGetObjectDetails(child, [OBJECT_REZZER_KEY]), 0);
+        llShout(0, \"object_rez mine=\" + (string)(rezzer == (string)llGetKey()));
+    }
+}
+";
+
+    /// The script of the child the rezzer rezzes: it tells the rezzer the
+    /// start parameter it was given.
+    const CHILD_SOURCE: &str = "default
+{
+    on_rez(integer start)
+    {
+        llShout(-5, \"child \" + (string)start + \" \" + (string)llGetStartParameter());
+    }
+}
+";
+
+    /// The rezzer's region-local id.
+    const REZZER: sl_proto::RegionLocalObjectId = sl_proto::RegionLocalObjectId(0x900);
+
+    /// The child's region-local id, before it is taken.
+    const REZZED_BOX: sl_proto::RegionLocalObjectId = sl_proto::RegionLocalObjectId(0x901);
+
+    /// What the client is told is shouted, in order, until the region falls
+    /// quiet.
+    async fn shouted(scene: &mut Scene) -> Vec<String> {
+        let mut lines = Vec::new();
+        while let Ok(Some(seen)) = tokio::time::timeout(QUIET, scene.seen.recv()).await {
+            if let Seen::Chat(ChatType::Shout, message) = seen {
+                lines.push(message);
+            }
+        }
+        lines
+    }
+
+    /// A scripted prim reads a notecard over the dataserver, rezzes an
+    /// object out of its contents with a start parameter its script gets,
+    /// hears of the rez before what the child tells it, and removes the notecard,
+    /// which the client is sent the prim again for — on a grid imitating
+    /// `imitated`. The object it rezzes is a scripted box the client took
+    /// and dropped into it, so the child comes back with its script.
+    async fn a_prim_reads_rezzes_from_and_changes_its_contents(
+        imitated: ImitatedGrid,
+    ) -> Result<(), TestError> {
+        let mut fixture = region_of(&[
+            ScriptedBox {
+                local_id: REZZER,
+                source: REZZER_SOURCE.to_owned(),
+                experience: None,
+            },
+            ScriptedBox {
+                local_id: REZZED_BOX,
+                source: CHILD_SOURCE.to_owned(),
+                experience: None,
+            },
+        ])?;
+        let rezzer_key = sl_types::key::ObjectKey::from(uuid::Uuid::from_u128(
+            (u128::from(REZZER.0) << 8) | 0x5,
+        ));
+        let notecard = sl_proto::AssetKey::from(uuid::Uuid::from_u128(0x4E07));
+        let body = sl_notecard::Notecard {
+            source_version: sl_notecard::NotecardVersion::V2,
+            items: Vec::new(),
+            text: "first\nsecond\n".to_owned(),
+        }
+        .encode();
+        let _previous = fixture.assets.insert(notecard, body);
+        fixture
+            .world
+            .objects
+            .contents_mut(REZZER)
+            .ok_or("the rezzer holds nothing")?
+            .write(sl_proto::TaskInventoryItem {
+                item_id: sl_types::key::InventoryKey::from(uuid::Uuid::from_u128(0x4E08)),
+                parent_task: rezzer_key,
+                asset_id: Some(notecard),
+                asset_type: sl_proto::AssetType::Notecard,
+                inv_type: sl_proto::InventoryType::Notecard,
+                name: "Lines".to_owned(),
+                ..sl_fake_grid::scenario::stock_script_item()
+            });
+        let mut scene = scene_with(
+            imitated,
+            fixture,
+            RegionConfig {
+                heartbeat: HeartbeatConfig::stepped(Duration::from_millis(100)),
+                ..RegionConfig::default()
+            },
+            AccountConfig {
+                agent_id: Some(box_owner()),
+                ..AccountConfig::new("Test", "User", "password")
+            },
+        )
+        .await?;
+        scene.tick(2).await?;
+
+        scene.shout("read").await?;
+        scene.tick(10).await?;
+        let counted = if imitated == ImitatedGrid::SecondLife {
+            "data 3"
+        } else {
+            "data 2"
+        };
+        assert_eq!(
+            shouted(&mut scene).await,
+            vec![counted, "data first", "data second"],
+            "a notecard read over the dataserver, in order"
+        );
+
+        // The child box taken, and dropped into the rezzer.
+        let objects = scene
+            .agent
+            .with_sim(|sim| {
+                sim.agent_inventory()
+                    .folders()
+                    .find(|folder| {
+                        folder.folder_type == sl_client_tokio::FolderType::Object.to_code()
+                    })
+                    .map(|folder| folder.folder_id)
+            })
+            .await
+            .ok_or("the account has no Objects folder")?;
+        scene
+            .commands
+            .send(Command::DerezObjects {
+                local_ids: vec![sl_client_tokio::ScopedObjectId::new(
+                    scene.circuit,
+                    REZZED_BOX,
+                )],
+                destination: sl_client_tokio::DeRezDestination::TakeIntoAgentInventory(objects),
+                transaction_id: sl_client_tokio::TransactionId::from(uuid::Uuid::from_u128(0x7C)),
+                group_id: None,
+            })
+            .await?;
+        let taken = scene
+            .next("the taken item", |seen| match seen {
+                Seen::Filed(item) => Some(item),
+                _other => None,
+            })
+            .await?;
+        let drop = sl_client_tokio::RestoreItem::for_task_drop(
+            &taken,
+            rezzer_key,
+            uuid::Uuid::from_u128(0xD1),
+        )?;
+        scene
+            .send(
+                Command::UpdateTaskInventory {
+                    target: sl_client_tokio::ScopedObjectId::new(scene.circuit, REZZER),
+                    key: sl_client_tokio::TaskInventoryKey::Item,
+                    item: Box::new(drop),
+                },
+                |event| matches!(event, ServerEvent::UpdateTaskInventory { .. }),
+            )
+            .await?;
+        scene.tick(2).await?;
+        let _dropped = shouted(&mut scene).await;
+
+        scene.shout("rez").await?;
+        scene.tick(10).await?;
+        assert_eq!(
+            shouted(&mut scene).await,
+            vec!["object_rez mine=1", "heard child 42 42"],
+            "the rezzer hears of the rez first, the child its start parameter"
+        );
+
+        scene.shout("remove").await?;
+        scene.tick(2).await?;
+        let sent_again = scene
+            .next("the rezzer sent again", |seen| match seen {
+                Seen::Updated(object) if object.local_id == REZZER => Some(()),
+                _other => None,
+            })
+            .await
+            .is_ok();
+        assert!(sent_again, "the prim is sent again for the removal");
+        let serial = scene
+            .agent
+            .with_world(|world, _sim| world.objects.contents(REZZER).map(|held| held.serial))
+            .await;
+        assert!(serial.is_some_and(|serial| serial > 1), "the serial moved");
+        scene.stop();
+        Ok(())
+    }
+
+    /// On a grid imitating Second Life.
+    #[tokio::test]
+    async fn a_prim_reads_rezzes_from_and_changes_its_contents_on_second_life()
+    -> Result<(), TestError> {
+        a_prim_reads_rezzes_from_and_changes_its_contents(ImitatedGrid::SecondLife).await
+    }
+
+    /// On a grid imitating OpenSim.
+    #[tokio::test]
+    async fn a_prim_reads_rezzes_from_and_changes_its_contents_on_opensim() -> Result<(), TestError>
+    {
+        a_prim_reads_rezzes_from_and_changes_its_contents(ImitatedGrid::OpenSim).await
+    }
+
+    /// The sensing box of [`a_prim_senses_the_avatar_and_casts_at_its_neighbour`]:
+    /// on channel 7 it sweeps for avatars or casts a ray east, and says what
+    /// it found.
+    const SENSING_SOURCE: &str = "default
+{
+    state_entry()
+    {
+        llListen(7, \"\", NULL_KEY, \"\");
+    }
+
+    listen(integer channel, string name, key id, string message)
+    {
+        if (message == \"sense\")
+        {
+            llSensor(\"\", NULL_KEY, AGENT, 96.0, PI);
+        }
+        else if (message == \"ray\")
+        {
+            list hits = llCastRay(llGetPos() + <0.6, 0.0, 0.0>, llGetPos() + <10.0, 0.0, 0.0>,
+                [RC_DATA_FLAGS, RC_GET_NORMAL]);
+            vector at = llList2Vector(hits, 1);
+            llShout(0, \"ray \" + (string)llGetListLength(hits) + \" \"
+                + (string)llList2Integer(hits, -1) + \" \"
+                + (string)llRound(at.x * 100.0) + \" \"
+                + (string)llList2Vector(hits, 2));
+        }
+    }
+
+    sensor(integer n)
+    {
+        llShout(0, \"sensed \" + (string)n + \" \" + llDetectedName(0) + \" \"
+            + (string)llDetectedType(0));
+    }
+
+    no_sensor()
+    {
+        llShout(0, \"sensed none\");
+    }
+}
+";
+
+    /// A scripted prim's sweep finds the avatar standing near, typed as its
+    /// grid types an avatar, and its ray east meets the face of the box 2 m
+    /// away — on a grid imitating `imitated`.
+    async fn a_prim_senses_the_avatar_and_casts_at_its_neighbour(
+        imitated: ImitatedGrid,
+    ) -> Result<(), TestError> {
+        let fixture = region_of(&[
+            ScriptedBox {
+                local_id: sl_proto::RegionLocalObjectId(0xA00),
+                source: SENSING_SOURCE.to_owned(),
+                experience: None,
+            },
+            ScriptedBox {
+                local_id: sl_proto::RegionLocalObjectId(0xA01),
+                source: "default { state_entry() { } }".to_owned(),
+                experience: None,
+            },
+        ])?;
+        let mut scene = scene_of(imitated, fixture).await?;
+        scene.tick(2).await?;
+        scene.shout("sense").await?;
+        scene.tick(3).await?;
+        let kind = if imitated == ImitatedGrid::SecondLife {
+            3
+        } else {
+            1
+        };
+        assert_eq!(
+            shouted(&mut scene).await,
+            vec![format!("sensed 1 Test User {kind}")]
+        );
+        scene.shout("ray").await?;
+        scene.tick(2).await?;
+        // The neighbour's near face is at 133.5; the normal points back west.
+        assert_eq!(
+            shouted(&mut scene).await,
+            vec!["ray 4 1 13350 <-1.00000, 0.00000, 0.00000>".to_owned()]
+        );
+        scene.stop();
+        Ok(())
+    }
+
+    /// On a grid imitating Second Life.
+    #[tokio::test]
+    async fn a_prim_senses_the_avatar_and_casts_at_its_neighbour_on_second_life()
+    -> Result<(), TestError> {
+        a_prim_senses_the_avatar_and_casts_at_its_neighbour(ImitatedGrid::SecondLife).await
+    }
+
+    /// The land box of [`a_prim_reads_its_land_and_region`]: on channel 7 it
+    /// says what it reads of the parcel, the region and the ground, sets the
+    /// parcel's music and reads it back.
+    const LAND_SOURCE: &str = "default
+{
+    state_entry()
+    {
+        llListen(7, \"\", NULL_KEY, \"\");
+    }
+
+    listen(integer channel, string name, key id, string message)
+    {
+        list parcel = llGetParcelDetails(llGetPos(), [PARCEL_DETAILS_NAME, PARCEL_DETAILS_AREA]);
+        llShout(0, llGetRegionName() + \"|\" + llList2CSV(parcel) + \"|\"
+            + (string)llRound(llGround(ZERO_VECTOR)) + \"|\" + llGetEnv(\"sim_channel\") + \"|\"
+            + (string)llEdgeOfWorld(llGetPos(), <1.0, 0.0, 0.0>) + \"|\"
+            + (string)llGetRegionCorner() + \"|\" + (string)llGetRegionAgentCount());
+        llSetParcelMusicURL(\"http://example.com/stream\");
+        llShout(0, \"music \" + llGetParcelMusicURL());
+    }
+}
+";
+
+    /// A scripted prim reads its parcel, its region and the ground as the
+    /// fake grid keeps them, and sets the parcel's music — on a grid imitating
+    /// `imitated`.
+    async fn a_prim_reads_its_land_and_region(imitated: ImitatedGrid) -> Result<(), TestError> {
+        let fixture = region_of(&[ScriptedBox {
+            local_id: sl_proto::RegionLocalObjectId(0xA00),
+            source: LAND_SOURCE.to_owned(),
+            experience: None,
+        }])?;
+        let mut fixture = fixture;
+        fixture.world.add_parcel(
+            sl_fake_grid::world::region_wide_parcel(
+                sl_fake_grid::scenario::STOCK_PARCEL_LOCAL_ID,
+                sl_types::key::OwnerKey::Agent(box_owner()),
+                sl_fake_grid::scenario::STOCK_PARCEL_NAME,
+            ),
+            sl_fake_grid::scenario::stock_parcel_id(),
+            0.0,
+        );
+        let mut scene = scene_of(imitated, fixture).await?;
+        scene.tick(2).await?;
+        scene.shout("land").await?;
+        // llSetParcelMusicURL holds the script 2 s on both grids.
+        scene.tick(150).await?;
+        let channel = if imitated == ImitatedGrid::SecondLife {
+            "Second Life Server"
+        } else {
+            "OpenSim"
+        };
+        let mut lines = Vec::new();
+        let mut music = Vec::new();
+        while let Ok(Some(seen)) = tokio::time::timeout(QUIET, scene.seen.recv()).await {
+            match seen {
+                Seen::Chat(ChatType::Shout, message) => lines.push(message),
+                Seen::Music(url) => music.push(url),
+                _other => {}
+            }
+        }
+        assert_eq!(
+            lines,
+            vec![
+                format!(
+                    "Fake Region|Fake Grid Parcel, 65536|25|{channel}|1|\
+                     <256000.00000, 256000.00000, 0.00000>|1"
+                ),
+                "music http://example.com/stream".to_owned(),
+            ]
+        );
+        assert_eq!(
+            music.last(),
+            Some(&Some("http://example.com/stream".to_owned())),
+            "the avatar on the parcel is sent its new music"
+        );
+        scene.stop();
+        Ok(())
+    }
+
+    /// On a grid imitating Second Life.
+    #[tokio::test]
+    async fn a_prim_reads_its_land_and_region_on_second_life() -> Result<(), TestError> {
+        a_prim_reads_its_land_and_region(ImitatedGrid::SecondLife).await
+    }
+
+    /// On a grid imitating OpenSim.
+    #[tokio::test]
+    async fn a_prim_reads_its_land_and_region_on_opensim() -> Result<(), TestError> {
+        a_prim_reads_its_land_and_region(ImitatedGrid::OpenSim).await
+    }
+
+    /// The URL box of [`a_script_serves_its_url_and_sends_requests`]: it asks
+    /// for a URL and shouts it, answers every request with what it read of it,
+    /// and on channel 7 sends a request to its own URL or off the grid,
+    /// shouting what comes back.
+    const URL_SOURCE: &str = "string url;
+default
+{
+    state_entry()
+    {
+        llListen(7, \"\", NULL_KEY, \"\");
+        llRequestURL();
+    }
+
+    listen(integer channel, string name, key id, string message)
+    {
+        if (message == \"own\")
+        {
+            llHTTPRequest(url + \"/own\", [HTTP_METHOD, \"POST\"], \"self\");
+        }
+        else if (message == \"off\")
+        {
+            llHTTPRequest(\"http://example.invalid/\", [], \"\");
+        }
+    }
+
+    http_request(key id, string method, string body)
+    {
+        if (method == URL_REQUEST_GRANTED)
+        {
+            url = body;
+            llShout(0, \"url\");
+            return;
+        }
+        llShout(0, \"inbound \" + method + \" \" + llGetHTTPHeader(id, \"x-path-info\") + \" \" + body
+            + \" \" + llGetHTTPHeader(id, \"x-secondlife-shard\")
+            + \" \" + (string)(llGetHTTPHeader(id, \"x-secondlife-object-key\") == (string)llGetKey()));
+        llHTTPResponse(id, 201, \"pong \" + body);
+    }
+
+    http_response(key id, integer status, list metadata, string body)
+    {
+        llShout(0, \"response \" + (string)status + \" \" + llGetSubString(body, 0, 30));
+    }
+}
+";
+
+    /// A scripted prim is granted a URL on the fake grid's HTTP service; a
+    /// request from outside reaches its script and comes back with what it
+    /// answers; its request to its own URL arrives with the grid's headers;
+    /// and one off the grid fails cleanly with no responder — on a grid
+    /// imitating `imitated`.
+    async fn a_script_serves_its_url_and_sends_requests(
+        imitated: ImitatedGrid,
+    ) -> Result<(), TestError> {
+        let fixture = region_of(&[ScriptedBox {
+            local_id: sl_proto::RegionLocalObjectId(0xA00),
+            source: URL_SOURCE.to_owned(),
+            experience: None,
+        }])?;
+        let mut scene = scene_of(imitated, fixture).await?;
+        scene.tick(3).await?;
+        assert_eq!(shouted(&mut scene).await, vec!["url".to_owned()]);
+        let url = scene
+            .grid
+            .script_urls()
+            .into_iter()
+            .next()
+            .ok_or("no URL granted")?;
+        let opensim = imitated == ImitatedGrid::OpenSim;
+        assert!(
+            url.contains(if opensim { "/lslhttp/" } else { "/cap/" }),
+            "{url}"
+        );
+        // From outside: the request waits on the script's answer while the
+        // region ticks.
+        let client = reqwest::Client::builder().no_proxy().build()?;
+        let fetch = tokio::spawn(client.post(format!("{url}/ext")).body("ping").send());
+        for _ in 0..20 {
+            scene.tick(1).await?;
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        let answer = fetch.await??;
+        assert_eq!(answer.status().as_u16(), 201);
+        assert_eq!(answer.text().await?, "pong ping");
+        let ext_path = if opensim { "//ext" } else { "/ext" };
+        let shard = if opensim { "OpenSim" } else { "Production" };
+        assert_eq!(
+            shouted(&mut scene).await,
+            vec![format!("inbound POST {ext_path} ping  0")]
+        );
+        // Its own URL, from the script: the grid's headers arrive with it.
+        scene.shout("own").await?;
+        scene.tick(6).await?;
+        let own_path = if opensim { "//own" } else { "/own" };
+        assert_eq!(
+            shouted(&mut scene).await,
+            vec![
+                format!("inbound POST {own_path} self {shard} 1"),
+                "response 201 pong self".to_owned(),
+            ]
+        );
+        // Off the grid: no responder, a clean failure.
+        scene.shout("off").await?;
+        scene.tick(4).await?;
+        assert_eq!(
+            shouted(&mut scene).await,
+            vec!["response 499 The fake grid sends no request ".to_owned()]
+        );
+        scene.stop();
+        Ok(())
+    }
+
+    /// On a grid imitating Second Life.
+    #[tokio::test]
+    async fn a_script_serves_its_url_and_sends_requests_on_second_life() -> Result<(), TestError> {
+        a_script_serves_its_url_and_sends_requests(ImitatedGrid::SecondLife).await
+    }
+
+    /// On a grid imitating OpenSim.
+    #[tokio::test]
+    async fn a_script_serves_its_url_and_sends_requests_on_opensim() -> Result<(), TestError> {
+        a_script_serves_its_url_and_sends_requests(ImitatedGrid::OpenSim).await
+    }
+
+    /// The pose box of [`a_script_animates_and_takes_the_controls_of_an_avatar`]:
+    /// on channel 7 it asks the avatar speaking to let it animate and take
+    /// controls, then dances it, takes the forward key and says what it reads
+    /// of it; asked again it says whether the dance plays, and it says
+    /// every change of the keys.
+    const AVATAR_SOURCE: &str = "key agent;
+default
+{
+    state_entry()
+    {
+        llListen(7, \"\", NULL_KEY, \"\");
+    }
+
+    listen(integer channel, string name, key id, string message)
+    {
+        if (message == \"ask\")
+        {
+            agent = id;
+            llRequestPermissions(id, PERMISSION_TRIGGER_ANIMATION | PERMISSION_TAKE_CONTROLS);
+        }
+        else if (message == \"list\")
+        {
+            llShout(0, \"dancing \" + (string)(llListFindList(llGetAnimationList(agent),
+                [(key)\"b68a3d7c-de9e-fc87-eec8-543d787e5b0d\"]) != -1));
+        }
+    }
+
+    run_time_permissions(integer perms)
+    {
+        llStartAnimation(\"dance1\");
+        llTakeControls(CONTROL_FWD, TRUE, FALSE);
+        llShout(0, \"granted \" + (string)perms + \" \" + llGetAnimation(agent) + \" \"
+            + llKey2Name(agent) + \" \" + llGetUsername(agent));
+    }
+
+    control(key id, integer level, integer edge)
+    {
+        if (edge)
+        {
+            llShout(0, \"control \" + (string)level + \" \" + (string)edge);
+        }
+    }
+}
+";
+
+    /// A scripted prim is granted animation and controls by the avatar, plays
+    /// a dance on it that its animation list then holds, reads its state and
+    /// names, and hears the forward key the viewer
+    /// holds and lets go — on a grid imitating `imitated`.
+    async fn a_script_animates_and_takes_the_controls_of_an_avatar(
+        imitated: ImitatedGrid,
+    ) -> Result<(), TestError> {
+        let fixture = region_of(&[ScriptedBox {
+            local_id: sl_proto::RegionLocalObjectId(0xA00),
+            source: AVATAR_SOURCE.to_owned(),
+            experience: None,
+        }])?;
+        let mut scene = scene_of(imitated, fixture).await?;
+        scene.tick(2).await?;
+        let question = scene.ask("ask").await?;
+        scene
+            .answer(&question, sl_types::lsl::ScriptPermissions(0x14))
+            .await?;
+        scene.tick(3).await?;
+        assert_eq!(
+            shouted(&mut scene).await,
+            vec!["granted 20 Standing Test User test.user".to_owned()]
+        );
+        scene.shout("list").await?;
+        scene.tick(2).await?;
+        assert_eq!(shouted(&mut scene).await, vec!["dancing 1".to_owned()]);
+        scene
+            .commands
+            .send(Command::SetControls(sl_proto::ControlFlags::AT_POS))
+            .await?;
+        for _ in 0..6 {
+            scene.tick(1).await?;
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        scene
+            .commands
+            .send(Command::SetControls(sl_proto::ControlFlags::empty()))
+            .await?;
+        for _ in 0..6 {
+            scene.tick(1).await?;
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert_eq!(
+            shouted(&mut scene).await,
+            vec!["control 1 1".to_owned(), "control 0 1".to_owned()]
+        );
+        scene.stop();
+        Ok(())
+    }
+
+    /// On a grid imitating Second Life.
+    #[tokio::test]
+    async fn a_script_animates_and_takes_the_controls_of_an_avatar_on_second_life()
+    -> Result<(), TestError> {
+        a_script_animates_and_takes_the_controls_of_an_avatar(ImitatedGrid::SecondLife).await
+    }
+
+    /// On a grid imitating OpenSim.
+    #[tokio::test]
+    async fn a_script_animates_and_takes_the_controls_of_an_avatar_on_opensim()
+    -> Result<(), TestError> {
+        a_script_animates_and_takes_the_controls_of_an_avatar(ImitatedGrid::OpenSim).await
     }
 }

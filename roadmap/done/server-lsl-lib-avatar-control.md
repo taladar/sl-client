@@ -2,7 +2,7 @@
 id: server-lsl-lib-avatar-control
 title: Library tranche — avatars, animation, sitting, controls and camera
 topic: server
-status: ideas
+status: done
 origin: LSL-on-the-fake-grid audit (2026-09-20)
 blocked_by: [server-lsl-vm-execution, server-world-agent-movement,
   server-world-sit-and-attach, gridspec-lsl-avatar-control]
@@ -173,3 +173,53 @@ event; `Host::seated_on` and `Host::sit_on_link` answer from the region.
 Left: `llGetAgentSize` (the `avatar/sit` probe reads it of the sitter),
 `llAttachToAvatarTemp`, `llGetAttachedList`, the follow camera cleared when a
 sitter stands on OpenSim, and the rest of the tranche.
+
+## Done (2026-11-07)
+
+`vm/avatars.rs` holds what a host lends of an avatar (`Agent`, `AgentRecord`)
+and each grid's shapes: the `ScriptControlChange`s of a take and a release
+(Second Life's release-everything first, the nudge bits and the complement
+for accept-off; OpenSim's double release), the follow-camera properties
+(vectors split, Second Life's order against OpenSim's sorted), the control
+event's repeats (every second frame against once) and the default animation
+names. `library/avatars.rs` has the queries (`llGetAgentSize`,
+`llGetAgentInfo`, `llGetAgentLanguage`, `llKey2Name`, `llGetDisplayName`,
+`llGetUsername`, `llName2Key`, `llRequestAgentData`, `llRequestDisplayName`,
+`llRequestUsername`, `llRequestUserKey`), the animations and overrides with
+Second Life's complaints, the object animations, `llTakeControls` /
+`llReleaseControls` (which drops `TAKE_CONTROLS`), the camera functions, the
+three teleports (the owner, or a granting avatar in an experience, on Second
+Life) and `llGetAttachedList`. The `control` event is `Engine::controls`. The
+`avatar/permissions` replay compares every line now; `avatar/animation`,
+`avatar/controls` and `avatar/camera` replay on the three flavours
+(`vm/tests/avatars.rs`). The fake grid (`scripts/avatars.rs`) reads the avatars
+present, plays animations through the session's animation set, stands an
+avatar as its `Standing` override, routes held keys to the scripts that took
+them, and sends the control changes and follow camera; held end to end by
+`a_script_animates_and_takes_the_controls_of_an_avatar`.
+
+## Left open
+
+- **OpenSim's 66 NPC and avatar functions** are
+  [[server-lsl-lib-ossl-avatars]].
+- **Scripted teleports on the fake grid**: `llTeleportAgent` and its family
+  are checked by the runtime, but the fake grid's teleport machinery runs
+  outside a region's tick, so the host only logs that it does not model them.
+  The acceptance row of a scripted teleport through the ordinary phases is not
+  met.
+- **Object animations on the fake grid** (`llStartObjectAnimation`) likewise
+  log and do nothing.
+- **`llAttachToAvatarTemp`** is the other worktree's (staged there with the
+  attachment work), not done here.
+- **`llPushObject`, `llMoveToTarget`** stay with
+  [[server-lsl-lib-physics-vehicles]], which lists them and is blocked on the
+  physics.
+- **Not modelled**: an animation's source object in the avatar's set (a
+  scripted dance is stated as the avatar's own), OpenSim's follow camera
+  cleared when a sitter stands, `llRequestAgentData`'s online state for an
+  avatar elsewhere on the grid (the tick sees only its region), `AGENT_*` bits
+  beyond posture, seat and attachments (typing, away, busy, mouselook,
+  scripted), and the pose-ball acceptance row as one scenario.
+- **The live check in the Bevy viewer** that `llTakeControls` routes its
+  movement keys is not run: the end-to-end test drives the keys through
+  `sl-client-tokio`'s `SetControls` instead.

@@ -94,3 +94,9 @@ The prim tranche's acceptance left the rendered half here: a prim whose script
 changes colour, texture, text, scale and particles on a timer, and both
 viewers' frames agreeing. `sl-fake-grid/tests/scripts.rs`'s
 `a_script_dresses_its_prim` already checks the update such a script sends.
+
+## From server-lsl-lib-task-inventory (2026-11-07)
+
+A rezzer is ready to stand in the scenario: a scripted prim holding an object
+the grid took (dropped in by a viewer, or by the scenario through the take
+path) rezzes it with its scripts and a start parameter.

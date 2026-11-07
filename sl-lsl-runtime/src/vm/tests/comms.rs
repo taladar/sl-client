@@ -40,7 +40,7 @@ fn prim_key(prim: u64) -> String {
 
 /// `source` offline as the script `script`, in the prim numbered `prim`, with
 /// the calls of the tranches not written yet answered.
-fn rigged(source: &str, script: &str, prim: u64) -> String {
+pub(super) fn rigged(source: &str, script: &str, prim: u64) -> String {
     let helpers = format!(
         "string key2name(key id)\n{{\n    if (id == \"{OWNER}\") {{ return \"{}\"; }}\n    \
          if (id == \"{OTHER}\") {{ return \"{}\"; }}\n    return \"\";\n}}\n\n",
@@ -69,17 +69,39 @@ pub(super) struct Region {
     places: BTreeMap<u64, Vector>,
     /// How many of the host's `said` and `said_to` lines are routed.
     routed: (usize, usize),
+    /// `object_rez(key)` to raise in each rezzer after the next tick's
+    /// scripts ran and before what they said is routed: the rezzed object's
+    /// scripts run their `on_rez` first, and its rezzer hears of it before it
+    /// hears what they said.
+    pub(super) object_rezzes: Vec<(CallerId, String)>,
 }
 
 impl Region {
     /// An empty region imitating `flavour`.
     pub(super) fn new(flavour: EngineFlavour) -> Self {
+        let mut host = Recorder::default();
+        // Each grid's URL surface as the `http/*` probes met it: aditi's
+        // simulator by name, the local OpenSim at its own address with no
+        // HTTPS listener.
+        host.http.flavour = flavour;
+        if flavour.is_opensim() {
+            host.http.authority = "127.0.0.1:9000".to_owned();
+            host.http.no_secure = true;
+            host.http.allowance = 100;
+            host.http.remote = "127.0.0.1".to_owned();
+        } else {
+            host.http.authority = "simhost.aditi.lindenlab.com:12046".to_owned();
+            host.http.secure_authority = "simhost.aditi.lindenlab.com:12043".to_owned();
+            host.http.allowance = 7851;
+            host.http.remote = "216.82.0.1".to_owned();
+        }
         Self {
             engine: engine_as(flavour),
-            host: Recorder::default(),
+            host,
             scripts: Vec::new(),
             places: BTreeMap::new(),
             routed: (0, 0),
+            object_rezzes: Vec::new(),
         }
     }
 
@@ -98,10 +120,27 @@ impl Region {
         prim: u64,
         source: &str,
     ) -> Result<(), String> {
+        self.add_as(id, name, prim, &rigged(source, name, prim))
+    }
+
+    /// Add `source` as it is, but for `llOwnerSay` printed, as `name`, the
+    /// script `id` in the prim numbered `prim`: for a probe whose world reads
+    /// (`llGetEnv`, `llGetRegionName`) the test answers for real.
+    pub(super) fn add_unrigged(
+        &mut self,
+        id: CallerId,
+        name: &str,
+        prim: u64,
+        source: &str,
+    ) -> Result<(), String> {
+        self.add_as(id, name, prim, &source.replace("llOwnerSay(", "print("))
+    }
+
+    /// Add the compiled `source` as `name`, the script `id` in the prim
+    /// numbered `prim`.
+    fn add_as(&mut self, id: CallerId, name: &str, prim: u64, source: &str) -> Result<(), String> {
         let flavour = self.engine.config().flavour;
-        let _none = self
-            .engine
-            .add(id, program_for(&rigged(source, name, prim), flavour)?);
+        let _none = self.engine.add(id, program_for(source, flavour)?);
         let _none = self.host.scripts.insert(name.to_owned(), id);
         let _none = self.host.prims.insert(id, prim);
         let _none = self.host.prim_keys.insert(prim, prim_key(prim));
@@ -122,6 +161,13 @@ impl Region {
     /// prim; a `llRegionSayTo` to the scripts of the prim it names.
     pub(super) fn tick(&mut self) -> Result<(), String> {
         let _reports = run(&mut self.engine, &mut self.host, 1);
+        self.route_http()?;
+        for (rezzer, object) in core::mem::take(&mut self.object_rezzes) {
+            let _posted = self
+                .engine
+                .object_rezzed(rezzer, &object)
+                .map_err(|error| error.to_string())?;
+        }
         let said: Vec<(CallerId, Speech)> = self
             .host
             .said
@@ -186,6 +232,182 @@ impl Region {
                 }
             }
         }
+        Ok(())
+    }
+
+    /// Route the HTTP the last tick's scripts did, as the grid would by the
+    /// next tick: a request to a script's URL reaches it (or the grid's URL
+    /// surface answers it), an answer goes back to the sender, a request
+    /// sent anywhere else is answered 499 (the test sends nothing off the
+    /// region), a request unanswered past the grid's wait times out, and a
+    /// URL its script no longer holds is released.
+    pub(super) fn route_http(&mut self) -> Result<(), String> {
+        let flavour = self.engine.config().flavour;
+        for (from, request) in core::mem::take(&mut self.host.http.sent) {
+            let url = request.url.clone();
+            let headers = request.headers.clone();
+            let arrived = self.arrive(
+                Some((from, request.id.clone())),
+                &request.method,
+                &url,
+                &headers,
+                &request.body,
+            )?;
+            if !arrived {
+                let prim = self.prim_mates(from);
+                let _posted = self
+                    .engine
+                    .http_response(
+                        from,
+                        &request.id,
+                        499,
+                        "No route: the test region sends nothing off it",
+                        &prim,
+                    )
+                    .map_err(|error| error.to_string())?;
+            }
+        }
+        for (_answering, request, answered) in core::mem::take(&mut self.host.http.answered) {
+            if let Some((sender, method, _)) = self.host.http.waiting.remove(&request) {
+                self.reply(sender, &method, answered)?;
+            }
+        }
+        let now = self.host.now;
+        let (wait, timed_out) = crate::vm::http::timeout(flavour);
+        let ticks = wait
+            .as_micros()
+            .checked_div(self.engine.config().step.as_micros())
+            .and_then(|ticks| u64::try_from(ticks).ok())
+            .unwrap_or(u64::MAX);
+        let late: Vec<String> = self
+            .host
+            .http
+            .waiting
+            .iter()
+            .filter(|(_, (_, _, at))| now.saturating_sub(*at) >= ticks)
+            .map(|(key, _)| key.clone())
+            .collect();
+        for key in late {
+            if let Some((sender, method, _)) = self.host.http.waiting.remove(&key) {
+                self.reply(sender, &method, timed_out.clone())?;
+            }
+        }
+        let engine = &self.engine;
+        self.host
+            .http
+            .urls
+            .retain(|_, (holder, url)| engine.urls(*holder).contains(url));
+        Ok(())
+    }
+
+    /// A request from `sender` (a script and its request's key, or [`None`]
+    /// from outside) to `url`; whether `url` is a script URL of the region.
+    fn arrive(
+        &mut self,
+        sender: Option<(CallerId, String)>,
+        method: &str,
+        url: &str,
+        headers: &[(String, String)],
+        body: &str,
+    ) -> Result<bool, String> {
+        let flavour = self.engine.config().flavour;
+        let Some((holder, granted)) = self
+            .host
+            .http
+            .urls
+            .iter()
+            .find(|(_, (_, granted))| url.starts_with(granted.trim_end_matches('/')))
+            .map(|(_, (holder, granted))| (*holder, granted.clone()))
+        else {
+            let released = url.split('/').any(|part| part.len() == 36)
+                && (url.contains("/cap/") || url.contains("/lslhttp/"));
+            if released && sender.is_none() {
+                let key = url
+                    .split('/')
+                    .find(|part| part.len() == 36)
+                    .unwrap_or_default()
+                    .to_owned();
+                self.reply(None, method, crate::vm::http::not_found(flavour, &key))?;
+                return Ok(true);
+            }
+            return Ok(false);
+        };
+        let rest = url
+            .get(granted.trim_end_matches('/').len()..)
+            .unwrap_or_default();
+        let (path, query) = rest.split_once('?').unwrap_or((rest, ""));
+        let remote = self.host.http.remote.clone();
+        match crate::vm::http::arrive(
+            flavour,
+            &granted,
+            (method, path, query),
+            &remote,
+            headers,
+            body,
+        ) {
+            crate::vm::http::Arrival::Answered(answered) => self.reply(sender, method, answered)?,
+            crate::vm::http::Arrival::Script(inbound) => {
+                self.host.http.arrivals = self.host.http.arrivals.saturating_add(1);
+                let id = format!("4e4e4e4e-0000-4000-8000-{:012x}", self.host.http.arrivals);
+                let now = self.host.now;
+                let _previous = self
+                    .host
+                    .http
+                    .waiting
+                    .insert(id.clone(), (sender, method.to_owned(), now));
+                let _posted = self
+                    .engine
+                    .http_request(holder, &id, inbound)
+                    .map_err(|error| error.to_string())?;
+            }
+        }
+        Ok(true)
+    }
+
+    /// Send `answered` back to `sender`: a script's `http_response`, or a
+    /// fetch's record. A `HEAD`'s answer carries no body.
+    fn reply(
+        &mut self,
+        sender: Option<(CallerId, String)>,
+        method: &str,
+        mut answered: crate::vm::http::Answered,
+    ) -> Result<(), String> {
+        if method == "HEAD" {
+            answered.body.clear();
+        }
+        match sender {
+            Some((script, request)) => {
+                let prim = self.prim_mates(script);
+                let _posted = self
+                    .engine
+                    .http_response(script, &request, answered.status, &answered.body, &prim)
+                    .map_err(|error| error.to_string())?;
+            }
+            None => self.host.http.fetched.push((method.to_owned(), answered)),
+        }
+        Ok(())
+    }
+
+    /// Every script in the prim `script` is in, itself included.
+    fn prim_mates(&self, script: CallerId) -> Vec<CallerId> {
+        let prim = self.host.prim_of(script);
+        self.scripts
+            .iter()
+            .copied()
+            .filter(|other| self.host.prim_of(*other) == prim)
+            .collect()
+    }
+
+    /// A request from outside the region (the probes' `fetch` drive) to
+    /// `url`.
+    pub(super) fn fetch(
+        &mut self,
+        method: &str,
+        url: &str,
+        headers: &[(String, String)],
+        body: &str,
+    ) -> Result<(), String> {
+        let _arrived = self.arrive(None, method, url, headers, body)?;
         Ok(())
     }
 

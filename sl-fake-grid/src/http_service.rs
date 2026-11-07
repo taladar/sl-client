@@ -166,6 +166,13 @@ async fn handle_request(
         &request,
         http::header::HeaderName::from_static("destination"),
     );
+    let headers: Vec<(String, String)> = request
+        .headers()
+        .iter()
+        .filter_map(|(name, value)| {
+            Some((name.as_str().to_owned(), value.to_str().ok()?.to_owned()))
+        })
+        .collect();
 
     let body = match collect_body(request).await {
         Ok(body) => body,
@@ -314,7 +321,60 @@ async fn handle_request(
         return Ok(caps_http_response(caps_response));
     }
 
+    if path.starts_with("/cap/") || path.starts_with("/lslhttp/") {
+        return Ok(script_url(&core, (&method, &path, query.as_deref()), &headers, &body).await);
+    }
+
     Ok(plain_status(HttpStatusCode::NOT_FOUND))
+}
+
+/// The longest a request from outside waits on a script, in real time: the
+/// region answers it itself after its grid's wait in ticks
+/// ([`sl_lsl_runtime::vm::http::timeout`]); this only stops a request hanging
+/// on a region that is not ticking at all.
+const SCRIPT_URL_PATIENCE: Duration = Duration::from_secs(60);
+
+/// A request from outside to a script's URL (`llRequestURL`): handed to the
+/// script at its region's next tick, and answered with what it answers
+/// (`llHTTPResponse`), or what the grid's URL surface answers in its place.
+async fn script_url(
+    core: &GridCore,
+    (method, path, query): (&str, &str, Option<&str>),
+    headers: &[(String, String)],
+    body: &[u8],
+) -> Response<Full<Bytes>> {
+    let url = format!(
+        "http://{}{path}{}",
+        crate::scripts::http::authority(core),
+        query.map_or_else(String::new, |query| format!("?{query}"))
+    );
+    let (sender, receiver) = tokio::sync::oneshot::channel();
+    let body = String::from_utf8_lossy(body);
+    let arrived = crate::scripts::http::arrive(
+        core,
+        crate::script_http::Reply::Outside(sender),
+        method,
+        &url,
+        headers,
+        &body,
+        "127.0.0.1",
+    );
+    if !arrived {
+        return plain_status(HttpStatusCode::NOT_FOUND);
+    }
+    let Ok(Ok(answered)) = tokio::time::timeout(SCRIPT_URL_PATIENCE, receiver).await else {
+        return plain_status(HttpStatusCode::GATEWAY_TIMEOUT);
+    };
+    let status = u16::try_from(answered.status)
+        .ok()
+        .and_then(|status| HttpStatusCode::from_u16(status).ok())
+        .unwrap_or(HttpStatusCode::INTERNAL_SERVER_ERROR);
+    let mut response = Response::new(Full::new(Bytes::from(answered.body)));
+    *response.status_mut() = status;
+    if !answered.content_type.is_empty() {
+        set_content_type(&mut response, &answered.content_type);
+    }
+    response
 }
 
 /// Reads one header as a string, if present and valid UTF-8.

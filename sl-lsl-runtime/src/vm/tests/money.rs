@@ -46,7 +46,16 @@ enum Drive {
     },
     /// `agent` asks the prim `prim` for its pay buttons.
     PayPrice { agent: String, prim: u64 },
+    /// The owner holds the control keys `keys` down for a second.
+    Control { keys: i32 },
+    /// `agent` sits on the probe's prim.
+    Sit { agent: String },
+    /// `agent` stands up from it.
+    Stand { agent: String },
 }
+
+/// `CHANGED_LINK`: an avatar sat down or stood up.
+const CHANGED_LINK: i32 = 0x20;
 
 /// The prim a `prim=` field names, A when it names none.
 fn prim_named(name: Option<&str>) -> u64 {
@@ -79,6 +88,8 @@ pub(super) struct Runner {
     /// A `PROBE` record that sets a script's start parameter when printed,
     /// and the parameter: how a rigged probe carries a mark across a reset.
     mark: Option<(&'static str, CallerId, i32)>,
+    /// The keys the owner holds down, and the tick it lets go.
+    holding: Option<(i32, u64)>,
 }
 
 impl Runner {
@@ -103,6 +114,7 @@ impl Runner {
             notes: Vec::new(),
             asked: 0,
             mark: None,
+            holding: None,
         }
     }
 
@@ -127,6 +139,7 @@ impl Runner {
             self.now = self.now.saturating_add(1);
             self.region.host.now = self.now;
             self.region.tick()?;
+            self.press()?;
             self.note_questions();
             self.schedule()?;
             self.act()?;
@@ -217,6 +230,11 @@ impl Runner {
                     agent,
                     prim: prim_named(parsed.field("prim")),
                 },
+                Some("control") => Drive::Control {
+                    keys: number("keys")?,
+                },
+                Some("sit") => Drive::Sit { agent },
+                Some("stand") => Drive::Stand { agent },
                 other => return Err(format!("no drive {other:?}: {line}")),
             };
             self.due
@@ -262,6 +280,50 @@ impl Runner {
                     prim,
                     amount,
                 } => self.pay(&agent, prim, amount)?,
+                Drive::Control { keys } => {
+                    let step = self.region.engine.config().step.as_micros().max(1);
+                    let second =
+                        u64::try_from(1_000_000_u128.checked_div(step).unwrap_or(1)).unwrap_or(1);
+                    self.holding = Some((keys, now.saturating_add(second)));
+                }
+                Drive::Sit { agent } => {
+                    // The avatar takes the prim's sit target, and its scripts
+                    // hear the link change.
+                    let _previous = self.region.host.on_target.insert(1, agent.clone());
+                    for id in self.scripts() {
+                        let _previous = self.region.host.seated.insert(id, agent.clone());
+                        let _posted = self
+                            .region
+                            .engine
+                            .changed(id, CHANGED_LINK)
+                            .map_err(|error| error.to_string())?;
+                    }
+                }
+                Drive::Stand { agent } => {
+                    // Both grids drop what a sitter granted unasked when it
+                    // stands, and OpenSim clears the follow camera it set.
+                    let _gone = self.region.host.on_target.remove(&1);
+                    for id in self.scripts() {
+                        let _gone = self.region.host.seated.remove(&id);
+                        let _posted = self
+                            .region
+                            .engine
+                            .changed(id, CHANGED_LINK)
+                            .map_err(|error| error.to_string())?;
+                        self.region.engine.revoke(
+                            id,
+                            &agent,
+                            crate::vm::permissions::PERMISSION_TAKE_CONTROLS
+                                | crate::vm::permissions::PERMISSION_CONTROL_CAMERA,
+                        );
+                    }
+                    if self.flavour.is_opensim() {
+                        self.region
+                            .host
+                            .avatar_notes
+                            .push("# follow-cam-clear object=probe".to_owned());
+                    }
+                }
                 Drive::PayPrice { agent, prim } => {
                     let by = if agent == OTHER { " by=other" } else { "" };
                     let letter = match prim {
@@ -337,6 +399,34 @@ impl Runner {
         Ok(())
     }
 
+    /// Offer every script that took the owner's controls what the owner
+    /// holds down this tick.
+    fn press(&mut self) -> Result<(), String> {
+        let held = match self.holding {
+            Some((keys, until)) if self.now < until => keys,
+            Some(_) => {
+                self.holding = None;
+                0
+            }
+            None => 0,
+        };
+        let takers: Vec<(CallerId, String)> = self
+            .region
+            .host
+            .controls_taken
+            .iter()
+            .map(|(id, agent)| (*id, agent.clone()))
+            .collect();
+        for (id, agent) in takers {
+            let _posted = self
+                .region
+                .engine
+                .controls(id, &agent, held)
+                .map_err(|error| error.to_string())?;
+        }
+        Ok(())
+    }
+
     /// Every script still in the region.
     fn scripts(&self) -> Vec<CallerId> {
         self.region.host.prims.keys().copied().collect()
@@ -390,26 +480,12 @@ fn transcripts(name: &str) -> [(EngineFlavour, &'static str); 3] {
     ]
 }
 
-/// What Second Life says of the avatar-control calls `avatar/permissions`
-/// makes before anything is granted. Those calls are
-/// `server-lsl-lib-avatar-control`'s, rigged out of the probe here, so the
-/// lines are not said.
-const AVATAR_CONTROL_COMPLAINTS: [&str; 3] = [
-    "Script trying to take controls from owner but PERMISSION_TAKE_CONTROLS permission not set!",
-    "Script trying to trigger animations but PERMISSION_TRIGGER_ANIMATION permission not set",
-    "Script trying to set camera parameters but PERMISSION_CONTROL_CAMERA permission not set!",
-];
-
 #[test]
 fn avatar_permissions_asks_answers_and_refuses_as_each_grid_did() -> Result<(), String> {
-    let source = include_str!("../../../probes/avatar/permissions.lsl")
-        .replace("llTakeControls(CONTROL_FWD, TRUE, FALSE);", "")
-        .replace("llStartAnimation(\"dance1\");", "")
-        .replace("llSetCameraParams([CAMERA_ACTIVE, TRUE]);", "")
-        .replace("llGetCameraPos() == ZERO_VECTOR", "TRUE");
+    let source = include_str!("../../../probes/avatar/permissions.lsl");
     for (flavour, transcript) in transcripts("permissions") {
         let mut runner = Runner::new(flavour);
-        runner.add(A, "Probe", 1, &source)?;
+        runner.add(A, "Probe", 1, source)?;
         runner.run(2_000)?;
         assert_eq!(
             canonical(&runner.region.lines(), &[]),
@@ -417,11 +493,11 @@ fn avatar_permissions_asks_answers_and_refuses_as_each_grid_did() -> Result<(), 
             "{flavour:?}"
         );
         assert_eq!(runner.notes, noted(transcript), "{flavour:?}");
-        let said: Vec<String> = noted_debug(transcript)
-            .into_iter()
-            .filter(|line| !AVATAR_CONTROL_COMPLAINTS.contains(&line.as_str()))
-            .collect();
-        assert_eq!(runner.region.debug_lines(), said, "{flavour:?}");
+        assert_eq!(
+            runner.region.debug_lines(),
+            noted_debug(transcript),
+            "{flavour:?}"
+        );
     }
     Ok(())
 }

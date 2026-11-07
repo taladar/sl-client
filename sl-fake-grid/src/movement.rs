@@ -159,6 +159,53 @@ pub enum Posture {
 }
 
 impl Posture {
+    /// The movement state as `llGetAnimation` names it.
+    #[must_use]
+    pub const fn state_name(self) -> &'static str {
+        match self {
+            Self::Standing => "Standing",
+            Self::Walking => "Walking",
+            Self::Running => "Running",
+            Self::Crouching => "Crouching",
+            Self::CrouchWalking => "CrouchWalking",
+            Self::PreJump => "PreJumping",
+            Self::Jumping => "Jumping",
+            Self::Falling => "Falling Down",
+            Self::Landing => "Landing",
+            Self::StandingUp => "Standing Up",
+            Self::Hovering => "Hovering",
+            Self::HoverUp => "Hovering Up",
+            Self::HoverDown => "Hovering Down",
+            Self::Flying => "Flying",
+            Self::SittingOnGround => "Sitting on Ground",
+        }
+    }
+
+    /// The `AGENT_*` bits of `llGetAgentInfo` the posture sets: flying,
+    /// walking, in the air, crouching, sitting on the ground.
+    #[must_use]
+    pub const fn agent_info(self) -> i32 {
+        /// `AGENT_FLYING`.
+        const FLYING: i32 = 0x1;
+        /// `AGENT_SITTING`.
+        const SITTING: i32 = 0x10;
+        /// `AGENT_WALKING`.
+        const WALKING: i32 = 0x80;
+        /// `AGENT_IN_AIR`.
+        const IN_AIR: i32 = 0x100;
+        /// `AGENT_CROUCHING`.
+        const CROUCHING: i32 = 0x400;
+        match self {
+            Self::Hovering | Self::HoverUp | Self::HoverDown | Self::Flying => FLYING | IN_AIR,
+            Self::Walking | Self::Running => WALKING,
+            Self::CrouchWalking => WALKING | CROUCHING,
+            Self::Crouching => CROUCHING,
+            Self::PreJump | Self::Jumping | Self::Falling => IN_AIR,
+            Self::SittingOnGround => SITTING,
+            Self::Standing | Self::Landing | Self::StandingUp => 0,
+        }
+    }
+
     /// The built-in animation's name (`sl_anim`'s short name for it).
     #[must_use]
     pub const fn animation_name(self) -> &'static str {
@@ -279,6 +326,9 @@ pub struct Motion {
     /// Whether the jump key has been let go since the last jump, so holding
     /// it is one jump, not a hop each landing.
     jump_armed: bool,
+    /// Whether the jump key went down since the last tick while armed: a tap
+    /// let go of before the tick is still a jump.
+    jump_tapped: bool,
     /// The avatar's velocity.
     velocity: Vector,
     /// What the avatar is doing.
@@ -297,6 +347,8 @@ pub struct Motion {
     /// How many unsolicited parcel pushes this session has had after its
     /// arrival's.
     pushes: i32,
+    /// Where the viewer last said its camera is, and its axes.
+    camera: Option<sl_proto::Camera>,
 }
 
 impl Default for Motion {
@@ -318,6 +370,19 @@ pub struct Stepped {
 }
 
 impl Motion {
+    /// The controls the viewer last stated.
+    #[must_use]
+    pub const fn controls(&self) -> ControlFlags {
+        self.controls
+    }
+
+    /// Where the viewer last said its camera is, and its axes; [`None`]
+    /// before its first `AgentUpdate`.
+    #[must_use]
+    pub const fn camera(&self) -> Option<&sl_proto::Camera> {
+        self.camera.as_ref()
+    }
+
     /// The state of an agent that has just arrived standing on `parcel`, which
     /// the arrival already told it of.
     #[must_use]
@@ -333,6 +398,7 @@ impl Motion {
             mode: MovementMode::Walk,
             finish_owed: false,
             jump_armed: true,
+            jump_tapped: false,
             velocity: Vector {
                 x: 0.0,
                 y: 0.0,
@@ -345,6 +411,7 @@ impl Motion {
             since_reported: Duration::ZERO,
             parcel,
             pushes: 0,
+            camera: None,
         }
     }
 
@@ -372,8 +439,11 @@ impl Motion {
                 }
                 self.controls = update.controls;
                 self.body = update.body_rotation.clone();
+                self.camera = Some(update.camera.clone());
                 if !self.controls.contains(ControlFlags::UP_POS) {
                     self.jump_armed = true;
+                } else if self.jump_armed {
+                    self.jump_tapped = true;
                 }
                 true
             }
@@ -452,6 +522,7 @@ impl Motion {
         let before = self.posture;
         self.in_posture = self.in_posture.saturating_add(step);
         let finished = core::mem::take(&mut self.finish_owed);
+        let tapped = core::mem::take(&mut self.jump_tapped);
         let mut at = position.clone();
         let floor = ground.height_at(at.x, at.y) + AVATAR_CENTRE_ABOVE_GROUND_M;
         let flying = self.controls.contains(ControlFlags::FLY);
@@ -477,7 +548,7 @@ impl Motion {
         } else if self.posture.airborne() || at.z > floor + ON_GROUND_M {
             self.fall(policy, dt);
         } else {
-            self.walk(policy, (dir_x, dir_y), steering, finished, dt);
+            self.walk(policy, (dir_x, dir_y), steering, (finished, tapped), dt);
         }
 
         at.x = self.velocity.x.mul_add(dt, at.x);
@@ -580,7 +651,7 @@ impl Motion {
         policy: &MovementPolicy,
         (dir_x, dir_y): (f32, f32),
         steering: bool,
-        finished: bool,
+        (finished, tapped): (bool, bool),
         dt: f32,
     ) {
         self.velocity.z = 0.0;
@@ -621,7 +692,7 @@ impl Motion {
             _other => {}
         }
         let crouched = self.controls.contains(ControlFlags::UP_NEG);
-        let jump = self.controls.contains(ControlFlags::UP_POS) && self.jump_armed;
+        let jump = (self.controls.contains(ControlFlags::UP_POS) || tapped) && self.jump_armed;
         if jump {
             self.jump_armed = false;
             self.velocity.x = 0.0;
@@ -1205,6 +1276,23 @@ mod test {
         let height = highest - standing().z;
         assert!((4.5..6.5).contains(&height), "{height}");
         assert!(same(at.z, standing().z), "down again: {at:?}");
+    }
+
+    /// A tap of the jump key let go of before the next tick is still a jump:
+    /// a busy viewer's press and release can both arrive between two ticks.
+    #[test]
+    fn a_tap_between_ticks_jumps() {
+        let policy = ImitatedGrid::OpenSim.movement_policy();
+        let mut motion = Motion::default();
+        hold(&mut motion, ControlFlags::UP_POS, 0.0);
+        hold(&mut motion, ControlFlags::empty(), 0.0);
+        let mut at = standing();
+        let mut highest = at.z;
+        for _tick in 0..40 {
+            at = motion.step(&policy, &Level, &at, STEP).position;
+            highest = highest.max(at.z);
+        }
+        assert!(highest - standing().z > 1.0, "{highest}");
     }
 
     /// Holding the jump key is one jump, not a hop at every landing.

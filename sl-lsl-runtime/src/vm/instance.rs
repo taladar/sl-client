@@ -462,6 +462,10 @@ pub struct Instance {
     pending_state: Option<StateId>,
     /// The first tick the script may run again.
     wake: Tick,
+    /// Reset once it has run every event it has queued: YEngine's reset of a
+    /// running script by another (`llResetOtherScript`), which delivers what
+    /// was queued first (`inventory/listing`).
+    reset_when_idle: bool,
     /// What the library may read and write: the detected block, the timer
     /// and the start parameter.
     data: ScriptData,
@@ -1062,6 +1066,7 @@ impl Instance {
             activity: None,
             pending_state: None,
             wake: Tick::default(),
+            reset_when_idle: false,
             data: ScriptData::default(),
             overdraft: 0,
             memory,
@@ -1234,7 +1239,20 @@ impl Instance {
         self.running
             && !self.held
             && self.wake <= now
-            && (self.activity.is_some() || !self.queue.is_empty())
+            && (self.activity.is_some() || !self.queue.is_empty() || self.reset_when_idle)
+    }
+
+    /// Reset the script as YEngine resets a running script another asks it
+    /// to: at once in a handler or with nothing queued, otherwise once it has
+    /// run what it has queued (`inventory/listing`).
+    pub fn reset_when_idle(&mut self) {
+        // In a handler — asleep in it, `time/reset-mid-sleep` — YEngine resets
+        // at once; idle, it runs what it had queued first.
+        if self.activity.is_some() || self.queue.is_empty() {
+            self.reset();
+        } else {
+            self.reset_when_idle = true;
+        }
     }
 
     /// Set or clear the run flag. Stopping is not resetting: the globals, the
@@ -1247,6 +1265,19 @@ impl Instance {
         if !running {
             self.queue.clear();
         }
+    }
+
+    /// [`Self::set_running`] as `flavour`'s engine stops a script: XEngine
+    /// abandons the handler in progress — asleep in it, it never wakes
+    /// (`time/reset-mid-sleep`, `time/sleep-while-stopped`) — where Second
+    /// Life and YEngine keep it to carry on when the script runs again.
+    pub fn set_running_as(&mut self, running: bool, flavour: EngineFlavour) {
+        if !running && flavour == EngineFlavour::XEngine && self.running {
+            self.activity = None;
+            self.pending_state = None;
+            self.wake = Tick::default();
+        }
+        self.set_running(running);
     }
 
     /// The script's listens: what lines it hears
@@ -1267,6 +1298,16 @@ impl Instance {
         &mut self.data.permissions
     }
 
+    /// The library-visible state of the script.
+    pub(crate) const fn data(&self) -> &ScriptData {
+        &self.data
+    }
+
+    /// The library-visible state of the script, to change.
+    pub(crate) const fn data_mut(&mut self) -> &mut ScriptData {
+        &mut self.data
+    }
+
     /// Reset the script: every global back to its type's default for the
     /// initialisers to run again, the call and operand stacks, the event queue
     /// and any requested state change dropped, any sleep cancelled, and the
@@ -1277,8 +1318,10 @@ impl Instance {
     /// start parameter are left as they are.
     pub fn reset(&mut self) {
         self.held = false;
+        self.reset_when_idle = false;
         self.data = ScriptData {
             start_parameter: self.data.start_parameter,
+            start_string: core::mem::take(&mut self.data.start_string),
             ..ScriptData::default()
         };
         self.globals = self
@@ -1493,6 +1536,19 @@ impl Instance {
         self.data.start_parameter = start_parameter;
     }
 
+    /// The start string, `llGetStartString`.
+    #[must_use]
+    pub fn start_string(&self) -> &str {
+        &self.data.start_string
+    }
+
+    /// Set the start string — what the object was rezzed with
+    /// (`REZ_PARAM_STRING`), before its `on_rez` is posted. Like the start
+    /// parameter it survives a reset; unlike it, a take does not save it.
+    pub fn set_start_string(&mut self, start_string: String) {
+        self.data.start_string = start_string;
+    }
+
     /// Whether a timer is set.
     #[must_use]
     pub const fn has_timer(&self) -> bool {
@@ -1514,17 +1570,69 @@ impl Instance {
     /// interval set in the handler replaces it. Busy in any other handler,
     /// the script has it queued when it falls due (`events/timer-reset`,
     /// 2026-11-05). OpenSim's timer thread queues it whatever runs.
-    pub(crate) fn timer_due(&mut self, now: Tick, flavour: EngineFlavour) -> bool {
+    ///
+    /// When the next falls due is each grid's (`time/timer-phase`): Second
+    /// Life keeps the phase of the due times, skipping any a busy handler let
+    /// pass; YEngine counts the next interval from this event, so its error
+    /// adds up; XEngine counts from its first event and keeps that phase.
+    pub(crate) fn timer_due(&mut self, now: Tick, step: Duration, flavour: EngineFlavour) -> bool {
         if flavour == EngineFlavour::SecondLife && self.runs_timer_handler() {
             return false;
         }
+        // A microsecond's slack: 45 ticks of 1/45 s, in whole nanoseconds,
+        // fall a hair short of the second a timer is due at.
+        let time =
+            crate::vm::context::region_time(now, step).saturating_add(Duration::from_micros(1));
         match self.data.timer.as_mut() {
-            Some(timer) if timer.next <= now => {
-                timer.next = now.after(timer.interval);
+            Some(timer) if timer.next <= time => {
+                let from_now = time.saturating_add(timer.interval);
+                timer.next = match flavour {
+                    EngineFlavour::YEngine => from_now,
+                    EngineFlavour::XEngine if !timer.fired => from_now,
+                    EngineFlavour::SecondLife | EngineFlavour::XEngine => {
+                        let mut next = timer.next.saturating_add(timer.interval);
+                        if next <= time && !timer.interval.is_zero() {
+                            let behind = time.saturating_sub(next).as_nanos();
+                            let steps = behind
+                                .checked_div(timer.interval.as_nanos())
+                                .unwrap_or(0)
+                                .saturating_add(1);
+                            let skip = timer.interval.as_nanos().saturating_mul(steps);
+                            next = next.saturating_add(Duration::from_nanos(
+                                u64::try_from(skip).unwrap_or(u64::MAX),
+                            ));
+                        }
+                        next
+                    }
+                };
+                timer.fired = true;
                 true
             }
             Some(_) | None => false,
         }
+    }
+
+    /// The sweeps due at `now`: those asked for since the last tick, and the
+    /// repeating one when it falls due, which then counts on to its next.
+    pub(crate) fn sweeps_due(
+        &mut self,
+        now: Tick,
+        step: Duration,
+    ) -> Vec<crate::vm::sensing::Query> {
+        if !self.running || self.held {
+            self.data.sweeps.clear();
+            return Vec::new();
+        }
+        let mut due = core::mem::take(&mut self.data.sweeps);
+        let time =
+            crate::vm::context::region_time(now, step).saturating_add(Duration::from_micros(1));
+        if let Some(repeat) = self.data.repeat.as_mut()
+            && repeat.next <= time
+        {
+            due.push(repeat.query.clone());
+            repeat.next = time.saturating_add(repeat.interval);
+        }
+        due
     }
 
     /// Whether the body in progress is the current state's `timer` handler.
@@ -1596,6 +1704,9 @@ impl Instance {
         if !self.is_runnable(now) {
             return Outcome::Idle;
         }
+        if self.activity.is_none() && self.queue.is_empty() && self.reset_when_idle {
+            self.reset();
+        }
         if self.activity.is_none()
             && let Err(error) = self.start_next_event()
         {
@@ -1623,6 +1734,10 @@ impl Instance {
             let flow = machine.step(used);
             if core::mem::take(&mut self.data.drop_queued_timer) {
                 self.queue.retain(|queued| queued.event.name != "timer");
+            }
+            if core::mem::take(&mut self.data.drop_queued_sensor) {
+                self.queue
+                    .retain(|queued| !matches!(queued.event.name, "sensor" | "no_sensor"));
             }
             return match flow {
                 Ok(Flow::Next) => continue,
@@ -1759,6 +1874,9 @@ impl Instance {
         self.state = target;
         self.queue.clear();
         self.data.listens.clear();
+        // A repeating sensor ends with the state on every grid
+        // (`events/state-drops`).
+        self.data.repeat = None;
         host.left_state(caller);
         let _entered = self.start_transition_handler(target, "state_entry", Phase::Entry);
         Outcome::StateChanged(target)

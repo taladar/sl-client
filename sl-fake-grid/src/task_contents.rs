@@ -144,6 +144,11 @@ pub(crate) fn answer_contents_write(
             let contents = world.objects.contents_or_empty(*local_id)?;
             let mut dropped = task_item_from(&source, object.full_id, mint);
             dropped.name = contents.free_name(&dropped.name);
+            // An object this grid took goes in with the linkset it was taken
+            // as, so a script can rez it from here.
+            if let Some(linkset) = assets.taken_linkset(source.item_id) {
+                assets.insert_taken_linkset(dropped.item_id, linkset);
+            }
             contents.write(dropped);
             let changes = tell(world, selection, sim, *local_id, Write::Drop, now);
             crate::changes::contents_written(world, *local_id, allowed_drop);
@@ -404,6 +409,48 @@ fn tell(
         tracing::warn!("pushing a written prim's contents serial failed: {error}");
     }
     if to_selectors {
+        changes.push(RegionChange::PropertiesChanged {
+            local_id,
+            properties: Box::new(properties),
+        });
+    }
+    changes
+}
+
+/// What the region's sessions are told of a write a **script** made into the
+/// prim `local_id`'s contents — no session wrote it, so only the half of
+/// [`tell`] that goes to the region: the prim sent again where its grid sends
+/// it for the write (on Second Life after every write, on OpenSim when a
+/// script lands or an item leaves — `script` says so), and its record, with
+/// the advanced serial, to the sessions holding it selected where the grid
+/// tells them.
+pub(crate) fn told_by_script(
+    world: &mut SceneFixtures,
+    local_id: RegionLocalObjectId,
+    script: bool,
+) -> Vec<RegionChange> {
+    let policy = world.contents;
+    let mut changes = Vec::new();
+    let scripted = world.objects.contents(local_id).is_some_and(|held| {
+        held.items
+            .iter()
+            .any(|item| item.inv_type == InventoryType::Script)
+    });
+    if let Some(mut object) = world.object_mut(local_id) {
+        if scripted {
+            object.update_flags |= prim_flags::SCRIPTED;
+        } else {
+            object.update_flags &= !prim_flags::SCRIPTED;
+        }
+    }
+    if (policy.resends == PrimResent::EveryWrite || script)
+        && let Some(object) = world.object_by_local_id(local_id)
+    {
+        changes.push(RegionChange::Updated(Box::new(object)));
+    }
+    if world.properties.contents_change_told_to == ContentsAudience::Selectors
+        && let Some(properties) = world.record_of(local_id)
+    {
         changes.push(RegionChange::PropertiesChanged {
             local_id,
             properties: Box::new(properties),

@@ -2,7 +2,7 @@
 id: server-lsl-forced-delays-per-flavour
 title: Charge each grid flavour's measured forced delays and throttles, not the keyword file's
 topic: server
-status: blocked
+status: ready
 origin: gridspec-lsl-throttles (2026-10-28)
 blocked_by: [gridspec-lsl-throttles, server-lsl-lib-comms,
   server-lsl-lib-http-url, server-lsl-lib-task-inventory,
@@ -78,3 +78,9 @@ The prim functions charge the keyword file's delays (`llGetPrimitiveParams`
 0.2 s, `llSetPrimitiveParams` 0.2 s, the media calls 1 s). OpenSim's refusals of
 a rule sleep a second of their own, written into `prim_params::args` and
 `prim_params::set`, not the table.
+
+## From server-lsl-lib-task-inventory (2026-11-07)
+
+`llGiveInventory` to an avatar already sleeps each flavour's measured 2 s or
+3 s (`library::rezzing::offer_delay`); move it into this task's table when the
+table lands. The other delays of the tranche are still the keyword file's.

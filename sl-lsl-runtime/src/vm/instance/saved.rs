@@ -69,8 +69,10 @@ pub(crate) fn save(instance: &Instance, now: Tick, step: Duration) -> SavedScrip
         pending_state: instance.pending_state,
         asleep: span(instance.wake.0.saturating_sub(now.0), step),
         timer: instance.data.timer.map(|timer| SavedTimer {
-            interval: span(timer.interval, step),
-            next: span(timer.next.0.saturating_sub(now.0), step),
+            interval: timer.interval,
+            next: timer
+                .next
+                .saturating_sub(crate::vm::context::region_time(now, step)),
         }),
         start_parameter: instance.data.start_parameter,
         script_time: span(instance.data.script_ticks, step),
@@ -149,11 +151,16 @@ pub(crate) fn restore(
         data: ScriptData {
             detected: saved.detected.clone(),
             timer: saved.timer.map(|timer| Timer {
-                interval: ticks_in(timer.interval, step).max(1),
-                next: now.after(ticks_in(timer.next, step)),
+                interval: timer.interval,
+                next: crate::vm::context::region_time(now, step).saturating_add(timer.next),
+                fired: true,
             }),
             drop_queued_timer: false,
             start_parameter: saved.start_parameter,
+            start_string: String::new(),
+            sweeps: Vec::new(),
+            repeat: None,
+            drop_queued_sensor: false,
             // Script time counts on through a take, a rez and a restart on
             // Second Life and YEngine; XEngine's reset of the script on a rez
             // and a restart starts it again (`persistence/rerez`,
@@ -167,7 +174,14 @@ pub(crate) fn restore(
             raised: Vec::new(),
             listens: saved.listens.clone(),
             permissions: saved.permissions.clone(),
+            // A URL is the region's, gone with a take, a rez or a restart, and
+            // with it every request in flight.
+            http: crate::vm::context::HttpState::default(),
+            // Controls are the avatar's, taken again by a script that wants
+            // them after a take, a rez or a restart.
+            controls: None,
         },
+        reset_when_idle: false,
         overdraft: 0,
         memory,
         charged: 0,

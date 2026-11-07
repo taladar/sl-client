@@ -8,13 +8,26 @@ use crate::library::{CallError, Key};
 use crate::vm::ScriptCtx;
 
 /// `llSleep`: suspend the script for `seconds`, counted in ticks and rounded
-/// up to a whole one. Nothing else of the script runs meanwhile; its events
-/// queue. A duration that is not positive does not suspend.
+/// up to a whole one — whole frames, as Second Life rounds a sleep
+/// (`time/sleep-lengths`). Nothing else of the script runs meanwhile; its
+/// events queue. A duration that is not positive does not suspend, but on
+/// XEngine a negative one throws from `WaitHandle.WaitOne` and ends the event
+/// (`time/sleep-negative`) — all but -1 ms, which .NET reads as forever and
+/// this VM, which waits for no one forever, as no wait.
 ///
 /// # Errors
 ///
-/// None; the signature is the library's.
-pub const fn ll_sleep(ctx: &mut ScriptCtx<'_>, seconds: f32) -> Result<(), CallError> {
+/// [`CallError::Exception`] on XEngine for a negative duration.
+pub fn ll_sleep(ctx: &mut ScriptCtx<'_>, seconds: f32) -> Result<(), CallError> {
+    if ctx.flavour() == crate::vm::EngineFlavour::XEngine {
+        let millis = (f64::from(seconds) * 1000.0).trunc();
+        if millis < -1.0 {
+            return Err(CallError::Exception {
+                id: crate::library::BuiltinId::LlSleep,
+                exception: crate::library::Exception::SleepTimeout,
+            });
+        }
+    }
     ctx.sleep(seconds);
     Ok(())
 }

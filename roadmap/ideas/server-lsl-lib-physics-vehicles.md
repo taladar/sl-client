@@ -119,3 +119,11 @@ the rule list (`library/prim_params`); `llSetStatus`/`llGetStatus` are not, and
 the `prim/changed` replay (`vm/tests/prim_state.rs`) rewrites the probe's
 `llSetStatus(STATUS_PHANTOM, …)` as `PRIM_PHANTOM` until they are. Drop that
 rewrite when they land.
+
+## From server-lsl-lib-task-inventory (2026-11-07)
+
+A script's rez hands the host `Rez::die_at_edge` (OpenSim sets
+`STATUS_DIE_AT_EDGE` on every object a script rezzes, Second Life not) and a
+velocity; the fake grid keeps neither, having no status flags or physics. Keep
+both here, and replay `inventory/rez`'s child with the real `llGetStatus` and
+`llGetVel` rather than the values its test writes in.

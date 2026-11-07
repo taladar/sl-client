@@ -136,6 +136,16 @@ pub enum Exception {
     /// start past the string's end: OpenSim's `llParseString2List` going on
     /// after a delimiter that matched an expansion at the end (`ae` in `æ`).
     StartIndexOutOfRange,
+    /// `System.ArgumentOutOfRangeException` from `ArrayList`'s indexer: an
+    /// index before its start (`llGetInventoryName` at −1,
+    /// `inventory/listing` on both OpenSim engines).
+    ItemIndexOutOfRange,
+    /// `System.ArgumentOutOfRangeException` from `WaitHandle.WaitOne`: a
+    /// negative `llSleep` on XEngine (`time/sleep-negative`).
+    SleepTimeout,
+    /// `System.NullReferenceException`: `llGetParcelFlags` of a position off
+    /// the region, where OpenSim finds no parcel (`land/parcel`).
+    NullReference,
     /// `System.Exception` from OpenMetaverse's `TextureEntry.GetFace`: a get
     /// of a face the texture entry cannot index (`prim/params-rules`: face
     /// 100, and −2 as the unsigned 4294967294).
@@ -155,8 +165,12 @@ impl Exception {
             }
             Self::FormatIndex | Self::FormatInvalid => "FormatException",
             Self::InvalidPattern => "ArgumentException",
-            Self::CountOutOfRange | Self::StartIndexOutOfRange => "ArgumentOutOfRangeException",
+            Self::CountOutOfRange
+            | Self::StartIndexOutOfRange
+            | Self::ItemIndexOutOfRange
+            | Self::SleepTimeout => "ArgumentOutOfRangeException",
             Self::FaceOutOfRange(_) => "Exception",
+            Self::NullReference => "NullReferenceException",
         }
     }
 
@@ -195,6 +209,15 @@ impl Exception {
             Self::StartIndexOutOfRange => {
                 "Index was out of range. Must be non-negative and less than the size of the \
                  collection.\nParameter name: startIndex"
+            }
+            Self::NullReference => "Object reference not set to an instance of an object",
+            Self::SleepTimeout => {
+                "Number must be either non-negative and less than or equal to Int32.MaxValue or \
+                 -1.\nParameter name: millisecondsTimeout"
+            }
+            Self::ItemIndexOutOfRange => {
+                "Index was out of range. Must be non-negative and less than the size of the \
+                 collection.\nParameter name: index"
             }
         }
     }

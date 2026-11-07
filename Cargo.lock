@@ -9313,6 +9313,7 @@ dependencies = [
  "regex",
  "sha1",
  "sha2",
+ "sl-anim",
  "sl-llsd",
  "sl-lsl",
  "sl-types",

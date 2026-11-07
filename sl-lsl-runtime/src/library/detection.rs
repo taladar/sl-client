@@ -26,12 +26,14 @@ fn field<T>(ctx: &ScriptCtx<'_>, index: i32, read: impl FnOnce(&Detected) -> T, 
 ///
 /// None; the signature is the library's.
 pub fn ll_detected_key(ctx: &mut ScriptCtx<'_>, index: i32) -> Result<Key, CallError> {
-    Ok(field(
-        ctx,
-        index,
-        |d| Key(d.key.clone()),
-        Key(NULL_KEY.to_owned()),
-    ))
+    // Past the end: `NULL_KEY` on Second Life, an empty key on OpenSim
+    // (`detection/sensor`).
+    let none = if ctx.flavour().is_opensim() {
+        String::new()
+    } else {
+        NULL_KEY.to_owned()
+    };
+    Ok(field(ctx, index, |d| Key(d.key.clone()), Key(none)))
 }
 
 /// `llDetectedName`: its name.

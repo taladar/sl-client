@@ -27,6 +27,13 @@
 //! - [`linkset_data`] — the key/value store a linkset owns, which the host
 //!   keeps and lends to the library, and the `linkset_data` event a change
 //!   raises in every script of the linkset.
+//! - [`contents`] — a prim's contents as a script reaches them: the items
+//!   it lists, the objects it rezzes, what it gives and the notecards it
+//!   reads.
+//! - [`sensing`] — what a script senses of the region: the sweeps of
+//!   `llSensor` and the hits of `llCastRay`, filtered by each grid's rules.
+//! - [`land`] — the land, the region and the estate as a script reads and
+//!   changes them.
 //! - [`permissions`] — what a script may do to an avatar: the grant it
 //!   holds, who made it and the question waiting for an answer.
 //! - [`economy`] — what a script pays and is paid: the payments it hands the
@@ -49,7 +56,9 @@
 //! instructions, never in elapsed time: a script's observable behaviour must
 //! not depend on the machine it runs on.
 
+pub mod avatars;
 pub mod comms;
+pub mod contents;
 mod context;
 mod cost;
 mod detected;
@@ -59,7 +68,9 @@ pub mod experiences;
 mod fault;
 mod flavour;
 mod host;
+pub mod http;
 mod instance;
+pub mod land;
 pub mod linkset_data;
 pub mod memory;
 pub(crate) mod objects;
@@ -69,6 +80,7 @@ pub mod persistence;
 pub mod prim;
 mod report;
 pub mod seating;
+pub mod sensing;
 #[cfg(test)]
 mod tests;
 
@@ -77,6 +89,8 @@ pub use comms::{
     LinkedPrim, Links, ListenFilter, Listens, LoadUrl, MapDestination, OPENSIM_LISTENS,
     SECOND_LIFE_LISTENS, TEXT_BOX_BUTTON, TooManyListens,
 };
+pub use contents::{Control, Item, Masks, Offer, RemoteLoad, Rez, RezRefusal};
+pub(crate) use context::TakenControls;
 #[cfg(test)]
 pub(crate) use context::{Peers, ScriptData};
 pub use context::{Raised, ScriptCtx, Tick};

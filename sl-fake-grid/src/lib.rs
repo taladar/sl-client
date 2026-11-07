@@ -47,6 +47,7 @@ pub mod runtime;
 pub mod scenario;
 pub mod scene_store;
 pub mod script_compile;
+pub mod script_http;
 pub mod script_syntax;
 pub mod scripts;
 mod seating;

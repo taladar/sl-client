@@ -2,7 +2,7 @@
 id: server-lsl-lib-time-timers
 title: Library tranche — time, timers and sleeping, on a tick clock
 topic: server
-status: ideas
+status: done
 origin: LSL-on-the-fake-grid audit (2026-09-20)
 blocked_by: [server-lsl-vm-execution, server-world-determinism-contract,
   gridspec-lsl-time-timers]
@@ -126,3 +126,31 @@ and saved with the script (`SavedScript::script_time`, saved form 4) — kept
 through a take and a restart on Second Life and YEngine without the time
 away, started again on XEngine. Whether Second Life counts the time away is
 not measured. The rest of the tranche stands.
+
+## Done (2026-11-07)
+
+The clocks run (`sl-lsl-runtime/src/library/clocks.rs`, calendar arithmetic on
+the `time` crate in `library/calendar.rs`, whose Pacific daylight-saving rule
+the fake grid's login now shares): `llGetUnixTime`, `llGetTimestamp`,
+`llGetDate`, `llGetGMTclock`, `llGetWallclock`, `llGetTimeOfDay`,
+`llGetRegionTimeDilation`, `llGetRegionFPS` and OpenSim's five, each in its
+grid's shape, reading the region's calendar time at tick 0
+(`Host::epoch_micros`, the fake grid's wall clock at the region's first tick)
+plus the ticks — so `llGetUnixTime` follows from the seed and the ticks. The
+timer keeps its interval and due time in region time, with each flavour's
+floor, negative interval and phase rule; a negative `llSleep` throws on
+XEngine; XEngine's stop abandons a sleeping handler; YEngine's reset of a
+script asleep in a handler is at once; OpenSim's `llGetTime` rounds to the
+millisecond. All nine `time/*` probes replay at their grids' frame rates
+(`vm/tests/clocks.rs`); the inventory rez replay compares `child_first` again.
+
+Left open:
+
+- Second Life runs a timer two or three frames after a handler longer than
+  its interval ends; the runtime runs it the frame after (a named deviation in
+  `timer-phase`, as `events/timer-reset` already had it).
+- YEngine's own timer error (84 ms over ten events) and XEngine's late first
+  event are their threads', not imitated; the replays hold them within 0.1 s.
+- The fake grid's simulator host keeps UTC; the local OpenSim's kept CET.
+- `osGetApparentTime*` read a constant day length and offset until
+  [[server-lsl-lib-land-region-env]] reads the region's environment.

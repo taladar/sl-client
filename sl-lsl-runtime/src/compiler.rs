@@ -159,8 +159,10 @@ pub enum Dialect {
     /// Life still compiles though it serves no document listing them, and no
     /// linkset data store — none of its functions, constants or its event —
     /// and no experiences — none of the experience functions, their result
-    /// constants or the two events; and its `JSON_APPEND` is the string
-    /// `"-1"`.
+    /// constants or the two events; none of the six task-inventory functions
+    /// Second Life added after OpenSim's library was written, nor their
+    /// `REZ_*`, `DEREZ_*` and `NAK` constants; and its `JSON_APPEND` is the
+    /// string `"-1"`.
     OpenSim,
 }
 
@@ -174,9 +176,10 @@ impl Dialect {
     /// Whether this compiler knows the library function `name` that the
     /// library table carries. Second Life knows only Linden Lab's library.
     /// OpenSim was measured refusing two of the functions Second Life
-    /// compiles from no served document (`keywords_lsl_unserved.xml`); which
-    /// of the rest of Linden Lab's table it lacks is not measured, so the
-    /// rest compile, as do all of its own.
+    /// compiles from no served document (`keywords_lsl_unserved.xml`), the
+    /// linkset data store, the experience functions and the newer
+    /// task-inventory functions; which of the rest of Linden Lab's table it
+    /// lacks is not measured, so the rest compile, as do all of its own.
     #[must_use]
     pub fn has_builtin(self, name: &str) -> bool {
         match self {
@@ -187,6 +190,8 @@ impl Dialect {
                 !OPENSIM_UNDEFINED.contains(&name)
                     && !is_linkset_data(name)
                     && !OPENSIM_NO_EXPERIENCE.contains(&name)
+                    && !OPENSIM_NO_NEWER_INVENTORY.contains(&name)
+                    && !OPENSIM_NO_ENVIRONMENT.contains(&name)
             }
         }
     }
@@ -206,6 +211,13 @@ impl Dialect {
                 !name.starts_with("LINKSETDATA_")
                     && !name.starts_with("XP_ERROR_")
                     && !OPENSIM_NO_SIT_RESULTS.contains(&name)
+                    && !name.starts_with("REZ_")
+                    && !name.starts_with("DEREZ_")
+                    && name != "NAK"
+                    && !name.starts_with("ENVIRONMENT_")
+                    && !name.starts_with("SKY_")
+                    && !name.starts_with("WATER_")
+                    && !OPENSIM_NO_HTTP_OPTIONS.contains(&name)
             }
         }
     }
@@ -264,6 +276,38 @@ const OPENSIM_NO_EXPERIENCE: &[&str] = &[
     "llDataSizeKeyValue",
     "llSitOnLink",
 ];
+
+/// The task-inventory functions Second Life added after OpenSim's library
+/// was written, which neither of its engines compiles: `inventory/newer`
+/// (YEngine: `undefined constant/function/variable llGetStartString()`;
+/// XEngine: CS0103, 2026-10-27), and none of the six is in OpenSim's
+/// `LSL_Api` — nor their `REZ_*`, `DEREZ_*` and `NAK` constants in its
+/// `LSL_Constants`.
+const OPENSIM_NO_NEWER_INVENTORY: &[&str] = &[
+    "llGetStartString",
+    "llGetInventoryDesc",
+    "llGetInventoryAcquireTime",
+    "llGetNotecardLineSync",
+    "llRezObjectWithParams",
+    "llDerezObject",
+];
+
+/// The environment and statistics functions only Second Life has:
+/// `land/sl-only` compiles under neither engine (YEngine: `undefined
+/// constant/function/variable llGetEnvironment(vector,list)`; XEngine:
+/// CS0103, 2026-10-26), and none of the four is in OpenSim's `LSL_Api`, nor
+/// an `ENVIRONMENT_*`, `SKY_*` or `WATER_*` constant in its `LSL_Constants`.
+const OPENSIM_NO_ENVIRONMENT: &[&str] = &[
+    "llGetEnvironment",
+    "llGetSimStats",
+    "llGetRegionTimeOfDay",
+    "llGetClosestNavPoint",
+];
+
+/// The `llHTTPRequest` options OpenSim does not know (`http/options`,
+/// 2026-10-27: YEngine `undefined constant/function/variable
+/// HTTP_USER_AGENT`, XEngine CS0103).
+const OPENSIM_NO_HTTP_OPTIONS: &[&str] = &["HTTP_USER_AGENT", "HTTP_ACCEPT", "HTTP_EXTENDED_ERROR"];
 
 /// `llSitOnLink`'s results, which OpenSim, having no `llSitOnLink`, has none
 /// of.

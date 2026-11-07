@@ -250,6 +250,16 @@ impl RegionEntry {
         RegionHandle::from_grid(self.config.grid_x, self.config.grid_y)
     }
 
+    /// The identity of the region as `core` runs it, for what a script reads
+    /// of it.
+    pub(crate) fn script_identity(&self, core: &GridCore) -> RegionIdentity {
+        self.identity(
+            core.estate_owner,
+            core.region_protocols,
+            &core.arrival_policy,
+        )
+    }
+
     /// Builds the identity the automatic `RegionHandshake` carries.
     ///
     /// `estate_owner` is the grid's own ([`GridCore::estate_owner`]): a region
@@ -667,6 +677,9 @@ pub(crate) struct GridCore {
     /// region's lock, and by nothing else.
     pub(crate) experience_stores:
         parking_lot::Mutex<BTreeMap<String, sl_lsl_runtime::vm::KeyValueStore>>,
+    /// The scripts' HTTP: the URLs granted and the requests and answers on
+    /// their way ([`crate::script_http`]).
+    pub(crate) script_http: parking_lot::Mutex<crate::script_http::ScriptHttp>,
 }
 
 /// Everything a successful login mints before the response is built. The
@@ -792,6 +805,11 @@ impl GridCore {
                 })
             })
             .collect()
+    }
+
+    /// Every account of the grid.
+    pub(crate) fn accounts(&self) -> impl Iterator<Item = &Account> {
+        self.accounts.iter()
     }
 
     /// The registered account owning `agent_id`.
@@ -1750,6 +1768,8 @@ pub struct FakeGridBuilder {
     character_dir: Option<PathBuf>,
     /// Builder-registered map tiles.
     map_tiles: MapTileStore,
+    /// What answers a script's HTTP request off the grid.
+    http_responder: Arc<dyn crate::script_http::HttpResponder>,
     /// The friendships between accounts, each pair of `First Last` names.
     friendships: Vec<[(String, String); 2]>,
     /// The groups the grid holds from its start.
@@ -1800,6 +1820,7 @@ impl std::fmt::Debug for FakeGridBuilder {
             .field("economy", &self.economy)
             .field("legacy_udp_inventory", &self.legacy_udp_inventory)
             .field("map_tiles", &self.map_tiles)
+            .field("http_responder", &self.http_responder)
             .field("minter", &self.minter)
             .field("clock", &"<closure>")
             .finish()
@@ -1885,6 +1906,7 @@ impl FakeGridBuilder {
             bakes: None,
             character_dir: None,
             map_tiles: MapTileStore::default(),
+            http_responder: Arc::new(crate::script_http::NoResponder),
             friendships: Vec::new(),
             groups: Vec::new(),
         }
@@ -2230,6 +2252,15 @@ impl FakeGridBuilder {
         self
     }
 
+    /// What answers a script's `llHTTPRequest` to an address that is not one
+    /// of the grid's own URLs: by default [`crate::script_http::NoResponder`],
+    /// which fails every one, saying why, so nothing leaves the process.
+    #[must_use]
+    pub fn http_responder(mut self, responder: Arc<dyn crate::script_http::HttpResponder>) -> Self {
+        self.http_responder = responder;
+        self
+    }
+
     /// Starts the grid: binds the HTTP listener, registers accounts and
     /// regions, and spawns the accept loop.
     ///
@@ -2547,6 +2578,9 @@ impl FakeGridBuilder {
             teleports_tx,
             crossings_tx,
             experience_stores: parking_lot::Mutex::new(BTreeMap::new()),
+            script_http: parking_lot::Mutex::new(crate::script_http::ScriptHttp::new(
+                self.http_responder,
+            )),
         });
         tokio::spawn(crate::http_service::run_http(
             Arc::clone(&core),
@@ -2623,6 +2657,19 @@ pub struct FakeGrid {
 }
 
 impl FakeGrid {
+    /// Every URL the grid's scripts hold (`llRequestURL`), in no particular
+    /// order: what a test sends a request from outside to.
+    #[must_use]
+    pub fn script_urls(&self) -> Vec<String> {
+        self.core
+            .script_http
+            .lock()
+            .urls
+            .values()
+            .map(|granted| granted.url.clone())
+            .collect()
+    }
+
     /// The login URI to point a client at (`http://127.0.0.1:<port>/`).
     #[must_use]
     pub fn login_uri(&self) -> url::Url {

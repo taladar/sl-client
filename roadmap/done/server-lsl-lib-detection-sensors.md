@@ -2,7 +2,7 @@
 id: server-lsl-lib-detection-sensors
 title: Library tranche — the detected block, sensors and raycasts
 topic: server
-status: ideas
+status: done
 origin: LSL-on-the-fake-grid audit (2026-09-20)
 blocked_by: [server-lsl-state-and-events, server-world-ecs-store,
   server-world-touch-and-grab, gridspec-lsl-detection-sensors]
@@ -144,3 +144,31 @@ flavour, the agent's position, whether its active group is the object's), the
 clicked prim's link number and the message's surface block as sent. The
 rotation and velocity are zero until [[server-world-agent-movement]] gives an
 avatar either.
+
+## Done (2026-11-07)
+
+Sweeps and rays run: `vm/sensing.rs` holds each grid's rules (the cap, the
+range edge, the arc, the type mask with Second Life's narrowing `SCRIPTED`,
+`llDetectedType`, the repeat's timing, one or every `llSensor` answered, a
+state change ending the repeat), `library/sensors.rs` the functions —
+`llSensor`, `llSensorRepeat`, `llSensorRemove`, `llCastRay` with both grids'
+option handling, refusals and hit layouts, `osGetAgents`, `osGetAvatarList` —
+and `llDetectedKey` past the end is empty on OpenSim. The fake grid
+(`sl-fake-grid/src/scripts/sensing.rs`) weighs every unworn object by its root
+and every avatar present, and casts against prims' boxes, avatars' boxes and
+the heightfield. Held by `vm/tests/sensing.rs` and, end to end, a sweep and a
+ray in `sl-fake-grid/tests/scripts.rs`; `time/timer-floor` replays with its
+`no_sensor` clock.
+
+Left open:
+
+- The probes are not replayed line for line: both regions held other
+  residents' objects the transcripts do not place.
+- Second Life's idle scripted prims drift in and out of `SCRIPTED` sweeps;
+  the fake grid holds them active, always found.
+- OpenSim V1's land hits past a ray's end are not imitated.
+- A prim meets a ray as its box: a sphere's or a cut prim's surface is not
+  the box's. The physics task's shapes ([[server-world-collision-and-physics]])
+  can replace it behind `Host::cast_ray`.
+- The acceptance's sensor watching an avatar walk in and out of range belongs
+  to [[server-fake-grid-scripted-scenario]].
