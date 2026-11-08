@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use core::time::Duration;
 
 use crate::value::Element;
-use crate::vm::comms::{LinkMessage, Listens};
+use crate::vm::comms::{LinkMessage, Listens, Overheard};
 use crate::vm::contents::Control;
 use crate::vm::delays::SayThrottle;
 use crate::vm::detected::Detected;
@@ -17,14 +17,14 @@ use crate::vm::instance::Instance;
 use crate::vm::linkset_data::{Answer, LinksetChange, LinksetData};
 use crate::vm::ossl::{Settings, Standing, stock_ossl};
 use crate::vm::permissions::{Permissions, Question};
-use crate::vm::report::Warning;
+use crate::vm::report::{Speech, Warning};
 
 /// An event a library call raised in the scripts of its linkset or in its
 /// own, which the engine posts once the call's slice is over — in the order
 /// of the calls, since on Second Life each is queued at its call (a link
 /// message sent before a write is ahead of the write's `linkset_data` in
 /// every queue).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Raised {
     /// `linkset_data`, in every script of the linkset.
     Linkset(LinksetChange),
@@ -84,6 +84,24 @@ pub enum Raised {
         /// The body.
         body: String,
     },
+    /// `changed(bits)` in every script of the prim keyed `prim`, queued by
+    /// the call that changed it: OpenSim's setters post it there
+    /// (`SceneObjectPart.TriggerScriptChangedEvent`), ahead of what the
+    /// handler raises after them (`events/order` round 2); Second Life runs
+    /// it two ticks later (`events/latency`).
+    Changed {
+        /// The key of the prim changed.
+        prim: String,
+        /// The `CHANGED_*` bits.
+        bits: i32,
+    },
+    /// A line a script said, `listen` in every script that hears it: at
+    /// once on Second Life, at OpenSim's next async command pass.
+    Heard(Overheard),
+    /// An `llSensor` sweep answered in the call: OpenSim's
+    /// `SensorRepeat.SenseOnce` sweeps at once and posts `sensor` or
+    /// `no_sensor` there (`events/order` round 4).
+    Sweep(crate::vm::sensing::Query),
     /// `llSetScriptState` or `llResetOtherScript` of another script of the
     /// caller's prim.
     Control {
@@ -452,13 +470,13 @@ impl<'host> ScriptCtx<'host> {
         }
     }
 
-    /// `llSensor`: sweep once with `query`, at the next tick. Second Life
-    /// keeps one asked-for sweep, the last, and ends a repeating one; OpenSim
-    /// sweeps for each and leaves the repeat running (`events/merging`,
-    /// `detection/sensor`).
+    /// `llSensor`: sweep once with `query` — on Second Life at the next
+    /// tick, keeping one asked-for sweep, the last, and ending a repeating
+    /// one; on OpenSim in the call itself, each one, leaving the repeat
+    /// running (`events/merging`, `detection/sensor`, `events/latency`).
     pub fn sense_once(&mut self, query: crate::vm::sensing::Query) {
         if self.flavour().is_opensim() {
-            self.data.sweeps.push(query);
+            self.data.raised.push(Raised::Sweep(query));
         } else {
             self.data.sweeps = vec![query];
             self.data.repeat = None;
@@ -671,6 +689,38 @@ impl<'host> ScriptCtx<'host> {
     /// The script's listens, to open, close or turn on and off.
     pub const fn listens(&mut self) -> &mut Listens {
         &mut self.data.listens
+    }
+
+    /// Say `speech` from the caller's object; the scripts in earshot hear it
+    /// once the slice is over, or on OpenSim at its next async command pass.
+    pub fn say(&mut self, speech: &Speech) {
+        let caller = self.caller;
+        if let Some(overheard) = self.host.say(caller, speech) {
+            self.data.raised.push(Raised::Heard(overheard));
+        }
+    }
+
+    /// `llRegionSayTo` from the caller's object, heard as [`Self::say`] is.
+    pub fn say_to(&mut self, target: &str, channel: i32, text: &str) {
+        let caller = self.caller;
+        if let Some(overheard) = self.host.say_to(caller, target, channel, text) {
+            self.data.raised.push(Raised::Heard(overheard));
+        }
+    }
+
+    /// Hand `prim` back to the host, changed, and raise the `changed` bits
+    /// each change raises in the prim's scripts, queued in the order of what
+    /// else the slice raised: OpenSim runs them as they come, Second Life two
+    /// ticks on (`events/order`, `events/latency`).
+    pub fn set_prim(&mut self, prim: &crate::vm::prim::Prim, changed: &[i32]) {
+        let caller = self.caller;
+        self.host.set_prim(caller, prim);
+        for bits in changed {
+            self.data.raised.push(Raised::Changed {
+                prim: prim.key.clone(),
+                bits: *bits,
+            });
+        }
     }
 
     /// Send a link message; the engine delivers it to every script `message`

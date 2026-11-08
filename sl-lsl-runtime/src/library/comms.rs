@@ -86,8 +86,7 @@ fn speak(ctx: &mut ScriptCtx<'_>, channel: i32, text: &str, volume: ChatVolume) 
         to_avatars: volume,
         to_scripts: Some(volume),
     };
-    let caller = ctx.caller();
-    ctx.host().say(caller, &speech);
+    ctx.say(&speech);
 }
 
 /// `llWhisper`: say `text` on `channel` within 10 m.
@@ -200,7 +199,7 @@ pub fn ll_region_say_to(
     } else {
         line(flavour, &text)
     };
-    ctx.host().say_to(caller, &target.0, channel, &text);
+    ctx.say_to(&target.0, channel, &text);
     Ok(())
 }
 

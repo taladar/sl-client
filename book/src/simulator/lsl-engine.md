@@ -567,8 +567,23 @@ observable as the handlers, so each is a named rule with a test.
   behind every queued event of a lower rank raised while the same handler
   ran — a touch behind the rest, a `changed` behind the touches — and
   behind every event raised before that handler began (`Queued::batch`
-  counts the handlers begun). `Never` and `WhileQueued` keep one rank,
-  first in, first out, as OpenSim does.
+  counts the handlers begun) — a sweep's answer behind the rest, a touch
+  behind the answers, a `changed` behind the touches (`events/latency`).
+  `Never` and `WhileQueued` keep one rank, first in, first out, as OpenSim
+  does.
+- **An event can be queued before it may run** (`Arrival::ready`). Second
+  Life queues a link message at the call yet runs it the next frame, and a
+  setter's `changed` and a sweep's answer two frames after the call
+  (`events/latency`); queued at once, they go with the queue at a state
+  change or a reset. A script starts the first queued event free to run,
+  passing over one still held back (`events/timer-reset`).
+- **Each flavour delivers chat when its grid does.** `Host::say` and
+  `Host::say_to` answer the scripts in earshot, and the engine offers them
+  the line (`Engine::overhear`): at once on Second Life, at the next of
+  OpenSim's async command passes, every 100 ms of region time. On OpenSim a
+  setter's `changed` and `llSensor`'s answer are queued in the call, and a
+  script an event reaches after its turn in the tick runs it on what is
+  left of its share, as an engine thread would.
 - **The detected block travels with the event.** A host posts a detection
   event (`touch*`, `collision*`, `sensor`) with `post_detected` and a list of
   `Detected` records, and the count parameter is the list's length. The block

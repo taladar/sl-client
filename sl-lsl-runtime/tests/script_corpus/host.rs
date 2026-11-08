@@ -21,9 +21,9 @@ use sl_lsl_runtime::vm::prim::{ObjectDetails, Prim, SoundCue};
 use sl_lsl_runtime::vm::seating::{Placement, Seat};
 use sl_lsl_runtime::vm::{
     Admission, CallerId, ExperienceDetails, ExperienceError, ExperienceQuestion, Host, Item,
-    KeyValueStore, LinksetData, LinksetId, Masks, MoneyRefusal, Offer, PayPrice, Payment, Question,
-    RemoteLoad, Rez, RezRefusal, ScriptExperience, Simulator, SitRefusal, Speech, Standing,
-    Whereabouts,
+    KeyValueStore, LinksetData, LinksetId, Masks, MoneyRefusal, Offer, Overheard, PayPrice,
+    Payment, Question, RemoteLoad, Rez, RezRefusal, ScriptExperience, Simulator, SitRefusal,
+    Speech, Standing, Whereabouts,
 };
 use sl_lsl_runtime::{NULL_KEY, Value, ZERO_VECTOR};
 use sl_types::lsl::{Rotation, Vector};
@@ -110,9 +110,6 @@ pub(crate) struct CorpusHost {
     pub(crate) now: u64,
     /// The transcript so far.
     pub(crate) lines: Vec<String>,
-    /// `changed(bits)` the host owes the prim's scripts, raised once the tick
-    /// that wrote them is over — as a grid raises them.
-    pub(crate) owed_changes: Vec<i32>,
     /// Whether the script's object has died; the driver removes the script.
     pub(crate) died: bool,
     /// The state of the xorshift the random draws come from.
@@ -143,7 +140,6 @@ impl CorpusHost {
         Self {
             now: 0,
             lines: Vec::new(),
-            owed_changes: Vec::new(),
             died: false,
             draws: 0,
             placement: Placement {
@@ -195,15 +191,23 @@ impl Host for CorpusHost {
         (name == SCRIPT_NAME).then_some(self.script)
     }
 
-    fn say(&mut self, _caller: CallerId, speech: &Speech) {
+    fn say(&mut self, _caller: CallerId, speech: &Speech) -> Option<Overheard> {
         self.line(format_args!(
             "say channel={} volume={:?} {:?}",
             speech.channel, speech.to_avatars, speech.text
         ));
+        None
     }
 
-    fn say_to(&mut self, _caller: CallerId, target: &str, channel: i32, text: &str) {
+    fn say_to(
+        &mut self,
+        _caller: CallerId,
+        target: &str,
+        channel: i32,
+        text: &str,
+    ) -> Option<Overheard> {
         self.line(format_args!("say-to {target} channel={channel} {text:?}"));
+        None
     }
 
     fn instant_message(&mut self, _caller: CallerId, message: &InstantMessage) {
@@ -405,7 +409,7 @@ impl Host for CorpusHost {
         (prim == PRIM).then(|| self.prim.clone())
     }
 
-    fn set_prim(&mut self, _caller: CallerId, state: &Prim, changed: &[i32]) {
+    fn set_prim(&mut self, _caller: CallerId, state: &Prim) {
         let mut state = state.clone();
         if state.local_position != self.placement.local {
             let to = Self::above_ground(state.local_position.clone());
@@ -419,8 +423,7 @@ impl Host for CorpusHost {
         }
         state.rotation = state.local_rotation.clone();
         state.root_rotation = state.local_rotation.clone();
-        self.line(format_args!("set-prim changed={changed:?}"));
-        self.owed_changes.extend_from_slice(changed);
+        self.line(format_args!("set-prim"));
         self.prim = state;
     }
 

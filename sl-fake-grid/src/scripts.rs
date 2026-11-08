@@ -99,8 +99,9 @@ use sl_lsl_runtime::vm::{
     Admission, Allowed, CallerId, Dialog, Engine, EngineConfig, EngineFlavour, ExperienceDetails,
     ExperienceError, ExperienceQuestion, Heard, Host, InstantMessage, InvalidLinkTarget,
     KeyValueStore, LinkedAvatar, LinkedPrim, Links, LinksetData, LinksetId, LoadUrl,
-    MapDestination, MoneyRefusal, PayPrice, Payment, Question, SavedScript, ScriptExperience,
-    ScriptUsage, Simulator, SitRefusal, Speech, Standing, Tick, TickReport, Whereabouts,
+    MapDestination, MoneyRefusal, Overheard, PayPrice, Payment, Question, SavedScript,
+    ScriptExperience, ScriptUsage, Simulator, SitRefusal, Speech, Standing, Tick, TickReport,
+    Whereabouts,
 };
 use sl_proto::{
     AssetKey, AssetSource as _, AssetType, ChatSource, ChatType, ExperiencePermission, ImDialog,
@@ -228,7 +229,8 @@ pub struct RegionScripts {
     pub(crate) rezzers: BTreeMap<ObjectKey, ObjectKey>,
     /// Rezzers to tell of the object they rezzed (`object_rez`), with the
     /// ticks each has waited: told after the tick in which the object's
-    /// scripts ran their `on_rez`, before what they said is heard.
+    /// scripts ran their `on_rez` — on Second Life after the tick that rezzed
+    /// it — before what they said is heard.
     pub(crate) rezzes_waiting: Vec<(CallerId, ObjectKey, u8)>,
     /// Scripts a load put in a prim (`llRemoteLoadScriptPin`), to start, with
     /// whether they run and the ticks each has waited: started once the tick
@@ -614,31 +616,23 @@ impl RegionScripts {
     /// its listens that admits it. Where a script is is where its prim's
     /// linkset root stands.
     pub(crate) fn hear(&mut self, line: &Line, objects: &ObjectStore) {
-        let heard = Heard {
-            channel: line.channel.0,
-            name: line.from_name.clone(),
-            speaker: line.source.source_id().to_string(),
-            message: line.message.clone(),
-        };
-        let in_earshot: Vec<CallerId> = self
-            .slots
+        let heard = heard_of(line);
+        for id in self.in_earshot(line, objects) {
+            self.engine.overhear(id, &heard);
+        }
+    }
+
+    /// The scripts `line` reaches: those whose prims stand within its range
+    /// of it, or anywhere for a region-say, but for the speaking prim's own.
+    fn in_earshot(&self, line: &Line, objects: &ObjectStore) -> Vec<CallerId> {
+        self.slots
             .iter()
             .filter(|(_id, slot)| {
                 crate::world::listening_position(objects, slot.prim)
                     .is_some_and(|position| line.reaches_listen_at(slot.prim, &position))
             })
             .map(|(id, _slot)| *id)
-            .collect();
-        for id in in_earshot {
-            self.offer(id, &heard);
-        }
-    }
-
-    /// Offer `heard` to the instance `id`.
-    fn offer(&mut self, id: CallerId, heard: &Heard) {
-        if let Err(error) = self.engine.hear(id, heard) {
-            tracing::warn!(?id, %error, "a line could not be offered to a script");
-        }
+            .collect()
     }
 
     /// Tells every script whose experience question has waited
@@ -939,21 +933,10 @@ enum Effect {
         /// The bits.
         bits: i32,
     },
-    /// A line said: what the avatars and the agents' listens hear, and what
-    /// the scripts in earshot are offered, where any are.
-    Say {
-        /// The line as the avatars hear it.
-        avatars: Line,
-        /// The line as the scripts hear it, or [`None`] when no script does.
-        scripts: Option<Line>,
-    },
-    /// A line offered to these scripts alone (`llRegionSayTo`).
-    Hear {
-        /// The scripts.
-        to: Vec<CallerId>,
-        /// The line.
-        heard: Heard,
-    },
+    /// A line said, as the avatars and the agents' listens hear it; the
+    /// scripts in earshot were handed to the engine in the call
+    /// ([`Host::say`]).
+    Say(Line),
     /// The linkset whose root is this prim leaves the region (`llDie`).
     Die(RegionLocalObjectId),
     /// The set `second` is in is linked under the set `first` is in
@@ -1640,10 +1623,8 @@ impl Host for RegionHost<'_> {
             .map(|(id, _slot)| *id)
     }
 
-    fn say(&mut self, caller: CallerId, speech: &Speech) {
-        let Some(origin) = self.origin(caller) else {
-            return;
-        };
+    fn say(&mut self, caller: CallerId, speech: &Speech) -> Option<Overheard> {
+        let origin = self.origin(caller)?;
         let channel = ChatChannel(speech.channel);
         let avatars = Line {
             source: ChatSource::Object(origin.prim),
@@ -1658,20 +1639,33 @@ impl Host for RegionHost<'_> {
             position: self.position(caller),
             message: speech.text.clone(),
         };
-        let scripts = speech.to_scripts.map(|volume| Line {
-            chat_type: chat_type_of(volume),
-            ..avatars.clone()
+        let overheard = speech.to_scripts.and_then(|volume| {
+            let line = Line {
+                chat_type: chat_type_of(volume),
+                ..avatars.clone()
+            };
+            let by = self
+                .world
+                .script_instances
+                .in_earshot(&line, &self.world.objects);
+            (!by.is_empty()).then(|| Overheard {
+                heard: heard_of(&line),
+                by,
+            })
         });
-        self.effects.push(Effect::Say { avatars, scripts });
+        self.effects.push(Effect::Say(avatars));
+        overheard
     }
 
-    fn say_to(&mut self, caller: CallerId, target: &str, channel: i32, text: &str) {
-        let Some(origin) = self.origin(caller) else {
-            return;
-        };
-        let Ok(key) = uuid::Uuid::parse_str(target) else {
-            return;
-        };
+    fn say_to(
+        &mut self,
+        caller: CallerId,
+        target: &str,
+        channel: i32,
+        text: &str,
+    ) -> Option<Overheard> {
+        let origin = self.origin(caller)?;
+        let key = uuid::Uuid::parse_str(target).ok()?;
         let heard = Heard {
             channel,
             name: origin.name.clone(),
@@ -1685,13 +1679,10 @@ impl Host for RegionHost<'_> {
             .get_by_key(ObjectKey::from(key))
             .is_some()
         {
-            let to = self.scripts_in(ObjectKey::from(key));
-            self.effects.push(Effect::Hear { to, heard });
-            return;
+            let by = self.scripts_in(ObjectKey::from(key));
+            return Some(Overheard { heard, by });
         }
-        if self.present(target).is_none() {
-            return;
-        }
+        self.present(target)?;
         let agent = AgentKey::from(key);
         if channel == 0 {
             let line = Line {
@@ -1704,7 +1695,7 @@ impl Host for RegionHost<'_> {
                 message: text.to_owned(),
             };
             self.deliveries.push(Delivery::Chat { agent, line });
-            return;
+            return None;
         }
         // On `DEBUG_CHANNEL` the avatar's viewer is sent it as a script error,
         // as Second Life tells an owner a rule list's complaints
@@ -1731,7 +1722,7 @@ impl Host for RegionHost<'_> {
             .copied()
             .filter(|id| self.wearer(*id) == Some(agent))
             .collect();
-        self.effects.push(Effect::Hear { to, heard });
+        Some(Overheard { heard, by: to })
     }
 
     fn instant_message(&mut self, caller: CallerId, message: &InstantMessage) {
@@ -1973,10 +1964,7 @@ impl Host for RegionHost<'_> {
             position: self.position(caller),
             message: text.to_owned(),
         };
-        self.effects.push(Effect::Say {
-            avatars,
-            scripts: None,
-        });
+        self.effects.push(Effect::Say(avatars));
     }
 
     fn whereabouts(&self, caller: CallerId) -> Whereabouts {
@@ -2385,12 +2373,7 @@ impl Host for RegionHost<'_> {
         crate::prim_state::read(self.world, local_id, self.opensim())
     }
 
-    fn set_prim(
-        &mut self,
-        _caller: CallerId,
-        state: &sl_lsl_runtime::vm::prim::Prim,
-        changed: &[i32],
-    ) {
+    fn set_prim(&mut self, _caller: CallerId, state: &sl_lsl_runtime::vm::prim::Prim) {
         let Some(local_id) = self.prim_keyed(&state.key) else {
             return;
         };
@@ -2400,12 +2383,6 @@ impl Host for RegionHost<'_> {
             |x: f32, y: f32| region.map_or(0.0, |region| region.config.terrain.height_at(x, y));
         let edge = u16::try_from(REGION_EDGE_M).map_or(f32::MAX, f32::from);
         let _written = crate::prim_state::write(self.world, local_id, state, opensim, ground, edge);
-        for bits in changed {
-            self.effects.push(Effect::Changed {
-                prim: local_id,
-                bits: *bits,
-            });
-        }
     }
 
     fn set_region_position(&mut self, caller: CallerId, position: Vector) -> Option<Vector> {
@@ -2971,6 +2948,16 @@ pub(crate) async fn run_tick(core: &GridCore, index: usize) -> Option<TickReport
     Some(report)
 }
 
+/// What a script hears of `line`.
+fn heard_of(line: &Line) -> Heard {
+    Heard {
+        channel: line.channel.0,
+        name: line.from_name.clone(),
+        speaker: line.source.source_id().to_string(),
+        message: line.message.clone(),
+    }
+}
+
 /// Runs one engine tick over `world` and applies to it what the scripts did,
 /// returning the tick's report, the changes the region's sessions are to be
 /// told and what is to be sent to viewers.
@@ -3018,17 +3005,7 @@ fn tick_locked(
     for effect in effects {
         match effect {
             Effect::Changed { prim, bits } => raise_changed_in(world, &[prim], bits),
-            Effect::Say { avatars, scripts } => {
-                if let Some(line) = scripts {
-                    world.script_instances.hear(&line, &world.objects);
-                }
-                changes.push(world.say_to_avatars(avatars));
-            }
-            Effect::Hear { to, heard } => {
-                for id in to {
-                    world.script_instances.offer(id, &heard);
-                }
-            }
+            Effect::Say(avatars) => changes.push(world.say_to_avatars(avatars)),
             Effect::Die(root) => changes.extend(remove_linkset(world, root)),
             Effect::Link { first, second } => {
                 changes.extend(crate::link_sets::script_link(world, first, second));
@@ -3136,9 +3113,10 @@ fn ticks_as_micros(ticks: Tick, step: Duration) -> i64 {
 }
 
 /// Tells each rezzer whose object's scripts ran their `on_rez` in the tick
-/// just run of the object it rezzed (`object_rez`): after the tick, before
-/// what the object's scripts said is heard, so on both grids the rezzer hears
-/// of the rez first though the child ran before it (`inventory/rez`).
+/// just run — on Second Life, whose object was rezzed in it — of the object
+/// it rezzed (`object_rez`): before what the object's scripts said is heard,
+/// so on both grids the rezzer hears of the rez first though the child ran
+/// before it (`inventory/rez`).
 fn tell_rezzers(world: &mut SceneFixtures) {
     let scripts = &mut world.script_instances;
     let mut waiting = core::mem::take(&mut scripts.rezzes_waiting);

@@ -167,40 +167,6 @@ field = "heard"
 reason = "Over loopback the runner saves the talker and the probe in the same frame, so the talker's sixth line falls in the tick of the probe's third timer and is heard after it; on a grid the probe follows the talker by round trips of a tenth of a second and more (the VM replay hears six so)"
 
 [[difference]]
-probe = "events/order"
-between = ["opensim-yengine", "fake-opensim"]
-record = "order"
-fields = { round = "2" }
-field = "events"
-reason = "OpenSim raises CHANGED_COLOR inside llSetColor, ahead of the link message the helper sends after it; the fake grid raises it when the tick is over"
-task = "server-lsl-event-raise-timing"
-
-[[difference]]
-probe = "events/order"
-between = ["opensim-yengine", "fake-opensim"]
-record = "order"
-fields = { round = "4" }
-field = "events"
-reason = "OpenSim answers llSensor inside the call, ahead of the helper's link message; the fake grid sweeps when the tick is over"
-task = "server-lsl-event-raise-timing"
-
-[[difference]]
-probe = "events/order"
-between = ["aditi", "fake-sl"]
-record = "order"
-fields = { round = "4" }
-field = "events"
-reason = "Second Life delivers the talker's line before the helper's link message and answers llSensor after the 0.3 s timer; the fake grid delivers link messages first and sweeps at the next tick"
-task = "server-lsl-event-raise-timing"
-
-# --- detection ----------------------------------------------------------
-#
-# Both grids' regions held other residents' objects and avatars around the
-# build position, which fill the sweeps and their caps; the fake region
-# holds the probe's prims alone (`vm::tests::sensing` holds each rule to the
-# probe's own row instead).
-
-[[difference]]
 probe = "detection/sensor"
 between = ["opensim-yengine", "fake-opensim"]
 record = "found"

@@ -314,10 +314,15 @@ impl RegionHost<'_> {
             .script_instances
             .rezzers
             .insert(root, rezzer_root);
+        // Second Life queues `object_rez` before the object's scripts run,
+        // since a line they say on rezzing reaches the rezzer at once;
+        // OpenSim once they have run, before its next async pass hands the
+        // rezzer the line (`inventory/rez`, `events/latency`).
+        let waited = u8::from(!self.opensim());
         self.world
             .script_instances
             .rezzes_waiting
-            .push((caller, root, 0));
+            .push((caller, root, waited));
         self.effects.push(Effect::Rezzed(rezzed));
         Ok(root.uuid().to_string())
     }

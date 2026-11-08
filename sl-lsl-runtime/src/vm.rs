@@ -87,7 +87,7 @@ mod tests;
 
 pub use comms::{
     Dialog, Heard, InstantMessage, InvalidLinkTarget, LinkMessage, Linked, LinkedAvatar,
-    LinkedPrim, Links, ListenFilter, Listens, LoadUrl, MapDestination, OPENSIM_LISTENS,
+    LinkedPrim, Links, ListenFilter, Listens, LoadUrl, MapDestination, OPENSIM_LISTENS, Overheard,
     SECOND_LIFE_LISTENS, TEXT_BOX_BUTTON, TooManyListens,
 };
 pub use contents::{Control, Item, Masks, Offer, RemoteLoad, Rez, RezRefusal};

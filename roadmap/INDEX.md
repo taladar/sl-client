@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 332 |
 | blocked | 35 |
 | in-progress | 11 |
-| bugs | 38 |
-| done | 1517 |
+| bugs | 37 |
+| done | 1518 |
 | deferred | 30 |
 | wont-do | 24 |
 | **total** | **2110** |
@@ -1265,7 +1265,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (38)
+## bugs (37)
 
 ### protocol
 
@@ -1360,12 +1360,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### server
 
-- [`server-lsl-event-raise-timing`](bugs/server-lsl-event-raise-timing.md) —
-  Raise each event when each grid raises it, not when the tick is over
 - [`server-lsl-sl-placement-lag`](bugs/server-lsl-sl-placement-lag.md) — Imitate
   Second Life's late bounding box and its stop above the ground
 
-## done (1517)
+## done (1518)
 
 ### protocol
 
@@ -4463,6 +4461,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-lsl-compiler-ir`](done/server-lsl-compiler-ir.md) — Lower the LSL
   syntax tree to something executable (blocked by `server-lsl-architecture`
   (done), `server-lsl-value-model` (done))
+- [`server-lsl-event-raise-timing`](done/server-lsl-event-raise-timing.md) —
+  Raise each event when each grid raises it, not when the tick is over
 - [`server-lsl-float-expression-precision`](done/server-lsl-float-expression-precision.md)
   — Round a float expression once, where Mono stores it, not at every operator
 - [`server-lsl-flood-gate-passes-spaced-lines`](done/server-lsl-flood-gate-passes-spaced-lines.md)

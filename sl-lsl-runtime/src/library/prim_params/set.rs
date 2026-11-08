@@ -166,7 +166,7 @@ pub(crate) fn apply_rules(
             let mut changes = Changes::default();
             ended = run(ctx, &mut reader, target, &mut prim, &mut changes);
             let events = changes.events(opensim_flavour);
-            ctx.host().set_prim(caller, &prim, &events);
+            ctx.set_prim(&prim, &events);
         }
         match ended {
             Ended::End | Ended::Stop => return,

@@ -208,8 +208,8 @@ mod tests {
     use crate::vm::{
         Admission, CallerId, Dialog, ExperienceDetails, ExperienceError, ExperienceQuestion, Host,
         InstantMessage, KeyValueStore, Links, LinksetData, LinksetId, LoadUrl, MapDestination,
-        Memory, MoneyRefusal, PayPrice, Payment, Peers, Question, ScriptData, ScriptExperience,
-        SitRefusal, Speech, Stack, Tick, Whereabouts,
+        Memory, MoneyRefusal, Overheard, PayPrice, Payment, Peers, Question, ScriptData,
+        ScriptExperience, SitRefusal, Speech, Stack, Tick, Whereabouts,
     };
 
     /// A host for calls that never reach it: the dispatch reports stubs
@@ -227,13 +227,7 @@ mod tests {
             None
         }
 
-        fn set_prim(
-            &mut self,
-            _caller: CallerId,
-            _state: &crate::vm::prim::Prim,
-            _changed: &[i32],
-        ) {
-        }
+        fn set_prim(&mut self, _caller: CallerId, _state: &crate::vm::prim::Prim) {}
 
         fn set_region_position(&mut self, _caller: CallerId, _position: Vector) -> Option<Vector> {
             None
@@ -586,11 +580,21 @@ mod tests {
             None
         }
 
-        fn say(&mut self, _caller: CallerId, _speech: &Speech) {}
+        fn say(&mut self, _caller: CallerId, _speech: &Speech) -> Option<Overheard> {
+            None
+        }
 
         fn owner_say(&mut self, _caller: CallerId, _text: &str) {}
 
-        fn say_to(&mut self, _caller: CallerId, _target: &str, _channel: i32, _text: &str) {}
+        fn say_to(
+            &mut self,
+            _caller: CallerId,
+            _target: &str,
+            _channel: i32,
+            _text: &str,
+        ) -> Option<Overheard> {
+            None
+        }
 
         fn instant_message(&mut self, _caller: CallerId, _message: &InstantMessage) {}
 

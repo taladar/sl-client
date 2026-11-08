@@ -1,5 +1,5 @@
 grid: fake-opensim
-date: 2026-11-07
+date: 2026-11-08
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating YEngine
@@ -7,11 +7,11 @@ settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor
 
 PROBE events/order rec=start region="Fake Region" channel="OpenSim" version="sl-fake-grid 0.1.0"
 PROBE events/order rec=order round=1 events="link1,changed2" touches=0
-PROBE events/order rec=order round=2 events="link2,changed2" touches=0
+PROBE events/order rec=order round=2 events="changed2,link2" touches=0
 PROBE events/order rec=order round=3 events="link3,changed2,link4,changed2" touches=0
 PROBE events/order rec=waiting drive=touch
 # touch surface=none
-PROBE events/order rec=order round=4 events="link5,changed2,sensor,listen,timer,touch_start,touch_end" touches=0
+PROBE events/order rec=order round=4 events="sensor,link5,changed2,listen,timer,touch_start,touch_end" touches=0
 PROBE events/order rec=waiting drive=touch
 # touch surface=none
 PROBE events/order rec=order round=5 events="touch_start,touch_end,link6,changed2,listen,timer" touches=0

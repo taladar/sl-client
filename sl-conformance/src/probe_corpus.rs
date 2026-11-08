@@ -40,8 +40,8 @@ pub enum CorpusError {
 /// expectation and the implementation could share one misunderstanding —
 /// the rotation helpers (an axis-order mistake gives plausible numbers),
 /// list and string functions at negative indices, `llSetPos`' reach, the
-/// order of events around a state change and a sensor's results, the
-/// forced delays and the chat throttle.
+/// order of events around a state change, the moment each kind of event is
+/// raised and a sensor's results, the forced delays and the chat throttle.
 pub const DIFFERENTIAL_SUITE: &[&str] = &[
     "math/rotations",
     "math/functions",
@@ -49,6 +49,7 @@ pub const DIFFERENTIAL_SUITE: &[&str] = &[
     "prim/placement",
     "events/state-change",
     "events/order",
+    "events/latency",
     "detection/sensor",
     "throttle/delays",
     "throttle/chat",

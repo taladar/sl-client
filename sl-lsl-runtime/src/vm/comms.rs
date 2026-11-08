@@ -124,6 +124,20 @@ pub struct Heard {
     pub message: String,
 }
 
+/// The scripts a line said by a script reaches, and what they hear: what
+/// [`Host::say`](crate::vm::Host::say) and
+/// [`Host::say_to`](crate::vm::Host::say_to) hand back, for the engine to
+/// offer each of them at the moment its flavour delivers chat — at the call
+/// on Second Life, at OpenSim's next async command pass (`events/latency`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Overheard {
+    /// What was said, as every script that hears it hears it.
+    pub heard: Heard,
+    /// The scripts in earshot, each once; their listens decide how many
+    /// `listen` events that makes.
+    pub by: Vec<CallerId>,
+}
+
 /// One listen a script holds.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct Listen {

@@ -1,0 +1,6 @@
+@1 set-prim
+@1 print "colour set"
+@1 print "changed 2"
+@3 > changed 4
+@3 print "changed 4"
+end state=default running=true queued=0

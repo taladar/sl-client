@@ -796,7 +796,7 @@ fn media_set(
     } else {
         &[]
     };
-    ctx.host().set_prim(caller, &prim, events);
+    ctx.set_prim(&prim, events);
     STATUS_OK
 }
 

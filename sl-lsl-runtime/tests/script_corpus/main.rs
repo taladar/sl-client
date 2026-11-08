@@ -168,11 +168,6 @@ mod tests {
                 post(&mut engine, stimulus)?;
             }
             let _report = engine.tick(&mut host);
-            for bits in core::mem::take(&mut host.owed_changes) {
-                engine
-                    .changed(SCRIPT, bits)
-                    .map_err(|error| format!("raising changed({bits}): {error:?}"))?;
-            }
             if host.died {
                 let _gone = engine.remove(SCRIPT);
                 host.lines.push(format!("@{tick} gone"));

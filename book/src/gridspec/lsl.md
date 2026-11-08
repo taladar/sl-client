@@ -552,18 +552,63 @@ sensor answer, and the runner touches the prim.
 | what was raised while the script slept, in that order | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
 | a link message, then a colour change, in one handler | link, `changed` | the same | each flavour as its grid |
-| a colour change, then a link message | **link, `changed`**: the `changed` comes after | `changed`, link: in the order raised | link, `changed` on both flavours: the fake grid raises the `changed` once the tick is over, after the link message |
+| a colour change, then a link message | **link, `changed`**: the `changed` comes after | `changed`, link: in the order raised | each flavour as its grid |
 | link, colour, link, colour, 0.3 s apart | link, link, **one** `changed` | link, `changed`, link, `changed` | each flavour as its grid |
-| link and colour, the sensor's answer, the talker's line, a 0.3 s timer, a touch at about a second | the line, link, timer, sensor, `touch_start`, `touch_end`, `changed` | sensor, link, `changed`, the line, timer, `touch_start`, `touch_end` | link, sensor, the line, timer, then as Second Life (Second Life); link, `changed`, sensor, then as OpenSim (OpenSim): a link message reaches its script in the tick it was sent, a sweep is answered at the next |
+| link and colour, the sensor's answer, the talker's line, a 0.3 s timer, a touch at about a second | the line, link, timer, sensor, `touch_start`, `touch_end`, `changed` | sensor, link, `changed`, the line, timer, `touch_start`, `touch_end` | each flavour as its grid |
 | a touch at about a second, link and colour at 2.5 s, the line at 3 s, a timer at 3.5 s | link, the line, timer, `touch_start`, `touch_end`, `changed` | `touch_start`, `touch_end`, link, `changed`, the line, timer | each flavour as its grid |
 
 OpenSim's queue is first in, first out across every type, on both engines.
-Second Life's is not: a touch and a `changed` raised while the script slept
-come after the link messages, chat, timers and sensor answers raised in the
-same sleep, whenever they were raised, and `changed` comes last of all.
-Among the others the order is the order they reached the script, which is
-frame timing (the sensor's answer came after a timer set to fire at 0.3 s,
-and the helper's link message after the talker's line).
+Second Life's is not: a sweep's answer, a touch and a `changed` raised while
+the script slept come after the link messages, chat and timers raised in the
+same sleep, whenever they were raised — the answer first of the three, then
+the touches, and `changed` last of all. Among the others the order is the
+order they reached the script, which is the moment each was raised and how
+long each takes to arrive (below): the helper's link message came after the
+talker's line because a line reaches a listener at once and a link message
+a frame later.
+
+The ranking is not fixed run to run. One of three runs on aditi's server
+2026-11-05 printed round 4 in the order raised (the line, link, sensor,
+`changed`, timer, `touch_start`, `touch_end`), and the other two ranked it as
+in the table. The fake grid always ranks.
+
+### When each event arrives
+
+`events/latency` (2026-11-08, all three grids) starts a clock, raises one
+event and ends the handler, and stops the clock in the handler that runs the
+event; two kinds poll the other script's mark while still busy in the
+raising handler, to time the first hop alone. Six trials of each.
+
+| what | Second Life (frames of 1/45 s) | OpenSim YEngine | OpenSim XEngine |
+| --- | --- | --- | --- |
+| a link message to its own prim, heard by the sender | 1 frame | at once | at once |
+| a link message to a second script, which answers with one | 2 frames | at once | at once, a tick of 10 ms at times |
+| the same, the first hop alone while the sender is busy | 1 frame | at once | at once |
+| a line said to a prim 3 m away, which answers with one | **1 frame** for both hops | 0.1 s | 0.1–0.2 s |
+| the same, the first hop alone | 1 frame | at once to 0.1 s | at once to 0.1 s |
+| `llSensor`'s answer | 2 frames | at once, in the call | at once, in the call |
+| a setter's `changed` (`llSetColor`) in the setter's own script | 2 frames | at once, in the call | at once, in the call |
+| a sweep's answer against a timer or a link message raised up to 1.5 s later in the same sleep | after both, every time | before both | before both |
+
+So Second Life queues a link message at the call but runs it no sooner than
+the next frame, and queues a line said for its listeners at once: a listener
+served later in the same frame runs it in that frame, which is how a chat
+round trip takes one frame and a link round trip two. The link message is in
+the queue from the call on — ten messages a script sends itself before a
+`state` change are dropped with the queue (`events/state-change`) — and an
+event behind it that is free to run goes first: a `changed` raised during a
+handler runs as the handler ends, ahead of the link message the handler sent
+itself last (`events/timer-reset`, `in-timer-media-keep`). A setter's
+`changed` and a sweep's answer run two frames after the call, and the answer
+waits behind every other kind of event of the same sleep but touches and
+`changed`.
+
+OpenSim posts a link message, a setter's `changed` and `llSensor`'s answer
+in the call, and an engine thread runs the event at once. Chat goes through
+`WorldCommModule.DeliverMessage`, which only queues the line; the async
+command pass (`AsyncCommandManager`, every `AsyncLLCommandLoopms`, 100 ms by
+default) hands it to the listening scripts, so a hop takes anything up to
+0.1 s and a round trip a whole pass.
 
 The fake grid's engine queues by that rule on a Second-Life-flavoured region
 (`Coalescing::Reference`): a touch waits behind every other kind of event
@@ -573,10 +618,22 @@ what makes the probe's fence work on aditi: the second fence, sent by the
 first fence's handler, comes after the round's `changed` — ranked against
 every queued event whenever raised, the `changed` and the touches would
 wait behind each round's fences for ever. An OpenSim-flavoured region is
-first in, first out. Where the fake grid still parts from the grids is when
-an event is raised, not where it waits: OpenSim raises a `changed` inside
-the setter and answers `llSensor` inside the call, and Second Life delivers
-chat ahead of a link message (`server-lsl-event-raise-timing`).
+first in, first out.
+
+The fake grid raises each event when its flavour does
+(`server-lsl-event-raise-timing`). An event carries the first tick its
+handler may start in: on Second Life a link message the next tick, a setter's
+`changed` and a sweep's answer two ticks after the call; a script starts the
+first queued event that is free to run. A line a script says reaches the
+listeners in earshot at the call there. On OpenSim the setter's `changed` and
+`llSensor`'s answer are queued in the call, a script an event reached after
+its turn in the tick runs it on what is left of its share, and lines are
+handed over every 100 ms of region time. Two of the probe's timings stay
+apart by the nature of ticks: a script polling in a busy loop sees the
+other's answer a tick late, having spent its share, and OpenSim's chat round
+trip reads 0.18 s where the live grid read 0.1 s, since the live probe
+happened to say each line just before a pass and the fake grid's passes fall
+at the start of a tick (`vary: t`, so the comparison does not count them).
 
 ### A timer that falls due while the script is busy
 

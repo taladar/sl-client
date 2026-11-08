@@ -115,8 +115,10 @@ pub enum Coalescing {
     /// `server-world-collision-and-physics`, carries that.
     ///
     /// The queue is not first in, first out either (`events/order`): a
-    /// touch waits behind every other kind of event queued with it, and a
-    /// `changed` behind those and the touches, whenever each was raised.
+    /// sweep's answer waits behind every other kind of event queued with it
+    /// (`events/latency`: behind a timer and a link message raised 1.5 s
+    /// after it), a touch behind those and the answers, and a `changed`
+    /// behind everything, whenever each was raised.
     #[default]
     Reference,
     /// Never merge: every raise is an event of its own, the most split-up
@@ -153,11 +155,13 @@ impl Coalescing {
     /// Where an event named `event` waits in a queue under this rule: behind
     /// every queued event of a lower rank and ahead of every one of a higher.
     /// One rank for all of them is first in, first out; the reference ranks
-    /// touches behind the rest and a `changed` behind those (`events/order`).
+    /// a sweep's answers behind the rest, touches behind those and a
+    /// `changed` behind everything (`events/order`, `events/latency`).
     fn rank(self, event: &str) -> u8 {
         match self {
-            Self::Reference if event == "changed" => 2,
-            Self::Reference if TOUCHES.contains(&event) => 1,
+            Self::Reference if event == "changed" => 3,
+            Self::Reference if TOUCHES.contains(&event) => 2,
+            Self::Reference if SWEEP_ANSWERS.contains(&event) => 1,
             Self::Reference | Self::Never | Self::WhileQueued => 0,
         }
     }
@@ -166,14 +170,35 @@ impl Coalescing {
 /// The three touch events.
 const TOUCHES: [&str; 3] = ["touch", "touch_end", "touch_start"];
 
-/// When an event is posted and how it may merge: the tick, and the region's
-/// [`Coalescing`].
+/// The two events a sweep answers with.
+const SWEEP_ANSWERS: [&str; 2] = ["no_sensor", "sensor"];
+
+/// When an event is posted and how it may merge: the tick, the region's
+/// [`Coalescing`], and the tick its handler may start in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Arrival {
     /// The tick the event is posted in.
     pub tick: Tick,
     /// Which queued event it may merge into.
     pub coalescing: Coalescing,
+    /// The first tick its handler may start in. An event is queued at the
+    /// moment it is raised, so a state change or a reset after it drops it,
+    /// yet Second Life runs a link message no sooner than the next frame and
+    /// a setter's `changed` and a sweep's answer two frames on
+    /// (`events/latency`, `events/state-change`).
+    pub ready: Tick,
+}
+
+impl Arrival {
+    /// This arrival, its handler held back `ticks` ticks after the tick it is
+    /// posted in.
+    #[must_use]
+    pub const fn ready_after(self, ticks: u64) -> Self {
+        Self {
+            ready: self.tick.after(ticks),
+            ..self
+        }
+    }
 }
 
 /// The events that never stack: one already queued, a second is dropped. A
@@ -216,7 +241,7 @@ pub enum Outcome {
 }
 
 /// The result of one [`Instance::run_slice`].
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Slice {
     /// How it ended.
     pub outcome: Outcome,
@@ -421,6 +446,9 @@ struct Queued {
     detected: Option<Vec<Detected>>,
     /// The tick it was posted in, which decides whether a later one merges.
     posted: Tick,
+    /// The first tick its handler may start in; until then the events
+    /// behind it that are free to run go first.
+    ready: Tick,
     /// How many handlers the script had begun when it was posted: the
     /// events raised while one handler ran are ranked among themselves, and
     /// wait behind every event raised before it began.
@@ -1301,7 +1329,9 @@ impl Instance {
         self.running
             && !self.held
             && self.wake <= now
-            && (self.activity.is_some() || !self.queue.is_empty() || self.reset_when_idle)
+            && (self.activity.is_some()
+                || self.queue.iter().any(|queued| queued.ready <= now)
+                || (self.queue.is_empty() && self.reset_when_idle))
     }
 
     /// Reset the script as YEngine resets a running script another asks it
@@ -1570,6 +1600,7 @@ impl Instance {
             args,
             detected,
             posted: arrival.tick,
+            ready: arrival.ready,
             batch: self.begun,
         };
         if first {
@@ -1778,7 +1809,7 @@ impl Instance {
             self.reset();
         }
         if self.activity.is_none()
-            && let Err(error) = self.start_next_event()
+            && let Err(error) = self.start_next_event(now)
         {
             return self.fault(error, None, peers.flavour());
         }
@@ -1897,14 +1928,22 @@ impl Instance {
         }
     }
 
-    /// Start the handler of the oldest queued event, if there is one.
-    fn start_next_event(&mut self) -> Result<(), RuntimeError> {
+    /// Start the handler of the first queued event free to run at `now`,
+    /// if there is one. One still held back stays where it is, and the next
+    /// behind it goes first: on Second Life a `changed` raised in a handler
+    /// runs as the handler ends, ahead of the link message the handler sent
+    /// itself last, which waits for the next frame (`events/timer-reset`).
+    fn start_next_event(&mut self, now: Tick) -> Result<(), RuntimeError> {
         let Some(Queued {
             handler,
             args,
             detected,
             ..
-        }) = self.queue.pop_front()
+        }) = self
+            .queue
+            .iter()
+            .position(|queued| queued.ready <= now)
+            .and_then(|first| self.queue.remove(first))
         else {
             return Ok(());
         };

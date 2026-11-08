@@ -1,0 +1,65 @@
+grid: aditi
+date: 2026-11-08
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Mauve
+engine: Mono
+settings: Linden Lab's; a resident cannot set them
+
+# animations avatar=other playing=""
+# animations avatar=owner playing=""
+PROBE events/latency rec=start region="Mauve" channel="Luau" version="2026-11-05.42088067707"
+PROBE events/latency rec=latency kind=link-self trial=0 t=0.154670
+PROBE events/latency rec=latency kind=link-self trial=1 t=0.022119
+PROBE events/latency rec=latency kind=link-self trial=2 t=0.022375
+PROBE events/latency rec=latency kind=link-self trial=3 t=0.021595
+PROBE events/latency rec=latency kind=link-self trial=4 t=0.021723
+PROBE events/latency rec=latency kind=link-self trial=5 t=0.021502
+PROBE events/latency rec=latency kind=link-echo trial=0 t=0.044448
+PROBE events/latency rec=latency kind=link-echo trial=1 t=0.044389
+PROBE events/latency rec=latency kind=link-echo trial=2 t=0.043585
+PROBE events/latency rec=latency kind=link-echo trial=3 t=0.043840
+PROBE events/latency rec=latency kind=link-echo trial=4 t=0.045215
+PROBE events/latency rec=latency kind=link-echo trial=5 t=0.045063
+PROBE events/latency rec=latency kind=chat-echo trial=0 t=0.022340
+PROBE events/latency rec=latency kind=chat-echo trial=1 t=0.021529
+PROBE events/latency rec=latency kind=chat-echo trial=2 t=0.021739
+PROBE events/latency rec=latency kind=chat-echo trial=3 t=0.021367
+PROBE events/latency rec=latency kind=chat-echo trial=4 t=0.021603
+PROBE events/latency rec=latency kind=chat-echo trial=5 t=0.021403
+PROBE events/latency rec=latency kind=sensor trial=0 event=sensor t=0.022223
+PROBE events/latency rec=latency kind=sensor trial=1 event=sensor t=0.045054
+PROBE events/latency rec=latency kind=sensor trial=2 event=sensor t=0.043769
+PROBE events/latency rec=latency kind=sensor trial=3 event=sensor t=0.044537
+PROBE events/latency rec=latency kind=sensor trial=4 event=sensor t=0.043723
+PROBE events/latency rec=latency kind=sensor trial=5 event=sensor t=0.044202
+PROBE events/latency rec=latency kind=changed trial=0 t=0.021542
+PROBE events/latency rec=latency kind=changed trial=1 t=0.045016
+PROBE events/latency rec=latency kind=changed trial=2 t=0.045231
+PROBE events/latency rec=latency kind=changed trial=3 t=0.044580
+PROBE events/latency rec=latency kind=changed trial=4 t=0.044533
+PROBE events/latency rec=latency kind=changed trial=5 t=0.044414
+PROBE events/latency rec=latency kind=link-busy trial=0 t=0.023075
+PROBE events/latency rec=latency kind=link-busy trial=1 t=0.022201
+PROBE events/latency rec=latency kind=link-busy trial=2 t=0.021622
+PROBE events/latency rec=latency kind=link-busy trial=3 t=0.022579
+PROBE events/latency rec=latency kind=link-busy trial=4 t=0.022514
+PROBE events/latency rec=latency kind=link-busy trial=5 t=0.021685
+PROBE events/latency rec=latency kind=chat-busy trial=0 t=0.044363
+PROBE events/latency rec=latency kind=chat-busy trial=1 t=0.021608
+PROBE events/latency rec=latency kind=chat-busy trial=2 t=0.021519
+PROBE events/latency rec=latency kind=chat-busy trial=3 t=0.021460
+PROBE events/latency rec=latency kind=chat-busy trial=4 t=0.022287
+PROBE events/latency rec=latency kind=chat-busy trial=5 t=0.021750
+PROBE events/latency rec=race kind=sensor-timer trial=0 delay=0.100000 events="timer,sensor"
+PROBE events/latency rec=race kind=sensor-timer trial=1 delay=0.300000 events="timer,sensor"
+PROBE events/latency rec=race kind=sensor-timer trial=2 delay=0.600000 events="timer,sensor"
+PROBE events/latency rec=race kind=sensor-timer trial=3 delay=0.900000 events="timer,sensor"
+PROBE events/latency rec=race kind=sensor-timer trial=4 delay=1.200000 events="timer,sensor"
+PROBE events/latency rec=race kind=sensor-timer trial=5 delay=1.500000 events="timer,sensor"
+PROBE events/latency rec=race kind=sensor-link trial=0 delay=0.100000 events="link,sensor"
+PROBE events/latency rec=race kind=sensor-link trial=1 delay=0.300000 events="link,sensor"
+PROBE events/latency rec=race kind=sensor-link trial=2 delay=0.600000 events="link,sensor"
+PROBE events/latency rec=race kind=sensor-link trial=3 delay=0.900000 events="link,sensor"
+PROBE events/latency rec=race kind=sensor-link trial=4 delay=1.200000 events="link,sensor"
+PROBE events/latency rec=race kind=sensor-link trial=5 delay=1.500000 events="link,sensor"
+PROBE events/latency rec=end

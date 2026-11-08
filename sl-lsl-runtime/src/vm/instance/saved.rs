@@ -226,6 +226,9 @@ fn queued(
         args: saved.args.clone(),
         detected: saved.detected.clone(),
         posted,
+        // A restored event is free to run: what held it back was the frame
+        // it was raised in, long over.
+        ready: posted,
         batch: 0,
     })
 }

@@ -28,6 +28,7 @@ mod identity;
 mod inventory;
 mod json;
 mod land;
+mod latency;
 mod linking;
 mod linkset;
 mod math;
@@ -442,18 +443,25 @@ impl Host for Recorder {
         )
     }
 
-    fn say(&mut self, caller: CallerId, speech: &Speech) {
+    fn say(&mut self, caller: CallerId, speech: &Speech) -> Option<Overheard> {
         if speech.channel == DEBUG_CHANNEL {
             self.debug.push(speech.text.clone());
         }
         self.said.push((self.now, caller, speech.clone()));
+        None
     }
 
     fn owner_say(&mut self, caller: CallerId, text: &str) {
         self.told.push((self.now, caller, text.to_owned()));
     }
 
-    fn say_to(&mut self, caller: CallerId, target: &str, channel: i32, text: &str) {
+    fn say_to(
+        &mut self,
+        caller: CallerId,
+        target: &str,
+        channel: i32,
+        text: &str,
+    ) -> Option<Overheard> {
         if channel == DEBUG_CHANNEL {
             self.debug.push(text.to_owned());
         }
@@ -464,6 +472,7 @@ impl Host for Recorder {
             channel,
             text.to_owned(),
         ));
+        None
     }
 
     fn instant_message(&mut self, caller: CallerId, message: &InstantMessage) {
@@ -831,7 +840,7 @@ impl Host for Recorder {
         Some(state)
     }
 
-    fn set_prim(&mut self, caller: CallerId, state: &crate::vm::prim::Prim, changed: &[i32]) {
+    fn set_prim(&mut self, caller: CallerId, state: &crate::vm::prim::Prim) {
         let mut state = state.clone();
         if state.key == self.prim_key(self.prim_of(caller)) {
             let mut placement = self.placement(caller);
@@ -850,9 +859,6 @@ impl Host for Recorder {
         if self.linked.is_none() {
             state.rotation = state.local_rotation.clone();
             state.root_rotation = state.local_rotation.clone();
-        }
-        for bits in changed {
-            self.changes.push((state.key.clone(), *bits));
         }
         let _was = self.prim_states.insert(state.key.clone(), state);
     }

@@ -13,7 +13,7 @@ use crate::bytecode::Program;
 use crate::library::{Event, event};
 use crate::num::ticks_for;
 use crate::value::Value;
-use crate::vm::comms::Heard;
+use crate::vm::comms::{Heard, Overheard};
 use crate::vm::contents::Control;
 use crate::vm::context::{Peers, Raised, Tick};
 use crate::vm::detected::Detected;
@@ -129,7 +129,7 @@ impl EngineConfig {
 }
 
 /// What one tick did.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct TickReport {
     /// The tick that ran.
     pub tick: Tick,
@@ -175,7 +175,26 @@ pub struct Engine {
     /// The region's `[OSSL]` configuration, which an OpenSim flavour's
     /// OSSL, LightShare and MOD calls pass; [`None`] for the stock one.
     ossl: Option<Arc<Settings>>,
+    /// Lines heard on OpenSim that wait for its next async command pass, in
+    /// the order they were said.
+    overheard: Vec<(CallerId, Heard)>,
 }
+
+/// How many ticks after its raise Second Life runs a link message: the next
+/// frame, to the sender too (`events/latency`, aditi 2026-11-08: one frame
+/// to itself, two for an echo's answer).
+const SECOND_LIFE_LINK_TICKS: u64 = 1;
+
+/// How many ticks after its call Second Life runs a setter's `changed` and
+/// a sweep's answer (`events/latency`: two frames for both).
+const SECOND_LIFE_LATE_TICKS: u64 = 2;
+
+/// How often OpenSim's async command pass delivers the lines its scripts
+/// heard (`AsyncCommandManager`'s `AsyncLLCommandLoopms`, 100 ms by default):
+/// `WorldCommModule.DeliverMessage` only queues a line, and the pass hands it
+/// to the listening scripts (`events/latency`: an echo's answer 0.1 s, the
+/// first hop alone anything from nothing to 0.1 s).
+const OPENSIM_ASYNC_PASS: Duration = Duration::from_millis(100);
 
 /// One script's line in the region's top-scripts report.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -203,6 +222,7 @@ impl Engine {
             floods: FloodGate::new(),
             active: 0.0,
             ossl: None,
+            overheard: Vec::new(),
         }
     }
 
@@ -283,7 +303,13 @@ impl Engine {
 
     /// Remove an instance, returning it.
     pub fn remove(&mut self, id: CallerId) -> Option<Instance> {
+        self.forget_pending(id);
         self.instances.remove(&id)
+    }
+
+    /// Drop the lines on their way to the instance `id`, which is leaving.
+    fn forget_pending(&mut self, id: CallerId) {
+        self.overheard.retain(|(to, _heard)| *to != id);
     }
 
     /// The instance `id` names.
@@ -372,6 +398,31 @@ impl Engine {
             }
         }
         Ok(Some(posted))
+    }
+
+    /// Offer the instance `id` a line `heard` when its flavour delivers chat
+    /// to scripts: at once on Second Life ([`Self::hear`]), at the next of
+    /// OpenSim's async command passes, every 100 ms of region time, there
+    /// (`events/latency`).
+    pub fn overhear(&mut self, id: CallerId, heard: &Heard) {
+        if self.config.flavour.is_opensim() {
+            self.overheard.push((id, heard.clone()));
+        } else {
+            // `listen` takes an integer, two strings and a key: it never
+            // fails.
+            let _posted = self.hear(id, heard);
+        }
+    }
+
+    /// Offer every script `overheard` reaches its line, as
+    /// [`Self::overhear`] does — but never the speaking script `speaker`,
+    /// whose prim does not hear its own line.
+    fn overhear_all(&mut self, speaker: CallerId, overheard: &Overheard) {
+        for to in &overheard.by {
+            if *to != speaker {
+                self.overhear(*to, &overheard.heard);
+            }
+        }
     }
 
     /// Raise `changed(change)` in the instance `id` — the one function every
@@ -703,6 +754,7 @@ impl Engine {
     /// the rez, so what it saves is never run.
     pub fn take(&mut self, id: CallerId) -> Option<SavedScript> {
         let saved = self.save(id)?;
+        self.forget_pending(id);
         let _taken = self.instances.remove(&id);
         Some(saved)
     }
@@ -863,11 +915,12 @@ impl Engine {
     }
 
     /// An event posted now: in the current tick, merging by the region's
-    /// policy.
+    /// policy, its handler free to start at once.
     const fn arrival(&self) -> Arrival {
         Arrival {
             tick: self.now,
             coalescing: self.config.coalescing,
+            ready: self.now,
         }
     }
 
@@ -946,11 +999,11 @@ impl Engine {
                 }
                 EngineFlavour::YEngine | EngineFlavour::XEngine => Admission::Pass,
             };
-            match (admission, line) {
-                (Admission::Drop, _) => {}
+            let heard = match (admission, line) {
+                (Admission::Drop, _) => None,
                 (Admission::Pass, Line::ToOwner(text)) => {
                     let owner = host.owner(id);
-                    host.say_to(id, &owner, DEBUG_CHANNEL, &text);
+                    host.say_to(id, &owner, DEBUG_CHANNEL, &text)
                 }
                 (Admission::Pass, Line::Said(text, to_avatars, to_scripts)) => host.say(
                     id,
@@ -970,6 +1023,9 @@ impl Engine {
                         to_scripts: fault_reach(flavour),
                     },
                 ),
+            };
+            if let Some(overheard) = heard {
+                self.overhear_all(id, &overheard);
             }
         }
     }
@@ -978,8 +1034,10 @@ impl Engine {
     /// calls: `linkset_data` for each change of the linkset's store in every
     /// script of the linkset, `link_message(sender, num, text, id)` for
     /// each link message in every script it reaches
-    /// ([`Links::reached`](crate::vm::Links::reached)), and its own
-    /// `run_time_permissions` and `transaction_result`. `instance` itself
+    /// ([`Links::reached`](crate::vm::Links::reached)), OpenSim's in-call
+    /// `changed` in every script of the changed prim and its in-call sweep's
+    /// `sensor` or `no_sensor`, and its own `run_time_permissions` and
+    /// `transaction_result`. `instance` itself
     /// gets its share too, unless the slice ended in a reset, which emptied
     /// its queue: on Second Life an event is queued at the call, so a reset
     /// after it in the same event drops it (`data/linkset-data`'s
@@ -1003,6 +1061,32 @@ impl Engine {
                     }
                     continue;
                 }
+                Raised::Sweep(query) => {
+                    let sweeper = sweeper_of(id, host);
+                    let candidates = host.sense(id);
+                    let Some(found) =
+                        crate::vm::sensing::sweep(query, &sweeper, &candidates, flavour)
+                    else {
+                        continue;
+                    };
+                    if own {
+                        let _posted = if found.is_empty() {
+                            instance.post(arrival, lifecycle("no_sensor"), Vec::new())
+                        } else {
+                            instance.post_detected(arrival, lifecycle("sensor"), found)
+                        };
+                    }
+                    continue;
+                }
+                Raised::Heard(overheard) => {
+                    self.overhear_all(id, overheard);
+                    continue;
+                }
+                Raised::Changed { prim, bits } => (
+                    lifecycle("changed"),
+                    vec![Value::Integer(*bits)],
+                    host.prim_scripts(prim).unwrap_or_default(),
+                ),
                 Raised::Linkset(change) => (
                     lifecycle("linkset_data"),
                     vec![
@@ -1101,6 +1185,18 @@ impl Engine {
                     vec![id],
                 ),
             };
+            // Queued now everywhere; Second Life runs a link message at the
+            // next tick and a setter's `changed` two on, OpenSim both at
+            // once.
+            let arrival = match (raised, flavour) {
+                (Raised::Linked(_), EngineFlavour::SecondLife) => {
+                    arrival.ready_after(SECOND_LIFE_LINK_TICKS)
+                }
+                (Raised::Changed { .. }, EngineFlavour::SecondLife) => {
+                    arrival.ready_after(SECOND_LIFE_LATE_TICKS)
+                }
+                _ => arrival,
+            };
             for to in reached {
                 if to == id {
                     if own {
@@ -1110,6 +1206,28 @@ impl Engine {
                     let _posted = peer.post(arrival, event, args.clone());
                 }
             }
+        }
+    }
+
+    /// Hand the scripts the lines they heard since OpenSim's last async
+    /// command pass, when one falls in tick `now`: the first tick at or after
+    /// each [`OPENSIM_ASYNC_PASS`] of region time.
+    fn pass_heard(&mut self, now: Tick) {
+        if self.overheard.is_empty() {
+            return;
+        }
+        let pass = OPENSIM_ASYNC_PASS.as_micros();
+        let at = |tick: u64| {
+            u128::from(tick)
+                .saturating_mul(self.config.step.as_micros())
+                .checked_div(pass)
+                .unwrap_or(0)
+        };
+        if now.0 > 0 && at(now.0) == at(now.0.saturating_sub(1)) {
+            return;
+        }
+        for (id, heard) in core::mem::take(&mut self.overheard) {
+            let _posted = self.hear(id, &heard);
         }
     }
 
@@ -1144,70 +1262,137 @@ impl Engine {
         }
         if !timers_last {
             self.post_due_timers(now);
+            self.pass_heard(now);
         }
         self.post_due_sweeps(now, host);
         let mut region_left = self.config.region_budget;
-        for id in order {
-            // Out of the map while it runs, so the others can be lent to it.
-            let Some(mut instance) = self.instances.remove(&id) else {
+        // What each script served this tick has left of its share.
+        let mut left: BTreeMap<CallerId, u32> = BTreeMap::new();
+        for id in &order {
+            let Some(mut instance) = self.instances.remove(id) else {
                 continue;
             };
             if !instance.is_runnable(now) {
-                let _none = self.instances.insert(id, instance);
+                let _none = self.instances.insert(*id, instance);
                 continue;
             }
             report.runnable = report.runnable.saturating_add(1);
             if region_left == 0 {
-                let _none = self.instances.insert(id, instance);
+                let _none = self.instances.insert(*id, instance);
                 continue;
             }
             report.served = report.served.saturating_add(1);
-            self.last_served = Some(id);
-            // What the script overdrew last time is still running: it comes
-            // out of this tick's share and the region's alike.
-            let mut script_left = instance.repay(self.config.script_budget);
-            region_left = region_left.saturating_sub(u64::from(
-                self.config.script_budget.saturating_sub(script_left),
-            ));
-            while script_left > 0 && region_left > 0 && instance.is_runnable(now) {
-                let slice = instance.run_slice_among(
-                    id,
-                    now,
-                    self.config.step,
-                    u32::try_from(region_left)
-                        .map_or(script_left, |region| script_left.min(region)),
-                    host,
-                    Peers::of(
-                        &self.instances,
-                        self.config.flavour,
-                        (
-                            self.ossl.as_deref().unwrap_or_else(|| stock_ossl()),
-                            self.config.script_delay_factor,
-                        ),
-                    ),
-                );
-                self.report(id, &slice, host);
-                self.raise(id, &mut instance, &slice, host);
-                instance.charge(slice.used);
-                instance.overdraw(slice.used.saturating_sub(script_left));
-                script_left = script_left.saturating_sub(slice.used);
-                region_left = region_left.saturating_sub(u64::from(slice.used));
-                report.used = report.used.saturating_add(u64::from(slice.used));
-                // Every body runs at least one instruction, so a slice that
-                // charged nothing had nothing to run.
-                let stop = slice.used == 0 || matches!(slice.outcome, Outcome::Idle);
-                report.slices.push((id, slice));
-                if stop {
-                    break;
+            self.last_served = Some(*id);
+            let share = self.repaid_share(&mut instance, &mut region_left);
+            let rest = self.run_share(
+                *id,
+                &mut instance,
+                (share, &mut region_left),
+                &mut report,
+                host,
+            );
+            let _was = left.insert(*id, rest);
+            let _none = self.instances.insert(*id, instance);
+        }
+        // OpenSim runs an event as soon as it is posted, on an engine
+        // thread: a script that an event reached after its turn in the tick,
+        // or one not yet served, runs it now on what is left of its share —
+        // a link message's answer takes no tick there (`events/latency`).
+        // Second Life serves each script once a frame.
+        while flavour.is_opensim() && region_left > 0 {
+            let mut ran = false;
+            for id in &order {
+                let Some(mut instance) = self.instances.remove(id) else {
+                    continue;
+                };
+                if !instance.is_runnable(now) || left.get(id) == Some(&0) {
+                    let _none = self.instances.insert(*id, instance);
+                    continue;
                 }
+                let share = match left.get(id) {
+                    Some(rest) => *rest,
+                    None => self.repaid_share(&mut instance, &mut region_left),
+                };
+                let used_before = report.used;
+                let rest = self.run_share(
+                    *id,
+                    &mut instance,
+                    (share, &mut region_left),
+                    &mut report,
+                    host,
+                );
+                ran |= report.used > used_before;
+                let _was = left.insert(*id, rest);
+                let _none = self.instances.insert(*id, instance);
             }
-            let _none = self.instances.insert(id, instance);
+            if !ran {
+                break;
+            }
         }
         if timers_last {
             self.post_due_timers(now);
+            self.pass_heard(now);
         }
         self.settle();
         report
+    }
+
+    /// The instance's share of this tick: the script budget less what it
+    /// overdrew last time, which is still running and comes out of the
+    /// region's budget too.
+    fn repaid_share(&self, instance: &mut Instance, region_left: &mut u64) -> u32 {
+        let share = instance.repay(self.config.script_budget);
+        *region_left =
+            region_left.saturating_sub(u64::from(self.config.script_budget.saturating_sub(share)));
+        share
+    }
+
+    /// Run the instance `id` for up to `share` instructions of what is left
+    /// of the region's budget, slice after slice while it has something to
+    /// run, posting what each slice raised; answers what is left of the
+    /// share.
+    fn run_share(
+        &mut self,
+        id: CallerId,
+        instance: &mut Instance,
+        (share, region_left): (u32, &mut u64),
+        report: &mut TickReport,
+        host: &mut dyn Host,
+    ) -> u32 {
+        let now = self.now;
+        let mut script_left = share;
+        while script_left > 0 && *region_left > 0 && instance.is_runnable(now) {
+            let slice = instance.run_slice_among(
+                id,
+                now,
+                self.config.step,
+                u32::try_from(*region_left).map_or(script_left, |region| script_left.min(region)),
+                host,
+                Peers::of(
+                    &self.instances,
+                    self.config.flavour,
+                    (
+                        self.ossl.as_deref().unwrap_or_else(|| stock_ossl()),
+                        self.config.script_delay_factor,
+                    ),
+                ),
+            );
+            self.report(id, &slice, host);
+            self.raise(id, instance, &slice, host);
+            instance.charge(slice.used);
+            instance.overdraw(slice.used.saturating_sub(script_left));
+            script_left = script_left.saturating_sub(slice.used);
+            *region_left = region_left.saturating_sub(u64::from(slice.used));
+            report.used = report.used.saturating_add(u64::from(slice.used));
+            // Every body runs at least one instruction, so a slice that
+            // charged nothing had nothing to run.
+            let stop = slice.used == 0 || matches!(slice.outcome, Outcome::Idle);
+            report.slices.push((id, slice));
+            if stop {
+                break;
+            }
+        }
+        script_left
     }
 
     /// Post a `timer` event to every script whose timer is due at `now`.
@@ -1242,13 +1427,23 @@ impl Engine {
                 else {
                     continue;
                 };
-                let posted = if found.is_empty() {
-                    self.post(id, lifecycle("no_sensor"), Vec::new())
+                // Second Life runs the answer a frame after it sweeps, two
+                // after the call (`events/latency`).
+                let arrival = if flavour == EngineFlavour::SecondLife {
+                    self.arrival()
+                        .ready_after(SECOND_LIFE_LATE_TICKS.saturating_sub(1))
                 } else {
-                    self.post_detected(id, lifecycle("sensor"), found)
+                    self.arrival()
+                };
+                let Some(instance) = self.instances.get_mut(&id) else {
+                    continue;
                 };
                 // A sweep's events take what the table says they take.
-                let _posted = posted;
+                let _posted = if found.is_empty() {
+                    instance.post(arrival, lifecycle("no_sensor"), Vec::new())
+                } else {
+                    instance.post_detected(arrival, lifecycle("sensor"), found)
+                };
             }
         }
     }

@@ -34,8 +34,7 @@ pub(crate) fn own(ctx: &mut ScriptCtx<'_>) -> Option<Prim> {
 /// Hands `prim` back to the host with the `changed` in `changes`.
 pub(crate) fn write(ctx: &mut ScriptCtx<'_>, prim: &Prim, changes: &Changes) {
     let events = changes.events(ctx.flavour().is_opensim());
-    let caller = ctx.caller();
-    ctx.host().set_prim(caller, prim, &events);
+    ctx.set_prim(prim, &events);
 }
 
 /// Changes the caller's own prim with `change`, then hands it back.

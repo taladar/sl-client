@@ -3,7 +3,9 @@
 use sl_types::lsl::Vector;
 
 use crate::library::BuiltinId;
-use crate::vm::comms::{Dialog, InstantMessage, InvalidLinkTarget, Links, LoadUrl, MapDestination};
+use crate::vm::comms::{
+    Dialog, InstantMessage, InvalidLinkTarget, Links, LoadUrl, MapDestination, Overheard,
+};
 use crate::vm::contents::{Item, Offer, RemoteLoad, Rez, RezRefusal};
 use crate::vm::economy::{MoneyRefusal, PayPrice, Payment};
 use crate::vm::experiences::{
@@ -69,24 +71,32 @@ pub trait Host {
     fn script_named(&self, caller: CallerId, name: &str) -> Option<CallerId>;
 
     /// The script's object says `speech`. The host hands it to the region's
-    /// chat fan-out: the avatars within [`Speech::to_avatars`] get it as
-    /// chat from the object (on `DEBUG_CHANNEL`, as the viewer's debug
-    /// chat), and the scripts within [`Speech::to_scripts`] are offered it
-    /// ([`Engine::hear`](crate::vm::Engine::hear)) — all but the scripts of
-    /// the speaking prim itself, which never hears its own line. The runtime
-    /// says a run-time error and a library call's refusal this way, already
-    /// worded and flood-limited, and `llWhisper`, `llSay`, `llShout` and
-    /// `llRegionSay` already cut.
-    fn say(&mut self, caller: CallerId, speech: &Speech);
+    /// chat fan-out for the avatars within [`Speech::to_avatars`], who get it
+    /// as chat from the object (on `DEBUG_CHANNEL`, as the viewer's debug
+    /// chat), and answers which scripts are within [`Speech::to_scripts`] —
+    /// all but the scripts of the speaking prim itself, which never hears its
+    /// own line — for the engine to offer it to; [`None`] when none is. The
+    /// runtime says a run-time error and a library call's refusal this way,
+    /// already worded and flood-limited, and `llWhisper`, `llSay`, `llShout`
+    /// and `llRegionSay` already cut.
+    fn say(&mut self, caller: CallerId, speech: &Speech) -> Option<Overheard>;
 
     /// `llRegionSayTo`: the script's object says `text` on `channel` to
     /// `target` alone, wherever in the region it is. An avatar on channel 0
     /// gets it as chat from the object, and on `DEBUG_CHANNEL` as a script
     /// error — how the engine tells an owner alone what went wrong; on
     /// another channel the scripts of the objects it wears are offered it; a
-    /// prim's scripts are offered it on any channel. The runtime has dropped a target that is no key,
-    /// `NULL_KEY` and the caller's own prim, and cut the text.
-    fn say_to(&mut self, caller: CallerId, target: &str, channel: i32, text: &str);
+    /// prim's scripts are offered it on any channel. The host delivers it to
+    /// the avatar and answers the scripts to offer it to, for the engine to
+    /// offer; [`None`] when there are none. The runtime has dropped a target
+    /// that is no key, `NULL_KEY` and the caller's own prim, and cut the text.
+    fn say_to(
+        &mut self,
+        caller: CallerId,
+        target: &str,
+        channel: i32,
+        text: &str,
+    ) -> Option<Overheard>;
 
     /// `llInstantMessage`: send `message` to its avatar, wherever it is —
     /// another region included, which `llOwnerSay` does not reach. A key that
@@ -325,11 +335,10 @@ pub trait Host {
     /// setter changed, which the library has clamped as the grid clamps it.
     /// The host keeps what it was given, so a later [`Self::prim`] reads the
     /// values set; a move of an unworn root it keeps out of the ground and in
-    /// the region, as [`Self::set_position`] does. Then it raises
-    /// `changed(bits)` in the prim's scripts once per element of `changed`,
-    /// in order — one event for a grid that joins two kinds of change in one
-    /// call, two for one that raises each.
-    fn set_prim(&mut self, caller: CallerId, state: &Prim, changed: &[i32]);
+    /// the region, as [`Self::set_position`] does. The `changed` the write
+    /// raises the engine queues itself, at the moment each flavour queues it
+    /// (`events/order`, `events/latency`).
+    fn set_prim(&mut self, caller: CallerId, state: &Prim);
 
     /// `llSetRegionPos`: moves `caller`'s object so its root stands at
     /// `position` in the region, in one move however far; the host keeps it
