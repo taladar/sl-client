@@ -262,6 +262,12 @@ pub struct AgentReadout {
     /// to see the camera framed somewhere, or brought back behind the avatar.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub camera_eye: Option<[f32; 3]>,
+    /// The land height under the agent, in metres — what the viewer's avatar
+    /// ground floor stands it on: the region's streamed ground, or, before
+    /// that has arrived, the ground the viewer kept from an earlier session.
+    /// Absent while the viewer knows no ground there.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ground_height: Option<f32>,
     /// The baked textures the viewer uploaded for its own avatar and named in
     /// its appearance, sorted — on a grid that leaves baking to the viewer,
     /// once it has published; empty where the grid bakes.
@@ -729,6 +735,7 @@ mod tests {
                 camera: Some(CameraView::Mouselook),
                 heading: Some(1.5),
                 camera_eye: Some([120.0, 128.0, 27.0]),
+                ground_height: Some(24.0),
                 published_bakes: vec![uuid::Uuid::from_u128(0xBA4E)],
             })?;
         }

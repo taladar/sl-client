@@ -3055,6 +3055,27 @@ impl FakeGrid {
         Ok(())
     }
 
+    /// Make the region called `region` leave its ground (the LAND layer) out
+    /// of what it streams to every agent arriving from now on, or stream it
+    /// again — what a test of a viewer's ground *before* the region's terrain
+    /// has streamed holds that window open with. Agents already there keep
+    /// what they were sent.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::UnknownRegion`] when the grid has no region by that name.
+    pub fn set_withholds_ground(&self, region: &str, withhold: bool) -> Result<(), Error> {
+        let index = self.region_index(region)?;
+        let entry = self
+            .core
+            .region(index)
+            .ok_or_else(|| Error::UnknownRegion {
+                region: region.to_owned(),
+            })?;
+        entry.world.lock().withholds_ground = withhold;
+        Ok(())
+    }
+
     /// Watches the ticks of the region called `region`: the receiver holds
     /// the latest, and is told of every one after.
     ///

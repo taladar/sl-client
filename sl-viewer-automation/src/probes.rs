@@ -27,7 +27,8 @@ use sl_viewer_notifications::{NotificationManager, NotificationRecord, ToastButt
 use sl_viewer_ui_core::i18n::Translator;
 use sl_viewer_world_api::rlv::RlvEnvironmentSlot;
 use sl_viewer_world_api::{
-    AgentRegionPosition, AvatarControls, CameraMode, ObjectState, SelectionSet, ViewerCamera,
+    AgentRegionPosition, AvatarControls, CameraMode, ObjectState, SelectionSet, TerrainState,
+    ViewerCamera,
 };
 
 use crate::probe_sources::ProbeSources;
@@ -196,11 +197,28 @@ pub fn read_agent(world: &mut World) -> AgentReadout {
             .get_resource::<AvatarControls>()
             .and_then(AvatarControls::held_heading),
         camera_eye: camera_eye(world),
+        ground_height: ground_height(world),
         published_bakes: ProbeSources::of(world)
             .published_bakes
             .map(|reader| reader(world))
             .unwrap_or_default(),
     }
+}
+
+/// The land height under the agent, as the avatar ground floor reads it
+/// ([`TerrainState::land_height`]: the live patches, else the retained land
+/// cache, which a relog fills from disk). `None` before the region or the
+/// agent's position is known, or while no ground there is.
+fn ground_height(world: &World) -> Option<f32> {
+    let region = world
+        .get_resource::<SlIdentity>()
+        .and_then(|identity| identity.region_handle)?;
+    let at = world
+        .get_resource::<AgentRegionPosition>()
+        .and_then(|position| position.position.as_ref())?;
+    world
+        .get_resource::<TerrainState>()?
+        .land_height(region, at.x, at.y)
 }
 
 /// Where the viewer camera's eye is, region-local to the agent's region: its

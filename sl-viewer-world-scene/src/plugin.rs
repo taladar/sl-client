@@ -44,6 +44,10 @@ impl Plugin for WorldScenePlugin {
         app.init_world_scoped::<TerrainState>();
         app.init_world_scoped::<TerrainTextures>();
         app.init_resource::<PendingPatchRebuilds>();
+        // Not world-scoped: the disk cache outlives a teleport, and what it
+        // restores is the land cache a teleport keeps too. The viewer replaces
+        // this default (nothing on disk) with its grid's directory.
+        app.init_resource::<crate::terrain_disk_cache::TerrainDiskCache>();
         // The viewer seeds this from its `--sky-day-position` style render
         // overrides before the plugin is added, so this is the harness's
         // default rather than the viewer's.
@@ -68,8 +72,12 @@ impl Plugin for WorldScenePlugin {
                 environment_fold_pipeline(),
                 environment_asset_pipeline(),
                 terrain_fold_pipeline(),
+                terrain_disk_cache_pipeline(),
             ),
         );
+        // Synchronous, and in `Last`, because Bevy checks for `AppExit` only
+        // once the whole schedule has run.
+        app.add_systems(Last, crate::terrain_disk_cache::save_land_on_exit);
     }
 }
 
@@ -93,6 +101,22 @@ fn terrain_fold_pipeline() -> ScheduleConfigs<ScheduleSystem> {
         .chain()
         .before(update_objects)
         .before(apply_object_meshes)
+}
+
+/// The land-height disk cache: ask for a region's cached land as it appears,
+/// merge what has been read, and save the regions whose land settled.
+///
+/// After the terrain fold, so a live patch folded this frame is already in the
+/// land cache when a cache read lands (the read never overwrites it), and a
+/// save encodes the newest land.
+fn terrain_disk_cache_pipeline() -> ScheduleConfigs<ScheduleSystem> {
+    (
+        crate::terrain_disk_cache::track_terrain_for_disk_cache,
+        crate::terrain_disk_cache::apply_cached_land,
+        crate::terrain_disk_cache::save_settled_land,
+    )
+        .chain()
+        .after(update_terrain)
 }
 
 /// The region-environment (EEP) fold: mirror the settings, restore what this

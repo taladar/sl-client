@@ -1186,7 +1186,13 @@ fn build_viewer_app(
     if options.offscreen_window.is_some() {
         // The builder spawned the off-screen window and installed the input
         // injector; what is this harness's own is reading every frame back.
-        app.add_systems(Last, screenshot_the_window);
+        // After the automation executor, which takes its own screenshots of
+        // the same window: see `screenshot_the_window` for why the two must
+        // not both ask in one frame.
+        app.add_systems(
+            Last,
+            screenshot_the_window.after(sl_viewer_automation::AutomationSystems::Execute),
+        );
         return Ok((app, captured));
     }
 
@@ -1233,12 +1239,35 @@ fn build_viewer_app(
     Ok((app, captured))
 }
 
-/// Ask for a screenshot of the primary window, landing in [`Captured`].
+/// Ask for a screenshot of the primary window, landing in [`Captured`] —
+/// unless another screenshot of the window is still waiting for its frame.
 ///
 /// A screenshot per frame rather than a `Readback`: a window's texture is not
 /// an `Image` asset a readback could name, and a screenshot of a window is
 /// Bevy's own way to read one.
-fn screenshot_the_window(mut commands: Commands) {
+///
+/// Bevy captures one screenshot per render target per frame and **despawns**
+/// any other asking for the same target that frame, with only a log warning.
+/// The automation executor asks for the same window when a test takes a
+/// screenshot, so this harness's per-frame request used to race it: which of
+/// the two Bevy kept depended on the order the two `Last` systems happened to
+/// run in, and when this one won every frame, the executor's screenshot never
+/// arrived (any new `Last` system could flip it). Ordered after the executor
+/// and standing aside while its request is pending, the harness skips a frame
+/// of its own instead.
+fn screenshot_the_window(
+    mut commands: Commands,
+    pending: Query<
+        (),
+        (
+            With<bevy::render::view::screenshot::Screenshot>,
+            Without<bevy::render::view::screenshot::Captured>,
+        ),
+    >,
+) {
+    if !pending.is_empty() {
+        return;
+    }
     commands
         .spawn(bevy::render::view::screenshot::Screenshot::primary_window())
         .observe(

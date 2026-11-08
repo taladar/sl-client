@@ -10443,6 +10443,7 @@ version = "0.1.0"
 dependencies = [
  "bevy",
  "bevy_flair",
+ "fs-err",
  "image",
  "pretty_assertions",
  "serde",
@@ -10460,6 +10461,7 @@ dependencies = [
  "sl-viewer-ui-widgets",
  "sl-viewer-world-api",
  "sl-viewer-world-objects",
+ "thiserror 2.0.19",
 ]
 
 [[package]]

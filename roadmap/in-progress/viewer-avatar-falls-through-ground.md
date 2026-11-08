@@ -92,11 +92,11 @@ fallback (`terrain.rs`).
 
 ## Remaining
 
-- **Login / cold-terrain window**: the in-memory `land_cache` is empty at login,
-  so before terrain streams the floor has only the (avatar-tracking) plane and
-  can still leak — the observer saw exactly this ("initially still fell through
-  … after a teleport it was better", once terrain had loaded). Fixed by
-  persisting the cache to disk — [[viewer-terrain-land-cache-on-disk]].
+- ~~**Login / cold-terrain window**~~ — **fixed** (2026-11-08) by
+  [[viewer-terrain-land-cache-on-disk]]: the land cache is persisted per grid
+  and restored from the login response's region handle, so on aditi the floor
+  has `land=Some` from the first frame of a warm login (a cold first-ever
+  visit to a region still has the plane-only window).
 - The **foot-IK** ground probe was rewritten onto the same plane in
   [[viewer-avatar-ground-from-collision-plane]] (separate task, same data
   source).

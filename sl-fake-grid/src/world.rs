@@ -237,6 +237,12 @@ pub struct SceneFixtures {
     /// The listens registered in the region: what hears a line on a channel
     /// no avatar does ([`crate::chat`]).
     pub listens: crate::chat::Listens,
+    /// Whether the region leaves its LAND layer out of what it streams to an
+    /// arriving agent ([`FakeGrid::set_withholds_ground`](crate::FakeGrid::set_withholds_ground)):
+    /// a test's stand-in for the login window before a region's ground has
+    /// streamed, held open for as long as the test needs. Wind and cloud
+    /// still go out.
+    pub(crate) withholds_ground: bool,
     /// What the region's viewers report of each other's complexity over
     /// `AvatarRenderInfo`, and what it states back ([`crate::render_info`]).
     /// Not a fixture: empty until a viewer reports.
@@ -944,6 +950,7 @@ impl SceneFixtures {
             region_info: crate::imitates::RegionInfoPolicy::default(),
             terrain_composition: None,
             listens: crate::chat::Listens::default(),
+            withholds_ground: false,
             render_info: crate::render_info::RegionRenderInfo::default(),
             script_instances: crate::scripts::RegionScripts::default(),
             experience_land: crate::experiences::ExperienceLand::default(),
@@ -2292,7 +2299,7 @@ pub(crate) fn push_arrival_world(
         record.sequence_id = UNSOLICITED_SEQUENCE_ID;
         sim.enqueue_parcel_properties(&record);
     }
-    push_terrain(ground, true, sim, now);
+    push_terrain(ground, !world.withholds_ground, true, sim, now);
     // Every object but what another avatar wears, which follows its wearer
     // ([`push_residents`]).
     let shown: Vec<&Object> = world
@@ -2532,7 +2539,7 @@ pub(crate) fn push_child_world(
     refresh_coarse_others(world, viewer, sim);
     sim.start_child_coarse_feed(now);
     push_object_animations(&world.object_animations, sim, now);
-    push_terrain(ground, false, sim, now);
+    push_terrain(ground, !world.withholds_ground, false, sim, now);
     // The overlay is the whole region's parcel layout, which a neighbouring
     // region draws on the minimap; it needs no viewer to be standing on it.
     // `overlay_for` colours the cells by owner, and a child agent owns nothing
@@ -2813,12 +2820,13 @@ pub(crate) struct Ground<'a> {
 }
 
 /// Streams the region's ground as the grid being imitated does: the LAND
-/// layer outwards from where the session's agent arrives, the WIND layer
+/// layer outwards from where the session's agent arrives (unless `land` is
+/// false, for a region told to withhold it), the WIND layer
 /// behind it where the grid sends a root agent its wind with the ground
 /// (`root`), and the CLOUD layer if the fixture carries one. The wind that
 /// follows on a timer is the session's own
 /// ([`SimSession::set_wind_feed`]). Send failures are logged.
-fn push_terrain(ground: Ground<'_>, root: bool, sim: &mut SimSession, now: Instant) {
+fn push_terrain(ground: Ground<'_>, land: bool, root: bool, sim: &mut SimSession, now: Instant) {
     let Ground {
         fixture: terrain,
         policy,
@@ -2826,7 +2834,7 @@ fn push_terrain(ground: Ground<'_>, root: bool, sim: &mut SimSession, now: Insta
     let handle = sim.region_handle();
     let placement = sim.arrival_position().position;
     let stream = policy.land_stream(placement.x(), placement.y());
-    if let Err(error) = sim.send_terrain(&terrain.to_patches(handle), &stream, now) {
+    if land && let Err(error) = sim.send_terrain(&terrain.to_patches(handle), &stream, now) {
         tracing::warn!("streaming the region's ground failed: {error}");
     }
     let wind = terrain.wind_patches(handle);

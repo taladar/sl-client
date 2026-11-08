@@ -64,6 +64,9 @@ pub struct StartupOverrides {
 /// unset override changes nothing.
 const DEFAULT_CACHE_MAX_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 
+/// The cache-root subdirectory holding the per-grid land-height caches.
+const TERRAIN_CACHE_KIND: &str = "terraincache";
+
 /// The filename of the global settings file within the config root.
 const GLOBAL_SETTINGS_FILE: &str = "viewer-settings.toml";
 
@@ -254,6 +257,16 @@ impl ViewerPaths {
             return Some(root.join(kind));
         }
         Some(self.resolved_cache_root()?.join(kind))
+    }
+
+    /// The land-height cache of one grid (`grid` from
+    /// `sl_account_dirs::grid_dir_name`): `terraincache/<grid>` beside the
+    /// asset caches. Grid-scoped, unlike the content-addressed caches, because
+    /// it is keyed by region handle and two grids reuse the same handles.
+    /// `None` when this viewer keeps nothing on disk.
+    #[must_use]
+    pub fn terrain_cache_dir(&self, grid: &str) -> Option<PathBuf> {
+        Some(self.asset_cache_dir(TERRAIN_CACHE_KIND)?.join(grid))
     }
 
     /// The **live** cache directory for `kind`, ignoring a replay bundle: where
@@ -489,6 +502,8 @@ const PURGE_KIND_DIRS: &[&str] = &[
     "envcache",
     "soundcache",
     "maptiles",
+    // The per-grid land-height cache (`terrain_cache_dir`); a purge re-streams.
+    TERRAIN_CACHE_KIND,
     // The grid's `LSLSyntax` documents by id (`sl-client-common`'s
     // `lsl_syntax_cache`, rooted here by the viewer); a purge refetches.
     "lsl-syntax",
@@ -616,6 +631,23 @@ mod tests {
         );
         assert_ne!(first.state_accounts_base(), second.state_accounts_base());
         assert_ne!(first.snapshots_dir(), second.snapshots_dir());
+    }
+
+    /// The land-height cache is one directory per grid, beside the asset
+    /// caches (so the user's cache root moves it too), and absent for a viewer
+    /// that keeps nothing.
+    #[test]
+    fn the_terrain_cache_is_per_grid() {
+        let paths = ViewerPaths::under(Path::new("/tmp/viewer"));
+        assert_eq!(
+            paths.terrain_cache_dir("127.0.0.1:9000"),
+            Some(Path::new("/tmp/viewer/cache/terraincache/127.0.0.1:9000").to_path_buf())
+        );
+        assert_ne!(
+            paths.terrain_cache_dir("127.0.0.1:9000"),
+            paths.terrain_cache_dir("login.aditi.lindenlab.com")
+        );
+        assert_eq!(ViewerPaths::none().terrain_cache_dir("any"), None);
     }
 
     /// A viewer with no paths keeps nothing anywhere, and a world with no

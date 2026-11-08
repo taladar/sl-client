@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 129 |
-| ready | 334 |
+| ready | 333 |
 | blocked | 40 |
 | in-progress | 9 |
 | bugs | 35 |
-| done | 1515 |
+| done | 1516 |
 | deferred | 30 |
 | wont-do | 24 |
 | **total** | **2116** |
@@ -326,7 +326,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-lsl-opensim-function-set`](ideas/gridspec-lsl-opensim-function-set.md)
   — Measure which library functions OpenSim's engines compile
 
-## ready (334)
+## ready (333)
 
 ### protocol
 
@@ -971,8 +971,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   telemetry, saying exactly what is sent
 - [`viewer-teleport-offer-maturity-prompt`](ready/viewer-teleport-offer-maturity-prompt.md)
   — Ask before accepting a teleport offer rated above the maturity preference
-- [`viewer-terrain-land-cache-on-disk`](ready/viewer-terrain-land-cache-on-disk.md)
-  — Persist the land-height cache to disk (ground floor available at login)
 - [`viewer-text-field-context-menu`](ready/viewer-text-field-context-menu.md) —
   Text-field edit context menu (cut / copy / paste / select all)
 - [`viewer-text-field-scrollbar`](ready/viewer-text-field-scrollbar.md) —
@@ -1392,7 +1390,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1515)
+## done (1516)
 
 ### protocol
 
@@ -3421,6 +3419,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-terrain-edit-brushes`](done/viewer-terrain-edit-brushes.md) — Terrain
   editing — sculpt brushes (blocked by `viewer-input-action-map` (done),
   `viewer-region-options-debug` (done))
+- [`viewer-terrain-land-cache-on-disk`](done/viewer-terrain-land-cache-on-disk.md)
+  — Persist the land-height cache to disk (ground floor available at login)
 - [`viewer-terrain-region-edge-seam-slope`](done/viewer-terrain-region-edge-seam-slope.md)
   — Terrain seam / misalignment at region edges on slopes
 - [`viewer-test-baseline-format`](done/viewer-test-baseline-format.md) — One
