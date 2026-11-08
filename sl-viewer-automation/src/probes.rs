@@ -27,8 +27,8 @@ use sl_viewer_notifications::{NotificationManager, NotificationRecord, ToastButt
 use sl_viewer_ui_core::i18n::Translator;
 use sl_viewer_world_api::rlv::RlvEnvironmentSlot;
 use sl_viewer_world_api::{
-    AgentRegionPosition, AvatarControls, CameraMode, ObjectState, SelectionSet, TerrainState,
-    ViewerCamera,
+    AgentRegionPosition, AvatarControls, AvatarMotion, AvatarState, CameraMode, ObjectState,
+    SelectionSet, TerrainState, ViewerCamera,
 };
 
 use crate::probe_sources::ProbeSources;
@@ -198,6 +198,10 @@ pub fn read_agent(world: &mut World) -> AgentReadout {
             .and_then(AvatarControls::held_heading),
         camera_eye: camera_eye(world),
         ground_height: ground_height(world),
+        foot_plane: foot_plane(world),
+        feet: ProbeSources::of(world)
+            .own_feet
+            .and_then(|reader| reader(world)),
         published_bakes: ProbeSources::of(world)
             .published_bakes
             .map(|reader| reader(world))
@@ -219,6 +223,18 @@ fn ground_height(world: &World) -> Option<f32> {
     world
         .get_resource::<TerrainState>()?
         .land_height(region, at.x, at.y)
+}
+
+/// The collision (foot) plane the grid last reported under the own avatar,
+/// as the avatar ground floor reads it ([`AvatarMotion::collision_plane`]).
+/// `None` before the own avatar is drawn, or when its last update carried no
+/// plane.
+fn foot_plane(world: &World) -> Option<[f32; 4]> {
+    let agent = world
+        .get_resource::<SlIdentity>()
+        .and_then(|identity| identity.agent_id)?;
+    let anchor = world.get_resource::<AvatarState>()?.anchor_of(agent)?;
+    world.get::<AvatarMotion>(anchor)?.collision_plane()
 }
 
 /// Where the viewer camera's eye is, region-local to the agent's region: its

@@ -2,7 +2,7 @@
 id: viewer-avatar-ground-from-collision-plane
 title: Avatar ground probe from the simulator's collision plane (drop the raycast)
 topic: viewer
-status: in-progress
+status: done
 origin: falls-through-ground investigation surfaced that we ignore the foot plane (2026-08-12)
 refs:
   - viewer-perf-avatar-ground-probe
@@ -59,15 +59,40 @@ now superseded).
   plane branch carries the real normal for ankle roll; the bare-land branch (up
   normal) is only the no-plane/airborne fallback where no foot rolls.
 
-## Remaining — live-verify on BOTH grids (they may differ)
+## Verified (2026-11-08) by automation on the fake grid, OpenSim and aditi
 
-- **aditi** and **OpenSim** (the two may send the plane differently — OpenSim's
-  `CreateImprovedTerseBlock` vs SL): walk across flat terrain, a slope, and onto
-  a prim floor/ramp; feet must stay planted with correct slope roll, no
-  punch-through, no false-airborne bank. Confirm the plane is populated (a
-  plane-less grid would fall back to land-only — acceptable but note it).
-- This is **independent of** [[viewer-avatar-falls-through-ground]] (the
-  body/root bounce is the sim's authoritative *position*, not the ground probe).
-  If the live plane turns out stable while that position bounces, the same plane
-  is also the natural sim-authoritative floor for that bug — a follow-up, not
-  this task.
+`tests/e2e_movement.rs` checks this through two new probe fields on the agent
+readout: `foot_plane` (the plane the viewer holds for the own avatar) and
+`feet` (each ankle as last posed, the ground the probe found under it, the
+foot IK's weight, and whether a built-in stand is playing; the viewer
+registers the reader in `automation_sources.rs`, fed by `OwnFeet`, which the
+pose pass now records in `AvatarGround`).
+
+- **Plane populated on both live grids.** After each walk the plane is a
+  floor under the avatar's centre and never under the land. Both grids send
+  `[0, 0, 0, 1]` while the avatar is airborne: an aditi login drops the
+  avatar about 13 m, so the stage polls up to 30 s. SL lets an avatar stand
+  on a 46° bank (`nz` 0.69, Mauve), so the floor test accepts `nz ≥ 0.5`.
+- **Flat ground.** Fake grid, OpenSim and aditi: the foot IK is fully applied
+  and both ankles stand 5 to 12 cm over their ground. The stage's band is
+  2 to 20 cm, with the two ankles within 5 cm of each other.
+- **Slope.** A new fake-grid stage starts the avatar on a ridge's 21° flank,
+  facing along it: the planes carry the slope normal, the uphill foot's
+  ground is 6 cm higher, and the ankles still agree within 5 cm. It runs on
+  the fake grid only, because a live grid's terrain can't be shaped per test.
+  To make it possible, the fake grid now honours a login's `uri:` start
+  location: a named region at that x/y, on the ground there whatever height
+  the start names (`login_arrival`; before this it always used the first
+  region's default spot).
+- **Animation overriders.** On aditi the test avatar wears an overrider:
+  a few seconds after login the grid plays only uploaded stands. The foot IK
+  plants the feet only under the built-in stands, like the reference's
+  `LLKeyframeStandMotion`, so its weight is then 0. That is faithful, so the
+  stage logs a warning and leaves the feet unchecked. On the fake-grid slope
+  stage, a missing built-in stand is still a failure.
+- **Not covered: a prim floor or a ramp.** It needs a live grid (the fake
+  grid's controller has no prim collision), so it stays in
+  [[test-e2e-sweep-live-grid]].
+
+This is still **independent of** [[viewer-avatar-falls-through-ground]],
+which uses the same plane for the body's floor.

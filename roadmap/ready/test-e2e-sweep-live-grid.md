@@ -22,8 +22,10 @@ OpenSim, as the estate owner:
 - [[viewer-terrain-edit-brushes]] and [[viewer-terrain-edit-bake-revert]]:
   a stroke moves ground, drag-select snaps, bake → raise → revert.
 - [[viewer-parcel-join-split]]: subdivide and join.
-- [[viewer-avatar-ground-from-collision-plane]]: flat ground, a slope, a
-  prim floor, a ramp (both grids).
+- [[viewer-avatar-ground-from-collision-plane]]: a prim floor and a ramp
+  (both grids): rez a thin slab, walk onto it, and check that the foot plane
+  rises above the land and the feet stay planted. Flat ground and a slope
+  are covered by `tests/e2e_movement.rs`.
 - The `api-g*` batches ([[api-g6]] and
   their siblings) — each "not live-tested", most testable on OpenSim with
   XEngine, Groups V2 and a money module.

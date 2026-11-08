@@ -47,7 +47,8 @@ use sl_anim::{
 use sl_client_bevy::{
     AgentKey, AnimationPose, AssetCacheLimits, AssetKey, AssetStore, AssetType, BevyAssetFetcher,
     BevySkeleton, BlobFetcher, CAP_VIEWER_ASSET, GateStats, JointOverrides, SkeletalDeformations,
-    SlCapabilities, SlEvent, SlSessionEvent, StoreStats, Uuid, VolumeDeformations, sample_motion,
+    SlCapabilities, SlEvent, SlIdentity, SlSessionEvent, StoreStats, Uuid, VolumeDeformations,
+    sample_motion,
 };
 
 use crate::avatars::{AvatarBody, AvatarBodyPart, AvatarRig, AvatarRuntimeMorphs};
@@ -1624,6 +1625,16 @@ fn pose_corrections(
     out
 }
 
+/// The ground [`pose_avatar_skeletons`] stands each avatar's feet on, and the
+/// own agent, whose posed feet it records there for the automation probe.
+#[derive(Debug, SystemParam)]
+pub(crate) struct PoseGround<'w> {
+    /// Each avatar's ground under its root and ankles, and the own feet.
+    ground: ResMut<'w, AvatarGround>,
+    /// Which avatar is our own.
+    identity: Res<'w, SlIdentity>,
+}
+
 /// The procedural adjusters' resources, bundled so [`pose_avatar_skeletons`] stays
 /// inside Bevy's system-parameter limit — each fold (look-at, reach & aim, locomotion,
 /// body physics) contributes its own target and state resource, and the runtime-morph
@@ -1709,11 +1720,17 @@ pub(crate) fn pose_avatar_skeletons(
     time: Res<Time>,
     anim: AnimationState,
     avatars: AvatarRig,
-    mut ground: ResMut<AvatarGround>,
+    pose_ground: PoseGround,
     mut adjusters: AvatarAdjusters,
     mut sockets: AvatarSockets,
     mut gpu: GpuAvatarHooks<'_, '_>,
 ) {
+    let PoseGround {
+        mut ground,
+        identity,
+    } = pose_ground;
+    // Re-recorded below for a posed own avatar; anything else leaves it absent.
+    ground.set_own_feet(None);
     let (Some(library), Some(body)) = (avatars.library, avatars.body) else {
         return;
     };
@@ -2045,6 +2062,39 @@ pub(crate) fn pose_avatar_skeletons(
                      belly_up_down={:.3} butt_up_down={:.3}",
                     report.active, report.breast_up_down, report.belly_up_down, report.butt_up_down,
                 );
+            }
+        }
+        // Record the own avatar's posed feet — the ankles from the final pose, beside
+        // the ground the probe found under each — for the automation probe.
+        if identity.agent_id == Some(agent)
+            && let Some(motion) = avatar_motion
+        {
+            let ground_under = ground.get(agent);
+            let ankles: Vec<usize> = [leg_joints.left, leg_joints.right]
+                .into_iter()
+                .flatten()
+                .map(|(_hip, _knee, ankle)| ankle)
+                .collect();
+            let posed = skeleton.deformed_world_chain(deform, volumes, &overrides, &pose, &ankles);
+            let foot = |leg: Option<(usize, usize, usize)>,
+                        hit: Option<crate::ground::GroundHit>| {
+                let (_hip, _knee, ankle) = leg?;
+                Some(crate::ground::PlantedFoot {
+                    ankle: root_global.transform_point(posed.get(&ankle)?.w_axis.truncate()),
+                    ground: hit.map(|hit| hit.point),
+                })
+            };
+            if let (Some(left), Some(right)) = (
+                foot(leg_joints.left, ground_under.left),
+                foot(leg_joints.right, ground_under.right),
+            ) {
+                ground.set_own_feet(Some(crate::ground::OwnFeet {
+                    region: motion.region(),
+                    left,
+                    right,
+                    foot_ik_weight: report.foot_ik_weight,
+                    standing: anims.standing,
+                }));
             }
         }
         // The GPU samples, blends and re-runs FK itself (passes A+B+C). Only the

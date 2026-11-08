@@ -34,7 +34,7 @@ use crate::ui_model::snapshot;
 /// names no folder the viewer knows.
 pub(super) fn read(world: &mut World, probe: &Probe) -> Result<ProbeReadout, Box<AutomationError>> {
     Ok(match probe {
-        Probe::Agent => ProbeReadout::Agent(read_agent(world)),
+        Probe::Agent => ProbeReadout::Agent(Box::new(read_agent(world))),
         Probe::Status => ProbeReadout::Status(read_status(world)),
         Probe::Conversations => ProbeReadout::Conversations(
             read_conversations(world).map_err(|error| probe_error(error, InventoryRoot::Agent))?,

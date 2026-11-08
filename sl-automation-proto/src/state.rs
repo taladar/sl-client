@@ -97,8 +97,8 @@ impl fmt::Display for Probe {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "probe", content = "readout", rename_all = "snake_case")]
 pub enum ProbeReadout {
-    /// The own agent.
-    Agent(AgentReadout),
+    /// The own agent, boxed: it is much the largest readout.
+    Agent(Box<AgentReadout>),
     /// The status bar.
     Status(StatusReadout),
     /// Every open conversation, Nearby first.

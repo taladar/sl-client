@@ -715,6 +715,42 @@ impl GridCore {
         self.regions.get(index)
     }
 
+    /// Where a login asking to start at `start` lands: the region and spot a
+    /// `uri:` start names, as both live grids honour it, or the account's
+    /// start region (`fallback`) with no placement of its own for `last`,
+    /// `home`, a malformed start or a region this grid does not serve.
+    ///
+    /// The avatar stands on the ground at the named spot whatever height it
+    /// names. That is where a live grid's physics leaves it — dropped onto
+    /// the ground from above, pushed out of it from below — and the fake
+    /// grid has no floor but the ground, so landing there directly is the
+    /// same end without a fall's animations in every login that names a
+    /// height a little off the terrain.
+    pub(crate) fn login_arrival(
+        &self,
+        start: &Result<sl_wire::StartLocation, String>,
+        fallback: usize,
+    ) -> (usize, Option<ArrivalPlacement>) {
+        let Ok(sl_wire::StartLocation::Region { region, position }) = start else {
+            return (fallback, None);
+        };
+        let Some((index, entry)) = self
+            .regions
+            .iter()
+            .enumerate()
+            .find(|(_index, entry)| entry.config.name.eq_ignore_ascii_case(region))
+        else {
+            return (fallback, None);
+        };
+        let ground = entry.config.terrain.height_at(position.x(), position.y())
+            + AVATAR_CENTRE_ABOVE_GROUND_M;
+        let placement = ArrivalPlacement {
+            position: RegionCoordinates::new(position.x(), position.y(), ground),
+            look_at: ArrivalPlacement::default().look_at,
+        };
+        (index, Some(placement))
+    }
+
     /// The index of the region called `name`.
     pub(crate) fn region_by_name(&self, name: &str) -> Option<usize> {
         self.regions
@@ -815,6 +851,7 @@ impl GridCore {
         self: &Arc<Self>,
         account: &Account,
         region_index: usize,
+        arrival: Option<ArrivalPlacement>,
     ) -> Result<(PreparedSession, Box<LoginSuccess>), Error> {
         let ids = SessionIds::mint(&self.minter);
         let region = self.region(region_index).ok_or(Error::UnknownRegion {
@@ -824,7 +861,7 @@ impl GridCore {
         // kicked by this login.
         let inventory = self.inventories.get(account.agent_id);
         let prepared = self
-            .prepare_region_session(account, region_index, ids, None, SessionRole::Root)
+            .prepare_region_session(account, region_index, ids, arrival, SessionRole::Root)
             .await?;
         let mut success = Box::new(LoginSuccess::minimal(
             account.agent_id,
@@ -3476,7 +3513,7 @@ mod test {
             .await?;
         let core = Arc::clone(&grid.core);
         let account = core.accounts.first().ok_or("no account")?.clone();
-        let (prepared, _success) = core.prepare_session(&account, 0).await?;
+        let (prepared, _success) = core.prepare_session(&account, 0, None).await?;
         core.activate_session(&prepared).await;
         let ids = prepared.shared.state.lock().await.ids;
         root_the_agent(&prepared.shared, account.agent_id, ids).await?;

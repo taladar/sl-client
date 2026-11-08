@@ -102,6 +102,78 @@ mod test {
         Ok((grid, client, agent))
     }
 
+    /// Logs Test User in at `start` on a fresh grid serving the stock region,
+    /// and returns where the grid placed the arriving avatar, with the
+    /// stock region for reference.
+    async fn login_lands_at(
+        start: impl FnOnce(&RegionConfig) -> StartLocation,
+    ) -> Result<(RegionCoordinates, RegionConfig), TestError> {
+        let region = RegionConfig::default();
+        let grid = FakeGridBuilder::new()
+            .account(AccountConfig::new("Test", "User", "password"))
+            .region(region.clone())
+            .start()
+            .await?;
+        let mut logins = grid.logins();
+        let request = LoginRequest::new(
+            "Test",
+            "User",
+            "password",
+            start(&region),
+            "sl-fake-grid-e2e",
+            "0.0",
+        );
+        let _client = Client::connect(LoginParams {
+            login_uri: grid.login_uri(),
+            request,
+        })
+        .await?;
+        let notice = tokio::time::timeout(WAIT, logins.recv()).await??;
+        let agent = grid.agent(&notice).await.ok_or("no live session")?;
+        let landed = agent.with_sim(|sim| sim.arrival_position().position).await;
+        Ok((landed, region))
+    }
+
+    /// A login that names a spot (`uri:Region&x&y&z`) lands there, as on
+    /// both live grids, standing on the ground: a spot below it is lifted
+    /// onto it, and one above it set down on it.
+    #[tokio::test]
+    async fn a_login_naming_a_spot_lands_on_it() -> Result<(), TestError> {
+        for height in [0.0, 80.0] {
+            let (landed, region) = login_lands_at(|region| {
+                StartLocation::region(
+                    region.name.clone(),
+                    RegionCoordinates::new(60.0, 70.0, height),
+                )
+            })
+            .await?;
+            let ground =
+                region.terrain.height_at(60.0, 70.0) + sl_fake_grid::AVATAR_CENTRE_ABOVE_GROUND_M;
+            assert_eq!(
+                (landed.x(), landed.y(), landed.z()),
+                (60.0, 70.0, ground),
+                "a login naming height {height} lands at the named spot, on the ground"
+            );
+        }
+        Ok(())
+    }
+
+    /// A login naming a region the grid does not serve lands in the
+    /// account's start region, at its centre.
+    #[tokio::test]
+    async fn a_login_naming_an_unknown_region_lands_at_the_start() -> Result<(), TestError> {
+        let (landed, _region) = login_lands_at(|_region| {
+            StartLocation::region("Nowhere At All", RegionCoordinates::new(60.0, 70.0, 40.0))
+        })
+        .await?;
+        assert_eq!(
+            (landed.x(), landed.y()),
+            (128.0, 128.0),
+            "the avatar lands at the start region's centre"
+        );
+        Ok(())
+    }
+
     /// A grid told to hold every datagram back is as far away as it says: the
     /// client's own ping round trip comes out at twice the one-way latency,
     /// where a stock grid answers in well under a millisecond.

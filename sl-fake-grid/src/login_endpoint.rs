@@ -127,7 +127,8 @@ async fn respond(core: &Arc<GridCore>, parsed: &ParsedLoginRequest) -> LoginResp
             "The account's start region is not part of this grid.",
         ));
     };
-    let (prepared, mut success) = match core.prepare_session(&account, region).await {
+    let (region, arrival) = core.login_arrival(&parsed.start, region);
+    let (prepared, mut success) = match core.prepare_session(&account, region, arrival).await {
         Ok(pair) => pair,
         Err(error) => {
             tracing::error!("preparing a session failed: {error}");

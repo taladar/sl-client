@@ -32,7 +32,41 @@ pub(crate) fn probe_sources() -> ProbeSources {
         published_bakes: Some(published_bakes),
         world_map: Some(sl_viewer_map::world_map::world_map_readout),
         parcel_media: Some(parcel_media),
+        own_feet: Some(own_feet),
     }
+}
+
+/// The own avatar's feet as the pose pass last left them, region-local in
+/// Second Life axes: each posed ankle and the height of the ground under it.
+fn own_feet(world: &mut World) -> Option<sl_viewer_automation::FeetReadout> {
+    use sl_viewer_kit::coords::{bevy_to_sl_vec, region_offset_bevy};
+
+    let feet = world
+        .get_resource::<sl_viewer_world_avatar::ground::AvatarGround>()?
+        .own_feet()?;
+    let origin = world
+        .get_resource::<sl_viewer_world_api::TerrainState>()
+        .and_then(sl_viewer_world_api::TerrainState::origin);
+    let offset = region_offset_bevy(feet.region, origin);
+    let foot = |foot: sl_viewer_world_avatar::ground::PlantedFoot| {
+        // Component-wise plain `f32`, per the workspace convention: the
+        // `arithmetic_side_effects` lint fires on `glam`'s operators.
+        let ankle = bevy_to_sl_vec(bevy::math::Vec3::new(
+            foot.ankle.x - offset.x,
+            foot.ankle.y - offset.y,
+            foot.ankle.z - offset.z,
+        ));
+        sl_viewer_automation::FootReadout {
+            ankle: [ankle.x, ankle.y, ankle.z],
+            ground: foot.ground.map(|ground| ground.y - offset.y),
+        }
+    };
+    Some(sl_viewer_automation::FeetReadout {
+        left: foot(feet.left),
+        right: foot(feet.right),
+        foot_ik_weight: feet.foot_ik_weight,
+        standing: feet.standing,
+    })
 }
 
 /// The agent parcel's legacy media as the parcel media player holds it, and how

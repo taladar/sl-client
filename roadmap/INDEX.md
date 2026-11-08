@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 129 |
-| ready | 333 |
+| ready | 334 |
 | blocked | 40 |
-| in-progress | 9 |
+| in-progress | 7 |
 | bugs | 35 |
-| done | 1516 |
+| done | 1518 |
 | deferred | 30 |
 | wont-do | 24 |
-| **total** | **2116** |
+| **total** | **2117** |
 
 ## ideas (129)
 
@@ -326,7 +326,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-lsl-opensim-function-set`](ideas/gridspec-lsl-opensim-function-set.md)
   — Measure which library functions OpenSim's engines compile
 
-## ready (333)
+## ready (334)
 
 ### protocol
 
@@ -403,6 +403,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Face-nearest and avatar fine-alignment tools
 - [`viewer-avatar-debug-tools`](ready/viewer-avatar-debug-tools.md) — Avatar
   debug & maintenance tools (incl. Rebake)
+- [`viewer-avatar-keyframe-constraints`](ready/viewer-avatar-keyframe-constraints.md)
+  — Apply an animation's own joint constraints (ground and body-volume targets)
 - [`viewer-avatar-moderation-actions`](ready/viewer-avatar-moderation-actions.md)
   — Per-avatar parcel / estate moderation — the shared action layer (blocked by
   `viewer-region-options-estate` (done))
@@ -1275,18 +1277,13 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-voice`](blocked/gridspec-voice.md) — Voice provisioning and
   signalling on each grid (blocked by `viewer-voice-audio`)
 
-## in-progress (9)
+## in-progress (7)
 
 ### viewer
 
 - [`viewer-agentupdate-cadence-effects`](in-progress/viewer-agentupdate-cadence-effects.md)
   — Explore what the raised AgentUpdate/camera-interest cadence buys (and how
   the sim reacts)
-- [`viewer-avatar-falls-through-ground`](in-progress/viewer-avatar-falls-through-ground.md)
-  — Avatar falls through the ground (simulator reports a bouncing avatar
-  position)
-- [`viewer-avatar-ground-from-collision-plane`](in-progress/viewer-avatar-ground-from-collision-plane.md)
-  — Avatar ground probe from the simulator's collision plane (drop the raycast)
 - [`viewer-perf-pbr-shadow-cluster-rez`](in-progress/viewer-perf-pbr-shadow-cluster-rez.md)
   — Tune main-view shadow specialization + clustered lighting during rez
 - [`viewer-realtime-mirrors`](in-progress/viewer-realtime-mirrors.md) —
@@ -1390,7 +1387,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1516)
+## done (1518)
 
 ### protocol
 
@@ -1990,6 +1987,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   rubberband)
 - [`viewer-avatar-face-bone-shape-brow-spike`](done/viewer-avatar-face-bone-shape-brow-spike.md)
   — Mesh-head brow spikes forward from face-bone shape deformation
+- [`viewer-avatar-falls-through-ground`](done/viewer-avatar-falls-through-ground.md)
+  — Avatar falls through the ground (simulator reports a bouncing avatar
+  position)
+- [`viewer-avatar-ground-from-collision-plane`](done/viewer-avatar-ground-from-collision-plane.md)
+  — Avatar ground probe from the simulator's collision plane (drop the raycast)
 - [`viewer-avatar-mesh-accurate-pick`](done/viewer-avatar-mesh-accurate-pick.md)
   — Mesh-accurate avatar picking (replace the bounding-box approximation)
   (blocked by `viewer-avatar-context-menu` (done))
