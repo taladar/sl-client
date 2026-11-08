@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 123 |
-| ready | 333 |
+| ready | 332 |
 | blocked | 35 |
 | in-progress | 11 |
 | bugs | 36 |
-| done | 1519 |
+| done | 1520 |
 | deferred | 30 |
 | wont-do | 24 |
 | **total** | **2111** |
@@ -303,7 +303,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-lsl-opensim-function-set`](ideas/gridspec-lsl-opensim-function-set.md)
   — Measure which library functions OpenSim's engines compile
 
-## ready (333)
+## ready (332)
 
 ### protocol
 
@@ -1072,8 +1072,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-fake-grid-object-return`](ready/server-fake-grid-object-return.md) —
   Fake grid — return somebody else's object, auto-return, and end a temporary
   prim
-- [`server-fake-grid-object-rez-time`](ready/server-fake-grid-object-rez-time.md)
-  — Keep each object's rez time, and key Second Life's box beat to it
 - [`server-fake-grid-object-update-forms`](ready/server-fake-grid-object-update-forms.md)
   — Fake grid — send compressed, terse and cached object updates as each grid
   does (blocked by `gridspec-object-update-stream` (done))
@@ -1360,7 +1358,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1519)
+## done (1520)
 
 ### protocol
 
@@ -4434,6 +4432,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-fake-grid-money-ledger`](done/server-fake-grid-money-ledger.md) —
   Fake grid — a money ledger: balances, transfers, buying and paying (blocked by
   `gridspec-money` (done), `gridspec-land-transactions` (done))
+- [`server-fake-grid-object-rez-time`](done/server-fake-grid-object-rez-time.md)
+  — Keep each object's rez time, and key Second Life's box beat to it
 - [`server-fake-grid-object-undo`](done/server-fake-grid-object-undo.md) — Fake
   grid — keep an object's edit history for Undo / Redo
 - [`server-fake-grid-parcel-on-movement`](done/server-fake-grid-parcel-on-movement.md)

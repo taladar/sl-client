@@ -173,25 +173,29 @@ pub(super) fn region(
     ground: f32,
     home: &Vector,
 ) -> Result<Region, String> {
-    region_after(flavour, scripts, (ground, home), Duration::ZERO)
+    region_after(flavour, scripts, (ground, home), (Duration::ZERO, None))
 }
 
 /// [`region`], its prims rezzed at once and their scripts saved `delay`
-/// later, as the runner saves them after it rezzes the prims.
+/// later, as the runner saves them after it rezzes the prims, ticking every
+/// `step` where one is given.
 fn region_after(
     flavour: EngineFlavour,
     scripts: &[(CallerId, &str, u64, String)],
     (ground, home): (f32, &Vector),
-    delay: Duration,
+    (delay, step): (Duration, Option<Duration>),
 ) -> Result<Region, String> {
     let mut region = Region::new(flavour);
+    let mut config = *region.engine.config();
+    if let Some(step) = step {
+        config.step = step;
+    }
     // OpenSim merges nothing and queues first in, first out, as the fake
     // grid configures its OpenSim regions.
     if flavour.is_opensim() {
-        let mut config = *region.engine.config();
         config.coalescing = crate::vm::Coalescing::Never;
-        region.engine = Engine::new(config);
     }
+    region.engine = Engine::new(config);
     region.host.ground = ground;
     region.host.moves_heard = flavour.is_opensim();
     for (id, _name, prim, _source) in scripts {
@@ -492,30 +496,31 @@ fn boxes_and_ground_stops_settle_as_each_grid_settled() -> Result<(), String> {
     for (flavour, transcript) in transcripts("placement-settle") {
         let (home, _ground) = home_of(flavour);
         let (below, delay) = settle_home(transcript)?;
-        // Second Life's box keeps to a beat about a second apart, counted
-        // from the prim's rez, and the runner saved the script a second and
-        // a half after it rezzed the prim.
+        // The runner saved the script a second and a half after it rezzed
+        // the prim, and the region ticks at its grid's frame: which side of
+        // a box's catch-up a read falls on comes down to a frame, and a
+        // sleep or a forced delay ends on a frame boundary.
         let mut region = region_after(
             flavour,
             &[(A, "Probe", 1, source.to_owned())],
             (home.z + below, &home),
-            delay,
+            (delay, Some(super::clocks::frame(flavour))),
         )?;
-        run_out(&mut region, 4000)?;
+        run_out(&mut region, 20_000)?;
         let (ours, theirs) = compared(&region, transcript);
-        // Counted so, the beat falls where aditi's did for every box read in
-        // the first 20 s (the `settled` reads half a second apart alternate
-        // between a fresh box and a stale one, and agree). aditi's beat came
-        // every 1.01 s by its own clocks (the `cadence` records' `seen`) and
-        // the runtime's every second, so by the `lag` reads the runtime's
-        // beat comes a little early: before `sleep-0.05` reads, where aditi's
-        // came after `params-fast`. `sleep-0.05` and `params-fast` read the
-        // 3 m box where aditi still read the 1 m cube, and `params-delayed`
-        // a box one rescale newer than aditi's.
+        // Second Life's box catches up a frame after a rescale, or a second
+        // after it last caught up, whichever is later (`prim/box-beat`): on
+        // its own frame clock, which jitters, the first frame at least a
+        // second on, 1.000 or 1.022 s and about 1.01 s on average, where the
+        // runtime's is 45 frames every time. Over the twenty-odd catch-ups
+        // chained from the drops to the `lag` reads the runtime's come a few
+        // frames early, and three reads half a second apart fall on the other
+        // side of one: `settled x-0.01`, `settled x-0.06` and `lag
+        // params-fast` read the new box where aditi still read the old one.
         let deviations: &[&str] = if flavour.is_opensim() {
             &[]
         } else {
-            &["lag sleep-0.05", "lag params-fast", "lag params-delayed"]
+            &["settled x-0.01", "settled x-0.06", "lag params-fast"]
         };
         hold(
             &unvaried(ours),
@@ -524,6 +529,101 @@ fn boxes_and_ground_stops_settle_as_each_grid_settled() -> Result<(), String> {
             &format!("{flavour:?}"),
         );
     }
+    Ok(())
+}
+
+/// The `polls` of each `beat` record of `label` in `lines`, by round: how
+/// many frames a box took to catch up with its rescale.
+fn beat_polls(lines: &[String], label: &str) -> Vec<u32> {
+    lines
+        .iter()
+        .filter(|line| line.contains(" rec=beat ") && line.contains(&format!(" label={label} ")))
+        .filter_map(|line| {
+            line.split(' ')
+                .find_map(|field| field.strip_prefix("polls="))
+                .and_then(|polls| polls.parse().ok())
+        })
+        .collect()
+}
+
+/// `prim/box-beat`'s own prim flips its scale twenty times across the second
+/// on Second Life, and each flip shows in its box as many frames later as on
+/// aditi, give or take the one frame a poll can land either side of: the
+/// next frame, or a second after the box last caught up.
+#[test]
+fn a_box_catches_up_a_frame_on_or_a_second_after_the_last() -> Result<(), String> {
+    let source = include_str!("../../../probes/prim/box-beat/leader.lsl");
+    let aditi = include_str!("../../../probes/results/aditi/prim/box-beat.txt");
+    let flavour = EngineFlavour::SecondLife;
+    let home = Vector {
+        x: 128.0,
+        y: 128.0,
+        z: 30.0,
+    };
+    // The runner saved the script four seconds after it rezzed the prim
+    // (the `home` record's `stamp` less `t` less `rez`), long enough that the
+    // rez holds back no rescale.
+    let mut region = region_after(
+        flavour,
+        &[(A, "Leader", 1, source.to_owned())],
+        (25.0, &home),
+        (Duration::from_secs(4), Some(super::clocks::frame(flavour))),
+    )?;
+    run_out(&mut region, 3000)?;
+    let (ours, _theirs) = compared(&region, aditi);
+    let ours = beat_polls(&ours, "L");
+    let theirs = beat_polls(&probe_lines(aditi), "L");
+    assert_eq!(ours.len(), 20, "{ours:?}");
+    assert_eq!(theirs.len(), 20, "{theirs:?}");
+    for (round, (mine, grid)) in ours.iter().zip(&theirs).enumerate() {
+        assert!(
+            mine.abs_diff(*grid) <= 1,
+            "round {round}: {mine} polls here, {grid} on aditi ({ours:?} against {theirs:?})"
+        );
+    }
+    Ok(())
+}
+
+/// A prim's box counts its first catch-up from the prim's rez: rescaled a
+/// fifth of a second after it, the box waits out the second; rescaled after
+/// the second, it shows a frame on. And each prim keeps its own clock.
+#[test]
+fn a_box_counts_from_its_prims_rez() -> Result<(), String> {
+    let source = |label: &str, wait: f32| {
+        format!(
+            "default {{ state_entry() {{ llSleep({wait:.1}); llSetScale(<2.0, 1.0, 1.0>); \
+             integer polls; \
+             while (llList2Vector(llGetBoundingBox(llGetKey()), 1) != <1.0, 0.5, 0.5>) \
+             {{ llSleep(0.01); ++polls; }} \
+             llOwnerSay(\"PROBE t rec=first label={label} polls=\" + (string)polls); }} }}"
+        )
+    };
+    let flavour = EngineFlavour::SecondLife;
+    let home = Vector {
+        x: 128.0,
+        y: 128.0,
+        z: 30.0,
+    };
+    let mut region = region_after(
+        flavour,
+        &[
+            (A, "Soon", 1, source("soon", 0.2)),
+            (CallerId(2), "Late", 2, source("late", 1.5)),
+        ],
+        (25.0, &home),
+        (Duration::ZERO, Some(super::clocks::frame(flavour))),
+    )?;
+    run_out(&mut region, 200)?;
+    let polls = |label: &str| -> Option<u32> {
+        region.host.printed.iter().find_map(|(_, _, line)| {
+            line.strip_prefix(&format!("PROBE t rec=first label={label} polls="))
+                .and_then(|polls| polls.parse().ok())
+        })
+    };
+    // Started at frame 1 and rescaled ten frames on (0.2 s, rounded up to a
+    // frame), at frame 11; caught up at frame 45, a second after the rez.
+    assert_eq!(polls("soon"), Some(34));
+    assert_eq!(polls("late"), Some(1));
     Ok(())
 }
 

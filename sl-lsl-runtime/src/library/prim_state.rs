@@ -289,10 +289,10 @@ const SECOND_LIFE_LEAST_BOX: f32 = 0.05;
 /// rotation (`prim/placement`). An avatar's is its size around its centre;
 /// a key nothing has answers an empty list.
 ///
-/// Second Life measures each prim at the scale it had at the region's last
-/// bounding-box refresh, once a second ([`ScriptCtx::box_scale`]), and no
-/// axis under 0.05 m (`SECOND_LIFE_LEAST_BOX`); OpenSim at the scale it has,
-/// however thin (`prim/placement-settle`).
+/// Second Life measures each prim at the scale it had when its box last
+/// caught up, at most once a second ([`ScriptCtx::box_scale`]), and no axis
+/// under 0.05 m (`SECOND_LIFE_LEAST_BOX`); OpenSim at the scale it has,
+/// however thin (`prim/placement-settle`, `prim/box-beat`).
 ///
 /// # Errors
 ///
@@ -1209,7 +1209,14 @@ fn detail(details: &ObjectDetails, code: i32, opensim_flavour: bool, link: i32) 
         31 => integer(details.inventory_count),
         32 => key(&details.rezzer),
         33 => vec![Element::String(String::new())],
-        36 | 45 => vec![Element::String(details.rez_time.clone())],
+        36 | 45 => vec![Element::String(details.rezzed.map_or_else(
+            String::new,
+            |micros| {
+                // Second Life's six digits of the second, OpenSim's none
+                // (`prim/placement-settle`'s `home` record on each grid).
+                crate::library::calendar::timestamp(micros, if opensim_flavour { 0 } else { 6 })
+            },
+        ))],
         38 => integer(details.selected.1),
         41 => integer(if details.avatar { 1 } else { -1 }),
         42 => integer(details.material),

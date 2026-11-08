@@ -318,6 +318,21 @@ impl RegionScripts {
         }
     }
 
+    /// The region's calendar time at the start of tick `tick`, in
+    /// microseconds since the UNIX epoch: what a script's clocks read then.
+    /// Before the region's first tick fixes where its ticks started, that is
+    /// `wall` now less the ticks run, as the first tick will fix it.
+    pub(crate) fn calendar_micros(&self, tick: Tick, wall: &crate::time::WallClock) -> i64 {
+        let step = self.engine.config().step;
+        self.epoch_micros
+            .unwrap_or_else(|| {
+                i64::try_from(wall.unix_micros())
+                    .unwrap_or(i64::MAX)
+                    .saturating_sub(ticks_as_micros(self.engine.now(), step))
+            })
+            .saturating_add(ticks_as_micros(tick, step))
+    }
+
     /// The engine running the region's scripts.
     #[must_use]
     pub const fn engine(&self) -> &Engine {
@@ -1481,7 +1496,14 @@ impl RegionHost<'_> {
                 (1.0, 0.05, 1.0, 0.5)
             },
             selected: (0, count(crate::seating::sitters_of(self.world, root).len())),
-            rez_time: String::new(),
+            // The object's root's creation, which a take keeps and a rez
+            // from an inventory brings back (`prim/box-beat`: three rezzes of
+            // one item, 25 s after it was made, all read the moment it was
+            // made).
+            rezzed: self
+                .world
+                .properties_of(root)
+                .and_then(|root| i64::try_from(root.creation_date).ok()),
             // The object a script rezzed names it; any other, nobody.
             rezzer: self
                 .world
@@ -1558,7 +1580,7 @@ impl RegionHost<'_> {
             },
             costs: (0.0, 0.0, 0.0, 0.0),
             selected: (0, 0),
-            rez_time: String::new(),
+            rezzed: None,
             rezzer: uuid::Uuid::nil().to_string(),
             masks: [0; 5],
             hover_height: 0.0,
@@ -2373,6 +2395,13 @@ impl Host for RegionHost<'_> {
         crate::prim_state::read(self.world, local_id, self.opensim())
     }
 
+    fn rezzed_in(&self, prim: &str) -> Option<Tick> {
+        self.world
+            .objects
+            .rezzed_at(self.prim_keyed(prim)?)
+            .map(Tick)
+    }
+
     fn set_prim(&mut self, _caller: CallerId, state: &sl_lsl_runtime::vm::prim::Prim) {
         let Some(local_id) = self.prim_keyed(&state.key) else {
             return;
@@ -2971,6 +3000,11 @@ fn tick_locked(
     // A touch held open is due its `touch` before the scripts run.
     let agents: Vec<AgentKey> = present.iter().map(|present| present.agent).collect();
     crate::touches::tick(world, config.step, &agents);
+    // A prim that comes into the region from here to the next tick came in
+    // in the tick about to run.
+    world
+        .objects
+        .set_rez_tick(world.script_instances.engine.now().after(1).0);
     if world.script_instances.epoch_micros.is_none() {
         // Where the region's ticks started: its wall clock now, less the
         // ticks already run.

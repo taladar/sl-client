@@ -826,6 +826,11 @@ impl Host for Recorder {
         self.prim_counts.get(object).copied()
     }
 
+    fn rezzed_in(&self, _prim: &str) -> Option<crate::vm::Tick> {
+        // Every prim is there when the region starts.
+        Some(crate::vm::Tick(0))
+    }
+
     fn prim(&self, caller: CallerId, prim: &str) -> Option<crate::vm::prim::Prim> {
         let mut state = self
             .prim_states
@@ -935,7 +940,7 @@ impl Host for Recorder {
             text: prim.text.clone(),
             costs: self.detail_costs.unwrap_or((1.0, 0.05, 1.0, 0.5)),
             selected: (0, 0),
-            rez_time: String::new(),
+            rezzed: None,
             rezzer: self
                 .rezzers
                 .get(key)

@@ -1,0 +1,99 @@
+grid: fake-opensim
+date: 2026-11-08
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Fake Region
+engine: sl-lsl-runtime imitating YEngine
+settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
+
+# object "Child" scripts=1
+PROBE prim/box-beat rec=start region="Fake Region" channel="OpenSim" version="sl-fake-grid 0.1.0"
+PROBE prim/box-beat rec=home rez=2026-11-08T19:16:04Z stamp=2026-11-08T19:16:04.2379470Z t=0.018000
+PROBE prim/box-beat rec=beat label=L round=0 polls=0 set=2026-11-08T19:16:04.6197650Z wall=2026-11-08T19:16:04.6197650Z t=0.400000 seen=0.400000
+PROBE prim/box-beat rec=beat label=L round=1 polls=0 set=2026-11-08T19:16:05.1106740Z wall=2026-11-08T19:16:05.1106740Z t=0.891000 seen=0.891000
+PROBE prim/box-beat rec=beat label=L round=2 polls=0 set=2026-11-08T19:16:05.7106740Z wall=2026-11-08T19:16:05.7106740Z t=1.491000 seen=1.491000
+PROBE prim/box-beat rec=beat label=L round=3 polls=0 set=2026-11-08T19:16:06.4197650Z wall=2026-11-08T19:16:06.4197650Z t=2.200000 seen=2.200000
+PROBE prim/box-beat rec=beat label=L round=4 polls=0 set=2026-11-08T19:16:07.2379470Z wall=2026-11-08T19:16:07.2379470Z t=3.018000 seen=3.018000
+PROBE prim/box-beat rec=beat label=L round=5 polls=0 set=2026-11-08T19:16:08.1652200Z wall=2026-11-08T19:16:08.1652200Z t=3.945000 seen=3.945000
+PROBE prim/box-beat rec=beat label=L round=6 polls=0 set=2026-11-08T19:16:09.2015840Z wall=2026-11-08T19:16:09.2015840Z t=4.982000 seen=4.982000
+PROBE prim/box-beat rec=beat label=L round=7 polls=0 set=2026-11-08T19:16:10.3470380Z wall=2026-11-08T19:16:10.3470380Z t=6.127000 seen=6.127000
+PROBE prim/box-beat rec=beat label=L round=8 polls=0 set=2026-11-08T19:16:11.6015830Z wall=2026-11-08T19:16:11.6015830Z t=7.382000 seen=7.382000
+PROBE prim/box-beat rec=beat label=L round=9 polls=0 set=2026-11-08T19:16:11.9834020Z wall=2026-11-08T19:16:11.9834020Z t=7.764000 seen=7.764000
+PROBE prim/box-beat rec=beat label=L round=10 polls=0 set=2026-11-08T19:16:12.4743110Z wall=2026-11-08T19:16:12.4743110Z t=8.255000 seen=8.255000
+PROBE prim/box-beat rec=beat label=L round=11 polls=0 set=2026-11-08T19:16:13.0743110Z wall=2026-11-08T19:16:13.0743110Z t=8.855000 seen=8.855000
+PROBE prim/box-beat rec=beat label=L round=12 polls=0 set=2026-11-08T19:16:13.7834020Z wall=2026-11-08T19:16:13.7834020Z t=9.564000 seen=9.564000
+PROBE prim/box-beat rec=beat label=L round=13 polls=0 set=2026-11-08T19:16:14.6015830Z wall=2026-11-08T19:16:14.6015830Z t=10.382000 seen=10.382000
+PROBE prim/box-beat rec=beat label=L round=14 polls=0 set=2026-11-08T19:16:15.5288560Z wall=2026-11-08T19:16:15.5288560Z t=11.309000 seen=11.309000
+PROBE prim/box-beat rec=beat label=L round=15 polls=0 set=2026-11-08T19:16:16.5652200Z wall=2026-11-08T19:16:16.5652200Z t=12.345000 seen=12.345000
+PROBE prim/box-beat rec=beat label=L round=16 polls=0 set=2026-11-08T19:16:17.7106740Z wall=2026-11-08T19:16:17.7106740Z t=13.491000 seen=13.491000
+PROBE prim/box-beat rec=beat label=L round=17 polls=0 set=2026-11-08T19:16:18.9652200Z wall=2026-11-08T19:16:18.9652200Z t=14.745000 seen=14.745000
+PROBE prim/box-beat rec=beat label=L round=18 polls=0 set=2026-11-08T19:16:19.3470380Z wall=2026-11-08T19:16:19.3470380Z t=15.127000 seen=15.127000
+PROBE prim/box-beat rec=beat label=L round=19 polls=0 set=2026-11-08T19:16:19.8379470Z wall=2026-11-08T19:16:19.8379470Z t=15.618000 seen=15.618000
+PROBE prim/box-beat rec=rezzed label=A called=2026-11-08T19:16:19.9470380Z
+PROBE prim/box-beat rec=rezzed label=B called=2026-11-08T19:16:20.4743110Z
+PROBE prim/box-beat rec=rezzed label=C called=2026-11-08T19:16:20.5834020Z
+PROBE prim/box-beat rec=first label=A rez=2026-11-08T19:16:04Z stamp=2026-11-08T19:16:19.8561290Z polls=0 set=2026-11-08T19:16:20.0743110Z wall=2026-11-08T19:16:20.0743110Z t=0.236000 seen=0.236000
+PROBE prim/box-beat rec=first label=B rez=2026-11-08T19:16:04Z stamp=2026-11-08T19:16:20.3834020Z polls=0 set=2026-11-08T19:16:21.0015830Z wall=2026-11-08T19:16:21.0015830Z t=0.636000 seen=0.636000
+PROBE prim/box-beat rec=first label=C rez=2026-11-08T19:16:04Z stamp=2026-11-08T19:16:20.4924930Z polls=0 set=2026-11-08T19:16:22.0015830Z wall=2026-11-08T19:16:22.0015830Z t=1.527000 seen=1.527000
+PROBE prim/box-beat rec=go fps=55.000000 dilation=1.000000
+PROBE prim/box-beat rec=beat label=A round=0 polls=0 set=2026-11-08T19:16:22.5288560Z wall=2026-11-08T19:16:22.5288560Z t=2.691000 seen=2.691000
+PROBE prim/box-beat rec=beat label=B round=0 polls=0 set=2026-11-08T19:16:22.5288560Z wall=2026-11-08T19:16:22.5288560Z t=2.164000 seen=2.164000
+PROBE prim/box-beat rec=beat label=C round=0 polls=0 set=2026-11-08T19:16:22.5288560Z wall=2026-11-08T19:16:22.5288560Z t=2.055000 seen=2.055000
+PROBE prim/box-beat rec=beat label=A round=1 polls=0 set=2026-11-08T19:16:23.0197650Z wall=2026-11-08T19:16:23.0197650Z t=3.182000 seen=3.182000
+PROBE prim/box-beat rec=beat label=B round=1 polls=0 set=2026-11-08T19:16:23.0197650Z wall=2026-11-08T19:16:23.0197650Z t=2.655000 seen=2.655000
+PROBE prim/box-beat rec=beat label=C round=1 polls=0 set=2026-11-08T19:16:23.0197650Z wall=2026-11-08T19:16:23.0197650Z t=2.545000 seen=2.545000
+PROBE prim/box-beat rec=beat label=A round=2 polls=0 set=2026-11-08T19:16:23.6197650Z wall=2026-11-08T19:16:23.6197650Z t=3.782000 seen=3.782000
+PROBE prim/box-beat rec=beat label=B round=2 polls=0 set=2026-11-08T19:16:23.6197650Z wall=2026-11-08T19:16:23.6197650Z t=3.255000 seen=3.255000
+PROBE prim/box-beat rec=beat label=C round=2 polls=0 set=2026-11-08T19:16:23.6197650Z wall=2026-11-08T19:16:23.6197650Z t=3.145000 seen=3.145000
+PROBE prim/box-beat rec=beat label=A round=3 polls=0 set=2026-11-08T19:16:24.3288560Z wall=2026-11-08T19:16:24.3288560Z t=4.491000 seen=4.491000
+PROBE prim/box-beat rec=beat label=B round=3 polls=0 set=2026-11-08T19:16:24.3288560Z wall=2026-11-08T19:16:24.3288560Z t=3.964000 seen=3.964000
+PROBE prim/box-beat rec=beat label=C round=3 polls=0 set=2026-11-08T19:16:24.3288560Z wall=2026-11-08T19:16:24.3288560Z t=3.855000 seen=3.855000
+PROBE prim/box-beat rec=beat label=A round=4 polls=0 set=2026-11-08T19:16:25.1470380Z wall=2026-11-08T19:16:25.1470380Z t=5.309000 seen=5.309000
+PROBE prim/box-beat rec=beat label=B round=4 polls=0 set=2026-11-08T19:16:25.1470380Z wall=2026-11-08T19:16:25.1470380Z t=4.782000 seen=4.782000
+PROBE prim/box-beat rec=beat label=C round=4 polls=0 set=2026-11-08T19:16:25.1470380Z wall=2026-11-08T19:16:25.1470380Z t=4.673000 seen=4.673000
+PROBE prim/box-beat rec=beat label=A round=5 polls=0 set=2026-11-08T19:16:26.0743110Z wall=2026-11-08T19:16:26.0743110Z t=6.236000 seen=6.236000
+PROBE prim/box-beat rec=beat label=B round=5 polls=0 set=2026-11-08T19:16:26.0743110Z wall=2026-11-08T19:16:26.0743110Z t=5.709000 seen=5.709000
+PROBE prim/box-beat rec=beat label=C round=5 polls=0 set=2026-11-08T19:16:26.0743110Z wall=2026-11-08T19:16:26.0743110Z t=5.600000 seen=5.600000
+PROBE prim/box-beat rec=beat label=A round=6 polls=0 set=2026-11-08T19:16:27.1106740Z wall=2026-11-08T19:16:27.1106740Z t=7.273000 seen=7.273000
+PROBE prim/box-beat rec=beat label=B round=6 polls=0 set=2026-11-08T19:16:27.1106740Z wall=2026-11-08T19:16:27.1106740Z t=6.745000 seen=6.745000
+PROBE prim/box-beat rec=beat label=C round=6 polls=0 set=2026-11-08T19:16:27.1106740Z wall=2026-11-08T19:16:27.1106740Z t=6.636000 seen=6.636000
+PROBE prim/box-beat rec=beat label=A round=7 polls=0 set=2026-11-08T19:16:28.2561290Z wall=2026-11-08T19:16:28.2561290Z t=8.418000 seen=8.418000
+PROBE prim/box-beat rec=beat label=B round=7 polls=0 set=2026-11-08T19:16:28.2561290Z wall=2026-11-08T19:16:28.2561290Z t=7.891000 seen=7.891000
+PROBE prim/box-beat rec=beat label=C round=7 polls=0 set=2026-11-08T19:16:28.2561290Z wall=2026-11-08T19:16:28.2561290Z t=7.782000 seen=7.782000
+PROBE prim/box-beat rec=beat label=A round=8 polls=0 set=2026-11-08T19:16:29.5106740Z wall=2026-11-08T19:16:29.5106740Z t=9.673000 seen=9.673000
+PROBE prim/box-beat rec=beat label=B round=8 polls=0 set=2026-11-08T19:16:29.5106740Z wall=2026-11-08T19:16:29.5106740Z t=9.145000 seen=9.145000
+PROBE prim/box-beat rec=beat label=C round=8 polls=0 set=2026-11-08T19:16:29.5106740Z wall=2026-11-08T19:16:29.5106740Z t=9.036000 seen=9.036000
+PROBE prim/box-beat rec=beat label=A round=9 polls=0 set=2026-11-08T19:16:29.8924920Z wall=2026-11-08T19:16:29.8924920Z t=10.055000 seen=10.055000
+PROBE prim/box-beat rec=beat label=B round=9 polls=0 set=2026-11-08T19:16:29.8924920Z wall=2026-11-08T19:16:29.8924920Z t=9.527000 seen=9.527000
+PROBE prim/box-beat rec=beat label=C round=9 polls=0 set=2026-11-08T19:16:29.8924920Z wall=2026-11-08T19:16:29.8924920Z t=9.418000 seen=9.418000
+PROBE prim/box-beat rec=beat label=A round=10 polls=0 set=2026-11-08T19:16:30.3834010Z wall=2026-11-08T19:16:30.3834010Z t=10.545000 seen=10.545000
+PROBE prim/box-beat rec=beat label=B round=10 polls=0 set=2026-11-08T19:16:30.3834010Z wall=2026-11-08T19:16:30.3834010Z t=10.018000 seen=10.018000
+PROBE prim/box-beat rec=beat label=C round=10 polls=0 set=2026-11-08T19:16:30.3834010Z wall=2026-11-08T19:16:30.3834010Z t=9.909000 seen=9.909000
+PROBE prim/box-beat rec=beat label=A round=11 polls=0 set=2026-11-08T19:16:30.9834010Z wall=2026-11-08T19:16:30.9834010Z t=11.145000 seen=11.145000
+PROBE prim/box-beat rec=beat label=B round=11 polls=0 set=2026-11-08T19:16:30.9834010Z wall=2026-11-08T19:16:30.9834010Z t=10.618000 seen=10.618000
+PROBE prim/box-beat rec=beat label=C round=11 polls=0 set=2026-11-08T19:16:30.9834010Z wall=2026-11-08T19:16:30.9834010Z t=10.509000 seen=10.509000
+PROBE prim/box-beat rec=beat label=A round=12 polls=0 set=2026-11-08T19:16:31.6924920Z wall=2026-11-08T19:16:31.6924920Z t=11.855000 seen=11.855000
+PROBE prim/box-beat rec=beat label=B round=12 polls=0 set=2026-11-08T19:16:31.6924920Z wall=2026-11-08T19:16:31.6924920Z t=11.327000 seen=11.327000
+PROBE prim/box-beat rec=beat label=C round=12 polls=0 set=2026-11-08T19:16:31.6924920Z wall=2026-11-08T19:16:31.6924920Z t=11.218000 seen=11.218000
+PROBE prim/box-beat rec=beat label=A round=13 polls=0 set=2026-11-08T19:16:32.5106740Z wall=2026-11-08T19:16:32.5106740Z t=12.673000 seen=12.673000
+PROBE prim/box-beat rec=beat label=B round=13 polls=0 set=2026-11-08T19:16:32.5106740Z wall=2026-11-08T19:16:32.5106740Z t=12.145000 seen=12.145000
+PROBE prim/box-beat rec=beat label=C round=13 polls=0 set=2026-11-08T19:16:32.5106740Z wall=2026-11-08T19:16:32.5106740Z t=12.036000 seen=12.036000
+PROBE prim/box-beat rec=beat label=A round=14 polls=0 set=2026-11-08T19:16:33.4379470Z wall=2026-11-08T19:16:33.4379470Z t=13.600000 seen=13.600000
+PROBE prim/box-beat rec=beat label=B round=14 polls=0 set=2026-11-08T19:16:33.4379470Z wall=2026-11-08T19:16:33.4379470Z t=13.073000 seen=13.073000
+PROBE prim/box-beat rec=beat label=C round=14 polls=0 set=2026-11-08T19:16:33.4379470Z wall=2026-11-08T19:16:33.4379470Z t=12.964000 seen=12.964000
+PROBE prim/box-beat rec=beat label=A round=15 polls=0 set=2026-11-08T19:16:34.4743110Z wall=2026-11-08T19:16:34.4743110Z t=14.636000 seen=14.636000
+PROBE prim/box-beat rec=beat label=B round=15 polls=0 set=2026-11-08T19:16:34.4743110Z wall=2026-11-08T19:16:34.4743110Z t=14.109000 seen=14.109000
+PROBE prim/box-beat rec=beat label=C round=15 polls=0 set=2026-11-08T19:16:34.4743110Z wall=2026-11-08T19:16:34.4743110Z t=14.000000 seen=14.000000
+PROBE prim/box-beat rec=beat label=A round=16 polls=0 set=2026-11-08T19:16:35.6197650Z wall=2026-11-08T19:16:35.6197650Z t=15.782000 seen=15.782000
+PROBE prim/box-beat rec=beat label=B round=16 polls=0 set=2026-11-08T19:16:35.6197650Z wall=2026-11-08T19:16:35.6197650Z t=15.255000 seen=15.255000
+PROBE prim/box-beat rec=beat label=C round=16 polls=0 set=2026-11-08T19:16:35.6197650Z wall=2026-11-08T19:16:35.6197650Z t=15.145000 seen=15.145000
+PROBE prim/box-beat rec=beat label=A round=17 polls=0 set=2026-11-08T19:16:36.8743110Z wall=2026-11-08T19:16:36.8743110Z t=17.036000 seen=17.036000
+PROBE prim/box-beat rec=beat label=B round=17 polls=0 set=2026-11-08T19:16:36.8743110Z wall=2026-11-08T19:16:36.8743110Z t=16.509000 seen=16.509000
+PROBE prim/box-beat rec=beat label=C round=17 polls=0 set=2026-11-08T19:16:36.8743110Z wall=2026-11-08T19:16:36.8743110Z t=16.400000 seen=16.400000
+PROBE prim/box-beat rec=beat label=A round=18 polls=0 set=2026-11-08T19:16:37.2561290Z wall=2026-11-08T19:16:37.2561290Z t=17.418000 seen=17.418000
+PROBE prim/box-beat rec=beat label=B round=18 polls=0 set=2026-11-08T19:16:37.2561290Z wall=2026-11-08T19:16:37.2561290Z t=16.891000 seen=16.891000
+PROBE prim/box-beat rec=beat label=C round=18 polls=0 set=2026-11-08T19:16:37.2561290Z wall=2026-11-08T19:16:37.2561290Z t=16.782000 seen=16.782000
+PROBE prim/box-beat rec=beat label=A round=19 polls=0 set=2026-11-08T19:16:37.7470380Z wall=2026-11-08T19:16:37.7470380Z t=17.909000 seen=17.909000
+PROBE prim/box-beat rec=beat label=B round=19 polls=0 set=2026-11-08T19:16:37.7470380Z wall=2026-11-08T19:16:37.7470380Z t=17.382000 seen=17.382000
+PROBE prim/box-beat rec=beat label=C round=19 polls=0 set=2026-11-08T19:16:37.7470380Z wall=2026-11-08T19:16:37.7470380Z t=17.273000 seen=17.273000
+PROBE prim/box-beat rec=frames fps=55.000000 dilation=1.000000
+PROBE prim/box-beat rec=end

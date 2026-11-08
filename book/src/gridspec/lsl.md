@@ -2007,7 +2007,7 @@ an offset from there.
 | a negative or zero axis | 0.01 | 0.001 | each flavour as its grid |
 | past 64 m (65) | **64** | kept | each flavour as its grid |
 | past 256 m (300) | 64 | **256** | each flavour as its grid |
-| `llGetBoundingBox` after a scale change | **the box of the scale at the last beat**: every rescale shows at once at a beat about a second apart, not sooner — not after a frame's sleep, `llSetLinkPrimitiveParamsFast` or in the next event (`prim/placement-settle`) | the new box at once | each flavour as its grid; fake-sl beats on whole seconds of region time, not from the prim's rez |
+| `llGetBoundingBox` after a scale change | **the old box until the next frame**, or, when the box last caught up less than a second before, until a second after that: never in the frame of the set, not after `llSetLinkPrimitiveParamsFast` and not in the next event if that is sooner; each prim keeps its own second, and its rez counts as its first catch-up (`prim/box-beat`, `prim/placement-settle`) | the new box at once | each flavour as its grid; Second Life's second is the first frame at least a second on, 1.000 or 1.022 s on its jittering frames, fake-sl's 45 frames every time, so a long chain of catch-ups drifts a few frames apart |
 | `llGetBoundingBox` of a prim thinner than 0.05 m | **0.05** m on that axis | the prim's own size | each flavour as its grid |
 | `llGetBoundingBox` a second later; `llGetGeometricCenter` | the half sizes of the new scale, in the prim's frame (a quarter turn does not change it); the centre 0 | the same | each flavour as its grid |
 | `llTargetOmega(<0,0,1>, 2, 1)` | `PRIM_OMEGA` reads it back; `llGetRot` does not move (the spin is the viewer's) | the same | each flavour as its grid |
@@ -2129,6 +2129,7 @@ newer rules go by number, since OpenSim has no constants for them.
 | `OBJECT_VELOCITY` of a prim at rest | a vector | a value `llGetListEntryType` calls `TYPE_INVALID`, printed `<0, 0, 0>` | a vector on both flavours |
 | `OBJECT_STREAMING_COST`, `OBJECT_PHYSICS_COST`, `OBJECT_SERVER_COST` of the cube | 0.05, 1.0, 0.5 | 1.0, 0.1, 0 | each flavour as its grid, for every prim: the region has no cost model yet |
 | `OBJECT_LAST_OWNER_ID` | `NULL_KEY` | the owner | each flavour as its grid |
+| `OBJECT_REZ_TIME` | the moment the object was made, `llGetTimestamp`'s form with six digits; a take keeps it, so three rezzes of one item 25 s after it was made all read the moment it was made (`prim/box-beat`), and so does a shift-copy (`object-edit`) | the same, with no fraction (XEngine does not name the constant; code 36 answers) | each flavour as its grid: a fixture made when the region starts, a new prim when it is rezzed, a rez from an inventory or a copy when the object it came from was made |
 | codes 42 to 56 (`OBJECT_MATERIAL` to `OBJECT_VOLUME_DETECT`) | answered (material 3, mass 125, scale, text colour and alpha, health, damage, the five permission masks, …) | **−1** for each | each flavour as its grid |
 | `OBJECT_PRIM_COUNT` of the owner | the prims the avatar wears (22 here) | 0 | each flavour as its grid |
 

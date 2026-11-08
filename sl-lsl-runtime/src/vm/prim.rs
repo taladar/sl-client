@@ -790,8 +790,10 @@ pub struct ObjectDetails {
     pub costs: (f32, f32, f32, f32),
     /// Whether its object is selected by a viewer, and how many sit on it.
     pub selected: (i32, i32),
-    /// Its creation time, as `llGetTimestamp` writes one.
-    pub rez_time: String,
+    /// When its object was rezzed, in the region's calendar time as
+    /// microseconds since the UNIX epoch (`OBJECT_REZ_TIME`); [`None`] for an
+    /// avatar.
+    pub rezzed: Option<i64>,
     /// The key of what rezzed it, `NULL_KEY` for an avatar's rez.
     pub rezzer: String,
     /// Its permission masks: base, owner, group, everyone, next owner.

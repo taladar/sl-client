@@ -331,6 +331,13 @@ pub trait Host {
     /// functions read prims of other objects by key.
     fn prim(&self, caller: CallerId, prim: &str) -> Option<Prim>;
 
+    /// The tick the prim keyed `prim` came into the region in — rezzed,
+    /// whether new, from an inventory or back from a take, or there when
+    /// the region started (tick 0) — or [`None`] when the host does not
+    /// keep it. Second Life counts it as the prim's first bounding-box
+    /// refresh (`prim/box-beat`).
+    fn rezzed_in(&self, prim: &str) -> Option<crate::vm::Tick>;
+
     /// Writes `state` back as the prim keyed [`Prim::key`]: everything a
     /// setter changed, which the library has clamped as the grid clamps it.
     /// The host keeps what it was given, so a later [`Self::prim`] reads the

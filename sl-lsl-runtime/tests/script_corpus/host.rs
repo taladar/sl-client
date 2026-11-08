@@ -405,6 +405,11 @@ impl Host for CorpusHost {
         self.prim.local_position = to;
     }
 
+    fn rezzed_in(&self, prim: &str) -> Option<sl_lsl_runtime::vm::Tick> {
+        // The one prim is there when the region starts.
+        (prim == PRIM).then_some(sl_lsl_runtime::vm::Tick(0))
+    }
+
     fn prim(&self, _caller: CallerId, prim: &str) -> Option<Prim> {
         (prim == PRIM).then(|| self.prim.clone())
     }
@@ -473,7 +478,7 @@ impl Host for CorpusHost {
             text: self.prim.text.clone(),
             costs: (1.0, 0.05, 1.0, 0.5),
             selected: (0, 0),
-            rez_time: String::new(),
+            rezzed: None,
             rezzer: OWNER.to_owned(),
             masks: [i32::MAX, i32::MAX, 0, 0, 532_480],
             hover_height: 0.0,

@@ -105,7 +105,7 @@ pub enum Raised {
     /// `no_sensor` there (`events/order` round 4).
     Sweep(crate::vm::sensing::Query),
     /// A setter changed the scale of the prim keyed `prim` on Second Life,
-    /// whose bounding box keeps `before` until the region's next refresh
+    /// whose bounding box keeps `before` until the box next catches up
     /// (`prim/placement-settle`). Nothing is posted.
     Rescaled {
         /// The key of the prim scaled.
@@ -282,9 +282,8 @@ pub(crate) struct Peers<'run> {
     /// The region's `ScriptDelayFactor` (OpenSim's), which scales every
     /// forced delay.
     delay_factor: f64,
-    /// The scale each prim rescaled since the region's last bounding-box
-    /// refresh had before it, by key ([`Raised::Rescaled`]); [`None`]
-    /// outside an engine.
+    /// The scale each prim rescaled since its box last caught up had before
+    /// it, by key ([`Raised::Rescaled`]); [`None`] outside an engine.
     stale_boxes: Option<&'run BTreeMap<String, Vector>>,
 }
 
@@ -319,7 +318,7 @@ impl<'run> Peers<'run> {
     }
 
     /// The scale the bounding box of the prim keyed `key` still keeps, when
-    /// an earlier script rescaled it since the region's last refresh.
+    /// an earlier script rescaled it since the box last caught up.
     fn stale_box(self, key: &str) -> Option<&'run Vector> {
         self.stale_boxes?.get(key)
     }
@@ -739,7 +738,7 @@ impl<'host> ScriptCtx<'host> {
     /// ticks on (`events/order`, `events/latency`).
     ///
     /// A new scale on Second Life leaves the prim's bounding box at the scale
-    /// before until the region's next refresh ([`Self::box_scale`]).
+    /// before until the box next catches up ([`Self::box_scale`]).
     pub fn set_prim(&mut self, prim: &crate::vm::prim::Prim, changed: &[i32]) {
         let caller = self.caller;
         if self.flavour() == EngineFlavour::SecondLife
@@ -761,12 +760,11 @@ impl<'host> ScriptCtx<'host> {
     }
 
     /// The scale `llGetBoundingBox` measures the prim `prim` with: on Second
-    /// Life the scale it had at the region's last bounding-box refresh, once
-    /// a second of region time, however long ago it was set — a scale set
-    /// since, by this script or another, shows in the box only after the
-    /// next one (`prim/placement-settle`, aditi 2026-11-08: a box caught up
-    /// at the same moment of each second wherever in the second the scale
-    /// was set); on OpenSim the scale it has.
+    /// Life the scale it had when its box last caught up — a scale set
+    /// since, by this script or another, shows from the next tick, or a
+    /// second after the box last caught up if that is later, the prim's rez
+    /// counting as its first (`prim/box-beat`, aditi 2026-11-08); on OpenSim
+    /// the scale it has.
     #[must_use]
     pub fn box_scale(&self, prim: &crate::vm::prim::Prim) -> Vector {
         if self.flavour() != EngineFlavour::SecondLife {

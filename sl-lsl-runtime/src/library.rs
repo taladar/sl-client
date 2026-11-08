@@ -227,6 +227,10 @@ mod tests {
             None
         }
 
+        fn rezzed_in(&self, _prim: &str) -> Option<crate::vm::Tick> {
+            None
+        }
+
         fn set_prim(&mut self, _caller: CallerId, _state: &crate::vm::prim::Prim) {}
 
         fn set_region_position(&mut self, _caller: CallerId, _position: Vector) -> Option<Vector> {

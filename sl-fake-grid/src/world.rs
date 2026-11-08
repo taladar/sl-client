@@ -1001,6 +1001,14 @@ impl SceneFixtures {
         let object = self.object_by_local_id(local_id)?;
         let mut properties = object.properties.clone().unwrap_or_else(|| {
             let mut fresh = default_object_properties(&object);
+            // Made when it came into the region: a fixture's when the region
+            // started.
+            if let Some(tick) = self.objects.rezzed_at(local_id) {
+                let made = self
+                    .script_instances
+                    .calendar_micros(sl_lsl_runtime::vm::Tick(tick), &self.wall);
+                fresh.creation_date = u64::try_from(made).unwrap_or(0);
+            }
             fresh.permissions.base = self.properties.new_prim_owner_mask;
             fresh.permissions.owner = self.properties.new_prim_owner_mask;
             if self.properties.new_prim_last_owner == crate::imitates::LastOwner::Rezzer {

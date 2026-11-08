@@ -219,10 +219,23 @@ reason = "The ground a drop stops on lies as far below the build position as the
 [[difference]]
 probe = "prim/placement-settle"
 between = ["aditi", "fake-sl"]
+record = "settled"
+fields = { label = "x-0.01" }
+reason = "A box catches up a second after it last did (prim/box-beat): on aditi's jittering frame clock 1.000 or 1.022 s, about 1.01 s on average, on the fake grid 45 frames every time, so over the twenty-odd catch-ups chained from the drops the fake grid's come a few frames early and this read, half a second after a rescale, falls after one on fake-sl and before it on aditi"
+
+[[difference]]
+probe = "prim/placement-settle"
+between = ["aditi", "fake-sl"]
+record = "settled"
+fields = { label = "x-0.06" }
+reason = "A box catches up a second after it last did (prim/box-beat): on aditi's jittering frame clock 1.000 or 1.022 s, about 1.01 s on average, on the fake grid 45 frames every time, so over the twenty-odd catch-ups chained from the drops the fake grid's come a few frames early and this read, half a second after a rescale, falls after one on fake-sl and before it on aditi"
+
+[[difference]]
+probe = "prim/placement-settle"
+between = ["aditi", "fake-sl"]
 record = "lag"
 fields = { label = "params-fast" }
-reason = "The fake grid counts Second Life's box beat from whole seconds of region time, aditi from the prim's rez, so the beat falls before this read on fake-sl and after it on aditi"
-task = "server-fake-grid-object-rez-time"
+reason = "A box catches up a second after it last did (prim/box-beat): on aditi's jittering frame clock 1.000 or 1.022 s, about 1.01 s on average, on the fake grid 45 frames every time, so over the twenty-odd catch-ups chained from the drops the fake grid's come a few frames early and this read, half a second after a rescale, falls after one on fake-sl and before it on aditi"
 
 # --- events -------------------------------------------------------------
 

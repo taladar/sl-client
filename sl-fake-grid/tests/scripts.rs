@@ -3156,6 +3156,192 @@ default
         a_prim_reads_rezzes_from_and_changes_its_contents(ImitatedGrid::OpenSim).await
     }
 
+    /// The rezzer of [`an_object_keeps_the_moment_it_was_made`]: on channel 7
+    /// it says its own `OBJECT_REZ_TIME` or rezzes its child, and passes on
+    /// what the child says on channel -5.
+    const MADE_REZZER_SOURCE: &str = "default
+{
+    state_entry()
+    {
+        llListen(7, \"\", NULL_KEY, \"\");
+        llListen(-5, \"\", NULL_KEY, \"\");
+    }
+
+    listen(integer channel, string name, key id, string message)
+    {
+        if (channel == -5)
+        {
+            llShout(0, \"child \" + message);
+        }
+        else if (message == \"made\")
+        {
+            llShout(0, \"made \" + llList2String(llGetObjectDetails(llGetKey(), [36]), 0));
+        }
+        else if (message == \"rez\")
+        {
+            llRezObject(llGetInventoryName(INVENTORY_OBJECT, 0), llGetPos() + <0.0, 0.0, 1.0>, ZERO_VECTOR, ZERO_ROTATION, 1);
+        }
+    }
+}
+";
+
+    /// The child of [`an_object_keeps_the_moment_it_was_made`]: rezzed, it
+    /// tells the rezzer its `OBJECT_REZ_TIME`, then rescales itself and how
+    /// many ticks its bounding box took to show it.
+    const MADE_CHILD_SOURCE: &str = "default
+{
+    on_rez(integer start)
+    {
+        llShout(-5, \"made \" + llList2String(llGetObjectDetails(llGetKey(), [36]), 0));
+        llSetScale(<2.0, 1.0, 1.0>);
+        integer polls;
+        while (llList2Vector(llGetBoundingBox(llGetKey()), 1) != <1.0, 0.5, 0.5> && polls < 100)
+        {
+            llSleep(0.01);
+            ++polls;
+        }
+        llShout(-5, \"polls \" + (string)polls);
+    }
+}
+";
+
+    /// The `OBJECT_REZ_TIME` (code 36, which OpenSim does not name) of a
+    /// prim is the moment its object was made, in the form each grid writes
+    /// it — six digits of the second on Second Life, none on OpenSim — a
+    /// fixture's the region's start; and a take
+    /// keeps it, so an object rezzed from a prim's contents seconds later
+    /// reads the moment it was first made, not its rez (`prim/box-beat`). On
+    /// Second Life the rezzed prim's box counts its first catch-up from its
+    /// rez: a rescale straight after it waits out the second (ten ticks of
+    /// this region's), on OpenSim it shows at once — on a grid imitating
+    /// `imitated`.
+    async fn an_object_keeps_the_moment_it_was_made(
+        imitated: ImitatedGrid,
+    ) -> Result<(), TestError> {
+        let fixture = region_of(&[
+            ScriptedBox {
+                local_id: REZZER,
+                source: MADE_REZZER_SOURCE.to_owned(),
+                experience: None,
+            },
+            ScriptedBox {
+                local_id: REZZED_BOX,
+                source: MADE_CHILD_SOURCE.to_owned(),
+                experience: None,
+            },
+        ])?;
+        let rezzer_key = sl_types::key::ObjectKey::from(uuid::Uuid::from_u128(
+            (u128::from(REZZER.0) << 8) | 0x5,
+        ));
+        let mut scene = scene_with(
+            imitated,
+            fixture,
+            RegionConfig {
+                heartbeat: HeartbeatConfig::stepped(Duration::from_millis(100)),
+                ..RegionConfig::default()
+            },
+            AccountConfig {
+                agent_id: Some(box_owner()),
+                ..AccountConfig::new("Test", "User", "password")
+            },
+        )
+        .await?;
+        scene.tick(2).await?;
+
+        scene.shout("made").await?;
+        scene.tick(2).await?;
+        let said = shouted(&mut scene).await;
+        let made = said
+            .first()
+            .and_then(|line| line.strip_prefix("made "))
+            .ok_or_else(|| format!("no rez time in {said:?}"))?
+            .to_owned();
+        let width = if imitated == ImitatedGrid::SecondLife {
+            "2026-11-08T13:52:23.319659Z".len()
+        } else {
+            "2026-11-08T13:52:23Z".len()
+        };
+        assert_eq!(made.len(), width, "{made} in the grid's form");
+        assert!(made.ends_with('Z'), "{made}");
+
+        // The child box taken, and dropped into the rezzer.
+        let objects = scene
+            .agent
+            .with_sim(|sim| {
+                sim.agent_inventory()
+                    .folders()
+                    .find(|folder| {
+                        folder.folder_type == sl_client_tokio::FolderType::Object.to_code()
+                    })
+                    .map(|folder| folder.folder_id)
+            })
+            .await
+            .ok_or("the account has no Objects folder")?;
+        scene
+            .commands
+            .send(Command::DerezObjects {
+                local_ids: vec![sl_client_tokio::ScopedObjectId::new(
+                    scene.circuit,
+                    REZZED_BOX,
+                )],
+                destination: sl_client_tokio::DeRezDestination::TakeIntoAgentInventory(objects),
+                transaction_id: sl_client_tokio::TransactionId::from(uuid::Uuid::from_u128(0x7D)),
+                group_id: None,
+            })
+            .await?;
+        let taken = scene
+            .next("the taken item", |seen| match seen {
+                Seen::Filed(item) => Some(item),
+                _other => None,
+            })
+            .await?;
+        let drop = sl_client_tokio::RestoreItem::for_task_drop(
+            &taken,
+            rezzer_key,
+            uuid::Uuid::from_u128(0xD2),
+        )?;
+        scene
+            .send(
+                Command::UpdateTaskInventory {
+                    target: sl_client_tokio::ScopedObjectId::new(scene.circuit, REZZER),
+                    key: sl_client_tokio::TaskInventoryKey::Item,
+                    item: Box::new(drop),
+                },
+                |event| matches!(event, ServerEvent::UpdateTaskInventory { .. }),
+            )
+            .await?;
+        // Three seconds on, so a rez time read off the rez would differ.
+        scene.tick(30).await?;
+        let _dropped = shouted(&mut scene).await;
+
+        scene.shout("rez").await?;
+        scene.tick(20).await?;
+        let polls = if imitated == ImitatedGrid::SecondLife {
+            "child polls 9"
+        } else {
+            "child polls 0"
+        };
+        assert_eq!(
+            shouted(&mut scene).await,
+            vec![format!("child made {made}"), polls.to_owned()],
+            "the child reads the moment it was made, and its box catches up as its grid's does"
+        );
+        scene.stop();
+        Ok(())
+    }
+
+    /// On a grid imitating Second Life.
+    #[tokio::test]
+    async fn an_object_keeps_the_moment_it_was_made_on_second_life() -> Result<(), TestError> {
+        an_object_keeps_the_moment_it_was_made(ImitatedGrid::SecondLife).await
+    }
+
+    /// On a grid imitating OpenSim.
+    #[tokio::test]
+    async fn an_object_keeps_the_moment_it_was_made_on_opensim() -> Result<(), TestError> {
+        an_object_keeps_the_moment_it_was_made(ImitatedGrid::OpenSim).await
+    }
+
     /// The sensing box of [`a_prim_senses_the_avatar_and_casts_at_its_neighbour`]:
     /// on channel 7 it sweeps for avatars or casts a ray east, and says what
     /// it found.

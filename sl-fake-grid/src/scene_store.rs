@@ -92,6 +92,13 @@ pub(crate) struct Shown(pub(crate) Object);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Component)]
 pub struct Seq(u64);
 
+/// The region tick a prim came into the region in: its rez, whether a
+/// fixture's (tick 0, the region's start), a viewer's, a script's or a take
+/// coming back. `OBJECT_REZ_TIME` reads it as calendar time, and Second
+/// Life's bounding-box beat counts from it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Component)]
+pub struct Rezzed(pub u64);
+
 /// What a prim's scripts set of it as a seat: its sit target, its sitter's
 /// camera. A prim no script set anything of has none, which reads as a seat
 /// without a target.
@@ -272,6 +279,9 @@ pub struct ObjectStore {
     contents_seen: Tick,
     /// The world's change tick when [`Self::take_written`] last answered.
     bodies_seen: Tick,
+    /// The region tick a prim that comes in now is stamped with
+    /// ([`Rezzed`]).
+    rez_tick: u64,
 }
 
 impl Default for ObjectStore {
@@ -281,6 +291,7 @@ impl Default for ObjectStore {
             indices: Indices::default(),
             contents_seen: Tick::new(0),
             bodies_seen: Tick::new(0),
+            rez_tick: 0,
         }
     }
 }
@@ -303,6 +314,9 @@ impl Clone for ObjectStore {
             };
             let copied = copy.spawn(body.0.clone());
             let mut spawned = copy.world.entity_mut(copied);
+            if let Some(rezzed) = self.world.get::<Rezzed>(*entity) {
+                let _held = spawned.insert(*rezzed);
+            }
             if let Some(contents) = self.world.get::<Contents>(*entity) {
                 let _held = spawned.insert(contents.clone());
             }
@@ -325,6 +339,7 @@ impl Clone for ObjectStore {
             // and a copy is a region nobody is in yet.
         }
         copy.indices.highest_local_id = self.indices.highest_local_id;
+        copy.rez_tick = self.rez_tick;
         copy
     }
 }
@@ -360,7 +375,10 @@ impl ObjectStore {
         let seq = Seq(self.indices.next_seq);
         self.indices.next_seq = self.indices.next_seq.saturating_add(1);
         let ids = Filed::of(&object);
-        let entity = self.world.spawn((Body(object), seq)).id();
+        let entity = self
+            .world
+            .spawn((Body(object), seq, Rezzed(self.rez_tick)))
+            .id();
         let _first = self.indices.order.insert(seq, entity);
         self.indices.file(entity, seq, ids);
         entity
@@ -374,6 +392,22 @@ impl ObjectStore {
     /// found.
     pub fn push(&mut self, object: Object) {
         let _entity = self.spawn(object);
+    }
+
+    /// Stamps every prim that comes in from now on with region tick `tick`
+    /// ([`Rezzed`]): the region's script engine sets it to each tick before
+    /// the tick runs.
+    pub const fn set_rez_tick(&mut self, tick: u64) {
+        self.rez_tick = tick;
+    }
+
+    /// The region tick the prim with the given region-local id came in, in
+    /// ([`Rezzed`]).
+    #[must_use]
+    pub fn rezzed_at(&self, local_id: RegionLocalObjectId) -> Option<u64> {
+        self.world
+            .get::<Rezzed>(self.entity(local_id)?)
+            .map(|rezzed| rezzed.0)
     }
 
     /// The entity of the prim with the given region-local id.

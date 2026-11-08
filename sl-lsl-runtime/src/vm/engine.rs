@@ -178,10 +178,24 @@ pub struct Engine {
     /// Lines heard on OpenSim that wait for its next async command pass, in
     /// the order they were said.
     overheard: Vec<(CallerId, Heard)>,
-    /// The scale each prim rescaled since Second Life's last bounding-box
-    /// refresh had before, by key: what its box still measures until the
-    /// next one ([`SECOND_LIFE_BOX_REFRESH`]).
+    /// The scale each prim rescaled since its last bounding-box refresh on
+    /// Second Life had before, by key: what its box still measures until
+    /// the refresh its [`BoxClock`] holds it to.
     stale_boxes: BTreeMap<String, sl_types::lsl::Vector>,
+    /// When each prim's bounding box last caught up with its scale on Second
+    /// Life, and when a rescale since will show, by key.
+    box_clocks: BTreeMap<String, BoxClock>,
+}
+
+/// When one prim's bounding box catches up with its scale on Second Life: at
+/// the next tick after a rescale, unless it caught up less than
+/// [`SECOND_LIFE_BOX_REFRESH`] before, when it waits until that long after.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct BoxClock {
+    /// The tick the box last caught up in, if it ever had to.
+    refreshed: Option<Tick>,
+    /// The tick a rescale waiting in [`Engine::stale_boxes`] shows in.
+    due: Tick,
 }
 
 /// How many ticks after its raise Second Life runs a link message: the next
@@ -193,12 +207,13 @@ const SECOND_LIFE_LINK_TICKS: u64 = 1;
 /// a sweep's answer (`events/latency`: two frames for both).
 const SECOND_LIFE_LATE_TICKS: u64 = 2;
 
-/// How often Second Life brings its prims' bounding boxes up to their scales:
-/// once a second of region time, at the same moment of each second wherever
-/// in it the scale was set (`prim/placement-settle`, aditi 2026-11-08: eight
-/// rescales set across the second all showed in `llGetBoundingBox` at the
-/// next of one beat a second apart, and none sooner — not after a link
-/// message, a sleep of a frame or `llSetLinkPrimitiveParamsFast`).
+/// How long Second Life keeps a prim's bounding box behind a new scale after
+/// the box last caught up: a rescale shows in `llGetBoundingBox` the frame
+/// after it, unless the box caught up less than a second before, when it
+/// shows a second after that (`prim/box-beat`, aditi 2026-11-08: twenty
+/// rescales across the second, each seen a frame after its set or exactly a
+/// second after the box's last catch-up, whichever came later; at 45 frames
+/// a second the region's clock and its frames cannot be told apart).
 const SECOND_LIFE_BOX_REFRESH: Duration = Duration::from_secs(1);
 
 /// How often OpenSim's async command pass delivers the lines its scripts
@@ -236,6 +251,7 @@ impl Engine {
             ossl: None,
             overheard: Vec::new(),
             stale_boxes: BTreeMap::new(),
+            box_clocks: BTreeMap::new(),
         }
     }
 
@@ -1097,11 +1113,23 @@ impl Engine {
                 }
                 Raised::Rescaled { prim, before } => {
                     // The scale at the last refresh: a second rescale before
-                    // the next keeps the first one's.
-                    let _kept = self
-                        .stale_boxes
-                        .entry(prim.clone())
-                        .or_insert_with(|| before.clone());
+                    // the next keeps the first one's, and its time.
+                    if !self.stale_boxes.contains_key(prim) {
+                        let _kept = self.stale_boxes.insert(prim.clone(), before.clone());
+                        let next = self.now.after(1);
+                        let period = self.box_refresh_ticks();
+                        // A box that never caught up counts from the rez.
+                        let clock =
+                            self.box_clocks
+                                .entry(prim.clone())
+                                .or_insert_with(|| BoxClock {
+                                    refreshed: host.rezzed_in(prim),
+                                    due: next,
+                                });
+                        clock.due = clock
+                            .refreshed
+                            .map_or(next, |refreshed| next.max(refreshed.after(period)));
+                    }
                     continue;
                 }
                 Raised::Changed { prim, bits } => (
@@ -1231,24 +1259,38 @@ impl Engine {
         }
     }
 
-    /// Bring every bounding box up to its prim's scale when Second Life's
-    /// refresh falls in tick `now`: the first tick at or after each
-    /// [`SECOND_LIFE_BOX_REFRESH`] of region time.
+    /// [`SECOND_LIFE_BOX_REFRESH`] in whole ticks.
+    fn box_refresh_ticks(&self) -> u64 {
+        let step = self.config.step.as_nanos().max(1);
+        let ticks = SECOND_LIFE_BOX_REFRESH
+            .as_nanos()
+            .saturating_add(step / 2)
+            .checked_div(step)
+            .unwrap_or(0);
+        u64::try_from(ticks).unwrap_or(u64::MAX)
+    }
+
+    /// Bring each bounding box whose refresh falls in tick `now` up to its
+    /// prim's scale ([`BoxClock`]), and forget the clocks of the boxes that
+    /// caught up long enough ago to hold nothing back.
     fn refresh_boxes(&mut self, now: Tick) {
-        if self.stale_boxes.is_empty() {
+        if self.box_clocks.is_empty() {
             return;
         }
-        let refresh = SECOND_LIFE_BOX_REFRESH.as_micros();
-        let at = |tick: u64| {
-            u128::from(tick)
-                .saturating_mul(self.config.step.as_micros())
-                .checked_div(refresh)
-                .unwrap_or(0)
-        };
-        if now.0 > 0 && at(now.0) == at(now.0.saturating_sub(1)) {
-            return;
-        }
-        self.stale_boxes.clear();
+        let period = self.box_refresh_ticks();
+        let stale = &mut self.stale_boxes;
+        self.box_clocks.retain(|prim, clock| {
+            if stale.contains_key(prim) {
+                if clock.due <= now {
+                    let _caught_up = stale.remove(prim);
+                    clock.refreshed = Some(now);
+                }
+                return true;
+            }
+            clock
+                .refreshed
+                .is_some_and(|refreshed| refreshed.after(period) > now)
+        });
     }
 
     /// Hand the scripts the lines they heard since OpenSim's last async
