@@ -4,6 +4,8 @@ use std::collections::BTreeMap;
 
 use core::time::Duration;
 
+use sl_types::lsl::Vector;
+
 use crate::value::Element;
 use crate::vm::comms::{LinkMessage, Listens, Overheard};
 use crate::vm::contents::Control;
@@ -102,6 +104,15 @@ pub enum Raised {
     /// `SensorRepeat.SenseOnce` sweeps at once and posts `sensor` or
     /// `no_sensor` there (`events/order` round 4).
     Sweep(crate::vm::sensing::Query),
+    /// A setter changed the scale of the prim keyed `prim` on Second Life,
+    /// whose bounding box keeps `before` until the region's next refresh
+    /// (`prim/placement-settle`). Nothing is posted.
+    Rescaled {
+        /// The key of the prim scaled.
+        prim: String,
+        /// Its scale before the call.
+        before: Vector,
+    },
     /// `llSetScriptState` or `llResetOtherScript` of another script of the
     /// caller's prim.
     Control {
@@ -271,6 +282,10 @@ pub(crate) struct Peers<'run> {
     /// The region's `ScriptDelayFactor` (OpenSim's), which scales every
     /// forced delay.
     delay_factor: f64,
+    /// The scale each prim rescaled since the region's last bounding-box
+    /// refresh had before it, by key ([`Raised::Rescaled`]); [`None`]
+    /// outside an engine.
+    stale_boxes: Option<&'run BTreeMap<String, Vector>>,
 }
 
 impl<'run> Peers<'run> {
@@ -281,22 +296,32 @@ impl<'run> Peers<'run> {
         flavour: EngineFlavour::SecondLife,
         ossl: None,
         delay_factor: 1.0,
+        stale_boxes: None,
     };
 
     /// The instances of an engine imitating `flavour` under the `[OSSL]`
     /// configuration `ossl` and the `ScriptDelayFactor` `delay_factor`, less
-    /// the one running.
+    /// the one running, and the scales its bounding boxes still keep
+    /// (`stale_boxes`).
     pub(crate) const fn of(
         instances: &'run BTreeMap<CallerId, Instance>,
         flavour: EngineFlavour,
         (ossl, delay_factor): (&'run Settings, f64),
+        stale_boxes: &'run BTreeMap<String, Vector>,
     ) -> Self {
         Self {
             instances: Some(instances),
             flavour,
             ossl: Some(ossl),
             delay_factor,
+            stale_boxes: Some(stale_boxes),
         }
+    }
+
+    /// The scale the bounding box of the prim keyed `key` still keeps, when
+    /// an earlier script rescaled it since the region's last refresh.
+    fn stale_box(self, key: &str) -> Option<&'run Vector> {
+        self.stale_boxes?.get(key)
     }
 
     /// The region's `ScriptDelayFactor`.
@@ -712,8 +737,20 @@ impl<'host> ScriptCtx<'host> {
     /// each change raises in the prim's scripts, queued in the order of what
     /// else the slice raised: OpenSim runs them as they come, Second Life two
     /// ticks on (`events/order`, `events/latency`).
+    ///
+    /// A new scale on Second Life leaves the prim's bounding box at the scale
+    /// before until the region's next refresh ([`Self::box_scale`]).
     pub fn set_prim(&mut self, prim: &crate::vm::prim::Prim, changed: &[i32]) {
         let caller = self.caller;
+        if self.flavour() == EngineFlavour::SecondLife
+            && let Some(before) = self.host.prim(caller, &prim.key)
+            && before.scale != prim.scale
+        {
+            self.data.raised.push(Raised::Rescaled {
+                prim: prim.key.clone(),
+                before: before.scale,
+            });
+        }
         self.host.set_prim(caller, prim);
         for bits in changed {
             self.data.raised.push(Raised::Changed {
@@ -721,6 +758,27 @@ impl<'host> ScriptCtx<'host> {
                 bits: *bits,
             });
         }
+    }
+
+    /// The scale `llGetBoundingBox` measures the prim `prim` with: on Second
+    /// Life the scale it had at the region's last bounding-box refresh, once
+    /// a second of region time, however long ago it was set — a scale set
+    /// since, by this script or another, shows in the box only after the
+    /// next one (`prim/placement-settle`, aditi 2026-11-08: a box caught up
+    /// at the same moment of each second wherever in the second the scale
+    /// was set); on OpenSim the scale it has.
+    #[must_use]
+    pub fn box_scale(&self, prim: &crate::vm::prim::Prim) -> Vector {
+        if self.flavour() != EngineFlavour::SecondLife {
+            return prim.scale.clone();
+        }
+        let own = self.data.raised.iter().find_map(|raised| match raised {
+            Raised::Rescaled { prim: key, before } if *key == prim.key => Some(before),
+            _ => None,
+        });
+        own.or_else(|| self.peers.stale_box(&prim.key))
+            .unwrap_or(&prim.scale)
+            .clone()
     }
 
     /// Send a link message; the engine delivers it to every script `message`

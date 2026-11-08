@@ -178,6 +178,10 @@ pub struct Engine {
     /// Lines heard on OpenSim that wait for its next async command pass, in
     /// the order they were said.
     overheard: Vec<(CallerId, Heard)>,
+    /// The scale each prim rescaled since Second Life's last bounding-box
+    /// refresh had before, by key: what its box still measures until the
+    /// next one ([`SECOND_LIFE_BOX_REFRESH`]).
+    stale_boxes: BTreeMap<String, sl_types::lsl::Vector>,
 }
 
 /// How many ticks after its raise Second Life runs a link message: the next
@@ -188,6 +192,14 @@ const SECOND_LIFE_LINK_TICKS: u64 = 1;
 /// How many ticks after its call Second Life runs a setter's `changed` and
 /// a sweep's answer (`events/latency`: two frames for both).
 const SECOND_LIFE_LATE_TICKS: u64 = 2;
+
+/// How often Second Life brings its prims' bounding boxes up to their scales:
+/// once a second of region time, at the same moment of each second wherever
+/// in it the scale was set (`prim/placement-settle`, aditi 2026-11-08: eight
+/// rescales set across the second all showed in `llGetBoundingBox` at the
+/// next of one beat a second apart, and none sooner — not after a link
+/// message, a sleep of a frame or `llSetLinkPrimitiveParamsFast`).
+const SECOND_LIFE_BOX_REFRESH: Duration = Duration::from_secs(1);
 
 /// How often OpenSim's async command pass delivers the lines its scripts
 /// heard (`AsyncCommandManager`'s `AsyncLLCommandLoopms`, 100 ms by default):
@@ -223,6 +235,7 @@ impl Engine {
             active: 0.0,
             ossl: None,
             overheard: Vec::new(),
+            stale_boxes: BTreeMap::new(),
         }
     }
 
@@ -1082,6 +1095,15 @@ impl Engine {
                     self.overhear_all(id, overheard);
                     continue;
                 }
+                Raised::Rescaled { prim, before } => {
+                    // The scale at the last refresh: a second rescale before
+                    // the next keeps the first one's.
+                    let _kept = self
+                        .stale_boxes
+                        .entry(prim.clone())
+                        .or_insert_with(|| before.clone());
+                    continue;
+                }
                 Raised::Changed { prim, bits } => (
                     lifecycle("changed"),
                     vec![Value::Integer(*bits)],
@@ -1209,6 +1231,26 @@ impl Engine {
         }
     }
 
+    /// Bring every bounding box up to its prim's scale when Second Life's
+    /// refresh falls in tick `now`: the first tick at or after each
+    /// [`SECOND_LIFE_BOX_REFRESH`] of region time.
+    fn refresh_boxes(&mut self, now: Tick) {
+        if self.stale_boxes.is_empty() {
+            return;
+        }
+        let refresh = SECOND_LIFE_BOX_REFRESH.as_micros();
+        let at = |tick: u64| {
+            u128::from(tick)
+                .saturating_mul(self.config.step.as_micros())
+                .checked_div(refresh)
+                .unwrap_or(0)
+        };
+        if now.0 > 0 && at(now.0) == at(now.0.saturating_sub(1)) {
+            return;
+        }
+        self.stale_boxes.clear();
+    }
+
     /// Hand the scripts the lines they heard since OpenSim's last async
     /// command pass, when one falls in tick `now`: the first tick at or after
     /// each [`OPENSIM_ASYNC_PASS`] of region time.
@@ -1235,6 +1277,7 @@ impl Engine {
     pub fn tick(&mut self, host: &mut dyn Host) -> TickReport {
         self.now = self.now.after(1);
         let now = self.now;
+        self.refresh_boxes(now);
         let order: Vec<CallerId> = match self.last_served {
             Some(last) => self
                 .instances
@@ -1375,6 +1418,7 @@ impl Engine {
                         self.ossl.as_deref().unwrap_or_else(|| stock_ossl()),
                         self.config.script_delay_factor,
                     ),
+                    &self.stale_boxes,
                 ),
             );
             self.report(id, &slice, host);

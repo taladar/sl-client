@@ -1993,7 +1993,7 @@ an offset from there.
 | --- | --- | --- | --- |
 | `llSetPos` 5 and 10 m | moves there | the same | the same |
 | `llSetPos` 15 or 50 m east, 15 or 100 m up, past the region's east edge, past 4096 m | **10 m** towards the target, in one call | the same | the same; a move that would end outside the region leaves the prim where it was (no object crosses a border yet) |
-| `llSetPos` or `llSetRegionPos` 20 m down, below the ground | stops at the ground (here 2.1 m below the prim) | the same | each flavour as its grid, stopping at the ground the region reads, where Second Life stopped 4 cm above it |
+| `llSetPos` or `llSetRegionPos` 20 m down, below the ground | the centre stops exactly on `llGround`, whatever the prim's size, shape or rotation and between the terrain's samples too (`prim/placement-settle`) | the same | each flavour as its grid, stopping at the ground the region reads |
 | `PRIM_POS_LOCAL` of a root prim | the region position, like `llSetPos` | the same | each flavour as its grid |
 | `llSetRegionPos` 50 m east, 100 m up, to 4000 m | moves there in one call, answers TRUE | the same | each flavour as its grid |
 | `llSetRegionPos` into the ground | stops at the ground and answers **FALSE** | the same | each flavour as its grid |
@@ -2007,7 +2007,8 @@ an offset from there.
 | a negative or zero axis | 0.01 | 0.001 | each flavour as its grid |
 | past 64 m (65) | **64** | kept | each flavour as its grid |
 | past 256 m (300) | 64 | **256** | each flavour as its grid |
-| `llGetBoundingBox` in the event that set the scale | **the box of an earlier scale**: it follows a scale late | the new box | the new box on both flavours |
+| `llGetBoundingBox` after a scale change | **the box of the scale at the last beat**: every rescale shows at once at a beat about a second apart, not sooner — not after a frame's sleep, `llSetLinkPrimitiveParamsFast` or in the next event (`prim/placement-settle`) | the new box at once | each flavour as its grid; fake-sl beats on whole seconds of region time, not from the prim's rez |
+| `llGetBoundingBox` of a prim thinner than 0.05 m | **0.05** m on that axis | the prim's own size | each flavour as its grid |
 | `llGetBoundingBox` a second later; `llGetGeometricCenter` | the half sizes of the new scale, in the prim's frame (a quarter turn does not change it); the centre 0 | the same | each flavour as its grid |
 | `llTargetOmega(<0,0,1>, 2, 1)` | `PRIM_OMEGA` reads it back; `llGetRot` does not move (the spin is the viewer's) | the same | each flavour as its grid |
 | `PRIM_OMEGA` with a gain of 0.5 | read back 0.5 | read back **1.0** | each flavour as its grid |

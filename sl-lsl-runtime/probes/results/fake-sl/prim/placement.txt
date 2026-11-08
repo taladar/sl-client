@@ -1,5 +1,5 @@
 grid: fake-sl
-date: 2026-11-07
+date: 2026-11-08
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating Mono
@@ -39,9 +39,9 @@ PROBE prim/placement rec=scale label=zero asked=<0.000000,1.000000,1.000000> got
 PROBE prim/placement rec=size label=under-min asked=<0.005000,0.005000,0.005000> got=<0.010000,0.010000,0.010000>
 PROBE prim/placement rec=size label=past-max asked=<65.000000,1.000000,1.000000> got=<64.000000,1.000000,1.000000>
 PROBE prim/placement rec=size label=negative asked=<-1.000000,1.000000,1.000000> got=<0.010000,1.000000,1.000000>
-PROBE prim/placement rec=box label=half when=at-once scale=<0.500000,0.500000,0.500000> min=<-0.250000,-0.250000,-0.250000> max=<0.250000,0.250000,0.250000> centre=<0.000000,0.000000,0.000000>
+PROBE prim/placement rec=box label=half when=at-once scale=<0.500000,0.500000,0.500000> min=<-0.020000,-0.500000,-0.500000> max=<0.030000,0.500000,0.500000> centre=<0.000000,0.000000,0.000000>
 PROBE prim/placement rec=box label=half when=later scale=<0.500000,0.500000,0.500000> min=<-0.250000,-0.250000,-0.250000> max=<0.250000,0.250000,0.250000> centre=<0.000000,0.000000,0.000000>
-PROBE prim/placement rec=box label=flat when=at-once scale=<2.000000,1.000000,0.100000> min=<-1.000000,-0.500000,-0.050000> max=<1.000000,0.500000,0.050000> centre=<0.000000,0.000000,0.000000>
+PROBE prim/placement rec=box label=flat when=at-once scale=<2.000000,1.000000,0.100000> min=<-0.250000,-0.250000,-0.250000> max=<0.250000,0.250000,0.250000> centre=<0.000000,0.000000,0.000000>
 PROBE prim/placement rec=box label=flat when=later scale=<2.000000,1.000000,0.100000> min=<-1.000000,-0.500000,-0.050000> max=<1.000000,0.500000,0.050000> centre=<0.000000,0.000000,0.000000>
 PROBE prim/placement rec=box label=flat-turned when=at-once scale=<2.000000,1.000000,0.100000> min=<-1.000000,-0.500000,-0.050000> max=<1.000000,0.500000,0.050000> centre=<0.000000,0.000000,0.000000>
 PROBE prim/placement rec=box label=flat-turned when=later scale=<2.000000,1.000000,0.100000> min=<-1.000000,-0.500000,-0.050000> max=<1.000000,0.500000,0.050000> centre=<0.000000,0.000000,0.000000>

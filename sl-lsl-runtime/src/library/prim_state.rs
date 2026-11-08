@@ -278,14 +278,21 @@ fn corners(half: &Vector, turn: &Rotation, at: &Vector) -> Vec<Vector> {
     points
 }
 
+/// The least extent of a prim along any axis of its bounding box on Second
+/// Life, in metres: a prim 0.01 or 0.04 m thin measures 0.05, one 0.1 m its
+/// own (`prim/placement-settle`, aditi 2026-11-08); OpenSim has none.
+const SECOND_LIFE_LEAST_BOX: f32 = 0.05;
+
 /// `llGetBoundingBox`: the box around the object one of whose prims is
 /// keyed `object`, as its lower and upper corners from its root in the
 /// root's frame — for a lone prim the half sizes of its scale, whatever its
 /// rotation (`prim/placement`). An avatar's is its size around its centre;
 /// a key nothing has answers an empty list.
 ///
-/// Second Life answers the box of an earlier scale in the event that set
-/// the scale; the runtime answers the scale set at once, as OpenSim does.
+/// Second Life measures each prim at the scale it had at the region's last
+/// bounding-box refresh, once a second ([`ScriptCtx::box_scale`]), and no
+/// axis under 0.05 m (`SECOND_LIFE_LEAST_BOX`); OpenSim at the scale it has,
+/// however thin (`prim/placement-settle`).
 ///
 /// # Errors
 ///
@@ -328,11 +335,17 @@ pub fn ll_get_bounding_box(
         y: f32::MIN,
         z: f32::MIN,
     };
+    let least = if ctx.flavour().is_opensim() {
+        0.0
+    } else {
+        SECOND_LIFE_LEAST_BOX
+    };
     for (index, prim) in prims.iter().enumerate() {
+        let scale = ctx.box_scale(prim);
         let half = Vector {
-            x: prim.scale.x / 2.0,
-            y: prim.scale.y / 2.0,
-            z: prim.scale.z / 2.0,
+            x: scale.x.max(least) / 2.0,
+            y: scale.y.max(least) / 2.0,
+            z: scale.z.max(least) / 2.0,
         };
         let (turn, at) = if index == 0 {
             (crate::value::ZERO_ROTATION, ZERO_VECTOR)

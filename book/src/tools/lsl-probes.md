@@ -288,9 +288,9 @@ What has bitten already, and how a probe should be shaped for it:
   `llSetRegionPos` a few metres past an edge with no neighbour moved the
   prim off the region, which returned it to its owner's inventory and ended
   the probe (`prim/placement`). Keep moves inside the region.
-- **Second Life reads some things back late.** `llGetBoundingBox` in the
-  event that set the scale is the box of an earlier scale
-  (`prim/placement`); read it again a second later.
+- **Second Life reads some things back late.** `llGetBoundingBox` after a
+  scale change is the box of the scale at its last beat, which comes about
+  once a second (`prim/placement-settle`); read it again a second later.
 - **OpenSim can say half a character.** It counts a string in UTF-16 units,
   so `llGetSubString` or `llDeleteSubString` of text outside the Basic
   Multilingual Plane can cut a surrogate pair in half, and the chat line that

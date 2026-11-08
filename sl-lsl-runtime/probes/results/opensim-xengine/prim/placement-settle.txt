@@ -1,0 +1,51 @@
+grid: opensim-xengine
+date: 2026-11-08
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Default Region
+engine: XEngine
+settings: OpenSimDefaults.ini: [YEngine] MinTimerInterval=0.1; [XEngine] MinTimerInterval unset (LSL_Api default 0.5); ScriptDelayFactor=1.0, SensorMaxRange=96, SensorMaxResults=16, UseLlCastRayV3=false (defaults) on both; [YEngine] ScriptHeapSize=1024 KiB, ScriptStackSize=2048 KiB (defaults); OpenSim.ini [Network] OutboundDisallowForUserScriptsExcept=127.0.0.1:9000 (the simulator itself), [ScriptsHttpRequestModule] and llHTTPRequest limits at their defaults
+
+# chat type=say from="Object" length=14 text="Script running"
+PROBE prim/placement-settle rec=start region="Default Region" channel="OpenSim" version="OpenSim 0.9.2.1 Yeti Dev   36f6d16 (Unix/Mono)"
+PROBE prim/placement-settle rec=home scale=<0.500000,0.500000,0.500000> ground=-6.500000 frac=<0.000000,0.000000,0.000000> rez=2026-11-08T13:55:16Z stamp=2026-11-08T13:55:17.5578240Z t=0.014000
+PROBE prim/placement-settle rec=drop label=cube-0.5 answer=0 scale=<0.500000,0.500000,0.500000> at=<0.000000,0.000000,0.000000> above=0.000000 ground=-6.500000 g00=-6.500000 g10=-6.500000 g01=-6.500000 g11=-6.500000
+PROBE prim/placement-settle rec=drop label=cube-0.1 answer=0 scale=<0.100000,0.100000,0.100000> at=<0.000000,0.000000,0.000000> above=0.000000 ground=-6.500000 g00=-6.500000 g10=-6.500000 g01=-6.500000 g11=-6.500000
+PROBE prim/placement-settle rec=drop label=cube-0.01 answer=0 scale=<0.010000,0.010000,0.010000> at=<0.000000,0.000000,0.000000> above=0.000000 ground=-6.500000 g00=-6.500000 g10=-6.500000 g01=-6.500000 g11=-6.500000
+PROBE prim/placement-settle rec=drop label=cube-2 answer=0 scale=<2.000000,2.000000,2.000000> at=<0.000000,0.000000,0.000000> above=0.000000 ground=-6.500000 g00=-6.500000 g10=-6.500000 g01=-6.500000 g11=-6.500000
+PROBE prim/placement-settle rec=drop label=cube-8 answer=0 scale=<8.000000,8.000000,8.000000> at=<0.000000,0.000000,0.000000> above=0.000000 ground=-6.500000 g00=-6.500000 g10=-6.500000 g01=-6.500000 g11=-6.500000
+PROBE prim/placement-settle rec=drop label=flat answer=0 scale=<2.000000,2.000000,0.100000> at=<0.000000,0.000000,0.000000> above=0.000000 ground=-6.500000 g00=-6.500000 g10=-6.500000 g01=-6.500000 g11=-6.500000
+PROBE prim/placement-settle rec=drop label=tall answer=0 scale=<0.100000,0.100000,4.000000> at=<0.000000,0.000000,0.000000> above=0.000000 ground=-6.500000 g00=-6.500000 g10=-6.500000 g01=-6.500000 g11=-6.500000
+PROBE prim/placement-settle rec=drop label=tall-lying answer=0 scale=<0.100000,0.100000,4.000000> at=<0.000000,0.000000,0.000000> above=0.000000 ground=-6.500000 g00=-6.500000 g10=-6.500000 g01=-6.500000 g11=-6.500000
+PROBE prim/placement-settle rec=drop label=cube-2-tilted answer=0 scale=<2.000000,2.000000,2.000000> at=<0.000000,0.000000,0.000000> above=0.000000 ground=-6.500000 g00=-6.500000 g10=-6.500000 g01=-6.500000 g11=-6.500000
+PROBE prim/placement-settle rec=drop label=cube-0.5-at-0.5 answer=0 scale=<0.500000,0.500000,0.500000> at=<0.500000,0.500000,0.000000> above=0.000000 ground=-6.500000 g00=-6.500000 g10=-6.500000 g01=-6.500000 g11=-6.500000
+PROBE prim/placement-settle rec=drop label=cube-0.5-at-0.25-0.75 answer=0 scale=<0.500000,0.500000,0.500000> at=<0.250000,0.750000,0.000000> above=0.000000 ground=-6.500000 g00=-6.500000 g10=-6.500000 g01=-6.500000 g11=-6.500000
+PROBE prim/placement-settle rec=drop label=cube-0.5-at-0.9-0.1 answer=0 scale=<0.500000,0.500000,0.500000> at=<3.900000,1.100000,0.000000> above=0.000000 ground=-6.500000 g00=-6.500000 g10=-6.500000 g01=-6.500000 g11=-6.500000
+PROBE prim/placement-settle rec=drop label=rescaled-4-to-0.1 answer=0 scale=<0.100000,0.100000,0.100000> at=<0.000000,0.000000,0.000000> above=0.000000 ground=-6.500000 g00=-6.500000 g10=-6.500000 g01=-6.500000 g11=-6.500000
+PROBE prim/placement-settle rec=drop label=rescaled-0.1-to-4 answer=0 scale=<4.000000,4.000000,4.000000> at=<0.000000,0.000000,0.000000> above=0.000000 ground=-6.500000 g00=-6.500000 g10=-6.500000 g01=-6.500000 g11=-6.500000
+PROBE prim/placement-settle rec=drop label=setpos-cube-2 answer=1 scale=<2.000000,2.000000,2.000000> at=<0.000000,0.000000,0.000000> above=0.000000 ground=-6.500000 g00=-6.500000 g10=-6.500000 g01=-6.500000 g11=-6.500000
+PROBE prim/placement-settle rec=settled label=x-0.01 scale=<0.010000,1.000000,1.000000> min=<-0.005000,-0.500000,-0.500000> max=<0.005000,0.500000,0.500000>
+PROBE prim/placement-settle rec=settled label=x-0.02 scale=<0.020000,1.000000,1.000000> min=<-0.010000,-0.500000,-0.500000> max=<0.010000,0.500000,0.500000>
+PROBE prim/placement-settle rec=settled label=x-0.04 scale=<0.040000,1.000000,1.000000> min=<-0.020000,-0.500000,-0.500000> max=<0.020000,0.500000,0.500000>
+PROBE prim/placement-settle rec=settled label=x-0.05 scale=<0.050000,1.000000,1.000000> min=<-0.025000,-0.500000,-0.500000> max=<0.025000,0.500000,0.500000>
+PROBE prim/placement-settle rec=settled label=x-0.06 scale=<0.060000,1.000000,1.000000> min=<-0.030000,-0.500000,-0.500000> max=<0.030000,0.500000,0.500000>
+PROBE prim/placement-settle rec=settled label=x-0.1 scale=<0.100000,1.000000,1.000000> min=<-0.050000,-0.500000,-0.500000> max=<0.050000,0.500000,0.500000>
+PROBE prim/placement-settle rec=settled label=cube-0.01 scale=<0.010000,0.010000,0.010000> min=<-0.005000,-0.005000,-0.005000> max=<0.005000,0.005000,0.005000>
+PROBE prim/placement-settle rec=settled label=cube-1 scale=<1.000000,1.000000,1.000000> min=<-0.500000,-0.500000,-0.500000> max=<0.500000,0.500000,0.500000>
+PROBE prim/placement-settle rec=lag label=set-scale scale=<2.000000,1.000000,1.000000> min=<-1.000000,-0.500000,-0.500000> max=<1.000000,0.500000,0.500000>
+PROBE prim/placement-settle rec=lag label=set-scale-again scale=<3.000000,1.000000,1.000000> min=<-1.500000,-0.500000,-0.500000> max=<1.500000,0.500000,0.500000>
+PROBE prim/placement-settle rec=lag label=sleep-0.01 scale=<3.000000,1.000000,1.000000> min=<-1.500000,-0.500000,-0.500000> max=<1.500000,0.500000,0.500000>
+PROBE prim/placement-settle rec=lag label=sleep-0.05 scale=<3.000000,1.000000,1.000000> min=<-1.500000,-0.500000,-0.500000> max=<1.500000,0.500000,0.500000>
+PROBE prim/placement-settle rec=lag label=params-fast scale=<1.000000,2.000000,1.000000> min=<-0.500000,-1.000000,-0.500000> max=<0.500000,1.000000,0.500000>
+PROBE prim/placement-settle rec=lag label=params-delayed scale=<1.000000,3.000000,1.000000> min=<-0.500000,-1.500000,-0.500000> max=<0.500000,1.500000,0.500000>
+PROBE prim/placement-settle rec=cadence round=0 polls=0 set=26.395000 seen=26.396000 after=0.000999 wall=2026-11-08T13:55:43.9399910Z
+PROBE prim/placement-settle rec=cadence round=1 polls=0 set=26.525999 seen=26.525999 after=0.000000 wall=2026-11-08T13:55:44.0702860Z
+PROBE prim/placement-settle rec=cadence round=2 polls=0 set=26.787001 seen=26.787001 after=0.000000 wall=2026-11-08T13:55:44.3305430Z
+PROBE prim/placement-settle rec=cadence round=3 polls=0 set=27.177000 seen=27.177000 after=0.000000 wall=2026-11-08T13:55:44.7208040Z
+PROBE prim/placement-settle rec=cadence round=4 polls=0 set=27.697001 seen=27.697001 after=0.000000 wall=2026-11-08T13:55:45.2410940Z
+PROBE prim/placement-settle rec=cadence round=5 polls=0 set=28.347000 seen=28.347000 after=0.000000 wall=2026-11-08T13:55:45.8913970Z
+PROBE prim/placement-settle rec=cadence round=6 polls=0 set=29.128000 seen=29.128000 after=0.000000 wall=2026-11-08T13:55:46.6717480Z
+PROBE prim/placement-settle rec=cadence round=7 polls=0 set=30.038000 seen=30.038000 after=0.000000 wall=2026-11-08T13:55:47.5819960Z
+PROBE prim/placement-settle rec=lag label=next-event scale=<1.000000,1.000000,2.000000> min=<-0.500000,-0.500000,-1.000000> max=<0.500000,0.500000,1.000000>
+PROBE prim/placement-settle rec=after moved=<0.000000,0.000000,0.000000> scale=<0.500000,0.500000,0.500000>
+PROBE prim/placement-settle rec=end
+# chat by=other type=say from="Object" length=14 text="Script running"

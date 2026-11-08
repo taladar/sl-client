@@ -45,6 +45,11 @@ fn transcripts(name: &str) -> [(EngineFlavour, &'static str); 3] {
             include_str!("../../../probes/results/opensim-yengine/prim/placement.txt"),
             include_str!("../../../probes/results/opensim-xengine/prim/placement.txt"),
         ],
+        "placement-settle" => [
+            include_str!("../../../probes/results/aditi/prim/placement-settle.txt"),
+            include_str!("../../../probes/results/opensim-yengine/prim/placement-settle.txt"),
+            include_str!("../../../probes/results/opensim-xengine/prim/placement-settle.txt"),
+        ],
         "changed" => [
             include_str!("../../../probes/results/aditi/prim/changed.txt"),
             include_str!("../../../probes/results/opensim-yengine/prim/changed.txt"),
@@ -168,6 +173,17 @@ pub(super) fn region(
     ground: f32,
     home: &Vector,
 ) -> Result<Region, String> {
+    region_after(flavour, scripts, (ground, home), Duration::ZERO)
+}
+
+/// [`region`], its prims rezzed at once and their scripts saved `delay`
+/// later, as the runner saves them after it rezzes the prims.
+fn region_after(
+    flavour: EngineFlavour,
+    scripts: &[(CallerId, &str, u64, String)],
+    (ground, home): (f32, &Vector),
+    delay: Duration,
+) -> Result<Region, String> {
     let mut region = Region::new(flavour);
     // OpenSim merges nothing and queues first in, first out, as the fake
     // grid configures its OpenSim regions.
@@ -178,7 +194,7 @@ pub(super) fn region(
     }
     region.host.ground = ground;
     region.host.moves_heard = flavour.is_opensim();
-    for (id, name, prim, source) in scripts {
+    for (id, _name, prim, _source) in scripts {
         region.place(*prim, home.x, home.y, home.z);
         let _placed = region.host.placements.insert(
             *id,
@@ -188,7 +204,6 @@ pub(super) fn region(
                 root: home.clone(),
             },
         );
-        region.add(*id, name, *prim, source)?;
         // A prim with no text reads its alpha as OpenSim stores it: 0.
         let key = region.host.prim_key(*prim);
         let mut fresh = crate::vm::prim::Prim::new_box(&key, super::OWNER);
@@ -196,6 +211,14 @@ pub(super) fn region(
             fresh.text.alpha = 0.0;
         }
         let _fresh = region.host.prim_states.insert(key, fresh);
+    }
+    let step = region.engine.config().step;
+    let idle = delay.as_micros().checked_div(step.as_micros()).unwrap_or(0);
+    for _ in 0..idle {
+        region.tick()?;
+    }
+    for (id, name, prim, source) in scripts {
+        region.add(*id, name, *prim, source)?;
     }
     Ok(region)
 }
@@ -271,7 +294,9 @@ pub(super) fn compared(region: &Region, transcript: &str) -> (Vec<String>, Vec<S
 }
 
 /// Where the probe's prim stood on each grid, and the ground under it
-/// (`prim/placement`'s `home` record and the moves that hit the ground).
+/// (`prim/placement`'s `home` record and the moves that hit the ground;
+/// aditi's ground to the millimetre from `prim/placement-settle`, since
+/// `prim/placement` prints it to the decimetre).
 pub(super) fn home_of(flavour: EngineFlavour) -> (Vector, f32) {
     if flavour.is_opensim() {
         (
@@ -289,7 +314,7 @@ pub(super) fn home_of(flavour: EngineFlavour) -> (Vector, f32) {
                 y: 62.0,
                 z: 34.62,
             },
-            32.42,
+            32.455,
         )
     }
 }
@@ -437,28 +462,111 @@ fn placement_moves_as_each_grid_moved() -> Result<(), String> {
     let source = include_str!("../../../probes/prim/placement.lsl");
     for (flavour, transcript) in transcripts("placement") {
         let (home, ground) = home_of(flavour);
-        let rigged = source.replace("llGround(ZERO_VECTOR)", &format!("{ground:.2}"));
+        let rigged = source.replace("llGround(ZERO_VECTOR)", &format!("{ground:.3}"));
         let mut region = region(flavour, &[(A, "Probe", 1, rigged)], ground, &home)?;
         run_out(&mut region, 600)?;
         let (ours, theirs) = compared(&region, transcript);
-        // Second Life stopped the prim 4 cm above the ground `llGround`
-        // gave; and its bounding box follows a scale late (the box of the
-        // scale before in the event that set it), which the runtime does not
-        // imitate.
-        let deviations: &[&str] = if flavour.is_opensim() {
-            &[]
-        } else {
-            &[
-                "move setpos-down-20",
-                "move regionpos-down-20",
-                "box half at-once",
-                "box flat at-once",
-            ]
-        };
-        hold(&ours, &theirs, deviations, &format!("{flavour:?}"));
+        hold(&ours, &theirs, &[], &format!("{flavour:?}"));
         assert_eq!(region.debug_lines(), debug_notes(transcript), "{flavour:?}");
     }
     Ok(())
+}
+
+#[test]
+fn boxes_and_ground_stops_settle_as_each_grid_settled() -> Result<(), String> {
+    let source = include_str!("../../../probes/prim/placement-settle.lsl");
+    let cadence = [
+        "polls=", "set=", "seen=", "after=", "rez=", "stamp=", "wall=", "t=",
+    ];
+    let unvaried = |lines: Vec<String>| -> Vec<String> {
+        lines
+            .into_iter()
+            .map(|line| {
+                line.split(' ')
+                    .filter(|field| !cadence.iter().any(|name| field.starts_with(name)))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            })
+            .collect()
+    };
+    for (flavour, transcript) in transcripts("placement-settle") {
+        let (home, _ground) = home_of(flavour);
+        let (below, delay) = settle_home(transcript)?;
+        // Second Life's box keeps to a beat about a second apart, counted
+        // from the prim's rez, and the runner saved the script a second and
+        // a half after it rezzed the prim.
+        let mut region = region_after(
+            flavour,
+            &[(A, "Probe", 1, source.to_owned())],
+            (home.z + below, &home),
+            delay,
+        )?;
+        run_out(&mut region, 4000)?;
+        let (ours, theirs) = compared(&region, transcript);
+        // Counted so, the beat falls where aditi's did for every box read in
+        // the first 20 s (the `settled` reads half a second apart alternate
+        // between a fresh box and a stale one, and agree). aditi's beat came
+        // every 1.01 s by its own clocks (the `cadence` records' `seen`) and
+        // the runtime's every second, so by the `lag` reads the runtime's
+        // beat comes a little early: before `sleep-0.05` reads, where aditi's
+        // came after `params-fast`. `sleep-0.05` and `params-fast` read the
+        // 3 m box where aditi still read the 1 m cube, and `params-delayed`
+        // a box one rescale newer than aditi's.
+        let deviations: &[&str] = if flavour.is_opensim() {
+            &[]
+        } else {
+            &["lag sleep-0.05", "lag params-fast", "lag params-delayed"]
+        };
+        hold(
+            &unvaried(ours),
+            &unvaried(theirs),
+            deviations,
+            &format!("{flavour:?}"),
+        );
+    }
+    Ok(())
+}
+
+/// `prim/placement-settle`'s `home` record: the ground below the prim (it
+/// differs from run to run on aditi), and how long after the prim was rezzed
+/// its script started (`stamp` less `t` less `rez`).
+fn settle_home(transcript: &str) -> Result<(f32, Duration), String> {
+    let line = probe_lines(transcript)
+        .into_iter()
+        .find(|line| line.contains(" rec=home "))
+        .ok_or("no home record")?;
+    let parsed = crate::probe::Line::parse(&line).map_err(|error| error.to_string())?;
+    let field = |name: &str| {
+        parsed
+            .field(name)
+            .ok_or_else(|| format!("no {name} in {line}"))
+    };
+    let number = |name: &str| -> Result<f64, String> {
+        field(name)?
+            .parse()
+            .map_err(|error| format!("{name} in {line}: {error}"))
+    };
+    // The second of the day of a timestamp, `YYYY-MM-DDThh:mm:ss[.f]Z`.
+    let second_of_day = |name: &str| -> Result<f64, String> {
+        let stamp = field(name)?;
+        let clock = stamp
+            .split_once('T')
+            .map(|(_, clock)| clock.trim_end_matches('Z'))
+            .ok_or_else(|| format!("{name} in {line}"))?;
+        clock.split(':').try_fold(0.0, |sum, part| {
+            part.parse::<f64>()
+                .map(|value| sum * 60.0 + value)
+                .map_err(|error| format!("{name} in {line}: {error}"))
+        })
+    };
+    let below: f32 = field("ground")?
+        .parse()
+        .map_err(|error| format!("ground in {line}: {error}"))?;
+    let delay = second_of_day("stamp")? - number("t")? - second_of_day("rez")?;
+    Ok((
+        below,
+        Duration::try_from_secs_f64(delay).unwrap_or(Duration::ZERO),
+    ))
 }
 
 #[test]

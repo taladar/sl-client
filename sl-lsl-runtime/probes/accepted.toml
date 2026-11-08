@@ -114,8 +114,7 @@ between = ["aditi", "fake-sl"]
 record = "move"
 fields = { label = "setpos-down-20" }
 field = "moved"
-reason = "The move ends at the fake region's ground, and Second Life stops it 4 cm above its own"
-task = "server-lsl-sl-placement-lag"
+reason = "The move ends on the ground, which lies as far below the build position as the fake region's terrain puts it"
 
 [[difference]]
 probe = "prim/placement"
@@ -123,8 +122,7 @@ between = ["aditi", "fake-sl"]
 record = "move"
 fields = { label = "regionpos-down-20" }
 field = "moved"
-reason = "The move ends at the fake region's ground, and Second Life stops it 4 cm above its own"
-task = "server-lsl-sl-placement-lag"
+reason = "The move ends on the ground, which lies as far below the build position as the fake region's terrain puts it"
 
 [[difference]]
 probe = "prim/placement"
@@ -135,20 +133,96 @@ field = "moved"
 reason = "A move to 4000 m is measured from the build height, which the fake region's terrain sets"
 
 [[difference]]
-probe = "prim/placement"
+probe = "prim/placement-settle"
 between = ["aditi", "fake-sl"]
-record = "box"
-fields = { label = "half", when = "at-once" }
-reason = "Second Life's bounding box follows a scale late: in the event that set it, the box of the scale before"
-task = "server-lsl-sl-placement-lag"
+record = "home"
+field = "ground"
+reason = "The fake region's ground under the build position is its own terrain's, not aditi's"
 
 [[difference]]
-probe = "prim/placement"
+probe = "prim/placement-settle"
 between = ["aditi", "fake-sl"]
-record = "box"
-fields = { label = "flat", when = "at-once" }
-reason = "Second Life's bounding box follows a scale late: in the event that set it, the box of the scale before"
-task = "server-lsl-sl-placement-lag"
+record = "drop"
+field = "ground"
+reason = "The ground a drop stops on lies as far below the build position as the fake region's terrain puts it"
+
+[[difference]]
+probe = "prim/placement-settle"
+between = ["aditi", "fake-sl"]
+record = "drop"
+field = "g00"
+reason = "The ground a drop stops on lies as far below the build position as the fake region's terrain puts it"
+
+[[difference]]
+probe = "prim/placement-settle"
+between = ["aditi", "fake-sl"]
+record = "drop"
+field = "g10"
+reason = "The ground a drop stops on lies as far below the build position as the fake region's terrain puts it"
+
+[[difference]]
+probe = "prim/placement-settle"
+between = ["aditi", "fake-sl"]
+record = "drop"
+field = "g01"
+reason = "The ground a drop stops on lies as far below the build position as the fake region's terrain puts it"
+
+[[difference]]
+probe = "prim/placement-settle"
+between = ["aditi", "fake-sl"]
+record = "drop"
+field = "g11"
+reason = "The ground a drop stops on lies as far below the build position as the fake region's terrain puts it"
+
+[[difference]]
+probe = "prim/placement-settle"
+between = ["opensim-yengine", "fake-opensim"]
+record = "home"
+field = "ground"
+reason = "The fake region's ground under the build position is its own terrain's, not the local OpenSim's"
+
+[[difference]]
+probe = "prim/placement-settle"
+between = ["opensim-yengine", "fake-opensim"]
+record = "drop"
+field = "ground"
+reason = "The ground a drop stops on lies as far below the build position as the fake region's terrain puts it"
+
+[[difference]]
+probe = "prim/placement-settle"
+between = ["opensim-yengine", "fake-opensim"]
+record = "drop"
+field = "g00"
+reason = "The ground a drop stops on lies as far below the build position as the fake region's terrain puts it"
+
+[[difference]]
+probe = "prim/placement-settle"
+between = ["opensim-yengine", "fake-opensim"]
+record = "drop"
+field = "g10"
+reason = "The ground a drop stops on lies as far below the build position as the fake region's terrain puts it"
+
+[[difference]]
+probe = "prim/placement-settle"
+between = ["opensim-yengine", "fake-opensim"]
+record = "drop"
+field = "g01"
+reason = "The ground a drop stops on lies as far below the build position as the fake region's terrain puts it"
+
+[[difference]]
+probe = "prim/placement-settle"
+between = ["opensim-yengine", "fake-opensim"]
+record = "drop"
+field = "g11"
+reason = "The ground a drop stops on lies as far below the build position as the fake region's terrain puts it"
+
+[[difference]]
+probe = "prim/placement-settle"
+between = ["aditi", "fake-sl"]
+record = "lag"
+fields = { label = "params-fast" }
+reason = "The fake grid counts Second Life's box beat from whole seconds of region time, aditi from the prim's rez, so the beat falls before this read on fake-sl and after it on aditi"
+task = "server-fake-grid-object-rez-time"
 
 # --- events -------------------------------------------------------------
 
