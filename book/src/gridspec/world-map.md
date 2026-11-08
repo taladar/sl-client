@@ -75,13 +75,13 @@ the region the agent is in. Every reply echoed flags of 2.
 
 | behaviour | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
-| whether the asker is counted | no: alone in a region its item has an `Extra` of 0 | no: "own position is not sent" | nobody is |
+| whether the asker is counted | no: alone in a region its item has an `Extra` of 0 | no: "own position is not sent" | no |
 | a region with nobody to show (**held**) | one item on the region's south-west corner, `Extra` 0 | one item a metre in from it on both axes, `Extra` 0 | each flavour's |
-| where an item is put | not where the avatar stands: two residents at (8, 10) were one item on the corner, `Extra` 1 to each of them; one at (128, 128) was an item at (128, 128). The step is somewhere from 11 to 128 m | where the avatar stands, cut to whole metres, one item for each with `Extra` 1 | the corner item alone |
-| `Extra` | how many others are at that spot. The first run's counts were one higher throughout, which a third resident in the region would explain | 1 | 0 |
+| where an item is put | not where the avatar stands: two residents at (8, 10) were one item on the corner, `Extra` 1 to each of them; one at (128, 128) was an item at (128, 128). The step is somewhere from 11 to 128 m | where the avatar stands, cut to whole metres, one item for each with `Extra` 1 | each flavour's; `FakeSl` takes the step to be 64 m (`AgentItems`) |
+| `Extra` | how many others are at that spot. The first run's counts were one higher throughout, which a third resident in the region would explain | 1 | each flavour's |
 | `Name` | a UUID for another region; seven or eight characters that are not digits for the agent's own | 32 hexadecimal digits: an MD5 of the region's name and a clock tick | a UUID on `FakeSl`, 32 digits on `FakeOpensim` |
-| how soon somebody leaving shows | in the first answer, 2 s later, in both regions | in its own region at once. Asked from another region, the answer is kept for two minutes: the neighbour went on reading as empty 75 s after somebody arrived there and showed them at 150 s | nobody leaves |
-| a region with one resident, asked about from another | that resident | that resident, and the region's telehub with it, this time with an id | the corner item |
+| how soon somebody leaving shows | in the first answer, 2 s later, in both regions | in its own region at once. Asked from another region, the answer is kept for two minutes: the neighbour went on reading as empty 75 s after somebody arrived there and showed them at 150 s | at once, from any region: nothing is kept |
+| a region with one resident, asked about from another | that resident | that resident, and the region's telehub with it, this time with an id | that resident; no telehub |
 
 A viewer has to skip an item whose `Extra` is zero on both grids, and ours
 does. On Second Life the items are a count at a coarse position and not a
@@ -99,7 +99,7 @@ dot for each avatar.
 | behaviour | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
 | `map-server-url` in the login | `https://secondlife-maps-cdn-dev.akamaized.net/aditi/` | the login URI, `http://127.0.0.1:9000/` | its login URI |
-| the region's tile, zoom 1 to 8 | `200`, `image/jpeg`, 256 × 256, from 11 kB at zoom 1 to 0.8 kB at zoom 8 | `200`, `image/jpeg`, 256 × 256, 4.9 kB down to 1.7 kB | zoom 1: the stock tile. Coarser: as an absent tile |
+| the region's tile, zoom 1 to 8 | `200`, `image/jpeg`, 256 × 256, from 11 kB at zoom 1 to 0.8 kB at zoom 8 | `200`, `image/jpeg`, 256 × 256, 4.9 kB down to 1.7 kB | the stock tile at every zoom, over each region |
 | its caching (**held**) | `Cache-Control: max-age=` up to 86,400, an `ETag` and a `Last-Modified` | none of the three; `Server: OSWebServer` | all three on `FakeSl`, none on `FakeOpensim` |
 | zoom 9 | `403`, `application/xml`: an `AccessDenied` document | `200`: 1,653 bytes of plain water | as an absent tile |
 | a tile of open ocean (**held**) | the same `403` | the same water tile | `403` with that document on `FakeSl`, OpenSim's water tile on `FakeOpensim` |

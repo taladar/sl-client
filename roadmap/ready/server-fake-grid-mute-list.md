@@ -44,3 +44,9 @@ measurement with the discovery task's conformance cases run against
 `instant-messages` runs on both fake flavours with
 `mute_list_after_the_mute` exempt (its `FAKE_EXEMPT`, naming this task):
 take it out of that list once the store answers `MuteListRequest`.
+
+## From server-fake-grid-agent-avatars-shared (2026-11-07)
+
+`e2e_two_avatars`' `a_live_block_is_kept_by_the_grid_and_the_radar_unblocks_it`
+runs on the fake grid but for this: take its `Need::LiveGrid` off once the
+list is kept across a relog.

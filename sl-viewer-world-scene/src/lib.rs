@@ -42,6 +42,7 @@ pub mod render_overrides;
 pub mod resolution_divisor;
 pub mod sky;
 pub mod terrain;
+pub mod terrain_disk_cache;
 pub mod tonemap;
 pub mod transparency;
 pub mod underwater_fog;

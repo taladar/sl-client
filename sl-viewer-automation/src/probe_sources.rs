@@ -22,7 +22,7 @@ use std::path::PathBuf;
 
 use bevy::prelude::*;
 use sl_automation_proto::{
-    ConversationReadout, ParcelMediaReadout, TeleportReadout, WorldMapReadout,
+    ConversationReadout, FeetReadout, ParcelMediaReadout, TeleportReadout, WorldMapReadout,
 };
 use sl_client_bevy::Uuid;
 use sl_viewer_notifications::{NotificationId, ToastButton};
@@ -61,6 +61,8 @@ pub struct ProbeSources {
     pub world_map: Option<fn(&mut World) -> WorldMapReadout>,
     /// The agent parcel's legacy media and whether it plays.
     pub parcel_media: Option<fn(&mut World) -> ParcelMediaReadout>,
+    /// The own avatar's feet as last posed, while it is drawn as a posed body.
+    pub own_feet: Option<fn(&mut World) -> Option<FeetReadout>>,
 }
 
 /// What the scene's environment holds beyond the sky the RLV slot publishes.

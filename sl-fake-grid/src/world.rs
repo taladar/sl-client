@@ -93,10 +93,11 @@ pub struct SceneFixtures {
     /// by either of its ids, and what the region keeps of it besides its
     /// record — its contents, its cost, its edit history — is held with it.
     pub objects: ObjectStore,
-    /// The other avatars the region shows — scripted, because the fake grid
-    /// has no inter-session broadcast. Each contributes its avatar body, an
-    /// `AvatarAppearance`, an `AvatarAnimation` and its attachments to the
-    /// arrival burst, and answers object refetches like any other object.
+    /// The scripted avatars the region shows beside its logged-in residents
+    /// (`Resident`): people a test wants without logging a viewer in. Each
+    /// contributes its avatar body, an `AvatarAppearance`, an
+    /// `AvatarAnimation` and its attachments to the arrival burst, and answers
+    /// object refetches like any other object.
     pub npcs: Vec<NpcFixture>,
     /// The animations signalled on the region's **animated objects**
     /// (animesh), pushed as one `ObjectAnimation` each on arrival.
@@ -123,6 +124,14 @@ pub struct SceneFixtures {
     /// Whether [`avatar_local_id`](Self::avatar_local_id) has been given to an
     /// avatar: once it has, every later one is minted.
     first_avatar_arrived: bool,
+    /// The agents' avatars standing in the region, as the region's other
+    /// viewers are shown them ([`Resident`]): from the arrival to the
+    /// departure — a logout, a teleport away, a walk over a border.
+    ///
+    /// The region's, not a session's, because a session answers its packets
+    /// with nothing but its own state and the region's: this is how one
+    /// viewer's arrival, and everything after it, is known to the rest.
+    residents: BTreeMap<AgentKey, Resident>,
     /// The highest region-local id [`mint_local_id`] has handed out, so a
     /// second rez cannot reuse the id of an object a first one has since had
     /// derezzed. Never lowered.
@@ -190,6 +199,24 @@ pub struct SceneFixtures {
     /// viewers, where the live grids disagree. Second Life's unless the
     /// grid's flavour says otherwise.
     pub(crate) relays: crate::relays::RelayPolicy,
+    /// How the region shows its residents to each other, where the live
+    /// grids disagree. Second Life's unless the grid's flavour says
+    /// otherwise.
+    pub(crate) presence: crate::imitates::PresencePolicy,
+    /// How the region wears and takes off attachments, where the live grids
+    /// disagree ([`crate::attachments`]). Second Life's unless the grid's
+    /// flavour says otherwise.
+    pub(crate) attachments: crate::attachments::AttachmentPolicy,
+    /// What each agent on its way here wears, packed by the region it left
+    /// and put back on at its arrival ([`crate::attachments::pack`]).
+    pub(crate) luggage: BTreeMap<AgentKey, Vec<crate::attachments::Carried>>,
+    /// The region-local id each worn prim had when it left with its wearer,
+    /// which OpenSim gives it again when it comes back
+    /// ([`AttachmentPolicy::returning_keeps_local_id`](crate::attachments::AttachmentPolicy::returning_keeps_local_id)).
+    pub(crate) departed_ids: BTreeMap<ObjectKey, RegionLocalObjectId>,
+    /// What came off an avatar and waits out a tick before it leaves
+    /// ([`crate::attachments::Leaving`]).
+    pub(crate) leaving: Vec<crate::attachments::Leaving>,
     /// How the region answers a script upload, where the live grids
     /// disagree ([`crate::script_compile`]). Second Life's unless the grid's
     /// flavour says otherwise.
@@ -210,6 +237,12 @@ pub struct SceneFixtures {
     /// The listens registered in the region: what hears a line on a channel
     /// no avatar does ([`crate::chat`]).
     pub listens: crate::chat::Listens,
+    /// Whether the region leaves its LAND layer out of what it streams to an
+    /// arriving agent ([`FakeGrid::set_withholds_ground`](crate::FakeGrid::set_withholds_ground)):
+    /// a test's stand-in for the login window before a region's ground has
+    /// streamed, held open for as long as the test needs. Wind and cloud
+    /// still go out.
+    pub(crate) withholds_ground: bool,
     /// What the region's viewers report of each other's complexity over
     /// `AvatarRenderInfo`, and what it states back ([`crate::render_info`]).
     /// Not a fixture: empty until a viewer reports.
@@ -229,6 +262,30 @@ pub struct SceneFixtures {
     /// access pass's expiry). The grid hands every region its own; a world
     /// built by hand reads the machine's.
     pub wall: crate::time::WallClock,
+}
+
+/// One agent's avatar standing in a region, as the region's **other** viewers
+/// are shown it.
+///
+/// A real simulator sends every avatar in the region to every agent: its
+/// object, its appearance and its animations on arrival, terse updates as it
+/// moves, and a `KillObject` when it leaves (`avatar-presence`, 2026-10-08,
+/// `book/src/gridspec/avatars.md`). What a newcomer is sent of the avatars
+/// already here is read from this record; what changes after is published
+/// as a [`RegionChange`] and the record kept in step.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Resident {
+    /// Its body as a full `ObjectUpdate` states it: standing in the region,
+    /// or a seat's child at its offset from the seat.
+    pub(crate) body: Object,
+    /// Where it stands in the region's own frame, which the coarse feed, the
+    /// world map and a parcel's privacy go by: the body's position, or a
+    /// seated one's seat's plus its offset.
+    pub(crate) at: Vector,
+    /// Its appearance as the others are sent it.
+    pub(crate) appearance: sl_proto::AvatarAppearance,
+    /// Its animations as the others are told them.
+    pub(crate) animations: crate::animations::Observed,
 }
 
 /// One parcel's two access lists: who may come in, and who may not.
@@ -475,8 +532,8 @@ pub enum RegionChange {
     /// The region stood `agent` up itself — a script's `llUnSit`, its seat
     /// gone from the region — and it stands at `stands_at`. That agent's own
     /// session, the one that made the change among them, forgets the sit and
-    /// re-sends the avatar standing there; the others have nothing to do,
-    /// residents not being shown to each other.
+    /// re-sends the avatar standing there, and tells the others with a
+    /// [`ResidentShown`](Self::ResidentShown).
     Unseated {
         /// The avatar.
         agent: AgentKey,
@@ -485,7 +542,8 @@ pub enum RegionChange {
     },
     /// The region seated `agent` itself (`llSitOnLink`): its session sends
     /// the sit response a request would have had, records the sit and
-    /// re-sends the avatar as the seat's child.
+    /// re-sends the avatar as the seat's child, and tells the others with a
+    /// [`ResidentShown`](Self::ResidentShown).
     Seated {
         /// The avatar.
         agent: AgentKey,
@@ -498,11 +556,9 @@ pub enum RegionChange {
         /// Its turn there.
         rotation: Rotation,
     },
-    /// An object was put on `agent`, the records the root first: its
-    /// wearer's session is sent them, and every other session kills them —
-    /// residents are not shown to each other on the fake grid, so another
-    /// viewer has no avatar to hang the object off
-    /// (`seating::shown_to`).
+    /// An object was put on `agent`, the records the root first: every
+    /// session the wearer is shown to is sent them worn, the wearer's own
+    /// among them, and any other kills them (`seating::shown_to`).
     Worn {
         /// The wearer.
         agent: AgentKey,
@@ -518,6 +574,76 @@ pub enum RegionChange {
         /// The worn root.
         root: RegionLocalObjectId,
     },
+    /// A script put its object on `agent` (`llAttachToAvatar`): that
+    /// agent's session files it as a new item in its inventory, sends it
+    /// worn and tells the others with a [`Worn`](Self::Worn).
+    FileWorn {
+        /// The wearer.
+        agent: AgentKey,
+        /// The worn root.
+        root: RegionLocalObjectId,
+    },
+    /// `agent`'s avatar arrived in the region and is shown (`Resident`):
+    /// every other viewer is sent its object, its appearance and its
+    /// animations, in that order, as both live grids introduce an avatar.
+    /// What it is sent is read from the region's record, so a watcher that
+    /// wakes after the avatar left sends nothing.
+    ResidentArrived(AgentKey),
+    /// `agent`'s avatar sat, stood or was put somewhere: every other viewer
+    /// is sent its whole object again.
+    ResidentShown {
+        /// The avatar.
+        agent: AgentKey,
+        /// Its object as it now stands.
+        body: Box<Object>,
+    },
+    /// `agent`'s avatar moved: every other viewer is sent the terse update
+    /// its own viewer was, at the same cadence, as both live grids send it.
+    ResidentMoved {
+        /// The avatar.
+        agent: AgentKey,
+        /// The update.
+        update: Box<sl_proto::TerseUpdate>,
+    },
+    /// `agent`'s animations were stated to its own viewer: every other viewer
+    /// is told the same set under the same sequence numbers, in the shape a
+    /// statement to somebody else takes
+    /// ([`Observed`](crate::animations::Observed)).
+    ResidentAnimated {
+        /// The avatar.
+        agent: AgentKey,
+        /// The statement.
+        statement: Box<crate::animations::Observed>,
+    },
+    /// An avatar's appearance changed — a bake the grid accepted on Second
+    /// Life, a publish on OpenSim: every other viewer is sent the record.
+    ResidentAppearance(Box<sl_proto::AvatarAppearance>),
+    /// `agent`'s avatar left the region — logged out, teleported away, walked
+    /// over a border: every other viewer is sent the `KillObject` of the id
+    /// it was shown under.
+    ResidentLeft {
+        /// The avatar.
+        agent: AgentKey,
+        /// The id it was shown under.
+        local_id: RegionLocalObjectId,
+    },
+}
+
+impl RegionChange {
+    /// The agent whose avatar a resident change is about, for a watcher that
+    /// sends nobody news of its own avatar; [`None`] for any other change.
+    #[must_use]
+    pub(crate) const fn resident(&self) -> Option<AgentKey> {
+        match self {
+            Self::ResidentArrived(agent)
+            | Self::ResidentShown { agent, .. }
+            | Self::ResidentMoved { agent, .. }
+            | Self::ResidentAnimated { agent, .. }
+            | Self::ResidentLeft { agent, .. } => Some(*agent),
+            Self::ResidentAppearance(appearance) => Some(appearance.avatar_id),
+            _ => None,
+        }
+    }
 }
 
 /// Where the object `key` among `objects` hears from, region-local metres:
@@ -796,6 +922,7 @@ impl SceneFixtures {
             avatar_local_id: RegionLocalObjectId(1),
             avatar_ids: BTreeMap::new(),
             first_avatar_arrived: false,
+            residents: BTreeMap::new(),
             last_minted_local_id: RegionLocalObjectId(0),
             parcel_access: BTreeMap::new(),
             estate: EstateFixture::default(),
@@ -813,11 +940,17 @@ impl SceneFixtures {
             changes: crate::imitates::ChangePolicy::default(),
             contents: crate::imitates::ContentsPolicy::default(),
             relays: crate::relays::RelayPolicy::default(),
+            presence: crate::imitates::PresencePolicy::default(),
+            attachments: crate::attachments::AttachmentPolicy::default(),
+            luggage: BTreeMap::new(),
+            departed_ids: BTreeMap::new(),
+            leaving: Vec::new(),
             scripts: crate::script_compile::CompilePolicy::default(),
             chat: crate::chat::ChatPolicy::default(),
             region_info: crate::imitates::RegionInfoPolicy::default(),
             terrain_composition: None,
             listens: crate::chat::Listens::default(),
+            withholds_ground: false,
             render_info: crate::render_info::RegionRenderInfo::default(),
             script_instances: crate::scripts::RegionScripts::default(),
             experience_land: crate::experiences::ExperienceLand::default(),
@@ -891,6 +1024,14 @@ impl SceneFixtures {
         self.last_minted_local_id
     }
 
+    /// Mints every later region-local id above `base`: where a grid starts
+    /// one region's numbering so that it does not run into another's.
+    pub(crate) const fn mint_above(&mut self, base: RegionLocalObjectId) {
+        if base.0 > self.last_minted_local_id.0 {
+            self.last_minted_local_id = base;
+        }
+    }
+
     /// Gives `agent`, arriving, its avatar's region-local id: the one it
     /// already has here, the region's first-avatar id
     /// ([`avatar_local_id`](Self::avatar_local_id)) for the first to come, and
@@ -910,9 +1051,103 @@ impl SceneFixtures {
     }
 
     /// `agent` left the region: its avatar's id goes with it, never to be
-    /// handed out again.
-    pub(crate) fn depart_avatar(&mut self, agent: AgentKey) {
+    /// handed out again, and it is no longer shown. The id its avatar had,
+    /// for the `KillObject` the region's other viewers are owed, or [`None`]
+    /// when it was not being shown ([`hide_resident`](Self::hide_resident)).
+    pub(crate) fn depart_avatar(&mut self, agent: AgentKey) -> Option<RegionLocalObjectId> {
         let _gone = self.avatar_ids.remove(&agent);
+        self.hide_resident(agent)
+    }
+
+    /// Shows `agent`'s avatar to the region's other viewers as `resident`
+    /// ([`Resident`]), replacing what was shown of it before.
+    pub(crate) fn show_resident(&mut self, agent: AgentKey, resident: Resident) {
+        let _before = self.residents.insert(agent, resident);
+    }
+
+    /// Stops showing `agent`'s avatar: it left the region on foot, which keeps
+    /// it a child agent here with its id, or left it altogether. The id it
+    /// was shown under, or [`None`] for an avatar not shown.
+    pub(crate) fn hide_resident(&mut self, agent: AgentKey) -> Option<RegionLocalObjectId> {
+        self.residents
+            .remove(&agent)
+            .map(|resident| resident.body.local_id)
+    }
+
+    /// Whether an avatar standing at `at` is hidden from a viewer whose own
+    /// avatar stands at `viewer_at` — [`None`] for one standing in another
+    /// region, down a child circuit: on a grid that hides avatars on a
+    /// private parcel ([`PresencePolicy`](crate::imitates::PresencePolicy)),
+    /// one on a parcel whose `SeeAVs` is off, from a viewer not on it.
+    #[must_use]
+    pub(crate) fn hides(&self, at: &Vector, viewer_at: Option<&Vector>) -> bool {
+        if !self.presence.hides_on_private_parcels {
+            return false;
+        }
+        let Some(parcel) = self.parcel_at(at.x, at.y) else {
+            return false;
+        };
+        if parcel.see_avs != Some(false) {
+            return false;
+        }
+        viewer_at
+            .and_then(|viewer| self.parcel_at(viewer.x, viewer.y))
+            .is_none_or(|theirs| theirs.local_id != parcel.local_id)
+    }
+
+    /// What the region's other viewers are shown of `agent`'s avatar.
+    #[must_use]
+    pub(crate) fn resident(&self, agent: AgentKey) -> Option<&Resident> {
+        self.residents.get(&agent)
+    }
+
+    /// What is shown of `agent`'s avatar, to keep in step with a change.
+    pub(crate) fn resident_mut(&mut self, agent: AgentKey) -> Option<&mut Resident> {
+        self.residents.get_mut(&agent)
+    }
+
+    /// Every avatar shown in the region, by agent, in key order.
+    pub(crate) fn residents(&self) -> impl Iterator<Item = (AgentKey, &Resident)> {
+        self.residents
+            .iter()
+            .map(|(agent, resident)| (*agent, resident))
+    }
+
+    /// Keeps the shown body of `agent`'s avatar as `body` — sat down, stood
+    /// up, put somewhere — and says what the region's other viewers are to be
+    /// told: the change carrying it, or [`None`] for an avatar not shown.
+    pub(crate) fn reshow_resident(
+        &mut self,
+        agent: AgentKey,
+        body: &Object,
+    ) -> Option<RegionChange> {
+        let at = self.region_position_of(body);
+        let resident = self.residents.get_mut(&agent)?;
+        resident.body = body.clone();
+        resident.at = at;
+        Some(RegionChange::ResidentShown {
+            agent,
+            body: Box::new(body.clone()),
+        })
+    }
+
+    /// Where `body`, an avatar's, stands in the region's own frame: its own
+    /// position, or its seat's plus its offset from it, the seat's rotation
+    /// left out as the coarse feed leaves it out.
+    pub(crate) fn region_position_of(&self, body: &Object) -> Vector {
+        let seat = (body.parent_id.0 != 0)
+            .then(|| self.objects.get(body.parent_id))
+            .flatten()
+            .map(|seat| seat.motion.position.clone());
+        let own = &body.motion.position;
+        seat.map_or_else(
+            || own.clone(),
+            |seat| Vector {
+                x: seat.x + own.x,
+                y: seat.y + own.y,
+                z: seat.z + own.z,
+            },
+        )
     }
 
     /// The region-local id of `agent`'s avatar here — what its own object
@@ -926,7 +1161,8 @@ impl SceneFixtures {
             .unwrap_or(self.avatar_local_id)
     }
 
-    /// The object with the given region-local id, prims and NPC bodies alike.
+    /// The object with the given region-local id: a prim, an NPC's body or
+    /// an agent's avatar shown here (`Resident`).
     ///
     /// A prim is an index lookup; an NPC's body is made from its fixture, as
     /// an arrival burst makes it.
@@ -934,6 +1170,13 @@ impl SceneFixtures {
     pub fn object_by_local_id(&self, local_id: RegionLocalObjectId) -> Option<Object> {
         if let Some(prim) = self.objects.get(local_id) {
             return Some(prim.clone());
+        }
+        if let Some(resident) = self
+            .residents
+            .values()
+            .find(|resident| resident.body.local_id == local_id)
+        {
+            return Some(resident.body.clone());
         }
         self.npcs.iter().find_map(|npc| {
             if npc.local_id == local_id {
@@ -969,6 +1212,13 @@ impl SceneFixtures {
         if let Some(prim) = self.objects.get_by_key(full_id) {
             return Some(prim.local_id);
         }
+        if let Some(resident) = self
+            .residents
+            .values()
+            .find(|resident| resident.body.full_id == full_id)
+        {
+            return Some(resident.body.local_id);
+        }
         self.npcs.iter().find_map(|npc| {
             if ObjectKey::from(npc.identity.agent_id.uuid()) == full_id {
                 return Some(npc.local_id);
@@ -998,6 +1248,15 @@ impl SceneFixtures {
     /// ([`PropertiesPolicy`](crate::imitates::PropertiesPolicy)).
     #[must_use]
     pub fn properties_of(&self, local_id: RegionLocalObjectId) -> Option<ObjectProperties> {
+        // An agent's avatar is no object to select: both grids answer a
+        // select of one with nothing (`object-select-scene`, 2026-10-09).
+        if self
+            .residents
+            .values()
+            .any(|resident| resident.body.local_id == local_id)
+        {
+            return None;
+        }
         let object = self.object_by_local_id(local_id)?;
         let mut properties = object.properties.clone().unwrap_or_else(|| {
             let mut fresh = default_object_properties(&object);
@@ -1063,11 +1322,15 @@ impl SceneFixtures {
             },
             |prim| Some(prim.parent_id),
         );
+        // An avatar is nobody's root: what it wears is a linkset of its own
+        // whose parent id names the wearer.
         parent
             .filter(|parent| {
                 parent.0 != 0
                     && (self.objects.contains(*parent)
-                        || self.object_by_local_id(*parent).is_some())
+                        || self
+                            .object_by_local_id(*parent)
+                            .is_some_and(|object| object.pcode != pcode::AVATAR))
             })
             .unwrap_or(local_id)
     }
@@ -1970,6 +2233,11 @@ pub fn avatar_prim(
 /// The avatar goes first because it is what teaches the client this
 /// circuit's region handle — a `LayerData` message carries none, so a patch
 /// that arrives before the first object update is stamped with handle zero.
+///
+/// The region's other avatars follow the objects: the NPCs, then the agents
+/// already standing here ([`push_residents`]). Returns the arriving avatar's
+/// object, which is what the region's other viewers are to be shown of it,
+/// and the avatars a private parcel hides from it.
 pub(crate) fn push_arrival_world(
     world: &SceneFixtures,
     ground: Ground<'_>,
@@ -1978,7 +2246,7 @@ pub(crate) fn push_arrival_world(
     bakes: crate::bakes::BakePolicy,
     sim: &mut SimSession,
     now: Instant,
-) {
+) -> (Object, BTreeSet<AgentKey>) {
     // Rez the avatar where the session says it arrives, not at a second
     // hard-coded guess: the placement is set once per session (a teleport's
     // target, or the ground at the region centre for a fresh login) and this
@@ -2020,10 +2288,17 @@ pub(crate) fn push_arrival_world(
             arrival.clone(),
         ),
     };
-    if let Err(error) = send_objects(sim, &[avatar], now) {
+    if let Err(error) = send_objects(sim, core::slice::from_ref(&avatar), now) {
         tracing::warn!("rezzing the arriving avatar failed: {error}");
     }
-    push_own_appearance(identity, assets, bakes, sim, now);
+    push_own_appearance(
+        identity,
+        assets,
+        bakes,
+        sim,
+        &listed_worn(world, identity.agent_id),
+        now,
+    );
     if let Err(error) = sim.send_parcel_overlay(&world.overlay_for(identity.agent_id), now) {
         tracing::warn!("sending the parcel overlay failed: {error}");
     }
@@ -2032,12 +2307,13 @@ pub(crate) fn push_arrival_world(
         record.sequence_id = UNSOLICITED_SEQUENCE_ID;
         sim.enqueue_parcel_properties(&record);
     }
-    push_terrain(ground, true, sim, now);
-    // Every object but what another avatar wears ([`crate::seating::shown_to`]).
+    push_terrain(ground, !world.withholds_ground, true, sim, now);
+    // Every object but what another avatar wears, which follows its wearer
+    // ([`push_residents`]).
     let shown: Vec<&Object> = world
         .objects
         .iter()
-        .filter(|object| crate::seating::shown_to(world, object, identity.agent_id))
+        .filter(|object| !worn_by_another(world, object, identity.agent_id))
         .collect();
     if !shown.is_empty()
         && let Err(error) = send_objects(sim, shown, now)
@@ -2045,18 +2321,162 @@ pub(crate) fn push_arrival_world(
         tracing::warn!("rezzing the fixture objects failed: {error}");
     }
     push_npcs(&world.npcs, bakes, sim, now);
-    sim.set_coarse_others(coarse_others(world, sim.coarse_rounding()));
+    let hidden = push_residents(world, (identity.agent_id, Some(&arrival)), sim, now);
+    refresh_coarse_others(world, identity.agent_id, sim);
     push_object_animations(&world.object_animations, sim, now);
+    (avatar, hidden)
+}
+
+/// Pushes the agents' avatars standing in the region to a viewer, in the
+/// order a simulator introduces one: the bodies as one update, then each
+/// one's appearance and its animations, then what they wear. `viewer` is the
+/// agent the circuit is for, left out, and `viewer_at` where its avatar
+/// stands in this region ([`None`] down a child circuit).
+///
+/// Both live grids send an arriving agent every avatar in the region, however
+/// far off (`avatar-presence`, 2026-10-08), and a child circuit the
+/// neighbour's — but for one a private parcel hides from it
+/// ([`SceneFixtures::hides`]), which is returned. Send failures are logged,
+/// never fatal.
+pub(crate) fn push_residents(
+    world: &SceneFixtures,
+    (viewer, viewer_at): (AgentKey, Option<&Vector>),
+    sim: &mut SimSession,
+    now: Instant,
+) -> BTreeSet<AgentKey> {
+    let mut hidden = BTreeSet::new();
+    let mut shown: Vec<(AgentKey, &Resident)> = Vec::new();
+    for (agent, resident) in world.residents() {
+        if agent == viewer {
+            continue;
+        }
+        if world.hides(&resident.at, viewer_at) {
+            let _new = hidden.insert(agent);
+        } else {
+            shown.push((agent, resident));
+        }
+    }
+    if shown.is_empty() {
+        return hidden;
+    }
+    let bodies: Vec<&Object> = shown
+        .iter()
+        .map(|(_agent, resident)| &resident.body)
+        .collect();
+    if let Err(error) = send_objects(sim, bodies, now) {
+        tracing::warn!("rezzing the region's other avatars failed: {error}");
+    }
+    for (agent, resident) in &shown {
+        push_resident_looks(*agent, resident, sim, now);
+    }
+    let worn: Vec<&Object> = shown
+        .iter()
+        .flat_map(|(agent, _resident)| worn_records(world, *agent, viewer))
+        .collect();
+    if !worn.is_empty()
+        && let Err(error) = send_objects(sim, worn, now)
+    {
+        tracing::warn!("rezzing what the region's other avatars wear failed: {error}");
+    }
+    hidden
+}
+
+/// Introduces `agent`'s avatar to `viewer`'s viewer: its object, its
+/// appearance and its animations, then what it wears — how an arrival, and
+/// an avatar a private parcel stops hiding, is sent. Nothing for an avatar the
+/// region does not show. Send failures are logged, never fatal.
+pub(crate) fn push_resident(
+    world: &SceneFixtures,
+    agent: AgentKey,
+    viewer: AgentKey,
+    sim: &mut SimSession,
+    now: Instant,
+) {
+    let Some(resident) = world.resident(agent) else {
+        return;
+    };
+    if let Err(error) = send_objects(sim, core::slice::from_ref(&resident.body), now) {
+        tracing::warn!("rezzing another avatar failed: {error}");
+    }
+    push_resident_looks(agent, resident, sim, now);
+    let worn = worn_records(world, agent, viewer);
+    if !worn.is_empty()
+        && let Err(error) = send_objects(sim, worn, now)
+    {
+        tracing::warn!("rezzing what another avatar wears failed: {error}");
+    }
+}
+
+/// The records of everything `agent` wears that `viewer` is shown
+/// ([`crate::seating::shown_to`]), each linkset's root first.
+fn worn_records(world: &SceneFixtures, agent: AgentKey, viewer: AgentKey) -> Vec<&Object> {
+    world
+        .objects
+        .worn_by(agent)
+        .into_iter()
+        .flat_map(|root| {
+            std::iter::once(root).chain(crate::link_sets::children_in_order(world, root))
+        })
+        .filter_map(|prim| world.objects.get(prim))
+        .filter(|object| crate::seating::shown_to(world, object, viewer))
+        .collect()
+}
+
+/// Whether `object` is part of something an avatar other than `viewer`
+/// wears: what an arrival burst sends after its wearer's body rather than
+/// with the region's objects.
+fn worn_by_another(world: &SceneFixtures, object: &Object, viewer: AgentKey) -> bool {
+    crate::attachments::is_leaving(world, object)
+        || world
+            .objects
+            .attached_to(world.root_of(object.local_id))
+            .is_some_and(|attached| attached.agent != viewer)
+}
+
+/// Sends what follows an avatar's object when it is introduced: its
+/// appearance, then its animations. Send failures are logged, never fatal.
+pub(crate) fn push_resident_looks(
+    agent: AgentKey,
+    resident: &Resident,
+    sim: &mut SimSession,
+    now: Instant,
+) {
+    if let Err(error) = sim.send_avatar_appearance(&resident.appearance, now) {
+        tracing::warn!("sending another avatar's appearance failed: {error}");
+    }
+    if let Err(error) = resident.animations.send(agent, sim, now) {
+        tracing::warn!("sending another avatar's animations failed: {error}");
+    }
+}
+
+/// Lists the region's other avatars in `sim`'s coarse feed as they stand now:
+/// the NPCs, then every agent shown here but `viewer`, whose own entry the
+/// session adds itself where it is the root agent.
+pub(crate) fn refresh_coarse_others(world: &SceneFixtures, viewer: AgentKey, sim: &mut SimSession) {
+    sim.set_coarse_others(coarse_others(world, viewer, sim.coarse_rounding()));
 }
 
 /// The entries the region's periodic `CoarseLocationUpdate` carries for its
-/// other avatars: one per NPC, where it stands. A seated one is placed at its
-/// seat's position plus its own offset from it, the seat's rotation left out:
-/// an entry is a whole metre wide.
+/// other avatars: one per NPC and then one per agent shown here but `viewer`,
+/// where each stands. A seated one is placed at its seat's position plus its
+/// own offset from it, the seat's rotation left out: an entry is a whole metre
+/// wide.
 fn coarse_others(
     world: &SceneFixtures,
+    viewer: AgentKey,
     rounding: sl_proto::CoarseRounding,
 ) -> Vec<sl_proto::CoarseLocation> {
+    let agents = world
+        .residents()
+        .filter(|(agent, _resident)| *agent != viewer)
+        .map(|(agent, resident)| {
+            sl_proto::coarse_location(
+                agent,
+                &sl_proto::RegionCoordinates::new(resident.at.x, resident.at.y, resident.at.z),
+                rounding,
+            )
+        })
+        .collect::<Vec<_>>();
     world
         .npcs
         .iter()
@@ -2078,6 +2498,7 @@ fn coarse_others(
                 rounding,
             )
         })
+        .chain(agents)
         .collect()
 }
 
@@ -2096,22 +2517,37 @@ fn coarse_others(
 /// It ends with a [marker](crate::marker) named after the region, which is how
 /// a test waits for a neighbour's scene to have arrived without sleeping.
 /// Send failures are logged, never fatal.
+///
+/// `viewer` is the agent the circuit is for, which stands elsewhere; the
+/// avatars a private parcel hides from it are returned.
 pub(crate) fn push_child_world(
     world: &SceneFixtures,
     ground: Ground<'_>,
-    identity: &sl_proto::RegionIdentity,
+    (identity, viewer): (&sl_proto::RegionIdentity, AgentKey),
     bakes: crate::bakes::BakePolicy,
     sim: &mut SimSession,
     now: Instant,
-) {
-    if !world.objects.is_empty()
-        && let Err(error) = send_objects(sim, &world.objects, now)
+) -> BTreeSet<AgentKey> {
+    // What the neighbour's residents wear follows them ([`push_residents`]).
+    let unworn: Vec<&Object> = world
+        .objects
+        .iter()
+        .filter(|object| !worn_by_another(world, object, viewer))
+        .collect();
+    if !unworn.is_empty()
+        && let Err(error) = send_objects(sim, unworn, now)
     {
         tracing::warn!("rezzing a neighbour's objects failed: {error}");
     }
     push_npcs(&world.npcs, bakes, sim, now);
+    // The neighbour's own residents, and its coarse feed listing them: a
+    // child circuit's agent stands elsewhere, so it is shown everybody a
+    // private parcel does not hide.
+    let hidden = push_residents(world, (viewer, None), sim, now);
+    refresh_coarse_others(world, viewer, sim);
+    sim.start_child_coarse_feed(now);
     push_object_animations(&world.object_animations, sim, now);
-    push_terrain(ground, false, sim, now);
+    push_terrain(ground, !world.withholds_ground, false, sim, now);
     // The overlay is the whole region's parcel layout, which a neighbouring
     // region draws on the minimap; it needs no viewer to be standing on it.
     // `overlay_for` colours the cells by owner, and a child agent owns nothing
@@ -2127,6 +2563,7 @@ pub(crate) fn push_child_world(
     if let Err(error) = sim.send_generic_message(&crate::marker::neighbour_marker(&name), now) {
         tracing::warn!("marking a neighbour's burst failed: {error}");
     }
+    hidden
 }
 
 /// Pushes each animated object's `ObjectAnimation` — the animesh counterpart
@@ -2180,26 +2617,62 @@ pub(crate) fn push_own_appearance(
     assets: &crate::assets::GridAssets,
     bakes: crate::bakes::BakePolicy,
     sim: &mut SimSession,
+    worn: &[sl_proto::AvatarAttachment],
     now: Instant,
 ) {
     if !bakes.sends_own_appearance(sim.handshake_reply_flags()) {
         return;
     }
-    push_own_appearance_baked(identity, assets, bakes, sim, None, now);
+    let _sent = push_own_appearance_baked(identity, assets, bakes, sim, (None, worn), now);
 }
 
-/// Pushes the agent its own `AvatarAppearance`, stamped with `cof_version`
-/// — the version just baked — or, for `None`, the Current Outfit Folder's
-/// version (both grids send the agent the version its outfit is at). The
-/// record carries an `AppearanceHover` block, as both grids' do.
+/// What an agent's own `AvatarAppearance` lists as worn: everything it
+/// wears in `world` on a grid whose appearance lists it, nothing on one whose
+/// does not ([`AttachmentPolicy::appearance_lists_worn`](crate::attachments::AttachmentPolicy::appearance_lists_worn)).
+pub(crate) fn listed_worn(
+    world: &SceneFixtures,
+    agent: AgentKey,
+) -> Vec<sl_proto::AvatarAttachment> {
+    if world.attachments.appearance_lists_worn {
+        crate::attachments::worn_list(world, agent)
+    } else {
+        Vec::new()
+    }
+}
+
+/// Pushes the agent its own `AvatarAppearance`
+/// ([`own_appearance`]) and returns it: what the region's other viewers are
+/// sent of it too.
 pub(crate) fn push_own_appearance_baked(
     identity: &AvatarIdentity,
     assets: &crate::assets::GridAssets,
     bakes: crate::bakes::BakePolicy,
     sim: &mut SimSession,
-    cof_version: Option<i32>,
+    (cof_version, worn): (Option<i32>, &[sl_proto::AvatarAttachment]),
     now: Instant,
-) {
+) -> sl_proto::AvatarAppearance {
+    let record = own_appearance(identity, assets, bakes, sim, (cof_version, worn));
+    if let Err(error) = sim.send_avatar_appearance(&record, now) {
+        tracing::warn!("sending the agent's own appearance failed: {error}");
+    }
+    record
+}
+
+/// The agent's `AvatarAppearance`, registering the bakes it names, stamped
+/// with `cof_version` — the version just baked — or, for `None`, the Current
+/// Outfit Folder's version (both grids send the agent the version its outfit
+/// is at). The record carries an `AppearanceHover` block, as both grids' do.
+///
+/// Both live grids send the region's other viewers the record they send the
+/// agent: the same bakes and the same block (`appearance-baking`,
+/// 2026-10-19, `book/src/gridspec/appearance.md` § Baking).
+pub(crate) fn own_appearance(
+    identity: &AvatarIdentity,
+    assets: &crate::assets::GridAssets,
+    bakes: crate::bakes::BakePolicy,
+    sim: &SimSession,
+    (cof_version, worn): (Option<i32>, &[sl_proto::AvatarAttachment]),
+) -> sl_proto::AvatarAppearance {
     let appearance = NpcAppearance::solid(identity.agent_id, OWN_AVATAR_BAKE_COLOR);
     {
         let mut store = assets.write();
@@ -2231,10 +2704,8 @@ pub(crate) fn push_own_appearance_baked(
         y: 0.0,
         z: 0.0,
     });
-    let record = bakes.applied(record);
-    if let Err(error) = sim.send_avatar_appearance(&record, now) {
-        tracing::warn!("sending the agent's own appearance failed: {error}");
-    }
+    record.attachments = worn.to_vec();
+    bakes.applied(record)
 }
 
 /// Pushes the arriving agent the animations it is playing: the arrival's
@@ -2341,7 +2812,10 @@ pub(crate) fn receive_crossing(
     push_npcs(&npcs, bakes, sim, now);
     world.objects.extend(objects);
     world.npcs.extend(npcs);
-    sim.set_coarse_others(coarse_others(world, sim.coarse_rounding()));
+    let viewer = sim
+        .agent_id()
+        .unwrap_or_else(|| AgentKey::from(uuid::Uuid::nil()));
+    refresh_coarse_others(world, viewer, sim);
 }
 
 /// A region's ground and how the grid being imitated sends it.
@@ -2354,12 +2828,13 @@ pub(crate) struct Ground<'a> {
 }
 
 /// Streams the region's ground as the grid being imitated does: the LAND
-/// layer outwards from where the session's agent arrives, the WIND layer
+/// layer outwards from where the session's agent arrives (unless `land` is
+/// false, for a region told to withhold it), the WIND layer
 /// behind it where the grid sends a root agent its wind with the ground
 /// (`root`), and the CLOUD layer if the fixture carries one. The wind that
 /// follows on a timer is the session's own
 /// ([`SimSession::set_wind_feed`]). Send failures are logged.
-fn push_terrain(ground: Ground<'_>, root: bool, sim: &mut SimSession, now: Instant) {
+fn push_terrain(ground: Ground<'_>, land: bool, root: bool, sim: &mut SimSession, now: Instant) {
     let Ground {
         fixture: terrain,
         policy,
@@ -2367,7 +2842,7 @@ fn push_terrain(ground: Ground<'_>, root: bool, sim: &mut SimSession, now: Insta
     let handle = sim.region_handle();
     let placement = sim.arrival_position().position;
     let stream = policy.land_stream(placement.x(), placement.y());
-    if let Err(error) = sim.send_terrain(&terrain.to_patches(handle), &stream, now) {
+    if land && let Err(error) = sim.send_terrain(&terrain.to_patches(handle), &stream, now) {
         tracing::warn!("streaming the region's ground failed: {error}");
     }
     let wind = terrain.wind_patches(handle);
@@ -2835,15 +3310,14 @@ pub(crate) fn answer_world_request(
                 tracing::warn!("answering a sit request failed: {error}");
             }
             sim.seat_agent(seat.full_id);
-            if let Some((_seat, sitter)) = world.objects.seat_of(identity.agent_id) {
-                push_seated_avatar(
-                    world,
-                    identity,
-                    seat.local_id,
-                    (sitter.offset.clone(), sitter.rotation.clone()),
-                    sim,
-                    now,
-                );
+            let placed = world
+                .objects
+                .seat_of(identity.agent_id)
+                .map(|(_seat, sitter)| (sitter.offset.clone(), sitter.rotation.clone()));
+            if let Some(placed) = placed {
+                return push_seated_avatar(world, identity, seat.local_id, placed, sim, now)
+                    .into_iter()
+                    .collect();
             }
         }
         // Standing up puts the avatar back in the region's own frame, in front
@@ -2861,7 +3335,9 @@ pub(crate) fn answer_world_request(
                     z: known.position.z(),
                 }
             });
-            stand_avatar(world, identity, sim, &stands_at, now);
+            return stand_avatar(world, identity, sim, &stands_at, now)
+                .into_iter()
+                .collect();
         }
         // An object of the agent's own put on its avatar from the world: the
         // same object under the same ids, re-sent as worn, as both grids do
@@ -2884,11 +3360,27 @@ pub(crate) fn answer_world_request(
             let at = crate::seating::seated_position(world, identity.agent_id)
                 .unwrap_or_else(|| crate::chat::agent_position(sim));
             let point = attachment_point.to_code();
-            let Some(objects) = crate::seating::wear(
+            if crate::seating::wear(
                 world,
                 (identity.agent_id, &at),
                 root,
                 (point, Some(rotation.clone())),
+                crate::scene_store::WornItem::Unfiled,
+            )
+            .is_none()
+            {
+                return Vec::new();
+            }
+            // Filed as a new item, announced over UDP, which its
+            // `AttachItemID` names (`attachments`, 2026-10-20).
+            let Some(objects) = crate::attachments::file_worn(
+                world,
+                assets,
+                (identity, mint),
+                object_assets,
+                sim,
+                root,
+                now,
             ) else {
                 return Vec::new();
             };
@@ -2900,15 +3392,41 @@ pub(crate) fn answer_world_request(
                 objects,
             }];
         }
+        // Inventory items worn: their objects rezzed onto the avatar.
+        ServerEvent::RezAttachment(rez) => {
+            return wear_items(
+                world,
+                assets,
+                (identity, mint),
+                sim,
+                core::slice::from_ref(&**rez),
+                now,
+            );
+        }
+        ServerEvent::RezAttachments { attachments, .. } => {
+            return wear_items(world, assets, (identity, mint), sim, attachments, now);
+        }
+        // Taken off by the item: killed, nothing restated.
+        ServerEvent::DetachAttachmentIntoInventory { item_id, .. } => {
+            return crate::attachments::detach_item(world, assets, identity, sim, *item_id, now);
+        }
         // Worn objects put back on the ground where the avatar stands, under
-        // the same ids.
+        // the same ids, and their items gone from the inventory.
         ServerEvent::DropAttachments(local_ids) => {
             let mut changes = Vec::new();
+            let mut removed = Vec::new();
             for local_id in local_ids {
                 let root = world.root_of(*local_id);
-                let Some(objects) = crate::seating::drop_off(world, identity.agent_id, root) else {
+                let Some((objects, item)) =
+                    crate::seating::drop_off(world, identity.agent_id, root)
+                else {
                     continue;
                 };
+                if let crate::scene_store::WornItem::Item(item) = item
+                    && sim.agent_inventory_mut().take_item(item).is_some()
+                {
+                    removed.push(item);
+                }
                 if let Err(error) = send_objects(sim, &objects, now) {
                     tracing::warn!("dropping a worn object failed: {error}");
                 }
@@ -2918,29 +3436,26 @@ pub(crate) fn answer_world_request(
                         .map(|object| RegionChange::Rezzed(Box::new(object))),
                 );
             }
+            if !removed.is_empty()
+                && let Err(error) = sim.send_remove_inventory_item(&removed, now)
+            {
+                tracing::warn!("removing a dropped object's item failed: {error}");
+            }
             return changes;
         }
-        // Worn objects taken off into the inventory: a take of each, as it
-        // stood where its wearer stood.
+        // Worn objects taken off into the inventory: each killed, one item
+        // restated, as both grids answer an `ObjectDetach`.
         ServerEvent::DetachObjects(local_ids) => {
             let roots: Vec<RegionLocalObjectId> = local_ids
                 .iter()
                 .map(|local_id| world.root_of(*local_id))
-                .filter(|root| {
-                    world
-                        .objects
-                        .attached_to(*root)
-                        .is_some_and(|attached| attached.agent == identity.agent_id)
-                })
                 .collect();
-            return take_off(
+            return crate::attachments::detach(
                 world,
                 assets,
-                (identity, region),
-                (object_assets, announcement),
-                mint,
+                identity,
                 sim,
-                &roots,
+                (&roots, crate::attachments::Restate::Last),
                 now,
             );
         }
@@ -3037,6 +3552,13 @@ pub(crate) fn answer_world_request(
                         .iter()
                         .flat_map(crate::fixtures::NpcFixture::objects)
                         .filter(|object| wanted(object)),
+                )
+                .chain(
+                    world
+                        .residents()
+                        .map(|(_agent, resident)| &resident.body)
+                        .filter(|object| wanted(object))
+                        .cloned(),
                 )
                 .collect();
             if !matching.is_empty()
@@ -3176,8 +3698,17 @@ const AGENT_RELATIVE_FLAGS: u32 = prim_flags::OBJECT_MODIFY
 /// Group sharing is not modelled: the fake grid has no group roles to ask, so a
 /// member of the object's group is judged as everyone. An avatar is not a prim
 /// and carries no such bits.
+///
+/// Anyone may be told it may transfer the object where its owner may, as both
+/// grids tell a stranger; `owner_modifies_to_others` also tells one the owner
+/// may modify it, as Second Life does (`object-edit-stranger`,
+/// `book/src/gridspec/building.md` § With no right over it).
 #[must_use]
-pub fn as_seen_by(object: &Object, agent: Option<AgentKey>) -> Object {
+pub fn as_seen_by(
+    object: &Object,
+    agent: Option<AgentKey>,
+    owner_modifies_to_others: bool,
+) -> Object {
     let mut seen = object.clone();
     if object.pcode == pcode::AVATAR {
         return seen;
@@ -3194,6 +3725,9 @@ pub fn as_seen_by(object: &Object, agent: Option<AgentKey>) -> Object {
     };
     let unlocked = permissions.owner.contains(sl_wire::Permissions::MOVE);
     let mut flags = object.update_flags & !AGENT_RELATIVE_FLAGS;
+    if permissions.owner.contains(sl_wire::Permissions::TRANSFER) {
+        flags |= prim_flags::OBJECT_TRANSFER;
+    }
     for (permission, flag, needs_unlocked) in [
         (sl_wire::Permissions::COPY, prim_flags::OBJECT_COPY, false),
         (sl_wire::Permissions::MOVE, prim_flags::OBJECT_MOVE, true),
@@ -3220,6 +3754,11 @@ pub fn as_seen_by(object: &Object, agent: Option<AgentKey>) -> Object {
         if flags & prim_flags::OBJECT_MODIFY != 0 {
             flags |= prim_flags::OBJECT_OWNER_MODIFY;
         }
+    } else if owner_modifies_to_others
+        && unlocked
+        && permissions.owner.contains(sl_wire::Permissions::MODIFY)
+    {
+        flags |= prim_flags::OBJECT_OWNER_MODIFY;
     }
     seen.update_flags = flags;
     seen
@@ -3240,7 +3779,7 @@ pub fn send_objects<'object>(
     let agent = sim.agent_id();
     let seen: Vec<Object> = objects
         .into_iter()
-        .map(|object| as_seen_by(object, agent))
+        .map(|object| as_seen_by(object, agent, sim.owner_modify_to_others()))
         .collect();
     sim.send_object_update(&seen, REAL_TIME_DILATION, now)
 }
@@ -3332,37 +3871,16 @@ fn rez_from_inventory(
         }
         return Vec::new();
     }
-    // A linkset this grid took is put back as it was taken. Anything else --
-    // a fixture's seeded object item, which no take ever made -- is read out of
-    // the published body, which is all there is for it. `store_taken_asset` and
-    // the `assets` module docs say why the two sources exist.
-    let taken = assets
-        .taken_linkset(item_id)
-        .filter(|linkset| !linkset.prims.is_empty());
-    let rezzed = match &taken {
-        Some(linkset) => rez_taken_linkset(
-            world,
-            sim.region_handle(),
-            mint,
-            &linkset.objects(),
-            &item,
-            request.at,
-        ),
-        None => {
-            let Some(bytes) = taken_object_body(assets, &item) else {
-                tracing::debug!("a rez named item {item_id}, whose object body nothing holds");
-                return Vec::new();
-            };
-            match rez_asset_body(world, sim.region_handle(), mint, &bytes, &item, request.at) {
-                Some(rezzed) => rezzed,
-                None => return Vec::new(),
-            }
-        }
+    let Some(rezzed) = rez_item(
+        world,
+        assets,
+        (sim.region_handle(), mint),
+        &item,
+        request.at,
+        now,
+    ) else {
+        return Vec::new();
     };
-    world.objects.extend(rezzed.iter().cloned());
-    if let Some(taken) = taken {
-        restore_contents(world, &rezzed, taken, (0, ""), now);
-    }
     if let Err(error) = send_objects(sim, &rezzed, now) {
         tracing::warn!("streaming an object rezzed from inventory failed: {error}");
     }
@@ -3381,6 +3899,67 @@ fn rez_from_inventory(
         .into_iter()
         .map(|object| RegionChange::Rezzed(Box::new(object)))
         .collect()
+}
+
+/// Wears `rezzes` from the agent's inventory where it stands
+/// ([`crate::attachments::wear_items`]), and on a grid whose own appearance
+/// lists what is worn, states it again after a wear of one item.
+fn wear_items(
+    world: &mut SceneFixtures,
+    assets: &crate::assets::GridAssets,
+    (identity, mint): (&AvatarIdentity, &dyn Fn() -> uuid::Uuid),
+    sim: &mut SimSession,
+    rezzes: &[sl_proto::RezAttachment],
+    now: Instant,
+) -> Vec<RegionChange> {
+    let wearer = crate::attachments::Wearer {
+        identity,
+        at: crate::seating::seated_position(world, identity.agent_id)
+            .unwrap_or_else(|| crate::chat::agent_position(sim)),
+        region_handle: sim.region_handle(),
+    };
+    let (changes, _wore) =
+        crate::attachments::wear_items(world, assets, (&wearer, mint), sim, rezzes, now);
+    changes
+}
+
+/// Puts the linkset the object item `item` stands for into the region under
+/// ids it mints, its root at `at` ([`None`]: where it was taken from), with
+/// what each prim held and its scripts back: the records, the root first, or
+/// [`None`] for an item whose object nothing holds.
+///
+/// A linkset this grid took is put back as it was taken. Anything else — a
+/// fixture's seeded object item, which no take ever made — is read out of the
+/// published body, which is all there is for it. [`store_taken_asset`] and the
+/// [`crate::assets`] module docs say why the two sources exist.
+pub(crate) fn rez_item(
+    world: &mut SceneFixtures,
+    assets: &crate::assets::GridAssets,
+    (region_handle, mint): (sl_wire::RegionHandle, &dyn Fn() -> uuid::Uuid),
+    item: &InventoryItem,
+    at: Option<&Vector>,
+    now: Instant,
+) -> Option<Vec<Object>> {
+    let taken = assets
+        .taken_linkset(item.item_id)
+        .filter(|linkset| !linkset.prims.is_empty());
+    let rezzed = match &taken {
+        Some(linkset) => {
+            rez_taken_linkset(world, region_handle, mint, &linkset.objects(), item, at)
+        }
+        None => {
+            let Some(bytes) = taken_object_body(assets, item) else {
+                tracing::debug!("item {} names an object body nothing holds", item.item_id);
+                return None;
+            };
+            rez_asset_body(world, region_handle, mint, &bytes, item, at)?
+        }
+    };
+    world.objects.extend(rezzed.iter().cloned());
+    if let Some(taken) = taken {
+        restore_contents(world, &rezzed, taken, (0, ""), now);
+    }
+    Some(rezzed)
 }
 
 /// Puts back into each prim of a linkset just rezzed (`rezzed`, in the order
@@ -3785,7 +4364,10 @@ fn stamp_rezzed(
 
 /// The agent inventory folder of the well-known type `folder_type`, if the
 /// session's inventory has one.
-fn folder_of_type(sim: &SimSession, folder_type: FolderType) -> Option<InventoryFolderKey> {
+pub(crate) fn folder_of_type(
+    sim: &SimSession,
+    folder_type: FolderType,
+) -> Option<InventoryFolderKey> {
     let code = folder_type.to_code();
     sim.agent_inventory()
         .folders()
@@ -4151,7 +4733,7 @@ fn return_notice(
 /// the order [`push_arrival_world`] already establishes (it writes an arriving
 /// agent's bakes under the same two locks). Nothing anywhere takes the region
 /// lock while holding the asset one, so the pair cannot invert.
-fn store_taken_asset(
+pub(crate) fn store_taken_asset(
     assets: &crate::assets::GridAssets,
     item: &InventoryItem,
     linkset: &[Object],
@@ -4336,7 +4918,7 @@ fn taken_prim(object: &Object) -> sl_object_asset::PrimBlock {
 /// a *minted* id nothing serves: that is the failure the round-trip cases hunt,
 /// and it is worse than a nil one, because it fails later and looks fine in an
 /// inventory window until it does.
-fn taken_item(
+pub(crate) fn taken_item(
     linkset: &[Object],
     folder: InventoryFolderKey,
     owner: AgentKey,
@@ -4433,14 +5015,16 @@ fn narrow_code(code: i32) -> i8 {
 const UNKNOWN_ASSET_CLASS: i8 = -1;
 
 /// Puts the agent's own avatar back on its feet at `stands_at`: the session's
-/// placement moved there, and the avatar re-sent with no parent.
+/// placement moved there, and the avatar re-sent with no parent. The region's
+/// other viewers are to be shown it so too: the change that says so, for an
+/// avatar the region shows.
 pub(crate) fn stand_avatar(
-    world: &SceneFixtures,
+    world: &mut SceneFixtures,
     identity: &AvatarIdentity,
     sim: &mut SimSession,
     stands_at: &Vector,
     now: Instant,
-) {
+) -> Option<RegionChange> {
     let look_at = sim.arrival_position().look_at.clone();
     sim.set_arrival_position(
         RegionCoordinates::new(stands_at.x, stands_at.y, stands_at.z),
@@ -4451,78 +5035,31 @@ pub(crate) fn stand_avatar(
         identity,
         stands_at.clone(),
     );
-    if let Err(error) = send_objects(sim, &[avatar], now) {
+    if let Err(error) = send_objects(sim, core::slice::from_ref(&avatar), now) {
         tracing::warn!("standing the agent up failed: {error}");
     }
-}
-
-/// Takes the agent's worn `roots` off into its Objects folder: a take of
-/// each, as it stood where its wearer stood. What the region's other sessions
-/// are to be told.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a take's: the region, the asset store, who and where, the two policies, the id \
-              mint, the session, what and when"
-)]
-pub(crate) fn take_off(
-    world: &mut SceneFixtures,
-    assets: &crate::assets::GridAssets,
-    (identity, region): (&AvatarIdentity, &RegionIdentity),
-    (object_assets, announcement): (
-        crate::assets::ObjectAssetPolicy,
-        crate::inventory::InventoryAnnouncement,
-    ),
-    mint: &dyn Fn() -> uuid::Uuid,
-    sim: &mut SimSession,
-    roots: &[RegionLocalObjectId],
-    now: Instant,
-) -> Vec<RegionChange> {
-    let Some(folder) = folder_of_type(sim, FolderType::Object) else {
-        tracing::warn!("the agent has no Objects folder to take a worn object off into");
-        return Vec::new();
-    };
-    let roots: Vec<RegionLocalObjectId> = roots
-        .iter()
-        .copied()
-        .filter(|root| crate::seating::unwear_for_take(world, *root))
-        .collect();
-    if roots.is_empty() {
-        return Vec::new();
-    }
-    derez(
-        world,
-        assets,
-        (identity, region),
-        (object_assets, announcement),
-        mint,
-        sim,
-        &Derez {
-            local_ids: &roots,
-            destination: &DeRezDestination::TakeIntoAgentInventory(folder),
-            transaction_id: TransactionId::from(mint()),
-            off_world_at: None,
-        },
-        now,
-    )
+    world.reshow_resident(identity.agent_id, &avatar)
 }
 
 /// Rezzes the agent's own avatar **seated**: parented to `seat` (a
 /// region-local id) at `offset` from it, which is how a seated avatar travels
-/// on the wire.
+/// on the wire. The region's other viewers are to be shown it so too: the
+/// change that says so, for an avatar the region shows.
 pub(crate) fn push_seated_avatar(
-    world: &SceneFixtures,
+    world: &mut SceneFixtures,
     identity: &AvatarIdentity,
     seat: RegionLocalObjectId,
     (offset, rotation): (Vector, Rotation),
     sim: &mut SimSession,
     now: Instant,
-) {
+) -> Option<RegionChange> {
     let mut avatar = avatar_prim(world.avatar_id(identity.agent_id), identity, offset);
     avatar.parent_id = seat;
     avatar.motion.rotation = rotation;
-    if let Err(error) = send_objects(sim, &[avatar], now) {
+    if let Err(error) = send_objects(sim, core::slice::from_ref(&avatar), now) {
         tracing::warn!("seating the agent's avatar failed: {error}");
     }
+    world.reshow_resident(identity.agent_id, &avatar)
 }
 
 /// Sends `record`, or the "no such parcel" reply (an empty record whose
@@ -4580,13 +5117,14 @@ mod test {
     }
 
     /// The owner of a new prim is told it owns it and may do anything with
-    /// it; anyone else is told somebody owns it and nothing more — and the
-    /// object's own bits reach both.
+    /// it; anyone else is told somebody owns it and it may be transferred —
+    /// on Second Life that the owner may modify it too — and the object's own
+    /// bits reach both.
     #[test]
     fn a_new_prim_is_the_owners_to_edit_and_nobody_elses() {
         let object = owned_box();
-        let owner = as_seen_by(&object, Some(agent(0x1))).update_flags;
-        let other = as_seen_by(&object, Some(agent(0x2))).update_flags;
+        let owner = as_seen_by(&object, Some(agent(0x1)), false).update_flags;
+        let other = as_seen_by(&object, Some(agent(0x2)), false).update_flags;
         assert_eq!(
             owner,
             prim_flags::USE_PHYSICS
@@ -4600,7 +5138,11 @@ mod test {
         );
         assert_eq!(
             other,
-            prim_flags::USE_PHYSICS | prim_flags::OBJECT_ANY_OWNER
+            prim_flags::USE_PHYSICS | prim_flags::OBJECT_ANY_OWNER | prim_flags::OBJECT_TRANSFER
+        );
+        assert_eq!(
+            as_seen_by(&object, Some(agent(0x2)), true).update_flags,
+            other | prim_flags::OBJECT_OWNER_MODIFY
         );
     }
 
@@ -4614,21 +5156,22 @@ mod test {
             sl_wire::Permissions::MODIFY.union(sl_wire::Permissions::MOVE);
         object.properties = Some(properties.clone());
         assert_eq!(
-            as_seen_by(&object, Some(agent(0x2))).update_flags,
+            as_seen_by(&object, Some(agent(0x2)), false).update_flags,
             prim_flags::USE_PHYSICS
                 | prim_flags::OBJECT_ANY_OWNER
                 | prim_flags::OBJECT_MOVE
                 | prim_flags::OBJECT_MODIFY
+                | prim_flags::OBJECT_TRANSFER
         );
         properties.permissions.owner =
             sl_wire::Permissions::ALL.difference(sl_wire::Permissions::MOVE);
         object.properties = Some(properties);
         assert_eq!(
-            as_seen_by(&object, Some(agent(0x2))).update_flags,
-            prim_flags::USE_PHYSICS | prim_flags::OBJECT_ANY_OWNER
+            as_seen_by(&object, Some(agent(0x2)), false).update_flags,
+            prim_flags::USE_PHYSICS | prim_flags::OBJECT_ANY_OWNER | prim_flags::OBJECT_TRANSFER
         );
         assert_eq!(
-            as_seen_by(&object, Some(agent(0x1))).update_flags
+            as_seen_by(&object, Some(agent(0x1)), false).update_flags
                 & (prim_flags::OBJECT_MOVE | prim_flags::OBJECT_MODIFY),
             0,
             "not even the owner moves a locked object"

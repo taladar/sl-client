@@ -20,17 +20,17 @@ Measured on 2026-10-08 by two conformance cases:
 - `parcel-privacy`, on OpenSim only: on aditi our avatars own no land
   (`gridspec-aditi-test-land`).
 
-The fake grid shows its residents nobody but the scene's NPCs
-(`server-fake-grid-agent-avatars-shared`), so its column speaks of the one
-resident's own session and of those NPCs.
+The fake grid shows its residents to each other as well as the scene's NPCs
+(`server-fake-grid-agent-avatars-shared`, since 2026-11-06); its column says
+what it sends, and the timings it does not imitate.
 
 ## The coarse feed
 
 | behaviour | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
 | how often it is sent (**held**) | every 1.333 s, the same in all three runs | every 4.54 s | every 1.333 s on `FakeSl`, every 4.545 s on `FakeOpensim` |
-| whether somebody moving changes that | no: 1.333 s while the other paced | no: 4.54 s | nobody moves |
-| whom it lists | everybody in the region, the agent it is sent to included | the same; at most sixty (its source) | the scene's NPCs and the agent |
+| whether somebody moving changes that | no: 1.333 s while the other paced | no: 4.54 s | no |
+| whom it lists | everybody in the region, the agent it is sent to included | the same; at most sixty (its source) | the scene's NPCs, the other residents and the agent, with no limit |
 | where the agent's own entry stands | second of two in all three runs: the one who logged in first was first | first in one run and second in two: the order of its presence list | last |
 | `You` (**held**) | the index of the agent's own entry | the same | the same |
 | `Prey` before anything is tracked | absent (−1) | absent | absent |
@@ -38,7 +38,7 @@ resident's own session and of those NPCs.
 | how a position becomes `X` and `Y` | **rounded** to the nearest metre: 7.64 is 8, 6.85 is 7, 8.35 is 8 | **cut off**: 127.82 is 127, 69.82 is 69 | each flavour's (`CoarseRounding`) |
 | how a height becomes `Z` | a quarter of it, rounded: 235.74 m is 59 (236 m), 40.54 m is 10 | a quarter of it, cut off: 226.56 m is 56 (224 m), 29.19 m is 7 | each flavour's |
 | a height above what a byte holds | 1,163 m is sent as 255 (1,020 m) | 1,177 m is sent as **0**: anything above 1,024 m is | each flavour's |
-| a neighbouring region's feed | each of the three neighbours sends its own, down its child circuit, in its own region's coordinates | the same, from all three | none down a child circuit |
+| a neighbouring region's feed | each of the three neighbours sends its own, down its child circuit, in its own region's coordinates | the same, from all three | the same, `You` absent |
 
 OpenSim's zero for a height it cannot state is the "height unknown" a viewer
 already has to read in a neighbour's entry, so it costs nothing new. Our
@@ -54,17 +54,17 @@ login from its XML-RPC answer.
 
 | behaviour | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
-| an avatar that does nothing | no object update in thirty seconds. Its `AvatarAnimation` is sent again five to seven times in that time, unasked | nothing at all | an NPC is sent once |
-| an avatar pacing back and forth | six to eleven updates a second, as many as the mover is sent of itself | 1.3 to 1.9 a second, the same as its own. Seven a second when it paced into the test objects around the region's centre | nobody moves |
-| leaving by teleport: the `KillObject` | 0.27 to 0.40 s after the request — before the mover's own arrival at 0.42 to 0.55 s | 0.19 to 0.24 s, with the mover's arrival | not shown |
-| leaving by teleport: gone from the coarse feed | in its next update, 0.4 to 0.65 s | in its next, 0.4 to 2.6 s | not shown |
-| a neighbour's avatar | sent down the neighbour's child circuit as a full object 0.44 to 0.57 s after the request, and listed in that region's coarse feed from 1.0 to 1.7 s | the same: the object at 0.2 s, the coarse entry with that region's next update | no avatars down a child circuit |
-| coming back by teleport: the order | `AvatarAnimation` (0.17 to 0.19 s, while the mover is still on its way), the object (0.45 to 0.56 s), `AvatarAppearance` (0.49 to 0.62 s), the coarse entry (1.2 to 1.5 s) | the object, `AvatarAppearance` in the same instant (0.14 to 0.26 s), `AvatarAnimation` 30 ms later, the coarse entry with the feed's next update | not shown |
+| an avatar that does nothing | no object update in thirty seconds. Its `AvatarAnimation` is sent again five to seven times in that time, unasked | nothing at all | nothing at all, on both flavours |
+| an avatar pacing back and forth | six to eleven updates a second, as many as the mover is sent of itself | 1.3 to 1.9 a second, the same as its own. Seven a second when it paced into the test objects around the region's centre | the same updates as the mover is sent of itself |
+| leaving by teleport: the `KillObject` | 0.27 to 0.40 s after the request — before the mover's own arrival at 0.42 to 0.55 s | 0.19 to 0.24 s, with the mover's arrival | `FakeSl`: as the finish goes out, before the arrival. `FakeOpensim`: none, as the `attachments` census held OpenSim (`appearance.md`), which disagrees with this case |
+| leaving by teleport: gone from the coarse feed | in its next update, 0.4 to 0.65 s | in its next, 0.4 to 2.6 s | in its next update |
+| a neighbour's avatar | sent down the neighbour's child circuit as a full object 0.44 to 0.57 s after the request, and listed in that region's coarse feed from 1.0 to 1.7 s | the same: the object at 0.2 s, the coarse entry with that region's next update | the same: the object on its arrival there, the coarse entry with that region's next update |
+| coming back by teleport: the order | `AvatarAnimation` (0.17 to 0.19 s, while the mover is still on its way), the object (0.45 to 0.56 s), `AvatarAppearance` (0.49 to 0.62 s), the coarse entry (1.2 to 1.5 s) | the object, `AvatarAppearance` in the same instant (0.14 to 0.26 s), `AvatarAnimation` 30 ms later, the coarse entry with the feed's next update | OpenSim's order, in one breath, on both flavours |
 | how often each is sent in the fifteen seconds after | the appearance twice, the animations five to seven times | once each (the animations four times in one run of five) | once each |
-| the neighbour's copy on return | killed at 0.26 to 0.39 s, before the object arrives in the watcher's own region | killed in the same instant the object arrives | not shown |
-| logging out: the `KillObject` | 0.57 to 0.64 s after the `LogoutRequest` (which is answered at 0.17 to 0.20 s) | 5 to 15 ms | not shown |
-| logging out: gone from the coarse feed | 0.7 to 1.6 s | in its next update | not shown |
-| logging in: the order | the object 0.86 to 0.97 s after the login's answer, the appearance and the animations 45 to 65 ms later; the coarse entry within 50 ms either side of the object in two runs, 0.3 s after it in the third | the object and the appearance at 0.10 to 0.12 s, the animations 30 ms later, the coarse entry with the feed's next update | not shown |
+| the neighbour's copy on return | killed at 0.26 to 0.39 s, before the object arrives in the watcher's own region | killed in the same instant the object arrives | killed in the same instant, on both flavours |
+| logging out: the `KillObject` | 0.57 to 0.64 s after the `LogoutRequest` (which is answered at 0.17 to 0.20 s) | 5 to 15 ms | at once: the circuit closes on the `LogoutRequest` |
+| logging out: gone from the coarse feed | 0.7 to 1.6 s | in its next update | in its next update |
+| logging in: the order | the object 0.86 to 0.97 s after the login's answer, the appearance and the animations 45 to 65 ms later; the coarse entry within 50 ms either side of the object in two runs, 0.3 s after it in the third | the object and the appearance at 0.10 to 0.12 s, the animations 30 ms later, the coarse entry with the feed's next update | the object, the appearance and the animations in one breath, the coarse entry with the feed's next update |
 
 A coarse entry may arrive before the object it belongs to (Second Life, at
 a login) and outlive it by a second and a half (Second Life, at a logout),
@@ -77,10 +77,10 @@ from beside it for seventy seconds, to about 1,150 m, and hovered there.
 
 | behaviour | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
-| a draw distance of 64 m and an avatar climbing away | **never taken out of the stream**: no `KillObject` on the way to 1,123 m, nor in the seventy-five seconds after | the same, to 1,150 m | NPCs are not culled |
-| updates of it meanwhile | about thirty in two and a half minutes: a steady climb is not reported, as the mover's own stream showed (`movement.md`) | 200 over the same time | none |
-| an agent that **arrives** with a draw distance of 64 m while the avatar hovers 1,123 m above | sent the avatar's object 1.2 s after its arrival (the watcher went to a neighbouring region and came back) | sent it too, 1,150 m above, in the scene its arrival brings | sent every NPC |
-| the coarse feed meanwhile | lists it throughout, at `Z` 255 | lists it throughout, at `Z` 0 | lists every NPC |
+| a draw distance of 64 m and an avatar climbing away | **never taken out of the stream**: no `KillObject` on the way to 1,123 m, nor in the seventy-five seconds after | the same, to 1,150 m | the same: nothing is culled |
+| updates of it meanwhile | about thirty in two and a half minutes: a steady climb is not reported, as the mover's own stream showed (`movement.md`) | 200 over the same time | the mover's own, at its flavour's cadence |
+| an agent that **arrives** with a draw distance of 64 m while the avatar hovers 1,123 m above | sent the avatar's object 1.2 s after its arrival (the watcher went to a neighbouring region and came back) | sent it too, 1,150 m above, in the scene its arrival brings | sent it in the scene its arrival brings |
+| the coarse feed meanwhile | lists it throughout, at `Z` 255 | lists it throughout, at `Z` 0 | lists it throughout, each flavour's way |
 
 So within one region neither grid withholds an avatar for being far away,
 whatever the draw distance: the draw distance decides which *neighbouring
@@ -107,13 +107,13 @@ in and out of it one at a time.
 
 | behaviour | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
-| the edit | not measured: no land | taken over the capability; the parcel reads back `SeeAVs` false | stored and read back; nothing is hidden |
-| one resident inside, the other outside (**held**) | not measured | the one outside is sent a `KillObject` for the one inside 60 ms after it steps in | not shown |
-| the same, seen from inside | not measured | the one inside **keeps** the one outside in its stream: hiding is one-way | not shown |
-| both inside (**held**) | not measured | sent each other again, as full objects, 70 ms after the second steps in | not shown |
-| stepping out | not measured | sent again 60 ms after | not shown |
-| the coarse feed | not measured | lists both to both at every step: the hidden avatar stays on the map | not shown |
-| the owner | not measured | hidden like anybody else: the owner standing outside its own parcel lost the resident inside it | not shown |
+| the edit | not measured: no land | taken over the capability; the parcel reads back `SeeAVs` false | stored and read back |
+| one resident inside, the other outside (**held**) | not measured | the one outside is sent a `KillObject` for the one inside 60 ms after it steps in | `FakeOpensim`: the same, on the step that takes it in. `FakeSl`: nothing is hidden |
+| the same, seen from inside | not measured | the one inside **keeps** the one outside in its stream: hiding is one-way | `FakeOpensim`: the same |
+| both inside (**held**) | not measured | sent each other again, as full objects, 70 ms after the second steps in | `FakeOpensim`: the same, on the step |
+| stepping out | not measured | sent again 60 ms after | `FakeOpensim`: the same, on the step |
+| the coarse feed | not measured | lists both to both at every step: the hidden avatar stays on the map | the same |
+| the owner | not measured | hidden like anybody else: the owner standing outside its own parcel lost the resident inside it | `FakeOpensim`: the same |
 
 OpenSim's source exempts a viewer in god mode and nobody else.
 
@@ -221,9 +221,9 @@ rules (`relays.rs`, `ImitatedGrid::relay_policy`), the way it routes local
 chat: the session that received them publishes them to the region and every
 session's watcher asks the policy whether its own avatar is sent them.
 `effects-sounds` runs its viewer legs offline on both flavours and holds
-them to 95 of the answers above. Because the fake grid tracks no walking,
-distance is from where an avatar last arrived, and the camera rule from the
-last `AgentUpdate`; those two are checked by unit tests of the policy. A
+them to 95 of the answers above. Distance is from where the region's avatar
+controller has an avatar standing, and the camera rule from the last
+`AgentUpdate`; those two are checked by unit tests of the policy. A
 timeline can show a session effects and sounds of its own making
 (`Action::Effects`, `TriggerSound`, `AttachSound`, `AdjustAttachedSound`,
 `PreloadSounds`). No script runs, so nothing in the second half of this
@@ -313,10 +313,10 @@ reports finished stays in the set. The reference sends that stop itself
 | --- | --- | --- | --- |
 | the agent's own set at rest (**held**) | restated every second or two (the overrider's churn: seven to ten statements in twelve seconds) | never restated (**held**: none in twelve seconds) | never restated |
 | sources in a statement to the agent itself (**held**) | **one per entry**: nil for the posture, the agent for what it started, the object for a script's | **only the objects'**, and those entries first (`LLClientView.SendAnimations`) | as the flavour's grid |
-| sources in a statement to another viewer (**held**) | **only the first entry's**, and that one nil | none | not shown |
+| sources in a statement to another viewer (**held**) | **only the first entry's**, and that one nil | none | as the flavour's grid |
 | the `PhysicalAvatarEventList` (**held** offline) | one empty block in every statement | none | as the flavour's grid |
 | the order of the entries | as the overrider left them | the default first, then the rest in the order started | the default first, then the rest in order |
-| the sequence numbers the two viewers are sent (**held**) | the same | the same | not shown |
+| the sequence numbers the two viewers are sent (**held**) | the same | the same | the same |
 
 Because the source list is positional (the reference reads entry `i`'s source
 from block `i`), OpenSim's habit of putting the scripted entries first is
@@ -344,11 +344,14 @@ object is gone, on both grids.
 `ImitatedGrid::animation_policy`): it starts from `stand`, folds every
 `AgentAnimation` in, and states the set back to the agent by its flavour's rules
 — after every request on `FakeOpensim`, after a change on `FakeSl`; sources and
-the empty physical block on `FakeSl`. `animations` runs its first seven legs
-offline on both flavours and holds them to the agent's own column above;
-`animation-play-stop` joined the offline list. It wears no overrider and asks
-nothing of a script, and it shows no resident to another, so nothing a second
-viewer is told is held there (`server-fake-grid-agent-avatars-shared`).
+the empty physical block on `FakeSl`. Every statement the agent is sent, the
+region's other viewers are sent too, under the same numbers, in the shape a
+statement to somebody else takes (`animations::Observed`). `animations` runs
+its first seven legs offline on both flavours and holds them to both columns
+above; `animation-play-stop` joined the offline list. It wears no overrider,
+so its idle set is `stand` alone, which cannot tell Second Life's one source
+from one per entry: that answer stays held on the live grids. It asks nothing
+of a script.
 
 ### What our viewer does with them
 
@@ -366,18 +369,37 @@ whose object is gone (`viewer-stop-animating-me`).
 
 ## What the fake grid does about it
 
-`sl-fake-grid` now sends the coarse feed on each flavour's timer, as part of
-the region's telemetry: the scene's NPCs where they stand and then the agent
-where it last arrived (it tracks no walking), each cut down to an entry the
-way the flavour's grid does it, with `You` on the agent's own. `avatar-presence`
-runs offline against both flavours for that much and holds them to the
-interval, the self-listing and `You`.
+`sl-fake-grid` keeps each region's residents in its world (`world::Resident`):
+what the region's other viewers are shown of each agent — its object, its
+appearance and its animations — from its arrival to its departure. An arrival
+is introduced to the others in OpenSim's order, object, appearance and
+animations in one breath; a newcomer is sent everybody already there in its
+arrival burst, however far off; a sit, a stand and a teleport within the
+region re-send the object; every terse update the region's avatar controller
+sends an agent of itself goes to the others too, at the same cadence; and a
+logout, a teleport away or a walk over a border kills it for them. What an
+avatar wears follows its body, a HUD never.
 
-Everything that needs a second resident — the object stream of one, the
-order of an arrival, the departure's `KillObject`, a neighbour's avatars
-and coarse feed down a child circuit, parcel hiding — waits for residents to
-be shown to each other (`server-fake-grid-agent-avatars-shared`), which is
-built to this chapter.
+The coarse feed goes out on each flavour's timer: the NPCs, the other residents
+and the agent, each cut down the way the flavour's grid does it, with `You` on
+the agent's own. A child circuit is sent its region's residents as full objects
+and the region's own feed, with no entry for the agent and no `You`.
+`FakeOpensim` hides a resident on a parcel whose `SeeAVs` is off from every
+viewer not on it (`PresencePolicy`), as the table above has it; `FakeSl` hides
+nobody, Second Life's answer being unmeasured.
+
+What it does not imitate is the timing: everything goes in the breath that
+caused it, and Second Life's repeats of an idle avatar's animations and of an
+arrival's appearance are not sent. A teleport away is the `attachments`
+census's: Second Life's region kills the avatar — for the agent itself and the
+viewers left behind — as the finish goes out, OpenSim's kills nothing, and
+neither kills what the avatar wears ([Appearance](appearance.md),
+*Attachments*). This case saw OpenSim kill the avatar for the viewer left
+behind; the census, which holds its answer, did not.
+
+`avatar-presence` runs whole offline on both flavours and holds them to the
+interval, the self-listing, `You` and the far avatar staying in the stream;
+`logout-seated` joined the offline list.
 
 ## What our viewer does with it
 
@@ -448,24 +470,26 @@ number.
 | whether it is granted | yes | yes | yes |
 | the label | `application/llsd+xml` | `text/html;charset=UTF-8`: the handler states none, and the HTTP server's default stands over the same LLSD | each flavour's (`ImitatedGrid::attachment_resources_label`) |
 | the shape | `{attachments:[{location, objects:[{id, is_group_owned, location, name, owner_id, resources}]}], summary:{available, used}}`, `location` an array of three reals | the same | the same |
-| what is listed | the scripted attachments, by attachment point, HUDs included: the test avatar's overrider is three, on `ATTACH_CHIN`, `ATTACH_LWING` and `ATTACH_HUD_TOP_LEFT`; nothing unscripted | the scripted attachments; nothing worn is `attachments: []` | `attachments: []` |
-| how a point is named | the LSL constant's name: `ATTACH_RIGHT_PEC` | the same | — |
-| an object's `resources` | `memory`, 65,536 for one Mono script, and `urls` when it holds one | `urls` when it holds one; never `memory` | — |
+| what is listed | the scripted attachments, by attachment point, HUDs included: the test avatar's overrider is three, on `ATTACH_CHIN`, `ATTACH_LWING` and `ATTACH_HUD_TOP_LEFT`; nothing unscripted | the scripted attachments; nothing worn is `attachments: []` | the same |
+| how a point is named | the LSL constant's name: `ATTACH_RIGHT_PEC` | the same | the same |
+| an object's `resources` | `memory`, 65,536 for one Mono script, and `urls` when it holds one | `urls` when it holds one; never `memory` | as the flavour's grid; no script holds a URL yet (`server-lsl-lib-http-url`) |
 | `summary.available` | `memory` -1 (no limit) and `urls` 38 | the same | the same |
-| `summary.used` | the sums: 327,680 bytes for the overrider, 393,216 with the cube | `memory` 0 whatever is worn; `urls` the sum | 0 and 0 |
-| a URL asked for by a prim and the prim then attached from the world | granted, and still held worn: `urls` 1 | the same | — |
-| the attachment taken off | gone from the next report | the same | — |
+| `summary.used` | the sums: 327,680 bytes for the overrider, 393,216 with the cube | `memory` 0 whatever is worn; `urls` the sum | as the flavour's grid |
+| a URL asked for by a prim and the prim then attached from the world | granted, and still held worn: `urls` 1 | the same | no URLs yet |
+| the attachment taken off | gone from the next report | the same | the same |
 
 Our client reads the report on both grids, whatever the label
 (`Command::RequestAttachmentResources`).
 
 ### What the fake grid does about it
 
-Each flavour answers `AttachmentResources` with what both grids answer an
-agent wearing nothing scripted, labelled as its grid labels it. It wears no
-attachments (`fake-grid-own-attachments-and-region-moves`), so it has none to
-list; `sl-proto`'s `attachment_resources_answer_nothing_scripted_by_default`
-holds the answer and the label.
+Each flavour answers `AttachmentResources` with what the agent wears that
+holds a script (`attachments::resources_report`, kept current with every
+flush), labelled as its grid labels it: by point, under its LSL constant,
+with a Mono script's memory on Second Life and none on OpenSim. No script
+holds a URL yet (`server-lsl-lib-http-url`), so `avatar-render-info` leaves
+its scripted cube's legs out offline. `tests/scripts.rs` holds the report on
+both flavours.
 
 The Second Life flavour grants `AvatarRenderInfo`; the OpenSim flavour
 refuses it. The region holds every report its viewers send

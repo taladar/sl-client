@@ -344,9 +344,12 @@ Life's 300-entry limit is a 7 kB datagram; it sends sections now.
 
 OpenSim's flag side effect has teeth. Adding one resident to a parcel's allow
 list **closes the parcel to everybody else** without the About Land checkbox
-being touched, and nothing tells the viewer: its "anyone can visit" box stays
-ticked, and the next About Land save writes that stale flag back and opens the
-parcel again (`viewer-about-land-list-save-leaves-flags-stale`).
+being touched, and nothing tells the viewer: its "anyone can visit" box stayed
+ticked, and the next About Land save wrote that stale flag back and opened the
+parcel again (`viewer-about-land-list-save-leaves-flags-stale`, fixed
+2026-11-07). About Land now reads the parcel back after every list save,
+addressed by a point inside it (OpenSim ignores the by-id request), and merges
+the flags per checkbox, so the box follows even beside an unapplied tick.
 
 `USE_ACCESS_GROUP` on its own closes nothing. The flag *admits* the parcel's
 group to a parcel that `USE_ACCESS_LIST` has closed; an aditi parcel with only

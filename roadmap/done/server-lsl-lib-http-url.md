@@ -166,5 +166,7 @@ replayed on the three flavours, `http/url` with the test playing the runner's
   the header with `llKey2Name(llGetOwner())`, and `llKey2Name` is not in the
   library yet.
 - **Worn objects' URLs** in the fake grid's `AttachmentResources` report
-  (the note above from `server-fake-grid-attachment-resources`) are still
-  counted as none: that report is the other worktree's, not merged yet.
+  (`attachments::resources_report`) are still counted as none: count the ones
+  a worn object's scripts hold (`urls` per object and in `summary.used`, both
+  grids), and put `avatar-render-info`'s scripted cube legs on the offline
+  flavours.

@@ -215,6 +215,9 @@ pub const OFFLINE_CASES: &[&str] = &[
     "estate-info",
     "estate-access",
     "logout-clean",
+    "logout-seated",
+    "attachments",
+    "outfits",
     "sit-stand",
     "agent-movement",
     "avatar-presence",
@@ -380,8 +383,11 @@ impl FakeGridHarness {
             .epoch(std::time::SystemTime::now())
             .imitates(imitates);
         for (label, first_name, agent_id) in ACCOUNTS {
+            // Dressed as the live grids' test avatars are, in clothing over
+            // their body parts: a census that copies a worn layer needs one.
             let account = sl_fake_grid::AccountConfig::new(first_name, LAST_NAME, PASSWORD)
-                .with_agent_id(AgentKey::from(Uuid::from_u128(agent_id)));
+                .with_agent_id(AgentKey::from(Uuid::from_u128(agent_id)))
+                .dressed();
             builder = builder.account(if label == ESTATE_MANAGER {
                 account.estate_manager()
             } else {

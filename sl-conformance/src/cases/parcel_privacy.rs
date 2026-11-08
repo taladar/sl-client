@@ -300,8 +300,8 @@ impl GridTest for ParcelPrivacy {
     }
 
     fn grids(&self) -> &'static [Grid] {
-        // Not aditi: our avatars own no land there. Not the fake grid: its
-        // residents are not shown to each other.
+        // Not aditi: our avatars own no land there. Not the fake grid: it
+        // cannot divide a parcel yet (`server-fake-grid-parcel-divide-join`).
         &[Grid::Opensim]
     }
 

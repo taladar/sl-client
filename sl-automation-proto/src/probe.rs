@@ -262,11 +262,61 @@ pub struct AgentReadout {
     /// to see the camera framed somewhere, or brought back behind the avatar.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub camera_eye: Option<[f32; 3]>,
+    /// The land height under the agent, in metres — what the viewer's avatar
+    /// ground floor stands it on: the region's streamed ground, or, before
+    /// that has arrived, the ground the viewer kept from an earlier session.
+    /// Absent while the viewer knows no ground there.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ground_height: Option<f32>,
+    /// The collision (foot) plane the grid last reported under the own
+    /// avatar, as `[nx, ny, nz, w]` with `n · p = w` in region-local Second
+    /// Life axes — the surface the simulator says the avatar rests on, a prim
+    /// floor included, which the viewer stands the avatar and its feet on.
+    /// Absent before the avatar is drawn, or when the last update carried
+    /// none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub foot_plane: Option<[f32; 4]>,
+    /// The own avatar's feet as the viewer last posed them, foot IK included;
+    /// absent while the own avatar is not drawn as a posed body.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub feet: Option<FeetReadout>,
     /// The baked textures the viewer uploaded for its own avatar and named in
     /// its appearance, sorted — on a grid that leaves baking to the viewer,
     /// once it has published; empty where the grid bakes.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub published_bakes: Vec<Uuid>,
+}
+
+/// The own avatar's two feet as the viewer posed them.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct FeetReadout {
+    /// The left foot.
+    pub left: FootReadout,
+    /// The right foot.
+    pub right: FootReadout,
+    /// How far the foot IK that plants a standing avatar's feet on the ground
+    /// was applied, `0` to `1`: `1` while the avatar stands with ground
+    /// under it, `0` while it walks or is in the air.
+    pub foot_ik_weight: f32,
+    /// Whether the avatar plays one of the built-in stands, the motions whose
+    /// legs the foot IK plants. An uploaded stand, as an animation overrider
+    /// plays one, keeps its own legs (as in the reference viewer), so the
+    /// weight stays `0` under it.
+    #[serde(default)]
+    pub standing: bool,
+}
+
+/// One of the own avatar's feet.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct FootReadout {
+    /// Where the posed ankle joint is, in region-local metres (Second Life
+    /// axes).
+    pub ankle: [f32; 3],
+    /// The height of the ground the viewer found under the ankle, in metres:
+    /// the higher of the land and the foot plane there. Absent when nothing
+    /// is within reach below the foot.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ground: Option<f32>,
 }
 
 /// What the viewer's world map knows: the regions the grid named, the items
@@ -610,6 +660,7 @@ mod tests {
         RegionReadout, SelectedObject, SkyReadout, SpeakerKind, StatusReadout, TeleportReadout,
         TeleportState, TranscriptLine, WaterReadout, WorldMapReadout,
     };
+    use super::{FeetReadout, FootReadout};
 
     /// Serializes `value`, reads it back and checks nothing was lost.
     fn round_trip<T>(value: &T) -> Result<String, serde_json::Error>
@@ -729,6 +780,20 @@ mod tests {
                 camera: Some(CameraView::Mouselook),
                 heading: Some(1.5),
                 camera_eye: Some([120.0, 128.0, 27.0]),
+                ground_height: Some(24.0),
+                foot_plane: Some([0.0, 0.0, 1.0, 24.0]),
+                feet: Some(FeetReadout {
+                    left: FootReadout {
+                        ankle: [128.1, 128.0, 24.1],
+                        ground: Some(24.0),
+                    },
+                    right: FootReadout {
+                        ankle: [127.9, 128.0, 24.1],
+                        ground: None,
+                    },
+                    foot_ik_weight: 1.0,
+                    standing: true,
+                }),
                 published_bakes: vec![uuid::Uuid::from_u128(0xBA4E)],
             })?;
         }

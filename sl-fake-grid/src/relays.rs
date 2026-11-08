@@ -30,9 +30,8 @@
 //! is routed ([`crate::chat`]).
 //!
 //! Not modelled: the group a parcel may leave its avatar sounds to (a parcel
-//! that bars everybody's bars the sender's), and — because the fake grid
-//! tracks no walking — distance from anywhere but where an avatar last
-//! arrived.
+//! that bars everybody's bars the sender's). Distance is from where the
+//! region's avatar controller has an avatar standing ([`crate::movement`]).
 
 use sl_proto::{TriggeredSound, ViewerEffect, ViewerEffectType};
 use sl_types::key::{AgentKey, ObjectKey, OwnerKey};

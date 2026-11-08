@@ -857,6 +857,53 @@ impl Engine {
         Ok(posted?)
     }
 
+    /// The script `id` arrives in this region inside a worn object its
+    /// wearer brought along, `away` after it left the last one: bring it back
+    /// from `saved` as an instance of `program`, and raise what the grid
+    /// raises in it there — `changed(change)`
+    /// ([`CHANGED_REGION`](crate::vm::CHANGED_REGION), with
+    /// [`CHANGED_TELEPORT`](crate::vm::CHANGED_TELEPORT) for a teleport), or
+    /// nothing for a `change` of 0: a move that was put back.
+    ///
+    /// What it finds is the grid's (`events/changed-worn`, 2026-11-03): on
+    /// **Second Life** and **YEngine** everything it held, the `changed`
+    /// behind what it had queued (YEngine's own 32768 as it left among them,
+    /// which the region left raises before it saves); on Second Life the time
+    /// away counts against a sleep and the timer, as a take's does.
+    /// **XEngine** runs it again from `default`'s `state_entry`, its globals
+    /// lost, and raises no `changed`.
+    ///
+    /// # Errors
+    ///
+    /// [`RestoreError`] when `saved` does not fit `program` or was saved
+    /// under another engine; nothing is added then.
+    pub fn travel_saved(
+        &mut self,
+        id: CallerId,
+        program: Arc<Program>,
+        saved: &SavedScript,
+        away: Duration,
+        change: i32,
+    ) -> Result<Option<Posted>, RestoreError> {
+        let flavour = self.config.flavour;
+        let mut saved = saved.clone();
+        if flavour == EngineFlavour::SecondLife {
+            saved.elapse(away);
+        }
+        let mut instance = restore(program, &saved, flavour, self.now, self.config.step)?;
+        if flavour == EngineFlavour::XEngine {
+            instance.set_running(true);
+            instance.reset();
+            let _replaced = self.instances.insert(id, instance);
+            return Ok(None);
+        }
+        let _replaced = self.instances.insert(id, instance);
+        if change == 0 {
+            return Ok(None);
+        }
+        Ok(self.changed(id, change)?)
+    }
+
     /// The region is going down: every instance leaves it, handed back saved
     /// under its id for the grid to keep with the region's objects
     /// ([`Self::start_up`] brings them back).

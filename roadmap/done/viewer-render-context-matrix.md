@@ -2,7 +2,7 @@
 id: viewer-render-context-matrix
 title: Render context matrix — subjects × eye, time of day, mirror, layering
 topic: viewer
-status: in-progress
+status: done
 origin: test-harness plan (2026-08-30); the coverage half of viewer-render-readback-tier
 points: 8
 refs: [viewer-render-readback-tier, viewer-water-transparency-scene-matrix, viewer-render-scene-coverage]
@@ -42,10 +42,26 @@ Once R1's `Eye` axis reproduces both `every_translucent_face_*` verdict
 sets, the six `water-translucency-*` scenes collapse into one
 `translucent-box-rack` subject.
 
-In progress (2026-08-30): the first slice is in
-`sl-client-bevy-viewer/src/render_matrix.rs` — the R0 sweep (every
-subject scene must paint its measured silhouette, exclusions listed with
-reasons and guarded), `capture_with`'s staging hook, the
-opaque-wall-hides-the-subject teeth pair and the first underwater-eye
-cell. The registry fields (`SubjectSignature`, `applies`), the stage
-builders and the R1 sweeps are still to grow.
+The registry and the sweeps are in.
+`SubjectSignature { marker, points, translucent, emissive }`, `applies` and
+`ContextSet { eye, time, viewpoint, layering, toggle }` live in
+`sl-viewer-render-fixtures` (`context.rs`); bounds are measured from the
+geometry tier rather than declared. `render_stage.rs` stages, captures
+(with and without the subject) and reads a cell; `render_matrix.rs` runs
+R0, the four R1 sweeps (plus the time-of-day luminance ordering on a
+tilted white plate), nine curated R2 cells and the opt-in all-pairs sweep,
+under registry-enforced capture budgets. The six `water-translucency-*`
+scenes are now the one `translucent-box-rack` subject.
+
+Done (2026-11-08). The parts not built are now their own tasks:
+[[viewer-render-hud-and-actor-axes]] (the `screen` slot and the
+name-tag, particle, avatar and terrain actors), which the HUD-over-world,
+name-tag-behind-glass and grazing-over-terrain pairs build on
+([[viewer-render-matrix-hud-over-world]],
+[[viewer-render-matrix-name-tag-behind-glass]],
+[[viewer-render-matrix-translucent-grazing-terrain]]);
+[[viewer-render-rig-glow-pass]], which glow over water needs
+([[viewer-render-matrix-glow-over-water]]);
+[[viewer-render-matrix-particles-projector-midnight]]; and
+[[viewer-render-rig-sky-ambient]] for the shaded face that reads the same
+at midday and midnight.

@@ -158,9 +158,26 @@ pub struct AttachedTo {
     pub point: u8,
     /// Where the wearer stands in the region: what the object's region
     /// position is (`llGetPos`), and where it hears and speaks from. Set
-    /// when it is put on and moved with its wearer's sits and stands, the
-    /// only moves an avatar makes within a fake region.
+    /// when it is put on and moved with its wearer as it walks, sits and
+    /// stands.
     pub at: Vector,
+    /// What it is worn as: the inventory item it stands for, which its
+    /// `AttachItemID` names.
+    pub item: WornItem,
+}
+
+/// What a worn object stands for in its wearer's inventory
+/// (`crate::attachments`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WornItem {
+    /// The item it was worn from, or the one a wear from the world filed.
+    Item(sl_types::key::InventoryKey),
+    /// No item yet: worn from the world by a script, which its wearer's
+    /// session files ([`crate::world::RegionChange::FileWorn`]).
+    Unfiled,
+    /// None ever: a script's temporary attachment (`llAttachToAvatarTemp`),
+    /// whose `AttachItemID` is its own id and which is gone when it comes off.
+    Temporary,
 }
 
 /// The ids a prim is filed under.
@@ -370,8 +387,13 @@ impl ObjectStore {
         RegionLocalObjectId(self.indices.highest_local_id)
     }
 
-    /// Spawns `object` and files it, returning its entity.
-    fn spawn(&mut self, object: Object) -> Entity {
+    /// Spawns `object` and files it, returning its entity. A prim comes in
+    /// holding nothing, and its flags say so (`FLAGS_INVENTORY_EMPTY`) until
+    /// its contents are stated.
+    fn spawn(&mut self, mut object: Object) -> Entity {
+        if object.pcode == sl_proto::pcode::PRIMITIVE {
+            object.update_flags |= sl_proto::prim_flags::INVENTORY_EMPTY;
+        }
         let seq = Seq(self.indices.next_seq);
         self.indices.next_seq = self.indices.next_seq.saturating_add(1);
         let ids = Filed::of(&object);
@@ -590,7 +612,32 @@ impl ObjectStore {
         };
         let replaced = prim.take::<Contents>().map(|held| held.0);
         let _held = prim.insert(Contents(contents));
+        self.settle_inventory_flag(local_id);
         Ok(replaced)
+    }
+
+    /// States in the flags of the prim with the given region-local id whether
+    /// its contents are empty (`FLAGS_INVENTORY_EMPTY`), as both grids state
+    /// it; the record is written only when that changes.
+    pub fn settle_inventory_flag(&mut self, local_id: RegionLocalObjectId) {
+        let empty = self
+            .contents(local_id)
+            .is_none_or(|contents| contents.items.is_empty());
+        let flag = sl_proto::prim_flags::INVENTORY_EMPTY;
+        let Some(object) = self.get(local_id) else {
+            return;
+        };
+        if object.pcode != sl_proto::pcode::PRIMITIVE || (object.update_flags & flag != 0) == empty
+        {
+            return;
+        }
+        if let Some(mut object) = self.get_mut(local_id) {
+            if empty {
+                object.update_flags |= flag;
+            } else {
+                object.update_flags &= !flag;
+            }
+        }
     }
 
     /// The prims whose contents were written or stated since the last call,

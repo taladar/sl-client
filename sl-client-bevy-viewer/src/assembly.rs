@@ -788,6 +788,13 @@ impl ViewerAppBuilder {
             // The per-avatar account identity (grid + name + accounts root), used by
             // `load_account_settings` to locate the account-scope settings once the
             // agent UUID is known at login. No accounts root, no account scope.
+            // The land-height cache on disk, for this grid: region handles are
+            // grid coordinates, so another grid's file would be another region.
+            .insert_resource(
+                sl_viewer_world_scene::terrain_disk_cache::TerrainDiskCache::new(
+                    paths.terrain_cache_dir(&grid),
+                ),
+            )
             .insert_resource(AccountContext {
                 accounts_base: config_accounts_base,
                 grid,

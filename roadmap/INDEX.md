@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 123 |
-| ready | 332 |
-| blocked | 35 |
-| in-progress | 11 |
-| bugs | 36 |
-| done | 1520 |
+| ready | 335 |
+| blocked | 39 |
+| in-progress | 7 |
+| bugs | 35 |
+| done | 1530 |
 | deferred | 30 |
 | wont-do | 24 |
-| **total** | **2111** |
+| **total** | **2123** |
 
 ## ideas (123)
 
@@ -255,9 +255,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   cross-region estate state
 - [`server-experience-service`](ideas/server-experience-service.md) — Experience
   service — records, permissions, key-value store
-- [`server-fake-grid-agent-avatars-shared`](ideas/server-fake-grid-agent-avatars-shared.md)
-  — Fake grid — logged-in agents see each other's avatars (blocked by
-  `gridspec-avatar-presence` (done), `gridspec-animations` (done))
 - [`server-fake-grid-dynamic-textures`](ideas/server-fake-grid-dynamic-textures.md)
   — Dynamic textures — render a drawing list to a texture on the fake grid
 - [`server-fake-grid-opensim-arrival-bakes`](ideas/server-fake-grid-opensim-arrival-bakes.md)
@@ -298,12 +295,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### gridspec
 
+- [`gridspec-friend-edit-rights`](ideas/gridspec-friend-edit-rights.md) —
+  Measure a friend's edit right in use
 - [`gridspec-lsl-in-experience`](ideas/gridspec-lsl-in-experience.md) — LSL
   behaviour on Second Life for a script saved into an experience
 - [`gridspec-lsl-opensim-function-set`](ideas/gridspec-lsl-opensim-function-set.md)
   — Measure which library functions OpenSim's engines compile
 
-## ready (332)
+## ready (335)
 
 ### protocol
 
@@ -380,6 +379,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Face-nearest and avatar fine-alignment tools
 - [`viewer-avatar-debug-tools`](ready/viewer-avatar-debug-tools.md) — Avatar
   debug & maintenance tools (incl. Rebake)
+- [`viewer-avatar-keyframe-constraints`](ready/viewer-avatar-keyframe-constraints.md)
+  — Apply an animation's own joint constraints (ground and body-volume targets)
 - [`viewer-avatar-moderation-actions`](ready/viewer-avatar-moderation-actions.md)
   — Per-avatar parcel / estate moderation — the shared action layer (blocked by
   `viewer-region-options-estate` (done))
@@ -840,11 +841,20 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-render-closedness-check`](ready/viewer-render-closedness-check.md) —
   Closedness check — an object's faces must enclose a volume (blocked by
   `viewer-render-test-harness` (done))
+- [`viewer-render-hud-and-actor-axes`](ready/viewer-render-hud-and-actor-axes.md)
+  — HUD screen axis and the name-tag, particle and avatar actors (blocked by
+  `viewer-render-context-matrix` (done))
+- [`viewer-render-matrix-particles-projector-midnight`](ready/viewer-render-matrix-particles-projector-midnight.md)
+  — Render matrix — particles and the projector as subjects at midnight
 - [`viewer-render-metadata-overlays`](ready/viewer-render-metadata-overlays.md)
   — Render-metadata debug overlays
 - [`viewer-render-readback-tier`](ready/viewer-render-readback-tier.md) — Render
   readback tier — assert on the pixels, headlessly (blocked by
   `viewer-render-test-harness` (done))
+- [`viewer-render-rig-glow-pass`](ready/viewer-render-rig-glow-pass.md) — Run
+  the glow pass in the headless readback rig
+- [`viewer-render-rig-sky-ambient`](ready/viewer-render-rig-sky-ambient.md) —
+  Light that follows the sky reaches faces turned away from the sun
 - [`viewer-render-type-toggles`](ready/viewer-render-type-toggles.md) —
   Render-type & render-feature toggles (hide object classes, wireframe)
 - [`viewer-report-abuse`](ready/viewer-report-abuse.md) — Report Abuse floater
@@ -939,8 +949,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   telemetry, saying exactly what is sent
 - [`viewer-teleport-offer-maturity-prompt`](ready/viewer-teleport-offer-maturity-prompt.md)
   — Ask before accepting a teleport offer rated above the maturity preference
-- [`viewer-terrain-land-cache-on-disk`](ready/viewer-terrain-land-cache-on-disk.md)
-  — Persist the land-height cache to disk (ground floor available at login)
 - [`viewer-text-field-context-menu`](ready/viewer-text-field-context-menu.md) —
   Text-field edit context menu (cut / copy / paste / select all)
 - [`viewer-text-field-scrollbar`](ready/viewer-text-field-scrollbar.md) —
@@ -1005,9 +1013,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### test
 
-- [`fake-grid-own-attachments-and-region-moves`](ready/fake-grid-own-attachments-and-region-moves.md)
-  — Fake grid — the agent's own attachments, the COF, and region moves (blocked
-  by `gridspec-outfits-wearables` (done), `gridspec-attachments` (done))
 - [`test-asset-save-mutation-survey`](ready/test-asset-save-mutation-survey.md)
   — Does a grid hand back the asset you saved?
 - [`test-assets-gesture-codec`](ready/test-assets-gesture-codec.md) — Read and
@@ -1112,7 +1117,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-sl-mfa-challenge`](ready/gridspec-sl-mfa-challenge.md) — Record
   Second Life's MFA challenge and whether a remembered mfa_hash gets past it
 
-## blocked (35)
+## blocked (39)
 
 ### viewer
 
@@ -1165,16 +1170,25 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-pathfinding-floaters`)
 - [`viewer-projector-lights-spot-shadows`](blocked/viewer-projector-lights-spot-shadows.md)
   — Projector spot-shadow tier (blocked by `viewer-projector-lights-textured`)
-- [`viewer-render-hud-and-actor-axes`](blocked/viewer-render-hud-and-actor-axes.md)
-  — HUD screen axis and the name-tag, particle and avatar actors (blocked by
-  `viewer-render-context-matrix`)
+- [`viewer-render-matrix-glow-over-water`](blocked/viewer-render-matrix-glow-over-water.md)
+  — Render matrix — a glowing prim over and under the water surface (blocked by
+  `viewer-render-rig-glow-pass`)
+- [`viewer-render-matrix-hud-over-world`](blocked/viewer-render-matrix-hud-over-world.md)
+  — Render matrix — a prim on a HUD composited over a prim in the world (blocked
+  by `viewer-render-hud-and-actor-axes`)
+- [`viewer-render-matrix-name-tag-behind-glass`](blocked/viewer-render-matrix-name-tag-behind-glass.md)
+  — Render matrix — a name tag seen through a translucent prim (blocked by
+  `viewer-render-hud-and-actor-axes`)
 - [`viewer-render-matrix-pairwise`](blocked/viewer-render-matrix-pairwise.md) —
   The generated all-pairs sweep (opt-in) (blocked by
   `viewer-render-toggle-axis`, `viewer-render-hud-and-actor-axes`)
+- [`viewer-render-matrix-translucent-grazing-terrain`](blocked/viewer-render-matrix-translucent-grazing-terrain.md)
+  — Render matrix — a translucent prim seen at a grazing angle over terrain
+  (blocked by `viewer-render-hud-and-actor-axes`)
 - [`viewer-render-toggle-axis`](blocked/viewer-render-toggle-axis.md) — The
   toggle axis — every effect must differ where it should and nowhere else
-  (blocked by `viewer-render-context-matrix`, `viewer-render-overrides-resource`
-  (done))
+  (blocked by `viewer-render-context-matrix` (done),
+  `viewer-render-overrides-resource` (done), `viewer-render-rig-glow-pass`)
 - [`viewer-rlv-enforce-info-hiding`](blocked/viewer-rlv-enforce-info-hiding.md)
   — RLV — information hiding / anonymisation layer (blocked by
   `viewer-rlv-restriction-state` (done), `viewer-name-tags-decorations`,
@@ -1215,6 +1229,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### server
 
+- [`server-fake-grid-friend-edit-rights`](blocked/server-fake-grid-friend-edit-rights.md)
+  — Fake grid — a friend's edit right lets it edit the granter's objects
+  (blocked by `gridspec-friend-edit-rights`)
 - [`server-fake-grid-profiles`](blocked/server-fake-grid-profiles.md) — Fake
   grid — profiles, picks, classifieds and notes with each grid's quirks (blocked
   by `gridspec-profiles` (done), `protocol-sim-profile-messages`)
@@ -1231,26 +1248,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-voice`](blocked/gridspec-voice.md) — Voice provisioning and
   signalling on each grid (blocked by `viewer-voice-audio`)
 
-## in-progress (11)
+## in-progress (7)
 
 ### viewer
 
 - [`viewer-agentupdate-cadence-effects`](in-progress/viewer-agentupdate-cadence-effects.md)
   — Explore what the raised AgentUpdate/camera-interest cadence buys (and how
   the sim reacts)
-- [`viewer-avatar-falls-through-ground`](in-progress/viewer-avatar-falls-through-ground.md)
-  — Avatar falls through the ground (simulator reports a bouncing avatar
-  position)
-- [`viewer-avatar-ground-from-collision-plane`](in-progress/viewer-avatar-ground-from-collision-plane.md)
-  — Avatar ground probe from the simulator's collision plane (drop the raycast)
 - [`viewer-perf-pbr-shadow-cluster-rez`](in-progress/viewer-perf-pbr-shadow-cluster-rez.md)
   — Tune main-view shadow specialization + clustered lighting during rez
 - [`viewer-realtime-mirrors`](in-progress/viewer-realtime-mirrors.md) —
   Real-time mirrors (hero probes)
-- [`viewer-render-context-matrix`](in-progress/viewer-render-context-matrix.md)
-  — Render context matrix — subjects × eye, time of day, mirror, layering
-  (blocked by `viewer-render-pixel-oracle` (done), `viewer-plugin-groups`
-  (done), `viewer-render-gpu-serialisation` (done))
 - [`viewer-ui-text-caret-grapheme-motion`](in-progress/viewer-ui-text-caret-grapheme-motion.md)
   — Upstream issue — parley caret motion steps one codepoint, not one grapheme
 - [`viewer-ui-text-parley-pr-backdelete`](in-progress/viewer-ui-text-parley-pr-backdelete.md)
@@ -1260,12 +1268,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-text-renderability-axis`](in-progress/viewer-ui-text-renderability-axis.md)
   — Upstream issue — font selection cannot see glyph-format renderability
 
-### chat
-
-- [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
-  — Server-side group / session chat history ("fetch history")
-
-## bugs (36)
+## bugs (35)
 
 ### protocol
 
@@ -1287,9 +1290,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`prim-path-curve-byte-ignores-reference-mask`](bugs/prim-path-curve-byte-ignores-reference-mask.md)
   — PathCurve::from_byte matches the exact byte where the reference masks 0xf0
-- [`viewer-about-land-list-save-leaves-flags-stale`](bugs/viewer-about-land-list-save-leaves-flags-stale.md)
-  — Saving an allow or ban list on OpenSim leaves About Land's access flags
-  stale
 - [`viewer-automation-ground-reveal-eye-under-terrain`](bugs/viewer-automation-ground-reveal-eye-under-terrain.md)
   — A ground reveal can put the camera under higher ground beside the point
 - [`viewer-camera-framing-ends-inside-the-framed-object`](bugs/viewer-camera-framing-ends-inside-the-framed-object.md)
@@ -1358,7 +1358,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1520)
+## done (1530)
 
 ### protocol
 
@@ -1678,6 +1678,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-about-floater`](done/viewer-about-floater.md) — About floater —
   version, system info, credits, licenses (blocked by
   `viewer-ui-widget-scaffold` (done))
+- [`viewer-about-land-list-save-leaves-flags-stale`](done/viewer-about-land-list-save-leaves-flags-stale.md)
+  — Saving an allow or ban list on OpenSim leaves About Land's access flags
+  stale
 - [`viewer-about-land-options-tab`](done/viewer-about-land-options-tab.md) —
   About Land floater — Options tab
 - [`viewer-about-landmark-floater`](done/viewer-about-landmark-floater.md) —
@@ -1955,6 +1958,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   rubberband)
 - [`viewer-avatar-face-bone-shape-brow-spike`](done/viewer-avatar-face-bone-shape-brow-spike.md)
   — Mesh-head brow spikes forward from face-bone shape deformation
+- [`viewer-avatar-falls-through-ground`](done/viewer-avatar-falls-through-ground.md)
+  — Avatar falls through the ground (simulator reports a bouncing avatar
+  position)
+- [`viewer-avatar-ground-from-collision-plane`](done/viewer-avatar-ground-from-collision-plane.md)
+  — Avatar ground probe from the simulator's collision plane (drop the raycast)
 - [`viewer-avatar-mesh-accurate-pick`](done/viewer-avatar-mesh-accurate-pick.md)
   — Mesh-accurate avatar picking (replace the bounding-box approximation)
   (blocked by `viewer-avatar-context-menu` (done))
@@ -3138,6 +3146,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A resolved parcel id names no question, so two askers cannot be told apart
 - [`viewer-remove-attachment-message-is-a-no-op`](done/viewer-remove-attachment-message-is-a-no-op.md)
   — '`Command::RemoveAttachment` sends a message no grid handles'
+- [`viewer-render-context-matrix`](done/viewer-render-context-matrix.md) —
+  Render context matrix — subjects × eye, time of day, mirror, layering (blocked
+  by `viewer-render-pixel-oracle` (done), `viewer-plugin-groups` (done),
+  `viewer-render-gpu-serialisation` (done))
 - [`viewer-render-cpu-skinning-crosscheck`](done/viewer-render-cpu-skinning-crosscheck.md)
   — CPU-skinning cross-check — make the R13 debug affordance a standing test
   (blocked by `viewer-render-test-harness` (done))
@@ -3380,6 +3392,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-terrain-edit-brushes`](done/viewer-terrain-edit-brushes.md) — Terrain
   editing — sculpt brushes (blocked by `viewer-input-action-map` (done),
   `viewer-region-options-debug` (done))
+- [`viewer-terrain-land-cache-on-disk`](done/viewer-terrain-land-cache-on-disk.md)
+  — Persist the land-height cache to disk (ground floor available at login)
 - [`viewer-terrain-region-edge-seam-slope`](done/viewer-terrain-region-edge-seam-slope.md)
   — Terrain seam / misalignment at region edges on slopes
 - [`viewer-test-baseline-format`](done/viewer-test-baseline-format.md) — One
@@ -3768,6 +3782,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Per-session voice-channel state (signalling only)
 - [`chat-b9`](done/chat-b9-optional-local-chat-log-files-runtime-all-text-chat.md)
   — Optional local chat-log files (runtime, all text chat)
+- [`chat-group-history-server-side`](done/chat-group-history-server-side.md) —
+  Server-side group / session chat history ("fetch history")
+- [`chat-invitation-line-transcript-gaps`](done/chat-invitation-line-transcript-gaps.md)
+  — A conference invitation's line is not transcribed, and a group one is under
+  Do Not Disturb
 
 ### permission
 
@@ -3894,6 +3913,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### test
 
+- [`fake-grid-own-attachments-and-region-moves`](done/fake-grid-own-attachments-and-region-moves.md)
+  — Fake grid — the agent's own attachments, the COF, and region moves (blocked
+  by `gridspec-outfits-wearables` (done), `gridspec-attachments` (done))
 - [`test-agent-alert`](done/test-agent-alert-observe-agentalertmessage-alertmessage.md)
   — observe AgentAlertMessage / AlertMessage
 - [`test-ais3-folder-lifecycle`](done/test-ais3-folder-lifecycle-create-rename-move-remove-purge-a-folder-caps-ais3-on-sl-gat.md)
@@ -4407,8 +4429,13 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`server-bake-service`](done/server-bake-service.md) — Server-side appearance
   bake service (blocked by `gridspec-appearance-baking` (done))
+- [`server-fake-grid-agent-avatars-shared`](done/server-fake-grid-agent-avatars-shared.md)
+  — Fake grid — logged-in agents see each other's avatars (blocked by
+  `gridspec-avatar-presence` (done), `gridspec-animations` (done))
 - [`server-fake-grid-agent-experiences`](done/server-fake-grid-agent-experiences.md)
   — Fake grid — the agent's own five experience lists
+- [`server-fake-grid-attachment-resources`](done/server-fake-grid-attachment-resources.md)
+  — Fake grid — list what is worn in the attachment resources answer
 - [`server-fake-grid-friends-presence`](done/server-fake-grid-friends-presence.md)
   — Fake grid — a mutable friendship store with rights, presence fan-out and
   calling cards (blocked by `gridspec-friends-presence` (done))

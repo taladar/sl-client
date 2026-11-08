@@ -28,5 +28,8 @@ sl-viewer-world-api = { workspace = true }
 sl-viewer-world-objects = { workspace = true }
 sl-viewer-world-scene = { workspace = true }
 
+[dev-dependencies]
+pretty_assertions = { workspace = true }
+
 [lints]
 workspace = true

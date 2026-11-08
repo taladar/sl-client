@@ -11,6 +11,10 @@
 //! A live grid declares no heights to hold the viewer to, so the one test
 //! that runs there (`SL_E2E_GRID=opensim|aditi`) asks less: that the viewer
 //! has ground to rest the pointer on beside its avatar at all.
+//!
+//! And the ground outlives the session: a viewer that relogs into a region
+//! whose ground has not streamed yet still knows the height it stands on,
+//! from the land it kept on disk ([[viewer-terrain-land-cache-on-disk]]).
 
 #[cfg(test)]
 mod test {
@@ -147,6 +151,87 @@ mod test {
                     return Err(format!(
                         "asked for the ground at <{east}, {north}>, the pointer landed on \
                          <{hit_east}, {hit_north}, {height}>"
+                    )
+                    .into());
+                }
+                Ok(())
+            })?;
+        Ok(())
+    }
+
+    /// The height of [`KEPT_GROUND`], in metres: none of the stock fixtures'
+    /// heights, so only the region's own ground can be where it came from.
+    const KEPT_HEIGHT: f32 = 37.25;
+
+    /// A flat region at [`KEPT_HEIGHT`].
+    const KEPT_GROUND: Heightfield = Heightfield::Flat {
+        height: KEPT_HEIGHT,
+    };
+
+    /// How long a pick that must find no ground is given before it counts as
+    /// having found none.
+    const NO_GROUND_WAIT: Duration = Duration::from_secs(5);
+
+    /// Wait until `alpha`'s ground floor stands it on [`KEPT_HEIGHT`].
+    async fn stands_on_the_kept_ground(alpha: &Viewer, when: &str) -> Result<(), BodyError> {
+        let mut last = None;
+        let polled = tokio::time::timeout(WAIT, async {
+            loop {
+                let ground = alpha.agent().await?.ground_height;
+                if ground.is_some_and(|height| (height - KEPT_HEIGHT).abs() <= HEIGHT_SLOP) {
+                    return Ok::<(), BodyError>(());
+                }
+                last = ground;
+                tokio::time::sleep(Duration::from_millis(250)).await;
+            }
+        })
+        .await;
+        match polled {
+            Ok(result) => result,
+            Err(_elapsed) => Err(format!(
+                "{when}, the viewer has the ground under its avatar at {last:?}, and the \
+                 region's is {KEPT_HEIGHT} m"
+            )
+            .into()),
+        }
+    }
+
+    /// **The ground is kept across a relog**: a viewer that has stood in a
+    /// region logs out and back in while the region streams it no ground at
+    /// all — the login window before the terrain arrives, held open — and its
+    /// avatar's ground floor still has the region's height under it, read
+    /// from the land the viewer saved as it quit. The pointer finds no ground
+    /// to rest on, which is what says none streamed.
+    #[test]
+    fn the_ground_under_the_avatar_survives_a_relog_before_the_terrain_streams()
+    -> Result<(), TestError> {
+        StageBuilder::new("terrain_kept")
+            .viewer_binary(VIEWER)
+            .viewer("Alpha")
+            .region(RegionConfig {
+                terrain: TerrainFixture::default().with_heights(KEPT_GROUND),
+                ..RegionConfig::default()
+            })
+            .run(async |stage: &Stage| {
+                let alpha = stage.viewer("Alpha")?;
+                arrived(&alpha).await?;
+                stands_on_the_kept_ground(&alpha, "once the region's ground streamed").await?;
+
+                stage
+                    .grid()?
+                    .set_withholds_ground(stage.home_region(), true)?;
+                let alpha = stage.relog("Alpha").await?;
+                arrived(&alpha).await?;
+                stands_on_the_kept_ground(&alpha, "after a relog with no ground streamed").await?;
+                if let Ok(hit) = alpha
+                    .world()
+                    .ground(stage.home_region(), 140.0, 128.0)
+                    .timeout(NO_GROUND_WAIT)
+                    .hover()
+                    .await
+                {
+                    return Err(format!(
+                        "the region was to stream no ground, and the pointer rested on {hit:?}"
                     )
                     .into());
                 }

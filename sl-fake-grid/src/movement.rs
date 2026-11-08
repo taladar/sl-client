@@ -53,7 +53,7 @@ use sl_types::map::RegionCoordinates;
 use uuid::Uuid;
 
 use crate::driver::SimState;
-use crate::world::AVATAR_CENTRE_ABOVE_GROUND_M;
+use crate::world::{AVATAR_CENTRE_ABOVE_GROUND_M, RegionChange};
 
 /// How a grid moves an avatar, where the live grids disagree.
 #[expect(
@@ -923,10 +923,19 @@ pub(crate) fn advance(state: &mut SimState, step: Duration, now: Instant) {
         let mut world = state.world.lock();
         if to != from {
             world.objects.move_wearer(state.avatar.agent_id, &to);
+            // Where the region's other viewers place it between updates: the
+            // coarse feed and a private parcel go by it.
+            if let Some(resident) = world.resident_mut(state.avatar.agent_id) {
+                resident.at = to.clone();
+                resident.body.motion.position = to.clone();
+            }
         }
         let parcel = world.parcel_at(to.x, to.y).cloned();
         (world.avatar_id(state.avatar.agent_id), parcel)
     };
+    if to != from {
+        crate::driver::refresh_privacy(state, now);
+    }
     if stepped.posture_changed
         && state
             .animations
@@ -939,6 +948,18 @@ pub(crate) fn advance(state: &mut SimState, step: Duration, now: Instant) {
             &mut state.sim,
             now,
         );
+        // Every statement the agent is sent, the others are sent too.
+        let statement = state
+            .animations
+            .observed(state.animation_policy, state.avatar.agent_id);
+        let agent = state.avatar.agent_id;
+        state.tell_others(|resident| {
+            resident.animations.clone_from(&statement);
+            RegionChange::ResidentAnimated {
+                agent,
+                statement: Box::new(statement),
+            }
+        });
     }
     if let Some(motion) = stepped.update {
         let update = sl_proto::TerseUpdate {
@@ -946,13 +967,23 @@ pub(crate) fn advance(state: &mut SimState, step: Duration, now: Instant) {
             state: 0,
             motion,
         };
-        if let Err(error) =
-            state
-                .sim
-                .send_terse_update(&[update], crate::world::REAL_TIME_DILATION, now)
-        {
+        if let Err(error) = state.sim.send_terse_update(
+            core::slice::from_ref(&update),
+            crate::world::REAL_TIME_DILATION,
+            now,
+        ) {
             tracing::warn!("reporting the agent's avatar failed: {error}");
         }
+        // The region's other viewers are sent the same update at the same
+        // cadence, as both live grids send another avatar's.
+        let agent = state.avatar.agent_id;
+        state.tell_others(|resident| {
+            resident.body.motion.clone_from(&update.motion);
+            RegionChange::ResidentMoved {
+                agent,
+                update: Box::new(update),
+            }
+        });
     }
     if let Some(parcel) = parcel
         && let Some(sequence_id) = state.motion.crossed_into(
@@ -1309,6 +1340,29 @@ mod test {
             "{:?}",
             motion.posture()
         );
+    }
+
+    /// A tap of the jump key whose press and release both arrive between
+    /// two ticks still jumps.
+    #[test]
+    fn a_tap_between_two_ticks_jumps() {
+        for grid in [ImitatedGrid::OpenSim, ImitatedGrid::SecondLife] {
+            let policy = grid.movement_policy();
+            let mut motion = Motion::default();
+            hold(&mut motion, ControlFlags::UP_POS, 0.0);
+            hold(&mut motion, ControlFlags::empty(), 0.0);
+            let mut at = standing();
+            let mut highest = at.z;
+            for _tick in 0..40 {
+                at = motion.step(&policy, &Level, &at, STEP).position;
+                highest = highest.max(at.z);
+                // Second Life waits for the pre-jump to play out.
+                if motion.posture() == Posture::PreJump {
+                    hold(&mut motion, ControlFlags::FINISH_ANIM, 0.0);
+                }
+            }
+            assert!(highest - standing().z > 1.0, "{grid:?} rose to {highest}");
+        }
     }
 
     /// A change of motion is reported at once; a steady one at the

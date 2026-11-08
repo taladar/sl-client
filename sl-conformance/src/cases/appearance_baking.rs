@@ -46,8 +46,7 @@
 //! What each live grid answered is stated as a [`Measured`] and written up in
 //! `book/src/gridspec/appearance.md` § Baking; every run is held to it.
 //!
-//! `2av`, live and fake grids; on a fake grid B is shown nobody, so only A's
-//! own column is held there.
+//! `2av`, live and fake grids, both columns held on each.
 
 use std::time::Duration;
 
@@ -797,8 +796,9 @@ const MEASURED: &[(&str, Measured<Answer>)] = &[
     ),
 ];
 
-/// What each grid was measured to tell B of A: held on the live grids only.
-const MEASURED_LIVE: &[(&str, Measured<Answer>)] = &[
+/// What each grid was measured to tell B of A: every run, live or fake, is
+/// held to it.
+const MEASURED_SEEN: &[(&str, Measured<Answer>)] = &[
     ("arrival_seen_bakes_as_own", both(Answer::Text("the same"))),
     (
         "arrival_seen_block",
@@ -987,13 +987,7 @@ impl GridTest for AppearanceBaking {
             ctx.metrics().merge(metrics.clone());
             outcome
                 .and_then(|()| hold_to_measured(grid, &metrics, MEASURED, SOURCE))
-                .and_then(|()| {
-                    if grid.is_fake() {
-                        Ok(())
-                    } else {
-                        hold_to_measured(grid, &metrics, MEASURED_LIVE, SOURCE)
-                    }
-                })
+                .and_then(|()| hold_to_measured(grid, &metrics, MEASURED_SEEN, SOURCE))
         })
     }
 }

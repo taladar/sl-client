@@ -96,9 +96,55 @@ pub struct AvatarGround {
     /// exactly as the reference viewer holds `mFootPlane`. Pruned to the live rigged
     /// avatars each frame.
     planes: HashMap<AgentKey, [f32; 4]>,
+    /// The own avatar's feet as last posed, for the automation probe; `None` while
+    /// the own avatar is not a posed rigged body.
+    own_feet: Option<OwnFeet>,
+}
+
+/// One of the own avatar's feet as the pose pass left it: where its ankle joint is
+/// once every adjuster (the foot IK included) has run, and the ground the probe found
+/// under it — the two a test compares to see the foot planted.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PlantedFoot {
+    /// The posed ankle joint (Bevy world metres).
+    pub ankle: Vec3,
+    /// The ground under the ankle (Bevy world metres), or [`None`] when nothing is
+    /// within the probe's reach (airborne).
+    pub ground: Option<Vec3>,
+}
+
+/// The own avatar's two feet as last posed, and how far the foot IK was applied.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct OwnFeet {
+    /// The region the avatar is in, for turning the Bevy positions region-local.
+    pub region: RegionHandle,
+    /// The left foot.
+    pub left: PlantedFoot,
+    /// The right foot.
+    pub right: PlantedFoot,
+    /// The eased `[0, 1]` weight the foot IK was applied at: `1` on a standing
+    /// avatar with ground under it, `0` while it walks or is airborne.
+    pub foot_ik_weight: f32,
+    /// Whether one of the built-in stands is playing, the motions whose lower body
+    /// the foot IK plants (`LLKeyframeStandMotion`); an uploaded stand, as an
+    /// animation overrider plays one, keeps the animation's own legs, as in the
+    /// reference viewer.
+    pub standing: bool,
 }
 
 impl AvatarGround {
+    /// The own avatar's feet as the pose pass last left them, or [`None`] while the
+    /// own avatar is not a posed rigged body.
+    #[must_use]
+    pub const fn own_feet(&self) -> Option<OwnFeet> {
+        self.own_feet
+    }
+
+    /// Record the own avatar's feet as the pose pass left them this frame.
+    pub(crate) const fn set_own_feet(&mut self, feet: Option<OwnFeet>) {
+        self.own_feet = feet;
+    }
+
     /// The ground samples under `agent`, or all-[`None`] if it was not probed.
     #[must_use]
     pub(crate) fn get(&self, agent: AgentKey) -> AgentGround {

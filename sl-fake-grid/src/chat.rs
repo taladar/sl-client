@@ -22,9 +22,8 @@
 //!   at the listening object would hear, minus its own object's lines, owner-
 //!   says and the typing indicators, and only what its filter admits.
 //!
-//! Distance is measured from each hearer's position in the region. The fake
-//! grid tracks no walking, so an avatar is where it last arrived — its login
-//! or its last teleport.
+//! Distance is measured from each hearer's position in the region, where the
+//! region's avatar controller has it standing ([`crate::movement`]).
 //!
 //! A line carries **over a border**: an avatar standing in a neighbouring
 //! region hears it by the same ranges, measured to where it stands there.

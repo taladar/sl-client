@@ -420,6 +420,50 @@ fn wearable_body(name: &str, wearable_type: WearableType, param: i32, weight: f3
     asset.to_text(&FIXTURE_WEARABLE_PERMISSIONS).into_bytes()
 }
 
+/// One clothing layer a dressed fixture account wears: its slot, its name,
+/// the asset it names and the bytes the asset holds.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WornClothing {
+    /// The slot it fills.
+    pub wearable_type: WearableType,
+    /// The item's name.
+    pub name: &'static str,
+    /// The asset id the item carries.
+    pub asset_id: Uuid,
+    /// The bytes the id resolves to.
+    pub body: Vec<u8>,
+}
+
+/// The visual-param the worn pants carry (`pants_length`).
+const PANTS_PARAM: i32 = 615;
+
+/// The visual-param the worn shoes carry (`shoe_height`).
+const SHOES_PARAM: i32 = 616;
+
+/// What a dressed fixture account wears over its body parts: a pair of pants
+/// and a pair of shoes, in slot order — two clothing layers, as the live
+/// grids' test avatars wear, so that a case that copies the lowest slot's
+/// layer has one to copy. Neither is on a slot Second Life's placeholder
+/// wearables fill (skin, hair, eyes, shirt), so a census can tell the
+/// placeholders from the outfit.
+#[must_use]
+pub fn worn_clothing() -> Vec<WornClothing> {
+    vec![
+        WornClothing {
+            wearable_type: WearableType::Pants,
+            name: "Worn Pants",
+            asset_id: Uuid::from_u128(0x5EED_C107_0000_0000_0000_0000_0000_0005),
+            body: wearable_body("Worn Pants", WearableType::Pants, PANTS_PARAM, 0.5),
+        },
+        WornClothing {
+            wearable_type: WearableType::Shoes,
+            name: "Worn Shoes",
+            asset_id: Uuid::from_u128(0x5EED_C107_0000_0000_0000_0000_0000_0006),
+            body: wearable_body("Worn Shoes", WearableType::Shoes, SHOES_PARAM, 0.5),
+        },
+    ]
+}
+
 /// An object body of `prims` prims: one box, or a root and that many children
 /// linked to it — the two shapes an object asset comes in.
 ///

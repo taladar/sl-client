@@ -317,6 +317,16 @@ pub(crate) async fn post_chat_session_fetch_history(
         report_caps_failure(&caps_tx, CHAT_SESSION_FETCH_HISTORY_TAG).await;
         return;
     };
+    tracing::debug!(
+        capability = CHAT_SESSION_FETCH_HISTORY_TAG,
+        %session_id,
+        %status,
+        records = match &reply {
+            Llsd::Array(records) => records.len(),
+            _other => 0,
+        },
+        "ChatSessionRequest answered fetch history"
+    );
     let mut map = HashMap::new();
     let _previous = map.insert("history".to_owned(), reply);
     let _previous = map.insert("session-id".to_owned(), Llsd::Uuid(session_id));

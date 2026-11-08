@@ -10,7 +10,7 @@ the exception, for behaviour no tier reaches yet.
 | Geometry | `sl-client-bevy-viewer/src/render_test.rs` | meshes, samplers, transforms, logs — no GPU |
 | UI layout | `sl-viewer-testkit` (`LayoutTest`) | bevy_ui layout with real fonts — no renderer |
 | Interaction | `sl-viewer-testkit::interact` (`InteractionTest`), viewer `world_test.rs` (`WorldTest`) | synthetic pointer/keyboard into the UI and into a headless fixture world |
-| Render matrix | `sl-client-bevy-viewer/src/render_readback.rs`, `render_matrix.rs` | pixels of registered scenes under context axes (eye, time of day, mirror, layering, toggles, HUD) |
+| Render matrix | `sl-client-bevy-viewer/src/render_readback.rs`, `render_stage.rs`, `render_matrix.rs` | pixels of registered scenes under context axes (eye, time of day, mirror, layering, toggles) |
 | Full stack | `sl-client-bevy-viewer/src/full_stack_test.rs` + `sl-fake-grid` | the real client stack against an in-process grid, read back as pixels |
 | Baselines | `sl-viewer-testkit::baseline`, `baselines/` | recorded derived facts that may not drift by accident |
 
@@ -24,8 +24,8 @@ extend the harness and fills in as the tiers land.
   test-group defined in `.config/nextest.toml`, one GPU app at a time;
   plain `cargo test` serialises them through `gpu_lock()`.
 - The all-pairs render sweep is opt-in:
-  `SL_VIEWER_RENDER_MATRIX=full cargo nextest run -P gpu-full -p
-  sl-client-bevy-viewer`.
+  `SL_VIEWER_RENDER_MATRIX=full cargo nextest run -p sl-client-bevy-viewer
+  render_matrix::all_pairs`.
 - A machine without a GPU adapter skips the GPU tiers with a logged
   warning; it never fails them silently.
 
@@ -38,6 +38,38 @@ extend the harness and fills in as the tiers land.
 - Expected verdicts are rules (opaque in front → hidden; translucent in
   front → see-through), not per-cell tables.
 - A capture is taken only once the scene has settled.
+
+## The render context matrix
+
+`render_matrix.rs` captures every registered subject on its own (R0) and
+then under the contexts it declares (R1), plus a curated set of pairs (R2)
+and, opt-in, every pair (`SL_VIEWER_RENDER_MATRIX=full`).
+
+- A **subject** is a `RenderScene` in `sl-viewer-render-fixtures` with
+  `subject: Some(SubjectSignature { marker, points, translucent, emissive })`
+  and the axes it means something under in `applies` (at most four). Its
+  bounds are measured from the geometry tier's tessellation, never
+  declared. A scene whose subject is the whole frame (a sky, a sea, light
+  on a wall) has `subject: None` and is listed with its reason in
+  `render_matrix.rs`'s `SELF_STAGED`.
+- The **axes** are `ContextSet`'s slots: `eye` (the subject centred on the
+  waterline, the eye under, grazing or over the sea), `time` (the real sky
+  stack at one of four anchors, with a matte white calibration plate),
+  `viewpoint` (a hero-probe mirror beside the subject), `layering` (a red
+  wall in front of or behind it, opaque or half transparent) and `toggle`
+  (a render feature the bare rig leaves off, used only in curated pairs).
+- `render_stage.rs` stages a cell, renders it with the subject and again
+  with the subject hidden, and reads it: a subject, and its reflection in
+  a mirror, by what it changed; a marked subject's points by colour.
+  Its `expectation()` is the rule table: an opaque actor in front hides the
+  subject, a translucent one is seen through, a wall behind shows through a
+  translucent subject, an edge-on or shallowly refracted point is reported
+  rather than asserted, and everything else is visible.
+- The time sweep also orders luminance: the plate, and a lit subject's own
+  surface, must be brighter at midday than at midnight. A toggled R2 cell
+  must differ from the same cell untoggled.
+- Each sweep has a **capture budget** (`R1_BUDGET`, `R2_BUDGET`,
+  `FULL_BUDGET`) that a registry test enforces without a GPU.
 
 ## The full-stack tier
 

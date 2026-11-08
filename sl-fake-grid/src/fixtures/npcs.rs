@@ -1,12 +1,12 @@
 //! NPC fixtures: other avatars, as content rather than as sessions.
 //!
-//! The fake grid rezzes only the arriving agent's own avatar and has no
-//! inter-session broadcast, so a second logged-in avatar is invisible to the
-//! first. Everything a viewer does with *other* people — the body, the bakes,
-//! the name tag, the playing animation, the attachment that follows a wearer —
-//! is therefore modelled here as scripted content: an [`NpcFixture`] on the
-//! region's [`SceneFixtures`](crate::world::SceneFixtures), pushed at every
-//! arriving agent in the same burst as the prims.
+//! Logged-in residents see each other (`world::Resident`); an NPC
+//! is somebody a test wants without logging a second viewer in. Everything a
+//! viewer does with *other* people — the body, the bakes, the name tag, the
+//! playing animation, the attachment that follows a wearer — can be scripted
+//! here as content: an [`NpcFixture`] on the region's
+//! [`SceneFixtures`](crate::world::SceneFixtures), pushed at every arriving
+//! agent in the same burst as the prims.
 //!
 //! What reaches the wire per NPC, in the order a simulator sends it:
 //!

@@ -1,11 +1,13 @@
 //! End-to-end tests for what two residents see of each other
 //! ([[test-e2e-sweep-two-avatars]]).
 //!
-//! On the fake grid two stage viewers do not see each other's avatars and
-//! their IMs are not relayed, so the other resident is played by the grid:
-//! a friend account that never logs in, a catalogue NPC, or a message the
-//! test sends through the viewer's own session. What only a real grid
-//! relays runs there (`SL_E2E_GRID=opensim|aditi`) and skips here:
+//! Two stage viewers share one fake-grid region: each sees the other's
+//! avatar, and IMs, typing, offers and bakes are relayed between them. A
+//! resident who never needs a viewer of their own is played by the grid: a
+//! friend account that never logs in, a catalogue NPC, or a message the test
+//! sends through the viewer's own session. Tests marked (live) still need a
+//! real grid (`SL_E2E_GRID=opensim|aditi`) and skip here, each naming the
+//! fake-grid task that lifts it:
 //!
 //! - a friend's edit-objects right asks before it is granted, Cancel sends
 //!   nothing, and every toggle — and a right the friend grants — reaches the
@@ -28,25 +30,32 @@
 //! - two residents befriend each other with a message and trade rights
 //!   (live);
 //! - a teleport offer is declined without a word to the offerer, and a second
-//!   one is taken (live);
+//!   one is taken;
 //! - two editors of one prim: what the loser is told (live);
 //! - the world map knows the region it is opened in, draws its tiles and
 //!   counts the other resident there, and its search finds the region as
-//!   each grid matches names (live);
+//!   each grid matches names;
 //! - the region states back the complexity the viewer reports, in the radar's
 //!   Reported column and on the name tag, and on Second Life states the other
-//!   resident's (live).
+//!   resident's;
+//! - a block is kept by the grid across a relog and the radar unblocks it
+//!   (live);
+//! - a profile shows its avatar online with its groups (live);
+//! - a group tab draws a line recalled from the viewer's transcript, one
+//!   fetched from the grid's history and a live one each in its own colour;
+//!   a third viewer keeps the group session populated (live).
 
 #[cfg(test)]
 mod test {
     use core::time::Duration;
+    use std::collections::BTreeSet;
     use std::path::Path;
     use std::time::Instant;
 
     use pretty_assertions::assert_eq;
     use serde_json::json;
     use sl_automation_proto::{Locator, LogStream, NodeVisibility, Probe, Role};
-    use sl_e2e::{BodyError, FIRST_NAME, Need, Stage, StageBuilder};
+    use sl_e2e::{BodyError, FIRST_NAME, Grid, Need, Stage, StageBuilder};
     use sl_fake_grid::fixtures::scenarios;
     use sl_fake_grid::scenario::{STOCK_PARCEL_LOCAL_ID, STOCK_PARCEL_NAME};
     use sl_fake_grid::{AccountConfig, AvatarIdentity, ImitatedGrid, NpcFixture, RegionConfig};
@@ -1492,7 +1501,9 @@ mod test {
                     "the arrival raised the radar sound"
                 );
 
-                // A resident the neighbour region knows only coarsely.
+                // A resident the neighbour region knows only coarsely: its
+                // periodic coarse feed lists them from now on, the first
+                // update sent at once.
                 let faraway = account_id(stage, FARAWAY)?;
                 let own = stage.agent_id("Alpha")?;
                 let child = stage
@@ -1505,17 +1516,14 @@ mod test {
                 let now = child.now();
                 child
                     .with_sim(|sim| {
-                        sim.send_coarse_location_update(
-                            &[CoarseLocation {
-                                agent_id: faraway,
-                                x: 20,
-                                y: 128,
-                                z: 24,
-                            }],
-                            None,
-                            None,
-                            now,
-                        )
+                        let listed = vec![CoarseLocation {
+                            agent_id: faraway,
+                            x: 20,
+                            y: 128,
+                            z: 24,
+                        }];
+                        sim.set_coarse_others(listed.clone());
+                        sim.send_coarse_location_update(&listed, None, None, now)
                     })
                     .await
                     .map_err(|error| format!("the neighbour's coarse update: {error}"))?;
@@ -1705,6 +1713,15 @@ mod test {
     /// by its parcel, so it is found by its title (the parcel's name) and
     /// addressed by its test id from then on.
     async fn about_land(viewer: &Viewer) -> Result<UiLocator, BodyError> {
+        Ok(about_land_on(viewer, "about-land-tab-general").await?.0)
+    }
+
+    /// [`about_land`], on the tab `tab_key`, with the window's instance key
+    /// (what the floaters it opens are keyed under).
+    async fn about_land_on(
+        viewer: &Viewer,
+        tab_key: &str,
+    ) -> Result<(UiLocator, String), BodyError> {
         let _opened = viewer
             .menu_path(&["menu-bar-world", "menu-bar-about-land"])
             .await?;
@@ -1714,17 +1731,19 @@ mod test {
             .timeout(WAIT)
             .node()
             .await?;
-        let window = viewer.ui().test_id(
-            titled
-                .test_id
-                .as_deref()
-                .ok_or("an About Land window with no test id")?,
-        );
-        let _general = window
-            .get(Locator::role(Role::Tab).name_key("about-land-tab-general"))
+        let test_id = titled
+            .test_id
+            .ok_or("an About Land window with no test id")?;
+        let instance = test_id
+            .strip_prefix("floater:about-land#")
+            .ok_or_else(|| format!("an About Land window keyed oddly: {test_id}"))?
+            .to_owned();
+        let window = viewer.ui().test_id(&test_id);
+        let _tab = window
+            .get(Locator::role(Role::Tab).name_key(tab_key))
             .click()
             .await?;
-        Ok(window)
+        Ok((window, instance))
     }
 
     /// **An open window follows a push**: Alpha watches the parcel's About
@@ -1777,6 +1796,82 @@ mod test {
                     .timeout(WAIT)
                     .to_have_text(RENAMED)
                     .await?;
+                Ok(())
+            })?;
+        Ok(())
+    }
+
+    /// **A list save re-reads the parcel's flags**: on OpenSim, saving an
+    /// allow list with somebody on it closes the parcel by itself (the
+    /// `USE_ACCESS_LIST` flag goes on), and emptying it opens it again —
+    /// with no push to say so. Beta, who owns the parcel, adds Alpha to the
+    /// allowed list and the Access tab's "anyone can visit" box clears;
+    /// removing Alpha ticks it again.
+    #[test]
+    fn an_allow_list_save_moves_the_anyone_can_visit_box() -> Result<(), TestError> {
+        stage("about_land_list_flags", &["Alpha", "Beta"])
+            .needs(Need::GridControl)
+            .needs(Need::OpenSim(
+                "saving an access list switches the parcel's list flag",
+            ))
+            .run(async |stage: &Stage| {
+                let beta = &stage.viewer("Beta")?;
+                let owner = stage.agent_id("Beta")?;
+                let allowed = stage.agent_id("Alpha")?;
+                let agent = stage.agent("Beta").await?;
+                let now = agent.now();
+                agent
+                    .with_world(|world, sim| {
+                        let parcel = world
+                            .parcel_mut(STOCK_PARCEL_LOCAL_ID)
+                            .ok_or_else(|| "the stock parcel is missing".to_owned())?;
+                        parcel.owner = OwnerKey::Agent(owner);
+                        let record = parcel.clone();
+                        sim.send_parcel_properties(&record, now)
+                            .map_err(|error| format!("telling Beta it owns the parcel: {error}"))
+                    })
+                    .await?;
+                let (access, instance) = about_land_on(beta, "about-land-tab-access").await?;
+                let public = access.test_id("about-land-access-public:checkbox");
+                let _open = beta.expect(&public).timeout(WAIT).to_be_checked().await?;
+                let _editable = beta.expect(&public).timeout(WAIT).to_be_enabled().await?;
+
+                // The allowed list's Add comes first; the banned list's second.
+                let _add = access
+                    .test_id("about-land-button:about-land-add")
+                    .nth(0)
+                    .click()
+                    .await?;
+                let picker = beta.ui().window(&format!(
+                    "avatar-picker#about-land/{instance}/about-land-allow"
+                ));
+                // A pasted key is looked up by id, which the grid answers
+                // without a name search.
+                let _typed = picker
+                    .test_id("avatar-picker-search:field")
+                    .fill(&allowed.uuid().to_string())
+                    .await?;
+                let _go = picker
+                    .test_id("avatar-picker:avatar-picker-go")
+                    .click()
+                    .await?;
+                let _row = picker
+                    .test_id("avatar-picker-row")
+                    .timeout(WAIT)
+                    .click()
+                    .await?;
+                let _ok = picker
+                    .test_id("avatar-picker:avatar-picker-ok")
+                    .click()
+                    .await?;
+                let _closed = beta.expect(&public).timeout(WAIT).to_be_unchecked().await?;
+
+                let _removed = access
+                    .test_id("about-land-button:remove-access")
+                    .timeout(WAIT)
+                    .click()
+                    .await?;
+                let _reopened = beta.expect(&public).timeout(WAIT).to_be_checked().await?;
                 Ok(())
             })?;
         Ok(())
@@ -2118,15 +2213,17 @@ mod test {
         Ok(())
     }
 
-    // ---- Live grids -------------------------------------------------------
+    // ---- Two viewers ------------------------------------------------------
 
-    /// What only a live grid does yet: two viewers seeing each other. Their
-    /// messages reach each other on the fake grid too since
-    /// `server-fake-grid-im-relay`; their avatars do not.
-    const RELAYED: Need = Need::LiveGrid(
-        "two viewers that see each other's avatars and reach each other \
-         (server-fake-grid-agent-avatars-shared)",
-    );
+    /// Whether the grid the stage runs on behaves as Second Life: aditi, and
+    /// the fake grid, which imitates Second Life unless a stage says
+    /// otherwise.
+    fn second_life() -> bool {
+        matches!(
+            std::env::var("SL_E2E_GRID").as_deref(),
+            Ok("aditi" | "fake") | Err(_)
+        )
+    }
 
     /// How long a live grid may take to tell one viewer what another did.
     const LIVE_WAIT: Duration = Duration::from_secs(120);
@@ -2291,7 +2388,9 @@ mod test {
     #[test]
     fn a_live_block_is_kept_by_the_grid_and_the_radar_unblocks_it() -> Result<(), TestError> {
         stage("live_block", &["Alpha", "Beta"])
-            .needs(RELAYED)
+            .needs(Need::LiveGrid(
+                "a grid that keeps the mute list across a relog (server-fake-grid-mute-list)",
+            ))
             .run(async |stage: &Stage| {
                 let alpha = &stage.viewer("Alpha")?;
                 let beta = &stage.viewer("Beta")?;
@@ -2450,39 +2549,37 @@ mod test {
     /// offers again, Beta presses Teleport, and arrives beside Alpha.
     #[test]
     fn a_live_teleport_offer_is_declined_in_silence_and_then_taken() -> Result<(), TestError> {
-        stage("live_lure", &["Alpha", "Beta"])
-            .needs(RELAYED)
-            .run(async |stage: &Stage| {
-                let alpha = &stage.viewer("Alpha")?;
-                let beta = &stage.viewer("Beta")?;
-                gather(stage, alpha, beta).await?;
-                let beta_name = shown_name(stage, alpha, "Beta").await?;
-                let home = alpha.agent().await?.region.and_then(|region| region.name);
+        stage("live_lure", &["Alpha", "Beta"]).run(async |stage: &Stage| {
+            let alpha = &stage.viewer("Alpha")?;
+            let beta = &stage.viewer("Beta")?;
+            gather(stage, alpha, beta).await?;
+            let beta_name = shown_name(stage, alpha, "Beta").await?;
+            let home = alpha.agent().await?.region.and_then(|region| region.name);
 
-                offer_teleport_from_radar(alpha, beta, &beta_name).await?;
-                let rated = offer_card(beta)
-                    .get(Locator::role(Role::Text).name_containing(RATING_LINE))
-                    .count()
-                    .await?;
-                let states_a_rating = std::env::var("SL_E2E_GRID").as_deref() == Ok("aditi");
-                assert_eq!(
-                    rated,
-                    usize::from(states_a_rating),
-                    "the card shows a rating exactly when the grid's offers state one"
-                );
-                let told_before = teleport_notices(alpha).await?;
-                answer_offer(beta, "Decline").await?;
-                tokio::time::sleep(DECLINE_WATCH).await;
-                assert_eq!(
-                    teleport_notices(alpha).await?,
-                    told_before,
-                    "the offerer is told nothing of a declined offer"
-                );
+            offer_teleport_from_radar(alpha, beta, &beta_name).await?;
+            let rated = offer_card(beta)
+                .get(Locator::role(Role::Text).name_containing(RATING_LINE))
+                .count()
+                .await?;
+            let states_a_rating = second_life();
+            assert_eq!(
+                rated,
+                usize::from(states_a_rating),
+                "the card shows a rating exactly when the grid's offers state one"
+            );
+            let told_before = teleport_notices(alpha).await?;
+            answer_offer(beta, "Decline").await?;
+            tokio::time::sleep(DECLINE_WATCH).await;
+            assert_eq!(
+                teleport_notices(alpha).await?,
+                told_before,
+                "the offerer is told nothing of a declined offer"
+            );
 
-                offer_teleport_from_radar(alpha, beta, &beta_name).await?;
-                take_offered_teleport(beta, home).await?;
-                Ok(())
-            })?;
+            offer_teleport_from_radar(alpha, beta, &beta_name).await?;
+            take_offered_teleport(beta, home).await?;
+            Ok(())
+        })?;
         Ok(())
     }
 
@@ -2497,69 +2594,75 @@ mod test {
     fn the_live_world_map_knows_the_region_and_who_is_in_it() -> Result<(), TestError> {
         /// The item type of agent locations.
         const AGENT_LOCATIONS: u32 = 6;
-        stage("live_world_map", &["Alpha", "Beta"])
-            .needs(RELAYED)
-            .run(async |stage: &Stage| {
-                let alpha = &stage.viewer("Alpha")?;
-                let beta = &stage.viewer("Beta")?;
-                gather(stage, alpha, beta).await?;
-                let here = alpha.agent().await?.region.ok_or("Alpha is in no region")?;
-                let name = here.name.clone().ok_or("Alpha's region has no name")?;
-                let cell = [
-                    u32::try_from(here.handle >> 32)? / 256,
-                    u32::try_from(here.handle & 0xFFFF_FFFF)? / 256,
-                ];
-                let _opened = alpha
-                    .menu_path(&["menu-bar-world", "menu-bar-world-map"])
-                    .await?;
-                let known = tokio::time::timeout(LIVE_WAIT, async {
-                    loop {
-                        let map = alpha.world_map().await?;
-                        let named = map
-                            .regions
-                            .iter()
-                            .any(|region| region.grid == cell && region.name == name);
-                        let somebody = map.items.iter().any(|layer| {
-                            layer.grid == cell
-                                && layer.kind == AGENT_LOCATIONS
-                                && layer.items.iter().any(|item| item.drawn && item.extra >= 1)
-                        });
-                        if named && somebody && map.tiles_ready > 0 {
-                            return Ok::<_, BodyError>(map);
-                        }
-                        tokio::time::sleep(Duration::from_secs(1)).await;
+        stage("live_world_map", &["Alpha", "Beta"]).run(async |stage: &Stage| {
+            let alpha = &stage.viewer("Alpha")?;
+            let beta = &stage.viewer("Beta")?;
+            gather(stage, alpha, beta).await?;
+            let here = alpha.agent().await?.region.ok_or("Alpha is in no region")?;
+            let name = here.name.clone().ok_or("Alpha's region has no name")?;
+            let cell = [
+                u32::try_from(here.handle >> 32)? / 256,
+                u32::try_from(here.handle & 0xFFFF_FFFF)? / 256,
+            ];
+            let _opened = alpha
+                .menu_path(&["menu-bar-world", "menu-bar-world-map"])
+                .await?;
+            let last = std::sync::Mutex::new((false, false, 0_usize));
+            let known = tokio::time::timeout(LIVE_WAIT, async {
+                loop {
+                    let map = alpha.world_map().await?;
+                    let named = map
+                        .regions
+                        .iter()
+                        .any(|region| region.grid == cell && region.name == name);
+                    let somebody = map.items.iter().any(|layer| {
+                        layer.grid == cell
+                            && layer.kind == AGENT_LOCATIONS
+                            && layer.items.iter().any(|item| item.drawn && item.extra >= 1)
+                    });
+                    if let Ok(mut last) = last.lock() {
+                        *last = (named, somebody, map.tiles_ready);
                     }
-                })
-                .await
-                .map_err(
-                    |_elapsed| "the world map never came to know its own region, a tile and Beta",
-                )??;
-                assert!(
-                    known.tile_server.is_some(),
-                    "tiles are drawn from a tile server the grid named"
-                );
+                    if named && somebody && map.tiles_ready > 0 {
+                        return Ok::<_, BodyError>(map);
+                    }
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                }
+            })
+            .await
+            .map_err(|_elapsed| {
+                format!(
+                    "the world map never came to know its own region, a tile and Beta: \
+                         (named, somebody, tiles ready) last read {:?}",
+                    last.lock().map(|last| *last).ok()
+                )
+            })??;
+            assert!(
+                known.tile_server.is_some(),
+                "tiles are drawn from a tile server the grid named"
+            );
 
-                let map = alpha.ui().window("worldmap");
-                let start: String = name.chars().take(4).collect();
-                let mut searches = vec![start];
-                if std::env::var("SL_E2E_GRID").as_deref() == Ok("opensim") {
-                    let skipped = name.chars().count().saturating_sub(4);
-                    searches.push(name.chars().skip(skipped).collect());
-                }
-                for text in searches {
-                    let _typed = map
-                        .test_id("worldmap:search")
-                        .role(Role::Textbox)
-                        .fill(&text)
-                        .await?;
-                    let _listed = alpha
-                        .expect(&map.get(Locator::role(Role::ListItem).named(&name)))
-                        .timeout(LIVE_WAIT)
-                        .to_be_visible()
-                        .await?;
-                }
-                Ok(())
-            })?;
+            let map = alpha.ui().window("worldmap");
+            let start: String = name.chars().take(4).collect();
+            let mut searches = vec![start];
+            if std::env::var("SL_E2E_GRID").as_deref() == Ok("opensim") {
+                let skipped = name.chars().count().saturating_sub(4);
+                searches.push(name.chars().skip(skipped).collect());
+            }
+            for text in searches {
+                let _typed = map
+                    .test_id("worldmap:search")
+                    .role(Role::Textbox)
+                    .fill(&text)
+                    .await?;
+                let _listed = alpha
+                    .expect(&map.get(Locator::role(Role::ListItem).named(&name)))
+                    .timeout(LIVE_WAIT)
+                    .to_be_visible()
+                    .await?;
+            }
+            Ok(())
+        })?;
         Ok(())
     }
 
@@ -2571,7 +2674,9 @@ mod test {
     #[test]
     fn a_live_profile_shows_its_avatar_online_with_its_groups() -> Result<(), TestError> {
         stage("live_profile", &["Alpha", "Beta"])
-            .needs(RELAYED)
+            .needs(Need::LiveGrid(
+                "a grid that serves a resident's profile (server-fake-grid-profiles)",
+            ))
             .run(async |stage: &Stage| {
                 let alpha = &stage.viewer("Alpha")?;
                 let beta = &stage.viewer("Beta")?;
@@ -2605,6 +2710,226 @@ mod test {
         Ok(())
     }
 
+    /// The grey a group line recalled from the viewer's own transcript is
+    /// drawn in (the skins' `--chat-recall`).
+    const RECALL_INK: &str = "#808080";
+
+    /// The muted green of a group line only the grid's history holds (the
+    /// skins' `--chat-server-history`).
+    const SERVER_HISTORY_INK: &str = "#5e8261";
+
+    /// The label of the Groups tab's "no group" row, in the stage's English.
+    const NO_GROUP_ROW: &str = "(none)";
+
+    /// The groups `viewer` lists on its Groups tab, once it lists one.
+    async fn listed_groups(viewer: &Viewer) -> Result<BTreeSet<String>, BodyError> {
+        let window = people_tab(viewer, "people-groups-tab").await?;
+        let rows = window.test_id("groups-row-name");
+        tokio::time::timeout(LIVE_WAIT, async {
+            loop {
+                let names: BTreeSet<String> = rows
+                    .nodes()
+                    .await?
+                    .into_iter()
+                    .filter_map(|node| node.name)
+                    .filter(|name| !name.is_empty() && name != NO_GROUP_ROW)
+                    .collect();
+                if !names.is_empty() {
+                    return Ok::<_, BodyError>(names);
+                }
+                tokio::time::sleep(Duration::from_millis(500)).await;
+            }
+        })
+        .await
+        .map_err(|_elapsed| "the Groups tab never listed a group")?
+    }
+
+    /// What the groups census names the group it founds and measures in
+    /// (`gs census <word>`), on every grid the test avatars log in to.
+    const CENSUS_GROUP_PREFIX: &str = "gs census ";
+
+    /// The census group, which every one of `viewers`' avatars is in. The
+    /// avatars share leftover groups of earlier runs too, so the stage picks
+    /// the census group by name, and refuses when there is not exactly one,
+    /// so it never speaks in a group nobody chose for it.
+    async fn shared_group(viewers: &[&Viewer]) -> Result<String, BodyError> {
+        let mut shared: Option<BTreeSet<String>> = None;
+        for viewer in viewers {
+            let listed = listed_groups(viewer).await?;
+            shared = Some(match shared {
+                Some(so_far) => so_far.intersection(&listed).cloned().collect(),
+                None => listed,
+            });
+        }
+        let shared: Vec<String> = shared
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|name| name.starts_with(CENSUS_GROUP_PREFIX))
+            .collect();
+        match shared.as_slice() {
+            [one] => Ok(one.clone()),
+            _ => Err(format!(
+                "the two avatars must share exactly one census group \
+                 (\"{CENSUS_GROUP_PREFIX}…\"); they share {shared:?}"
+            )
+            .into()),
+        }
+    }
+
+    /// Of the nodes `locator` names, the one that is drawn: a conversation's
+    /// pane is laid out away while another tab is shown, and keeps its nodes.
+    /// The tab can be listed a frame before its pane is built, so this waits
+    /// for one to be attached first.
+    async fn drawn_one(viewer: &Viewer, locator: &UiLocator) -> Result<UiLocator, BodyError> {
+        let nodes = viewer
+            .expect(locator)
+            .timeout(LIVE_WAIT)
+            .to_be_attached()
+            .await?;
+        let index = nodes
+            .iter()
+            .position(|node| node.visibility == NodeVisibility::Visible)
+            .ok_or_else(|| format!("none of {nodes:#?} is drawn"))?;
+        Ok(locator.nth(u32::try_from(index)?))
+    }
+
+    /// Show the conversation tab of `group` in `viewer`'s Conversations
+    /// window, once there is one; the window.
+    async fn group_tab(viewer: &Viewer, group: &str) -> Result<UiLocator, BodyError> {
+        let window = viewer.open_floater("conversations").await?;
+        let tab = window.get(Locator::role(Role::Tab).name_containing(group));
+        let _shown = tab.timeout(LIVE_WAIT).click().await?;
+        Ok(window)
+    }
+
+    /// `viewer` opens `group`'s chat from its Groups tab, as a person does:
+    /// the row, then IM.
+    async fn open_group_chat(viewer: &Viewer, group: &str) -> Result<(), BodyError> {
+        let window = people_tab(viewer, "people-groups-tab").await?;
+        let _picked = window
+            .get(Locator::test_id("groups-row-name").named(group))
+            .click()
+            .await?;
+        let _im = window.button_key("groups-action-im").click().await?;
+        Ok(())
+    }
+
+    /// `viewer` says `line` in `group`'s open chat.
+    async fn say_in_group(viewer: &Viewer, group: &str, line: &str) -> Result<(), BodyError> {
+        let window = group_tab(viewer, group).await?;
+        let field = drawn_one(viewer, &window.test_id("conversations-im-input:field")).await?;
+        let _typed = field.fill(line).await?;
+        field.press("Enter").await?;
+        Ok(())
+    }
+
+    /// The colour `viewer` draws the transcript text holding `line` in, on
+    /// `group`'s tab, once `accept` takes it: the history bands land after
+    /// the live line that opened the tab, whichever reply comes first.
+    async fn group_line_ink(
+        viewer: &Viewer,
+        group: &str,
+        line: &str,
+        accept: impl Fn(&str) -> bool + Send + Sync,
+    ) -> Result<String, BodyError> {
+        let window = group_tab(viewer, group).await?;
+        let text = window.get(Locator::role(Role::Text).name_containing(line));
+        let mut last = None;
+        let deadline = Instant::now()
+            .checked_add(LIVE_WAIT)
+            .ok_or("the wait overflows the clock")?;
+        while Instant::now() < deadline {
+            let shown = viewer
+                .expect(&text)
+                .timeout(LIVE_WAIT)
+                .to_be_attached()
+                .await?;
+            if let [node] = shown.as_slice()
+                && let Some(ink) = &node.color
+                && accept(ink)
+            {
+                return Ok(ink.clone());
+            }
+            last = Some(
+                shown
+                    .iter()
+                    .map(|node| (node.name.clone(), node.color.clone()))
+                    .collect::<Vec<_>>(),
+            );
+            tokio::time::sleep(Duration::from_millis(500)).await;
+        }
+        Err(format!("{line:?} was never drawn as wanted: last {last:?}").into())
+    }
+
+    /// **Group chat history, live**: in the census group, Beta says a line
+    /// Alpha hears, another while Alpha is logged out, and a third once Alpha
+    /// is back, which opens Alpha's group tab. Gamma stays in the session
+    /// throughout: Second Life neither broadcasts nor keeps a line said to a
+    /// session with one participant left ("You are the only participant in
+    /// this IM session"). The tab draws
+    /// the first from Alpha's own transcript in grey and, on Second Life, the
+    /// second from the grid's `fetch history` in muted green; the third is a
+    /// live line, in neither. OpenSim has no history to fetch, so nothing on
+    /// it is green (`book/src/gridspec/chat.md` § Server history).
+    #[test]
+    fn a_live_group_tab_draws_recalled_fetched_and_live_lines_apart() -> Result<(), TestError> {
+        stage("live_group_history", &["Alpha", "Beta", "Gamma"])
+            .needs(Need::LiveGrid(
+                "a grid with group chat (server-fake-grid-group-chat)",
+            ))
+            .run(async |stage: &Stage| {
+                let alpha = &stage.viewer("Alpha")?;
+                let beta = &stage.viewer("Beta")?;
+                let gamma = &stage.viewer("Gamma")?;
+                let group = shared_group(&[alpha, beta, gamma]).await?;
+                // A run's own lines: an earlier run's are in both transcripts.
+                let run = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)?
+                    .as_secs();
+                let recalled = format!("recalled line {run}");
+                let fetched = format!("fetched line {run}");
+                let live = format!("live line {run}");
+
+                open_group_chat(beta, &group).await?;
+                say_in_group(beta, &group, &recalled).await?;
+                let _heard = group_line_ink(alpha, &group, &recalled, |_ink| true).await?;
+                let _joined = group_line_ink(gamma, &group, &recalled, |_ink| true).await?;
+
+                stage.log_out_viewer("Alpha").await?;
+                say_in_group(beta, &group, &fetched).await?;
+                let alpha = &stage.log_in_again("Alpha").await?;
+                say_in_group(beta, &group, &live).await?;
+
+                let live_ink = group_line_ink(alpha, &group, &live, |_ink| true).await?;
+                assert!(
+                    live_ink != RECALL_INK && live_ink != SERVER_HISTORY_INK,
+                    "the live line is in no history band: {live_ink}"
+                );
+                let _grey =
+                    group_line_ink(alpha, &group, &recalled, |ink| ink == RECALL_INK).await?;
+                if stage.on_grid() == Grid::Aditi {
+                    let _green =
+                        group_line_ink(alpha, &group, &fetched, |ink| ink == SERVER_HISTORY_INK)
+                            .await?;
+                } else {
+                    let window = group_tab(alpha, &group).await?;
+                    let green: Vec<_> = window
+                        .role(Role::Text)
+                        .nodes()
+                        .await?
+                        .into_iter()
+                        .filter(|node| node.color.as_deref() == Some(SERVER_HISTORY_INK))
+                        .collect();
+                    assert!(
+                        green.is_empty(),
+                        "nothing is fetched on OpenSim: {green:#?}"
+                    );
+                }
+                Ok(())
+            })?;
+        Ok(())
+    }
+
     /// The prim the two editors fight over.
     const CONTESTED: &str = "E2E Contested Prim";
 
@@ -2620,7 +2945,10 @@ mod test {
     #[test]
     fn two_residents_befriend_trade_rights_and_contest_one_prim() -> Result<(), TestError> {
         stage("live_friendship", &["Alpha", "Beta"])
-            .needs(RELAYED)
+            .needs(Need::LiveGrid(
+                "a friend's edit right letting it edit the granter's prim \
+                 (server-fake-grid-friend-edit-rights)",
+            ))
             .run(async |stage: &Stage| {
                 let alpha = &stage.viewer("Alpha")?;
                 let beta = &stage.viewer("Beta")?;
@@ -2908,46 +3236,44 @@ mod test {
     /// Beta hears Alpha's typing animation.
     #[test]
     fn a_resident_sees_another_type() -> Result<(), TestError> {
-        stage("live_typing", &["Alpha", "Beta"])
-            .needs(RELAYED)
-            .run(async |stage: &Stage| {
-                let alpha = &stage.viewer("Alpha")?;
-                let beta = &stage.viewer("Beta")?;
-                gather(stage, alpha, beta).await?;
-                let alpha_name = shown_name(stage, beta, "Alpha").await?;
-                open_radar(beta).await?;
-                let row = radar_row(beta, &alpha_name);
-                let _seen = beta.expect(&row).timeout(LIVE_WAIT).to_be_visible().await?;
-                let bar = alpha.ui().test_id("nearby-chat-bar").role(Role::Textbox);
-                let _typed = bar.fill("a thought in progress").await?;
-                let _typing = beta
-                    .expect(&row)
-                    .timeout(LIVE_WAIT)
-                    .to_contain_text("T")
-                    .await?;
-                let alpha_id = stage.agent_id("Alpha")?.uuid().to_string();
-                let animated = tokio::time::timeout(LIVE_WAIT, async {
-                    loop {
-                        let heard = beta
-                            .events_from_start()
-                            .read(&[LogStream::Event])
-                            .await?
-                            .iter()
-                            .any(|entry| {
-                                entry.kind == "AvatarAnimation"
-                                    && entry.detail.contains(&alpha_id)
-                                    && entry.detail.contains(&TYPE_ANIMATION.to_string())
-                            });
-                        if heard {
-                            return Ok::<_, BodyError>(());
-                        }
+        stage("live_typing", &["Alpha", "Beta"]).run(async |stage: &Stage| {
+            let alpha = &stage.viewer("Alpha")?;
+            let beta = &stage.viewer("Beta")?;
+            gather(stage, alpha, beta).await?;
+            let alpha_name = shown_name(stage, beta, "Alpha").await?;
+            open_radar(beta).await?;
+            let row = radar_row(beta, &alpha_name);
+            let _seen = beta.expect(&row).timeout(LIVE_WAIT).to_be_visible().await?;
+            let bar = alpha.ui().test_id("nearby-chat-bar").role(Role::Textbox);
+            let _typed = bar.fill("a thought in progress").await?;
+            let _typing = beta
+                .expect(&row)
+                .timeout(LIVE_WAIT)
+                .to_contain_text("T")
+                .await?;
+            let alpha_id = stage.agent_id("Alpha")?.uuid().to_string();
+            let animated = tokio::time::timeout(LIVE_WAIT, async {
+                loop {
+                    let heard = beta
+                        .events_from_start()
+                        .read(&[LogStream::Event])
+                        .await?
+                        .iter()
+                        .any(|entry| {
+                            entry.kind == "AvatarAnimation"
+                                && entry.detail.contains(&alpha_id)
+                                && entry.detail.contains(&TYPE_ANIMATION.to_string())
+                        });
+                    if heard {
+                        return Ok::<_, BodyError>(());
                     }
-                })
-                .await;
-                let _cleared = bar.fill("").await?;
-                animated.map_err(|_elapsed| "Beta never heard Alpha's typing animation")??;
-                Ok(())
-            })?;
+                }
+            })
+            .await;
+            let _cleared = bar.fill("").await?;
+            animated.map_err(|_elapsed| "Beta never heard Alpha's typing animation")??;
+            Ok(())
+        })?;
         Ok(())
     }
 
@@ -2957,7 +3283,6 @@ mod test {
     #[test]
     fn another_viewer_sees_the_published_bake() -> Result<(), TestError> {
         stage("live_bake", &["Alpha", "Beta"])
-            .needs(RELAYED)
             .needs(Need::OpenSim("the viewer bakes and uploads its own avatar"))
             .run(async |stage: &Stage| {
                 let alpha = &stage.viewer("Alpha")?;
@@ -3001,40 +3326,38 @@ mod test {
     #[test]
     fn a_live_region_states_each_avatars_complexity_where_it_grants_render_info()
     -> Result<(), TestError> {
-        stage("live_render_info", &["Alpha", "Beta"])
-            .needs(RELAYED)
-            .run(async |stage: &Stage| {
-                let alpha = &stage.viewer("Alpha")?;
-                let beta = &stage.viewer("Beta")?;
-                gather(stage, alpha, beta).await?;
-                let beta_name = shown_name(stage, alpha, "Beta").await?;
-                let states = std::env::var("SL_E2E_GRID").as_deref() == Ok("aditi");
-                let (cost, reported) = radar_complexity(
-                    alpha,
-                    &beta_name,
-                    if states { RENDER_INFO_WAIT } else { WAIT },
-                    |cost, reported| !cost.is_empty() && !reported.is_empty(),
-                )
+        stage("live_render_info", &["Alpha", "Beta"]).run(async |stage: &Stage| {
+            let alpha = &stage.viewer("Alpha")?;
+            let beta = &stage.viewer("Beta")?;
+            gather(stage, alpha, beta).await?;
+            let beta_name = shown_name(stage, alpha, "Beta").await?;
+            let states = second_life();
+            let (cost, reported) = radar_complexity(
+                alpha,
+                &beta_name,
+                if states { RENDER_INFO_WAIT } else { WAIT },
+                |cost, reported| !cost.is_empty() && !reported.is_empty(),
+            )
+            .await?;
+            assert!(!cost.is_empty(), "Alpha never measured Beta");
+            if !states {
+                assert_eq!(reported, "", "a grid without render info states nothing");
+                return Ok(());
+            }
+            assert!(
+                reported.parse::<u32>().is_ok_and(|weight| weight > 0),
+                "the region states Beta's complexity (ours {cost}, stated {reported:?})"
+            );
+            let _all = alpha
+                .set_setting(COMPLEXITY_WHEN_LIMITED_ONLY, json!(false))
                 .await?;
-                assert!(!cost.is_empty(), "Alpha never measured Beta");
-                if !states {
-                    assert_eq!(reported, "", "a grid without render info states nothing");
-                    return Ok(());
-                }
-                assert!(
-                    reported.parse::<u32>().is_ok_and(|weight| weight > 0),
-                    "the region states Beta's complexity (ours {cost}, stated {reported:?})"
-                );
-                let _all = alpha
-                    .set_setting(COMPLEXITY_WHEN_LIMITED_ONLY, json!(false))
-                    .await?;
-                let tag = tag_with(alpha, &beta_name, "(reported ").await?;
-                assert!(
-                    tag.contains("(reported "),
-                    "Beta's name tag states the region's figure: {tag:?}"
-                );
-                Ok(())
-            })?;
+            let tag = tag_with(alpha, &beta_name, "(reported ").await?;
+            assert!(
+                tag.contains("(reported "),
+                "Beta's name tag states the region's figure: {tag:?}"
+            );
+            Ok(())
+        })?;
         Ok(())
     }
 }

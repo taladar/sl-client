@@ -2,7 +2,7 @@
 id: viewer-avatar-falls-through-ground
 title: Avatar falls through the ground (simulator reports a bouncing avatar position)
 topic: viewer
-status: in-progress
+status: done
 origin: observed during incremental-shadow-cull verification on aditi (2026-08-12)
 refs:
   - viewer-avatar-ground-from-collision-plane
@@ -90,16 +90,18 @@ Unit tests: `avatar_collision_floor` (higher of land/plane, plane-only when land
 unknown, near-vertical plane ignored, neither → `None`); `land_height` cache
 fallback (`terrain.rs`).
 
-## Remaining
+## Remaining (closed 2026-11-08)
 
-- **Login / cold-terrain window**: the in-memory `land_cache` is empty at login,
-  so before terrain streams the floor has only the (avatar-tracking) plane and
-  can still leak — the observer saw exactly this ("initially still fell through
-  … after a teleport it was better", once terrain had loaded). Fixed by
-  persisting the cache to disk — [[viewer-terrain-land-cache-on-disk]].
+- ~~**Login / cold-terrain window**~~ — **fixed** (2026-11-08) by
+  [[viewer-terrain-land-cache-on-disk]]: the land cache is persisted per grid
+  and restored from the login response's region handle, so on aditi the floor
+  has `land=Some` from the first frame of a warm login (a cold first-ever
+  visit to a region still has the plane-only window).
 - The **foot-IK** ground probe was rewritten onto the same plane in
   [[viewer-avatar-ground-from-collision-plane]] (separate task, same data
-  source).
+  source). Since 2026-11-08 `tests/e2e_movement.rs` checks after every walk,
+  on the fake grid, OpenSim and aditi, that the viewer holds that plane as a
+  floor under the avatar and never under the land.
 - Still worth knowing (does **not** block the fix): does Firestorm bounce at the
   same spot? If our `AgentUpdate` is what destabilises the sim's avatar, fixing
   that would remove the bounce at the source rather than rendering over it.

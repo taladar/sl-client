@@ -29,9 +29,8 @@
 //! - **logout** — the mover logs out and in again at `last`: the same two
 //!   questions for a session ending and beginning.
 //!
-//! The fake grid's residents are not shown to each other
-//! (`server-fake-grid-agent-avatars-shared`), so there the case is the idle
-//! leg alone, from the one resident's own session.
+//! Every leg runs on both fake flavours too, since the fake grid shows its
+//! residents to each other (`server-fake-grid-agent-avatars-shared`).
 
 use std::collections::{BTreeSet, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -47,7 +46,7 @@ use crate::grid::Grid;
 use crate::measured::Measured;
 use crate::metrics::Metrics;
 use crate::registry::{GridTest, TestFuture};
-use crate::support::{REGION_TIMEOUT, check, count_metric, is_fake, log_out, secs_metric};
+use crate::support::{REGION_TIMEOUT, check, count_metric, log_out, secs_metric};
 use crate::teleport_trace::{neighbouring_region, request_teleport, watch_teleport};
 
 /// Where the measured answers are written down.
@@ -1296,27 +1295,6 @@ pub(crate) fn agent_of(session: &Session) -> Result<Uuid, TestFailure> {
         .ok_or_else(|| TestFailure::Assertion("login reported no agent id".to_owned()))
 }
 
-/// The fake grid's one resident: its own coarse feed.
-async fn alone(ctx: &mut TestContext) -> Result<(), TestFailure> {
-    let grid = ctx.grid();
-    let session = ctx.primary();
-    session.wait_for_region(REGION_TIMEOUT).await?;
-    let mut feed = Feed::new(session, agent_of(session)?, None, Instant::now());
-    let from = feed.now();
-    ran_out(
-        session
-            .wait_for(IDLE, |event| {
-                feed.note(event);
-                None::<()>
-            })
-            .await,
-    )?;
-    let mut metrics = Metrics::new();
-    let listing = record_coarse(&feed, from, feed.now(), &mut metrics);
-    ctx.metrics().merge(metrics);
-    check_listing(grid, listing.as_ref())
-}
-
 /// Watches one avatar from another's session.
 #[derive(Debug)]
 pub struct AvatarPresence;
@@ -1353,9 +1331,6 @@ impl GridTest for AvatarPresence {
     fn run<'a>(&'a self, ctx: &'a mut TestContext) -> TestFuture<'a> {
         Box::pin(async move {
             let grid = ctx.grid();
-            if is_fake(grid) {
-                return alone(ctx).await;
-            }
             let mut metrics = Metrics::new();
             let started = Instant::now();
             let (listing, killed, mut feed) = {

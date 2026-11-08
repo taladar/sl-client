@@ -2,7 +2,7 @@
 id: viewer-render-hud-and-actor-axes
 title: HUD screen axis and the name-tag, particle and avatar actors
 topic: viewer
-status: blocked
+status: ready
 origin: test-harness plan (2026-08-30)
 points: 5
 refs: [viewer-render-scene-coverage]
@@ -22,8 +22,15 @@ paths are their own subsystems, and the HUD screen:
   `ActorKind::Particles` (the fountain system with a red texture),
   `ActorKind::Avatar` (the fixture base part), `ActorKind::Terrain` (a
   red composition) — each with the expectation rule it implies.
-- New subjects: `name-tag`, `glow-prim`, `pbr-sphere`, `translucent-box`.
+- New subjects: `name-tag` and `pbr-sphere` (`translucent-box` landed
+  with the matrix as `prim-translucent-box`; `glow-prim` belongs to
+  [[viewer-render-rig-glow-pass]]).
 
-Acceptance: the curated pairs that need these (name tag behind glass,
-particles at midnight, HUD over world, translucent grazing over terrain)
-run and their teeth cases fail as declared.
+Acceptance: the `screen` slot and each new actor kind run in the R1
+sweeps, each with a teeth case that fails as declared (for example, an
+opaque name-tag actor in front of a subject must read `Hidden` if tags
+occlude, and the HUD subject must vanish with its camera ordered below the
+world's). The curated pairs built on them are their own tasks:
+[[viewer-render-matrix-hud-over-world]],
+[[viewer-render-matrix-name-tag-behind-glass]] and
+[[viewer-render-matrix-translucent-grazing-terrain]].

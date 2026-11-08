@@ -45,9 +45,9 @@
 //! | who composites an avatar ([`BakePolicy`]) | the grid: an `agent_appearance_service`, the central-bake protocol bit, an `AppearanceData` block on every appearance, and the `UpdateAvatarAppearance` trigger | every viewer for itself: none of those four |
 //! | the baked-texture cache, `AgentCachedTexture` ([`BakePolicy::answers_cache_queries`]) | never answered | one entry per slot asked, in order: the bake an `AgentSetAppearance` of this session published under that cache id, else nil — a new login starts empty |
 //! | the Current Outfit Folder's version at a login | the version the account's last session bumped it to (`IncrementCOFVersion`) | no version named |
-//! | a viewer's own publish, `AgentSetAppearance` ([`BakePolicy::keeps_published_appearance`]) | ignored | kept for the cache, and never shown to the publisher (the live grid shows it to every other viewer) |
+//! | a viewer's own publish, `AgentSetAppearance` ([`BakePolicy::keeps_published_appearance`]) | ignored | kept for the cache, and shown to every other viewer as it was sent, never to the publisher |
 //! | a bake request of a version the Current Outfit Folder is not at (`UpdateAvatarAppearance`) | `400`, `success` false, "Cof Version Mismatch: asked != current", `expected` the folder's version; nothing baked | no capability |
-//! | an accepted bake, the same version again included | `200` with the bake's `textures`, `visual_params` and `avatar_scale`, and the agent sent that appearance at the version baked (the live grid sends every viewer near it the same; the fake grid shows no resident to another) | no capability |
+//! | an accepted bake, the same version again included | `200` with the bake's `textures`, `visual_params` and `avatar_scale`, and the agent and every other viewer sent that appearance at the version baked | no capability |
 //! | the agent's bakes (the bake service, `bake_service.rs`) | the grid's own: composited from the worn outfit with the viewer's baker, each named by a hash of its inputs, a slot nothing feeds the default placeholder; a refusal dumps the outfit (`cof_raw`, `debug_cof`) | the fixture's solid bakes, by asset id |
 //! | a texture the appearance service holds no bake under | `404` with an LLSD `code` 2, `"Hash mismatch: <id>"` | no service |
 //! | whether an update capability's completion names the item it rewrote ([`UpdateCompletionItem`]) | omitted: `new_asset` alone, and the client uses the id it sent | echoed: `new_inventory_item` carries the rewritten item |
@@ -924,6 +924,9 @@ impl ImitatedGrid {
                 no_match_alert: None,
                 layers: MapLayerAnswer::None,
                 named_region_sends_agents: false,
+                agent_items: AgentItems::CountedPerCell {
+                    cell_m: AgentItems::SECOND_LIFE_CELL_M,
+                },
                 empty_region_dot_m: 0,
                 absent_tile: AbsentTile::Forbidden,
                 tile_cache_headers: true,
@@ -939,6 +942,7 @@ impl ImitatedGrid {
                 no_match_alert: Some("No regions found with that name."),
                 layers: MapLayerAnswer::WholeGrid,
                 named_region_sends_agents: true,
+                agent_items: AgentItems::EachAtWholeMetres,
                 empty_region_dot_m: 1,
                 absent_tile: AbsentTile::BlankTile,
                 tile_cache_headers: false,
@@ -1652,6 +1656,60 @@ impl ImitatedGrid {
                 gaze_camera_range_m: Some(crate::relays::OPENSIM_GAZE_RANGE_M),
                 sound_range_m: Some(crate::relays::OPENSIM_SOUND_RANGE_M),
                 sound_names_a_parent: true,
+            },
+        }
+    }
+
+    /// How this grid shows its residents to each other, where the live grids
+    /// disagree — measured by the `avatar-presence` and `parcel-privacy`
+    /// conformance cases (2026-10-08, `book/src/gridspec/avatars.md`).
+    ///
+    /// Both send every avatar in a region to every agent in it, however far
+    /// off. OpenSim hides an avatar standing on a parcel that turned off
+    /// *avatars on other parcels can see* from everybody not on it; on
+    /// Second Life our avatars own no land, and that was not measured.
+    #[must_use]
+    pub const fn presence_policy(self) -> PresencePolicy {
+        match self {
+            Self::SecondLife => PresencePolicy {
+                hides_on_private_parcels: false,
+            },
+            Self::OpenSim => PresencePolicy {
+                hides_on_private_parcels: true,
+            },
+        }
+    }
+
+    /// How this grid wears and takes off attachments, where the live grids
+    /// disagree — measured by the `attachments` census on aditi and the local
+    /// OpenSim (2026-10-20, `book/src/gridspec/appearance.md` §
+    /// Attachments), and tabulated in [`crate::attachments`].
+    #[must_use]
+    pub const fn attachment_policy(self) -> crate::attachments::AttachmentPolicy {
+        match self {
+            Self::SecondLife => crate::attachments::AttachmentPolicy {
+                replace: crate::attachments::Replace::First,
+                alerts_unknown_item: true,
+                restated: crate::inventory::InventoryAnnouncement::BulkUpdate,
+                appearance_lists_worn: true,
+                others_told_owner_modifies: true,
+                hud_off_killed_for_others: true,
+                teleport_kills_avatar: true,
+                returning_keeps_local_id: false,
+                update_owner: sl_proto::UpdateOwner::WithSound,
+                script_memory: Some(MONO_SCRIPT_MEMORY),
+            },
+            Self::OpenSim => crate::attachments::AttachmentPolicy {
+                replace: crate::attachments::Replace::All,
+                alerts_unknown_item: false,
+                restated: crate::inventory::InventoryAnnouncement::Legacy,
+                appearance_lists_worn: false,
+                others_told_owner_modifies: false,
+                hud_off_killed_for_others: false,
+                teleport_kills_avatar: false,
+                returning_keeps_local_id: true,
+                update_owner: sl_proto::UpdateOwner::WithSoundOrFlags,
+                script_memory: None,
             },
         }
     }
@@ -3080,6 +3138,8 @@ pub struct MapPolicy {
     /// for. OpenSim does it for every type; Second Life answers the type
     /// asked for and nothing else.
     pub named_region_sends_agents: bool,
+    /// How a region's avatars become agent-location items.
+    pub agent_items: AgentItems,
     /// How far inside a region's south-west corner the one agent-location
     /// item of a region with nobody to show sits, in metres along each axis.
     /// Both grids send such an item with an `Extra` of zero; Second Life puts
@@ -3114,6 +3174,32 @@ impl MapPolicy {
     pub const NON_EXISTENT_ACCESS: u8 = 255;
 }
 
+/// How a region's avatars become agent-location items
+/// ([`MapPolicy::agent_items`]): never counting the agent that asks, on both
+/// grids (`gridspec-world-map`, `book/src/gridspec/world-map.md` § Agent
+/// locations).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AgentItems {
+    /// One item for each avatar, where it stands cut down to whole metres,
+    /// with an `Extra` of one: OpenSim.
+    EachAtWholeMetres,
+    /// One item for each square of `cell_m` metres anybody stands in, at its
+    /// south-west corner, with an `Extra` of how many stand there: Second
+    /// Life. Two residents at (8, 10) were one item on the region's corner,
+    /// and one at (128, 128) an item at (128, 128): the square is somewhere
+    /// from 11 to 128 m wide.
+    CountedPerCell {
+        /// How wide a square is, in metres.
+        cell_m: u8,
+    },
+}
+
+impl AgentItems {
+    /// How wide a square of Second Life's is taken to be: a width inside the
+    /// measured window, which no measurement has narrowed further.
+    pub const SECOND_LIFE_CELL_M: u8 = 64;
+}
+
 /// Which empty cells a null-sims `MapBlockRequest` reports
 /// ([`MapPolicy::empty_cells`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -3124,6 +3210,23 @@ pub enum EmptyCells {
     /// A cell only when the request names that one cell and nothing is there:
     /// OpenSim, which answers a larger empty rectangle with nothing.
     LoneCell,
+}
+
+/// The script memory Second Life reports for one Mono script, in bytes
+/// ([`crate::attachments::AttachmentPolicy::script_memory`]).
+const MONO_SCRIPT_MEMORY: i32 = 0x0001_0000;
+
+/// How a region shows its residents to each other, where the live grids
+/// disagree ([`ImitatedGrid::presence_policy`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct PresencePolicy {
+    /// Whether an avatar standing on a parcel whose `SeeAVs` is off is hidden
+    /// from every viewer whose avatar is not on that parcel: killed for it
+    /// when it steps in, sent again whole when it steps out or the viewer
+    /// steps in. Hiding is one-way — the hidden avatar still sees the rest —
+    /// and the coarse feed lists it throughout (`parcel-privacy`,
+    /// 2026-10-08). OpenSim's; Second Life's is not measured.
+    pub hides_on_private_parcels: bool,
 }
 
 /// What an agent-location item's `Name` holds ([`MapPolicy::agent_dot_name`]).

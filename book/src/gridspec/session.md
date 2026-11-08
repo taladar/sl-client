@@ -244,9 +244,9 @@ listening.
 | behaviour | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
 | the next login, one request | admitted (after the two-minute login cooldown the harness keeps on aditi) | admitted at once, whether or not the logout was answered | admitted on both |
-| a seated avatar, as an observer sees it | the seat is re-sent once, then the avatar's `KillObject`, 0.6 s after the request | the seat is re-sent once, then the avatar's `KillObject`, 30 ms after the request | not modelled: residents of the fake grid are not shown to each other (`server-fake-grid-agent-avatars-shared`) |
-| the seat after the kill | re-sent once more | not re-sent | — |
-| the next login at `last` after a seated logout | standing, 1.04 m from the seat | standing, 1 m from the seat | — |
+| a seated avatar, as an observer sees it | the seat is re-sent once, then the avatar's `KillObject`, 0.6 s after the request | the seat is re-sent once, then the avatar's `KillObject`, 30 ms after the request | the avatar's `KillObject` as the request closes the circuit |
+| the seat after the kill | re-sent once more | not re-sent | not re-sent |
+| the next login at `last` after a seated logout | standing, 1.04 m from the seat | standing, 1 m from the seat | standing |
 
 So a logout that OpenSim never answered left nothing behind: no presence to
 refuse the next login, no avatar in anybody's view. The `presence` refusal

@@ -176,6 +176,9 @@ pub(crate) async fn cross_session(
     }
     // Subscribe before announcing, or the arrival can slip past.
     let mut dest_events = destination.subscribe_events();
+    // What the agent wears walks over with it, under the same full ids.
+    crate::attachments::carry(core, source, (agent_id, false), region_index).await;
+    crate::inventory::hand_over(source, &destination).await;
 
     source
         .with_sim(|sim| {
@@ -206,6 +209,7 @@ pub(crate) async fn cross_session(
             core.remove_session(dest_seq).await;
             destination.with_sim(sl_proto::SimSession::abandon).await;
         }
+        crate::attachments::bring_back(core, source, agent_id, region_index).await;
         return Err(Error::CrossingTimedOut);
     }
 
@@ -214,8 +218,19 @@ pub(crate) async fn cross_session(
     // demotion would be a hand-over from a runner that had already stopped.
     crate::timeline::hand_over(source, &destination).await;
 
+    // The region the avatar walked out of stops showing it: its other viewers
+    // are sent its `KillObject`, as both live grids send it — a viewer holding
+    // the region it walked into is shown it there.
     source
-        .with_sim(sl_proto::SimSession::make_child_agent)
+        .with_state(|state| {
+            state.sim.make_child_agent();
+            let agent = state.avatar.agent_id;
+            let mut world = state.world.lock();
+            if let Some(local_id) = world.hide_resident(agent) {
+                state.publish(crate::world::RegionChange::ResidentLeft { agent, local_id });
+            }
+            drop(world);
+        })
         .await;
     neighbours::retire_distant_children(core, agent_id, region_index).await;
     tracing::info!(

@@ -405,6 +405,23 @@ pub fn ll_attach_to_avatar(ctx: &mut ScriptCtx<'_>, point: i32) -> Result<(), Ca
     Ok(())
 }
 
+/// `llAttachToAvatarTemp`: wear the object on its owner's `point` as
+/// [`ll_attach_to_avatar`] does, as a temporary attachment: no item is made,
+/// its `AttachItemID` is its own id, and a detach takes it out of the world
+/// (`attachments`, 2026-10-20).
+///
+/// # Errors
+///
+/// None; the signature is the library's.
+pub fn ll_attach_to_avatar_temp(ctx: &mut ScriptCtx<'_>, point: i32) -> Result<(), CallError> {
+    let caller = ctx.caller();
+    if ctx.host().attached(caller) != 0 || !may_attach(ctx) {
+        return Ok(());
+    }
+    ctx.host().attach_temp(caller, point);
+    Ok(())
+}
+
 /// `llDetachFromAvatar`: take the worn object off into its owner's
 /// inventory, with `PERMISSION_ATTACH` granted by the owner; nothing for an
 /// object not worn.

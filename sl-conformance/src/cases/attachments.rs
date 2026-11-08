@@ -35,10 +35,10 @@
 //! What each live grid answered is stated as a [`Measured`] and written up in
 //! `book/src/gridspec/appearance.md` § Attachments; every run is held to it.
 //!
-//! `2av`, live grids only: the fake grid wears nothing yet
-//! (`fake-grid-own-attachments-and-region-moves`). Everything rezzed is
-//! derezzed to the Trash and every item made is removed, also when a leg
-//! fails; every item still worn is taken off first.
+//! `2av`, live and fake grids; one answer of B's turns on aditi's telehub and
+//! is held live only. Everything rezzed is derezzed to the Trash and every
+//! item made is removed, also when a leg fails; every item still worn is
+//! taken off first.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::time::{Duration, Instant};
@@ -393,10 +393,6 @@ const MEASURED: &[(&str, Measured<Answer>)] = &[
     ("move_back_arrived", both(Answer::Text("cube1"))),
     ("move_back_attach_item", both(Answer::Text("the item"))),
     ("move_back_b_appearance", both(Answer::Text("none"))),
-    (
-        "move_back_b_arrived",
-        each(Answer::Text("none"), Answer::Text("cube1")),
-    ),
     ("move_back_b_attach_item", both(Answer::Text("the item"))),
     ("move_back_b_killed", both(Answer::Text("none"))),
     ("move_back_b_killed_the_avatar", both(Answer::Flag(false))),
@@ -430,10 +426,6 @@ const MEASURED: &[(&str, Measured<Answer>)] = &[
     ("move_back_point", both(Answer::Text("the first point"))),
     ("move_back_removed", both(Answer::Text("none"))),
     ("move_back_same_full_id", both(Answer::Flag(true))),
-    (
-        "move_back_same_local_id",
-        each(Answer::Flag(false), Answer::Flag(true)),
-    ),
     ("move_back_shown", both(Answer::Flag(true))),
     ("move_back_teleport", both(Answer::Text("arrived"))),
     ("move_back_update_flags", both(Answer::Text("0x1002093c"))),
@@ -800,6 +792,22 @@ const MEASURED: &[(&str, Measured<Answer>)] = &[
     ("wear_worn", both(Answer::Text("cube1"))),
 ];
 
+/// What a live grid answered that turns on where the grid put A, held on the
+/// live grids only: aditi's telehub brought A back out of B's sight, so B was
+/// not sent it again — and the last word on whether the two viewers hold the
+/// attachment under one local id was B's silence. A fake region has no
+/// telehub, and puts A where it asked to go — beside B.
+const MEASURED_LIVE: &[(&str, Measured<Answer>)] = &[
+    (
+        "move_back_b_arrived",
+        each(Answer::Text("none"), Answer::Text("cube1")),
+    ),
+    (
+        "move_back_same_local_id",
+        each(Answer::Flag(false), Answer::Flag(true)),
+    ),
+];
+
 /// A census of attachments.
 #[derive(Debug)]
 pub struct Attachments;
@@ -816,7 +824,7 @@ impl GridTest for Attachments {
     }
 
     fn grids(&self) -> &'static [Grid] {
-        &[Grid::Opensim, Grid::Aditi]
+        &[Grid::Opensim, Grid::Aditi, Grid::FakeSl, Grid::FakeOpensim]
     }
 
     fn accounts(&self) -> u8 {
@@ -852,6 +860,13 @@ impl GridTest for Attachments {
             let cleanup = tidy(ctx.primary(), &left, folders).await;
             outcome
                 .and_then(|()| hold_to_measured(grid, &metrics, MEASURED, SOURCE))
+                .and_then(|()| {
+                    if grid.is_fake() {
+                        Ok(())
+                    } else {
+                        hold_to_measured(grid, &metrics, MEASURED_LIVE, SOURCE)
+                    }
+                })
                 .and(cleanup)
         })
     }
@@ -1823,13 +1838,6 @@ async fn census(
         .map(|benefits| benefits.attachment_limit);
     a.wait_for_region(REGION_TIMEOUT).await?;
     b.wait_for_region(REGION_TIMEOUT).await?;
-    a.send(Command::RequestSimulatorFeatures).await?;
-    let features_limit = a
-        .wait_for(STEP, |event| match event {
-            Event::SimulatorFeatures(features) => Some(features.max_agent_attachments),
-            _ => None,
-        })
-        .await?;
 
     // --- 1. The arrival. ---
     let mut arrival: Vec<Object> = Vec::new();
@@ -1860,6 +1868,15 @@ async fn census(
         },
     )
     .await?;
+    // Asked once the arrival is read: the wait for its answer passes over
+    // everything else, and on a fast grid the arrival with it.
+    a.send(Command::RequestSimulatorFeatures).await?;
+    let features_limit = a
+        .wait_for(STEP, |event| match event {
+            Event::SimulatorFeatures(features) => Some(features.max_agent_attachments),
+            _ => None,
+        })
+        .await?;
     let mut roles = Roles::default();
     let mut own = View::default();
     let _change = fold(

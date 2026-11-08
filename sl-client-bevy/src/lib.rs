@@ -5242,6 +5242,14 @@ fn apply_command(
         Command::SetChatLogConfig(config) => {
             chat_log.set_config((**config).clone());
         }
+        Command::TranscribeInvitationLine {
+            session: kind,
+            from_agent_id,
+            from_name,
+            message,
+        } => {
+            chat_log.log_invitation_line(session, *kind, *from_agent_id, from_name, message);
+        }
         Command::SetDiagnostics(enabled) => {
             session.set_diagnostics(*enabled);
         }

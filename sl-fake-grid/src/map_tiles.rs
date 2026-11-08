@@ -1,13 +1,14 @@
 //! The world-map tile surface: `GET /map-<zoom>-<x>-<y>-objects.jpg` under
 //! the login URI, which doubles as the grid's `map-server-url`.
 //!
-//! Tiles are whatever the builder registered plus a stock zoom-1 tile per
-//! configured region (an embedded JPEG), so a viewer's world map shows the
-//! grid's regions without any image pipeline in the fake grid. A tile it does
-//! not have is answered as the imitated grid's tile server answers one
-//! ([`AbsentTile`]): Second Life's with a `403`, OpenSim's with a tile of
-//! plain water — and since only zoom 1 is seeded, that is every coarser zoom
-//! too.
+//! Tiles are whatever the builder registered plus the stock tile (an embedded
+//! JPEG) at every zoom for the tile that covers each configured region — at
+//! zoom `z` the one whose corner is the region's grid position rounded down to
+//! a multiple of 2<sup>z−1</sup> — so a viewer's world map shows the grid's
+//! regions at whatever scale it draws, without any image pipeline in the fake
+//! grid. A tile it does not have is answered as the imitated grid's tile
+//! server answers one ([`AbsentTile`]): Second Life's with a `403`, OpenSim's
+//! with a tile of plain water.
 
 use std::collections::HashMap;
 
@@ -58,13 +59,19 @@ impl MapTileStore {
         self.cache_headers = policy.tile_cache_headers;
     }
 
-    /// Registers the stock tile for a region at zoom 1 unless the builder
-    /// already supplied one.
+    /// Registers the stock tile at every zoom for the tile that covers the
+    /// region at `(grid_x, grid_y)`, where the builder supplied none: both
+    /// live grids serve a region's tiles from zoom 1 to 8.
     pub(crate) fn seed_region(&mut self, grid_x: u32, grid_y: u32) {
-        if let Some(tile) = MapTileRef::new(1, grid_x, grid_y) {
-            self.tiles
-                .entry(tile)
-                .or_insert_with(|| Bytes::from_static(STOCK_TILE_JPEG));
+        for zoom in sl_wire::MAP_TILE_MIN_ZOOM..=sl_wire::MAP_TILE_MAX_ZOOM {
+            let span = 1_u32 << u32::from(zoom.saturating_sub(1));
+            // `span` is a power of two: clearing its low bits rounds down.
+            let corner = |at: u32| at & !span.wrapping_sub(1);
+            if let Some(tile) = MapTileRef::new(zoom, corner(grid_x), corner(grid_y)) {
+                self.tiles
+                    .entry(tile)
+                    .or_insert_with(|| Bytes::from_static(STOCK_TILE_JPEG));
+            }
         }
     }
 
@@ -196,9 +203,22 @@ mod test {
     fn missing_tiles_and_other_paths() -> Result<(), String> {
         let mut store = MapTileStore::default();
         store.seed_region(1000, 1000);
+        // The tile over the region is served at every zoom, named by its
+        // corner; a tile over no region is not.
+        for zoom in 1..=8_u32 {
+            let span = 1_u32 << (zoom - 1);
+            let corner = 1000 - 1000 % span;
+            assert_eq!(
+                store
+                    .answer("GET", &format!("/map-{zoom}-{corner}-{corner}-objects.jpg"))
+                    .map(|a| a.status),
+                Some(200),
+                "zoom {zoom}"
+            );
+        }
         assert_eq!(
             store
-                .answer("GET", "/map-2-1000-1000-objects.jpg")
+                .answer("GET", "/map-2-1002-1000-objects.jpg")
                 .map(|a| a.status),
             Some(403)
         );

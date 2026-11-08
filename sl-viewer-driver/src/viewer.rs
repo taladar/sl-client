@@ -523,7 +523,7 @@ impl Viewer {
     /// As [`read`](Self::read).
     pub async fn agent(&self) -> Result<AgentReadout, DriverError> {
         match self.read(Probe::Agent).await? {
-            ProbeReadout::Agent(agent) => Ok(agent),
+            ProbeReadout::Agent(agent) => Ok(*agent),
             other => Err(self.unexpected("read agent", &ResponseBody::Readout { readout: other })),
         }
     }

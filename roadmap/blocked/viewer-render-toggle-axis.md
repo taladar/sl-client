@@ -6,7 +6,7 @@ status: blocked
 origin: test-harness plan (2026-08-30)
 points: 5
 refs: [viewer-render-type-toggles, viewer-render-readback-tier]
-blocked_by: [viewer-render-context-matrix, viewer-render-overrides-resource]
+blocked_by: [viewer-render-context-matrix, viewer-render-overrides-resource, viewer-render-rig-glow-pass]
 ---
 
 Context: [context/testing.md](../context/testing.md).
@@ -29,3 +29,9 @@ where they are cheap: fog tints toward the fog colour, glow adds a halo
 ring outside the silhouette, the plate is brighter with the sky on.
 
 Teeth: a toggle wired to nothing fails its "must differ" cell.
+
+The context matrix already has a `toggle` slot on `ContextSet`
+(`Toggle::UnderwaterFog`, used in curated R2 cells and checked against the
+untoggled twin); this task grows it into the full axis. The `Glow` toggle
+needs the glow pass running in the readback rig first
+([[viewer-render-rig-glow-pass]]).

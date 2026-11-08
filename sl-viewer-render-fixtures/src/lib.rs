@@ -104,6 +104,13 @@
 //! fixture whose intent is readable — `sculpt_sphere_map` says it is a sphere in
 //! the code, where a committed `.tga` would say it in a comment nobody can check.
 
+mod context;
+
+pub use context::{
+    ActorKind, Axis, ContextSet, Eye, Layering, SubjectMarker, SubjectPoint, SubjectSignature,
+    TimeOfDay, Toggle, Viewpoint,
+};
+
 use std::collections::HashMap;
 use std::f32::consts::{PI, TAU};
 use std::sync::Arc;
@@ -252,24 +259,53 @@ const MINI_SKELETON: &str = sl_avatar::fixtures::MINI_SKELETON;
 /// What varies across a matrix cell — the render harness's counterpart of
 /// `ElementCx`.
 ///
-/// One axis so far, and it is the one that matters: a prim / sculpt / tree is
-/// tessellated **on the client** at a detail level chosen by on-screen size, so
-/// every such object has four geometries rather than one, and the coarse ones
-/// are precisely the ones nobody looks at. A vertex count that collapses to
-/// nothing at [`PrimLod::Lowest`], a normal that stops being unit length, a UV
-/// that inverts — all of that is invisible until a user walks far enough away.
+/// Two kinds of thing vary. The **detail level** is the geometry tier's axis: a
+/// prim / sculpt / tree is tessellated **on the client** at a detail level chosen
+/// by on-screen size, so every such object has four geometries rather than one,
+/// and the coarse ones are precisely the ones nobody looks at. A vertex count
+/// that collapses to nothing at [`PrimLod::Lowest`], a normal that stops being
+/// unit length, a UV that inverts — all of that is invisible until a user walks
+/// far enough away.
+///
+/// The **contexts** are the pixel tier's: what the subject is staged among
+/// ([`ContextSet`]). A scene's own spawn ignores them — the viewer's
+/// `render_stage` builds them around whatever the scene spawned — so a fixture
+/// never grows a branch per context.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SceneCx {
     /// The client-tessellation detail level to build prim / sculpt geometry at.
     pub lod: PrimLod,
+    /// What the subject is staged among.
+    pub contexts: ContextSet,
 }
 
 impl SceneCx {
     /// The resting cell: full detail, the way an object a metre from the camera
-    /// is built.
+    /// is built, and no contexts.
     #[must_use]
     pub const fn new() -> Self {
-        Self { lod: PrimLod::High }
+        Self {
+            lod: PrimLod::High,
+            contexts: ContextSet::NONE,
+        }
+    }
+
+    /// The resting cell at detail level `lod`.
+    #[must_use]
+    pub const fn at_lod(lod: PrimLod) -> Self {
+        Self {
+            lod,
+            contexts: ContextSet::NONE,
+        }
+    }
+
+    /// The resting detail level, staged among `contexts`.
+    #[must_use]
+    pub const fn among(contexts: ContextSet) -> Self {
+        Self {
+            lod: PrimLod::High,
+            contexts,
+        }
     }
 }
 
@@ -521,7 +557,24 @@ pub struct RenderScene {
     /// geometry in ordinary Second Life Z-up metres, exactly as
     /// [`sl_viewer_world_objects::objects`] does for a real prim.
     pub spawn: fn(SceneCx, Entity, &mut Commands, &mut SceneAssets<'_>),
+    /// What the scene's subject is to the context matrix. `None` is a
+    /// **self-staged** scene — a sky, a sea, light on a wall — whose subject is
+    /// the whole frame or an interaction: it is captured on the bare rig by its
+    /// own checks and takes no contexts.
+    pub subject: Option<SubjectSignature>,
+    /// The context axes that mean something for this subject, each swept by the
+    /// matrix's R1 tier. At most four, and empty for a self-staged scene.
+    pub applies: &'static [Axis],
 }
+
+/// A lit, unmarked subject: read by difference, see-through nowhere, lit by
+/// whatever lights the cell.
+const LIT_SUBJECT: SubjectSignature = SubjectSignature {
+    marker: None,
+    points: &[],
+    translucent: false,
+    emissive: false,
+};
 
 /// The scenes every check runs against.
 ///
@@ -539,6 +592,20 @@ pub const SCENES: &[RenderScene] = &[
         lighting: SceneLighting::Stage,
         camera: SceneCamera::framing(3.0),
         spawn: prim_box,
+        subject: Some(LIT_SUBJECT),
+        applies: &[Axis::Eye, Axis::Time, Axis::Viewpoint, Axis::Layering],
+    },
+    RenderScene {
+        id: "prim-translucent-box",
+        what: "one half-transparent emissive green box: the small translucent subject the context \
+               matrix stages occluders, walls, mirrors and the sea around, whose green must show \
+               what is behind it and survive what is drawn after it",
+        timeline: Timeline::STATIC,
+        lighting: SceneLighting::Own,
+        camera: SceneCamera::framing(3.0),
+        spawn: prim_translucent_box,
+        subject: Some(TRANSLUCENT_SUBJECT),
+        applies: &[Axis::Eye, Axis::Viewpoint, Axis::Layering],
     },
     RenderScene {
         id: "prim-textured-tiling",
@@ -548,6 +615,8 @@ pub const SCENES: &[RenderScene] = &[
         lighting: SceneLighting::Stage,
         camera: SceneCamera::framing(3.0),
         spawn: prim_textured_tiling,
+        subject: Some(LIT_SUBJECT),
+        applies: &[Axis::Time],
     },
     RenderScene {
         id: "prim-hollow-cut-cylinder",
@@ -557,6 +626,8 @@ pub const SCENES: &[RenderScene] = &[
         lighting: SceneLighting::Stage,
         camera: SceneCamera::framing(3.0),
         spawn: prim_hollow_cut_cylinder,
+        subject: Some(LIT_SUBJECT),
+        applies: &[Axis::Eye],
     },
     RenderScene {
         id: "prim-twisted-torus",
@@ -566,6 +637,8 @@ pub const SCENES: &[RenderScene] = &[
         lighting: SceneLighting::Stage,
         camera: SceneCamera::framing(3.0),
         spawn: prim_twisted_torus,
+        subject: Some(LIT_SUBJECT),
+        applies: &[Axis::Time],
     },
     RenderScene {
         id: "sculpt-sphere",
@@ -575,6 +648,8 @@ pub const SCENES: &[RenderScene] = &[
         lighting: SceneLighting::Stage,
         camera: SceneCamera::framing(3.0),
         spawn: sculpt_sphere,
+        subject: Some(LIT_SUBJECT),
+        applies: &[Axis::Viewpoint, Axis::Layering],
     },
     RenderScene {
         id: "mesh-cube",
@@ -584,6 +659,8 @@ pub const SCENES: &[RenderScene] = &[
         lighting: SceneLighting::Stage,
         camera: SceneCamera::framing(3.0),
         spawn: mesh_cube,
+        subject: Some(LIT_SUBJECT),
+        applies: &[Axis::Eye, Axis::Layering],
     },
     RenderScene {
         id: "rigged-mesh",
@@ -593,6 +670,8 @@ pub const SCENES: &[RenderScene] = &[
         lighting: SceneLighting::Stage,
         camera: SceneCamera::framing(3.0),
         spawn: rigged_mesh,
+        subject: Some(LIT_SUBJECT),
+        applies: &[Axis::Time],
     },
     RenderScene {
         id: "avatar-base-part",
@@ -604,6 +683,8 @@ pub const SCENES: &[RenderScene] = &[
         lighting: SceneLighting::Stage,
         camera: SceneCamera::framing_front_at(3.4, 0.95),
         spawn: avatar_base_part,
+        subject: Some(LIT_SUBJECT),
+        applies: &[Axis::Time],
     },
     RenderScene {
         id: "avatar-morphed-body",
@@ -615,6 +696,8 @@ pub const SCENES: &[RenderScene] = &[
         lighting: SceneLighting::Stage,
         camera: SceneCamera::framing_front_at(3.4, 0.95),
         spawn: avatar_morphed_body,
+        subject: Some(LIT_SUBJECT),
+        applies: &[Axis::Eye, Axis::Time],
     },
     RenderScene {
         id: "terrain-patch",
@@ -629,6 +712,8 @@ pub const SCENES: &[RenderScene] = &[
             look_at: Vec3::new(8.0, 8.0, 21.0),
         },
         spawn: terrain_patch,
+        subject: None,
+        applies: &[],
     },
     RenderScene {
         id: "terrain-patch-seam",
@@ -643,6 +728,8 @@ pub const SCENES: &[RenderScene] = &[
             look_at: Vec3::new(16.0, 16.0, 21.0),
         },
         spawn: terrain_patch_seam,
+        subject: None,
+        applies: &[],
     },
     RenderScene {
         id: "flexi-streamer",
@@ -659,6 +746,8 @@ pub const SCENES: &[RenderScene] = &[
             look_at: Vec3::new(0.0, 0.0, -1.2),
         },
         spawn: flexi_streamer,
+        subject: Some(LIT_SUBJECT),
+        applies: &[],
     },
     RenderScene {
         id: "texture-anim-flipbook",
@@ -674,6 +763,8 @@ pub const SCENES: &[RenderScene] = &[
         lighting: SceneLighting::Stage,
         camera: SceneCamera::framing(3.0),
         spawn: texture_anim_flipbook,
+        subject: Some(LIT_SUBJECT),
+        applies: &[Axis::Time, Axis::Viewpoint],
     },
     RenderScene {
         id: "bump-face",
@@ -684,6 +775,8 @@ pub const SCENES: &[RenderScene] = &[
         lighting: SceneLighting::Stage,
         camera: SceneCamera::framing(7.0),
         spawn: bump_face,
+        subject: Some(LIT_SUBJECT),
+        applies: &[Axis::Eye, Axis::Time],
     },
     RenderScene {
         id: "legacy-material-face",
@@ -694,6 +787,8 @@ pub const SCENES: &[RenderScene] = &[
         lighting: SceneLighting::Stage,
         camera: SceneCamera::framing(5.0),
         spawn: legacy_material_face,
+        subject: Some(LIT_SUBJECT),
+        applies: &[Axis::Time],
     },
     RenderScene {
         id: "sky-sunrise",
@@ -707,6 +802,8 @@ pub const SCENES: &[RenderScene] = &[
         lighting: SceneLighting::Own,
         camera: SKY_CAMERA,
         spawn: sky_sunrise,
+        subject: None,
+        applies: &[],
     },
     RenderScene {
         id: "sky-midday",
@@ -718,6 +815,8 @@ pub const SCENES: &[RenderScene] = &[
         lighting: SceneLighting::Own,
         camera: SKY_CAMERA,
         spawn: sky_midday,
+        subject: None,
+        applies: &[],
     },
     RenderScene {
         id: "sky-sunset",
@@ -730,6 +829,8 @@ pub const SCENES: &[RenderScene] = &[
         lighting: SceneLighting::Own,
         camera: SKY_CAMERA,
         spawn: sky_sunset,
+        subject: None,
+        applies: &[],
     },
     RenderScene {
         id: "sky-midnight",
@@ -742,6 +843,8 @@ pub const SCENES: &[RenderScene] = &[
         lighting: SceneLighting::Own,
         camera: SKY_CAMERA,
         spawn: sky_midnight,
+        subject: None,
+        applies: &[],
     },
     RenderScene {
         id: "water-surface",
@@ -754,6 +857,8 @@ pub const SCENES: &[RenderScene] = &[
             look_at: Vec3::new(0.0, 40.0, 20.0),
         },
         spawn: water_surface,
+        subject: None,
+        applies: &[],
     },
     RenderScene {
         id: "water-straddling-translucent-prim",
@@ -767,54 +872,27 @@ pub const SCENES: &[RenderScene] = &[
             look_at: STRADDLING_LOOK_AT,
         },
         spawn: water_straddling_translucent_prim,
+        subject: None,
+        applies: &[],
     },
     RenderScene {
-        id: "water-translucency-under-sea",
-        what: "translucent prims walked across the waterline, seen from under the surface, over open sea: whatever is drawn after a box can paint over it, so the question is whether the box is on screen at all",
+        id: "translucent-box-rack",
+        what: "five half-transparent boxes stepped in half-height steps across one height: staged \
+               on the waterline by the context matrix's eye axis, every face is walked across the \
+               depth-writing sea, so a face bucketed on the wrong side of it vanishes from the \
+               frame — and with a wall behind, a face drawn opaque stops showing the wall",
         timeline: Timeline::STATIC,
         lighting: SceneLighting::Own,
-        camera: matrix_camera(MATRIX_EYE_UNDER),
-        spawn: translucency_matrix_under_sea,
-    },
-    RenderScene {
-        id: "water-translucency-under-backdrop",
-        what: "translucent prims walked across the waterline, seen from under the surface, over an opaque backdrop, whose colour can only reach the frame through a box — so the question is whether the box is see-through",
-        timeline: Timeline::STATIC,
-        lighting: SceneLighting::Own,
-        camera: matrix_camera(MATRIX_EYE_UNDER),
-        spawn: translucency_matrix_under_backdrop,
-    },
-    RenderScene {
-        id: "water-translucency-grazing-sea",
-        what: "translucent prims walked across the waterline, seen from just above the surface, over open sea: whatever is drawn after a box can paint over it, so the question is whether the box is on screen at all",
-        timeline: Timeline::STATIC,
-        lighting: SceneLighting::Own,
-        camera: matrix_camera(MATRIX_EYE_GRAZING),
-        spawn: translucency_matrix_grazing_sea,
-    },
-    RenderScene {
-        id: "water-translucency-grazing-backdrop",
-        what: "translucent prims walked across the waterline, seen from just above the surface, over an opaque backdrop, whose colour can only reach the frame through a box — so the question is whether the box is see-through",
-        timeline: Timeline::STATIC,
-        lighting: SceneLighting::Own,
-        camera: matrix_camera(MATRIX_EYE_GRAZING),
-        spawn: translucency_matrix_grazing_backdrop,
-    },
-    RenderScene {
-        id: "water-translucency-over-sea",
-        what: "translucent prims walked across the waterline, seen from well above the surface, over open sea: whatever is drawn after a box can paint over it, so the question is whether the box is on screen at all",
-        timeline: Timeline::STATIC,
-        lighting: SceneLighting::Own,
-        camera: matrix_camera(MATRIX_EYE_OVER),
-        spawn: translucency_matrix_over_sea,
-    },
-    RenderScene {
-        id: "water-translucency-over-backdrop",
-        what: "translucent prims walked across the waterline, seen from well above the surface, over an opaque backdrop, whose colour can only reach the frame through a box — so the question is whether the box is see-through",
-        timeline: Timeline::STATIC,
-        lighting: SceneLighting::Own,
-        camera: matrix_camera(MATRIX_EYE_OVER),
-        spawn: translucency_matrix_over_backdrop,
+        camera: SceneCamera {
+            position: Vec3::new(0.0, -RACK_DISTANCE, 0.0),
+            look_at: Vec3::ZERO,
+        },
+        spawn: translucent_box_rack,
+        subject: Some(SubjectSignature {
+            points: RACK_POINTS,
+            ..TRANSLUCENT_SUBJECT
+        }),
+        applies: &[Axis::Eye, Axis::Layering],
     },
     RenderScene {
         id: "water-translucent-cap-pair",
@@ -828,6 +906,8 @@ pub const SCENES: &[RenderScene] = &[
             look_at: Vec3::new(0.0, 0.0, SCENE_WATER_LEVEL),
         },
         spawn: water_translucent_cap_pair,
+        subject: None,
+        applies: &[],
     },
     RenderScene {
         id: "tree",
@@ -838,6 +918,8 @@ pub const SCENES: &[RenderScene] = &[
         lighting: SceneLighting::Stage,
         camera: SceneCamera::framing_at(62.0, 17.0),
         spawn: tree,
+        subject: Some(LIT_SUBJECT),
+        applies: &[Axis::Time],
     },
     RenderScene {
         id: "grass",
@@ -848,6 +930,8 @@ pub const SCENES: &[RenderScene] = &[
         lighting: SceneLighting::Stage,
         camera: SceneCamera::framing_at(3.0, 0.5),
         spawn: grass,
+        subject: Some(LIT_SUBJECT),
+        applies: &[],
     },
     RenderScene {
         id: "tree-billboard",
@@ -858,6 +942,8 @@ pub const SCENES: &[RenderScene] = &[
         lighting: SceneLighting::Stage,
         camera: SceneCamera::framing_at(62.0, 17.0),
         spawn: tree_billboard,
+        subject: Some(LIT_SUBJECT),
+        applies: &[],
     },
     RenderScene {
         id: "projector-light-on-wall",
@@ -867,6 +953,8 @@ pub const SCENES: &[RenderScene] = &[
         lighting: SceneLighting::Own,
         camera: SceneCamera::framing(6.0),
         spawn: projector_light_on_wall,
+        subject: None,
+        applies: &[],
     },
     RenderScene {
         id: "point-light-between-prims",
@@ -876,6 +964,8 @@ pub const SCENES: &[RenderScene] = &[
         lighting: SceneLighting::Own,
         camera: SceneCamera::framing(6.0),
         spawn: point_light_between_prims,
+        subject: None,
+        applies: &[],
     },
     RenderScene {
         id: "metallic-sphere-among-prims",
@@ -886,6 +976,8 @@ pub const SCENES: &[RenderScene] = &[
         lighting: SceneLighting::Own,
         camera: SceneCamera::framing(6.0),
         spawn: metallic_sphere_among_prims,
+        subject: None,
+        applies: &[],
     },
     RenderScene {
         id: "particles-fountain",
@@ -898,6 +990,8 @@ pub const SCENES: &[RenderScene] = &[
         lighting: SceneLighting::Stage,
         camera: SceneCamera::framing(8.0),
         spawn: particles_fountain,
+        subject: None,
+        applies: &[],
     },
 ];
 
@@ -2276,55 +2370,84 @@ fn point_light_between_prims(
     ));
 }
 
-/// [`SCENES`] `metallic-sphere-among-prims`: a mirror surrounded by colour.
-fn metallic_sphere_among_prims(
-    cx: SceneCx,
+/// Where a mirror sphere goes: its debug label, centre, size, the diameter of
+/// the probe volume around it, and the detail it is tessellated at.
+#[derive(Debug, Clone, Copy)]
+struct MirrorSpec<'a> {
+    /// The debug-name prefix.
+    label: &'a str,
+    /// The sphere's centre, relative to the root.
+    centre: Vec3,
+    /// The sphere's diameter, in metres.
+    diameter: f32,
+    /// The probe volume's diameter, in metres: it must contain the mirror *and*
+    /// whatever the mirror is meant to show.
+    volume: f32,
+    /// The detail level the sphere is tessellated at.
+    lod: PrimLod,
+}
+
+/// Spawn a mirror: a metallic sphere, and the `MIRROR`-flagged reflection probe
+/// that makes it a hero probe, under `root`. Returns the sphere's object entity.
+///
+/// A Second Life sphere is a **half-circle profile swept around the `Circle`
+/// path** — a solid of revolution. Not `Circle2`, which looks like the sphere
+/// path from its name and is not: the reference (`LLPath::generate`,
+/// `LL_PCODE_PATH_CIRCLE2`) runs `genNGon` and then *overrides every path point's
+/// X to alternate between +0.5 and -0.5*. `sl-prim` reproduces that faithfully,
+/// so a half-circle on `Circle2` sweeps a 2 x 1 x 1 pill — which is what the
+/// mirror fixture built at first, and exactly what it looked like.
+///
+/// The reflection probe is a **separate, larger prim** centred on the sphere,
+/// which is how this is built in-world — you rez a probe prim covering the area
+/// and put the shiny thing inside it. It carries no geometry of its own; a probe
+/// is a prim with an `LLReflectionProbeParams` block, not a shape.
+///
+/// Separate, and larger, for a reason that is easy to get wrong: a probe's
+/// influence volume is derived from its prim's scale (a sphere probe's radius is
+/// `scale.x * 0.5`), so putting the block on the **sphere itself** gives a 1 m
+/// ball a 0.5 m influence radius — and the ball's own surface then sits exactly
+/// *on* the volume's boundary, where `SPHERE_FALLOFF` tapers the local probe out
+/// and the view's default probe fills in behind it. That renders as two
+/// reflections: the local one, and a faint ghost of the default probe's
+/// viewpoint-captured cube, in the wrong place. The volume has to *contain* what
+/// it lights.
+fn spawn_mirror_sphere(
+    mirror: MirrorSpec<'_>,
     root: Entity,
     commands: &mut Commands,
     assets: &mut SceneAssets<'_>,
-) {
-    // The reflector, at the centre.
-    // A Second Life sphere is a **half-circle profile swept around the `Circle`
-    // path** — a solid of revolution. Not `Circle2`, which looks like the sphere
-    // path from its name and is not: the reference (`LLPath::generate`,
-    // `LL_PCODE_PATH_CIRCLE2`) runs `genNGon` and then *overrides every path
-    // point's X to alternate between +0.5 and -0.5*. `sl-prim` reproduces that
-    // faithfully, so a half-circle on `Circle2` sweeps a 2 x 1 x 1 pill — which is
-    // what this fixture built at first, and exactly what it looked like.
+) -> Entity {
+    let MirrorSpec {
+        label,
+        centre,
+        diameter,
+        volume,
+        lod,
+    } = mirror;
     let sphere = tessellate(
         &PrimShapeFloat {
             path_curve: PathCurve::Circle,
             profile_curve: ProfileCurve::HalfCircle,
             ..base_shape()
         },
-        cx.lod,
+        lod,
     );
     let sphere_object = commands
         .spawn((
-            Transform::IDENTITY,
+            Transform::from_translation(centre).with_scale(Vec3::splat(diameter)),
             Visibility::default(),
-            Name::new("metallic-sphere-among-prims/sphere"),
+            Name::new(format!("{label}/sphere")),
             ChildOf(root),
-            DeclaredBounds {
-                // A unit sphere. Declared because the pill this fixture used to
-                // build broke *no* invariant — it was finite, unit-normalled and
-                // correctly indexed, just the wrong shape, and only a human
-                // looking at it noticed. This is the check that notices next time.
-                half_extents: Vec3::splat(0.5),
-                // A circle profile is inscribed, so a coarse LOD legitimately
-                // falls slightly inside the nominal radius.
-                tolerance: 0.06,
-            },
         ))
         .id();
     for (index, mesh) in to_bevy_prim_meshes(&sphere).into_iter().enumerate() {
         spawn_geometry(
-            format!("metallic-sphere-among-prims/sphere/face-{index}"),
+            format!("{label}/sphere/face-{index}"),
             mesh,
             StandardMaterial {
                 base_color: Color::WHITE,
-                // A mirror: nothing to see on it but what is around it, which is
-                // the point of the scene.
+                // A mirror: nothing to see on it but what is around it.
                 metallic: 1.0,
                 perceptual_roughness: 0.05,
                 ..default()
@@ -2335,24 +2458,10 @@ fn metallic_sphere_among_prims(
             assets,
         );
     }
-    // The reflection probe: a **separate, larger prim** centred on the sphere,
-    // which is how this is built in-world — you rez a probe prim covering the area
-    // and put the shiny thing inside it. It carries no geometry of its own; a probe
-    // is a prim with an `LLReflectionProbeParams` block, not a shape.
-    //
-    // Separate, and larger, for a reason that is easy to get wrong: a probe's
-    // influence volume is derived from its prim's scale (a sphere probe's radius is
-    // `scale.x * 0.5`), so putting the block on the **sphere itself** gives a 1 m
-    // ball a 0.5 m influence radius — and the ball's own surface then sits exactly
-    // *on* the volume's boundary, where `SPHERE_FALLOFF` tapers the local probe out
-    // and the view's default probe fills in behind it. That renders as two
-    // reflections: the local one, and a faint ghost of the default probe's
-    // viewpoint-captured cube, in the wrong place. The volume has to *contain* what
-    // it lights.
     commands.spawn((
-        Transform::IDENTITY,
+        Transform::from_translation(centre),
         Visibility::default(),
-        Name::new("metallic-sphere-among-prims/probe"),
+        Name::new(format!("{label}/probe")),
         ChildOf(root),
         ObjectReflectionProbe {
             data: ReflectionProbe {
@@ -2360,11 +2469,45 @@ fn metallic_sphere_among_prims(
                 clip_distance: 0.0,
                 flags: ReflectionProbeFlags::MIRROR,
             },
-            // A 6 m sphere volume: it contains the mirror and its neighbours with
-            // room to spare, so nothing being lit sits in the falloff.
-            scale: [6.0, 6.0, 6.0],
+            scale: [volume, volume, volume],
         },
     ));
+    sphere_object
+}
+
+/// [`SCENES`] `metallic-sphere-among-prims`: a mirror surrounded by colour.
+fn metallic_sphere_among_prims(
+    cx: SceneCx,
+    root: Entity,
+    commands: &mut Commands,
+    assets: &mut SceneAssets<'_>,
+) {
+    // The reflector, at the centre, inside a separate and larger probe prim —
+    // see `spawn_mirror_sphere`.
+    let sphere_object = spawn_mirror_sphere(
+        MirrorSpec {
+            label: "metallic-sphere-among-prims",
+            centre: Vec3::ZERO,
+            diameter: 1.0,
+            // A 6 m sphere volume: it contains the mirror and its neighbours with
+            // room to spare, so nothing being lit sits in the falloff.
+            volume: 6.0,
+            lod: cx.lod,
+        },
+        root,
+        commands,
+        assets,
+    );
+    commands.entity(sphere_object).insert(DeclaredBounds {
+        // A unit sphere. Declared because the pill this fixture used to build
+        // broke *no* invariant — it was finite, unit-normalled and correctly
+        // indexed, just the wrong shape, and only a human looking at it noticed.
+        // This is the check that notices next time.
+        half_extents: Vec3::splat(0.5),
+        // A circle profile is inscribed, so a coarse LOD legitimately falls
+        // slightly inside the nominal radius.
+        tolerance: 0.06,
+    });
 
     // What it has to reflect: strongly and distinctly coloured boxes on each side,
     // so a reflection check can tell *which* neighbour a pixel came from rather
@@ -3181,10 +3324,27 @@ fn spawn_sky_at(
     commands: &mut Commands,
     assets: &mut SceneAssets<'_>,
 ) {
+    let label = preset.label;
+    spawn_atmosphere(preset, label, root, commands, assets);
+    spawn_sky_ground(label, cx, root, commands, assets);
+}
+
+/// The sky half of [`spawn_sky_at`]: the atmosphere dome, the clouds, the stars,
+/// the two discs and the light the sky yields, named under `label`.
+///
+/// Split out because it is also the context matrix's **time of day** stage
+/// ([`spawn_stage_sky`]), which lights a subject with exactly this sky and must
+/// not bring the sky scenes' ground and caster box along with it.
+fn spawn_atmosphere(
+    preset: &SkyPreset,
+    label: &str,
+    root: Entity,
+    commands: &mut Commands,
+    assets: &mut SceneAssets<'_>,
+) {
     let sky = sky_settings_from(preset);
     // The viewer's real derivation, shared with `drive_sky` — see `ResolvedSky`.
     let resolved = resolve_sky(&sky);
-    let label = preset.label;
     let placeholder = sky_placeholder(assets);
 
     // The Bevy-space subtree. See `bevy_space`: everything the atmosphere builds is
@@ -3366,7 +3526,17 @@ fn spawn_sky_at(
         Name::new(format!("{label}/light")),
         ChildOf(space),
     ));
+}
 
+/// The ground half of [`spawn_sky_at`]: a wide plate and a box floating over it,
+/// for the sky's light to throw a shadow of.
+fn spawn_sky_ground(
+    label: &str,
+    cx: SceneCx,
+    root: Entity,
+    commands: &mut Commands,
+    assets: &mut SceneAssets<'_>,
+) {
     // The ground, and something floating over it. Ordinary Second Life prims through
     // the real tessellator, under the scene root's own basis — the sky is the
     // exception here, not the region.
@@ -3662,45 +3832,18 @@ fn water_straddling_translucent_prim(
     }
 }
 
-/// How far back the translucency matrix's camera stands, in metres — far enough
-/// that all five boxes fit the frame with margin. Public because the readback tier
-/// measures how steeply the eye looks at each band, which decides whether a band
-/// seen through the refracting surface is stable enough to assert on.
-pub const MATRIX_DISTANCE: f32 = 30.0;
+/// How far back the translucent box rack's camera stands, in metres — far enough
+/// that all five boxes fit the frame with margin. The context matrix's `Eye`
+/// stage keeps this distance and only moves the eye up or down, so the rack is
+/// seen exactly as the hand-staged translucency matrix it replaced saw it.
+const RACK_DISTANCE: f32 = 30.0;
 
-/// The three eye heights the translucency matrix is rendered from, as offsets
-/// from the water level: under the surface, grazing it, and well above it.
-///
-/// The **grazing** one is barely above rather than exactly on the surface. The
-/// classification boundary — an eye exactly at the level counts as submerged, the
-/// reference's `eyedepth <= 0` — is a question about a number, and
-/// `the_eye_counts_as_submerged_at_the_surface` asks it directly; what a *picture*
-/// adds at that height is a water plane exactly edge-on through the middle of the
-/// frame, which makes every band degenerate and answers nothing.
-const MATRIX_EYE_UNDER: f32 = -3.0;
-/// See [`MATRIX_EYE_UNDER`].
-const MATRIX_EYE_GRAZING: f32 = 0.05;
-/// See [`MATRIX_EYE_UNDER`].
-const MATRIX_EYE_OVER: f32 = 6.0;
+/// Half the height of each box in the translucent box rack, in metres.
+const RACK_HALF_HEIGHT: f32 = 1.5;
 
-/// The eye heights the translucency matrix is rendered from, as offsets from the
-/// water level, with the name each scene id carries. Public so the readback tier
-/// walks exactly the scenes that exist, and knows how high the eye was.
-pub const MATRIX_EYES: [(&str, f32); 3] = [
-    ("under", MATRIX_EYE_UNDER),
-    ("grazing", MATRIX_EYE_GRAZING),
-    ("over", MATRIX_EYE_OVER),
-];
-
-/// Half the height of each box in the translucency matrix, in metres.
-pub const MATRIX_HALF_HEIGHT: f32 = 1.5;
-
-/// Half the depth of each box — how far its near face stands toward the camera,
-/// which is where the matrix samples it.
-pub const MATRIX_HALF_DEPTH: f32 = 1.5;
-
-/// The translucency matrix's boxes: a label, an X, and the height of the box's
-/// centre as an offset from the water level.
+/// The rack's boxes: a label, an X, and the height of the box's centre over the
+/// rack's origin — which the context matrix's `Eye` stage puts **on the
+/// waterline**.
 ///
 /// Five, because the axis that matters is not where the *object* is but where each
 /// **face** is: `classify_bucket` reads the world-space centre of each face mesh,
@@ -3722,7 +3865,7 @@ pub const MATRIX_HALF_DEPTH: f32 = 1.5;
 /// ([[viewer-straddling-transparency-oit]]): a prim resting mostly submerged, so
 /// its sides are bucketed by a centre under the water while their upper halves
 /// stand above it.
-pub const MATRIX_BOXES: [(&str, f32, f32); 5] = [
+const RACK_BOXES: [(&str, f32, f32); 5] = [
     ("under", -9.0, -2.25),
     ("sunk", -4.5, -0.75),
     ("centred", 0.0, 0.0),
@@ -3730,14 +3873,116 @@ pub const MATRIX_BOXES: [(&str, f32, f32); 5] = [
     ("clear", 9.0, 2.25),
 ];
 
-/// The colour of the translucency matrix's boxes: strongly green, and the only
-/// green in those scenes.
-const MATRIX_PRIM: Color = Color::srgb(0.05, 0.9, 0.05);
+/// The near face's outward normal: back along `-Y`, toward the rack's camera.
+const RACK_NEAR: Vec3 = Vec3::new(0.0, -1.0, 0.0);
 
-/// The colour of the opaque backdrop in the matrix's `-backdrop` scenes: strongly
-/// red, and the only red in them — so a pixel carrying **both** channels is the
-/// backdrop seen *through* a box, which is the whole question those scenes ask.
-const MATRIX_BACKDROP: Color = Color::srgb(0.9, 0.05, 0.05);
+/// A top cap's outward normal.
+const RACK_UP: Vec3 = Vec3::Z;
+
+/// The rack's sampled points: for each box, the middle of its band above the
+/// rack's origin height and of its band below it, on the **near** face (the one
+/// the camera sees, and its middle because a band's edges are a grazing-angle
+/// smear of it and its neighbour), plus the middle of its top cap — skipping a
+/// band the box does not have. Staged by the `Eye` axis, "above the origin" is
+/// "above the water".
+///
+/// Written out rather than generated, so a failure line's label can be read
+/// straight back to a coordinate here; `rack_points_are_the_bands_of_rack_boxes`
+/// holds the two together.
+pub const RACK_POINTS: &[SubjectPoint] = &[
+    SubjectPoint {
+        label: "under below",
+        at: Vec3::new(-9.0, -RACK_HALF_HEIGHT, -2.25),
+        normal: RACK_NEAR,
+    },
+    SubjectPoint {
+        label: "under top",
+        at: Vec3::new(-9.0, 0.0, -0.75),
+        normal: RACK_UP,
+    },
+    SubjectPoint {
+        label: "sunk above",
+        at: Vec3::new(-4.5, -RACK_HALF_HEIGHT, 0.375),
+        normal: RACK_NEAR,
+    },
+    SubjectPoint {
+        label: "sunk below",
+        at: Vec3::new(-4.5, -RACK_HALF_HEIGHT, -1.125),
+        normal: RACK_NEAR,
+    },
+    SubjectPoint {
+        label: "sunk top",
+        at: Vec3::new(-4.5, 0.0, 0.75),
+        normal: RACK_UP,
+    },
+    SubjectPoint {
+        label: "centred above",
+        at: Vec3::new(0.0, -RACK_HALF_HEIGHT, 0.75),
+        normal: RACK_NEAR,
+    },
+    SubjectPoint {
+        label: "centred below",
+        at: Vec3::new(0.0, -RACK_HALF_HEIGHT, -0.75),
+        normal: RACK_NEAR,
+    },
+    SubjectPoint {
+        label: "centred top",
+        at: Vec3::new(0.0, 0.0, 1.5),
+        normal: RACK_UP,
+    },
+    SubjectPoint {
+        label: "risen above",
+        at: Vec3::new(4.5, -RACK_HALF_HEIGHT, 1.125),
+        normal: RACK_NEAR,
+    },
+    SubjectPoint {
+        label: "risen below",
+        at: Vec3::new(4.5, -RACK_HALF_HEIGHT, -0.375),
+        normal: RACK_NEAR,
+    },
+    SubjectPoint {
+        label: "risen top",
+        at: Vec3::new(4.5, 0.0, 2.25),
+        normal: RACK_UP,
+    },
+    SubjectPoint {
+        label: "clear above",
+        at: Vec3::new(9.0, -RACK_HALF_HEIGHT, 2.25),
+        normal: RACK_NEAR,
+    },
+    SubjectPoint {
+        label: "clear top",
+        at: Vec3::new(9.0, 0.0, 3.75),
+        normal: RACK_UP,
+    },
+];
+
+/// The colour of the rack's and the translucent box's faces: strongly green, and
+/// the only green in those scenes.
+const TRANSLUCENT_MARKER: Color = Color::srgb(0.05, 0.9, 0.05);
+
+/// The material every half-transparent green marker face wears: half coverage,
+/// emissive so no cell's lighting decides whether it is visible, and blended —
+/// which is what puts it in the transparent phase these subjects are about.
+fn translucent_marker_material() -> StandardMaterial {
+    StandardMaterial {
+        base_color: TRANSLUCENT_MARKER.with_alpha(0.5),
+        // Written out rather than scaled: the workspace's
+        // `arithmetic_side_effects` lint bans the multiply.
+        emissive: LinearRgba::rgb(0.05, 2.0, 0.05),
+        alpha_mode: AlphaMode::Blend,
+        perceptual_roughness: 0.9,
+        ..default()
+    }
+}
+
+/// The signature of a half-transparent green marker subject.
+const TRANSLUCENT_SUBJECT: SubjectSignature = SubjectSignature {
+    marker: Some(SubjectMarker::Green),
+    points: &[],
+    translucent: true,
+    emissive: true,
+};
 
 /// Where the [`water_translucent_cap_pair`] scene's camera stands, in Second Life
 /// metres: above the surface and looking **down** at the two caps, which is the
@@ -3802,7 +4047,7 @@ fn water_translucent_cap_pair(
         let object = commands
             .spawn((
                 Transform::from_xyz(x, 0.0, SCENE_WATER_LEVEL)
-                    .with_scale(Vec3::splat(MATRIX_HALF_HEIGHT + MATRIX_HALF_HEIGHT)),
+                    .with_scale(Vec3::splat(RACK_HALF_HEIGHT + RACK_HALF_HEIGHT)),
                 Visibility::default(),
                 Name::new(format!("water-translucent-cap-pair/{label}")),
                 ChildOf(root),
@@ -3855,199 +4100,212 @@ fn prim_face_tag(index: usize) -> PrimFaceEntity {
     }
 }
 
-/// The camera pose the translucency matrix is rendered from at eye height
-/// `eye` (an offset from the water level).
-const fn matrix_camera(eye: f32) -> SceneCamera {
-    SceneCamera {
-        position: Vec3::new(0.0, -MATRIX_DISTANCE, SCENE_WATER_LEVEL + eye),
-        look_at: Vec3::new(0.0, 0.0, SCENE_WATER_LEVEL),
-    }
-}
-
-/// Build one cell of the translucency matrix: the sea, five half-transparent
-/// boxes walked across the waterline ([`MATRIX_BOXES`]), and — when `backdrop` —
-/// an opaque wall standing behind them.
+/// [`SCENES`] `translucent-box-rack`: five half-transparent boxes stepped in
+/// half-height steps across the rack's origin height ([`RACK_BOXES`]).
 ///
-/// The two backgrounds ask different questions, and neither can ask the other's.
-/// Over **open sea**, whatever is drawn after a box can paint over it, so the
-/// question is whether the box is on screen at all. Over the **backdrop**, the
-/// wall is opaque and its colour can only reach the frame *through* the box, so
-/// the question is whether the box is see-through. A box against the **sky** —
-/// which the low eye heights give for free above the horizon — is the control:
-/// nothing is drawn after it there, so it must survive however it was bucketed.
-fn translucency_matrix(
-    scene: &str,
-    backdrop: bool,
+/// On its own it is five green boxes. Staged by the context matrix's `Eye` axis
+/// it is the translucency matrix: the origin goes on the waterline, the eye
+/// under, grazing or over the sea, and every band either side of the surface is
+/// a cell ([`RACK_POINTS`]). Staged with an opaque wall `Behind` it as well, the
+/// wall's red can only reach the frame *through* a box, which is the question
+/// whether each face is see-through rather than merely drawn. Those were six
+/// hand-staged scenes; the axes make them cells of one subject.
+///
+/// Each face carries the viewer's own `PrimFaceEntity` tag, which is not
+/// decoration: it is what `sl_viewer_world_scene::water_clip` selects the faces
+/// it may split by, so a fixture without it would render a prim the viewer never
+/// renders.
+fn translucent_box_rack(
     cx: SceneCx,
     root: Entity,
     commands: &mut Commands,
     assets: &mut SceneAssets<'_>,
 ) {
-    let _space = spawn_sea(scene, root, commands, assets);
-    if backdrop {
-        // Behind the boxes and tall enough to stand well clear of the water, so a
-        // box's emergent half always has it behind rather than the sky.
-        let wall = assets
-            .meshes
-            .add(Cuboid::new(30.0, 0.5, 14.0).mesh().build());
-        let material = assets.materials.add(inert_face_material(StandardMaterial {
-            base_color: MATRIX_BACKDROP,
-            // Bright enough that the scene's own lighting is not what decides
-            // whether it is visible.
-            emissive: LinearRgba::rgb(3.0, 0.05, 0.05),
-            ..default()
-        }));
-        commands.spawn((
-            Mesh3d(wall),
-            MeshMaterial3d(material),
-            Transform::from_xyz(0.0, 8.0, SCENE_WATER_LEVEL),
-            Name::new(format!("{scene}/backdrop")),
+    for (label, x, offset) in RACK_BOXES {
+        spawn_translucent_box(
+            &format!("translucent-box-rack/{label}"),
+            Transform::from_xyz(x, 0.0, offset)
+                .with_scale(Vec3::splat(RACK_HALF_HEIGHT + RACK_HALF_HEIGHT)),
+            cx,
+            root,
+            commands,
+            assets,
+        );
+    }
+}
+
+/// [`SCENES`] `prim-translucent-box`: one half-transparent green box — the
+/// small translucent subject the matrix's layering, mirror and eye cells need,
+/// where the rack is eighteen metres wide.
+fn prim_translucent_box(
+    cx: SceneCx,
+    root: Entity,
+    commands: &mut Commands,
+    assets: &mut SceneAssets<'_>,
+) {
+    spawn_translucent_box(
+        "prim-translucent-box",
+        Transform::IDENTITY,
+        cx,
+        root,
+        commands,
+        assets,
+    );
+}
+
+/// Spawn one half-transparent green box as an object with a tagged child per
+/// face.
+fn spawn_translucent_box(
+    part: &str,
+    transform: Transform,
+    cx: SceneCx,
+    root: Entity,
+    commands: &mut Commands,
+    assets: &mut SceneAssets<'_>,
+) {
+    let object = commands
+        .spawn((
+            transform,
+            Visibility::default(),
+            Name::new(part.to_owned()),
             ChildOf(root),
-        ));
-    }
-    // Each face carries the viewer's own `PrimFaceEntity` tag, which is not
-    // decoration: it is what `sl_viewer_world_scene::water_clip` selects the faces it may split by,
-    // so a fixture without it would render a prim the viewer never renders.
-    for (label, x, offset) in MATRIX_BOXES {
-        let object = commands
-            .spawn((
-                Transform::from_xyz(x, 0.0, SCENE_WATER_LEVEL + offset)
-                    .with_scale(Vec3::splat(MATRIX_HALF_HEIGHT + MATRIX_HALF_HEIGHT)),
-                Visibility::default(),
-                Name::new(format!("{scene}/{label}")),
-                ChildOf(root),
-            ))
-            .id();
-        let prim = tessellate(&base_shape(), cx.lod);
-        for (index, mesh) in to_bevy_prim_meshes(&prim).into_iter().enumerate() {
-            let face = spawn_geometry(
-                format!("{scene}/{label}/face-{index}"),
-                mesh,
-                StandardMaterial {
-                    base_color: MATRIX_PRIM.with_alpha(0.5),
-                    emissive: LinearRgba::rgb(0.05, 2.0, 0.05),
-                    alpha_mode: AlphaMode::Blend,
-                    perceptual_roughness: 0.9,
-                    ..default()
-                },
-                Transform::IDENTITY,
-                object,
-                commands,
-                assets,
-            );
-            commands.entity(face).insert(prim_face_tag(index));
-        }
+        ))
+        .id();
+    let prim = tessellate(&base_shape(), cx.lod);
+    for (index, mesh) in to_bevy_prim_meshes(&prim).into_iter().enumerate() {
+        let face = spawn_geometry(
+            format!("{part}/face-{index}"),
+            mesh,
+            translucent_marker_material(),
+            Transform::IDENTITY,
+            object,
+            commands,
+            assets,
+        );
+        commands.entity(face).insert(prim_face_tag(index));
     }
 }
 
-/// [`SCENES`] `water-translucency-under-sea`: the translucency matrix from an eye
-/// under the surface, over open sea.
-/// See [`translucency_matrix`].
-fn translucency_matrix_under_sea(
-    cx: SceneCx,
+// ---------------------------------------------------------------------------
+// The context matrix's stage: what the viewer's `render_stage` spawns around a
+// subject to realise a cell. Each spawns under the root it is given, which the
+// stage gives the same probe-layer propagation as a scene root, so a staged
+// mirror reflects the staged sea and sky too.
+// ---------------------------------------------------------------------------
+
+/// The `Eye` axis's sea: the endless ocean and a region plane at
+/// [`SCENE_WATER_LEVEL`], exactly as every water scene builds it.
+pub fn spawn_stage_sea(root: Entity, commands: &mut Commands, assets: &mut SceneAssets<'_>) {
+    let _space = spawn_sea("stage", root, commands, assets);
+}
+
+/// The `Time` axis's sky: the real atmosphere stack and the light it yields at
+/// `time`, as the sky scenes build it — without their ground and caster.
+pub fn spawn_stage_sky(
+    time: TimeOfDay,
     root: Entity,
     commands: &mut Commands,
     assets: &mut SceneAssets<'_>,
 ) {
-    translucency_matrix(
-        "water-translucency-under-sea",
-        false,
-        cx,
+    let preset = match time {
+        TimeOfDay::Sunrise => &SUNRISE,
+        TimeOfDay::Midday => &MIDDAY,
+        TimeOfDay::Sunset => &SUNSET,
+        TimeOfDay::Midnight => &MIDNIGHT,
+    };
+    spawn_atmosphere(preset, "stage-sky", root, commands, assets);
+}
+
+/// The `Viewpoint::InMirror` stage's mirror: a metallic sphere of `diameter`
+/// at `centre`, inside a `MIRROR` probe volume of diameter `volume` — which the
+/// caller sizes to contain the subject the mirror must show.
+pub fn spawn_stage_mirror(
+    centre: Vec3,
+    diameter: f32,
+    volume: f32,
+    root: Entity,
+    commands: &mut Commands,
+    assets: &mut SceneAssets<'_>,
+) {
+    let _sphere = spawn_mirror_sphere(
+        MirrorSpec {
+            label: "stage-mirror",
+            centre,
+            diameter,
+            volume,
+            lod: PrimLod::High,
+        },
         root,
         commands,
         assets,
     );
 }
 
-/// [`SCENES`] `water-translucency-under-backdrop`: the translucency matrix from an eye
-/// under the surface, over an opaque backdrop.
-/// See [`translucency_matrix`].
-fn translucency_matrix_under_backdrop(
-    cx: SceneCx,
+/// The colour every matrix actor wears: strongly red, and the only red in a
+/// staged cell — so red at a subject's pixels is the actor, in front of it or
+/// through it.
+const ACTOR_RED: Color = Color::srgb(0.9, 0.0, 0.0);
+
+/// The `Layering` axis's actor: a red wall of `size` (Second Life axes, before
+/// `rotation`) at `centre`, opaque or half transparent, and emissive so that
+/// whether it is visible is never the cell's lighting.
+pub fn spawn_stage_actor(
+    kind: ActorKind,
+    centre: Vec3,
+    size: Vec3,
+    rotation: Quat,
     root: Entity,
     commands: &mut Commands,
     assets: &mut SceneAssets<'_>,
 ) {
-    translucency_matrix(
-        "water-translucency-under-backdrop",
-        true,
-        cx,
-        root,
-        commands,
-        assets,
-    );
+    let (alpha, alpha_mode) = match kind {
+        ActorKind::OpaquePrim => (1.0, AlphaMode::Opaque),
+        ActorKind::TranslucentPrim => (0.5, AlphaMode::Blend),
+    };
+    let mesh = assets
+        .meshes
+        .add(Cuboid::new(size.x, size.y, size.z).mesh().build());
+    let material = assets.materials.add(inert_face_material(StandardMaterial {
+        base_color: ACTOR_RED.with_alpha(alpha),
+        // Red and nothing else: the cell reads its marked subject by which
+        // channels are present, and under the linear output the cell pins, a
+        // 0.05 green glow lands near a quarter of full scale on screen — enough
+        // to read a solid wall as the green subject seen through it.
+        emissive: LinearRgba::rgb(3.0, 0.0, 0.0),
+        alpha_mode,
+        ..default()
+    }));
+    commands.spawn((
+        Mesh3d(mesh),
+        MeshMaterial3d(material),
+        Transform::from_translation(centre).with_rotation(rotation),
+        Name::new(format!("stage-actor/{}", kind.name())),
+        ChildOf(root),
+    ));
 }
 
-/// [`SCENES`] `water-translucency-grazing-sea`: the translucency matrix from an eye
-/// grazing the surface, over open sea.
-/// See [`translucency_matrix`].
-fn translucency_matrix_grazing_sea(
-    cx: SceneCx,
+/// The `Time` axis's calibration plate: a matte white slab, `size` square and a
+/// tenth of a metre thick, at `centre` and turned by `rotation` (its square face
+/// is `-Y` before it), lit by whatever lights the cell — the reference a
+/// luminance ordering across times of day is read from.
+pub fn spawn_stage_plate(
+    centre: Vec3,
+    size: f32,
+    rotation: Quat,
     root: Entity,
     commands: &mut Commands,
     assets: &mut SceneAssets<'_>,
 ) {
-    translucency_matrix(
-        "water-translucency-grazing-sea",
-        false,
-        cx,
-        root,
-        commands,
-        assets,
-    );
-}
-
-/// [`SCENES`] `water-translucency-grazing-backdrop`: the translucency matrix from an eye
-/// grazing the surface, over an opaque backdrop.
-/// See [`translucency_matrix`].
-fn translucency_matrix_grazing_backdrop(
-    cx: SceneCx,
-    root: Entity,
-    commands: &mut Commands,
-    assets: &mut SceneAssets<'_>,
-) {
-    translucency_matrix(
-        "water-translucency-grazing-backdrop",
-        true,
-        cx,
-        root,
-        commands,
-        assets,
-    );
-}
-
-/// [`SCENES`] `water-translucency-over-sea`: the translucency matrix from an eye
-/// well above the surface, over open sea.
-/// See [`translucency_matrix`].
-fn translucency_matrix_over_sea(
-    cx: SceneCx,
-    root: Entity,
-    commands: &mut Commands,
-    assets: &mut SceneAssets<'_>,
-) {
-    translucency_matrix(
-        "water-translucency-over-sea",
-        false,
-        cx,
-        root,
-        commands,
-        assets,
-    );
-}
-
-/// [`SCENES`] `water-translucency-over-backdrop`: the translucency matrix from an eye
-/// well above the surface, over an opaque backdrop.
-/// See [`translucency_matrix`].
-fn translucency_matrix_over_backdrop(
-    cx: SceneCx,
-    root: Entity,
-    commands: &mut Commands,
-    assets: &mut SceneAssets<'_>,
-) {
-    translucency_matrix(
-        "water-translucency-over-backdrop",
-        true,
-        cx,
+    let _plate = spawn_prim(
+        PrimSpec {
+            part: "stage-plate",
+            shape: &base_shape(),
+            lod: PrimLod::High,
+            colour: Color::WHITE,
+            transform: Transform::from_translation(centre)
+                .with_rotation(rotation)
+                .with_scale(Vec3::new(size, 0.1, size)),
+        },
         root,
         commands,
         assets,
@@ -4165,4 +4423,50 @@ fn spawn_sea(
         ));
     }
     space
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{RACK_BOXES, RACK_HALF_HEIGHT, RACK_NEAR, RACK_POINTS, RACK_UP, SubjectPoint};
+    use bevy::prelude::Vec3;
+    use pretty_assertions::assert_eq;
+
+    /// The rack's points, generated from its boxes the way they were written out:
+    /// the middle of each band either side of the origin height on the near face,
+    /// and the middle of each top cap.
+    fn generated() -> Vec<(String, Vec3, Vec3)> {
+        let mut points = Vec::new();
+        for (label, x, centre) in RACK_BOXES {
+            let top = centre + RACK_HALF_HEIGHT;
+            let bottom = centre - RACK_HALF_HEIGHT;
+            if top > 0.0 {
+                points.push((
+                    format!("{label} above"),
+                    Vec3::new(x, -RACK_HALF_HEIGHT, f32::midpoint(bottom.max(0.0), top)),
+                    RACK_NEAR,
+                ));
+            }
+            if bottom < 0.0 {
+                points.push((
+                    format!("{label} below"),
+                    Vec3::new(x, -RACK_HALF_HEIGHT, f32::midpoint(bottom, top.min(0.0))),
+                    RACK_NEAR,
+                ));
+            }
+            points.push((format!("{label} top"), Vec3::new(x, 0.0, top), RACK_UP));
+        }
+        points
+    }
+
+    #[test]
+    fn rack_points_are_the_bands_of_rack_boxes() {
+        let mut written: Vec<(String, Vec3, Vec3)> = RACK_POINTS
+            .iter()
+            .map(|SubjectPoint { label, at, normal }| ((*label).to_owned(), *at, *normal))
+            .collect();
+        let mut expected = generated();
+        written.sort_by(|a, b| a.0.cmp(&b.0));
+        expected.sort_by(|a, b| a.0.cmp(&b.0));
+        assert_eq!(written, expected);
+    }
 }

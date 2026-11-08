@@ -3366,10 +3366,11 @@ impl SimCaps {
                     };
                     return match sim.ais_create_links(parent, &links) {
                         Ok((update, items)) => {
-                            let embedded = match ais_embedded(&[], &items, &["links"]) {
+                            let mut embedded = match ais_embedded(&[], &items, &["links"]) {
                                 Ok(embedded) => embedded,
                                 Err(response) => return response,
                             };
+                            mark_created_links(&mut embedded);
                             ais_answer(
                                 AisAnswer::new(201, name, agent).folder(sim, parent),
                                 vec![
@@ -4539,6 +4540,19 @@ fn decorate_ais(body: &mut Llsd, cap: &str, agent: Uuid, top: AisTop) {
         let mut links: Vec<(&str, Llsd)> = vec![("parent", href(format!("/category/{parent}")))];
         if is_item {
             links.push(("self", href(format!("/item/{}", text_of(map, "item_id")))));
+            // A link states what it names and no record of its own: no flags,
+            // no permissions, no sale (`outfits`, 2026-10-20,
+            // `book/src/gridspec/appearance.md` § The folder).
+            let is_link = matches!(
+                map.get("type"),
+                Some(Llsd::Integer(code))
+                    if *code == crate::ASSET_CODE_LINK || *code == crate::ASSET_CODE_LINK_FOLDER
+            );
+            if is_link {
+                for key in ["flags", "permissions", "sale_info"] {
+                    let _dropped = map.remove(key);
+                }
+            }
             stringify(map, &["item_id", "parent_id", "asset_id", "linked_id"]);
             if let Some(Llsd::Map(permissions)) = map.get_mut("permissions") {
                 let _group = permissions.remove("is_owner_group");
@@ -4689,6 +4703,25 @@ fn ais_versions(update: &AisUpdate) -> Llsd {
             .map(|(folder, version)| (folder.to_string(), Llsd::Integer(*version)))
             .collect(),
     )
+}
+
+/// Gives each link of an AIS3 creation answer's `_embedded` block the
+/// `_broken` and `_embedded` keys Second Life states a link it has just made
+/// with (`outfits`, 2026-10-20): its target not missing, and nothing embedded
+/// of it — what the census saw was the keys, not what they held.
+fn mark_created_links(embedded: &mut Llsd) {
+    let Llsd::Map(kinds) = embedded else {
+        return;
+    };
+    let Some(Llsd::Map(links)) = kinds.get_mut("links") else {
+        return;
+    };
+    for link in links.values_mut() {
+        if let Llsd::Map(fields) = link {
+            let _broken = fields.insert("_broken".to_owned(), Llsd::Boolean(false));
+            let _embedded = fields.insert("_embedded".to_owned(), Llsd::Map(HashMap::new()));
+        }
+    }
 }
 
 /// The `_embedded` block of `folders` and `items`, keeping only the kinds

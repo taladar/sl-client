@@ -858,6 +858,7 @@ const fn command_name(command: &Command) -> &'static str {
         Command::RequestUserInfo => "request_user_info",
         Command::UpdateUserInfo { .. } => "update_user_info",
         Command::SetChatLogConfig(_) => "set_chat_log_config",
+        Command::TranscribeInvitationLine { .. } => "transcribe_invitation_line",
         Command::SetDiagnostics(_) => "set_diagnostics",
         Command::ProbeCircuits(_) => "probe_circuits",
         Command::TriggerSound { .. } => "trigger_sound",

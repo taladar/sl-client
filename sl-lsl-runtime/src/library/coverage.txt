@@ -197,6 +197,7 @@ implemented llSetCameraAtOffset
 implemented llForceMouselook
 implemented llGetAttached
 implemented llAttachToAvatar
+implemented llAttachToAvatarTemp
 implemented llDetachFromAvatar
 implemented llGetPos
 implemented llGetLocalPos

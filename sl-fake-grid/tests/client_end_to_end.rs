@@ -102,6 +102,78 @@ mod test {
         Ok((grid, client, agent))
     }
 
+    /// Logs Test User in at `start` on a fresh grid serving the stock region,
+    /// and returns where the grid placed the arriving avatar, with the
+    /// stock region for reference.
+    async fn login_lands_at(
+        start: impl FnOnce(&RegionConfig) -> StartLocation,
+    ) -> Result<(RegionCoordinates, RegionConfig), TestError> {
+        let region = RegionConfig::default();
+        let grid = FakeGridBuilder::new()
+            .account(AccountConfig::new("Test", "User", "password"))
+            .region(region.clone())
+            .start()
+            .await?;
+        let mut logins = grid.logins();
+        let request = LoginRequest::new(
+            "Test",
+            "User",
+            "password",
+            start(&region),
+            "sl-fake-grid-e2e",
+            "0.0",
+        );
+        let _client = Client::connect(LoginParams {
+            login_uri: grid.login_uri(),
+            request,
+        })
+        .await?;
+        let notice = tokio::time::timeout(WAIT, logins.recv()).await??;
+        let agent = grid.agent(&notice).await.ok_or("no live session")?;
+        let landed = agent.with_sim(|sim| sim.arrival_position().position).await;
+        Ok((landed, region))
+    }
+
+    /// A login that names a spot (`uri:Region&x&y&z`) lands there, as on
+    /// both live grids, standing on the ground: a spot below it is lifted
+    /// onto it, and one above it set down on it.
+    #[tokio::test]
+    async fn a_login_naming_a_spot_lands_on_it() -> Result<(), TestError> {
+        for height in [0.0, 80.0] {
+            let (landed, region) = login_lands_at(|region| {
+                StartLocation::region(
+                    region.name.clone(),
+                    RegionCoordinates::new(60.0, 70.0, height),
+                )
+            })
+            .await?;
+            let ground =
+                region.terrain.height_at(60.0, 70.0) + sl_fake_grid::AVATAR_CENTRE_ABOVE_GROUND_M;
+            assert_eq!(
+                (landed.x(), landed.y(), landed.z()),
+                (60.0, 70.0, ground),
+                "a login naming height {height} lands at the named spot, on the ground"
+            );
+        }
+        Ok(())
+    }
+
+    /// A login naming a region the grid does not serve lands in the
+    /// account's start region, at its centre.
+    #[tokio::test]
+    async fn a_login_naming_an_unknown_region_lands_at_the_start() -> Result<(), TestError> {
+        let (landed, _region) = login_lands_at(|_region| {
+            StartLocation::region("Nowhere At All", RegionCoordinates::new(60.0, 70.0, 40.0))
+        })
+        .await?;
+        assert_eq!(
+            (landed.x(), landed.y()),
+            (128.0, 128.0),
+            "the avatar lands at the start region's centre"
+        );
+        Ok(())
+    }
+
     /// A grid told to hold every datagram back is as far away as it says: the
     /// client's own ping round trip comes out at twice the one-way latency,
     /// where a stock grid answers in well under a millisecond.
@@ -6226,8 +6298,9 @@ mod test {
     }
 
     /// What each viewer is told it may do with a prim is its own: the rezzer
-    /// owns it and may edit it, the region's other avatar is told only that
-    /// somebody owns it.
+    /// owns it and may edit it, the region's other avatar is told that
+    /// somebody owns it, that it may be transferred, and — Second Life's way —
+    /// that its owner may modify it.
     #[tokio::test]
     async fn a_rezzed_prim_is_the_rezzers_to_edit_and_nobody_elses() -> Result<(), TestError> {
         use sl_proto::prim_flags;
@@ -6266,9 +6339,14 @@ mod test {
             permission_bits,
             "the rezzer may do anything with its prim"
         );
+        // Told only that the prim may be transferred and — on Second Life,
+        // the flavour this grid imitates by default — that its owner may
+        // modify it (`object-edit-stranger`, `book/src/gridspec/building.md`).
         assert_eq!(
             seen.update_flags & permission_bits,
-            prim_flags::OBJECT_ANY_OWNER,
+            prim_flags::OBJECT_ANY_OWNER
+                | prim_flags::OBJECT_TRANSFER
+                | prim_flags::OBJECT_OWNER_MODIFY,
             "the other avatar may do nothing with it"
         );
         Ok(())
@@ -6295,6 +6373,688 @@ mod test {
             .region(RegionConfig::default())
             .start()
             .await?)
+    }
+
+    /// The two residents of one region are shown each other, as both live
+    /// grids show them (`avatar-presence` and `animations`, 2026-10-08 and
+    /// 2026-10-19): the one already there is in the newcomer's arrival burst,
+    /// the newcomer is streamed to the other — its object, its appearance, its
+    /// animations — an animation it starts reaches the other under the same
+    /// number in the shape of a statement to somebody else, and its logout
+    /// kills its object for the other.
+    #[tokio::test]
+    async fn the_regions_residents_are_shown_to_each_other() -> Result<(), TestError> {
+        let clap =
+            sl_proto::AnimationKey::from(uuid::uuid!("9b0c1c4e-8ac7-7969-1494-28c874c4f668"));
+        for imitates in [ImitatedGrid::SecondLife, ImitatedGrid::OpenSim] {
+            let grid = two_avatar_grid_imitating(imitates).await?;
+            let mut first = join(&grid, "First").await?;
+            let first_id = first.agent.agent_id();
+            let mut second = join(&grid, "Second").await?;
+            let second_id = second.agent.agent_id();
+            let body_of = |agent: sl_types::key::AgentKey| {
+                move |event: &Event| match event {
+                    Event::ObjectAdded(object)
+                        if object.full_id == sl_types::key::ObjectKey::from(agent.uuid()) =>
+                    {
+                        Some((**object).clone())
+                    }
+                    _other => None,
+                }
+            };
+            let looks = |agent: sl_types::key::AgentKey| {
+                move |event: &Event| match event {
+                    Event::AvatarAppearance(appearance) if appearance.avatar_id == agent => {
+                        Some(())
+                    }
+                    _other => None,
+                }
+            };
+            let animated = |agent: sl_types::key::AgentKey| {
+                move |event: &Event| match event {
+                    Event::AvatarAnimation {
+                        avatar_id,
+                        animations,
+                        physical_events,
+                    } if *avatar_id == agent => Some((animations.clone(), physical_events.clone())),
+                    _other => None,
+                }
+            };
+            // The newcomer's burst names the one already there, in order.
+            let theirs = wait_on(&mut second.events, body_of(first_id)).await?;
+            assert_eq!(theirs.pcode, sl_proto::pcode::AVATAR, "{imitates:?}");
+            assert!(theirs.name_value.contains("FirstName STRING RW SV First"));
+            wait_on(&mut second.events, looks(first_id)).await?;
+            let _stand = wait_on(&mut second.events, animated(first_id)).await?;
+            // The one already there is streamed the newcomer.
+            let newcomer = wait_on(&mut first.events, body_of(second_id)).await?;
+            wait_on(&mut first.events, looks(second_id)).await?;
+            let _stand = wait_on(&mut first.events, animated(second_id)).await?;
+
+            second.commands.send(Command::PlayAnimation(clap)).await?;
+            let with_clap = |agent| {
+                let animated = animated(agent);
+                move |event: &Event| {
+                    animated(event).filter(|(animations, _events)| {
+                        animations.iter().any(|entry| entry.anim_id == clap.uuid())
+                    })
+                }
+            };
+            let (own, _own_events) = wait_on(&mut second.events, with_clap(second_id)).await?;
+            let (seen, seen_events) = wait_on(&mut first.events, with_clap(second_id)).await?;
+            let numbers = |animations: &[sl_proto::PlayingAnimation]| -> Vec<(uuid::Uuid, i32)> {
+                animations
+                    .iter()
+                    .map(|entry| (entry.anim_id, entry.sequence_id))
+                    .collect()
+            };
+            assert_eq!(numbers(&seen), numbers(&own), "{imitates:?}");
+            let sources: Vec<Option<sl_types::key::ObjectKey>> =
+                seen.iter().map(|entry| entry.source_id).collect();
+            let (expected_sources, expected_events): (_, Vec<Vec<u8>>) = match imitates {
+                ImitatedGrid::SecondLife => (
+                    vec![
+                        Some(sl_types::key::ObjectKey::from(uuid::Uuid::nil())),
+                        None,
+                    ],
+                    vec![Vec::new()],
+                ),
+                ImitatedGrid::OpenSim => (vec![None, None], Vec::new()),
+            };
+            assert_eq!(sources, expected_sources, "{imitates:?}");
+            assert_eq!(seen_events, expected_events, "{imitates:?}");
+
+            second.commands.send(Command::Logout).await?;
+            wait_on(&mut first.events, |event| match event {
+                Event::ObjectRemoved { local_id, .. } if local_id.id == newcomer.local_id => {
+                    Some(())
+                }
+                _other => None,
+            })
+            .await?;
+        }
+        Ok(())
+    }
+
+    /// Two accounts, First and Second, imitating `imitates`, on `regions`.
+    async fn two_avatars_on(
+        imitates: ImitatedGrid,
+        regions: Vec<RegionConfig>,
+    ) -> Result<FakeGrid, TestError> {
+        let mut builder = FakeGridBuilder::new()
+            .account(AccountConfig::new("First", "User", "password"))
+            .account(AccountConfig::new("Second", "User", "password"))
+            .imitates(imitates)
+            .event_queue_hold(Duration::from_secs(2));
+        for region in regions {
+            builder = builder.region(region);
+        }
+        Ok(builder.start().await?)
+    }
+
+    /// Reads and drops everything `avatar`'s client is sent from now on, for a
+    /// viewer a test does not watch: a client whose events nobody reads stops
+    /// once its channel is full, and does nothing it is told after.
+    fn ignore_events(avatar: &mut Joined) {
+        let (_unused, closed) = mpsc::channel(1);
+        let mut events = std::mem::replace(&mut avatar.events, closed);
+        drop(tokio::spawn(async move {
+            while events.recv().await.is_some() {}
+        }));
+    }
+
+    /// Whether `event` is `agent`'s avatar object, full or terse, in the
+    /// region `region` — any region for `None`.
+    fn avatar_update(
+        event: &Event,
+        agent: sl_types::key::AgentKey,
+        region: Option<sl_proto::RegionHandle>,
+    ) -> Option<sl_proto::Object> {
+        match event {
+            Event::ObjectAdded(object) | Event::ObjectUpdated(object)
+                if object.full_id.uuid() == agent.uuid()
+                    && region.is_none_or(|region| object.region_handle == region) =>
+            {
+                Some((**object).clone())
+            }
+            _other => None,
+        }
+    }
+
+    /// A resident walking is moved for the region's other viewer as for its
+    /// own, by the updates it is sent itself, and the other's coarse feed
+    /// lists it beside the agent's own entry.
+    #[tokio::test]
+    async fn a_walking_resident_moves_for_the_other_and_is_listed_coarsely() -> Result<(), TestError>
+    {
+        use sl_proto::ControlFlags;
+        for imitates in [ImitatedGrid::SecondLife, ImitatedGrid::OpenSim] {
+            let grid = two_avatars_on(imitates, vec![RegionConfig::default()]).await?;
+            let mut first = join(&grid, "First").await?;
+            let first_id = first.agent.agent_id();
+            let mut second = join(&grid, "Second").await?;
+            let second_id = second.agent.agent_id();
+            ignore_events(&mut second);
+            let start = wait_on(&mut first.events, |event| {
+                avatar_update(event, second_id, None)
+            })
+            .await?
+            .motion
+            .position;
+            second
+                .commands
+                .send(Command::SetControls(ControlFlags::AT_POS))
+                .await?;
+            // Walked a few metres east, as the other is shown it.
+            wait_on(&mut first.events, |event| {
+                avatar_update(event, second_id, None)
+                    .filter(|object| object.motion.position.x > start.x + 3.0)
+            })
+            .await?;
+            second
+                .commands
+                .send(Command::SetControls(ControlFlags::empty()))
+                .await?;
+            let listed = wait_on(&mut first.events, |event| match event {
+                Event::CoarseLocationUpdate { locations, you, .. } => {
+                    let agents: Vec<sl_types::key::AgentKey> =
+                        locations.iter().map(|location| location.agent_id).collect();
+                    let both = agents.contains(&second_id) && agents.contains(&first_id);
+                    both.then_some((agents, *you))
+                }
+                _other => None,
+            })
+            .await?;
+            let (agents, you) = listed;
+            assert_eq!(
+                you.and_then(|you| agents.get(you)).copied(),
+                Some(first_id),
+                "{imitates:?}: `You` is the agent's own entry"
+            );
+        }
+        Ok(())
+    }
+
+    /// A resident who walks into the region next door is taken out of the
+    /// stream of the region it left and shown down the child circuit a viewer
+    /// holds next door — killed here, a full object there, and listed in that
+    /// region's own coarse feed (`avatar-presence`, 2026-10-08).
+    #[tokio::test]
+    async fn a_resident_next_door_is_shown_down_the_child_circuit() -> Result<(), TestError> {
+        let grid = two_avatars_on(
+            ImitatedGrid::OpenSim,
+            vec![RegionConfig::default(), adjacent_east_region()],
+        )
+        .await?;
+        let east = grid
+            .region_handle("Fake Region East")
+            .ok_or("no east region")?;
+        let mut first = join(&grid, "First").await?;
+        wait_on(&mut first.events, |event| match event {
+            Event::GenericMessage(generic)
+                if sl_fake_grid::neighbour_marker_region(generic).as_deref()
+                    == Some("Fake Region East") =>
+            {
+                Some(())
+            }
+            _other => None,
+        })
+        .await?;
+        let mut second = join(&grid, "Second").await?;
+        let second_id = second.agent.agent_id();
+        ignore_events(&mut second);
+        let here = wait_on(&mut first.events, |event| {
+            avatar_update(event, second_id, None)
+        })
+        .await?;
+        assert_ne!(here.region_handle, east);
+        let _destination = grid
+            .cross_agent(
+                &second.agent,
+                "Fake Region East",
+                RegionCoordinates::new(2.0, 128.0, 26.0),
+                Vector {
+                    x: 3.2,
+                    y: 0.0,
+                    z: 0.0,
+                },
+            )
+            .await?;
+        let (mut killed, mut there, mut listed) = (false, false, false);
+        wait_on(&mut first.events, |event| {
+            match event {
+                Event::ObjectRemoved { local_id, .. } if local_id.id == here.local_id => {
+                    killed = true;
+                }
+                Event::CoarseLocationUpdate {
+                    locations,
+                    you,
+                    region_handle,
+                    ..
+                } if *region_handle == east => {
+                    listed |= locations
+                        .iter()
+                        .any(|location| location.agent_id == second_id);
+                    assert_eq!(*you, None, "the agent stands in another region");
+                }
+                other => there |= avatar_update(other, second_id, Some(east)).is_some(),
+            }
+            (killed && there && listed).then_some(())
+        })
+        .await?;
+        Ok(())
+    }
+
+    /// OpenSim hides a resident standing on a parcel that turned off *avatars
+    /// on other parcels can see* from a viewer not on it — killed as it
+    /// steps in, sent whole again as it steps out — and Second Life, whose
+    /// answer was not measured, hides nobody (`parcel-privacy`, 2026-10-08).
+    #[tokio::test]
+    async fn a_private_parcel_hides_its_resident_from_outside() -> Result<(), TestError> {
+        use sl_proto::ControlFlags;
+        for imitates in [ImitatedGrid::OpenSim, ImitatedGrid::SecondLife] {
+            let grid = two_avatars_on(imitates, vec![two_parcels(false, None)]).await?;
+            let mut first = join(&grid, "First").await?;
+            let mut second = join(&grid, "Second").await?;
+            let second_id = second.agent.agent_id();
+            let body = wait_on(&mut first.events, |event| {
+                avatar_update(event, second_id, None)
+            })
+            .await?;
+            first
+                .agent
+                .with_world(|world, _sim| {
+                    for parcel in &mut world.parcels {
+                        if parcel.local_id.0 == 2 {
+                            parcel.see_avs = Some(false);
+                        }
+                    }
+                })
+                .await;
+            second
+                .commands
+                .send(Command::SetControls(ControlFlags::AT_POS))
+                .await?;
+            // Over the parcel line at x = 136, and a few metres on, by its own
+            // viewer's updates.
+            wait_on(&mut second.events, |event| {
+                avatar_update(event, second_id, None)
+                    .filter(|object| object.motion.position.x > 140.0)
+            })
+            .await?;
+            // What the other viewer was sent meanwhile, the last of it given
+            // time to land.
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            let mut hidden = false;
+            while let Ok(event) = first.events.try_recv() {
+                hidden |= matches!(event, Event::ObjectRemoved { local_id, .. }
+                    if local_id.id == body.local_id);
+            }
+            assert_eq!(
+                hidden,
+                imitates == ImitatedGrid::OpenSim,
+                "{imitates:?}: whether the resident on the private parcel was killed"
+            );
+            second
+                .commands
+                .send(Command::SetControls(ControlFlags::AT_NEG))
+                .await?;
+            wait_on(&mut first.events, |event| {
+                avatar_update(event, second_id, None)
+                    .filter(|object| object.motion.position.x < 134.0)
+            })
+            .await?;
+            second
+                .commands
+                .send(Command::SetControls(ControlFlags::empty()))
+                .await?;
+        }
+        Ok(())
+    }
+
+    /// The `AttachItemID` name-value a worn object carries for `item`.
+    fn worn_as(item: sl_client_tokio::InventoryKey) -> String {
+        format!("AttachItemID STRING RW SV {item}")
+    }
+
+    /// Wears `item` from `avatar`'s inventory on `point`, replacing what is
+    /// there, and returns the object the region puts on its avatar.
+    async fn wear(
+        avatar: &mut Joined,
+        item: &sl_client_tokio::InventoryItem,
+        point: sl_proto::AttachmentPoint,
+    ) -> Result<sl_client_tokio::Object, TestError> {
+        avatar
+            .commands
+            .send(Command::RezAttachment(sl_proto::RezAttachment {
+                item_id: item.item_id,
+                owner_id: avatar.agent.agent_id().uuid(),
+                attachment_point: point,
+                mode: sl_proto::AttachmentMode::Replace,
+                name: item.name.clone(),
+                description: item.description.clone(),
+            }))
+            .await?;
+        let named = worn_as(item.item_id);
+        wait_on(&mut avatar.events, |event| match event {
+            Event::ObjectAdded(object) | Event::ObjectUpdated(object)
+                if object.name_value == named && object.attachment_point_id().is_some() =>
+            {
+                Some((**object).clone())
+            }
+            _other => None,
+        })
+        .await
+    }
+
+    /// An item worn from the inventory, as both grids wear one
+    /// (`attachments`, 2026-10-20): the object on the point asked, under its
+    /// `AttachItemID`, its owner stated nil; the region's other resident is
+    /// shown it after the wearer's body and never a HUD; and the next login
+    /// puts it back on unasked.
+    #[tokio::test]
+    async fn a_worn_item_is_shown_to_the_other_and_put_back_at_the_next_login()
+    -> Result<(), TestError> {
+        for imitates in [ImitatedGrid::SecondLife, ImitatedGrid::OpenSim] {
+            let grid = two_avatars_on(imitates, vec![RegionConfig::default()]).await?;
+            let mut first = join(&grid, "First").await?;
+            let first_id = first.agent.agent_id();
+            let cube = take_a_donor_item(
+                &mut first,
+                &Vector {
+                    x: 130.0,
+                    y: 128.0,
+                    z: 26.0,
+                },
+            )
+            .await?;
+            let worn = wear(&mut first, &cube, sl_proto::AttachmentPoint::Chest).await?;
+            assert_eq!(
+                worn.attachment_point_id(),
+                Some(sl_proto::AttachmentPoint::Chest.to_code()),
+                "{imitates:?}"
+            );
+            assert!(
+                worn.owner_id.is_nil(),
+                "{imitates:?}: a worn object states no owner"
+            );
+            let hud_item = take_a_donor_item(
+                &mut first,
+                &Vector {
+                    x: 131.0,
+                    y: 128.0,
+                    z: 26.0,
+                },
+            )
+            .await?;
+            let hud = wear(&mut first, &hud_item, sl_proto::AttachmentPoint::HudCenter2).await?;
+
+            let mut second = join(&grid, "Second").await?;
+            let mut body_at = None;
+            let mut worn_at = None;
+            let mut index = 0_usize;
+            let mut hud_seen = false;
+            wait_on(&mut second.events, |event| {
+                index += 1;
+                if let Event::ObjectAdded(object) | Event::ObjectUpdated(object) = event {
+                    if object.full_id.uuid() == first_id.uuid() {
+                        body_at.get_or_insert(index);
+                    }
+                    if object.full_id == worn.full_id {
+                        worn_at.get_or_insert(index);
+                    }
+                    hud_seen |= object.full_id == hud.full_id;
+                }
+                worn_at.map(|_seen| ())
+            })
+            .await?;
+            assert!(
+                body_at.is_some_and(|body| worn_at.is_some_and(|worn| body < worn)),
+                "{imitates:?}: the body ({body_at:?}) before what it wears ({worn_at:?})"
+            );
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            while let Ok(event) = second.events.try_recv() {
+                if let Event::ObjectAdded(object) | Event::ObjectUpdated(object) = &event {
+                    hud_seen |= object.full_id == hud.full_id;
+                }
+            }
+            assert!(!hud_seen, "{imitates:?}: another's HUD is never shown");
+
+            first.commands.send(Command::Logout).await?;
+            wait_on(&mut first.events, |event| {
+                matches!(event, Event::LoggedOut | Event::Disconnected(_)).then_some(())
+            })
+            .await
+            .ok();
+            drop(first);
+            let mut again = join(&grid, "First").await?;
+            let named = worn_as(cube.item_id);
+            let back = wait_on(&mut again.events, |event| match event {
+                Event::ObjectAdded(object) | Event::ObjectUpdated(object)
+                    if object.name_value == named =>
+                {
+                    Some((**object).clone())
+                }
+                _other => None,
+            })
+            .await?;
+            assert_eq!(
+                back.attachment_point_id(),
+                Some(sl_proto::AttachmentPoint::Chest.to_code()),
+                "{imitates:?}: put back where it was worn"
+            );
+        }
+        Ok(())
+    }
+
+    /// Taking off, as both grids answer it (`attachments`, 2026-10-20): a
+    /// detach kills the object for both viewers and restates its item — on
+    /// the event queue on Second Life, over UDP on OpenSim; a take-off by the
+    /// item restates nothing; a drop puts the object back in the world under
+    /// the same ids with no name-values and removes the item; and a wear of an
+    /// item nobody has puts nothing on, with Second Life's alert.
+    #[tokio::test]
+    async fn worn_items_come_off_as_both_grids_take_them_off() -> Result<(), TestError> {
+        for imitates in [ImitatedGrid::SecondLife, ImitatedGrid::OpenSim] {
+            let grid = two_avatars_on(imitates, vec![RegionConfig::default()]).await?;
+            let mut first = join(&grid, "First").await?;
+            let mut second = join(&grid, "Second").await?;
+            let cube = take_a_donor_item(
+                &mut first,
+                &Vector {
+                    x: 130.0,
+                    y: 128.0,
+                    z: 26.0,
+                },
+            )
+            .await?;
+            let scoped = |avatar: &Joined, local_id| {
+                sl_client_tokio::ScopedObjectId::new(avatar.circuit, local_id)
+            };
+            let killed = |local_id: sl_proto::RegionLocalObjectId| {
+                move |event: &Event| match event {
+                    Event::ObjectRemoved { local_id: id, .. } if id.id == local_id => Some(()),
+                    _other => None,
+                }
+            };
+
+            let worn = wear(&mut first, &cube, sl_proto::AttachmentPoint::Chest).await?;
+            first
+                .commands
+                .send(Command::DetachObjects {
+                    local_ids: vec![scoped(&first, worn.local_id)],
+                })
+                .await?;
+            let restated = wait_on(&mut first.events, |event| match event {
+                Event::InventoryBulkUpdate { items, .. }
+                    if items.iter().any(|item| item.item_id == cube.item_id) =>
+                {
+                    Some("bulk")
+                }
+                Event::InventoryItemCreated { item, .. } if item.item_id == cube.item_id => {
+                    Some("udp")
+                }
+                _other => None,
+            })
+            .await?;
+            assert_eq!(
+                restated,
+                match imitates {
+                    ImitatedGrid::SecondLife => "bulk",
+                    ImitatedGrid::OpenSim => "udp",
+                },
+                "{imitates:?}"
+            );
+            wait_on(&mut second.events, killed(worn.local_id)).await?;
+
+            let again = wear(&mut first, &cube, sl_proto::AttachmentPoint::Chest).await?;
+            first
+                .commands
+                .send(Command::DetachAttachmentIntoInventory {
+                    item_id: cube.item_id,
+                })
+                .await?;
+            wait_on(&mut first.events, killed(again.local_id)).await?;
+
+            let dropped = wear(&mut first, &cube, sl_proto::AttachmentPoint::Chest).await?;
+            first
+                .commands
+                .send(Command::DropAttachments {
+                    local_ids: vec![scoped(&first, dropped.local_id)],
+                })
+                .await?;
+            let mut put_down = None;
+            let mut removed = false;
+            wait_on(&mut first.events, |event| {
+                match event {
+                    Event::ObjectUpdated(object) | Event::ObjectAdded(object)
+                        if object.full_id == dropped.full_id && object.parent_id.0 == 0 =>
+                    {
+                        put_down = Some((**object).clone());
+                    }
+                    Event::InventoryItemsRemoved { items } => {
+                        removed |= items.contains(&cube.item_id);
+                    }
+                    _other => {}
+                }
+                (put_down.is_some() && removed).then_some(())
+            })
+            .await?;
+            let put_down = put_down.ok_or("never put down")?;
+            assert_eq!(
+                put_down.local_id, dropped.local_id,
+                "{imitates:?}: the same ids"
+            );
+            assert!(
+                put_down.name_value.is_empty(),
+                "{imitates:?}: no name-values"
+            );
+
+            first
+                .commands
+                .send(Command::RezAttachment(sl_proto::RezAttachment {
+                    item_id: sl_client_tokio::InventoryKey::from(uuid::Uuid::from_u128(0xBAD)),
+                    owner_id: first.agent.agent_id().uuid(),
+                    attachment_point: sl_proto::AttachmentPoint::Chest,
+                    mode: sl_proto::AttachmentMode::Add,
+                    name: String::new(),
+                    description: String::new(),
+                }))
+                .await?;
+            if imitates == ImitatedGrid::SecondLife {
+                wait_on(&mut first.events, |event| match event {
+                    Event::AlertMessage { message, .. }
+                        if message == "Attempt to rez an object failed." =>
+                    {
+                        Some(())
+                    }
+                    _other => None,
+                })
+                .await?;
+            }
+        }
+        Ok(())
+    }
+
+    /// What is worn goes with its wearer to the region next door and back,
+    /// under the same full id and a new local id in each region — and back in
+    /// the region it left, under the local id it had there on OpenSim, a new
+    /// one on Second Life (`attachments`, 2026-10-20).
+    #[tokio::test]
+    async fn a_worn_item_travels_next_door_and_back() -> Result<(), TestError> {
+        for imitates in [ImitatedGrid::SecondLife, ImitatedGrid::OpenSim] {
+            let grid = two_avatars_on(
+                imitates,
+                vec![RegionConfig::default(), adjacent_east_region()],
+            )
+            .await?;
+            let home = grid.region_handle("Fake Region").ok_or("no home region")?;
+            let east = grid
+                .region_handle("Fake Region East")
+                .ok_or("no east region")?;
+            let mut first = join(&grid, "First").await?;
+            wait_on(&mut first.events, |event| match event {
+                Event::GenericMessage(generic)
+                    if sl_fake_grid::neighbour_marker_region(generic).as_deref()
+                        == Some("Fake Region East") =>
+                {
+                    Some(())
+                }
+                _other => None,
+            })
+            .await?;
+            let cube = take_a_donor_item(
+                &mut first,
+                &Vector {
+                    x: 130.0,
+                    y: 128.0,
+                    z: 26.0,
+                },
+            )
+            .await?;
+            let worn = wear(&mut first, &cube, sl_proto::AttachmentPoint::Chest).await?;
+            let mut there = None;
+            for (region, at) in [(east, (70.0, 128.0, 26.0)), (home, (128.0, 128.0, 26.0))] {
+                first
+                    .commands
+                    .send(Command::Teleport {
+                        region_handle: region,
+                        position: RegionCoordinates::new(at.0, at.1, at.2),
+                        look_at: Vector {
+                            x: 1.0,
+                            y: 0.0,
+                            z: 0.0,
+                        },
+                    })
+                    .await?;
+                let arrived = wait_on(&mut first.events, |event| match event {
+                    Event::ObjectAdded(object) | Event::ObjectUpdated(object)
+                        if object.full_id == worn.full_id && object.region_handle == region =>
+                    {
+                        Some((**object).clone())
+                    }
+                    _other => None,
+                })
+                .await?;
+                assert_eq!(arrived.name_value, worn_as(cube.item_id), "{imitates:?}");
+                assert!(
+                    arrived.attachment_point_id().is_some(),
+                    "{imitates:?}: still worn"
+                );
+                if region == east {
+                    assert_ne!(arrived.local_id, worn.local_id, "{imitates:?}");
+                    there = Some(arrived.local_id);
+                } else {
+                    assert_ne!(Some(arrived.local_id), there, "{imitates:?}");
+                    assert_eq!(
+                        arrived.local_id == worn.local_id,
+                        imitates == ImitatedGrid::OpenSim,
+                        "{imitates:?}: back under the id it had here"
+                    );
+                }
+            }
+        }
+        Ok(())
     }
 
     /// An estate manager's region message and restart reach both avatars in

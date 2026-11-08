@@ -2,7 +2,7 @@
 id: chat-group-history-server-side
 title: Server-side group / session chat history ("fetch history")
 topic: chat
-status: in-progress
+status: done
 origin: user request (2026-07-21); follow-up to viewer-chat-history-panel
 points: 5
 refs: [chat-a8, chat-b4, viewer-chat-history-panel, viewer-social-im-conversations]
@@ -200,3 +200,50 @@ Items 1, 3 and 4 of the list above are answered by the `group-chat` census
 
 Left: item 2, the viewer's three bands on a group tab, which needs a live
 viewer run with someone looking.
+
+## Verified live (2026-11-07)
+
+Item 2 is now the e2e stage
+`a_live_group_tab_draws_recalled_fetched_and_live_lines_apart`
+(`sl-client-bevy-viewer/tests/e2e_two_avatars.rs`), which passes on aditi and
+on the local OpenSim. In the census group (picked by its `gs census` name),
+Beta says a line Alpha hears, a second while Alpha is logged out
+(`Stage::log_out_viewer` / `log_in_again`, the two halves of `relog`), and a
+third once Alpha is back. Alpha's tab draws the first in grey from its own
+transcript, the third live, and on Second Life the second in muted green from
+`fetch history`; on OpenSim no line is green. Gamma (`tertiary` on aditi,
+`estate-owner` on OpenSim, both joined to the census group for this; the
+group has open enrollment) stays in the session, because a line said to a
+session with one participant left is neither broadcast nor kept
+(`gridspec/chat.md`).
+
+Getting it to pass found five bugs, all fixed with unit tests:
+
+- **The line an invitation carries was never written to the transcript.**
+  Until an agent joins a group session, Second Life hands lines over as
+  invitations; the viewer showed the first but `ChatLog::observe_event` only
+  took the group name from it, so the opening line was missing from the
+  recipient's transcript and from the next session's recall. The viewer now
+  has the runtime write each invitation line it shows
+  ([[chat-invitation-line-transcript-gaps]]).
+- **Our own group and conference lines were written twice**, on send and again
+  when Second Life echoes them back, in the transcript and in the session's
+  history ring. The echo is now dropped in both (the reference adds a group
+  line it sent only from the echo; we keep the send-time write).
+- **The server band drew lines the tab already showed live.** The backlog
+  was de-duplicated only against the recall band and the session ring, and
+  the opening line is in neither (it came in the invitation), so it showed
+  twice. `filter_server_band` now also drops lines among the live ones.
+- **Speakers were matched by name across bands.** Recalled and live lines
+  name a speaker as the viewer shows them, fetched ones by the server's
+  legacy name, so a match depended on whether the name had resolved yet.
+  Avatars now match by key.
+- **Stage viewers ran with server history switched off**
+  (`fetch_server_chat_history = false` in `sl-e2e`'s viewer setup, with no
+  reason recorded), so no stage could ever see the green band. They now run
+  with the viewer's default (on). The fake grid does not model group
+  sessions yet, so offline stages never fetch.
+
+Not driven live: `--no-group-chat-history` dropping only the green band.
+Stages cannot pass viewer CLI options; the flag is covered by the
+scheduler's disabled-flag unit test and the CLI wiring.

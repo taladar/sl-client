@@ -211,7 +211,10 @@ What a test may say about its stage:
 Through the stage a test also reaches the grid's side: `stage.agent(label)`
 (a session to script an IM or an object update with `with_sim` /
 `with_world`, and the events the viewer sent), `stage.grid()` (teleport or
-walk an agent over a border), `mark` / `wait_marker`, and `relog(label)`.
+walk an agent over a border), `mark` / `wait_marker`, and `relog(label)` —
+or its two halves, `log_out_viewer(label)` and `log_in_again(label)`, when
+something has to happen while the account is away (a line said in a group
+session it has left).
 
 `SL_E2E_GRID=opensim|aditi` runs the same tests against a live grid with the
 accounts of its credentials file, under nextest's `live` profile (which

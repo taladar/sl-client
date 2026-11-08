@@ -29,9 +29,9 @@
 //! Every request is followed by a fixed listening window rather than a wait
 //! for a reply, because no reply is one of the answers.
 //!
-//! The fake grid's residents are not shown to each other
-//! (`server-fake-grid-agent-avatars-shared`), so there the second resident's
-//! part is left out.
+//! On the fake grid the second resident's part is left out: nothing it
+//! records is held, and its waits of minutes are for how long OpenSim keeps
+//! another region's answer, which the fake grid does not imitate.
 
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};

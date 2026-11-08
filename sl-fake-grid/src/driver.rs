@@ -101,6 +101,12 @@ pub(crate) struct SimState {
     /// Every account's Current Outfit Folder version, which an
     /// `IncrementCOFVersion` moves ([`crate::bakes::OutfitVersions`]).
     pub(crate) outfit_versions: crate::bakes::OutfitVersions,
+    /// What every account wears as its last session left it
+    /// ([`crate::attachments::WornOutfits`]).
+    pub(crate) worn_outfits: crate::attachments::WornOutfits,
+    /// Every account's inventory as its last session left it
+    /// ([`crate::inventory::Inventories`]).
+    pub(crate) inventories: crate::inventory::Inventories,
     /// Every account's active gestures, which an `ActivateGestures` and a
     /// `DeactivateGestures` move ([`crate::notecards::ActiveGestures`]).
     pub(crate) active_gestures: crate::notecards::ActiveGestures,
@@ -178,6 +184,14 @@ pub(crate) struct SimState {
     /// the arrival is handled, not where a task that heard of it wakes up —
     /// two tasks woken by one event read two different clocks.
     pub(crate) arrived_at: Option<Instant>,
+    /// The region's residents a private parcel hides from this session's
+    /// viewer ([`SceneFixtures::hides`](crate::world::SceneFixtures::hides)):
+    /// killed for it, or never sent, and introduced again when it no longer
+    /// is.
+    pub(crate) hidden: std::collections::BTreeSet<sl_types::key::AgentKey>,
+    /// Whether this session's arrival is a login's, which puts back on what
+    /// the account last wore ([`crate::attachments::WornOutfits`]).
+    pub(crate) rewear_on_arrival: bool,
     /// Where this session's viewer last said its camera is, region-local
     /// metres; [`None`] until an `AgentUpdate` says. OpenSim sends a gaze only
     /// to a camera near the avatar gazing ([`crate::relays`]).
@@ -208,6 +222,10 @@ pub(crate) struct SimState {
     /// on the grid ([`crate::world_map`]). Shared, because it is the same
     /// answer for every session and never changes after start-up.
     pub(crate) map: Arc<[sl_proto::MapRegionInfo]>,
+    /// Every region's world by its handle, shared grid-wide: what the world
+    /// map's agent locations are read from, for any region a viewer asks
+    /// about ([`crate::world_map`]).
+    pub(crate) worlds: Arc<[(sl_proto::RegionHandle, RegionWorld)]>,
     /// The scripted steps this session runs once its agent has arrived
     /// ([`crate::timeline`]), starting as the region scenario's own.
     ///
@@ -227,6 +245,38 @@ pub(crate) struct SimState {
     /// are the same number and name different steps. The runner reads this
     /// alongside the cursor and treats a change as "look again".
     pub(crate) timeline_generation: u64,
+}
+
+impl SimState {
+    /// Publishes `change` on the region's change stream as this session's,
+    /// so every other session's watcher streams it ([`run_region_watcher`]).
+    /// A caller holding the region lock publishes before letting it go, so a
+    /// watcher that wakes on the change cannot read a world it has not landed
+    /// in yet.
+    pub(crate) fn publish(&self, change: RegionChange) {
+        // A region whose other sessions have all gone has no subscribers;
+        // that is not a failure.
+        drop(self.changes.send(RegionUpdate {
+            source: self.seq,
+            change,
+        }));
+    }
+
+    /// Keeps what the region's other viewers are shown of this session's
+    /// avatar in step with a change `keep` makes to it, and publishes the
+    /// change `keep` says they are to be told. Nothing happens for an avatar
+    /// the region does not show: one not yet arrived, or gone.
+    pub(crate) fn tell_others(
+        &self,
+        keep: impl FnOnce(&mut crate::world::Resident) -> RegionChange,
+    ) {
+        let mut world = self.world.lock();
+        if let Some(resident) = world.resident_mut(self.avatar.agent_id) {
+            let change = keep(resident);
+            self.publish(change);
+        }
+        drop(world);
+    }
 }
 
 /// One live session's shared handle: the lockable state plus its I/O anchors
@@ -366,6 +416,10 @@ impl SharedSim {
                 state.camera_at = Some(update.camera.center.clone());
             }
             let _moved = state.motion.hear(&event);
+            // A logout leaves the inventory where the next login finds it.
+            if matches!(event, ServerEvent::LoggedOut) {
+                state.inventories.keep(state.avatar.agent_id, &state.sim);
+            }
             // The greeting goes out as soon as the circuit is open, as a real
             // simulator does on `UseCircuitCode`: the viewer waits for the
             // `RegionHandshake` before it sends `CompleteAgentMovement`, and
@@ -398,13 +452,13 @@ impl SharedSim {
                             tracing::warn!("repeated region handshake failed: {error}");
                         }
                     }
-                    push_child_world(
+                    state.hidden = push_child_world(
                         &state.world.lock(),
                         Ground {
                             fixture: &state.terrain,
                             policy: &state.terrain_policy,
                         },
-                        &state.identity,
+                        (&state.identity, state.avatar.agent_id),
                         state.bakes,
                         &mut state.sim,
                         now,
@@ -422,11 +476,13 @@ impl SharedSim {
                     .sends_own_appearance(state.sim.handshake_reply_flags())
             {
                 state.own_appearance_owed = false;
+                let worn = crate::world::listed_worn(&state.world.lock(), state.avatar.agent_id);
                 push_own_appearance(
                     &state.avatar,
                     &state.assets,
                     state.bakes,
                     &mut state.sim,
+                    &worn,
                     now,
                 );
             }
@@ -481,12 +537,50 @@ impl SharedSim {
                 // The arrival tells the agent of the parcel it stands on; the
                 // movement controller pushes the next one it walks onto.
                 let arrival = state.sim.arrival_position().position;
+                // What it wears is on the avatar before the burst, which sends
+                // it after the avatar and lists it in the appearance where the
+                // grid lists it: brought along from the region left, or, at a
+                // login, what the account last wore, put back on.
+                let standing = sl_types::lsl::Vector {
+                    x: arrival.x(),
+                    y: arrival.y(),
+                    z: arrival.z(),
+                };
+                if let Some(carried) = world.luggage.remove(&state.avatar.agent_id) {
+                    let _records = crate::attachments::unpack(
+                        &mut world,
+                        (state.avatar.agent_id, &standing),
+                        carried,
+                        state.sim.region_handle(),
+                        now,
+                    );
+                } else if core::mem::take(&mut state.rewear_on_arrival) {
+                    let minter = state.minter.clone();
+                    let mint = move || minter.uuid();
+                    let wearer = crate::attachments::Wearer {
+                        identity: &state.avatar,
+                        at: standing,
+                        region_handle: state.sim.region_handle(),
+                    };
+                    for (item_id, point) in state.worn_outfits.get(state.avatar.agent_id) {
+                        if let Some(item) = state.sim.agent_inventory().item(item_id).cloned() {
+                            let _records = crate::attachments::wear_item(
+                                &mut world,
+                                &state.assets,
+                                (&wearer, &mint),
+                                &item,
+                                point,
+                                now,
+                            );
+                        }
+                    }
+                }
                 state.motion = crate::movement::Motion::arriving(
                     world
                         .parcel_at(arrival.x(), arrival.y())
                         .map(|parcel| parcel.local_id),
                 );
-                push_arrival_world(
+                let (body, hidden) = push_arrival_world(
                     &world,
                     Ground {
                         fixture: &state.terrain,
@@ -498,6 +592,29 @@ impl SharedSim {
                     &mut state.sim,
                     now,
                 );
+                // The region's other viewers are shown the avatar from now:
+                // its object, its appearance and its animations, as both live
+                // grids introduce one, whatever the agent is sent itself.
+                let resident = crate::world::Resident {
+                    at: world.region_position_of(&body),
+                    body,
+                    appearance: crate::world::own_appearance(
+                        &state.avatar,
+                        &state.assets,
+                        state.bakes,
+                        &state.sim,
+                        (
+                            None,
+                            &crate::world::listed_worn(&world, state.avatar.agent_id),
+                        ),
+                    ),
+                    animations: state
+                        .animations
+                        .observed(state.animation_policy, state.avatar.agent_id),
+                };
+                state.hidden = hidden;
+                world.show_resident(state.avatar.agent_id, resident);
+                state.publish(RegionChange::ResidentArrived(state.avatar.agent_id));
                 drop(world);
                 crate::world::push_own_animation(
                     &state.avatar,
@@ -515,14 +632,20 @@ impl SharedSim {
                 &mut state.sim,
                 &event,
             );
-            let _baked = crate::bakes::answer(
+            // OpenSim shows a publish to every other viewer as it was sent.
+            if let Some(published) = crate::bakes::answer(
                 &mut state.published_bakes,
                 (&state.outfit_versions, state.avatar.agent_id),
                 state.bakes,
                 &mut state.sim,
                 &event,
                 now,
-            );
+            ) {
+                state.tell_others(|resident| {
+                    resident.appearance.clone_from(&published);
+                    RegionChange::ResidentAppearance(Box::new(published))
+                });
+            }
             // An accepted central bake is stated back to the agent as its
             // appearance at the version baked, as Second Life does.
             if let ServerEvent::ServerAppearanceRequested { cof_version } = &event {
@@ -530,23 +653,40 @@ impl SharedSim {
                 // since the last bake.
                 let outfit = state.bake_service.bake(&state.sim, &state.assets);
                 state.sim.set_baked_outfit(outfit);
-                push_own_appearance_baked(
+                let worn = crate::world::listed_worn(&state.world.lock(), state.avatar.agent_id);
+                let record = push_own_appearance_baked(
                     &state.avatar,
                     &state.assets,
                     state.bakes,
                     &mut state.sim,
-                    Some(*cof_version),
+                    (Some(*cof_version), &worn),
                     now,
                 );
+                // Second Life sends every viewer around the agent the record
+                // after each bake it accepts, the same as the agent's own.
+                state.tell_others(|resident| {
+                    resident.appearance.clone_from(&record);
+                    RegionChange::ResidentAppearance(Box::new(record))
+                });
             }
-            let _animated = crate::animations::answer(
+            // Every statement the agent is sent, the others are sent too.
+            if let Some(statement) = crate::animations::answer(
                 &mut state.animations,
                 state.animation_policy,
                 state.avatar.agent_id,
                 &mut state.sim,
                 &event,
                 now,
-            );
+            ) {
+                let agent = state.avatar.agent_id;
+                state.tell_others(|resident| {
+                    resident.animations.clone_from(&statement);
+                    RegionChange::ResidentAnimated {
+                        agent,
+                        statement: Box::new(statement),
+                    }
+                });
+            }
             answer_from_fixtures(
                 &mut state.udp_assets,
                 &state.assets,
@@ -631,6 +771,43 @@ impl SharedSim {
                 if let ServerEvent::DisplayNameChanged(update) = &event {
                     changes.push(RegionChange::DisplayNameChanged(update.clone()));
                 }
+                // What is worn is what the next login puts back on; and on a
+                // grid whose own appearance lists it, a wear of one item from
+                // the inventory states the appearance again.
+                if matches!(
+                    event,
+                    ServerEvent::RezAttachment(_)
+                        | ServerEvent::RezAttachments { .. }
+                        | ServerEvent::AttachObject { .. }
+                        | ServerEvent::DetachObjects(_)
+                        | ServerEvent::DropAttachments(_)
+                        | ServerEvent::DetachAttachmentIntoInventory { .. }
+                ) {
+                    state.worn_outfits.keep(&world, state.avatar.agent_id);
+                }
+                let agent = state.avatar.agent_id;
+                // Not after a HUD's, as Second Life sends none for one.
+                if matches!(event, ServerEvent::RezAttachment(_))
+                    && world.attachments.appearance_lists_worn
+                    && changes.iter().any(|change| {
+                        matches!(change, RegionChange::Worn { agent: wearer, objects }
+                        if *wearer == agent
+                            && objects.first().is_some_and(|root| {
+                                !root.attachment_point_id().is_some_and(|point| {
+                                    sl_proto::AttachmentPoint::from_code(point).is_hud()
+                                })
+                            }))
+                    })
+                {
+                    push_own_appearance(
+                        &state.avatar,
+                        &state.assets,
+                        state.bakes,
+                        &mut state.sim,
+                        &crate::world::listed_worn(&world, agent),
+                        now,
+                    );
+                }
                 // Published while the store is still held, so a watcher that
                 // wakes on the change and re-reads the region cannot see a
                 // world the change has not landed in yet.
@@ -671,9 +848,23 @@ impl SharedSim {
                 &event,
                 now,
             );
+            let worlds = Arc::clone(&state.worlds);
+            let roster = move |handle: sl_proto::RegionHandle| {
+                worlds
+                    .iter()
+                    .find(|(region, _world)| *region == handle)
+                    .map(|(_region, world)| {
+                        world
+                            .lock()
+                            .residents()
+                            .map(|(agent, resident)| (agent, resident.at.clone()))
+                            .collect()
+                    })
+                    .unwrap_or_default()
+            };
             crate::world_map::answer_map_request(
                 &state.map_policy,
-                &state.map,
+                (&state.map, &roster),
                 state.identity.region_handle,
                 &mut state.sim,
                 &event,
@@ -694,6 +885,11 @@ impl SharedSim {
             // Only lagging subscribers error; the driver never stalls on them.
             drop(self.events_tx.send(event));
         }
+        // What the agent wears, as its attachment resources report states it:
+        // kept current here, cheaply, rather than at every change to it.
+        let report =
+            crate::attachments::resources_report(&state.world.lock(), state.avatar.agent_id);
+        state.sim.set_attachment_resources(report);
         let mut transmits = Vec::new();
         while let Some(transmit) = state.sim.poll_transmit() {
             transmits.push(transmit);
@@ -922,7 +1118,7 @@ fn send_burst(
     let (full, terse): (Vec<&sl_proto::Object>, Vec<sl_proto::TerseUpdate>) = {
         let world = state.world.lock();
         let agent = state.avatar.agent_id;
-        let shown = |object: &&sl_proto::Object| crate::seating::shown_to(&world, object, agent);
+        let shown = |object: &&sl_proto::Object| streams(&world, &state.hidden, object, agent);
         (
             burst.full.iter().filter(shown).collect(),
             burst
@@ -949,6 +1145,149 @@ fn send_burst(
         state.sim.send_kill_object(&burst.killed, now)?;
     }
     Ok(())
+}
+
+/// Whether `object` goes down `viewer`'s circuit: everything
+/// [`crate::seating::shown_to`] shows it but what an avatar a private parcel
+/// hides from it wears (`hidden`, [`SimState::hidden`]).
+fn streams(
+    world: &crate::world::SceneFixtures,
+    hidden: &std::collections::BTreeSet<sl_types::key::AgentKey>,
+    object: &sl_proto::Object,
+    viewer: sl_types::key::AgentKey,
+) -> bool {
+    crate::seating::shown_to(world, object, viewer)
+        && world
+            .objects
+            .attached_to(world.root_of(object.local_id))
+            .is_none_or(|attached| !hidden.contains(&attached.agent))
+}
+
+/// Streams a change to another agent's avatar to this session's viewer
+/// ([`RegionChange::resident`]), and lists the region's avatars in its coarse
+/// feed as they now stand.
+///
+/// Nothing goes to the avatar's own viewer, which was told in the same
+/// breath, nor to a root agent still arriving, whose arrival burst sends it
+/// every avatar the region shows. An avatar a private parcel hides from this
+/// viewer ([`SceneFixtures::hides`](crate::world::SceneFixtures::hides)) is
+/// killed for it as it steps in and introduced again whole as it steps out;
+/// nothing else of it is sent meanwhile.
+fn stream_resident(
+    state: &mut SimState,
+    change: &RegionChange,
+    now: Instant,
+) -> Result<(), sl_proto::Error> {
+    let Some(agent) = change.resident() else {
+        return Ok(());
+    };
+    let viewer = state.avatar.agent_id;
+    let root = state.sim.is_root_agent();
+    if agent == viewer || (root && state.arrived_at.is_none()) {
+        return Ok(());
+    }
+    let viewer_at = root.then(|| crate::chat::agent_position(&state.sim));
+    // Whether it is still shown, whether it is hidden from this viewer, and
+    // the id it is shown under.
+    let shown = {
+        let world = state.world.lock();
+        crate::world::refresh_coarse_others(&world, viewer, &mut state.sim);
+        world.resident(agent).map(|resident| {
+            (
+                world.hides(&resident.at, viewer_at.as_ref()),
+                resident.body.local_id,
+            )
+        })
+    };
+    if let RegionChange::ResidentLeft { local_id, .. } = change {
+        if state.hidden.remove(&agent) {
+            return Ok(());
+        }
+        return state.sim.send_kill_object(&[*local_id], now);
+    }
+    let Some((hide, local_id)) = shown else {
+        return Ok(());
+    };
+    let arrived = matches!(change, RegionChange::ResidentArrived(_));
+    let was_hidden = state.hidden.contains(&agent);
+    if hide {
+        if was_hidden {
+            return Ok(());
+        }
+        let _new = state.hidden.insert(agent);
+        if arrived {
+            return Ok(());
+        }
+        return state.sim.send_kill_object(&[local_id], now);
+    }
+    if arrived || was_hidden {
+        let _shown = state.hidden.remove(&agent);
+        let world = state.world.lock();
+        crate::world::push_resident(&world, agent, viewer, &mut state.sim, now);
+        drop(world);
+        return Ok(());
+    }
+    match change {
+        RegionChange::ResidentShown { body, .. } => {
+            crate::world::send_objects(&mut state.sim, core::slice::from_ref(body.as_ref()), now)
+        }
+        RegionChange::ResidentMoved { update, .. } => state.sim.send_terse_update(
+            core::slice::from_ref(update.as_ref()),
+            crate::world::REAL_TIME_DILATION,
+            now,
+        ),
+        RegionChange::ResidentAnimated { statement, .. } => {
+            statement.send(agent, &mut state.sim, now)
+        }
+        RegionChange::ResidentAppearance(appearance) => {
+            state.sim.send_avatar_appearance(appearance, now)
+        }
+        _other => Ok(()),
+    }
+}
+
+/// Settles which of the region's residents a private parcel hides from this
+/// session's viewer now that its own avatar has moved: one it no longer hides
+/// is introduced again whole, one it now hides is killed — both live grids'
+/// way of walking into and out of such a parcel (`parcel-privacy`,
+/// 2026-10-08).
+pub(crate) fn refresh_privacy(state: &mut SimState, now: Instant) {
+    let viewer = state.avatar.agent_id;
+    let viewer_at = state
+        .sim
+        .is_root_agent()
+        .then(|| crate::chat::agent_position(&state.sim));
+    let settled: Vec<(sl_types::key::AgentKey, bool, sl_proto::RegionLocalObjectId)> = {
+        let world = state.world.lock();
+        if !world.presence.hides_on_private_parcels {
+            return;
+        }
+        world
+            .residents()
+            .filter(|(agent, _resident)| *agent != viewer)
+            .map(|(agent, resident)| {
+                (
+                    agent,
+                    world.hides(&resident.at, viewer_at.as_ref()),
+                    resident.body.local_id,
+                )
+            })
+            .collect()
+    };
+    for (agent, hide, local_id) in settled {
+        let was_hidden = state.hidden.contains(&agent);
+        if hide && !was_hidden {
+            let _new = state.hidden.insert(agent);
+            if let Err(error) = state.sim.send_kill_object(&[local_id], now) {
+                tracing::debug!("hiding an avatar on a private parcel failed: {error}");
+            }
+        } else if !hide && was_hidden {
+            let _shown = state.hidden.remove(&agent);
+            let world = state.world.lock();
+            crate::world::push_resident(&world, agent, viewer, &mut state.sim, now);
+            drop(world);
+        }
+    }
 }
 
 /// The region watcher: streams the changes *other* sessions in this region
@@ -1019,14 +1358,15 @@ pub(crate) async fn run_region_watcher(
                         }
                         shared
                             .with_state(|state| {
-                                // Another avatar's worn object is never
-                                // drawn here ([`crate::seating::shown_to`]).
+                                // Another avatar's HUD, and what a hidden or
+                                // unshown avatar wears, is never drawn here
+                                // ([`streams`]).
                                 if let RegionChange::Rezzed(object)
                                 | RegionChange::Updated(object)
                                 | RegionChange::Moved(object) = &change
                                 {
                                     let world = state.world.lock();
-                                    if !crate::seating::shown_to(&world, object, state.avatar.agent_id) {
+                                    if !streams(&world, &state.hidden, object, state.avatar.agent_id) {
                                         return;
                                     }
                                 }
@@ -1037,19 +1377,24 @@ pub(crate) async fn run_region_watcher(
                                         std::slice::from_ref(object.as_ref()),
                                         now,
                                     ),
+                                    // The stood avatar's own session re-sends
+                                    // it and tells the others.
                                     RegionChange::Unseated { agent, stands_at } => {
                                         if *agent != state.avatar.agent_id {
                                             return;
                                         }
                                         let _was = state.sim.unseat_agent();
-                                        let world = state.world.lock();
-                                        crate::world::stand_avatar(
-                                            &world,
+                                        let mut world = state.world.lock();
+                                        if let Some(shown) = crate::world::stand_avatar(
+                                            &mut world,
                                             &state.avatar,
                                             &mut state.sim,
                                             stands_at,
                                             now,
-                                        );
+                                        ) {
+                                            state.publish(shown);
+                                        }
+                                        drop(world);
                                         Ok(())
                                     }
                                     RegionChange::Seated {
@@ -1068,21 +1413,32 @@ pub(crate) async fn run_region_watcher(
                                             now,
                                         );
                                         state.sim.seat_agent(seat.full_id);
-                                        let world = state.world.lock();
-                                        crate::world::push_seated_avatar(
-                                            &world,
+                                        let mut world = state.world.lock();
+                                        if let Some(shown) = crate::world::push_seated_avatar(
+                                            &mut world,
                                             &state.avatar,
                                             seat.local_id,
                                             (offset.clone(), rotation.clone()),
                                             &mut state.sim,
                                             now,
-                                        );
+                                        ) {
+                                            state.publish(shown);
+                                        }
+                                        drop(world);
                                         sent
                                     }
-                                    // The wearer is shown its object worn; any
-                                    // other viewer loses it from the world.
+                                    // Whoever is shown the wearer is shown
+                                    // its object worn, the wearer among them;
+                                    // any other viewer loses it from the
+                                    // world (a HUD, an avatar hidden here).
                                     RegionChange::Worn { agent, objects } => {
-                                        if *agent == state.avatar.agent_id {
+                                        let shown = {
+                                            let world = state.world.lock();
+                                            objects.first().is_some_and(|root| {
+                                                streams(&world, &state.hidden, root, state.avatar.agent_id)
+                                            })
+                                        };
+                                        if shown || *agent == state.avatar.agent_id {
                                             crate::world::send_objects(&mut state.sim, objects, now)
                                         } else {
                                             let ids: Vec<sl_proto::RegionLocalObjectId> =
@@ -1090,30 +1446,73 @@ pub(crate) async fn run_region_watcher(
                                             state.sim.send_kill_object(&ids, now)
                                         }
                                     }
+                                    // Another agent's avatar: arrived, moved,
+                                    // changed, gone.
+                                    RegionChange::ResidentArrived(_)
+                                    | RegionChange::ResidentShown { .. }
+                                    | RegionChange::ResidentMoved { .. }
+                                    | RegionChange::ResidentAnimated { .. }
+                                    | RegionChange::ResidentAppearance(_)
+                                    | RegionChange::ResidentLeft { .. } => {
+                                        stream_resident(state, &change, now)
+                                    }
+                                    // A script took its object off: killed,
+                                    // its item restated, a temporary one gone.
                                     RegionChange::TakeOff { agent, root } => {
+                                        if *agent != state.avatar.agent_id {
+                                            return;
+                                        }
+                                        let mut world = state.world.lock();
+                                        let changes = crate::attachments::detach(
+                                            &mut world,
+                                            &state.assets,
+                                            &state.avatar,
+                                            &mut state.sim,
+                                            (&[*root], crate::attachments::Restate::Each),
+                                            now,
+                                        );
+                                        for change in changes {
+                                            state.publish(change);
+                                        }
+                                        state.worn_outfits.keep(&world, state.avatar.agent_id);
+                                        drop(world);
+                                        Ok(())
+                                    }
+                                    // A script put its object on this agent:
+                                    // filed, sent worn, the others told.
+                                    RegionChange::FileWorn { agent, root } => {
                                         if *agent != state.avatar.agent_id {
                                             return;
                                         }
                                         let minter = state.minter.clone();
                                         let mut world = state.world.lock();
-                                        let changes = crate::world::take_off(
+                                        let filed = crate::attachments::file_worn(
                                             &mut world,
                                             &state.assets,
-                                            (&state.avatar, &state.identity),
-                                            (state.object_assets, state.inventory_announcement),
-                                            &move || minter.uuid(),
+                                            (&state.avatar, &move || minter.uuid()),
+                                            state.object_assets,
                                             &mut state.sim,
-                                            &[*root],
+                                            *root,
                                             now,
                                         );
-                                        for change in changes {
-                                            drop(state.changes.send(RegionUpdate {
-                                                source: state.seq,
-                                                change,
-                                            }));
-                                        }
+                                        let sent = match filed {
+                                            Some(objects) => {
+                                                let sent = crate::world::send_objects(
+                                                    &mut state.sim,
+                                                    &objects,
+                                                    now,
+                                                );
+                                                state.publish(RegionChange::Worn {
+                                                    agent: *agent,
+                                                    objects,
+                                                });
+                                                sent
+                                            }
+                                            None => Ok(()),
+                                        };
+                                        state.worn_outfits.keep(&world, state.avatar.agent_id);
                                         drop(world);
-                                        Ok(())
+                                        sent
                                     }
                                     RegionChange::Moved(object) => state.sim.send_terse_update(
                                         &[sl_proto::TerseUpdate {

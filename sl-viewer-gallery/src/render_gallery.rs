@@ -198,7 +198,7 @@ impl Default for GalleryCell {
 impl GalleryCell {
     /// This cell as the context a scene is spawned with.
     const fn cx(self) -> SceneCx {
-        SceneCx { lod: self.lod }
+        SceneCx::at_lod(self.lod)
     }
 
     /// The scene this cell names, if the index is in range.

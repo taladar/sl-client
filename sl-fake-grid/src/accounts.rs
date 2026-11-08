@@ -55,6 +55,12 @@ pub struct AccountConfig {
     /// `"Base"` by default. Ignored entirely on a grid whose flavour sends no
     /// benefits package.
     pub package: String,
+    /// Whether the account wears clothing over its body parts at its first
+    /// login: a pair of pants and a pair of shoes
+    /// ([`sl_test_assets::inventory::worn_clothing`]), each in its Clothing
+    /// folder, linked from the Current Outfit Folder under the reference's
+    /// order token and named in the outfit the region holds. Off by default.
+    pub dressed: bool,
 }
 
 impl AccountConfig {
@@ -77,7 +83,16 @@ impl AccountConfig {
             maturity_ceiling: Maturity::Adult,
             preferred_maturity: None,
             package: "Base".to_owned(),
+            dressed: false,
         }
+    }
+
+    /// The same account, wearing a pair of pants and a pair of shoes
+    /// ([`dressed`](Self::dressed)).
+    #[must_use]
+    pub const fn dressed(mut self) -> Self {
+        self.dressed = true;
+        self
     }
 
     /// The same account, entitled only up to `ceiling`.

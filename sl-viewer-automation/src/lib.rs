@@ -187,7 +187,7 @@ pub use crate::world_query::{WorldProgress, WorldQuery, WorldWant, find_world};
 pub use crate::world_sweep::{SweepProgress, SweepTarget, WorldSweep};
 /// What a [`ProbeSources::parcel_media`] reader answers — re-exported so a
 /// viewer can supply one without naming the protocol crate.
-pub use sl_automation_proto::ParcelMediaReadout;
+pub use sl_automation_proto::{FeetReadout, FootReadout, ParcelMediaReadout};
 
 /// Installs what the state probes record as the app runs: the [`EventLog`],
 /// the render-settle [`PipelineStatus`] and the [`Screenshots`] store. The

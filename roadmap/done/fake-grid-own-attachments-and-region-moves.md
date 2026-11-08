@@ -2,9 +2,11 @@
 id: fake-grid-own-attachments-and-region-moves
 title: Fake grid — the agent's own attachments, the COF, and region moves
 topic: test
-status: ready
+status: done
 origin: gap found while fixing viewer-inventory-worn-before-attach-confirmed (2026-09-27)
-refs: [viewer-inventory-worn-before-attach-confirmed, viewer-object-moved-region-reuse, viewer-menu-touch-object]
+refs: [viewer-inventory-worn-before-attach-confirmed, viewer-object-moved-region-reuse,
+  viewer-menu-touch-object, server-fake-grid-agent-avatars-shared,
+  server-fake-grid-attachment-resources]
 blocked_by: [gridspec-outfits-wearables, gridspec-attachments]
 ---
 
@@ -155,3 +157,61 @@ it leaves, and **XEngine runs `state_entry` again** in the worn object on every
 arrival, its globals lost. Once attachments travel, their scripts travel with
 them and raise these (`book/src/gridspec/lsl.md` § `changed`: what a viewer's
 change raises).
+
+## Done (2026-11-07)
+
+Built to `book/src/gridspec/appearance.md` § Attachments and § Outfits, with
+both censuses running offline on both flavours.
+
+- **Wearing** (`sl-fake-grid/src/attachments.rs`, `AttachmentPolicy`): a
+  `RezSingleAttachmentFromInv` / `RezMultipleAttachmentsFromInv` rezzes the
+  item's linkset onto the avatar under its `AttachItemID`; *replace* takes
+  off the point's first (Second Life) or all (OpenSim), restating their
+  items; an item worn already and the 39th are ignored, an unknown one is
+  refused with Second Life's `RezAttemptFailed`. An `ObjectAttach` and a
+  script's `llAttachToAvatar` file a new item, announced over UDP (the
+  script's id minted in the region, `FileWorn` filing it in the wearer's
+  session); `llAttachToAvatarTemp` (new in `sl-lsl-runtime`) files none.
+  Second Life states the appearance again after a wear of one non-HUD item,
+  listing what is worn.
+- **Taking off**: `ObjectDetach` and a script's `llDetachFromAvatar` kill for
+  every viewer (a HUD for the others on Second Life alone) and restate the
+  item — one per message for a viewer's — on the event queue or over UDP;
+  `DetachAttachmentIntoInv` restates nothing; a drop keeps the ids, clears the
+  name-values and removes the item; what comes off is saved into its item.
+- **On the wire**: an update states the owner of a sound alone
+  (`sl_proto::UpdateOwner`), so a worn and a dropped object say nil; any
+  prim's flags say empty contents (`FLAGS_INVENTORY_EMPTY`, kept by the
+  store), and a stranger is told it may transfer it and, on Second Life, that
+  its owner may modify it.
+- **Region moves**: a teleport and a crossing pack what is worn out of the
+  region left and unpack it at the arrival, same full ids, new local ids — on
+  OpenSim the id it had in a region it comes back to — its scripts carried
+  with what they held (`Engine::travel_saved`: `CHANGED_REGION`, with
+  `CHANGED_TELEPORT` for a teleport, YEngine's own 32768 as it leaves,
+  XEngine's `state_entry` again). Second Life's region left kills the avatar
+  for the agent and the viewers left behind as the finish goes out, OpenSim's
+  nothing. Each region mints local ids from a range of its own.
+- **Logins**: what an account wears is put back on (`WornOutfits`), and its
+  inventory outlives the session (`inventory::Inventories`): kept at a logout
+  or the kick a second login gives the last session, with the outfit last
+  stated; handed over across a teleport or a crossing. Each session mints ids
+  from a range of its own (`SimSession::seed_serials`).
+- **The folder**: the session already took the COF writes; AIS3 now states a
+  link with no flags, permissions or sale, and a link just made with
+  `_broken` and `_embedded`. `FakeSl`'s bake service bakes the folder's outfit
+  in token order. `AccountConfig::dressed` dresses an account in pants and
+  shoes; the offline conformance accounts are dressed.
+- **Tests**: `client_end_to_end` — a worn item shown to the other after the
+  body and never a HUD, and put back on at the next login; taken off, by the
+  item, dropped, refused; carried next door and back. `sl-lsl-runtime` —
+  what a travelling script hears per engine. Conformance: `attachments` and
+  `outfits` offline on both flavours; `attachments`' two answers that turn on
+  aditi's telehub (`move_back_b_arrived`, `move_back_same_local_id`) held live
+  only.
+
+Also built after review: a take-off's scripts hear `attach(NULL_KEY)` — the
+object, killed for every viewer, waits out the region's next tick before it
+is saved into its item and leaves (`attachments::Leaving`); and the
+`AttachmentResources` answer lists what is worn
+([[server-fake-grid-attachment-resources]]).

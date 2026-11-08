@@ -733,6 +733,55 @@ pub enum AgentPresence {
     Root,
 }
 
+/// Which owner a full `ObjectUpdate` states for an object
+/// ([`SimSession::set_update_owner`]).
+///
+/// The block's `OwnerID` is the owner of the object's **sound**: the
+/// reference viewer reads it as nothing else, and a simulator sends the nil
+/// id for an object with none — on Second Life a worn object and a dropped
+/// one state it nil to every viewer, on OpenSim too (`attachments`,
+/// 2026-10-20, `book/src/gridspec/appearance.md` § Attachments). After
+/// `llStopSound` Second Life's update names no owner, OpenSim's still names
+/// it (`effects-sounds`, `book/src/gridspec/avatars.md`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum UpdateOwner {
+    /// The object's `owner_id` as it is given: what a test that builds its
+    /// own objects expects to read back.
+    #[default]
+    AsGiven,
+    /// The owner while a sound is attached, the nil id otherwise: Second
+    /// Life.
+    WithSound,
+    /// The owner while a sound is attached or the sound's flags say anything
+    /// (a stopped one included), the nil id otherwise: OpenSim.
+    WithSoundOrFlags,
+}
+
+impl UpdateOwner {
+    /// The `OwnerID` an update of `object` states.
+    #[must_use]
+    pub const fn stated(self, object: &Object) -> Uuid {
+        let sounding = !object.sound.is_nil();
+        let stated = match self {
+            Self::AsGiven => true,
+            Self::WithSound => sounding,
+            Self::WithSoundOrFlags => sounding || object.sound_flags != 0,
+        };
+        if stated { object.owner_id } else { Uuid::nil() }
+    }
+}
+
+/// What a simulator states of an object's owner in its updates
+/// ([`SimSession::set_update_owner`], [`SimSession::set_owner_modify_to_others`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+struct UpdateOwnership {
+    /// Which owner an update states.
+    owner: UpdateOwner,
+    /// Whether a viewer that does not own an object is told its owner may
+    /// modify it.
+    owner_modify_to_others: bool,
+}
+
 /// How long after an agent arrives the first of the region's periodic
 /// messages goes out: both live grids' came about a second in.
 const TELEMETRY_FIRST_DELAY: Duration = Duration::from_secs(1);
@@ -3553,6 +3602,10 @@ pub struct SimSession {
     /// How an `ObjectUpdate` body is put on the wire; see
     /// [`SimSession::set_short_zero_tails`].
     object_update_coding: BodyCoding,
+    /// What an `ObjectUpdate` states of an object's owner; see
+    /// [`SimSession::set_update_owner`] and
+    /// [`SimSession::set_owner_modify_to_others`].
+    ownership: UpdateOwnership,
     /// The region handle this simulator serves (echoed in `AgentMovementComplete`).
     region_handle: RegionHandle,
     /// The channel/version string reported in `AgentMovementComplete`.
@@ -3963,6 +4016,7 @@ impl SimSession {
             coarse_others: Vec::new(),
             coarse_prey: None,
             object_update_coding: BodyCoding::Plain,
+            ownership: UpdateOwnership::default(),
             region_handle,
             channel_version: b"sl-proto SimSession".to_vec(),
             client_addr: None,
@@ -4376,6 +4430,15 @@ impl SimSession {
     ) {
         self.events
             .push_back(ServerEvent::AbuseReportWithScreenshotReceived { report, screenshot });
+    }
+
+    /// Starts the serial this simulator mints its ids from — a copied item's,
+    /// a new folder's, an upload's asset — at `base`: what keeps two sessions
+    /// of one grid from minting the same id, now that an inventory one session
+    /// fills is the next one's too. A grid hands each session a base of its
+    /// own; one that hands none mints from zero.
+    pub const fn seed_serials(&mut self, base: u128) {
+        self.next_sim_serial = base;
     }
 
     /// Bumps and returns the monotonic sim serial that mints upload asset ids
@@ -4911,6 +4974,30 @@ impl SimSession {
     /// circuit is closed without a word on both.
     pub fn set_timeout_kick(&mut self, reason: Option<String>) {
         self.timeout_kick = reason;
+    }
+
+    /// Sets which owner a full `ObjectUpdate` states for each object
+    /// ([`UpdateOwner`]): the object's own `owner_id` as given (the default),
+    /// or the owner of its sound alone, as a simulator states it.
+    pub const fn set_update_owner(&mut self, owner: UpdateOwner) {
+        self.ownership.owner = owner;
+    }
+
+    /// Sets whether a viewer that does not own an object is told, in the
+    /// update flags its owner works out for it, that the owner may modify it
+    /// (`OBJECT_OWNER_MODIFY`): no by default. Second Life tells it, OpenSim
+    /// does not (`object-edit-stranger`, `attachments`;
+    /// `book/src/gridspec/building.md`). The flags are the simulator's to
+    /// work out per viewer; this is what it asks.
+    pub const fn set_owner_modify_to_others(&mut self, told: bool) {
+        self.ownership.owner_modify_to_others = told;
+    }
+
+    /// Whether a viewer that does not own an object is told its owner may
+    /// modify it ([`set_owner_modify_to_others`](Self::set_owner_modify_to_others)).
+    #[must_use]
+    pub const fn owner_modify_to_others(&self) -> bool {
+        self.ownership.owner_modify_to_others
     }
 
     /// Sets whether an `ObjectUpdate` goes out zero-coded with its final run
@@ -8455,7 +8542,14 @@ impl SimSession {
                 region_handle: self.region_handle.0,
                 time_dilation,
             },
-            object_data: objects.iter().map(full_update_block).collect(),
+            object_data: objects
+                .iter()
+                .map(|object| {
+                    let mut block = full_update_block(object);
+                    block.owner_id = self.ownership.owner.stated(object);
+                    block
+                })
+                .collect(),
         });
         self.send(&message, Reliability::Reliable, now)?;
         Ok(())
@@ -9398,25 +9492,52 @@ impl SimSession {
         physical_events: &[Vec<u8>],
         now: Instant,
     ) -> Result<(), Error> {
-        if self.client_addr.is_none() {
-            return Err(Error::NoCircuit);
-        }
-        let animation_source_list = if animations
+        let sources: Vec<sl_types::key::ObjectKey> = if animations
             .iter()
             .any(|animation| animation.source_id.is_some())
         {
             animations
                 .iter()
-                .map(|animation| AvatarAnimationAnimationSourceListBlock {
-                    object_id: animation
+                .map(|animation| {
+                    animation
                         .source_id
-                        .as_ref()
-                        .map_or_else(|| avatar_id.uuid(), sl_types::key::ObjectKey::uuid),
+                        .unwrap_or_else(|| sl_types::key::ObjectKey::from(avatar_id.uuid()))
                 })
                 .collect()
         } else {
             Vec::new()
         };
+        self.send_avatar_animation_statement(avatar_id, animations, &sources, physical_events, now)
+    }
+
+    /// Sends an `AvatarAnimation` whose `AnimationSourceList` is `sources`
+    /// exactly, however many entries the animation list has; each animation's
+    /// own [`source_id`](PlayingAnimation::source_id) is not read.
+    ///
+    /// The list is positional — a viewer reads entry `i`'s source from block
+    /// `i` — and may be shorter than the animations: Second Life tells another
+    /// viewer an avatar's set with one source block, the first entry's.
+    ///
+    /// # Errors
+    ///
+    /// As [`send_avatar_animation`](Self::send_avatar_animation).
+    pub fn send_avatar_animation_statement(
+        &mut self,
+        avatar_id: AgentKey,
+        animations: &[PlayingAnimation],
+        sources: &[sl_types::key::ObjectKey],
+        physical_events: &[Vec<u8>],
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let animation_source_list = sources
+            .iter()
+            .map(|source| AvatarAnimationAnimationSourceListBlock {
+                object_id: source.uuid(),
+            })
+            .collect();
         let message = AnyMessage::AvatarAnimation(AvatarAnimationWire {
             sender: AvatarAnimationSenderBlock {
                 id: avatar_id.uuid(),
@@ -11266,13 +11387,33 @@ impl SimSession {
     /// simulator kills it only for *other* viewers that cannot see the region
     /// the avatar walked into, never for the crossing agent's own client,
     /// whose avatar is one object across every circuit it holds.
+    ///
+    /// The region's coarse feed goes on down the circuit at its own pace, now
+    /// without an entry for the agent: both live grids send a neighbour's feed
+    /// down the child circuit an agent holds there.
     pub fn make_child_agent(&mut self) {
         self.agent_presence = AgentPresence::Child;
-        // A child circuit carries no region telemetry.
+        // A child circuit carries no statistics and no clock.
         if let Some(armed) = self.telemetry.as_mut() {
             armed.stats_due = None;
             armed.time_due = None;
-            armed.coarse_due = None;
+        }
+    }
+
+    /// Starts the region's coarse feed down a **child** circuit, the first a
+    /// second from `now` and then at the telemetry's own interval
+    /// ([`RegionTelemetry::coarse_interval`]): the region's avatars as
+    /// [`set_coarse_others`](Self::set_coarse_others) lists them, with no
+    /// entry for the agent, which is not standing here. Both live grids send a
+    /// neighbour's feed down the child circuit an agent holds there, in that
+    /// region's coordinates. A session with no coarse feed, or one already
+    /// sending it, is left as it is.
+    pub fn start_child_coarse_feed(&mut self, now: Instant) {
+        if let Some(armed) = self.telemetry.as_mut()
+            && armed.telemetry.coarse_interval.is_some()
+            && armed.coarse_due.is_none()
+        {
+            armed.coarse_due = Some(deadline(now, TELEMETRY_FIRST_DELAY));
         }
     }
 
@@ -14530,14 +14671,18 @@ impl SimSession {
                         locations.len().saturating_sub(1)
                     })
             });
-            if let Some(agent_id) = self.agent_id() {
+            // A child circuit's agent stands in another region: it has no
+            // entry here, and `You` points at nobody.
+            let root = matches!(self.agent_presence, AgentPresence::Root);
+            let mut you = None;
+            if root && let Some(agent_id) = self.agent_id() {
                 locations.push(coarse_location(
                     agent_id,
                     &self.arrival.position,
                     armed.telemetry.coarse_rounding,
                 ));
+                you = locations.len().checked_sub(1);
             }
-            let you = locations.len().checked_sub(1);
             if let Err(error) = self.send_coarse_location_update(&locations, you, prey, now) {
                 tracing::warn!(%error, "failed to send the region's coarse locations");
             }
