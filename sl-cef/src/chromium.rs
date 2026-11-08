@@ -78,6 +78,13 @@ struct SurfaceShared {
     /// The live browser, set by `on_after_created` / creation and cleared by
     /// `on_before_close`.
     browser: Option<Browser>,
+    /// Whether the page the surface was created with has started loading.
+    /// Chromium issues that first navigation after `create_browser_sync`
+    /// returns, so a `load_url` sent before it starts is replaced by it.
+    first_load_started: bool,
+    /// A URL [`MediaSurface::navigate`] was asked for before the first load
+    /// started, loaded as soon as it does.
+    pending_url: Option<String>,
 }
 
 impl SurfaceShared {
@@ -93,6 +100,8 @@ impl SurfaceShared {
                 ..SurfaceStatus::default()
             },
             browser: None,
+            first_load_started: false,
+            pending_url: None,
         }
     }
 
@@ -183,22 +192,32 @@ wrap_load_handler! {
     impl LoadHandler {
         fn on_loading_state_change(
             &self,
-            _browser: Option<&mut Browser>,
+            browser: Option<&mut Browser>,
             is_loading: c_int,
             can_go_back: c_int,
             can_go_forward: c_int,
         ) {
-            let mut shared = self.shared.borrow_mut();
-            shared.status.loading = is_loading != 0;
-            shared.status.can_go_back = can_go_back != 0;
-            shared.status.can_go_forward = can_go_forward != 0;
-            if is_loading != 0 {
-                shared.status.load_error = None;
-                shared.status.progress = 0.0;
-            } else {
-                shared.status.progress = 1.0;
+            let pending = {
+                let mut shared = self.shared.borrow_mut();
+                shared.status.loading = is_loading != 0;
+                shared.status.can_go_back = can_go_back != 0;
+                shared.status.can_go_forward = can_go_forward != 0;
+                if is_loading != 0 {
+                    shared.status.load_error = None;
+                    shared.status.progress = 0.0;
+                } else {
+                    shared.status.progress = 1.0;
+                }
+                shared.touch_status();
+                shared.first_load_started = true;
+                shared.pending_url.take()
+            };
+            // Outside the borrow: `load_url` may call back into a handler.
+            if let Some(url) = pending
+                && let Some(frame) = browser.and_then(|browser| browser.main_frame())
+            {
+                frame.load_url(Some(&CefString::from(url.as_str())));
             }
-            shared.touch_status();
         }
         fn on_load_error(
             &self,
@@ -675,6 +694,13 @@ impl CefMediaSurface {
 
 impl MediaSurface for CefMediaSurface {
     fn navigate(&self, url: &ValidatedMediaUrl) {
+        {
+            let mut shared = self.shared.borrow_mut();
+            if !shared.first_load_started {
+                shared.pending_url = Some(url.as_str().to_owned());
+                return;
+            }
+        }
         if let Some(frame) = self.browser().and_then(|browser| browser.main_frame()) {
             frame.load_url(Some(&CefString::from(url.as_str())));
         }
