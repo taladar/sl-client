@@ -10174,6 +10174,7 @@ version = "0.1.0"
 dependencies = [
  "bevy",
  "bytes",
+ "pretty_assertions",
  "sl-avatar",
  "sl-client-bevy",
  "sl-terrain",

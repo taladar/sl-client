@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 129 |
-| ready | 330 |
-| blocked | 37 |
-| in-progress | 10 |
+| ready | 334 |
+| blocked | 40 |
+| in-progress | 9 |
 | bugs | 35 |
-| done | 1514 |
+| done | 1515 |
 | deferred | 30 |
 | wont-do | 24 |
-| **total** | **2109** |
+| **total** | **2116** |
 
 ## ideas (129)
 
@@ -326,7 +326,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-lsl-opensim-function-set`](ideas/gridspec-lsl-opensim-function-set.md)
   — Measure which library functions OpenSim's engines compile
 
-## ready (330)
+## ready (334)
 
 ### protocol
 
@@ -863,11 +863,20 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-render-closedness-check`](ready/viewer-render-closedness-check.md) —
   Closedness check — an object's faces must enclose a volume (blocked by
   `viewer-render-test-harness` (done))
+- [`viewer-render-hud-and-actor-axes`](ready/viewer-render-hud-and-actor-axes.md)
+  — HUD screen axis and the name-tag, particle and avatar actors (blocked by
+  `viewer-render-context-matrix` (done))
+- [`viewer-render-matrix-particles-projector-midnight`](ready/viewer-render-matrix-particles-projector-midnight.md)
+  — Render matrix — particles and the projector as subjects at midnight
 - [`viewer-render-metadata-overlays`](ready/viewer-render-metadata-overlays.md)
   — Render-metadata debug overlays
 - [`viewer-render-readback-tier`](ready/viewer-render-readback-tier.md) — Render
   readback tier — assert on the pixels, headlessly (blocked by
   `viewer-render-test-harness` (done))
+- [`viewer-render-rig-glow-pass`](ready/viewer-render-rig-glow-pass.md) — Run
+  the glow pass in the headless readback rig
+- [`viewer-render-rig-sky-ambient`](ready/viewer-render-rig-sky-ambient.md) —
+  Light that follows the sky reaches faces turned away from the sun
 - [`viewer-render-type-toggles`](ready/viewer-render-type-toggles.md) —
   Render-type & render-feature toggles (hide object classes, wireframe)
 - [`viewer-report-abuse`](ready/viewer-report-abuse.md) — Report Abuse floater
@@ -1131,7 +1140,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-sl-mfa-challenge`](ready/gridspec-sl-mfa-challenge.md) — Record
   Second Life's MFA challenge and whether a remembered mfa_hash gets past it
 
-## blocked (37)
+## blocked (40)
 
 ### viewer
 
@@ -1184,16 +1193,25 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-pathfinding-floaters`)
 - [`viewer-projector-lights-spot-shadows`](blocked/viewer-projector-lights-spot-shadows.md)
   — Projector spot-shadow tier (blocked by `viewer-projector-lights-textured`)
-- [`viewer-render-hud-and-actor-axes`](blocked/viewer-render-hud-and-actor-axes.md)
-  — HUD screen axis and the name-tag, particle and avatar actors (blocked by
-  `viewer-render-context-matrix`)
+- [`viewer-render-matrix-glow-over-water`](blocked/viewer-render-matrix-glow-over-water.md)
+  — Render matrix — a glowing prim over and under the water surface (blocked by
+  `viewer-render-rig-glow-pass`)
+- [`viewer-render-matrix-hud-over-world`](blocked/viewer-render-matrix-hud-over-world.md)
+  — Render matrix — a prim on a HUD composited over a prim in the world (blocked
+  by `viewer-render-hud-and-actor-axes`)
+- [`viewer-render-matrix-name-tag-behind-glass`](blocked/viewer-render-matrix-name-tag-behind-glass.md)
+  — Render matrix — a name tag seen through a translucent prim (blocked by
+  `viewer-render-hud-and-actor-axes`)
 - [`viewer-render-matrix-pairwise`](blocked/viewer-render-matrix-pairwise.md) —
   The generated all-pairs sweep (opt-in) (blocked by
   `viewer-render-toggle-axis`, `viewer-render-hud-and-actor-axes`)
+- [`viewer-render-matrix-translucent-grazing-terrain`](blocked/viewer-render-matrix-translucent-grazing-terrain.md)
+  — Render matrix — a translucent prim seen at a grazing angle over terrain
+  (blocked by `viewer-render-hud-and-actor-axes`)
 - [`viewer-render-toggle-axis`](blocked/viewer-render-toggle-axis.md) — The
   toggle axis — every effect must differ where it should and nowhere else
-  (blocked by `viewer-render-context-matrix`, `viewer-render-overrides-resource`
-  (done))
+  (blocked by `viewer-render-context-matrix` (done),
+  `viewer-render-overrides-resource` (done), `viewer-render-rig-glow-pass`)
 - [`viewer-rlv-enforce-info-hiding`](blocked/viewer-rlv-enforce-info-hiding.md)
   — RLV — information hiding / anonymisation layer (blocked by
   `viewer-rlv-restriction-state` (done), `viewer-name-tags-decorations`,
@@ -1259,7 +1277,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-voice`](blocked/gridspec-voice.md) — Voice provisioning and
   signalling on each grid (blocked by `viewer-voice-audio`)
 
-## in-progress (10)
+## in-progress (9)
 
 ### viewer
 
@@ -1275,10 +1293,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Tune main-view shadow specialization + clustered lighting during rez
 - [`viewer-realtime-mirrors`](in-progress/viewer-realtime-mirrors.md) —
   Real-time mirrors (hero probes)
-- [`viewer-render-context-matrix`](in-progress/viewer-render-context-matrix.md)
-  — Render context matrix — subjects × eye, time of day, mirror, layering
-  (blocked by `viewer-render-pixel-oracle` (done), `viewer-plugin-groups`
-  (done), `viewer-render-gpu-serialisation` (done))
 - [`viewer-ui-text-caret-grapheme-motion`](in-progress/viewer-ui-text-caret-grapheme-motion.md)
   — Upstream issue — parley caret motion steps one codepoint, not one grapheme
 - [`viewer-ui-text-parley-pr-backdelete`](in-progress/viewer-ui-text-parley-pr-backdelete.md)
@@ -1378,7 +1392,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1514)
+## done (1515)
 
 ### protocol
 
@@ -3161,6 +3175,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A resolved parcel id names no question, so two askers cannot be told apart
 - [`viewer-remove-attachment-message-is-a-no-op`](done/viewer-remove-attachment-message-is-a-no-op.md)
   — '`Command::RemoveAttachment` sends a message no grid handles'
+- [`viewer-render-context-matrix`](done/viewer-render-context-matrix.md) —
+  Render context matrix — subjects × eye, time of day, mirror, layering (blocked
+  by `viewer-render-pixel-oracle` (done), `viewer-plugin-groups` (done),
+  `viewer-render-gpu-serialisation` (done))
 - [`viewer-render-cpu-skinning-crosscheck`](done/viewer-render-cpu-skinning-crosscheck.md)
   — CPU-skinning cross-check — make the R13 debug affordance a standing test
   (blocked by `viewer-render-test-harness` (done))

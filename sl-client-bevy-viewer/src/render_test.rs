@@ -2016,7 +2016,7 @@ mod tests {
         let mut failures = Vec::new();
         for scene in SCENES {
             for lod in PrimLod::ALL {
-                let mut app = spawn_scene(SceneCx { lod }, scene);
+                let mut app = spawn_scene(SceneCx::at_lod(lod), scene);
                 if let Some(&last) = scene.timeline.samples.last() {
                     advance_to(&mut app, last);
                 }
@@ -2250,7 +2250,7 @@ mod tests {
     fn scene_facts(scene: &RenderScene) -> Facts {
         let mut facts = Facts::new();
         for lod in PrimLod::ALL {
-            let mut app = spawn_scene(SceneCx { lod }, scene);
+            let mut app = spawn_scene(SceneCx::at_lod(lod), scene);
             if let Some(&last) = scene.timeline.samples.last() {
                 advance_to(&mut app, last);
             }

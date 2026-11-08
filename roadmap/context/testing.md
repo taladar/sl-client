@@ -223,13 +223,17 @@ reason.
 ## How to add …
 
 - **a render subject**: register a `RenderScene` with `subject:
-  Some(SubjectSignature { marker, points, bounds, translucent, emissive })`
-  and the `applies` axes; the R0 canonical sweep and every listed R1 axis
-  pick it up. A self-staged scene (`subject: None`) is captured with the
-  bare rig and takes no contexts.
-- **a context axis**: a variant on `ContextSet`, a stage builder in
-  `render_stage.rs`, an `expectation()` rule, and a `toggle_should_differ`
-  row if it is a toggle.
+  Some(SubjectSignature { marker, points, translucent, emissive })` and
+  the `applies` axes; the R0 canonical sweep and every listed R1 axis
+  pick it up. Its bounds are measured from the geometry tier, never
+  declared. A self-staged scene (`subject: None`) is captured with the
+  bare rig, takes no contexts and is listed with its reason in
+  `render_matrix.rs`'s `SELF_STAGED`.
+- **a context axis**: a slot on `ContextSet` (and an `Axis` variant if
+  subjects declare it), a stage builder in `render_stage.rs::stage`, an
+  `expectation()` rule, and the budget it adds. A **toggle** is a
+  `Toggle` value used only in curated R2 cells; each toggled cell is
+  checked against the same cell untoggled and must differ.
 - **an interaction test**: `InteractionTest` (UI) or `WorldTest` (world)
   from the testkit / viewer crate; address a widget by **locator** where the
   crate can reach `sl_viewer_automation::in_app` (`click`, `fill`, `press`,

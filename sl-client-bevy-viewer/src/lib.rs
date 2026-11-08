@@ -322,13 +322,15 @@ mod pixel_oracle;
 mod render_matrix;
 #[cfg(test)]
 mod render_readback;
+#[cfg(test)]
+mod render_stage;
 mod viewer_plugins;
 #[cfg(test)]
 mod world_test;
 pub(crate) use sl_viewer_world_scene::render_overrides;
 pub(crate) use sl_viewer_world_scene::resolution_divisor;
 // Only the render-harness tiers (`render_matrix`, `render_readback`,
-// `render_test`) build scenes; the viewer proper builds the world.
+// `render_stage`, `render_test`) build scenes; the viewer proper builds the world.
 #[cfg(test)]
 pub(crate) use sl_viewer_render_fixtures as render_scene;
 #[cfg(test)]

@@ -68,9 +68,8 @@ use crate::viewer_plugins::ViewerRenderPlugins;
 use crate::world_api::ViewerCamera;
 
 use crate::render_scene::{
-    CAP_PAIR_OPAQUE_X, CAP_PAIR_TOP, CAP_PAIR_TRANSLUCENT_X, MATRIX_BOXES, MATRIX_DISTANCE,
-    MATRIX_EYES, MATRIX_HALF_DEPTH, MATRIX_HALF_HEIGHT, RenderScene, SCENE_WATER_LEVEL,
-    STRADDLING_EMERGENT, SceneAssets, SceneCx, SceneRuntimePlugin, scene_root,
+    CAP_PAIR_OPAQUE_X, CAP_PAIR_TOP, CAP_PAIR_TRANSLUCENT_X, RenderScene, SCENE_WATER_LEVEL,
+    STRADDLING_EMERGENT, SceneAssets, SceneCamera, SceneCx, SceneRuntimePlugin, scene_root,
     scene_root_transform,
 };
 
@@ -78,66 +77,6 @@ use crate::render_scene::{
 /// scene's check samples. A constant rather than a division at the call site: the
 /// workspace's `arithmetic_side_effects` lint bans the operator there.
 const HALF_EMERGENT: f32 = STRADDLING_EMERGENT / 2.0;
-
-/// One sample of the translucency matrix: which box, which band of it, and the
-/// world point at the middle of that band on the box's **near** face.
-///
-/// The near face because that is the one the camera sees, and its middle because
-/// a band's edges are a grazing-angle smear of it and its neighbour. A box's top
-/// cap gets its own cell, sampled at the middle of the cap.
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct MatrixCell {
-    /// The box's label, from `MATRIX_BOXES`.
-    pub(crate) box_label: &'static str,
-    /// Which part of the box this samples: `above`, `below`, or `top`.
-    pub(crate) band: &'static str,
-    /// Whether the sampled point is above the water surface.
-    pub(crate) emergent: bool,
-    /// The point to project, in Second Life metres (the frame the scenes are
-    /// written in).
-    pub(crate) point: Vec3,
-}
-
-/// Every cell of the translucency matrix: for each box, the middle of its
-/// emergent band, the middle of its submerged band, and its top cap — skipping a
-/// band the box does not have (one clear of the surface has only one).
-pub(crate) fn matrix_cells() -> Vec<MatrixCell> {
-    let mut cells = Vec::new();
-    for (box_label, x, offset) in MATRIX_BOXES {
-        let centre = SCENE_WATER_LEVEL + offset;
-        let top = centre + MATRIX_HALF_HEIGHT;
-        let bottom = centre - MATRIX_HALF_HEIGHT;
-        // The near face stands half the box's depth toward the camera, which is
-        // back along -Y.
-        let near = -MATRIX_HALF_DEPTH;
-        if top > SCENE_WATER_LEVEL {
-            let from = bottom.max(SCENE_WATER_LEVEL);
-            cells.push(MatrixCell {
-                box_label,
-                band: "above",
-                emergent: true,
-                point: Vec3::new(x, near, f32::midpoint(from, top)),
-            });
-        }
-        if bottom < SCENE_WATER_LEVEL {
-            let to = top.min(SCENE_WATER_LEVEL);
-            cells.push(MatrixCell {
-                box_label,
-                band: "below",
-                emergent: false,
-                point: Vec3::new(x, near, f32::midpoint(bottom, to)),
-            });
-        }
-        cells.push(MatrixCell {
-            box_label,
-            band: "top",
-            emergent: top > SCENE_WATER_LEVEL,
-            // The middle of the cap, not its near edge.
-            point: Vec3::new(x, 0.0, top),
-        });
-    }
-    cells
-}
 
 /// A frame row index as a float, to compare against a projected screen `y`.
 #[expect(
@@ -361,7 +300,7 @@ pub(crate) fn frame_at(app: &mut App, captured: &Captured, seconds: f32) -> Opti
 /// R26 was logged by Bevy's mesh allocator, which lives in the render app, and
 /// with pipelined rendering off that app runs on this thread, under this
 /// capture.
-fn check_logs(logs: &LogCapture, scene: &str) {
+pub(crate) fn check_logs(logs: &LogCapture, scene: &str) {
     let events = logs.events();
     assert!(
         events.is_empty(),
@@ -428,6 +367,25 @@ impl Projected {
 /// The clock starts **held at zero** and only moves when a caller advances it,
 /// so a scene settles at a known time and is captured at a known time.
 pub(crate) fn build_readback_app(scene: &RenderScene, cx: SceneCx) -> (App, Captured) {
+    build_posed_app(scene, cx, scene.camera, Vec3::ZERO)
+}
+
+/// The scene root a readback app spawns its scene under — the **subject**, which
+/// the context matrix hides to capture the same cell without it
+/// (`crate::render_stage`). Staged content hangs from a root of its own.
+#[derive(Component, Debug)]
+pub(crate) struct SubjectRoot;
+
+/// [`build_readback_app`] with the camera at `pose` rather than the scene's
+/// declared one, and the scene root moved by `offset` (Second Life metres) — how
+/// the context matrix stands a subject on the waterline and frames it among
+/// whatever it staged beside it.
+pub(crate) fn build_posed_app(
+    scene: &RenderScene,
+    cx: SceneCx,
+    pose: SceneCamera,
+    offset: Vec3,
+) -> (App, Captured) {
     let mut app = App::new();
     app.add_plugins(
         DefaultPlugins
@@ -490,20 +448,26 @@ pub(crate) fn build_readback_app(scene: &RenderScene, cx: SceneCx) -> (App, Capt
     target.texture_descriptor.usage |= TextureUsages::COPY_SRC;
     let target = app.world_mut().resource_mut::<Assets<Image>>().add(target);
 
-    let scene_camera = scene.camera;
     let spawn = scene.spawn;
     let readback_target = target.clone();
     app.add_systems(
         Startup,
         move |mut commands: Commands, mut assets: SceneAssets| {
-            let root = commands.spawn(scene_root()).id();
+            // The basis change, then the subject's offset expressed in Bevy's
+            // frame: the root's translation is applied after its rotation.
+            let basis = scene_root_transform().rotation;
+            // Inserted over the bundle's own transform rather than beside it: one
+            // bundle may not carry a component twice.
+            let root = commands
+                .spawn((scene_root(), SubjectRoot))
+                .insert(Transform::from_rotation(basis).with_translation(basis.mul_vec3(offset)))
+                .id();
             spawn(cx, root, &mut commands, &mut assets);
 
-            // The scene's declared camera pose, converted from Second Life
-            // region-local metres exactly as `crate::render_gallery` converts it.
-            let basis = scene_root_transform().rotation;
-            let position = basis.mul_vec3(scene_camera.position);
-            let look_at = basis.mul_vec3(scene_camera.look_at);
+            // The camera pose, converted from Second Life region-local metres
+            // exactly as `crate::render_gallery` converts it.
+            let position = basis.mul_vec3(pose.position);
+            let look_at = basis.mul_vec3(pose.look_at);
             // The viewer's own camera bundle (its exposure, HDR target and the
             // `ViewerCamera` marker `install_global_probe` binds the default probe
             // to), aimed into the readback target — in Bevy 0.19 the render target
@@ -648,9 +612,8 @@ pub(crate) fn capture_over_time(scene: &RenderScene, cx: SceneCx) -> Option<(Fra
 mod tests {
     use super::{
         CAP_PAIR_OPAQUE_X, CAP_PAIR_TOP, CAP_PAIR_TRANSLUCENT_X, CAPTURE_AT_SECS, FRAME,
-        HALF_EMERGENT, MATRIX_DISTANCE, MATRIX_EYES, SCENE_WATER_LEVEL, SettleError,
-        build_readback_app, capture, capture_over_time, capture_with, check_logs, frame_at,
-        gpu_lock, matrix_cells, row_to_f32, settle,
+        HALF_EMERGENT, SCENE_WATER_LEVEL, SettleError, build_readback_app, capture,
+        capture_over_time, capture_with, check_logs, frame_at, gpu_lock, row_to_f32, settle,
     };
     use crate::environment::EnvironmentState;
     use crate::pixel_oracle::{
@@ -997,6 +960,8 @@ mod tests {
             look_at: Vec3::new(0.0, 100.0, SCENE_WATER_LEVEL + HAZE_EYE_HEIGHT),
         },
         spawn: haze_stage_spawn,
+        subject: None,
+        applies: &[],
     };
 
     /// The haze stage stages nothing: the pass fogs empty depth by itself.
@@ -1227,99 +1192,6 @@ mod tests {
         Ok(())
     }
 
-    /// How steep the view to a sample must be — rise over run — before the matrix
-    /// asserts on a band that sits on the **far side of the water surface from the
-    /// eye**.
-    ///
-    /// Such a band is seen *through* the surface, so what reaches the frame is a
-    /// refracted sample, displaced by the wave normal where the ray crosses. The
-    /// displacement grows without bound as the view flattens, and the waves animate
-    /// from `globals.time`, so a shallow cell lands somewhere slightly different
-    /// every run: `grazing: sunk below` came back `solid` standalone and
-    /// `background` under a loaded parallel run. Below this slope such a cell is
-    /// reported and not asserted; above it the displacement is small against the
-    /// band and the sample is stable.
-    const REFRACTED_MIN_SLOPE: f32 = 0.06;
-
-    /// How close, in metres, a box's cap may come to the eye's own height before
-    /// the matrix stops asserting on it.
-    ///
-    /// A cap is horizontal, so an eye level with it sees it exactly edge-on: it
-    /// covers no pixels worth sampling and the projected point lands on whatever is
-    /// behind. The grazing eye is level with *some* cap by construction — that is
-    /// what grazing means — so those cells are reported and skipped rather than
-    /// asserted, which is honest about what the fixture can see.
-    const EDGE_ON_MARGIN: f32 = 1.0;
-
-    /// What one walk of a matrix scene reports: a line per cell, and the subset of
-    /// those lines whose verdict was not the wanted one. `None` where the machine
-    /// has no GPU adapter and the tier skips.
-    type MatrixWalk = Option<(Vec<String>, Vec<String>)>;
-
-    /// Walk one matrix scene at eye height `eye` (an offset from the water level)
-    /// and return a line per cell, plus the cells whose verdict is not `wanted`.
-    fn walk_matrix(id: &str, eye: f32, wanted: &[CellVerdict]) -> Result<MatrixWalk, TestError> {
-        let scene = SCENES
-            .iter()
-            .find(|scene| scene.id == id)
-            .ok_or_else(|| TestError::from(format!("the `{id}` scene is not registered")))?;
-        let cells = matrix_cells();
-        // Second Life metres to Bevy's frame, the same basis change the scene root
-        // and the declared camera pose go through.
-        let basis = crate::render_scene::scene_root_transform().rotation;
-        let points: Vec<Vec3> = cells
-            .iter()
-            .map(|cell| basis.mul_vec3(cell.point))
-            .collect();
-        let Some((frame, projected)) = capture(scene, SceneCx::new(), &points) else {
-            return Ok(None);
-        };
-        let mut report = Vec::new();
-        let mut wrong = Vec::new();
-        for (index, cell) in cells.iter().enumerate() {
-            let verdict = read_cell(&frame, projected.get(index), Marker::Green, Marker::Red);
-            let shown = verdict.map_or_else(
-                || "off-frame".to_owned(),
-                |verdict| format!("{verdict:?}").to_lowercase(),
-            );
-            let side = if cell.emergent {
-                "emergent"
-            } else {
-                "submerged"
-            };
-            let eye_height = SCENE_WATER_LEVEL + eye;
-            // A cap the eye is level with is edge-on; see `EDGE_ON_MARGIN`.
-            let edge_on = cell.band == "top" && (cell.point.z - eye_height).abs() < EDGE_ON_MARGIN;
-            // A band on the far side of the surface from the eye is seen through it,
-            // and refracted; see `REFRACTED_MIN_SLOPE`.
-            let across = cell.emergent != (eye_height > SCENE_WATER_LEVEL);
-            let run = cell
-                .point
-                .distance(Vec3::new(0.0, -MATRIX_DISTANCE, eye_height));
-            let slope = if run > 0.0 {
-                (cell.point.z - eye_height).abs() / run
-            } else {
-                f32::INFINITY
-            };
-            let skipped = if edge_on {
-                " [edge-on, not asserted]"
-            } else if across && slope < REFRACTED_MIN_SLOPE {
-                " [refracted at a grazing angle, not asserted]"
-            } else {
-                ""
-            };
-            let line = format!(
-                "{} {} ({side}) → {shown}{skipped}",
-                cell.box_label, cell.band
-            );
-            if skipped.is_empty() && !verdict.is_some_and(|verdict| wanted.contains(&verdict)) {
-                wrong.push(line.clone());
-            }
-            report.push(line);
-        }
-        Ok(Some((report, wrong)))
-    }
-
     /// **A half-transparent top cap is not drawn as an opaque one.**
     ///
     /// Seen from above, a translucent prim's top cap reads as solid on the grid
@@ -1365,83 +1237,6 @@ mod tests {
             !through(opaque),
             "the plate reached the frame through the **opaque** cap — the scene is not framing \
              what this test thinks it is, so its other half proves nothing",
-        );
-        Ok(())
-    }
-
-    /// **Every translucent face over open sea is drawn.**
-    ///
-    /// The sea is opaque and writes depth; a translucent face writes none. So any
-    /// face handed to the pre-water pass that is *not* actually behind the surface
-    /// is painted over by the sea and disappears — which is the shape of the defect
-    /// reported from the grid, where the emergent half of a prim resting mostly
-    /// submerged is simply absent.
-    ///
-    /// Walked over every box in `MATRIX_BOXES` and every band of it, from three eye
-    /// heights, because which side of the surface is the far one flips with the eye
-    /// and the bucket flips with it. Nothing in these scenes is red, so a cell is
-    /// either the prim's green or it is not the prim.
-    #[test]
-    fn every_translucent_face_over_the_sea_is_drawn() -> Result<(), TestError> {
-        let mut all = Vec::new();
-        let mut wrong = Vec::new();
-        for (eye, height) in MATRIX_EYES {
-            let id = format!("water-translucency-{eye}-sea");
-            // Both verdicts mean "the prim's green is there": nothing in these
-            // scenes is deliberately red, but a face drawn over a *bright*
-            // background — sun glint, a pale horizon — carries the red channel
-            // anyway, and that is a drawn face, not a see-through one. Only
-            // `missing` and `background` mean the face is not on screen.
-            let Some((report, missing)) =
-                walk_matrix(&id, height, &[CellVerdict::Solid, CellVerdict::Translucent])?
-            else {
-                warn!("skipping: no frame came back, so this machine has no usable GPU adapter");
-                return Ok(());
-            };
-            all.extend(report.iter().map(|line| format!("{eye}: {line}")));
-            wrong.extend(missing.iter().map(|line| format!("{eye}: {line}")));
-        }
-        assert!(
-            wrong.is_empty(),
-            "translucent faces are missing from the frame over open sea — the depth-writing \
-             sea painted over faces the water bucket put in front of it.\n  wrong:\n    {}\n  \
-             whole matrix:\n    {}",
-            wrong.join("\n    "),
-            all.join("\n    "),
-        );
-        Ok(())
-    }
-
-    /// **Every translucent face shows what is behind it.**
-    ///
-    /// The same walk, with an opaque wall standing behind the boxes: its red can
-    /// only reach the frame *through* a box, so a cell carrying both channels is a
-    /// face that is drawn **and** see-through, one carrying only green is a face
-    /// that is drawn opaque, and one carrying only red is a face that is not drawn
-    /// at all. That three-way split is what a photograph of the live grid cannot
-    /// give, because a brightly lit face blended over a dark background still
-    /// tone-maps bright ([[viewer-translucent-top-face-reads-opaque]]).
-    #[test]
-    fn every_translucent_face_shows_what_is_behind_it() -> Result<(), TestError> {
-        let mut all = Vec::new();
-        let mut wrong = Vec::new();
-        for (eye, height) in MATRIX_EYES {
-            let id = format!("water-translucency-{eye}-backdrop");
-            let Some((report, opaque)) = walk_matrix(&id, height, &[CellVerdict::Translucent])?
-            else {
-                warn!("skipping: no frame came back, so this machine has no usable GPU adapter");
-                return Ok(());
-            };
-            all.extend(report.iter().map(|line| format!("{eye}: {line}")));
-            wrong.extend(opaque.iter().map(|line| format!("{eye}: {line}")));
-        }
-        assert!(
-            wrong.is_empty(),
-            "a half-transparent face did not show the opaque wall behind it — `solid` means it \
-             drew but nothing came through, `missing` means it did not draw at all.\n  wrong:\n    \
-             {}\n  whole matrix:\n    {}",
-            wrong.join("\n    "),
-            all.join("\n    "),
         );
         Ok(())
     }
