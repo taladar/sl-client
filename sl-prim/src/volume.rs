@@ -241,17 +241,22 @@ pub fn lod_triangle_counts(shape: &PrimShape) -> [u32; crate::PRIM_LOD_COUNT] {
 /// The per-edge split count for `shape` at `lod` (Firestorm `LLVolume::generate`):
 /// `floor(detail * 0.66)`, except a straight-sided profile on a scaled line path
 /// takes no split (its flat sides gain nothing from edge subdivision).
+///
+/// The reference tests both curves by their whole bytes, so a profile byte that
+/// names a hole (`0x21`) or a path byte with low bits set (`0x11`) keeps the
+/// split, though it decodes to the same square on a line.
 fn split_for(shape: &PrimShape, lod: PrimLod) -> u32 {
-    let straight_profile = matches!(
-        shape.profile_curve,
-        ProfileCurve::Square
-            | ProfileCurve::IsoTriangle
-            | ProfileCurve::EqualTriangle
-            | ProfileCurve::RightTriangle
-    );
+    let straight_profile = [
+        ProfileCurve::Square,
+        ProfileCurve::IsoTriangle,
+        ProfileCurve::EqualTriangle,
+        ProfileCurve::RightTriangle,
+    ]
+    .into_iter()
+    .any(|curve| shape.profile_is_exactly(curve));
     let scaled = (shape.path_scale_x - 1.0).abs() > f32::EPSILON
         || (shape.path_scale_y - 1.0).abs() > f32::EPSILON;
-    if shape.path_curve == PathCurve::Line && scaled && straight_profile {
+    if shape.path_is_exactly(PathCurve::Line) && scaled && straight_profile {
         return 0;
     }
     floor_to_u32(lod.detail() * SPLIT_DETAIL)
@@ -455,9 +460,10 @@ fn wrap_side_normals(
 
     // A half-circle profile swept on a circular path collapses to an axis at the
     // converged poles (the reference viewer's only pole special-case); give
-    // those columns the axis normal directly.
+    // those columns the axis normal directly. The reference matches the path's
+    // whole byte here but only the profile's low nibble.
     let half_on_circle =
-        shape.path_curve == PathCurve::Circle && shape.profile_curve == ProfileCurve::HalfCircle;
+        shape.path_is_exactly(PathCurve::Circle) && shape.profile_curve == ProfileCurve::HalfCircle;
     if half_on_circle {
         if bottom_converges {
             for t in 0..num_t {
@@ -538,10 +544,12 @@ fn pole_convergence(grid: &SweptGrid, num_s: usize, num_t: usize) -> (bool, bool
 /// Whether `shape` is a plain **box** — a solid, uncut, full-path square profile
 /// on a line path — the case the reference viewer caps with its optimised
 /// two-triangle grid (`createCap`'s `createUnCutCubeCap` guard) instead of a
-/// centre fan.
+/// centre fan. The guard compares whole curve bytes, so a solid box whose
+/// profile byte still names a hole (`0x21`), or whose path byte has low bits
+/// set, is capped with the fan.
 fn is_uncut_cube(shape: &PrimShape) -> bool {
-    shape.profile_curve == ProfileCurve::Square
-        && shape.path_curve == PathCurve::Line
+    shape.profile_is_exactly(ProfileCurve::Square)
+        && shape.path_is_exactly(PathCurve::Line)
         && !shape.is_hollow()
         && !shape.is_profile_cut()
         && !shape.is_path_cut()
@@ -1437,6 +1445,66 @@ mod tests {
             assert_cap_winds(face, want_top);
         }
         assert_eq!(checked, 2, "both box caps were checked");
+    }
+
+    /// The plain-box cap is the reference's whole-byte guard: a solid box whose
+    /// profile byte names a hole (`0x21`) or whose path byte has low bits set
+    /// (`0x11`) is capped with the fan, while a bad profile nibble (`0x26`) is
+    /// constrained to a plain square first and keeps the quad.
+    #[test]
+    fn box_cap_quad_needs_exact_curve_bytes() {
+        let cap_vertices = |profile_curve: u8, path_curve: u8| {
+            let shape = PrimShape::from_params(&PrimShapeParams {
+                profile_curve,
+                path_curve,
+                ..default_box_params()
+            });
+            let mesh = tessellate(&shape, PrimLod::Lowest);
+            assert_mesh_integrity(&mesh);
+            mesh.faces
+                .iter()
+                .find(|face| face.face_id.get() == 0)
+                .map_or(0, PrimFace::vertex_count)
+        };
+        assert_eq!(cap_vertices(0x01, 0x10), 4, "a plain box takes the quad");
+        assert_eq!(
+            cap_vertices(0x26, 0x10),
+            4,
+            "a bad nibble is a plain square"
+        );
+        assert!(cap_vertices(0x21, 0x10) > 4, "a named hole takes the fan");
+        assert!(cap_vertices(0x01, 0x11) > 4, "path low bits take the fan");
+    }
+
+    /// The edge split is dropped only for a straight profile on a scaled line
+    /// path **by whole byte**: a tapered box whose profile byte names a hole,
+    /// or whose path byte has low bits set, keeps its split, so it carries more
+    /// vertices than the canonical tapered box.
+    #[test]
+    fn split_drop_needs_exact_curve_bytes() {
+        let tapered = |profile_curve: u8, path_curve: u8| {
+            PrimShape::from_params(&PrimShapeParams {
+                profile_curve,
+                path_curve,
+                path_scale_x: 150,
+                ..default_box_params()
+            })
+        };
+        let canonical = tapered(0x01, 0x10);
+        assert_eq!(super::split_for(&canonical, PrimLod::High), 0);
+        assert_eq!(super::split_for(&tapered(0x03, 0x10), PrimLod::High), 0);
+        assert_eq!(super::split_for(&tapered(0x26, 0x10), PrimLod::High), 0);
+        // floor(4.0 * 0.66) = 2.
+        assert_eq!(super::split_for(&tapered(0x21, 0x10), PrimLod::High), 2);
+        assert_eq!(super::split_for(&tapered(0x31, 0x10), PrimLod::High), 2);
+        assert_eq!(super::split_for(&tapered(0x01, 0x11), PrimLod::High), 2);
+        assert_eq!(super::split_for(&tapered(0x01, 0x50), PrimLod::High), 2);
+
+        let vertices = |shape: &PrimShape| tessellate(shape, PrimLod::High).vertex_count();
+        assert!(
+            vertices(&tapered(0x21, 0x10)) > vertices(&canonical),
+            "the named-hole box splits its edges"
+        );
     }
 
     /// Even split (High detail) box caps stay an all-quad grid — never a centre

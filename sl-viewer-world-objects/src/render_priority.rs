@@ -24,7 +24,8 @@
 //!   pixel area, so a small / distant face is fetched (and kept) at a coarser
 //!   discard level and upgraded as the camera approaches;
 //! - mesh level-of-detail (P21.2): it computes each mesh object's
-//!   [`MeshLod`] from its bounding radius and camera distance
+//!   [`MeshLod`] from its shape-weighted scale ([`LodScaleBias`]) and camera
+//!   distance
 //!   ([`MeshLod::for_distance`], the reference viewer's `LLVOVolume::calcLOD`)
 //!   and calls `MeshManager::set_lod_for_area`, so a small / distant mesh is
 //!   fetched (and kept) at a coarser geometry block and upgraded as the camera
@@ -49,7 +50,8 @@ use bevy::window::PrimaryWindow;
 use std::collections::{HashMap, HashSet};
 
 use sl_client_bevy::{
-    DEFAULT_LOD_FACTOR, MeshKey, MeshLod, PrimLod, Priority, ScreenMetrics, TextureKey, TreeLod,
+    DEFAULT_LOD_FACTOR, LodScaleBias, MeshKey, MeshLod, PrimLod, PrimShapeFloat, Priority,
+    ScreenMetrics, TextureKey, TreeLod,
 };
 
 use crate::meshes::MeshManager;
@@ -257,9 +259,10 @@ pub fn drive_render_priority(
         // full-screen instead (P35.1).
         let hud = on_hud_layer(layers);
         // The object's full scale-vector length: its half is the bounding-sphere
-        // radius for pixel area, while `LLVOVolume::calcLOD` ranks LOD against the
-        // full length (`getScale().length()`), so the two uses differ (P21.2/P21.3).
+        // radius for pixel area. `LLVOVolume::calcLOD` ranks a volume's LOD by
+        // the scale weighted per axis by its shape instead (`lod_radius`).
         let scale_length = Vec3::from_array(info.scale()).length();
+        let lod_radius = lod_radius(scene.category, info);
         let distance = camera_position.distance(transform.translation());
         let Some(asset) = info.render_asset() else {
             // A plain prim (no mesh / sculpt asset) is client-tessellation LOD
@@ -273,7 +276,7 @@ pub fn drive_render_priority(
                 let desired = if hud {
                     PrimLod::FINEST
                 } else {
-                    PrimLod::for_distance(scale_length, distance, lod_factor)
+                    PrimLod::for_distance(lod_radius, distance, lod_factor)
                 };
                 targets.prim_targets.0.insert(scene.scoped_id, desired);
             } else if scene.category == ObjectCategory::Tree && !hud {
@@ -301,7 +304,7 @@ pub fn drive_render_priority(
             let desired = if hud {
                 PrimLod::FINEST
             } else {
-                PrimLod::for_distance(scale_length, distance, lod_factor)
+                PrimLod::for_distance(lod_radius, distance, lod_factor)
             };
             targets.prim_targets.0.insert(scene.scoped_id, desired);
         }
@@ -315,7 +318,7 @@ pub fn drive_render_priority(
         let desired = if hud {
             MeshLod::FINEST
         } else {
-            MeshLod::for_distance(scale_length, distance, lod_factor)
+            MeshLod::for_distance(lod_radius, distance, lod_factor)
         };
         let lod_slot = mesh_lod.entry(mesh_key).or_insert(MeshLod::COARSEST);
         *lod_slot = lod_slot.finer_of(desired);
@@ -353,6 +356,24 @@ pub fn drive_render_priority(
         // unmanaged) or not-yet-decoded mesh.
         targets.meshes.set_lod_for_area(mesh_key, desired);
     }
+}
+
+/// The radius `LLVOVolume::calcLOD` ranks a volume's level of detail by: its
+/// scale weighted per axis by the volume's `mLODScaleBias`. A prim or sculpt
+/// takes the bias of its shape, a mesh the default half of every axis. The
+/// other categories never reach a volume LOD, and take the default.
+fn lod_radius(category: ObjectCategory, info: &ObjectDebugInfo) -> f32 {
+    let bias = match category {
+        ObjectCategory::Prim | ObjectCategory::Sculpt => {
+            PrimShapeFloat::from_params(&info.shape()).lod_scale_bias()
+        }
+        ObjectCategory::Mesh
+        | ObjectCategory::Avatar
+        | ObjectCategory::Tree
+        | ObjectCategory::Grass
+        | ObjectCategory::Other => LodScaleBias::DEFAULT,
+    };
+    bias.radius(info.scale())
 }
 
 /// Pixel area below which a tree drops to the [`TreeTier::Billboard`] imposter —
@@ -410,5 +431,32 @@ mod tests {
             settings.store().get_f32(SETTING_LOD_FACTOR).ok(),
             Some(DEFAULT_LOD_FACTOR)
         );
+    }
+
+    /// A volume ranks its level of detail by its scale weighted by its shape,
+    /// as `LLVOVolume::calcLOD` does: a tall cylinder prim's height counts for
+    /// nothing, a mesh of the same scale halves every axis, and both rank
+    /// smaller than the unweighted scale length the pass used to take.
+    #[test]
+    fn lod_radius_weighs_the_scale_by_the_volume_shape() {
+        use crate::objects::{ObjectCategory, ObjectDebugInfo};
+        use sl_client_bevy::{PrimShapeParams, Uuid};
+
+        let scale = [1.0, 1.0, 10.0];
+        let info = ObjectDebugInfo::new(
+            Uuid::nil(),
+            None,
+            scale,
+            [0.0; 3],
+            PrimShapeParams {
+                path_curve: 0x10,
+                profile_curve: 0x00,
+                ..PrimShapeParams::default()
+            },
+        );
+        let cylinder = super::lod_radius(ObjectCategory::Prim, &info);
+        let mesh = super::lod_radius(ObjectCategory::Mesh, &info);
+        assert!((cylinder - 0.72_f32.sqrt()).abs() < 1.0e-5, "{cylinder}");
+        assert!((mesh - 0.5 * 102.0_f32.sqrt()).abs() < 1.0e-5, "{mesh}");
     }
 }

@@ -14,6 +14,8 @@
 
 use sl_proto::PrimShapeParams;
 
+use crate::LodScaleBias;
+
 /// The cut / hollow quantum (`CUT_QUANTA` / `HOLLOW_QUANTA`, `0.00002` =
 /// `1 / 50000`): begin / end / hollow wire integers are multiples of it.
 const CUT_QUANTA: f32 = 0.000_02;
@@ -162,6 +164,67 @@ pub enum PathCurve {
 /// an exact comparison.
 const PATH_FLEXIBLE: u8 = 0x80;
 
+/// The `LL_PCODE_PATH_LINE` byte, which a constrained path byte falls back to.
+const PATH_LINE: u8 = 0x10;
+
+/// The highest profile nibble the reference accepts (`LL_PCODE_PROFILE_MAX`).
+const PROFILE_NIBBLE_MAX: u8 = 0x05;
+
+/// The highest hole nibble the reference accepts, shifted down
+/// (`LL_PCODE_HOLE_MAX`).
+const HOLE_NIBBLE_MAX: u8 = 0x03;
+
+/// The lowest and highest path nibbles the reference accepts, shifted down
+/// (`LL_PCODE_PATH_MIN` / `LL_PCODE_PATH_MAX`).
+const PATH_NIBBLE_RANGE: core::ops::RangeInclusive<u8> = 0x01..=0x08;
+
+/// The `LL_PCODE_PROFILE_SQUARE` byte, which a bad profile nibble becomes.
+const PROFILE_SQUARE: u8 = 0x01;
+
+/// A received profile byte as the reference keeps it: `LLVolumeParams::setType`
+/// (run on every unpack by `constrainVolumeParams`) turns a bad profile nibble
+/// into a plain square, **hole bits and all**, and a bad hole nibble into no
+/// hole. So `0x26` is a solid square and `0x41` a square with no hole.
+const fn constrain_profile_byte(byte: u8) -> u8 {
+    if byte & 0x0f > PROFILE_NIBBLE_MAX {
+        PROFILE_SQUARE
+    } else if byte >> 4 > HOLE_NIBBLE_MAX {
+        byte & 0x0f
+    } else {
+        byte
+    }
+}
+
+/// A received path byte as the reference keeps it: `LLVolumeParams::setType`
+/// makes a path whose high nibble lies outside `1..=8` a plain line and keeps
+/// every other byte whole, low bits included.
+const fn constrain_path_byte(byte: u8) -> u8 {
+    let nibble = byte >> 4;
+    if nibble < *PATH_NIBBLE_RANGE.start() || nibble > *PATH_NIBBLE_RANGE.end() {
+        PATH_LINE
+    } else {
+        byte
+    }
+}
+
+/// Whether a prim's path byte was exactly its [`PathCurve`]'s own byte.
+///
+/// The generators decode the path by its high nibble, so `0x10`, `0x11` and
+/// `0x50` all extrude along a line. A few shortcuts in the reference compare
+/// the **whole** byte instead (`== LL_PCODE_PATH_LINE`): the edge split and
+/// the level-of-detail bias in `LLVolume::generate`, the plain box cap in
+/// `LLVolumeFace::createCap` and the half-circle pole normals in
+/// `createSide`. Those fire only for an [`Exact`](Self::Exact) byte.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
+pub enum PathByteForm {
+    /// The byte is the curve's canonical byte ([`PathCurve::to_byte`]).
+    #[default]
+    Exact,
+    /// The byte decodes to the curve but is not its canonical byte: low bits
+    /// are set, or the line is a nibble the generator only falls back to.
+    Variant,
+}
+
 impl PathCurve {
     /// The path from a path byte, decoded the way the reference viewer does:
     /// `LLPath::generate` switches on the high nibble (`byte & 0xf0`), so
@@ -217,6 +280,9 @@ impl PathCurve {
 pub struct PrimShape {
     /// The extrusion path curve.
     pub path_curve: PathCurve,
+    /// Whether the path byte was exactly `path_curve`'s own byte, which the
+    /// reference's whole-byte shortcuts need (see [`PathByteForm`]).
+    pub path_byte_form: PathByteForm,
     /// The swept profile curve (the profile byte's low nibble).
     pub profile_curve: ProfileCurve,
     /// The inner hole curve for a hollow prim (the profile byte's high nibble).
@@ -264,12 +330,28 @@ impl PrimShape {
     /// `0.01`) even though the wire — and [`sl_proto::PrimShapeParams`] — types
     /// them `u8`; the viewer reads them as `S8`, so they are reinterpreted here.
     /// Cut and hollow fractions are clamped to `[0, 1]`.
+    ///
+    /// The curve bytes are first constrained the way the reference constrains
+    /// every unpacked shape (`LLVolumeParams::setType`): a bad profile nibble
+    /// becomes a square with no hole, a bad hole nibble no hole, and a path
+    /// nibble outside `1..=8` a line. The kinds are then decoded from those
+    /// bytes, and [`path_byte_form`](Self::path_byte_form) records whether the
+    /// path byte was exactly its curve's.
     #[must_use]
     pub fn from_params(params: &PrimShapeParams) -> Self {
+        let path_byte = constrain_path_byte(params.path_curve);
+        let profile_byte = constrain_profile_byte(params.profile_curve);
+        let path_curve = PathCurve::from_byte(path_byte);
+        let path_byte_form = if path_byte == path_curve.to_byte() {
+            PathByteForm::Exact
+        } else {
+            PathByteForm::Variant
+        };
         Self {
-            path_curve: PathCurve::from_byte(params.path_curve),
-            profile_curve: ProfileCurve::from_byte(params.profile_curve),
-            hole_type: HoleType::from_byte(params.profile_curve),
+            path_curve,
+            path_byte_form,
+            profile_curve: ProfileCurve::from_byte(profile_byte),
+            hole_type: HoleType::from_byte(profile_byte),
             path_begin: clamp_unit(f32::from(params.path_begin) * CUT_QUANTA),
             path_end: clamp_unit((PATH_END_MAX - f32::from(params.path_end)) * CUT_QUANTA),
             path_scale_x: (200.0 - f32::from(params.path_scale_x)) * SCALE_QUANTA,
@@ -346,6 +428,38 @@ impl PrimShape {
     #[must_use]
     pub fn is_path_cut(&self) -> bool {
         self.path_begin > 0.0 || self.path_end < 1.0
+    }
+
+    /// Whether the path byte is exactly `curve`'s byte — the reference's
+    /// `getPathParams().getCurveType() == LL_PCODE_PATH_*`, as opposed to the
+    /// generators' high-nibble decode.
+    #[must_use]
+    pub fn path_is_exactly(&self, curve: PathCurve) -> bool {
+        self.path_curve == curve && self.path_byte_form == PathByteForm::Exact
+    }
+
+    /// Whether the profile byte is exactly `curve`'s byte — the reference's
+    /// `getProfileParams().getCurveType() == LL_PCODE_PROFILE_*`, which
+    /// compares the hole nibble too, so a square with a named hole (`0x21`) is
+    /// not a square here.
+    #[must_use]
+    pub fn profile_is_exactly(&self, curve: ProfileCurve) -> bool {
+        self.profile_curve == curve && self.hole_type == HoleType::Same
+    }
+
+    /// The level-of-detail scale bias the reference gives this shape
+    /// (`LLVolume::generate`'s `mLODScaleBias`): a cylinder ignores its height,
+    /// a circle path weighs every axis a little more, and everything else
+    /// halves the scale. Both shape tests compare whole bytes.
+    #[must_use]
+    pub fn lod_scale_bias(&self) -> LodScaleBias {
+        if self.path_is_exactly(PathCurve::Line) && self.profile_is_exactly(ProfileCurve::Circle) {
+            LodScaleBias::CYLINDER
+        } else if self.path_is_exactly(PathCurve::Circle) {
+            LodScaleBias::CIRCLE_PATH
+        } else {
+            LodScaleBias::DEFAULT
+        }
     }
 }
 
@@ -425,7 +539,8 @@ const FULL_SCALE: u8 = 200;
 
 #[cfg(test)]
 mod tests {
-    use super::{HoleType, PathCurve, PrimShape, ProfileCurve};
+    use super::{HoleType, PathByteForm, PathCurve, PrimShape, ProfileCurve};
+    use crate::LodScaleBias;
     use pretty_assertions::assert_eq;
     use sl_proto::PrimShapeParams;
 
@@ -595,5 +710,95 @@ mod tests {
         ] {
             assert_eq!(PathCurve::from_byte(byte), expected, "byte {byte:#04x}");
         }
+    }
+
+    /// The received curve bytes are constrained as `LLVolumeParams::setType`
+    /// constrains them before anything decodes them: a bad profile nibble is a
+    /// square with no hole, a bad hole nibble no hole, and a path nibble outside
+    /// `1..=8` an exact line. Whether the kept path byte was its curve's own is
+    /// recorded.
+    #[test]
+    fn curve_bytes_are_constrained_like_set_type() {
+        for (profile_byte, profile, hole) in [
+            (0x21, ProfileCurve::Square, HoleType::Square),
+            (0x26, ProfileCurve::Square, HoleType::Same),
+            (0x3f, ProfileCurve::Square, HoleType::Same),
+            (0x43, ProfileCurve::EqualTriangle, HoleType::Same),
+            (0x15, ProfileCurve::HalfCircle, HoleType::Circle),
+        ] {
+            let shape = PrimShape::from_params(&PrimShapeParams {
+                profile_curve: profile_byte,
+                ..default_box_params()
+            });
+            assert_eq!(
+                (shape.profile_curve, shape.hole_type),
+                (profile, hole),
+                "profile byte {profile_byte:#04x}"
+            );
+        }
+        for (path_byte, curve, form) in [
+            (0x10, PathCurve::Line, PathByteForm::Exact),
+            (0x05, PathCurve::Line, PathByteForm::Exact),
+            (0x95, PathCurve::Line, PathByteForm::Exact),
+            (0x11, PathCurve::Line, PathByteForm::Variant),
+            (0x50, PathCurve::Line, PathByteForm::Variant),
+            (0x20, PathCurve::Circle, PathByteForm::Exact),
+            (0x21, PathCurve::Circle, PathByteForm::Variant),
+            (0x40, PathCurve::Test, PathByteForm::Exact),
+            (0x80, PathCurve::Flexible, PathByteForm::Exact),
+            (0x81, PathCurve::Line, PathByteForm::Variant),
+        ] {
+            let shape = PrimShape::from_params(&PrimShapeParams {
+                path_curve: path_byte,
+                ..default_box_params()
+            });
+            assert_eq!(
+                (shape.path_curve, shape.path_byte_form),
+                (curve, form),
+                "path byte {path_byte:#04x}"
+            );
+        }
+    }
+
+    /// The exact-byte predicates compare what the reference's `==` compares:
+    /// the hole nibble for a profile, the low bits for a path.
+    #[test]
+    fn exact_curve_predicates_compare_whole_bytes() {
+        let shape = |profile_curve: u8, path_curve: u8| {
+            PrimShape::from_params(&PrimShapeParams {
+                profile_curve,
+                path_curve,
+                ..default_box_params()
+            })
+        };
+        assert!(shape(0x01, 0x10).profile_is_exactly(ProfileCurve::Square));
+        assert!(!shape(0x21, 0x10).profile_is_exactly(ProfileCurve::Square));
+        assert!(shape(0x01, 0x10).path_is_exactly(PathCurve::Line));
+        assert!(!shape(0x01, 0x11).path_is_exactly(PathCurve::Line));
+        assert!(!shape(0x01, 0x10).path_is_exactly(PathCurve::Circle));
+    }
+
+    /// The level-of-detail bias follows `LLVolume::generate`: a cylinder by
+    /// whole bytes ignores its height, an exact circle path weighs every axis
+    /// by 0.6, and anything else — a named hole on the cylinder, low bits on
+    /// the circle path, a box — halves the scale.
+    #[test]
+    fn lod_scale_bias_follows_the_whole_curve_bytes() {
+        let bias = |profile_curve: u8, path_curve: u8| {
+            PrimShape::from_params(&PrimShapeParams {
+                profile_curve,
+                path_curve,
+                ..default_box_params()
+            })
+            .lod_scale_bias()
+        };
+        assert_eq!(bias(0x00, 0x10), LodScaleBias::CYLINDER);
+        assert_eq!(bias(0x00, 0x20), LodScaleBias::CIRCLE_PATH);
+        assert_eq!(bias(0x05, 0x20), LodScaleBias::CIRCLE_PATH);
+        assert_eq!(bias(0x10, 0x10), LodScaleBias::DEFAULT);
+        assert_eq!(bias(0x00, 0x11), LodScaleBias::DEFAULT);
+        assert_eq!(bias(0x00, 0x21), LodScaleBias::DEFAULT);
+        assert_eq!(bias(0x01, 0x10), LodScaleBias::DEFAULT);
+        assert_eq!(bias(0x00, 0x30), LodScaleBias::DEFAULT);
     }
 }

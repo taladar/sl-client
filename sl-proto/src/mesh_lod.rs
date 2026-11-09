@@ -146,11 +146,10 @@ impl MeshLod {
     /// the caller passes the raw LOD factor and the near-distance ramp uses it
     /// directly (`sLODFactor`), as the reference does.
     ///
-    /// `radius` is the object's full scale-vector length (`getScale().length()`,
-    /// the box diagonal), **not** the half-diagonal bounding-sphere radius used
-    /// for pixel area: the reference viewer's LOD thresholds were tuned against
-    /// that quantity (its own comment notes the rigged path is deliberately "2x
-    /// off"), so passing the diagonal reproduces the reference LOD selection.
+    /// `radius` is the object's scale weighted per axis by its volume's LOD
+    /// scale bias (`mLODScaleBias.scaledVec(getScale()).length()`): half of
+    /// every axis for a mesh and most prims, more for a cylinder or a circle
+    /// path. The caller weighs it (`sl_prim::LodScaleBias` carries the weights).
     ///
     /// A degenerate input (a non-finite or non-positive radius, distance, or LOD
     /// factor — an object at or behind the camera, or of zero size) yields the

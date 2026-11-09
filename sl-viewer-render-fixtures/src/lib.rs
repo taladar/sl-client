@@ -128,16 +128,16 @@ use sl_client_bevy::{
 };
 use sl_client_bevy::{
     CloudMaterial, DecodedMesh, DecodedTexture, DiscardLevel, FlexiChain, FlexibleData, HoleType,
-    JointOverrides, LegacyMaterial, MeshLod, MeshSkin, MorphWeights, PathCurve, PrimFaceId,
-    PrimLod, PrimShapeFloat, ProfileCurve, RegionHandle, ResolvedParams, SKY_LIGHTING_IMAGE,
-    SkeletalDeformations, SkyMaterial, StarMaterial, StarParams, Submesh, SunDiscMaterial,
-    SunDiscParams, TerrainLayerType, TerrainMaterial, TerrainOwnership, TerrainPatch,
-    TextureAnimation, TextureFace, TextureKey, TextureUpload, TreeLod, Uuid, VolumeDeformations,
-    WaterMaterial, WaterSettings, grass_geometry, grass_species, rigged_inverse_bindposes,
-    tessellate, tessellate_sculpt, tessellate_with_path, texture_anim_mode, to_bevy_base_mesh,
-    to_bevy_grass_mesh, to_bevy_mesh, to_bevy_morphed_mesh, to_bevy_prim_meshes,
-    to_bevy_rigged_mesh, to_bevy_tree_mesh, tree_billboard_geometry, tree_geometry, tree_species,
-    upload_decoded, write_sky_lighting,
+    JointOverrides, LegacyMaterial, MeshLod, MeshSkin, MorphWeights, PathByteForm, PathCurve,
+    PrimFaceId, PrimLod, PrimShapeFloat, ProfileCurve, RegionHandle, ResolvedParams,
+    SKY_LIGHTING_IMAGE, SkeletalDeformations, SkyMaterial, StarMaterial, StarParams, Submesh,
+    SunDiscMaterial, SunDiscParams, TerrainLayerType, TerrainMaterial, TerrainOwnership,
+    TerrainPatch, TextureAnimation, TextureFace, TextureKey, TextureUpload, TreeLod, Uuid,
+    VolumeDeformations, WaterMaterial, WaterSettings, grass_geometry, grass_species,
+    rigged_inverse_bindposes, tessellate, tessellate_sculpt, tessellate_with_path,
+    texture_anim_mode, to_bevy_base_mesh, to_bevy_grass_mesh, to_bevy_mesh, to_bevy_morphed_mesh,
+    to_bevy_prim_meshes, to_bevy_rigged_mesh, to_bevy_tree_mesh, tree_billboard_geometry,
+    tree_geometry, tree_species, upload_decoded, write_sky_lighting,
 };
 use sl_terrain::TerrainComposition;
 
@@ -1265,6 +1265,7 @@ fn matte(colour: Color) -> StandardMaterial {
 const fn base_shape() -> PrimShapeFloat {
     PrimShapeFloat {
         path_curve: PathCurve::Line,
+        path_byte_form: PathByteForm::Exact,
         profile_curve: ProfileCurve::Square,
         hole_type: HoleType::Same,
         path_begin: 0.0,

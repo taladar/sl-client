@@ -423,6 +423,9 @@ impl LegacyShape {
     pub fn to_params(&self) -> PrimShapeParams {
         let shape = PrimShape {
             path_curve: sl_prim::PathCurve::from_byte(self.path.curve),
+            // Only the floats are quantized from this shape; the raw curve
+            // bytes below replace whatever its curves would pack.
+            path_byte_form: sl_prim::PathByteForm::Exact,
             profile_curve: sl_prim::ProfileCurve::from_byte(self.profile.curve),
             hole_type: sl_prim::HoleType::from_byte(self.profile.curve),
             path_begin: self.path.begin,
