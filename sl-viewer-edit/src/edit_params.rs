@@ -243,6 +243,9 @@ impl PrimTypeUi {
                 ProfileCurve::Square => Self::Tube,
             },
             PathCurve::Circle2 => Self::Sphere,
+            // The reference has hidden `MI_PATH_TEST_*` entries for these,
+            // which its combo cannot show; box is its own fallback.
+            PathCurve::Test => Self::Box,
         }
     }
 
@@ -3791,6 +3794,8 @@ mod tests {
         assert_eq!(classify(0x20, 0x01, 175), PrimTypeUi::Tube);
         assert_eq!(classify(0x20, 0x03, 175), PrimTypeUi::Ring);
         assert_eq!(classify(0x30, 0x00, 100), PrimTypeUi::Sphere);
+        // The test path has no entry the combo can show; box is the fallback.
+        assert_eq!(classify(0x40, 0x01, 100), PrimTypeUi::Box);
         // A sculpt / mesh block overrides the curve classification.
         let box_shape = PrimShapeFloat::from_params(&box_params());
         assert_eq!(

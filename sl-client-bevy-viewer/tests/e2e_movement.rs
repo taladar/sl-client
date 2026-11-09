@@ -64,9 +64,12 @@ mod test {
     /// in the way on a live grid.
     const WALKED: f32 = 3.0;
 
-    /// How many frames the jump key is held: a tap, let go long before the
-    /// half second that would make it a take-off.
-    const JUMP_FRAMES: u32 = 6;
+    /// How many frames the jump key is held: a tap. A hold takes off once it
+    /// has lasted half a second *and* more than four frames (the reference's
+    /// `AutomaticFly` rule), and frames are not time — a loaded machine runs a
+    /// headless viewer at a handful a second, where six frames outlast the half
+    /// second and fly the avatar off. Three never pass the frame bar.
+    const JUMP_FRAMES: u32 = 3;
 
     /// How high a jump must have taken the avatar: Second Life's reaches four
     /// metres and OpenSim's five and a half.
@@ -329,8 +332,14 @@ mod test {
                 );
                 // Back down before the next walk: at rest within a step of
                 // the height it jumped from.
-                let (_down, _highest) =
+                let (down, _highest) =
                     position_until(alpha, |at| (height(at) - ground).abs() < 0.5).await?;
+                assert!(
+                    (height(down) - ground).abs() < 0.5,
+                    "the jump left the avatar {} m off the ground it jumped from: {:?}",
+                    height(down) - ground,
+                    alpha.agent().await?
+                );
 
                 let walked = walk(alpha).await?;
                 assert!(

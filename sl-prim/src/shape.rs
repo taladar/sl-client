@@ -149,22 +149,37 @@ pub enum PathCurve {
     /// The second circle path (`LL_PCODE_PATH_CIRCLE2`, `0x30`) — the sphere
     /// path.
     Circle2,
+    /// The test path (`LL_PCODE_PATH_TEST`, `0x40`): five frames curling the
+    /// profile through the end twist about X. No build tool makes one, but the
+    /// reference still generates it, so a prim that carries it renders.
+    Test,
     /// A flexible ("flexi") path (`LL_PCODE_PATH_FLEXIBLE`, `0x80`); tessellated
     /// as a straight line here (softbody flex is a non-goal).
     Flexible,
 }
 
+/// The `LL_PCODE_PATH_FLEXIBLE` byte, which the reference recognises only by
+/// an exact comparison.
+const PATH_FLEXIBLE: u8 = 0x80;
+
 impl PathCurve {
-    /// The path from a path byte; unknown values fall back to
-    /// [`PathCurve::Line`], matching the viewer's tolerance of out-of-range
-    /// curves.
+    /// The path from a path byte, decoded the way the reference viewer does:
+    /// `LLPath::generate` switches on the high nibble (`byte & 0xf0`), so
+    /// `0x21` is a circle, and every nibble it has no case for falls back to
+    /// [`PathCurve::Line`]. A flexible path is the one exception — the
+    /// reference tests `== LL_PCODE_PATH_FLEXIBLE` on the whole byte
+    /// (`llvolume.cpp`, `llvovolume.cpp`), so only `0x80` itself is flexi and
+    /// `0x81` is a line.
     #[must_use]
     pub const fn from_byte(byte: u8) -> Self {
-        match byte {
+        if byte == PATH_FLEXIBLE {
+            return Self::Flexible;
+        }
+        match byte & 0xf0 {
             0x20 => Self::Circle,
             0x30 => Self::Circle2,
-            0x80 => Self::Flexible,
-            // 0x10 and any unknown value.
+            0x40 => Self::Test,
+            // 0x10, and any nibble the reference's switch has no case for.
             _line => Self::Line,
         }
     }
@@ -176,7 +191,8 @@ impl PathCurve {
             Self::Line => 0x10,
             Self::Circle => 0x20,
             Self::Circle2 => 0x30,
-            Self::Flexible => 0x80,
+            Self::Test => 0x40,
+            Self::Flexible => PATH_FLEXIBLE,
         }
     }
 
@@ -546,9 +562,38 @@ mod tests {
             PathCurve::Line,
             PathCurve::Circle,
             PathCurve::Circle2,
+            PathCurve::Test,
             PathCurve::Flexible,
         ] {
             assert_eq!(PathCurve::from_byte(path.to_byte()), path);
+        }
+    }
+
+    /// A path byte decodes by its high nibble, as the reference's
+    /// `LLPath::generate` switch does: low bits are ignored, `0x40` is the
+    /// test path and an uncovered nibble is a line — except flexi, which the
+    /// reference matches on the whole byte.
+    #[test]
+    fn path_curve_decodes_the_high_nibble_but_flexi_exactly() {
+        for (byte, expected) in [
+            (0x00, PathCurve::Line),
+            (0x10, PathCurve::Line),
+            (0x1f, PathCurve::Line),
+            (0x20, PathCurve::Circle),
+            (0x21, PathCurve::Circle),
+            (0x2f, PathCurve::Circle),
+            (0x30, PathCurve::Circle2),
+            (0x3a, PathCurve::Circle2),
+            (0x40, PathCurve::Test),
+            (0x45, PathCurve::Test),
+            (0x50, PathCurve::Line),
+            (0x70, PathCurve::Line),
+            (0x80, PathCurve::Flexible),
+            (0x81, PathCurve::Line),
+            (0x90, PathCurve::Line),
+            (0xf0, PathCurve::Line),
+        ] {
+            assert_eq!(PathCurve::from_byte(byte), expected, "byte {byte:#04x}");
         }
     }
 }

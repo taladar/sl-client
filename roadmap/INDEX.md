@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 39 |
 | in-progress | 7 |
 | bugs | 33 |
-| done | 1532 |
+| done | 1533 |
 | deferred | 30 |
 | wont-do | 24 |
-| **total** | **2124** |
+| **total** | **2125** |
 
 ## ideas (124)
 
@@ -1290,8 +1290,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### viewer
 
-- [`prim-path-curve-byte-ignores-reference-mask`](bugs/prim-path-curve-byte-ignores-reference-mask.md)
-  — PathCurve::from_byte matches the exact byte where the reference masks 0xf0
+- [`prim-shape-exact-curve-byte-checks`](bugs/prim-shape-exact-curve-byte-checks.md)
+  — Tessellation shortcuts compare decoded curve kinds where the reference
+  compares whole bytes
 - [`viewer-automation-ground-reveal-eye-under-terrain`](bugs/viewer-automation-ground-reveal-eye-under-terrain.md)
   — A ground reveal can put the camera under higher ground beside the point
 - [`viewer-camera-framing-ends-inside-the-framed-object`](bugs/viewer-camera-framing-ends-inside-the-framed-object.md)
@@ -1356,7 +1357,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1532)
+## done (1533)
 
 ### protocol
 
@@ -1671,6 +1672,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`build-structural-encapsulation-audit`](done/build-structural-encapsulation-audit.md)
   — Audit the workspace for structural and encapsulation improvements the crate
   split exposed (blocked by `build-split-viewer-crate` (done))
+- [`prim-path-curve-byte-ignores-reference-mask`](done/prim-path-curve-byte-ignores-reference-mask.md)
+  — PathCurve::from_byte matches the exact byte where the reference masks 0xf0
 - [`viewer-360-snapshot`](done/viewer-360-snapshot.md) — 360-degree
   (equirectangular) snapshot
 - [`viewer-about-floater`](done/viewer-about-floater.md) — About floater —

@@ -546,6 +546,23 @@ mod test {
         assert_eq!(LegacyShape::from_params(&params).to_params(), params);
     }
 
+    /// A path byte with low bits set decodes by its high nibble for the
+    /// geometry, but the asset still writes back the byte it was given — and
+    /// so does the test path, which no build tool makes.
+    #[test]
+    fn a_path_byte_with_low_bits_set_round_trips_verbatim() {
+        for path_curve in [0x21, 0x45, 0x81] {
+            let params = PrimShapeParams {
+                path_curve,
+                profile_curve: 0x01,
+                path_scale_x: 100,
+                path_scale_y: 100,
+                ..PrimShapeParams::default()
+            };
+            assert_eq!(LegacyShape::from_params(&params).to_params(), params);
+        }
+    }
+
     /// A face survives the same trip, with the bump / shiny / full-bright byte
     /// split apart and re-packed.
     #[test]
