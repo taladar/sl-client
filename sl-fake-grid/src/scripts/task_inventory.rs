@@ -300,10 +300,16 @@ impl RegionHost<'_> {
             now,
         )
         .ok_or(RezRefusal::Missing)?;
-        let root = rezzed
+        let (root, root_local) = rezzed
             .first()
-            .map(|object| object.full_id)
+            .map(|object| (object.full_id, object.local_id))
             .ok_or(RezRefusal::Missing)?;
+        if rez.die_at_edge {
+            // OpenSim marks every object a script rezzes `STATUS_DIE_AT_EDGE`
+            // (`inventory/rez`); the flag is no record's, so the script's
+            // side of the prim keeps it.
+            self.mark_die_at_edge(root_local);
+        }
         let rezzer_root = self
             .world
             .objects
@@ -325,6 +331,23 @@ impl RegionHost<'_> {
             .push((caller, root, waited));
         self.effects.push(Effect::Rezzed(rezzed));
         Ok(root.uuid().to_string())
+    }
+
+    /// Keeps `STATUS_DIE_AT_EDGE` set on the prim `local_id`, as a script's
+    /// `llSetStatus` would.
+    fn mark_die_at_edge(&mut self, local_id: RegionLocalObjectId) {
+        const STATUS_DIE_AT_EDGE: i32 = 128;
+        let opensim_flavour = self.opensim();
+        let Some(mut prim) = crate::prim_state::read(self.world, local_id, opensim_flavour) else {
+            return;
+        };
+        let Some(written) = self.world.objects.get(local_id).cloned() else {
+            return;
+        };
+        prim.status |= STATUS_DIE_AT_EDGE;
+        self.world
+            .objects
+            .set_scripted(local_id, crate::prim_state::Scripted { prim, written });
     }
 
     /// `llDerezObject(id, DEREZ_DIE)` of an object `caller`'s object rezzed.

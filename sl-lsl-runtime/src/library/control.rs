@@ -5,6 +5,7 @@
 //! returned.
 
 use crate::library::{CallError, Key};
+use crate::value::NULL_KEY;
 use crate::vm::ScriptCtx;
 
 /// `llSleep`: suspend the script for `seconds`, counted in ticks and rounded
@@ -90,6 +91,25 @@ pub const fn ll_get_start_parameter(ctx: &mut ScriptCtx<'_>) -> Result<i32, Call
 pub fn ll_get_owner(ctx: &mut ScriptCtx<'_>) -> Result<Key, CallError> {
     let caller = ctx.caller();
     Ok(Key(ctx.host().owner(caller)))
+}
+
+/// `llGetOwnerKey`: the owner of the prim keyed `id`, a key in any case; for
+/// any other key — an avatar's, one nothing in the region has, `NULL_KEY` —
+/// the key as it was given; for text that is no key, `NULL_KEY`. The same on
+/// every grid (`prim/owner-key`, aditi and both OpenSim engines).
+///
+/// # Errors
+///
+/// None; the signature is the library's.
+pub fn ll_get_owner_key(ctx: &mut ScriptCtx<'_>, id: Key) -> Result<Key, CallError> {
+    if !crate::library::dotnet::is_uuid(&id.0) {
+        return Ok(Key(NULL_KEY.to_owned()));
+    }
+    let caller = ctx.caller();
+    Ok(match ctx.host().object_details(caller, &id.0) {
+        Some(details) if !details.avatar => Key(details.owner),
+        _ => id,
+    })
 }
 
 /// `llGetScriptState`: whether the script called `name` in this prim is

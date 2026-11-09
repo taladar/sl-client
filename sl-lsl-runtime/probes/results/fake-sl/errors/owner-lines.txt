@@ -1,12 +1,12 @@
 grid: fake-sl
-date: 2026-11-07
+date: 2026-11-09
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating Mono
 settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
 
-PROBE errors/owner-lines rec=start region="Fake Region" channel="Second Life Server" version="sl-fake-grid 0.1.0"
 PROBE errors/owner-lines rec=listening channel=2147483647
+PROBE errors/owner-lines rec=start region="Fake Region" channel="Second Life Server" version="sl-fake-grid 0.1.0"
 # debug-channel: from="Object" text="Could not find sound 'no such sound'."
 PROBE errors/owner-lines rec=heard name="Object" msg="Could not find sound 'no such sound'."
 PROBE errors/owner-lines rec=said step=1
@@ -17,12 +17,12 @@ PROBE errors/owner-lines rec=said step=3
 # debug-channel: from="Object" text="llSetPrimMediaParams error: Malformed parameters near parameter #0, param=99.  No values have been set."
 PROBE errors/owner-lines rec=heard name="Object" msg="llSetPrimMediaParams error: Malformed parameters near parameter #0, param=99.  No values have been set."
 PROBE errors/owner-lines rec=said step=4
-# debug-channel: from="Object" text="PRIM_MEDIA error: face 9 on object f2071ccd-5418-4524-c7f8-0b29b959bcae not found"
-PROBE errors/owner-lines rec=heard name="Object" msg="PRIM_MEDIA error: face 9 on object f2071ccd-5418-4524-c7f8-0b29b959bcae not found"
+# debug-channel: from="Object" text="PRIM_MEDIA error: face 9 on object f43dc6c0-9ca1-3f0a-c180-3a93eddefff4 not found"
+PROBE errors/owner-lines rec=heard name="Object" msg="PRIM_MEDIA error: face 9 on object f43dc6c0-9ca1-3f0a-c180-3a93eddefff4 not found"
 PROBE errors/owner-lines rec=said step=5
 # debug-channel: from="Object" text="llGetPrimitiveParams error: Param 0 error, unknown parameter"
 PROBE errors/owner-lines rec=said step=6
 PROBE errors/owner-lines rec=end
 # debug-channel by=other: from="Object" text="Could not find sound 'no such sound'."
 # debug-channel by=other: from="Object" text="llSetPrimMediaParams error: Malformed parameters near parameter #0, param=99.  No values have been set."
-# debug-channel by=other: from="Object" text="PRIM_MEDIA error: face 9 on object f2071ccd-5418-4524-c7f8-0b29b959bcae not found"
+# debug-channel by=other: from="Object" text="PRIM_MEDIA error: face 9 on object f43dc6c0-9ca1-3f0a-c180-3a93eddefff4 not found"

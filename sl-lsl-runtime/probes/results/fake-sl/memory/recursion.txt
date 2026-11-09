@@ -1,5 +1,5 @@
 grid: fake-sl
-date: 2026-11-07
+date: 2026-11-09
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating Mono
@@ -83,7 +83,8 @@ PROBE memory/recursion rec=depth script=wide-lso depth=32 used=6733 free=58803 l
 PROBE memory/recursion rec=depth script=wide-lso depth=64 used=6733 free=58803 limit=65536
 PROBE memory/recursion rec=depth script=wide-lso depth=128 used=6733 free=58803 limit=65536
 PROBE memory/recursion rec=depth script=wide-lso depth=256 used=6733 free=58803 limit=65536
-# debug-channel: from="Object" text="Too many errors... dropping further messages until the flood stops"
+# debug-channel: from="Object" text="Object [script:Wide LSO] Script run-time error"
+# debug-channel: from="Object" text="Stack-Heap Collision"
 PROBE memory/recursion rec=reached script="Wide LSO" depth="424" running=0
 PROBE memory/recursion rec=end
 # debug-channel by=other: from="Object" text="Object [script:Narrow] Script run-time error"
@@ -94,4 +95,5 @@ PROBE memory/recursion rec=end
 # debug-channel by=other: from="Object" text="Stack-Heap Collision"
 # debug-channel by=other: from="Object" text="Object [script:Narrow LSO] Script run-time error"
 # debug-channel by=other: from="Object" text="Stack-Heap Collision"
-# debug-channel by=other: from="Object" text="Too many errors... dropping further messages until the flood stops"
+# debug-channel by=other: from="Object" text="Object [script:Wide LSO] Script run-time error"
+# debug-channel by=other: from="Object" text="Stack-Heap Collision"

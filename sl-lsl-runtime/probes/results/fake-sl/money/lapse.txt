@@ -1,12 +1,12 @@
 grid: fake-sl
-date: 2026-11-07
+date: 2026-11-09
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating Mono
 settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
 
-PROBE money/lapse rec=start region="Fake Region" channel="Second Life Server" version="sl-fake-grid 0.1.0"
 # question permissions=1046 object="Object" owner="<first> <last>" experience=none
+PROBE money/lapse rec=start region="Fake Region" channel="Second Life Server" version="sl-fake-grid 0.1.0"
 PROBE money/lapse rec=held step=0 why=fresh perms=0 granter=none attached=0
 PROBE money/lapse rec=waiting drive=answer grant=1046
 # answer grant=1046
@@ -19,15 +19,15 @@ PROBE money/lapse rec=waiting drive=answer grant=1046
 PROBE money/lapse rec=answer step=2 answer=1046
 PROBE money/lapse rec=waiting drive=revoke perms=16
 # revoke perms=16 target=object
-# question permissions=1046 object="Object" owner="<first> <last>" experience=none
 PROBE money/lapse rec=held step=2 why=after perms=1030 granter=owner attached=0
+# question permissions=1046 object="Object" owner="<first> <last>" experience=none
 PROBE money/lapse rec=waiting drive=answer grant=1046
 # answer grant=1046
 PROBE money/lapse rec=answer step=3 answer=1046
 PROBE money/lapse rec=waiting drive=revoke target=region perms=32784
 # revoke perms=32784 target=region
-PROBE money/lapse rec=held step=3 why=after perms=1046 granter=owner attached=0
 # question permissions=1046 object="Object" owner="<first> <last>" experience=none
+PROBE money/lapse rec=held step=3 why=after perms=1030 granter=owner attached=0
 PROBE money/lapse rec=waiting drive=answer grant=1046
 # answer grant=1046
 PROBE money/lapse rec=answer step=4 answer=1046
@@ -42,8 +42,8 @@ PROBE money/lapse rec=waiting drive=answer grant=1046
 PROBE money/lapse rec=answer step=5 answer=1046
 # script-control-change action=release controls=524289 pass_to_agent=1
 PROBE money/lapse rec=held step=5 why=took perms=1046 granter=owner attached=0
-# question permissions=1046 object="Object" owner="<first> <last>" experience=none
 PROBE money/lapse rec=held step=5 why=after perms=1042 granter=owner attached=0
+# question permissions=1046 object="Object" owner="<first> <last>" experience=none
 PROBE money/lapse rec=waiting drive=answer grant=1046
 # answer grant=1046
 PROBE money/lapse rec=answer step=6 answer=1046
@@ -56,6 +56,7 @@ PROBE money/lapse rec=waiting drive=away seconds=20
 # animations avatar=owner playing="stand@other-object"
 # teleport-started flags=0x10
 # back arrived
+# animations avatar=other playing="stand@other-object"
 # question permissions=1046 object="Object" owner="<first> <last>" experience=none
 PROBE money/lapse rec=away step=6 poll=1 owner_gone=1 perms=1046 granter=owner
 PROBE money/lapse rec=away step=6 poll=2 owner_gone=1 perms=1046 granter=owner
@@ -71,8 +72,8 @@ PROBE money/lapse rec=away step=6 poll=11 owner_gone=0 perms=1046 granter=owner
 PROBE money/lapse rec=held step=6 why=back perms=1046 granter=owner attached=0
 PROBE money/lapse rec=waiting drive=answer grant=1046
 # answer grant=1046
-PROBE money/lapse rec=answer step=7 answer=1046
 # question permissions=1046 object="Object" owner="<first> <last>" experience=none
+PROBE money/lapse rec=answer step=7 answer=1046
 PROBE money/lapse rec=held step=7 why=after-reset perms=0 granter=none attached=0
 PROBE money/lapse rec=waiting drive=answer grant=1046
 # answer grant=1046
@@ -90,8 +91,8 @@ PROBE money/lapse rec=answer step=9 answer=1046
 PROBE money/lapse rec=waiting drive=attach point=5
 # attach point=5
 # attached point=5 key=same
-PROBE money/lapse rec=held step=9 why=attached perms=1046 granter=owner attached=5
 # question permissions=1046 object="Object" owner="<first> <last>" experience=none
+PROBE money/lapse rec=held step=9 why=attached perms=1046 granter=owner attached=5
 PROBE money/lapse rec=waiting drive=answer grant=1046
 # answer grant=1046
 PROBE money/lapse rec=answer step=9 answer=1046

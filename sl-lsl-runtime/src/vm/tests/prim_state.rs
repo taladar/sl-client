@@ -5,10 +5,8 @@
 //! grid printed (see `strings.rs` for how a probe is run offline).
 //!
 //! What a probe reads of a tranche not written yet is written in where it
-//! reads it: `llGround` is the height the grid's ground had under the probe,
-//! and `llSetStatus(STATUS_PHANTOM, …)` the `PRIM_PHANTOM` rule, which raises
-//! nothing either. Every other difference is a named deviation, with its
-//! reason.
+//! reads it: `llGround` is the height the grid's ground had under the probe.
+//! Every other difference is a named deviation, with its reason.
 
 use pretty_assertions::assert_eq;
 use sl_types::lsl::Vector;
@@ -49,6 +47,11 @@ fn transcripts(name: &str) -> [(EngineFlavour, &'static str); 3] {
             include_str!("../../../probes/results/aditi/prim/placement-settle.txt"),
             include_str!("../../../probes/results/opensim-yengine/prim/placement-settle.txt"),
             include_str!("../../../probes/results/opensim-xengine/prim/placement-settle.txt"),
+        ],
+        "status" => [
+            include_str!("../../../probes/results/aditi/physics/status.txt"),
+            include_str!("../../../probes/results/opensim-yengine/physics/status.txt"),
+            include_str!("../../../probes/results/opensim-xengine/physics/status.txt"),
         ],
         "changed" => [
             include_str!("../../../probes/results/aditi/prim/changed.txt"),
@@ -671,18 +674,37 @@ fn settle_home(transcript: &str) -> Result<(f32, Duration), String> {
 
 #[test]
 fn setters_raise_changed_as_each_grid_did() -> Result<(), String> {
-    let source = include_str!("../../../probes/prim/changed.lsl")
-        .replace(
-            "llSetStatus(STATUS_PHANTOM, TRUE)",
-            "llSetPrimitiveParams([PRIM_PHANTOM, TRUE])",
-        )
-        .replace(
-            "llSetStatus(STATUS_PHANTOM, FALSE)",
-            "llSetPrimitiveParams([PRIM_PHANTOM, FALSE])",
-        );
+    let source = include_str!("../../../probes/prim/changed.lsl");
     for (flavour, transcript) in transcripts("changed") {
         let (home, ground) = home_of(flavour);
-        let mut region = region(flavour, &[(A, "Probe", 1, source.clone())], ground, &home)?;
+        let mut region = region(
+            flavour,
+            &[(A, "Probe", 1, source.to_owned())],
+            ground,
+            &home,
+        )?;
+        run_out(&mut region, 1200)?;
+        let (ours, theirs) = compared(&region, transcript);
+        hold(&ours, &theirs, &[], &format!("{flavour:?}"));
+        assert_eq!(region.debug_lines(), debug_notes(transcript), "{flavour:?}");
+    }
+    Ok(())
+}
+
+/// `physics/status`: the status flags as each grid reads and writes them.
+/// The probe's physical leg only reads the flags: the prim falls on a grid
+/// and stands here, and the probe reads nothing of where it went.
+#[test]
+fn status_flags_read_as_each_grid_read_them() -> Result<(), String> {
+    let source = include_str!("../../../probes/physics/status.lsl");
+    for (flavour, transcript) in transcripts("status") {
+        let (home, ground) = home_of(flavour);
+        let mut region = region(
+            flavour,
+            &[(A, "Probe", 1, source.to_owned())],
+            ground,
+            &home,
+        )?;
         run_out(&mut region, 1200)?;
         let (ours, theirs) = compared(&region, transcript);
         hold(&ours, &theirs, &[], &format!("{flavour:?}"));

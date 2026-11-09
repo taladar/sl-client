@@ -1,5 +1,5 @@
 grid: fake-sl
-date: 2026-11-07
+date: 2026-11-09
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating Mono
@@ -44,8 +44,8 @@ PROBE throttle/delays rec=delay fn=llInstantMessage seconds=2.022000 least=2.022
 PROBE throttle/delays rec=delay fn=llDialog seconds=1.022000 least=1.022000 most=1.022000
 # dialog object="Object" owner="<first> <last>" channel=-7402 message_length=15 message="throttle/delays" buttons="!!llTextBox!!" count=1
 # dialog object="Object" owner="<first> <last>" channel=-7402 message_length=15 message="throttle/delays" buttons="!!llTextBox!!" count=1
-PROBE throttle/delays rec=delay fn=llTextBox seconds=0.000000 least=0.000000 most=0.000000
 # dialog object="Object" owner="<first> <last>" channel=-7402 message_length=15 message="throttle/delays" buttons="!!llTextBox!!" count=1
+PROBE throttle/delays rec=delay fn=llTextBox seconds=0.000000 least=0.000000 most=0.000000
 PROBE throttle/delays rec=delay fn=llLoadURL seconds=0.111000 least=0.111000 most=0.111000
 PROBE throttle/delays rec=answers dataserver=12
 PROBE throttle/delays rec=end

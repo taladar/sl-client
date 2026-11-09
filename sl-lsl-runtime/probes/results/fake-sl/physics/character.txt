@@ -1,5 +1,5 @@
 grid: fake-sl
-date: 2026-11-07
+date: 2026-11-09
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating Mono
@@ -7,7 +7,9 @@ settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor
 complete: no
 
 PROBE physics/character rec=start region="Fake Region" channel="Second Life Server" version="sl-fake-grid 0.1.0"
+PROBE physics/character rec=fresh physics=0 phantom=0 rotate_x=1 rotate_y=1 rotate_z=1 pathfinding_type=0 shape_type=0
+PROBE physics/character rec=closest-nav-point length=1 dist=1.950001
 # debug-channel: from="Object" text="Object [script:Probe] Script run-time error"
-# debug-channel: from="Object" text="llGetStatus is not implemented by this grid"
+# debug-channel: from="Object" text="llGetStaticPath is not implemented by this grid"
 # debug-channel by=other: from="Object" text="Object [script:Probe] Script run-time error"
-# debug-channel by=other: from="Object" text="llGetStatus is not implemented by this grid"
+# debug-channel by=other: from="Object" text="llGetStaticPath is not implemented by this grid"

@@ -60,10 +60,22 @@ begin()
         + " version=" + q(llGetEnv("sim_version")));
 }
 
+// Where `handle` sits among the handles of a [handle, count, ...] list, or
+// -1: only the handles are searched, so a count equal to a handle is no match.
+integer slot_of(list pairs, integer handle)
+{
+    integer at = llListFindList(llList2ListStrided(pairs, 0, -1, 2), [handle]);
+    if (at < 0)
+    {
+        return -1;
+    }
+    return at * 2;
+}
+
 list bump(list pairs, integer handle)
 {
-    integer at = llListFindList(pairs, [handle]);
-    if (at < 0 || at % 2)
+    integer at = slot_of(pairs, handle);
+    if (at < 0)
     {
         return pairs + [handle, 1];
     }
@@ -72,8 +84,8 @@ list bump(list pairs, integer handle)
 
 integer count_of(list pairs, integer handle)
 {
-    integer at = llListFindList(pairs, [handle]);
-    if (at < 0 || at % 2)
+    integer at = slot_of(pairs, handle);
+    if (at < 0)
     {
         return 0;
     }

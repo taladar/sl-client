@@ -1,5 +1,5 @@
 grid: fake-sl
-date: 2026-11-07
+date: 2026-11-09
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating Mono
@@ -9,7 +9,7 @@ settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor
 # object "Child" scripts=1
 PROBE inventory/newer rec=start region="Fake Region" channel="Second Life Server" version="sl-fake-grid 0.1.0"
 PROBE inventory/newer rec=item name=Lines desc="sl-conformance lsl-probes" acquired_length=20 acquired_shape="-TZ"
-PROBE inventory/newer rec=item name=Child desc="" acquired_length=20 acquired_shape="-TZ"
+PROBE inventory/newer rec=item name=Child desc="(No Description)" acquired_length=20 acquired_shape="-TZ"
 PROBE inventory/newer rec=item name=Probe desc="" acquired_length=20 acquired_shape="-TZ"
 PROBE inventory/newer rec=item name=nope desc="" acquired_length=0 acquired_shape=""
 PROBE inventory/newer rec=try label=sync-before

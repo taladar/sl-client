@@ -13,10 +13,6 @@
 //! probe prints is compared as present, not as a number), what a listener
 //! reads of where the speaker is, and `llResetOtherScript`, which the test
 //! does for the leader. Keys minted on either side compare as keys.
-//!
-//! One line differs, by the value model's rule rather than OSSL's:
-//! `(string)` of `osGetRegionSize`'s vector writes Second Life's five
-//! decimals on every grid, where OpenSim writes six (`EngineFlavour`).
 
 use pretty_assertions::assert_eq;
 
@@ -160,23 +156,9 @@ fn available_answers_as_each_engine_did() -> Result<(), String> {
                 break;
             }
         }
-        let deviating = |line: &String| line.contains(" fn=osGetRegionSize ");
-        let (ours_deviating, ours): (Vec<String>, Vec<String>) = canonical(&region.lines(), &[])
-            .into_iter()
-            .partition(deviating);
-        let (theirs_deviating, theirs): (Vec<String>, Vec<String>) =
-            canonical(&probe_lines(transcript), &[])
-                .into_iter()
-                .partition(deviating);
-        assert_eq!(ours, theirs, "{flavour:?}");
         assert_eq!(
-            ours_deviating,
-            vec!["PROBE ossl/available rec=always fn=osGetRegionSize value=\"<256.00000, 256.00000, 0.00000>\"".to_owned()],
-            "{flavour:?}"
-        );
-        assert_eq!(
-            theirs_deviating,
-            vec!["PROBE ossl/available rec=always fn=osGetRegionSize value=\"<256.000000, 256.000000, 0.000000>\"".to_owned()],
+            canonical(&region.lines(), &[]),
+            canonical(&probe_lines(transcript), &[]),
             "{flavour:?}"
         );
         assert_eq!(region.debug_lines(), Vec::<String>::new(), "{flavour:?}");
@@ -596,7 +578,7 @@ default
             "110101",
             "cdef|cd",
             "LineTo 1,2; |MoveTo 1,2; LineTo 3,4; ",
-            "<1.00000, 0.00000, 0.00000><0.00000, 0.00000, 0.00000, 1.00000>",
+            "<1.000000, 0.000000, 0.000000><0.000000, 0.000000, 0.000000, 1.000000>",
         ]
     );
     // Second Life knows none of it.

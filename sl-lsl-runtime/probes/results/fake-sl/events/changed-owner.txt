@@ -1,13 +1,17 @@
 grid: fake-sl
-date: 2026-11-07
+date: 2026-11-09
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating Mono
 settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
-complete: no
 
 PROBE events/changed-owner rec=start region="Fake Region" channel="Second Life Server" version="sl-fake-grid 0.1.0"
-# debug-channel: from="Object" text="Object [script:Relay] Script run-time error"
-# debug-channel: from="Object" text="llGetOwnerKey is not implemented by this grid"
-# debug-channel by=other: from="Object" text="Object [script:Relay] Script run-time error"
-# debug-channel by=other: from="Object" text="llGetOwnerKey is not implemented by this grid"
+PROBE events/changed-owner rec=waiting drive=buy by=other
+# sale prim=A type=original price=0
+# buy by=other prim=A
+# money-balance success=1 change=unknown type=5000 source=other dest=owner amount=0 item="Object" description=""
+PROBE events/changed-owner rec=changed prim=A bits=OWNER same_owner=0
+# alert by=other text="You are now the owner of object Object"
+# money-balance by=other success=1 change=unknown type=5000 source=other dest=owner amount=0 item="Object" description="You paid <first> <last> L$0 for Object."
+PROBE events/changed-owner rec=sold owner=other
+PROBE events/changed-owner rec=end

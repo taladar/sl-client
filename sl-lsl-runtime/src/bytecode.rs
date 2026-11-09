@@ -146,6 +146,9 @@ pub enum Instr {
     BuildRotation,
     /// `e1 … en → list`, `e1` deepest; no element is a list.
     BuildList(u32),
+    /// `en … e1 → list`, `en` deepest: the elements evaluated last first, as
+    /// YEngine evaluates a list literal's; no element is a list.
+    BuildListReversed(u32),
     /// `a1 … an → [r]`: call a library function, `a1` deepest, each argument
     /// already of the type the table states. Pushes the return value unless
     /// the function returns nothing.
@@ -419,6 +422,7 @@ impl Program {
             Instr::BuildVector => "BuildVector".to_owned(),
             Instr::BuildRotation => "BuildRotation".to_owned(),
             Instr::BuildList(count) => format!("BuildList {count}"),
+            Instr::BuildListReversed(count) => format!("BuildListReversed {count}"),
             Instr::CallBuiltin(id) => format!("CallBuiltin {}", id.descriptor().name),
             Instr::CallFunction(id) => format!(
                 "CallFunction {}",

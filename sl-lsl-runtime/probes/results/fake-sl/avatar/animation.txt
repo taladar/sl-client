@@ -1,26 +1,26 @@
 grid: fake-sl
-date: 2026-11-07
+date: 2026-11-09
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating Mono
 settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
 
-PROBE avatar/animation rec=start region="Fake Region" channel="Second Life Server" version="sl-fake-grid 0.1.0"
 # question permissions=32784 object="Object" owner="<first> <last>" experience=none
+PROBE avatar/animation rec=start region="Fake Region" channel="Second Life Server" version="sl-fake-grid 0.1.0"
 PROBE avatar/animation rec=playing step=0 of=owner why=before state="Standing" has_dance=0
 PROBE avatar/animation rec=waiting drive=answer grant=32784
 # answer grant=32784
 # animations avatar=owner playing="dance1,stand@other-object"
 PROBE avatar/animation rec=held step=0 answer=32784 perms=32784
 PROBE avatar/animation rec=did step=1 call=llStartAnimation anim=dance1
-# animations avatar=owner playing="stand@other-object"
 PROBE avatar/animation rec=playing step=2 of=owner why=started state="Standing" has_dance=1
+# animations avatar=owner playing="stand@other-object"
 PROBE avatar/animation rec=did step=2 call=llStopAnimation anim=dance1
 PROBE avatar/animation rec=playing step=3 of=owner why=stopped state="Standing" has_dance=0
 PROBE avatar/animation rec=did step=3 call=llStartAnimation anim=missing
 # debug-channel: from="Object" text="Could not find animation 'no such animation'"
-PROBE avatar/animation rec=playing step=4 of=owner why=missing state="Standing" has_dance=0
 # animations avatar=owner playing="dance1@other-object"
+PROBE avatar/animation rec=playing step=4 of=owner why=missing state="Standing" has_dance=0
 PROBE avatar/animation rec=did step=4 call=llSetAnimationOverride state=Standing anim=dance1 override="dance1"
 PROBE avatar/animation rec=playing step=5 of=owner why=overridden state="Standing" has_dance=1
 # animations avatar=owner playing="stand@other-object"

@@ -1064,16 +1064,30 @@ impl Engine {
             flood: ticks_for(FLOOD_SECONDS, self.config.step),
             gap: ticks_for(FLOOD_GAP_SECONDS, self.config.step),
         };
-        for line in refused.chain(faulted) {
+        // A fault's lines are one error to Second Life's flood limit: they
+        // pass or drop together on one count (`errors/runtime-errors`: four
+        // faults' eight lines and a refusal within the window all passed).
+        let mut fault_admitted: Option<Admission> = None;
+        let refusals = refused.map(|line| (false, line));
+        let faults = faulted.into_iter().map(|line| (true, line));
+        for (of_fault, line) in refusals.chain(faults) {
             let audience = match &line {
                 Line::Said(..) => Audience::Near,
                 Line::ToOwner(_) => Audience::Owner,
             };
-            let admission = match flavour {
-                EngineFlavour::SecondLife => {
-                    self.floods.admit(&at.object, audience, self.now, ticks)
+            let admission = match (flavour, of_fault, fault_admitted) {
+                (EngineFlavour::SecondLife, true, Some(first)) => match first {
+                    Admission::Pass => Admission::Pass,
+                    Admission::Notice | Admission::Drop => Admission::Drop,
+                },
+                (EngineFlavour::SecondLife, _, _) => {
+                    let admitted = self.floods.admit(&at.object, audience, self.now, ticks);
+                    if of_fault {
+                        fault_admitted = Some(admitted);
+                    }
+                    admitted
                 }
-                EngineFlavour::YEngine | EngineFlavour::XEngine => Admission::Pass,
+                (EngineFlavour::YEngine | EngineFlavour::XEngine, _, _) => Admission::Pass,
             };
             let heard = match (admission, line) {
                 (Admission::Drop, _) => None,
@@ -1284,8 +1298,13 @@ impl Engine {
             };
             // Queued now everywhere; Second Life runs a link message at the
             // next tick and a setter's `changed` two on, OpenSim both at
-            // once.
-            let arrival = match (raised, flavour) {
+            // once. A store's `linkset_data` reaches the writer at once and
+            // the linkset's other scripts at the next tick on Second Life, so
+            // a write after a link message reaches them after it
+            // (`data/linkset-data`: the writer's own event before a line it
+            // asked another object for, the Watcher's link message before
+            // the fill's writes).
+            let to_self = match (raised, flavour) {
                 (Raised::Linked(_), EngineFlavour::SecondLife) => {
                     arrival.ready_after(SECOND_LIFE_LINK_TICKS)
                 }
@@ -1294,13 +1313,19 @@ impl Engine {
                 }
                 _ => arrival,
             };
+            let to_others = match (raised, flavour) {
+                (Raised::Linkset(_), EngineFlavour::SecondLife) => {
+                    arrival.ready_after(SECOND_LIFE_LINK_TICKS)
+                }
+                _ => to_self,
+            };
             for to in reached {
                 if to == id {
                     if own {
-                        let _posted = instance.post(arrival, event, args.clone());
+                        let _posted = instance.post(to_self, event, args.clone());
                     }
                 } else if let Some(peer) = self.instances.get_mut(&to) {
-                    let _posted = peer.post(arrival, event, args.clone());
+                    let _posted = peer.post(to_others, event, args.clone());
                 }
             }
         }
@@ -1397,6 +1422,7 @@ impl Engine {
             self.pass_heard(now);
         }
         self.post_due_sweeps(now, host);
+        self.post_due_targets(now, host);
         let mut region_left = self.config.region_budget;
         // What each script served this tick has left of its share.
         let mut left: BTreeMap<CallerId, u32> = BTreeMap::new();
@@ -1581,6 +1607,102 @@ impl Engine {
         }
     }
 
+    /// Check the targets of every script due a check at `now`, and post
+    /// what each found: `at_target` for each position target reached, with
+    /// its handle, where it is and where the object is; `not_at_target` when
+    /// none is — and on XEngine also beside an `at_target` while another
+    /// target is not; and the same for rotation targets. Second Life checks
+    /// every other frame, OpenSim's engines about eleven times a second
+    /// (`physics/targets`). An event already waiting for its handle is not
+    /// queued again.
+    fn post_due_targets(&mut self, now: Tick, host: &dyn Host) {
+        let flavour = self.config.flavour;
+        let step = self.config.step;
+        let time =
+            crate::vm::context::region_time(now, step).saturating_add(Duration::from_micros(1));
+        let interval = match flavour {
+            EngineFlavour::SecondLife => step.saturating_mul(2),
+            EngineFlavour::YEngine | EngineFlavour::XEngine => Duration::from_micros(90_909),
+        };
+        let arrival = self.arrival();
+        let ids: Vec<CallerId> = self.instances.keys().copied().collect();
+        for id in ids {
+            let Some(targets) = self
+                .instances
+                .get_mut(&id)
+                .and_then(|instance| instance.targets_due(time, interval))
+            else {
+                continue;
+            };
+            let at = host.whereabouts(id);
+            let position = host.placement(id).position;
+            let rotation = host
+                .prim(id, &at.prim)
+                .map_or(crate::value::ZERO_ROTATION, |prim| prim.rotation);
+            let mut events: Vec<(&'static str, Vec<Value>)> = Vec::new();
+            let reached_positions: Vec<&crate::vm::context::PositionTarget> = targets
+                .positions
+                .iter()
+                .filter(|target| {
+                    reached(
+                        distance_squared(&position, &target.position),
+                        target.range,
+                        flavour,
+                    )
+                })
+                .collect();
+            for target in &reached_positions {
+                events.push((
+                    "at_target",
+                    vec![
+                        Value::Integer(target.handle),
+                        Value::Vector(target.position.clone()),
+                        Value::Vector(position.clone()),
+                    ],
+                ));
+            }
+            let missed_position = reached_positions.len() < targets.positions.len();
+            if missed_position
+                && (reached_positions.is_empty() || flavour == EngineFlavour::XEngine)
+            {
+                events.push(("not_at_target", Vec::new()));
+            }
+            let reached_rotations: Vec<&crate::vm::context::RotationTarget> = targets
+                .rotations
+                .iter()
+                .filter(|target| {
+                    let angle = angle_between(&rotation, &target.rotation);
+                    reached(angle * angle, target.error, flavour)
+                })
+                .collect();
+            for target in &reached_rotations {
+                events.push((
+                    "at_rot_target",
+                    vec![
+                        Value::Integer(target.handle),
+                        Value::Rotation(target.rotation.clone()),
+                        Value::Rotation(rotation.clone()),
+                    ],
+                ));
+            }
+            let missed_rotation = reached_rotations.len() < targets.rotations.len();
+            if missed_rotation
+                && (reached_rotations.is_empty() || flavour == EngineFlavour::XEngine)
+            {
+                events.push(("not_at_rot_target", Vec::new()));
+            }
+            let Some(instance) = self.instances.get_mut(&id) else {
+                continue;
+            };
+            for (name, args) in events {
+                if instance.has_queued(name, args.first()) {
+                    continue;
+                }
+                let _posted = instance.post(arrival, lifecycle(name), args);
+            }
+        }
+    }
+
     /// Fold the tick into every script's load and the active-script count.
     fn settle(&mut self) {
         let weight = (self.config.step.as_secs_f64() / LOAD_WINDOW_SECONDS).min(1.0);
@@ -1625,6 +1747,43 @@ fn apply_control(instance: &mut Instance, control: Control, flavour: EngineFlavo
 }
 
 /// Where the script `id`'s prim is, as a sweep measures from it.
+/// Whether a target `squared` away (a distance or an angle, squared) is
+/// reached with a range of `range`: compared with the range squared, so a
+/// negative range reaches as its size does; a range of 0 is never reached on
+/// Second Life, and at the target on OpenSim (`<=`, `physics/targets`).
+fn reached(squared: f32, range: f32, flavour: EngineFlavour) -> bool {
+    let range = range * range;
+    if flavour.is_opensim() {
+        squared <= range
+    } else {
+        squared < range
+    }
+}
+
+/// The distance between `a` and `b`, squared.
+fn distance_squared(a: &sl_types::lsl::Vector, b: &sl_types::lsl::Vector) -> f32 {
+    let (x, y, z) = (a.x - b.x, a.y - b.y, a.z - b.z);
+    x.mul_add(x, y.mul_add(y, z * z))
+}
+
+/// The angle between two rotations, in radians, 0 to π: twice the arc
+/// cosine of their dot product's size, both taken as unit rotations.
+fn angle_between(a: &sl_types::lsl::Rotation, b: &sl_types::lsl::Rotation) -> f32 {
+    let length = |r: &sl_types::lsl::Rotation| {
+        r.s.mul_add(r.s, r.x.mul_add(r.x, r.y.mul_add(r.y, r.z * r.z)))
+            .sqrt()
+    };
+    let scale = length(a) * length(b);
+    if scale == 0.0 {
+        return 0.0;
+    }
+    let dot =
+        a.s.mul_add(b.s, a.x.mul_add(b.x, a.y.mul_add(b.y, a.z * b.z))) / scale;
+    2.0 * dot.abs().min(1.0).acos()
+}
+
+/// The sweeper an in-call sweep of the instance `id` senses from: its
+/// object, where it stands and how it is turned, as `host` says.
 fn sweeper_of(id: CallerId, host: &dyn Host) -> crate::vm::sensing::Sweeper {
     let at = host.whereabouts(id);
     let rotation = host

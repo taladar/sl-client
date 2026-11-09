@@ -17,7 +17,7 @@ use regex::{Captures, Regex};
 use sha2::{Digest as _, Sha256};
 use sl_types::lsl::{Rotation, Vector};
 
-use crate::cast::element_to_string;
+use crate::cast::element_to_string_for;
 use crate::format;
 use crate::library::collation::{self, Case, OutOfRange};
 use crate::library::dotnet::is_uuid;
@@ -442,10 +442,11 @@ pub fn os_format_string<C: PureCtx>(
                         .map_err(|_error| thrown(Exception::FormatInvalid))?,
                     None => 0,
                 };
-                let text = element_to_string(
+                let text = element_to_string_for(
                     strings
                         .get(index)
                         .ok_or_else(|| thrown(Exception::FormatIndex))?,
+                    true,
                 );
                 let pad = count_of(alignment.saturating_abs())
                     .saturating_sub(text.encode_utf16().count());
@@ -1367,7 +1368,7 @@ pub fn os_slerp_rotation<C: PureCtx>(
 
 /// A float in a drawing list, as OpenSim's `LSL_Float` writes itself.
 fn draw_float(value: f32) -> String {
-    format::float(value, 6)
+    format::opensim_float(value)
 }
 
 /// `osMovePen`: `MoveTo x,y;`.
@@ -1496,7 +1497,13 @@ fn polygon(list: String, command: &str, x: &[Element], y: &[Element]) -> String 
     let points: Vec<String> = x
         .iter()
         .zip(y)
-        .map(|(x, y)| format!("{},{}", element_to_string(x), element_to_string(y)))
+        .map(|(x, y)| {
+            format!(
+                "{},{}",
+                element_to_string_for(x, true),
+                element_to_string_for(y, true)
+            )
+        })
         .collect();
     format!("{list}{command} {}; ", points.join(","))
 }

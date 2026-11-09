@@ -127,6 +127,34 @@ fn a_linksets_names_follow_its_link_numbers() -> Result<(), String> {
     Ok(())
 }
 
+/// `llGetLinkKey(0)` in a linkset (`prim/link`'s `linked` and `as-child`):
+/// on Second Life nothing to the root and the root to a child, on OpenSim the
+/// root to both.
+#[test]
+fn link_zero_of_a_linkset_is_the_root_but_to_the_root_on_second_life() -> Result<(), String> {
+    let source = "default { state_entry() { print((string)llGetLinkKey(0)); } }";
+    for flavour in FLAVOURS {
+        for this in [1, 2] {
+            let mut host = Recorder {
+                linked: Some(three(this)),
+                ..Recorder::default()
+            };
+            let _engine = started(source, flavour, &mut host, 2)?;
+            let expected = if this == 1 && !flavour.is_opensim() {
+                NULL_KEY
+            } else {
+                ROOT
+            };
+            assert_eq!(
+                host.texts(A),
+                vec![expected.to_owned()],
+                "{flavour:?} {this}"
+            );
+        }
+    }
+    Ok(())
+}
+
 /// The `LINK_*` constants name prims in one place: from the root of three,
 /// `LINK_ALL_OTHERS` names exactly the other two, `LINK_ALL_CHILDREN` the
 /// same, `LINK_SET` all three and `LINK_THIS` the root.

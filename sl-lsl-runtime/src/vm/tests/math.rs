@@ -71,15 +71,12 @@ fn math_functions_print_what_aditi_printed() -> Result<(), String> {
 /// range (`1e60`, `1e42` there, `Infinity` in a float), `llTan(PI_BY_TWO)`
 /// with all its digits (−22877332.428857; the float −22877332 prints
 /// `-22877330.000000`), `llTan(1e30)` of the double 1e30 — the literal is a
-/// float here, `1.0000000150474662e30`, whose tangent is another number —
-/// and `llSqrt(-0.0)`, which is `-0.0` on both but OpenSim prints without the
-/// sign.
-const OPENSIM_FUNCTIONS_IN_DOUBLE: [(&str, &str); 5] = [
+/// float here, `1.0000000150474662e30`, whose tangent is another number.
+const OPENSIM_FUNCTIONS_IN_DOUBLE: [(&str, &str); 4] = [
     ("pow", "1e30^2"),
     ("pow", "1e-6^-7"),
     ("tan", "pi/2"),
     ("tan", "1e30"),
-    ("sqrt", "minus-zero"),
 ];
 
 #[test]
@@ -137,19 +134,12 @@ fn math_rotations_print_what_aditi_printed() -> Result<(), String> {
 /// prints a sixth decimal a float rounds away (`90.000001`, `-140.000004`;
 /// `llRot2Axis(<1, 2, 3, 4>)`'s `y` is 0.53452248 in either, which a float
 /// prints `0.534523` and a double `0.534522`).
-const OPENSIM_ROTATIONS_IN_DOUBLE: [(&str, &str); 12] = [
+const OPENSIM_ROTATIONS_IN_DOUBLE: [(&str, &str); 5] = [
     ("euler2rot-back", "y90"),
     ("euler2rot-back", "gimbal-up"),
     ("euler2rot-back", "gimbal-down"),
     ("euler2rot-back", "past-a-turn"),
-    ("axis-angle", "z-450"),
-    ("axis-angle", "z-minus-90"),
-    ("rot2euler", "negative-identity"),
-    ("rot2euler", "z-negative-s"),
     ("rot2axis", "1234"),
-    ("rot2axis", "z-negative-s"),
-    ("axes2rot", "left-handed"),
-    ("negate", "x-axis"),
 ];
 
 #[test]
@@ -239,11 +229,6 @@ fn the_library_cases_of_errors_math_answer_as_on_aditi() -> Result<(), String> {
     Ok(())
 }
 
-/// The library cases OpenSim prints otherwise for the value model: case 15
-/// prints vectors and a rotation with `(string)`, five decimals here and six
-/// there (its answers, `ZERO_VECTOR` twice and `<0, 0, 0, 0.5>`, agree).
-const OPENSIM_MATH_CASTS: [u32; 1] = [15];
-
 /// YEngine's report of `llModPow(2, 3, 0)`, as the transcript has it after
 /// the item's key: the exception and that a reset is needed.
 const YENGINE_MOD_POW: [&str; 2] = [
@@ -269,8 +254,7 @@ fn the_library_cases_of_errors_math_answer_as_on_opensim() -> Result<(), String>
             }
             let theirs = math_case_lines(transcript, number);
             assert_eq!(
-                lines == theirs,
-                !OPENSIM_MATH_CASTS.contains(&number),
+                lines, theirs,
                 "{flavour:?} Math {number}:\n  ours {lines:?}\n  grid {theirs:?}"
             );
             match (number, flavour) {
@@ -301,6 +285,53 @@ fn the_library_cases_of_errors_math_answer_as_on_opensim() -> Result<(), String>
             }
         }
     }
+    Ok(())
+}
+
+#[test]
+fn a_rotation_of_four_zeros_is_the_identity_on_opensim_alone() -> Result<(), String> {
+    // `errors/math`'s Math 5 divides by `<zf, zf, zf, zf>`: Second Life's
+    // zero rotation divides to zero, OpenSim's expression was the identity.
+    for (flavour, transcript) in [
+        (
+            EngineFlavour::SecondLife,
+            include_str!("../../../probes/results/aditi/errors/math.txt"),
+        ),
+        (
+            EngineFlavour::YEngine,
+            include_str!("../../../probes/results/opensim-yengine/errors/math.txt"),
+        ),
+        (
+            EngineFlavour::XEngine,
+            include_str!("../../../probes/results/opensim-xengine/errors/math.txt"),
+        ),
+    ] {
+        let (_number, lines, _told, _said) = math_errors(flavour)?
+            .into_iter()
+            .find(|(number, ..)| *number == 5)
+            .ok_or("no Math 5")?;
+        assert_eq!(lines, math_case_lines(transcript, 5), "{flavour:?}");
+    }
+    // A cast goes through OpenSim's string constructor, which keeps the
+    // zeros.
+    let source = r#"
+default
+{
+    state_entry()
+    {
+        float zf;
+        print((string)<zf, zf, zf, zf>);
+        print((string)((rotation)"<0, 0, 0, 0>"));
+    }
+}"#;
+    let (host, _probe_lines) = replay(source, EngineFlavour::YEngine, 5)?;
+    assert_eq!(
+        host.texts(A),
+        [
+            "<0.000000, 0.000000, 0.000000, 1.000000>",
+            "<0.000000, 0.000000, 0.000000, 0.000000>",
+        ]
+    );
     Ok(())
 }
 

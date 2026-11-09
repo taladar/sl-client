@@ -110,13 +110,15 @@ pub fn os_get_last_changed_event_key(ctx: &mut ScriptCtx<'_>) -> Result<Key, Cal
 pub fn os_get_rezzing_object(ctx: &mut ScriptCtx<'_>) -> Result<Key, CallError> {
     let caller = ctx.caller();
     let object = ctx.host().whereabouts(caller).object;
-    let rezzer = ctx
+    let (rezzer, owner) = ctx
         .host()
         .object_details(caller, &object)
-        .map(|details| details.rezzer)
+        .map(|details| (details.rezzer, details.owner))
         .unwrap_or_default();
+    // An avatar's rez names the avatar, who may have left the region.
     let by_avatar = rezzer.is_empty()
         || rezzer == NULL_KEY
+        || rezzer == owner
         || ctx
             .host()
             .object_details(caller, &rezzer)
@@ -194,7 +196,7 @@ pub fn os_make_notecard(
     contents: Vec<Element>,
 ) -> Result<(), CallError> {
     let text = contents.iter().fold(String::new(), |mut all, element| {
-        all.push_str(&crate::cast::element_to_string(element));
+        all.push_str(&crate::cast::element_to_string_for(element, true));
         all.push('\n');
         all
     });

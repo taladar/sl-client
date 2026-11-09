@@ -1,21 +1,19 @@
 grid: fake-opensim
-date: 2026-11-07
+date: 2026-11-09
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating YEngine
 settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
 complete: no
 
-# chat type=say from="Object" length=14 text="Script running"
+PROBE physics/keyframed rec=try label=types-swapped
+# debug-channel: from="Object" text="YEngine: llSetKeyframedMotion is not implemented by this grid (script: Swapped event: state_entry primID: 02c1a472-e40d-570a-c826-37e13639cf24 at: <131,124,26>) Script must be Reset to re-enable.\n"
+PROBE physics/keyframed rec=try label=translation-only-three
+# debug-channel: from="Object" text="YEngine: llSetKeyframedMotion is not implemented by this grid (script: Mismatched event: state_entry primID: 74af2281-a8b6-f5ba-c2ae-5863354fb6d1 at: <134,124,26>) Script must be Reset to re-enable.\n"
 PROBE physics/keyframed rec=start region="Fake Region" channel="OpenSim" version="sl-fake-grid 0.1.0"
 PROBE physics/keyframed rec=shape shape_type=0
 PROBE physics/keyframed rec=try label=fresh-shape
-# debug-channel: from="Object" text="YEngine: llSetKeyframedMotion is not implemented by this grid (script: Probe event: state_entry primID: 29ec6dc8-fa77-b072-c5db-d8a107450392 at: <128,124,26>) Script must be Reset to re-enable.\n"
-PROBE physics/keyframed rec=try label=types-swapped
-# debug-channel: from="Object" text="YEngine: llSetKeyframedMotion is not implemented by this grid (script: Swapped event: state_entry primID: a1600f4b-6e53-2d15-c140-6388d5f86e0f at: <131,124,26>) Script must be Reset to re-enable.\n"
-PROBE physics/keyframed rec=try label=translation-only-three
-# debug-channel: from="Object" text="YEngine: llSetKeyframedMotion is not implemented by this grid (script: Mismatched event: state_entry primID: 7a2074d6-4daf-fd13-c461-22ca793b8629 at: <134,124,26>) Script must be Reset to re-enable.\n"
-# chat by=other type=say from="Object" length=14 text="Script running"
-# debug-channel by=other: from="Object" text="YEngine: llSetKeyframedMotion is not implemented by this grid (script: Probe event: state_entry primID: 29ec6dc8-fa77-b072-c5db-d8a107450392 at: <128,124,26>) Script must be Reset to re-enable.\n"
-# debug-channel by=other: from="Object" text="YEngine: llSetKeyframedMotion is not implemented by this grid (script: Swapped event: state_entry primID: a1600f4b-6e53-2d15-c140-6388d5f86e0f at: <131,124,26>) Script must be Reset to re-enable.\n"
-# debug-channel by=other: from="Object" text="YEngine: llSetKeyframedMotion is not implemented by this grid (script: Mismatched event: state_entry primID: 7a2074d6-4daf-fd13-c461-22ca793b8629 at: <134,124,26>) Script must be Reset to re-enable.\n"
+# debug-channel: from="Object" text="YEngine: llSetKeyframedMotion is not implemented by this grid (script: Probe event: state_entry primID: 521821c1-7f2d-8257-cafd-43cbdfdfac93 at: <128,124,26>) Script must be Reset to re-enable.\n"
+# debug-channel by=other: from="Object" text="YEngine: llSetKeyframedMotion is not implemented by this grid (script: Swapped event: state_entry primID: 02c1a472-e40d-570a-c826-37e13639cf24 at: <131,124,26>) Script must be Reset to re-enable.\n"
+# debug-channel by=other: from="Object" text="YEngine: llSetKeyframedMotion is not implemented by this grid (script: Mismatched event: state_entry primID: 74af2281-a8b6-f5ba-c2ae-5863354fb6d1 at: <134,124,26>) Script must be Reset to re-enable.\n"
+# debug-channel by=other: from="Object" text="YEngine: llSetKeyframedMotion is not implemented by this grid (script: Probe event: state_entry primID: 521821c1-7f2d-8257-cafd-43cbdfdfac93 at: <128,124,26>) Script must be Reset to re-enable.\n"

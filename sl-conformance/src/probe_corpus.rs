@@ -464,6 +464,8 @@ mod tests {
         let root = corpus_root();
         let probes = load_corpus(&root).map_err(|error| error.to_string())?;
         let accepted = crate::accepted::load(&root).map_err(|error| error.to_string())?;
+        // Every stale entry, so one run names them all.
+        let mut stale = Vec::new();
         for entry in &accepted {
             let probe = probes
                 .iter()
@@ -521,13 +523,15 @@ mod tests {
                     .iter()
                     .any(|difference| entry.covers(difference))
             };
-            assert!(
-                covers,
-                "{} between {left} and {right}: the accepted difference {:?} {:?} {:?} no \
-                 longer differs",
-                entry.probe, entry.record, entry.fields, entry.field
-            );
+            if !covers {
+                stale.push(format!(
+                    "{} between {left} and {right}: the accepted difference {:?} {:?} {:?} no \
+                     longer differs",
+                    entry.probe, entry.record, entry.fields, entry.field
+                ));
+            }
         }
+        assert!(stale.is_empty(), "{}", stale.join("\n"));
         Ok(())
     }
 

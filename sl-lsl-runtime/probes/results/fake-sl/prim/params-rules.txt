@@ -1,21 +1,21 @@
 grid: fake-sl
-date: 2026-11-07
+date: 2026-11-09
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating Mono
 settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
 
+PROBE prim/params-rules rec=try label=code-as-string
+PROBE prim/params-rules rec=get label=code-as-string count=0 got=""
+PROBE prim/params-rules rec=try label=face-100
+PROBE prim/params-rules rec=get label=face-100 count=1 got="Object"
+PROBE prim/params-rules rec=try label=face-minus-2
+PROBE prim/params-rules rec=get label=face-minus-2 count=7 got="0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, Object"
 PROBE prim/params-rules rec=start region="Fake Region" channel="Second Life Server" version="sl-fake-grid 0.1.0"
 PROBE prim/params-rules rec=faces sides=6
 PROBE prim/params-rules rec=try label=order
-PROBE prim/params-rules rec=try label=code-as-string
-PROBE prim/params-rules rec=try label=face-100
-PROBE prim/params-rules rec=try label=face-minus-2
 PROBE prim/params-rules rec=get label=order count=4 types=vsfi got="<0.500000, 0.500000, 0.500000>, Object, 0.000000, 3"
 PROBE prim/params-rules rec=try label=order-reversed
-PROBE prim/params-rules rec=get label=code-as-string count=0 got=""
-PROBE prim/params-rules rec=get label=face-100 count=1 got="Object"
-PROBE prim/params-rules rec=get label=face-minus-2 count=7 got="0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, Object"
 PROBE prim/params-rules rec=get label=order-reversed count=4 types=ifsv got="3, 0.000000, Object, <0.500000, 0.500000, 0.500000>"
 PROBE prim/params-rules rec=try label=same-twice
 PROBE prim/params-rules rec=get label=same-twice count=2 types=ss got="Object, Object"
@@ -42,8 +42,8 @@ PROBE prim/params-rules rec=get label=unknown-negative-code count=0 types= got="
 # debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1: unknown rule."
 PROBE prim/params-rules rec=try label=set-unknown-code
 PROBE prim/params-rules rec=set label=set-unknown-code name="Object" glow0=0.000000 color0="<1.000000, 1.000000, 1.000000>" glow5=0.000000
-PROBE prim/params-rules rec=try label=set-unknown-then-glow
 # debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1: unknown rule."
+PROBE prim/params-rules rec=try label=set-unknown-then-glow
 PROBE prim/params-rules rec=set label=set-unknown-then-glow name="Object" glow0=0.000000 color0="<1.000000, 1.000000, 1.000000>" glow5=0.000000
 # debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1 (PRIM_GLOW): arg #2 (glow) float expected but string given."
 PROBE prim/params-rules rec=try label=glow-as-string

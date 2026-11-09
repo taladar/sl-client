@@ -1,0 +1,9 @@
+@1 say channel=0 volume=Whisper "whispered"
+@1 say channel=5 volume=Say "said"
+@1 say channel=0 volume=Shout "shouted"
+@1 say channel=9 volume=RegionSay "region"
+@1 owner-say "to the owner"
+@1 set-position <129.0, 128.0, 21.0>
+@3 set-position <128.52435, 128.0, 20.0>
+@5 print "<128.524400, 128.000000, 20.000000>"
+end state=default running=true queued=0

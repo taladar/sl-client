@@ -1,12 +1,12 @@
 grid: fake-sl
-date: 2026-11-07
+date: 2026-11-09
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating Mono
 settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
 
 PROBE time/clocks rec=start region="Fake Region" channel="Second Life Server" version="sl-fake-grid 0.1.0"
-PROBE time/clocks rec=formats timestamp="2026-11-07T19:40:17.005238Z" length=27 fraction_digits=6 ends_z=1 date="2026-11-07" date_is_timestamps=1 unix=1794080417 unix_second_is_timestamps=1 gmt=70817.000000 gmt_whole=1 gmt_is_unix_of_day=1 wall=42017.000000 wall_whole=1 wall_behind_gmt_hours=8 time_of_day=13217.000000 time_of_day_under_4h=1
+PROBE time/clocks rec=formats timestamp="2026-11-09T18:18:58.397932Z" length=27 fraction_digits=6 ends_z=1 date="2026-11-09" date_is_timestamps=1 unix=1794248338 unix_second_is_timestamps=1 gmt=65938.000000 gmt_whole=1 gmt_is_unix_of_day=1 wall=37138.000000 wall_whole=1 wall_behind_gmt_hours=8 time_of_day=8338.397000 time_of_day_under_4h=1
 PROBE time/clocks rec=get-and-reset reset_reads=0.000000 got=0.511111 then=0.000000 then_is_zero=1
 PROBE time/clocks rec=dilation script=5.000000 real=5.000000 ratio=1.000000 dilation=1.000000 fps=45.000000
 PROBE time/clocks rec=end

@@ -1,5 +1,5 @@
 grid: fake-sl
-date: 2026-11-07
+date: 2026-11-09
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating Mono
@@ -19,8 +19,8 @@ PROBE events/attach rec=step step=3 timer=1 attached=5 key_same=1
 PROBE events/attach rec=waiting drive=drop
 # drop worn=1
 # dropped key=same
-PROBE events/attach rec=event step=3 seq=3 type=attach id_is_owner=0 id_is_null=1 attached=0 key_same=1
 # question permissions=32 object="Object" owner="<first> <last>" experience=none
+PROBE events/attach rec=event step=3 seq=3 type=attach id_is_owner=0 id_is_null=1 attached=0 key_same=1
 PROBE events/attach rec=step step=4 timer=1 attached=0 key_same=1
 PROBE events/attach rec=waiting drive=answer grant=32
 # answer grant=32

@@ -1,0 +1,6 @@
+@2 > touch by 0a0a0a0a-0000-4000-8000-000000000001 at <128.0, 128.0, 21.0>
+@2 print "touch_start 1 Corpus Resident 0a0a0a0a-0000-4000-8000-000000000001"
+@2 print "type 1 owner? 1"
+@2 print "touch_end 1"
+end state=default running=true queued=0
+global outside = string ""

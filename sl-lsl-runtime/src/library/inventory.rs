@@ -191,9 +191,24 @@ pub fn ll_get_inventory_creator(ctx: &mut ScriptCtx<'_>, name: String) -> Result
     Ok(Key(NULL_KEY.to_owned()))
 }
 
+/// OpenSim's `PermissionMaskToLSLPerm`: `mask` cut to its copy, modify,
+/// move and transfer bits (which LSL's `PERM_*` share), all four read as
+/// `PERM_ALL`.
+const fn opensim_perm(mask: i32) -> i32 {
+    /// `PermissionMask.All` without export: move, copy, modify, transfer.
+    const ALL: i32 = 0x0008_E000;
+    match mask & ALL {
+        ALL => 0x7FFF_FFFF,
+        cut => cut,
+    }
+}
+
 /// `llGetInventoryPermMask`: the item's mask `which` (`MASK_BASE` …
 /// `MASK_NEXT`). A missing name is 0 and `No item named '…'.` on Second
-/// Life, −1 and silence on OpenSim.
+/// Life, −1 and silence on OpenSim. OpenSim answers through
+/// `PermissionMaskToLSLPerm`: the copy, modify, move and transfer bits
+/// alone, all four as `PERM_ALL`, and −1 for a mask it does not know
+/// (`inventory/listing`).
 ///
 /// # Errors
 ///
@@ -204,7 +219,11 @@ pub fn ll_get_inventory_perm_mask(
     which: i32,
 ) -> Result<i32, CallError> {
     if let Some(item) = named(ctx, &name) {
-        return Ok(item.masks.get(which).unwrap_or(0));
+        let mask = item.masks.get(which);
+        if ctx.flavour().is_opensim() {
+            return Ok(mask.map_or(-1, opensim_perm));
+        }
+        return Ok(mask.unwrap_or(0));
     }
     if ctx.flavour().is_opensim() {
         return Ok(-1);

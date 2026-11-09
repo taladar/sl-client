@@ -13,9 +13,7 @@
 //! other scripts' in order — since which of two scripts prints first in one
 //! frame is the grid's scheduling, not the library's. What a probe reads of a
 //! tranche not written yet is written in where it reads it: `llSensor` finds
-//! prim B, `llGetVel` of an object that is not physical reads zero,
-//! `llGetStatus(STATUS_DIE_AT_EDGE)` is what the rez set. Every other
-//! difference is a named deviation, with its reason.
+//! prim B. Every other difference is a named deviation, with its reason.
 
 use std::collections::BTreeMap;
 
@@ -272,12 +270,11 @@ impl Stage {
         if flavour.is_opensim() {
             state.text.alpha = 0.0;
         }
+        if rez.die_at_edge {
+            state.status |= 128;
+        }
         let _state = self.region.host.prim_states.insert(key.to_owned(), state);
         for (name, source) in scripts {
-            let source = source.replace("llGetVel()", "ZERO_VECTOR").replace(
-                "llGetStatus(STATUS_DIE_AT_EDGE)",
-                if rez.die_at_edge { "TRUE" } else { "FALSE" },
-            );
             self.last_id = self.last_id.saturating_add(1);
             let id = CallerId(self.last_id);
             let program = program_for(&rigged(&source, &name, prim), flavour)?;
@@ -426,6 +423,23 @@ fn listing_reads_and_changes_the_contents_as_each_grid_did() -> Result<(), Strin
             item(21, "Probe", INVENTORY_SCRIPT),
             item(22, "aaa Helper", INVENTORY_SCRIPT),
         ]);
+        if flavour.is_opensim() {
+            // The masks as an OpenSim region holds them, export and the
+            // object's own bits in: `PermissionMaskToLSLPerm` reads them as
+            // the probe printed.
+            for held in &mut in_a {
+                let raw = |mask: i32| {
+                    if mask == crate::vm::contents::PERM_ALL {
+                        0x0009_E000
+                    } else {
+                        mask | 0xF
+                    }
+                };
+                held.masks.base = raw(held.masks.base);
+                held.masks.owner = raw(held.masks.owner);
+                held.masks.next = raw(held.masks.next);
+            }
+        }
         let contents = BTreeMap::from([(1, in_a), (2, in_b)]);
         let mut stage = Stage::new(flavour, &scripts, contents)?;
         // Mauve runs no outside scripts; the local grid's parcel runs all.
@@ -632,6 +646,25 @@ fn giving_from_the_contents_answers_as_each_grid_did() -> Result<(), String> {
                 &format!("{flavour:?}"),
             );
         }
+        // Each call's forced delay, to half a second (a grid's frames add a
+        // little): OpenSim sleeps for a gift to an avatar alone.
+        let delays = |lines: &[String]| -> Vec<(String, f64)> {
+            lines
+                .iter()
+                .filter_map(|line| crate::probe::Line::parse(line).ok())
+                .filter(|line| line.rec == "called")
+                .filter_map(|line| {
+                    let label = line.field("label")?.to_owned();
+                    let delay: f64 = line.field("delay")?.parse().ok()?;
+                    Some((label, (delay * 2.0).round()))
+                })
+                .collect()
+        };
+        assert_eq!(
+            delays(&stage.lines()),
+            delays(&probe_lines(transcript)),
+            "{flavour:?}: the delays"
+        );
         let offers: Vec<(bool, String, String, usize, String)> = stage
             .region
             .host

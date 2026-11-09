@@ -1,12 +1,12 @@
 grid: fake-sl
-date: 2026-11-08
+date: 2026-11-09
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating Mono
 settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
 
 PROBE prim/placement-settle rec=start region="Fake Region" channel="Second Life Server" version="sl-fake-grid 0.1.0"
-PROBE prim/placement-settle rec=home scale=<0.500000,0.500000,0.500000> ground=-1.950000 frac=<0.000000,0.000000,0.000000> rez=2026-11-08T19:15:03.374131Z stamp=2026-11-08T19:15:03.397028Z t=0.022222
+PROBE prim/placement-settle rec=home scale=<0.500000,0.500000,0.500000> ground=-1.950000 frac=<0.000000,0.000000,0.000000> rez=2026-11-09T19:18:30.959214Z stamp=2026-11-09T19:18:30.992859Z t=0.022222
 PROBE prim/placement-settle rec=drop label=cube-0.5 answer=0 scale=<0.500000,0.500000,0.500000> at=<0.000000,0.000000,0.000000> above=0.000000 ground=-1.950000 g00=-1.950000 g10=-1.950000 g01=-1.950000 g11=-1.950000
 PROBE prim/placement-settle rec=drop label=cube-0.1 answer=0 scale=<0.100000,0.100000,0.100000> at=<0.000000,0.000000,0.000000> above=0.000000 ground=-1.950000 g00=-1.950000 g10=-1.950000 g01=-1.950000 g11=-1.950000
 PROBE prim/placement-settle rec=drop label=cube-0.01 answer=0 scale=<0.010000,0.010000,0.010000> at=<0.000000,0.000000,0.000000> above=0.000000 ground=-1.950000 g00=-1.950000 g10=-1.950000 g01=-1.950000 g11=-1.950000
@@ -36,14 +36,14 @@ PROBE prim/placement-settle rec=lag label=sleep-0.01 scale=<3.000000,1.000000,1.
 PROBE prim/placement-settle rec=lag label=sleep-0.05 scale=<3.000000,1.000000,1.000000> min=<-0.500000,-0.500000,-0.500000> max=<0.500000,0.500000,0.500000>
 PROBE prim/placement-settle rec=lag label=params-fast scale=<1.000000,2.000000,1.000000> min=<-1.500000,-0.500000,-0.500000> max=<1.500000,0.500000,0.500000>
 PROBE prim/placement-settle rec=lag label=params-delayed scale=<1.000000,3.000000,1.000000> min=<-0.500000,-1.000000,-0.500000> max=<0.500000,1.000000,0.500000>
-PROBE prim/placement-settle rec=cadence round=0 polls=6 set=27.511110 seen=27.644440 after=0.133333 wall=2026-11-08T19:15:31.019250Z
-PROBE prim/placement-settle rec=cadence round=1 polls=39 set=27.777780 seen=28.644440 after=0.866667 wall=2026-11-08T19:15:32.019250Z
-PROBE prim/placement-settle rec=cadence round=2 polls=33 set=28.911110 seen=29.644440 after=0.733334 wall=2026-11-08T19:15:33.019250Z
-PROBE prim/placement-settle rec=cadence round=3 polls=27 set=30.044450 seen=30.644440 after=0.599999 wall=2026-11-08T19:15:34.019250Z
-PROBE prim/placement-settle rec=cadence round=4 polls=21 set=31.177780 seen=31.644440 after=0.466665 wall=2026-11-08T19:15:35.019250Z
-PROBE prim/placement-settle rec=cadence round=5 polls=15 set=32.311110 seen=32.644440 after=0.333332 wall=2026-11-08T19:15:36.019249Z
-PROBE prim/placement-settle rec=cadence round=6 polls=9 set=33.444440 seen=33.644440 after=0.200001 wall=2026-11-08T19:15:37.019249Z
-PROBE prim/placement-settle rec=cadence round=7 polls=4 set=34.555550 seen=34.644440 after=0.088890 wall=2026-11-08T19:15:38.019249Z
+PROBE prim/placement-settle rec=cadence round=0 polls=6 set=27.511110 seen=27.644440 after=0.133333 wall=2026-11-09T19:18:58.615081Z
+PROBE prim/placement-settle rec=cadence round=1 polls=39 set=27.777780 seen=28.644440 after=0.866667 wall=2026-11-09T19:18:59.615081Z
+PROBE prim/placement-settle rec=cadence round=2 polls=33 set=28.911110 seen=29.644440 after=0.733334 wall=2026-11-09T19:19:00.615081Z
+PROBE prim/placement-settle rec=cadence round=3 polls=27 set=30.044450 seen=30.644440 after=0.599999 wall=2026-11-09T19:19:01.615081Z
+PROBE prim/placement-settle rec=cadence round=4 polls=21 set=31.177780 seen=31.644440 after=0.466665 wall=2026-11-09T19:19:02.615081Z
+PROBE prim/placement-settle rec=cadence round=5 polls=15 set=32.311110 seen=32.644440 after=0.333332 wall=2026-11-09T19:19:03.615081Z
+PROBE prim/placement-settle rec=cadence round=6 polls=9 set=33.444440 seen=33.644440 after=0.200001 wall=2026-11-09T19:19:04.615081Z
+PROBE prim/placement-settle rec=cadence round=7 polls=4 set=34.555550 seen=34.644440 after=0.088890 wall=2026-11-09T19:19:05.615081Z
 PROBE prim/placement-settle rec=lag label=next-event scale=<1.000000,1.000000,2.000000> min=<-2.500000,-0.500000,-0.500000> max=<2.500000,0.500000,0.500000>
 PROBE prim/placement-settle rec=after moved=<0.000000,0.000000,0.000000> scale=<0.500000,0.500000,0.500000>
 PROBE prim/placement-settle rec=end

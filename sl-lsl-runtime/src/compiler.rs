@@ -173,6 +173,14 @@ impl Dialect {
         matches!(self, Self::SecondLife)
     }
 
+    /// Whether a list literal's elements are evaluated last first: YEngine
+    /// builds `[f(1), f(2), f(3)]` calling `f(3)` first; Second Life calls
+    /// them in order (`vm/eval-order`).
+    #[must_use]
+    pub const fn lists_right_to_left(self) -> bool {
+        matches!(self, Self::OpenSim)
+    }
+
     /// Whether this compiler knows the library function `name` that the
     /// library table carries. Second Life knows only Linden Lab's library.
     /// OpenSim was measured refusing two of the functions Second Life
@@ -192,6 +200,7 @@ impl Dialect {
                     && !OPENSIM_NO_EXPERIENCE.contains(&name)
                     && !OPENSIM_NO_NEWER_INVENTORY.contains(&name)
                     && !OPENSIM_NO_ENVIRONMENT.contains(&name)
+                    && !OPENSIM_NO_NEWER_LISTS.contains(&name)
             }
         }
     }
@@ -302,6 +311,23 @@ const OPENSIM_NO_ENVIRONMENT: &[&str] = &[
     "llGetSimStats",
     "llGetRegionTimeOfDay",
     "llGetClosestNavPoint",
+];
+
+/// The list, string, hash and colour functions Second Life added after
+/// OpenSim's library was written: `errors/bounds-newer`, `strings/newer` and
+/// `vm/call-cost-newer` compile under neither engine (YEngine: `undefined
+/// constant/function/variable llSHA256String(string)`; XEngine: CS0103,
+/// 2026-10-27), and none of the nine is in OpenSim 0.9.2.1's `LSL_Api`.
+const OPENSIM_NO_NEWER_LISTS: &[&str] = &[
+    "llReplaceSubString",
+    "llList2ListSlice",
+    "llListFindStrided",
+    "llListSortStrided",
+    "llComputeHash",
+    "llHMAC",
+    "llSHA256String",
+    "llLinear2sRGB",
+    "llsRGB2Linear",
 ];
 
 /// The `llHTTPRequest` options OpenSim does not know (`http/options`,

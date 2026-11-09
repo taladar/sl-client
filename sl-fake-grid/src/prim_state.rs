@@ -710,6 +710,8 @@ fn keep_written(prim: &mut Prim, object: &Object, scripted: &Scripted) {
     prim.allow_unsit = kept.allow_unsit;
     prim.scripted_sit_only = kept.scripted_sit_only;
     prim.sit_flags = kept.sit_flags;
+    prim.status = kept.status;
+    prim.volume_detect = kept.volume_detect;
     prim.damage = kept.damage;
     prim.health = kept.health;
     prim.sound.queueing = kept.sound.queueing;

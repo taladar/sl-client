@@ -1,5 +1,5 @@
 grid: fake-opensim
-date: 2026-11-07
+date: 2026-11-09
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating YEngine
@@ -20,6 +20,6 @@ PROBE land/ground rec=ground offset=fraction same_as_clamped=1 above_prim=-1.950
 PROBE land/ground rec=ground-west near_minus_edge=0.000 mid_minus_edge=0.000 far_minus_edge=0.000 far_minus_mid=0.000
 PROBE land/ground rec=surface normal_length=1.000 slope_length=0.000 contour_length=0.000 normal_up=1 normal_dot_slope=0.000 normal_dot_contour=0.000 slope_dot_contour=0.000 contour_z=0.000
 PROBE land/ground rec=surface-agrees normal_dot_heights=1.000 slope_points_down=1
-PROBE land/ground rec=surface-flat normal="<0.00000, 0.00000, 1.00000>" slope="<0.00000, 0.00000, 0.00000>" contour="<0.00000, 0.00000, 0.00000>"
-PROBE land/ground rec=weather wind="<1.00000, 0.00000, 0.00000>" wind_level=1 cloud=0.000000 cloud_in_range=1 wind_far_same=1
+PROBE land/ground rec=surface-flat normal="<0.000000, 0.000000, 1.000000>" slope="<0.000000, 0.000000, 0.000000>" contour="<0.000000, 0.000000, 0.000000>"
+PROBE land/ground rec=weather wind="<1.000000, 0.000000, 0.000000>" wind_level=1 cloud=0.000000 cloud_in_range=1 wind_far_same=1
 PROBE land/ground rec=end

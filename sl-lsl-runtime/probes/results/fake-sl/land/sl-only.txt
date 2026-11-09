@@ -1,5 +1,5 @@
 grid: fake-sl
-date: 2026-11-07
+date: 2026-11-09
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating Mono
@@ -35,7 +35,7 @@ PROBE land/sl-only rec=sim-stat code=24 value=0.000000 zero=1 negative=0 whole=1
 PROBE land/sl-only rec=sim-stat code=25 value=0.000000 zero=1 negative=0 whole=1
 PROBE land/sl-only rec=sim-stat code=26 value=0.000000 zero=1 negative=0 whole=1
 PROBE land/sl-only rec=sim-stat code=27 value=0.000000 zero=1 negative=0 whole=1
-PROBE land/sl-only rec=environment at=here rule=200 length=3 got="14400, 57600, 9627.049805"
+PROBE land/sl-only rec=environment at=here rule=200 length=3 got="14400, 57600, 5192.331055"
 # debug-channel: from="Object" text="Unknown stat."
 # debug-channel: from="Object" text="Unknown stat."
 PROBE land/sl-only rec=environment at=here rule=0 length=1 got="<0.250000, 0.250000, 0.250000>"
@@ -70,8 +70,8 @@ PROBE land/sl-only rec=environment at=here rule=106 length=2 got="<1.049990, -0.
 PROBE land/sl-only rec=environment at=here rule=107 length=0 got=""
 PROBE land/sl-only rec=environment at=here rule=999 length=0 got=""
 PROBE land/sl-only rec=environment at=high rule=0 length=1 got="<0.250000, 0.250000, 0.250000>"
-PROBE land/sl-only rec=environment at=west rule=200 length=3 got="14400, 57600, 9627.227539"
-PROBE land/sl-only rec=time time_of_day=9627.228000 same_as_parcel=1
+PROBE land/sl-only rec=environment at=west rule=200 length=3 got="14400, 57600, 5192.509277"
+PROBE land/sl-only rec=time time_of_day=5192.509000 same_as_parcel=1
 # debug-channel: from="Object" text="llGetEnvironment Error running rule #1 (WATER_NORMAL_TEXTURE): Attempt to read unreadable value.."
 # debug-channel: from="Object" text="llGetEnvironment Error running rule #1: unknown rule id 999."
 PROBE land/sl-only rec=nav-point length=1 within_50m=1 got="<128.000000, 124.000000, 25.000000>"

@@ -21,7 +21,9 @@ pub const DEBUG_CHANNEL: i32 = 0x7FFF_FFFF;
 /// [`FLOOD_WINDOW_SECONDS`] on Second Life: aditi passed eight a second apart
 /// and put the notice in place of the ninth (`errors/flood`,
 /// `errors/flood-kinds`, `errors/flood-paths`), whatever the lines were —
-/// refusals of any function and a fault's lines count alike.
+/// refusals of any function and faults count alike, a fault's two lines as
+/// one (`errors/runtime-errors`: four faults and a refusal within the window
+/// all passed).
 pub const FLOOD_LINES: usize = 8;
 
 /// The line Second Life says in place of the first one a flood drops.

@@ -154,6 +154,7 @@ pub(crate) fn answer_upload(
 ) -> bool {
     let UploadTerms {
         announcements,
+        names,
         landmarks,
     } = terms;
     match event {
@@ -170,6 +171,7 @@ pub(crate) fn answer_upload(
                     bound_asset: *bound_asset,
                     callback_id: *callback_id,
                     landmarks,
+                    names,
                 },
                 mint,
                 now,
@@ -230,7 +232,7 @@ pub(crate) fn answer_upload(
             items,
             transaction_id,
         } => {
-            apply_item_updates(sim, items, *transaction_id, now);
+            apply_item_updates(sim, (items, names), *transaction_id, now);
             true
         }
         _other => false,
@@ -283,6 +285,8 @@ fn default_settings_asset(subtype: u8) -> Option<(AssetKey, Vec<u8>)> {
 pub(crate) struct UploadTerms {
     /// Who is told of an item an upload created or rewrote.
     pub(crate) announcements: UploadAnnouncements,
+    /// How the grid stores the name a viewer gives an item.
+    pub(crate) names: crate::imitates::ItemNames,
     /// What a landmark holds.
     pub(crate) landmarks: LandmarkTerms,
 }
@@ -333,6 +337,8 @@ struct NewItem<'a> {
     callback_id: InventoryCallbackId,
     /// What a landmark holds.
     landmarks: LandmarkTerms,
+    /// How the grid stores the name asked for.
+    names: crate::imitates::ItemNames,
 }
 
 /// Mints the item a `CreateInventoryItem` asked for, names the asset it starts
@@ -350,6 +356,7 @@ fn create_item(
         bound_asset,
         callback_id,
         landmarks,
+        names,
     } = new;
     let landmark = request.inv_type == InventoryType::Landmark;
     let subtype = request.wearable_type.to_code();
@@ -408,7 +415,7 @@ fn create_item(
     let item = InventoryItem {
         item_id: InventoryKey::from(mint()),
         folder_id: request.folder_id,
-        name: request.name.clone(),
+        name: names.stored(&request.name),
         description: request.description.clone(),
         asset_id: asset_id.uuid(),
         item_type: narrow(request.asset_type.to_code()),
@@ -645,7 +652,10 @@ fn set_script_experience(
 /// upload stored.
 fn apply_item_updates(
     sim: &mut SimSession,
-    items: &[sl_proto::UpdatedInventoryItem],
+    (items, names): (
+        &[sl_proto::UpdatedInventoryItem],
+        crate::imitates::ItemNames,
+    ),
     transaction_id: TransactionId,
     now: Instant,
 ) {
@@ -663,7 +673,7 @@ fn apply_item_updates(
         // reassign creatorship is a rename a viewer could use to launder an
         // asset's provenance.
         item.folder_id = update.item.folder_id;
-        item.name.clone_from(&update.item.name);
+        item.name = names.stored(&update.item.name);
         item.description.clone_from(&update.item.description);
         item.permissions = update.item.permissions;
         item.item_type = update.item.asset_type;

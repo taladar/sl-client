@@ -837,7 +837,7 @@ impl Machine<'_> {
                     // A list cast to a list is the same object on OpenSim
                     // (`vm/list-identity`'s `cast`).
                     shared @ Operand::Shared(..) if ty == TypeName::List => shared,
-                    operand => operand::cast(operand, ty)?,
+                    operand => operand::cast(operand, ty, self.memory.flavour().is_opensim())?,
                 };
                 if let Operand::Value(value) = &result {
                     self.memory.made(value)?;
@@ -898,10 +898,26 @@ impl Machine<'_> {
                 let z = pop_float(stack)?;
                 let y = pop_float(stack)?;
                 let x = pop_float(stack)?;
+                // OpenSim's `LSL_Types.Quaternion(double, double, double,
+                // double)`, which both its engines build a rotation
+                // expression with, makes four zeros the identity
+                // (`errors/math`); its string constructor, and so a cast,
+                // does not.
+                let s = if self.memory.flavour().is_opensim()
+                    && [x, y, z, s].iter().all(|component| *component == 0.0)
+                {
+                    1.0
+                } else {
+                    s
+                };
                 stack.push(Value::Rotation(Rotation { x, y, z, s }).into());
             }
-            Instr::BuildList(count) => {
-                let elements = pop_n(stack, index(count))?
+            Instr::BuildList(count) | Instr::BuildListReversed(count) => {
+                let mut popped = pop_n(stack, index(count))?;
+                if matches!(instr, Instr::BuildListReversed(_)) {
+                    popped.reverse();
+                }
+                let elements = popped
                     .into_iter()
                     .map(|value| match value {
                         Value::List(_) => Err(internal("a list element that is a list")),
@@ -1057,17 +1073,27 @@ impl Machine<'_> {
             }
             Instr::Jump(target) => Self::jump(frame, target, used),
             Instr::JumpIfFalse(target) => {
-                if !pop_operand(stack)?.is_true() {
+                if !pop_operand(stack)?.is_true(self.memory.flavour().is_opensim()) {
                     Self::jump(frame, target, used);
                 }
             }
             Instr::JumpIfTrue(target) => {
-                if pop_operand(stack)?.is_true() {
+                if pop_operand(stack)?.is_true(self.memory.flavour().is_opensim()) {
                     Self::jump(frame, target, used);
                 }
             }
             Instr::StateChange(target) => {
                 *self.pending_state = Some(target);
+                // On OpenSim a `state` throws `ScriptChangeStateException`,
+                // which ends the whole handler whatever function it is in
+                // (`events/state-self`: no line after the call).
+                if self.memory.flavour().is_opensim() {
+                    loop {
+                        if Self::leave(frames, stack, held, None) == Flow::BodyDone {
+                            return Ok(Flow::BodyDone);
+                        }
+                    }
+                }
                 // In a function — the reference's "state change hack" — the
                 // call yields its return type's default and the caller
                 // carries on; the transition waits for the handler's end.
@@ -1733,6 +1759,29 @@ impl Instance {
         due
     }
 
+    /// The script's targets, if it may be checked at `time` and is due: the
+    /// next check is then counted from `time`, `interval` on.
+    pub(crate) fn targets_due(
+        &mut self,
+        time: Duration,
+        interval: Duration,
+    ) -> Option<crate::vm::context::Targets> {
+        let targets = &mut self.data.targets;
+        if !self.running || self.held || !targets.any() || targets.next_check > time {
+            return None;
+        }
+        targets.next_check = time.saturating_add(interval);
+        Some(targets.clone())
+    }
+
+    /// Whether an event `name` whose first argument is `first` waits in the
+    /// queue: a target's event is not queued twice for one handle.
+    pub(crate) fn has_queued(&self, name: &str, first: Option<&Value>) -> bool {
+        self.queue
+            .iter()
+            .any(|queued| queued.event.name == name && queued.args.first() == first)
+    }
+
     /// Whether the body in progress is the current state's `timer` handler.
     fn runs_timer_handler(&self) -> bool {
         self.activity.as_ref().is_some_and(|activity| {
@@ -1839,6 +1888,14 @@ impl Instance {
             if core::mem::take(&mut self.data.drop_queued_sensor) {
                 self.queue
                     .retain(|queued| !matches!(queued.event.name, "sensor" | "no_sensor"));
+            }
+            let removed = core::mem::take(&mut self.data.targets.removed);
+            if !removed.is_empty() {
+                self.queue.retain(|queued| {
+                    !(matches!(queued.event.name, "at_target" | "at_rot_target")
+                        && matches!(queued.args.first(),
+                            Some(Value::Integer(handle)) if removed.contains(handle)))
+                });
             }
             return match flow {
                 Ok(Flow::Next) => continue,
@@ -1984,9 +2041,13 @@ impl Instance {
         self.state = target;
         self.queue.clear();
         self.data.listens.clear();
-        // A repeating sensor ends with the state on every grid
-        // (`events/state-drops`).
+        // A repeating sensor ends with the state on every grid, targets on
+        // OpenSim's engines only (`events/state-drops`).
         self.data.repeat = None;
+        if self.memory.flavour().is_opensim() {
+            self.data.targets.positions.clear();
+            self.data.targets.rotations.clear();
+        }
         host.left_state(caller);
         let _entered = self.start_transition_handler(target, "state_entry", Phase::Entry);
         Outcome::StateChanged(target)

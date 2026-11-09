@@ -1,10 +1,9 @@
 grid: fake-sl
-date: 2026-11-07
+date: 2026-11-09
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating Mono
 settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
-complete: no
 
 PROBE experience/powers rec=start region="Fake Region" channel="Second Life Server" version="sl-fake-grid 0.1.0"
 PROBE experience/powers rec=teleport step=1 call=llTeleportAgent of=owner back=0 perms=0 granter=none
@@ -40,7 +39,5 @@ PROBE experience/powers rec=after step=10 of=owner landed=0 moved=0 off=3.0 dz=0
 PROBE experience/powers rec=teleport step=11 call=llTeleportAgent of=owner back=1 perms=4128 granter=owner
 PROBE experience/powers rec=after step=11 of=owner landed=1 moved=0 off=0.0 dz=0.0
 PROBE experience/powers rec=attach-temp step=12 perms=4128 granter=owner
-# debug-channel: from="Object" text="Object [script:Probe] Script run-time error"
-# debug-channel: from="Object" text="llAttachToAvatarTemp is not implemented by this grid"
-# debug-channel by=other: from="Object" text="Object [script:Probe] Script run-time error"
-# debug-channel by=other: from="Object" text="llAttachToAvatarTemp is not implemented by this grid"
+PROBE experience/powers rec=attached step=12 to=owner point=5 owner=owner perms=4128
+PROBE experience/powers rec=end attached=5

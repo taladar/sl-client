@@ -373,3 +373,42 @@ fn flood_records_count_as_each_grid_counted() -> Result<(), String> {
     let missing = [210, 211, 410, 411, 510].map(material);
     replayed("flood-records", source, 9500, None, &[], &missing)
 }
+
+/// A fault's two lines are one error to Second Life's flood limit
+/// (`errors/runtime-errors`): four scripts of one object fault three seconds
+/// apart, and a refusal six seconds after the last is still said — the fifth
+/// error in the window, where counting each line would make it the ninth.
+#[test]
+fn a_faults_lines_count_once_against_the_flood() -> Result<(), String> {
+    let mut engine = engine_as(EngineFlavour::SecondLife);
+    let mut host = Recorder::default();
+    for (id, seconds) in [(A, 3), (B, 6), (C, 9), (D, 12)] {
+        let source = format!(
+            "integer zero; default {{ state_entry() {{ llSetTimerEvent({seconds}.0); }} \
+             timer() {{ llSetTimerEvent(0.0); llOwnerSay((string)(1 / zero)); }} }}"
+        );
+        let _none = engine.add(id, program(&source)?);
+    }
+    let _none = engine.add(
+        E,
+        program(
+            "default { state_entry() { llSetTimerEvent(18.0); } \
+             timer() { llSetTimerEvent(0.0); llResetOtherScript(\"Nope\"); } }",
+        )?,
+    );
+    let _reports = run(&mut engine, &mut host, 200);
+    let errors: Vec<String> = host
+        .said
+        .iter()
+        .filter(|(_, _, speech)| speech.channel == crate::vm::report::DEBUG_CHANNEL)
+        .map(|(_, _, speech)| speech.text.clone())
+        .collect();
+    assert_eq!(errors.len(), 9, "{errors:?}");
+    assert!(
+        !errors
+            .iter()
+            .any(|text| text == crate::vm::report::FLOOD_NOTICE),
+        "{errors:?}"
+    );
+    Ok(())
+}

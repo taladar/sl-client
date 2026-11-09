@@ -1,5 +1,5 @@
 grid: fake-opensim
-date: 2026-11-07
+date: 2026-11-09
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating YEngine
@@ -13,8 +13,8 @@ PROBE money/debit rec=touch by=other
 PROBE money/debit rec=give step=1 to=other amount=1 result=0
 PROBE money/debit rec=transfer step=1 to=other amount=1 handle_null=0
 PROBE money/debit rec=result step=1 id=handle success=0 data="MISSING_PERMISSION_DEBIT"
-PROBE money/debit rec=timeout step=1
 # question permissions=2 object="Object" owner="<first> <last>" experience=none
+PROBE money/debit rec=timeout step=1
 PROBE money/debit rec=waiting drive=answer grant=2
 # answer grant=2
 PROBE money/debit rec=answer step=2 perms=2

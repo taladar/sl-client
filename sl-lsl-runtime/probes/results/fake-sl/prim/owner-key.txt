@@ -1,0 +1,17 @@
+grid: fake-sl
+date: 2026-11-09
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Fake Region
+engine: sl-lsl-runtime imitating Mono
+settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
+
+PROBE prim/owner-key rec=start region="Fake Region" channel="Second Life Server" version="sl-fake-grid 0.1.0"
+PROBE prim/owner-key rec=owner-key label=self got=owner valid=1
+PROBE prim/owner-key rec=owner-key label=self-upper got=owner valid=1
+PROBE prim/owner-key rec=owner-key label=owner got=owner valid=1
+PROBE prim/owner-key rec=owner-key label=stranger got=same valid=1
+PROBE prim/owner-key rec=owner-key label=null got=null valid=0
+PROBE prim/owner-key rec=owner-key label=nothing got=same valid=1
+PROBE prim/owner-key rec=owner-key label=junk got=null valid=0
+PROBE prim/owner-key rec=owner-key label=empty got=null valid=0
+PROBE prim/owner-key rec=end

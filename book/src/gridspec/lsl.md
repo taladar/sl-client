@@ -539,8 +539,8 @@ a second one, so that what was still on its way lands in front of it.
 | — an `llTarget` and an `llRotTarget` set in the handler that changes state | **kept**: `at_target` and `at_rot_target` run in the new state | **dropped**: neither runs | no scripts |
 | a sensor and targets set afresh in the new state | they work | the same | no scripts |
 | `state default` in `default` | runs neither `state_exit` nor `state_entry` | the same | no scripts |
-| `state` in a function | the caller carries on; the change comes when the handler ends | the handler ends at the `state` | no scripts |
-| `llDetectedKey`, `llDetectedName`, `llDetectedTouchFace` outside the event | `NULL_KEY`, `NULL_KEY`'s text, 0 | an empty key and name, −1 | no scripts |
+| `state` in a function | the caller carries on; the change comes when the handler ends | the handler ends at the `state` | each flavour as its grid |
+| `llDetectedKey`, `llDetectedName`, `llDetectedTouchFace` outside the event | `NULL_KEY`, `NULL_KEY`'s text, 0 | an empty key and name, −1 | each flavour as its grid; OpenSim's owner empty too, its touch coordinates `<-1, -1, 0>` and its rotation four zeros, as `LSL_Api` answers them |
 
 ### The order of events of different types
 
@@ -1119,6 +1119,7 @@ on OpenSim.
 | `llLinksetDataReset` | `LINKSETDATA_RESET`, `""`, `""` | no such event | no scripts |
 | a refused write, `LINKSETDATA_NOUPDATE`, a delete of a missing name | no event | no such event | no scripts |
 | who gets it | every script in the linkset, the writer too, in the order of the calls | no such event | no scripts |
+| when | the writer at once; the linkset's other scripts a frame on, as a link message, so a link message sent before a write reaches them before the write's event | no such event | Second Life's flavour as its grid |
 | a script writing 131 pairs in one event | its queue fills: 64 events, one of them its own link message, the rest dropped | no such event | no scripts |
 
 ### What the viewer does with it
@@ -1382,8 +1383,8 @@ starts and an idle LSO one — and another object with one Mono script.
 
 | what | Second Life | OpenSim (both engines) | fake grid |
 | --- | --- | --- | --- |
-| `OBJECT_SCRIPT_MEMORY` | the sum of every script's **limit**, running or not: 65 536 a Mono script (or its lowered limit), 16 384 an LSO one — `229376` for the five; stopping a script changes nothing; raising the limit to 32 768 adds 16 384 | **16 384 per running script**: `65536` for the four running, `49152` with one stopped; the other object `16384` | no scripts |
-| `OBJECT_RUNNING_SCRIPT_COUNT`, `OBJECT_TOTAL_SCRIPT_COUNT` | the running ones (`4`, `3` with one stopped), all of them (`5`) | the same | no scripts |
+| `OBJECT_SCRIPT_MEMORY` | the sum of every script's **limit**, running or not: 65 536 a Mono script (or its lowered limit), 16 384 an LSO one — `229376` for the five; stopping a script changes nothing; raising the limit to 32 768 adds 16 384 | **16 384 per running script**: `65536` for the four running, `49152` with one stopped; the other object `16384` | each flavour as its grid, but for LSO (`server-lsl-lso-memory`) |
+| `OBJECT_RUNNING_SCRIPT_COUNT`, `OBJECT_TOTAL_SCRIPT_COUNT` | the running ones (`4`, `3` with one stopped), all of them (`5`) | the same | the same |
 | `OBJECT_SCRIPT_TIME` | a few microseconds | a few milliseconds | no scripts |
 | of an avatar (the owner) | its attachments' scripts: five, `327680` | `0`, `0`, `0`: the local avatar wears none | no scripts |
 | of `NULL_KEY`, of a key that names nothing | `[]` | `[]` | no scripts |
@@ -1511,7 +1512,7 @@ stands up from it. YEngine agrees with Second Life on every row.
 | --- | --- | --- | --- | --- |
 | a state change and back | all kept | the same | the same | no scripts |
 | the viewer revoking `TRIGGER_ANIMATION` of the object | that bit gone (`1030`), the rest and the granter kept; **no** `run_time_permissions` | the same | the same | no scripts (the grid surfaces `ServerEvent::RevokeScriptPermissions`) |
-| … `TRIGGER_ANIMATION \| OVERRIDE_ANIMATIONS` of the region | the same: `1030` | the same | the same | no scripts |
+| … `TRIGGER_ANIMATION \| OVERRIDE_ANIMATIONS` of the region | the same: `1030` | the same | the same | the same: a revoke naming the region's id reaches every script in it, and OpenSim's hears only one that takes an animation permission (`HandleRevokePermissions`) |
 | … every bit (`0xFFFFFFFF`) of the object | nothing held, the granter `NULL_KEY`; no event | the same | the same | no scripts |
 | `llTakeControls`, then `llReleaseControls` | `TAKE_CONTROLS` gone (`1042`) | the same | the same | no scripts |
 | the owner in another region for 20 s | all kept, while it is gone and after | the same | the same | no scripts |
@@ -2143,7 +2144,7 @@ granted `PERMISSION_CHANGE_LINKS`; each step is a second and a half apart.
 | `llCreateLink` with no permission | `Script trying to link but PERMISSION_CHANGE_LINKS permission not set!` | `llCreateLink: PERMISSION_CHANGE_LINKS permission not set` | each flavour as its grid |
 | `llCreateLink` of `NULL_KEY`, a key nothing has, the owner | `Script trying to link but target is invalid.` each | nothing, silently | each flavour as its grid |
 | linked | `CHANGED_LINK` in both prims; the root is link 1, the child 2, `llGetNumberOfPrims` 2 | the same, and the child gets a `changed` of 32768 (OpenSim's `CHANGED_POSITION`) whenever it moves | each flavour as its grid; the 32768 at the link alone, since nothing moves a child yet |
-| `llGetLinkKey(0)` in a linkset | `NULL_KEY` | the prim itself | each flavour as its grid |
+| `llGetLinkKey(0)` in a linkset | `NULL_KEY` from the root, the root from a child | the root | each flavour as its grid |
 | `llSetLinkPrimitiveParamsFast` of `LINK_SET`, `LINK_ALL_OTHERS`, `LINK_ALL_CHILDREN`, `LINK_ROOT`, `LINK_THIS`, 1, 2 | the prims each names | the same | each flavour as its grid; not replayed in a linkset yet |
 | … of link 0 or 3 in a linkset of two | nothing | the same | each flavour as its grid; not replayed in a linkset yet |
 | `llGetLinkPrimitiveParams` of `LINK_SET`, `LINK_ALL_OTHERS`, `LINK_ALL_CHILDREN` | **nothing** | the prims each names, in link order | each flavour as its grid; not replayed in a linkset yet |
@@ -2169,6 +2170,8 @@ sits on prim A, no sit target set.
 | `llBreakLink(2)` with an avatar sitting on the root | the avatar is **stood up**, the child unlinked | the same | the same |
 | `llBreakLink` of the sitter's link number | nothing: the avatar stays | the same | the same |
 | `llBreakAllLinks` with an avatar sitting on the root | the avatar is **stood up**, every prim unlinked | every prim unlinked, the avatar **stays seated** on the root | each flavour as its grid |
+| `llGetLinkNumber` of the lone root, the avatar still seated | 1 | **0**: OpenSim counts prims alone | each flavour as its grid |
+| `llCreateLink` of the far prim, then of prim B | (the far link refused) | B is link 2 and the far prim 3: a script's link **inserts** the joined prims after the root (`LinkToGroup(child, true)`), where a viewer's link appends them | the same on both flavours (Second Life's script link numbers after the root as its viewer link does) |
 
 ### `changed`: which setter raises what
 
@@ -2329,7 +2332,7 @@ is marked *first run*.
 | | Second Life | OpenSim (both engines) | fake grid |
 | --- | --- | --- | --- |
 | a run of errors | the first **eight** pass, then `Too many errors... dropping further messages until the flood stops` and nothing more | every one passes | each flavour as its grid |
-| what counts | **every line** of the object: a missing sound, a missing texture, a fault's two lines and each rule-list complaint alike; four missing textures after a flood of sounds are dropped with it | — | each flavour as its grid |
+| what counts | **every error** of the object: a missing sound, a missing texture, a fault and each rule-list complaint alike; four missing textures after a flood of sounds are dropped with it. A fault's two lines count **once** and pass or drop together: four faults three seconds apart and a refusal six seconds after the last all passed (`errors/runtime-errors`), where counting lines would make the refusal the ninth | — | each flavour as its grid |
 | whose flood it is | the **object's**: the second script in the same prim is dropped, the other object's error passes | — | each flavour as its grid |
 | spacing | a **rate**, not a count: ten lines four seconds apart all pass, and a ninth line ten seconds after eight passes (18 seconds after the first); nine lines in 8.3 seconds do not. Where it turns is **not repeatable** to a second: eight lines and a ninth 16 seconds after the first flooded once and passed three times, at 17 seconds the notice once and passed five times; twelve lines 1.5 seconds apart passed nine, eleven, nine, eleven and ten, and a script's own `llOwnerSay` lines between them did not change that | — | counted over 16 seconds, which gets the fewest of those lines wrong; the replays name the rest |
 | how long a flood lasts | from its first dropped line: still dropping 32 seconds in (*first run*), passing again 37 seconds in, whatever was dropped meanwhile (10 or 11 seconds before); and eight lines in a row pass 35 seconds after a flood began. **Never** while a line comes every 1.5 seconds (ten minutes); with one every 2.2, 2.7 and 3.2 seconds about 56, 36 and 49 seconds | — | 34 seconds, and on until two seconds pass with no line |
@@ -2727,11 +2730,11 @@ box with its script, a removal sent to the viewer).
 | what | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
 | the order of `llGetInventoryName` | by name, case folded, **digits as numbers**: `9`, `10`, `_under`, `aaa Helper`, `alpha`, `Beta`, `Box`, `Probe`, `Zed` | by name, case folded, culture order: `_under`, `10`, `9`, `aaa Helper`, `alpha`, … | each flavour as its grid |
-| a name made with an accent (`élan`, `CreateInventoryItem` over UDP) | the accented character dropped: `lan` | **a hex dump of the bytes**: `C3 A9 6C 61 6E 00 …..lan.` | the name as the grid stored it; the fake grid keeps what the viewer sent |
+| a name made with an accent (`élan`, `CreateInventoryItem` over UDP) | the accented character dropped: `lan` | **a hex dump of the bytes**: `C3 A9 6C 61 6E 00 …..lan.` | each flavour as its grid: Second Life's is the reference viewer's `correctInventoryName` (every byte past ASCII a space, trimmed), OpenSim's `Util.FieldToString` |
 | a name in another case (`ALPHA`) | not found: the lookup is exact | not found | each flavour as its grid |
 | `llGetInventoryName` of −1, past the end, of type `INVENTORY_ALL` at 100, of a type that is none | `""` | `""`, but −1 **throws** (`ArgumentOutOfRangeException`; YEngine stops the script) | each flavour as its grid |
 | a missing name's type, key, creator, masks | −1, `NULL_KEY`, `NULL_KEY`, 0 each; `No item named '…'.` for every call but the type, so six lines for one name and then the flood limit | −1, `NULL_KEY`, `""`, −1 each; one line, `llGetInventoryCreator: Can't find item ''` | each flavour as its grid |
-| key, creator, masks of the owner's full-permission items | the asset key, the owner, base and owner `0x7FFFFFFF`, group and everyone 0, next owner `0x7FFFFFFF`; the object's next-owner mask `532480` (move, modify, copy, transfer) | the same | each flavour as its grid |
+| key, creator, masks of the owner's full-permission items | the asset key, the owner, base and owner `0x7FFFFFFF`, group and everyone 0, next owner `0x7FFFFFFF`; the object's next-owner mask `532480` (move, modify, copy, transfer) | the same: the masks it holds (export and the object's own bits in) read through `PermissionMaskToLSLPerm`, cut to those four bits and all four as `0x7FFFFFFF` | each flavour as its grid |
 | `llSetInventoryPermMask` | does nothing, says nothing | does nothing, says nothing | each flavour as its grid |
 | `llScriptDanger` at the prim | 1 (Mauve) | 0 | each flavour by its grid's rule over the region's parcel flags |
 | a script that is not there: `llGetScriptState`, `llResetOtherScript`, `llSetScriptState` | 0, and silent here only because the missing item's six lines above had set off the object's [flood limit](#floods); alone, `Could not find script 'nope'.` ([Run-time errors](#what-is-said-and-to-whom)) | 0, and `llGetScriptState: Can't find script 'nope'` (and the like) on the debug channel | each flavour as its grid |
@@ -2843,7 +2846,7 @@ either grid.
 | `llLoadURL` | 0.1 | 0.11 | **10.0** | each flavour as its grid |
 | `llEmail` | 20.0 | 20.0 | 1.0: the email module is off (below) | not run yet (`server-lsl-lib-email-xmlrpc`) |
 | `llRezObject` ([Rezzing](#rezzing)) | 0.1 | 0.1–0.2 | 0.1 | 0.1; on OpenSim none for a rez that rezzes nothing |
-| `llGiveInventory` to an avatar ([Giving](#giving)) | 0 | 2 | 3 | each flavour as its grid; OpenSim's 3 s for a gift to a prim too |
+| `llGiveInventory` to an avatar ([Giving](#giving)) | 0 | 2 | 3 | each flavour as its grid; a gift to a prim takes no time on either (OpenSim sleeps in its avatar branch alone) |
 
 **OpenSim sleeps a script for a second whenever a library call reports an
 error.** Its `LSL_Api.Error`, which every such message goes through, ends

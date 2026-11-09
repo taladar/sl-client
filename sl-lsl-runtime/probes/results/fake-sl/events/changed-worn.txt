@@ -1,10 +1,9 @@
 grid: fake-sl
-date: 2026-11-07
+date: 2026-11-09
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating Mono
 settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
-complete: no
 
 PROBE events/changed-worn rec=start region="Fake Region" channel="Second Life Server" version="sl-fake-grid 0.1.0"
 PROBE events/changed-worn rec=waiting drive=attach point=5
@@ -20,3 +19,11 @@ PROBE events/changed-worn rec=waiting drive=away seconds=15
 # animations avatar=owner playing="stand@other-object"
 # teleport-started flags=0x10
 # back arrived
+# animations avatar=other playing="stand@other-object"
+PROBE events/changed-worn rec=changed step=2 bits=REGION|TELEPORT home=0
+PROBE events/changed-worn rec=changed step=2 bits=REGION|TELEPORT home=1
+PROBE events/changed-worn rec=back home=1 seconds=25
+PROBE events/changed-worn rec=waiting drive=drop
+# drop worn=1
+# dropped key=same
+PROBE events/changed-worn rec=end

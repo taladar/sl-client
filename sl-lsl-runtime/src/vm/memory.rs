@@ -326,9 +326,10 @@ impl Memory {
     }
 
     /// `llSetMemoryLimit(asked)`: on Mono, a limit from what the script uses
-    /// now up to [`MEMORY_LIMIT`] is taken, and the low-water mark restarts
-    /// from the use; anything else is refused and the limit left as it was.
-    /// Both OpenSim engines refuse every call.
+    /// now up to [`MEMORY_LIMIT`] is taken, and where it changes the limit
+    /// the low-water mark restarts from the use (asked for the limit it has,
+    /// aditi kept the mark, `memory/budget`); anything else is refused and
+    /// the limit left as it was. Both OpenSim engines refuse every call.
     pub(crate) fn set_limit(&mut self, asked: i32, stack: Stack) -> bool {
         if self.flavour != EngineFlavour::SecondLife {
             return false;
@@ -336,8 +337,10 @@ impl Memory {
         let used = self.heap(stack);
         match u32::try_from(asked) {
             Ok(limit) if (used..=MEMORY_LIMIT).contains(&limit) => {
+                if limit != self.limit {
+                    self.peak = used;
+                }
                 self.limit = limit;
-                self.peak = used;
                 true
             }
             Ok(_) | Err(_) => false,

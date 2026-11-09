@@ -29,6 +29,14 @@ implemented llPassTouches
 implemented llGetScriptState
 implemented llGetStartParameter
 implemented llGetOwner
+implemented llGetOwnerKey
+implemented llSetStatus
+implemented llGetStatus
+implemented llVolumeDetect
+implemented llTarget
+implemented llTargetRemove
+implemented llRotTarget
+implemented llRotTargetRemove
 implemented llSetTimerEvent
 implemented llGetTime
 implemented llResetTime

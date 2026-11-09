@@ -71,11 +71,15 @@ const PASSWORD: &str = "conformance";
 /// ([`GridTest::accounts`]); registering them all costs one login-endpoint
 /// entry each and nothing at run time, since an account nobody logs in as is
 /// never minted a session.
+/// A first name is a word none of the runner's own strings holds: the probe
+/// runner writes every first name into a transcript as a placeholder, and
+/// "Conformance" turned its `sl-conformance` user agent and item descriptions
+/// into `sl-<first>` on the fake grids alone.
 /// The agent ids are **fixed** rather than minted, so the harness can name one
 /// before anybody has logged in — which is what supplying the "other avatar"
 /// fixture ([`Fixtures::with_other_avatar`]) needs.
 const ACCOUNTS: [(&str, &str, u128); 3] = [
-    ("primary", "Conformance", 0xC0_4F_A6_00_01),
+    ("primary", "Quill", 0xC0_4F_A6_00_01),
     ("secondary", "Bystander", 0xC0_4F_A6_00_02),
     ("tertiary", "Onlooker", 0xC0_4F_A6_00_03),
 ];
@@ -714,6 +718,23 @@ mod tests {
     use crate::grid::Grid;
     use crate::registry::find;
     use pretty_assertions::assert_eq;
+
+    /// No first name is a word of what the probe runner writes itself, which
+    /// its transcripts would otherwise hold as `<first>`.
+    #[test]
+    fn no_first_name_is_a_word_the_runner_writes() {
+        for (_label, first_name, _agent_id) in ACCOUNTS {
+            let name = first_name.to_ascii_lowercase();
+            for written in ["sl-conformance-probe", "sl-conformance lsl-probes"] {
+                assert!(
+                    !written
+                        .split(|c: char| !c.is_alphanumeric())
+                        .any(|word| word == name),
+                    "{first_name} is a word of {written:?}"
+                );
+            }
+        }
+    }
 
     /// Every synthesised account resolves under its own label, names the grid's
     /// URI, and is distinct from the others — which is what the runner's

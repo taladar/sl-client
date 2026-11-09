@@ -1,5 +1,5 @@
 grid: fake-opensim
-date: 2026-11-07
+date: 2026-11-09
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating YEngine
@@ -30,10 +30,10 @@ PROBE avatar/controls rec=waiting drive=control keys=2
 # control keys=2 held=1s
 # animations avatar=owner playing="walk"
 # animations avatar=owner playing="stand"
-PROBE avatar/controls rec=hold-over step=3 repeats=0
 # script-control-change action=release controls=256 pass_to_agent=0
 # script-control-change action=release controls=256 pass_to_agent=1
 # script-control-change action=take controls=256 pass_to_agent=1
+PROBE avatar/controls rec=hold-over step=3 repeats=0
 PROBE avatar/controls rec=took step=4 controls=256 accept=0 pass_on=1
 PROBE avatar/controls rec=waiting drive=control keys=256
 # control keys=256 held=1s

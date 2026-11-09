@@ -464,7 +464,8 @@ fn offer_message(ctx: &mut ScriptCtx<'_>, what: &str, folder: bool) -> String {
 /// contents (a name it holds already becomes `Gift 1`, a script arrives
 /// stopped, `changed(CHANGED_INVENTORY)` there), or as an offer to an avatar,
 /// marked offline, which holds the script 2 s on Second Life and 3 s on
-/// OpenSim, where a gift to a prim takes the 3 s too. A missing name is
+/// OpenSim, where a gift to a prim takes no time (`LSL_Api.llGiveInventory`
+/// sleeps in its avatar branch alone, `inventory/give`). A missing name is
 /// refused: on Second Life `Unable to give inventory: 'No item named
 /// 'Nope'.'.`, on OpenSim with a second's sleep and none of its own.
 ///
@@ -502,6 +503,9 @@ pub fn ll_give_inventory(
     let items = [name.clone()];
     if ctx.host().prim_scripts(&destination.0).is_some() {
         let _given = ctx.host().give_to_prim(caller, &destination.0, &items);
+        if opensim {
+            ctx.delay(0.0);
+        }
         return Ok(());
     }
     let message = offer_message(ctx, &name, false);

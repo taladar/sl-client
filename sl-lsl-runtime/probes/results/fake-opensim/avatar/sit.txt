@@ -1,5 +1,5 @@
 grid: fake-opensim
-date: 2026-11-07
+date: 2026-11-09
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating YEngine
@@ -32,6 +32,9 @@ PROBE avatar/sit rec=seat step=7 why=changed on_target=none prims=1 last_link=pr
 PROBE avatar/sit rec=held step=7 why=after-stand answer=-1 perms=1040 granter=other
 PROBE avatar/sit rec=target-cleared on_target=none
 PROBE avatar/sit rec=waiting drive=sit
+# animations avatar=other playing="falldown"
+# animations avatar=other playing="land"
+# animations avatar=other playing="stand"
 # sit sit_position=<0.415, 0.000, 0.900> sit_rotation=<0.000, 0.000, 0.000, 1.000> camera_eye=<-2.000, 0.000, 1.000> camera_at=<0.000, 0.000, 0.500> force_mouselook=0 autopilot=1
 PROBE avatar/sit rec=seat step=8 why=changed on_target=none prims=2 last_link=owner objects=1
 PROBE avatar/sit rec=waiting drive=stand

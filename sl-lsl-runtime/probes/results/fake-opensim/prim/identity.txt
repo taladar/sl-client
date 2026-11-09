@@ -1,5 +1,5 @@
 grid: fake-opensim
-date: 2026-11-07
+date: 2026-11-09
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating YEngine
@@ -68,7 +68,7 @@ PROBE prim/identity rec=detail code=28 count=1 got="i:0"
 PROBE prim/identity rec=detail code=29 count=1 got="v:<0.000000, 0.000000, 0.000000>"
 PROBE prim/identity rec=detail code=30 count=1 got="i:1"
 PROBE prim/identity rec=detail code=31 count=1 got="i:1"
-PROBE prim/identity rec=detail code=32 count=1 got="key:null"
+PROBE prim/identity rec=detail code=32 count=1 got="key:owner"
 PROBE prim/identity rec=detail code=33 count=1 got="s:"
 PROBE prim/identity rec=detail code=34 count=1 got="i:0"
 PROBE prim/identity rec=detail code=35 count=1 got="i:0"

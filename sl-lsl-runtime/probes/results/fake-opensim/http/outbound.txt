@@ -1,5 +1,5 @@
 grid: fake-opensim
-date: 2026-11-07
+date: 2026-11-09
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating YEngine
@@ -9,12 +9,12 @@ PROBE http/outbound rec=start region="Fake Region" channel="OpenSim" version="sl
 PROBE http/outbound rec=url granted=1
 PROBE http/outbound rec=sent step=1 case=default request=set
 PROBE http/outbound rec=inbound step=1 method="GET" path="//s1" query="" length=0 body="" content_type="text/plain;charset=utf-8" content_length="" pragma="" x_probe="" x_probe_two=""
-PROBE http/outbound rec=headers step=1 shard="OpenSim" object_name=match object_key=match region="Fake Region (256000, 256000)" position="(128.000000, 124.000000, 26.950001)" here="<128.00000, 124.00000, 26.95000>" rotation="(0.000000, 0.000000, 0.000000, 1.000000)" turn="<0.00000, 0.00000, 0.00000, 1.00000>" velocity="(0.000000, 0.000000, 0.000000)" owner_name=legacy owner_key=match
+PROBE http/outbound rec=headers step=1 shard="OpenSim" object_name=match object_key=match region="Fake Region (256000, 256000)" position="(128.000000, 124.000000, 26.950001)" here="<128.000000, 124.000000, 26.950000>" rotation="(0.000000, 0.000000, 0.000000, 1.000000)" turn="<0.000000, 0.000000, 0.000000, 1.000000>" velocity="(0.000000, 0.000000, 0.000000)" owner_name=legacy owner_key=match
 PROBE http/outbound rec=transport step=1 user_agent="" accept="" accept_charset="" accept_encoding="" cache_control="" connection="" via="" forwarded_for=empty remote_ip=loopback host=empty script_url=without-slash
 PROBE http/outbound rec=response step=1 status=200 metadata="" length=4 body="ok-1"
 PROBE http/outbound rec=sent step=2 case=post-json request=set
 PROBE http/outbound rec=inbound step=2 method="POST" path="//s2" query="" length=7 body="{\"a\":1}" content_type="application/json" content_length="" pragma="" x_probe="" x_probe_two=""
-PROBE http/outbound rec=headers step=2 shard="OpenSim" object_name=match object_key=match region="Fake Region (256000, 256000)" position="(128.000000, 124.000000, 26.950001)" here="<128.00000, 124.00000, 26.95000>" rotation="(0.000000, 0.000000, 0.000000, 1.000000)" turn="<0.00000, 0.00000, 0.00000, 1.00000>" velocity="(0.000000, 0.000000, 0.000000)" owner_name=legacy owner_key=match
+PROBE http/outbound rec=headers step=2 shard="OpenSim" object_name=match object_key=match region="Fake Region (256000, 256000)" position="(128.000000, 124.000000, 26.950001)" here="<128.000000, 124.000000, 26.950000>" rotation="(0.000000, 0.000000, 0.000000, 1.000000)" turn="<0.000000, 0.000000, 0.000000, 1.000000>" velocity="(0.000000, 0.000000, 0.000000)" owner_name=legacy owner_key=match
 PROBE http/outbound rec=transport step=2 user_agent="" accept="" accept_charset="" accept_encoding="" cache_control="" connection="" via="" forwarded_for=empty remote_ip=loopback host=empty script_url=without-slash
 PROBE http/outbound rec=response step=2 status=200 metadata="" length=4 body="ok-2"
 PROBE http/outbound rec=sent step=3 case=post-default-type request=set

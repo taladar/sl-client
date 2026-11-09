@@ -1,34 +1,34 @@
 grid: fake-sl
-date: 2026-11-07
+date: 2026-11-09
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating Mono
 settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
 
 PROBE vm/call-cost-newer rec=start region="Fake Region" channel="Second Life Server" version="sl-fake-grid 0.1.0"
-PROBE vm/call-cost-newer rec=rate fn=none size=1 calls=618530 seconds=1.511111 per_second=409321
+PROBE vm/call-cost-newer rec=rate fn=none size=1 calls=618590 seconds=1.511111 per_second=409361
 PROBE vm/call-cost-newer rec=rate fn=llReplaceSubString size=1 calls=24420 seconds=1.511111 per_second=16160
 PROBE vm/call-cost-newer rec=rate fn=llSHA256String size=1 calls=3940 seconds=1.511111 per_second=2607
-PROBE vm/call-cost-newer rec=rate fn=llComputeHash size=1 calls=7610 seconds=1.511111 per_second=5036
-PROBE vm/call-cost-newer rec=rate fn=llOrd size=1 calls=82020 seconds=1.511111 per_second=54278
-PROBE vm/call-cost-newer rec=rate fn=llHash size=1 calls=84770 seconds=1.511111 per_second=56098
-PROBE vm/call-cost-newer rec=rate fn=none size=10 calls=618380 seconds=1.511111 per_second=409222
+PROBE vm/call-cost-newer rec=rate fn=llComputeHash size=1 calls=7620 seconds=1.511111 per_second=5043
+PROBE vm/call-cost-newer rec=rate fn=llOrd size=1 calls=82140 seconds=1.511111 per_second=54357
+PROBE vm/call-cost-newer rec=rate fn=llHash size=1 calls=84790 seconds=1.511111 per_second=56111
+PROBE vm/call-cost-newer rec=rate fn=none size=10 calls=618530 seconds=1.511111 per_second=409321
 PROBE vm/call-cost-newer rec=rate fn=llReplaceSubString size=10 calls=12120 seconds=1.511111 per_second=8021
 PROBE vm/call-cost-newer rec=rate fn=llSHA256String size=10 calls=3940 seconds=1.511111 per_second=2607
-PROBE vm/call-cost-newer rec=rate fn=llComputeHash size=10 calls=7600 seconds=1.511111 per_second=5029
-PROBE vm/call-cost-newer rec=rate fn=llOrd size=10 calls=42830 seconds=1.511111 per_second=28343
-PROBE vm/call-cost-newer rec=rate fn=llHash size=10 calls=42940 seconds=1.511111 per_second=28416
-PROBE vm/call-cost-newer rec=rate fn=none size=100 calls=617180 seconds=1.511111 per_second=408428
+PROBE vm/call-cost-newer rec=rate fn=llComputeHash size=10 calls=7620 seconds=1.511111 per_second=5043
+PROBE vm/call-cost-newer rec=rate fn=llOrd size=10 calls=42850 seconds=1.511111 per_second=28357
+PROBE vm/call-cost-newer rec=rate fn=llHash size=10 calls=42950 seconds=1.511111 per_second=28423
+PROBE vm/call-cost-newer rec=rate fn=none size=100 calls=617340 seconds=1.511111 per_second=408534
 PROBE vm/call-cost-newer rec=rate fn=llReplaceSubString size=100 calls=2620 seconds=1.511111 per_second=1734
-PROBE vm/call-cost-newer rec=rate fn=llSHA256String size=100 calls=3460 seconds=1.511111 per_second=2290
-PROBE vm/call-cost-newer rec=rate fn=llComputeHash size=100 calls=5450 seconds=1.511111 per_second=3607
-PROBE vm/call-cost-newer rec=rate fn=llOrd size=100 calls=13440 seconds=1.511111 per_second=8894
-PROBE vm/call-cost-newer rec=rate fn=llHash size=100 calls=12350 seconds=1.511111 per_second=8173
-PROBE vm/call-cost-newer rec=rate fn=none size=1000 calls=617390 seconds=1.511111 per_second=408567
+PROBE vm/call-cost-newer rec=rate fn=llSHA256String size=100 calls=3470 seconds=1.511111 per_second=2296
+PROBE vm/call-cost-newer rec=rate fn=llComputeHash size=100 calls=5460 seconds=1.511111 per_second=3613
+PROBE vm/call-cost-newer rec=rate fn=llOrd size=100 calls=13450 seconds=1.511111 per_second=8901
+PROBE vm/call-cost-newer rec=rate fn=llHash size=100 calls=12360 seconds=1.511111 per_second=8179
+PROBE vm/call-cost-newer rec=rate fn=none size=1000 calls=617750 seconds=1.511111 per_second=408805
 PROBE vm/call-cost-newer rec=rate fn=llReplaceSubString size=1000 calls=330 seconds=1.533333 per_second=215
-PROBE vm/call-cost-newer rec=rate fn=llSHA256String size=1000 calls=1580 seconds=1.511111 per_second=1046
-PROBE vm/call-cost-newer rec=rate fn=llComputeHash size=1000 calls=1310 seconds=1.511111 per_second=867
+PROBE vm/call-cost-newer rec=rate fn=llSHA256String size=1000 calls=1590 seconds=1.511111 per_second=1052
+PROBE vm/call-cost-newer rec=rate fn=llComputeHash size=1000 calls=1320 seconds=1.511111 per_second=874
 PROBE vm/call-cost-newer rec=rate fn=llOrd size=1000 calls=2040 seconds=1.511111 per_second=1350
-PROBE vm/call-cost-newer rec=rate fn=llHash size=1000 calls=1660 seconds=1.511111 per_second=1099
-PROBE vm/call-cost-newer rec=rate fn=none size=0 calls=615950 seconds=1.511111 per_second=407614
+PROBE vm/call-cost-newer rec=rate fn=llHash size=1000 calls=1670 seconds=1.511111 per_second=1105
+PROBE vm/call-cost-newer rec=rate fn=none size=0 calls=618590 seconds=1.511111 per_second=409361
 PROBE vm/call-cost-newer rec=end

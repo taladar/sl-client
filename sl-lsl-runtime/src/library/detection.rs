@@ -8,6 +8,11 @@
 //! `ZERO_ROTATION` — except `llDetectedName`, which answers the `NULL_KEY`
 //! *string*. The touch fields are zero as well, not the `TOUCH_INVALID_*`
 //! markers: those are for a real touch the viewer sent no surface for.
+//!
+//! OpenSim answers its own past the block (`LSL_Api.llDetected*`,
+//! `events/detected-cleared`): an empty name, key and owner, a touch face of
+//! −1, touch coordinates of `<-1, -1, 0>`, and a rotation of four zeros (its
+//! struct's default, not its constructor's identity).
 
 use sl_types::lsl::{Rotation, Vector};
 
@@ -28,11 +33,7 @@ fn field<T>(ctx: &ScriptCtx<'_>, index: i32, read: impl FnOnce(&Detected) -> T, 
 pub fn ll_detected_key(ctx: &mut ScriptCtx<'_>, index: i32) -> Result<Key, CallError> {
     // Past the end: `NULL_KEY` on Second Life, an empty key on OpenSim
     // (`detection/sensor`).
-    let none = if ctx.flavour().is_opensim() {
-        String::new()
-    } else {
-        NULL_KEY.to_owned()
-    };
+    let none = absent_key(ctx);
     Ok(field(ctx, index, |d| Key(d.key.clone()), Key(none)))
 }
 
@@ -42,7 +43,32 @@ pub fn ll_detected_key(ctx: &mut ScriptCtx<'_>, index: i32) -> Result<Key, CallE
 ///
 /// None; the signature is the library's.
 pub fn ll_detected_name(ctx: &mut ScriptCtx<'_>, index: i32) -> Result<String, CallError> {
-    Ok(field(ctx, index, |d| d.name.clone(), NULL_KEY.to_owned()))
+    let none = absent_key(ctx);
+    Ok(field(ctx, index, |d| d.name.clone(), none))
+}
+
+/// What a key or a name reads past the block: `NULL_KEY` on Second Life,
+/// empty on OpenSim.
+fn absent_key(ctx: &ScriptCtx<'_>) -> String {
+    if ctx.flavour().is_opensim() {
+        String::new()
+    } else {
+        NULL_KEY.to_owned()
+    }
+}
+
+/// What a touch's surface or texture coordinates read past the block: zero
+/// on Second Life, `<-1, -1, 0>` on OpenSim.
+const fn absent_touch_point(ctx: &ScriptCtx<'_>) -> Vector {
+    if ctx.flavour().is_opensim() {
+        Vector {
+            x: -1.0,
+            y: -1.0,
+            z: 0.0,
+        }
+    } else {
+        ZERO_VECTOR
+    }
 }
 
 /// `llDetectedOwner`: its owner (an avatar owns itself).
@@ -51,12 +77,8 @@ pub fn ll_detected_name(ctx: &mut ScriptCtx<'_>, index: i32) -> Result<String, C
 ///
 /// None; the signature is the library's.
 pub fn ll_detected_owner(ctx: &mut ScriptCtx<'_>, index: i32) -> Result<Key, CallError> {
-    Ok(field(
-        ctx,
-        index,
-        |d| Key(d.owner.clone()),
-        Key(NULL_KEY.to_owned()),
-    ))
+    let none = absent_key(ctx);
+    Ok(field(ctx, index, |d| Key(d.owner.clone()), Key(none)))
 }
 
 /// `llDetectedType`: its `AGENT` / `ACTIVE` / `PASSIVE` / `SCRIPTED` bits.
@@ -101,7 +123,17 @@ pub fn ll_detected_pos(ctx: &mut ScriptCtx<'_>, index: i32) -> Result<Vector, Ca
 ///
 /// None; the signature is the library's.
 pub fn ll_detected_rot(ctx: &mut ScriptCtx<'_>, index: i32) -> Result<Rotation, CallError> {
-    Ok(field(ctx, index, |d| d.rotation.clone(), ZERO_ROTATION))
+    let none = if ctx.flavour().is_opensim() {
+        Rotation {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+            s: 0.0,
+        }
+    } else {
+        ZERO_ROTATION
+    };
+    Ok(field(ctx, index, |d| d.rotation.clone(), none))
 }
 
 /// `llDetectedVel`: its velocity.
@@ -128,7 +160,8 @@ pub fn ll_detected_grab(ctx: &mut ScriptCtx<'_>, index: i32) -> Result<Vector, C
 ///
 /// None; the signature is the library's.
 pub fn ll_detected_touch_face(ctx: &mut ScriptCtx<'_>, index: i32) -> Result<i32, CallError> {
-    Ok(field(ctx, index, |d| d.touch.face, 0))
+    let none = if ctx.flavour().is_opensim() { -1 } else { 0 };
+    Ok(field(ctx, index, |d| d.touch.face, none))
 }
 
 /// `llDetectedTouchST`: the surface coordinates touched.
@@ -137,7 +170,8 @@ pub fn ll_detected_touch_face(ctx: &mut ScriptCtx<'_>, index: i32) -> Result<i32
 ///
 /// None; the signature is the library's.
 pub fn ll_detected_touch_st(ctx: &mut ScriptCtx<'_>, index: i32) -> Result<Vector, CallError> {
-    Ok(field(ctx, index, |d| d.touch.st.clone(), ZERO_VECTOR))
+    let none = absent_touch_point(ctx);
+    Ok(field(ctx, index, |d| d.touch.st.clone(), none))
 }
 
 /// `llDetectedTouchUV`: the texture coordinates touched.
@@ -146,7 +180,8 @@ pub fn ll_detected_touch_st(ctx: &mut ScriptCtx<'_>, index: i32) -> Result<Vecto
 ///
 /// None; the signature is the library's.
 pub fn ll_detected_touch_uv(ctx: &mut ScriptCtx<'_>, index: i32) -> Result<Vector, CallError> {
-    Ok(field(ctx, index, |d| d.touch.uv.clone(), ZERO_VECTOR))
+    let none = absent_touch_point(ctx);
+    Ok(field(ctx, index, |d| d.touch.uv.clone(), none))
 }
 
 /// `llDetectedTouchPos`: the region position touched.

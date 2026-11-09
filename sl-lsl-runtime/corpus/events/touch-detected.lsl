@@ -1,5 +1,7 @@
 // corpus: a touch reaches touch_start and touch_end, with the toucher in the
-// detected block, and llDetected* reads only inside the event
+// detected block, and llDetected* reads only inside the event: outside it
+// a name is NULL_KEY as text on Second Life and "" on OpenSim, as past the
+// end of the block (detection/sensor on both engines)
 // ticks: 5
 // at 2: touch
 string outside = "unread";

@@ -1,5 +1,5 @@
 grid: fake-opensim
-date: 2026-11-07
+date: 2026-11-09
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating YEngine
@@ -9,32 +9,32 @@ settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor
 PROBE inventory/give rec=start region="Fake Region" channel="OpenSim" version="sl-fake-grid 0.1.0"
 PROBE inventory/give rec=found n=1
 PROBE inventory/give rec=try label=give-notecard
+PROBE inventory/give rec=called label=give-notecard delay=0.000000
 PROBE inventory/give rec=receiver-changed change=1 items="Gift:7|Receiver:10:1"
-PROBE inventory/give rec=called label=give-notecard delay=3.019000
 PROBE inventory/give rec=try label=give-notecard-again
+PROBE inventory/give rec=called label=give-notecard-again delay=0.000000
 PROBE inventory/give rec=receiver-changed change=1 items="Gift:7|Gift 1:7|Receiver:10:1"
-PROBE inventory/give rec=called label=give-notecard-again delay=3.018000
 PROBE inventory/give rec=try label=give-script
+PROBE inventory/give rec=called label=give-script delay=0.000000
 PROBE inventory/give rec=receiver-changed change=1 items="Gift:7|Gift 1:7|Passed:10:0|Receiver:10:1"
-PROBE inventory/give rec=called label=give-script delay=3.018000
 PROBE inventory/give rec=try label=give-none
 # debug-channel: from="Object" text="llGiveInventory: Can't find inventory object 'Nope'"
-PROBE inventory/give rec=called label=give-none delay=1.018001
+PROBE inventory/give rec=called label=give-none delay=1.018000
 # im dialog=9 from=owner id=someone name="Object" offline=1 length=60 message="'Gift'. (Object is located at Fake Region <128, 124, 26.95>)" bucket=1
 PROBE inventory/give rec=try label=give-owner
 # im dialog=9 from=owner id=someone name="Object" offline=0 length=14 message="'Probe folder'" bucket=1
 PROBE inventory/give rec=called label=give-owner delay=3.018001
 PROBE inventory/give rec=try label=give-list-owner
-PROBE inventory/give rec=called label=give-list-owner delay=3.018999
+PROBE inventory/give rec=called label=give-list-owner delay=3.018001
 PROBE inventory/give rec=try label=give-list-prim
 PROBE inventory/give rec=receiver-changed change=1 items="Gift:7|Gift 1:7|Gift 2:7|Passed:10:0|Receiver:10:1"
-PROBE inventory/give rec=called label=give-list-prim delay=0.109001
+PROBE inventory/give rec=called label=give-list-prim delay=0.108999
 PROBE inventory/give rec=try label=remote-load
 PROBE inventory/give rec=receiver-changed change=1 items="Gift:7|Gift 1:7|Gift 2:7|Loaded:10:0|Passed:10:0|Receiver:10:1"
 PROBE inventory/give rec=loaded param=77 in=Receiver
-PROBE inventory/give rec=called label=remote-load delay=3.018000
+PROBE inventory/give rec=called label=remote-load delay=3.018999
 PROBE inventory/give rec=try label=remote-load-wrong-pin
-PROBE inventory/give rec=called label=remote-load-wrong-pin delay=3.018000
+PROBE inventory/give rec=called label=remote-load-wrong-pin delay=3.018002
 PROBE inventory/give rec=try label=remote-load-stopped
 PROBE inventory/give rec=receiver-changed change=1 items="Gift:7|Gift 1:7|Gift 2:7|Loaded:10:0|Passed:10:0|Receiver:10:1"
 PROBE inventory/give rec=receiver-changed change=1 items="Gift:7|Gift 1:7|Gift 2:7|Loaded:10:0|Passed:10:0|Receiver:10:1"
@@ -43,6 +43,6 @@ PROBE inventory/give rec=waiting drive=touch by=other
 # debug-channel by=other: from="Object" text="llGiveInventory: Can't find inventory object 'Nope'"
 # touch by=other active_group=none surface=none
 PROBE inventory/give rec=try label=give-other
-PROBE inventory/give rec=called label=give-other delay=3.018999
+PROBE inventory/give rec=called label=give-other delay=3.018000
 PROBE inventory/give rec=end
 # im by=other dialog=9 from=owner id=someone name="Object" offline=1 length=60 message="'Gift'. (Object is located at Fake Region <128, 124, 26.95>)" bucket=1

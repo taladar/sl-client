@@ -1,13 +1,12 @@
 grid: fake-sl
-date: 2026-11-07
+date: 2026-11-09
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating Mono
 settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
-complete: no
 
-# question permissions=4 object="Object" owner="<first> <last>" experience=none
 PROBE events/state-drops rec=start region="Fake Region" channel="Second Life Server" version="sl-fake-grid 0.1.0"
+# question permissions=4 object="Object" owner="<first> <last>" experience=none
 PROBE events/state-drops rec=waiting drive=answer grant=4
 # answer grant=4
 PROBE events/state-drops rec=held perms=4
@@ -18,7 +17,14 @@ PROBE events/state-drops rec=waiting drive=chat channel=7 text="before"
 # control keys=256 held=1s
 # chat channel=7 text="before"
 PROBE events/state-drops rec=default sensed=1 sensors=13 presses=1 heard7=1 heard8=0 at_target=0 at_rot_target=0 ticks=14
-# debug-channel: from="Object" text="Object [script:Probe] Script run-time error"
-# debug-channel: from="Object" text="llTarget is not implemented by this grid"
-# debug-channel by=other: from="Object" text="Object [script:Probe] Script run-time error"
-# debug-channel by=other: from="Object" text="llTarget is not implemented by this grid"
+PROBE events/state-drops rec=entered exits=1 perms=4 perm_key_is_owner=1
+PROBE events/state-drops rec=waiting drive=control keys=256
+PROBE events/state-drops rec=waiting drive=chat channel=7 text="after"
+PROBE events/state-drops rec=waiting drive=chat channel=8 text="from state_exit"
+# control keys=256 held=1s
+# chat channel=7 text="after"
+# chat channel=8 text="from state_exit"
+PROBE events/state-drops rec=two sensed=0 sensors=0 presses=1 heard7=0 heard8=0 at_target=1 at_rot_target=1 ticks=14
+PROBE events/state-drops rec=fresh sensed=1 at_target=1 at_rot_target=1
+# script-control-change action=release controls=256 pass_to_agent=0
+PROBE events/state-drops rec=end

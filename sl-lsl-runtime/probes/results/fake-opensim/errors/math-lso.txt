@@ -1,5 +1,5 @@
 grid: fake-opensim
-date: 2026-11-07
+date: 2026-11-09
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating YEngine
@@ -11,30 +11,28 @@ settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor
 # target: script "LSO 4" lsl2
 # target: script "LSO 5" lsl2
 # target: script "LSO 6" lsl2
-# target: script "LSO 7" lsl2
-# target: script "LSO 8" lsl2
 # chat type=say from="Object" length=14 text="Script running"
+# target: script "LSO 7" lsl2
+# chat type=say from="Object" length=14 text="Script running"
+# target: script "LSO 8" lsl2
 # target: script "LSO 9" lsl2
 # target: script "LSO 10" lsl2
-# chat type=say from="Object" length=14 text="Script running"
 # target: script "LSO 11" lsl2
 # target: script "LSO 12" lsl2
-# chat type=say from="Object" length=14 text="Script running"
 # target: script "LSO 13" lsl2
 # target: script "LSO 14" lsl2
 # target: script "LSO 15" lsl2
-# chat type=say from="Object" length=14 text="Script running"
 PROBE errors/math-lso rec=start region="Fake Region" channel="OpenSim" version="sl-fake-grid 0.1.0"
 PROBE errors/math-lso rec=case script="LSO 1" case=int-div step=before
-# debug-channel: from="Object" text="YEngine: Division by Zero (script: LSO 1 event: link_message primID: e50bb94f-ee6f-a3b8-c310-3c523bd292ff at: <128,124,26>) Script must be Reset to re-enable.\n"
+# debug-channel: from="Object" text="YEngine: Division by Zero (script: LSO 1 event: link_message primID: 53b5bffd-6e15-b577-c9b5-c80fe0b023dd at: <128,124,26>) Script must be Reset to re-enable.\n"
 PROBE errors/math-lso rec=case script="LSO 2" case=int-mod step=before
-# debug-channel: from="Object" text="YEngine: Division by Zero (script: LSO 2 event: link_message primID: e50bb94f-ee6f-a3b8-c310-3c523bd292ff at: <128,124,26>) Script must be Reset to re-enable.\n"
+# debug-channel: from="Object" text="YEngine: Division by Zero (script: LSO 2 event: link_message primID: 53b5bffd-6e15-b577-c9b5-c80fe0b023dd at: <128,124,26>) Script must be Reset to re-enable.\n"
 PROBE errors/math-lso rec=case script="LSO 3" case=float-div step=before
-# debug-channel: from="Object" text="YEngine: Division by Zero (script: LSO 3 event: link_message primID: e50bb94f-ee6f-a3b8-c310-3c523bd292ff at: <128,124,26>) Script must be Reset to re-enable.\n"
+# debug-channel: from="Object" text="YEngine: Division by Zero (script: LSO 3 event: link_message primID: 53b5bffd-6e15-b577-c9b5-c80fe0b023dd at: <128,124,26>) Script must be Reset to re-enable.\n"
 PROBE errors/math-lso rec=case script="LSO 4" case=vector-div step=before
-# debug-channel: from="Object" text="YEngine: Vector division by zero (script: LSO 4 event: link_message primID: e50bb94f-ee6f-a3b8-c310-3c523bd292ff at: <128,124,26>) Script must be Reset to re-enable.\n"
+# debug-channel: from="Object" text="YEngine: Vector division by zero (script: LSO 4 event: link_message primID: 53b5bffd-6e15-b577-c9b5-c80fe0b023dd at: <128,124,26>) Script must be Reset to re-enable.\n"
 PROBE errors/math-lso rec=case script="LSO 5" case=rotation-div step=before
-PROBE errors/math-lso rec=case script="LSO 5" case=rotation-div step=after result="<0.00000, 0.00000, 0.00000, 0.00000>"
+PROBE errors/math-lso rec=case script="LSO 5" case=rotation-div step=after result="<0.000000, 0.000000, 0.000000, 1.000000>"
 PROBE errors/math-lso rec=case script="LSO 6" case=int-min-div step=before
 PROBE errors/math-lso rec=case script="LSO 6" case=int-min-div step=after result="-2147483648"
 PROBE errors/math-lso rec=case script="LSO 7" case=int-min-mod step=before
@@ -44,7 +42,7 @@ PROBE errors/math-lso rec=case script="LSO 8" case=sqrt-negative step=after resu
 PROBE errors/math-lso rec=case script="LSO 9" case=float-overflow step=before
 PROBE errors/math-lso rec=case script="LSO 9" case=float-overflow step=after result="Infinity"
 PROBE errors/math-lso rec=case script="LSO 10" case=modpow-zero step=before
-# owner-say: from="Object" text="[YEngine]: Exception while running 74af2281-a8b6-f5ba-c2ae-5863354fb6d1"
+# owner-say: from="Object" text="[YEngine]: Exception while running 1a7d1ddb-3330-db0b-c621-534862fb187d"
 # owner-say: from="Object" text="DivideByZeroException: Attempted to divide by zero."
 # owner-say: from="Object" text="Prim: <Object>, Script: <LSO 10>, Location: Fake Region <128,124,26>"
 # owner-say: from="Object" text="Script must be Reset to re-enable."
@@ -55,9 +53,9 @@ PROBE errors/math-lso rec=case script="LSO 12" case=acos-out-of-range step=after
 PROBE errors/math-lso rec=case script="LSO 13" case=pow-nan step=before
 PROBE errors/math-lso rec=case script="LSO 13" case=pow-nan step=after result="NaN Infinity"
 PROBE errors/math-lso rec=case script="LSO 14" case=inf-nan-casts step=before
-PROBE errors/math-lso rec=case script="LSO 14" case=inf-nan-casts step=after result="Infinity -2147483648 NaN -2147483648"
+PROBE errors/math-lso rec=case script="LSO 14" case=inf-nan-casts step=after result="0.000000 0 0.000000 0"
 PROBE errors/math-lso rec=case script="LSO 15" case=zero-normalise step=before
-PROBE errors/math-lso rec=case script="LSO 15" case=zero-normalise step=after result="<0.00000, 0.00000, 0.00000> <0.00000, 0.00000, 0.00000> <0.00000, 0.00000, 0.00000, 0.50000>"
+PROBE errors/math-lso rec=case script="LSO 15" case=zero-normalise step=after result="<0.000000, 0.000000, 0.000000> <0.000000, 0.000000, 0.000000> <0.000000, 0.000000, 0.000000, 0.500000>"
 PROBE errors/math-lso rec=script-state when=after-faults script="LSO 1" running=1
 PROBE errors/math-lso rec=script-state when=after-faults script="LSO 2" running=1
 PROBE errors/math-lso rec=script-state when=after-faults script="LSO 3" running=1
@@ -106,9 +104,7 @@ PROBE errors/math-lso rec=script-state when=after-revive script="LSO 15" running
 PROBE errors/math-lso rec=end
 # chat by=other type=say from="Object" length=14 text="Script running"
 # chat by=other type=say from="Object" length=14 text="Script running"
-# chat by=other type=say from="Object" length=14 text="Script running"
-# chat by=other type=say from="Object" length=14 text="Script running"
-# debug-channel by=other: from="Object" text="YEngine: Division by Zero (script: LSO 1 event: link_message primID: e50bb94f-ee6f-a3b8-c310-3c523bd292ff at: <128,124,26>) Script must be Reset to re-enable.\n"
-# debug-channel by=other: from="Object" text="YEngine: Division by Zero (script: LSO 2 event: link_message primID: e50bb94f-ee6f-a3b8-c310-3c523bd292ff at: <128,124,26>) Script must be Reset to re-enable.\n"
-# debug-channel by=other: from="Object" text="YEngine: Division by Zero (script: LSO 3 event: link_message primID: e50bb94f-ee6f-a3b8-c310-3c523bd292ff at: <128,124,26>) Script must be Reset to re-enable.\n"
-# debug-channel by=other: from="Object" text="YEngine: Vector division by zero (script: LSO 4 event: link_message primID: e50bb94f-ee6f-a3b8-c310-3c523bd292ff at: <128,124,26>) Script must be Reset to re-enable.\n"
+# debug-channel by=other: from="Object" text="YEngine: Division by Zero (script: LSO 1 event: link_message primID: 53b5bffd-6e15-b577-c9b5-c80fe0b023dd at: <128,124,26>) Script must be Reset to re-enable.\n"
+# debug-channel by=other: from="Object" text="YEngine: Division by Zero (script: LSO 2 event: link_message primID: 53b5bffd-6e15-b577-c9b5-c80fe0b023dd at: <128,124,26>) Script must be Reset to re-enable.\n"
+# debug-channel by=other: from="Object" text="YEngine: Division by Zero (script: LSO 3 event: link_message primID: 53b5bffd-6e15-b577-c9b5-c80fe0b023dd at: <128,124,26>) Script must be Reset to re-enable.\n"
+# debug-channel by=other: from="Object" text="YEngine: Vector division by zero (script: LSO 4 event: link_message primID: 53b5bffd-6e15-b577-c9b5-c80fe0b023dd at: <128,124,26>) Script must be Reset to re-enable.\n"

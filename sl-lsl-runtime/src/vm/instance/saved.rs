@@ -183,6 +183,8 @@ pub(crate) fn restore(
             controls: None,
             // OpenSim's `LSL_Api` is made anew for the restored script.
             say_throttle: crate::vm::delays::SayThrottle::default(),
+            // Nothing measured keeps a target through a take or a restart.
+            targets: crate::vm::context::Targets::default(),
         },
         reset_when_idle: false,
         overdraft: 0,

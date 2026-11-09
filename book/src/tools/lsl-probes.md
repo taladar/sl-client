@@ -39,7 +39,7 @@ A probe's id is its path below `probes/` without the extension
 | `probe` | the id; required |
 | `drive` | `none` (runs from `state_entry`), or the stimuli the probe asks for with `waiting` records, comma-separated: `touch`, `chat`, `answer`, `sit`, `stand`, `control`, `dialog`, `away`, `attach`, `drop`, `rerez`, `fetch`, `pay`, `pay-price`, `revoke`, `restart`, `edit`, `contents`, `buy`; required |
 | `script` | the inventory name, which the probe's scripts find each other by; required in a probe of several |
-| `order` | where the script comes in the save order; required in a probe of several |
+| `order` | where the script comes in the save order; required in a probe of several. The runner reads on for a quarter of a second after each compile before it saves the next, so an earlier script has run its `state_entry` before a later one is there to hear it, as a grid's compile of a second or more makes sure; the fake grid answers an upload at once |
 | `prim` | the object that holds it, `A` (the default), `B`, … |
 | `distance` | how far east of prim A its prim stands, in metres |
 | `height` | how far above prim A its prim stands, in metres — for a range no parcel is wide enough for (a chat range is a distance in three dimensions) |
@@ -203,7 +203,9 @@ What has bitten already, and how a probe should be shaped for it:
   names cannot name a function.
 - **Second Life evaluates an expression right to left.** In
   `"code=" + (string)llLinksetDataDelete(n) + cost()`, `cost()` runs before
-  the delete. Call what changes state in a statement of its own first.
+  the delete. YEngine builds a list literal right to left and XEngine
+  evaluates everything left to right (`vm/eval-order`). Call what changes
+  state in a statement of its own first.
 - **Never look for a JSON sentinel with a string function on OpenSim.** It
   finds `JSON_INVALID` at the start of every string and splits on it between
   every character (`data/json`), so a replace loop over the sentinels grows
@@ -417,10 +419,12 @@ under its name with `RezScript`, in save order, and uploads the source running,
 prefixed on OpenSim with the line that picks the engine (`//YEngine:` or
 `//XEngine:`), for the header's `target` (a script uploaded for `lsl2` is noted
 `# target:`). It answers each `waiting` record and notes what it did (`# touch`,
-`# chat by=other channel=7 text="…"`; a touch by the other avatar also says
-whether that avatar has an active group, `active_group=set|none`, which decides
-what `llDetectedGroup` answers and no script can read; every touch says the
-surface it sent, `surface=none` or `face=… uv=… st=… pos=… normal=… binormal=…`
+`# chat by=other channel=7 text="…"`; the runner clears the other avatar's
+active group before the first probe, since it decides what `llDetectedGroup`
+answers of its touch and no script can read it, and a touch by the other
+avatar says whether it still has one, `active_group=set|none`; every touch
+says the surface it sent, `surface=none` or
+`face=… uv=… st=… pos=… normal=… binormal=…`
 with `pos` in the region). It keeps the probe's owner-say lines from its prims,
 and every `DEBUG_CHANNEL` message they send as a `# debug-channel:` note
 (`# debug-channel by=other:` for what the other avatar is sent; an owner-say
@@ -649,4 +653,4 @@ the reading. The grid tasks (`gridspec-lsl-events`, `-time-timers`,
 | `time/*`, 2026-10-28: the timer's floor and what a negative interval does, drift and phase, setting a timer again, the clocks' formats and time zones, how long a sleep really is, and what a stop or a reset does to a script in the middle of one | read in [Grid Behaviour → LSL scripts](../gridspec/lsl.md#time-timers-and-sleep) | | |
 | `events/other-avatar`, 2026-10-24: a listener on 7 | hears the owner and the other avatar, `key_is_owner` 1 and 0, the name `llKey2Name`'s | the same | the same |
 | — a listener on 8 filtered to the owner | does not hear the other avatar | the same | the same |
-| — the other avatar's touch | `llDetectedType` 3 (`AGENT \| ACTIVE`); `llDetectedGroup` 1, the object's group and the avatar's active group both unset | 1 (`AGENT`); `llDetectedGroup` 0, the avatar's active group set (the object's group compared with the toucher's active group, as OpenSim's source reads) | the same as YEngine |
+| — the other avatar's touch | `llDetectedType` 3 (`AGENT \| ACTIVE`); `llDetectedGroup` 1, the object's group and the avatar's active group both unset | 1 (`AGENT`); `llDetectedGroup` 0 when the avatar's active group was set (the object's group compared with the toucher's active group, as OpenSim's source reads), measured before the runner cleared it | the same as YEngine |

@@ -1,11 +1,60 @@
 grid: fake-opensim
-date: 2026-11-07
+date: 2026-11-09
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating YEngine
 settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
-complete: no
 
 PROBE events/changed-contents rec=start region="Fake Region" channel="OpenSim" version="sl-fake-grid 0.1.0"
-# debug-channel: from="Object" text="YEngine: llGetOwnerKey is not implemented by this grid (script: Child event: listen primID: 8e14e2a5-89bc-6032-c40e-905789555472 at: <130,124,26>) Script must be Reset to re-enable.\n"
-# debug-channel by=other: from="Object" text="YEngine: llGetOwnerKey is not implemented by this grid (script: Child event: listen primID: 8e14e2a5-89bc-6032-c40e-905789555472 at: <130,124,26>) Script must be Reset to re-enable.\n"
+# question permissions=128 object="Object" owner="<first> <last>" experience=none
+PROBE events/changed-contents rec=waiting drive=answer grant=128
+# answer grant=128
+PROBE events/changed-contents rec=permissions got=128
+PROBE events/changed-contents rec=changed prim=B step=0 bits=32768 items=1
+PROBE events/changed-contents rec=changed prim=B step=0 bits=LINK items=1
+PROBE events/changed-contents rec=changed prim=A step=0 bits=LINK items=1
+PROBE events/changed-contents rec=step n=1 allow_drop=0 items=1
+PROBE events/changed-contents rec=waiting drive=contents op=drop name=Dropped
+# contents prim=A op=drop name="Dropped"
+PROBE events/changed-contents rec=changed prim=A step=1 bits=INVENTORY items=2
+PROBE events/changed-contents rec=step n=2 allow_drop=0 items=2
+PROBE events/changed-contents rec=waiting drive=contents op=rename name=Dropped to=Renamed
+# contents prim=A op=rename name="Dropped" to="Renamed"
+PROBE events/changed-contents rec=changed prim=A step=2 bits=INVENTORY items=2
+PROBE events/changed-contents rec=step n=3 allow_drop=0 items=2
+PROBE events/changed-contents rec=waiting drive=contents op=remove name=Renamed
+# contents prim=A op=remove name="Renamed"
+PROBE events/changed-contents rec=changed prim=A step=3 bits=INVENTORY items=1
+PROBE events/changed-contents rec=step n=4 allow_drop=0 items=1
+PROBE events/changed-contents rec=waiting drive=contents op=new-script name=Fresh
+# contents prim=A op=new-script name="Fresh"
+# chat type=say from="Object" length=14 text="Script running"
+PROBE events/changed-contents rec=changed prim=A step=4 bits=INVENTORY items=2
+PROBE events/changed-contents rec=step n=5 allow_drop=0 items=2
+PROBE events/changed-contents rec=waiting drive=contents op=save-script name=Fresh
+# chat by=other type=say from="Object" length=14 text="Script running"
+# contents prim=A op=save-script name="Fresh" compiled=1
+PROBE events/changed-contents rec=changed prim=A step=5 bits=INVENTORY items=2
+PROBE events/changed-contents rec=step n=6 allow_drop=0 items=2
+PROBE events/changed-contents rec=waiting drive=contents op=remove name=Fresh
+# contents prim=A op=remove name="Fresh"
+PROBE events/changed-contents rec=changed prim=A step=6 bits=INVENTORY items=1
+PROBE events/changed-contents rec=step n=7 allow_drop=0 items=1
+PROBE events/changed-contents rec=waiting drive=contents op=drop name=Card prim=B
+# contents prim=B op=drop name="Card"
+PROBE events/changed-contents rec=changed prim=B step=7 bits=INVENTORY items=2
+PROBE events/changed-contents rec=step n=8 allow_drop=0 items=1
+PROBE events/changed-contents rec=waiting drive=contents by=other op=drop name=Gift
+# contents by=other prim=A op=drop name="Gift"
+PROBE events/changed-contents rec=step n=9 allow_drop=1 items=1
+PROBE events/changed-contents rec=waiting drive=contents by=other op=drop name=Allowed
+# contents by=other prim=A op=drop name="Allowed"
+PROBE events/changed-contents rec=changed prim=A step=9 bits=ALLOWED_DROP items=2
+PROBE events/changed-contents rec=step n=10 allow_drop=1 items=2
+PROBE events/changed-contents rec=waiting drive=contents op=drop name=Owned
+# contents prim=A op=drop name="Owned"
+PROBE events/changed-contents rec=changed prim=A step=10 bits=INVENTORY items=3
+PROBE events/changed-contents rec=step n=11 what=unlink allow_drop=0 items=3
+PROBE events/changed-contents rec=changed prim=B step=11 bits=LINK items=2
+PROBE events/changed-contents rec=changed prim=A step=11 bits=LINK items=3
+PROBE events/changed-contents rec=end items=3 prims=1

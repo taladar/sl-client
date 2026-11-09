@@ -109,6 +109,13 @@ const STEP_TIMEOUT: Duration = Duration::from_secs(30);
 /// `persistence/lists` on 2026-11-01 — past [`STEP_TIMEOUT`].
 const COMPILE_TIMEOUT: Duration = Duration::from_secs(90);
 
+/// How long the case keeps reading after a script compiled before it plants
+/// the next: a grid's compile takes a second or more, so a probe's earlier
+/// script has run its `state_entry` before a later one is there to hear it
+/// (`time/reset-mid-sleep`). The fake grid answers an upload at once, and
+/// without the pause the next script could start in the same frame.
+const PLANT_SETTLE: Duration = Duration::from_millis(250);
+
 /// How long a probe may run before its transcript is written as
 /// incomplete, unless its header asks for longer (`deadline`). The longest
 /// probe without one, `http/outbound`, runs about a minute and a half.
@@ -353,34 +360,57 @@ impl Cast {
         }
     }
 
-    /// `text` with both avatars' names put as placeholders (`<first>`,
+    /// `text` with the avatars' names put as placeholders (`<first>`,
     /// `<last>` for the owner's, `<other-first>`, `<other-last>` for the
-    /// other's), matched without regard to case: what a note may hold of
-    /// something a grid wrote.
+    /// other's): what a note may hold of something a grid wrote. A full name
+    /// (`First Last`, or `first.last` as a username) is matched in any case;
+    /// a first or last name alone only as it is spelled, since a test
+    /// account's name may be a word the probes write themselves, in a probe's
+    /// id or in its text.
     fn scrub(&self, text: &str) -> String {
         let mut scrubbed = text.to_owned();
-        for (name, placeholder) in [
-            (&self.owner_name.0, "<first>"),
-            (&self.owner_name.1, "<last>"),
-            (&self.other_name.0, "<other-first>"),
-            (&self.other_name.1, "<other-last>"),
-            (&self.estate_name.0, "<estate-first>"),
-            (&self.estate_name.1, "<estate-last>"),
+        for ((first, last), (first_mark, last_mark)) in [
+            (&self.owner_name, ("<first>", "<last>")),
+            (&self.other_name, ("<other-first>", "<other-last>")),
+            (&self.estate_name, ("<estate-first>", "<estate-last>")),
         ] {
-            scrubbed = replace_ignoring_case(&scrubbed, name, placeholder);
+            if !first.is_empty() && !last.is_empty() {
+                for separator in [" ", "."] {
+                    scrubbed = replace_word(
+                        &scrubbed,
+                        &format!("{first}{separator}{last}"),
+                        &format!("{first_mark}{separator}{last_mark}"),
+                        Case::Any,
+                    );
+                }
+            }
+            scrubbed = replace_word(&scrubbed, first, first_mark, Case::AsSpelled);
+            scrubbed = replace_word(&scrubbed, last, last_mark, Case::AsSpelled);
         }
         scrubbed
     }
 }
 
-/// `text` with every occurrence of `name` as a whole word, in any ASCII
-/// case, replaced by `placeholder`; `text` itself for an empty `name`.
-fn replace_ignoring_case(text: &str, name: &str, placeholder: &str) -> String {
+/// Whether [`replace_word`] matches a name in any ASCII case or only as it is
+/// spelled.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Case {
+    /// In any ASCII case.
+    Any,
+    /// Only as spelled.
+    AsSpelled,
+}
+
+/// `text` with every occurrence of `name` as a whole word, matched as `case`
+/// says, replaced by `placeholder`; `text` itself for an empty `name`.
+fn replace_word(text: &str, name: &str, placeholder: &str, case: Case) -> String {
     if name.is_empty() {
         return text.to_owned();
     }
-    let lower_text = text.to_ascii_lowercase();
-    let lower_name = name.to_ascii_lowercase();
+    let (lower_text, lower_name) = match case {
+        Case::Any => (text.to_ascii_lowercase(), name.to_ascii_lowercase()),
+        Case::AsSpelled => (text.to_owned(), name.to_owned()),
+    };
     let is_word = |c: char| c.is_alphanumeric();
     let mut out = String::with_capacity(text.len());
     let mut copied = 0_usize;
@@ -1094,7 +1124,7 @@ async fn run_corpus(ctx: &mut TestContext, xengine: bool) -> Result<(), TestFail
             )
             .await?;
         }
-        (active_group(other).await?, other_trash)
+        (clear_active_group(other).await?, other_trash)
     };
     let Some(reference) = reference else {
         if is_opensim(grid) {
@@ -1257,9 +1287,9 @@ struct Avatars<'a> {
     session: &'a mut Session,
     /// The other avatar's session.
     other: &'a mut Session,
-    /// Whether the other avatar has an active group, which decides what a
-    /// script's `llDetectedGroup` says of its touch; `None` when the grid
-    /// did not say.
+    /// Whether the other avatar still has an active group after the runner
+    /// cleared it, which decides what a script's `llDetectedGroup` says of
+    /// its touch; `None` when the grid did not say.
     other_active_group: Option<bool>,
     /// Who the two avatars are.
     cast: Cast,
@@ -1310,10 +1340,12 @@ fn split_name(legacy: &str) -> (String, String) {
     (first.to_owned(), last.to_owned())
 }
 
-/// Whether `session`'s avatar has an active group, as the grid answers an
-/// `AgentDataUpdateRequest`; `None`, with a warning, when it does not answer.
-async fn active_group(session: &mut Session) -> Result<Option<bool>, TestFailure> {
-    session.send(Command::RequestAgentDataUpdate).await?;
+/// Clears the active group of `session`'s avatar, so a touch by it reads the
+/// same `llDetectedGroup` on every grid whatever group the account was last
+/// left in, and whether it still has one as the grid then says; `None`, with
+/// a warning, when the grid does not answer.
+async fn clear_active_group(session: &mut Session) -> Result<Option<bool>, TestFailure> {
+    session.send(Command::ActivateGroup(None)).await?;
     let answer = session
         .wait_for(REPLY_TIMEOUT, |event| match event {
             Event::ActiveGroupChanged(active) => Some(active.active_group_id.is_some()),
@@ -1323,7 +1355,7 @@ async fn active_group(session: &mut Session) -> Result<Option<bool>, TestFailure
     match answer {
         Ok(set) => Ok(Some(set)),
         Err(TestFailure::Timeout(_)) => {
-            tracing::warn!("the grid did not say whether the other avatar has an active group");
+            tracing::warn!("the grid did not confirm clearing the other avatar's active group");
             Ok(None)
         }
         Err(other) => Err(other),
@@ -3053,6 +3085,16 @@ async fn plant_script(
         })
         .await
         .map_err(|failure| in_step(failure, &format!("compiling script {:?}", script.name)))?;
+    let outcome = session
+        .wait_for(PLANT_SETTLE, |event| {
+            let _kept = watch.transcript.take(watch.id, watch.prims, event);
+            None::<()>
+        })
+        .await;
+    match outcome {
+        Ok(()) | Err(TestFailure::Timeout(_)) => {}
+        Err(other) => return Err(other),
+    }
     match compiled {
         Ok((true, _)) => Ok(true),
         Ok((false, errors)) => {
@@ -3290,7 +3332,7 @@ mod tests {
         MoneyBalance, MoneyTransaction, ObjectKey, OwnerKey, RegionCoordinates, Uuid,
     };
 
-    use super::{Cast, Transcript, clip, replace_ignoring_case, shown_line, split_name};
+    use super::{Case, Cast, Transcript, clip, replace_word, shown_line, split_name};
 
     #[test]
     fn a_fetch_record_keeps_its_url_out_of_the_transcript() -> Result<(), String> {
@@ -3313,16 +3355,47 @@ mod tests {
     }
 
     #[test]
-    fn a_name_is_replaced_as_a_whole_word_in_any_case() {
+    fn a_name_is_replaced_as_a_whole_word() {
         assert_eq!(
-            replace_ignoring_case("Knob Label, knob label: KNOB", "Knob", "<first>"),
+            replace_word("Knob Label, knob label: KNOB", "Knob", "<first>", Case::Any),
             "<first> Label, <first> label: <first>"
         );
         assert_eq!(
-            replace_ignoring_case("Knobs knobby aknob knob", "knob", "<first>"),
+            replace_word("Knobs knobby aknob knob", "knob", "<first>", Case::Any),
             "Knobs knobby aknob <first>"
         );
-        assert_eq!(replace_ignoring_case("anything", "", "<first>"), "anything");
+        assert_eq!(
+            replace_word(
+                "Knob Label, knob label: KNOB",
+                "Knob",
+                "<first>",
+                Case::AsSpelled
+            ),
+            "<first> Label, knob label: KNOB"
+        );
+        assert_eq!(
+            replace_word("anything", "", "<first>", Case::Any),
+            "anything"
+        );
+    }
+
+    /// A name that is also a word the probes write is kept where it is that
+    /// word, and replaced where it is the name.
+    #[test]
+    fn a_name_that_is_a_word_is_kept_as_the_word() {
+        let cast = Cast {
+            owner_name: split_name("Other Label"),
+            ..Cast::default()
+        };
+        assert_eq!(
+            cast.scrub("PROBE events/other-avatar rec=heard message=\"from another avatar\""),
+            "PROBE events/other-avatar rec=heard message=\"from another avatar\""
+        );
+        assert_eq!(
+            cast.scrub("Other Label, other label and other.label"),
+            "<first> <last>, <first> <last> and <first>.<last>"
+        );
+        assert_eq!(cast.scrub("Other here"), "<first> here");
     }
 
     #[test]

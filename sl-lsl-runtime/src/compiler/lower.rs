@@ -1589,9 +1589,16 @@ impl<'source> Lowerer<'source> {
         chosen.ret.map_or(Ty::Void, Ty::Value)
     }
 
-    /// `[a, b, …]`: elements left to right, none a list or void.
+    /// `[a, b, …]`: elements left to right — right to left in YEngine's
+    /// dialect — none a list or void.
     fn list(&mut self, elements: &[Expr], span: &Range<usize>) -> Ty {
-        for element in elements {
+        let backwards = self.dialect.lists_right_to_left();
+        let ordered: Vec<&Expr> = if backwards {
+            elements.iter().rev().collect()
+        } else {
+            elements.iter().collect()
+        };
+        for element in ordered {
             match self.expr(element) {
                 Ty::Value(TypeName::List) => self.error(
                     Kind::ListInList,
@@ -1607,7 +1614,12 @@ impl<'source> Lowerer<'source> {
             }
         }
         let count = self.index(elements.len(), span);
-        self.emit(Instr::BuildList(count), span);
+        let build = if backwards {
+            Instr::BuildListReversed(count)
+        } else {
+            Instr::BuildList(count)
+        };
+        self.emit(build, span);
         Ty::Value(TypeName::List)
     }
 

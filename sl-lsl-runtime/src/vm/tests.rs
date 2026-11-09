@@ -42,6 +42,7 @@ mod prim_state;
 mod sensing;
 mod sitting;
 mod strings;
+mod targets;
 mod throttles;
 mod timers;
 
@@ -191,6 +192,8 @@ struct Recorder {
     told: Vec<(u64, CallerId, String)>,
     /// The state of the xorshift the random draws come from.
     draws: u32,
+    /// The last scene id minted, from OpenSim's first local id, 7200.
+    scene_ids: i32,
     /// The linkset each script is in; linkset 0 when not listed.
     linksets: std::collections::BTreeMap<CallerId, u64>,
     /// Each linkset's data store.
@@ -609,6 +612,11 @@ impl Host for Recorder {
         state
     }
 
+    fn mint_scene_id(&mut self) -> i32 {
+        self.scene_ids = self.scene_ids.max(7200).saturating_add(1);
+        self.scene_ids
+    }
+
     fn linkset(&self, caller: CallerId) -> LinksetId {
         LinksetId(self.linksets.get(&caller).copied().unwrap_or(0))
     }
@@ -905,11 +913,15 @@ impl Host for Recorder {
         caller: CallerId,
         key: &str,
     ) -> Option<crate::vm::prim::ObjectDetails> {
+        // A key in any case, as the grid parses it.
+        let key = &key.to_ascii_lowercase();
         if let Some(details) = self.details.get(key) {
             return Some(details.clone());
         }
         let prim = self.prim(caller, key).filter(|_| {
-            self.prim_states.contains_key(key) || self.prim_keys.values().any(|prim| prim == key)
+            self.prim_states.contains_key(key)
+                || self.prim_keys.values().any(|prim| prim == key)
+                || *key == self.prim_key(self.prim_of(caller))
         })?;
         Some(crate::vm::prim::ObjectDetails {
             avatar: false,
@@ -2130,7 +2142,7 @@ fn a_call_to_a_function_nobody_wrote_stops_the_script() -> Result<(), String> {
     let mut host = Recorder::default();
     let _none = engine.add(
         A,
-        program("default { state_entry() { llSetStatus(1, TRUE); } }")?,
+        program("default { state_entry() { llSetBuoyancy(1.0); } }")?,
     );
     let reports = run(&mut engine, &mut host, 1);
     assert!(matches!(
@@ -2138,7 +2150,7 @@ fn a_call_to_a_function_nobody_wrote_stops_the_script() -> Result<(), String> {
         Some([
             Outcome::Finished,
             Outcome::Faulted(Fault {
-                error: RuntimeError::Unimplemented(BuiltinId::LlSetStatus),
+                error: RuntimeError::Unimplemented(BuiltinId::LlSetBuoyancy),
                 ..
             })
         ])

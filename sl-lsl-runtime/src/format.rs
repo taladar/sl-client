@@ -150,11 +150,156 @@ fn format_components(components: &[f32], decimals: u32) -> String {
     text
 }
 
+/// The double OpenSim would hold for `value`: the float to seven
+/// significant digits. OpenSim keeps every float a double; this crate keeps
+/// an `f32`, whose error from the double a script's literal or arithmetic
+/// would have lies past the seventh digit (`5e-7` is `4.9999999e-7` as a
+/// float, a rotation's 30° comes back as `30.000002`). A value whose double
+/// has more digits than a float keeps (`123456789`) prints otherwise there.
+fn opensim_double(value: f32) -> f64 {
+    format!("{value:.6e}")
+        .parse()
+        .unwrap_or_else(|_| f64::from(value))
+}
+
+/// A float as OpenSim prints it — `(string)`, a list's text, `llList2String`
+/// and the rest: the double `opensim_double` in .NET's `0.000000` format, as
+/// Mono writes it — fifteen significant digits, then six decimals rounded half
+/// away from zero, every integer digit, and no sign on a value that prints as
+/// zero (`-0.0` is `0.000000`); `Infinity`, `-Infinity` and `NaN`
+/// (`strings/conversions`, `LSL_Types.LSLFloat.ToString`).
+#[must_use]
+pub fn opensim_float(value: f32) -> String {
+    if value.is_nan() {
+        return "NaN".to_owned();
+    }
+    if value.is_infinite() {
+        return if value > 0.0 { "Infinity" } else { "-Infinity" }.to_owned();
+    }
+    let double = opensim_double(value);
+    // Fifteen significant digits: `d.dddddddddddddde±x`.
+    let scientific = format!("{:.14e}", double.abs());
+    let (mantissa, exponent) = scientific.split_once('e').unwrap_or((&scientific, "0"));
+    let exponent: i64 = exponent.parse().unwrap_or(0);
+    let digits: Vec<u8> = mantissa
+        .bytes()
+        .filter(u8::is_ascii_digit)
+        .map(|digit| digit.saturating_sub(b'0'))
+        .collect();
+    // The value is 0.d1d2… × 10^(exponent + 1); keep the digits down to the
+    // sixth decimal, as many as there are, and round at the next one.
+    let point = exponent.saturating_add(1);
+    let keep = point.saturating_add(6);
+    let mut kept: Vec<u8> = (0..keep.max(0))
+        .map(|index| {
+            usize::try_from(index)
+                .ok()
+                .and_then(|index| digits.get(index))
+                .copied()
+                .unwrap_or(0)
+        })
+        .collect();
+    let next = usize::try_from(keep)
+        .ok()
+        .and_then(|index| digits.get(index))
+        .copied()
+        .unwrap_or(0);
+    if next >= 5 {
+        let mut carry = true;
+        for digit in kept.iter_mut().rev() {
+            if !carry {
+                break;
+            }
+            if *digit == 9 {
+                *digit = 0;
+            } else {
+                *digit = digit.saturating_add(1);
+                carry = false;
+            }
+        }
+        if carry {
+            kept.insert(0, 1);
+        }
+    }
+    // Pad on the left so that there are at least six decimals and one integer
+    // digit.
+    let decimals = 6_usize;
+    while kept.len() < decimals.saturating_add(1) {
+        kept.insert(0, 0);
+    }
+    let integer_digits = kept.len().saturating_sub(decimals);
+    let text: String = kept
+        .iter()
+        .map(|digit| char::from(digit.saturating_add(b'0')))
+        .collect();
+    let (integer, fraction) = text.split_at(integer_digits);
+    let integer = integer.trim_start_matches('0');
+    let integer = if integer.is_empty() { "0" } else { integer };
+    let zero = kept.iter().all(|digit| *digit == 0);
+    let sign = if double.is_sign_negative() && !zero {
+        "-"
+    } else {
+        ""
+    };
+    format!("{sign}{integer}.{fraction}")
+}
+
+/// A vector as OpenSim prints it: `<x, y, z>`, each component as
+/// [`opensim_float`] — six decimals in a `(string)` cast and in a list alike.
+#[must_use]
+pub fn opensim_vector(vector: &Vector) -> String {
+    format!(
+        "<{}, {}, {}>",
+        opensim_float(vector.x),
+        opensim_float(vector.y),
+        opensim_float(vector.z)
+    )
+}
+
+/// A rotation as OpenSim prints it: `<x, y, z, s>`, as [`opensim_vector`].
+#[must_use]
+pub fn opensim_rotation(rotation: &Rotation) -> String {
+    format!(
+        "<{}, {}, {}, {}>",
+        opensim_float(rotation.x),
+        opensim_float(rotation.y),
+        opensim_float(rotation.z),
+        opensim_float(rotation.s)
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use pretty_assertions::assert_eq;
 
     use super::*;
+
+    #[test]
+    fn opensim_prints_the_float_to_seven_digits_as_dotnet_prints_a_double() {
+        // strings/conversions on the local OpenSim (YEngine).
+        for (value, printed) in [
+            (1e30_f32, "1000000000000000000000000000000.000000"),
+            (-1e30, "-1000000000000000000000000000000.000000"),
+            (1e-7, "0.000000"),
+            (5e-7, "0.000001"),
+            (1.5e-6, "0.000002"),
+            (-0.0, "0.000000"),
+            (0.1, "0.100000"),
+            (3.4e38, "340000000000000000000000000000000000000.000000"),
+            (1e-30, "0.000000"),
+            (99999.99, "99999.990000"),
+            (1e-6, "0.000001"),
+            (-0.000_002, "-0.000002"),
+            (123_456.7, "123456.700000"),
+            (0.999_999_9, "1.000000"),
+            (30.000_002, "30.000000"),
+            (1_234_567.9, "1234568.000000"),
+            (f32::INFINITY, "Infinity"),
+            (f32::NAN, "NaN"),
+        ] {
+            assert_eq!(opensim_float(value), printed, "{value}");
+        }
+    }
 
     /// A float from its IEEE bits, for inputs the expression suite writes as
     /// hex floats.

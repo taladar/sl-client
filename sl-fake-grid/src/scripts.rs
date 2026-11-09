@@ -1237,6 +1237,13 @@ struct RegionHost<'tick> {
     stores: parking_lot::MutexGuard<'tick, BTreeMap<String, KeyValueStore>>,
     /// The avatars in the region when the tick started.
     present: &'tick [Present],
+    /// The agents with only a child circuit into the region when the tick
+    /// started: they stand in a neighbour, and see this region from there.
+    children: &'tick [Present],
+    /// Each script's run flag and memory as its engine reads them, when the
+    /// tick started: the engine is lent to the tick, and an object's details
+    /// sum its scripts'.
+    scripts_read: BTreeMap<CallerId, (bool, u32)>,
     /// What to apply to the world after the tick.
     effects: Vec<Effect>,
     /// What to send to viewers after the tick.
@@ -1492,9 +1499,15 @@ impl RegionHost<'_> {
             .filter_map(|prim| self.world.objects.get(*prim))
             .flat_map(|prim| self.world.script_instances.scripts_in(prim.full_id))
             .collect();
-        // The engine is lent to the tick, so a script's own run flag cannot
-        // be read here; every script with an instance counts as running.
-        let running = scripts.len();
+        let read: Vec<(bool, u32)> = scripts
+            .iter()
+            .filter_map(|id| self.scripts_read.get(id).copied())
+            .collect();
+        let running = read.iter().filter(|(running, _memory)| *running).count();
+        let memory: u64 = read
+            .iter()
+            .map(|(_running, memory)| u64::from(*memory))
+            .sum();
         let inventory: usize = prims
             .iter()
             .filter_map(|prim| self.world.objects.contents(*prim))
@@ -1533,7 +1546,7 @@ impl RegionHost<'_> {
                 .map_or_else(|| prim.key.clone(), |root| root.full_id.uuid().to_string()),
             attached_point: attached,
             scripts: (count(scripts.len()), count(running)),
-            script_memory: count(scripts.len().saturating_mul(0x0001_0000)),
+            script_memory: i32::try_from(memory).unwrap_or(i32::MAX),
             prim_count: count(prims.len()),
             inventory_count: count(inventory),
             click_action: prim.click_action,
@@ -1562,13 +1575,19 @@ impl RegionHost<'_> {
                 .world
                 .properties_of(root)
                 .and_then(|root| i64::try_from(root.creation_date).ok()),
-            // The object a script rezzed names it; any other, nobody.
-            rezzer: self
-                .world
-                .objects
-                .get(root)
-                .and_then(|prim| self.world.script_instances.rezzers.get(&prim.full_id))
-                .map_or_else(|| uuid::Uuid::nil().to_string(), ToString::to_string),
+            // The object a script rezzed names it; any other, its owner, who
+            // rezzed it (`prim/identity`: aditi and both OpenSim engines read
+            // the owner of a cube the avatar rezzed).
+            rezzer: self.world.objects.get(root).map_or_else(
+                || uuid::Uuid::nil().to_string(),
+                |prim| {
+                    self.world
+                        .script_instances
+                        .rezzers
+                        .get(&prim.full_id)
+                        .map_or_else(|| prim.owner_id.to_string(), ToString::to_string)
+                },
+            ),
             masks: [
                 mask(masks.base),
                 mask(masks.owner),
@@ -2089,6 +2108,10 @@ impl Host for RegionHost<'_> {
         self.world.script_instances.draw()
     }
 
+    fn mint_scene_id(&mut self) -> i32 {
+        i32::try_from(self.world.mint_local_id().0).unwrap_or(i32::MAX)
+    }
+
     fn linkset(&self, caller: CallerId) -> LinksetId {
         LinksetId(
             self.origin(caller)
@@ -2529,8 +2552,22 @@ impl Host for RegionHost<'_> {
         if let Some(local_id) = self.prim_keyed(key) {
             return self.prim_details(local_id);
         }
-        let present = self.present(key)?;
-        Some(self.avatar_details(present))
+        if let Some(present) = self.present(key) {
+            return Some(self.avatar_details(present));
+        }
+        // OpenSim keeps a child agent's `ScenePresence` in the region and
+        // answers `llGetObjectDetails` from it (`comms/owner-away`: the owner
+        // in a neighbour still has its `OBJECT_POS`); Second Life answers
+        // only for an avatar in the region.
+        if !self.world.script_instances.flavour().is_opensim() {
+            return None;
+        }
+        let agent = uuid::Uuid::parse_str(key).ok()?;
+        let child = self
+            .children
+            .iter()
+            .find(|child| child.agent.uuid() == agent)?;
+        Some(self.avatar_details(child))
     }
 
     fn inventory_key(&self, caller: CallerId, name: &str, asset_type: i32) -> Option<String> {
@@ -2963,8 +3000,9 @@ impl Host for RegionHost<'_> {
     }
 }
 
-/// The avatars standing in the region at `index`, in session order.
-async fn presence(core: &GridCore, index: usize) -> Vec<Present> {
+/// The avatars standing in the region at `index`, in session order, and
+/// beside them the agents that see it down a child circuit from a neighbour.
+async fn presence(core: &GridCore, index: usize) -> (Vec<Present>, Vec<Present>) {
     let mut sessions: Vec<_> = core
         .sessions
         .lock()
@@ -2974,15 +3012,16 @@ async fn presence(core: &GridCore, index: usize) -> Vec<Present> {
         .collect();
     sessions.sort_unstable_by_key(|(seq, _shared)| *seq);
     let mut present = Vec::new();
+    let mut children = Vec::new();
     for (_seq, shared) in sessions {
         if shared.is_closed() {
             continue;
         }
         let here = shared
             .with_state(|state| {
-                (state.region == index && state.sim.is_root_agent()).then(|| {
+                (state.region == index).then(|| {
                     let (allowed, blocked) = state.sim.experiences().agent_permissions();
-                    Present {
+                    let present = Present {
                         agent: state.avatar.agent_id,
                         allowed,
                         blocked,
@@ -2998,13 +3037,18 @@ async fn presence(core: &GridCore, index: usize) -> Vec<Present> {
                             .map(|playing| playing.anim_id.to_string())
                             .collect(),
                         camera: state.motion.camera().cloned(),
-                    }
+                    };
+                    (state.sim.is_root_agent(), present)
                 })
             })
             .await;
-        present.extend(here);
+        match here {
+            Some((true, here)) => present.push(here),
+            Some((false, here)) => children.push(here),
+            None => {}
+        }
     }
-    present
+    (present, children)
 }
 
 /// One tick of the region's scripts: what it ran, or [`None`] for a region
@@ -3034,11 +3078,12 @@ pub(crate) async fn run_tick(core: &GridCore, index: usize) -> Option<TickReport
         crate::attachments::finish_leaving(&mut region.world.lock(), &core.assets, (core.clock)());
         return None;
     }
-    let present = presence(core, index).await;
+    let (present, children) = presence(core, index).await;
     let (report, changes, deliveries) = {
         let mut world = region.world.lock();
         crate::updates::begin(&mut world);
-        let (report, changes, deliveries) = tick_locked(core, index, &mut world, &present);
+        let (report, changes, deliveries) =
+            tick_locked(core, index, &mut world, &present, &children);
         let changes = crate::updates::finish(&mut world, changes);
         // What came off before this tick has had its turn, and leaves.
         crate::attachments::finish_leaving(&mut world, &core.assets, (core.clock)());
@@ -3074,6 +3119,7 @@ fn tick_locked(
     index: usize,
     world: &mut SceneFixtures,
     present: &[Present],
+    children: &[Present],
 ) -> (TickReport, Vec<RegionChange>, Vec<Delivery>) {
     let config = *world.script_instances.engine.config();
     // A touch held open is due its `touch` before the scripts run.
@@ -3096,6 +3142,24 @@ fn tick_locked(
         let scripts = &mut world.script_instances;
         avatars::hand_in_controls(&mut scripts.engine, &mut scripts.avatars, present);
     }
+    let scripts_read = {
+        let scripts = &world.script_instances;
+        let flavour = scripts.flavour();
+        scripts
+            .slots
+            .keys()
+            .filter_map(|id| {
+                let instance = scripts.engine.instance(*id)?;
+                Some((
+                    *id,
+                    (
+                        instance.reads_running(flavour),
+                        instance.script_memory(flavour),
+                    ),
+                ))
+            })
+            .collect()
+    };
     let mut engine = core::mem::replace(&mut world.script_instances.engine, Engine::new(config));
     let mut host = RegionHost {
         core,
@@ -3103,6 +3167,8 @@ fn tick_locked(
         world: &mut *world,
         stores: core.experience_stores.lock(),
         present,
+        children,
+        scripts_read,
         effects: Vec::new(),
         deliveries: Vec::new(),
     };
@@ -3601,7 +3667,7 @@ fn send_sound(
 /// for anything else.
 pub(crate) fn answer_script_command(
     world: &mut SceneFixtures,
-    identity: &AvatarIdentity,
+    (identity, region_id): (&AvatarIdentity, uuid::Uuid),
     sim: &mut SimSession,
     event: &ServerEvent,
     now: Instant,
@@ -3662,15 +3728,26 @@ pub(crate) fn answer_script_command(
             }
             Some(Vec::new())
         }
+        // A revoke names a prim, or the region for every prim in it (the
+        // viewer's revoke of the animation permissions: `money/lapse`, on
+        // aditi and YEngine). OpenSim's `HandleRevokePermissions` hears only
+        // one that takes an animation permission.
         ServerEvent::RevokeScriptPermissions {
             object_id,
             permissions,
         } => {
+            const ANIMATION_PERMISSIONS: i32 = 0x10 | 0x8000;
+            if world.script_instances.flavour().is_opensim()
+                && permissions.0 & ANIMATION_PERMISSIONS == 0
+            {
+                return Some(Vec::new());
+            }
+            let every_prim = object_id.uuid() == region_id;
             let ids: Vec<CallerId> = world
                 .script_instances
                 .slots
                 .iter()
-                .filter(|(_id, slot)| slot.prim == *object_id)
+                .filter(|(_id, slot)| every_prim || slot.prim == *object_id)
                 .map(|(id, _slot)| *id)
                 .collect();
             for id in ids {

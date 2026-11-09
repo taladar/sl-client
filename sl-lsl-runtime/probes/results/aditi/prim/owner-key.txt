@@ -1,0 +1,19 @@
+grid: aditi
+date: 2026-11-08
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Mauve
+engine: Mono
+settings: Linden Lab's; a resident cannot set them
+
+# animations avatar=other playing=""
+PROBE prim/owner-key rec=start region="Mauve" channel="Luau" version="2026-11-05.42088067707"
+PROBE prim/owner-key rec=owner-key label=self got=owner valid=1
+PROBE prim/owner-key rec=owner-key label=self-upper got=owner valid=1
+PROBE prim/owner-key rec=owner-key label=owner got=owner valid=1
+PROBE prim/owner-key rec=owner-key label=stranger got=same valid=1
+PROBE prim/owner-key rec=owner-key label=null got=null valid=0
+PROBE prim/owner-key rec=owner-key label=nothing got=same valid=1
+PROBE prim/owner-key rec=owner-key label=junk got=null valid=0
+PROBE prim/owner-key rec=owner-key label=empty got=null valid=0
+PROBE prim/owner-key rec=end
+# animations avatar=owner playing=""

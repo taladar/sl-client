@@ -2981,7 +2981,9 @@ pub(crate) fn answer_world_request(
     if let Some(changes) = crate::grabs::answer_grab(world, identity.agent_id, sim, event, now) {
         return changes;
     }
-    if let Some(changes) = crate::scripts::answer_script_command(world, identity, sim, event, now) {
+    if let Some(changes) =
+        crate::scripts::answer_script_command(world, (identity, region.region_id), sim, event, now)
+    {
         return changes;
     }
     // The estate's experience lists are the region's: a POST from one session
@@ -4516,7 +4518,11 @@ fn derez(
                 folder,
                 identity.agent_id,
                 mint,
-                (object_assets, policy.taken_item_masks),
+                (
+                    object_assets,
+                    policy.taken_item_masks,
+                    policy.undescribed_take,
+                ),
             );
             store_taken_asset(assets, &item, &linkset, (&contents, scripts), now);
             if returned && let Some(root) = linkset.first() {
@@ -4659,7 +4665,11 @@ pub(crate) fn file_linkset_copy(
         folder,
         owner,
         mint,
-        (object_assets, world.rez.taken_item_masks),
+        (
+            object_assets,
+            world.rez.taken_item_masks,
+            world.rez.undescribed_take,
+        ),
     );
     store_taken_asset(assets, &item, &linkset, (&contents, scripts), now);
     Some(item)
@@ -4923,9 +4933,10 @@ pub(crate) fn taken_item(
     folder: InventoryFolderKey,
     owner: AgentKey,
     mint: &dyn Fn() -> uuid::Uuid,
-    (object_assets, masks): (
+    (object_assets, masks, undescribed): (
         crate::assets::ObjectAssetPolicy,
         crate::imitates::TakenItemMasks,
+        Option<&'static str>,
     ),
 ) -> InventoryItem {
     let properties = linkset.first().and_then(|root| root.properties.as_ref());
@@ -4949,7 +4960,10 @@ pub(crate) fn taken_item(
         folder_id: folder,
         name: named.to_owned(),
         description: properties
-            .map_or_else(String::new, |properties| properties.description.clone()),
+            .map(|properties| properties.description.clone())
+            .filter(|description| !description.is_empty())
+            .or_else(|| undescribed.map(str::to_owned))
+            .unwrap_or_default(),
         asset_id: match object_assets {
             crate::assets::ObjectAssetPolicy::Withheld => uuid::Uuid::nil(),
             crate::assets::ObjectAssetPolicy::Served => mint(),
@@ -5689,7 +5703,7 @@ mod test {
                 folder,
                 owner,
                 &|| uuid::Uuid::from_u128(id),
-                (policy, crate::imitates::TakenItemMasks::Objects),
+                (policy, crate::imitates::TakenItemMasks::Objects, None),
             )
         };
 
@@ -5833,6 +5847,7 @@ mod test {
                 (
                     crate::assets::ObjectAssetPolicy::Served,
                     crate::imitates::TakenItemMasks::Objects,
+                    None,
                 ),
             )
         };
@@ -6056,6 +6071,7 @@ mod test {
             (
                 crate::assets::ObjectAssetPolicy::Served,
                 crate::imitates::TakenItemMasks::Objects,
+                None,
             ),
         );
         store_taken_asset(
@@ -6128,6 +6144,7 @@ mod test {
             (
                 crate::assets::ObjectAssetPolicy::Served,
                 crate::imitates::TakenItemMasks::Objects,
+                None,
             ),
         );
         let group = filed_group(&[root, child], &[], &item);
@@ -6135,6 +6152,45 @@ mod test {
         assert_eq!(filed.name, DEFAULT_OBJECT_NAME);
         assert_eq!(filed.shape.texture_entry, default_texture_entry());
         Ok(())
+    }
+
+    /// A take of an object with no description files it as each grid does:
+    /// `(No Description)` on Second Life (`inventory/newer`), empty on
+    /// OpenSim; a description of its own is kept on both.
+    #[test]
+    fn an_undescribed_take_is_described_as_its_grid_describes_it() {
+        let owner = agent(0x1);
+        let mut prim = box_prim(
+            RegionLocalObjectId(7),
+            ObjectKey::from(uuid::Uuid::from_u128(7)),
+            owner,
+            ZERO,
+            ZERO,
+        );
+        let described = |prim: &Object, imitated: crate::imitates::ImitatedGrid| {
+            let policy = imitated.rez_policy();
+            taken_item(
+                std::slice::from_ref(prim),
+                InventoryFolderKey::from(uuid::Uuid::from_u128(0xF0)),
+                owner,
+                &|| uuid::Uuid::from_u128(0xDE5C),
+                (
+                    crate::assets::ObjectAssetPolicy::Served,
+                    policy.taken_item_masks,
+                    policy.undescribed_take,
+                ),
+            )
+            .description
+        };
+        let second_life = crate::imitates::ImitatedGrid::SecondLife;
+        let opensim = crate::imitates::ImitatedGrid::OpenSim;
+        assert_eq!(described(&prim, second_life), "(No Description)");
+        assert_eq!(described(&prim, opensim), "");
+        let mut properties = default_object_properties(&prim);
+        "a lamp".clone_into(&mut properties.description);
+        prim.properties = Some(properties);
+        assert_eq!(described(&prim, second_life), "a lamp");
+        assert_eq!(described(&prim, opensim), "a lamp");
     }
 
     fn task_item(task: ObjectKey, item: u128, name: &str) -> TaskInventoryItem {

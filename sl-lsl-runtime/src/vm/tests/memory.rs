@@ -463,22 +463,26 @@ fn free_memory_is_a_low_water_mark_on_mono_and_the_heap_left_on_yengine() -> Res
         // One call a statement: LSL evaluates an expression right to left.
         integer set = llSetMemoryLimit(65536);
         integer after = llGetFreeMemory();
-        print((string)set + " " + (string)(after - low));
+        integer lowered = llSetMemoryLimit(32768);
+        integer restarted = llGetFreeMemory() - llGetMemoryLimit() + 65536;
+        print((string)set + " " + (string)(after - low) + " " + (string)lowered + " "
+            + (string)(restarted - low));
     "#;
     // Mono: the list's 64 and 16 an integer; clearing it lowers the use and
-    // leaves free where it was, until setting the limit restarts the mark.
+    // leaves free where it was. Asked for the limit it has, the mark stays
+    // (aditi, `memory/budget`); a new limit restarts it from the use.
     assert_eq!(
         printed(globals, body, EngineFlavour::SecondLife)?,
-        vec!["1664 0 0", "1 1664"]
+        vec!["1664 0 0", "1 0 1 1664"]
     );
     // YEngine: 4 an integer, and free rises again at once.
     assert_eq!(
         printed(globals, body, EngineFlavour::YEngine)?,
-        vec!["400 0 400", "0 400"]
+        vec!["400 0 400", "0 400 0 400"]
     );
     assert_eq!(
         printed(globals, body, EngineFlavour::XEngine)?,
-        vec!["0 0 0", "0 0"]
+        vec!["0 0 0", "0 0 0 0"]
     );
     Ok(())
 }

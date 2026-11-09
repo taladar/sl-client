@@ -66,14 +66,20 @@ fn a_root_moves_at_most_ten_metres_a_call() -> Result<(), String> {
             vec![(A, east(5.0)), (A, east(15.0))],
             "{flavour:?}"
         );
-        assert_eq!(
-            host.texts(A),
+        // `(string)vector` has five decimals on Second Life and six on
+        // OpenSim (`strings/conversions`).
+        let printed = if flavour.is_opensim() {
+            vec![
+                "<5.000000, 0.000000, 0.000000>",
+                "<15.000000, 0.000000, 0.000000>",
+            ]
+        } else {
             vec![
                 "<5.00000, 0.00000, 0.00000>",
-                "<15.00000, 0.00000, 0.00000>"
-            ],
-            "{flavour:?}"
-        );
+                "<15.00000, 0.00000, 0.00000>",
+            ]
+        };
+        assert_eq!(host.texts(A), printed, "{flavour:?}");
     }
     Ok(())
 }

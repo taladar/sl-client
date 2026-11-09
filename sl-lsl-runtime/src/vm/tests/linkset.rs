@@ -101,6 +101,15 @@ fn data_linkset_data_prints_what_aditi_printed() -> Result<(), String> {
     let mine: Vec<&String> = ours.iter().filter(before_fill).collect();
     assert_eq!(theirs.len(), 25);
     assert_eq!(mine, theirs);
+    // And none after: the fill's link message reaches the Watcher before the
+    // fill's first write does, so it counts the fill rather than printing it.
+    let events = |lines: &[String]| {
+        lines
+            .iter()
+            .filter(|line| line.contains(" rec=watcher-event "))
+            .count()
+    };
+    assert_eq!(events(&ours), events(&aditi));
     Ok(())
 }
 

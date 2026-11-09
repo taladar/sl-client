@@ -1,13 +1,13 @@
 grid: fake-opensim
-date: 2026-11-07
+date: 2026-11-09
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating YEngine
 settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
 
-PROBE prim/params rec=start region="Fake Region" channel="OpenSim" version="sl-fake-grid 0.1.0"
 PROBE prim/params rec=try label=cast-shadows
 # debug-channel: from="Object" text="llSetPrimitiveParams: Error running rule #1: arg #0 - unsupported parameter"
+PROBE prim/params rec=start region="Fake Region" channel="OpenSim" version="sl-fake-grid 0.1.0"
 PROBE prim/params rec=read label=fresh-type got="0, 0, <0.000000, 1.000000, 0.000000>, 0.000000, <0.000000, 0.000000, 0.000000>, <1.000000, 1.000000, 0.000000>, <0.000000, 0.000000, 0.000000>"
 PROBE prim/params rec=read label=fresh-color got="<1.000000, 1.000000, 1.000000>, 1.000000"
 PROBE prim/params rec=read label=fresh-texture got="89556747-24cb-43ed-920b-47caed15465f, <1.000000, 1.000000, 0.000000>, <0.000000, 0.000000, 0.000000>, 0.000000"
@@ -43,9 +43,9 @@ PROBE prim/params rec=rt label=box-past-range got="0, 0, <0.000000, 1.000000, 0.
 PROBE prim/params rec=try label=box-cut-reversed t=0.600000
 PROBE prim/params rec=rt label=box-cut-reversed got="0, 0, <0.180000, 0.200000, 0.000000>, 0.000000, <0.000000, 0.000000, 0.000000>, <1.000000, 1.000000, 0.000000>, <0.000000, 0.000000, 0.000000>"
 PROBE prim/params rec=try label=box-cut-tiny t=0.818000
+PROBE prim/params rec=rt label=cast-shadows got=""
 PROBE prim/params rec=rt label=box-cut-tiny got="0, 0, <0.490000, 0.510000, 0.000000>, 0.000000, <0.000000, 0.000000, 0.000000>, <1.000000, 1.000000, 0.000000>, <0.000000, 0.000000, 0.000000>"
 PROBE prim/params rec=try label=box-hollow-0.99 t=1.036000
-PROBE prim/params rec=rt label=cast-shadows got=""
 PROBE prim/params rec=rt label=box-hollow-0.99 got="0, 0, <0.000000, 1.000000, 0.000000>, 0.990000, <0.000000, 0.000000, 0.000000>, <1.000000, 1.000000, 0.000000>, <0.000000, 0.000000, 0.000000>"
 PROBE prim/params rec=try label=box-hole-unknown t=1.255000
 PROBE prim/params rec=rt label=box-hole-unknown got="0, 0, <0.000000, 1.000000, 0.000000>, 0.500000, <0.000000, 0.000000, 0.000000>, <1.000000, 1.000000, 0.000000>, <0.000000, 0.000000, 0.000000>"

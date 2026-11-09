@@ -1,5 +1,5 @@
 grid: fake-sl
-date: 2026-11-07
+date: 2026-11-09
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating Mono
@@ -7,10 +7,10 @@ settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor
 
 # debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1: unknown rule."
 PROBE prim/params rec=try label=cast-shadows
-PROBE prim/params rec=start region="Fake Region" channel="Second Life Server" version="sl-fake-grid 0.1.0"
 # debug-channel: from="Object" text="llGetPrimitiveParams error: Param 0 error, unknown parameter"
-PROBE prim/params rec=read label=fresh-type got="0, 0, <0.000000, 1.000000, 0.000000>, 0.000000, <0.000000, 0.000000, 0.000000>, <1.000000, 1.000000, 0.000000>, <0.000000, 0.000000, 0.000000>"
+PROBE prim/params rec=start region="Fake Region" channel="Second Life Server" version="sl-fake-grid 0.1.0"
 PROBE prim/params rec=rt label=cast-shadows got=""
+PROBE prim/params rec=read label=fresh-type got="0, 0, <0.000000, 1.000000, 0.000000>, 0.000000, <0.000000, 0.000000, 0.000000>, <1.000000, 1.000000, 0.000000>, <0.000000, 0.000000, 0.000000>"
 PROBE prim/params rec=read label=fresh-color got="<1.000000, 1.000000, 1.000000>, 1.000000"
 PROBE prim/params rec=read label=fresh-texture got="89556747-24cb-43ed-920b-47caed15465f, <1.000000, 1.000000, 0.000000>, <0.000000, 0.000000, 0.000000>, 0.000000"
 PROBE prim/params rec=read label=fresh-bump-shiny got="0, 0"
@@ -36,8 +36,8 @@ PROBE prim/params rec=read label=fresh-click-action got="0"
 PROBE prim/params rec=read label=fresh-projector got=""
 PROBE prim/params rec=read label=fresh-reflection-probe got="0, 0.000000, 0.000000, 0"
 PROBE prim/params rec=read label=fresh-render-material got="00000000-0000-0000-0000-000000000000"
-# debug-channel: from="Object" text="llGetPrimitiveParams error: Param 0 error, unknown parameter"
 PROBE prim/params rec=read label=fresh-sit-flags got="2"
+# debug-channel: from="Object" text="llGetPrimitiveParams error: Param 0 error, unknown parameter"
 PROBE prim/params rec=read label=fresh-cast-shadows got=""
 PROBE prim/params rec=read label=fresh-temp-on-rez got="0"
 PROBE prim/params rec=try label=box-in-range t=6.244444
@@ -102,8 +102,8 @@ PROBE prim/params rec=rt label=texture-null-key got="00000000-0000-0000-0000-000
 PROBE prim/params rec=try label=texture-missing-name t=19.488890
 PROBE prim/params rec=rt label=texture-missing-name got="00000000-0000-0000-0000-000000000000, <1.000000, 1.000000, 0.000000>, <0.000000, 0.000000, 0.000000>, 0.000000"
 PROBE prim/params rec=try label=bump-shiny t=20.155560
-# debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1 (PRIM_BUMP_SHINY): bounds error; 7 is not in (0, 3)."
 PROBE prim/params rec=rt label=bump-shiny got="3, 5"
+# debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1 (PRIM_BUMP_SHINY): bounds error; 7 is not in (0, 3)."
 PROBE prim/params rec=try label=bump-shiny-past-range t=20.600000
 PROBE prim/params rec=rt label=bump-shiny-past-range got="3, 5"
 PROBE prim/params rec=try label=fullbright t=21.266670
@@ -115,8 +115,8 @@ PROBE prim/params rec=try label=glow t=22.377780
 # debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1 (PRIM_GLOW): bounds error; 2 is not in (0, 1)."
 PROBE prim/params rec=rt label=glow got="0.500000"
 PROBE prim/params rec=try label=glow-past-range t=22.822220
-# debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1 (PRIM_GLOW): bounds error; -1 is not in (0, 1)."
 PROBE prim/params rec=rt label=glow-past-range got="0.500000"
+# debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1 (PRIM_GLOW): bounds error; -1 is not in (0, 1)."
 PROBE prim/params rec=try label=glow-negative t=23.266670
 PROBE prim/params rec=rt label=glow-negative got="0.500000"
 PROBE prim/params rec=try label=glow-fine t=23.711110
@@ -129,11 +129,11 @@ PROBE prim/params rec=rt label=texgen-unknown got="1"
 PROBE prim/params rec=try label=material-glass t=25.488890
 PROBE prim/params rec=rt label=material-glass got="2"
 PROBE prim/params rec=try label=material-light t=25.933330
-# debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1 (PRIM_MATERIAL): bounds error; 8 is not in (0, 7)."
 PROBE prim/params rec=rt label=material-light got="7"
+# debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1 (PRIM_MATERIAL): bounds error; 8 is not in (0, 7)."
 PROBE prim/params rec=try label=material-unknown t=26.377780
-# debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1 (PRIM_MATERIAL): bounds error; -1 is not in (0, 7)."
 PROBE prim/params rec=rt label=material-unknown got="7"
+# debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1 (PRIM_MATERIAL): bounds error; -1 is not in (0, 7)."
 PROBE prim/params rec=try label=material-negative t=26.822220
 PROBE prim/params rec=rt label=material-negative got="7"
 PROBE prim/params rec=try label=light t=27.488890

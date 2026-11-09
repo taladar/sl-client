@@ -174,11 +174,19 @@ pub fn ll_get_number_of_prims(ctx: &mut ScriptCtx<'_>) -> Result<i32, CallError>
 
 /// `llGetLinkNumber`: the caller's prim's link number — 0 for a prim linked
 /// to nothing and with nobody sitting on it (`prim/identity`), 1 for a root.
+/// OpenSim counts prims alone, so a lone prim is 0 with a sitter too
+/// (`LSL_Api.llGetLinkNumber`, `prim/link-refusals`).
 ///
 /// # Errors
 ///
 /// None; the signature is the library's.
 pub fn ll_get_link_number(ctx: &mut ScriptCtx<'_>) -> Result<i32, CallError> {
+    if ctx.flavour().is_opensim() {
+        let caller = ctx.caller();
+        if ctx.host().links(caller).prims.len() < 2 {
+            return Ok(0);
+        }
+    }
     Ok(this_link(ctx))
 }
 
@@ -188,8 +196,9 @@ pub fn ll_get_link_number(ctx: &mut ScriptCtx<'_>) -> Result<i32, CallError> {
 /// last prim's are the sitters', in the order they sat (`avatar/sit`: the
 /// last link is the sitter). Where the grids part (`prim/identity`,
 /// `prim/link`): on Second Life a prim linked to nothing is link 0 and has no
-/// link 1, and in a linkset 0 is `NULL_KEY`; OpenSim answers the root for any
-/// number under 2. Any other constant is `NULL_KEY`.
+/// link 1, and in a linkset 0 is `NULL_KEY` to the root and the root to a
+/// child (`prim/link`'s `linked` and `as-child`); OpenSim answers the root
+/// for any number under 2. Any other constant is `NULL_KEY`.
 ///
 /// # Errors
 ///
@@ -198,11 +207,16 @@ pub fn ll_get_link_key(ctx: &mut ScriptCtx<'_>, link: i32) -> Result<Key, CallEr
     let caller = ctx.caller();
     let links = ctx.host().links(caller);
     let null = || NULL_KEY.to_owned();
-    let key = if ctx.flavour().is_opensim() && (0..2).contains(&link) {
+    let root = || {
         links
             .prims
             .first()
             .map_or_else(null, |root| root.key.clone())
+    };
+    let opensim_root = ctx.flavour().is_opensim() && (0..2).contains(&link);
+    let from_a_child = link == 0 && links.prims.len() > 1 && links.this > 1;
+    let key = if opensim_root || from_a_child {
+        root()
     } else {
         links
             .numbered(link)

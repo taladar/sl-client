@@ -223,6 +223,69 @@ pub(crate) struct ScriptData {
     pub(crate) controls: Option<TakenControls>,
     /// OpenSim's channel-0 chat throttle, which a reset keeps.
     pub(crate) say_throttle: SayThrottle,
+    /// The script's position and rotation targets (`llTarget`,
+    /// `llRotTarget`), which a reset drops, and a state change on OpenSim
+    /// (`events/state-drops`).
+    pub(crate) targets: Targets,
+}
+
+/// The most position targets, and the most rotation targets, a script keeps:
+/// a ninth drops the oldest (`physics/targets`, on every grid).
+const MAX_TARGETS: usize = 8;
+
+/// A position target (`llTarget`): reached while the object stands within
+/// `range` of `position`.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct PositionTarget {
+    /// Its handle.
+    pub(crate) handle: i32,
+    /// Where it is.
+    pub(crate) position: Vector,
+    /// How near is near enough.
+    pub(crate) range: f32,
+}
+
+/// A rotation target (`llRotTarget`): reached while the prim is turned
+/// within `error` radians of `rotation`.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct RotationTarget {
+    /// Its handle.
+    pub(crate) handle: i32,
+    /// The rotation wanted.
+    pub(crate) rotation: sl_types::lsl::Rotation,
+    /// How near is near enough, in radians.
+    pub(crate) error: f32,
+}
+
+/// A script's targets, and the handles Second Life gives them: one counter
+/// for both kinds, one apart from the first, 1 (`physics/targets`).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct Targets {
+    /// The position targets, oldest first.
+    pub(crate) positions: Vec<PositionTarget>,
+    /// The rotation targets, oldest first.
+    pub(crate) rotations: Vec<RotationTarget>,
+    /// The last handle given.
+    pub(crate) last_handle: i32,
+    /// The region time the targets are next checked at.
+    pub(crate) next_check: Duration,
+    /// The handles just removed, whose events still queued the instance
+    /// drops after the call: no grid runs a removed target's `at_target`
+    /// (`physics/targets`).
+    pub(crate) removed: Vec<i32>,
+}
+
+impl Targets {
+    /// The next handle.
+    const fn next_handle(&mut self) -> i32 {
+        self.last_handle = self.last_handle.saturating_add(1);
+        self.last_handle
+    }
+
+    /// Whether the script has any target.
+    pub(crate) const fn any(&self) -> bool {
+        !self.positions.is_empty() || !self.rotations.is_empty()
+    }
 }
 
 /// An avatar's controls a script took.
@@ -534,6 +597,61 @@ impl<'host> ScriptCtx<'host> {
             interval,
             next: region_time(self.now, self.step).saturating_add(first),
         });
+    }
+
+    /// `llTarget`: a position target, its handle.
+    pub fn add_position_target(&mut self, position: Vector, range: f32) -> i32 {
+        let handle = self.target_handle();
+        let targets = &mut self.data.targets;
+        targets.positions.push(PositionTarget {
+            handle,
+            position,
+            range,
+        });
+        if targets.positions.len() > MAX_TARGETS {
+            let _oldest = targets.positions.remove(0);
+        }
+        handle
+    }
+
+    /// A new target's handle: the script's next on Second Life, the region's
+    /// next local id on OpenSim (`physics/targets`).
+    fn target_handle(&mut self) -> i32 {
+        if self.flavour().is_opensim() {
+            self.host().mint_scene_id()
+        } else {
+            self.data.targets.next_handle()
+        }
+    }
+
+    /// `llTargetRemove`: drops the position target `handle`, if there is one.
+    pub fn remove_position_target(&mut self, handle: i32) {
+        let targets = &mut self.data.targets;
+        targets.positions.retain(|target| target.handle != handle);
+        targets.removed.push(handle);
+    }
+
+    /// `llRotTarget`: a rotation target, its handle.
+    pub fn add_rotation_target(&mut self, rotation: sl_types::lsl::Rotation, error: f32) -> i32 {
+        let handle = self.target_handle();
+        let targets = &mut self.data.targets;
+        targets.rotations.push(RotationTarget {
+            handle,
+            rotation,
+            error,
+        });
+        if targets.rotations.len() > MAX_TARGETS {
+            let _oldest = targets.rotations.remove(0);
+        }
+        handle
+    }
+
+    /// `llRotTargetRemove`: drops the rotation target `handle`, if there is
+    /// one.
+    pub fn remove_rotation_target(&mut self, handle: i32) {
+        let targets = &mut self.data.targets;
+        targets.rotations.retain(|target| target.handle != handle);
+        targets.removed.push(handle);
     }
 
     /// `llSensorRemove`: end the repeating sweep. Second Life drops a sweep's

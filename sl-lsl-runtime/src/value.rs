@@ -124,6 +124,18 @@ impl Value {
         }
     }
 
+    /// Whether a condition takes this value as true on `opensim`'s grid:
+    /// [`Self::is_true`] on Second Life; on OpenSim a key is true unless it is
+    /// empty or [`NULL_KEY`], a UUID or not (`strings/conversions`: `(key)"junk"`
+    /// is true there; YEngine's `TypeCast.KeyToBool`).
+    #[must_use]
+    pub fn is_true_for(&self, opensim: bool) -> bool {
+        match self {
+            Self::Key(text) if opensim => !text.is_empty() && text != NULL_KEY,
+            other => other.is_true(),
+        }
+    }
+
     /// This value as the elements it contributes to a list: a list its own
     /// elements, anything else itself as the one element. It is what
     /// `(list)value`, `list + value` and `value + list` put in the list.

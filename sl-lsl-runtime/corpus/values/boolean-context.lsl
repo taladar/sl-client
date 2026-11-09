@@ -1,7 +1,9 @@
 // corpus: what is false in a condition
 // Oracle: the book's simulator/lsl-engine.md: 0, 0.0, ZERO_VECTOR,
 // ZERO_ROTATION, "", the empty list and an invalid key are false, and the
-// zero vector and rotation are usable in a condition at all.
+// zero vector and rotation are usable in a condition at all. OpenSim makes
+// a rotation of four zeros the identity (its LSL_Rotation constructor), so
+// <0, 0, 0, 0> is false there (errors/math's Math 5 on both engines).
 show(string name, integer truth)
 {
     if (truth) print(name + " true"); else print(name + " false");

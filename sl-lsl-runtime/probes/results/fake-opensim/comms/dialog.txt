@@ -1,12 +1,12 @@
 grid: fake-opensim
-date: 2026-11-07
+date: 2026-11-09
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating YEngine
 settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
 
-PROBE comms/dialog rec=start region="Fake Region" channel="OpenSim" version="sl-fake-grid 0.1.0"
 # dialog object="Object" owner="<first> <last>" channel=-731001 message_length=8 message="Pick one" buttons="One|Two|Three" count=3
+PROBE comms/dialog rec=start region="Fake Region" channel="OpenSim" version="sl-fake-grid 0.1.0"
 PROBE comms/dialog rec=waiting drive=dialog reply="Two"
 PROBE comms/dialog rec=put step=1 to=owner how=answered buttons=3 message_length=8
 # dialog-reply reply="Two" index=1 sent_length=3
@@ -54,8 +54,8 @@ PROBE comms/dialog rec=moved-on step=11
 # dialog object="Object" owner="<first> <last>" channel=-731001 message_length=511 message="mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm…" buttons="One" count=1
 PROBE comms/dialog rec=put step=12 to=owner how=unanswered buttons=1 message_length=512
 PROBE comms/dialog rec=moved-on step=12
-PROBE comms/dialog rec=put step=13 to=owner how=unanswered buttons=1 message_length=513
 # dialog object="Object" owner="<first> <last>" channel=-731001 message_length=511 message="mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm…" buttons="One" count=1
+PROBE comms/dialog rec=put step=13 to=owner how=unanswered buttons=1 message_length=513
 # debug-channel: from="Object" text="llDialog: Message longer than 512 bytes"
 PROBE comms/dialog rec=moved-on step=13
 PROBE comms/dialog rec=put step=14 to=someone how=unanswered buttons=1 message_length=9

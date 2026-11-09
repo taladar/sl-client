@@ -59,6 +59,7 @@ pub mod sensors;
 pub mod sitting;
 pub mod strings;
 pub mod table;
+pub mod targets;
 mod text;
 pub mod usage;
 
@@ -687,6 +688,10 @@ mod tests {
             0
         }
 
+        fn mint_scene_id(&mut self) -> i32 {
+            0
+        }
+
         fn linkset(&self, _caller: CallerId) -> LinksetId {
             LinksetId(0)
         }
@@ -1094,12 +1099,8 @@ mod tests {
             })
         );
         assert_eq!(
-            call(
-                BuiltinId::LlSetStatus,
-                &mut ctx,
-                vec![Value::Integer(1), Value::Integer(0)]
-            ),
-            Err(CallError::Missing(BuiltinId::LlSetStatus))
+            call(BuiltinId::LlSetBuoyancy, &mut ctx, vec![Value::Float(1.0)]),
+            Err(CallError::Missing(BuiltinId::LlSetBuoyancy))
         );
     }
 

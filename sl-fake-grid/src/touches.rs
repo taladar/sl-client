@@ -413,11 +413,10 @@ fn detect(
 ) -> Option<Detected> {
     world.objects.get(local_id)?;
     let root = world.root_of(local_id);
-    let same_group = toucher.group.is_some_and(|group| {
-        world
-            .record_of(root)
-            .is_some_and(|record| record.group == Some(group))
-    });
+    // The two groups as they are: no group on either side is the same
+    // group (`events/other-avatar` on aditi; OpenSim compares the ids, both
+    // null).
+    let same_group = toucher.group == world.record_of(root).and_then(|record| record.group);
     let agent = toucher.identity.agent_id.uuid().to_string();
     Some(Detected {
         key: agent.clone(),

@@ -1,5 +1,5 @@
 grid: fake-sl
-date: 2026-11-07
+date: 2026-11-09
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating Mono
@@ -13,7 +13,6 @@ PROBE http/options rec=carried-on label=agent-space-extended request=set
 # debug-channel: from="Object" text="HTTP_USER_AGENT 'probe agent' is invalid"
 PROBE http/options rec=try-response label=agent-space-extended status=472 length=192 body="{\n   \"detail\" : \"Invalid user agent probe agent in position 2\",\n   \"status\" : 472,\n   \"title\" : \"llHTTPRequest parameter error.\",\n   \"type\" : \"http://wiki.secondlife.com/wiki/llHTTPRequest\"\n}\n"
 PROBE http/options rec=start region="Fake Region" channel="Second Life Server" version="sl-fake-grid 0.1.0"
-PROBE http/options rec=stray status=472
 PROBE http/options rec=url granted=1
 PROBE http/options rec=sent step=1 case=agent-default request=set
 PROBE http/options rec=inbound step=1 method="GET" user_agent="Second-Life-LSL/sl-fake-grid 0.1.0 (https://secondlife.com)" accept=""

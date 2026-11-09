@@ -1,5 +1,5 @@
 grid: fake-sl
-date: 2026-11-07
+date: 2026-11-09
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating Mono
@@ -34,8 +34,8 @@ PROBE errors/flood-kinds rec=phase name=B t=120.355600
 PROBE errors/flood-kinds rec=fault script=faulter step=before
 # debug-channel: from="Object" text="Too many errors... dropping further messages until the flood stops"
 PROBE errors/flood-kinds rec=single name="D9" t=130.533300
-# debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1: unknown rule."
 PROBE errors/flood-kinds rec=phase name=C t=201.555600
+# debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1: unknown rule."
 # debug-channel: from="Object" text="llSetPrimitiveParams error running rule #2: unknown rule."
 # debug-channel: from="Object" text="llSetPrimitiveParams error running rule #3: unknown rule."
 # debug-channel: from="Object" text="llSetPrimitiveParams error running rule #4: unknown rule."

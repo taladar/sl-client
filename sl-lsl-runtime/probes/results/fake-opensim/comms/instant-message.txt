@@ -1,5 +1,5 @@
 grid: fake-opensim
-date: 2026-11-07
+date: 2026-11-09
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating YEngine
@@ -10,14 +10,14 @@ PROBE comms/instant-message rec=waiting drive=touch by=other
 # touch by=other active_group=none surface=none
 # im dialog=19 from=owner id=probe name="Object" offline=0 length=12 message="to the owner" bucket=0
 PROBE comms/instant-message rec=touch by_owner=0
-PROBE comms/instant-message rec=sent call=im to=owner length=12 seconds=2.019000
+PROBE comms/instant-message rec=sent call=im to=owner length=12 seconds=2.018000
 PROBE comms/instant-message rec=sent call=im to=other length=12 seconds=2.018000
 # debug-channel: from="Object" text="llInstantMessage: An invalid key  was passed to llInstantMessage"
 PROBE comms/instant-message rec=sent call=im to=null length=9 seconds=3.018001
 PROBE comms/instant-message rec=sent call=im to=unknown length=25 seconds=2.018000
 # im dialog=19 from=owner id=probe name="Object" offline=0 length=1023 message="iiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiii…" bucket=0
-PROBE comms/instant-message rec=sent call=im to=owner length=1100 seconds=2.019000
 # im dialog=19 from=owner id=probe name="Object" offline=0 length=9 message="two\nlines" bucket=0
+PROBE comms/instant-message rec=sent call=im to=owner length=1100 seconds=2.018000
 # chat type=direct from="Object" length=23 text="region-say-to beside it"
 PROBE comms/instant-message rec=sent call=im to=owner length=9 seconds=2.018000
 # owner-say: from="Object" text="owner-say beside it"

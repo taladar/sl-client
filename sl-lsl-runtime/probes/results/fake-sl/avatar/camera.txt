@@ -1,5 +1,5 @@
 grid: fake-sl
-date: 2026-11-07
+date: 2026-11-09
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating Mono
@@ -7,9 +7,9 @@ settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor
 
 PROBE avatar/camera rec=start region="Fake Region" channel="Second Life Server" version="sl-fake-grid 0.1.0"
 PROBE avatar/camera rec=waiting drive=answer grant=3072
-# debug-channel by=other: from="Object" text="Camera control currently only supported for attachments and objects on which you are sitting."
 PROBE avatar/camera rec=asked step=1 seated=0 mask=3072
 # debug-channel: from="Object" text="Camera control currently only supported for attachments and objects on which you are sitting."
+# debug-channel by=other: from="Object" text="Camera control currently only supported for attachments and objects on which you are sitting."
 # answer grant=3072 question=none
 PROBE avatar/camera rec=timeout step=1
 PROBE avatar/camera rec=held step=1 why=no-answer answer=-1 perms=0

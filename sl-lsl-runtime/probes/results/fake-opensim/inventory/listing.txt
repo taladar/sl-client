@@ -1,11 +1,11 @@
 grid: fake-opensim
-date: 2026-11-07
+date: 2026-11-09
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating YEngine
 settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
 
-# notecard "élan" bytes=19
+# notecard "élan" bytes=19 named="C3 A9 6C 61 6E 00                               ..lan."
 # notecard "10" bytes=16
 # notecard "9" bytes=15
 # notecard "Beta" bytes=18
@@ -13,24 +13,26 @@ settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor
 # notecard "_under" bytes=20
 # notecard "alpha" bytes=19
 # object "Box" scripts=1
+# chat type=say from="Object" length=14 text="Script running"
 PROBE inventory/listing rec=helper-entry param=0
-# owner-say: from="Object" text="[YEngine]: Exception while running 2b43b5ff-0c2f-ab98-c4e3-b58e293012cf"
+# owner-say: from="Object" text="[YEngine]: Exception while running 4f3ab7a2-eecd-f3d5-c6a2-3b83dcf23d72"
 # owner-say: from="Object" text="ArgumentOutOfRangeException: Index was out of range. Must be non-negative and less than the size of the collection."
 # owner-say: from="Object" text="Parameter name: index"
 # owner-say: from="Object" text="Prim: <Object>, Script: <Range minus one>, Location: Fake Region <130,124,26>"
 # owner-say: from="Object" text="Script must be Reset to re-enable."
+# chat type=say from="Object" length=14 text="Script running"
 PROBE inventory/listing rec=name case=past-end value=""
 PROBE inventory/listing rec=name case=all-100 value=""
+PROBE inventory/listing rec=name case=no-type value=""
 # chat type=say from="Object" length=14 text="Script running"
 PROBE inventory/listing rec=start region="Fake Region" channel="OpenSim" version="sl-fake-grid 0.1.0"
-PROBE inventory/listing rec=count when=first type=-1 n=10 names="_under|10|9|aaa Helper|alpha|Beta|Box|élan|Probe|Zed"
+PROBE inventory/listing rec=count when=first type=-1 n=10 names="_under|10|9|aaa Helper|alpha|Beta|Box|C3 A9 6C 61 6E 00                               ..lan.|Probe|Zed"
 PROBE inventory/listing rec=count when=first type=0 n=0 names=""
-PROBE inventory/listing rec=name case=no-type value=""
 PROBE inventory/listing rec=count when=first type=1 n=0 names=""
 PROBE inventory/listing rec=count when=first type=3 n=0 names=""
 PROBE inventory/listing rec=count when=first type=5 n=0 names=""
 PROBE inventory/listing rec=count when=first type=6 n=1 names="Box"
-PROBE inventory/listing rec=count when=first type=7 n=7 names="_under|10|9|alpha|Beta|élan|Zed"
+PROBE inventory/listing rec=count when=first type=7 n=7 names="_under|10|9|alpha|Beta|C3 A9 6C 61 6E 00                               ..lan.|Zed"
 PROBE inventory/listing rec=count when=first type=10 n=2 names="aaa Helper|Probe"
 PROBE inventory/listing rec=count when=first type=13 n=0 names=""
 PROBE inventory/listing rec=count when=first type=20 n=0 names=""
@@ -41,18 +43,19 @@ PROBE inventory/listing rec=count when=first type=4 n=0 names=""
 PROBE inventory/listing rec=count when=first type=99 n=0 names=""
 PROBE inventory/listing rec=count when=first type=-2 n=0 names=""
 PROBE inventory/listing rec=try label=item-0
-PROBE inventory/listing rec=item name="alpha" type=7 key=other creator=owner masks=647168,647168,0,0,2147483647
+PROBE inventory/listing rec=item name="alpha" type=7 key=other creator=owner masks=2147483647,2147483647,0,0,2147483647
 PROBE inventory/listing rec=try label=item-1
 # debug-channel: from="Object" text="llGetInventoryCreator: Can't find item ''"
 PROBE inventory/listing rec=item name="ALPHA" type=-1 key=null creator=empty masks=-1,-1,-1,-1,-1
 PROBE inventory/listing rec=try label=item-2
-PROBE inventory/listing rec=item name="Box" type=6 key=other creator=owner masks=581647,581647,0,0,532480
+PROBE inventory/listing rec=item name="Box" type=6 key=other creator=owner masks=2147483647,2147483647,0,0,532480
 PROBE inventory/listing rec=try label=item-3
 PROBE inventory/listing rec=item name="Probe" type=10 key=other creator=owner masks=2147483647,2147483647,0,0,2147483647
 PROBE inventory/listing rec=try label=item-4
 PROBE inventory/listing rec=item name="aaa Helper" type=10 key=other creator=owner masks=2147483647,2147483647,0,0,2147483647
 PROBE inventory/listing rec=try label=item-5
-PROBE inventory/listing rec=item name="élan" type=7 key=other creator=owner masks=647168,647168,0,0,2147483647
+# debug-channel: from="Object" text="llGetInventoryCreator: Can't find item ''"
+PROBE inventory/listing rec=item name="élan" type=-1 key=null creator=empty masks=-1,-1,-1,-1,-1
 PROBE inventory/listing rec=try label=item-6
 # debug-channel: from="Object" text="llGetInventoryCreator: Can't find item ''"
 PROBE inventory/listing rec=item name="nope" type=-1 key=null creator=empty masks=-1,-1,-1,-1,-1
@@ -60,7 +63,7 @@ PROBE inventory/listing rec=try label=item-7
 # debug-channel: from="Object" text="llGetInventoryCreator: Can't find item ''"
 PROBE inventory/listing rec=item name="" type=-1 key=null creator=empty masks=-1,-1,-1,-1,-1
 PROBE inventory/listing rec=try label=set-perm-mask
-PROBE inventory/listing rec=item name="alpha" type=7 key=other creator=owner masks=647168,647168,0,0,2147483647
+PROBE inventory/listing rec=item name="alpha" type=7 key=other creator=owner masks=2147483647,2147483647,0,0,2147483647
 PROBE inventory/listing rec=script name="Probe" helper=1 self=1 danger=1
 PROBE inventory/listing rec=try label=state-of-none
 # debug-channel: from="Object" text="llGetScriptState: Can't find script 'nope'"
@@ -88,13 +91,13 @@ PROBE inventory/listing rec=removed name=nope n=9
 PROBE inventory/listing rec=try label=remove-object
 PROBE inventory/listing rec=removed name=Box n=0
 PROBE inventory/listing rec=changed change=1 step=8
-PROBE inventory/listing rec=count when=last type=-1 n=8 names="_under|10|9|aaa Helper|alpha|Beta|élan|Probe"
+PROBE inventory/listing rec=count when=last type=-1 n=8 names="_under|10|9|aaa Helper|alpha|Beta|C3 A9 6C 61 6E 00                               ..lan.|Probe"
 PROBE inventory/listing rec=count when=last type=0 n=0 names=""
 PROBE inventory/listing rec=count when=last type=1 n=0 names=""
 PROBE inventory/listing rec=count when=last type=3 n=0 names=""
 PROBE inventory/listing rec=count when=last type=5 n=0 names=""
 PROBE inventory/listing rec=count when=last type=6 n=0 names=""
-PROBE inventory/listing rec=count when=last type=7 n=6 names="_under|10|9|alpha|Beta|élan"
+PROBE inventory/listing rec=count when=last type=7 n=6 names="_under|10|9|alpha|Beta|C3 A9 6C 61 6E 00                               ..lan."
 PROBE inventory/listing rec=count when=last type=10 n=2 names="aaa Helper|Probe"
 PROBE inventory/listing rec=count when=last type=13 n=0 names=""
 PROBE inventory/listing rec=count when=last type=20 n=0 names=""
@@ -106,6 +109,9 @@ PROBE inventory/listing rec=count when=last type=99 n=0 names=""
 PROBE inventory/listing rec=count when=last type=-2 n=0 names=""
 PROBE inventory/listing rec=end
 # chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# debug-channel by=other: from="Object" text="llGetInventoryCreator: Can't find item ''"
 # debug-channel by=other: from="Object" text="llGetInventoryCreator: Can't find item ''"
 # debug-channel by=other: from="Object" text="llGetInventoryCreator: Can't find item ''"
 # debug-channel by=other: from="Object" text="llGetInventoryCreator: Can't find item ''"

@@ -1290,6 +1290,7 @@ impl GridCore {
                 wearables_reply: self.imitated.wearables_reply(),
             },
             home_policy: self.imitated.home_policy(),
+            item_names: self.imitated.item_names(),
             home_told: None,
             homes: self.homes.clone(),
             god_powers: self.imitated.god_powers(),

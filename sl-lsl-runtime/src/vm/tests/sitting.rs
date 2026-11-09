@@ -90,7 +90,8 @@ fn a_sit_target_is_set_and_cleared_as_each_grid_clears_it() -> Result<(), String
 
 /// The prim's counts and link keys with nobody on it and with an avatar on
 /// its target (`avatar/sit`, `prim/identity`): one prim and link 0 alone, two
-/// and the sitter the last link once seated; `llGetLinkKey(1)` of a lone prim
+/// and the sitter the last link once seated, the prim link 1 on Second Life
+/// and still 0 on OpenSim; `llGetLinkKey(1)` of a lone prim
 /// is `NULL_KEY` on Second Life and the prim on OpenSim.
 #[test]
 fn a_sitter_is_counted_and_takes_the_link_after_the_prims() -> Result<(), String> {
@@ -118,9 +119,12 @@ fn a_sitter_is_counted_and_takes_the_link_after_the_prims() -> Result<(), String
         };
         let seated = printed(source, flavour, &mut host)?;
         let link_zero = if flavour.is_opensim() { PRIM } else { NULL_KEY };
+        // OpenSim counts prims alone for the prim's own link number
+        // (`prim/link-refusals`: link=0 with one seated).
+        let own = u8::from(!flavour.is_opensim());
         assert_eq!(
             seated,
-            vec![format!("2 1 {link_zero} {PRIM} {OTHER} {OTHER}")],
+            vec![format!("2 {own} {link_zero} {PRIM} {OTHER} {OTHER}")],
             "{flavour:?}"
         );
     }

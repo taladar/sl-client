@@ -1,5 +1,5 @@
 grid: fake-sl
-date: 2026-11-07
+date: 2026-11-09
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating Mono
@@ -18,8 +18,8 @@ PROBE detection/sensor rec=swept step=ours event=sensor num=1
 PROBE detection/sensor rec=found step=ours i=0 dist=69.066000 type=12 owned=0 name=ours self=0
 PROBE detection/sensor rec=sweep step=agents name="" key="" type=1 range=96.000000 arc=3.142000
 PROBE detection/sensor rec=swept step=agents event=sensor num=2
+PROBE detection/sensor rec=agent step=agents key_is_owner=0 type=3 owner_is_self=1 name_is_key2name=1 agent_dist=1.056000
 PROBE detection/sensor rec=agent step=agents key_is_owner=1 type=3 owner_is_self=1 name_is_key2name=1 agent_dist=4.123000
-PROBE detection/sensor rec=agent step=agents key_is_owner=0 type=3 owner_is_self=1 name_is_key2name=1 agent_dist=4.123000
 PROBE detection/sensor rec=sweep step=owner-legacy name="@owner" key="" type=1 range=96.000000 arc=3.142000
 PROBE detection/sensor rec=swept step=owner-legacy event=sensor num=1
 PROBE detection/sensor rec=agent step=owner-legacy key_is_owner=1 type=3 owner_is_self=1 name_is_key2name=1 agent_dist=4.123000
@@ -104,20 +104,20 @@ PROBE detection/sensor rec=swept step=far-96 event=no_sensor num=0
 PROBE detection/sensor rec=sweep step=far-200 name="Target X" key="" type=14 range=200.000000 arc=3.142000
 PROBE detection/sensor rec=swept step=far-200 event=no_sensor num=0
 PROBE detection/sensor rec=repeat phase=1 call="llSensorRepeat Target B every 0.5 s"
-PROBE detection/sensor rec=fired phase=1 event=1 num=1 found=target-b t=0.511000
-PROBE detection/sensor rec=fired phase=1 event=2 num=1 found=target-b t=1.022000
-PROBE detection/sensor rec=fired phase=1 event=3 num=1 found=target-b t=1.533000
-PROBE detection/sensor rec=fired phase=1 event=4 num=1 found=target-b t=2.044000
-PROBE detection/sensor rec=fired phase=1 event=5 num=1 found=target-b t=2.556000
+PROBE detection/sensor rec=fired phase=1 event=1 num=1 found=target-b t=0.533000
+PROBE detection/sensor rec=fired phase=1 event=2 num=1 found=target-b t=1.044000
+PROBE detection/sensor rec=fired phase=1 event=3 num=1 found=target-b t=1.556000
+PROBE detection/sensor rec=fired phase=1 event=4 num=1 found=target-b t=2.067000
+PROBE detection/sensor rec=fired phase=1 event=5 num=1 found=target-b t=2.578000
 PROBE detection/sensor rec=phase phase=1 events=5
 PROBE detection/sensor rec=removed after_phase=1
 PROBE detection/sensor rec=phase phase=2 events=0
 PROBE detection/sensor rec=repeat phase=3 call="llSensorRepeat nothing every 0.5 s"
-PROBE detection/sensor rec=fired phase=3 event=1 num=0 found=none t=0.511000
-PROBE detection/sensor rec=fired phase=3 event=2 num=0 found=none t=1.022000
-PROBE detection/sensor rec=fired phase=3 event=3 num=0 found=none t=1.533000
-PROBE detection/sensor rec=fired phase=3 event=4 num=0 found=none t=2.044000
-PROBE detection/sensor rec=fired phase=3 event=5 num=0 found=none t=2.556000
+PROBE detection/sensor rec=fired phase=3 event=1 num=0 found=none t=0.533000
+PROBE detection/sensor rec=fired phase=3 event=2 num=0 found=none t=1.044000
+PROBE detection/sensor rec=fired phase=3 event=3 num=0 found=none t=1.556000
+PROBE detection/sensor rec=fired phase=3 event=4 num=0 found=none t=2.067000
+PROBE detection/sensor rec=fired phase=3 event=5 num=0 found=none t=2.578000
 PROBE detection/sensor rec=phase phase=3 events=5
 PROBE detection/sensor rec=removed after_phase=3
 PROBE detection/sensor rec=phase phase=4 events=0
@@ -126,12 +126,12 @@ PROBE detection/sensor rec=rate phase=5 events=29 per_second=14.500000
 PROBE detection/sensor rec=removed after_phase=5
 PROBE detection/sensor rec=phase phase=6 events=0
 PROBE detection/sensor rec=repeat phase=7 call="llSensorRepeat Target B every 1 s, then llSensor Target X"
-PROBE detection/sensor rec=fired phase=7 event=1 num=0 found=none t=0.022000
+PROBE detection/sensor rec=fired phase=7 event=1 num=0 found=none t=0.044000
 PROBE detection/sensor rec=phase phase=7 events=1
 PROBE detection/sensor rec=removed after_phase=7
 PROBE detection/sensor rec=phase phase=8 events=0
 PROBE detection/sensor rec=repeat phase=9 call="llSensorRepeat Target B every 0.0 s"
-PROBE detection/sensor rec=fired phase=9 event=1 num=1 found=target-b t=0.022000
+PROBE detection/sensor rec=fired phase=9 event=1 num=1 found=target-b t=0.044000
 PROBE detection/sensor rec=phase phase=9 events=1
 PROBE detection/sensor rec=removed after_phase=9
 PROBE detection/sensor rec=phase phase=10 events=0

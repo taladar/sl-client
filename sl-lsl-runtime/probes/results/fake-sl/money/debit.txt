@@ -1,5 +1,5 @@
 grid: fake-sl
-date: 2026-11-07
+date: 2026-11-09
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating Mono
@@ -19,29 +19,29 @@ PROBE money/debit rec=timeout step=1
 PROBE money/debit rec=waiting drive=answer grant=2
 # debug-channel by=other: from="Object" text="Script trying to debit L$ from owner but PERMISSION_DEBIT permission not set!"
 # answer grant=2
-PROBE money/debit rec=answer step=2 perms=2
 # money-balance success=1 change=-1 type=5009 source=owner dest=other amount=1 item="Object" description="You paid <other-first> <last> L$1."
+PROBE money/debit rec=answer step=2 perms=2
 PROBE money/debit rec=held step=2 why=answer perms=2 granter=owner
 PROBE money/debit rec=give step=3 to=other amount=1 result=0
 PROBE money/debit rec=timeout step=3
 # money-balance success=1 change=-1 type=5009 source=owner dest=other amount=1 item="Object" description="You paid <other-first> <last> L$1."
 PROBE money/debit rec=transfer step=4 to=other amount=1 handle_null=0
-# money-balance success=1 change=0 type=5009 source=owner dest=owner amount=1 item="Object" description="<first> <last> paid you L$1."
 PROBE money/debit rec=result step=4 id=handle success=1 data="other,1"
-# money-balance success=1 change=0 type=5009 source=owner dest=owner amount=1 item="Object" description="You paid <first> <last> L$1."
+# money-balance success=1 change=0 type=5009 source=owner dest=owner amount=1 item="Object" description="<first> <last> paid you L$1."
 PROBE money/debit rec=transfer step=5 to=owner amount=1 handle_null=0
-# money-balance success=0 change=0 type=5009 source=owner dest=probe amount=1 item="Object" description="There has been a problem transferring L$. This error has been logged and reported."
+# money-balance success=1 change=0 type=5009 source=owner dest=owner amount=1 item="Object" description="You paid <first> <last> L$1."
 PROBE money/debit rec=result step=5 id=handle success=1 data="owner,1"
+# money-balance success=0 change=0 type=5009 source=owner dest=probe amount=1 item="Object" description="There has been a problem transferring L$. This error has been logged and reported."
 PROBE money/debit rec=transfer step=6 to=none amount=1 handle_null=0
 PROBE money/debit rec=result step=6 id=handle success=0 data="INVALID_DESTINATION"
 PROBE money/debit rec=transfer step=7 to=prim amount=1 handle_null=0
-PROBE money/debit rec=result step=7 id=handle success=0 data="LINDENDOLLAR_ENTITYDOESNOTEXIST"
 # money-balance success=0 change=0 type=5009 source=owner dest=someone amount=1 item="Object" description="There has been a problem transferring L$. This error has been logged and reported."
+PROBE money/debit rec=result step=7 id=handle success=0 data="LINDENDOLLAR_ENTITYDOESNOTEXIST"
 PROBE money/debit rec=transfer step=8 to=someone amount=1 handle_null=0
 PROBE money/debit rec=result step=8 id=handle success=0 data="LINDENDOLLAR_ENTITYDOESNOTEXIST"
 PROBE money/debit rec=transfer step=9 to=other amount=0 handle_null=0
-# money-balance success=0 change=0 type=5009 source=owner dest=other amount=1000000000 item="Object" description="Insufficient funds."
 PROBE money/debit rec=result step=9 id=handle success=0 data="INVALID_AMOUNT"
+# money-balance success=0 change=0 type=5009 source=owner dest=other amount=1000000000 item="Object" description="Insufficient funds."
 PROBE money/debit rec=transfer step=10 to=other amount=-1 handle_null=0
 PROBE money/debit rec=result step=10 id=handle success=0 data="INVALID_AMOUNT"
 PROBE money/debit rec=transfer step=11 to=other amount=1000000000 handle_null=0

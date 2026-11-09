@@ -11,8 +11,10 @@
 //! queue naming that destination and its seed — and **nothing announcing the
 //! destination ahead of it** — after which the client opens the destination's
 //! circuit itself (`UseCircuitCode` + `CompleteAgentMovement`), and, only once
-//! the destination saw the arrival, the source circuit's retirement with
-//! `DisableSimulator`.
+//! the destination saw the arrival, the source's demotion: a source that
+//! neighbours the destination becomes a child agent, as a crossing's does and
+//! as OpenSim's `MakeChildAgent` does, and any other source circuit is retired
+//! with `DisableSimulator`.
 //!
 //! The absent announcement is the part worth stating, because the grid used to
 //! send one. `TransferAgent_V2` says so in the source — "New protocol: send TP
@@ -527,15 +529,26 @@ pub(crate) async fn teleport_session(
     // as for a scripted one ([`crate::timeline::hand_over`]).
     crate::timeline::hand_over(source, &dest).await;
 
-    // The avatar is in the destination: retire the source, which the
-    // client now holds as a child circuit.
-    if let Err(error) = source
-        .with_sim(|sim| sim.retire_circuit(source.now()))
-        .await
-    {
-        tracing::warn!("retiring the source circuit failed: {error}");
+    // The avatar is in the destination, and the client now holds the source
+    // as a child circuit. A source that neighbours the destination stays one,
+    // as both live grids keep a child agent there: OpenSim demotes the very
+    // presence the agent left, so a script there finds the agent at every
+    // moment of the teleport (`comms/owner-away`). Any other source is
+    // retired.
+    let source_region = source.with_state(|state| state.region).await;
+    if core.neighbours_of(request.region).contains(&source_region) {
+        source
+            .with_state(|state| state.sim.make_child_agent())
+            .await;
+    } else {
+        if let Err(error) = source
+            .with_sim(|sim| sim.retire_circuit(source.now()))
+            .await
+        {
+            tracing::warn!("retiring the source circuit failed: {error}");
+        }
+        core.remove_session(source_seq).await;
     }
-    core.remove_session(source_seq).await;
     // The neighbours of the region left behind are neighbours no longer. A
     // crossing has always retired them; a teleport used to leave one open
     // circuit per region the agent had ever bordered, still streaming to a
@@ -897,13 +910,17 @@ pub(crate) fn run_teleport_responder(
             };
             match resolved {
                 Ok(request) => match teleport_session(&core, &shared, request).await {
-                    // The source session is retired (or the teleport was local):
-                    // this responder's job is done either way for a move.
-                    Ok(TeleportOutcome::Moved(_)) => break,
-                    // A local hop keeps this session, and so does a refusal;
-                    // a timed-out move was already reported to the client as
-                    // `timeout_tport`.
-                    Ok(TeleportOutcome::Local | TeleportOutcome::Refused)
+                    // A move retires a distant source, whose `CircuitRetired`
+                    // ends this loop, and demotes a neighbouring one to a child
+                    // agent, which the agent may come back to and teleport from
+                    // again: the responder stays. A local hop keeps this
+                    // session, and so does a refusal; a timed-out move was
+                    // already reported to the client as `timeout_tport`.
+                    Ok(
+                        TeleportOutcome::Moved(_)
+                        | TeleportOutcome::Local
+                        | TeleportOutcome::Refused,
+                    )
                     | Err(Error::TeleportTimedOut) => {}
                     Err(error) => {
                         tracing::warn!("teleport failed: {error}");

@@ -242,17 +242,29 @@ list, a vector and a call's arguments left to right; `f(0) && f(11)` both
 sides, 11 first; `c + 5 + e *= 4` as `c + 5 + (e *= 4)`; and a nested
 `return` of a void call run.
 
+OpenSim's engines differ (`vm/eval-order`, 2026-11-09). YEngine keeps
+Second Life's order but for a list literal, whose elements it evaluates
+right to left: `[f(1), f(2), f(3)]` runs 3, 2, 1, the list holding them in
+the written order. The OpenSim dialect does the same: it emits the
+elements backwards and builds the list with `BuildListReversed`. XEngine,
+compiling to C#, evaluates everything left to right — operands, `&&` and
+`||`, lists, a concatenation and a compound assignment's right side. The
+runtime does not model XEngine's order: its one OpenSim dialect is
+YEngine's, the engine a fake grid imitating OpenSim runs. The values agree
+on all three grids; only the order of the side effects differs.
+
 Three instructions carry reference quirks. `integer *= float` stores
 `(integer)((float)target * value)` and yields that integer as a `float`.
 `StateChange` requests the transition and leaves the body at once: in a
 function — legal only inside an `if`, the reference's "state change hack" —
 it returns the default of the return type, and the transition happens when
-the event handler ends, as Mono does. And `InvalidProgram`, only ever a
-body's first instruction, raises the run-time error Second Life raises when
-Mono refuses a whole method: using the *value* of `integer *= float` compiles
-there, but the event then fails with `System.InvalidProgramException` before
-its first line runs (measured on aditi), because the IL leaves an `int32`
-where it declares a `float`.
+the event handler ends, as Mono does; on the OpenSim flavours it leaves the
+whole handler, as both engines' `ScriptChangeStateException` does. And
+`InvalidProgram`, only ever a body's first instruction, raises the run-time
+error Second Life raises when Mono refuses a whole method: using the *value*
+of `integer *= float` compiles there, but the event then fails with
+`System.InvalidProgramException` before its first line runs (measured on
+aditi), because the IL leaves an `int32` where it declares a `float`.
 
 **A compile error happens exactly where Second Life's does, and says more.**
 Each carries the grid's kind — Linden's own message, as PyOptimizer quotes it
@@ -518,10 +530,11 @@ limits):
   Life, the scripts present on OpenSim). The fake grid reports them in
   `SimStats` (with the scripts-run percentage of its last tick) and in a
   `LandStatRequest`'s top scripts, summed per linkset on its root, for an
-  object the scene states no cost for. `llGetObjectDetails` does not read
-  them yet: its host answers while the engine is lent to the tick, so
-  `OBJECT_SCRIPT_MEMORY` is 64 KiB a script, `OBJECT_SCRIPT_TIME` 0 and every
-  script with an instance counts as running.
+  object the scene states no cost for. `llGetObjectDetails` answers while
+  the engine is lent to the tick, so the host takes each script's run flag and
+  `OBJECT_SCRIPT_MEMORY` figure as the tick starts and sums them for
+  `OBJECT_SCRIPT_MEMORY` and `OBJECT_RUNNING_SCRIPT_COUNT`;
+  `OBJECT_SCRIPT_TIME` is still 0.
 - **Not modelled:** Second Life's LSO and its 16 KB, since the fake grid
   compiles every script from source; and the garbage Mono's readings carry,
   which is why a reading here sits a couple of hundred bytes under aditi's and

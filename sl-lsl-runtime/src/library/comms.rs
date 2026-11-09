@@ -433,7 +433,10 @@ fn opensim_dialog(
     let labels: Vec<String> = if buttons.is_empty() {
         vec!["Ok".to_owned()]
     } else {
-        buttons.iter().map(element_to_string).collect()
+        buttons
+            .iter()
+            .map(|button| crate::cast::element_to_string_for(button, true))
+            .collect()
     };
     if labels.iter().any(String::is_empty) {
         opensim_refuse(ctx, "llDialog: Button label cannot be blank", true);

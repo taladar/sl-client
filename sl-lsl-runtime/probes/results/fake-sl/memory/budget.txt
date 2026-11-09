@@ -1,5 +1,5 @@
 grid: fake-sl
-date: 2026-11-07
+date: 2026-11-09
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating Mono
@@ -77,9 +77,9 @@ PROBE memory/budget rec=held kind=integer count=16 used=13585 free=45679 limit=6
 PROBE memory/budget rec=held kind=integer count=64 used=14353 free=45679 limit=65536
 PROBE memory/budget rec=held kind=integer count=cleared used=13265 free=45679 limit=65536
 PROBE memory/budget rec=profiler sp_max_before=0 sp_max_after=14353 used=13265 free=45679 limit=65536
-PROBE memory/budget rec=set-limit asked=65536 value=65536 result=1 used=13265 free=52271 limit=65536
-PROBE memory/budget rec=set-limit asked=65537 value=65537 result=0 used=13265 free=52271 limit=65536
-PROBE memory/budget rec=set-limit asked=100000 value=100000 result=0 used=13265 free=52271 limit=65536
+PROBE memory/budget rec=set-limit asked=65536 value=65536 result=1 used=13265 free=45679 limit=65536
+PROBE memory/budget rec=set-limit asked=65537 value=65537 result=0 used=13265 free=45679 limit=65536
+PROBE memory/budget rec=set-limit asked=100000 value=100000 result=0 used=13265 free=45679 limit=65536
 PROBE memory/budget rec=set-limit asked=32768 value=32768 result=1 used=13265 free=19503 limit=32768
 PROBE memory/budget rec=set-limit asked=used+1024 value=14289 result=1 used=13265 free=1024 limit=14289
 # debug-channel: from="Object" text="Object [script:Probe] Script run-time error"

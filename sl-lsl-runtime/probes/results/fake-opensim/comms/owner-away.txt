@@ -1,5 +1,5 @@
 grid: fake-opensim
-date: 2026-11-07
+date: 2026-11-09
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating YEngine
@@ -21,7 +21,8 @@ PROBE comms/owner-away rec=waiting drive=away seconds=20
 # animations avatar=owner playing="stand"
 # teleport-started flags=0x10
 # back arrived
-PROBE comms/owner-away rec=gone after_polls=2 agent_size_zero=1 details=0
+# animations avatar=other playing="stand"
+PROBE comms/owner-away rec=gone after_polls=2 agent_size_zero=1 details=1
 PROBE comms/owner-away rec=sent-away
 PROBE comms/owner-away rec=returned agent_size_zero=0 details=1
 PROBE comms/owner-away rec=end

@@ -1,16 +1,16 @@
 grid: fake-sl
-date: 2026-11-07
+date: 2026-11-09
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating Mono
 settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
 
-PROBE money/pay-price rec=start region="Fake Region" channel="Second Life Server" version="sl-fake-grid 0.1.0"
-PROBE money/pay-price rec=ask step=0 what=fresh
-PROBE money/pay-price rec=waiting drive=pay-price
 PROBE money/pay-price rec=set prim=B price=9 buttons=1,2,3,4
 PROBE money/pay-price rec=mixed prim=C call=before
 PROBE money/pay-price rec=mixed prim=C call=after
+PROBE money/pay-price rec=start region="Fake Region" channel="Second Life Server" version="sl-fake-grid 0.1.0"
+PROBE money/pay-price rec=ask step=0 what=fresh
+PROBE money/pay-price rec=waiting drive=pay-price
 # pay-price prim=A default=-2 buttons="1,5,10,20"
 PROBE money/pay-price rec=set step=1 what=default price=-2 buttons="-2, -2, -2, -2"
 PROBE money/pay-price rec=waiting drive=pay-price

@@ -1521,10 +1521,9 @@ default
         assert_eq!(
             scene.line("where ").await?,
             format!(
-                "where 1 <0.00000, 0.00000, 0.00000> <{:.5}, {:.5}, {:.5}>",
-                standing.x(),
-                standing.y(),
-                standing.z()
+                "where 1 {} {}",
+                said_vector(imitated, 0.0, 0.0, 0.0),
+                said_vector(imitated, standing.x(), standing.y(), standing.z())
             )
         );
 
@@ -1743,7 +1742,8 @@ default
     touch_start(integer n)
     {
         llShout(0, \"start \" + (string)n + \" link \" + (string)llDetectedLinkNumber(0)
-            + \" grab \" + (string)llDetectedGrab(0) + \" face \" + (string)llDetectedTouchFace(0));
+            + \" grab \" + (string)llDetectedGrab(0) + \" face \" + (string)llDetectedTouchFace(0)
+            + \" group \" + (string)llDetectedGroup(0));
     }
     touch(integer n)
     {
@@ -1773,11 +1773,27 @@ default
         z: 0.33,
     };
 
-    /// The zero vector as a script says it.
+    /// The zero vector as a Second Life script says it.
     const ZERO: &str = "<0.00000, 0.00000, 0.00000>";
 
-    /// The press's offset as a script says it.
-    const SAID_OFFSET: &str = "<0.11000, 0.22000, 0.33000>";
+    /// The press's offset as an OpenSim script says it (only OpenSim tells
+    /// a script the offset).
+    const SAID_OFFSET: &str = "<0.110000, 0.220000, 0.330000>";
+
+    /// `<x, y, z>` as `(string)` writes a vector on the grid `imitated`
+    /// imitates: five decimals on Second Life; on OpenSim each component
+    /// rounded to seven significant digits, then written with six decimals.
+    fn said_vector(imitated: ImitatedGrid, x: f32, y: f32, z: f32) -> String {
+        if imitated == ImitatedGrid::SecondLife {
+            return format!("<{x:.5}, {y:.5}, {z:.5}>");
+        }
+        let seven = |value: f32| -> f64 {
+            format!("{value:.6e}")
+                .parse()
+                .unwrap_or_else(|_error| f64::from(value))
+        };
+        format!("<{:.6}, {:.6}, {:.6}>", seven(x), seven(y), seven(z))
+    }
 
     /// A region holding one box beside the arrival point running
     /// [`TOUCH_SOURCE`].
@@ -1822,7 +1838,8 @@ default
     /// A button held five ticks and a click: Second Life raises `touch` on
     /// the region's clock, once a tick here, and once for the click; OpenSim
     /// raises none with no update between. The prim carries the touch flag
-    /// once its script runs.
+    /// once its script runs. A toucher with no group touching a prim with
+    /// none is of its group (`events/other-avatar`).
     async fn a_held_touch(imitated: ImitatedGrid) -> Result<(), TestError> {
         let region = touch_region()?;
         let mut scene = scene_of(imitated, region).await?;
@@ -1840,9 +1857,9 @@ default
 
         let second_life = imitated == ImitatedGrid::SecondLife;
         let start = if second_life {
-            format!("start 1 link 0 grab {ZERO} face -1")
+            format!("start 1 link 0 grab {ZERO} face -1 group 1")
         } else {
-            format!("start 1 link 0 grab {SAID_OFFSET} face -1")
+            format!("start 1 link 0 grab {SAID_OFFSET} face -1 group 1")
         };
         scene.press(TOUCHED).await?;
         scene.tick(5).await?;
@@ -1902,7 +1919,7 @@ default
         scene.tick(2).await?;
         let mut told = Vec::new();
         if imitated == ImitatedGrid::OpenSim {
-            told.push(format!("start 1 link 2 grab {grab} face -1"));
+            told.push(format!("start 1 link 2 grab {grab} face -1 group 1"));
             told.push("end".to_owned());
         }
         assert_eq!(scene.touch_lines().await, told, "a click on the child");
@@ -1910,7 +1927,7 @@ default
         scene.press(TOUCHED).await?;
         scene.release(TOUCHED).await?;
         scene.tick(2).await?;
-        let mut told = vec![format!("start 1 link 1 grab {grab} face -1")];
+        let mut told = vec![format!("start 1 link 1 grab {grab} face -1 group 1")];
         told.extend(touch);
         told.push("end".to_owned());
         assert_eq!(scene.touch_lines().await, told, "a click on the root");
@@ -2165,14 +2182,12 @@ default
         }
         assert_eq!(broken, lines(&told), "llBreakLink(2)");
 
-        // The child comes back as link 2 on Second Life and last on OpenSim;
-        // the link's forced second of sleep is over within fifteen ticks.
+        // The child comes back as link 2 on both: OpenSim's script link
+        // inserts (`LinkToGroup(child, true)`, `prim/link-refusals`) where
+        // its viewer's link appends. The link's forced second of sleep is
+        // over within fifteen ticks.
         let relinked = step(&mut scene, "link B", 15).await?;
-        let told = if opensim {
-            ["changed 1/3: A C B", "child B 3/3", "child C 2/3"]
-        } else {
-            ["changed 1/3: A B C", "child B 2/3", "child C 3/3"]
-        };
+        let told = ["changed 1/3: A B C", "child B 2/3", "child C 3/3"];
         assert_eq!(relinked, lines(&told), "llCreateLink");
 
         // OpenSim's root hears it once for each child it let go.
@@ -2200,6 +2215,117 @@ default
     #[tokio::test]
     async fn a_scripted_linkset_on_opensim() -> Result<(), TestError> {
         a_scripted_linkset(ImitatedGrid::OpenSim).await
+    }
+
+    /// A box of three scripts — one that reports its object's script memory
+    /// and counts when spoken to, one stopped, one that lowers its limit to
+    /// 16 KB — beside the arrival point.
+    fn counted_scripts_region() -> Result<sl_fake_grid::RegionFixture, TestError> {
+        let local_id = sl_proto::RegionLocalObjectId(0x5C0);
+        let id = u128::from(local_id.0) << 8;
+        let key = sl_types::key::ObjectKey::from(uuid::Uuid::from_u128(id | 0x5));
+        let mut fixture = sl_fake_grid::RegionFixture::new();
+        fixture.world.objects.push(sl_fake_grid::world::box_prim(
+            local_id,
+            key,
+            box_owner(),
+            sl_types::lsl::Vector {
+                x: 132.0,
+                y: 128.0,
+                z: 25.5,
+            },
+            sl_types::lsl::Vector {
+                x: 1.0,
+                y: 1.0,
+                z: 1.0,
+            },
+        ));
+        let reporter = format!(
+            "default
+{{
+    state_entry() {{ llListen({ECHO_SCRIPT_CHANNEL}, \"\", NULL_KEY, \"\"); }}
+    listen(integer channel, string name, key id, string message)
+    {{
+        llShout(0, \"scripts \" + llList2CSV(llGetObjectDetails(llGetKey(),
+            [OBJECT_SCRIPT_MEMORY, OBJECT_RUNNING_SCRIPT_COUNT, OBJECT_TOTAL_SCRIPT_COUNT,
+                OBJECT_LAST_OWNER_ID, OBJECT_REZZER_KEY])));
+    }}
+}}
+"
+        );
+        let idle = "default { state_entry() { } }\n".to_owned();
+        let limited = "default { state_entry() { llSetMemoryLimit(16384); } }\n".to_owned();
+        let mut items = Vec::new();
+        let mut contents_running = Vec::new();
+        for (slot, (name, source, running)) in (0_u128..).zip([
+            ("Reporter", reporter, true),
+            ("Stopped", idle, false),
+            ("Limited", limited, true),
+        ]) {
+            let asset = sl_proto::AssetKey::from(uuid::Uuid::from_u128(id | 0x10 | slot));
+            let item = sl_proto::TaskInventoryItem {
+                item_id: sl_types::key::InventoryKey::from(uuid::Uuid::from_u128(id | 0x20 | slot)),
+                parent_task: key,
+                asset_id: Some(asset),
+                name: name.to_owned(),
+                ..sl_fake_grid::scenario::stock_script_item()
+            };
+            if running {
+                contents_running.push(item.item_id);
+            }
+            items.push(item);
+            let _previous = fixture.assets.insert(asset, source.into_bytes());
+        }
+        let mut contents = sl_fake_grid::world::TaskInventory::stated(1, items);
+        contents.running.extend(contents_running);
+        fixture
+            .world
+            .add_task_inventory(local_id, contents)
+            .map_err(|_contents| "the box is not in the region")?;
+        Ok(fixture)
+    }
+
+    /// An object's script memory and running count are its scripts' as its
+    /// grid reads them (`memory/object`): Second Life counts every script at
+    /// its limit, running or not; OpenSim 16 KB for each running one. Its
+    /// last owner is nobody on Second Life and its owner on OpenSim, and its
+    /// rezzer its owner on both (`prim/identity`).
+    async fn an_object_counts_its_scripts(
+        imitated: ImitatedGrid,
+        expected: &str,
+    ) -> Result<(), TestError> {
+        let region = counted_scripts_region()?;
+        let mut scene = scene_of(imitated, region).await?;
+        scene.tick(3).await?;
+        scene.shout("count").await?;
+        scene.tick(2).await?;
+        assert_eq!(scene.line("scripts ").await?, expected);
+        scene.stop();
+        Ok(())
+    }
+
+    /// On a grid imitating Second Life: 64 KB, 64 KB and 16 KB; two of three
+    /// running.
+    #[tokio::test]
+    async fn an_object_counts_its_scripts_on_second_life() -> Result<(), TestError> {
+        an_object_counts_its_scripts(
+            ImitatedGrid::SecondLife,
+            "scripts 147456, 2, 3, 00000000-0000-0000-0000-000000000000, \
+             00000000-0000-0000-0000-00000000b0c0",
+        )
+        .await
+    }
+
+    /// On a grid imitating OpenSim, which takes no limit: two running at
+    /// 16 KB each.
+    #[tokio::test]
+    async fn an_object_counts_its_scripts_on_opensim() -> Result<(), TestError> {
+        an_object_counts_its_scripts(
+            ImitatedGrid::OpenSim,
+            "scripts 32768, 2, 3, 00000000-0000-0000-0000-00000000b0c0, \
+             00000000-0000-0000-0000-00000000b0c0",
+        )
+        .await
     }
 
     /// What every prim of [`changes_region`] runs: each `changed` shouted as
@@ -2674,7 +2800,10 @@ default
                 _other => None,
             })
             .await?;
-        assert_eq!(ended, "at <134.50000, 128.00000, 25.00000>");
+        assert_eq!(
+            ended,
+            format!("at {}", said_vector(imitated, 134.5, 128.0, 25.0))
+        );
         scene.stop();
         Ok(())
     }
@@ -3124,12 +3253,13 @@ default
 ";
 
     /// The script of the child the rezzer rezzes: it tells the rezzer the
-    /// start parameter it was given.
+    /// start parameter it was given, and whether it stands still.
     const CHILD_SOURCE: &str = "default
 {
     on_rez(integer start)
     {
-        llShout(-5, \"child \" + (string)start + \" \" + (string)llGetStartParameter());
+        llShout(-5, \"child \" + (string)start + \" \" + (string)llGetStartParameter()
+            + \" still \" + (string)(llGetVel() == ZERO_VECTOR));
     }
 }
 ";
@@ -3279,7 +3409,7 @@ default
         scene.tick(10).await?;
         assert_eq!(
             shouted(&mut scene).await,
-            vec!["object_rez mine=1", "heard child 42 42"],
+            vec!["object_rez mine=1", "heard child 42 42 still 1"],
             "the rezzer hears of the rez first, the child its start parameter"
         );
 
@@ -3657,8 +3787,8 @@ default
             lines,
             vec![
                 format!(
-                    "Fake Region|Fake Grid Parcel, 65536|25|{channel}|1|\
-                     <256000.00000, 256000.00000, 0.00000>|1"
+                    "Fake Region|Fake Grid Parcel, 65536|25|{channel}|1|{}|1",
+                    said_vector(imitated, 256_000.0, 256_000.0, 0.0)
                 ),
                 "music http://example.com/stream".to_owned(),
             ]
@@ -3833,6 +3963,10 @@ default
             llShout(0, \"dancing \" + (string)(llListFindList(llGetAnimationList(agent),
                 [(key)\"b68a3d7c-de9e-fc87-eec8-543d787e5b0d\"]) != -1));
         }
+        else if (message == \"held\")
+        {
+            llShout(0, \"held \" + (string)llGetPermissions());
+        }
     }
 
     run_time_permissions(integer perms)
@@ -3899,6 +4033,22 @@ default
             shouted(&mut scene).await,
             vec!["control 1 1".to_owned(), "control 0 1".to_owned()]
         );
+        // The viewer's revoke of the animation permissions names the region,
+        // for every prim in it (`money/lapse`): the controls stay.
+        let region_id = scene.grid.region_id(REGION).ok_or("no region id")?;
+        scene
+            .send(
+                Command::RevokeScriptPermissions {
+                    object_id: sl_types::key::ObjectKey::from(region_id),
+                    permissions: sl_types::lsl::ScriptPermissions(0x10 | 0x8000),
+                },
+                |event| matches!(event, ServerEvent::RevokeScriptPermissions { .. }),
+            )
+            .await?;
+        scene.tick(1).await?;
+        scene.shout("held").await?;
+        scene.tick(2).await?;
+        assert_eq!(shouted(&mut scene).await, vec!["held 4".to_owned()]);
         scene.stop();
         Ok(())
     }

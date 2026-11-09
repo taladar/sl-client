@@ -1,30 +1,37 @@
 grid: fake-sl
-date: 2026-11-07
+date: 2026-11-09
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating Mono
 settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
 
+PROBE errors/runtime-errors rec=listening channel=2147483647
+PROBE errors/runtime-errors rec=listening channel=2147483647
 PROBE errors/runtime-errors rec=start region="Fake Region" channel="Second Life Server" version="sl-fake-grid 0.1.0"
-PROBE errors/runtime-errors rec=listening channel=2147483647
-PROBE errors/runtime-errors rec=listening channel=2147483647
 PROBE errors/runtime-errors rec=fault script=div-int step=before
 # debug-channel: from="Object" text="Object [script:Div int] Script run-time error"
 # debug-channel: from="Object" text="Math Error"
-# debug-channel: from="Object" text="Object [script:Listener near] Script run-time error"
-# debug-channel: from="Object" text="llGetOwnerKey is not implemented by this grid"
+PROBE errors/runtime-errors rec=heard name="Object" same_owner=1 dist=10.000000 len=45 msg="Object [script:Div int] Script run-time error"
+PROBE errors/runtime-errors rec=heard name="Object" same_owner=1 dist=10.000000 len=10 msg="Math Error"
 # debug-channel: from="Object" text="Object [script:Mod int] Script run-time error"
 # debug-channel: from="Object" text="Math Error"
+PROBE errors/runtime-errors rec=heard name="Object" same_owner=1 dist=10.000000 len=45 msg="Object [script:Mod int] Script run-time error"
+PROBE errors/runtime-errors rec=heard name="Object" same_owner=1 dist=10.000000 len=10 msg="Math Error"
 # debug-channel: from="Object" text="Object [script:Div float] Script run-time error"
 # debug-channel: from="Object" text="Math Error"
+PROBE errors/runtime-errors rec=heard name="Object" same_owner=1 dist=10.000000 len=47 msg="Object [script:Div float] Script run-time error"
+PROBE errors/runtime-errors rec=heard name="Object" same_owner=1 dist=10.000000 len=10 msg="Math Error"
 # debug-channel: from="Object" text="Object [script:Recurse] Script run-time error"
 # debug-channel: from="Object" text="Stack-Heap Collision"
+PROBE errors/runtime-errors rec=heard name="Object" same_owner=1 dist=10.000000 len=45 msg="Object [script:Recurse] Script run-time error"
+PROBE errors/runtime-errors rec=heard name="Object" same_owner=1 dist=10.000000 len=20 msg="Stack-Heap Collision"
 PROBE errors/runtime-errors rec=script-state when=after-faults script="Div int" running=0
 PROBE errors/runtime-errors rec=script-state when=after-faults script="Mod int" running=0
 PROBE errors/runtime-errors rec=script-state when=after-faults script="Div float" running=0
 PROBE errors/runtime-errors rec=script-state when=after-faults script="Recurse" running=0
 PROBE errors/runtime-errors rec=script-state when=after-faults script=self running=1
-# debug-channel: from="Object" text="Too many errors... dropping further messages until the flood stops"
+# debug-channel: from="Object" text="Could not find script 'Nope'."
+PROBE errors/runtime-errors rec=heard name="Object" same_owner=1 dist=10.000000 len=29 msg="Could not find script 'Nope'."
 PROBE errors/runtime-errors rec=script-state when=after-faults script=missing running=0
 PROBE errors/runtime-errors rec=ping target=stopped
 PROBE errors/runtime-errors rec=restart script="Div int"
@@ -34,16 +41,17 @@ PROBE errors/runtime-errors rec=script-state when=after-restart script="Mod int"
 PROBE errors/runtime-errors rec=script-state when=after-restart script="Div float" running=0
 PROBE errors/runtime-errors rec=script-state when=after-restart script="Recurse" running=0
 PROBE errors/runtime-errors rec=script-state when=after-restart script=self running=1
+# debug-channel: from="Object" text="Could not find script 'Nope'."
+PROBE errors/runtime-errors rec=heard name="Object" same_owner=1 dist=10.000000 len=29 msg="Could not find script 'Nope'."
 PROBE errors/runtime-errors rec=script-state when=after-restart script=missing running=0
 PROBE errors/runtime-errors rec=end
 # debug-channel by=other: from="Object" text="Object [script:Div int] Script run-time error"
 # debug-channel by=other: from="Object" text="Math Error"
-# debug-channel by=other: from="Object" text="Object [script:Listener near] Script run-time error"
-# debug-channel by=other: from="Object" text="llGetOwnerKey is not implemented by this grid"
 # debug-channel by=other: from="Object" text="Object [script:Mod int] Script run-time error"
 # debug-channel by=other: from="Object" text="Math Error"
 # debug-channel by=other: from="Object" text="Object [script:Div float] Script run-time error"
 # debug-channel by=other: from="Object" text="Math Error"
 # debug-channel by=other: from="Object" text="Object [script:Recurse] Script run-time error"
 # debug-channel by=other: from="Object" text="Stack-Heap Collision"
-# debug-channel by=other: from="Object" text="Too many errors... dropping further messages until the flood stops"
+# debug-channel by=other: from="Object" text="Could not find script 'Nope'."
+# debug-channel by=other: from="Object" text="Could not find script 'Nope'."

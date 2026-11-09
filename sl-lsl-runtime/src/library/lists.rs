@@ -12,7 +12,7 @@
 
 use sl_types::lsl::{Rotation, Vector};
 
-use crate::cast::element_to_string;
+use crate::cast::{element_to_string, element_to_string_for};
 use crate::format;
 use crate::library::collation::OutOfRange;
 use crate::library::dotnet::{is_uuid, parse_double};
@@ -102,17 +102,21 @@ pub fn ll_get_list_entry_type<C: PureCtx>(
 }
 
 /// `llList2String`: the element as `(string)` of a list prints it (a vector
-/// with six decimals), or `""` past either end.
+/// with six decimals; on OpenSim a float as .NET prints a double), or `""`
+/// past either end.
 ///
 /// # Errors
 ///
 /// None; the signature is the library's.
-pub fn ll_list2_string<C>(
-    _ctx: &mut C,
+pub fn ll_list2_string<C: PureCtx>(
+    ctx: &mut C,
     list: Vec<Element>,
     index: i32,
 ) -> Result<String, CallError> {
-    Ok(at(&list, index).map(element_to_string).unwrap_or_default())
+    let opensim = ctx.flavour().is_opensim();
+    Ok(at(&list, index)
+        .map(|element| element_to_string_for(element, opensim))
+        .unwrap_or_default())
 }
 
 /// `llList2Integer`: the element as an integer — a float truncated on
@@ -1235,19 +1239,27 @@ fn dump_element(element: &Element) -> String {
 
 /// `llDumpList2String`: the elements as text, joined by `separator`; a float
 /// written as `(string)` writes it, but negative zero as `0.000000`
-/// (`strings/conversions`).
+/// (`strings/conversions`). OpenSim writes each element as its list's text
+/// does.
 ///
 /// # Errors
 ///
 /// None; the signature is the library's.
-pub fn ll_dump_list2_string<C>(
-    _ctx: &mut C,
+pub fn ll_dump_list2_string<C: PureCtx>(
+    ctx: &mut C,
     list: Vec<Element>,
     separator: String,
 ) -> Result<String, CallError> {
+    let opensim = ctx.flavour().is_opensim();
     Ok(list
         .iter()
-        .map(dump_element)
+        .map(|element| {
+            if opensim {
+                element_to_string_for(element, true)
+            } else {
+                dump_element(element)
+            }
+        })
         .collect::<Vec<_>>()
         .join(&separator))
 }
@@ -1272,11 +1284,19 @@ fn csv_float(float: f32) -> String {
 /// `llList2CSV`: the elements as text joined by `", "`, a float with all its
 /// digits (`123456789.0` is `123456792.000000`, where `(string)` writes
 /// `123456800.000000`) and a vector's or rotation's components likewise.
+/// OpenSim writes each element as its list's text does.
 ///
 /// # Errors
 ///
 /// None; the signature is the library's.
-pub fn ll_list2_csv<C>(_ctx: &mut C, list: Vec<Element>) -> Result<String, CallError> {
+pub fn ll_list2_csv<C: PureCtx>(ctx: &mut C, list: Vec<Element>) -> Result<String, CallError> {
+    if ctx.flavour().is_opensim() {
+        return Ok(list
+            .iter()
+            .map(|element| element_to_string_for(element, true))
+            .collect::<Vec<_>>()
+            .join(", "));
+    }
     Ok(list
         .iter()
         .map(|element| match element {
@@ -1509,7 +1529,7 @@ mod tests {
     fn csv(list: &[Element]) -> String {
         format!(
             "[{}]",
-            ll_list2_csv(&mut (), list.to_vec()).unwrap_or_default()
+            ll_list2_csv(&mut crate::library::bare::sl(), list.to_vec()).unwrap_or_default()
         )
     }
 
@@ -1575,7 +1595,7 @@ mod tests {
         );
         assert_eq!(ll_list2_integer(&mut sl(), vec![f(3e9)], 0), Ok(i32::MIN));
         assert_eq!(
-            ll_list2_string(&mut (), vec![f(-0.0)], 0),
+            ll_list2_string(&mut crate::library::bare::sl(), vec![f(-0.0)], 0),
             Ok("-0.000000".to_owned())
         );
     }
@@ -1853,18 +1873,21 @@ mod tests {
         // `llDumpList2String` a float as `(string)` does but negative zero.
         assert_eq!(
             ll_list2_csv(
-                &mut (),
+                &mut crate::library::bare::sl(),
                 vec![f(123_456_789.0), f(-0.0), f(f32::INFINITY), f(f32::NAN)]
             ),
             Ok("123456792.000000, -0.000000, inf, nan".to_owned())
         );
         assert_eq!(
-            ll_list2_csv(&mut (), vec![v(1.0, -0.000_002, 123_456.7)]),
+            ll_list2_csv(
+                &mut crate::library::bare::sl(),
+                vec![v(1.0, -0.000_002, 123_456.7)]
+            ),
             Ok("<1.000000, -0.000002, 123456.703125>".to_owned())
         );
         assert_eq!(
             ll_dump_list2_string(
-                &mut (),
+                &mut crate::library::bare::sl(),
                 vec![f(123_456_789.0), f(-0.0), i(1), s("s"), v(1.0, 2.0, 3.0)],
                 "|".to_owned()
             ),

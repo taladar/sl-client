@@ -1,12 +1,12 @@
 grid: fake-opensim
-date: 2026-11-07
+date: 2026-11-09
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating YEngine
 settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
 
 PROBE land/region rec=start region="Fake Region" channel="OpenSim" version="sl-fake-grid 0.1.0"
-PROBE land/region rec=region named=1 corner="<256000.00000, 256000.00000, 0.00000>" corner_on_grid=1
+PROBE land/region rec=region named=1 corner="<256000.000000, 256000.000000, 0.000000>" corner_on_grid=1
 PROBE land/region rec=region-flags value=335544326 set="" other_bits=335544326
 PROBE land/region rec=load fps=55.000000 dilation=1.000000 agents=2
 PROBE land/region rec=hostname hostname="127.0.0.1" same_as_env=1
@@ -15,19 +15,19 @@ PROBE land/region rec=agent-list scope=2 owner_in=1 others=1
 PROBE land/region rec=agent-list scope=4 owner_in=1 others=1
 PROBE land/region rec=agent-list scope=0 owner_in=0 others=1 only="INVALID_SCOPE"
 PROBE land/region rec=agent-list scope=8 owner_in=0 others=1 only="INVALID_SCOPE"
-PROBE land/region rec=edge from=here dir="<1.00000, 0.00000, 0.00000>" answer=0
-PROBE land/region rec=edge from=here dir="<-1.00000, 0.00000, 0.00000>" answer=1
-PROBE land/region rec=edge from=here dir="<0.00000, 1.00000, 0.00000>" answer=1
-PROBE land/region rec=edge from=here dir="<0.00000, -1.00000, 0.00000>" answer=1
-PROBE land/region rec=edge from=here dir="<1.00000, 1.00000, 0.00000>" answer=0
-PROBE land/region rec=edge from=here dir="<0.00000, 0.00000, 1.00000>" answer=1
-PROBE land/region rec=edge from=here dir="<1.00000, 0.00000, 1.00000>" answer=0
-PROBE land/region rec=edge from=here dir="<0.00000, 0.00000, 0.00000>" answer=1
-PROBE land/region rec=edge from=west-edge dir="<-1.00000, 0.00000, 0.00000>" answer=1
-PROBE land/region rec=edge from=east-edge dir="<1.00000, 0.00000, 0.00000>" answer=0
-PROBE land/region rec=edge from=south-edge dir="<0.00000, -1.00000, 0.00000>" answer=1
-PROBE land/region rec=edge from=north-edge dir="<0.00000, 1.00000, 0.00000>" answer=1
-PROBE land/region rec=edge from=outside dir="<-1.00000, 0.00000, 0.00000>" answer=1
+PROBE land/region rec=edge from=here dir="<1.000000, 0.000000, 0.000000>" answer=0
+PROBE land/region rec=edge from=here dir="<-1.000000, 0.000000, 0.000000>" answer=1
+PROBE land/region rec=edge from=here dir="<0.000000, 1.000000, 0.000000>" answer=1
+PROBE land/region rec=edge from=here dir="<0.000000, -1.000000, 0.000000>" answer=1
+PROBE land/region rec=edge from=here dir="<1.000000, 1.000000, 0.000000>" answer=0
+PROBE land/region rec=edge from=here dir="<0.000000, 0.000000, 1.000000>" answer=1
+PROBE land/region rec=edge from=here dir="<1.000000, 0.000000, 1.000000>" answer=0
+PROBE land/region rec=edge from=here dir="<0.000000, 0.000000, 0.000000>" answer=1
+PROBE land/region rec=edge from=west-edge dir="<-1.000000, 0.000000, 0.000000>" answer=1
+PROBE land/region rec=edge from=east-edge dir="<1.000000, 0.000000, 0.000000>" answer=0
+PROBE land/region rec=edge from=south-edge dir="<0.000000, -1.000000, 0.000000>" answer=1
+PROBE land/region rec=edge from=north-edge dir="<0.000000, 1.000000, 0.000000>" answer=1
+PROBE land/region rec=edge from=outside dir="<-1.000000, 0.000000, 0.000000>" answer=1
 PROBE land/region rec=sim-data-asked of=own data=5 got_key=1
 PROBE land/region rec=sim-data-asked of=own data=6 got_key=1
 PROBE land/region rec=sim-data-asked of=own data=7 got_key=1

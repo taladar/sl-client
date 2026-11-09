@@ -1,14 +1,12 @@
 grid: fake-opensim
-date: 2026-11-07
+date: 2026-11-09
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating YEngine
 settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
 
-# chat type=say from="Object" length=14 text="Script running"
-# debug-channel: from="Object" text="YEngine: llSetStatus is not implemented by this grid (script: Faller event: state_entry primID: 5ad8827b-a095-42fe-c909-6c33f52d17fb at: <128,124,28>) Script must be Reset to re-enable.\n"
 PROBE events/collision rec=start region="Fake Region" channel="OpenSim" version="sl-fake-grid 0.1.0"
-PROBE events/collision rec=no-faller
+PROBE events/collision rec=phase phase=1 name=solid events="" collisions=0 faller_start=0 faller_end=0 faller_land_start=0 faller_land_end=0 faller_collisions=0 faller_hit_probe=0
+PROBE events/collision rec=phase phase=2 name=volume-detect events="" collisions=0 faller_start=0 faller_end=0 faller_land_start=0 faller_land_end=0 faller_collisions=0 faller_hit_probe=0
+PROBE events/collision rec=phase phase=3 name=asleep events="" collisions=0 faller_start=0 faller_end=0 faller_land_start=0 faller_land_end=0 faller_collisions=0 faller_hit_probe=0
 PROBE events/collision rec=end
-# chat by=other type=say from="Object" length=14 text="Script running"
-# debug-channel by=other: from="Object" text="YEngine: llSetStatus is not implemented by this grid (script: Faller event: state_entry primID: 5ad8827b-a095-42fe-c909-6c33f52d17fb at: <128,124,28>) Script must be Reset to re-enable.\n"

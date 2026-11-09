@@ -1,6 +1,7 @@
 // corpus: a key compares as text but tests true only when it is a valid key
 // Oracle: the value model: (key)"" == NULL_KEY is false; NULL_KEY and a key
-// that is not a UUID at all are false in a condition.
+// that is not a UUID at all are false in a condition. OpenSim takes any key
+// but "" and NULL_KEY as true (strings/conversions on both engines).
 default
 {
     state_entry()

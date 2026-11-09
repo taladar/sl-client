@@ -77,3 +77,13 @@ script on the Second Life flavour, bridged to the existing library — which
 also contradicts [context/lsl.md](../context/lsl.md)'s "no LSO bytecode"
 non-goal. Deferred by the user's call rather than built as an
 approximation.
+
+## From test-lsl-differential-corpus-triage (2026-11-09)
+
+The LSO port is also where LSO's maths errors belong: `errors/math-lso` on
+aditi shows LSO raising `Math Error` and stopping the script for a NaN or an
+infinite result (a negative `llSqrt`, a float overflow, `llAcos` out of range,
+a NaN `llPow`, casts of infinity and NaN), where Mono answers NaN and Infinity.
+The fake grid runs those scripts as Mono, and `probes/accepted.toml` names
+this task for their differences, with `memory/budget-lso` and the LSO scripts
+of `memory/collision`, `memory/recursion` and `memory/object`.

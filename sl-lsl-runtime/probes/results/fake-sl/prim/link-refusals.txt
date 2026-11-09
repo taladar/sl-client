@@ -1,13 +1,62 @@
 grid: fake-sl
-date: 2026-11-07
+date: 2026-11-09
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating Mono
 settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
-complete: no
 
 PROBE prim/link-refusals rec=start region="Fake Region" channel="Second Life Server" version="sl-fake-grid 0.1.0"
-# debug-channel: from="Object" text="Object [script:Child] Script run-time error"
-# debug-channel: from="Object" text="llGetOwnerKey is not implemented by this grid"
-# debug-channel by=other: from="Object" text="Object [script:Child] Script run-time error"
-# debug-channel by=other: from="Object" text="llGetOwnerKey is not implemented by this grid"
+# question permissions=128 object="Object" owner="<first> <last>" experience=none
+PROBE prim/link-refusals rec=found
+PROBE prim/link-refusals rec=waiting drive=answer grant=128
+# answer grant=128
+PROBE prim/link-refusals rec=permissions got=128
+PROBE prim/link-refusals rec=try label=link-too-far
+PROBE prim/link-refusals rec=links label=after-too-far prims=1 link=0 seated=0 key1=null key2=null key3=null key4=null
+PROBE prim/link-refusals rec=try label=link
+PROBE prim/link-refusals rec=child-changed bits=LINK link=2 prims=2
+PROBE prim/link-refusals rec=changed bits=LINK link=1 prims=2 seated=0
+PROBE prim/link-refusals rec=links label=linked prims=2 link=1 seated=0 key1=self key2=child key3=null key4=null
+PROBE prim/link-refusals rec=try label=break-2-unpermitted
+PROBE prim/link-refusals rec=try label=break-1-unpermitted
+PROBE prim/link-refusals rec=try label=break-all-unpermitted
+PROBE prim/link-refusals rec=unpermitted-done prims=2
+# debug-channel: from="Object" text="Script trying to break links but PERMISSION_CHANGE_LINKS permission not set!"
+# debug-channel: from="Object" text="Script trying to break links but PERMISSION_CHANGE_LINKS permission not set!"
+# debug-channel: from="Object" text="Script trying to break links but PERMISSION_CHANGE_LINKS permission not set!"
+PROBE prim/link-refusals rec=links label=after-unpermitted prims=2 link=1 seated=0 key1=self key2=child key3=null key4=null
+PROBE prim/link-refusals rec=waiting drive=sit by=other
+# debug-channel by=other: from="Object" text="Script trying to break links but PERMISSION_CHANGE_LINKS permission not set!"
+# debug-channel by=other: from="Object" text="Script trying to break links but PERMISSION_CHANGE_LINKS permission not set!"
+# debug-channel by=other: from="Object" text="Script trying to break links but PERMISSION_CHANGE_LINKS permission not set!"
+# sit by=other sit_position=<-0.340, 0.000, 0.550> sit_rotation=<0.000, 0.000, 1.000, 0.000> camera_eye=<0.000, 0.000, 0.000> camera_at=<0.000, 0.000, 0.000> force_mouselook=0 autopilot=1
+PROBE prim/link-refusals rec=child-changed bits=LINK link=2 prims=3
+PROBE prim/link-refusals rec=changed bits=LINK link=1 prims=3 seated=1
+PROBE prim/link-refusals rec=links label=seated prims=3 link=1 seated=1 key1=self key2=child key3=avatar key4=null
+PROBE prim/link-refusals rec=try label=break-2-seated
+PROBE prim/link-refusals rec=child-changed bits=LINK link=0 prims=1
+PROBE prim/link-refusals rec=changed bits=LINK link=0 prims=1 seated=0
+# animations avatar=other playing="falldown@other-object"
+# animations avatar=other playing="land@other-object"
+# animations avatar=other playing="stand@other-object"
+PROBE prim/link-refusals rec=links label=after-break-2-seated prims=1 link=0 seated=0 key1=null key2=null key3=null key4=null
+PROBE prim/link-refusals rec=waiting drive=sit by=other
+# sit by=other sit_position=<-0.340, 0.000, 0.550> sit_rotation=<0.000, 0.000, 1.000, 0.000> camera_eye=<0.000, 0.000, 0.000> camera_at=<0.000, 0.000, 0.000> force_mouselook=0 autopilot=1
+PROBE prim/link-refusals rec=changed bits=LINK link=1 prims=2 seated=1
+PROBE prim/link-refusals rec=links label=before-relink-seated prims=2 link=1 seated=1 key1=self key2=avatar key3=null key4=null
+PROBE prim/link-refusals rec=try label=relink-seated
+PROBE prim/link-refusals rec=child-changed bits=LINK link=2 prims=3
+PROBE prim/link-refusals rec=changed bits=LINK link=1 prims=3 seated=1
+PROBE prim/link-refusals rec=links label=relinked-seated prims=3 link=1 seated=1 key1=self key2=child key3=avatar key4=null
+PROBE prim/link-refusals rec=try label=break-sitter link=3
+PROBE prim/link-refusals rec=links label=after-break-sitter prims=3 link=1 seated=1 key1=self key2=child key3=avatar key4=null
+PROBE prim/link-refusals rec=links label=before-break-all-seated prims=3 link=1 seated=1 key1=self key2=child key3=avatar key4=null
+PROBE prim/link-refusals rec=try label=break-all-seated
+# animations avatar=other playing="falldown@other-object"
+PROBE prim/link-refusals rec=child-changed bits=LINK link=0 prims=1
+PROBE prim/link-refusals rec=changed bits=LINK link=0 prims=1 seated=0
+# animations avatar=other playing="land@other-object"
+# animations avatar=other playing="stand@other-object"
+PROBE prim/link-refusals rec=links label=after-break-all-seated prims=1 link=0 seated=0 key1=null key2=null key3=null key4=null
+PROBE prim/link-refusals rec=links label=end prims=1 link=0 seated=0 key1=null key2=null key3=null key4=null
+PROBE prim/link-refusals rec=end

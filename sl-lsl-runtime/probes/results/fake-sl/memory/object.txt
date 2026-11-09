@@ -1,44 +1,44 @@
 grid: fake-sl
-date: 2026-11-07
+date: 2026-11-09
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating Mono
 settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
 
-# target: script "Idle LSO" lsl2
 PROBE memory/object rec=limit script=limited asked=16384 result=1 limit=16384
+# sim-stats active_scripts=2.110492
+# target: script "Idle LSO" lsl2
 PROBE memory/object rec=start region="Fake Region" channel="Second Life Server" version="sl-fake-grid 0.1.0"
 PROBE memory/object rec=self used=11203 limit=65536
-# sim-stats active_scripts=3.3789835
-# sim-stats active_scripts=3.6151068
+# sim-stats active_scripts=2.337596
 PROBE memory/object rec=script-state when=settled script="Idle" running=1
 PROBE memory/object rec=script-state when=settled script="Limited" running=1
 PROBE memory/object rec=script-state when=settled script="Stopped" running=0
 PROBE memory/object rec=script-state when=settled script="Idle LSO" running=1
 PROBE memory/object rec=script-state when=settled script="Reader" running=1
-PROBE memory/object rec=details of=self when=settled length=4 script_memory=327680 running=5 total=5 script_time=0.000000
-# sim-stats active_scripts=3.7895145
+PROBE memory/object rec=details of=self when=settled length=4 script_memory=278528 running=4 total=5 script_time=0.000000
+# sim-stats active_scripts=2.5602477
+# sim-stats active_scripts=2.7193418
 PROBE memory/object rec=script-state when=idle-stopped script="Idle" running=0
 PROBE memory/object rec=script-state when=idle-stopped script="Limited" running=1
 PROBE memory/object rec=script-state when=idle-stopped script="Stopped" running=0
 PROBE memory/object rec=script-state when=idle-stopped script="Idle LSO" running=1
 PROBE memory/object rec=script-state when=idle-stopped script="Reader" running=1
-PROBE memory/object rec=details of=self when=idle-stopped length=4 script_memory=327680 running=5 total=5 script_time=0.000000
+PROBE memory/object rec=details of=self when=idle-stopped length=4 script_memory=278528 running=3 total=5 script_time=0.000000
 PROBE memory/object rec=limit script=limited asked=32768 result=1 limit=32768
-# sim-stats active_scripts=3.9483693
-# sim-stats active_scripts=4.147363
+# sim-stats active_scripts=2.9179063
 PROBE memory/object rec=script-state when=idle-started script="Idle" running=1
 PROBE memory/object rec=script-state when=idle-started script="Limited" running=1
 PROBE memory/object rec=script-state when=idle-started script="Stopped" running=0
 PROBE memory/object rec=script-state when=idle-started script="Idle LSO" running=1
 PROBE memory/object rec=script-state when=idle-started script="Reader" running=1
-PROBE memory/object rec=details of=self when=idle-started length=4 script_memory=327680 running=5 total=5 script_time=0.000000
-# sim-stats active_scripts=4.333381
+PROBE memory/object rec=details of=self when=idle-started length=4 script_memory=294912 running=4 total=5 script_time=0.000000
+# sim-stats active_scripts=3.1188867
+# sim-stats active_scripts=3.3067615
 PROBE memory/object rec=other answered=1
 PROBE memory/object rec=details of=other when=settled length=4 script_memory=65536 running=1 total=1 script_time=0.000000
 PROBE memory/object rec=details of=owner when=settled length=4 script_memory=0 running=0 total=0 script_time=0.000000
 PROBE memory/object rec=details of=null-key when=settled length=0
 PROBE memory/object rec=details of=nothing when=settled length=0
 PROBE memory/object rec=end
-# sim-stats active_scripts=4.507269
-# sim-stats active_scripts=4.6698174
+# sim-stats active_scripts=3.4823852

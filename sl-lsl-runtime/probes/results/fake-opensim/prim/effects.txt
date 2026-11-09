@@ -1,13 +1,12 @@
 grid: fake-opensim
-date: 2026-11-07
+date: 2026-11-09
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating YEngine
 settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
 
-# chat type=say from="Object" length=14 text="Script running"
 PROBE prim/effects rec=try label=particles-missing-value
-# owner-say: from="Object" text="[YEngine]: Exception while running c29287f4-e7aa-fab8-c527-b42fb916014d"
+# owner-say: from="Object" text="[YEngine]: Exception while running 56f5bb64-36e0-6cdd-cfdc-99d93d853b44"
 # owner-say: from="Object" text="IndexOutOfRangeException: Index was outside the bounds of the array."
 # owner-say: from="Object" text="Prim: <Object>, Script: <Missing>, Location: Fake Region <130,124,26>"
 # owner-say: from="Object" text="Script must be Reset to re-enable."
@@ -53,4 +52,3 @@ PROBE prim/effects rec=media label=get-unknown-rule got="1000"
 PROBE prim/effects rec=media label=clear status=0
 PROBE prim/effects rec=media label=clear-face-9 status=1003
 PROBE prim/effects rec=end
-# chat by=other type=say from="Object" length=14 text="Script running"

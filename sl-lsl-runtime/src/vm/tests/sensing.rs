@@ -425,3 +425,42 @@ fn a_ray_is_answered_as_each_grid_answers_it() -> Result<(), String> {
     assert!(said.is_empty(), "YEngine tells the owner: {said:?}");
     Ok(())
 }
+
+/// What `llDetected*` read in an event with no detected block, as each grid
+/// answers it (`events/detected-cleared`): Second Life's zero values with
+/// the `NULL_KEY` name, OpenSim's empty strings, face −1, touch points of
+/// `<-1, -1, 0>` and a rotation of four zeros.
+#[test]
+fn nothing_detected_reads_as_each_grid_reads_it() -> Result<(), String> {
+    let source = r#"
+default
+{
+    state_entry()
+    {
+        print("[" + llDetectedName(0) + "] [" + (string)llDetectedKey(0) + "] ["
+            + (string)llDetectedOwner(0) + "] " + (string)llDetectedTouchFace(0) + " "
+            + (string)llDetectedTouchST(0) + " " + (string)llDetectedTouchUV(0) + " "
+            + (string)llDetectedRot(0));
+    }
+}"#;
+    let null = crate::value::NULL_KEY;
+    for (flavour, expected) in [
+        (
+            EngineFlavour::SecondLife,
+            format!(
+                "[{null}] [{null}] [{null}] 0 <0.00000, 0.00000, 0.00000> \
+                 <0.00000, 0.00000, 0.00000> <0.00000, 0.00000, 0.00000, 1.00000>"
+            ),
+        ),
+        (
+            EngineFlavour::YEngine,
+            "[] [] [] -1 <-1.000000, -1.000000, 0.000000> <-1.000000, -1.000000, 0.000000> \
+             <0.000000, 0.000000, 0.000000, 0.000000>"
+                .to_owned(),
+        ),
+    ] {
+        let (host, _lines) = super::strings::replay(source, flavour, 5)?;
+        assert_eq!(host.texts(A), vec![expected.as_str()], "{flavour:?}");
+    }
+    Ok(())
+}

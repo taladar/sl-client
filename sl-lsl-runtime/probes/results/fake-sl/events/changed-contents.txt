@@ -1,13 +1,58 @@
 grid: fake-sl
-date: 2026-11-07
+date: 2026-11-09
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating Mono
 settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
-complete: no
 
 PROBE events/changed-contents rec=start region="Fake Region" channel="Second Life Server" version="sl-fake-grid 0.1.0"
-# debug-channel: from="Object" text="Object [script:Child] Script run-time error"
-# debug-channel: from="Object" text="llGetOwnerKey is not implemented by this grid"
-# debug-channel by=other: from="Object" text="Object [script:Child] Script run-time error"
-# debug-channel by=other: from="Object" text="llGetOwnerKey is not implemented by this grid"
+PROBE events/changed-contents rec=waiting drive=answer grant=128
+# question permissions=128 object="Object" owner="<first> <last>" experience=none
+# answer grant=128
+PROBE events/changed-contents rec=permissions got=128
+PROBE events/changed-contents rec=changed prim=B step=0 bits=LINK items=1
+PROBE events/changed-contents rec=changed prim=A step=0 bits=LINK items=1
+PROBE events/changed-contents rec=step n=1 allow_drop=0 items=1
+PROBE events/changed-contents rec=waiting drive=contents op=drop name=Dropped
+# contents prim=A op=drop name="Dropped"
+PROBE events/changed-contents rec=changed prim=A step=1 bits=INVENTORY items=2
+PROBE events/changed-contents rec=step n=2 allow_drop=0 items=2
+PROBE events/changed-contents rec=waiting drive=contents op=rename name=Dropped to=Renamed
+# contents prim=A op=rename name="Dropped" to="Renamed"
+PROBE events/changed-contents rec=changed prim=A step=2 bits=INVENTORY items=2
+PROBE events/changed-contents rec=step n=3 allow_drop=0 items=2
+PROBE events/changed-contents rec=waiting drive=contents op=remove name=Renamed
+# contents prim=A op=remove name="Renamed"
+PROBE events/changed-contents rec=changed prim=A step=3 bits=INVENTORY items=1
+PROBE events/changed-contents rec=step n=4 allow_drop=0 items=1
+PROBE events/changed-contents rec=waiting drive=contents op=new-script name=Fresh
+# contents prim=A op=new-script name="Fresh"
+PROBE events/changed-contents rec=changed prim=A step=4 bits=INVENTORY items=2
+PROBE events/changed-contents rec=step n=5 allow_drop=0 items=2
+PROBE events/changed-contents rec=waiting drive=contents op=save-script name=Fresh
+# contents prim=A op=save-script name="Fresh" compiled=1
+PROBE events/changed-contents rec=changed prim=A step=5 bits=INVENTORY items=2
+PROBE events/changed-contents rec=step n=6 allow_drop=0 items=2
+PROBE events/changed-contents rec=waiting drive=contents op=remove name=Fresh
+# contents prim=A op=remove name="Fresh"
+PROBE events/changed-contents rec=changed prim=A step=6 bits=INVENTORY items=1
+PROBE events/changed-contents rec=step n=7 allow_drop=0 items=1
+PROBE events/changed-contents rec=waiting drive=contents op=drop name=Card prim=B
+# contents prim=B op=drop name="Card"
+PROBE events/changed-contents rec=changed prim=B step=7 bits=INVENTORY items=2
+PROBE events/changed-contents rec=step n=8 allow_drop=0 items=1
+PROBE events/changed-contents rec=waiting drive=contents by=other op=drop name=Gift
+# contents by=other prim=A op=drop name="Gift"
+PROBE events/changed-contents rec=step n=9 allow_drop=1 items=1
+PROBE events/changed-contents rec=waiting drive=contents by=other op=drop name=Allowed
+# alert by=other text="Unable to edit this!"
+# contents by=other prim=A op=drop name="Allowed"
+PROBE events/changed-contents rec=changed prim=A step=9 bits=ALLOWED_DROP items=2
+PROBE events/changed-contents rec=step n=10 allow_drop=1 items=2
+PROBE events/changed-contents rec=waiting drive=contents op=drop name=Owned
+# contents prim=A op=drop name="Owned"
+PROBE events/changed-contents rec=changed prim=A step=10 bits=INVENTORY items=3
+PROBE events/changed-contents rec=step n=11 what=unlink allow_drop=0 items=3
+PROBE events/changed-contents rec=changed prim=B step=11 bits=LINK items=2
+PROBE events/changed-contents rec=changed prim=A step=11 bits=LINK items=3
+PROBE events/changed-contents rec=end items=3 prims=1

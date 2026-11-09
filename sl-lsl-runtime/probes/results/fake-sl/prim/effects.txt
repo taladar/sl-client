@@ -1,15 +1,15 @@
 grid: fake-sl
-date: 2026-11-07
+date: 2026-11-09
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating Mono
 settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
 
+PROBE prim/effects rec=try label=particles-missing-value
+PROBE prim/effects rec=carried-on label=particles-missing-value
 PROBE prim/effects rec=start region="Fake Region" channel="Second Life Server" version="sl-fake-grid 0.1.0"
 PROBE prim/effects rec=try label=play-missing-name
 # debug-channel: from="Object" text="Could not find sound 'no such sound'."
-PROBE prim/effects rec=try label=particles-missing-value
-PROBE prim/effects rec=carried-on label=particles-missing-value
 PROBE prim/effects rec=try label=play-unknown-key
 PROBE prim/effects rec=try label=play-null-key
 # debug-channel: from="Object" text="Could not find sound '00000000-0000-0000-0000-000000000000'."
@@ -46,7 +46,7 @@ PROBE prim/effects rec=try label=texture-anim-negative-rate
 PROBE prim/effects rec=try label=texture-anim-face-9
 PROBE prim/effects rec=try label=texture-anim-without-on
 PROBE prim/effects rec=try label=media-face-9
-# debug-channel: from="Object" text="PRIM_MEDIA error: face 9 on object d237804e-4451-d9a2-cad1-db6352b95291 not found"
+# debug-channel: from="Object" text="PRIM_MEDIA error: face 9 on object 5e46272c-be53-dd7d-c498-e76803798587 not found"
 PROBE prim/effects rec=media label=face-9 status=1003
 PROBE prim/effects rec=try label=media-long-url
 # debug-channel: from="Object" text="llSetPrimMediaParams error: Bounds error near parameter #0, param=3.  No values have been set."
@@ -57,11 +57,11 @@ PROBE prim/effects rec=media label=unknown-rule status=1000
 PROBE prim/effects rec=try label=media-width-past-max
 # debug-channel: from="Object" text="llSetPrimMediaParams error: Bounds error near parameter #0, param=9.  No values have been set."
 PROBE prim/effects rec=media label=width-past-max status=1002 got=
-# debug-channel: from="Object" text="PRIM_MEDIA error: face 9 on object d237804e-4451-d9a2-cad1-db6352b95291 not found"
+# debug-channel: from="Object" text="PRIM_MEDIA error: face 9 on object 5e46272c-be53-dd7d-c498-e76803798587 not found"
 PROBE prim/effects rec=media label=get-face-9 count=0
 PROBE prim/effects rec=media label=get-unknown-rule got=""
 PROBE prim/effects rec=media label=clear status=0
-# debug-channel: from="Object" text="PRIM_MEDIA error: face 9 on object d237804e-4451-d9a2-cad1-db6352b95291 not found"
+# debug-channel: from="Object" text="PRIM_MEDIA error: face 9 on object 5e46272c-be53-dd7d-c498-e76803798587 not found"
 PROBE prim/effects rec=media label=clear-face-9 status=1003
 PROBE prim/effects rec=end
 # debug-channel by=other: from="Object" text="Could not find sound 'no such sound'."
@@ -72,9 +72,9 @@ PROBE prim/effects rec=end
 # debug-channel by=other: from="Object" text="Could not find sound 'no such sound'."
 # debug-channel by=other: from="Object" text="Could not find sound 'no such sound'."
 # debug-channel by=other: from="Object" text="Could not find sound 'no such sound'."
-# debug-channel by=other: from="Object" text="PRIM_MEDIA error: face 9 on object d237804e-4451-d9a2-cad1-db6352b95291 not found"
+# debug-channel by=other: from="Object" text="PRIM_MEDIA error: face 9 on object 5e46272c-be53-dd7d-c498-e76803798587 not found"
 # debug-channel by=other: from="Object" text="llSetPrimMediaParams error: Bounds error near parameter #0, param=3.  No values have been set."
 # debug-channel by=other: from="Object" text="llSetPrimMediaParams error: Malformed parameters near parameter #0, param=99.  No values have been set."
 # debug-channel by=other: from="Object" text="llSetPrimMediaParams error: Bounds error near parameter #0, param=9.  No values have been set."
-# debug-channel by=other: from="Object" text="PRIM_MEDIA error: face 9 on object d237804e-4451-d9a2-cad1-db6352b95291 not found"
-# debug-channel by=other: from="Object" text="PRIM_MEDIA error: face 9 on object d237804e-4451-d9a2-cad1-db6352b95291 not found"
+# debug-channel by=other: from="Object" text="PRIM_MEDIA error: face 9 on object 5e46272c-be53-dd7d-c498-e76803798587 not found"
+# debug-channel by=other: from="Object" text="PRIM_MEDIA error: face 9 on object 5e46272c-be53-dd7d-c498-e76803798587 not found"

@@ -144,6 +144,12 @@ pub(crate) fn answer_contents_write(
             let contents = world.objects.contents_or_empty(*local_id)?;
             let mut dropped = task_item_from(&source, object.full_id, mint);
             dropped.name = contents.free_name(&dropped.name);
+            // An object Second Life took names no asset to the viewer, but
+            // the simulator holds one: a script reads its key in the prim
+            // (`llGetInventoryKey`, `inventory/listing`).
+            if dropped.asset_id.is_none() && dropped.inv_type == InventoryType::Object {
+                dropped.asset_id = Some(AssetKey::from(mint()));
+            }
             // An object this grid took goes in with the linkset it was taken
             // as, so a script can rez it from here.
             if let Some(linkset) = assets.taken_linkset(source.item_id) {

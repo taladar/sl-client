@@ -1,5 +1,5 @@
 grid: fake-opensim
-date: 2026-11-07
+date: 2026-11-09
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating YEngine
@@ -18,8 +18,8 @@ PROBE avatar/camera rec=seat step=2 seated=1
 PROBE avatar/camera rec=asked step=3 seated=1 mask=3072
 PROBE avatar/camera rec=held step=3 why=answer answer=3072 perms=3072
 PROBE avatar/camera rec=set step=4 which=in-range
-# follow-cam object=probe 0=-200 6=9 7=100 8=400 10=-1
 PROBE avatar/camera rec=set step=5 which=out-of-range
+# follow-cam object=probe 0=-200 6=9 7=100 8=400 10=-1
 # follow-cam-clear object=probe
 PROBE avatar/camera rec=cleared step=6
 PROBE avatar/camera rec=track step=7 pos_zero=0 rot_identity=0

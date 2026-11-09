@@ -5,7 +5,8 @@
 use crate::library::{
     avatars, clocks, comms, contents, control, detection, effects, encoding, experiences, http,
     inventory, json_text, land, linking, linkset, lists, math, money_permissions, notecards, ossl,
-    ossl_inventory, ossl_prim, prim_state, rezzing, rotations, sensors, sitting, strings, usage,
+    ossl_inventory, ossl_prim, prim_state, rezzing, rotations, sensors, sitting, strings, targets,
+    usage,
 };
 
 crate::registry! {
@@ -100,6 +101,14 @@ crate::registry! {
         LlDie => control::ll_die,
         LlGetStartParameter => control::ll_get_start_parameter,
         LlGetOwner => control::ll_get_owner,
+        LlGetOwnerKey => control::ll_get_owner_key,
+        LlSetStatus => prim_state::ll_set_status,
+        LlGetStatus => prim_state::ll_get_status,
+        LlVolumeDetect => prim_state::ll_volume_detect,
+        LlTarget => targets::ll_target,
+        LlTargetRemove => targets::ll_target_remove,
+        LlRotTarget => targets::ll_rot_target,
+        LlRotTargetRemove => targets::ll_rot_target_remove,
         LlSetTimerEvent => control::ll_set_timer_event,
         LlGetTime => control::ll_get_time,
         LlResetTime => control::ll_reset_time,
@@ -311,6 +320,7 @@ crate::registry! {
         LlGetGeometricCenter => prim_state::ll_get_geometric_center,
         LlTargetOmega => prim_state::ll_target_omega,
         LlGetOmega => prim_state::ll_get_omega,
+        LlGetVel => prim_state::ll_get_vel,
         LlSetRegionPos => prim_state::ll_set_region_pos,
         LlSetColor => prim_state::ll_set_color,
         LlSetLinkColor => prim_state::ll_set_link_color,

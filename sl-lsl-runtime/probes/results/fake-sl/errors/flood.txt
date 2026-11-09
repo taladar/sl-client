@@ -1,5 +1,5 @@
 grid: fake-sl
-date: 2026-11-07
+date: 2026-11-09
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating Mono
@@ -8,27 +8,36 @@ settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor
 PROBE errors/flood rec=listening channel=2147483647
 PROBE errors/flood rec=start region="Fake Region" channel="Second Life Server" version="sl-fake-grid 0.1.0"
 # debug-channel: from="Object" text="Could not find script 'Nope 1'."
-# debug-channel: from="Object" text="Object [script:Listener] Script run-time error"
-# debug-channel: from="Object" text="llGetOwnerKey is not implemented by this grid"
+PROBE errors/flood rec=heard name="Object" same_owner=1 dist=10.000000 len=31 msg="Could not find script 'Nope 1'."
 # debug-channel: from="Object" text="Could not find script 'Nope 2'."
+PROBE errors/flood rec=heard name="Object" same_owner=1 dist=10.000000 len=31 msg="Could not find script 'Nope 2'."
 # debug-channel: from="Object" text="Could not find script 'Nope 3'."
+PROBE errors/flood rec=heard name="Object" same_owner=1 dist=10.000000 len=31 msg="Could not find script 'Nope 3'."
 # debug-channel: from="Object" text="Could not find script 'Nope 4'."
+PROBE errors/flood rec=heard name="Object" same_owner=1 dist=10.000000 len=31 msg="Could not find script 'Nope 4'."
 # debug-channel: from="Object" text="Could not find script 'Nope 5'."
+PROBE errors/flood rec=heard name="Object" same_owner=1 dist=10.000000 len=31 msg="Could not find script 'Nope 5'."
 # debug-channel: from="Object" text="Could not find script 'Nope 6'."
+PROBE errors/flood rec=heard name="Object" same_owner=1 dist=10.000000 len=31 msg="Could not find script 'Nope 6'."
 # debug-channel: from="Object" text="Could not find script 'Nope 7'."
+PROBE errors/flood rec=heard name="Object" same_owner=1 dist=10.000000 len=31 msg="Could not find script 'Nope 7'."
 # debug-channel: from="Object" text="Could not find script 'Nope 8'."
+PROBE errors/flood rec=heard name="Object" same_owner=1 dist=10.000000 len=31 msg="Could not find script 'Nope 8'."
 # debug-channel: from="Object" text="Too many errors... dropping further messages until the flood stops"
+PROBE errors/flood rec=heard name="Object" same_owner=1 dist=10.000000 len=66 msg="Too many errors... dropping further messages until the flood stops"
+PROBE errors/flood rec=asked script=listener
+# debug-channel: from="Object" text="Could not find script 'Listener asks'."
 PROBE errors/flood rec=asked script=second
 PROBE errors/flood rec=burst names="Nope " count=12 seconds=12.266670
 PROBE errors/flood rec=single name="Later 1" quiet=10
 PROBE errors/flood rec=single name="Later 2" quiet=30
 # debug-channel: from="Object" text="Could not find script 'Later 2'."
+PROBE errors/flood rec=heard name="Object" same_owner=1 dist=10.000000 len=32 msg="Could not find script 'Later 2'."
 PROBE errors/flood rec=single name="Later 3" quiet=60
 # debug-channel: from="Object" text="Could not find script 'Later 3'."
+PROBE errors/flood rec=heard name="Object" same_owner=1 dist=10.000000 len=32 msg="Could not find script 'Later 3'."
 PROBE errors/flood rec=end
 # debug-channel by=other: from="Object" text="Could not find script 'Nope 1'."
-# debug-channel by=other: from="Object" text="Object [script:Listener] Script run-time error"
-# debug-channel by=other: from="Object" text="llGetOwnerKey is not implemented by this grid"
 # debug-channel by=other: from="Object" text="Could not find script 'Nope 2'."
 # debug-channel by=other: from="Object" text="Could not find script 'Nope 3'."
 # debug-channel by=other: from="Object" text="Could not find script 'Nope 4'."
@@ -37,5 +46,6 @@ PROBE errors/flood rec=end
 # debug-channel by=other: from="Object" text="Could not find script 'Nope 7'."
 # debug-channel by=other: from="Object" text="Could not find script 'Nope 8'."
 # debug-channel by=other: from="Object" text="Too many errors... dropping further messages until the flood stops"
+# debug-channel by=other: from="Object" text="Could not find script 'Listener asks'."
 # debug-channel by=other: from="Object" text="Could not find script 'Later 2'."
 # debug-channel by=other: from="Object" text="Could not find script 'Later 3'."

@@ -362,7 +362,11 @@ pub(crate) fn file_worn(
         folder,
         identity.agent_id,
         mint,
-        (object_assets, world.rez.taken_item_masks),
+        (
+            object_assets,
+            world.rez.taken_item_masks,
+            world.rez.undescribed_take,
+        ),
     );
     if let Some(named) = named {
         item.item_id = named;

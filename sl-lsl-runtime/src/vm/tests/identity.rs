@@ -160,3 +160,112 @@ fn a_take_and_a_restart_keep_or_part_the_lists_as_each_grid_saves_them() -> Resu
     }
     Ok(())
 }
+
+/// `prim/owner-key` under each flavour, with the region's agents written in
+/// as the owner and one stranger: `llGetOwnerKey` answers alike on every grid.
+#[test]
+fn owner_key_prints_what_each_grid_printed() -> Result<(), String> {
+    let source = offline(include_str!("../../../probes/prim/owner-key.lsl"), "")
+        .replace(
+            "llGetAgentList(AGENT_LIST_REGION, [])",
+            &format!("[(key)\"{OWNER}\", (key)\"0a0a0a0a-0000-4000-8000-0000000000aa\"]"),
+        )
+        .replace("llGetOwner()", &format!("(key)\"{OWNER}\""));
+    for (flavour, transcript) in [
+        (
+            EngineFlavour::SecondLife,
+            include_str!("../../../probes/results/aditi/prim/owner-key.txt"),
+        ),
+        (
+            EngineFlavour::YEngine,
+            include_str!("../../../probes/results/opensim-yengine/prim/owner-key.txt"),
+        ),
+        (
+            EngineFlavour::XEngine,
+            include_str!("../../../probes/results/opensim-xengine/prim/owner-key.txt"),
+        ),
+    ] {
+        let (_, ours) = replay(&source, flavour, 50)?;
+        hold(&ours, &probe_lines(transcript), &[]);
+    }
+    Ok(())
+}
+
+/// `vm/eval-order` under each flavour: the order each engine evaluates an
+/// expression's parts in. Second Life evaluates a binary operator's operands
+/// right to left and a list's elements left to right; YEngine the same but a
+/// list literal's elements right to left; XEngine, C#, everything left to
+/// right.
+#[test]
+fn expressions_evaluate_in_each_engines_order() -> Result<(), String> {
+    let source = offline(include_str!("../../../probes/vm/eval-order.lsl"), "");
+    for (flavour, transcript, deviations) in [
+        (
+            EngineFlavour::SecondLife,
+            include_str!("../../../probes/results/aditi/vm/eval-order.txt"),
+            &[][..],
+        ),
+        (
+            EngineFlavour::YEngine,
+            include_str!("../../../probes/results/opensim-yengine/vm/eval-order.txt"),
+            &[][..],
+        ),
+        (
+            EngineFlavour::XEngine,
+            include_str!("../../../probes/results/opensim-xengine/vm/eval-order.txt"),
+            &XENGINE_ORDER[..],
+        ),
+    ] {
+        let (_, ours) = replay(&source, flavour, 50)?;
+        hold(&ours, &probe_lines(transcript), deviations);
+    }
+    Ok(())
+}
+
+/// The `vm/eval-order` cases XEngine evaluates left to right where the
+/// runtime keeps YEngine's order: the compiler has one OpenSim dialect, and
+/// it is YEngine's, the engine a fake grid that imitates OpenSim runs. The
+/// values agree; only the order of the side effects differs.
+const XENGINE_ORDER: [(&str, &str); 12] = [
+    ("order", "minus"),
+    ("order", "chain"),
+    ("order", "products"),
+    ("order", "less"),
+    ("order", "and"),
+    ("order", "or"),
+    ("order", "list"),
+    ("order", "list-plus"),
+    ("order", "library-list-arg"),
+    ("order", "concat"),
+    ("order", "compound"),
+    ("order", "index-inline"),
+];
+
+/// `events/state-self` under each flavour: a `state` in a global function
+/// lets the caller carry on on Second Life, and ends the whole handler on
+/// both OpenSim engines, which throw out of it.
+#[test]
+fn a_state_in_a_function_ends_the_handler_on_opensim_alone() -> Result<(), String> {
+    let source = offline(
+        include_str!("../../../probes/events/state-self.lsl"),
+        "Probe",
+    );
+    for (flavour, transcript) in [
+        (
+            EngineFlavour::SecondLife,
+            include_str!("../../../probes/results/aditi/events/state-self.txt"),
+        ),
+        (
+            EngineFlavour::YEngine,
+            include_str!("../../../probes/results/opensim-yengine/events/state-self.txt"),
+        ),
+        (
+            EngineFlavour::XEngine,
+            include_str!("../../../probes/results/opensim-xengine/events/state-self.txt"),
+        ),
+    ] {
+        let (_, ours) = replay(&source, flavour, 50)?;
+        hold(&ours, &probe_lines(transcript), &[]);
+    }
+    Ok(())
+}

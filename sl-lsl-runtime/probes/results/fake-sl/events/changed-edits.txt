@@ -1,13 +1,107 @@
 grid: fake-sl
-date: 2026-11-07
+date: 2026-11-09
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating Mono
 settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
-complete: no
 
 PROBE events/changed-edits rec=start region="Fake Region" channel="Second Life Server" version="sl-fake-grid 0.1.0"
-# debug-channel: from="Object" text="Object [script:Child] Script run-time error"
-# debug-channel: from="Object" text="llGetOwnerKey is not implemented by this grid"
-# debug-channel by=other: from="Object" text="Object [script:Child] Script run-time error"
-# debug-channel by=other: from="Object" text="llGetOwnerKey is not implemented by this grid"
+# question permissions=128 object="Object" owner="<first> <last>" experience=none
+PROBE events/changed-edits rec=waiting drive=answer grant=128
+# answer grant=128
+PROBE events/changed-edits rec=permissions got=128
+PROBE events/changed-edits rec=changed prim=B step=0 bits=LINK
+PROBE events/changed-edits rec=changed prim=A step=0 bits=LINK
+PROBE events/changed-edits rec=step n=1 what=color prim=A prims=2
+PROBE events/changed-edits rec=waiting drive=edit what=color value=255,0,0 prim=A
+# edit prim=A what=color value=255,0,0
+PROBE events/changed-edits rec=changed prim=A step=1 bits=COLOR
+PROBE events/changed-edits rec=step n=2 what=color prim=A prims=2
+PROBE events/changed-edits rec=waiting drive=edit what=color value=255,0,0 prim=A
+# edit prim=A what=color value=255,0,0
+PROBE events/changed-edits rec=step n=3 what=alpha prim=A prims=2
+PROBE events/changed-edits rec=waiting drive=edit what=alpha value=128 prim=A
+# edit prim=A what=alpha value=128
+PROBE events/changed-edits rec=changed prim=A step=3 bits=COLOR
+PROBE events/changed-edits rec=step n=4 what=alpha prim=A prims=2
+PROBE events/changed-edits rec=waiting drive=edit what=alpha value=128 prim=A
+# edit prim=A what=alpha value=128
+PROBE events/changed-edits rec=step n=5 what=texture prim=A prims=2
+PROBE events/changed-edits rec=waiting drive=edit what=texture value=5748decc-f629-461c-9a36-a35a221fe21f prim=A
+# edit prim=A what=texture value=5748decc-f629-461c-9a36-a35a221fe21f
+PROBE events/changed-edits rec=changed prim=A step=5 bits=TEXTURE
+PROBE events/changed-edits rec=step n=6 what=texture prim=A prims=2
+PROBE events/changed-edits rec=waiting drive=edit what=texture value=5748decc-f629-461c-9a36-a35a221fe21f prim=A
+# edit prim=A what=texture value=5748decc-f629-461c-9a36-a35a221fe21f
+PROBE events/changed-edits rec=step n=7 what=repeats prim=A prims=2
+PROBE events/changed-edits rec=waiting drive=edit what=repeats value=2 prim=A
+# edit prim=A what=repeats value=2
+PROBE events/changed-edits rec=changed prim=A step=7 bits=TEXTURE
+PROBE events/changed-edits rec=step n=8 what=glow prim=A prims=2
+PROBE events/changed-edits rec=waiting drive=edit what=glow value=0.2 prim=A
+# edit prim=A what=glow value=0.2
+PROBE events/changed-edits rec=changed prim=A step=8 bits=TEXTURE
+PROBE events/changed-edits rec=step n=9 what=fullbright prim=A prims=2
+PROBE events/changed-edits rec=waiting drive=edit what=fullbright value=1 prim=A
+# edit prim=A what=fullbright value=1
+PROBE events/changed-edits rec=changed prim=A step=9 bits=TEXTURE
+PROBE events/changed-edits rec=step n=10 what=scale prim=A prims=2
+PROBE events/changed-edits rec=waiting drive=edit what=scale value=0.6,0.6,0.6 prim=A
+# edit prim=A what=scale value=<0.6, 0.6, 0.6>
+PROBE events/changed-edits rec=changed prim=A step=10 bits=SCALE
+PROBE events/changed-edits rec=step n=11 what=scale prim=A prims=2
+PROBE events/changed-edits rec=waiting drive=edit what=scale value=0.6,0.6,0.6 prim=A
+# edit prim=A what=scale value=<0.6, 0.6, 0.6>
+PROBE events/changed-edits rec=changed prim=A step=11 bits=SCALE
+PROBE events/changed-edits rec=step n=12 what=move prim=A prims=2
+PROBE events/changed-edits rec=waiting drive=edit what=move value=0,0,0.3 prim=A
+# edit prim=A what=move value=<0, 0, 0.3>
+PROBE events/changed-edits rec=step n=13 what=turn prim=A prims=2
+PROBE events/changed-edits rec=waiting drive=edit what=turn value=45 prim=A
+# edit prim=A what=turn value=45
+PROBE events/changed-edits rec=step n=14 what=cut prim=A prims=2
+PROBE events/changed-edits rec=waiting drive=edit what=cut value=25 prim=A
+# edit prim=A what=cut value=25
+PROBE events/changed-edits rec=changed prim=A step=14 bits=SHAPE
+PROBE events/changed-edits rec=step n=15 what=light prim=A prims=2
+PROBE events/changed-edits rec=waiting drive=edit what=light value=1 prim=A
+# edit prim=A what=light value=1
+PROBE events/changed-edits rec=step n=16 what=name prim=A prims=2
+PROBE events/changed-edits rec=waiting drive=edit what=name value="Edited" prim=A
+# edit prim=A what=name value="Edited"
+PROBE events/changed-edits rec=step n=17 what=description prim=A prims=2
+PROBE events/changed-edits rec=waiting drive=edit what=description value="edited" prim=A
+# edit prim=A what=description value="edited"
+PROBE events/changed-edits rec=step n=18 what=phantom prim=A prims=2
+PROBE events/changed-edits rec=waiting drive=edit what=phantom value=1 prim=A
+# edit prim=A what=phantom value=1
+PROBE events/changed-edits rec=step n=19 what=phantom prim=A prims=2
+PROBE events/changed-edits rec=waiting drive=edit what=phantom value=0 prim=A
+# edit prim=A what=phantom value=0
+PROBE events/changed-edits rec=step n=20 what=media prim=A prims=2
+PROBE events/changed-edits rec=waiting drive=edit what=media value="https://example.com/" prim=A
+# edit prim=A what=media value="https://example.com/"
+PROBE events/changed-edits rec=changed prim=A step=20 bits=MEDIA
+PROBE events/changed-edits rec=step n=21 what=media prim=A prims=2
+PROBE events/changed-edits rec=waiting drive=edit what=media value="" prim=A
+# edit prim=A what=media value=""
+PROBE events/changed-edits rec=changed prim=A step=21 bits=MEDIA
+PROBE events/changed-edits rec=step n=22 what=color prim=B prims=2
+PROBE events/changed-edits rec=waiting drive=edit what=color value=0,255,0 prim=B
+# edit prim=B what=color value=0,255,0
+PROBE events/changed-edits rec=changed prim=B step=22 bits=COLOR
+PROBE events/changed-edits rec=step n=23 what=scale prim=B prims=2
+PROBE events/changed-edits rec=waiting drive=edit what=scale value=0.4,0.4,0.4 prim=B
+# edit prim=B what=scale value=<0.4, 0.4, 0.4>
+PROBE events/changed-edits rec=changed prim=A step=23 bits=SCALE
+PROBE events/changed-edits rec=step n=24 what=texture prim=B prims=2
+PROBE events/changed-edits rec=waiting drive=edit what=texture value=5748decc-f629-461c-9a36-a35a221fe21f prim=B
+# edit prim=B what=texture value=5748decc-f629-461c-9a36-a35a221fe21f
+PROBE events/changed-edits rec=changed prim=B step=24 bits=TEXTURE
+PROBE events/changed-edits rec=step n=25 what=move prim=B prims=2
+PROBE events/changed-edits rec=waiting drive=edit what=move value=0,0,0.3 prim=B
+# edit prim=B what=move value=<0, 0, 0.3>
+PROBE events/changed-edits rec=step n=26 what=unlink
+PROBE events/changed-edits rec=changed prim=B step=26 bits=LINK
+PROBE events/changed-edits rec=changed prim=A step=26 bits=LINK
+PROBE events/changed-edits rec=end prims=1

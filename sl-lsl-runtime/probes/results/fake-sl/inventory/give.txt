@@ -1,5 +1,5 @@
 grid: fake-sl
-date: 2026-11-07
+date: 2026-11-09
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating Mono
@@ -25,7 +25,7 @@ PROBE inventory/give rec=try label=give-owner
 PROBE inventory/give rec=called label=give-owner delay=2.022223
 # im dialog=9 from=owner id=someone name="Object" offline=0 length=72 message="'Probe folder'  ( http://slurl.com/secondlife/Fake%20Region/…" bucket=1
 PROBE inventory/give rec=try label=give-list-owner
-PROBE inventory/give rec=called label=give-list-owner delay=3.022222
+PROBE inventory/give rec=called label=give-list-owner delay=3.022223
 PROBE inventory/give rec=try label=give-list-prim
 PROBE inventory/give rec=receiver-changed change=1 items="Gift:7|Gift 1:7|Gift 2:7|Passed:10:0|Receiver:10:1"
 PROBE inventory/give rec=called label=give-list-prim delay=3.022223

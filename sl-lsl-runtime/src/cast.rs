@@ -84,6 +84,62 @@ pub fn cast(value: Value, to: TypeName) -> Result<Value, ValueError> {
     })
 }
 
+/// `(to)value` as `opensim`'s grid casts it: OpenSim reads a string with its
+/// own parsers ([`parse::opensim_integer`] and the rest) and prints a float,
+/// a vector and a rotation as .NET prints a double, six decimals everywhere
+/// ([`format::opensim_float`]); Second Life is [`cast`].
+///
+/// # Errors
+///
+/// As [`cast`].
+pub fn for_grid(value: Value, to: TypeName, opensim: bool) -> Result<Value, ValueError> {
+    if !opensim {
+        return cast(value, to);
+    }
+    Ok(match (value, to) {
+        (Value::String(text), TypeName::Integer) => {
+            Value::Integer(parse::opensim_integer(&until_nul(text)))
+        }
+        (Value::String(text), TypeName::Float) => {
+            Value::Float(parse::opensim_float(&until_nul(text)))
+        }
+        (Value::String(text), TypeName::Vector) => {
+            Value::Vector(parse::opensim_vector(&until_nul(text)))
+        }
+        (Value::String(text), TypeName::Rotation) => {
+            Value::Rotation(parse::opensim_rotation(&until_nul(text)))
+        }
+        (Value::Float(float), TypeName::String) => Value::String(format::opensim_float(float)),
+        (Value::Vector(vector), TypeName::String) => Value::String(format::opensim_vector(&vector)),
+        (Value::Rotation(rotation), TypeName::String) => {
+            Value::String(format::opensim_rotation(&rotation))
+        }
+        (Value::List(elements), TypeName::String) => Value::String(
+            elements
+                .iter()
+                .map(|element| element_to_string_for(element, true))
+                .collect(),
+        ),
+        (value, to) => cast(value, to)?,
+    })
+}
+
+/// One list element as `opensim`'s grid prints it in a list's text and
+/// `llList2String`: [`element_to_string`] on Second Life; on OpenSim a float,
+/// a vector or a rotation as [`format::opensim_float`] prints it.
+#[must_use]
+pub fn element_to_string_for(element: &Element, opensim: bool) -> String {
+    if !opensim {
+        return element_to_string(element);
+    }
+    match element {
+        Element::Float(float) => format::opensim_float(*float),
+        Element::Vector(vector) => format::opensim_vector(vector),
+        Element::Rotation(rotation) => format::opensim_rotation(rotation),
+        other => element_to_string(other),
+    }
+}
+
 /// One list element as `(string)list` prints it: like `(string)` of the
 /// element, except that a vector or rotation keeps six decimals.
 #[must_use]

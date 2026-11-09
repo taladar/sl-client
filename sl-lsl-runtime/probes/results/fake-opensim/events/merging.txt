@@ -1,10 +1,11 @@
 grid: fake-opensim
-date: 2026-11-07
+date: 2026-11-09
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating YEngine
 settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
 
+# chat type=say from="Object" length=14 text="Script running"
 PROBE events/merging rec=start region="Fake Region" channel="OpenSim" version="sl-fake-grid 0.1.0"
 PROBE events/merging rec=merged round=1 name=color-burst events="changed2,changed2,changed2,changed2,changed2" touches=0
 PROBE events/merging rec=merged round=2 name=color-same events="" touches=0
@@ -15,6 +16,7 @@ PROBE events/merging rec=merged round=6 name=listen-same events="listen:same,lis
 PROBE events/merging rec=merged round=7 name=listen-distinct events="listen:1,listen:2,listen:3,listen:4,listen:5" touches=0
 PROBE events/merging rec=merged round=8 name=sensor-burst events="sensor,sensor,sensor" touches=0
 PROBE events/merging rec=waiting drive=touch
+# chat by=other type=say from="Object" length=14 text="Script running"
 PROBE events/merging rec=waiting drive=touch
 PROBE events/merging rec=waiting drive=touch
 # touch surface=none

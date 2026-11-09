@@ -1,5 +1,5 @@
 grid: fake-opensim
-date: 2026-11-07
+date: 2026-11-09
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating YEngine
@@ -26,8 +26,8 @@ PROBE money/lapse rec=waiting drive=answer grant=1046
 PROBE money/lapse rec=answer step=3 answer=1046
 PROBE money/lapse rec=waiting drive=revoke target=region perms=32784
 # revoke perms=32784 target=region
+PROBE money/lapse rec=held step=3 why=after perms=1030 granter=owner attached=0
 # question permissions=1046 object="Object" owner="<first> <last>" experience=none
-PROBE money/lapse rec=held step=3 why=after perms=1046 granter=owner attached=0
 PROBE money/lapse rec=waiting drive=answer grant=1046
 # answer grant=1046
 PROBE money/lapse rec=answer step=4 answer=1046
@@ -56,6 +56,7 @@ PROBE money/lapse rec=waiting drive=away seconds=20
 # animations avatar=owner playing="stand"
 # teleport-started flags=0x10
 # back arrived
+# animations avatar=other playing="stand"
 # question permissions=1046 object="Object" owner="<first> <last>" experience=none
 PROBE money/lapse rec=away step=6 poll=1 owner_gone=1 perms=1046 granter=owner
 PROBE money/lapse rec=away step=6 poll=2 owner_gone=1 perms=1046 granter=owner
@@ -71,8 +72,8 @@ PROBE money/lapse rec=away step=6 poll=11 owner_gone=0 perms=1046 granter=owner
 PROBE money/lapse rec=held step=6 why=back perms=1046 granter=owner attached=0
 PROBE money/lapse rec=waiting drive=answer grant=1046
 # answer grant=1046
-# question permissions=1046 object="Object" owner="<first> <last>" experience=none
 PROBE money/lapse rec=answer step=7 answer=1046
+# question permissions=1046 object="Object" owner="<first> <last>" experience=none
 PROBE money/lapse rec=held step=7 why=after-reset perms=0 granter=none attached=0
 PROBE money/lapse rec=waiting drive=answer grant=1046
 # answer grant=1046

@@ -1,5 +1,5 @@
 grid: fake-opensim
-date: 2026-11-07
+date: 2026-11-09
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating YEngine
@@ -7,13 +7,13 @@ settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor
 
 PROBE events/timer-reset rec=start region="Fake Region" channel="OpenSim" version="sl-fake-grid 0.1.0"
 PROBE events/timer-reset rec=round label=sleep-keep events="timer@0" tenths=10 took=1.018000 stray=0
-PROBE events/timer-reset rec=round label=sleep-reset events="timer@0" tenths=10 took=1.018001 stray=0
-PROBE events/timer-reset rec=round label=sleep-stop events="" tenths=10 took=1.018000 stray=0
-PROBE events/timer-reset rec=round label=color-keep events="changed2@0,timer@0" tenths=10 took=1.018002 stray=0
+PROBE events/timer-reset rec=round label=sleep-reset events="timer@0" tenths=10 took=1.018000 stray=0
+PROBE events/timer-reset rec=round label=sleep-stop events="" tenths=10 took=1.018001 stray=0
+PROBE events/timer-reset rec=round label=color-keep events="changed2@0,timer@0" tenths=10 took=1.018000 stray=0
 PROBE events/timer-reset rec=round label=media-keep events="changed2048@0,timer@0" tenths=10 took=1.018000 stray=0
-PROBE events/timer-reset rec=round label=media-reset events="changed2048@0,timer@0" tenths=10 took=1.018997 stray=0
-PROBE events/timer-reset rec=round label=clear-keep events="changed2048@0,timer@0" tenths=10 took=1.019001 stray=0
-PROBE events/timer-reset rec=round label=media-get events="" tenths=10 took=1.018002 stray=0
+PROBE events/timer-reset rec=round label=media-reset events="changed2048@0,timer@0" tenths=10 took=1.018002 stray=0
+PROBE events/timer-reset rec=round label=clear-keep events="changed2048@0,timer@0" tenths=10 took=1.018002 stray=0
+PROBE events/timer-reset rec=round label=media-get events="" tenths=10 took=1.019001 stray=0
 PROBE events/timer-reset rec=round label=in-timer-keep events="timer@0" tenths=10 took=1.018002 stray=0
 PROBE events/timer-reset rec=round label=in-timer-reset events="timer@0" tenths=10 took=1.017998 stray=0
 PROBE events/timer-reset rec=round label=in-timer-media events="changed2048@0,timer@0" tenths=10 took=1.017998 stray=0

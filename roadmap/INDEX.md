@@ -11,17 +11,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 123 |
-| ready | 335 |
+| ideas | 125 |
+| ready | 334 |
 | blocked | 39 |
 | in-progress | 7 |
-| bugs | 35 |
-| done | 1530 |
+| bugs | 42 |
+| done | 1531 |
 | deferred | 30 |
 | wont-do | 24 |
-| **total** | **2123** |
+| **total** | **2132** |
 
-## ideas (123)
+## ideas (125)
 
 ### protocol
 
@@ -273,6 +273,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   service — per-agent trees and the library
 - [`server-login-service`](ideas/server-login-service.md) — Standalone login
   server
+- [`server-lsl-cast-ray-cost`](ideas/server-lsl-cast-ray-cost.md) — Charge
+  llCastRay what each grid charges
 - [`server-lsl-lib-physics-vehicles`](ideas/server-lsl-lib-physics-vehicles.md)
   — Library tranche — status flags, forces, targets and vehicles (blocked by
   `server-lsl-vm-execution` (done), `server-world-collision-and-physics`,
@@ -297,12 +299,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`gridspec-friend-edit-rights`](ideas/gridspec-friend-edit-rights.md) —
   Measure a friend's edit right in use
+- [`gridspec-lsl-fake-grid-column`](ideas/gridspec-lsl-fake-grid-column.md) —
+  Fill the LSL gridspec's fake grid column from the probe results
 - [`gridspec-lsl-in-experience`](ideas/gridspec-lsl-in-experience.md) — LSL
   behaviour on Second Life for a script saved into an experience
 - [`gridspec-lsl-opensim-function-set`](ideas/gridspec-lsl-opensim-function-set.md)
   — Measure which library functions OpenSim's engines compile
 
-## ready (335)
+## ready (334)
 
 ### protocol
 
@@ -1029,8 +1033,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-handover-distant-and-vehicle-aditi`](ready/test-handover-distant-and-vehicle-aditi.md)
   — Live-test distant teleport (world_reset) and vehicle corner crossings, incl.
   on aditi
-- [`test-lsl-differential-corpus-triage`](ready/test-lsl-differential-corpus-triage.md)
-  — Triage every probe's differences between each grid and its fake flavour
 
 ### repl
 
@@ -1268,7 +1270,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-text-renderability-axis`](in-progress/viewer-ui-text-renderability-axis.md)
   — Upstream issue — font selection cannot see glyph-format renderability
 
-## bugs (35)
+## bugs (42)
 
 ### protocol
 
@@ -1358,7 +1360,25 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1530)
+### server
+
+- [`server-fake-grid-worn-departure-change`](bugs/server-fake-grid-worn-departure-change.md)
+  — Fake OpenSim runs a worn script's departing changed(32768) after it arrives
+- [`server-lsl-link-applies-after-tick`](bugs/server-lsl-link-applies-after-tick.md)
+  — A script's link or delink applies only after the tick
+- [`server-lsl-mono-collision-model-under-lowered-limit`](bugs/server-lsl-mono-collision-model-under-lowered-limit.md)
+  — A script 1 KB over its use collides in the runtime where Mono carries on
+- [`server-lsl-opensim-child-move-change-late`](bugs/server-lsl-opensim-child-move-change-late.md)
+  — OpenSim's position change in a moved child comes after the mover's handler
+- [`server-lsl-opensim-grow-loop-slow`](bugs/server-lsl-opensim-grow-loop-slow.md)
+  — fake-opensim grows memory/collision's Full list four times slower than
+  YEngine
+- [`server-lsl-restarted-sleeper-order`](bugs/server-lsl-restarted-sleeper-order.md)
+  — A restarted script whose sleep ran out waits for its restarter's slice
+- [`server-lsl-scripted-teleport-unmodelled`](bugs/server-lsl-scripted-teleport-unmodelled.md)
+  — The fake grid ignores llTeleportAgent and llTeleportAgentGlobalCoords
+
+## done (1531)
 
 ### protocol
 
@@ -4214,6 +4234,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — fetch the read-only Library tree
 - [`test-logout-clean`](done/test-logout-clean-request-logout-assert-clean-logoutreply-shutdown.md)
   — request logout, assert clean LogoutReply / shutdown
+- [`test-lsl-differential-corpus-triage`](done/test-lsl-differential-corpus-triage.md)
+  — Triage every probe's differences between each grid and its fake flavour
 - [`test-lsl-differential-opensim`](done/test-lsl-differential-opensim.md) — Run
   one script on both grids and diff what it did (blocked by
   `server-fake-grid-script-engine-wiring` (done),

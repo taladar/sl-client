@@ -302,7 +302,7 @@ impl<'list> Reader<'list> {
         let element = self.next().ok_or(Stop::Short)?;
         match element {
             Element::String(text) => Ok(text.clone()),
-            other if self.opensim => Ok(crate::cast::element_to_string(other)),
+            other if self.opensim => Ok(crate::cast::element_to_string_for(other, true)),
             Element::Key(_) => Err(Stop::Silent),
             other => Err(self.refuse(ctx, Want::String, label, other)),
         }
@@ -323,7 +323,7 @@ impl<'list> Reader<'list> {
         let element = self.next().ok_or(Stop::Short)?;
         match element {
             Element::String(text) | Element::Key(text) => Ok(text.clone()),
-            other if self.opensim => Ok(crate::cast::element_to_string(other)),
+            other if self.opensim => Ok(crate::cast::element_to_string_for(other, true)),
             other => Err(self.refuse(ctx, Want::String, label, other)),
         }
     }

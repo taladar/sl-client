@@ -240,20 +240,6 @@ reason = "A box catches up a second after it last did (prim/box-beat): on aditi'
 # --- events -------------------------------------------------------------
 
 [[difference]]
-probe = "events/state-change"
-between = ["opensim-yengine", "fake-opensim"]
-record = "default"
-field = "heard"
-reason = "Over loopback the runner saves the talker and the probe in the same frame, so the talker's sixth line falls in the tick of the probe's third timer and is heard after it; on a grid the probe follows the talker by round trips of a tenth of a second and more (the VM replay hears six so)"
-
-[[difference]]
-probe = "events/state-change"
-between = ["aditi", "fake-sl"]
-record = "default"
-field = "heard"
-reason = "Over loopback the runner saves the talker and the probe in the same frame, so the talker's sixth line falls in the tick of the probe's third timer and is heard after it; on a grid the probe follows the talker by round trips of a tenth of a second and more (the VM replay hears six so)"
-
-[[difference]]
 probe = "detection/sensor"
 between = ["opensim-yengine", "fake-opensim"]
 record = "found"
@@ -415,3 +401,1319 @@ between = ["opensim-yengine", "fake-opensim"]
 record = "fired"
 fields = { phase = "6", event = "1" }
 reason = "OpenSim sweeps on its 100 ms command loop: a sweep within a pass of the probe's timer lands on either side of it, and one after it arrives once the repeat is removed"
+
+# --- the rest of the corpus (test-lsl-differential-corpus-triage) ----------
+
+[[difference]]
+probe = "comms/link-messages"
+between = ["opensim-yengine", "fake-opensim"]
+record = "sent"
+fields = { payload = "odd" }
+reason = "Where the Receiver's lines fall among the Sender's is scheduling: OpenSim ran the Sender's handler to its end on its own thread before the Receiver had a turn, the fake grid gives the Receiver its turn mid-handler, as aditi did (the VM replay compares each script's lines apart)"
+
+[[difference]]
+probe = "comms/link-messages"
+between = ["opensim-yengine", "fake-opensim"]
+record = "got"
+fields = { script = "Receiver", text_length = "3000" }
+reason = "Where the Receiver's lines fall among the Sender's is scheduling: OpenSim ran the Sender's handler to its end on its own thread before the Receiver had a turn, the fake grid gives the Receiver its turn mid-handler, as aditi did (the VM replay compares each script's lines apart)"
+
+[[difference]]
+probe = "data/json"
+between = ["opensim-yengine", "fake-opensim"]
+record = "list2json"
+fields = { case = "floats" }
+field = "result"
+reason = "OpenSim's floats are doubles, the runtime's f32: 1e20 writes the float's digits and 1e39 overflows to an infinity a double does not reach"
+
+[[difference]]
+probe = "data/json"
+between = ["opensim-yengine", "fake-opensim"]
+record = "list2json"
+fields = { case = "strings" }
+field = "result"
+reason = "The probe prints one UTF-16 unit at a time on OpenSim, so an emoji goes out as its two halves: OpenSim's llEscapeURL of a half throws and the probe prints ?, a Rust string holds each half as U+FFFD; the whole string escaped (result_esc) agrees"
+
+[[difference]]
+probe = "data/json"
+between = ["opensim-yengine", "fake-opensim"]
+record = "json2list"
+fields = { case = "surrogates" }
+field = "e0"
+reason = "The probe prints one UTF-16 unit at a time on OpenSim, so an emoji goes out as its two halves: OpenSim's llEscapeURL of a half throws and the probe prints ?, a Rust string holds each half as U+FFFD; the whole string escaped (e0_esc) agrees"
+
+[[difference]]
+probe = "data/json"
+between = ["opensim-yengine", "fake-opensim"]
+record = "json2list"
+fields = { case = "lone-surrogate" }
+reason = "A lone surrogate, which OpenSim's \\ud83d decodes to, cannot be held in a Rust string: it reads back as U+FFFD, so llEscapeURL answers its three bytes where OpenSim's threw"
+
+[[difference]]
+probe = "errors/flood"
+between = ["opensim-yengine", "fake-opensim"]
+record = "asked"
+fields = { script = "listener" }
+reason = "The errors go out one a second, and whether the Second script's error takes the slot before or after the flooder's eleventh is a race between two scripts"
+
+[[difference]]
+probe = "errors/flood"
+between = ["opensim-yengine", "fake-opensim"]
+record = "heard"
+fields = { len = "49" }
+reason = "The errors go out one a second, and whether the Second script's error takes the slot before or after the flooder's eleventh is a race between two scripts"
+
+[[difference]]
+probe = "detection/cast-ray"
+between = ["opensim-yengine", "fake-opensim"]
+record = "ray"
+reason = "A ray's hits are the region's: the local OpenSim's land rises within the probe's 15 m and its owner stands elsewhere, so its rays meet land and the avatar where the fake region's flat ground and arrival point give none; the rules are held one by one by the VM's sensing tests"
+
+[[difference]]
+probe = "detection/cast-ray"
+between = ["opensim-yengine", "fake-opensim"]
+record = "item"
+reason = "A ray's hits are the region's: the local OpenSim's land rises within the probe's 15 m and its owner stands elsewhere, so its rays meet land and the avatar where the fake region's flat ground and arrival point give none; the rules are held one by one by the VM's sensing tests"
+
+[[difference]]
+probe = "errors/bounds-newer"
+between = ["opensim-yengine", "fake-opensim"]
+reason = "OpenSim compiles none of the newer list and string functions, so the probe stops at its first script's compile error on both, never printing its end"
+
+# --- physics: the fake grid runs none (server-lsl-lib-physics-vehicles) ---
+
+[[difference]]
+probe = "physics/forces"
+between = ["aditi", "fake-sl"]
+reason = "Forces, impulses, buoyancy, hover and the velocity setters move a physical prim, and the fake grid runs no physics: its prims never move under a force"
+task = "server-lsl-lib-physics-vehicles"
+
+[[difference]]
+probe = "physics/keyframed"
+between = ["aditi", "fake-sl"]
+reason = "The fake grid does not play keyframed motion yet, nor refuse its calls as Second Life does"
+task = "server-lsl-lib-physics-vehicles"
+
+[[difference]]
+probe = "physics/material"
+between = ["aditi", "fake-sl"]
+reason = "Physics material, mass and density are not modelled: the fake grid runs no physics"
+task = "server-lsl-lib-physics-vehicles"
+
+[[difference]]
+probe = "physics/vehicles"
+between = ["aditi", "fake-sl"]
+reason = "Vehicles are not modelled: the fake grid runs no physics, and the vehicle decision is still open"
+task = "server-lsl-lib-physics-vehicles"
+
+[[difference]]
+probe = "physics/targets"
+between = ["aditi", "fake-sl"]
+reason = "llMoveToTarget and the look-at functions do not move a prim on the fake grid, which runs no physics, so the probe waits in its move phase and never ends; its target phases agree"
+task = "server-lsl-lib-physics-vehicles"
+
+[[difference]]
+probe = "physics/forces"
+between = ["opensim-yengine", "fake-opensim"]
+reason = "Forces, impulses, buoyancy, hover and the velocity setters move a physical prim, and the fake grid runs no physics: its prims never move under a force"
+task = "server-lsl-lib-physics-vehicles"
+
+[[difference]]
+probe = "physics/keyframed"
+between = ["opensim-yengine", "fake-opensim"]
+reason = "The fake grid does not play keyframed motion yet, nor refuse its calls as Second Life does"
+task = "server-lsl-lib-physics-vehicles"
+
+[[difference]]
+probe = "physics/material"
+between = ["opensim-yengine", "fake-opensim"]
+reason = "Physics material, mass and density are not modelled: the fake grid runs no physics"
+task = "server-lsl-lib-physics-vehicles"
+
+[[difference]]
+probe = "physics/vehicles"
+between = ["opensim-yengine", "fake-opensim"]
+reason = "Vehicles are not modelled: the fake grid runs no physics, and the vehicle decision is still open"
+task = "server-lsl-lib-physics-vehicles"
+
+[[difference]]
+probe = "physics/targets"
+between = ["opensim-yengine", "fake-opensim"]
+reason = "llMoveToTarget and the look-at functions do not move a prim on the fake grid, which runs no physics, so the probe waits in its move phase and never ends; its target phases agree"
+task = "server-lsl-lib-physics-vehicles"
+
+[[difference]]
+probe = "physics/character"
+between = ["aditi", "fake-sl"]
+reason = "The character and pathfinding functions are not implemented on the fake grid yet, so the probe stops at its first call"
+task = "server-lsl-lib-physics-vehicles"
+
+# --- the rest of the corpus, second pass (test-lsl-differential-corpus-triage) ---
+
+# --- floats as doubles on OpenSim, last bits on Second Life ---
+
+[[difference]]
+probe = "math/rotation-bits"
+between = ["aditi", "fake-sl"]
+record = "euler2rot"
+reason = "llEuler2Rot's last bits: the runtime takes PyOptimizer's double form, one to three units in the last place from aditi's, as no arrangement of Linden's code tried matches them (as math/rotations' xyz30-45-60)"
+
+[[difference]]
+probe = "math/rotation-bits"
+between = ["aditi", "fake-sl"]
+record = "rot2euler"
+reason = "llRot2Euler's last bit: Linden's normalise-orthogonalise-read in floats, which the runtime follows but rounds one unit in the last place differently in two of the seven cases"
+
+[[difference]]
+probe = "math/rotation-bits"
+between = ["opensim-yengine", "fake-opensim"]
+reason = "The probe prints each value's exact bits, and every one of OpenSim's is a double (its inputs parsed and its arithmetic done in double); the runtime's values are floats on every flavour"
+
+[[difference]]
+probe = "math/float-rounding"
+between = ["opensim-yengine", "fake-opensim"]
+record = "input"
+reason = "OpenSim parses the inputs as doubles, whose bits the probe prints; the runtime's are floats"
+
+[[difference]]
+probe = "math/float-rounding"
+between = ["opensim-yengine", "fake-opensim"]
+record = "point"
+reason = "OpenSim computes and stores floats as doubles, so A*B-R is 0 there, the casts and comparisons that follow read it so, and a big float plus one is a different number; the runtime rounds to float as Second Life does"
+
+[[difference]]
+probe = "strings/conversions"
+between = ["opensim-yengine", "fake-opensim"]
+record = "float"
+field = "value"
+reason = "OpenSim's floats are doubles: 123456789 and 1234567.875 keep their digits there and 3.4e39 is a number; the runtime's floats round and overflow to Infinity"
+
+[[difference]]
+probe = "strings/conversions"
+between = ["opensim-yengine", "fake-opensim"]
+record = "to-float"
+field = "value"
+reason = "OpenSim's (float) of a string is a double: 1e39 is a number and 3.4028235e38 keeps its digits; the runtime's float overflows to Infinity and rounds"
+
+[[difference]]
+probe = "errors/math-lso"
+between = ["opensim-yengine", "fake-opensim"]
+record = "case"
+fields = { case = "float-overflow" }
+field = "result"
+reason = "OpenSim's floats are doubles, so 1e38*1e38 is 1e76, written out in 77 digits; the runtime's float overflows to Infinity"
+
+[[difference]]
+probe = "errors/math"
+between = ["opensim-yengine", "fake-opensim"]
+record = "case"
+fields = { case = "float-overflow", step = "after" }
+field = "result"
+reason = "OpenSim's floats are doubles, so 1e76 is a number there; the runtime's values are floats on every flavour, and the product overflows to Infinity"
+
+[[difference]]
+probe = "strings/newer"
+between = ["opensim-yengine", "fake-opensim"]
+reason = "OpenSim compiles none of the newer string, hash, colour and list functions, so the probe stops at its compile error on both, never printing its end"
+
+[[difference]]
+probe = "vm/call-cost-newer"
+between = ["opensim-yengine", "fake-opensim"]
+reason = "OpenSim compiles none of llReplaceSubString, llSHA256String and llComputeHash, so the probe stops at its compile error on both, never printing its end"
+
+# --- memory: Second Life's Mono accounting in the runtime's fitted model ---
+
+[[difference]]
+probe = "memory/collision"
+between = ["aditi", "fake-sl"]
+record = "before"
+field = "used"
+reason = "llGetUsedMemory counts Mono's compiled code, which the runtime does not have; its fitted code model is within 300 bytes of aditi's reading (sl-lsl-runtime vm/memory.rs)"
+
+[[difference]]
+probe = "memory/collision"
+between = ["aditi", "fake-sl"]
+record = "before"
+field = "free"
+reason = "llGetFreeMemory is the limit less the code model's use, within 300 bytes of aditi's"
+
+[[difference]]
+probe = "memory/collision"
+between = ["aditi", "fake-sl"]
+record = "grown"
+field = "used"
+reason = "The code model's offset, and aditi's garbage, which moves its reading by tens to hundreds of bytes between steps; the runtime counts each value exactly"
+
+[[difference]]
+probe = "memory/collision"
+between = ["aditi", "fake-sl"]
+record = "grown"
+field = "free"
+reason = "The code model's offset and aditi's garbage, as in used"
+
+[[difference]]
+probe = "memory/collision"
+between = ["aditi", "fake-sl"]
+record = "set-limit"
+fields = { script = "limited-list" }
+reason = "The limit asked is used+8192, so it carries the code model's offset, and used and free with it"
+
+[[difference]]
+probe = "memory/collision"
+between = ["aditi", "fake-sl"]
+record = "grown"
+fields = { script = "limited-list" }
+reason = "Under its lowered limit aditi collects garbage and grows to 540 elements where the runtime, which has no garbage, collides making 500 (vm/memory.rs)"
+
+[[difference]]
+probe = "memory/collision"
+between = ["aditi", "fake-sl"]
+record = "reached"
+fields = { script = "\"Full" }
+field = "last"
+reason = "aditi's Full list collides making 3 660 elements, the runtime's 3 650: the fitted code model's offset in a 64 KB budget"
+
+[[difference]]
+probe = "memory/collision"
+between = ["aditi", "fake-sl"]
+record = "reached"
+fields = { script = "\"Limited" }
+field = "last"
+reason = "Under its lowered limit aditi collects garbage and grows to 540 elements; the runtime, which has no garbage, collides at 500 (vm/memory.rs)"
+
+[[difference]]
+probe = "memory/collision"
+between = ["aditi", "fake-sl"]
+record = "before"
+fields = { script = "doubling-lso" }
+reason = "Second Life runs Doubling LSO in LSO's 16 KB; the fake grid runs it as Mono"
+task = "server-lsl-lso-memory"
+
+[[difference]]
+probe = "memory/collision"
+between = ["aditi", "fake-sl"]
+record = "grown"
+fields = { script = "doubling-lso" }
+reason = "In LSO's 16 KB a doubled string collides at 8 192 characters on Second Life; run as Mono it doubles twice more"
+task = "server-lsl-lso-memory"
+
+[[difference]]
+probe = "memory/collision"
+between = ["aditi", "fake-sl"]
+record = "reached"
+fields = { script = "\"Doubling" }
+field = "last"
+reason = "In LSO's 16 KB Doubling LSO stops at step 13; run as Mono, at step 15"
+task = "server-lsl-lso-memory"
+
+[[difference]]
+probe = "memory/collision"
+between = ["opensim-yengine", "fake-opensim"]
+reason = "fake-opensim runs Full list's llSetObjectDesc-and-append loop about four times slower than YEngine, so it is still growing when the controller moves on and overwrites Limited list's progress"
+task = "server-lsl-opensim-grow-loop-slow"
+
+[[difference]]
+probe = "memory/recursion"
+between = ["aditi", "fake-sl"]
+record = "before"
+field = "used"
+reason = "The fitted Mono code model, within 300 bytes of aditi's reading"
+
+[[difference]]
+probe = "memory/recursion"
+between = ["aditi", "fake-sl"]
+record = "before"
+field = "free"
+reason = "The fitted Mono code model, within 300 bytes of aditi's reading"
+
+[[difference]]
+probe = "memory/recursion"
+between = ["aditi", "fake-sl"]
+record = "depth"
+field = "used"
+reason = "The fitted Mono code model, and aditi's garbage"
+
+[[difference]]
+probe = "memory/recursion"
+between = ["aditi", "fake-sl"]
+record = "depth"
+field = "free"
+reason = "The fitted Mono code and stack models, and aditi's garbage"
+
+[[difference]]
+probe = "memory/recursion"
+between = ["aditi", "fake-sl"]
+record = "depth"
+fields = { script = "wide" }
+reason = "Wide's depth is a fitted stack model: aditi reached 413 to 518 across runs (518 in this one, so it printed depth 512), the model 424"
+
+[[difference]]
+probe = "memory/recursion"
+between = ["aditi", "fake-sl"]
+record = "depth"
+fields = { script = "limited" }
+reason = "Under a limit lowered to 4 096 over the use aditi goes deeper (129 to 253, here 151) than the stack model (73)"
+task = "server-lsl-mono-collision-model-under-lowered-limit"
+
+[[difference]]
+probe = "memory/recursion"
+between = ["aditi", "fake-sl"]
+record = "set-limit"
+fields = { script = "limited" }
+reason = "The limit asked is used+4096, so it carries the code model's offset, and used and free with it"
+
+[[difference]]
+probe = "memory/recursion"
+between = ["aditi", "fake-sl"]
+record = "before"
+fields = { script = "narrow-lso" }
+reason = "Second Life runs Narrow LSO in LSO's 16 KB; the fake grid runs it as Mono"
+task = "server-lsl-lso-memory"
+
+[[difference]]
+probe = "memory/recursion"
+between = ["aditi", "fake-sl"]
+record = "before"
+fields = { script = "wide-lso" }
+reason = "Second Life runs Wide LSO in LSO's 16 KB; the fake grid runs it as Mono"
+task = "server-lsl-lso-memory"
+
+[[difference]]
+probe = "memory/recursion"
+between = ["aditi", "fake-sl"]
+record = "depth"
+fields = { script = "narrow-lso" }
+reason = "In LSO's 16 KB a one-integer recursion stops at depth 763 on Second Life; run as Mono it passes 1024"
+task = "server-lsl-lso-memory"
+
+[[difference]]
+probe = "memory/recursion"
+between = ["aditi", "fake-sl"]
+record = "depth"
+fields = { script = "wide-lso" }
+reason = "In LSO's 16 KB Wide stops at depth 208 on Second Life; run as Mono it passes 256"
+task = "server-lsl-lso-memory"
+
+[[difference]]
+probe = "memory/sizes"
+between = ["aditi", "fake-sl"]
+record = "list"
+field = "deltas"
+reason = "Each value's cost is the runtime's exact one, the same in all three runs; aditi's three runs wander by tens to hundreds of bytes as its garbage is collected"
+
+[[difference]]
+probe = "memory/sizes"
+between = ["aditi", "fake-sl"]
+record = "text"
+field = "deltas"
+reason = "As list: aditi's garbage wanders the deltas, the runtime's are exact"
+
+[[difference]]
+probe = "memory/sizes"
+between = ["aditi", "fake-sl"]
+record = "local"
+field = "deltas"
+reason = "Locals cost nothing in Mono's llGetUsedMemory; aditi's nonzero deltas are its garbage"
+
+[[difference]]
+probe = "memory/sizes"
+between = ["aditi", "fake-sl"]
+record = "argument"
+field = "deltas"
+reason = "Arguments cost nothing in Mono's llGetUsedMemory; aditi's nonzero deltas are its garbage"
+
+[[difference]]
+probe = "memory/sizes"
+between = ["aditi", "fake-sl"]
+record = "frames"
+field = "deltas"
+reason = "Frames cost nothing in Mono's llGetUsedMemory; aditi's nonzero deltas are its garbage"
+
+[[difference]]
+probe = "memory/sizes"
+between = ["aditi", "fake-sl"]
+record = "global-key"
+field = "deltas"
+reason = "aditi's garbage wanders one of three runs' deltas; the runtime's are exact"
+
+[[difference]]
+probe = "memory/sizes"
+between = ["aditi", "fake-sl"]
+record = "globals"
+field = "used"
+reason = "llGetUsedMemory counts Mono's compiled code, which the runtime models (vm/memory.rs); 43 bytes apart for these scripts"
+
+[[difference]]
+probe = "memory/object"
+between = ["aditi", "fake-sl"]
+record = "self"
+field = "used"
+reason = "The fitted Mono code model, within 300 bytes of aditi's reading"
+
+[[difference]]
+probe = "memory/object"
+between = ["aditi", "fake-sl"]
+record = "details"
+fields = { of = "owner" }
+reason = "An avatar's script count and memory are its attachments'; aditi's test avatar wears five scripts (327 680 bytes), the fake grid's avatar wears nothing"
+
+[[difference]]
+probe = "memory/object"
+between = ["aditi", "fake-sl"]
+record = "details"
+fields = { of = "self" }
+field = "script_memory"
+reason = "Second Life counts the LSO script Idle LSO at LSO's 16 384; the fake grid runs it as Mono, 65 536"
+task = "server-lsl-lso-memory"
+
+[[difference]]
+probe = "memory/budget-lso"
+between = ["aditi", "fake-sl"]
+reason = "Second Life runs the probe as LSO, with its fixed 16 KB, 16 384 used and limit and a low-water free; the fake grid compiles every script as Mono"
+task = "server-lsl-lso-memory"
+
+[[difference]]
+probe = "memory/budget"
+between = ["aditi", "fake-sl"]
+reason = "The runtime's Mono collision model charges a call more than the 1 KB the probe leaves over its use, so it stops at a stack-heap collision where aditi goes on; used and free otherwise differ by the fitted code model"
+task = "server-lsl-mono-collision-model-under-lowered-limit"
+
+# --- LSO maths errors (server-lsl-lso-memory) ---
+
+[[difference]]
+probe = "errors/math-lso"
+between = ["aditi", "fake-sl"]
+record = "case"
+fields = { case = "sqrt-negative" }
+reason = "LSO raises Math Error for a NaN or infinite result and stops the script; the fake grid runs it as Mono, which answers NaN and Infinity"
+task = "server-lsl-lso-memory"
+
+[[difference]]
+probe = "errors/math-lso"
+between = ["aditi", "fake-sl"]
+record = "case"
+fields = { case = "float-overflow" }
+reason = "LSO raises Math Error for a NaN or infinite result and stops the script; the fake grid runs it as Mono, which answers NaN and Infinity"
+task = "server-lsl-lso-memory"
+
+[[difference]]
+probe = "errors/math-lso"
+between = ["aditi", "fake-sl"]
+record = "case"
+fields = { case = "acos-out-of-range" }
+reason = "LSO raises Math Error for a NaN or infinite result and stops the script; the fake grid runs it as Mono, which answers NaN and Infinity"
+task = "server-lsl-lso-memory"
+
+[[difference]]
+probe = "errors/math-lso"
+between = ["aditi", "fake-sl"]
+record = "case"
+fields = { case = "pow-nan" }
+reason = "LSO raises Math Error for a NaN or infinite result and stops the script; the fake grid runs it as Mono, which answers NaN and Infinity"
+task = "server-lsl-lso-memory"
+
+[[difference]]
+probe = "errors/math-lso"
+between = ["aditi", "fake-sl"]
+record = "case"
+fields = { case = "inf-nan-casts" }
+reason = "LSO raises Math Error for a NaN or infinite result and stops the script; the fake grid runs it as Mono, which answers NaN and Infinity"
+task = "server-lsl-lso-memory"
+
+[[difference]]
+probe = "errors/math-lso"
+between = ["aditi", "fake-sl"]
+record = "script-state"
+field = "running"
+reason = "The LSO scripts Math Error stopped read as stopped, before and after the revive; run as Mono they never faulted"
+task = "server-lsl-lso-memory"
+
+[[difference]]
+probe = "errors/math-lso"
+between = ["aditi", "fake-sl"]
+record = "answer"
+reason = "A script stopped by LSO's Math Error answers nothing; run as Mono the five answer"
+task = "server-lsl-lso-memory"
+
+# --- time, land and the region (the fake region is its own) ---
+
+[[difference]]
+probe = "time/clocks"
+between = ["aditi", "fake-sl"]
+record = "formats"
+field = "wall_behind_gmt_hours"
+reason = "Pacific time is seven hours behind in daylight time and eight outside it; aditi's run was on 2026-10-28, in daylight time, and a run after 2026-11-01 reads eight"
+
+[[difference]]
+probe = "time/clocks"
+between = ["opensim-yengine", "fake-opensim"]
+record = "formats"
+field = "wall_behind_gmt_hours"
+reason = "OpenSim's llGetWallclock reads the simulator host's own zone (the local grid's, an hour ahead of UTC); the fake grid's host keeps UTC"
+
+[[difference]]
+probe = "land/day-cycle"
+between = ["aditi", "fake-sl"]
+record = "body"
+fields = { which = "moon", scope = "parcel" }
+field = "dot_up"
+reason = "Second Life's moon moves between the probe's llGetMoonDirection and llGetMoonRotation, so their dot product's third decimal is the move between the two calls; the fake grid answers both in one tick"
+
+[[difference]]
+probe = "land/env"
+between = ["aditi", "fake-sl"]
+record = "env"
+fields = { name = "sim_channel" }
+field = "value"
+reason = "The fake grid's own server name"
+
+[[difference]]
+probe = "land/env"
+between = ["aditi", "fake-sl"]
+record = "env"
+fields = { name = "sim_version" }
+field = "value"
+reason = "The fake grid's own version"
+
+[[difference]]
+probe = "land/env"
+between = ["aditi", "fake-sl"]
+record = "env"
+fields = { name = "estate_name" }
+field = "value"
+reason = "The fake estate's name, not Mauve's"
+
+[[difference]]
+probe = "land/env"
+between = ["aditi", "fake-sl"]
+record = "env"
+fields = { name = "region_max_prims" }
+field = "value"
+reason = "Mauve's mainland prim allowance against the fake region's"
+
+[[difference]]
+probe = "land/env"
+between = ["aditi", "fake-sl"]
+record = "env"
+fields = { name = "region_object_bonus" }
+field = "value"
+reason = "Mauve's object bonus against the fake region's"
+
+[[difference]]
+probe = "land/env"
+between = ["aditi", "fake-sl"]
+record = "env"
+fields = { name = "region_rating" }
+field = "value"
+reason = "Mauve's ADULT rating against the fake region's PG"
+
+[[difference]]
+probe = "land/env"
+between = ["aditi", "fake-sl"]
+record = "env"
+fields = { name = "agent_limit" }
+field = "value"
+reason = "Mauve's agent limit against the fake region's"
+
+[[difference]]
+probe = "land/env"
+between = ["aditi", "fake-sl"]
+record = "env"
+fields = { name = "region_start_time" }
+field = "value"
+reason = "The moment each region started"
+
+[[difference]]
+probe = "land/env"
+between = ["aditi", "fake-sl"]
+record = "env"
+fields = { name = "grid" }
+field = "value"
+reason = "The grid's own name: aditi against the fake grid"
+
+[[difference]]
+probe = "land/env"
+between = ["aditi", "fake-sl"]
+record = "env"
+fields = { name = "region_name" }
+field = "value"
+reason = "The region's own name"
+
+[[difference]]
+probe = "land/env"
+between = ["opensim-yengine", "fake-opensim"]
+record = "env"
+fields = { name = "sim_version" }
+field = "value"
+reason = "The fake grid's own version"
+
+[[difference]]
+probe = "land/env"
+between = ["opensim-yengine", "fake-opensim"]
+record = "env"
+fields = { name = "estate_id" }
+field = "value"
+reason = "The fake estate's id"
+
+[[difference]]
+probe = "land/env"
+between = ["opensim-yengine", "fake-opensim"]
+record = "env"
+fields = { name = "estate_name" }
+field = "value"
+reason = "The fake estate's name"
+
+[[difference]]
+probe = "land/env"
+between = ["opensim-yengine", "fake-opensim"]
+record = "env"
+fields = { name = "region_start_time" }
+field = "value"
+reason = "The moment each region started"
+
+[[difference]]
+probe = "land/env"
+between = ["opensim-yengine", "fake-opensim"]
+record = "env"
+fields = { name = "Sim_Version" }
+field = "value"
+reason = "The fake grid's own version"
+
+[[difference]]
+probe = "land/ground"
+between = ["aditi", "fake-sl"]
+record = "ground"
+field = "above_prim"
+reason = "The fake region's own level terrain, not Mauve's"
+
+[[difference]]
+probe = "land/ground"
+between = ["aditi", "fake-sl"]
+record = "ground"
+field = "same_as_clamped"
+reason = "Second Life's height past the region edge is within 0.04 m of the edge's own, not the same; on the fake region's level land the two are equal whatever the rule"
+
+[[difference]]
+probe = "land/ground"
+between = ["aditi", "fake-sl"]
+record = "ground-west"
+reason = "Second Life's height past the west edge is 0.035 m off the edge's; on the fake region's level land every height is the edge's"
+
+[[difference]]
+probe = "land/ground"
+between = ["aditi", "fake-sl"]
+record = "weather"
+field = "wind_far_same"
+reason = "The fake region's wind is its terrain fixture's, the same everywhere; Second Life's differs 100 m away"
+
+[[difference]]
+probe = "land/ground"
+between = ["opensim-yengine", "fake-opensim"]
+record = "ground"
+field = "above_prim"
+reason = "The fake region's own level terrain, not the local OpenSim's"
+
+[[difference]]
+probe = "land/ground"
+between = ["opensim-yengine", "fake-opensim"]
+record = "weather"
+field = "wind_far_same"
+reason = "The fake region's wind is its terrain fixture's, the same everywhere; OpenSim's differs 100 m away"
+
+[[difference]]
+probe = "land/parcel"
+between = ["aditi", "fake-sl"]
+record = "outside"
+reason = "Mauve's parcels and their prims against the fake region's single empty parcel"
+
+[[difference]]
+probe = "land/parcel"
+between = ["aditi", "fake-sl"]
+record = "flags"
+reason = "Mauve's sandbox parcel sets ban lists, local sound, no-push and group building; the fake parcel only fly, scripts, landmarks and building"
+
+[[difference]]
+probe = "land/parcel"
+between = ["aditi", "fake-sl"]
+record = "details"
+reason = "Mauve's group-owned sandbox parcel (its name, description, group, area, landing point, prims) against the fake region's"
+
+[[difference]]
+probe = "land/parcel"
+between = ["aditi", "fake-sl"]
+record = "max-prims"
+reason = "Mauve's prim allowance against the fake region's 20000"
+
+[[difference]]
+probe = "land/parcel"
+between = ["aditi", "fake-sl"]
+record = "land-owner"
+reason = "Mauve's parcel is group-owned; the fake region's is the avatar's"
+
+[[difference]]
+probe = "land/parcel"
+between = ["opensim-yengine", "fake-opensim"]
+record = "flags"
+reason = "The local parcel lets every object enter and sets another bit the fake parcel does not"
+
+[[difference]]
+probe = "land/parcel"
+between = ["opensim-yengine", "fake-opensim"]
+record = "details"
+reason = "The local parcel's name, its see-avatars and avatar-sound flags (off there, on in the fake parcel) and its dwell"
+
+[[difference]]
+probe = "land/parcel"
+between = ["opensim-yengine", "fake-opensim"]
+record = "prim-owners"
+reason = "The local parcel holds other prims; the fake region is empty"
+
+[[difference]]
+probe = "land/parcel"
+between = ["opensim-yengine", "fake-opensim"]
+record = "script-danger"
+reason = "The local parcel lets every object enter, so it is no danger; the fake parcel does not"
+
+[[difference]]
+probe = "land/region"
+between = ["aditi", "fake-sl"]
+record = "region"
+field = "corner"
+reason = "Mauve's place on the grid against the fake region's"
+
+[[difference]]
+probe = "land/region"
+between = ["aditi", "fake-sl"]
+record = "edge"
+reason = "Mauve's east edge is the edge of the world; the fake region has a neighbour there"
+
+[[difference]]
+probe = "land/region"
+between = ["aditi", "fake-sl"]
+record = "sim-data"
+reason = "Mauve's grid corner and ADULT rating against the fake region's corner and PG"
+
+[[difference]]
+probe = "land/region"
+between = ["opensim-yengine", "fake-opensim"]
+record = "edge"
+reason = "The local grid has a region north of the default one; the fake region has none there"
+
+[[difference]]
+probe = "land/sl-only"
+between = ["aditi", "fake-sl"]
+record = "sim-stat"
+reason = "The fake grid measures only the frame rate, exactly 45, and the avatars; every other stat is 0.0"
+
+[[difference]]
+probe = "land/sl-only"
+between = ["aditi", "fake-sl"]
+record = "environment"
+reason = "Mauve's own sky and water and the time of day it was read at; the fake region answers the reference viewer's default sky at its own time"
+
+[[difference]]
+probe = "land/sl-only"
+between = ["aditi", "fake-sl"]
+record = "nav-point"
+reason = "The fake grid has no navmesh and answers the ground below the point"
+
+# --- experiences, HTTP, money, throttles ---
+
+[[difference]]
+probe = "experience/no-experience"
+between = ["aditi", "fake-sl"]
+record = "details"
+fields = { of = "bugsly" }
+reason = "Bugsly Testing is an experience of aditi's; the fake grid has no such experience and answers it as an unknown one"
+
+[[difference]]
+probe = "experience/powers"
+between = ["aditi", "fake-sl"]
+record = "after"
+fields = { of = "owner" }
+reason = "The fake grid does not run a scripted teleport, so the owner never moves; Second Life moves it to the parcel's landing point"
+task = "server-lsl-scripted-teleport-unmodelled"
+
+[[difference]]
+probe = "experience/powers"
+between = ["opensim-yengine", "fake-opensim"]
+record = "after"
+reason = "The fake grid does not run a scripted teleport, so neither the owner nor the granting other avatar moves; OpenSim lands both at the aim"
+task = "server-lsl-scripted-teleport-unmodelled"
+
+[[difference]]
+probe = "throttle/email"
+between = ["aditi", "fake-sl"]
+reason = "llEmail and llGetNextEmail are not implemented, so both scripts stop at their first call"
+task = "server-lsl-lib-email-xmlrpc"
+
+[[difference]]
+probe = "throttle/email"
+between = ["opensim-yengine", "fake-opensim"]
+reason = "llEmail and llGetNextEmail are not implemented, so both scripts stop at their first call; OpenSim's email module is off and each call only sleeps and complains"
+task = "server-lsl-lib-email-xmlrpc"
+
+[[difference]]
+probe = "throttle/cast-ray"
+between = ["aditi", "fake-sl"]
+record = "status"
+fields = { kind = "expensive" }
+field = "status"
+reason = "The expensive ray's hit count: the objects across Mauve corner to corner; the fake region has none"
+
+[[difference]]
+probe = "throttle/cast-ray"
+between = ["opensim-yengine", "fake-opensim"]
+record = "status"
+fields = { kind = "expensive" }
+field = "status"
+reason = "The expensive ray's hit count: the object across the local region corner to corner; the fake region has none"
+
+[[difference]]
+probe = "http/options"
+between = ["aditi", "fake-sl"]
+record = "inbound"
+field = "user_agent"
+reason = "The user agent carries the simulator's version, the fake grid's own"
+
+[[difference]]
+probe = "http/options"
+between = ["aditi", "fake-sl"]
+record = "response"
+fields = { step = "17" }
+reason = "The fake grid sends no request off the grid: an unresolvable host is answered 499 with its own text, not Second Life's proxy's 502 Unknown Host page"
+
+[[difference]]
+probe = "http/outbound"
+between = ["aditi", "fake-sl"]
+record = "headers"
+field = "shard"
+reason = "Aditi is the beta grid and says Testing; the fake grid imitates the main grid's Production"
+
+[[difference]]
+probe = "http/outbound"
+between = ["aditi", "fake-sl"]
+record = "transport"
+field = "user_agent"
+reason = "The user agent carries the simulator's version, the fake grid's own"
+
+[[difference]]
+probe = "http/outbound"
+between = ["aditi", "fake-sl"]
+record = "transport"
+field = "remote_ip"
+reason = "The fake grid's requests come from loopback"
+
+[[difference]]
+probe = "http/outbound"
+between = ["aditi", "fake-sl"]
+record = "response"
+fields = { step = "7" }
+reason = "Second Life answers a HEAD to the script's own URL 400 with the raw response, its date in it, as the body, of which the probe kept 40 bytes; the fake grid's 400 has no body"
+
+[[difference]]
+probe = "http/outbound"
+between = ["aditi", "fake-sl"]
+record = "response"
+fields = { step = "31" }
+reason = "The fake grid sends no request off the grid: an unresolvable host is answered 499 with its own text, not Second Life's proxy's 502 Unknown Host page"
+
+[[difference]]
+probe = "http/outbound"
+between = ["opensim-yengine", "fake-opensim"]
+record = "response"
+fields = { step = "31" }
+reason = "The fake grid sends no request off the grid: an unresolvable host is answered with its own text, not OpenSim's NameResolutionFailure"
+
+[[difference]]
+probe = "http/url"
+between = ["aditi", "fake-sl"]
+record = "granted"
+reason = "The fake grid's URLs are its loopback service's address and port, and it grants no secure URL (it runs no HTTPS listener), so every later count is one lower"
+
+[[difference]]
+probe = "http/url"
+between = ["aditi", "fake-sl"]
+record = "released"
+reason = "No secure URL was granted on the fake grid, so it releases the third and holds one fewer"
+
+[[difference]]
+probe = "http/url"
+between = ["aditi", "fake-sl"]
+record = "free"
+fields = { when = "later" }
+field = "used"
+reason = "No secure URL was granted on the fake grid, so it holds one fewer"
+
+[[difference]]
+probe = "http/url"
+between = ["opensim-yengine", "fake-opensim"]
+record = "granted"
+field = "port"
+reason = "The fake grid's URLs are on its loopback service's own port, not OpenSim's 9000"
+
+[[difference]]
+probe = "http/url"
+between = ["opensim-yengine", "fake-opensim"]
+record = "granted"
+field = "length"
+reason = "The fake grid's port has five digits, OpenSim's 9000 four"
+
+[[difference]]
+probe = "money/lapse"
+between = ["aditi", "fake-sl"]
+record = "away"
+fields = { poll = "11" }
+field = "owner_gone"
+reason = "Aditi's teleport back took one two-second poll longer than the fake grid's"
+
+[[difference]]
+probe = "money/lapse"
+between = ["aditi", "fake-sl"]
+record = "away"
+fields = { poll = "12" }
+reason = "Aditi's teleport back took one two-second poll longer than the fake grid's"
+
+# --- events, errors, detection, OSSL, persistence ---
+
+[[difference]]
+probe = "detection/cast-ray"
+between = ["aditi", "fake-sl"]
+record = "ray"
+reason = "A ray's hits are the region's: aditi's land falls away below the probe and rises within the off-region ray's reach, and its owner stands elsewhere, so its rays end and hit where the fake region's flat ground and arrival point put them otherwise; the rules are held one by one by the VM's sensing tests"
+
+[[difference]]
+probe = "detection/cast-ray"
+between = ["aditi", "fake-sl"]
+record = "item"
+reason = "A ray's hits are the region's: aditi's land falls away below the probe and rises within the off-region ray's reach, and its owner stands elsewhere, so its rays end and hit where the fake region's flat ground and arrival point put them otherwise; the rules are held one by one by the VM's sensing tests"
+
+[[difference]]
+probe = "errors/flood-repeat"
+between = ["aditi", "fake-sl"]
+record = "single"
+fields = { n = "22" }
+reason = "A G phase complains every 2.5 s until 60 s have passed since its first: aditi's steps came 2.71 s apart and the fake grid's 2.73, so the 21st ended at 59.5 s on aditi and 60.04 s on the fake grid, and only aditi's phase had a 22nd"
+
+[[difference]]
+probe = "errors/flood-repeat"
+between = ["opensim-yengine", "fake-opensim"]
+record = "single"
+fields = { n = "27" }
+reason = "A G phase complains every 2 s until 60 s have passed since its first: OpenSim's steps came 2.20 s apart and the fake grid's 2.22, so the 26th fell at 59.5 s on OpenSim and 60.07 s on the fake grid, and only OpenSim's phase had a 27th"
+
+[[difference]]
+probe = "events/collision"
+between = ["aditi", "fake-sl"]
+record = "phase"
+reason = "A falling physical prim makes the collisions, and the fake grid runs no physics: its faller never falls"
+task = "server-world-collision-and-physics"
+
+[[difference]]
+probe = "events/collision"
+between = ["opensim-yengine", "fake-opensim"]
+record = "phase"
+reason = "A falling physical prim makes the collisions, and the fake grid runs no physics: its faller never falls"
+task = "server-world-collision-and-physics"
+
+[[difference]]
+probe = "ossl/available"
+between = ["opensim-yengine", "fake-opensim"]
+reason = "osGetWindParam is not implemented, so the probe's script stops at it and never prints its end (osGetGender, osGetHealth and osIsNpc after it are server-lsl-lib-ossl-avatars'); osGetGridName and osGetGridNick name the fake grid"
+task = "server-lsl-lib-ossl-land-writers"
+
+[[difference]]
+probe = "persistence/restart"
+between = ["opensim-yengine", "fake-opensim"]
+reason = "The fake grid announces an estate restart and never restarts the region, so the probe times out waiting for CHANGED_REGION_START"
+task = "server-fake-grid-estate-actions"
+
+[[difference]]
+probe = "persistence/lists"
+between = ["opensim-yengine", "fake-opensim"]
+record = "timeout"
+fields = { awaited = "region_start" }
+reason = "The fake grid announces an estate restart and never restarts the region, so the probe times out waiting for CHANGED_REGION_START"
+task = "server-fake-grid-estate-actions"
+
+[[difference]]
+probe = "events/changed-worn"
+between = ["opensim-yengine", "fake-opensim"]
+record = "changed"
+reason = "OpenSim runs a worn script's changed(32768) in the region it is leaving; the fake grid runs it after arrival, and raises one more on the drop after the trip"
+task = "server-fake-grid-worn-departure-change"
+
+[[difference]]
+probe = "prim/identity"
+between = ["aditi", "fake-sl"]
+record = "details"
+fields = { label = "owner" }
+field = "got"
+reason = "OBJECT_PRIM_COUNT of an avatar counts the prims it wears: aditi's test avatar wears 22, the fake grid's none"
+
+[[difference]]
+probe = "prim/identity"
+between = ["opensim-yengine", "fake-opensim"]
+record = "detail"
+fields = { code = "5" }
+field = "got"
+reason = "OpenSim puts a prim's OBJECT_VELOCITY in the list as a bare OpenMetaverse Vector3 (LSL_Api.llGetObjectDetails: ret.Add(vel)), a value of no LSL type that llGetListEntryType cannot name and that casts as <0, 0, 0>; the runtime's lists hold LSL values only"
+
+[[difference]]
+probe = "prim/link"
+between = ["opensim-yengine", "fake-opensim"]
+record = "child"
+fields = { label = "as-child" }
+reason = "The fake grid applies a script's llBreakAllLinks once the tick is over, so the other prim's script, which handles the link message in the same tick, still reads the set as linked"
+task = "server-lsl-link-applies-after-tick"
+
+# Two prims' changed events in one frame: whose handler runs first is
+# scheduling; the local OpenSim ran them in either order in different probes.
+
+[[difference]]
+probe = "events/changed-edits"
+between = ["opensim-yengine", "fake-opensim"]
+record = "changed"
+fields = { step = "26", bits = "LINK" }
+reason = "The unlink raises changed in prims A and B in the same frame, and which prim's script prints first is scheduling: OpenSim ran B first here and A first in events/changed-contents"
+
+[[difference]]
+probe = "events/changed-edits"
+between = ["opensim-yengine", "fake-opensim"]
+record = "changed"
+fields = { step = "12", bits = "32768" }
+reason = "The move raises OpenSim's position change in A and twice in B in the same frame, and how A's line falls among B's is scheduling"
+
+[[difference]]
+probe = "events/changed-contents"
+between = ["opensim-yengine", "fake-opensim"]
+record = "changed"
+fields = { step = "11", bits = "LINK" }
+reason = "The unlink raises changed in prims A and B in the same frame, and which prim's script prints first is scheduling: OpenSim ran A first here and B first in events/changed-edits"
+
+[[difference]]
+probe = "events/changed-edits"
+between = ["aditi", "fake-sl"]
+record = "changed"
+fields = { prim = "A", step = "26", bits = "LINK" }
+reason = "The unlink raises changed in prims A and B in the same frame, and which prim's script prints first is scheduling: aditi ran B first"
+
+# A drive against a step timer: on aditi the owner's drop (an item made in the
+# Trash, saved and dropped) took longer than the probe's four-second step, so
+# it reached prim A after the unlink; the fake grid answers it at once.
+
+[[difference]]
+probe = "events/changed-contents"
+between = ["aditi", "fake-sl"]
+record = "step"
+fields = { n = "11", what = "unlink" }
+field = "items"
+reason = "On aditi the owner's drop of step 10 landed after the probe's four-second step had moved on to the unlink; the fake grid answers a drop at once"
+
+[[difference]]
+probe = "events/changed-contents"
+between = ["aditi", "fake-sl"]
+record = "changed"
+fields = { prim = "A" }
+field = "step"
+reason = "On aditi the owner's drop of step 10 landed after the probe's four-second step had moved on to the unlink, so prim A heard its LINK before its INVENTORY; the fake grid answers a drop at once"
+
+[[difference]]
+probe = "events/changed-contents"
+between = ["aditi", "fake-sl"]
+record = "changed"
+fields = { prim = "A" }
+field = "bits"
+reason = "On aditi the owner's drop of step 10 landed after the probe's four-second step had moved on to the unlink, so prim A heard its LINK before its INVENTORY; the fake grid answers a drop at once"
+
+[[difference]]
+probe = "events/changed-contents"
+between = ["aditi", "fake-sl"]
+record = "changed"
+fields = { prim = "A" }
+field = "items"
+reason = "On aditi the owner's drop of step 10 landed after the probe's four-second step had moved on to the unlink, so prim A heard its LINK before its INVENTORY; the fake grid answers a drop at once"
+
+# Two scripts' lines in one frame: whose prints first is scheduling.
+
+[[difference]]
+probe = "inventory/give"
+between = ["aditi", "fake-sl"]
+record = "receiver-changed"
+reason = "The receiving prim's changed and the giver's next line come in the same frame from two prims' scripts, and which prints first is scheduling"
+
+[[difference]]
+probe = "inventory/give"
+between = ["opensim-yengine", "fake-opensim"]
+record = "receiver-changed"
+reason = "The receiving prim's changed and the giver's next line come in the same frame from two prims' scripts, and which prints first is scheduling"
+
+[[difference]]
+probe = "money/pay"
+between = ["aditi", "fake-sl"]
+record = "money"
+fields = { script = "till", step = "1" }
+reason = "One payment raises money in both of prim A's scripts in the same frame, and which prints first is scheduling"
+
+[[difference]]
+probe = "prim/params"
+between = ["aditi", "fake-sl"]
+record = "rt"
+fields = { label = "cast-shadows" }
+reason = "The second script's first line and the leader's start come in the same frame, and which prints first is scheduling"
+
+[[difference]]
+probe = "prim/params"
+between = ["opensim-yengine", "fake-opensim"]
+record = "rt"
+fields = { label = "cast-shadows" }
+reason = "The second script's first line and the leader's start come in the same frame, and which prints first is scheduling"
+
+[[difference]]
+probe = "ossl/errors"
+between = ["opensim-yengine", "fake-opensim"]
+record = "returned"
+fields = { script = "Listed" }
+reason = "Each OSSL script returns from its call in the same frame as the others, and in which order their lines print is scheduling"
+
+[[difference]]
+probe = "ossl/errors"
+between = ["opensim-yengine", "fake-opensim"]
+record = "returned"
+fields = { script = "LightShare" }
+reason = "Each OSSL script returns from its call in the same frame as the others, and in which order their lines print is scheduling"
+
+[[difference]]
+probe = "ossl/errors"
+between = ["opensim-yengine", "fake-opensim"]
+record = "answer"
+field = "script"
+reason = "The scripts answer the leader in the same frame, and in which order their lines print is scheduling"
+
+[[difference]]
+probe = "prim/link-refusals"
+between = ["opensim-yengine", "fake-opensim"]
+record = "try"
+fields = { label = "break-all-unpermitted" }
+reason = "Each refused llBreakLink costs the second script OpenSim's second for an error, which puts its third try at the moment the leader's two-second step prints, and which comes first is scheduling"
+
+# The restarted sleeper wakes inside llSetScriptState on both grids.
+
+[[difference]]
+probe = "time/sleep-while-stopped"
+between = ["aditi", "fake-sl"]
+record = "woke"
+fields = { run = "late" }
+reason = "A sleeper restarted after its sleep would have ended wakes inside the controller's llSetScriptState on aditi, before the controller's next line; the fake grid runs it after"
+task = "server-lsl-restarted-sleeper-order"
+
+[[difference]]
+probe = "time/sleep-while-stopped"
+between = ["opensim-yengine", "fake-opensim"]
+record = "woke"
+fields = { run = "late" }
+reason = "A sleeper restarted after its sleep would have ended wakes inside the controller's llSetScriptState on OpenSim, before the controller's next line; the fake grid runs it after"
+task = "server-lsl-restarted-sleeper-order"
+
+# OpenSim raises a link's changed events while its scene is still changing
+# the linkset on another thread, so what each handler reads of it (its link
+# number, the prim count) and in which order the prims print is whichever
+# state it catches.
+
+[[difference]]
+probe = "prim/link-refusals"
+between = ["opensim-yengine", "fake-opensim"]
+record = "far-changed"
+fields = { bits = "32768" }
+field = "link"
+reason = "OpenSim's handler read the far prim's link number while the linking thread had not yet numbered it (link 0 with two prims counted); the fake grid's handlers read the linkset as the link left it"
+
+[[difference]]
+probe = "prim/link-refusals"
+between = ["opensim-yengine", "fake-opensim"]
+record = "far-changed"
+fields = { bits = "32" }
+field = "link"
+reason = "OpenSim's handler read the linkset before the unlink thread had taken the child out; the fake grid's handlers read it as the unlink left it"
+
+[[difference]]
+probe = "prim/link-refusals"
+between = ["opensim-yengine", "fake-opensim"]
+record = "far-changed"
+fields = { bits = "32" }
+field = "prims"
+reason = "OpenSim's handler read the linkset before the unlink thread had taken the child out; the fake grid's handlers read it as the unlink left it"
+
+[[difference]]
+probe = "prim/link-refusals"
+between = ["opensim-yengine", "fake-opensim"]
+record = "child-changed"
+reason = "OpenSim raises the child's changed while the scene's thread is still linking or unlinking it, so what its handler reads and where its line falls among the other prims' is whichever state it catches; the fake grid's handlers read the linkset as the change left it"
+
+[[difference]]
+probe = "prim/link-refusals"
+between = ["opensim-yengine", "fake-opensim"]
+record = "changed"
+fields = { bits = "LINK", link = "1", prims = "3", seated = "1" }
+reason = "The sit raises changed in prim A and the far prim in the same frame, and which prints first is scheduling"
+
+[[difference]]
+probe = "prim/link-refusals"
+between = ["aditi", "fake-sl"]
+record = "changed"
+fields = { bits = "LINK", link = "1", prims = "3", seated = "1" }
+reason = "The sit raises changed in prim A and its child in the same frame, and which prints first is scheduling"
+
+[[difference]]
+probe = "prim/link-refusals"
+between = ["aditi", "fake-sl"]
+record = "changed"
+fields = { bits = "LINK", link = "1", prims = "2", seated = "0" }
+reason = "aditi raised CHANGED_LINK twice in the leader for a refused link followed by a granted one in the same event (one sample); the fake grid raises it once, for the granted link"
+task = "server-lsl-link-applies-after-tick"
+
+# Fixture differences.
+
+[[difference]]
+probe = "inventory/listing"
+between = ["opensim-yengine", "fake-opensim"]
+record = "script"
+fields = { name = "Probe" }
+field = "danger"
+reason = "The local parcel lets every object enter, so it is no danger; the fake parcel does not"
+
+[[difference]]
+probe = "inventory/listing"
+between = ["opensim-yengine", "fake-opensim"]
+record = "helper-pong"
+fields = { num = "5" }
+reason = "The helper's answer to the reset comes from its own script in the same frame as the probe's next try, and which prints first is scheduling"
+
+[[difference]]
+probe = "prim/link"
+between = ["opensim-yengine", "fake-opensim"]
+record = "child-changed"
+fields = { bits = "32768" }
+reason = "OpenSim raises the child's position change as each of the Leader's moves lands; the fake grid raises them after the Leader's moves, one fewer, and the first one reads the linkset after the link where OpenSim's linking thread had not yet numbered it"
+task = "server-lsl-opensim-child-move-change-late"
+
+[[difference]]
+probe = "prim/link"
+between = ["opensim-yengine", "fake-opensim"]
+record = "child"
+fields = { label = "linked" }
+reason = "The child's report and the leader's lines come in the same frame from two prims' scripts, and which prints first is scheduling"
+
+[[difference]]
+probe = "prim/link"
+between = ["aditi", "fake-sl"]
+record = "child"
+fields = { label = "linked" }
+reason = "The child's report and the leader's lines come in the same frame from two prims' scripts, and which prints first is scheduling"
+
+[[difference]]
+probe = "prim/link"
+between = ["opensim-yengine", "fake-opensim"]
+record = "changed"
+fields = { bits = "LINK", link = "0", prims = "1" }
+reason = "The unlink raises changed in both prims in the same frame, and which prints first is scheduling"

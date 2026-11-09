@@ -367,10 +367,46 @@ fn every_bounds_case_answers_as_on_aditi() -> Result<(), String> {
     Ok(())
 }
 
-/// The cases that print a vector or rotation with `(string)`, which writes
-/// five decimals here, as the value model is Second Life's on every grid,
-/// and six on OpenSim. Their library answers agree; only the cast differs.
-const OPENSIM_VECTOR_CASTS: [u32; 3] = [1, 2, 3];
+/// OpenSim compiles none of the newer cases: both engines refused the first
+/// at `llReplaceSubString` (`errors/bounds-newer`), and none of the four
+/// newer list and string functions is in its `LSL_Api`.
+#[test]
+fn opensim_compiles_none_of_the_newer_bounds_cases() {
+    for (number, source) in BOUNDS_NEWER {
+        let script = bounds_script(number, source);
+        assert!(
+            crate::compile_for(&script, crate::Dialect::OpenSim).is_err(),
+            "Bounds {number} compiled on OpenSim"
+        );
+        assert!(
+            crate::compile_for(&script, crate::Dialect::SecondLife).is_ok(),
+            "Bounds {number} did not compile on Second Life"
+        );
+    }
+}
+
+#[test]
+fn opensim_compiles_none_of_the_newer_hash_and_colour_functions() {
+    // `strings/newer` and `vm/call-cost-newer` stop at their first compile
+    // error under both of OpenSim's engines (2026-10-27).
+    for call in [
+        "llComputeHash(\"a\", \"sha256\")",
+        "llHMAC(\"k\", \"a\", \"sha256\")",
+        "llSHA256String(\"a\")",
+        "llLinear2sRGB(<0.5, 0.5, 0.5>)",
+        "llsRGB2Linear(<0.5, 0.5, 0.5>)",
+    ] {
+        let script = format!("default {{ state_entry() {{ llOwnerSay((string){call}); }} }}");
+        assert!(
+            crate::compile_for(&script, crate::Dialect::OpenSim).is_err(),
+            "{call} compiled on OpenSim"
+        );
+        assert!(
+            crate::compile_for(&script, crate::Dialect::SecondLife).is_ok(),
+            "{call} did not compile on Second Life"
+        );
+    }
+}
 
 /// The cases whose library call throws on OpenSim: `llList2ListStrided`,
 /// `llListStatistics` and `llInsertString`.
@@ -388,12 +424,7 @@ const YENGINE_TOLD: [&str; 2] = [
 fn every_bounds_case_answers_as_on_yengine_and_a_throw_is_told_to_the_owner() -> Result<(), String>
 {
     let transcript = include_str!("../../../probes/results/opensim-yengine/errors/bounds.txt");
-    for (number, told, said) in hold_bounds(
-        &BOUNDS,
-        EngineFlavour::YEngine,
-        transcript,
-        &OPENSIM_VECTOR_CASTS,
-    )? {
+    for (number, told, said) in hold_bounds(&BOUNDS, EngineFlavour::YEngine, transcript, &[])? {
         assert!(said.is_empty(), "Bounds {number}: {said:?}");
         if THROWING.contains(&number) {
             let [first, exception, _where, reset] = told.as_slice() else {
@@ -416,12 +447,7 @@ fn every_bounds_case_answers_as_on_yengine_and_a_throw_is_told_to_the_owner() ->
 #[test]
 fn every_bounds_case_answers_as_on_xengine_and_a_throw_is_said_on_debug() -> Result<(), String> {
     let transcript = include_str!("../../../probes/results/opensim-xengine/errors/bounds.txt");
-    for (number, told, said) in hold_bounds(
-        &BOUNDS,
-        EngineFlavour::XEngine,
-        transcript,
-        &OPENSIM_VECTOR_CASTS,
-    )? {
+    for (number, told, said) in hold_bounds(&BOUNDS, EngineFlavour::XEngine, transcript, &[])? {
         assert!(told.is_empty(), "Bounds {number}: {told:?}");
         if THROWING.contains(&number) {
             let [line] = said.as_slice() else {

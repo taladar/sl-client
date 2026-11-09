@@ -1,0 +1,26 @@
+grid: fake-sl
+date: 2026-11-09
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Fake Region
+engine: sl-lsl-runtime imitating Mono
+settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
+
+PROBE vm/eval-order rec=start region="Fake Region" channel="Second Life Server" version="sl-fake-grid 0.1.0"
+PROBE vm/eval-order rec=order case=minus seen=2,1 value="-1"
+PROBE vm/eval-order rec=order case=chain seen=3,2,1 value="2"
+PROBE vm/eval-order rec=order case=products seen=4,3,2,1 value="14"
+PROBE vm/eval-order rec=order case=less seen=2,1 value="1"
+PROBE vm/eval-order rec=order case=and seen=1,0 value="0"
+PROBE vm/eval-order rec=order case=or seen=0,1 value="1"
+PROBE vm/eval-order rec=order case=list seen=1,2,3 value="1, 2, 3"
+PROBE vm/eval-order rec=order case=list-plus seen=2,1 value="1, 2"
+PROBE vm/eval-order rec=order case=vector seen=1,2,3 value="<1.00000, 2.00000, 3.00000>"
+PROBE vm/eval-order rec=order case=rotation seen=1,2,3,4 value="<1.00000, 2.00000, 3.00000, 4.00000>"
+PROBE vm/eval-order rec=order case=user-args seen=1,2 value="12"
+PROBE vm/eval-order rec=order case=user-args-three seen=1,2,3 value="123"
+PROBE vm/eval-order rec=order case=library-args seen=1,2 value="bc"
+PROBE vm/eval-order rec=order case=library-list-arg seen=1,2,3 value="132"
+PROBE vm/eval-order rec=order case=concat seen=3,2,1 value="123"
+PROBE vm/eval-order rec=order case=compound seen=2,1 value="7"
+PROBE vm/eval-order rec=order case=index-inline seen=10,20,30,1 value="20"
+PROBE vm/eval-order rec=end

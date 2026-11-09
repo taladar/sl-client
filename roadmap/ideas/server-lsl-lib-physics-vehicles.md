@@ -127,3 +127,33 @@ A script's rez hands the host `Rez::die_at_edge` (OpenSim sets
 velocity; the fake grid keeps neither, having no status flags or physics. Keep
 both here, and replay `inventory/rez`'s child with the real `llGetStatus` and
 `llGetVel` rather than the values its test writes in.
+
+## From test-lsl-differential-corpus-triage (2026-11-09)
+
+Four parts of this tranche need no physics and landed with the corpus
+triage, each held to its probe by a VM replay:
+
+- **Status flags**: `llSetStatus` and `llGetStatus` over every `STATUS_*`
+  flag, each flavour's multi-flag mask and `STATUS_CAST_SHADOWS` rule
+  (`library/prim_state.rs`, `vm/tests/prim_state.rs`, `physics/status`). A
+  physical prim only reads as one. OpenSim's script rez sets
+  `STATUS_DIE_AT_EDGE` (the fake grid keeps it on the script's side of the
+  prim); the `inventory/rez` replay reads the real flag.
+- **`llVolumeDetect`**, as a flag only: the prim reads as phantom and a
+  phantom clear leaves it so. The collisions it turns into detections are
+  still this tranche's.
+- **Targets**: `llTarget`, `llRotTarget`, their removals and the four events
+  (`library/targets.rs`, `Engine::post_due_targets`, `vm/tests/targets.rs`,
+  `physics/targets`' target phases): eight per script, Second Life's handles
+  from the script's counter and OpenSim's from the region's local ids, the
+  range rule, XEngine's `not_at_target` beside `at_target`, and OpenSim
+  dropping targets at a state change (`events/state-drops`).
+- **`llGetVel`**, as a read: the object's velocity as `OBJECT_VELOCITY` reads
+  it, zero for every prim the fake grid has, since none is physical
+  (`library/prim_state.rs`). `inventory/rez`'s child, rezzed at 5 m/s, reads
+  zero on aditi and both OpenSim engines; its replay now calls the function.
+  Physical motion is still this tranche's.
+
+What remains: forces and impulses, `llMoveToTarget` and the look-at
+functions, keyframed motion, vehicles, characters, material and mass, and
+volume detect's collisions.

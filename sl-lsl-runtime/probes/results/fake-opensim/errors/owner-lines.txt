@@ -1,12 +1,12 @@
 grid: fake-opensim
-date: 2026-11-07
+date: 2026-11-09
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating YEngine
 settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
 
-PROBE errors/owner-lines rec=start region="Fake Region" channel="OpenSim" version="sl-fake-grid 0.1.0"
 PROBE errors/owner-lines rec=listening channel=2147483647
+PROBE errors/owner-lines rec=start region="Fake Region" channel="OpenSim" version="sl-fake-grid 0.1.0"
 PROBE errors/owner-lines rec=said step=1
 # debug-channel: from="Object" text="llSetPrimitiveParams: Error running rule #1: arg #0 - unsupported parameter"
 PROBE errors/owner-lines rec=heard name="Object" msg="llSetPrimitiveParams: Error running rule #1: arg #0 - unsupported parameter"

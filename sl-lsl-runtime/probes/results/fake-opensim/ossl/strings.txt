@@ -1,5 +1,5 @@
 grid: fake-opensim
-date: 2026-11-07
+date: 2026-11-09
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating YEngine
@@ -94,7 +94,7 @@ PROBE ossl/strings rec=sort case=expression list="3, 1, 2" types=111
 PROBE ossl/strings rec=sorted
 PROBE ossl/strings rec=trigger step=3
 PROBE ossl/strings rec=call fn=osStringLastIndexOf start=0
-# owner-say: from="Object" text="[YEngine]: Exception while running 0a69a7dc-cb91-e78c-cb48-4fcee408a743"
+# owner-say: from="Object" text="[YEngine]: Exception while running a5c0feae-f491-7891-cf98-4e141e745e20"
 # owner-say: from="Object" text="ArgumentOutOfRangeException: Count must be positive and count must refer to a location within the string/array/collection."
 # owner-say: from="Object" text="Parameter name: count"
 # owner-say: from="Object" text="Prim: <Object>, Script: <Strings>, Location: Fake Region <128,124,26>"
@@ -118,7 +118,7 @@ PROBE ossl/strings rec=parse case=first-wins count=2 parts="a%7Cb"
 PROBE ossl/strings rec=parsed
 PROBE ossl/strings rec=trigger step=5
 PROBE ossl/strings rec=call fn=llParseString2List
-# owner-say: from="Object" text="[YEngine]: Exception while running 175042dd-5f5a-4fc7-c2fd-0bfbafbfea98"
+# owner-say: from="Object" text="[YEngine]: Exception while running 96e2a27c-f396-0b1e-cfc4-3b566f802088"
 # owner-say: from="Object" text="ArgumentOutOfRangeException: Index was out of range. Must be non-negative and less than the size of the collection."
 # owner-say: from="Object" text="Parameter name: startIndex"
 # owner-say: from="Object" text="Prim: <Object>, Script: <Parser>, Location: Fake Region <128,124,26>"

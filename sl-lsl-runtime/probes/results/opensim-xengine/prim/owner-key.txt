@@ -1,0 +1,19 @@
+grid: opensim-xengine
+date: 2026-11-08
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Default Region
+engine: XEngine
+settings: OpenSimDefaults.ini: [YEngine] MinTimerInterval=0.1; [XEngine] MinTimerInterval unset (LSL_Api default 0.5); ScriptDelayFactor=1.0, SensorMaxRange=96, SensorMaxResults=16, UseLlCastRayV3=false (defaults) on both; [YEngine] ScriptHeapSize=1024 KiB, ScriptStackSize=2048 KiB (defaults); OpenSim.ini [Network] OutboundDisallowForUserScriptsExcept=127.0.0.1:9000 (the simulator itself), [ScriptsHttpRequestModule] and llHTTPRequest limits at their defaults
+
+# chat type=say from="Object" length=14 text="Script running"
+PROBE prim/owner-key rec=start region="Default Region" channel="OpenSim" version="OpenSim 0.9.2.1 Yeti Dev   36f6d16 (Unix/Mono)"
+PROBE prim/owner-key rec=owner-key label=self got=owner valid=1
+PROBE prim/owner-key rec=owner-key label=self-upper got=owner valid=1
+PROBE prim/owner-key rec=owner-key label=owner got=owner valid=1
+PROBE prim/owner-key rec=owner-key label=stranger got=same valid=1
+PROBE prim/owner-key rec=owner-key label=null got=null valid=0
+PROBE prim/owner-key rec=owner-key label=nothing got=same valid=1
+PROBE prim/owner-key rec=owner-key label=junk got=null valid=0
+PROBE prim/owner-key rec=owner-key label=empty got=null valid=0
+PROBE prim/owner-key rec=end
+# chat by=other type=say from="Object" length=14 text="Script running"

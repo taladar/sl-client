@@ -1,27 +1,27 @@
 grid: fake-opensim
-date: 2026-11-07
+date: 2026-11-09
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating YEngine
 settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
 
+PROBE prim/params-rules rec=try label=code-as-string
+PROBE prim/params-rules rec=get label=code-as-string count=2 got="<0.500000, 0.500000, 0.500000>, Object"
+PROBE prim/params-rules rec=try label=face-100
+# owner-say: from="Object" text="[YEngine]: Exception while running 09051d3a-c910-27ef-cad6-f87cc4b61c60"
+# owner-say: from="Object" text="Exception: 100 is outside the range of MAX_FACES"
+# owner-say: from="Object" text="Prim: <Object>, Script: <Face100>, Location: Fake Region <130,124,26>"
+# owner-say: from="Object" text="Script must be Reset to re-enable."
+PROBE prim/params-rules rec=try label=face-minus-2
+# owner-say: from="Object" text="[YEngine]: Exception while running b0abd1db-b40d-d065-c72c-f22e5f177285"
+# owner-say: from="Object" text="Exception: 4294967294 is outside the range of MAX_FACES"
+# owner-say: from="Object" text="Prim: <Object>, Script: <FaceMinus2>, Location: Fake Region <130,124,26>"
+# owner-say: from="Object" text="Script must be Reset to re-enable."
 PROBE prim/params-rules rec=start region="Fake Region" channel="OpenSim" version="sl-fake-grid 0.1.0"
 PROBE prim/params-rules rec=faces sides=6
 PROBE prim/params-rules rec=try label=order
 PROBE prim/params-rules rec=get label=order count=4 types=vsfi got="<0.500000, 0.500000, 0.500000>, Object, 0.000000, 3"
 PROBE prim/params-rules rec=try label=order-reversed
-PROBE prim/params-rules rec=try label=code-as-string
-PROBE prim/params-rules rec=get label=code-as-string count=2 got="<0.500000, 0.500000, 0.500000>, Object"
-PROBE prim/params-rules rec=try label=face-100
-# owner-say: from="Object" text="[YEngine]: Exception while running 45c94682-7c2f-c905-cbe8-2f1f65ab77d7"
-# owner-say: from="Object" text="Exception: 100 is outside the range of MAX_FACES"
-# owner-say: from="Object" text="Prim: <Object>, Script: <Face100>, Location: Fake Region <130,124,26>"
-# owner-say: from="Object" text="Script must be Reset to re-enable."
-PROBE prim/params-rules rec=try label=face-minus-2
-# owner-say: from="Object" text="[YEngine]: Exception while running c2fa9cce-8774-3418-c531-0951f514da70"
-# owner-say: from="Object" text="Exception: 4294967294 is outside the range of MAX_FACES"
-# owner-say: from="Object" text="Prim: <Object>, Script: <FaceMinus2>, Location: Fake Region <130,124,26>"
-# owner-say: from="Object" text="Script must be Reset to re-enable."
 PROBE prim/params-rules rec=get label=order-reversed count=4 types=ifsv got="3, 0.000000, Object, <0.500000, 0.500000, 0.500000>"
 PROBE prim/params-rules rec=try label=same-twice
 PROBE prim/params-rules rec=get label=same-twice count=2 types=ss got="Object, Object"

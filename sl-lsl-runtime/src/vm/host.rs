@@ -174,6 +174,11 @@ pub trait Host {
     /// determinism rule).
     fn random_bits(&mut self, caller: CallerId) -> u32;
 
+    /// A fresh id from the region's counter of prim local ids, which OpenSim
+    /// hands a position or rotation target as its handle (`AllocateIntId`):
+    /// the region's next local id, never one handed out before.
+    fn mint_scene_id(&mut self) -> i32;
+
     /// The linkset the script `caller` is in. Two scripts share a linkset
     /// data store, and both get the `linkset_data` event of a change to it,
     /// exactly when the host answers the same id for them.

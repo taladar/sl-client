@@ -1,10 +1,9 @@
 grid: fake-sl
-date: 2026-11-07
+date: 2026-11-09
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating Mono
 settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
-complete: no
 
 PROBE prim/changed rec=start region="Fake Region" channel="Second Life Server" version="sl-fake-grid 0.1.0"
 PROBE prim/changed rec=try label=color
@@ -58,7 +57,37 @@ PROBE prim/changed rec=changed label=flexible bits=none events=0
 PROBE prim/changed rec=try label=material
 PROBE prim/changed rec=changed label=material bits=none events=0
 PROBE prim/changed rec=try label=phantom
-# debug-channel: from="Probe prim" text="Probe prim [script:Probe] Script run-time error"
-# debug-channel: from="Probe prim" text="llSetStatus is not implemented by this grid"
-# debug-channel by=other: from="Probe prim" text="Probe prim [script:Probe] Script run-time error"
-# debug-channel by=other: from="Probe prim" text="llSetStatus is not implemented by this grid"
+PROBE prim/changed rec=changed label=phantom bits=none events=0
+PROBE prim/changed rec=try label=slice
+PROBE prim/changed rec=changed label=slice bits=none events=0
+PROBE prim/changed rec=try label=target-omega
+PROBE prim/changed rec=changed label=target-omega bits=none events=0
+PROBE prim/changed rec=try label=texture-anim
+PROBE prim/changed rec=changed label=texture-anim bits=none events=0
+PROBE prim/changed rec=try label=particles
+PROBE prim/changed rec=changed label=particles bits=none events=0
+PROBE prim/changed rec=try label=sit-target
+PROBE prim/changed rec=changed label=sit-target bits=none events=0
+PROBE prim/changed rec=try label=sit-text
+PROBE prim/changed rec=changed label=sit-text bits=none events=0
+PROBE prim/changed rec=try label=click-action
+PROBE prim/changed rec=changed label=click-action bits=none events=0
+PROBE prim/changed rec=try label=allow-drop
+PROBE prim/changed rec=changed label=allow-drop bits=none events=0
+PROBE prim/changed rec=try label=media
+PROBE prim/changed rec=changed label=media bits=MEDIA events=1
+PROBE prim/changed rec=try label=media-clear
+PROBE prim/changed rec=changed label=media-clear bits=MEDIA events=1
+PROBE prim/changed rec=try label=alpha-mode
+PROBE prim/changed rec=changed label=alpha-mode bits=none events=0
+PROBE prim/changed rec=try label=normal
+PROBE prim/changed rec=changed label=normal bits=none events=0
+PROBE prim/changed rec=try label=specular
+PROBE prim/changed rec=changed label=specular bits=none events=0
+PROBE prim/changed rec=try label=render-material
+PROBE prim/changed rec=changed label=render-material bits=RENDER_MATERIAL events=1
+PROBE prim/changed rec=try label=color-and-size
+PROBE prim/changed rec=changed label=color-and-size bits=COLOR|SCALE events=1
+PROBE prim/changed rec=try label=link-color-this
+PROBE prim/changed rec=changed label=link-color-this bits=COLOR events=1
+PROBE prim/changed rec=end

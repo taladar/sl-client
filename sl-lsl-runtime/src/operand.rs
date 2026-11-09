@@ -74,9 +74,9 @@ impl Operand {
     /// Whether a condition takes the operand as true. A double is tested
     /// before it is rounded, so `1e-30 * 1e-20` is true (`math/float-rounding`'s
     /// `condition`) though it rounds to `0.0`.
-    pub(crate) fn is_true(&self) -> bool {
+    pub(crate) fn is_true(&self, opensim: bool) -> bool {
         match self {
-            Self::Value(value) => value.is_true(),
+            Self::Value(value) => value.is_true_for(opensim),
             Self::Double(double) => *double != 0.0,
             Self::Shared(elements, _) => !elements.is_empty(),
         }
@@ -200,13 +200,13 @@ pub(crate) fn prefix(op: PrefixOp, operand: Operand) -> Result<Operand, ValueErr
 ///
 /// # Errors
 ///
-/// As [`crate::cast()`].
-pub(crate) fn cast(operand: Operand, to: TypeName) -> Result<Operand, ValueError> {
+/// As [`crate::cast()`], as `opensim`'s grid casts ([`crate::cast::for_grid`]).
+pub(crate) fn cast(operand: Operand, to: TypeName, opensim: bool) -> Result<Operand, ValueError> {
     match (operand, to) {
         (Operand::Double(double), TypeName::Float) => Ok(Operand::Double(double)),
         (Operand::Value(Value::Integer(integer)), TypeName::Float) => {
             Ok(Operand::Double(f64::from(integer)))
         }
-        (operand, to) => crate::cast(operand.round(), to).map(Operand::Value),
+        (operand, to) => crate::cast::for_grid(operand.round(), to, opensim).map(Operand::Value),
     }
 }

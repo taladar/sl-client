@@ -1,10 +1,11 @@
 grid: fake-opensim
-date: 2026-11-07
+date: 2026-11-09
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating YEngine
 settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
 
+# chat type=say from="Object" length=14 text="Script running"
 # target: script "Probe" lsl2
 PROBE memory/budget-lso rec=start region="Fake Region" channel="OpenSim" version="sl-fake-grid 0.1.0"
 PROBE memory/budget-lso rec=read when=entry used=34 free=1048542 limit=65536
@@ -90,3 +91,4 @@ PROBE memory/budget-lso rec=set-limit asked=-1 value=-1 result=0 used=34 free=10
 PROBE memory/budget-lso rec=set-limit asked=65536 value=65536 result=0 used=34 free=1048542 limit=65536
 PROBE memory/budget-lso rec=read when=last used=34 free=1048542 limit=65536
 PROBE memory/budget-lso rec=end
+# chat by=other type=say from="Object" length=14 text="Script running"

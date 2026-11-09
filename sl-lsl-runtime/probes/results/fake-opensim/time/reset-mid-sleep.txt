@@ -1,5 +1,5 @@
 grid: fake-opensim
-date: 2026-11-07
+date: 2026-11-09
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating YEngine
@@ -7,22 +7,21 @@ settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor
 
 PROBE time/reset-mid-sleep rec=start region="Fake Region" channel="OpenSim" version="sl-fake-grid 0.1.0"
 PROBE time/reset-mid-sleep rec=heard run=none what=entry at=0.018000
-PROBE time/reset-mid-sleep rec=heard run=none what=entry at=0.036000
-PROBE time/reset-mid-sleep rec=heard run=reset what=sleeping at=0.018000
+PROBE time/reset-mid-sleep rec=heard run=reset what=sleeping at=0.000000
 PROBE time/reset-mid-sleep rec=control run=reset did=reset at=1.018000
-PROBE time/reset-mid-sleep rec=heard run=reset what=entry at=1.036000
+PROBE time/reset-mid-sleep rec=heard run=reset what=entry at=1.018000
 PROBE time/reset-mid-sleep rec=control run=clock did=stop at=1.018000
 PROBE time/reset-mid-sleep rec=control run=clock did=restart at=4.073000
 PROBE time/reset-mid-sleep rec=control run=clock did=ask-clock at=5.091000
-PROBE time/reset-mid-sleep rec=heard run=clock what=clock at=5.109000 script_time=5.091000
-PROBE time/reset-mid-sleep rec=heard run=ask what=sleeping at=0.018000
+PROBE time/reset-mid-sleep rec=heard run=clock what=clock at=5.091000 script_time=5.091000
+PROBE time/reset-mid-sleep rec=heard run=ask what=sleeping at=0.000000
 PROBE time/reset-mid-sleep rec=control run=ask did=stop at=1.018000
 PROBE time/reset-mid-sleep rec=control run=ask did=restart at=2.036000
 PROBE time/reset-mid-sleep rec=control run=ask did=ping at=3.055000
-PROBE time/reset-mid-sleep rec=heard run=ask what=woke at=5.036000
-PROBE time/reset-mid-sleep rec=heard run=ask what=pong at=5.036000
+PROBE time/reset-mid-sleep rec=heard run=ask what=woke at=5.018000
+PROBE time/reset-mid-sleep rec=heard run=ask what=pong at=5.018000
 PROBE time/reset-mid-sleep rec=control run=ask did=reset at=10.182000
-PROBE time/reset-mid-sleep rec=heard run=ask what=entry at=10.200000
+PROBE time/reset-mid-sleep rec=heard run=ask what=entry at=10.182000
 PROBE time/reset-mid-sleep rec=control run=ask did=ping at=14.255000
-PROBE time/reset-mid-sleep rec=heard run=ask what=pong at=14.273000
+PROBE time/reset-mid-sleep rec=heard run=ask what=pong at=14.255000
 PROBE time/reset-mid-sleep rec=end

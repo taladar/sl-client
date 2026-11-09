@@ -114,6 +114,8 @@ pub(crate) struct CorpusHost {
     pub(crate) died: bool,
     /// The state of the xorshift the random draws come from.
     draws: u32,
+    /// The last scene id minted.
+    scene_ids: i32,
     /// Where the prim stands.
     placement: Placement,
     /// The prim, as the library reads and writes it.
@@ -142,6 +144,7 @@ impl CorpusHost {
             lines: Vec::new(),
             died: false,
             draws: 0,
+            scene_ids: 7200,
             placement: Placement {
                 position: AT,
                 local: AT,
@@ -279,6 +282,11 @@ impl Host for CorpusHost {
             region: REGION.to_owned(),
             position: self.placement.position.clone(),
         }
+    }
+
+    fn mint_scene_id(&mut self) -> i32 {
+        self.scene_ids = self.scene_ids.saturating_add(1);
+        self.scene_ids
     }
 
     fn random_bits(&mut self, _caller: CallerId) -> u32 {

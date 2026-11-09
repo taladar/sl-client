@@ -165,6 +165,9 @@ pub(crate) struct SimState {
     /// Who may set home where, what the grid says about it and what its
     /// landmarks hold ([`crate::ImitatedGrid::home_policy`]).
     pub(crate) home_policy: crate::imitates::HomePolicy,
+    /// How the grid stores the names a viewer gives items
+    /// ([`crate::ImitatedGrid::item_names`]).
+    pub(crate) item_names: crate::imitates::ItemNames,
     /// The last thing this session's agent was told about its home, and when
     /// ([`crate::imitates::HomePolicy::repeat_quiet`]).
     pub(crate) home_told: Option<(std::time::Instant, crate::imitates::HomeNotice)>,
@@ -709,6 +712,7 @@ impl SharedSim {
                 &state.world,
                 crate::uploads::UploadTerms {
                     announcements: state.upload_announcements,
+                    names: state.item_names,
                     landmarks: crate::uploads::LandmarkTerms {
                         body: state.home_policy.landmark_body,
                         masks: state.home_policy.landmark_masks,

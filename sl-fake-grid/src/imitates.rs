@@ -1289,6 +1289,16 @@ impl ImitatedGrid {
         }
     }
 
+    /// How the grid stores the name a viewer gives a new or renamed item
+    /// ([`ItemNames`]).
+    #[must_use]
+    pub const fn item_names(self) -> ItemNames {
+        match self {
+            Self::SecondLife => ItemNames::Corrected,
+            Self::OpenSim => ItemNames::Dumped,
+        }
+    }
+
     /// How this grid answers "Set Home to Here" and what a landmark it makes
     /// holds — measured by the `landmarks-home` census on aditi and the local
     /// OpenSim (2026-10-19, `book/src/gridspec/teleport.md` § Home and
@@ -1406,6 +1416,7 @@ impl ImitatedGrid {
                 trash_folder: TrashFolder::Named,
                 group_object_trash: GroupObjectTrash::AsAnyOther,
                 taken_item_masks: TakenItemMasks::Objects,
+                undescribed_take: Some("(No Description)"),
                 announcement_states_a_transaction: true,
                 rezzed_record_names_folder: true,
                 return_notice: ReturnNotice::SecondLife,
@@ -1423,6 +1434,7 @@ impl ImitatedGrid {
                 trash_folder: TrashFolder::AgentsOwn,
                 group_object_trash: GroupObjectTrash::LostAndFound,
                 taken_item_masks: TakenItemMasks::Folded,
+                undescribed_take: None,
                 announcement_states_a_transaction: false,
                 rezzed_record_names_folder: false,
                 return_notice: ReturnNotice::Server,
@@ -3698,6 +3710,10 @@ pub struct RezPolicy {
     pub group_object_trash: GroupObjectTrash,
     /// The base and owner masks of the item a derez files.
     pub taken_item_masks: TakenItemMasks,
+    /// The description the item a derez files has when the object has none:
+    /// Second Life's `(No Description)` (`inventory/newer`); OpenSim's is
+    /// unmeasured, and left empty.
+    pub undescribed_take: Option<&'static str>,
     /// Whether the announcement of that item states a transaction. Second
     /// Life's states one, which is not the derez's; OpenSim's is nil.
     pub announcement_states_a_transaction: bool,
@@ -4490,6 +4506,23 @@ mod test {
 
     use super::*;
 
+    /// The names `inventory/listing`'s "élan" notecard was stored under:
+    /// "lan" on aditi, the hex dump on the local OpenSim; a plain name as it
+    /// is on both.
+    #[test]
+    fn an_item_name_is_stored_as_its_grid_stores_it() {
+        assert_eq!(ItemNames::Corrected.stored("élan"), "lan");
+        assert_eq!(ItemNames::Corrected.stored(" a|b "), "a b");
+        assert_eq!(ItemNames::Corrected.stored(&"x".repeat(70)).len(), 63);
+        assert_eq!(
+            ItemNames::Dumped.stored("élan"),
+            format!("C3 A9 6C 61 6E 00 {}..lan.", " ".repeat(30))
+        );
+        for names in [ItemNames::Corrected, ItemNames::Dumped] {
+            assert_eq!(names.stored("aaa Helper"), "aaa Helper");
+        }
+    }
+
     /// The default is the grid the workspace targets. Every derived knob reads
     /// this, so it is the one place a stock fake grid's whole personality is
     /// decided.
@@ -4988,5 +5021,93 @@ mod test {
         assert_eq!(format!("{} {} {}", kept.x, kept.y, kept.z), "64 0.01 0.5");
         let kept = opensim.kept_scale(&sent);
         assert_eq!(format!("{} {} {}", kept.x, kept.y, kept.z), "256 0.001 0.5");
+    }
+}
+
+/// How a grid stores the name a viewer gives an item
+/// ([`ImitatedGrid::item_names`]): `inventory/listing` named a notecard
+/// "élan".
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ItemNames {
+    /// The reference viewer's `correctInventoryName`, which Second Life
+    /// applies itself: every byte past ASCII (and every control byte but a
+    /// line feed) a space, every `|` a space, trimmed and cut to 63 bytes —
+    /// aditi stored "élan" as "lan".
+    Corrected,
+    /// OpenSim's `Util.FieldToString` over the field's bytes, its trailing
+    /// NUL in: a name of printable ASCII as it is, any other as a hex dump,
+    /// sixteen bytes a row, each as two hex digits and a space and then the
+    /// printable ones as themselves and the rest as dots — the local OpenSim
+    /// stored "élan" as `C3 A9 6C 61 6E 00` and padding, then `..lan.`.
+    Dumped,
+}
+
+/// The longest item name Second Life keeps, in bytes
+/// (`DB_INV_ITEM_NAME_STR_LEN`).
+const ITEM_NAME_BYTES: usize = 63;
+
+impl ItemNames {
+    /// The name the grid stores for `name`.
+    #[must_use]
+    pub fn stored(self, name: &str) -> String {
+        match self {
+            Self::Corrected => {
+                let bytes: Vec<u8> = name
+                    .bytes()
+                    .map(|byte| {
+                        if (byte < 0x20 && byte != b'\n') || byte >= 0x80 || byte == b'|' {
+                            b' '
+                        } else {
+                            byte
+                        }
+                    })
+                    .collect();
+                let text = String::from_utf8_lossy(&bytes);
+                let trimmed = text.trim();
+                let mut end = trimmed.len().min(ITEM_NAME_BYTES);
+                while !trimmed.is_char_boundary(end) {
+                    end = end.saturating_sub(1);
+                }
+                trimmed.get(..end).unwrap_or_default().to_owned()
+            }
+            Self::Dumped => {
+                let printable =
+                    |byte: u8| (0x20..=0x7E).contains(&byte) || matches!(byte, 0x09 | 0x0A | 0x0D);
+                if name.bytes().all(printable) {
+                    return name.to_owned();
+                }
+                let mut bytes = name.as_bytes().to_vec();
+                bytes.push(0);
+                let rows: Vec<String> = bytes
+                    .chunks(16)
+                    .map(|row| {
+                        let mut line = String::new();
+                        for slot in 0..16 {
+                            match row.get(slot) {
+                                Some(byte) => {
+                                    for nibble in [byte >> 4, byte & 0x0F] {
+                                        line.extend(
+                                            char::from_digit(u32::from(nibble), 16)
+                                                .map(|digit| digit.to_ascii_uppercase()),
+                                        );
+                                    }
+                                    line.push(' ');
+                                }
+                                None => line.push_str("   "),
+                            }
+                        }
+                        line.extend(row.iter().map(|byte| {
+                            if (0x20..0x7E).contains(byte) {
+                                char::from(*byte)
+                            } else {
+                                '.'
+                            }
+                        }));
+                        line
+                    })
+                    .collect();
+                rows.join("\n")
+            }
+        }
     }
 }

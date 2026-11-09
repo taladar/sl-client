@@ -1,29 +1,26 @@
 grid: fake-opensim
-date: 2026-11-07
+date: 2026-11-09
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating YEngine
 settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
 
 # chat type=say from="Object" length=14 text="Script running"
-# chat type=say from="Object" length=14 text="Script running"
 PROBE errors/runtime-errors rec=listening channel=2147483647
-# chat type=say from="Object" length=14 text="Script running"
-# chat type=say from="Object" length=14 text="Script running"
 PROBE errors/runtime-errors rec=listening channel=2147483647
 PROBE errors/runtime-errors rec=start region="Fake Region" channel="OpenSim" version="sl-fake-grid 0.1.0"
 PROBE errors/runtime-errors rec=fault script=div-int step=before
-# debug-channel: from="Object" text="YEngine: Division by Zero (script: Div int event: link_message primID: 82db5fd9-2fb1-cfc3-cd44-aa11315d3c9c at: <128,124,26>) Script must be Reset to re-enable.\n"
-# debug-channel: from="Object" text="YEngine: Division by Zero (script: Mod int event: link_message primID: 82db5fd9-2fb1-cfc3-cd44-aa11315d3c9c at: <128,124,26>) Script must be Reset to re-enable.\n"
-# debug-channel: from="Object" text="YEngine: Division by Zero (script: Div float event: link_message primID: 82db5fd9-2fb1-cfc3-cd44-aa11315d3c9c at: <128,124,26>) Script must be Reset to re-enable.\n"
+# debug-channel: from="Object" text="YEngine: Division by Zero (script: Div int event: link_message primID: ea841437-12cb-27cb-cfd7-a63eec562344 at: <128,124,26>) Script must be Reset to re-enable.\n"
+# debug-channel: from="Object" text="YEngine: Division by Zero (script: Mod int event: link_message primID: ea841437-12cb-27cb-cfd7-a63eec562344 at: <128,124,26>) Script must be Reset to re-enable.\n"
+# debug-channel: from="Object" text="YEngine: Division by Zero (script: Div float event: link_message primID: ea841437-12cb-27cb-cfd7-a63eec562344 at: <128,124,26>) Script must be Reset to re-enable.\n"
 PROBE errors/runtime-errors rec=script-state when=after-faults script="Div int" running=1
 PROBE errors/runtime-errors rec=script-state when=after-faults script="Mod int" running=1
 PROBE errors/runtime-errors rec=script-state when=after-faults script="Div float" running=1
 PROBE errors/runtime-errors rec=script-state when=after-faults script="Recurse" running=1
 PROBE errors/runtime-errors rec=script-state when=after-faults script=self running=1
 # debug-channel: from="Object" text="llGetScriptState: Can't find script 'Nope'"
-# debug-channel: from="Object" text="YEngine: llGetOwnerKey is not implemented by this grid (script: Listener far event: listen primID: 0a5346e4-a029-21e5-c8c2-437f12d1aae6 at: <178,124,26>) Script must be Reset to re-enable.\n"
-# debug-channel: from="Object" text="YEngine: llGetOwnerKey is not implemented by this grid (script: Listener near event: listen primID: 450221e3-8da4-7033-c8d3-77bd05835413 at: <138,124,26>) Script must be Reset to re-enable.\n"
+PROBE errors/runtime-errors rec=heard name="Object" same_owner=1 dist=50.000000 len=42 msg="llGetScriptState: Can't find script 'Nope'"
+PROBE errors/runtime-errors rec=heard name="Object" same_owner=1 dist=10.000000 len=42 msg="llGetScriptState: Can't find script 'Nope'"
 PROBE errors/runtime-errors rec=script-state when=after-faults script=missing running=0
 PROBE errors/runtime-errors rec=ping target=stopped
 PROBE errors/runtime-errors rec=restart script="Div int"
@@ -34,16 +31,13 @@ PROBE errors/runtime-errors rec=script-state when=after-restart script="Div floa
 PROBE errors/runtime-errors rec=script-state when=after-restart script="Recurse" running=1
 PROBE errors/runtime-errors rec=script-state when=after-restart script=self running=1
 # debug-channel: from="Object" text="llGetScriptState: Can't find script 'Nope'"
+PROBE errors/runtime-errors rec=heard name="Object" same_owner=1 dist=50.000000 len=42 msg="llGetScriptState: Can't find script 'Nope'"
+PROBE errors/runtime-errors rec=heard name="Object" same_owner=1 dist=10.000000 len=42 msg="llGetScriptState: Can't find script 'Nope'"
 PROBE errors/runtime-errors rec=script-state when=after-restart script=missing running=0
 PROBE errors/runtime-errors rec=end
 # chat by=other type=say from="Object" length=14 text="Script running"
-# chat by=other type=say from="Object" length=14 text="Script running"
-# chat by=other type=say from="Object" length=14 text="Script running"
-# chat by=other type=say from="Object" length=14 text="Script running"
-# debug-channel by=other: from="Object" text="YEngine: Division by Zero (script: Div int event: link_message primID: 82db5fd9-2fb1-cfc3-cd44-aa11315d3c9c at: <128,124,26>) Script must be Reset to re-enable.\n"
-# debug-channel by=other: from="Object" text="YEngine: Division by Zero (script: Mod int event: link_message primID: 82db5fd9-2fb1-cfc3-cd44-aa11315d3c9c at: <128,124,26>) Script must be Reset to re-enable.\n"
-# debug-channel by=other: from="Object" text="YEngine: Division by Zero (script: Div float event: link_message primID: 82db5fd9-2fb1-cfc3-cd44-aa11315d3c9c at: <128,124,26>) Script must be Reset to re-enable.\n"
+# debug-channel by=other: from="Object" text="YEngine: Division by Zero (script: Div int event: link_message primID: ea841437-12cb-27cb-cfd7-a63eec562344 at: <128,124,26>) Script must be Reset to re-enable.\n"
+# debug-channel by=other: from="Object" text="YEngine: Division by Zero (script: Mod int event: link_message primID: ea841437-12cb-27cb-cfd7-a63eec562344 at: <128,124,26>) Script must be Reset to re-enable.\n"
+# debug-channel by=other: from="Object" text="YEngine: Division by Zero (script: Div float event: link_message primID: ea841437-12cb-27cb-cfd7-a63eec562344 at: <128,124,26>) Script must be Reset to re-enable.\n"
 # debug-channel by=other: from="Object" text="llGetScriptState: Can't find script 'Nope'"
-# debug-channel by=other: from="Object" text="YEngine: llGetOwnerKey is not implemented by this grid (script: Listener far event: listen primID: 0a5346e4-a029-21e5-c8c2-437f12d1aae6 at: <178,124,26>) Script must be Reset to re-enable.\n"
-# debug-channel by=other: from="Object" text="YEngine: llGetOwnerKey is not implemented by this grid (script: Listener near event: listen primID: 450221e3-8da4-7033-c8d3-77bd05835413 at: <138,124,26>) Script must be Reset to re-enable.\n"
 # debug-channel by=other: from="Object" text="llGetScriptState: Can't find script 'Nope'"

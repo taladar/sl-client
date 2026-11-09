@@ -1,5 +1,5 @@
 grid: fake-opensim
-date: 2026-11-07
+date: 2026-11-09
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating YEngine
@@ -37,8 +37,8 @@ PROBE math/rotations rec=axis-angle case=z-90 value=<0.000000,0.000000,0.707107,
 PROBE math/rotations rec=axis-angle case=z-length-2-90 value=<0.000000,0.000000,0.707107,0.707107>
 PROBE math/rotations rec=axis-angle case=zero-axis-90 value=<0.000000,0.000000,0.000000,0.707107>
 PROBE math/rotations rec=axis-angle case=tiny-axis-90 value=<0.000000,0.000000,0.707107,0.707107>
-PROBE math/rotations rec=axis-angle case=z-450 value=<-0.000000,-0.000000,-0.707107,-0.707107>
-PROBE math/rotations rec=axis-angle case=z-minus-90 value=<-0.000000,-0.000000,-0.707107,0.707107>
+PROBE math/rotations rec=axis-angle case=z-450 value=<0.000000,0.000000,-0.707107,-0.707107>
+PROBE math/rotations rec=axis-angle case=z-minus-90 value=<0.000000,0.000000,-0.707107,0.707107>
 PROBE math/rotations rec=rot2axis case=identity value=<0.000000,0.000000,0.000000>
 PROBE math/rotations rec=rot2angle case=identity value=0.000000
 PROBE math/rotations rec=rot2euler case=identity value=<0.000000,0.000000,0.000000>
@@ -47,7 +47,7 @@ PROBE math/rotations rec=rot2left case=identity value=<0.000000,1.000000,0.00000
 PROBE math/rotations rec=rot2up case=identity value=<0.000000,0.000000,1.000000>
 PROBE math/rotations rec=rot2axis case=negative-identity value=<0.000000,0.000000,0.000000>
 PROBE math/rotations rec=rot2angle case=negative-identity value=0.000000
-PROBE math/rotations rec=rot2euler case=negative-identity value=<-0.000000,0.000000,-0.000000>
+PROBE math/rotations rec=rot2euler case=negative-identity value=<0.000000,0.000000,0.000000>
 PROBE math/rotations rec=rot2fwd case=negative-identity value=<1.000000,0.000000,0.000000>
 PROBE math/rotations rec=rot2left case=negative-identity value=<0.000000,1.000000,0.000000>
 PROBE math/rotations rec=rot2up case=negative-identity value=<0.000000,0.000000,1.000000>
@@ -69,9 +69,9 @@ PROBE math/rotations rec=rot2euler case=zero value=<0.000000,0.000000,0.000000>
 PROBE math/rotations rec=rot2fwd case=zero value=<1.000000,0.000000,0.000000>
 PROBE math/rotations rec=rot2left case=zero value=<0.000000,1.000000,0.000000>
 PROBE math/rotations rec=rot2up case=zero value=<0.000000,0.000000,1.000000>
-PROBE math/rotations rec=rot2axis case=z-negative-s value=<-0.000000,-0.000000,-1.000000>
+PROBE math/rotations rec=rot2axis case=z-negative-s value=<0.000000,0.000000,-1.000000>
 PROBE math/rotations rec=rot2angle case=z-negative-s value=1.570796
-PROBE math/rotations rec=rot2euler case=z-negative-s value=<-0.000000,0.000000,-1.570796>
+PROBE math/rotations rec=rot2euler case=z-negative-s value=<0.000000,0.000000,-1.570796>
 PROBE math/rotations rec=rot2fwd case=z-negative-s value=<0.000000,-1.000000,0.000000>
 PROBE math/rotations rec=rot2left case=z-negative-s value=<1.000000,0.000000,0.000000>
 PROBE math/rotations rec=rot2up case=z-negative-s value=<0.000000,0.000000,1.000000>
@@ -97,12 +97,12 @@ PROBE math/rotations rec=angle-between case=x90-z90 value=2.094395
 PROBE math/rotations rec=angle-between case=identity-zero value=0.000000
 PROBE math/rotations rec=axes2rot case=unit value=<0.000000,0.000000,0.000000,1.000000>
 PROBE math/rotations rec=axes2rot case=x-twice value=<0.000000,0.000000,0.000000,1.118034>
-PROBE math/rotations rec=axes2rot case=left-handed value=<0.000000,-0.000000,0.000000,0.707107>
+PROBE math/rotations rec=axes2rot case=left-handed value=<0.000000,0.000000,0.000000,0.707107>
 PROBE math/rotations rec=axes2rot case=skewed value=<0.000000,0.000000,-0.250000,1.000000>
 PROBE math/rotations rec=axes2rot case=z90-axes value=<0.000000,0.000000,0.707107,0.707107>
 PROBE math/rotations rec=add case=1234+half value=<1.500000,2.500000,3.500000,4.500000>
 PROBE math/rotations rec=subtract case=1234-half value=<0.500000,1.500000,2.500000,3.500000>
-PROBE math/rotations rec=negate case=x-axis value=<-1.000000,-0.000000,-0.000000>
+PROBE math/rotations rec=negate case=x-axis value=<-1.000000,0.000000,0.000000>
 PROBE math/rotations rec=dot case=123.x value=1.000000
 PROBE math/rotations rec=cross case=x%y value=<0.000000,0.000000,1.000000>
 PROBE math/rotations rec=scale case=123*2 value=<2.000000,4.000000,6.000000>

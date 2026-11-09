@@ -2,7 +2,7 @@
 id: test-lsl-differential-corpus-triage
 title: Triage every probe's differences between each grid and its fake flavour
 topic: test
-status: ready
+status: done
 origin: test-lsl-differential-opensim (2026-11-07)
 refs: [test-lsl-differential-opensim, server-lsl-event-raise-timing,
   server-lsl-sl-placement-lag]
@@ -84,3 +84,30 @@ batching fix.
 
 Acceptance: `compare-probes` between each grid and its fake flavour reports
 every probe as agreeing, or agreeing but for accepted differences.
+
+## Outcome (2026-11-09)
+
+Both fake corpora were re-run with the fixed binary and every probe now
+agrees with its grid, or agrees but for entries in `accepted.toml`; the
+conformance test holding the entries now names every stale one in a single
+run. Fixed on the way, each with a test: the runner's settle after each
+upload and its clearing of the other avatar's active group (so
+`llDetectedGroup` reads alike on every grid) and a name scrubber that keeps a
+test account's name where it is also a word the probes write; teleport
+answers from a region demoted to a child agent; script counts and memory in
+object details; `OBJECT_REZZER_KEY`, `llGetLinkKey(0)` from a child,
+`llGetVel`, item names and undescribed takes, OpenSim's permission masks,
+rotation of four zeros, a state change inside a function, detected values
+past the end, the newer functions OpenSim does not compile, a region-wide
+revoke, a fault's lines against the flood limit, and the order of link
+numbers and linkset-data events.
+
+Left as known defects, each with a new task and the entries that name it:
+[[server-lsl-mono-collision-model-under-lowered-limit]],
+[[server-lsl-opensim-grow-loop-slow]],
+[[server-lsl-scripted-teleport-unmodelled]],
+[[server-lsl-link-applies-after-tick]],
+[[server-fake-grid-worn-departure-change]],
+[[server-lsl-restarted-sleeper-order]],
+[[server-lsl-opensim-child-move-change-late]], and the idea
+[[server-lsl-cast-ray-cost]].

@@ -429,6 +429,22 @@ pub fn ll_get_omega(ctx: &mut ScriptCtx<'_>) -> Result<Vector, CallError> {
     }))
 }
 
+/// `llGetVel`: the object's velocity, as `OBJECT_VELOCITY` reads it, zero
+/// for one that is not physical however it was rezzed (`inventory/rez`'s
+/// child, rezzed at 5 m/s, reads zero on aditi and both OpenSim engines).
+///
+/// # Errors
+///
+/// None; the signature is the library's.
+pub fn ll_get_vel(ctx: &mut ScriptCtx<'_>) -> Result<Vector, CallError> {
+    let caller = ctx.caller();
+    let object = ctx.host().whereabouts(caller).object;
+    Ok(ctx
+        .host()
+        .object_details(caller, &object)
+        .map_or(ZERO_VECTOR, |details| details.velocity))
+}
+
 /// The highest a prim may be put, in metres (`prim/placement`: 4000 m
 /// moves, 5000 m does not).
 const CEILING_M: f32 = 4096.0;
@@ -1267,4 +1283,98 @@ pub fn ll_get_object_details(
             _ => vec![Element::Integer(-1)],
         })
         .collect())
+}
+
+/// `STATUS_PHYSICS`.
+const STATUS_PHYSICS: i32 = 1;
+/// `STATUS_PHANTOM`.
+const STATUS_PHANTOM: i32 = 16;
+/// `STATUS_CAST_SHADOWS`.
+const STATUS_CAST_SHADOWS: i32 = 512;
+/// Every `STATUS_*` flag, `STATUS_PHYSICS` to `STATUS_BLOCK_GRAB_OBJECT`.
+const STATUS_ALL: i32 = 0x7ff;
+
+/// The prim's `STATUS_*` flags, physics and phantom included; a prim under
+/// `llVolumeDetect` reads as phantom.
+const fn status_of(prim: &Prim) -> i32 {
+    let mut status = prim.status;
+    if prim.physics {
+        status |= STATUS_PHYSICS;
+    }
+    if prim.phantom || prim.volume_detect {
+        status |= STATUS_PHANTOM;
+    }
+    status
+}
+
+/// `llSetStatus`: sets the `STATUS_*` flags in `mask` on the prim, or clears
+/// them for a `value` of 0 (any other value sets). `STATUS_CAST_SHADOWS`
+/// cannot be set on Second Life, and is set for good by either value on
+/// OpenSim; a phantom clear leaves a prim under `llVolumeDetect` phantom
+/// (`physics/status`, on every grid). The fake grid runs no physics, so a
+/// physical prim only reads as one.
+///
+/// # Errors
+///
+/// None; the signature is the library's.
+pub fn ll_set_status(ctx: &mut ScriptCtx<'_>, mask: i32, value: i32) -> Result<(), CallError> {
+    let opensim_flavour = ctx.flavour().is_opensim();
+    let on = value != 0;
+    change_own(ctx, |_ctx, prim, _changes| {
+        let mask = mask & STATUS_ALL;
+        if mask & STATUS_PHYSICS != 0 {
+            prim.physics = on;
+        }
+        if mask & STATUS_PHANTOM != 0 && (on || !prim.volume_detect) {
+            prim.phantom = on;
+        }
+        let rest = mask & !(STATUS_PHYSICS | STATUS_PHANTOM | STATUS_CAST_SHADOWS);
+        if on {
+            prim.status |= rest;
+        } else {
+            prim.status &= !rest;
+        }
+        if mask & STATUS_CAST_SHADOWS != 0 && opensim_flavour {
+            prim.status |= STATUS_CAST_SHADOWS;
+        }
+    });
+    Ok(())
+}
+
+/// `llGetStatus`: whether the prim has the `STATUS_*` flags of `mask`. On
+/// Second Life `TRUE` if it has any of them, and `FALSE` for a mask with a
+/// bit no flag has (`-1`, `2048`); on OpenSim `FALSE` for any mask that is
+/// not exactly one flag (`physics/status`).
+///
+/// # Errors
+///
+/// None; the signature is the library's.
+pub fn ll_get_status(ctx: &mut ScriptCtx<'_>, mask: i32) -> Result<i32, CallError> {
+    let Some(prim) = own(ctx) else {
+        return Ok(0);
+    };
+    let status = status_of(&prim);
+    let known = mask != 0 && mask & !STATUS_ALL == 0;
+    let asked = if ctx.flavour().is_opensim() {
+        known && mask.count_ones() == 1
+    } else {
+        known
+    };
+    Ok(i32::from(asked && status & mask != 0))
+}
+
+/// `llVolumeDetect`: on, the prim reads as phantom, through `STATUS_PHANTOM`
+/// and `PRIM_PHANTOM`, and a phantom clear leaves it so; off, it is not
+/// phantom, even if it was before (`physics/status`, on every grid). The
+/// collisions it turns into detections are the physics tranche's.
+///
+/// # Errors
+///
+/// None; the signature is the library's.
+pub fn ll_volume_detect(ctx: &mut ScriptCtx<'_>, detect: i32) -> Result<(), CallError> {
+    change_own(ctx, |_ctx, prim, _changes| {
+        prim.volume_detect = detect != 0;
+        prim.phantom = prim.volume_detect;
+    });
+    Ok(())
 }

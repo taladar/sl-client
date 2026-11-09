@@ -589,6 +589,13 @@ pub struct Prim {
     pub physics: bool,
     /// Whether it is temporary.
     pub temp_on_rez: bool,
+    /// Its `STATUS_*` flags but physics and phantom, which are
+    /// [`Self::physics`] and [`Self::phantom`]: a fresh prim's are the three
+    /// rotation flags.
+    pub status: i32,
+    /// Whether `llVolumeDetect` is on: the prim reads as phantom, and a
+    /// `STATUS_PHANTOM` clear leaves it so (`physics/status`).
+    pub volume_detect: bool,
     /// Its physics shape (`PRIM_PHYSICS_SHAPE_*`).
     pub physics_shape: i32,
     /// Its spin.
@@ -622,6 +629,10 @@ pub struct Prim {
     /// there (`events/timer-reset`); Second Life raises one all the same.
     pub has_media_list: bool,
 }
+
+/// The three rotation flags, `STATUS_ROTATE_X | STATUS_ROTATE_Y |
+/// STATUS_ROTATE_Z`: a fresh prim's status on every grid.
+pub const STATUS_ROTATE_XYZ: i32 = 2 | 4 | 8;
 
 impl Prim {
     /// A new half-metre plywood box keyed `key`, at the origin, created by
@@ -677,6 +688,8 @@ impl Prim {
             phantom: false,
             physics: false,
             temp_on_rez: false,
+            status: STATUS_ROTATE_XYZ,
+            volume_detect: false,
             physics_shape: 0,
             omega: Omega {
                 axis: ZERO,

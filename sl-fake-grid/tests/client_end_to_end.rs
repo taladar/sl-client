@@ -3053,6 +3053,162 @@ mod test {
         Ok(())
     }
 
+    /// The test account's agent key, fixed so a region's fixture can make it
+    /// the owner of a scripted box.
+    fn owner_key() -> sl_types::key::AgentKey {
+        sl_types::key::AgentKey::from(uuid::Uuid::from_u128(0x0A11_CE00))
+    }
+
+    /// A script that waits for its owner to be in the region, then for it to
+    /// leave, reads how many values `llGetObjectDetails` gives for the owner
+    /// while it is away, and tells the owner once it is back.
+    const OWNER_AWAY_SOURCE: &str = "integer phase;
+integer seen = -1;
+default
+{
+    state_entry()
+    {
+        llSetTimerEvent(0.2);
+    }
+
+    timer()
+    {
+        key owner = llGetOwner();
+        integer here = llGetAgentSize(owner) != ZERO_VECTOR;
+        if (phase == 0 && here)
+        {
+            phase = 1;
+            llRegionSayTo(owner, 0, \"present\");
+        }
+        else if (phase == 1 && !here)
+        {
+            phase = 2;
+            seen = llGetListLength(llGetObjectDetails(owner, [OBJECT_POS]));
+        }
+        else if (phase == 2 && here)
+        {
+            phase = 3;
+            llRegionSayTo(owner, 0, \"away details=\" + (string)seen);
+        }
+    }
+}
+";
+
+    /// The start region with one box owned by [`owner_key`], running
+    /// [`OWNER_AWAY_SOURCE`].
+    fn owner_away_region() -> Result<RegionConfig, TestError> {
+        let local_id = sl_proto::RegionLocalObjectId(0x700);
+        let key = sl_types::key::ObjectKey::from(uuid::Uuid::from_u128(0x7005));
+        let asset = sl_proto::AssetKey::from(uuid::Uuid::from_u128(0x7006));
+        let mut fixture = sl_fake_grid::RegionFixture::new();
+        fixture.world.objects.push(sl_fake_grid::world::box_prim(
+            local_id,
+            key,
+            owner_key(),
+            Vector {
+                x: 132.0,
+                y: 128.0,
+                z: 25.5,
+            },
+            Vector {
+                x: 1.0,
+                y: 1.0,
+                z: 1.0,
+            },
+        ));
+        let item = sl_proto::TaskInventoryItem {
+            item_id: sl_types::key::InventoryKey::from(uuid::Uuid::from_u128(0x7007)),
+            parent_task: key,
+            asset_id: Some(asset),
+            name: "Script".to_owned(),
+            ..sl_fake_grid::scenario::stock_script_item()
+        };
+        let mut contents = sl_fake_grid::world::TaskInventory::stated(1, vec![item.clone()]);
+        let _running = contents.running.insert(item.item_id);
+        fixture
+            .world
+            .add_task_inventory(local_id, contents)
+            .map_err(|_contents| "the box is not in the region")?;
+        let _previous = fixture
+            .assets
+            .insert(asset, OWNER_AWAY_SOURCE.as_bytes().to_vec());
+        Ok(fixture.into_region(RegionConfig::default()))
+    }
+
+    /// What a script reads of its owner while the owner stands in the
+    /// neighbouring region (`comms/owner-away`): `llGetAgentSize` is zero on
+    /// both grids, but OpenSim keeps the owner's child agent in the region
+    /// and `llGetObjectDetails` still answers from it, where Second Life
+    /// answers nothing.
+    async fn owner_away_details(imitates: ImitatedGrid) -> Result<String, TestError> {
+        let mut account = AccountConfig::new("Test", "User", "password");
+        account.agent_id = Some(owner_key());
+        let regions = vec![owner_away_region()?, adjacent_east_region()];
+        let mut running = start_as(account, regions, imitates, None).await?;
+        let home = running
+            ._grid
+            .region_handle("Fake Region")
+            .ok_or("no home region")?;
+        let east = running
+            ._grid
+            .region_handle("Fake Region East")
+            .ok_or("no east region")?;
+        running
+            .wait_for(|event| match event {
+                Event::ChatReceived(message) if message.message == "present" => Some(()),
+                _ => None,
+            })
+            .await?;
+        teleport_to(&running, east, RegionCoordinates::new(64.0, 32.0, 25.0)).await?;
+        running
+            .wait_for(|event| match event {
+                Event::AgentArrived { .. } => Some(()),
+                _ => None,
+            })
+            .await?;
+        // A second of the script's timer while the owner stands in the
+        // neighbour, its child circuit back into the start region open.
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        teleport_to(&running, home, RegionCoordinates::new(128.0, 128.0, 25.0)).await?;
+        let said = running
+            .wait_for(|event| match event {
+                Event::ChatReceived(message) if message.message.starts_with("away ") => {
+                    Some(message.message.clone())
+                }
+                _ => None,
+            })
+            .await?;
+        // And away again: the start region, a child agent while the owner
+        // stood in the neighbour and a root one again since, still answers
+        // the owner's next teleport.
+        teleport_to(&running, east, RegionCoordinates::new(64.0, 32.0, 25.0)).await?;
+        running
+            .wait_for(|event| match event {
+                Event::AgentArrived { region_handle, .. } if *region_handle == east => Some(()),
+                _ => None,
+            })
+            .await?;
+        Ok(said)
+    }
+
+    #[tokio::test]
+    async fn an_open_sim_script_reads_its_owners_child_agent() -> Result<(), TestError> {
+        assert_eq!(
+            owner_away_details(ImitatedGrid::OpenSim).await?,
+            "away details=1"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_second_life_script_reads_nothing_of_its_owner_away() -> Result<(), TestError> {
+        assert_eq!(
+            owner_away_details(ImitatedGrid::SecondLife).await?,
+            "away details=0"
+        );
+        Ok(())
+    }
+
     /// The region bordering the start region to the east: the crossing tests'
     /// destination, and — unlike [`east_region`] — close enough that the start
     /// region announces it as a neighbour.

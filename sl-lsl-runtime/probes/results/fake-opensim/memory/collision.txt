@@ -1,11 +1,15 @@
 grid: fake-opensim
-date: 2026-11-07
+date: 2026-11-09
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating YEngine
 settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
 
+# chat type=say from="Object" length=14 text="Script running"
+# chat type=say from="Object" length=14 text="Script running"
 # target: script "Doubling LSO" lsl2
+# chat type=say from="Object" length=14 text="Script running"
+# chat type=say from="Object" length=14 text="Script running"
 PROBE memory/collision rec=start region="Fake Region" channel="OpenSim" version="sl-fake-grid 0.1.0"
 PROBE memory/collision rec=grow script="Doubling"
 PROBE memory/collision rec=before script=doubling used=48 free=1048528 limit=65536
@@ -27,7 +31,7 @@ PROBE memory/collision rec=grown script=doubling step=15 length=32768 used=65584
 PROBE memory/collision rec=grown script=doubling step=16 length=65536 used=131120 free=917456 limit=65536
 PROBE memory/collision rec=grown script=doubling step=17 length=131072 used=262192 free=786384 limit=65536
 PROBE memory/collision rec=grown script=doubling step=18 length=262144 used=524336 free=524240 limit=65536
-# owner-say: from="Object" text="[YEngine]: Exception while running c7d65af3-d2c4-e658-cd45-01cdebbbf994"
+# owner-say: from="Object" text="[YEngine]: Exception while running 103f533b-1f60-1c7e-cac1-e51ab55a03c6"
 # owner-say: from="Object" text="OutOfHeapException: oldtotal=0, newtotal=524288, limit=1048576"
 # owner-say: from="Object" text="Prim: <Object>, Script: <Doubling>, Location: Fake Region <128,124,26>"
 # owner-say: from="Object" text="Script must be Reset to re-enable."
@@ -52,7 +56,7 @@ PROBE memory/collision rec=grown script=doubling-lso step=15 length=32768 used=6
 PROBE memory/collision rec=grown script=doubling-lso step=16 length=65536 used=131128 free=917448 limit=65536
 PROBE memory/collision rec=grown script=doubling-lso step=17 length=131072 used=262200 free=786376 limit=65536
 PROBE memory/collision rec=grown script=doubling-lso step=18 length=262144 used=524344 free=524232 limit=65536
-# owner-say: from="Object" text="[YEngine]: Exception while running 55366d69-dfd5-1b2d-c9d6-d4adeeffda5b"
+# owner-say: from="Object" text="[YEngine]: Exception while running 1a7d1ddb-3330-db0b-c621-534862fb187d"
 # owner-say: from="Object" text="OutOfHeapException: oldtotal=0, newtotal=524288, limit=1048576"
 # owner-say: from="Object" text="Prim: <Object>, Script: <Doubling LSO>, Location: Fake Region <128,124,26>"
 # owner-say: from="Object" text="Script must be Reset to re-enable."
@@ -93,3 +97,7 @@ PROBE memory/collision rec=grown script=limited-list count=4000 used=16056 free=
 PROBE memory/collision rec=no-collision script=limited-list count=4000
 PROBE memory/collision rec=reached script="Limited list" last="9620" running=1
 PROBE memory/collision rec=end
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"

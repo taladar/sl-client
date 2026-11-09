@@ -349,6 +349,16 @@ pub(crate) fn link(
     world: &mut SceneFixtures,
     named: &[RegionLocalObjectId],
 ) -> Result<Option<Joined>, LinkRefusal> {
+    let newcomers = world.linking.newcomers;
+    link_numbering(world, named, newcomers)
+}
+
+/// [`link`], the prims it brings in numbered as `numbering` says.
+fn link_numbering(
+    world: &mut SceneFixtures,
+    named: &[RegionLocalObjectId],
+    numbering: Newcomers,
+) -> Result<Option<Joined>, LinkRefusal> {
     let policy = world.linking;
     let is_prim = |world: &SceneFixtures, prim: RegionLocalObjectId| world.objects.contains(prim);
     let Some((first, rest)) = named.split_first() else {
@@ -435,7 +445,7 @@ pub(crate) fn link(
     for of in &joining {
         world.objects.forget_link_order(*of);
     }
-    let numbered = match policy.newcomers {
+    let numbered = match numbering {
         Newcomers::AfterTheRoot => newcomers.iter().chain(&had).copied().collect(),
         Newcomers::AtTheEnd => had.iter().chain(&newcomers).copied().collect(),
     };
@@ -554,14 +564,17 @@ fn updated_sets(world: &SceneFixtures, roots: &[RegionLocalObjectId]) -> Vec<Reg
 
 /// `llCreateLink`, once the tick is over: links the set `first` is in and
 /// the set `second` is in under the set of `first`, as a viewer's link of the
-/// two would, and tells their scripts. A link the grid refuses (too far, too
-/// many) leaves both as they were.
+/// two would but for the numbering — the joined prims come right after the
+/// root on both grids, where OpenSim's viewer link puts them at the end
+/// (`LinkToGroup(child, true)`, `prim/link-refusals`) — and tells their
+/// scripts. A link the grid refuses (too far, too many) leaves both as they
+/// were.
 pub(crate) fn script_link(
     world: &mut SceneFixtures,
     first: RegionLocalObjectId,
     second: RegionLocalObjectId,
 ) -> Vec<RegionChange> {
-    match link(world, &[first, second]) {
+    match link_numbering(world, &[first, second], Newcomers::AfterTheRoot) {
         Ok(Some(joined)) => {
             announce_link(world, &joined);
             updated_sets(world, &[joined.root])
@@ -806,6 +819,17 @@ mod test {
         assert_eq!(numbers(&world, A), vec![A, B, C, D]);
         assert_eq!(peel(&mut world, A), vec![A, D, C, B]);
         Ok(())
+    }
+
+    /// A script's link on OpenSim inserts the prim it brings at link 2
+    /// (`LinkToGroup(child, true)`), where its viewer's link appends:
+    /// `prim/link-refusals` linked C, then B, and read B as link 2.
+    #[test]
+    fn opensims_script_link_numbers_the_newcomer_second() {
+        let mut world = world(ImitatedGrid::OpenSim);
+        let _changes = super::script_link(&mut world, A, C);
+        let _changes = super::script_link(&mut world, A, B);
+        assert_eq!(numbers(&world, A), vec![A, B, C]);
     }
 
     /// A link that names a child brings the child's whole set, and one that

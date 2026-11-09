@@ -330,6 +330,196 @@ pub fn rotation(text: &str) -> Rotation {
     parse_components::<4>(text).map_or(ZERO_ROTATION, |[x, y, z, s]| Rotation { x, y, z, s })
 }
 
+/// `(integer)text` on OpenSim (`LSL_Types.LSLInteger(string)`): what its
+/// pattern takes from the start — spaces (only spaces), then `0x` and hex
+/// digits, or one sign and decimal digits — with a `+` dropped. Hex is read
+/// as 32 bits, so `0xFFFFFFFF` is −1; a number past 32 bits is −1, whichever
+/// sign (`strings/conversions`). A hex number after spaces makes .NET throw
+/// a `FormatException` there, which no probe has measured; it reads 0 here.
+#[must_use]
+pub fn opensim_integer(text: &str) -> i32 {
+    let bytes = text.as_bytes();
+    let spaces = run(bytes, |byte| byte == b' ');
+    let body = from(bytes, spaces);
+    let hex_digits = body
+        .strip_prefix(b"0x")
+        .or_else(|| body.strip_prefix(b"0X"))
+        .map_or(0, |rest| run(rest, |byte| byte.is_ascii_hexdigit()));
+    if hex_digits > 0 {
+        if spaces > 0 {
+            return 0;
+        }
+        let digits = body
+            .get(2..hex_digits.saturating_add(2))
+            .unwrap_or_default();
+        let value = digits.iter().try_fold(0_u64, |value, digit| {
+            let value = value.checked_mul(16)?.checked_add(hex_value(*digit)?)?;
+            u32::try_from(value).is_ok().then_some(value)
+        });
+        return value.map_or(-1, |value| {
+            i32::from_ne_bytes(u32::try_from(value).unwrap_or(u32::MAX).to_ne_bytes())
+        });
+    }
+    let (negative, unsigned) = match body.first() {
+        Some(b'-') => (true, from(body, 1)),
+        Some(b'+') => (false, from(body, 1)),
+        _ => (false, body),
+    };
+    let digits = run(unsigned, |byte| byte.is_ascii_digit());
+    if digits == 0 {
+        return 0;
+    }
+    let magnitude =
+        unsigned
+            .get(..digits)
+            .unwrap_or_default()
+            .iter()
+            .try_fold(0_i64, |value, digit| {
+                value
+                    .checked_mul(10)?
+                    .checked_add(i64::from(digit.saturating_sub(b'0')))
+                    .filter(|value| *value <= 1 << 31)
+            });
+    let value = magnitude.and_then(|magnitude| {
+        if negative {
+            magnitude.checked_neg()
+        } else {
+            Some(magnitude)
+        }
+    });
+    value
+        .and_then(|value| i32::try_from(value).ok())
+        .unwrap_or(-1)
+}
+
+/// `(float)text` on OpenSim (`LSL_Types.LSLFloat(string)`): what its pattern
+/// takes from the start — spaces, a sign, digits with a point or a point
+/// with digits, an exponent with digits — read as a double; anything else,
+/// `inf`, `NaN` and hex included, is 0 (`strings/conversions`).
+#[must_use]
+pub fn opensim_float(text: &str) -> f32 {
+    let bytes = text.as_bytes();
+    let start = run(bytes, |byte| byte == b' ');
+    let mut end = start;
+    if matches!(bytes.get(end), Some(b'+' | b'-')) {
+        end = end.saturating_add(1);
+    }
+    let whole = run(from(bytes, end), |byte| byte.is_ascii_digit());
+    end = end.saturating_add(whole);
+    if bytes.get(end) == Some(&b'.') {
+        let fraction = run(from(bytes, end.saturating_add(1)), |byte| {
+            byte.is_ascii_digit()
+        });
+        if whole == 0 && fraction == 0 {
+            return 0.0;
+        }
+        end = end.saturating_add(1).saturating_add(fraction);
+    } else if whole == 0 {
+        return 0.0;
+    }
+    if matches!(bytes.get(end), Some(b'e' | b'E')) {
+        let mut at = end.saturating_add(1);
+        if matches!(bytes.get(at), Some(b'+' | b'-')) {
+            at = at.saturating_add(1);
+        }
+        let digits = run(from(bytes, at), |byte| byte.is_ascii_digit());
+        if digits > 0 {
+            end = at.saturating_add(digits);
+        }
+    }
+    text.get(start..end)
+        .and_then(|number| number.parse::<f64>().ok())
+        .map_or(0.0, to_f32)
+}
+
+/// Whitespace as .NET's `NumberStyles.Float` skips it: tab to carriage
+/// return and the space.
+const fn is_dotnet_space(character: char) -> bool {
+    matches!(character, '\t'..='\r' | ' ')
+}
+
+/// A component as `Double.TryParse(…, NumberStyles.Float, invariant)` reads
+/// it: the whole text must be one number — white space at either end, a
+/// sign, digits with a point or a point with digits, an exponent with digits
+/// — or `Infinity`, `-Infinity` or `NaN`; [`None`] for anything else.
+fn dotnet_double(text: &str) -> Option<f64> {
+    let trimmed = text.trim_matches(is_dotnet_space);
+    match trimmed {
+        "Infinity" => return Some(f64::INFINITY),
+        "-Infinity" => return Some(f64::NEG_INFINITY),
+        "NaN" => return Some(f64::NAN),
+        _ => {}
+    }
+    let bytes = trimmed.as_bytes();
+    let mut at = usize::from(matches!(bytes.first(), Some(b'+' | b'-')));
+    let whole = run(from(bytes, at), |byte| byte.is_ascii_digit());
+    at = at.saturating_add(whole);
+    let mut fraction = 0;
+    if bytes.get(at) == Some(&b'.') {
+        fraction = run(from(bytes, at.saturating_add(1)), |byte| {
+            byte.is_ascii_digit()
+        });
+        at = at.saturating_add(1).saturating_add(fraction);
+    }
+    if whole == 0 && fraction == 0 {
+        return None;
+    }
+    if matches!(bytes.get(at), Some(b'e' | b'E')) {
+        let mut exponent = at.saturating_add(1);
+        if matches!(bytes.get(exponent), Some(b'+' | b'-')) {
+            exponent = exponent.saturating_add(1);
+        }
+        let digits = run(from(bytes, exponent), |byte| byte.is_ascii_digit());
+        if digits == 0 {
+            return None;
+        }
+        at = exponent.saturating_add(digits);
+    }
+    if at != bytes.len() {
+        return None;
+    }
+    trimmed.parse().ok()
+}
+
+/// The first `N` components of `text` as OpenSim reads a vector or a
+/// rotation (`LSL_Types.Vector3(string)`, `Quaternion(string)`): every `<`
+/// and `>` made a space, the text split at its commas, and each of the
+/// first `N` parts one number ([`dotnet_double`]); [`None`] when there are
+/// fewer parts or one is not a number.
+fn opensim_components<const N: usize>(text: &str) -> Option<[f32; N]> {
+    let spaced = text.replace(['<', '>'], " ");
+    let parts: Vec<&str> = spaced.split(',').collect();
+    let mut components = [0.0_f32; N];
+    for (slot, part) in components.iter_mut().zip(parts.iter()) {
+        *slot = to_f32(dotnet_double(part)?);
+    }
+    (parts.len() >= N).then_some(components)
+}
+
+/// `(vector)text` on OpenSim: three comma-separated numbers, the brackets
+/// anywhere or nowhere and anything after a fourth comma ignored, or
+/// [`ZERO_VECTOR`] (`strings/conversions`: `"1,2,3"` is `<1, 2, 3>`,
+/// `"<1,2,3> tail"` is zero).
+#[must_use]
+pub fn opensim_vector(text: &str) -> Vector {
+    opensim_components::<3>(text).map_or(ZERO_VECTOR, |[x, y, z]| Vector { x, y, z })
+}
+
+/// `(rotation)text` on OpenSim: four numbers as [`opensim_vector`] reads
+/// three, or `<0, 0, 0, 1>` — not [`ZERO_ROTATION`] — when they do not parse.
+#[must_use]
+pub fn opensim_rotation(text: &str) -> Rotation {
+    opensim_components::<4>(text).map_or(
+        Rotation {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+            s: 1.0,
+        },
+        |[x, y, z, s]| Rotation { x, y, z, s },
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use pretty_assertions::assert_eq;

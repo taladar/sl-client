@@ -1,5 +1,5 @@
 grid: fake-sl
-date: 2026-11-07
+date: 2026-11-09
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating Mono
@@ -55,8 +55,8 @@ PROBE errors/flood-repeat rec=phase name=B17 run=1 t=175.422200
 PROBE errors/flood-repeat rec=single n=9 t=192.444400
 # debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1 (PRIM_MATERIAL): bounds error; 11710 is not in (0, 7)."
 # debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1 (PRIM_MATERIAL): bounds error; 11711 is not in (0, 7)."
-PROBE errors/flood-repeat rec=phase name=S17 run=1 t=233.111100
 # debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1 (PRIM_MATERIAL): bounds error; 11701 is not in (0, 7)."
+PROBE errors/flood-repeat rec=phase name=S17 run=1 t=233.111100
 # debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1 (PRIM_MATERIAL): bounds error; 11702 is not in (0, 7)."
 # debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1 (PRIM_MATERIAL): bounds error; 11703 is not in (0, 7)."
 # debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1 (PRIM_MATERIAL): bounds error; 11704 is not in (0, 7)."
@@ -64,8 +64,8 @@ PROBE errors/flood-repeat rec=phase name=S17 run=1 t=233.111100
 # debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1 (PRIM_MATERIAL): bounds error; 11706 is not in (0, 7)."
 # debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1 (PRIM_MATERIAL): bounds error; 11707 is not in (0, 7)."
 # debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1 (PRIM_MATERIAL): bounds error; 11708 is not in (0, 7)."
-PROBE errors/flood-repeat rec=single n=9 t=250.133300
 # debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1 (PRIM_MATERIAL): bounds error; 11709 is not in (0, 7)."
+PROBE errors/flood-repeat rec=single n=9 t=250.133300
 # debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1 (PRIM_MATERIAL): bounds error; 11710 is not in (0, 7)."
 # debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1 (PRIM_MATERIAL): bounds error; 11711 is not in (0, 7)."
 PROBE errors/flood-repeat rec=phase name=N17 run=1 t=290.800000
@@ -90,8 +90,8 @@ PROBE errors/flood-repeat rec=phase name=B16 run=2 t=350.866700
 # debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1 (PRIM_MATERIAL): bounds error; 21606 is not in (0, 7)."
 # debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1 (PRIM_MATERIAL): bounds error; 21607 is not in (0, 7)."
 # debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1 (PRIM_MATERIAL): bounds error; 21608 is not in (0, 7)."
-# debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1 (PRIM_MATERIAL): bounds error; 21609 is not in (0, 7)."
 PROBE errors/flood-repeat rec=single n=9 t=366.888900
+# debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1 (PRIM_MATERIAL): bounds error; 21609 is not in (0, 7)."
 # debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1 (PRIM_MATERIAL): bounds error; 21610 is not in (0, 7)."
 # debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1 (PRIM_MATERIAL): bounds error; 21611 is not in (0, 7)."
 # debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1 (PRIM_MATERIAL): bounds error; 21601 is not in (0, 7)."
@@ -128,8 +128,8 @@ PROBE errors/flood-repeat rec=phase name=B17 run=2 t=523.311100
 # debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1 (PRIM_MATERIAL): bounds error; 21706 is not in (0, 7)."
 # debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1 (PRIM_MATERIAL): bounds error; 21707 is not in (0, 7)."
 # debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1 (PRIM_MATERIAL): bounds error; 21708 is not in (0, 7)."
-# debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1 (PRIM_MATERIAL): bounds error; 21709 is not in (0, 7)."
 PROBE errors/flood-repeat rec=single n=9 t=540.333300
+# debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1 (PRIM_MATERIAL): bounds error; 21709 is not in (0, 7)."
 # debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1 (PRIM_MATERIAL): bounds error; 21710 is not in (0, 7)."
 # debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1 (PRIM_MATERIAL): bounds error; 21711 is not in (0, 7)."
 # debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1 (PRIM_MATERIAL): bounds error; 21701 is not in (0, 7)."
@@ -158,8 +158,8 @@ PROBE errors/flood-repeat rec=single n=9 t=655.688900
 # debug-channel: from="Object" text="Could not find sound 'N17r2-9'."
 # debug-channel: from="Object" text="Could not find sound 'N17r2-10'."
 # debug-channel: from="Object" text="Could not find sound 'N17r2-11'."
-# debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1 (PRIM_MATERIAL): bounds error; 30201 is not in (0, 7)."
 PROBE errors/flood-repeat rec=phase name=G2 run=3 t=698.755600
+# debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1 (PRIM_MATERIAL): bounds error; 30201 is not in (0, 7)."
 # debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1 (PRIM_MATERIAL): bounds error; 30202 is not in (0, 7)."
 # debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1 (PRIM_MATERIAL): bounds error; 30203 is not in (0, 7)."
 # debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1 (PRIM_MATERIAL): bounds error; 30204 is not in (0, 7)."
@@ -197,14 +197,14 @@ PROBE errors/flood-repeat rec=single n=20 t=745.644400
 PROBE errors/flood-repeat rec=single n=21 t=747.866600
 # debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1 (PRIM_MATERIAL): bounds error; 31222 is not in (0, 7)."
 PROBE errors/flood-repeat rec=single n=22 t=750.088900
-PROBE errors/flood-repeat rec=single n=23 t=752.311100
 # debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1 (PRIM_MATERIAL): bounds error; 31223 is not in (0, 7)."
-PROBE errors/flood-repeat rec=single n=24 t=754.533300
+PROBE errors/flood-repeat rec=single n=23 t=752.311100
 # debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1 (PRIM_MATERIAL): bounds error; 31224 is not in (0, 7)."
-PROBE errors/flood-repeat rec=single n=25 t=756.755600
+PROBE errors/flood-repeat rec=single n=24 t=754.533300
 # debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1 (PRIM_MATERIAL): bounds error; 31225 is not in (0, 7)."
-PROBE errors/flood-repeat rec=single n=26 t=758.977800
+PROBE errors/flood-repeat rec=single n=25 t=756.755600
 # debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1 (PRIM_MATERIAL): bounds error; 31226 is not in (0, 7)."
+PROBE errors/flood-repeat rec=single n=26 t=758.977800
 # debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1 (PRIM_MATERIAL): bounds error; 32501 is not in (0, 7)."
 PROBE errors/flood-repeat rec=phase name=G25 run=3 t=799.200000
 # debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1 (PRIM_MATERIAL): bounds error; 32502 is not in (0, 7)."
@@ -237,16 +237,16 @@ PROBE errors/flood-repeat rec=single n=15 t=842.644400
 PROBE errors/flood-repeat rec=single n=16 t=845.377700
 # debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1 (PRIM_MATERIAL): bounds error; 33517 is not in (0, 7)."
 PROBE errors/flood-repeat rec=single n=17 t=848.111100
-PROBE errors/flood-repeat rec=single n=18 t=850.844400
 # debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1 (PRIM_MATERIAL): bounds error; 33518 is not in (0, 7)."
-# debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1 (PRIM_MATERIAL): bounds error; 33519 is not in (0, 7)."
+PROBE errors/flood-repeat rec=single n=18 t=850.844400
 PROBE errors/flood-repeat rec=single n=19 t=853.577800
-# debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1 (PRIM_MATERIAL): bounds error; 33520 is not in (0, 7)."
+# debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1 (PRIM_MATERIAL): bounds error; 33519 is not in (0, 7)."
 PROBE errors/flood-repeat rec=single n=20 t=856.311100
-PROBE errors/flood-repeat rec=single n=21 t=859.044400
+# debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1 (PRIM_MATERIAL): bounds error; 33520 is not in (0, 7)."
 # debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1 (PRIM_MATERIAL): bounds error; 33521 is not in (0, 7)."
-# debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1 (PRIM_MATERIAL): bounds error; 30301 is not in (0, 7)."
+PROBE errors/flood-repeat rec=single n=21 t=859.044400
 PROBE errors/flood-repeat rec=phase name=G3 run=3 t=899.266700
+# debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1 (PRIM_MATERIAL): bounds error; 30301 is not in (0, 7)."
 # debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1 (PRIM_MATERIAL): bounds error; 30302 is not in (0, 7)."
 # debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1 (PRIM_MATERIAL): bounds error; 30303 is not in (0, 7)."
 # debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1 (PRIM_MATERIAL): bounds error; 30304 is not in (0, 7)."

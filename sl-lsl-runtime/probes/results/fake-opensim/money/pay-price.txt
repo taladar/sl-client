@@ -1,19 +1,19 @@
 grid: fake-opensim
-date: 2026-11-07
+date: 2026-11-09
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating YEngine
 settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
 
-PROBE money/pay-price rec=start region="Fake Region" channel="OpenSim" version="sl-fake-grid 0.1.0"
-PROBE money/pay-price rec=ask step=0 what=fresh
-PROBE money/pay-price rec=waiting drive=pay-price
 PROBE money/pay-price rec=set prim=B price=9 buttons=1,2,3,4
 PROBE money/pay-price rec=mixed prim=C call=before
-# owner-say: from="Object" text="[YEngine]: Exception while running aa64d477-2e00-9f49-cb23-42f08bfc6c37"
+# owner-say: from="Object" text="[YEngine]: Exception while running 947d63f9-2452-62ca-cf89-5e4be7c5348f"
 # owner-say: from="Object" text="InvalidCastException: Specified cast is not valid."
 # owner-say: from="Object" text="Prim: <Object>, Script: <Mixed>, Location: Fake Region <134,124,26>"
 # owner-say: from="Object" text="Script must be Reset to re-enable."
+PROBE money/pay-price rec=start region="Fake Region" channel="OpenSim" version="sl-fake-grid 0.1.0"
+PROBE money/pay-price rec=ask step=0 what=fresh
+PROBE money/pay-price rec=waiting drive=pay-price
 # pay-price prim=A default=-2 buttons="-2,-2,-2,-2"
 PROBE money/pay-price rec=set step=1 what=default price=-2 buttons="-2, -2, -2, -2"
 PROBE money/pay-price rec=waiting drive=pay-price

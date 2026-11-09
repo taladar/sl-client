@@ -1,5 +1,5 @@
 grid: fake-sl
-date: 2026-11-07
+date: 2026-11-09
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating Mono
@@ -8,14 +8,14 @@ settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor
 PROBE errors/flood-epoch rec=start region="Fake Region" channel="Second Life Server" version="sl-fake-grid 0.1.0"
 PROBE errors/flood-epoch rec=line n=1 t=1.511111
 # debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1 (PRIM_MATERIAL): bounds error; 1001 is not in (0, 7)."
-# debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1 (PRIM_MATERIAL): bounds error; 1002 is not in (0, 7)."
 PROBE errors/flood-epoch rec=line n=2 t=3.000000
-PROBE errors/flood-epoch rec=line n=3 t=4.511111
+# debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1 (PRIM_MATERIAL): bounds error; 1002 is not in (0, 7)."
 # debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1 (PRIM_MATERIAL): bounds error; 1003 is not in (0, 7)."
+PROBE errors/flood-epoch rec=line n=3 t=4.511111
 # debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1 (PRIM_MATERIAL): bounds error; 1004 is not in (0, 7)."
 PROBE errors/flood-epoch rec=line n=4 t=6.000000
-PROBE errors/flood-epoch rec=line n=5 t=7.511111
 # debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1 (PRIM_MATERIAL): bounds error; 1005 is not in (0, 7)."
+PROBE errors/flood-epoch rec=line n=5 t=7.511111
 # debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1 (PRIM_MATERIAL): bounds error; 1006 is not in (0, 7)."
 PROBE errors/flood-epoch rec=line n=6 t=9.000000
 # debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1 (PRIM_MATERIAL): bounds error; 1007 is not in (0, 7)."
