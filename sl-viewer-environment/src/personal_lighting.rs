@@ -89,8 +89,7 @@ const RESET_CONFIRM: TemplateRef<OkCancel> = TemplateRef::new("PersonalSettingsC
 // ---------------------------------------------------------------------------
 
 /// A sky slider of *this* window: the knob it drives. The readout and the
-/// thumb are [`SliderRow`](crate::rows::SliderRow)'s business, shared with
-/// every other environment window.
+/// thumb are the slider widget's business, shared with every other slider.
 #[derive(Component, Debug, Clone, Copy)]
 struct SkySliderRow(SkyKnob);
 
@@ -760,7 +759,7 @@ fn handle_reset_confirmation(
 /// floater is, with its headings at the cell's font size — then seeded by the
 /// live `reseed_personal_widgets` from a sample capture (the legacy WindLight
 /// default sky and water), exactly as an open seeds the real window, and its
-/// slider readouts drawn by the shared rows sync that writes them live.
+/// slider readouts drawn by the slider widget that writes them live.
 ///
 /// The sample buffers stay installed as the window's edit state, so a drag on
 /// a specimen slider lands in them as it would live; nothing pushes them to an

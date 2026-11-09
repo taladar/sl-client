@@ -2346,7 +2346,9 @@ mod test {
     fn a_skinned_slider_thumb_follows_its_value() -> Result<(), TestError> {
         use bevy::ui_widgets::{Slider, SliderRange, SliderThumb, SliderValue};
         use sl_viewer_ui_core::ui::{UiDirection, resolve_logical_boxes};
-        use sl_viewer_ui_widgets::ui_slider::{SliderStyle, place_slider_thumbs, spawn_slider};
+        use sl_viewer_ui_widgets::ui_slider::{
+            SliderLabels, SliderStyle, place_slider_thumbs, spawn_slider,
+        };
 
         const STYLE: SliderStyle = SliderStyle {
             track_width: 110.0,
@@ -2356,6 +2358,7 @@ mod test {
             track_fill: Color::BLACK,
             thumb_width: 10.0,
             thumb_fill: Color::WHITE,
+            font_size: 12.0,
         };
         let mut app = app();
         app.init_resource::<UiDirection>();
@@ -2381,6 +2384,7 @@ mod test {
                 STYLE,
                 0,
                 0.0,
+                SliderLabels::None,
                 (
                     Slider::default(),
                     SliderValue(0.0),

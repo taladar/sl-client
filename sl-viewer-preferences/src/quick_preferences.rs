@@ -59,7 +59,7 @@ use crate::ui_checkbox::{CheckboxSpec, spawn_checkbox};
 use crate::ui_combo::{ComboChanged, ComboSelection, ComboSpec, spawn_combo};
 use crate::ui_element::ElementCx;
 use crate::ui_font::UiFont;
-use crate::ui_slider::{SliderStyle, spawn_slider};
+use crate::ui_slider::{SliderFormat, SliderLabels, SliderStyle, spawn_slider};
 use crate::ui_spawn::{self, ButtonKind, ButtonSpec, UiLabel};
 use sl_viewer_ui_core::glyph;
 use sl_viewer_ui_core::semantic::LabelledBy;
@@ -90,9 +90,8 @@ const SLIDER: SliderStyle = SliderStyle {
     track_fill: TRACK_FILL,
     thumb_width: 12.0,
     thumb_fill: THUMB_FILL,
+    font_size: FONT,
 };
-/// The width of a setting row's trailing value readout, in logical pixels.
-const VALUE_WIDTH: f32 = 44.0;
 
 /// The floater's minimum content size, in logical pixels.
 const MIN_SIZE: Vec2 = Vec2::new(240.0, 160.0);
@@ -121,9 +120,6 @@ const SPAWN_POSITION: Vec2 = Vec2::splat(ANCHOR_MARGIN);
 const SECTION_COLOR: Color = SkinPalette::FALLBACK.text_heading;
 /// Row-label colour.
 const LABEL_COLOR: Color = SkinPalette::FALLBACK.text_primary;
-/// A slider's numeric read-out: quieter than its label, which is the muted
-/// role.
-const VALUE_COLOR: Color = SkinPalette::FALLBACK.text_muted;
 /// A control's border colour.
 const CONTROL_BORDER: Color = Color::srgb(0.4, 0.5, 0.62);
 /// A slider track's fill.
@@ -578,15 +574,6 @@ const fn combo_indices(fixed: Option<FixedEnvironment>, local_in_force: bool) ->
 #[derive(Component, Debug, Clone, Copy)]
 struct QuickPrefsFloaterRoot;
 
-/// A setting row's trailing value readout, tagged with what it displays.
-#[derive(Component, Debug, Clone)]
-struct QuickPrefValueLabel {
-    /// The setting whose value this label shows.
-    control_name: String,
-    /// Whether to format as an integer (no decimals).
-    integer: bool,
-}
-
 /// Owns the Quick Preferences panel: the floater chrome + deferred content, the
 /// toolbar button, the environment combos, and the control visuals.
 #[derive(Debug, Clone, Copy, Default)]
@@ -608,7 +595,6 @@ impl Plugin for QuickPreferencesPlugin {
                 anchor_quick_prefs,
                 apply_env_combos,
                 sync_env_combos.after(apply_env_combos),
-                update_quick_pref_values,
             ),
         );
     }
@@ -984,7 +970,8 @@ fn spawn_checkbox_row(commands: &mut Commands, parent: Entity, entry: &QuickPref
         .insert(bound_checkbox(entry_binding(entry)));
 }
 
-/// Spawn a slider row bound to a numeric setting, with a trailing value readout.
+/// Spawn a slider row bound to a numeric setting; the slider writes its own
+/// value readout and bounds, an integer setting's as whole numbers.
 fn spawn_slider_row(commands: &mut Commands, parent: Entity, entry: &QuickPrefEntry) {
     let row_entity = commands
         .spawn((
@@ -996,56 +983,24 @@ fn spawn_slider_row(commands: &mut Commands, parent: Entity, entry: &QuickPrefEn
     let label = spawn_entry_label(commands, row_entity, entry);
     // The slider draws no caption: the row's label names it.
     commands.entity(row_entity).insert(LabelledBy(label));
-    // A trailing group holds the slider and its numeric readout together, so the
-    // label sits at the leading edge and the control at the trailing edge.
-    let group = commands
-        .spawn((
-            Node {
-                align_items: AlignItems::Center,
-                flex_shrink: 0.0,
-                ..row(Val::Px(6.0))
-            },
-            ChildOf(row_entity),
-        ))
-        .id();
+    let format = if entry.integer {
+        SliderFormat::Decimal(0)
+    } else {
+        SliderFormat::for_step(entry.increment)
+    };
     spawn_slider(
         commands,
-        group,
+        row_entity,
         SLIDER,
         0,
         0.0,
+        SliderLabels::beside(format),
         bound_slider(
             entry_binding(entry),
             SliderRange::new(entry.min, entry.max),
             SliderStep(entry.increment),
         ),
     );
-    // A right-aligning slot with a minimum width (not a fixed one) so the readout
-    // column lines up but a long value / large UI scale grows it rather than
-    // clipping or wrapping the text. The value Text itself is content-sized (a
-    // width on the Text leaf makes bevy_text wrap instead of growing the box).
-    let value_slot = commands
-        .spawn((
-            Node {
-                min_width: Val::Px(VALUE_WIDTH),
-                justify_content: JustifyContent::FlexEnd,
-                flex_shrink: 0.0,
-                ..default()
-            },
-            ChildOf(group),
-        ))
-        .id();
-    commands.spawn((
-        Text::default(),
-        UiFont::Sans.at(FONT),
-        text_role(VALUE_COLOR),
-        QuickPrefValueLabel {
-            control_name: entry.control_name.clone(),
-            integer: entry.integer,
-        },
-        Pickable::IGNORE,
-        ChildOf(value_slot),
-    ));
 }
 
 // ---------------------------------------------------------------------------
@@ -1301,74 +1256,6 @@ fn show_environment(
 }
 
 // ---------------------------------------------------------------------------
-// Control visuals (thumb position, checkbox fill, value readout).
-// ---------------------------------------------------------------------------
-
-/// Keep each setting slider's value readout current from the store.
-fn update_quick_pref_values(
-    settings: Option<Res<ViewerSettings>>,
-    mut labels: Query<(&mut Text, &QuickPrefValueLabel)>,
-) {
-    let Some(settings) = settings else {
-        return;
-    };
-    for (mut text, label) in &mut labels {
-        let Some(value) = settings
-            .store()
-            .get(&label.control_name)
-            .and_then(setting_as_f32)
-        else {
-            continue;
-        };
-        show_value(&mut text, label, value);
-    }
-}
-
-/// Write `value` into one slider's readout, formatted as its label asks. The
-/// drawing half of [`update_quick_pref_values`], shared with the specimen.
-fn show_value(text: &mut Mut<'_, Text>, label: &QuickPrefValueLabel, value: f32) {
-    let wanted = if label.integer {
-        format!("{}", value.round())
-    } else {
-        format!("{value:.2}")
-    };
-    if text.0 != wanted {
-        text.0 = wanted;
-    }
-}
-
-/// A setting value as the `f32` a slider readout shows, or `None` for a
-/// non-numeric setting.
-const fn setting_as_f32(value: &sl_settings::SettingValue) -> Option<f32> {
-    match value {
-        sl_settings::SettingValue::F32(v) => Some(*v),
-        sl_settings::SettingValue::I32(v) => Some(i32_to_f32(*v)),
-        sl_settings::SettingValue::U32(v) => Some(u32_to_f32(*v)),
-        _ => None,
-    }
-}
-
-/// Widen an `i32` setting to the `f32` a readout shows.
-#[expect(
-    clippy::cast_precision_loss,
-    clippy::as_conversions,
-    reason = "a quick-prefs integer setting's magnitude is small; the readout only shows whole numbers"
-)]
-const fn i32_to_f32(value: i32) -> f32 {
-    value as f32
-}
-
-/// Widen a `u32` setting to the `f32` a readout shows.
-#[expect(
-    clippy::cast_precision_loss,
-    clippy::as_conversions,
-    reason = "a quick-prefs integer setting's magnitude is small; the readout only shows whole numbers"
-)]
-const fn u32_to_f32(value: u32) -> f32 {
-    value as f32
-}
-
-// ---------------------------------------------------------------------------
 // The gallery specimen.
 // ---------------------------------------------------------------------------
 
@@ -1398,6 +1285,9 @@ pub fn spawn_quick_prefs_specimen(
         crate::quick_prefs_environment::QUICK_PREFS_HOST.scope,
     );
     commands.run_system_cached_with(compose_quick_prefs_specimen, (combos, parent));
+    // After the sample values have landed: the sliders' readouts and bounds,
+    // which the slider widget's plugin writes in the viewer.
+    commands.run_system_cached(crate::ui_slider::label_sliders);
     parent
 }
 
@@ -1417,15 +1307,14 @@ pub(crate) fn sample_slider_value(range: &SliderRange, step: f32) -> f32 {
 /// The specimen's composing pass: the environment pair through
 /// [`show_environment`] (the region's shared environment), and each slider at
 /// its [`sample_slider_value`], where the binding layer's sync would put a
-/// stored one, with its readout through [`show_value`]. Only the sliders and
-/// readouts under `slot` are touched: another window's slider may bind the
-/// same setting.
+/// stored one (the slider writes its own readout from it). Only the sliders
+/// under `slot` are touched: another window's slider may bind the same
+/// setting.
 fn compose_quick_prefs_specimen(
     In((combos, slot)): In<(QuickPrefEnvCombos, Entity)>,
     mut selections: Query<&mut ComboSelection>,
     time_disabled: Query<Has<InteractionDisabled>>,
-    mut labels: Query<(Entity, &mut Text, &QuickPrefValueLabel)>,
-    sliders: Query<(Entity, &SettingBinding, &SliderRange, &SliderStep), With<Slider>>,
+    sliders: Query<(Entity, &SliderRange, &SliderStep), With<Slider>>,
     parents: Query<&ChildOf>,
     mut commands: Commands,
 ) {
@@ -1441,24 +1330,10 @@ fn compose_quick_prefs_specimen(
         &time_disabled,
         &mut commands,
     );
-    let mut values: Vec<(&str, f32)> = Vec::new();
-    for (slider, binding, range, step) in &sliders {
-        if !under_slot(slider) {
-            continue;
-        }
-        let value = sample_slider_value(range, step.0);
-        commands.entity(slider).insert(SliderValue(value));
-        values.push((binding.name(), value));
-    }
-    for (entity, mut text, label) in &mut labels {
-        if !under_slot(entity) {
-            continue;
-        }
-        if let Some((_name, value)) = values
-            .iter()
-            .find(|(name, _value)| *name == label.control_name)
-        {
-            show_value(&mut text, label, *value);
+    for (slider, range, step) in &sliders {
+        if under_slot(slider) {
+            let value = sample_slider_value(range, step.0);
+            commands.entity(slider).insert(SliderValue(value));
         }
     }
 }
@@ -1471,9 +1346,9 @@ mod tests {
 
     use super::{
         ENV_GROUP_CUSTOM, ENV_GROUP_ELEMENT, ENV_TIME_ELEMENT, QuickPrefEntry, QuickPrefEnvCombos,
-        QuickPrefKind, QuickPrefLabel, QuickPrefValueLabel, apply_env_combos, binding_kind,
-        combo_indices, default_entries, fixed_for, sky_for_time_index, sync_env_combos,
-        time_index_for_sky, update_quick_pref_values,
+        QuickPrefKind, QuickPrefLabel, apply_env_combos, binding_kind, combo_indices,
+        default_entries, fixed_for, sky_for_time_index, spawn_slider_row, sync_env_combos,
+        time_index_for_sky,
     };
     use crate::environment::{EnvironmentState, FixedEnvironment};
     use crate::settings::ViewerSettings;
@@ -1838,26 +1713,34 @@ mod tests {
         Ok(())
     }
 
-    /// A slider value readout tracks its setting's stored value.
+    /// **An integer setting reads as a whole number.** The slider writes its
+    /// own readout; the row's part is choosing the format from the entry.
     #[test]
-    fn value_readout_follows_store() -> Result<(), TestError> {
+    fn an_integer_entry_reads_as_a_whole_number() -> Result<(), TestError> {
+        use crate::ui_slider::{SliderFormat, SliderLabelParts, SliderWidgetPlugin};
+        use bevy::ui_widgets::SliderValue;
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .insert_resource(ViewerSettings::from_store_for_test(render_store()));
-        let label = app
+            .add_plugins(SliderWidgetPlugin);
+        let entry = default_entries()
+            .into_iter()
+            .find(|entry| entry.control_name == crate::session::SETTING_DRAW_DISTANCE)
+            .ok_or("no draw-distance entry")?;
+        let parent = app.world_mut().spawn(Node::default()).id();
+        spawn_slider_row(&mut app.world_mut().commands(), parent, &entry);
+        app.world_mut().flush();
+        let (track, parts) = app
             .world_mut()
-            .spawn((
-                Text::default(),
-                QuickPrefValueLabel {
-                    control_name: crate::session::SETTING_DRAW_DISTANCE.to_owned(),
-                    integer: true,
-                },
-            ))
-            .id();
-        app.add_systems(Update, update_quick_pref_values);
+            .query::<(Entity, &SliderLabelParts)>()
+            .single(app.world())
+            .map(|(track, parts)| (track, *parts))?;
+        assert_eq!(parts.format, SliderFormat::Decimal(0));
+        // Where the binding's sync would put the stored value.
+        app.world_mut().entity_mut(track).insert(SliderValue(512.0));
         app.update();
+        let readout = parts.readout.ok_or("the row's slider has no readout")?;
         assert_eq!(
-            app.world().entity(label).get::<Text>().map(|t| t.0.clone()),
+            app.world().get::<Text>(readout).map(|text| text.0.clone()),
             Some("512".to_owned())
         );
         Ok(())

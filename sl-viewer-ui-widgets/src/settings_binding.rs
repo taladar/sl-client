@@ -766,6 +766,7 @@ const DEMO_SLIDER: SliderStyle = SliderStyle {
     track_fill: DEMO_TRACK_FILL,
     thumb_width: 14.0,
     thumb_fill: DEMO_THUMB_FILL,
+    font_size: DEMO_FONT_SIZE,
 };
 
 /// The demo checkbox box's side length, in logical pixels.

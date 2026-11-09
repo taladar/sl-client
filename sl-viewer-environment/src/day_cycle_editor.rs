@@ -3133,10 +3133,9 @@ const SAMPLE_KEYFRAMES: [(f32, &str, f32); 3] = [
 /// by the same `spawn_day_cycle_content` the viewer's window is at the cell's
 /// font size, then drawn by the live `rebuild_day_markers`,
 /// `reseed_day_widgets` and `sync_day_chrome` (and the slider readouts by
-/// the shared rows sync) from a sample session — the
-/// legacy default cycle with a sunrise, a midday and a dusk keyframe added to
-/// its ground track, the midday one selected, as if the user had just clicked
-/// it. The item behind it is a stand-in (nil keys); nothing here saves.
+/// the slider widget) from a sample session — the legacy default cycle with a
+/// sunrise, a midday and a dusk keyframe added to its ground track, the midday
+/// one selected, as if the user had just clicked it. The item behind it is a stand-in (nil keys); nothing here saves.
 ///
 /// The sample session stays installed as the window's state, so a drag on a
 /// specimen slider or strip edits it as it would live. A specimen stands in for

@@ -55,11 +55,12 @@ use sl_settings::SettingValue;
 use crate::audio::{OutputDeviceEnumerator, OutputDeviceStatus};
 use crate::preferences::{
     PreferencesUi, spawn_pref_checkbox, spawn_pref_combo, spawn_pref_combo_with_anchor,
-    spawn_pref_note, spawn_pref_section, spawn_pref_slider,
+    spawn_pref_note, spawn_pref_section, spawn_pref_slider_as,
 };
 use crate::settings_binding::{ComboBindingValues, SettingBinding};
 use crate::ui::UiPanelShown;
 use crate::ui_combo::SetComboOptions;
+use crate::ui_slider::{SliderFormat, SliderLabels};
 use crate::volume_panel::{bus_mute_setting, bus_volume_setting};
 
 /// The stable id of this tab in `crate::preferences::PREF_TABS`.
@@ -145,13 +146,13 @@ fn device_options(devices: Vec<String>, requested: &str) -> Vec<(String, Setting
 pub(crate) fn build_audio_tab(commands: &mut Commands, panel: Entity) {
     spawn_pref_section(commands, panel, "preferences-section-volumes");
     for bus in Bus::ALL {
-        spawn_pref_slider(
+        spawn_pref_slider_as(
             commands,
             panel,
             volume_row_key(bus),
             SettingBinding::global(bus_volume_setting(bus)),
-            SliderRange::new(0.0, 1.0),
-            SliderStep(VOLUME_STEP),
+            (SliderRange::new(0.0, 1.0), SliderStep(VOLUME_STEP)),
+            SliderLabels::value_only(SliderFormat::Percent),
         );
         spawn_pref_checkbox(
             commands,

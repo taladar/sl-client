@@ -510,8 +510,9 @@ fn editor_floater_spec(editor: EditorKind) -> FloaterSpec {
         title: title.to_owned(),
         position: Vec2::new(160.0, 140.0),
         // Wide enough for three knob columns beside each other, tall enough for
-        // the longest column plus the name row and the buttons.
-        default_size: Some(Vec2::new(560.0, 520.0)),
+        // the longest column (each slider with its bounds under it) plus the
+        // name row and the buttons.
+        default_size: Some(Vec2::new(560.0, 590.0)),
         min_size: Some(Vec2::new(320.0, 260.0)),
         dock_host: None,
         caps: FloaterCaps {
@@ -2113,9 +2114,9 @@ pub fn spawn_water_settings_editor_specimen(
 /// [`spawn_editor_content`] the viewer's window is at the cell's font size, then
 /// seeded by the live [`reseed_editor_widgets`] from a sample session — the
 /// legacy WindLight default sky (or water) under a sample name, as if it had
-/// just been opened — and its slider readouts drawn by the shared rows sync
-/// that writes them live. The session has no inventory item behind it, which is what
-/// an imported preset looks like; nothing here saves.
+/// just been opened — and its slider readouts drawn by the slider widget that
+/// writes them live. The session has no inventory item behind it, which is
+/// what an imported preset looks like; nothing here saves.
 ///
 /// The sample session stays installed as the window's state, so a drag on a
 /// specimen slider edits it as it would live.

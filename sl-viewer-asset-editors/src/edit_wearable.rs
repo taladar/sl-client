@@ -98,7 +98,7 @@ use crate::ui::{column, row};
 use crate::ui_color_picker::{ColorPicked, ColorSwatchValue, spawn_color_swatch};
 use crate::ui_font::UiFont;
 use crate::ui_radio::{RadioLayout, RadioSelection, RadioSpec, spawn_radio_group};
-use crate::ui_slider::{SliderStyle, SliderWidgetPlugin, spawn_slider};
+use crate::ui_slider::{SliderFormat, SliderLabels, SliderStyle, SliderWidgetPlugin, spawn_slider};
 use crate::ui_spawn::{self, ButtonKind, ButtonSpec, LabeledRowSpec, UiLabel};
 use crate::ui_texture_picker::{TextureSwatchValue, spawn_texture_swatch};
 use crate::world_api::DecodedTextures;
@@ -113,9 +113,6 @@ const WEARABLE_VERSION: i32 = 22;
 
 /// The chrome font size, in logical pixels.
 const FONT: f32 = 13.0;
-
-/// A slider row's value-readout width at [`FONT`], in logical pixels.
-const READOUT_WIDTH: f32 = 38.0;
 
 /// The scrollable param list's height, in logical pixels.
 const LIST_HEIGHT: f32 = 380.0;
@@ -132,6 +129,7 @@ const SLIDER: SliderStyle = SliderStyle {
     track_fill: TRACK_FILL,
     thumb_width: 9.0,
     thumb_fill: THUMB_FILL,
+    font_size: FONT,
 };
 
 /// The label colour.
@@ -157,8 +155,9 @@ const NEXT_OWNER_DEFAULT: u32 = 0x0008_e000;
 // Messages, components and resources.
 // ---------------------------------------------------------------------------
 
-/// A param slider row: the param it drives, whether that param feeds the bake
-/// (a colour / alpha layer) rather than the body shape, and its value label.
+/// A param slider row: the param it drives, and whether that param feeds the
+/// bake (a colour / alpha layer) rather than the body shape. Its value readout
+/// is the slider widget's.
 #[derive(Component, Debug, Clone, Copy)]
 struct WearParamSlider {
     /// The visual-param id.
@@ -166,8 +165,6 @@ struct WearParamSlider {
     /// Whether editing this param re-composites the bake (a colour / alpha
     /// param) rather than only re-shaping the body.
     is_bake: bool,
-    /// The value-readout label entity to keep in sync.
-    label: Entity,
 }
 
 /// A texture picker swatch row: the avatar `TextureEntry` slot it edits.
@@ -278,7 +275,6 @@ impl Plugin for EditWearablePlugin {
                         apply_wear_gender_radio,
                         note_edited_texture_decoded,
                         drive_wearable_preview,
-                        sync_wearable_sliders,
                         save_wearable,
                         report_wearable_save,
                         report_wearable_save_as,
@@ -839,17 +835,8 @@ fn spawn_labeled_row(
     .row
 }
 
-/// The width of a slider row's value readout, in logical pixels: 38 at the
-/// editor's [`FONT`], and in proportion above it, so a larger font's
-/// `0.00`-style value stays inside its column. A fixed width at a given font
-/// size (not the text's own), so the slider track does not jitter as the value
-/// changes.
-fn readout_width(font_size: f32) -> f32 {
-    READOUT_WIDTH.max((font_size * READOUT_WIDTH / FONT).ceil())
-}
-
-/// Spawn one param slider row at `font_size`: a label, a slider track + thumb
-/// (over `[min, max]`), and a value readout, tagged [`WearParamSlider`].
+/// Spawn one param slider row at `font_size`: a label, then a slider over
+/// `[min, max]` with its value readout and bounds, tagged [`WearParamSlider`].
 fn spawn_param_slider(
     commands: &mut Commands,
     parent: Entity,
@@ -866,36 +853,24 @@ fn spawn_param_slider(
         ref label,
     } = spec;
     let row_entity = spawn_labeled_row(commands, parent, label, font_size);
-    let readout = commands
-        .spawn((
-            Text::new(format!("{value:.2}")),
-            UiFont::Sans.at(font_size),
-            text_role(LABEL_COLOR),
-            Node {
-                width: Val::Px(readout_width(font_size)),
-                flex_shrink: 0.0,
-                ..Default::default()
-            },
-            ChildOf(row_entity),
-        ))
-        .id();
     let range = SliderRange::new(min, max);
     let track = spawn_slider(
         commands,
         row_entity,
-        SLIDER,
+        SliderStyle {
+            font_size,
+            ..SLIDER
+        },
         *tab,
         0.0,
+        // The reference's `LLSliderCtrl` value field, read-only here.
+        SliderLabels::beside(SliderFormat::Decimal(2)),
         (
             Slider::default(),
             SliderValue(value.clamp(min, max)),
             range,
             SliderStep((max - min) / 100.0),
-            WearParamSlider {
-                id,
-                is_bake,
-                label: readout,
-            },
+            WearParamSlider { id, is_bake },
             Name::new(format!("wearable-slider:{id}")),
         ),
     );
@@ -1081,22 +1056,6 @@ fn drive_wearable_preview(
 ) {
     for mut edit in &mut edits {
         preview.show(&mut edit, &mut texts);
-    }
-}
-
-/// Keep each slider's value **readout** in sync with its [`SliderValue`]. The
-/// thumb is `sl_viewer_ui_widgets::ui_slider`'s to place.
-fn sync_wearable_sliders(
-    sliders: Query<(&WearParamSlider, &SliderValue)>,
-    mut texts: Query<&mut Text>,
-) {
-    for (info, value) in &sliders {
-        if let Ok(mut text) = texts.get_mut(info.label) {
-            let want = format!("{:.2}", value.0);
-            if text.0 != want {
-                text.0 = want;
-            }
-        }
     }
 }
 

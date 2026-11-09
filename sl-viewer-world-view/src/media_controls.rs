@@ -54,7 +54,9 @@ use sl_viewer_ui_core::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row
 use sl_viewer_ui_core::ui_element::UiAction;
 use sl_viewer_ui_core::ui_font::UiFont;
 use sl_viewer_ui_core::ui_spawn::{self, ButtonKind, ButtonSpec, UiLabel};
-use sl_viewer_ui_widgets::ui_slider::{SliderStyle, SliderWidgetPlugin, spawn_slider};
+use sl_viewer_ui_widgets::ui_slider::{
+    SliderLabels, SliderStyle, SliderWidgetPlugin, spawn_slider,
+};
 use sl_viewer_ui_widgets::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use sl_viewer_world_api::FLAGS_OBJECT_YOU_OWNER;
 use sl_viewer_world_api::MediaFocus;
@@ -87,6 +89,9 @@ const SCRUBBER: SliderStyle = SliderStyle {
     track_fill: Color::srgb(0.16, 0.19, 0.25),
     thumb_width: 10.0,
     thumb_fill: Color::srgb(0.62, 0.72, 0.86),
+    // The scrubber draws no labels of its own (`SliderLabels::None`); this is
+    // the size of the clock text that stands in for them.
+    font_size: 11.0,
 };
 
 /// The bar's entities.
@@ -321,6 +326,9 @@ fn spawn_scrub_row(commands: &mut Commands, bar: Entity) -> (Entity, Entity, Ent
         SCRUBBER,
         38,
         0.0,
+        // The position ∕ duration text beside it is the scrubber's readout,
+        // in a clock's format, and its range is the clip's length.
+        SliderLabels::None,
         (
             Slider::default(),
             SliderValue(0.0),

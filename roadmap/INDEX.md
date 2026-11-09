@@ -11,17 +11,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 123 |
+| ideas | 124 |
 | ready | 335 |
 | blocked | 39 |
 | in-progress | 7 |
-| bugs | 35 |
-| done | 1530 |
+| bugs | 34 |
+| done | 1531 |
 | deferred | 30 |
 | wont-do | 24 |
-| **total** | **2123** |
+| **total** | **2124** |
 
-## ideas (123)
+## ideas (124)
 
 ### protocol
 
@@ -174,6 +174,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   shadow tuning (bias / blur / softness)
 - [`viewer-sit-across-region-border-auto-approach`](ideas/viewer-sit-across-region-border-auto-approach.md)
   — Sit on an object across a region border by moving into its region first
+- [`viewer-slider-editable-value-field`](ideas/viewer-slider-editable-value-field.md)
+  — A slider's readout a user can type into, as the reference's LLSliderCtrl
 - [`viewer-snapshot-scene-sidecar`](ideas/viewer-snapshot-scene-sidecar.md) —
   Say what a snapshot is a picture of
 - [`viewer-stars-srgb-linearize`](ideas/viewer-stars-srgb-linearize.md) —
@@ -1268,7 +1270,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-text-renderability-axis`](in-progress/viewer-ui-text-renderability-axis.md)
   — Upstream issue — font selection cannot see glyph-format renderability
 
-## bugs (35)
+## bugs (34)
 
 ### protocol
 
@@ -1328,8 +1330,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-retired-neighbour-stays-drawn`](bugs/viewer-retired-neighbour-stays-drawn.md)
   — A neighbour the simulator retired stays drawn — its ground, water and map
   tile outlive its circuit
-- [`viewer-sliders-show-no-value`](bugs/viewer-sliders-show-no-value.md) — A
-  slider shows no value, and no bounds or step either
 - [`viewer-terraform-parcel-refusal`](bugs/viewer-terraform-parcel-refusal.md) —
   A brush over a parcel the agent may not terraform warns nothing
 - [`viewer-texture-filtering-in-linear-space`](bugs/viewer-texture-filtering-in-linear-space.md)
@@ -1358,7 +1358,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1530)
+## done (1531)
 
 ### protocol
 
@@ -3324,6 +3324,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-sliced-art-seam-at-fractional-ui-scale`](done/viewer-sliced-art-seam-at-fractional-ui-scale.md)
   — A nine-sliced button's frame changes thickness along the quad's diagonal at
   a fractional UI scale
+- [`viewer-sliders-show-no-value`](done/viewer-sliders-show-no-value.md) — A
+  slider shows no value, and no bounds or step either
 - [`viewer-slurl-parse-dispatch`](done/viewer-slurl-parse-dispatch.md) — SLURL
   parsing & action dispatch
 - [`viewer-snapshot-chat-overlay-not-hidden`](done/viewer-snapshot-chat-overlay-not-hidden.md)

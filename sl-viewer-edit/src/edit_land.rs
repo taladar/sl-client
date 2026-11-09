@@ -66,7 +66,7 @@ use sl_viewer_notifications::{NotificationResponse, OkCancel, ShowNotification, 
 use sl_viewer_settings::ViewerSettings;
 use sl_viewer_ui_widgets::settings_binding::{SettingBinding, bound_checkbox, bound_slider};
 use sl_viewer_ui_widgets::ui_checkbox::{CheckboxSpec, spawn_checkbox};
-use sl_viewer_ui_widgets::ui_slider::{SliderStyle, spawn_slider};
+use sl_viewer_ui_widgets::ui_slider::{SliderFormat, SliderLabels, SliderStyle, spawn_slider};
 use sl_viewer_world_scene::parcel_borders::SETTING_SHOW_PARCEL_OWNERS;
 
 use crate::coords::{bevy_to_sl_vec, sl_to_bevy_vec};
@@ -182,6 +182,8 @@ const LAND_SLIDER: SliderStyle = SliderStyle {
     track_fill: Color::srgb(0.16, 0.17, 0.2),
     thumb_width: 12.0,
     thumb_fill: Color::srgb(0.62, 0.66, 0.74),
+    // The panel's base size; a row passes its own (the cell's).
+    font_size: 13.0,
 };
 
 /// One land action the panel's radio offers: the rectangle drag-select, or one
@@ -1309,9 +1311,13 @@ fn spawn_land_slider(
     let track = spawn_slider(
         commands,
         row_entity,
-        LAND_SLIDER,
+        SliderStyle {
+            font_size,
+            ..LAND_SLIDER
+        },
         tab_index,
         0.0,
+        SliderLabels::beside(SliderFormat::for_step(step)),
         bound_slider(
             SettingBinding::global(setting),
             SliderRange::new(min, max),

@@ -1754,6 +1754,13 @@ trackball-west = W
 # control itself shows only the compass letters.
 trackball-sun = Sun direction
 trackball-moon = Moon direction
+# A slider's value as a percentage, in its readout and at the ends of its
+# track. $percent is the number already written for the locale; the sign's
+# side and spacing are the translation's.
+slider-percent = { $percent }%
+# The tooltip over a slider's track: how far one notch (an arrow key) moves
+# it. $step is the number already written as the slider writes its value.
+slider-step = Step: { $step }
 texture-picker-title = Pick: Texture
 texture-picker-title-material = Pick: Material
 texture-picker-search = Search
