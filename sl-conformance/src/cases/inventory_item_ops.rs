@@ -30,6 +30,7 @@
 
 use std::time::{Duration, Instant};
 
+use sl_client_tokio::Permissions;
 use sl_client_tokio::{
     AssetType, Command, Event, FolderType, InventoryFolderKey, InventoryItem,
     InventoryItemOrFolderKey, InventoryKey, InventoryType, NewInventoryItem, NewInventoryLink,
@@ -63,7 +64,8 @@ const VERIFY_POLL_INTERVAL: Duration = Duration::from_millis(500);
 /// a future owner; OpenSim forces the creator's own current permissions to full
 /// regardless, so the freshly created item is always copyable (the copy step
 /// depends on that).
-const NEXT_OWNER_FULL: u32 = 0x0008_2000 | 0x0004_0000 | 0x0002_0000;
+const NEXT_OWNER_FULL: Permissions =
+    Permissions::from_bits(0x0008_2000 | 0x0004_0000 | 0x0002_0000);
 
 /// `AT_LINK` — the asset type marking an inventory link that points at a single
 /// item (vs `AT_LINK_FOLDER` = 25 for a folder link).

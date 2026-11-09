@@ -355,7 +355,7 @@ pub enum Command {
         /// The new item's description.
         description: String,
         /// The next-owner permission mask for the new item.
-        next_owner_mask: u32,
+        next_owner_mask: Permissions,
         /// The script language (sets the item's subtype; selects the sim's default
         /// body).
         language: ScriptLanguage,
@@ -2462,11 +2462,11 @@ pub enum Command {
         /// The new item's description.
         description: String,
         /// The permission bits granted to the next owner.
-        next_owner_mask: u32,
+        next_owner_mask: Permissions,
         /// The permission bits granted to the group.
-        group_mask: u32,
+        group_mask: Permissions,
         /// The permission bits granted to everyone.
-        everyone_mask: u32,
+        everyone_mask: Permissions,
         /// The L$ price the client expects to be charged (the grid rejects a
         /// mismatch; 0 on free grids such as OpenSim).
         expected_upload_cost: i32,

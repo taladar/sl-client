@@ -291,9 +291,9 @@ pub(crate) fn rez_object_command(
             rez_selected,
             remove_item: !copyable,
             item_flags: item.flags,
-            group_mask: item.permissions.group.bits(),
-            everyone_mask: item.permissions.everyone.bits(),
-            next_owner_mask: item.permissions.next_owner.bits(),
+            group_mask: item.permissions.group,
+            everyone_mask: item.permissions.everyone,
+            next_owner_mask: item.permissions.next_owner,
             item: restore_item(item),
         }),
     }

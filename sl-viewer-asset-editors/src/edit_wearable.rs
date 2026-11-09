@@ -74,9 +74,9 @@ use bevy::prelude::*;
 use bevy::ui_widgets::{Activate, Slider, SliderRange, SliderStep, SliderValue, ValueChange};
 use sl_client_bevy::{
     ASSET_CODE_LINK, AssetType, Command, InventoryKey, InventoryType, ItemInfo, JointOverrides,
-    ParamEffect, ParamGroup, ParamSex, ResolvedParams, SkeletalDeformations, SlCommand, SlEvent,
-    SlSessionEvent, TextureKey, TransactionId, Uuid, WearableAsset, WearablePermissions,
-    WearableSaleType, WearableType,
+    ParamEffect, ParamGroup, ParamSex, Permissions, ResolvedParams, SkeletalDeformations,
+    SlCommand, SlEvent, SlSessionEvent, TextureKey, TransactionId, Uuid, WearableAsset,
+    WearablePermissions, WearableSaleType, WearableType,
 };
 use sl_client_bevy::{SaleType, avatar_texture};
 
@@ -146,10 +146,6 @@ const THUMB_FILL: Color = Color::srgb(0.72, 0.76, 0.84);
 
 /// A button's background.
 const BUTTON_BACKGROUND: Color = Color::srgb(0.13, 0.15, 0.20);
-
-/// The default next-owner permission mask a Save-As grants (modify | copy |
-/// transfer), matching the New-wearable creators.
-const NEXT_OWNER_DEFAULT: u32 = 0x0008_e000;
 
 // ---------------------------------------------------------------------------
 // Messages, components and resources.
@@ -1115,9 +1111,9 @@ fn on_wear_button(
                 inventory_type: InventoryType::Wearable,
                 name,
                 description: String::new(),
-                next_owner_mask: NEXT_OWNER_DEFAULT,
-                group_mask: 0,
-                everyone_mask: 0,
+                next_owner_mask: Permissions::DEFAULT_NEXT_OWNER,
+                group_mask: Permissions::NONE,
+                everyone_mask: Permissions::NONE,
                 expected_upload_cost: 0,
                 data,
             }));

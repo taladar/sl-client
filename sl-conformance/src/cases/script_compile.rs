@@ -58,6 +58,7 @@
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
+use sl_client_tokio::Permissions;
 use sl_client_tokio::{
     AssetKey, AssetType, ChatChannel, ChatSource, ChatType, Command, DeRezDestination, Event,
     FolderType, InventoryFolder, InventoryFolderKey, InventoryKey, InventoryType, NewInventoryItem,
@@ -874,7 +875,7 @@ impl Run<'_> {
             .send(Command::CreateInventoryItem(NewInventoryItem {
                 folder_id: root,
                 transaction_id: Uuid::nil(),
-                next_owner_mask: 0x0008_e000,
+                next_owner_mask: Permissions::DEFAULT_NEXT_OWNER,
                 asset_type: AssetType::ScriptText,
                 inv_type: InventoryType::Script,
                 wearable_type: WearableType::Shape,

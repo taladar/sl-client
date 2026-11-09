@@ -98,7 +98,8 @@ const TRANSFER_TIMEOUT: Duration = Duration::from_secs(20);
 
 /// The next-owner mask of every item the run makes: move, copy, modify,
 /// transfer.
-const NEXT_OWNER_FULL: u32 = 0x0008_e000;
+const NEXT_OWNER_FULL: sl_client_tokio::Permissions =
+    sl_client_tokio::Permissions::from_bits(0x0008_e000);
 
 /// The callback id the copies are asked under, so its echo can be told from
 /// the zero a grid writes by default.

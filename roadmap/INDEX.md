@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 335 |
 | blocked | 39 |
 | in-progress | 7 |
-| bugs | 34 |
-| done | 1531 |
+| bugs | 33 |
+| done | 1532 |
 | deferred | 30 |
 | wont-do | 24 |
 | **total** | **2124** |
@@ -1270,7 +1270,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-text-renderability-axis`](in-progress/viewer-ui-text-renderability-axis.md)
   — Upstream issue — font selection cannot see glyph-format renderability
 
-## bugs (34)
+## bugs (33)
 
 ### protocol
 
@@ -1299,8 +1299,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-day-cycle-strip-click-mirrored-rtl`](bugs/viewer-day-cycle-strip-click-mirrored-rtl.md)
   — In a right-to-left layout a click on the day-cycle timeline lands mirrored
   from the markers
-- [`viewer-default-next-owner-mask-diverges`](bugs/viewer-default-next-owner-mask-diverges.md)
-  — Three different default next-owner masks, two without PERM_MOVE
 - [`viewer-floater-minimize-caps-follow-no-pattern`](bugs/viewer-floater-minimize-caps-follow-no-pattern.md)
   — Which floaters have a minimize button follows no pattern, and most that lack
   one should have it
@@ -1358,7 +1356,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1531)
+## done (1532)
 
 ### protocol
 
@@ -2118,6 +2116,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Cut-prim path caps drop a triangle (filed as "prim LOD not reacting")
 - [`viewer-debug-screenshot-offthread-save`](done/viewer-debug-screenshot-offthread-save.md)
   — Offload the debug screenshot PNG encode off the main thread
+- [`viewer-default-next-owner-mask-diverges`](done/viewer-default-next-owner-mask-diverges.md)
+  — Three different default next-owner masks, two without PERM_MOVE
 - [`viewer-derender-blacklist`](done/viewer-derender-blacklist.md) — Derender +
   asset blacklist (blocked by `viewer-object-context-menu` (done))
 - [`viewer-dialog-lldialog`](done/viewer-dialog-lldialog.md) — llDialog script

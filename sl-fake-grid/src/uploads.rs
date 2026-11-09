@@ -432,7 +432,7 @@ fn create_item(
                 owner: sl_proto::Permissions::from_bits(owner),
                 group: sl_proto::Permissions::from_bits(group),
                 everyone: sl_proto::Permissions::from_bits(everyone),
-                next_owner: sl_proto::Permissions::from_bits(request.next_owner_mask),
+                next_owner: request.next_owner_mask,
             }
         } else {
             let made =
@@ -442,7 +442,7 @@ fn create_item(
                 owner: made,
                 group: sl_proto::Permissions::from_bits(0),
                 everyone: sl_proto::Permissions::from_bits(0),
-                next_owner: sl_proto::Permissions::from_bits(request.next_owner_mask),
+                next_owner: request.next_owner_mask,
             }
         },
     };

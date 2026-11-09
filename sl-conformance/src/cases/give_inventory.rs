@@ -51,6 +51,7 @@
 
 use std::time::{Duration, Instant};
 
+use sl_client_tokio::Permissions;
 use sl_client_tokio::{
     AssetType, Command, Event, FolderType, ImDialog, InventoryFolderKey, InventoryItem,
     InventoryItemOrFolderKey, InventoryKey, InventoryType, NewInventoryItem, Throttle,
@@ -96,7 +97,8 @@ const VERIFY_POLL_INTERVAL: Duration = Duration::from_millis(500);
 /// (`PERM_COPY | PERM_MODIFY | PERM_TRANSFER`). The Transfer bit is what makes the
 /// item giveable; OpenSim also forces the creator's own current permissions to
 /// full, so the original survives the give (a copyable item is not deleted).
-const NEXT_OWNER_FULL: u32 = 0x0008_2000 | 0x0004_0000 | 0x0002_0000;
+const NEXT_OWNER_FULL: Permissions =
+    Permissions::from_bits(0x0008_2000 | 0x0004_0000 | 0x0002_0000);
 
 /// Query the agent's inventory root folder.
 async fn agent_root(session: &mut Session) -> Result<InventoryFolderKey, TestFailure> {

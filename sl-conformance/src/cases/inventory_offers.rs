@@ -117,11 +117,11 @@ const PROBE_NAME: &str = "SLClientOfferProbe";
 
 /// The next-owner mask of a full-permission gift: move, copy, modify,
 /// transfer.
-const NEXT_OWNER_FULL: u32 = 0x0008_e000;
+const NEXT_OWNER_FULL: Permissions = Permissions::from_bits(0x0008_e000);
 
 /// The next-owner mask of a gift its next owner may not copy: move, modify,
 /// transfer.
-const NEXT_OWNER_NO_COPY: u32 = 0x0008_6000;
+const NEXT_OWNER_NO_COPY: Permissions = Permissions::from_bits(0x0008_6000);
 
 /// What every name the census gives begins with.
 const NAME_PREFIX: &str = "conf-off-";
@@ -1438,7 +1438,7 @@ impl Offers<'_> {
         &mut self,
         who: Who,
         word: &str,
-        next_owner_mask: u32,
+        next_owner_mask: Permissions,
         role: &str,
     ) -> Result<InventoryItem, TestFailure> {
         let folder = self
@@ -1456,7 +1456,7 @@ impl Offers<'_> {
         who: Who,
         folder: Uuid,
         word: &str,
-        next_owner_mask: u32,
+        next_owner_mask: Permissions,
         role: &str,
     ) -> Result<InventoryItem, TestFailure> {
         let name = self.scene.name(word);

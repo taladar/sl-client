@@ -2031,7 +2031,7 @@ pub(crate) async fn create_item(
         .send(Command::CreateInventoryItem(NewInventoryItem {
             folder_id: folders.root,
             transaction_id: Uuid::nil(),
-            next_owner_mask: Permissions::ALL.bits(),
+            next_owner_mask: Permissions::ALL,
             asset_type,
             inv_type,
             wearable_type: WearableType::Shape,

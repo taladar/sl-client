@@ -54,6 +54,7 @@
 //! separately by `notecard-create-update`, and the two together are what
 //! `sl_fake_grid::UploadAnnouncements` carries a value per path for.
 
+use sl_client_tokio::Permissions;
 use sl_client_tokio::{
     AssetType, Command, Event, FolderInfo, FolderType, InventoryFolderKey, InventoryKey,
     InventoryType, MoneyBalance, Throttle, UploadClass, Uuid, expected_upload_cost,
@@ -167,9 +168,9 @@ impl GridTest for AssetUpload {
                     description: "sl-conformance asset-upload".to_owned(),
                     // The next-owner mask a viewer sends for a fresh upload
                     // (move / modify / copy / transfer).
-                    next_owner_mask: 0x0008_e000,
-                    group_mask: 0,
-                    everyone_mask: 0,
+                    next_owner_mask: Permissions::DEFAULT_NEXT_OWNER,
+                    group_mask: Permissions::NONE,
+                    everyone_mask: Permissions::NONE,
                     expected_upload_cost: i32::try_from(cost).unwrap_or(i32::MAX),
                     data: subject.data,
                 })

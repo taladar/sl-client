@@ -873,11 +873,11 @@ pub struct NotecardRez {
     /// The item flags to apply to the rezzed object.
     pub item_flags: u32,
     /// The group permissions mask for the rezzed object.
-    pub group_mask: u32,
+    pub group_mask: Permissions,
     /// The everyone permissions mask for the rezzed object.
-    pub everyone_mask: u32,
+    pub everyone_mask: Permissions,
     /// The next-owner permissions mask for the rezzed object.
-    pub next_owner_mask: u32,
+    pub next_owner_mask: Permissions,
     /// The notecard inventory item the object asset is embedded in.
     pub notecard_item_id: InventoryKey,
     /// The object that holds the notecard ([`Uuid::nil`] when the notecard is in
@@ -973,11 +973,11 @@ pub struct RezObjectParams {
     /// The item flags to apply to the rezzed object.
     pub item_flags: u32,
     /// The group permissions mask to apply to the rezzed object.
-    pub group_mask: u32,
+    pub group_mask: Permissions,
     /// The everyone permissions mask to apply to the rezzed object.
-    pub everyone_mask: u32,
+    pub everyone_mask: Permissions,
     /// The next-owner permissions mask to apply to the rezzed object.
-    pub next_owner_mask: u32,
+    pub next_owner_mask: Permissions,
     /// The full inventory item being rezzed (the message's `InventoryData`
     /// block — the same per-item payload as [`RezRestoreToWorld`]).
     ///

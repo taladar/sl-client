@@ -214,11 +214,6 @@ pub(crate) const FOLDER_HAS_WORN: &str = "folder-has-worn";
 /// ("everyone" in it).
 pub(crate) const FOLDER_HAS_CALLING_CARDS: &str = "folder-has-calling-cards";
 
-/// The default next-owner permission mask for a freshly created item: modify,
-/// copy and transfer (`PERM_ITEM_UNRESTRICTED`), the reference viewer's default
-/// for new notecards / scripts / gestures.
-const NEXT_OWNER_DEFAULT: u32 = 0x0000_E000;
-
 // ---------------------------------------------------------------------------
 // The menus. Reference order (menu_inventory.xml); the marketplace block and
 // Firestorm's upload-defaults block are gated to folders we never surface and
@@ -3311,7 +3306,11 @@ pub(crate) fn default_wearable_asset(
     let _written = writeln!(text, "\t\towner_mask\t7fffffff");
     let _written = writeln!(text, "\t\tgroup_mask\t00000000");
     let _written = writeln!(text, "\t\teveryone_mask\t00000000");
-    let _written = writeln!(text, "\t\tnext_owner_mask\t0008e000");
+    let _written = writeln!(
+        text,
+        "\t\tnext_owner_mask\t{:08x}",
+        Permissions::DEFAULT_NEXT_OWNER.bits()
+    );
     let _written = writeln!(text, "\t\tcreator_id\t{creator}");
     let _written = writeln!(text, "\t\towner_id\t{creator}");
     let _written = writeln!(text, "\t\tlast_owner_id\t{}", Uuid::nil());
@@ -3505,7 +3504,7 @@ pub fn new_settings_item(kind: SettingsKind, name: &str, dest: InventoryFolderKe
         // Nil: no asset of ours is being associated with the item, which is the
         // whole point — the simulator authors the default one.
         transaction_id: Uuid::nil(),
-        next_owner_mask: NEXT_OWNER_DEFAULT,
+        next_owner_mask: Permissions::DEFAULT_NEXT_OWNER,
         asset_type: AssetType::Settings,
         inv_type: InventoryType::Settings,
         wearable_type: WearableType::from_code(kind.subtype()),
@@ -3564,9 +3563,9 @@ fn dispatch_create(
             inventory_type: InventoryType::Wearable,
             name: name.to_owned(),
             description: String::new(),
-            next_owner_mask: NEXT_OWNER_DEFAULT,
-            group_mask: 0,
-            everyone_mask: 0,
+            next_owner_mask: Permissions::DEFAULT_NEXT_OWNER,
+            group_mask: Permissions::NONE,
+            everyone_mask: Permissions::NONE,
             expected_upload_cost: 0,
             data: text.into_bytes(),
         }));
@@ -3619,7 +3618,7 @@ fn dispatch_create(
                 folder_id: dest,
                 name: "New Script".to_owned(),
                 description: String::new(),
-                next_owner_mask: NEXT_OWNER_DEFAULT,
+                next_owner_mask: Permissions::DEFAULT_NEXT_OWNER,
                 language: ScriptLanguage::Lsl,
             }));
             true
@@ -3627,7 +3626,7 @@ fn dispatch_create(
         "new-notecard" => {
             commands.write(SlCommand(Command::CreateInventoryItem(NewInventoryItem {
                 folder_id: dest,
-                next_owner_mask: NEXT_OWNER_DEFAULT,
+                next_owner_mask: Permissions::DEFAULT_NEXT_OWNER,
                 asset_type: AssetType::Notecard,
                 inv_type: InventoryType::Notecard,
                 name: "New Note".to_owned(),
@@ -3638,7 +3637,7 @@ fn dispatch_create(
         "new-gesture" => {
             commands.write(SlCommand(Command::CreateInventoryItem(NewInventoryItem {
                 folder_id: dest,
-                next_owner_mask: NEXT_OWNER_DEFAULT,
+                next_owner_mask: Permissions::DEFAULT_NEXT_OWNER,
                 asset_type: AssetType::Gesture,
                 inv_type: InventoryType::Gesture,
                 name: "New Gesture".to_owned(),
@@ -4448,6 +4447,103 @@ mod tests {
             },
         );
         assert!(!held.contains(&CAN_SHARE));
+    }
+
+    /// **Every inventory creator grants the next owner the reference's default:
+    /// move, copy, modify and transfer.**
+    ///
+    /// The reference's `LLFloaterPerms::getNextOwnerPerms` always starts from
+    /// `PERM_MOVE`; these creators once sent `0x0000_E000` without it, while a
+    /// wearable's Save As sent `0x0008_E000` — three hand-written masks that had
+    /// drifted apart.
+    #[test]
+    fn every_creator_grants_the_default_next_owner_mask() {
+        use super::{
+            CreateSinks, SettingsInventorySupport, default_wearable_asset, dispatch_create,
+        };
+        use bevy::ecs::message::{MessageWriter, Messages};
+        use bevy::ecs::system::{ResMut, RunSystemOnce as _};
+        use bevy::prelude::World;
+        use sl_client_bevy::SlCommand;
+
+        let dest = InventoryFolderKey::from(Uuid::from_u128(0x5E));
+        let mut world = World::new();
+        world.init_resource::<crate::intents::PendingItemCreations>();
+        world.init_resource::<PendingSettingsCreations>();
+        world.init_resource::<crate::inventory::InlineRename>();
+        world.init_resource::<Messages<SlCommand>>();
+        world.init_resource::<Messages<crate::inventory::InventoryUiAction>>();
+        for action in [
+            "new-script",
+            "new-notecard",
+            "new-gesture",
+            "new-shirt",
+            "new-shape",
+        ] {
+            let handled =
+                world
+                    .run_system_once(
+                        move |mut pending_creations: ResMut<
+                            crate::intents::PendingItemCreations,
+                        >,
+                              mut settings_creations: ResMut<PendingSettingsCreations>,
+                              mut rename: ResMut<crate::inventory::InlineRename>,
+                              mut commands: MessageWriter<SlCommand>,
+                              mut ui_actions: MessageWriter<
+                            crate::inventory::InventoryUiAction,
+                        >| {
+                            dispatch_create(
+                                action,
+                                dest,
+                                None,
+                                None,
+                                SettingsInventorySupport::new(true),
+                                CreateSinks {
+                                    pending_creations: &mut pending_creations,
+                                    settings_creations: &mut settings_creations,
+                                    commands: &mut commands,
+                                    ui_actions: &mut ui_actions,
+                                    rename: &mut rename,
+                                },
+                            )
+                        },
+                    )
+                    .ok();
+            assert_eq!(handled, Some(true), "{action} is a creator");
+        }
+        let masks: Vec<Permissions> = world
+            .resource_mut::<Messages<SlCommand>>()
+            .drain()
+            .filter_map(|SlCommand(command)| match command {
+                Command::CreateScript {
+                    next_owner_mask, ..
+                }
+                | Command::UploadAsset {
+                    next_owner_mask, ..
+                } => Some(next_owner_mask),
+                Command::CreateInventoryItem(new) => Some(new.next_owner_mask),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(masks, vec![Permissions::DEFAULT_NEXT_OWNER; 5]);
+        assert!(Permissions::DEFAULT_NEXT_OWNER.contains(Permissions::MOVE));
+        // A settings item and the default wearable's own permission block too.
+        for kind in [
+            SettingsKind::Sky,
+            SettingsKind::Water,
+            SettingsKind::DayCycle,
+        ] {
+            let Command::CreateInventoryItem(new) = new_settings_item(kind, "New Thing", dest)
+            else {
+                unreachable!("a settings item is minted by CreateInventoryItem");
+            };
+            assert_eq!(new.next_owner_mask, Permissions::DEFAULT_NEXT_OWNER);
+        }
+        let text = default_wearable_asset("New Shirt", WearableType::Shirt, None, None);
+        assert!(
+            text.contains("\t\tnext_owner_mask\t0008e000\n"),
+            "the default wearable's next-owner line: {text}"
+        );
     }
 
     /// A freshly authored default wearable parses back through the shared

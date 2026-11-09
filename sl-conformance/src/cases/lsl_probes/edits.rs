@@ -279,7 +279,7 @@ pub(super) async fn saved_notecard(
         .send(Command::CreateInventoryItem(NewInventoryItem {
             folder_id: folder,
             transaction_id: Uuid::nil(),
-            next_owner_mask: Permissions::ALL.bits(),
+            next_owner_mask: Permissions::ALL,
             asset_type: AssetType::Notecard,
             inv_type: InventoryType::Notecard,
             wearable_type: WearableType::Shape,
