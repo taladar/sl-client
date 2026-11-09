@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 39 |
 | in-progress | 7 |
 | bugs | 32 |
-| done | 1534 |
+| done | 1535 |
 | deferred | 30 |
 | wont-do | 24 |
-| **total** | **2125** |
+| **total** | **2126** |
 
 ## ideas (124)
 
@@ -1294,9 +1294,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A ground reveal can put the camera under higher ground beside the point
 - [`viewer-camera-framing-ends-inside-the-framed-object`](bugs/viewer-camera-framing-ends-inside-the-framed-object.md)
   — A framing glide can carry the camera inside the object it frames
-- [`viewer-day-cycle-strip-click-mirrored-rtl`](bugs/viewer-day-cycle-strip-click-mirrored-rtl.md)
-  — In a right-to-left layout a click on the day-cycle timeline lands mirrored
-  from the markers
 - [`viewer-floater-minimize-caps-follow-no-pattern`](bugs/viewer-floater-minimize-caps-follow-no-pattern.md)
   — Which floaters have a minimize button follows no pattern, and most that lack
   one should have it
@@ -1326,6 +1323,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-retired-neighbour-stays-drawn`](bugs/viewer-retired-neighbour-stays-drawn.md)
   — A neighbour the simulator retired stays drawn — its ground, water and map
   tile outlive its circuit
+- [`viewer-slider-click-mirrored-rtl`](bugs/viewer-slider-click-mirrored-rtl.md)
+  — In a right-to-left layout a slider's track click and drag run mirrored from
+  its thumb
 - [`viewer-terraform-parcel-refusal`](bugs/viewer-terraform-parcel-refusal.md) —
   A brush over a parcel the agent may not terraform warns nothing
 - [`viewer-texture-filtering-in-linear-space`](bugs/viewer-texture-filtering-in-linear-space.md)
@@ -1354,7 +1354,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1534)
+## done (1535)
 
 ### protocol
 
@@ -2117,6 +2117,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   specular
 - [`viewer-cut-prim-cap-missing-triangle`](done/viewer-cut-prim-cap-missing-triangle.md)
   — Cut-prim path caps drop a triangle (filed as "prim LOD not reacting")
+- [`viewer-day-cycle-strip-click-mirrored-rtl`](done/viewer-day-cycle-strip-click-mirrored-rtl.md)
+  — In a right-to-left layout a click on the day-cycle timeline lands mirrored
+  from the markers
 - [`viewer-debug-screenshot-offthread-save`](done/viewer-debug-screenshot-offthread-save.md)
   — Offload the debug screenshot PNG encode off the main thread
 - [`viewer-default-next-owner-mask-diverges`](done/viewer-default-next-owner-mask-diverges.md)

@@ -87,7 +87,7 @@ use sl_viewer_ui_core::skin::{
     SELECTED_CLASS, set_action_button_enabled, set_button_on, set_state_class, text_role,
 };
 use sl_viewer_ui_core::ui::{
-    LogicalInset, LogicalRect, UiPanelShown, UiRoot, UiScaffoldSystems, column, row,
+    LogicalInset, LogicalRect, UiDirection, UiPanelShown, UiRoot, UiScaffoldSystems, column, row,
 };
 use sl_viewer_ui_core::ui_font::UiFont;
 use sl_viewer_ui_core::ui_text::set_node_text;
@@ -1619,33 +1619,55 @@ fn open_land_day_cycle(
 // The timeline.
 // ---------------------------------------------------------------------------
 
-/// The logical-pixel rectangle of a UI node: `(top_left, size)`.
+/// The logical-pixel rectangle inside a UI node's border: `(top_left, size)`.
+///
+/// Inside the border because that is the box an absolutely positioned child's
+/// insets resolve against — the strip's rail, and through it every marker — so
+/// measuring the pointer against the outer box read a click up to a border's
+/// width off the marker it was aimed at, toward the leading edge.
 ///
 /// Component-wise f32 maths, per the workspace `arithmetic_side_effects`
 /// convention on `glam` operators.
 fn node_rect(computed: &ComputedNode, transform: &UiGlobalTransform) -> (Vec2, Vec2) {
     let scale = computed.inverse_scale_factor();
     let physical = computed.size();
-    let size = Vec2::new(physical.x * scale, physical.y * scale);
+    let (start, end) = (computed.border.min_inset, computed.border.max_inset);
+    let outer = Vec2::new(physical.x * scale, physical.y * scale);
     let centre = transform.translation;
     (
         Vec2::new(
-            centre.x * scale - size.x / 2.0,
-            centre.y * scale - size.y / 2.0,
+            centre.x * scale - outer.x / 2.0 + start.x * scale,
+            centre.y * scale - outer.y / 2.0 + start.y * scale,
         ),
-        size,
+        Vec2::new(
+            (physical.x - start.x - end.x).max(0.0) * scale,
+            (physical.y - start.y - end.y).max(0.0) * scale,
+        ),
     )
 }
 
 /// Where along a strip a pointer at `pointer` sits, as a `0.0..=1.0` fraction.
 ///
-/// A marker is placed by its *left* edge, so the usable span is the strip minus
-/// one marker — and the pointer is measured against that same span, or grabbing
-/// a marker would make it jump by half its width.
-fn strip_fraction(pointer: Vec2, rect: (Vec2, Vec2)) -> f32 {
+/// A marker is placed by its *leading* edge, so the usable span is the strip
+/// minus one marker — and the pointer is measured against that same span, or
+/// grabbing a marker would make it jump by half its width.
+///
+/// The day runs along the inline axis like the rest of the UI, so under
+/// [`UiDirection::Rtl`] it starts at the strip's **right** edge: the markers,
+/// the rail and the tick row all mirror through the logical boxes, and the
+/// pointer is measured from that same leading edge, or a click would land on
+/// the position mirrored across the strip from the marker it was aimed at. (A
+/// day timeline is a value running from one end to the other, like a slider,
+/// which mirrors; not a picture of a clock face, which would not.)
+fn strip_fraction(pointer: Vec2, rect: (Vec2, Vec2), direction: UiDirection) -> f32 {
     let (top_left, size) = rect;
     let span = (size.x - MARKER_WIDTH).max(1.0);
-    ((pointer.x - top_left.x - MARKER_WIDTH / 2.0) / span).clamp(0.0, 1.0)
+    let from_leading = if direction.is_rtl() {
+        top_left.x + size.x - pointer.x
+    } else {
+        pointer.x - top_left.x
+    };
+    ((from_leading - MARKER_WIDTH / 2.0) / span).clamp(0.0, 1.0)
 }
 
 /// A press on either strip: move the scrubber, and on the keyframe strip pick up
@@ -1653,6 +1675,7 @@ fn strip_fraction(pointer: Vec2, rect: (Vec2, Vec2)) -> f32 {
 fn on_day_strip_press(
     mut press: On<Pointer<Press>>,
     strips: Query<(&DayStrip, &ComputedNode, &UiGlobalTransform)>,
+    direction: Res<UiDirection>,
     mut state: ResMut<DayCycleEditorState>,
 ) {
     if press.button != PointerButton::Primary {
@@ -1665,6 +1688,7 @@ fn on_day_strip_press(
     let fraction = strip_fraction(
         press.pointer_location.position,
         node_rect(computed, transform),
+        *direction,
     );
     let Some(session) = state.session.as_mut() else {
         return;
@@ -1684,6 +1708,7 @@ fn on_day_strip_press(
 fn on_day_strip_drag(
     mut drag: On<Pointer<Drag>>,
     strips: Query<(&DayStrip, &ComputedNode, &UiGlobalTransform)>,
+    direction: Res<UiDirection>,
     mut state: ResMut<DayCycleEditorState>,
 ) {
     if drag.button != PointerButton::Primary {
@@ -1696,6 +1721,7 @@ fn on_day_strip_drag(
     let fraction = strip_fraction(
         drag.pointer_location.position,
         node_rect(computed, transform),
+        *direction,
     );
     let Some(session) = state.session.as_mut() else {
         return;
@@ -3201,15 +3227,18 @@ mod tests {
     use super::{
         DayAction, DaySession, DaySource, EditedItem, MARKER_WIDTH, MAX_KEYFRAMES, PLAY_SECONDS,
         Playback, TICKS, action_enabled, clock_at, day_percent, named, neighbour_keyframe,
-        strip_fraction, tick_fraction,
+        node_rect, strip_fraction, tick_fraction,
     };
     use bevy::prelude::{App, Entity, Vec2};
+    use bevy::sprite::BorderRect;
+    use bevy::ui::{ComputedNode, UiGlobalTransform};
     use pretty_assertions::{assert_eq, assert_ne};
     use sl_client_bevy::{
         DayCycle, DayTrack, EnvironmentAsset, EnvironmentSettings, InventoryFolderKey,
         InventoryKey, KEYFRAME_SLOP, SkySettings, Uuid, environment_asset_from_bytes,
         environment_asset_to_bytes,
     };
+    use sl_viewer_ui_core::ui::UiDirection;
 
     /// A boxed error, so a test can `?` rather than reach for the `panic!` the
     /// workspace's lints (rightly) forbid.
@@ -3253,7 +3282,7 @@ mod tests {
         cycle
     }
 
-    /// **A marker is placed by its left edge, and the pointer is measured
+    /// **A marker is placed by its leading edge, and the pointer is measured
     /// against the same span.** Getting this wrong is not a wrong number — it is
     /// a keyframe that jumps half a marker sideways the instant it is grabbed,
     /// every time, which looks like the drag is broken rather than the maths.
@@ -3261,24 +3290,64 @@ mod tests {
     fn the_timeline_maps_a_pointer_to_the_span_a_marker_is_placed_in() {
         let rect = (Vec2::new(100.0, 50.0), Vec2::new(200.0, 14.0));
         let span = 200.0 - MARKER_WIDTH;
+        let at = |x: f32| strip_fraction(Vec2::new(x, 55.0), rect, UiDirection::Ltr);
         // The left edge of the usable span reads zero, its right edge one.
-        assert!(strip_fraction(Vec2::new(100.0 + MARKER_WIDTH / 2.0, 55.0), rect).abs() < 0.001);
-        assert!(
-            (strip_fraction(Vec2::new(100.0 + MARKER_WIDTH / 2.0 + span, 55.0), rect) - 1.0).abs()
-                < 0.001
-        );
+        assert!(at(100.0 + MARKER_WIDTH / 2.0).abs() < 0.001);
+        assert!((at(100.0 + MARKER_WIDTH / 2.0 + span) - 1.0).abs() < 0.001);
         // The middle is a half, and everything past either end clamps rather
         // than running off the day.
-        assert!(
-            (strip_fraction(
-                Vec2::new(100.0 + MARKER_WIDTH / 2.0 + span / 2.0, 55.0),
-                rect
-            ) - 0.5)
-                .abs()
-                < 0.001
-        );
-        assert!(strip_fraction(Vec2::new(-500.0, 55.0), rect).abs() < f32::EPSILON);
-        assert!((strip_fraction(Vec2::new(5000.0, 55.0), rect) - 1.0).abs() < f32::EPSILON);
+        assert!((at(100.0 + MARKER_WIDTH / 2.0 + span / 2.0) - 0.5).abs() < 0.001);
+        assert!(at(-500.0).abs() < f32::EPSILON);
+        assert!((at(5000.0) - 1.0).abs() < f32::EPSILON);
+    }
+
+    /// **A click on a marker selects that marker, in both directions.** Under
+    /// right-to-left the logical boxes put a marker at `fraction` of the rail
+    /// measured from the strip's *right* edge; the pointer over the middle of
+    /// that marker must read back the same fraction, where measuring from the
+    /// left read the position mirrored across the strip.
+    #[test]
+    fn a_click_on_a_marker_reads_its_own_position_in_either_direction() {
+        let (left, width) = (100.0_f32, 200.0_f32);
+        let rect = (Vec2::new(left, 50.0), Vec2::new(width, 14.0));
+        let span = width - MARKER_WIDTH;
+        for fraction in [0.0_f32, 0.125, 0.25, 0.5, 0.75, 0.9, 1.0] {
+            let offset = fraction * span + MARKER_WIDTH / 2.0;
+            // Where the marker's centre is drawn: its inline-start inset is
+            // `fraction` of the rail, from the left edge or from the right.
+            let ltr_centre = left + offset;
+            let rtl_centre = left + width - offset;
+            let ltr = strip_fraction(Vec2::new(ltr_centre, 55.0), rect, UiDirection::Ltr);
+            let rtl = strip_fraction(Vec2::new(rtl_centre, 55.0), rect, UiDirection::Rtl);
+            assert!((ltr - fraction).abs() < 0.001, "ltr {fraction}: read {ltr}");
+            assert!((rtl - fraction).abs() < 0.001, "rtl {fraction}: read {rtl}");
+        }
+        // The ends clamp in both directions, the day starting on the right.
+        let rtl_at = |x: f32| strip_fraction(Vec2::new(x, 55.0), rect, UiDirection::Rtl);
+        assert!(rtl_at(5000.0).abs() < f32::EPSILON);
+        assert!((rtl_at(-500.0) - 1.0).abs() < f32::EPSILON);
+    }
+
+    /// The pointer is measured inside the strip's border, the box the rail's
+    /// percentages resolve against, in logical pixels at any scale factor.
+    #[test]
+    fn the_strip_rect_is_the_box_inside_its_border() {
+        // A 204 x 20 physical-pixel strip at scale factor 2, centred on
+        // (300, 100) physical, with a 2 px border left and right and 4 px top and
+        // bottom.
+        let computed = ComputedNode {
+            size: Vec2::new(204.0, 20.0),
+            border: BorderRect {
+                min_inset: Vec2::new(2.0, 4.0),
+                max_inset: Vec2::new(2.0, 4.0),
+            },
+            inverse_scale_factor: 0.5,
+            ..ComputedNode::default()
+        };
+        let transform = UiGlobalTransform::from_translation(Vec2::new(300.0, 100.0));
+        let (top_left, size) = node_rect(&computed, &transform);
+        assert_eq!(top_left, Vec2::new(150.0 - 51.0 + 1.0, 50.0 - 5.0 + 2.0));
+        assert_eq!(size, Vec2::new(100.0, 6.0));
     }
 
     /// The tick labels span the whole day, ends included.
