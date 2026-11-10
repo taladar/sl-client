@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 334 |
 | blocked | 39 |
 | in-progress | 6 |
-| bugs | 34 |
-| done | 1538 |
+| bugs | 33 |
+| done | 1539 |
 | deferred | 30 |
 | wont-do | 24 |
 | **total** | **2130** |
@@ -1268,7 +1268,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-text-renderability-axis`](in-progress/viewer-ui-text-renderability-axis.md)
   — Upstream issue — font selection cannot see glyph-format renderability
 
-## bugs (34)
+## bugs (33)
 
 ### protocol
 
@@ -1327,9 +1327,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-sky-irradiance-ignores-local-probes`](bugs/viewer-sky-irradiance-ignores-local-probes.md)
   — Sky-lit faces take their probe ambient from the view's probe, never from a
   placed probe
-- [`viewer-slider-thumb-offset-by-track-border`](bugs/viewer-slider-thumb-offset-by-track-border.md)
-  — A slider's thumb is drawn one track border width off the value the pointer
-  set
 - [`viewer-terraform-parcel-refusal`](bugs/viewer-terraform-parcel-refusal.md) —
   A brush over a parcel the agent may not terraform warns nothing
 - [`viewer-texture-filtering-in-linear-space`](bugs/viewer-texture-filtering-in-linear-space.md)
@@ -1358,7 +1355,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1538)
+## done (1539)
 
 ### protocol
 
@@ -3341,6 +3338,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-slider-click-mirrored-rtl`](done/viewer-slider-click-mirrored-rtl.md)
   — In a right-to-left layout a slider's track click and drag run mirrored from
   its thumb
+- [`viewer-slider-thumb-offset-by-track-border`](done/viewer-slider-thumb-offset-by-track-border.md)
+  — A slider's thumb is drawn one track border width off the value the pointer
+  set
 - [`viewer-sliders-show-no-value`](done/viewer-sliders-show-no-value.md) — A
   slider shows no value, and no bounds or step either
 - [`viewer-slurl-parse-dispatch`](done/viewer-slurl-parse-dispatch.md) — SLURL

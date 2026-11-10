@@ -118,15 +118,21 @@ pub struct SliderStyle {
 }
 
 impl SliderStyle {
-    /// How far the thumb travels: the track's width less the thumb's own, since
-    /// the thumb has to stay inside the track at either end.
+    /// How far the thumb travels: the track's interior — its width less the
+    /// border on both ends, the box an absolutely positioned thumb is placed in
+    /// — less the thumb's own width, since the thumb has to stay inside that
+    /// interior at either end.
     ///
-    /// The same number `bevy_ui_widgets`' core slider works out from the thumb's
-    /// *measured* size when it converts a drag into a value, which is why the
-    /// thumb must carry a real width and why the two agree.
+    /// The same number `bevy_ui_widgets`' core slider works out from the track's
+    /// measured border and the thumb's *measured* size when it converts a click
+    /// or a drag into a value, which is why the thumb must carry a real width and
+    /// why the two agree. Counting the border box here instead drew every thumb
+    /// one border width off the value the pointer set, and let it overhang the
+    /// trailing border at the maximum
+    /// (`viewer-slider-thumb-offset-by-track-border`).
     #[must_use]
     pub fn travel(&self) -> f32 {
-        (self.track_width - self.thumb_width).max(0.0)
+        (self.track_width - 2.0 * self.border - self.thumb_width).max(0.0)
     }
 }
 
@@ -1027,16 +1033,49 @@ mod tests {
             );
             let drawn =
                 interact::centre_of_entity(&app, thumb).ok_or("the thumb has no position")?;
-            // Within a border: the thumb is inset inside the track's border
-            // while the core slider measures the border box, which shifts the
-            // drawn thumb one border width toward the trailing end in either
-            // direction (viewer-slider-thumb-offset-by-track-border).
+            // Within a pixel: the thumb travels inside the track's border and
+            // the core slider measures the same box. Measuring the border box
+            // put the thumb one border width toward the trailing end
+            // (viewer-slider-thumb-offset-by-track-border).
             assert!(
-                (drawn.x - at.x).abs() <= STYLE.border + 0.5,
+                (drawn.x - at.x).abs() <= 1.0,
                 "{direction:?}: the thumb is drawn at x = {}, the click was at x = {}",
                 drawn.x,
                 at.x,
             );
+        }
+        Ok(())
+    }
+
+    /// **A thumb stays inside its track's border at either end, in both
+    /// directions.** At the minimum and the maximum the thumb's edge meets the
+    /// inner edge of the border on that side, never covering it.
+    #[test]
+    fn a_thumb_never_overhangs_its_track_border() -> Result<(), TestError> {
+        for direction in [UiDirection::Ltr, UiDirection::Rtl] {
+            for value in [0.0, 100.0] {
+                let (mut app, _track, thumb) = live_slider(direction, value, TrackClick::Snap)?;
+                let centre = interact::centre_of(&mut app, "slider-under-test")
+                    .ok_or("the track has no position")?;
+                let drawn =
+                    interact::centre_of_entity(&app, thumb).ok_or("the thumb has no position")?;
+                let inner_half = STYLE.track_width / 2.0 - STYLE.border;
+                let (thumb_left, thumb_right) = (
+                    drawn.x - STYLE.thumb_width / 2.0,
+                    drawn.x + STYLE.thumb_width / 2.0,
+                );
+                let at_right_end = (value > 50.0) != direction.is_rtl();
+                let (edge, wanted) = if at_right_end {
+                    (thumb_right, centre.x + inner_half)
+                } else {
+                    (thumb_left, centre.x - inner_half)
+                };
+                assert!(
+                    (edge - wanted).abs() <= 0.5,
+                    "{direction:?} at {value}: the thumb spans x = {thumb_left}…{thumb_right}, \
+                     its edge belongs at the border's inner edge x = {wanted}",
+                );
+            }
         }
         Ok(())
     }
