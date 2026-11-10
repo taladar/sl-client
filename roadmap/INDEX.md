@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 39 |
 | in-progress | 7 |
 | bugs | 40 |
-| done | 1533 |
+| done | 1534 |
 | deferred | 30 |
 | wont-do | 24 |
-| **total** | **2132** |
+| **total** | **2133** |
 
 ## ideas (125)
 
@@ -1301,6 +1301,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   from the markers
 - [`viewer-default-next-owner-mask-diverges`](bugs/viewer-default-next-owner-mask-diverges.md)
   — Three different default next-owner masks, two without PERM_MOVE
+- [`viewer-e2e-walk-foot-plane-lost-under-load`](bugs/viewer-e2e-walk-foot-plane-lost-under-load.md)
+  — Under heavy load the walking avatar reads no foot plane after a walk
 - [`viewer-floater-minimize-caps-follow-no-pattern`](bugs/viewer-floater-minimize-caps-follow-no-pattern.md)
   — Which floaters have a minimize button follows no pattern, and most that lack
   one should have it
@@ -1366,15 +1368,13 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Fake OpenSim runs a worn script's departing changed(32768) after it arrives
 - [`server-lsl-mono-collision-model-under-lowered-limit`](bugs/server-lsl-mono-collision-model-under-lowered-limit.md)
   — A script 1 KB over its use collides in the runtime where Mono carries on
-- [`server-lsl-opensim-child-move-change-late`](bugs/server-lsl-opensim-child-move-change-late.md)
-  — OpenSim's position change in a moved child comes after the mover's handler
 - [`server-lsl-opensim-grow-loop-slow`](bugs/server-lsl-opensim-grow-loop-slow.md)
   — fake-opensim grows memory/collision's Full list four times slower than
   YEngine
 - [`server-lsl-scripted-teleport-unmodelled`](bugs/server-lsl-scripted-teleport-unmodelled.md)
   — The fake grid ignores llTeleportAgent and llTeleportAgentGlobalCoords
 
-## done (1533)
+## done (1534)
 
 ### protocol
 
@@ -4593,6 +4593,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `gridspec-lsl-memory-limits` (done))
 - [`server-lsl-memory-sizes`](done/server-lsl-memory-sizes.md) — Measure Second
   Life's per-value memory costs and rotation arithmetic on aditi
+- [`server-lsl-opensim-child-move-change-late`](done/server-lsl-opensim-child-move-change-late.md)
+  — OpenSim's position change in a moved child comes after the mover's handler
 - [`server-lsl-opensim-pos-local-moved-six`](done/server-lsl-opensim-pos-local-moved-six.md)
   — OpenSim moved prim/params' PRIM_POS_LOCAL prim 6 m, where it moved it 10
 - [`server-lsl-opensim-shared-lists`](done/server-lsl-opensim-shared-lists.md) —

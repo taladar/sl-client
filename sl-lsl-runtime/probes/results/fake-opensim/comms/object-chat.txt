@@ -1,5 +1,5 @@
 grid: fake-opensim
-date: 2026-11-09
+date: 2026-11-10
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating YEngine
@@ -8,6 +8,7 @@ settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor
 PROBE comms/object-chat rec=start region="Fake Region" channel="OpenSim" version="sl-fake-grid 0.1.0"
 PROBE comms/object-chat rec=ready message="ready At9" from_own_prim=0
 PROBE comms/object-chat rec=ready message="ready At11" from_own_prim=0
+# chat type=say from="Object" length=14 text="Script running"
 PROBE comms/object-chat rec=ready message="ready At19" from_own_prim=0
 PROBE comms/object-chat rec=ready message="ready At21" from_own_prim=0
 PROBE comms/object-chat rec=ready message="ready At99" from_own_prim=0
@@ -55,5 +56,6 @@ PROBE comms/object-chat rec=said step=13 call=say channel=9 length=5
 PROBE comms/object-chat rec=said step=13 call=say channel=9 length=7
 PROBE comms/object-chat rec=heard listener=At9 on=9 from_own_prim=0 from_agent=0 length=5 message="match"
 PROBE comms/object-chat rec=end
+# chat by=other type=say from="Object" length=14 text="Script running"
 # debug-channel by=other: from="Object" text="llRegionSay: Cannot use on channel 0"
 # chat by=other type=say from="Object" length=8 text="say on 0"

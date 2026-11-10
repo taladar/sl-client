@@ -686,21 +686,25 @@ fn read_type(
 }
 
 /// Writes a move of `target` to `to`, which is its local position: an
-/// unworn root's region position, a child's offset. `capped` moves at most
-/// 10 m from where it is. OpenSim raises its `CHANGED_POSITION` for a move.
+/// unworn root's region position, a child's offset. A root moves at most
+/// 10 m from where it is. OpenSim raises its `CHANGED_POSITION` for a move:
+/// a root's only when it goes somewhere (the group's position setter
+/// compares), a child's whether it goes anywhere or not (the part's offset
+/// setter raises it unconditionally; `prim/link`'s first move of the child
+/// to where it already was).
 fn move_to(
     prim: &mut Prim,
     to: &Vector,
-    capped: bool,
+    child: bool,
     opensim_flavour: bool,
     changes: &mut Changes,
 ) {
-    let goes = if capped {
-        within_reach(&prim.local_position, to)
-    } else {
+    let goes = if child {
         to.clone()
+    } else {
+        within_reach(&prim.local_position, to)
     };
-    if goes != prim.local_position && opensim_flavour {
+    if opensim_flavour && (child || goes != prim.local_position) {
         changes.raise(CHANGED_POSITION);
     }
     prim.local_position = goes;
@@ -799,9 +803,9 @@ fn rule(
                 if code == POSITION && !opensim_flavour {
                     return Ok(());
                 }
-                move_to(prim, &to, false, opensim_flavour, changes);
-            } else {
                 move_to(prim, &to, true, opensim_flavour, changes);
+            } else {
+                move_to(prim, &to, false, opensim_flavour, changes);
             }
         }
         SIZE => {

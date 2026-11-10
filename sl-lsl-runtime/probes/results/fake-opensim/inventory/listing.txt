@@ -1,5 +1,5 @@
 grid: fake-opensim
-date: 2026-11-09
+date: 2026-11-10
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating YEngine
@@ -13,18 +13,15 @@ settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor
 # notecard "_under" bytes=20
 # notecard "alpha" bytes=19
 # object "Box" scripts=1
-# chat type=say from="Object" length=14 text="Script running"
 PROBE inventory/listing rec=helper-entry param=0
-# owner-say: from="Object" text="[YEngine]: Exception while running 4f3ab7a2-eecd-f3d5-c6a2-3b83dcf23d72"
+# owner-say: from="Object" text="[YEngine]: Exception while running 458f6e58-8995-1cb5-c63d-0b3b89cfbbcc"
 # owner-say: from="Object" text="ArgumentOutOfRangeException: Index was out of range. Must be non-negative and less than the size of the collection."
 # owner-say: from="Object" text="Parameter name: index"
 # owner-say: from="Object" text="Prim: <Object>, Script: <Range minus one>, Location: Fake Region <130,124,26>"
 # owner-say: from="Object" text="Script must be Reset to re-enable."
-# chat type=say from="Object" length=14 text="Script running"
 PROBE inventory/listing rec=name case=past-end value=""
 PROBE inventory/listing rec=name case=all-100 value=""
 PROBE inventory/listing rec=name case=no-type value=""
-# chat type=say from="Object" length=14 text="Script running"
 PROBE inventory/listing rec=start region="Fake Region" channel="OpenSim" version="sl-fake-grid 0.1.0"
 PROBE inventory/listing rec=count when=first type=-1 n=10 names="_under|10|9|aaa Helper|alpha|Beta|Box|C3 A9 6C 61 6E 00                               ..lan.|Probe|Zed"
 PROBE inventory/listing rec=count when=first type=0 n=0 names=""
@@ -108,9 +105,6 @@ PROBE inventory/listing rec=count when=last type=4 n=0 names=""
 PROBE inventory/listing rec=count when=last type=99 n=0 names=""
 PROBE inventory/listing rec=count when=last type=-2 n=0 names=""
 PROBE inventory/listing rec=end
-# chat by=other type=say from="Object" length=14 text="Script running"
-# chat by=other type=say from="Object" length=14 text="Script running"
-# chat by=other type=say from="Object" length=14 text="Script running"
 # debug-channel by=other: from="Object" text="llGetInventoryCreator: Can't find item ''"
 # debug-channel by=other: from="Object" text="llGetInventoryCreator: Can't find item ''"
 # debug-channel by=other: from="Object" text="llGetInventoryCreator: Can't find item ''"

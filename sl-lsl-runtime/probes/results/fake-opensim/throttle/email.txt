@@ -1,5 +1,5 @@
 grid: fake-opensim
-date: 2026-11-09
+date: 2026-11-10
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating YEngine
@@ -8,7 +8,7 @@ complete: no
 
 PROBE throttle/email rec=start region="Fake Region" channel="OpenSim" version="sl-fake-grid 0.1.0"
 PROBE throttle/email rec=mailbox found=1
-# debug-channel: from="Object" text="YEngine: llEmail is not implemented by this grid (script: Sender event: listen primID: 0c24d7ee-d7c3-cfb3-c9ed-b9df0ab1c4ec at: <128,124,26>) Script must be Reset to re-enable.\n"
-# debug-channel: from="Object" text="YEngine: llGetNextEmail is not implemented by this grid (script: Mailbox event: timer primID: b61bb4a8-1882-1c65-c4a1-fda66982a11d at: <131,124,26>) Script must be Reset to re-enable.\n"
-# debug-channel by=other: from="Object" text="YEngine: llEmail is not implemented by this grid (script: Sender event: listen primID: 0c24d7ee-d7c3-cfb3-c9ed-b9df0ab1c4ec at: <128,124,26>) Script must be Reset to re-enable.\n"
-# debug-channel by=other: from="Object" text="YEngine: llGetNextEmail is not implemented by this grid (script: Mailbox event: timer primID: b61bb4a8-1882-1c65-c4a1-fda66982a11d at: <131,124,26>) Script must be Reset to re-enable.\n"
+# debug-channel: from="Object" text="YEngine: llEmail is not implemented by this grid (script: Sender event: listen primID: 0f714de5-bffd-7918-c55c-2811af2bc5ea at: <128,124,26>) Script must be Reset to re-enable.\n"
+# debug-channel: from="Object" text="YEngine: llGetNextEmail is not implemented by this grid (script: Mailbox event: timer primID: 2300ddbc-6ffb-a8e1-c501-0747133247f0 at: <131,124,26>) Script must be Reset to re-enable.\n"
+# debug-channel by=other: from="Object" text="YEngine: llEmail is not implemented by this grid (script: Sender event: listen primID: 0f714de5-bffd-7918-c55c-2811af2bc5ea at: <128,124,26>) Script must be Reset to re-enable.\n"
+# debug-channel by=other: from="Object" text="YEngine: llGetNextEmail is not implemented by this grid (script: Mailbox event: timer primID: 2300ddbc-6ffb-a8e1-c501-0747133247f0 at: <131,124,26>) Script must be Reset to re-enable.\n"

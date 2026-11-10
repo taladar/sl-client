@@ -1,18 +1,18 @@
 grid: fake-opensim
-date: 2026-11-09
+date: 2026-11-10
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating YEngine
 settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
 
-PROBE events/state-drops rec=start region="Fake Region" channel="OpenSim" version="sl-fake-grid 0.1.0"
 # question permissions=4 object="Object" owner="<first> <last>" experience=none
+PROBE events/state-drops rec=start region="Fake Region" channel="OpenSim" version="sl-fake-grid 0.1.0"
 PROBE events/state-drops rec=waiting drive=answer grant=4
 # answer grant=4
-PROBE events/state-drops rec=held perms=4
 # script-control-change action=release controls=256 pass_to_agent=0
 # script-control-change action=release controls=256 pass_to_agent=1
 # script-control-change action=take controls=256 pass_to_agent=0
+PROBE events/state-drops rec=held perms=4
 PROBE events/state-drops rec=waiting drive=control keys=256
 PROBE events/state-drops rec=waiting drive=chat channel=7 text="before"
 # control keys=256 held=1s

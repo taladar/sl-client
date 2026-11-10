@@ -1,12 +1,12 @@
 grid: fake-opensim
-date: 2026-11-09
+date: 2026-11-10
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating YEngine
 settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
 
 PROBE prim/effects rec=try label=particles-missing-value
-# owner-say: from="Object" text="[YEngine]: Exception while running 56f5bb64-36e0-6cdd-cfdc-99d93d853b44"
+# owner-say: from="Object" text="[YEngine]: Exception while running 4386cd88-fc13-b0dd-c05e-83969ee400fc"
 # owner-say: from="Object" text="IndexOutOfRangeException: Index was outside the bounds of the array."
 # owner-say: from="Object" text="Prim: <Object>, Script: <Missing>, Location: Fake Region <130,124,26>"
 # owner-say: from="Object" text="Script must be Reset to re-enable."

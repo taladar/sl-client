@@ -1,13 +1,13 @@
 grid: fake-opensim
-date: 2026-11-09
+date: 2026-11-10
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating YEngine
 settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
 
 PROBE prim/link-refusals rec=start region="Fake Region" channel="OpenSim" version="sl-fake-grid 0.1.0"
-PROBE prim/link-refusals rec=found
 # question permissions=128 object="Object" owner="<first> <last>" experience=none
+PROBE prim/link-refusals rec=found
 PROBE prim/link-refusals rec=waiting drive=answer grant=128
 # answer grant=128
 PROBE prim/link-refusals rec=permissions got=128
@@ -40,11 +40,11 @@ PROBE prim/link-refusals rec=far-changed bits=32 link=3 prims=4
 PROBE prim/link-refusals rec=child-changed bits=LINK link=2 prims=4
 PROBE prim/link-refusals rec=links label=seated prims=4 link=1 seated=1 key1=self key2=child key3=far key4=avatar
 PROBE prim/link-refusals rec=try label=break-2-seated
+# animations avatar=other playing="falldown"
 PROBE prim/link-refusals rec=far-changed bits=32 link=2 prims=2
 PROBE prim/link-refusals rec=child-changed bits=LINK link=0 prims=1
 PROBE prim/link-refusals rec=child-changed bits=LINK link=0 prims=1
 PROBE prim/link-refusals rec=changed bits=LINK link=1 prims=2 seated=0
-# animations avatar=other playing="falldown"
 # animations avatar=other playing="land"
 # animations avatar=other playing="stand"
 PROBE prim/link-refusals rec=links label=after-break-2-seated prims=2 link=1 seated=0 key1=self key2=far key3=null key4=null

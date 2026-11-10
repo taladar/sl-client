@@ -1,19 +1,17 @@
 grid: fake-opensim
-date: 2026-11-09
+date: 2026-11-10
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating YEngine
 settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
 
-# chat type=say from="Object" length=14 text="Script running"
 PROBE land/day-cycle rec=start region="Fake Region" channel="OpenSim" version="sl-fake-grid 0.1.0"
 PROBE land/day-cycle rec=day length=14400 offset=57600 region_length=14400 region_offset=57600
-PROBE land/day-cycle rec=body which=sun scope=parcel sun="<-0.766045, 0.000000, 0.642788>" length=1.000 rot_length=1.000 dot_fwd=1.000 dot_left=0.000 dot_up=0.000
-PROBE land/day-cycle rec=body which=sun scope=region sun="<-0.766045, 0.000000, 0.642788>" length=1.000 rot_length=1.000 dot_fwd=1.000 dot_left=0.000 dot_up=0.000
-PROBE land/day-cycle rec=body which=moon scope=parcel moon="<0.766045, 0.000000, -0.642788>" length=1.000 rot_length=1.000 dot_fwd=1.000 dot_left=0.000 dot_up=0.000
-PROBE land/day-cycle rec=body which=moon scope=region moon="<0.766045, 0.000000, -0.642788>" length=1.000 rot_length=1.000 dot_fwd=1.000 dot_left=0.000 dot_up=0.000
+PROBE land/day-cycle rec=body which=sun scope=parcel sun="<0.878817, 0.000000, -0.477159>" length=1.000 rot_length=1.000 dot_fwd=1.000 dot_left=0.000 dot_up=0.000
+PROBE land/day-cycle rec=body which=sun scope=region sun="<0.878817, 0.000000, -0.477159>" length=1.000 rot_length=1.000 dot_fwd=1.000 dot_left=0.000 dot_up=0.000
+PROBE land/day-cycle rec=body which=moon scope=parcel moon="<-0.878817, 0.000000, 0.477159>" length=1.000 rot_length=1.000 dot_fwd=1.000 dot_left=0.000 dot_up=0.000
+PROBE land/day-cycle rec=body which=moon scope=region moon="<-0.878817, 0.000000, 0.477159>" length=1.000 rot_length=1.000 dot_fwd=1.000 dot_left=0.000 dot_up=0.000
 PROBE land/day-cycle rec=agree sun=1 moon=1 sun_dot_moon=-1.000
-PROBE land/day-cycle rec=time time_of_day=5600.861000 within_day=1 fraction=0.389
-PROBE land/day-cycle rec=time-later advanced=1 time_of_day=5602.880000
+PROBE land/day-cycle rec=time time_of_day=13260.770000 within_day=1 fraction=0.921
+PROBE land/day-cycle rec=time-later advanced=1 time_of_day=13262.790000
 PROBE land/day-cycle rec=end
-# chat by=other type=say from="Object" length=14 text="Script running"

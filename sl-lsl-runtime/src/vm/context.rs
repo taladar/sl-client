@@ -336,6 +336,11 @@ pub(crate) enum Request {
     /// caller goes on: `llSetScriptState` started a script whose sleep ran
     /// out while it was stopped.
     Hand(CallerId),
+    /// End the slice and let the other scripts a `changed` the call raised
+    /// reached run it before the caller goes on: OpenSim raises the event
+    /// inside the setter and runs it on another engine thread
+    /// ([`ScriptCtx::set_prim`]).
+    Pass,
 }
 
 /// The region's other scripts, as a library function may see them: their run
@@ -911,6 +916,20 @@ impl<'host> ScriptCtx<'host> {
                 bits: *bits,
             });
         }
+        // OpenSim raises a `changed` inside the setter, and another engine
+        // thread runs it while the caller goes on: a script of the prim
+        // hears each of a mover's moves as it lands, still in the linkset a
+        // break after it leaves (`prim/link`).
+        if self.flavour().is_opensim()
+            && !changed.is_empty()
+            && self.request.is_none()
+            && self
+                .host
+                .prim_scripts(&prim.key)
+                .is_some_and(|scripts| scripts.iter().any(|script| *script != caller))
+        {
+            self.request = Some(Request::Pass);
+        }
     }
 
     /// The scale `llGetBoundingBox` measures the prim `prim` with: on Second
@@ -1193,9 +1212,10 @@ impl<'host> ScriptCtx<'host> {
 
     /// Suspend the script for `seconds` once the function returns
     /// (`llSleep`), never scaled. A duration that is not positive (or is NaN)
-    /// does not suspend.
+    /// does not suspend. A sleep stands in for the pass a setter's `changed`
+    /// asked for: the others run while the script sleeps.
     pub const fn sleep(&mut self, seconds: f32) {
-        if self.request.is_none() || matches!(self.request, Some(Request::Sleep(_))) {
+        if matches!(self.request, None | Some(Request::Sleep(_) | Request::Pass)) {
             self.request = Some(Request::Sleep(seconds));
         }
     }

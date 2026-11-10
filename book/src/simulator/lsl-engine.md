@@ -596,7 +596,14 @@ observable as the handlers, so each is a named rule with a test.
   OpenSim's async command passes, every 100 ms of region time. On OpenSim a
   setter's `changed` and `llSensor`'s answer are queued in the call, and a
   script an event reaches after its turn in the tick runs it on what is
-  left of its share, as an engine thread would.
+  left of its share, as an engine thread would. A setter that raises
+  `changed` in another script (`ScriptCtx::set_prim`: a move of a child, a
+  colour set on another link) steps aside after the call
+  (`Outcome::Passed`): the engine runs the turns of the scripts the event
+  reached, then the caller goes on, so a moved child hears each move as it
+  lands, still linked when a break follows (`prim/link`). Where YEngine's
+  other thread prints among the mover's lines is thread timing, and two
+  runs of the probe disagreed on it.
 - **The detected block travels with the event.** A host posts a detection
   event (`touch*`, `collision*`, `sensor`) with `post_detected` and a list of
   `Detected` records, and the count parameter is the list's length. The block

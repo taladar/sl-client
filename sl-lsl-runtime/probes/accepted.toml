@@ -1653,8 +1653,14 @@ probe = "prim/link"
 between = ["opensim-yengine", "fake-opensim"]
 record = "child-changed"
 fields = { bits = "32768" }
-reason = "OpenSim raises the child's position change as each of the Leader's moves lands; the fake grid raises them after the Leader's moves, one fewer, and the first one reads the linkset after the link where OpenSim's linking thread had not yet numbered it"
-task = "server-lsl-opensim-child-move-change-late"
+reason = "YEngine runs the child's position change on another thread while the Leader goes on, so where its line falls among the Leader's is thread timing: two runs (2026-10-27, 2026-11-10) placed the fourteen differently, and the first read the change at the link before the linkset was numbered; the fake grid runs each as its move lands"
+
+[[difference]]
+probe = "prim/link"
+between = ["opensim-yengine", "fake-opensim"]
+record = "try"
+fields = { label = "break-2" }
+reason = "The child's change from the move just before the break prints after the Leader's try line on YEngine's thread (both runs) and before it on the fake grid, which runs it as the move lands; both read the child still linked"
 
 [[difference]]
 probe = "prim/link"

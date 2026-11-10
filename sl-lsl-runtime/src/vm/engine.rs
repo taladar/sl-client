@@ -1013,6 +1013,7 @@ impl Engine {
             | Outcome::Finished
             | Outcome::Sleeping(_)
             | Outcome::Handed(_)
+            | Outcome::Passed
             | Outcome::StateChanged(_)
             | Outcome::Reset
             | Outcome::Died => None,
@@ -1132,10 +1133,18 @@ impl Engine {
     /// gets its share too, unless the slice ended in a reset, which emptied
     /// its queue: on Second Life an event is queued at the call, so a reset
     /// after it in the same event drops it (`data/linkset-data`'s
-    /// `after-script-reset`).
-    fn raise(&mut self, id: CallerId, instance: &mut Instance, slice: &Slice, host: &dyn Host) {
+    /// `after-script-reset`). Answers the other scripts a `changed` reached,
+    /// in the order reached, each once.
+    fn raise(
+        &mut self,
+        id: CallerId,
+        instance: &mut Instance,
+        slice: &Slice,
+        host: &dyn Host,
+    ) -> Vec<CallerId> {
+        let mut changed_in = Vec::new();
         if slice.raised.is_empty() {
-            return;
+            return changed_in;
         }
         let own = !matches!(slice.outcome, Outcome::Reset);
         let arrival = self.arrival();
@@ -1323,6 +1332,7 @@ impl Engine {
                 }
                 _ => to_self,
             };
+            let is_changed = matches!(raised, Raised::Changed { .. });
             for to in reached {
                 if to == id {
                     if own {
@@ -1330,9 +1340,13 @@ impl Engine {
                     }
                 } else if let Some(peer) = self.instances.get_mut(&to) {
                     let _posted = peer.post(to_others, event, args.clone());
+                    if is_changed && !changed_in.contains(&to) {
+                        changed_in.push(to);
+                    }
                 }
             }
         }
+        changed_in
     }
 
     /// [`SECOND_LIFE_BOX_REFRESH`] in whole ticks.
@@ -1514,8 +1528,9 @@ impl Engine {
     /// of the region's budget, slice after slice while it has something to
     /// run, posting what each slice raised; answers what is left of the
     /// share. A slice that hands its turn to a script it started
-    /// ([`Outcome::Handed`]) runs that script's turn first, recording what
-    /// is left of its share in `left`, then goes on.
+    /// ([`Outcome::Handed`]), or to the scripts a `changed` it raised reached
+    /// ([`Outcome::Passed`]), runs those scripts' turns first, recording what
+    /// is left of each share in `left`, then goes on.
     fn run_share(
         &mut self,
         id: CallerId,
@@ -1544,7 +1559,7 @@ impl Engine {
                 ),
             );
             self.report(id, &slice, host);
-            self.raise(id, instance, &slice, host);
+            let changed_in = self.raise(id, instance, &slice, host);
             instance.charge(slice.used);
             instance.overdraw(slice.used.saturating_sub(script_left));
             script_left = script_left.saturating_sub(slice.used);
@@ -1554,7 +1569,8 @@ impl Engine {
             // charged nothing had nothing to run.
             let stop = slice.used == 0 || matches!(slice.outcome, Outcome::Idle);
             let handed = match slice.outcome {
-                Outcome::Handed(target) => Some(target),
+                Outcome::Handed(target) => vec![target],
+                Outcome::Passed => changed_in,
                 Outcome::Idle
                 | Outcome::Yielded
                 | Outcome::Finished
@@ -1562,18 +1578,20 @@ impl Engine {
                 | Outcome::StateChanged(_)
                 | Outcome::Reset
                 | Outcome::Died
-                | Outcome::Faulted(_) => None,
+                | Outcome::Faulted(_) => Vec::new(),
             };
             report.slices.push((id, slice));
             if stop {
                 break;
             }
-            if let Some(target) = handed {
+            if !handed.is_empty() {
                 // The caller waits in the region's instances meanwhile, so
-                // the script it started sees it, and what that script
-                // raises in it — a link message, a control — reaches it.
+                // the scripts it handed to see it, and what they raise in
+                // it — a link message, a control — reaches it.
                 let _none = self.instances.insert(id, instance.clone());
-                self.run_handed(target, (region_left, left), report, host);
+                for target in handed {
+                    self.run_handed(target, (region_left, left), report, host);
+                }
                 if let Some(back) = self.instances.remove(&id) {
                     *instance = back;
                 }
@@ -1582,8 +1600,8 @@ impl Engine {
         script_left
     }
 
-    /// Run the turn of the script `target`, which another script started
-    /// and handed the rest of its slice to ([`Outcome::Handed`]): on what is
+    /// Run the turn of the script `target`, which another script handed the
+    /// rest of its slice to ([`Outcome::Handed`], [`Outcome::Passed`]): on what is
     /// left of its share when it was served this tick already, else on a
     /// fresh share, recorded in `left` either way.
     fn run_handed(

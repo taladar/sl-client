@@ -1,5 +1,5 @@
 grid: fake-opensim
-date: 2026-11-09
+date: 2026-11-10
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating YEngine
@@ -57,34 +57,35 @@ PROBE prim/link rec=link-get label=link-get-target count=3 got="Object, , "
 PROBE prim/link rec=try label=link-set-target
 PROBE prim/link rec=try label=link-set-target
 PROBE prim/link rec=link-get label=link-set-target count=2 got="root, child"
+PROBE prim/link rec=child-changed bits=32768 link=2 prims=2
 PROBE prim/link rec=try label=pos-local-5
+PROBE prim/link rec=child-changed bits=32768 link=2 prims=2
 PROBE prim/link rec=child-moved label=pos-local-5 local=<5.000000,0.000000,0.000000>
+PROBE prim/link rec=child-changed bits=32768 link=2 prims=2
 PROBE prim/link rec=try label=pos-local-20
+PROBE prim/link rec=child-changed bits=32768 link=2 prims=2
 PROBE prim/link rec=child-moved label=pos-local-20 local=<20.000000,0.000000,0.000000>
+PROBE prim/link rec=child-changed bits=32768 link=2 prims=2
 PROBE prim/link rec=try label=pos-local-60
+PROBE prim/link rec=child-changed bits=32768 link=2 prims=2
 PROBE prim/link rec=child-moved label=pos-local-60 local=<60.000000,0.000000,0.000000>
+PROBE prim/link rec=child-changed bits=32768 link=2 prims=2
 PROBE prim/link rec=try label=position-5
+PROBE prim/link rec=child-changed bits=32768 link=2 prims=2
 PROBE prim/link rec=child-moved label=position-5 local=the-region-position
+PROBE prim/link rec=child-changed bits=32768 link=2 prims=2
 PROBE prim/link rec=try label=position-20
+PROBE prim/link rec=child-changed bits=32768 link=2 prims=2
 PROBE prim/link rec=child-moved label=position-20 local=the-region-position
+PROBE prim/link rec=child-changed bits=32768 link=2 prims=2
 PROBE prim/link rec=try label=position-60
+PROBE prim/link rec=child-changed bits=32768 link=2 prims=2
 PROBE prim/link rec=child-moved label=position-60 local=the-region-position
-PROBE prim/link rec=child-changed bits=32768 link=2 prims=2
-PROBE prim/link rec=child-changed bits=32768 link=2 prims=2
-PROBE prim/link rec=child-changed bits=32768 link=2 prims=2
-PROBE prim/link rec=child-changed bits=32768 link=2 prims=2
-PROBE prim/link rec=child-changed bits=32768 link=2 prims=2
-PROBE prim/link rec=child-changed bits=32768 link=2 prims=2
-PROBE prim/link rec=child-changed bits=32768 link=2 prims=2
-PROBE prim/link rec=child-changed bits=32768 link=2 prims=2
-PROBE prim/link rec=child-changed bits=32768 link=2 prims=2
-PROBE prim/link rec=child-changed bits=32768 link=2 prims=2
-PROBE prim/link rec=child-changed bits=32768 link=2 prims=2
 PROBE prim/link rec=child-changed bits=32768 link=2 prims=2
 PROBE prim/link rec=child-setpos asked=15 local=<12.000000,0.000000,0.000000>
 PROBE prim/link rec=child-changed bits=32768 link=2 prims=2
+PROBE prim/link rec=child-changed bits=32768 link=2 prims=2
 PROBE prim/link rec=try label=break-2
-PROBE prim/link rec=child-changed bits=32768 link=0 prims=1
 PROBE prim/link rec=child-changed bits=LINK link=0 prims=1
 PROBE prim/link rec=links label=broken-2 prims=1 link=0 key0=self key1=self key2=null key3=null name1="00000000-0000-0000-0000-000000000000" name2="00000000-0000-0000-0000-000000000000"
 PROBE prim/link rec=try label=relink

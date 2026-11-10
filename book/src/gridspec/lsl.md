@@ -2143,7 +2143,7 @@ granted `PERMISSION_CHANGE_LINKS`; each step is a second and a half apart.
 | --- | --- | --- | --- |
 | `llCreateLink` with no permission | `Script trying to link but PERMISSION_CHANGE_LINKS permission not set!` | `llCreateLink: PERMISSION_CHANGE_LINKS permission not set` | each flavour as its grid |
 | `llCreateLink` of `NULL_KEY`, a key nothing has, the owner | `Script trying to link but target is invalid.` each | nothing, silently | each flavour as its grid |
-| linked | `CHANGED_LINK` in both prims; the root is link 1, the child 2, `llGetNumberOfPrims` 2 | the same, and the child gets a `changed` of 32768 (OpenSim's `CHANGED_POSITION`) whenever it moves | each flavour as its grid; the 32768 at the link alone, since nothing moves a child yet |
+| linked | `CHANGED_LINK` in both prims; the root is link 1, the child 2, `llGetNumberOfPrims` 2 | the same, and the child gets a `changed` of 32768 (OpenSim's `CHANGED_POSITION`) for every move, a move to where it already is included (YEngine, 2026-11-10: fourteen for the probe's thirteen rule moves and one `llSetPos`) | each flavour as its grid; OpenSim's 32768 for every move of the child, one where it already was included, heard as the move lands |
 | `llGetLinkKey(0)` in a linkset | `NULL_KEY` from the root, the root from a child | the root | each flavour as its grid |
 | `llSetLinkPrimitiveParamsFast` of `LINK_SET`, `LINK_ALL_OTHERS`, `LINK_ALL_CHILDREN`, `LINK_ROOT`, `LINK_THIS`, 1, 2 | the prims each names | the same | each flavour as its grid; not replayed in a linkset yet |
 | … of link 0 or 3 in a linkset of two | nothing | the same | each flavour as its grid; not replayed in a linkset yet |
@@ -2740,7 +2740,7 @@ box with its script, a removal sent to the viewer).
 | `llScriptDanger` at the prim | 1 (Mauve) | 0 | each flavour by its grid's rule over the region's parcel flags |
 | a script that is not there: `llGetScriptState`, `llResetOtherScript`, `llSetScriptState` | 0, and silent here only because the missing item's six lines above had set off the object's [flood limit](#floods); alone, `Could not find script 'nope'.` ([Run-time errors](#what-is-said-and-to-whom)) | 0, and `llGetScriptState: Can't find script 'nope'` (and the like) on the debug channel | each flavour as its grid |
 | a link message to a stopped script | lost | lost | each flavour as its grid |
-| `llResetOtherScript` of a stopped script, then `llSetScriptState(…, TRUE)` | stays stopped through the reset; started, it **carries on without `state_entry`** | stays stopped; started, it runs `state_entry` | each flavour as its grid |
+| `llResetOtherScript` of a stopped script, then `llSetScriptState(…, TRUE)` | stays stopped through the reset; started, it **carries on without `state_entry`** | stays stopped; started, it runs `state_entry`, its line after the starter's next (YEngine and XEngine) | each flavour as its grid |
 | `llResetOtherScript` of a running script with a link message queued | the message is lost with the reset | YEngine delivers it first, then the reset; XEngine loses it | each flavour as its grid |
 | `llRemoveInventory` | removes, **no `changed`** in the prim; a missing name is silent | removes and raises `changed(CHANGED_INVENTORY)`; a missing name is silent | each flavour as its grid |
 

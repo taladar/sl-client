@@ -1,11 +1,11 @@
 grid: fake-opensim
-date: 2026-11-09
+date: 2026-11-10
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating YEngine
 settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
 
-# owner-say: from="Object" text="[YEngine]: Exception while running d3536e4b-570c-7040-cea0-29cf7df678a0"
+# owner-say: from="Object" text="[YEngine]: Exception while running 7679efdb-2b59-83a3-c45f-79920bd3b864"
 # owner-say: from="Object" text="NullReferenceException: Object reference not set to an instance of an object"
 # owner-say: from="Object" text="Prim: <Object>, Script: <Outside flags>, Location: Fake Region <128,124,26>"
 # owner-say: from="Object" text="Script must be Reset to re-enable."
@@ -15,6 +15,7 @@ PROBE land/parcel rec=outside call=llScriptDanger answer=1
 PROBE land/parcel rec=outside call=llGetParcelMaxPrims answer=0
 # chat type=say from="Object" length=14 text="Script running"
 PROBE land/parcel rec=outside call=llGetParcelPrimCount answer=0
+# chat type=say from="Object" length=14 text="Script running"
 PROBE land/parcel rec=start region="Fake Region" channel="OpenSim" version="sl-fake-grid 0.1.0"
 PROBE land/parcel rec=flags value=536870987 set="ALLOW_FLY,ALLOW_SCRIPTS,ALLOW_LANDMARK,ALLOW_CREATE_OBJECTS" other_bits=536870912
 PROBE land/parcel rec=details at=here codes="-1" length=1 got="integer:\"0\""
@@ -69,4 +70,5 @@ PROBE land/parcel rec=music step=set url="" changed=0
 PROBE land/parcel rec=details at=high codes="4, 5" length=2 got="integer:\"65536\",key:set"
 PROBE land/parcel rec=details at=low codes="4, 5" length=2 got="integer:\"65536\",key:set"
 PROBE land/parcel rec=end
+# chat by=other type=say from="Object" length=14 text="Script running"
 # chat by=other type=say from="Object" length=14 text="Script running"

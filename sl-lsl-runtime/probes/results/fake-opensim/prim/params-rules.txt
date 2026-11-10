@@ -1,5 +1,5 @@
 grid: fake-opensim
-date: 2026-11-09
+date: 2026-11-10
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating YEngine
@@ -8,12 +8,12 @@ settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor
 PROBE prim/params-rules rec=try label=code-as-string
 PROBE prim/params-rules rec=get label=code-as-string count=2 got="<0.500000, 0.500000, 0.500000>, Object"
 PROBE prim/params-rules rec=try label=face-100
-# owner-say: from="Object" text="[YEngine]: Exception while running 09051d3a-c910-27ef-cad6-f87cc4b61c60"
+# owner-say: from="Object" text="[YEngine]: Exception while running 383c11ae-b1d6-2354-c34b-6eb4e973da12"
 # owner-say: from="Object" text="Exception: 100 is outside the range of MAX_FACES"
 # owner-say: from="Object" text="Prim: <Object>, Script: <Face100>, Location: Fake Region <130,124,26>"
 # owner-say: from="Object" text="Script must be Reset to re-enable."
 PROBE prim/params-rules rec=try label=face-minus-2
-# owner-say: from="Object" text="[YEngine]: Exception while running b0abd1db-b40d-d065-c72c-f22e5f177285"
+# owner-say: from="Object" text="[YEngine]: Exception while running 88af29c3-eb93-95d2-c97d-8e2ff6e98679"
 # owner-say: from="Object" text="Exception: 4294967294 is outside the range of MAX_FACES"
 # owner-say: from="Object" text="Prim: <Object>, Script: <FaceMinus2>, Location: Fake Region <130,124,26>"
 # owner-say: from="Object" text="Script must be Reset to re-enable."

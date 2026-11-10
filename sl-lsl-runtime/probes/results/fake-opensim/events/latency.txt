@@ -1,5 +1,5 @@
 grid: fake-opensim
-date: 2026-11-09
+date: 2026-11-10
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating YEngine
@@ -22,7 +22,7 @@ PROBE events/latency rec=latency kind=chat-echo trial=0 t=0.164000
 PROBE events/latency rec=latency kind=chat-echo trial=1 t=0.182000
 PROBE events/latency rec=latency kind=chat-echo trial=2 t=0.182000
 PROBE events/latency rec=latency kind=chat-echo trial=3 t=0.182000
-PROBE events/latency rec=latency kind=chat-echo trial=4 t=0.181999
+PROBE events/latency rec=latency kind=chat-echo trial=4 t=0.182000
 PROBE events/latency rec=latency kind=chat-echo trial=5 t=0.182000
 PROBE events/latency rec=latency kind=sensor trial=0 event=sensor t=0.000000
 PROBE events/latency rec=latency kind=sensor trial=1 event=sensor t=0.000000
@@ -36,18 +36,18 @@ PROBE events/latency rec=latency kind=changed trial=2 t=0.000000
 PROBE events/latency rec=latency kind=changed trial=3 t=0.000000
 PROBE events/latency rec=latency kind=changed trial=4 t=0.000000
 PROBE events/latency rec=latency kind=changed trial=5 t=0.000000
-PROBE events/latency rec=latency kind=link-busy trial=0 t=0.018001
-PROBE events/latency rec=latency kind=link-busy trial=1 t=0.019000
-PROBE events/latency rec=latency kind=link-busy trial=2 t=0.018000
-PROBE events/latency rec=latency kind=link-busy trial=3 t=0.018000
-PROBE events/latency rec=latency kind=link-busy trial=4 t=0.019001
-PROBE events/latency rec=latency kind=link-busy trial=5 t=0.018000
-PROBE events/latency rec=latency kind=chat-busy trial=0 t=0.036999
-PROBE events/latency rec=latency kind=chat-busy trial=1 t=0.091000
-PROBE events/latency rec=latency kind=chat-busy trial=2 t=0.073000
-PROBE events/latency rec=latency kind=chat-busy trial=3 t=0.091000
-PROBE events/latency rec=latency kind=chat-busy trial=4 t=0.073000
-PROBE events/latency rec=latency kind=chat-busy trial=5 t=0.091000
+PROBE events/latency rec=latency kind=link-busy trial=0 t=0.019000
+PROBE events/latency rec=latency kind=link-busy trial=1 t=0.018000
+PROBE events/latency rec=latency kind=link-busy trial=2 t=0.018002
+PROBE events/latency rec=latency kind=link-busy trial=3 t=0.018999
+PROBE events/latency rec=latency kind=link-busy trial=4 t=0.018000
+PROBE events/latency rec=latency kind=link-busy trial=5 t=0.018002
+PROBE events/latency rec=latency kind=chat-busy trial=0 t=0.054001
+PROBE events/latency rec=latency kind=chat-busy trial=1 t=0.073000
+PROBE events/latency rec=latency kind=chat-busy trial=2 t=0.091000
+PROBE events/latency rec=latency kind=chat-busy trial=3 t=0.073000
+PROBE events/latency rec=latency kind=chat-busy trial=4 t=0.091000
+PROBE events/latency rec=latency kind=chat-busy trial=5 t=0.073000
 PROBE events/latency rec=race kind=sensor-timer trial=0 delay=0.100000 events="sensor,timer"
 PROBE events/latency rec=race kind=sensor-timer trial=1 delay=0.300000 events="sensor,timer"
 PROBE events/latency rec=race kind=sensor-timer trial=2 delay=0.600000 events="sensor,timer"

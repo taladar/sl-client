@@ -1,5 +1,5 @@
 grid: fake-opensim
-date: 2026-11-09
+date: 2026-11-10
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating YEngine
@@ -9,5 +9,5 @@ complete: no
 PROBE physics/vehicles rec=start region="Fake Region" channel="OpenSim" version="sl-fake-grid 0.1.0"
 PROBE physics/vehicles rec=fresh physics=0 rotate_x=1 rotate_y=1 rotate_z=1 phantom=0
 PROBE physics/vehicles rec=try label=param-before-type
-# debug-channel: from="Object" text="YEngine: llSetVehicleFloatParam is not implemented by this grid (script: Probe event: state_entry primID: 00008712-49bd-bf98-c7b0-60ddf07c22e7 at: <128,124,26>) Script must be Reset to re-enable.\n"
-# debug-channel by=other: from="Object" text="YEngine: llSetVehicleFloatParam is not implemented by this grid (script: Probe event: state_entry primID: 00008712-49bd-bf98-c7b0-60ddf07c22e7 at: <128,124,26>) Script must be Reset to re-enable.\n"
+# debug-channel: from="Object" text="YEngine: llSetVehicleFloatParam is not implemented by this grid (script: Probe event: state_entry primID: 62d8e7ac-c34e-a9d3-c4a4-1d8adcd82040 at: <128,124,26>) Script must be Reset to re-enable.\n"
+# debug-channel by=other: from="Object" text="YEngine: llSetVehicleFloatParam is not implemented by this grid (script: Probe event: state_entry primID: 62d8e7ac-c34e-a9d3-c4a4-1d8adcd82040 at: <128,124,26>) Script must be Reset to re-enable.\n"

@@ -1,5 +1,5 @@
 grid: fake-opensim
-date: 2026-11-09
+date: 2026-11-10
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating YEngine
@@ -8,11 +8,11 @@ settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor
 PROBE http/url rec=start region="Fake Region" channel="OpenSim" version="sl-fake-grid 0.1.0"
 PROBE http/url rec=free when=before free=100
 PROBE http/url rec=asked kind=plain request=set
-PROBE http/url rec=granted kind=plain granted=1 id_matches=1 used=1 free=99 scheme=http port=37553 path="/lslhttp/1a70ebb1-bf53-4646-9738-6bcb1e1b0ac1/" host=address length=68
+PROBE http/url rec=granted kind=plain granted=1 id_matches=1 used=1 free=99 scheme=http port=40803 path="/lslhttp/0fc52f0c-4112-4d0b-ace3-214d8324853e/" host=address length=68
 PROBE http/url rec=asked kind=secure request=set
 PROBE http/url rec=granted kind=secure granted=0 id_matches=1 used=1 free=99 reason=""
 PROBE http/url rec=asked kind=third request=set
-PROBE http/url rec=granted kind=third granted=1 id_matches=1 used=2 free=98 scheme=http port=37553 path="/lslhttp/b0b54106-6659-460e-8c73-312a89411422/" host=address length=68
+PROBE http/url rec=granted kind=third granted=1 id_matches=1 used=2 free=98 scheme=http port=40803 path="/lslhttp/099701a7-98f5-4d7e-b6a3-078a7d8e96a4/" host=address length=68
 PROBE http/url rec=released kind=third used=1
 PROBE http/url rec=free when=later used=1
 PROBE http/url rec=waiting drive=fetch url=<url> method=GET path="/get/a?x=1&y=two%20words" header="X-Probe: one"

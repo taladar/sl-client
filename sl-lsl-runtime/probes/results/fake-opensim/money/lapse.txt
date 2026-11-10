@@ -1,5 +1,5 @@
 grid: fake-opensim
-date: 2026-11-09
+date: 2026-11-10
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating YEngine
@@ -26,8 +26,8 @@ PROBE money/lapse rec=waiting drive=answer grant=1046
 PROBE money/lapse rec=answer step=3 answer=1046
 PROBE money/lapse rec=waiting drive=revoke target=region perms=32784
 # revoke perms=32784 target=region
-PROBE money/lapse rec=held step=3 why=after perms=1030 granter=owner attached=0
 # question permissions=1046 object="Object" owner="<first> <last>" experience=none
+PROBE money/lapse rec=held step=3 why=after perms=1030 granter=owner attached=0
 PROBE money/lapse rec=waiting drive=answer grant=1046
 # answer grant=1046
 PROBE money/lapse rec=answer step=4 answer=1046
@@ -37,10 +37,10 @@ PROBE money/lapse rec=waiting drive=revoke perms=4294967295
 PROBE money/lapse rec=held step=4 why=after perms=0 granter=none attached=0
 PROBE money/lapse rec=waiting drive=answer grant=1046
 # answer grant=1046
+PROBE money/lapse rec=answer step=5 answer=1046
 # script-control-change action=release controls=1 pass_to_agent=0
 # script-control-change action=release controls=1 pass_to_agent=1
 # script-control-change action=take controls=1 pass_to_agent=1
-PROBE money/lapse rec=answer step=5 answer=1046
 PROBE money/lapse rec=held step=5 why=took perms=1046 granter=owner attached=0
 # question permissions=1046 object="Object" owner="<first> <last>" experience=none
 PROBE money/lapse rec=held step=5 why=after perms=1042 granter=owner attached=0
@@ -72,8 +72,8 @@ PROBE money/lapse rec=away step=6 poll=11 owner_gone=0 perms=1046 granter=owner
 PROBE money/lapse rec=held step=6 why=back perms=1046 granter=owner attached=0
 PROBE money/lapse rec=waiting drive=answer grant=1046
 # answer grant=1046
-PROBE money/lapse rec=answer step=7 answer=1046
 # question permissions=1046 object="Object" owner="<first> <last>" experience=none
+PROBE money/lapse rec=answer step=7 answer=1046
 PROBE money/lapse rec=held step=7 why=after-reset perms=0 granter=none attached=0
 PROBE money/lapse rec=waiting drive=answer grant=1046
 # answer grant=1046
@@ -97,8 +97,8 @@ PROBE money/lapse rec=waiting drive=answer grant=1046
 # answer grant=1046
 PROBE money/lapse rec=answer step=9 answer=1046
 PROBE money/lapse rec=held step=9 why=worn-asked perms=1046 granter=owner attached=5
-# question permissions=1046 object="Object" owner="<first> <last>" experience=none
 PROBE money/lapse rec=held step=9 why=after perms=1046 granter=owner attached=5
+# question permissions=1046 object="Object" owner="<first> <last>" experience=none
 PROBE money/lapse rec=waiting drive=answer grant=1046
 # answer grant=1046
 PROBE money/lapse rec=answer step=10 answer=1046

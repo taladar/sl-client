@@ -1,5 +1,5 @@
 grid: fake-opensim
-date: 2026-11-09
+date: 2026-11-10
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating YEngine
@@ -7,5 +7,5 @@ settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor
 
 PROBE time/get-time-frames rec=start region="Fake Region" channel="OpenSim" version="sl-fake-grid 0.1.0"
 PROBE time/get-time-frames rec=steps samples=224023 distinct=55 smallest=0.018000 largest=0.019000 first="0.018000, 0.018000, 0.019000, 0.018000, 0.018000, 0.018000, 0.018000, 0.018000, 0.019000, 0.018000"
-PROBE time/get-time-frames rec=clocks timestamp="2026-11-09T18:20:53.4800990Z" unix=1794248453 gmt=66053.480000 wall=66053.480000 time_of_day=8453.480000
+PROBE time/get-time-frames rec=clocks timestamp="2026-11-10T16:28:10.0776600Z" unix=1794328090 gmt=59290.080000 wall=59290.080000 time_of_day=1690.077000
 PROBE time/get-time-frames rec=end

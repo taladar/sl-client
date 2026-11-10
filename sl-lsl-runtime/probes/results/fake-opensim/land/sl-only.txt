@@ -1,12 +1,11 @@
 grid: fake-opensim
-date: 2026-11-09
+date: 2026-11-10
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: unknown (no start record)
 engine: sl-lsl-runtime imitating YEngine
 settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
 complete: no
 
-# chat type=say from="Object" length=14 text="Script running"
 # compile error in "Probe": "(39,15) Error: no function `llGetEnvironment`"
 # compile error in "Probe": "(59,22) Error: no function `llGetSimStats`"
 # compile error in "Probe": "(66,34) Error: no variable `ENVIRONMENT_DAYINFO` in scope here"

@@ -1,11 +1,10 @@
 grid: fake-opensim
-date: 2026-11-09
+date: 2026-11-10
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating YEngine
 settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
 
-# chat type=say from="Object" length=14 text="Script running"
 PROBE math/functions rec=start region="Fake Region" channel="OpenSim" version="sl-fake-grid 0.1.0"
 PROBE math/functions rec=round case=0.500000 value="1"
 PROBE math/functions rec=floor case=0.500000 value="0"
@@ -102,4 +101,3 @@ PROBE math/functions rec=frand case=minus-one draws=2000 below_zero=1 above_zero
 PROBE math/functions rec=frand case=zero draws=2000 below_zero=0 above_zero=0 zeros=2000 min=0.000000 max=0.000000
 PROBE math/functions rec=frand case=1e30 draws=2000 below_zero=0 above_zero=1 zeros=0 min=286102300000000000000000000.000000 max=999378200000000000000000000000.000000
 PROBE math/functions rec=end
-# chat by=other type=say from="Object" length=14 text="Script running"

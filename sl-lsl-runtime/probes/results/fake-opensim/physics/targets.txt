@@ -1,5 +1,5 @@
 grid: fake-opensim
-date: 2026-11-09
+date: 2026-11-10
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating YEngine
@@ -13,5 +13,5 @@ PROBE physics/targets rec=ranges ranges="0,-1" fired="0,1" not_at=0
 PROBE physics/targets rec=rot-handles after_position_target=2
 PROBE physics/targets rec=rot-targets steps="-1" fired="0" at=11 not_at=0 position_events=0 first_handle_is=0 ours_is_rot=1
 PROBE physics/targets rec=ten-rot-targets fired="2,3,4,5,6,7,8,9" not_at=0
-# debug-channel: from="Object" text="YEngine: llMoveToTarget is not implemented by this grid (script: Probe event: timer primID: 6a66c848-ee54-2ca5-c65b-d407746f0dbc at: <128,124,26>) Script must be Reset to re-enable.\n"
-# debug-channel by=other: from="Object" text="YEngine: llMoveToTarget is not implemented by this grid (script: Probe event: timer primID: 6a66c848-ee54-2ca5-c65b-d407746f0dbc at: <128,124,26>) Script must be Reset to re-enable.\n"
+# debug-channel: from="Object" text="YEngine: llMoveToTarget is not implemented by this grid (script: Probe event: timer primID: 18d3ca0e-16d8-ec1b-c8d8-6e5ed74b3b03 at: <128,124,26>) Script must be Reset to re-enable.\n"
+# debug-channel by=other: from="Object" text="YEngine: llMoveToTarget is not implemented by this grid (script: Probe event: timer primID: 18d3ca0e-16d8-ec1b-c8d8-6e5ed74b3b03 at: <128,124,26>) Script must be Reset to re-enable.\n"

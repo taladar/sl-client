@@ -1,11 +1,10 @@
 grid: fake-opensim
-date: 2026-11-09
+date: 2026-11-10
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating YEngine
 settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
 
-# chat type=say from="Object" length=14 text="Script running"
 # chat type=say from="Object" length=14 text="Script running"
 PROBE errors/bounds rec=start region="Fake Region" channel="OpenSim" version="sl-fake-grid 0.1.0"
 PROBE errors/bounds rec=case script="Bounds 1" case=list-read-past-end step=before
@@ -88,5 +87,4 @@ PROBE errors/bounds rec=answer script="Bounds 15"
 PROBE errors/bounds rec=answer script="Bounds 17"
 PROBE errors/bounds rec=answer script="Bounds 18"
 PROBE errors/bounds rec=end
-# chat by=other type=say from="Object" length=14 text="Script running"
 # chat by=other type=say from="Object" length=14 text="Script running"

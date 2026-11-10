@@ -1,5 +1,5 @@
 grid: fake-opensim
-date: 2026-11-09
+date: 2026-11-10
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating YEngine
@@ -7,8 +7,8 @@ settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor
 
 PROBE experience/powers rec=start region="Fake Region" channel="OpenSim" version="sl-fake-grid 0.1.0"
 PROBE experience/powers rec=teleport step=1 call=llTeleportAgent of=owner back=0 perms=0 granter=none
-PROBE experience/powers rec=after step=1 of=owner landed=0 moved=0 off=3.0 dz=0.0
 # question permissions=4096 object="Object" owner="<first> <last>" experience=none
+PROBE experience/powers rec=after step=1 of=owner landed=0 moved=0 off=3.0 dz=0.0
 PROBE experience/powers rec=waiting drive=answer grant=4096
 PROBE experience/powers rec=asked step=2 of=owner mask=4096
 # answer grant=4096
@@ -28,10 +28,10 @@ PROBE experience/powers rec=asked step=7 of=other mask=4096
 # answer by=other grant=4096
 PROBE experience/powers rec=held step=7 answer=4096 perms=4096 granter=other
 PROBE experience/powers rec=teleport step=8 call=llTeleportAgent of=other back=0 perms=4096 granter=other
+# question permissions=4128 object="Object" owner="<first> <last>" experience=none
 PROBE experience/powers rec=after step=8 of=other landed=0 moved=0 off=3.0 dz=0.0
 PROBE experience/powers rec=waiting drive=answer grant=4128
 PROBE experience/powers rec=asked step=9 of=owner mask=4128
-# question permissions=4128 object="Object" owner="<first> <last>" experience=none
 # answer grant=4128
 PROBE experience/powers rec=held step=9 answer=4128 perms=4128 granter=owner
 PROBE experience/powers rec=teleport step=10 call=llTeleportAgentGlobalCoords of=owner back=0 perms=4128 granter=owner

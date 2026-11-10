@@ -1810,6 +1810,53 @@ default {
     Ok(())
 }
 
+/// `inventory/listing`'s `start-helper`: a script reset while stopped is
+/// started after the starter's next line on every grid; only a script stopped
+/// in the middle of a body wakes inside the call. On OpenSim the reset makes
+/// it run `state_entry` again; on Second Life it carries on without one.
+#[test]
+fn a_script_reset_while_stopped_starts_after_the_starters_next_line() -> Result<(), String> {
+    let starter = r#"integer step;
+        default {
+            state_entry() { llSetTimerEvent(0.5); }
+            timer() {
+                ++step;
+                if (step == 1) llSetScriptState("Helper", FALSE);
+                else if (step == 2) llResetOtherScript("Helper");
+                else {
+                    llSetTimerEvent(0.0);
+                    llSetScriptState("Helper", TRUE);
+                    print("started");
+                }
+            }
+        }"#;
+    let helper = r#"default { state_entry() { print("entry"); } }"#;
+    for (flavour, heard) in [
+        (EngineFlavour::SecondLife, vec!["entry", "started"]),
+        (EngineFlavour::YEngine, vec!["entry", "started", "entry"]),
+        (EngineFlavour::XEngine, vec!["entry", "started", "entry"]),
+    ] {
+        let mut engine = engine_as(flavour);
+        let mut host = Recorder {
+            scripts: [("Starter", A), ("Helper", B)]
+                .into_iter()
+                .map(|(name, id)| (name.to_owned(), id))
+                .collect(),
+            ..Recorder::default()
+        };
+        let _none = engine.add(A, program_for(starter, flavour)?);
+        let _none = engine.add(B, program_for(helper, flavour)?);
+        let _reports = run(&mut engine, &mut host, 40);
+        let printed: Vec<&str> = host
+            .printed
+            .iter()
+            .map(|(_, _, text)| text.as_str())
+            .collect();
+        assert_eq!(printed, heard, "{flavour:?}");
+    }
+    Ok(())
+}
+
 #[test]
 fn get_script_state_reads_the_flag_a_fault_clears() -> Result<(), String> {
     let mut engine = engine();

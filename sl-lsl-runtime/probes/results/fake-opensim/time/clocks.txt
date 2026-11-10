@@ -1,12 +1,12 @@
 grid: fake-opensim
-date: 2026-11-09
+date: 2026-11-10
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating YEngine
 settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
 
 PROBE time/clocks rec=start region="Fake Region" channel="OpenSim" version="sl-fake-grid 0.1.0"
-PROBE time/clocks rec=formats timestamp="2026-11-09T18:20:43.7528260Z" length=28 fraction_digits=7 ends_z=1 date="2026-11-09" date_is_timestamps=1 unix=1794248443 unix_second_is_timestamps=1 gmt=66043.750000 gmt_whole=0 gmt_is_unix_of_day=1 wall=66043.750000 wall_whole=0 wall_behind_gmt_hours=0 time_of_day=8443.752000 time_of_day_under_4h=1
+PROBE time/clocks rec=formats timestamp="2026-11-10T16:28:00.3503880Z" length=28 fraction_digits=7 ends_z=1 date="2026-11-10" date_is_timestamps=1 unix=1794328080 unix_second_is_timestamps=1 gmt=59280.350000 gmt_whole=0 gmt_is_unix_of_day=1 wall=59280.350000 wall_whole=0 wall_behind_gmt_hours=0 time_of_day=1680.350000 time_of_day_under_4h=1
 PROBE time/clocks rec=get-and-reset reset_reads=0.000000 got=0.509000 then=0.000000 then_is_zero=1
 PROBE time/clocks rec=dilation script=5.000000 real=5.000000 ratio=1.000000 dilation=1.000000 fps=55.000000
 PROBE time/clocks rec=end

@@ -226,6 +226,11 @@ pub enum Outcome {
     /// the engine runs that script's turn before this one's next slice, which
     /// resumes after the call.
     Handed(CallerId),
+    /// A setter raised a `changed` in another script on OpenSim, and the
+    /// script stepped aside: the engine runs the turns of the scripts the
+    /// event reached before this one's next slice, which resumes after the
+    /// call.
+    Passed,
     /// The state changed to this one: `state_exit` of the old state has run,
     /// the event queue is empty, and `state_entry` of the new one is next.
     StateChanged(StateId),
@@ -475,6 +480,9 @@ enum Flow {
     Died,
     /// End the slice so the script started by the call runs first.
     Hand(CallerId),
+    /// End the slice so the other scripts a `changed` raised by the call
+    /// reached run it first.
+    Pass,
 }
 
 /// One script instance: a shared compiled program and everything that is this
@@ -1043,8 +1051,11 @@ impl Machine<'_> {
                     Some(Request::Reset) => Flow::Reset,
                     Some(Request::Die) => Flow::Died,
                     Some(Request::Sleep(seconds)) => Flow::Sleep(f64::from(seconds) + after),
-                    None | Some(Request::Hand(_)) if after > 0.0 => Flow::Sleep(after),
+                    None | Some(Request::Hand(_) | Request::Pass) if after > 0.0 => {
+                        Flow::Sleep(after)
+                    }
                     Some(Request::Hand(target)) => Flow::Hand(target),
+                    Some(Request::Pass) => Flow::Pass,
                     None => Flow::Next,
                 });
             }
@@ -1371,10 +1382,22 @@ impl Instance {
     /// Whether starting the script would let it run at `now` at once, in the
     /// middle of the body it was stopped in: it is stopped, not held, has a
     /// body in progress and no sleep left. XEngine drops the body at the
-    /// stop ([`Self::set_running_as`]), so it never has one there.
+    /// stop ([`Self::set_running_as`]), so it never has one there. A script
+    /// reset while stopped has only its fresh start waiting, which is no
+    /// body in progress: it runs after the starter's next line on both
+    /// grids (`inventory/listing`, `start-helper`).
     #[must_use]
     pub const fn resumes_when_started(&self, now: Tick) -> bool {
-        !self.running && !self.held && self.activity.is_some() && self.wake.0 <= now.0
+        !self.running
+            && !self.held
+            && matches!(
+                self.activity,
+                Some(Activity {
+                    phase: Phase::Event | Phase::Entry | Phase::Exit(_),
+                    ..
+                })
+            )
+            && self.wake.0 <= now.0
     }
 
     /// Reset the script as YEngine resets a running script another asks it
@@ -1926,6 +1949,7 @@ impl Instance {
                     Outcome::Sleeping(self.wake)
                 }
                 Ok(Flow::Hand(target)) => Outcome::Handed(target),
+                Ok(Flow::Pass) => Outcome::Passed,
                 Ok(Flow::Reset) => {
                     // A reset drops the library's state; what the call
                     // refused before it is still said, and what it changed

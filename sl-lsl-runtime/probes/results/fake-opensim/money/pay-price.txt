@@ -1,5 +1,5 @@
 grid: fake-opensim
-date: 2026-11-09
+date: 2026-11-10
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating YEngine
@@ -7,7 +7,7 @@ settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor
 
 PROBE money/pay-price rec=set prim=B price=9 buttons=1,2,3,4
 PROBE money/pay-price rec=mixed prim=C call=before
-# owner-say: from="Object" text="[YEngine]: Exception while running 947d63f9-2452-62ca-cf89-5e4be7c5348f"
+# owner-say: from="Object" text="[YEngine]: Exception while running e44a3ac5-d88b-28af-cbfa-8d1cfe99f53e"
 # owner-say: from="Object" text="InvalidCastException: Specified cast is not valid."
 # owner-say: from="Object" text="Prim: <Object>, Script: <Mixed>, Location: Fake Region <134,124,26>"
 # owner-say: from="Object" text="Script must be Reset to re-enable."

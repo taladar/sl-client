@@ -2551,10 +2551,14 @@ impl Host for RegionHost<'_> {
                 .map_or(0.0, |region| region.config.terrain.height_at(to.x, to.y));
             to.z = to.z.max(ground);
         }
+        // OpenSim's part raises its position change whether a child goes
+        // anywhere or not; a root that stays put raises nothing anywhere.
+        let child = origin.local_id != origin.root;
+        let raises_anyway = child && self.opensim();
         let Some(mut prim) = self.world.object_mut(origin.local_id) else {
             return;
         };
-        if prim.motion.position == to {
+        if prim.motion.position == to && !raises_anyway {
             return;
         }
         prim.motion.position = to.clone();

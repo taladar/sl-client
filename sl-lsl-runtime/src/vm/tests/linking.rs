@@ -350,3 +350,72 @@ fn a_delink_without_the_permission_is_refused() -> Result<(), String> {
     }
     Ok(())
 }
+
+/// A script that moves a child of its linkset (`prim/link`): on OpenSim the
+/// child's script hears each move as it lands, before the mover's next line
+/// (the part's setter raises `changed(32768)` and another engine thread runs
+/// it), and a move to where the child already is raises one too; Second Life
+/// raises nothing for a move.
+#[test]
+fn a_moved_child_prims_script_hears_each_move_as_it_lands() -> Result<(), String> {
+    let mover = "default {
+        state_entry() { llSetTimerEvent(0.5); }
+        timer() {
+            llSetTimerEvent(0.0);
+            print(\"before\");
+            llSetLinkPrimitiveParamsFast(2, [PRIM_POS_LOCAL, <2.0, 0.0, 0.0>]);
+            print(\"between\");
+            llSetLinkPrimitiveParamsFast(2, [PRIM_POS_LOCAL, <2.0, 0.0, 0.0>]);
+            print(\"after\");
+        }
+    }";
+    let child = "default {
+        changed(integer change) { print(\"changed \" + (string)change); }
+    }";
+    for (flavour, heard) in [
+        (
+            EngineFlavour::SecondLife,
+            vec!["before", "between", "after"],
+        ),
+        (
+            EngineFlavour::YEngine,
+            vec![
+                "before",
+                "changed 32768",
+                "between",
+                "changed 32768",
+                "after",
+            ],
+        ),
+        (
+            EngineFlavour::XEngine,
+            vec![
+                "before",
+                "changed 32768",
+                "between",
+                "changed 32768",
+                "after",
+            ],
+        ),
+    ] {
+        let mut host = Recorder {
+            linked: Some(three(1)),
+            prims: [(A, 1), (B, 2)].into_iter().collect(),
+            prim_keys: [(1, ROOT.to_owned()), (2, SECOND.to_owned())]
+                .into_iter()
+                .collect(),
+            ..Recorder::default()
+        };
+        let mut engine = engine_as(flavour);
+        let _none = engine.add(A, program_for(mover, flavour)?);
+        let _none = engine.add(B, program_for(child, flavour)?);
+        let _reports = run(&mut engine, &mut host, 40);
+        let printed: Vec<&str> = host
+            .printed
+            .iter()
+            .map(|(_, _, text)| text.as_str())
+            .collect();
+        assert_eq!(printed, heard, "{flavour:?}");
+    }
+    Ok(())
+}

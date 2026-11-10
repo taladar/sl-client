@@ -1,10 +1,11 @@
 grid: fake-opensim
-date: 2026-11-09
+date: 2026-11-10
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating YEngine
 settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
 
+# chat type=say from="Object" length=14 text="Script running"
 PROBE strings/unicode rec=start region="Fake Region" channel="OpenSim" version="sl-fake-grid 0.1.0"
 PROBE strings/unicode rec=char case="65" value="A length=1 back=65"
 PROBE strings/unicode rec=char case="233" value="%C3%A9 length=1 back=233"
@@ -30,3 +31,4 @@ PROBE strings/unicode rec=hash case="%C3%A9" value="233"
 PROBE strings/unicode rec=hash case="%F0%9F%98%80" value="128512"
 PROBE strings/unicode rec=hash case="The%20quick%20brown%20fox" value="-1927828445"
 PROBE strings/unicode rec=end
+# chat by=other type=say from="Object" length=14 text="Script running"
