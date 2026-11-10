@@ -1972,6 +1972,7 @@ impl ImitatedGrid {
                     break_link: BreakLinkHeard::TheWholeSet,
                     root_hears_each_child: false,
                     break_all_links_stands_sitters: true,
+                    refused_link: RefusedLinkHeard::TheCaller,
                 },
             },
             Self::OpenSim => LinkPolicy {
@@ -1988,6 +1989,7 @@ impl ImitatedGrid {
                     break_link: BreakLinkHeard::TheChildAlone,
                     root_hears_each_child: true,
                     break_all_links_stands_sitters: false,
+                    refused_link: RefusedLinkHeard::Nobody,
                 },
             },
         }
@@ -3434,6 +3436,22 @@ pub struct LinkEvents {
     /// the set first, as Second Life does; OpenSim's `BreakAllLinks` leaves
     /// them sitting on the root.
     pub break_all_links_stands_sitters: bool,
+    /// Who hears a script's `llCreateLink` the grid refused as too far.
+    pub refused_link: RefusedLinkHeard,
+}
+
+/// Who hears a script's `llCreateLink` refused as too far
+/// ([`LinkEvents::refused_link`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RefusedLinkHeard {
+    /// Nobody: OpenSim, which refuses no link as too far.
+    Nobody,
+    /// The calling prim's scripts, as `changed(CHANGED_LINK)`, though nothing
+    /// was linked: Second Life, in both runs of `prim/link-refusals` on aditi
+    /// (2026-11-03 and 2026-11-09), where a refused and then a granted link
+    /// in one event raised it twice in the caller and a lone granted link in
+    /// `prim/link` once.
+    TheCaller,
 }
 
 /// Who hears a script's `llBreakLink` of a child ([`LinkEvents::break_link`]).

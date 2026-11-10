@@ -251,6 +251,33 @@ pub struct RegionScripts {
     http: http::RegionHttp,
     /// What scripts hold of the region's avatars ([`avatars::RegionAvatars`]).
     avatars: avatars::RegionAvatars,
+    /// While the engine is lent to a tick, the calls into it that a change
+    /// made under the tick asked for, in order, to be made once it is back;
+    /// [`None`] while it is in place.
+    deferred: Option<Vec<EngineCall>>,
+}
+
+/// A call into the region's engine that a change made while the engine was
+/// lent to a tick asked for: made once the tick is over, in order with the
+/// tick's other effects.
+#[derive(Debug, Clone)]
+enum EngineCall {
+    /// `changed(bits)` in the script.
+    Changed {
+        /// The script.
+        id: CallerId,
+        /// The bits.
+        bits: i32,
+    },
+    /// `bits` of what `granter` granted the script lapse.
+    Revoke {
+        /// The script.
+        id: CallerId,
+        /// The granting agent's key.
+        granter: String,
+        /// The bits.
+        bits: i32,
+    },
 }
 
 /// A script arriving in the region with the object it is in.
@@ -324,6 +351,40 @@ impl RegionScripts {
             epoch_micros: None,
             http: http::RegionHttp::default(),
             avatars: avatars::RegionAvatars::default(),
+            deferred: None,
+        }
+    }
+
+    /// Raises `changed(bits)` in the script, or, while the engine is lent to
+    /// a tick, notes it to be raised once the tick is over.
+    fn raise_changed_or_defer(&mut self, id: CallerId, bits: i32) {
+        if let Some(deferred) = &mut self.deferred {
+            deferred.push(EngineCall::Changed { id, bits });
+        } else if let Err(error) = self.engine.changed(id, bits) {
+            tracing::warn!(?id, %error, "raising changed failed");
+        }
+    }
+
+    /// Lets `bits` of what `granter` granted the script lapse, or, while the
+    /// engine is lent to a tick, notes it to be done once the tick is over.
+    fn revoke_or_defer(&mut self, id: CallerId, granter: &str, bits: i32) {
+        if let Some(deferred) = &mut self.deferred {
+            deferred.push(EngineCall::Revoke {
+                id,
+                granter: granter.to_owned(),
+                bits,
+            });
+        } else {
+            self.engine.revoke(id, granter, bits);
+        }
+    }
+
+    /// Makes a call a change under a tick deferred, the engine back in
+    /// place.
+    fn make(&mut self, call: EngineCall) {
+        match call {
+            EngineCall::Changed { id, bits } => self.raise_changed_or_defer(id, bits),
+            EngineCall::Revoke { id, granter, bits } => self.revoke_or_defer(id, &granter, bits),
         }
     }
 
@@ -1009,19 +1070,6 @@ enum Effect {
     Say(Line),
     /// The linkset whose root is this prim leaves the region (`llDie`).
     Die(RegionLocalObjectId),
-    /// The set `second` is in is linked under the set `first` is in
-    /// (`llCreateLink`).
-    Link {
-        /// A prim of the set that is to be the root.
-        first: RegionLocalObjectId,
-        /// A prim of the set that is to join it.
-        second: RegionLocalObjectId,
-    },
-    /// The prim leaves its set (`llBreakLink`).
-    BreakLink(RegionLocalObjectId),
-    /// Every prim of the set whose root is this prim leaves it
-    /// (`llBreakAllLinks`).
-    BreakAllLinks(RegionLocalObjectId),
     /// The prim lets anybody drop an item in, or stops letting them
     /// (`llAllowInventoryDrop`).
     AllowDrop {
@@ -1089,6 +1137,12 @@ enum Effect {
         /// The experience.
         experience: ExperienceKey,
     },
+    /// A call into the engine a change made under the tick asked for
+    /// ([`RegionScripts::deferred`]).
+    Engine(EngineCall),
+    /// What the region's sessions are to be told of a change made under the
+    /// tick, already in the store.
+    Tell(Vec<RegionChange>),
 }
 
 /// What a tick's scripts send to a viewer, delivered once the region's lock
@@ -1269,6 +1323,26 @@ struct Origin {
     reason = "the host's methods are split by library tranche across the `scripts` modules"
 )]
 impl RegionHost<'_> {
+    /// Makes a change to the region as the script's call makes it, so a read
+    /// later in the tick sees it, as on both live grids (`prim/link`): the
+    /// calls into the engine it asks for, and what the region's sessions are
+    /// told of it, wait for the tick to be over, in order with its other
+    /// effects.
+    fn change_now(&mut self, change: impl FnOnce(&mut SceneFixtures) -> Vec<RegionChange>) {
+        let told = change(self.world);
+        let calls = self
+            .world
+            .script_instances
+            .deferred
+            .as_mut()
+            .map(core::mem::take)
+            .unwrap_or_default();
+        self.effects.extend(calls.into_iter().map(Effect::Engine));
+        if !told.is_empty() {
+            self.effects.push(Effect::Tell(told));
+        }
+    }
+
     /// The prim's owner pays `payment` out of the grid's ledger
     /// ([`crate::money::pay_from_object`]): both sides told when it moved, the
     /// owner told of a refusal. Where the grid keeps no balances nothing moves
@@ -2011,7 +2085,9 @@ impl Host for RegionHost<'_> {
         } else {
             (other, origin.local_id)
         };
-        self.effects.push(Effect::Link { first, second });
+        self.change_now(|world| {
+            crate::link_sets::script_link(world, origin.local_id, first, second)
+        });
         Ok(())
     }
 
@@ -2028,7 +2104,7 @@ impl Host for RegionHost<'_> {
         else {
             return;
         };
-        self.effects.push(Effect::BreakLink(local_id));
+        self.change_now(|world| crate::link_sets::script_break_link(world, local_id));
     }
 
     fn break_all_links(&mut self, caller: CallerId) {
@@ -2036,7 +2112,7 @@ impl Host for RegionHost<'_> {
             return;
         };
         if self.world.objects.attached_to(origin.root).is_none() {
-            self.effects.push(Effect::BreakAllLinks(origin.root));
+            self.change_now(|world| crate::link_sets::script_break_all_links(world, origin.root));
         }
     }
 
@@ -3161,6 +3237,7 @@ fn tick_locked(
             .collect()
     };
     let mut engine = core::mem::replace(&mut world.script_instances.engine, Engine::new(config));
+    world.script_instances.deferred = Some(Vec::new());
     let mut host = RegionHost {
         core,
         index,
@@ -3177,6 +3254,11 @@ fn tick_locked(
     let deliveries = core::mem::take(&mut host.deliveries);
     drop(host);
     world.script_instances.engine = engine;
+    // A call no effect carries was asked for outside a change the host made
+    // as a script's call: it is made first.
+    for call in world.script_instances.deferred.take().unwrap_or_default() {
+        world.script_instances.make(call);
+    }
     world.script_instances.last_load = (report.runnable, report.served);
     http::hand_out(core, index, &mut world.script_instances);
     tell_rezzers(world);
@@ -3186,15 +3268,8 @@ fn tick_locked(
             Effect::Changed { prim, bits } => raise_changed_in(world, &[prim], bits),
             Effect::Say(avatars) => changes.push(world.say_to_avatars(avatars)),
             Effect::Die(root) => changes.extend(remove_linkset(world, root)),
-            Effect::Link { first, second } => {
-                changes.extend(crate::link_sets::script_link(world, first, second));
-            }
-            Effect::BreakLink(prim) => {
-                changes.extend(crate::link_sets::script_break_link(world, prim));
-            }
-            Effect::BreakAllLinks(root) => {
-                changes.extend(crate::link_sets::script_break_all_links(world, root));
-            }
+            Effect::Engine(call) => world.script_instances.make(call),
+            Effect::Tell(told) => changes.extend(told),
             Effect::AllowDrop { prim, allow } => {
                 if let Some(mut object) = world.object_mut(prim) {
                     let flags = object.update_flags;
@@ -3375,9 +3450,7 @@ pub(crate) fn linkset_scripts(world: &SceneFixtures, root: RegionLocalObjectId) 
 /// `root` — what concerns the whole object, as an avatar sitting on it does.
 pub(crate) fn raise_changed(world: &mut SceneFixtures, root: RegionLocalObjectId, bits: i32) {
     for id in linkset_scripts(world, root) {
-        if let Err(error) = world.script_instances.engine.changed(id, bits) {
-            tracing::warn!(?id, %error, "raising changed failed");
-        }
+        world.script_instances.raise_changed_or_defer(id, bits);
     }
 }
 
@@ -3394,9 +3467,7 @@ pub(crate) fn raise_changed_in(
             continue;
         };
         for id in world.script_instances.scripts_in(key) {
-            if let Err(error) = world.script_instances.engine.changed(id, bits) {
-                tracing::warn!(?id, %error, "raising changed failed");
-            }
+            world.script_instances.raise_changed_or_defer(id, bits);
         }
     }
 }
@@ -3412,7 +3483,7 @@ pub(crate) fn lapse(
 ) {
     let granter = agent.uuid().to_string();
     for id in linkset_scripts(world, root) {
-        world.script_instances.engine.revoke(id, &granter, bits);
+        world.script_instances.revoke_or_defer(id, &granter, bits);
     }
 }
 

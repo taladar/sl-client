@@ -30,8 +30,16 @@ use crate::vm::report::{Speech, Warning};
 pub enum Raised {
     /// `linkset_data`, in every script of the linkset.
     Linkset(LinksetChange),
-    /// `link_message`, in every script the message reaches.
-    Linked(LinkMessage),
+    /// `link_message`, in every script the message reached when it was sent.
+    Linked {
+        /// The message.
+        message: LinkMessage,
+        /// The sender's link number when it was sent.
+        sender: i32,
+        /// The scripts it reached then
+        /// ([`Links::reached`](crate::vm::Links::reached)).
+        reached: Vec<CallerId>,
+    },
     /// `run_time_permissions(mask)` in the calling script: a grant made
     /// without a question, or OpenSim's release and refusal.
     Permissions(i32),
@@ -897,11 +905,20 @@ impl<'host> ScriptCtx<'host> {
             .clone()
     }
 
-    /// Send a link message; the engine delivers it to every script `message`
-    /// reaches once the slice is over — the sender too, unless the slice ends
-    /// in a reset, which empties its queue.
+    /// Send a link message; the engine delivers it once the slice is over to
+    /// every script `message` reaches now — the sender too, unless the slice
+    /// ends in a reset, which empties its queue. Who it reaches is read at
+    /// the call, so a link change later in the same event does not change it
+    /// (`prim/link`: a child's message to the root, then its
+    /// `llBreakAllLinks`, reaches the root on both grids).
     pub fn send_linked(&mut self, message: LinkMessage) {
-        self.data.raised.push(Raised::Linked(message));
+        let flavour = self.flavour();
+        let links = self.host.links(self.caller);
+        self.data.raised.push(Raised::Linked {
+            reached: links.reached(message.target, flavour),
+            sender: links.this,
+            message,
+        });
     }
 
     /// What the script holds of an avatar's permissions.

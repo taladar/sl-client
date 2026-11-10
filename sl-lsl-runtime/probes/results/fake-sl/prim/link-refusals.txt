@@ -16,6 +16,7 @@ PROBE prim/link-refusals rec=links label=after-too-far prims=1 link=0 seated=0 k
 PROBE prim/link-refusals rec=try label=link
 PROBE prim/link-refusals rec=child-changed bits=LINK link=2 prims=2
 PROBE prim/link-refusals rec=changed bits=LINK link=1 prims=2 seated=0
+PROBE prim/link-refusals rec=changed bits=LINK link=1 prims=2 seated=0
 PROBE prim/link-refusals rec=links label=linked prims=2 link=1 seated=0 key1=self key2=child key3=null key4=null
 PROBE prim/link-refusals rec=try label=break-2-unpermitted
 PROBE prim/link-refusals rec=try label=break-1-unpermitted
@@ -52,9 +53,9 @@ PROBE prim/link-refusals rec=try label=break-sitter link=3
 PROBE prim/link-refusals rec=links label=after-break-sitter prims=3 link=1 seated=1 key1=self key2=child key3=avatar key4=null
 PROBE prim/link-refusals rec=links label=before-break-all-seated prims=3 link=1 seated=1 key1=self key2=child key3=avatar key4=null
 PROBE prim/link-refusals rec=try label=break-all-seated
-# animations avatar=other playing="falldown@other-object"
 PROBE prim/link-refusals rec=child-changed bits=LINK link=0 prims=1
 PROBE prim/link-refusals rec=changed bits=LINK link=0 prims=1 seated=0
+# animations avatar=other playing="falldown@other-object"
 # animations avatar=other playing="land@other-object"
 # animations avatar=other playing="stand@other-object"
 PROBE prim/link-refusals rec=links label=after-break-all-seated prims=1 link=0 seated=0 key1=null key2=null key3=null key4=null

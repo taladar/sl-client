@@ -2156,6 +2156,7 @@ granted `PERMISSION_CHANGE_LINKS`; each step is a second and a half apart.
 | `llBreakLink(3)` | nothing | the same | the same |
 | `llCreateLink(…, FALSE)` | the target becomes the root, this script's prim link 2 | the same | the same |
 | `llBreakAllLinks` from a child | unlinks every prim | the same | the same |
+| a link change, then another script's read in the same frame | reads the new linkset: a child's `llMessageLinked(LINK_ROOT, …)` and then `llBreakAllLinks` reaches the root, whose handler reads itself unlinked | the same | the same: the change is made as the call returns, and a link message reaches whom it named when sent |
 
 `prim/link-refusals`: prim A holds the Leader, which is granted
 `PERMISSION_CHANGE_LINKS`, and a second script that holds no permission;
@@ -2164,7 +2165,7 @@ sits on prim A, no sit target set.
 
 | what | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
-| `llCreateLink` of a prim 70 m away | nothing, silently: no link, no `changed` in the far prim | **links** it: no distance limit | each flavour as its grid |
+| `llCreateLink` of a prim 70 m away | nothing, silently: no link, no `changed` in the far prim, but **`CHANGED_LINK` in the calling prim** (two runs, 2026-11-03 and 2026-11-09: refused then granted in one event, the caller heard it twice; one granted link alone in `prim/link`, once) | **links** it: no distance limit | each flavour as its grid |
 | `llBreakLink(2)`, `llBreakLink(1)` with no permission | `Script trying to break links but PERMISSION_CHANGE_LINKS permission not set!` | `llBreakLink: PERMISSION_CHANGE_LINKS permission not set` | each flavour as its grid |
 | `llBreakAllLinks` with no permission | the same words as `llBreakLink`'s | `llBreakAllLinks: Script trying to link but PERMISSION_CHANGE_LINKS permission not set!` | each flavour as its grid |
 | `llBreakLink(2)` with an avatar sitting on the root | the avatar is **stood up**, the child unlinked | the same | the same |

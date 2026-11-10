@@ -5,12 +5,10 @@ region: Fake Region
 engine: sl-lsl-runtime imitating YEngine
 settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
 
-# chat type=say from="Object" length=14 text="Script running"
 PROBE prim/link-refusals rec=start region="Fake Region" channel="OpenSim" version="sl-fake-grid 0.1.0"
-# question permissions=128 object="Object" owner="<first> <last>" experience=none
 PROBE prim/link-refusals rec=found
+# question permissions=128 object="Object" owner="<first> <last>" experience=none
 PROBE prim/link-refusals rec=waiting drive=answer grant=128
-# chat by=other type=say from="Object" length=14 text="Script running"
 # answer grant=128
 PROBE prim/link-refusals rec=permissions got=128
 PROBE prim/link-refusals rec=try label=link-too-far

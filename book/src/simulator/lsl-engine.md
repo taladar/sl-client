@@ -1225,7 +1225,14 @@ is.
   one prim's scripts, a linkset removed — and what goes to one viewer (a
   dialog, a permission question, a page, a map destination, a directed
   line, an instant message) is sent once the lock is released, the crate's
-  session-then-region lock order. The region's own changes go out on its
+  session-then-region lock order. A link or delink (`llCreateLink`,
+  `llBreakLink`, `llBreakAllLinks`) is the exception: it changes the store
+  as the script calls it, so a script that runs later in the tick reads the
+  new linkset, as on both live grids (`prim/link`). The `changed` events and
+  permission lapses it brings, which need the engine, are noted while the
+  engine is lent out and raised after the tick in order with the other
+  effects, as is what the region's sessions are told of it. The region's
+  own changes go out on its
   change stream with the source `REGION_SOURCE`, which no session's watcher
   takes for its own.
 - **Lines.** Every line said in the region — an avatar's, a dialog reply (a

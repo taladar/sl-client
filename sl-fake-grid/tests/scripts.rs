@@ -1964,8 +1964,9 @@ default
     /// What the root's script does: on channel 7, `report` says its link
     /// number, the prim count and the names in link order and pings the other
     /// prims; `ask` asks the owner for `PERMISSION_CHANGE_LINKS`; `break 2`,
-    /// `break all` and `link B` link and delink; and every `CHANGED_LINK`
-    /// is reported.
+    /// `break all` and `link B` link and delink — `break all` asking the
+    /// other prims to count the set first, in the same event, as `prim/link`
+    /// step 7 does; and every `CHANGED_LINK` is reported.
     fn leader_source() -> String {
         format!(
             "report(string label)
@@ -2011,6 +2012,7 @@ default
         }}
         else if (message == \"break all\")
         {{
+            llMessageLinked(LINK_ALL_OTHERS, 0, \"count\", \"\");
             llBreakAllLinks();
         }}
         else if (message == \"link B\")
@@ -2037,13 +2039,22 @@ default
         )
     }
 
-    /// What each child's script does: says whom a link message came from,
-    /// and its link number and the prim count at every `CHANGED_LINK`.
+    /// What each child's script does: says whom a link message came from, or
+    /// for `count` its link number and the prim count, and its link number
+    /// and the prim count at every `CHANGED_LINK`.
     const FOLLOWER_SOURCE: &str = "default
 {
     link_message(integer sender, integer number, string message, key id)
     {
-        llShout(0, \"pinged \" + llGetObjectName() + \" by \" + (string)sender);
+        if (message == \"count\")
+        {
+            llShout(0, \"counted \" + llGetObjectName() + \" \" + (string)llGetLinkNumber() + \"/\"
+                + (string)llGetNumberOfPrims());
+        }
+        else
+        {
+            llShout(0, \"pinged \" + llGetObjectName() + \" by \" + (string)sender);
+        }
     }
 
     changed(integer change)
@@ -2190,9 +2201,18 @@ default
         let told = ["changed 1/3: A B C", "child B 2/3", "child C 3/3"];
         assert_eq!(relinked, lines(&told), "llCreateLink");
 
-        // OpenSim's root hears it once for each child it let go.
+        // OpenSim's root hears it once for each child it let go. The
+        // children count the set after the break, though the root asked them
+        // to before it and they run in the same tick: a script's link change
+        // is in as the call returns, on both grids (`prim/link`).
         let all = step(&mut scene, "break all", 3).await?;
-        let mut told = vec!["changed 0/1: A", "child B 0/1", "child C 0/1"];
+        let mut told = vec![
+            "changed 0/1: A",
+            "child B 0/1",
+            "child C 0/1",
+            "counted B 0/1",
+            "counted C 0/1",
+        ];
         if opensim {
             told.push("changed 0/1: A");
         }

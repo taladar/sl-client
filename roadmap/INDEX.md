@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 334 |
 | blocked | 39 |
 | in-progress | 7 |
-| bugs | 42 |
-| done | 1531 |
+| bugs | 41 |
+| done | 1532 |
 | deferred | 30 |
 | wont-do | 24 |
 | **total** | **2132** |
@@ -1270,7 +1270,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-text-renderability-axis`](in-progress/viewer-ui-text-renderability-axis.md)
   — Upstream issue — font selection cannot see glyph-format renderability
 
-## bugs (42)
+## bugs (41)
 
 ### protocol
 
@@ -1364,8 +1364,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`server-fake-grid-worn-departure-change`](bugs/server-fake-grid-worn-departure-change.md)
   — Fake OpenSim runs a worn script's departing changed(32768) after it arrives
-- [`server-lsl-link-applies-after-tick`](bugs/server-lsl-link-applies-after-tick.md)
-  — A script's link or delink applies only after the tick
 - [`server-lsl-mono-collision-model-under-lowered-limit`](bugs/server-lsl-mono-collision-model-under-lowered-limit.md)
   — A script 1 KB over its use collides in the runtime where Mono carries on
 - [`server-lsl-opensim-child-move-change-late`](bugs/server-lsl-opensim-child-move-change-late.md)
@@ -1378,7 +1376,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-lsl-scripted-teleport-unmodelled`](bugs/server-lsl-scripted-teleport-unmodelled.md)
   — The fake grid ignores llTeleportAgent and llTeleportAgentGlobalCoords
 
-## done (1531)
+## done (1532)
 
 ### protocol
 
@@ -4584,6 +4582,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — The vendored library document lacks 50 current functions
 - [`server-lsl-library-unserved-functions`](done/server-lsl-library-unserved-functions.md)
   — Five functions no served LSLSyntax document lists
+- [`server-lsl-link-applies-after-tick`](done/server-lsl-link-applies-after-tick.md)
+  — A script's link or delink applies only after the tick
 - [`server-lsl-luau-compiler`](done/server-lsl-luau-compiler.md) — Compile the
   Luau target as Second Life does
 - [`server-lsl-media-changed-before-timer`](done/server-lsl-media-changed-before-timer.md)

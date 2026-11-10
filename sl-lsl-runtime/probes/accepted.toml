@@ -1459,14 +1459,6 @@ fields = { code = "5" }
 field = "got"
 reason = "OpenSim puts a prim's OBJECT_VELOCITY in the list as a bare OpenMetaverse Vector3 (LSL_Api.llGetObjectDetails: ret.Add(vel)), a value of no LSL type that llGetListEntryType cannot name and that casts as <0, 0, 0>; the runtime's lists hold LSL values only"
 
-[[difference]]
-probe = "prim/link"
-between = ["opensim-yengine", "fake-opensim"]
-record = "child"
-fields = { label = "as-child" }
-reason = "The fake grid applies a script's llBreakAllLinks once the tick is over, so the other prim's script, which handles the link message in the same tick, still reads the set as linked"
-task = "server-lsl-link-applies-after-tick"
-
 # Two prims' changed events in one frame: whose handler runs first is
 # scheduling; the local OpenSim ran them in either order in different probes.
 
@@ -1656,21 +1648,6 @@ between = ["opensim-yengine", "fake-opensim"]
 record = "changed"
 fields = { bits = "LINK", link = "1", prims = "3", seated = "1" }
 reason = "The sit raises changed in prim A and the far prim in the same frame, and which prints first is scheduling"
-
-[[difference]]
-probe = "prim/link-refusals"
-between = ["aditi", "fake-sl"]
-record = "changed"
-fields = { bits = "LINK", link = "1", prims = "3", seated = "1" }
-reason = "The sit raises changed in prim A and its child in the same frame, and which prints first is scheduling"
-
-[[difference]]
-probe = "prim/link-refusals"
-between = ["aditi", "fake-sl"]
-record = "changed"
-fields = { bits = "LINK", link = "1", prims = "2", seated = "0" }
-reason = "aditi raised CHANGED_LINK twice in the leader for a refused link followed by a granted one in the same event (one sample); the fake grid raises it once, for the granted link"
-task = "server-lsl-link-applies-after-tick"
 
 # Fixture differences.
 

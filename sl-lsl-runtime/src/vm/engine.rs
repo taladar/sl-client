@@ -1123,7 +1123,7 @@ impl Engine {
     /// Post what `slice` of the instance `id` raised, in the order of its
     /// calls: `linkset_data` for each change of the linkset's store in every
     /// script of the linkset, `link_message(sender, num, text, id)` for
-    /// each link message in every script it reaches
+    /// each link message in every script it reached when it was sent
     /// ([`Links::reached`](crate::vm::Links::reached)), OpenSim's in-call
     /// `changed` in every script of the changed prim and its in-call sweep's
     /// `sensor` or `no_sensor`, and its own `run_time_permissions` and
@@ -1140,7 +1140,6 @@ impl Engine {
         let arrival = self.arrival();
         let flavour = self.config.flavour;
         let linkset = host.linkset(id);
-        let links = host.links(id);
         for raised in &slice.raised {
             let (event, args, reached) = match raised {
                 Raised::Control { target, control } => {
@@ -1214,15 +1213,19 @@ impl Engine {
                         )
                         .collect::<Vec<_>>(),
                 ),
-                Raised::Linked(message) => (
+                Raised::Linked {
+                    message,
+                    sender,
+                    reached,
+                } => (
                     lifecycle("link_message"),
                     vec![
-                        Value::Integer(links.this),
+                        Value::Integer(*sender),
                         Value::Integer(message.num),
                         Value::String(message.text.clone()),
                         Value::Key(message.id.clone()),
                     ],
-                    links.reached(message.target, flavour),
+                    reached.clone(),
                 ),
                 Raised::Permissions(mask) => (
                     lifecycle("run_time_permissions"),
@@ -1305,7 +1308,7 @@ impl Engine {
             // asked another object for, the Watcher's link message before
             // the fill's writes).
             let to_self = match (raised, flavour) {
-                (Raised::Linked(_), EngineFlavour::SecondLife) => {
+                (Raised::Linked { .. }, EngineFlavour::SecondLife) => {
                     arrival.ready_after(SECOND_LIFE_LINK_TICKS)
                 }
                 (Raised::Changed { .. }, EngineFlavour::SecondLife) => {

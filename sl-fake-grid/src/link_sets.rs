@@ -39,7 +39,9 @@ use sl_lsl_runtime::vm::seating::CHANGED_LINK;
 use sl_proto::RegionLocalObjectId;
 use sl_types::lsl::{Rotation, Vector};
 
-use crate::imitates::{BreakLinkHeard, LinkPolicy, Newcomers, NoBuildAlert, Promoted, SentOrder};
+use crate::imitates::{
+    BreakLinkHeard, LinkPolicy, Newcomers, NoBuildAlert, Promoted, RefusedLinkHeard, SentOrder,
+};
 use crate::object_edits::{into_frame, out_of_frame};
 use crate::world::{RegionChange, SceneFixtures};
 
@@ -562,15 +564,18 @@ fn updated_sets(world: &SceneFixtures, roots: &[RegionLocalObjectId]) -> Vec<Reg
         .collect()
 }
 
-/// `llCreateLink`, once the tick is over: links the set `first` is in and
+/// `llCreateLink`, as the script calls it: links the set `first` is in and
 /// the set `second` is in under the set of `first`, as a viewer's link of the
 /// two would but for the numbering — the joined prims come right after the
 /// root on both grids, where OpenSim's viewer link puts them at the end
 /// (`LinkToGroup(child, true)`, `prim/link-refusals`) — and tells their
 /// scripts. A link the grid refuses (too far, too many) leaves both as they
-/// were.
+/// were; one refused as too far is still heard in `caller`, the prim whose
+/// script called it, where the grid says so
+/// ([`RefusedLinkHeard`]).
 pub(crate) fn script_link(
     world: &mut SceneFixtures,
+    caller: RegionLocalObjectId,
     first: RegionLocalObjectId,
     second: RegionLocalObjectId,
 ) -> Vec<RegionChange> {
@@ -584,12 +589,17 @@ pub(crate) fn script_link(
             // Second Life refuses a script's link too far without a word to
             // the script (`prim/link-refusals`); the region notes it.
             tracing::info!(?refusal, ?first, ?second, "a script's link was refused");
+            if matches!(refusal, LinkRefusal::TooFar { .. })
+                && world.linking.events.refused_link == RefusedLinkHeard::TheCaller
+            {
+                crate::scripts::raise_changed_in(world, &[caller], CHANGED_LINK);
+            }
             Vec::new()
         }
     }
 }
 
-/// `llBreakLink`, once the tick is over: takes `prim` out of its set as a
+/// `llBreakLink`, as the script calls it: takes `prim` out of its set as a
 /// viewer's delink of it would — a root delinked alone leaves the rest under
 /// the prim the grid promotes — and tells the scripts who hear it
 /// ([`LinkEvents`](crate::imitates::LinkEvents)). Whoever sits on the set is
@@ -619,7 +629,7 @@ pub(crate) fn script_break_link(
     changes
 }
 
-/// `llBreakAllLinks`, once the tick is over: sets every prim of the set
+/// `llBreakAllLinks`, as the script calls it: sets every prim of the set
 /// `root` is the root of free, and tells their scripts — on OpenSim the root
 /// once for each child it let go. On Second Life whoever sits on the set is
 /// stood up first; OpenSim leaves them sitting on the root.
@@ -827,8 +837,8 @@ mod test {
     #[test]
     fn opensims_script_link_numbers_the_newcomer_second() {
         let mut world = world(ImitatedGrid::OpenSim);
-        let _changes = super::script_link(&mut world, A, C);
-        let _changes = super::script_link(&mut world, A, B);
+        let _changes = super::script_link(&mut world, A, A, C);
+        let _changes = super::script_link(&mut world, A, A, B);
         assert_eq!(numbers(&world, A), vec![A, B, C]);
     }
 
