@@ -1359,9 +1359,15 @@ is.
   set stands as. A script that took controls hears, before each tick, the keys
   its avatar's viewer holds (`Engine::controls`), and its viewer is sent the
   flavour's `ScriptControlChange`s; the follow camera goes out as
-  `SetFollowCamProperties` naming the script's prim. Scripted teleports and
-  object animations are not modelled yet: the call does nothing and the fake
-  grid's log says so.
+  `SetFollowCamProperties` naming the script's prim. A scripted teleport is
+  handed to the grid's teleport machinery after the tick, on a task of its
+  own (`sl_fake_grid::teleport::scripted`), and runs as the client's own
+  teleport of its kind: a place in the region or at global coordinates as a
+  location (Second Life flags the second `VIA_GLOBAL_COORDS`), a landmark by
+  landmark, home as home. On Second Life's flavour the first teleport after a
+  grant alerts the avatar with the object, its parcel and its owner. Object
+  animations are not modelled yet: the call does nothing and the fake grid's
+  log says so.
 - **HTTP** (`sl_fake_grid::script_http`, `sl_fake_grid::scripts::http`,
   `server-lsl-lib-http-url`). A URL is granted on the grid's own HTTP service
   in its flavour's form; a request to it — from outside, or from any script

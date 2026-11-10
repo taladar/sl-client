@@ -45,6 +45,11 @@ const NO_CONTROLS_PERMISSION: &str =
 /// Second Life's complaint for `llSetCameraParams` without its permission.
 const NO_CAMERA_PERMISSION: &str =
     "Script trying to set camera parameters but PERMISSION_CONTROL_CAMERA permission not set!";
+/// Second Life's complaint for a teleport by a script that holds no
+/// `PERMISSION_TELEPORT` (`experience/powers`).
+const NO_TELEPORT_PERMISSION: &str = "Script trying to teleport agent without current permission!";
+/// `AGENT_SITTING`: OpenSim teleports no seated avatar.
+const AGENT_SITTING: i32 = 0x10;
 
 /// The avatar who granted the script `bits`, if it holds them all.
 fn granted(ctx: &ScriptCtx<'_>, bits: i32) -> Option<String> {
@@ -617,18 +622,59 @@ pub fn ll_get_camera_rot(ctx: &mut ScriptCtx<'_>) -> Result<Rotation, CallError>
     Ok(camera(ctx).map_or(ZERO_ROTATION, |(_, rotation)| rotation))
 }
 
-/// Whether the script may teleport `agent`: it granted
-/// `PERMISSION_TELEPORT`, and — on Second Life, outside an experience — it
-/// owns the object (`experience/powers`).
-fn may_teleport(ctx: &mut ScriptCtx<'_>, agent: &str) -> bool {
-    if granted(ctx, PERMISSION_TELEPORT).as_deref() != Some(agent) {
+/// Whether the script may teleport `agent` (`experience/powers`).
+///
+/// Second Life: the agent granted `PERMISSION_TELEPORT` and, outside an
+/// experience, owns the object; a script that holds no `PERMISSION_TELEPORT`
+/// at all is told so on `DEBUG_CHANNEL`, one that holds another avatar's
+/// grant is not.
+///
+/// OpenSim (`LSL_Api.llTeleportAgent`): an agent in the region and not
+/// seated, who granted the permission — or, with none, the owner wearing the
+/// object, or anyone when the object and the agent both stand on the
+/// object's owner's land. `llTeleportAgentGlobalCoords` (`global`) is the
+/// owner's alone, and only by the grant.
+fn may_teleport(ctx: &mut ScriptCtx<'_>, agent: &str, global: bool) -> bool {
+    let caller = ctx.caller();
+    let grant = granted(ctx, PERMISSION_TELEPORT);
+    if !ctx.flavour().is_opensim() {
+        let Some(granter) = grant else {
+            complain(ctx, NO_TELEPORT_PERMISSION);
+            return false;
+        };
+        return granter == agent
+            && (ctx.host().owner(caller) == agent || ctx.host().experience(caller).is_some());
+    }
+    let owner = ctx.host().owner(caller);
+    if global && owner != agent {
         return false;
     }
-    if ctx.flavour().is_opensim() {
+    let Some(present) = ctx.host().agent(caller, agent) else {
+        return false;
+    };
+    if present.info & AGENT_SITTING != 0 {
+        return false;
+    }
+    if grant.as_deref() == Some(agent) {
         return true;
     }
-    let caller = ctx.caller();
-    ctx.host().owner(caller) == agent || ctx.host().experience(caller).is_some()
+    if global {
+        return false;
+    }
+    if ctx.host().attached(caller) != 0 && owner == agent {
+        return true;
+    }
+    let Some(standing) = ctx
+        .host()
+        .object_details(caller, agent)
+        .map(|details| details.position)
+    else {
+        return false;
+    };
+    let here = ctx.host().placement(caller).position;
+    let owns = |parcel: Option<crate::vm::land::Parcel>| parcel.is_some_and(|p| p.owner == owner);
+    owns(ctx.host().parcel_at(caller, here.x, here.y))
+        && owns(ctx.host().parcel_at(caller, standing.x, standing.y))
 }
 
 /// `llTeleportAgent`: send the avatar to the landmark `landmark` of the
@@ -644,7 +690,7 @@ pub fn ll_teleport_agent(
     position: Vector,
     look_at: Vector,
 ) -> Result<(), CallError> {
-    if !may_teleport(ctx, &agent.0) {
+    if !may_teleport(ctx, &agent.0, false) {
         return Ok(());
     }
     let caller = ctx.caller();
@@ -682,7 +728,7 @@ pub fn ll_teleport_agent_global_coords(
     position: Vector,
     look_at: Vector,
 ) -> Result<(), CallError> {
-    if !may_teleport(ctx, &agent.0) {
+    if !may_teleport(ctx, &agent.0, true) {
         return Ok(());
     }
     let caller = ctx.caller();

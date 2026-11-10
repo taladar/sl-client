@@ -769,22 +769,22 @@ experience-only reach of `llTeleportAgent` are unmeasured.
 
 `experience/powers` aims each teleport three metres east of where the
 agent stands, in the region, and reads where it is five seconds later; the
-runner notes the teleport messages each viewer is sent. Bit 16 is
+runner notes the teleport messages each viewer is sent. `0x10` is
 `TeleportFlags::VIA_LOCATION`, `0x20000` `WITHIN_REGION`, `0x10000`
-`VIA_REGION_ID`.
+`VIA_GLOBAL_COORDS`.
 
 | behaviour | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
-| `llTeleportAgent(owner)` with no permission | `Script trying to teleport agent without current permission!` on `DEBUG_CHANNEL`; nothing moves | nothing at all | no scripts |
-| asking the owner for `PERMISSION_TELEPORT` (4096) | an ordinary question, no experience; granted | the same | no scripts |
-| `llTeleportAgent(owner, "", …)` granted | a `TeleportStart` and a `TeleportLocal`, flags `0x20010`, and an alert, `You have been teleported by the object 'Object' on the parcel '…' owned by <the object's owner>.`; the avatar lands **where the region routes it** — by Mauve's telehub, 66–80 m from the aim in three runs — not at the aim | `TeleportStart` and `TeleportLocal`, flags `0x10`, no alert; the avatar lands at the aim | no scripts |
-| — teleported back where it stood | the same routing, no alert; still as far off | lands where it stood | no scripts |
-| `llTeleportAgent(other)` with the owner's grant | nothing moves, no complaint | the same | no scripts |
-| asking the other avatar for `PERMISSION_TELEPORT` | the question is put to it; granted, the key is that avatar's | the same | no scripts |
-| `llTeleportAgent(other)` granted by that avatar | **nothing moves**, no complaint, nothing sent to either viewer: outside an experience only the owner is teleported | **teleported**, as the owner is | no scripts |
-| `llTeleportAgentGlobalCoords(owner, llGetRegionCorner(), …)` granted (with `PERMISSION_ATTACH`) | flags `0x30000`, the alert; lands 18.5 m from the aim | flags `0x10`, lands at the aim | no scripts |
-| — `llTeleportAgent` back where it stood | **refused**: `TeleportFailed`, `Could not teleport closer to destination` | lands where it stood | no scripts |
-| `llAttachToAvatarTemp(ATTACH_LHAND)` by the owner's prim, granted `PERMISSION_ATTACH` | `attach` with the owner's key; `llGetAttached` 5; the owner and the permissions unchanged | the same | no scripts |
+| `llTeleportAgent(owner)` with no permission | `Script trying to teleport agent without current permission!` on `DEBUG_CHANNEL`; nothing moves | nothing at all | each flavour as its grid |
+| asking the owner for `PERMISSION_TELEPORT` (4096) | an ordinary question, no experience; granted | the same | the same |
+| `llTeleportAgent(owner, "", …)` granted | a `TeleportStart` and a `TeleportLocal`, flags `0x20010`, and an alert, `You have been teleported by the object 'Object' on the parcel '…' owned by <the object's owner>.`; the avatar lands **where the region routes it** — by Mauve's telehub, 66–80 m from the aim in three runs — not at the aim | `TeleportStart` and `TeleportLocal`, flags `0x10`, no alert; the avatar lands at the aim | each flavour's flags and Second Life's alert; the avatar lands at the aim, or on a parcel's landing point on the Second Life flavour (the fake region has no telehub: `server-fake-grid-telehub-routing`) |
+| — teleported back where it stood | the same routing, no alert; still as far off | lands where it stood | lands where it stood, with no alert |
+| `llTeleportAgent(other)` with the owner's grant | nothing moves, no complaint | the same | the same |
+| asking the other avatar for `PERMISSION_TELEPORT` | the question is put to it; granted, the key is that avatar's | the same | the same |
+| `llTeleportAgent(other)` granted by that avatar | **nothing moves**, no complaint, nothing sent to either viewer: outside an experience only the owner is teleported | **teleported**, as the owner is | each flavour as its grid |
+| `llTeleportAgentGlobalCoords(owner, llGetRegionCorner(), …)` granted (with `PERMISSION_ATTACH`) | flags `0x30000`, the alert; lands 18.5 m from the aim | flags `0x10`, lands at the aim | each flavour's flags and Second Life's alert; lands at the aim |
+| — `llTeleportAgent` back where it stood | **refused**: `TeleportFailed`, `Could not teleport closer to destination` | lands where it stood | lands where it stood; the refusal needs a telehub |
+| `llAttachToAvatarTemp(ATTACH_LHAND)` by the owner's prim, granted `PERMISSION_ATTACH` | `attach` with the owner's key; `llGetAttached` 5; the owner and the permissions unchanged | the same | the same |
 
 A landing that is not the aim is the region's routing, not the function's:
 Mauve has a telehub, and a teleport inside a region with one is sent to it

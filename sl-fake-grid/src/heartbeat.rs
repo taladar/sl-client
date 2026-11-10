@@ -216,7 +216,7 @@ fn times(step: Duration, ticks: u64) -> Duration {
 
 /// Runs one tick of the region at `index`, returning what it did, or `None`
 /// for a region the grid does not have.
-pub(crate) async fn beat(core: &GridCore, index: usize) -> Option<Tick> {
+pub(crate) async fn beat(core: &std::sync::Arc<GridCore>, index: usize) -> Option<Tick> {
     let heartbeat = &core.region(index)?.heartbeat;
     let mut pulse = heartbeat.pulse.lock().await;
     let now = (core.clock)();

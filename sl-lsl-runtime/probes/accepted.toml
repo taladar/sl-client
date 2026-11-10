@@ -1231,15 +1231,8 @@ probe = "experience/powers"
 between = ["aditi", "fake-sl"]
 record = "after"
 fields = { of = "owner" }
-reason = "The fake grid does not run a scripted teleport, so the owner never moves; Second Life moves it to the parcel's landing point"
-task = "server-lsl-scripted-teleport-unmodelled"
-
-[[difference]]
-probe = "experience/powers"
-between = ["opensim-yengine", "fake-opensim"]
-record = "after"
-reason = "The fake grid does not run a scripted teleport, so neither the owner nor the granting other avatar moves; OpenSim lands both at the aim"
-task = "server-lsl-scripted-teleport-unmodelled"
+reason = "Mauve has a telehub and routes a teleport within the region to its spawn points, refusing one that would come no closer; the fake region has no telehub, so the owner lands at the aim"
+task = "server-fake-grid-telehub-routing"
 
 [[difference]]
 probe = "throttle/email"

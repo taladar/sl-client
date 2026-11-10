@@ -781,6 +781,15 @@ impl GridCore {
             .position(|entry| entry.handle() == handle)
     }
 
+    /// The index of the region whose south-west corner is at `corner`, in
+    /// global metres (`llTeleportAgentGlobalCoords`), to within half a metre.
+    pub(crate) fn region_at_corner(&self, corner: (f64, f64)) -> Option<usize> {
+        self.regions.iter().position(|entry| {
+            let (x, y) = entry.handle().global_coordinates();
+            (f64::from(x) - corner.0).abs() < 0.5 && (f64::from(y) - corner.1).abs() < 0.5
+        })
+    }
+
     /// The index of the region with the given id.
     pub(crate) fn region_by_id(&self, region_id: Uuid) -> Option<usize> {
         self.regions

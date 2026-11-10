@@ -224,6 +224,10 @@ pub struct RegionScripts {
     /// The experience questions put and not yet answered, by the script and
     /// the avatar asked: the experience, and the tick the question went out.
     experience_questions: BTreeMap<(CallerId, AgentKey), (ExperienceKey, Tick)>,
+    /// The scripts that have teleported an avatar since it last granted them
+    /// a permission, by the script and the avatar: Second Life alerts the
+    /// avatar of the first such teleport only ([`RegionHost::teleport_alert`]).
+    teleport_alerted: BTreeSet<(CallerId, AgentKey)>,
     /// The object a script rezzed, by its root, with the root of the object
     /// whose script rezzed it (`OBJECT_REZZER_KEY`, `llDerezObject`).
     pub(crate) rezzers: BTreeMap<ObjectKey, ObjectKey>,
@@ -343,6 +347,7 @@ impl RegionScripts {
             last_load: (0, 0),
             arriving: BTreeMap::new(),
             experience_questions: BTreeMap::new(),
+            teleport_alerted: BTreeSet::new(),
             rezzers: BTreeMap::new(),
             rezzes_waiting: Vec::new(),
             starting: Vec::new(),
@@ -777,6 +782,8 @@ impl RegionScripts {
     fn remove(&mut self, id: CallerId) {
         self.experience_questions
             .retain(|(asked, _agent), _question| *asked != id);
+        self.teleport_alerted
+            .retain(|(teleporter, _agent)| *teleporter != id);
         let _instance = self.engine.remove(id);
         if let Some(slot) = self.slots.remove(&id) {
             let _gone = self.by_item.remove(&(slot.prim, slot.item));
@@ -1255,6 +1262,17 @@ enum Delivery {
         /// The properties, or [`None`] to clear them.
         rules: Option<Vec<sl_lsl_runtime::vm::avatars::CameraRule>>,
     },
+    /// The avatar sent somewhere by a script (`llTeleportAgent`,
+    /// `llTeleportAgentGlobalCoords`, `llTeleportAgentHome`): handed to the
+    /// grid's teleport machinery after the tick ([`crate::teleport::scripted`]).
+    Teleport {
+        /// The avatar.
+        agent: AgentKey,
+        /// Where it is sent.
+        destination: Box<sl_lsl_runtime::vm::avatars::Destination>,
+        /// The alert it is sent once it has moved, on a grid that sends one.
+        alert: Option<String>,
+    },
     /// The media of the parcel the avatar stands on, changed or commanded by
     /// a script (`llParcelMediaCommandList`).
     Media {
@@ -1457,6 +1475,46 @@ impl RegionHost<'_> {
                     )
                 },
             )
+    }
+
+    /// The alert Second Life sends an avatar a script of `caller`'s teleported:
+    /// `You have been teleported by the object '…' on the parcel '…' owned by
+    /// …`, naming the object, the parcel it stands on and its owner by user
+    /// name (`experience/powers`). Sent for the first teleport since the
+    /// avatar last granted the script a permission, and not again: aditi sent
+    /// it on the teleport after each grant and not on the teleport back that
+    /// followed. OpenSim sends none.
+    fn teleport_alert(&mut self, caller: CallerId, agent: AgentKey) -> Option<String> {
+        if self.core.teleport_policy.scripted_alert
+            != crate::imitates::ScriptedTeleportAlert::NamesTheObject
+        {
+            return None;
+        }
+        let origin = self.origin(caller)?;
+        if !self
+            .world
+            .script_instances
+            .teleport_alerted
+            .insert((caller, agent))
+        {
+            return None;
+        }
+        let here = Host::placement(self, caller).position;
+        let parcel = self
+            .parcel_record(here.x, here.y)
+            .map(|parcel| parcel.name)
+            .unwrap_or_default();
+        let (first, last) = self.name_of(origin.object.owner_id);
+        let owner = if last.is_empty() || last == "Resident" {
+            first
+        } else {
+            format!("{first} {last}")
+        };
+        Some(format!(
+            "You have been teleported by the object '{}' on the parcel '{parcel}' owned by \
+             {owner}.",
+            origin.name
+        ))
     }
 
     /// The linkset `caller` is in, root first.
@@ -3038,11 +3096,23 @@ impl Host for RegionHost<'_> {
         &mut self,
         caller: CallerId,
         agent: &str,
-        _destination: &sl_lsl_runtime::vm::avatars::Destination,
+        destination: &sl_lsl_runtime::vm::avatars::Destination,
     ) {
-        // A scripted teleport needs the grid's teleport machinery, which runs
-        // outside a region's tick: not modelled yet, and said so.
-        self.refuse_unmodelled(caller, &format!("a scripted teleport of {agent}"));
+        // The grid's teleport machinery runs outside the tick, and waits on
+        // the client: the teleport is handed to it once the tick is over.
+        let Some(present) = self.present(agent) else {
+            return;
+        };
+        let agent = present.agent;
+        let alert = match destination {
+            sl_lsl_runtime::vm::avatars::Destination::Home => None,
+            _sent => self.teleport_alert(caller, agent),
+        };
+        self.deliveries.push(Delivery::Teleport {
+            agent,
+            destination: Box::new(destination.clone()),
+            alert,
+        });
     }
 
     fn attached_list(&self, _caller: CallerId, agent: &str) -> Option<Vec<String>> {
@@ -3140,7 +3210,7 @@ async fn presence(core: &GridCore, index: usize) -> (Vec<Present>, Vec<Present>)
 
 /// One tick of the region's scripts: what it ran, or [`None`] for a region
 /// the grid does not have or that has no script.
-pub(crate) async fn run_tick(core: &GridCore, index: usize) -> Option<TickReport> {
+pub(crate) async fn run_tick(core: &Arc<GridCore>, index: usize) -> Option<TickReport> {
     let region = core.region(index)?;
     let (scripted, unflagged) = {
         let mut world = region.world.lock();
@@ -3560,7 +3630,7 @@ pub(crate) fn remove_linkset(
 
 /// Sends what a tick's scripts said to viewers, each to the session it is
 /// for: one in the region, but an instant message wherever its avatar is.
-async fn deliver(core: &GridCore, index: usize, deliveries: Vec<Delivery>) {
+async fn deliver(core: &Arc<GridCore>, index: usize, deliveries: Vec<Delivery>) {
     for delivery in deliveries {
         let agent = match &delivery {
             Delivery::Chat { agent, .. }
@@ -3576,8 +3646,16 @@ async fn deliver(core: &GridCore, index: usize, deliveries: Vec<Delivery>) {
             | Delivery::Animate { agent, .. }
             | Delivery::StandAs { agent, .. }
             | Delivery::Controls { agent, .. }
-            | Delivery::FollowCam { agent, .. } => *agent,
+            | Delivery::FollowCam { agent, .. }
+            | Delivery::Teleport { agent, .. } => *agent,
         };
+        if let Delivery::Teleport {
+            destination, alert, ..
+        } = delivery
+        {
+            crate::teleport::scripted(core, index, agent, *destination, alert).await;
+            continue;
+        }
         let Some(shared) = core.root_session_of(agent).await else {
             tracing::debug!(%agent, "a script spoke to an avatar no longer in world");
             continue;
@@ -3686,8 +3764,9 @@ fn send(sim: &mut SimSession, delivery: &Delivery, now: Instant) -> Result<(), s
             }
             None => sim.send_clear_follow_cam_properties(*object, now),
         },
-        // Sent with the session's animation set, above.
-        Delivery::Animate { .. } | Delivery::StandAs { .. } => Ok(()),
+        // Sent with the session's animation set, above; a teleport is the
+        // grid's, not the session's.
+        Delivery::Animate { .. } | Delivery::StandAs { .. } | Delivery::Teleport { .. } => Ok(()),
         Delivery::Parcel { parcel, .. } => {
             // Both grids push a changed parcel down the event queue.
             sim.enqueue_parcel_properties(parcel);
@@ -3806,7 +3885,11 @@ pub(crate) fn answer_script_command(
                     .map(|posted| posted.is_some())
             };
             match answered {
-                Ok(true) => {}
+                // A grant starts the script's teleports over: the next one is
+                // alerted again on a grid that alerts it.
+                Ok(true) => {
+                    let _was = scripts.teleport_alerted.remove(&(id, identity.agent_id));
+                }
                 Ok(false) => tracing::debug!(?id, "an answer to a question the script did not put"),
                 Err(error) => {
                     tracing::warn!(?id, %error, "a permission answer could not be posted");

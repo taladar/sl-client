@@ -648,6 +648,10 @@ impl ImitatedGrid {
                     alert: "TPCancelled",
                 },
                 enforces_maturity_preference: true,
+                scripted_global_flags: sl_types::map::TeleportFlags::VIA_GLOBAL_COORDS,
+                scripted_alert: ScriptedTeleportAlert::NamesTheObject,
+                landing: LandingRouting::ToTheLandingPoint,
+                no_closer: "Could not teleport closer to destination",
             },
             Self::OpenSim => TeleportPolicy {
                 progress: &[],
@@ -666,6 +670,10 @@ impl ImitatedGrid {
                 finish_flags: FinishFlags::ViaLocation,
                 cancel: CancelAnswer::Ignored,
                 enforces_maturity_preference: false,
+                scripted_global_flags: sl_types::map::TeleportFlags::VIA_LOCATION,
+                scripted_alert: ScriptedTeleportAlert::Silent,
+                landing: LandingRouting::Direct,
+                no_closer: "Can't teleport closer to destination",
             },
         }
     }
@@ -2839,6 +2847,18 @@ pub struct TeleportPolicy {
     /// `RegionTPAccessBlocked` (a home teleport is let through); OpenSim has
     /// no such check.
     pub enforces_maturity_preference: bool,
+    /// The flags of a scripted teleport to global coordinates
+    /// (`llTeleportAgentGlobalCoords`, `experience/powers`): Second Life's
+    /// `VIA_GLOBAL_COORDS`, OpenSim's `VIA_LOCATION` as for every other.
+    pub scripted_global_flags: u32,
+    /// What a scripted teleport tells the avatar it moved.
+    pub scripted_alert: ScriptedTeleportAlert,
+    /// Where a teleport into a parcel with a landing point lands.
+    pub landing: LandingRouting,
+    /// The reason a teleport routed no closer to its aim fails with
+    /// (Second Life's measured on aditi, OpenSim's
+    /// `ScenePresence.CheckLocalTPLandingPoint`).
+    pub no_closer: &'static str,
 }
 
 /// The reason Second Life gives for refusing a region above the agent's
@@ -2873,6 +2893,30 @@ pub enum FinishFlags {
     /// flying bit of the request's own flags (OpenSim:
     /// `EventQueueGetHandlers.TeleportFinishEvent`).
     ViaLocation,
+}
+
+/// What a scripted teleport tells the avatar it moved
+/// ([`TeleportPolicy::scripted_alert`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScriptedTeleportAlert {
+    /// An alert naming the object, the parcel it stands on and its owner, for
+    /// the first teleport after each grant (Second Life, `experience/powers`).
+    NamesTheObject,
+    /// Nothing (OpenSim).
+    Silent,
+}
+
+/// Where a teleport into a parcel with a landing point lands
+/// ([`TeleportPolicy::landing`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LandingRouting {
+    /// On the landing point, for anyone but the parcel's owner and for every
+    /// teleport but a lure, failing a local one that would not bring the
+    /// avatar closer to its aim (Second Life).
+    ToTheLandingPoint,
+    /// At the aim: the local OpenSim allows direct teleport
+    /// (`AllowDirectTeleport`).
+    Direct,
 }
 
 /// Which way a `TeleportLocal` says the agent faces

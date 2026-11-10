@@ -11,17 +11,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 125 |
+| ideas | 127 |
 | ready | 334 |
 | blocked | 39 |
 | in-progress | 7 |
-| bugs | 39 |
-| done | 1535 |
+| bugs | 38 |
+| done | 1536 |
 | deferred | 30 |
 | wont-do | 24 |
-| **total** | **2133** |
+| **total** | **2135** |
 
-## ideas (125)
+## ideas (127)
 
 ### protocol
 
@@ -260,6 +260,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-fake-grid-opensim-arrival-bakes`](ideas/server-fake-grid-opensim-arrival-bakes.md)
   — The OpenSim flavour names solid fixture bakes where OpenSim names the
   default placeholder
+- [`server-fake-grid-telehub-routing`](ideas/server-fake-grid-telehub-routing.md)
+  — Fake grid — route teleports to a region's telehub and spawn points
 - [`server-fake-grid-teleport-edges`](ideas/server-fake-grid-teleport-edges.md)
   — Fake grid — the teleport edges each grid was measured handling and the fake
   grid does not model
@@ -279,6 +281,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Library tranche — status flags, forces, targets and vehicles (blocked by
   `server-lsl-vm-execution` (done), `server-world-collision-and-physics`,
   `gridspec-lsl-physics-vehicles` (done))
+- [`server-lsl-opensim-teleport-by-region-name`](ideas/server-lsl-opensim-teleport-by-region-name.md)
+  — OpenSim's llTeleportAgent to a region named in place of a landmark
 - [`server-map-service`](ideas/server-map-service.md) — Map service — tiles and
   map items
 - [`server-message-routing`](ideas/server-message-routing.md) — Global message
@@ -1270,7 +1274,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-text-renderability-axis`](in-progress/viewer-ui-text-renderability-axis.md)
   — Upstream issue — font selection cannot see glyph-format renderability
 
-## bugs (39)
+## bugs (38)
 
 ### protocol
 
@@ -1369,10 +1373,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-lsl-opensim-grow-loop-slow`](bugs/server-lsl-opensim-grow-loop-slow.md)
   — fake-opensim grows memory/collision's Full list four times slower than
   YEngine
-- [`server-lsl-scripted-teleport-unmodelled`](bugs/server-lsl-scripted-teleport-unmodelled.md)
-  — The fake grid ignores llTeleportAgent and llTeleportAgentGlobalCoords
 
-## done (1535)
+## done (1536)
 
 ### protocol
 
@@ -4611,6 +4613,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Script state that survives a take, a rez and a region restart (blocked by
   `server-lsl-vm-execution` (done), `server-lsl-state-and-events` (done),
   `gridspec-lsl-persistence` (done))
+- [`server-lsl-scripted-teleport-unmodelled`](done/server-lsl-scripted-teleport-unmodelled.md)
+  — The fake grid ignores llTeleportAgent and llTeleportAgentGlobalCoords
 - [`server-lsl-sl-placement-lag`](done/server-lsl-sl-placement-lag.md) — Imitate
   Second Life's late bounding box and its stop above the ground
 - [`server-lsl-state-and-events`](done/server-lsl-state-and-events.md) — The

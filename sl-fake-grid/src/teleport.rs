@@ -166,6 +166,44 @@ pub(crate) async fn teleport_session(
     let dest_region = core.region(request.region).ok_or(Error::UnknownRegion {
         region: request.region.to_string(),
     })?;
+
+    // Read what the destination session inherits, and reject a session
+    // whose agent is not actually here.
+    let (source_seq, source_region, ids, agent_id, standing) = {
+        let state = source.state.lock().await;
+        if !state.sim.is_root_agent() {
+            return Err(Error::NotRootAgent);
+        }
+        (
+            state.seq,
+            state.region,
+            state.ids,
+            state.avatar.agent_id,
+            state.sim.arrival_position().position,
+        )
+    };
+    let policy = core.teleport_policy;
+
+    // A parcel's landing point, on a grid that routes to it.
+    let local = source_region == request.region;
+    let routed = landing_point(core, &request, agent_id);
+    if let Some(landing) = routed {
+        // A local teleport the landing point brings no closer fails, before
+        // anything moves (OpenSim's `CheckLocalTPLandingPoint`, which mimics
+        // Second Life; aditi refused a teleport routed no closer with this).
+        let aim = request.arrival.position;
+        if local && distance(standing, aim) < distance(landing.position, aim) {
+            let refusal = Refusal::plain(
+                request.flags | policy.local_flags,
+                Vec::new(),
+                policy.no_closer,
+            );
+            report_refusal(source, &policy, &refusal).await;
+            return Ok(TeleportOutcome::Refused);
+        }
+        request.arrival = landing;
+    }
+
     // A simulator never leaves an avatar under its ground: a place below the
     // terrain — a map teleport asks for height 0 — lands on it (OpenSim's
     // `ScenePresence` lifts it to the ground), with the avatar's centre half
@@ -182,16 +220,6 @@ pub(crate) async fn teleport_session(
     let dest_handle = dest_region.handle();
     let dest_name = dest_region.config.name.clone();
     let sim_access = dest_region.config.maturity.to_sim_access();
-
-    // Read what the destination session inherits, and reject a session
-    // whose agent is not actually here.
-    let (source_seq, source_region, ids, agent_id) = {
-        let state = source.state.lock().await;
-        if !state.sim.is_root_agent() {
-            return Err(Error::NotRootAgent);
-        }
-        (state.seq, state.region, state.ids, state.avatar.agent_id)
-    };
     let account = core
         .account_by_agent(agent_id)
         .cloned()
@@ -205,8 +233,7 @@ pub(crate) async fn teleport_session(
         })
         .await;
 
-    let policy = core.teleport_policy;
-    if source_region == request.region {
+    if local {
         // A home or a landmark teleport carries its kind alone; the grid's
         // local flag is a location's and a lure's.
         let flags = if request.kind_line.is_some() {
@@ -610,6 +637,256 @@ fn local_look_at(rule: LocalLookAt, arrival: &ArrivalPlacement) -> sl_types::lsl
     }
 }
 
+/// Where `agent_id`'s home is: where the account last set it, and until it
+/// has, its start region at the centre.
+fn home_of(
+    core: &GridCore,
+    agent_id: sl_types::key::AgentKey,
+) -> Option<(usize, ArrivalPlacement)> {
+    let stored = core.homes.get(agent_id).and_then(|home| {
+        core.region_by_id(home.region_id).map(|region| {
+            (
+                region,
+                ArrivalPlacement {
+                    position: home.position,
+                    look_at: home.look_at,
+                },
+            )
+        })
+    });
+    stored.or_else(|| {
+        core.account_by_agent(agent_id)
+            .and_then(|account| core.start_region(account))
+            .map(|region| (region, ArrivalPlacement::default()))
+    })
+}
+
+/// The region and position the landmark asset `landmark` names, from the
+/// grid-wide store: a landmark is an asset like any other, and the region the
+/// agent happens to be standing in has nothing to do with whether the grid
+/// holds it.
+fn landmark_place(
+    core: &GridCore,
+    landmark: sl_proto::AssetKey,
+) -> Option<(usize, RegionCoordinates)> {
+    let body = core
+        .assets
+        .read()
+        .get(landmark)
+        .map(|bytes| String::from_utf8_lossy(bytes).into_owned());
+    let asset = body.and_then(|text| sl_wire::parse_landmark(&text).ok())?;
+    let region = match &asset {
+        LandmarkAsset::Regional { region_id, .. } => core.region_by_id(*region_id),
+        LandmarkAsset::Global(global) => global.split().and_then(|(grid, _)| {
+            core.region_by_handle(sl_wire::RegionHandle::from_grid(grid.x(), grid.y()))
+        }),
+    }?;
+    let position = asset.local_position()?;
+    Some((region, position))
+}
+
+/// The straight-line distance between two places in a region.
+fn distance(from: RegionCoordinates, to: RegionCoordinates) -> f32 {
+    let (dx, dy, dz) = (to.x() - from.x(), to.y() - from.y(), to.z() - from.z());
+    dx.mul_add(dx, dy.mul_add(dy, dz * dz)).sqrt()
+}
+
+/// Where a teleport into a parcel with a landing point lands instead of its
+/// aim, on a grid that routes to it ([`TeleportPolicy::landing`]):
+/// the parcel's landing point, facing its look-at when it has one, for anyone
+/// but the parcel's owner and for every teleport but a lure. [`None`] where
+/// nothing routes it.
+fn landing_point(
+    core: &GridCore,
+    request: &TeleportRequest,
+    agent: sl_types::key::AgentKey,
+) -> Option<ArrivalPlacement> {
+    if core.teleport_policy.landing != crate::imitates::LandingRouting::ToTheLandingPoint
+        || request.flags & TeleportFlags::VIA_LURE != 0
+    {
+        return None;
+    }
+    let region = core.region(request.region)?;
+    let aim = request.arrival.position;
+    let (landing_type, owner, at, look) =
+        region
+            .world
+            .lock()
+            .parcel_at(aim.x(), aim.y())
+            .map(|parcel| {
+                (
+                    parcel.landing_type,
+                    parcel.owner,
+                    parcel.user_location,
+                    parcel.user_look_at,
+                )
+            })?;
+    if landing_type != sl_proto::LandingType::LandingPoint
+        || owner == sl_types::key::OwnerKey::Agent(agent)
+    {
+        return None;
+    }
+    if at.x().abs() < f32::EPSILON && at.y().abs() < f32::EPSILON && at.z().abs() < f32::EPSILON {
+        return None;
+    }
+    let look_at = if look.length() < f32::EPSILON {
+        request.arrival.look_at.clone()
+    } else {
+        sl_types::lsl::Vector {
+            x: look.x(),
+            y: look.y(),
+            z: look.z(),
+        }
+    };
+    Some(ArrivalPlacement {
+        position: at,
+        look_at,
+    })
+}
+
+/// Hands a teleport a script of the region at `index` asked for
+/// (`llTeleportAgent`, `llTeleportAgentGlobalCoords`, `llTeleportAgentHome`)
+/// to the teleport machinery, on a task of its own: a teleport waits on the
+/// client — for its acknowledgement, its arrival — and on the region's own
+/// next tick for what the avatar wears, so the tick that asked cannot wait for
+/// it. An avatar that has left the region since is not sent.
+///
+/// A place in the region or at global coordinates is a teleport to a location
+/// (Second Life marks the second `VIA_GLOBAL_COORDS`), a landmark one by
+/// landmark and home one home, each as the client's own request of that kind
+/// is run. Once the avatar has moved, a grid that alerts it is sent `alert`
+/// ([`TeleportPolicy::scripted_alert`]).
+pub(crate) async fn scripted(
+    core: &Arc<GridCore>,
+    index: usize,
+    agent: sl_types::key::AgentKey,
+    destination: sl_lsl_runtime::vm::avatars::Destination,
+    alert: Option<String>,
+) {
+    use sl_lsl_runtime::vm::avatars::Destination;
+    let Some(source) = core.root_session_of(agent).await else {
+        tracing::debug!(%agent, "a script teleported an avatar no longer in world");
+        return;
+    };
+    if source.with_state(|state| state.region).await != index {
+        tracing::debug!(%agent, "a script teleported an avatar that has left its region");
+        return;
+    }
+    let policy = core.teleport_policy;
+    let place = |position: &sl_types::lsl::Vector| {
+        RegionCoordinates::new(position.x, position.y, position.z)
+    };
+    let resolved: Result<TeleportRequest, Refusal> = match destination {
+        Destination::Local { position, look_at } => Ok(TeleportRequest {
+            region: index,
+            arrival: ArrivalPlacement {
+                position: place(&position),
+                look_at,
+            },
+            flags: TeleportFlags::VIA_LOCATION,
+            kind_line: None,
+            client_requested: false,
+        }),
+        Destination::Global {
+            corner,
+            position,
+            look_at,
+        } => {
+            let flags = policy.scripted_global_flags;
+            match core.region_at_corner(corner) {
+                Some(region) => Ok(TeleportRequest {
+                    region,
+                    arrival: ArrivalPlacement {
+                        position: place(&position),
+                        look_at,
+                    },
+                    flags,
+                    kind_line: None,
+                    client_requested: false,
+                }),
+                None => Err(Refusal::plain(
+                    flags,
+                    policy.progress.first().copied().into_iter().collect(),
+                    policy.unknown_region,
+                )),
+            }
+        }
+        Destination::Landmark { asset, look_at } => {
+            let flags = TeleportFlags::VIA_LANDMARK | policy.kind_flags;
+            let line = teleport_strings::SENDING_LANDMARK;
+            let found = uuid::Uuid::parse_str(&asset)
+                .ok()
+                .and_then(|asset| landmark_place(core, sl_proto::AssetKey::from(asset)));
+            match found {
+                Some((region, position)) => Ok(TeleportRequest {
+                    region,
+                    arrival: ArrivalPlacement { position, look_at },
+                    flags,
+                    kind_line: Some(line),
+                    client_requested: false,
+                }),
+                None => Err(Refusal::plain(
+                    flags,
+                    if policy.names_the_kind {
+                        vec![line]
+                    } else {
+                        Vec::new()
+                    },
+                    policy.unknown_landmark,
+                )),
+            }
+        }
+        Destination::Home => {
+            let flags = TeleportFlags::VIA_HOME | policy.kind_flags;
+            let line = teleport_strings::SENDING_HOME;
+            match home_of(core, agent) {
+                Some((region, arrival)) => Ok(TeleportRequest {
+                    region,
+                    arrival,
+                    flags,
+                    kind_line: Some(line),
+                    client_requested: false,
+                }),
+                None => Err(Refusal::plain(
+                    flags,
+                    if policy.names_the_kind {
+                        vec![line]
+                    } else {
+                        Vec::new()
+                    },
+                    policy.no_home,
+                )),
+            }
+        }
+    };
+    let request = match resolved {
+        Ok(request) => request,
+        Err(refusal) => {
+            report_refusal(&source, &policy, &refusal).await;
+            return;
+        }
+    };
+    let core = Arc::clone(core);
+    drop(tokio::spawn(async move {
+        let arrived = match teleport_session(&core, &source, request).await {
+            Ok(TeleportOutcome::Local) => Some(source.clone()),
+            Ok(TeleportOutcome::Moved(dest)) => Some(dest),
+            Ok(TeleportOutcome::Refused) | Err(Error::TeleportTimedOut) => None,
+            Err(error) => {
+                tracing::warn!(%agent, "a scripted teleport failed: {error}");
+                None
+            }
+        };
+        if let (Some(session), Some(alert)) = (arrived, alert)
+            && let Err(error) = session
+                .with_sim(|sim| sim.send_alert_message(&alert, &[], &[], session.now()))
+                .await
+        {
+            tracing::warn!(%agent, "alerting a scripted teleport failed: {error}");
+        }
+    }));
+}
+
 /// Resolves a client teleport request into a [`TeleportRequest`], or the
 /// [`Refusal`] to answer with.
 async fn resolve_request(
@@ -657,23 +934,7 @@ async fn resolve_request(
             // region at the centre.
             let agent_id = source.state.lock().await.avatar.agent_id;
             let flags = TeleportFlags::VIA_HOME | policy.kind_flags;
-            let stored = core.homes.get(agent_id).and_then(|home| {
-                core.region_by_id(home.region_id).map(|region| {
-                    (
-                        region,
-                        ArrivalPlacement {
-                            position: home.position,
-                            look_at: home.look_at,
-                        },
-                    )
-                })
-            });
-            let home = stored.or_else(|| {
-                core.account_by_agent(agent_id)
-                    .and_then(|account| core.start_region(account))
-                    .map(|region| (region, ArrivalPlacement::default()))
-            });
-            Some(home.map_or_else(
+            Some(home_of(core, agent_id).map_or_else(
                 || {
                     Err(Refusal::plain(
                         flags,
@@ -698,23 +959,7 @@ async fn resolve_request(
             // The grid-wide store: a landmark is an asset like any other, and
             // the region the agent happens to be standing in has nothing to do
             // with whether the grid holds it.
-            let body = core
-                .assets
-                .read()
-                .get(*landmark)
-                .map(|bytes| String::from_utf8_lossy(bytes).into_owned());
-            let parsed = body.and_then(|text| sl_wire::parse_landmark(&text).ok());
-            let resolved = parsed.and_then(|asset| {
-                let region = match &asset {
-                    LandmarkAsset::Regional { region_id, .. } => core.region_by_id(*region_id),
-                    LandmarkAsset::Global(global) => global.split().and_then(|(grid, _)| {
-                        core.region_by_handle(sl_wire::RegionHandle::from_grid(grid.x(), grid.y()))
-                    }),
-                }?;
-                let position = asset.local_position()?;
-                Some((region, position))
-            });
-            Some(resolved.map_or_else(
+            Some(landmark_place(core, *landmark).map_or_else(
                 || {
                     Err(Refusal::plain(
                         TeleportFlags::VIA_LANDMARK | policy.kind_flags,

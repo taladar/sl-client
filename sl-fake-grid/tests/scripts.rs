@@ -69,6 +69,12 @@ mod test {
         ),
         /// What the agent's scripted attachments use.
         Resources(Box<sl_proto::AttachmentResourcesReport>),
+        /// A teleport started, with its flags.
+        TeleportStarted(u32),
+        /// A teleport within the region ended: its flags and where it landed.
+        TeleportLocal(u32, sl_types::map::RegionCoordinates),
+        /// A teleport failed, with its reason.
+        TeleportFailed(String),
     }
 
     /// A logged-in client in a stepped catalogue region.
@@ -199,6 +205,11 @@ mod test {
                         Seen::Music(parcel.music_url.as_ref().map(ToString::to_string))
                     }
                     Event::AttachmentResources(report) => Seen::Resources(report),
+                    Event::TeleportStarted { flags } => Seen::TeleportStarted(flags.0),
+                    Event::TeleportLocal {
+                        position, flags, ..
+                    } => Seen::TeleportLocal(flags.0, position),
+                    Event::TeleportFailed { reason, .. } => Seen::TeleportFailed(reason),
                     Event::ObjectStreamBatch(batch) => Seen::Stream(
                         batch.form,
                         batch.entries.iter().map(|entry| entry.local_id).collect(),
@@ -4335,5 +4346,236 @@ default
     #[tokio::test]
     async fn a_script_is_held_as_opensim_holds_it() -> Result<(), TestError> {
         a_script_is_held_as_its_grid_holds_it(ImitatedGrid::OpenSim).await
+    }
+
+    /// A script that teleports its owner when told to: `ask` asks for
+    /// `PERMISSION_TELEPORT`, `tp x y` sends the owner to `<x, y, 30>` in the
+    /// region, `global x y` the same by global coordinates, and `where` says
+    /// where the owner stands, to the metre.
+    const TELEPORT_SOURCE: &str = "default
+{
+    state_entry()
+    {
+        llListen(7, \"\", NULL_KEY, \"\");
+    }
+
+    listen(integer channel, string name, key id, string message)
+    {
+        list words = llParseString2List(message, [\" \"], []);
+        string verb = llList2String(words, 0);
+        vector aim = <llList2Float(words, 1), llList2Float(words, 2), 30.0>;
+        if (verb == \"ask\")
+        {
+            llRequestPermissions(llGetOwner(), PERMISSION_TELEPORT);
+        }
+        else if (verb == \"tp\")
+        {
+            llTeleportAgent(llGetOwner(), \"\", aim, aim + <1.0, 0.0, 0.0>);
+        }
+        else if (verb == \"global\")
+        {
+            llTeleportAgentGlobalCoords(llGetOwner(), llGetRegionCorner(), aim,
+                aim + <1.0, 0.0, 0.0>);
+        }
+        else if (verb == \"where\")
+        {
+            vector at = llList2Vector(llGetObjectDetails(llGetOwner(), [OBJECT_POS]), 0);
+            llShout(0, \"where \" + (string)llRound(at.x) + \" \" + (string)llRound(at.y));
+        }
+    }
+}
+";
+
+    /// What a scripted teleport showed the client: the start's flags, the
+    /// local teleport's flags and landing, and the alerts that came with it.
+    async fn teleported(
+        scene: &mut Scene,
+    ) -> Result<(u32, u32, sl_types::map::RegionCoordinates, Vec<String>), TestError> {
+        let started = scene
+            .next("the scripted teleport's start", |seen| match seen {
+                Seen::TeleportStarted(flags) => Some(flags),
+                _other => None,
+            })
+            .await?;
+        let (flags, landed) = scene
+            .next("the scripted teleport's landing", |seen| match seen {
+                Seen::TeleportLocal(flags, landed) => Some((flags, landed)),
+                _other => None,
+            })
+            .await?;
+        let mut alerts = Vec::new();
+        while let Ok(Some(seen)) = tokio::time::timeout(QUIET, scene.seen.recv()).await {
+            if let Seen::Alert(alert) = seen {
+                alerts.push(alert);
+            }
+        }
+        Ok((started, flags, landed, alerts))
+    }
+
+    /// Whether `landed` is `<x, y>` across the ground, to within a centimetre.
+    fn lands_at(landed: sl_types::map::RegionCoordinates, x: f32, y: f32) -> bool {
+        (landed.x() - x).abs() < 0.01 && (landed.y() - y).abs() < 0.01
+    }
+
+    /// A script granted `PERMISSION_TELEPORT` teleports its owner within the
+    /// region, by `llTeleportAgent` and by `llTeleportAgentGlobalCoords`: an
+    /// ordinary local teleport with each grid's flags, the avatar standing at
+    /// the aim for the script to read, and on Second Life an alert naming the
+    /// object for the first teleport after the grant alone
+    /// (`experience/powers`) — on a grid imitating `imitated`.
+    async fn a_script_teleports_its_owner(imitated: ImitatedGrid) -> Result<(), TestError> {
+        let mut scene = seat_scene(imitated, TELEPORT_SOURCE).await?;
+        let second_life = imitated == ImitatedGrid::SecondLife;
+        let question = scene.ask("ask").await?;
+        scene
+            .answer(
+                &question,
+                sl_types::lsl::ScriptPermissions(sl_types::lsl::ScriptPermissions::TELEPORT),
+            )
+            .await?;
+        scene.tick(2).await?;
+
+        scene.say_seven("tp 120 140").await?;
+        scene.tick(2).await?;
+        let (started, flags, landed, alerts) = teleported(&mut scene).await?;
+        let local = if second_life { 0x2_0010 } else { 0x10 };
+        assert_eq!((started, flags), (local, local));
+        assert!(lands_at(landed, 120.0, 140.0), "{landed:?}");
+        let alerted = if second_life {
+            vec![
+                "You have been teleported by the object 'Object' on the parcel '' owned by \
+                 Test User."
+                    .to_owned(),
+            ]
+        } else {
+            Vec::new()
+        };
+        assert_eq!(alerts, alerted);
+        scene.say_seven("where").await?;
+        scene.tick(2).await?;
+        assert_eq!(scene.line("where ").await?, "where 120 140");
+
+        // The teleport back is not alerted again.
+        scene.say_seven("tp 125 130").await?;
+        scene.tick(2).await?;
+        let (_started, _flags, landed, alerts) = teleported(&mut scene).await?;
+        assert!(lands_at(landed, 125.0, 130.0), "{landed:?}");
+        assert_eq!(alerts, Vec::<String>::new());
+
+        scene.say_seven("global 110 150").await?;
+        scene.tick(2).await?;
+        let (started, flags, landed, _alerts) = teleported(&mut scene).await?;
+        let global = if second_life { 0x3_0000 } else { 0x10 };
+        assert_eq!((started, flags), (global, global));
+        assert!(lands_at(landed, 110.0, 150.0), "{landed:?}");
+        scene.stop();
+        Ok(())
+    }
+
+    /// On a grid imitating Second Life.
+    #[tokio::test]
+    async fn a_script_teleports_its_owner_on_second_life() -> Result<(), TestError> {
+        a_script_teleports_its_owner(ImitatedGrid::SecondLife).await
+    }
+
+    /// On a grid imitating OpenSim.
+    #[tokio::test]
+    async fn a_script_teleports_its_owner_on_opensim() -> Result<(), TestError> {
+        a_script_teleports_its_owner(ImitatedGrid::OpenSim).await
+    }
+
+    /// A scripted teleport into land with a landing point, owned by somebody
+    /// else: Second Life lands the avatar on the landing point when that brings
+    /// it closer to the aim, and refuses the teleport with `Could not teleport
+    /// closer to destination` when it does not; OpenSim, which allows direct
+    /// teleport, lands it at the aim.
+    async fn a_scripted_teleport_routes_to_the_landing_point(
+        imitated: ImitatedGrid,
+    ) -> Result<(), TestError> {
+        let mut fixture = region_of(&[ScriptedBox {
+            local_id: SEAT,
+            source: TELEPORT_SOURCE.to_owned(),
+            experience: None,
+        }])?;
+        let mut parcel = sl_fake_grid::world::region_wide_parcel(
+            sl_fake_grid::scenario::STOCK_PARCEL_LOCAL_ID,
+            sl_types::key::OwnerKey::Agent(sl_types::key::AgentKey::from(uuid::Uuid::from_u128(
+                0xBEEF,
+            ))),
+            "Routed",
+        );
+        parcel.landing_type = sl_proto::LandingType::LandingPoint;
+        parcel.user_location = sl_types::map::RegionCoordinates::new(100.0, 100.0, 30.0);
+        fixture
+            .world
+            .add_parcel(parcel, sl_fake_grid::scenario::stock_parcel_id(), 0.0);
+        let mut scene = scene_with(
+            imitated,
+            fixture,
+            RegionConfig {
+                heartbeat: HeartbeatConfig::stepped(Duration::from_millis(100)),
+                ..RegionConfig::default()
+            },
+            AccountConfig {
+                agent_id: Some(box_owner()),
+                ..AccountConfig::new("Test", "User", "password")
+            },
+        )
+        .await?;
+        scene.tick(2).await?;
+        let question = scene.ask("ask").await?;
+        scene
+            .answer(
+                &question,
+                sl_types::lsl::ScriptPermissions(sl_types::lsl::ScriptPermissions::TELEPORT),
+            )
+            .await?;
+        scene.tick(2).await?;
+
+        // Far from the landing point and near the avatar: no closer.
+        let standing = scene
+            .agent
+            .with_sim(|sim| sim.arrival_position().position)
+            .await;
+        let (near_x, near_y) = (standing.x() + 5.0, standing.y() + 5.0);
+        scene.say_seven(&format!("tp {near_x} {near_y}")).await?;
+        scene.tick(2).await?;
+        if imitated == ImitatedGrid::SecondLife {
+            let reason = scene
+                .next("the refused teleport", |seen| match seen {
+                    Seen::TeleportFailed(reason) => Some(reason),
+                    _other => None,
+                })
+                .await?;
+            assert_eq!(reason, "Could not teleport closer to destination");
+        } else {
+            let (_started, _flags, landed, _alerts) = teleported(&mut scene).await?;
+            assert!(lands_at(landed, near_x, near_y), "{landed:?}");
+        }
+
+        // Beside the landing point: routed onto it.
+        scene.say_seven("tp 96 96").await?;
+        scene.tick(2).await?;
+        let (_started, _flags, landed, _alerts) = teleported(&mut scene).await?;
+        if imitated == ImitatedGrid::SecondLife {
+            assert!(lands_at(landed, 100.0, 100.0), "{landed:?}");
+        } else {
+            assert!(lands_at(landed, 96.0, 96.0), "{landed:?}");
+        }
+        scene.stop();
+        Ok(())
+    }
+
+    /// On a grid imitating Second Life.
+    #[tokio::test]
+    async fn a_scripted_teleport_routes_to_the_landing_point_on_second_life()
+    -> Result<(), TestError> {
+        a_scripted_teleport_routes_to_the_landing_point(ImitatedGrid::SecondLife).await
+    }
+
+    /// On a grid imitating OpenSim.
+    #[tokio::test]
+    async fn a_scripted_teleport_lands_at_the_aim_on_opensim() -> Result<(), TestError> {
+        a_scripted_teleport_routes_to_the_landing_point(ImitatedGrid::OpenSim).await
     }
 }

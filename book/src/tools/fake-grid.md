@@ -2052,7 +2052,12 @@ a region rated above the agent's stored maturity preference
 — and answers a `TeleportCancel` that arrives before the finish with
 `TPCancelled`; the OpenSim flavour does neither. A same-region request
 finishes as a `TeleportLocal`, flagged `WITHIN_REGION` and facing the
-region's origin on Second Life's flavour. The explicit
+region's origin on Second Life's flavour. On that flavour a teleport (but a
+lure) into a parcel with a landing point, owned by somebody else, lands on the
+landing point, and a local one it would bring no closer fails with `Could not
+teleport closer to destination`; the OpenSim flavour allows direct teleport, as
+the local OpenSim does. A script's `llTeleportAgent` and its family go through
+the same sequence once its tick is over. The explicit
 `FakeGrid::teleport_agent(&agent, "Region", position, look_at)` is the
 grid-initiated counterpart (what `llTeleportAgent` or a scripted push
 does — no client request at all; the client follows a remote
