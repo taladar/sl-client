@@ -1437,13 +1437,6 @@ reason = "The fake grid announces an estate restart and never restarts the regio
 task = "server-fake-grid-estate-actions"
 
 [[difference]]
-probe = "events/changed-worn"
-between = ["opensim-yengine", "fake-opensim"]
-record = "changed"
-reason = "OpenSim runs a worn script's changed(32768) in the region it is leaving; the fake grid runs it after arrival, and raises one more on the drop after the trip"
-task = "server-fake-grid-worn-departure-change"
-
-[[difference]]
 probe = "prim/identity"
 between = ["aditi", "fake-sl"]
 record = "details"

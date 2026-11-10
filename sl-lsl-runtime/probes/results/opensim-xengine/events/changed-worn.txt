@@ -1,5 +1,5 @@
 grid: opensim-xengine
-date: 2026-11-06
+date: 2026-11-10
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Default Region
 engine: XEngine
@@ -25,5 +25,6 @@ PROBE events/changed-worn rec=restarted home=1
 PROBE events/changed-worn rec=back home=1 seconds=26
 PROBE events/changed-worn rec=waiting drive=drop
 # drop worn=1
-PROBE events/changed-worn rec=end
+PROBE events/changed-worn rec=detached
 # dropped key=same
+PROBE events/changed-worn rec=end

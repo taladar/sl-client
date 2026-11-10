@@ -164,6 +164,11 @@ pub struct AttachedTo {
     /// What it is worn as: the inventory item it stands for, which its
     /// `AttachItemID` names.
     pub item: WornItem,
+    /// Whether it came into the region on its wearer from another one. On
+    /// OpenSim a drop then raises no `changed(32768)` in its scripts, where a
+    /// drop of one put on here raises one (`events/changed-worn`,
+    /// `events/attach`).
+    pub travelled: bool,
 }
 
 /// What a worn object stands for in its wearer's inventory

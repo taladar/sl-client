@@ -2230,7 +2230,8 @@ root) and B (its child) each printed every `changed` event they got.
 | an owner or a region change | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
 | the other avatar buys the original for L$ 0 | **one** `CHANGED_OWNER`, the new owner read at once; the buyer is told `You are now the owner of object Object`, and both get a balance reply of type 5000 | **three** `CHANGED_OWNER` | as its grid (`sl_fake_grid::money`) |
-| worn, its wearer teleports to another region and back | `CHANGED_REGION \| CHANGED_TELEPORT` on arrival, each way, and nothing else | YEngine: 32768 as it leaves, then `CHANGED_REGION \| CHANGED_TELEPORT` on arrival, each way; **XEngine runs `state_entry` again** in the object on each arrival, so the script loses its globals and nothing it held of the trip survives | each flavour as its grid |
+| worn, its wearer teleports to another region and back | `CHANGED_REGION \| CHANGED_TELEPORT` on arrival, each way, and nothing else | YEngine: 32768 as it leaves, run while the script is still in the region it leaves, then `CHANGED_REGION \| CHANGED_TELEPORT` on arrival, each way; **XEngine runs `state_entry` again** in the object on each arrival, so the script loses its globals and nothing it held of the trip survives | each flavour as its grid: the region left gives the script its next tick to run the 32768 before the object goes |
+| … then dropped (measured 2026-11-10) | `attach(NULL_KEY)` alone | `attach(NULL_KEY)` alone under both engines, and nothing in the five seconds after — where a drop of an object put on in the region raises 32768 first (`events/attach`) | each flavour as its grid |
 
 ### Sound, particles, texture animation and media
 

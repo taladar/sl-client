@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 334 |
 | blocked | 39 |
 | in-progress | 7 |
-| bugs | 40 |
-| done | 1534 |
+| bugs | 39 |
+| done | 1535 |
 | deferred | 30 |
 | wont-do | 24 |
 | **total** | **2133** |
@@ -1270,7 +1270,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-text-renderability-axis`](in-progress/viewer-ui-text-renderability-axis.md)
   — Upstream issue — font selection cannot see glyph-format renderability
 
-## bugs (40)
+## bugs (39)
 
 ### protocol
 
@@ -1364,8 +1364,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### server
 
-- [`server-fake-grid-worn-departure-change`](bugs/server-fake-grid-worn-departure-change.md)
-  — Fake OpenSim runs a worn script's departing changed(32768) after it arrives
 - [`server-lsl-mono-collision-model-under-lowered-limit`](bugs/server-lsl-mono-collision-model-under-lowered-limit.md)
   — A script 1 KB over its use collides in the runtime where Mono carries on
 - [`server-lsl-opensim-grow-loop-slow`](bugs/server-lsl-opensim-grow-loop-slow.md)
@@ -1374,7 +1372,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-lsl-scripted-teleport-unmodelled`](bugs/server-lsl-scripted-teleport-unmodelled.md)
   — The fake grid ignores llTeleportAgent and llTeleportAgentGlobalCoords
 
-## done (1534)
+## done (1535)
 
 ### protocol
 
@@ -4494,6 +4492,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-fake-grid-top-objects-report`](done/server-fake-grid-top-objects-report.md)
   — Fake grid — a top-objects report with rows in it, and a return that finds
   them
+- [`server-fake-grid-worn-departure-change`](done/server-fake-grid-worn-departure-change.md)
+  — Fake OpenSim runs a worn script's departing changed(32768) after it arrives
 - [`server-lsl-architecture`](done/server-lsl-architecture.md) — LSL engine
   architecture — execution model, crate layout, scheduling
 - [`server-lsl-call-cost-sizes`](done/server-lsl-call-cost-sizes.md) — Measure

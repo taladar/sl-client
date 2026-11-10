@@ -1,5 +1,5 @@
 grid: fake-sl
-date: 2026-11-09
+date: 2026-11-10
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating Mono
@@ -26,4 +26,5 @@ PROBE events/changed-worn rec=back home=1 seconds=25
 PROBE events/changed-worn rec=waiting drive=drop
 # drop worn=1
 # dropped key=same
+PROBE events/changed-worn rec=detached
 PROBE events/changed-worn rec=end

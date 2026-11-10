@@ -22,13 +22,13 @@ PROBE events/changed-worn rec=waiting drive=away seconds=15
 # teleport-started flags=0x10
 # back arrived
 # animations avatar=other playing="stand"
-PROBE events/changed-worn rec=changed step=2 bits=32768 home=0
-PROBE events/changed-worn rec=changed step=2 bits=REGION|TELEPORT home=0
 PROBE events/changed-worn rec=changed step=2 bits=32768 home=1
+PROBE events/changed-worn rec=changed step=2 bits=REGION|TELEPORT home=0
+PROBE events/changed-worn rec=changed step=2 bits=32768 home=0
 PROBE events/changed-worn rec=changed step=2 bits=REGION|TELEPORT home=1
 PROBE events/changed-worn rec=back home=1 seconds=25
 PROBE events/changed-worn rec=waiting drive=drop
 # drop worn=1
 # dropped key=same
-PROBE events/changed-worn rec=changed step=3 bits=32768 home=1
+PROBE events/changed-worn rec=detached
 PROBE events/changed-worn rec=end

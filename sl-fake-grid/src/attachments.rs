@@ -436,7 +436,9 @@ pub(crate) fn detach(
         // Its scripts hear it come off — `attach(NULL_KEY)` — and have the
         // region's next tick to answer before it leaves; one with none leaves
         // at once.
-        crate::scripts::raise_attach(world, *root, None);
+        // Taking off into inventory after a trip is not measured; it is
+        // raised as for an object put on here.
+        crate::scripts::raise_attach(world, *root, None, false);
         let leaving = Leaving { root: *root, item };
         if crate::scripts::linkset_scripts(world, *root).is_empty() {
             leaving.leave(world, assets, now);
@@ -592,8 +594,8 @@ pub(crate) struct Carried {
 /// Takes everything `agent` wears out of the region it is leaving, kill
 /// nobody is sent: both live grids carry it, and the region left never kills
 /// it. Each prim's id is kept, for a grid on which an object brought back
-/// takes it again. On OpenSim's YEngine the scripts first hear their own
-/// `changed(32768)`, as they do leaving.
+/// takes it again. What the scripts hear leaving ([`raise_departing`]) they
+/// have heard by now.
 pub(crate) fn pack(
     world: &mut SceneFixtures,
     agent: AgentKey,
@@ -605,13 +607,6 @@ pub(crate) fn pack(
         let Some(attached) = world.objects.attached_to(root).cloned() else {
             continue;
         };
-        if world.script_instances.flavour() == sl_lsl_runtime::vm::EngineFlavour::YEngine {
-            crate::scripts::raise_changed(
-                world,
-                root,
-                sl_lsl_runtime::vm::OPENSIM_CHANGED_POSITION,
-            );
-        }
         let linkset = linkset_of(world, root);
         let contents = contents_of(world, &linkset);
         let scripts = linkset
@@ -710,6 +705,7 @@ pub(crate) fn unpack(
                 point: worn.point,
                 at: at.clone(),
                 item: worn.item,
+                travelled: true,
             },
         );
         tracing::debug!(
@@ -730,7 +726,9 @@ pub(crate) fn unpack(
 /// does not have.
 ///
 /// `teleport` says how it goes: the scripts hear `CHANGED_REGION`, with
-/// `CHANGED_TELEPORT` for a teleport, as they arrive.
+/// `CHANGED_TELEPORT` for a teleport, as they arrive. What they hear leaving
+/// ([`raise_departing`]) they have the region's next tick to run, still in
+/// the region they leave, before they are packed.
 pub(crate) async fn carry(
     core: &crate::runtime::GridCore,
     source: &crate::driver::SharedSim,
@@ -746,12 +744,67 @@ pub(crate) async fn carry(
     } else {
         sl_lsl_runtime::vm::CHANGED_REGION
     };
+    let departing = source
+        .with_state(|state| {
+            let mut world = state.world.lock();
+            raise_departing(&mut world, agent)
+                .then(|| (state.region, world.script_instances.last_turn()))
+        })
+        .await;
+    if let Some((index, raised)) = departing {
+        await_turn(core, index, raised).await;
+    }
     let carried = source
         .with_state(|state| pack(&mut state.world.lock(), agent, change, now))
         .await;
     if !carried.is_empty() {
         let _left = region.world.lock().luggage.insert(agent, carried);
     }
+}
+
+/// Raises what the scripts of everything `agent` wears hear as it leaves the
+/// region with them: on OpenSim's YEngine their own `changed(32768)`, run in
+/// the region they leave (`events/changed-worn`); nothing on Second Life or
+/// XEngine. Whether any script heard it.
+fn raise_departing(world: &mut SceneFixtures, agent: AgentKey) -> bool {
+    if world.script_instances.flavour() != sl_lsl_runtime::vm::EngineFlavour::YEngine {
+        return false;
+    }
+    let mut heard = false;
+    for root in world.objects.worn_by(agent) {
+        heard |= !crate::scripts::linkset_scripts(world, root).is_empty();
+        crate::scripts::raise_changed(world, root, sl_lsl_runtime::vm::OPENSIM_CHANGED_POSITION);
+    }
+    heard
+}
+
+/// Waits until the scripts of the region at `index` have had a turn after the
+/// one at `raised`, so what was raised in them then has run; at once for a
+/// region with no script left, and when the region's heartbeat stops. A
+/// [stepped](crate::heartbeat::HeartbeatMode::Stepped) region's turn comes
+/// when its test advances it.
+async fn await_turn(
+    core: &crate::runtime::GridCore,
+    index: usize,
+    raised: sl_lsl_runtime::vm::Tick,
+) {
+    let Some(region) = core.region(index) else {
+        return;
+    };
+    let mut ticks = region.heartbeat.subscribe();
+    loop {
+        if had_turn(&region.world.lock().script_instances, raised) {
+            return;
+        }
+        if ticks.changed().await.is_err() {
+            return;
+        }
+    }
+}
+
+/// Whether `scripts` have had a turn after the one at `raised`, or are gone.
+fn had_turn(scripts: &crate::scripts::RegionScripts, raised: sl_lsl_runtime::vm::Tick) -> bool {
+    scripts.is_empty() || scripts.last_turn() > raised
 }
 
 /// Puts back on in `source`'s region what [`carry`] left waiting at

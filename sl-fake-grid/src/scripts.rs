@@ -465,6 +465,13 @@ impl RegionScripts {
         self.slots.is_empty()
     }
 
+    /// The last tick the region's scripts had their turn in: an event raised
+    /// now has been run once this has moved on.
+    #[must_use]
+    pub(crate) const fn last_turn(&self) -> Tick {
+        self.engine.now()
+    }
+
     /// The instance of the script `item` in the prim `prim`, if it has one.
     #[must_use]
     pub fn instance_of(&self, prim: ObjectKey, item: InventoryKey) -> Option<CallerId> {
@@ -3494,15 +3501,19 @@ pub(crate) fn lapse(
 /// Tells every script of the linkset whose root is `root` that it was put on
 /// by `wearer`, or — [`None`] — taken off: `attach(wearer)`, on OpenSim after
 /// its own `changed(32768)` twice for a wear and once for a drop
-/// (`events/attach`; Second Life raises no `changed` for either).
+/// (`events/attach`; Second Life raises no `changed` for either). A drop of an
+/// object that `travelled` here on its wearer raises no `changed(32768)` on
+/// OpenSim either (`events/changed-worn`).
 pub(crate) fn raise_attach(
     world: &mut SceneFixtures,
     root: RegionLocalObjectId,
     wearer: Option<AgentKey>,
+    travelled: bool,
 ) {
     let moves = match (world.script_instances.flavour().is_opensim(), wearer) {
         (false, _) => 0,
         (true, Some(_)) => 2,
+        (true, None) if travelled => 0,
         (true, None) => 1,
     };
     let wearer = wearer.map(|agent| agent.uuid().to_string());

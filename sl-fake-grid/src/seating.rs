@@ -409,9 +409,10 @@ pub(crate) fn wear(
             point,
             at: at.clone(),
             item,
+            travelled: false,
         },
     );
-    crate::scripts::raise_attach(world, root, Some(agent));
+    crate::scripts::raise_attach(world, root, Some(agent), false);
     Some(linkset_records(world, root))
 }
 
@@ -447,7 +448,7 @@ pub(crate) fn drop_off(
         dropped.motion.position = attached.at;
         dropped.name_value = String::new();
     }
-    crate::scripts::raise_attach(world, root, None);
+    crate::scripts::raise_attach(world, root, None, attached.travelled);
     crate::scripts::lapse(world, root, agent, PERMISSION_TAKE_CONTROLS);
     Some((linkset_records(world, root), attached.item))
 }

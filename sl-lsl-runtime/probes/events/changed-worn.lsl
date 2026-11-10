@@ -13,7 +13,9 @@
 // is kept in the object's description too: a grid that runs `state_entry`
 // again in a worn object arriving in a region (XEngine) loses the script's
 // globals, and the script then says `restarted`, with the region it is in,
-// and carries on waiting for the owner to come home.
+// and carries on waiting for the owner to come home. After the drop's
+// `attach(NULL_KEY)` (`detached`) the script listens five seconds more, so a
+// `changed` the drop raises after it is seen too.
 string ID = "events/changed-worn";
 
 string home;
@@ -112,9 +114,10 @@ default
         }
         else if (step == 3 && id == NULL_KEY)
         {
+            held += ["detached"];
             flush();
-            llSetTimerEvent(0.0);
-            emit("end", "");
+            step = 4;
+            ticks = 0;
         }
     }
 
@@ -131,6 +134,16 @@ default
     timer()
     {
         ++ticks;
+        if (step == 4)
+        {
+            if (ticks >= 5)
+            {
+                flush();
+                llSetTimerEvent(0.0);
+                emit("end", "");
+            }
+            return;
+        }
         if (step != 2)
         {
             if (ticks > 60)

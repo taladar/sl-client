@@ -133,13 +133,26 @@ mod test {
         config: RegionConfig,
         account: AccountConfig,
     ) -> Result<Scene, TestError> {
+        scene_beside(imitated, fixture, config, account, Vec::new()).await
+    }
+
+    /// As [`scene_with`], the grid also holding the regions `others`.
+    async fn scene_beside(
+        imitated: ImitatedGrid,
+        fixture: sl_fake_grid::RegionFixture,
+        config: RegionConfig,
+        account: AccountConfig,
+        others: Vec<RegionConfig>,
+    ) -> Result<Scene, TestError> {
         let region = fixture.into_region(config);
-        let grid = FakeGridBuilder::new()
+        let mut builder = FakeGridBuilder::new()
             .imitates(imitated)
             .account(account)
-            .region(region)
-            .start()
-            .await?;
+            .region(region);
+        for other in others {
+            builder = builder.region(other);
+        }
+        let grid = builder.start().await?;
         let mut logins = grid.logins();
         let client = Client::connect(LoginParams {
             login_uri: grid.login_uri(),
@@ -1721,6 +1734,174 @@ default
     #[tokio::test]
     async fn an_object_taken_off_hears_it_before_it_leaves_on_opensim() -> Result<(), TestError> {
         an_object_taken_off_hears_it_before_it_leaves(ImitatedGrid::OpenSim).await
+    }
+
+    /// A worn object that shouts each `changed` it hears with the region it
+    /// hears it in.
+    const TRAVELLER_SOURCE: &str = "default
+{
+    changed(integer change)
+    {
+        llShout(0, \"changed \" + (string)change + \" \" + llGetRegionName());
+    }
+}
+";
+
+    /// The region east of the scene's, ticking by itself.
+    fn east_region() -> RegionConfig {
+        RegionConfig {
+            name: "Fake Region East".to_owned(),
+            grid_x: RegionConfig::default().grid_x.saturating_add(1),
+            ..RegionConfig::default()
+        }
+    }
+
+    /// Teleports the agent to `at` in the region called `region`.
+    async fn teleport(scene: &Scene, region: &str, at: (f32, f32, f32)) -> Result<(), TestError> {
+        let region_handle = scene.grid.region_handle(region).ok_or("no such region")?;
+        scene
+            .commands
+            .send(Command::Teleport {
+                region_handle,
+                position: sl_types::map::RegionCoordinates::new(at.0, at.1, at.2),
+                look_at: sl_types::lsl::Vector {
+                    x: 1.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+            })
+            .await?;
+        Ok(())
+    }
+
+    /// The next `count` lines starting with `changed `, the scene's
+    /// region ticked meanwhile: a teleport out of it waits on its tick.
+    async fn changes_ticking(scene: &mut Scene, count: usize) -> Result<Vec<String>, TestError> {
+        let grid = &scene.grid;
+        let seen = &mut scene.seen;
+        let ticking = async {
+            while grid.advance_one_tick(REGION).await.is_ok() {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        };
+        let wanted = async {
+            let mut lines = Vec::with_capacity(count);
+            while lines.len() < count {
+                match seen.recv().await {
+                    Some(Seen::Chat(_, message)) if message.starts_with("changed ") => {
+                        lines.push(message);
+                    }
+                    Some(_other) => {}
+                    None => break,
+                }
+            }
+            lines
+        };
+        let lines = tokio::time::timeout(WAIT, async {
+            tokio::select! {
+                () = ticking => Vec::new(),
+                lines = wanted => lines,
+            }
+        })
+        .await
+        .map_err(|_elapsed| format!("fewer than {count} changes came"))?;
+        Ok(lines)
+    }
+
+    /// Worn to the region next door and back: on OpenSim its script hears its
+    /// own `changed(32768)` in the region it is leaving, before
+    /// `CHANGED_REGION | CHANGED_TELEPORT` in the one it arrives in; on Second
+    /// Life the arrival alone (`events/changed-worn`).
+    async fn a_worn_script_hears_its_departure_where_it_leaves(
+        imitated: ImitatedGrid,
+    ) -> Result<(), TestError> {
+        let region = region_of(&[ScriptedBox {
+            local_id: SEAT,
+            source: TRAVELLER_SOURCE.to_owned(),
+            experience: None,
+        }])?;
+        let mut scene = scene_beside(
+            imitated,
+            region,
+            RegionConfig {
+                heartbeat: HeartbeatConfig::stepped(Duration::from_millis(100)),
+                ..RegionConfig::default()
+            },
+            AccountConfig {
+                agent_id: Some(box_owner()),
+                ..AccountConfig::new("Test", "User", "password")
+            },
+            vec![east_region()],
+        )
+        .await?;
+        scene.tick(2).await?;
+        scene
+            .commands
+            .send(Command::AttachObject {
+                local_id: sl_client_tokio::ScopedObjectId::new(scene.circuit, SEAT),
+                attachment_point: sl_proto::AttachmentPoint::LeftHand,
+                mode: sl_proto::AttachmentMode::Add,
+                rotation: sl_types::lsl::Rotation {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                    s: 1.0,
+                },
+            })
+            .await?;
+        let _worn = scene
+            .next("the worn object", |seen| match seen {
+                Seen::Updated(object)
+                    if object.local_id == SEAT && object.attachment_point_id().is_some() =>
+                {
+                    Some(object)
+                }
+                _other => None,
+            })
+            .await?;
+        scene.tick(6).await?;
+        let wear = worn_lines(imitated, true).len().saturating_sub(1);
+        let _wear = changes_ticking(&mut scene, wear).await?;
+
+        let opensim = imitated == ImitatedGrid::OpenSim;
+        let trip = |from: &str, to: &str| {
+            let mut lines = Vec::new();
+            if opensim {
+                lines.push(format!("changed 32768 {from}"));
+            }
+            lines.push(format!("changed 768 {to}"));
+            lines
+        };
+        teleport(&scene, "Fake Region East", (70.0, 128.0, 26.0)).await?;
+        let away = trip(REGION, "Fake Region East");
+        assert_eq!(
+            changes_ticking(&mut scene, away.len()).await?,
+            away,
+            "{imitated:?}"
+        );
+        teleport(&scene, REGION, (128.0, 128.0, 26.0)).await?;
+        let back = trip("Fake Region East", REGION);
+        assert_eq!(
+            changes_ticking(&mut scene, back.len()).await?,
+            back,
+            "{imitated:?}"
+        );
+        scene.stop();
+        Ok(())
+    }
+
+    /// On a grid imitating Second Life.
+    #[tokio::test]
+    async fn a_worn_script_hears_its_departure_where_it_leaves_on_second_life()
+    -> Result<(), TestError> {
+        a_worn_script_hears_its_departure_where_it_leaves(ImitatedGrid::SecondLife).await
+    }
+
+    /// On a grid imitating OpenSim.
+    #[tokio::test]
+    async fn a_worn_script_hears_its_departure_where_it_leaves_on_opensim() -> Result<(), TestError>
+    {
+        a_worn_script_hears_its_departure_where_it_leaves(ImitatedGrid::OpenSim).await
     }
 
     /// On a grid imitating Second Life.
