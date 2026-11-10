@@ -2,9 +2,10 @@
 id: viewer-slider-click-mirrored-rtl
 title: In a right-to-left layout a slider's track click and drag run mirrored from its thumb
 topic: viewer
-status: bugs
+status: done
 origin: viewer-day-cycle-strip-click-mirrored-rtl (2026-11-09)
-refs: [viewer-day-cycle-strip-click-mirrored-rtl, viewer-slider-editable-value-field]
+refs: [viewer-day-cycle-strip-click-mirrored-rtl, viewer-slider-editable-value-field,
+  viewer-slider-thumb-offset-by-track-border]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
@@ -41,3 +42,30 @@ mirrors the value on the way in. Cover both directions in a test.
 
 A click on a slider's track sets the value under the pointer and a drag
 moves the thumb with the hand, in both directions.
+
+## Fixed (2026-11-10)
+
+- **The core slider learned a direction**, in our bevy fork
+  (`crates/bevy_ui_widgets/src/slider.rs`, listed in the `[patch.crates-io]`
+  comment of the root `Cargo.toml`). A horizontal slider whose own
+  `Node::direction` is `Rtl` — which `apply_ui_direction` keeps current on
+  every node — runs right to left: a track click measures the pointer from
+  the right edge, a drag negates its horizontal distance, and the arrow keys
+  swap, so `ArrowLeft` steps toward the maximum on the left (the visual
+  direction, as a browser's mirrored range input does). A vertical slider is
+  not mirrored. The widget needed no change: its thumb already sat at
+  `inline_start`.
+- Reading the slider node's own direction rather than a viewer resource keeps
+  the fix upstreamable: `taffy` lays out off the same field.
+- Pinned in `sl-viewer-ui-widgets/src/ui_slider.rs` by
+  `a_drag_carries_the_value_toward_the_hand_in_either_direction`,
+  `a_track_click_sets_the_value_drawn_under_the_pointer` (a snapping click
+  lands on the value whose thumb is drawn there) and
+  `the_arrow_keys_follow_the_thumb_in_either_direction`, each run in both
+  directions through the real input and picking stack; all three failed on
+  their `Rtl` case before the fork change. The fork carries a unit test of
+  which sliders mirror.
+- The click test showed the drawn thumb sitting one track border width off
+  the pointer in **both** directions — the thumb is inset inside the border,
+  the core slider measures the border box — filed as
+  [[viewer-slider-thumb-offset-by-track-border]].

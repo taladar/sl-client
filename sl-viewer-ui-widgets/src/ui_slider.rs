@@ -751,10 +751,12 @@ mod tests {
         SliderStyle, SliderWidgetPlugin, slider_text, spawn_slider, step_decimals,
     };
     use bevy::prelude::*;
-    use bevy::ui_widgets::{Slider, SliderRange, SliderStep, SliderValue};
+    use bevy::ui_widgets::{Slider, SliderRange, SliderStep, SliderValue, TrackClick};
     use bevy_flair::style::components::ClassList;
     use pretty_assertions::assert_eq;
+    use sl_viewer_testkit::interact::{self, InteractionTest};
     use sl_viewer_testkit::{LayoutTest, TestError, settle, spawn_under_root};
+    use sl_viewer_ui_core::ui::UiDirection;
 
     /// A slider with a 2 px border, so the interior is 4 px shorter than the
     /// track and the difference is visible in a whole number of pixels.
@@ -888,7 +890,6 @@ mod tests {
     /// through the real input and picking stack.
     #[test]
     fn a_drag_along_the_track_moves_the_value() -> Result<(), TestError> {
-        use sl_viewer_testkit::interact::{self, InteractionTest};
         let mut app = InteractionTest::new().build();
         let (track, _thumb) = laid_out(&mut app, 0.0, true)?;
         // The headless slider only announces a move; its owner writes the
@@ -919,6 +920,154 @@ mod tests {
             value > 50.0,
             "a drag three quarters along the track left the value at {value}"
         );
+        Ok(())
+    }
+
+    /// An interactive app in `direction` holding one slider at `value` over
+    /// 0…100 that clicks its track as `track_click` says, and writes each
+    /// value it announces back, as `settings_binding`'s observer does. Gives
+    /// back the app, the track and its thumb.
+    fn live_slider(
+        direction: UiDirection,
+        value: f32,
+        track_click: TrackClick,
+    ) -> Result<(App, Entity, Entity), TestError> {
+        let mut app = InteractionTest::over(LayoutTest::new().with_direction(direction)).build();
+        app.add_plugins(SliderWidgetPlugin);
+        let row = spawn_under_root(&mut app, (Node::default(), Name::new("row")));
+        let mut commands = app.world_mut().commands();
+        let track = spawn_slider(
+            &mut commands,
+            row,
+            STYLE,
+            0,
+            0.0,
+            SliderLabels::beside(SliderFormat::Decimal(0)),
+            (
+                Slider {
+                    track_click,
+                    ..Slider::default()
+                },
+                SliderValue(value),
+                SliderRange::new(0.0, 100.0),
+                SliderStep(5.0),
+            ),
+        );
+        app.world_mut().flush();
+        app.world_mut()
+            .entity_mut(track)
+            .insert(Name::new("slider-under-test"))
+            .observe(
+                |change: On<bevy::ui_widgets::ValueChange<f32>>, mut commands: Commands| {
+                    commands
+                        .entity(change.source)
+                        .insert(SliderValue(change.value));
+                },
+            );
+        settle(&mut app);
+        let thumb = *app
+            .world()
+            .entity(track)
+            .get::<Children>()
+            .and_then(|children| children.first())
+            .ok_or("the track has no thumb")?;
+        Ok((app, track, thumb))
+    }
+
+    /// The slider's current value.
+    fn value_of(app: &App, track: Entity) -> Result<f32, TestError> {
+        Ok(app.world().get::<SliderValue>(track).ok_or("no value")?.0)
+    }
+
+    /// **A drag moves the thumb with the hand, in both directions.** The thumb
+    /// starts at the minimum — the left end, or the right end under a
+    /// right-to-left layout — and a drag from it three quarters of the way
+    /// toward the other end carries the value past the middle. Before the core
+    /// slider read its node's direction, a leftward drag under `Rtl` lowered
+    /// the value and the thumb ran away from the pointer.
+    #[test]
+    fn a_drag_carries_the_value_toward_the_hand_in_either_direction() -> Result<(), TestError> {
+        for direction in [UiDirection::Ltr, UiDirection::Rtl] {
+            let (mut app, track, thumb) = live_slider(direction, 0.0, TrackClick::Drag)?;
+            let from =
+                interact::centre_of_entity(&app, thumb).ok_or("the thumb has no position")?;
+            let toward_max = if direction.is_rtl() { -1.0 } else { 1.0 };
+            let to = from + Vec2::new(toward_max * 0.75 * STYLE.travel(), 0.0);
+            interact::drag(&mut app, from, to, 8, MouseButton::Left);
+            settle(&mut app);
+            let value = value_of(&app, track)?;
+            assert!(
+                (70.0..=80.0).contains(&value),
+                "{direction:?}: a drag three quarters of the travel toward the maximum left \
+                 the value at {value}"
+            );
+        }
+        Ok(())
+    }
+
+    /// **A track click lands on the value under the pointer, in both
+    /// directions.** A snapping click a quarter of the way along the track from
+    /// its right end sets the value whose thumb is drawn there: three quarters
+    /// left to right, a quarter right to left — and the thumb then sits under
+    /// the pointer.
+    #[test]
+    fn a_track_click_sets_the_value_drawn_under_the_pointer() -> Result<(), TestError> {
+        for (direction, expected) in [(UiDirection::Ltr, 75.0), (UiDirection::Rtl, 25.0)] {
+            let (mut app, track, thumb) = live_slider(direction, 50.0, TrackClick::Snap)?;
+            let centre = interact::centre_of(&mut app, "slider-under-test")
+                .ok_or("the track has no position")?;
+            let at = centre + Vec2::new(0.25 * STYLE.travel(), 0.0);
+            interact::click(&mut app, at, MouseButton::Left);
+            settle(&mut app);
+            let value = value_of(&app, track)?;
+            assert!(
+                (value - expected).abs() < 1.0,
+                "{direction:?}: a click a quarter of the travel right of centre set {value}, \
+                 not {expected}"
+            );
+            let drawn =
+                interact::centre_of_entity(&app, thumb).ok_or("the thumb has no position")?;
+            // Within a border: the thumb is inset inside the track's border
+            // while the core slider measures the border box, which shifts the
+            // drawn thumb one border width toward the trailing end in either
+            // direction (viewer-slider-thumb-offset-by-track-border).
+            assert!(
+                (drawn.x - at.x).abs() <= STYLE.border + 0.5,
+                "{direction:?}: the thumb is drawn at x = {}, the click was at x = {}",
+                drawn.x,
+                at.x,
+            );
+        }
+        Ok(())
+    }
+
+    /// **The arrow keys step toward the side they point at.** `ArrowRight`
+    /// raises a left-to-right slider and lowers a right-to-left one, whose
+    /// maximum is on the left; `ArrowLeft` the other way round.
+    #[test]
+    fn the_arrow_keys_follow_the_thumb_in_either_direction() -> Result<(), TestError> {
+        use bevy::input::keyboard::Key;
+        for (direction, right_step) in [(UiDirection::Ltr, 5.0), (UiDirection::Rtl, -5.0)] {
+            let (mut app, track, _thumb) = live_slider(direction, 50.0, TrackClick::Drag)?;
+            interact::focus(&mut app, track);
+            interact::tap(&mut app, KeyCode::ArrowRight, Key::ArrowRight);
+            settle(&mut app);
+            // Bit-exact: a step of 5 from 50 is exact in `f32`.
+            assert_eq!(
+                value_of(&app, track)?.to_bits(),
+                (50.0_f32 + right_step).to_bits(),
+                "{direction:?}: ArrowRight"
+            );
+            interact::tap(&mut app, KeyCode::ArrowLeft, Key::ArrowLeft);
+            interact::tap(&mut app, KeyCode::ArrowLeft, Key::ArrowLeft);
+            settle(&mut app);
+            // Bit-exact: a step of 5 from 50 is exact in `f32`.
+            assert_eq!(
+                value_of(&app, track)?.to_bits(),
+                (50.0_f32 - right_step).to_bits(),
+                "{direction:?}: ArrowLeft twice"
+            );
+        }
         Ok(())
     }
 
