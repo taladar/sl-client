@@ -125,7 +125,10 @@ nothing runs while none are queued.
   regions the map was told of, each item layer with its counts and whether
   an item is drawn, and the tiles ready, pending and absent — what
   `sl-viewer-ctl world-map` prints; the map is one composited image, so
-  none of this is a widget).
+  none of this is a widget), `parcel_media`, and `mirrors` (whether
+  realtime mirrors are on, and each mirror prim captured live with how
+  often its reflection was re-rendered since it was bound — what
+  `sl-viewer-ctl mirrors` prints; a reflection is a render, no widget).
 - **Settings** are read and written by the key the settings store keeps
   them under (`ReadSetting` / `WriteSetting`, `Viewer::setting` /
   `set_setting`, `sl-viewer-ctl setting <KEY> [VALUE]`): a value is the bare

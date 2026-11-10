@@ -11,17 +11,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 124 |
-| ready | 335 |
+| ideas | 125 |
+| ready | 334 |
 | blocked | 39 |
-| in-progress | 7 |
-| bugs | 32 |
-| done | 1535 |
+| in-progress | 6 |
+| bugs | 34 |
+| done | 1537 |
 | deferred | 30 |
 | wont-do | 24 |
-| **total** | **2126** |
+| **total** | **2129** |
 
-## ideas (124)
+## ideas (125)
 
 ### protocol
 
@@ -99,6 +99,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-minimized-floaters-move-to-a-shelf`](ideas/viewer-minimized-floaters-move-to-a-shelf.md)
   — A minimized floater should move to a shelf of minimized windows, not
   collapse where it stands
+- [`viewer-mirror-planar-projection`](ideas/viewer-mirror-planar-projection.md)
+  — Realtime mirrors as a planar projection, not a cube from the mirror's centre
 - [`viewer-mouselook-combat`](ideas/viewer-mouselook-combat.md) — Mouselook
   combat conveniences
 - [`viewer-mouselook-ui-options`](ideas/viewer-mouselook-ui-options.md) —
@@ -304,7 +306,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-lsl-opensim-function-set`](ideas/gridspec-lsl-opensim-function-set.md)
   — Measure which library functions OpenSim's engines compile
 
-## ready (335)
+## ready (334)
 
 ### protocol
 
@@ -413,8 +415,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-transform-gizmos` (done))
 - [`viewer-build-physics-params`](ready/viewer-build-physics-params.md) —
   Features tab — physics shape type & material params
-- [`viewer-build-probe-animesh-controls`](ready/viewer-build-probe-animesh-controls.md)
-  — Features tab — reflection-probe & animated-mesh controls
 - [`viewer-build-sculpt-controls`](ready/viewer-build-sculpt-controls.md) —
   Object tab — sculpt editing controls
 - [`viewer-build-selection-filters`](ready/viewer-build-selection-filters.md) —
@@ -1250,7 +1250,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-voice`](blocked/gridspec-voice.md) — Voice provisioning and
   signalling on each grid (blocked by `viewer-voice-audio`)
 
-## in-progress (7)
+## in-progress (6)
 
 ### viewer
 
@@ -1259,8 +1259,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   the sim reacts)
 - [`viewer-perf-pbr-shadow-cluster-rez`](in-progress/viewer-perf-pbr-shadow-cluster-rez.md)
   — Tune main-view shadow specialization + clustered lighting during rez
-- [`viewer-realtime-mirrors`](in-progress/viewer-realtime-mirrors.md) —
-  Real-time mirrors (hero probes)
 - [`viewer-ui-text-caret-grapheme-motion`](in-progress/viewer-ui-text-caret-grapheme-motion.md)
   — Upstream issue — parley caret motion steps one codepoint, not one grapheme
 - [`viewer-ui-text-parley-pr-backdelete`](in-progress/viewer-ui-text-parley-pr-backdelete.md)
@@ -1270,7 +1268,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-text-renderability-axis`](in-progress/viewer-ui-text-renderability-axis.md)
   — Upstream issue — font selection cannot see glyph-format renderability
 
-## bugs (32)
+## bugs (34)
 
 ### protocol
 
@@ -1316,6 +1314,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Own avatar looks broken after a teleport
 - [`viewer-parcel-audio-bar-backing-unskinned`](bugs/viewer-parcel-audio-bar-backing-unskinned.md)
   — The parcel audio bar's backing is a colour no skin can reach
+- [`viewer-pbr-face-shows-legacy-texture-on-aditi`](bugs/viewer-pbr-face-shows-legacy-texture-on-aditi.md)
+  — A prim given a PBR material from the Build window sometimes keeps drawing
+  its plywood
 - [`viewer-perf-steady-state-46fps-ceiling`](bugs/viewer-perf-steady-state-46fps-ceiling.md)
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
 - [`viewer-refused-capability-silent-drops`](bugs/viewer-refused-capability-silent-drops.md)
@@ -1323,6 +1324,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-retired-neighbour-stays-drawn`](bugs/viewer-retired-neighbour-stays-drawn.md)
   — A neighbour the simulator retired stays drawn — its ground, water and map
   tile outlive its circuit
+- [`viewer-sky-irradiance-ignores-local-probes`](bugs/viewer-sky-irradiance-ignores-local-probes.md)
+  — Sky-lit faces take their probe ambient from the view's probe, never from a
+  placed probe
 - [`viewer-slider-click-mirrored-rtl`](bugs/viewer-slider-click-mirrored-rtl.md)
   — In a right-to-left layout a slider's track click and drag run mirrored from
   its thumb
@@ -1354,7 +1358,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1535)
+## done (1537)
 
 ### protocol
 
@@ -2010,6 +2014,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   reference spinner)
 - [`viewer-build-phantom-flag-wrong-bit`](done/viewer-build-phantom-flag-wrong-bit.md)
   — Build floater's Phantom checkbox reads and writes the any-owner bit
+- [`viewer-build-probe-animesh-controls`](done/viewer-build-probe-animesh-controls.md)
+  — Features tab — reflection-probe & animated-mesh controls
 - [`viewer-build-systems-gate-on-build-mode`](done/viewer-build-systems-gate-on-build-mode.md)
   — Performance — gate all build-tool systems on build mode being active
 - [`viewer-build-tool-modify-permission-gate`](done/viewer-build-tool-modify-permission-gate.md)
@@ -3115,6 +3121,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   unconfirmed
 - [`viewer-radar-multi-select`](done/viewer-radar-multi-select.md) — Radar
   multi-row selection and its multi-avatar menu
+- [`viewer-realtime-mirrors`](done/viewer-realtime-mirrors.md) — Real-time
+  mirrors (hero probes)
 - [`viewer-reattached-rigged-mesh-renders-static-mislocated`](done/viewer-reattached-rigged-mesh-renders-static-mislocated.md)
   — Re-attached rigged mesh renders static and mislocated (fine at login)
 - [`viewer-region-environment-panel`](done/viewer-region-environment-panel.md) —

@@ -245,6 +245,7 @@ pub use sl_mesh::{
     AssetBytes, CacheLimits as MeshCacheLimits, DEFAULT_LOD_FACTOR, DecodedMesh, MeshDiskCache,
     MeshEntry, MeshError, MeshFetcher, MeshHeader, MeshLod, MeshPhysics, MeshProgress,
     MeshReadLease, MeshRequest, MeshSkin, MeshStore, PhysicsConvex, Submesh, VertexWeights,
+    est_triangles_by_lod,
 };
 
 // The generic-asset store (the opaque-blob counterpart of the texture/mesh

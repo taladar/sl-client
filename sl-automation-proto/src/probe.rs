@@ -363,6 +363,27 @@ pub struct ParcelMediaReadout {
     pub faces: usize,
 }
 
+/// The realtime mirrors (hero reflection probes): whether the viewer draws
+/// them, and the mirror prims it captures live.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MirrorsReadout {
+    /// Whether realtime mirrors are on (`RenderMirrors`).
+    pub enabled: bool,
+    /// The mirrors bound to a capture rig, nearest first as they were ranked.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mirrors: Vec<MirrorReadout>,
+}
+
+/// One mirror prim the viewer captures live.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MirrorReadout {
+    /// The mirror prim's full id.
+    pub full_id: Uuid,
+    /// How many times its cube has been re-rendered since it was bound — it
+    /// climbs every frame (or every update-rate frames) while it is live.
+    pub captures: u64,
+}
+
 /// A region the world map knows.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MapRegionReadout {
@@ -651,7 +672,6 @@ mod tests {
     use serde::Serialize;
     use serde::de::DeserializeOwned;
 
-    use super::ParcelMediaReadout;
     use super::{
         AgentReadout, CameraView, ChatKind, ClockTime, ConversationReadout, ConversationRef,
         DiagnosticLine, DiagnosticsReadout, EnvironmentReadout, InventoryEntry,
@@ -661,6 +681,7 @@ mod tests {
         TeleportState, TranscriptLine, WaterReadout, WorldMapReadout,
     };
     use super::{FeetReadout, FootReadout};
+    use super::{MirrorReadout, MirrorsReadout, ParcelMediaReadout};
 
     /// Serializes `value`, reads it back and checks nothing was lost.
     fn round_trip<T>(value: &T) -> Result<String, serde_json::Error>
@@ -895,6 +916,24 @@ mod tests {
         );
         let nothing = round_trip(&ParcelMediaReadout::default())?;
         assert_eq!(nothing, r#"{"faces":0}"#);
+        Ok(())
+    }
+
+    #[test]
+    fn mirrors_round_trip() -> Result<(), serde_json::Error> {
+        let json = round_trip(&MirrorsReadout {
+            enabled: true,
+            mirrors: vec![MirrorReadout {
+                full_id: uuid::Uuid::from_u128(0x3d),
+                captures: 12,
+            }],
+        })?;
+        assert_eq!(
+            json,
+            r#"{"enabled":true,"mirrors":[{"full_id":"00000000-0000-0000-0000-00000000003d","captures":12}]}"#
+        );
+        let nothing = round_trip(&MirrorsReadout::default())?;
+        assert_eq!(nothing, r#"{"enabled":false}"#);
         Ok(())
     }
 

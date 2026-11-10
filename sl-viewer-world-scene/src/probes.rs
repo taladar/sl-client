@@ -1598,11 +1598,11 @@ pub use sl_viewer_settings::keys::probes::{
 };
 
 /// The live mirror configuration, mirrored from the persistent `[render]` settings by
-/// [`sync_mirror_settings`] so an edit in the settings file (or a bound preferences
+/// `sync_mirror_settings` so an edit in the settings file (or a bound preferences
 /// control) takes effect without a restart — except the resolution, which sizes the
-/// GPU targets and so is fixed at [`setup_hero_rigs`] (a restart applies a change).
+/// GPU targets and so is fixed at `setup_hero_rigs` (a restart applies a change).
 #[derive(Resource, Clone, Copy, Debug)]
-pub(crate) struct MirrorSettings {
+pub struct MirrorSettings {
     /// Whether realtime mirrors are enabled (`RenderMirrors`). Off releases the hero
     /// rigs and lets the P33 local pool reclaim mirror prims as ordinary probes.
     enabled: bool,
@@ -1611,15 +1611,25 @@ pub(crate) struct MirrorSettings {
     update_rate: u32,
 }
 
-impl Default for MirrorSettings {
-    /// Mirrors on, re-rendered every frame — the most faithful (and costliest)
-    /// starting point, matching the P33 dynamic-content default's "measure the full
-    /// cost" stance. Only a mirror prim actually in view incurs any of that cost.
-    fn default() -> Self {
+impl MirrorSettings {
+    /// Mirrors `enabled` or not, re-rendered every frame — for an app without a
+    /// settings store (the readback harness) to turn the hero path on.
+    #[must_use]
+    pub const fn new(enabled: bool) -> Self {
         Self {
-            enabled: true,
+            enabled,
             update_rate: HERO_DEFAULT_UPDATE_RATE,
         }
+    }
+}
+
+impl Default for MirrorSettings {
+    /// Mirrors **off**, as the reference ships them (`RenderMirrors` is `0` in its
+    /// `settings.xml`, and its feature table turns them on for no preset but the
+    /// top ones): a mirror prim is then an ordinary local probe, a shiny but
+    /// blurry surface. Turned on, a mirror re-renders every frame.
+    fn default() -> Self {
+        Self::new(false)
     }
 }
 
@@ -1665,9 +1675,43 @@ struct HeroProbeRigs {
     rigs: Vec<CaptureRig>,
     /// What each rig is bound to (`None` = free), indexed as [`rigs`](Self::rigs).
     bindings: Vec<Option<LocalBinding>>,
+    /// How many times each rig's cube was re-rendered since it was last bound,
+    /// indexed as [`rigs`](Self::rigs) — what says a mirror is live, not just
+    /// bound ([`live_mirrors`]).
+    captures: Vec<u64>,
     /// The per-face resolution every rig's cube and faces were created at — fixed at
     /// setup (it sizes GPU targets), fed to the render-world blit.
     resolution: u32,
+}
+
+/// The realtime mirrors as the hero probes hold them: whether mirrors are on,
+/// and each bound mirror prim's entity with how often its cube has been
+/// re-rendered since it was bound.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct LiveMirrors {
+    /// Whether realtime mirrors are on (`RenderMirrors`).
+    pub enabled: bool,
+    /// The bound mirror prims and their capture counts, in rig order.
+    pub bound: Vec<(Entity, u64)>,
+}
+
+/// The realtime mirrors `world` captures, or `None` in an app without the hero
+/// probes (the gallery, a UI harness) — the automation's mirror probe reads it.
+#[must_use]
+pub fn live_mirrors(world: &World) -> Option<LiveMirrors> {
+    let rigs = world.get_resource::<HeroProbeRigs>()?;
+    let settings = world.get_resource::<MirrorSettings>()?;
+    Some(LiveMirrors {
+        enabled: settings.enabled,
+        bound: rigs
+            .bindings
+            .iter()
+            .zip(&rigs.captures)
+            .filter_map(|(binding, captures)| {
+                binding.as_ref().map(|bound| (bound.object, *captures))
+            })
+            .collect(),
+    })
 }
 
 impl HeroProbeRigs {
@@ -1831,6 +1875,7 @@ fn setup_hero_rigs(
         bindings: std::iter::repeat_with(|| None)
             .take(MAX_HERO_PROBES)
             .collect(),
+        captures: vec![0; MAX_HERO_PROBES],
         resolution,
     });
     debug!("hero probes: {MAX_HERO_PROBES} hero rig(s) set up at {resolution}² per face");
@@ -2008,6 +2053,9 @@ fn drive_hero_probes(
                         sample_rotation: world_rotation,
                     });
                 }
+                if let Some(count) = rigs.captures.get_mut(index) {
+                    *count = 0;
+                }
                 debug!("hero probes: mirror took hero rig {index}");
             }
         }
@@ -2045,7 +2093,7 @@ fn drive_hero_probes(
 /// frame time back.
 fn drive_hero_captures(
     settings: Res<MirrorSettings>,
-    rigs: Res<HeroProbeRigs>,
+    mut rigs: ResMut<HeroProbeRigs>,
     mut schedule: ResMut<HeroSchedule>,
     probes: Query<(&ObjectReflectionProbe, &GlobalTransform)>,
     mut cameras: Query<(
@@ -2084,6 +2132,13 @@ fn drive_hero_captures(
         let active = pose.is_some();
         if camera.is_active != active {
             camera.is_active = active;
+        }
+        // One count per cube, on its first face.
+        if active
+            && capture.face == 0
+            && let Some(count) = rigs.captures.get_mut(capture.rig)
+        {
+            *count = count.saturating_add(1);
         }
     }
 }

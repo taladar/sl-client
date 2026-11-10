@@ -7,6 +7,7 @@
 //! progressive discard levels). The pieces are:
 //!
 //! - [`decode`] — LLMesh header parsing and geometry / skin / physics decoding.
+//! - [`cost`] — the triangle estimate the reference derives from a header.
 //! - [`encode`] — its inverse: writing an LLMesh asset, which model upload and
 //!   the mesh test fixtures both need.
 //! - [`disk`] — the Firestorm-compatible per-UUID on-disk mesh cache.
@@ -15,6 +16,7 @@
 //! - [`store`] — the weak-reference fetch/decode/cache store.
 //! - [`progress`] — priority, progress observation, and cancellation.
 
+pub mod cost;
 pub mod decode;
 pub mod disk;
 pub mod encode;
@@ -24,6 +26,7 @@ pub mod progress;
 pub mod seams;
 pub mod store;
 
+pub use cost::est_triangles_by_lod;
 pub use decode::{
     BlockRef, DecodedMesh, MeshDecodeError, MeshHeader, MeshPhysics, MeshSkin, PhysicsConvex,
     Submesh, VertexWeights, decode_lod, decode_physics_convex, decode_physics_mesh, decode_skin,

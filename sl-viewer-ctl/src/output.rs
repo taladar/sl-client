@@ -8,8 +8,8 @@ use serde::Serialize;
 use serde_json::{Value as JsonValue, json};
 use sl_automation_proto::{
     AgentReadout, ConversationReadout, ConversationRef, EnvironmentReadout, GroundPoint,
-    InventoryFolderReadout, LogEntry, NodeState, NodeValue, NodeVisibility, NotificationReadout,
-    ParcelMediaReadout, UiNode, ViewerIdentity, WorldMapReadout, WorldNode,
+    InventoryFolderReadout, LogEntry, MirrorsReadout, NodeState, NodeValue, NodeVisibility,
+    NotificationReadout, ParcelMediaReadout, UiNode, ViewerIdentity, WorldMapReadout, WorldNode,
 };
 use sl_viewer_driver::{AnsweredFileDialog, Screenshot};
 
@@ -68,6 +68,8 @@ pub enum Outcome {
     WorldMap(WorldMapReadout),
     /// The agent parcel's legacy media.
     ParcelMedia(ParcelMediaReadout),
+    /// The realtime mirrors.
+    Mirrors(MirrorsReadout),
     /// A setting as it now stands.
     Setting {
         /// The setting's key.
@@ -224,6 +226,7 @@ fn json_of(outcome: &Outcome) -> io::Result<JsonValue> {
         Outcome::Environment(environment) => to_json(environment)?,
         Outcome::WorldMap(map) => to_json(map)?,
         Outcome::ParcelMedia(media) => to_json(media)?,
+        Outcome::Mirrors(mirrors) => to_json(mirrors)?,
         Outcome::Setting { key, value } => json!({ "setting": key, "value": value }),
         Outcome::FileDialog { answered, picked } => json!({
             "done": if picked.is_some() { "answered" } else { "cancelled" },
@@ -319,6 +322,7 @@ fn text_of(out: &mut impl Write, outcome: &Outcome) -> io::Result<()> {
         Outcome::Environment(environment) => environment_lines(out, environment)?,
         Outcome::WorldMap(map) => world_map_lines(out, map)?,
         Outcome::ParcelMedia(media) => parcel_media_lines(out, media)?,
+        Outcome::Mirrors(mirrors) => mirror_lines(out, mirrors)?,
         Outcome::Setting { key, value } => writeln!(out, "{key} = {value}")?,
         Outcome::FileDialog { answered, picked } => match picked {
             Some(path) => writeln!(
@@ -596,6 +600,23 @@ fn parcel_media_lines(out: &mut impl Write, media: &ParcelMediaReadout) -> io::R
         ),
         None => writeln!(out, "playing  no"),
     }
+}
+
+/// The mirrors readout: whether mirrors are on, then a mirror a line.
+fn mirror_lines(out: &mut impl Write, mirrors: &MirrorsReadout) -> io::Result<()> {
+    writeln!(
+        out,
+        "mirrors  {}",
+        if mirrors.enabled { "on" } else { "off" }
+    )?;
+    for mirror in &mirrors.mirrors {
+        writeln!(
+            out,
+            "mirror   {} captured {} time(s)",
+            mirror.full_id, mirror.captures
+        )?;
+    }
+    Ok(())
 }
 
 /// The world map's readout: the tiles, then a region a line, then an item

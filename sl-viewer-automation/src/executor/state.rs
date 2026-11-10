@@ -19,8 +19,8 @@ use crate::locate::{find_all, shallow};
 use crate::probe_sources::{FileDialogAnswer, ProbeSources};
 use crate::probes::{
     ProbeError, read_agent, read_conversations, read_environment, read_inventory,
-    read_inventory_tree, read_notifications, read_parcel_media, read_quiescence, read_selection,
-    read_status, read_world_map,
+    read_inventory_tree, read_mirrors, read_notifications, read_parcel_media, read_quiescence,
+    read_selection, read_status, read_world_map,
 };
 use crate::screenshot::{ScreenshotTicket, request_screenshot, take_screenshot};
 use crate::ui_model::snapshot;
@@ -51,6 +51,7 @@ pub(super) fn read(world: &mut World, probe: &Probe) -> Result<ProbeReadout, Box
         Probe::Environment => ProbeReadout::Environment(read_environment(world)),
         Probe::WorldMap => ProbeReadout::WorldMap(read_world_map(world)),
         Probe::ParcelMedia => ProbeReadout::ParcelMedia(read_parcel_media(world)),
+        Probe::Mirrors => ProbeReadout::Mirrors(read_mirrors(world)),
     })
 }
 

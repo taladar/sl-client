@@ -401,6 +401,12 @@ impl MaterialManager {
         if id.uuid().is_nil() {
             return;
         }
+        debug!(
+            "render material {} registered on {} face {}",
+            id.uuid(),
+            key.0,
+            key.1
+        );
         let _prev = self.face_slots.insert(
             key,
             FaceSlot {
@@ -435,6 +441,12 @@ impl MaterialManager {
         if id.uuid().is_nil() {
             return false;
         }
+        debug!(
+            "render material {} assigned to {} face {}",
+            id.uuid(),
+            key.0,
+            key.1
+        );
         if let Some(slot) = self.face_slots.get_mut(&key) {
             if slot.material_id == id {
                 return false;
@@ -647,9 +659,15 @@ impl MaterialManager {
                             None
                         }
                     },
-                    None => None,
+                    None => {
+                        warn!("material {} came back with no data", id.uuid());
+                        None
+                    }
                 },
-                Err(_error) => None,
+                Err(error) => {
+                    warn!("fetching material {}: {error}", id.uuid());
+                    None
+                }
             }
         });
         let _prev = self.inflight.insert(id, task);
@@ -1061,6 +1079,7 @@ pub fn poll_materials(
         let _removed = manager.inflight.remove(&id);
         match result {
             Some(material) => {
+                debug!("material {} decoded", id.uuid());
                 let _prev = manager.decoded.insert(id, material);
                 newly_decoded.push(id);
             }
@@ -1440,11 +1459,19 @@ fn recompose_face(
     let base_uv = slot.base_uv;
     let entity = slot.entity;
     let glow = slot.glow;
-    let base = manager
-        .decoded
-        .get(&material_id)
-        .copied()
-        .unwrap_or_default();
+    let decoded = manager.decoded.get(&material_id).copied();
+    debug!(
+        "recomposing {} face {} on material {} ({})",
+        key.0,
+        key.1,
+        material_id.uuid(),
+        if decoded.is_some() {
+            "decoded"
+        } else {
+            "not decoded yet"
+        }
+    );
+    let base = decoded.unwrap_or_default();
     let mut effective = base;
     if let Some(over) = manager.overrides.get(&key) {
         over.apply_to(&mut effective);

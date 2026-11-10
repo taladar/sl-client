@@ -10,9 +10,10 @@ use std::time::Duration;
 use sl_automation_proto::{
     AgentReadout, AutomationError, ConversationReadout, Deadline, DiagnosticsReadout,
     EnvironmentReadout, InventoryFolderReadout, InventoryRoot, Locator, LogEntry, LogPage,
-    LogStream, NotificationReadout, PROTOCOL_VERSION, ParcelMediaReadout, Probe, ProbeReadout,
-    QuiescenceReadout, Request, RequestBody, ResponseBody, SelectedObject, StateCondition,
-    StateObservation, StatusReadout, UiNode, ViewerIdentity, ViewerMessage, WorldMapReadout,
+    LogStream, MirrorsReadout, NotificationReadout, PROTOCOL_VERSION, ParcelMediaReadout, Probe,
+    ProbeReadout, QuiescenceReadout, Request, RequestBody, ResponseBody, SelectedObject,
+    StateCondition, StateObservation, StatusReadout, UiNode, ViewerIdentity, ViewerMessage,
+    WorldMapReadout,
 };
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
@@ -669,6 +670,22 @@ impl Viewer {
                 "read parcel media",
                 &ResponseBody::Readout { readout: other },
             )),
+        }
+    }
+
+    /// The realtime mirrors: whether the viewer draws them, and each mirror
+    /// prim it captures live with how often its reflection has been
+    /// re-rendered.
+    ///
+    /// # Errors
+    ///
+    /// As [`read`](Self::read).
+    pub async fn mirrors(&self) -> Result<MirrorsReadout, DriverError> {
+        match self.read(Probe::Mirrors).await? {
+            ProbeReadout::Mirrors(mirrors) => Ok(mirrors),
+            other => {
+                Err(self.unexpected("read mirrors", &ResponseBody::Readout { readout: other }))
+            }
         }
     }
 

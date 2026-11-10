@@ -256,6 +256,9 @@ pub enum Verb {
     /// replaced texture, the engine a live surface runs on, and how many faces
     /// wear it.
     ParcelMedia,
+    /// Print the realtime mirrors: whether they are on, and each mirror prim
+    /// captured live with how often its reflection was re-rendered.
+    Mirrors,
     /// Answer the file dialog the viewer waits on — an Import's, a bulk
     /// import's — with a file or a folder, or cancel it; waits for one to be
     /// asked for. Only a `--headless` viewer waits; a windowed one shows the

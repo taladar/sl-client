@@ -3,7 +3,8 @@
 //! phantom flags, the prim **shape** parameters (type, cut, hollow & hollow
 //! shape, twist, taper / hole size, shear, the per-type advanced cut, taper
 //! profile, radius offset, revolutions, skew) — and the Features-tab editors —
-//! the physical material, the flexible path, and the light source.
+//! the physical material, the flexible path, the light source, the animated
+//! mesh flag and the reflection probe (its rules in `edit_probe`).
 //!
 //! # Model
 //!
@@ -37,10 +38,20 @@
 //!   projector texture are not editable ([[viewer-ui-texture-picker]]) — a
 //!   sculpt keeps its identity (switching a prim *to* sculpt is not offered),
 //!   and an existing spotlight's FOV / focus / ambiance stay editable.
+//! - Making a prim a **reflection probe** asks first (`ReflectionProbeApplied`)
+//!   and then, as the reference's `doSendIsReflectionProbe` does, makes the
+//!   volume match the probe: phantom, no PBR material, every face transparent,
+//!   and a fresh box (a prim on a linear path — Firestorm's choice over the
+//!   stock viewer's sphere) or sphere. A volume-type change that flips the box
+//!   bit does the same, a sphere taking the prim's X size on every axis.
+//!   The Dynamic checkbox shows while realtime mirrors are off and the Update
+//!   Type combo while they are on, as the reference swaps them on
+//!   `RenderMirrors`.
 //!
 //! Reference (Firestorm, read-only): `llpanelobject`, `llpanelvolume`;
 //! messages `ObjectName`, `ObjectDescription`, `ObjectFlagUpdate`,
-//! `ObjectMaterial`, `ObjectShape`, `ObjectExtraParams`.
+//! `ObjectMaterial`, `ObjectShape`, `ObjectExtraParams`, `ObjectImage`,
+//! `MultipleObjectUpdate`; the `ModifyMaterialParams` capability.
 
 use bevy::input_focus::InputFocus;
 use bevy::prelude::*;
@@ -52,11 +63,24 @@ use bevy::text::{EditableText, FontCx, LayoutCx};
 use bevy_flair::style::components::ClassList;
 use bevy_fluent::Localization;
 use sl_client_bevy::{
-    AgentKey, CircuitId, Command, FlexibleData, GroupKey, HoleType, LightData, Material,
-    ObjectExtraParams, ObjectFlagSettings, OwnerKey, PathCurve, PermissionField, Permissions,
-    Permissions5, PrimShapeFloat, PrimShapeParams, ProfileCurve, RegionLocalObjectId,
-    ScopedObjectId, SlCommand, Uuid, Vector, pcode,
+    AgentKey, CircuitId, Command, ExtendedMesh, FlexibleData, GroupKey, HoleType, LightData,
+    Material, MaterialOverrideUpdate, ObjectExtraParams, ObjectFlagSettings, ObjectKey,
+    ObjectTransform, OwnerKey, PathCurve, PermissionField, Permissions, Permissions5,
+    PrimShapeFloat, PrimShapeParams, ProfileCurve, ReflectionProbeFlags, RegionLocalObjectId,
+    ScopedObjectId, SculptOrMeshKey, SlCommand, TextureEntry, TextureFace, Uuid, Vector, pcode,
 };
+use sl_viewer_notifications::{NotificationResponse, OkCancel, ShowNotification, TemplateRef};
+use sl_viewer_settings::ViewerSettings;
+use sl_viewer_settings::keys::probes::RENDER_MIRRORS_SETTING;
+
+use crate::edit_probe::{
+    ANIMATED_MESH_ENABLED_FLAG, AnimeshFacts, AnimeshLimits, PROBE_DEFAULTS, PROBE_MAX_AMBIANCE,
+    PROBE_MAX_NEAR_CLIP, ProbeChange, ProbeUpdate, ProbeVolume, animesh_allowed,
+    apply_probe_change, ingest_animesh_limits,
+};
+use crate::edit_texture::PrimFaceLookup;
+use crate::ui_combo::{ComboChanged, ComboSelection, ComboSpec, spawn_combo};
+use sl_viewer_world_objects::meshes::MeshManager;
 
 use crate::edit_tool::{
     BuildTabPages, LABEL_CLASS, TOOL_FONT_SIZE, VALUE_CLASS, name_part, spawn_row_label,
@@ -595,6 +619,10 @@ pub(crate) enum ParamField {
     SpotFocus,
     /// Spotlight ambiance.
     SpotAmbiance,
+    /// Reflection-probe ambiance.
+    ProbeAmbiance,
+    /// Reflection-probe near clip, metres.
+    ProbeNearClip,
 }
 
 /// Which wire message a committed [`ParamField`] edit rebuilds.
@@ -612,6 +640,8 @@ enum CommitFamily {
     Light,
     /// `ObjectExtraParams` with the spotlight projection rebuilt.
     Spot,
+    /// `ObjectExtraParams` with the reflection-probe block changed.
+    Probe,
 }
 
 impl ParamField {
@@ -660,6 +690,7 @@ impl ParamField {
             | Self::LightRadius
             | Self::LightFalloff => CommitFamily::Light,
             Self::SpotFov | Self::SpotFocus | Self::SpotAmbiance => CommitFamily::Spot,
+            Self::ProbeAmbiance | Self::ProbeNearClip => CommitFamily::Probe,
         }
     }
 
@@ -747,6 +778,8 @@ impl ParamField {
             Self::SpotFov => step(0.1, 0.0, 3.0),
             Self::SpotFocus => step(0.5, -20.0, 20.0),
             Self::SpotAmbiance => step(0.05, 0.0, 1.0),
+            Self::ProbeAmbiance => step(0.05, 0.0, f64::from(PROBE_MAX_AMBIANCE)),
+            Self::ProbeNearClip => step(0.05, 0.0, f64::from(PROBE_MAX_NEAR_CLIP)),
         }
     }
 
@@ -758,6 +791,7 @@ impl ParamField {
             CommitFamily::Flexi => ParamGate::FlexiFields,
             CommitFamily::Light => ParamGate::LightFields,
             CommitFamily::Spot => ParamGate::SpotFields,
+            CommitFamily::Probe => ParamGate::ProbeShapeFields,
         }
     }
 }
@@ -776,6 +810,12 @@ enum ParamToggle {
     Flexi,
     /// The light feature.
     Light,
+    /// The animated-mesh flag (the linkset root's `ExtendedMesh` block).
+    AnimatedMesh,
+    /// The reflection-probe feature.
+    ReflectionProbe,
+    /// The probe's Dynamic flag — the control shown while mirrors are off.
+    ProbeDynamic,
     /// Next owner can modify (`ObjectPermissions`, next-owner mask).
     NextModify,
     /// Next owner can copy.
@@ -805,6 +845,82 @@ enum ParamCycle {
 /// Marks a [`ParamCycle`] button's value text.
 #[derive(Component, Debug, Clone, Copy)]
 struct ParamCycleValue(ParamCycle);
+
+/// Which combo box this is (the reflection probe's two).
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+enum ParamCombo {
+    /// The probe's influence volume ([`ProbeVolume`]).
+    ProbeVolume,
+    /// The probe's update type ([`ProbeUpdate`]), shown while mirrors are on.
+    ProbeUpdate,
+}
+
+impl ParamCombo {
+    /// The combo's entries' Fluent keys, in order.
+    fn label_keys(self) -> Vec<String> {
+        match self {
+            Self::ProbeVolume => ProbeVolume::ALL
+                .iter()
+                .map(|volume| volume.label_key().to_owned())
+                .collect(),
+            Self::ProbeUpdate => ProbeUpdate::ALL
+                .iter()
+                .map(|update| update.label_key().to_owned())
+                .collect(),
+        }
+    }
+
+    /// The combo's element id.
+    const fn element(self) -> &'static str {
+        match self {
+            Self::ProbeVolume => "build-probe-volume",
+            Self::ProbeUpdate => "build-probe-update",
+        }
+    }
+
+    /// The entry a probe's flags select.
+    fn active(self, flags: ReflectionProbeFlags) -> usize {
+        match self {
+            Self::ProbeVolume => {
+                let volume = ProbeVolume::of(flags);
+                ProbeVolume::ALL
+                    .iter()
+                    .position(|entry| *entry == volume)
+                    .unwrap_or(0)
+            }
+            Self::ProbeUpdate => {
+                let update = ProbeUpdate::of(flags);
+                ProbeUpdate::ALL
+                    .iter()
+                    .position(|entry| *entry == update)
+                    .unwrap_or(0)
+            }
+        }
+    }
+
+    /// The probe edit picking entry `index` makes, or `None` past the end.
+    fn change(self, index: usize) -> Option<ProbeChange> {
+        match self {
+            Self::ProbeVolume => ProbeVolume::ALL
+                .get(index)
+                .copied()
+                .map(ProbeChange::Volume),
+            Self::ProbeUpdate => ProbeUpdate::ALL
+                .get(index)
+                .copied()
+                .map(ProbeChange::Update),
+        }
+    }
+
+    /// The gate guarding the combo: the volume type is the mirror's to fix, so
+    /// it greys for a mirror as the reference's does.
+    const fn gate(self) -> ParamGate {
+        match self {
+            Self::ProbeVolume => ParamGate::ProbeShapeFields,
+            Self::ProbeUpdate => ParamGate::ProbeFields,
+        }
+    }
+}
 
 /// Which per-type row container this is, for the visibility pass.
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
@@ -855,6 +971,25 @@ enum FeatureRows {
     Light,
     /// The spotlight projection row.
     Spot,
+    /// The reflection-probe parameter rows.
+    Probe,
+    /// The probe's Dynamic checkbox, shown while realtime mirrors are off.
+    ProbeDynamic,
+    /// The probe's Update Type row, shown while realtime mirrors are on.
+    ProbeUpdate,
+}
+
+impl FeatureRows {
+    /// Whether the rows show while realtime mirrors are `mirrors_enabled` —
+    /// the reference swaps the Dynamic checkbox for the Update Type combo on
+    /// `RenderMirrors`; everything else always shows, greyed by its gate.
+    const fn shown(self, mirrors_enabled: bool) -> bool {
+        match self {
+            Self::ProbeDynamic => !mirrors_enabled,
+            Self::ProbeUpdate => mirrors_enabled,
+            Self::Flexi | Self::Light | Self::Spot | Self::Probe => true,
+        }
+    }
 }
 
 /// What must be true of the selection for an interactive widget to be live.
@@ -892,6 +1027,18 @@ enum ParamGate {
     LightFields,
     /// A spotlight projection present (its parameter fields).
     SpotFields,
+    /// One selected volume prim, not a mesh (the reflection-probe toggle,
+    /// the reference's `single_volume && !isMesh()`).
+    ProbeToggle,
+    /// The probe feature on, on one selected prim (the Dynamic checkbox and
+    /// the Update Type combo).
+    ProbeFields,
+    /// The probe feature on and the probe no mirror (the volume type and the
+    /// ambiance / near-clip spinners, which a mirror fixes).
+    ProbeShapeFields,
+    /// One selected linkset, its root the primary, within the animated-object
+    /// limits ([`animesh_allowed`]).
+    AnimeshToggle,
     /// A selection whose object is set to a group (the Deed button).
     Deed,
 }
@@ -910,6 +1057,9 @@ const fn toggle_gate(toggle: ParamToggle) -> ParamGate {
         | ParamToggle::AnyoneCopy => ParamGate::Record,
         ParamToggle::Flexi => ParamGate::FlexiToggle,
         ParamToggle::Light => ParamGate::Prim,
+        ParamToggle::AnimatedMesh => ParamGate::AnimeshToggle,
+        ParamToggle::ReflectionProbe => ParamGate::ProbeToggle,
+        ParamToggle::ProbeDynamic => ParamGate::ProbeFields,
     }
 }
 
@@ -1125,6 +1275,34 @@ fn spawn_param_cycle(
     commands
         .entity(spawned.label)
         .insert(ParamCycleValue(cycle));
+}
+
+/// Spawn one probe combo box, its entries the combo's translated labels, tagged
+/// with its [`ParamCombo`] and gate so the sync and the change handler map it
+/// back.
+fn spawn_param_combo(
+    commands: &mut Commands,
+    parent: Entity,
+    combo: ParamCombo,
+    tab_index: &mut i32,
+    font_size: f32,
+) {
+    let index = *tab_index;
+    *tab_index = tab_index.saturating_add(1);
+    let labels = combo.label_keys();
+    let anchor = spawn_combo(
+        commands,
+        parent,
+        &ComboSpec {
+            element: combo.element(),
+            labels: &labels,
+            active: 0,
+            tab_index: index,
+            font_size,
+            translate_labels: true,
+        },
+    );
+    commands.entity(anchor).insert((combo, combo.gate()));
 }
 
 /// Spawn one action button (a bordered button with a translated label).
@@ -1672,6 +1850,17 @@ pub(crate) fn spawn_param_tabs_into(
         font_size,
     );
 
+    // The reference puts the linkset-wide flag first, above the per-prim
+    // features.
+    spawn_param_toggle(
+        commands,
+        features,
+        ParamToggle::AnimatedMesh,
+        "build-feature-animesh",
+        &mut tab_index,
+        font_size,
+    );
+
     spawn_param_toggle(
         commands,
         features,
@@ -1828,6 +2017,90 @@ pub(crate) fn spawn_param_tabs_into(
             font_size,
         );
     }
+
+    spawn_probe_rows(commands, features, &mut tab_index, font_size);
+}
+
+/// Spawn the Features tab's reflection-probe block under `features`: the
+/// toggle, then the volume type, the Dynamic checkbox / Update Type combo pair
+/// (one shows at a time — see [`FeatureRows::shown`]) and the two spinners.
+fn spawn_probe_rows(
+    commands: &mut Commands,
+    features: Entity,
+    tab_index: &mut i32,
+    font_size: f32,
+) {
+    spawn_param_toggle(
+        commands,
+        features,
+        ParamToggle::ReflectionProbe,
+        "build-feature-probe",
+        tab_index,
+        font_size,
+    );
+    let probe_rows = commands
+        .spawn((
+            Node {
+                padding: UiRect::left(Val::Px(14.0)),
+                ..column(Val::Px(4.0))
+            },
+            FeatureRows::Probe,
+            UiPanelShown(true),
+            ChildOf(features),
+        ))
+        .id();
+    let volume_row = spawn_param_row(commands, probe_rows, "build-probe-volume-label", font_size);
+    spawn_param_combo(
+        commands,
+        volume_row,
+        ParamCombo::ProbeVolume,
+        tab_index,
+        font_size,
+    );
+    let dynamic_holder = commands
+        .spawn((
+            Node::default(),
+            FeatureRows::ProbeDynamic,
+            UiPanelShown(true),
+            ChildOf(probe_rows),
+        ))
+        .id();
+    spawn_param_toggle(
+        commands,
+        dynamic_holder,
+        ParamToggle::ProbeDynamic,
+        "build-probe-dynamic",
+        tab_index,
+        font_size,
+    );
+    let update_row = spawn_param_row(commands, probe_rows, "build-probe-update-label", font_size);
+    commands
+        .entity(update_row)
+        .insert((FeatureRows::ProbeUpdate, UiPanelShown(true)));
+    spawn_param_combo(
+        commands,
+        update_row,
+        ParamCombo::ProbeUpdate,
+        tab_index,
+        font_size,
+    );
+    for (field, key, element) in [
+        (
+            ParamField::ProbeAmbiance,
+            "build-probe-ambiance-label",
+            "build-probe-ambiance",
+        ),
+        (
+            ParamField::ProbeNearClip,
+            "build-probe-near-clip-label",
+            "build-probe-near-clip",
+        ),
+    ] {
+        let field_row = spawn_param_row(commands, probe_rows, key, font_size);
+        spawn_param_field(
+            commands, field_row, field, element, 6.0, tab_index, font_size,
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1957,6 +2230,10 @@ fn feature_display_value(field: ParamField, extra: &ObjectExtraParams) -> f32 {
             .light_image
             .as_ref()
             .map_or(0.0, |image| image.params.z),
+        ParamField::ProbeAmbiance => extra.reflection_probe.map_or(0.0, |probe| probe.ambiance),
+        ParamField::ProbeNearClip => extra
+            .reflection_probe
+            .map_or(0.0, |probe| probe.clip_distance),
         _not_feature => 0.0,
     }
 }
@@ -2152,6 +2429,10 @@ fn light_from_ui(
 struct ShownSnapshot {
     /// The last-displayed state, or `None` when nothing valid is shown yet.
     shown: Option<SnapshotData>,
+    /// Whether realtime mirrors were on when it was drawn, which decides
+    /// which of the probe's two update controls shows; `None` before the
+    /// first draw.
+    mirrors_enabled: Option<bool>,
 }
 
 /// See `ShownSnapshot`.
@@ -2198,6 +2479,12 @@ struct SnapshotData {
     /// the reply lands, pending while it is in flight, or unavailable on a grid
     /// without the cap.
     land_impact: crate::object_cost::LandImpact,
+    /// Whether the selection is exactly one volume prim — the reference's
+    /// `single_volume`, which the reflection-probe controls want.
+    single_object: bool,
+    /// Whether the Animated Mesh checkbox may be used: one linkset selected,
+    /// its root the primary, within the animated-object limits.
+    animesh_ok: bool,
 }
 
 /// The shape-row visibility query (aliased for clippy's type-complexity cap);
@@ -2244,6 +2531,11 @@ impl Plugin for EditParamsPlugin {
     fn build(&self, app: &mut App) {
         crate::ui_spinner::ensure_spinner_widget(app);
         app.init_resource::<ShownSnapshot>()
+            .init_resource::<AnimeshLimits>()
+            .init_resource::<PendingProbeConfirm>()
+            .add_message::<ShowNotification>()
+            .add_message::<NotificationResponse>()
+            .add_message::<ComboChanged>()
             // Registered here as well as by the picker's own plugin: the Set…
             // button writes one and `apply_group_picks` reads the other, and a
             // harness that stands up the build floater without the picker
@@ -2262,7 +2554,17 @@ impl Plugin for EditParamsPlugin {
             // Not under that gate: a pick can land the frame the picker closes,
             // and the build tool settling out from under it must not swallow
             // the answer the person just gave.
-            .add_systems(Update, apply_group_picks);
+            .add_systems(Update, apply_group_picks)
+            // Neither under the build gate: the warning's answer can land after
+            // the window closed, and the limits are learnt at login.
+            .add_systems(
+                Update,
+                (
+                    ingest_animesh_limits,
+                    answer_probe_confirmations,
+                    apply_probe_combo_changes,
+                ),
+            );
     }
 }
 
@@ -2280,6 +2582,8 @@ struct OwnedEditData {
     update_flags: u32,
     /// The complete extra params.
     extra: ObjectExtraParams,
+    /// The size in Second Life metres, as last sent.
+    scale: Vec3,
 }
 
 /// The owned editable state of `scoped`, or `None` if untracked.
@@ -2290,7 +2594,76 @@ fn owned_edit_data(objects: &ObjectState, scoped: &ScopedObjectId) -> Option<Own
         material: data.material,
         update_flags: data.update_flags,
         extra: data.extra.clone(),
+        scale: data.scale,
     })
+}
+
+/// How the selection counts, for the controls that want a single object or a
+/// single linkset: `(single volume prim, single linkset of volume prims)`.
+/// With whole-linkset selection each selected node stands for its whole
+/// linkset; with Edit Linked Parts for itself.
+fn selection_counts(
+    selection: &SelectionSet,
+    objects: &ObjectState,
+    edit_linked: bool,
+) -> (bool, bool) {
+    let all_prims = selection.iter().all(|node| {
+        objects
+            .edit_data(&node.scoped)
+            .is_some_and(|data| data.pcode == pcode::PRIMITIVE)
+    });
+    let objects_selected: usize = selection
+        .iter()
+        .map(|node| {
+            if edit_linked {
+                1
+            } else {
+                objects.linkset_prim_count(&node.scoped).max(1)
+            }
+        })
+        .sum();
+    let roots: std::collections::HashSet<ScopedObjectId> = selection
+        .iter()
+        .map(|node| objects.linkset_root_of(&node.scoped).unwrap_or(node.scoped))
+        .collect();
+    (
+        all_prims && objects_selected == 1,
+        all_prims && roots.len() == 1,
+    )
+}
+
+/// The animated-object facts of the linkset rooted at `root`: its summed mesh
+/// triangle estimate (a mesh whose header has not landed counts nothing, as
+/// the reference's `getEstTrianglesMax` does without cost data), whether it is
+/// animated already, and, worn, how many animated attachments its wearer has.
+fn animesh_facts(
+    objects: &ObjectState,
+    meshes: Option<&MeshManager>,
+    root: &ScopedObjectId,
+) -> AnimeshFacts {
+    let est_triangles = objects
+        .linkset_members(root)
+        .iter()
+        .filter_map(|member| {
+            let data = objects.edit_data(member)?;
+            let SculptOrMeshKey::Mesh(mesh) = data.extra.sculpt?.texture else {
+                return None;
+            };
+            meshes?
+                .header(mesh)
+                .map(sl_client_bevy::MeshHeader::est_triangles_max)
+        })
+        .sum();
+    let animated = objects.edit_data(root).is_some_and(|data| {
+        data.extra
+            .extended_mesh
+            .is_some_and(|mesh| mesh.flags & ANIMATED_MESH_ENABLED_FLAG != 0)
+    });
+    AnimeshFacts {
+        est_triangles,
+        animated,
+        worn_animated: objects.animated_attachments_beside(root),
+    }
 }
 
 /// What a still-outstanding answer displays (the land impact while its cost
@@ -2325,15 +2698,29 @@ fn group_label(
 /// requests them (deduplicated) as a side effect; the arriving reply changes
 /// the snapshot, which rewrites the info lines.
 fn build_snapshot(
-    selection: &SelectionSet,
-    objects: &ObjectState,
-    avatars: &mut AvatarState,
-    groups: &GroupsModel,
-    costs: &mut crate::object_cost::ObjectCostModel,
+    facts: &mut ParamFacts,
+    edit_linked: bool,
     names: &mut MessageWriter<SlCommand>,
 ) -> Option<SnapshotData> {
+    let ParamFacts {
+        selection,
+        objects,
+        avatars,
+        groups,
+        costs,
+        meshes,
+        animesh_limits,
+        settings: _,
+    } = facts;
     let primary = selection.primary()?;
     let data = owned_edit_data(objects, &primary.scoped)?;
+    let (single_object, single_root) = selection_counts(selection, objects, edit_linked);
+    let animesh_ok = single_root
+        && objects.heads_linkset(&primary.scoped)
+        && animesh_allowed(
+            animesh_facts(objects, meshes.as_deref(), &primary.scoped),
+            animesh_limits,
+        );
     // The selected linkset's land impact (`GetObjectCost`): the shared model
     // sends the request once for the primary root and shares the reply with the
     // hover tooltip (no duplicate requests).
@@ -2370,6 +2757,8 @@ fn build_snapshot(
         group_label: group.map_or_else(String::new, |group| group_label(group, groups, names)),
         permissions: properties.map(|properties| properties.permissions),
         land_impact,
+        single_object,
+        animesh_ok,
     })
 }
 
@@ -2448,6 +2837,8 @@ struct ParamWidgets<'w, 's> {
     swap_labels: SwapLabelQuery<'w, 's>,
     /// The feature sub-sections.
     feature_rows: FeatureRowQuery<'w, 's>,
+    /// The probe combos' selections.
+    combos: Query<'w, 's, (&'static ParamCombo, &'static mut ComboSelection)>,
     /// The fields' spinners, re-ranged per prim type.
     spinners: Query<'w, 's, (&'static ParamField, &'static mut Spinner)>,
     /// The focused field, which a programmatic rewrite must leave alone.
@@ -2472,6 +2863,20 @@ struct ParamFacts<'w> {
     groups: Res<'w, GroupsModel>,
     /// The land-impact / render-cost scores shown.
     costs: ResMut<'w, crate::object_cost::ObjectCostModel>,
+    /// The mesh headers, for an animated object's triangle estimate.
+    meshes: Option<Res<'w, MeshManager>>,
+    /// The animated-object caps.
+    animesh_limits: Res<'w, AnimeshLimits>,
+    /// The settings, for whether realtime mirrors are on.
+    settings: Option<Res<'w, ViewerSettings>>,
+}
+
+/// Whether realtime mirrors are on (`RenderMirrors`) — off where the settings
+/// store is absent, the setting's default.
+fn mirrors_enabled(settings: Option<&ViewerSettings>) -> bool {
+    settings
+        .and_then(|settings| settings.store().get_bool(RENDER_MIRRORS_SETTING).ok())
+        .unwrap_or(false)
 }
 
 /// How the panel's text is worded, bundled as one
@@ -2503,19 +2908,14 @@ fn sync_param_widgets(
     if !state.active {
         return;
     }
-    let current = build_snapshot(
-        &facts.selection,
-        &facts.objects,
-        &mut facts.avatars,
-        &facts.groups,
-        &mut facts.costs,
-        &mut names,
-    );
+    let current = build_snapshot(&mut facts, state.edit_linked, &mut names);
+    let mirrors = mirrors_enabled(facts.settings.as_deref());
     // Widgets just spawned have drawn nothing yet, whatever was last shown:
     // with nothing selected the snapshot is `None` before and after, and the
     // fresh controls would keep their spawned (enabled) state until the first
     // selection.
     if snapshot.shown.as_ref() == current.as_ref()
+        && snapshot.mirrors_enabled == Some(mirrors)
         && !text.localization.is_changed()
         && !text.locale.is_changed()
         && widgets.new_gates.is_empty()
@@ -2524,11 +2924,13 @@ fn sync_param_widgets(
     }
     show_param_snapshot(
         current.as_ref(),
+        mirrors,
         &text.translator,
         &mut widgets,
         &mut commands,
     );
     snapshot.shown = current;
+    snapshot.mirrors_enabled = Some(mirrors);
 }
 
 /// Draw `data` (the primary selection's snapshot, or `None` for nothing
@@ -2538,6 +2940,7 @@ fn sync_param_widgets(
 /// gallery specimen calls with a sample snapshot.
 fn show_param_snapshot(
     data: Option<&SnapshotData>,
+    mirrors: bool,
     translator: &Translator<'_>,
     widgets: &mut ParamWidgets<'_, '_>,
     commands: &mut Commands<'_, '_>,
@@ -2580,6 +2983,15 @@ fn show_param_snapshot(
             .is_some_and(|shape| matches!(shape.path_curve, PathCurve::Line | PathCurve::Flexible));
     let deed_ok = data.is_some_and(|data| data.group.is_some());
     let has_record = data.is_some_and(|data| data.permissions.is_some());
+    let single_object = data.is_some_and(|data| data.single_object);
+    let probe = data.and_then(|data| data.extra.reflection_probe);
+    let probe_on = probe.is_some() && single_object;
+    let mirror = probe.is_some_and(|probe| probe.flags.contains(ReflectionProbeFlags::MIRROR));
+    let animated = data.is_some_and(|data| {
+        data.extra
+            .extended_mesh
+            .is_some_and(|mesh| mesh.flags & ANIMATED_MESH_ENABLED_FLAG != 0)
+    });
     let enabled_for = |gate: ParamGate| -> bool {
         let base = match gate {
             ParamGate::Selection => has_selection,
@@ -2590,6 +3002,12 @@ fn show_param_snapshot(
             ParamGate::FlexiFields => flexi_on,
             ParamGate::LightFields => light_on,
             ParamGate::SpotFields => spot_on,
+            ParamGate::ProbeToggle => {
+                is_prim && single_object && prim_type != Some(PrimTypeUi::Mesh)
+            }
+            ParamGate::ProbeFields => probe_on,
+            ParamGate::ProbeShapeFields => probe_on && !mirror,
+            ParamGate::AnimeshToggle => data.is_some_and(|data| data.animesh_ok),
             ParamGate::Deed => deed_ok,
         };
         // No modify permission greys every editable parameter control.
@@ -2649,6 +3067,13 @@ fn show_param_snapshot(
                         String::new()
                     }
                 }
+                CommitFamily::Probe => {
+                    if probe_on {
+                        field.format(feature_display_value(*field, &data.extra))
+                    } else {
+                        String::new()
+                    }
+                }
                 CommitFamily::Name | CommitFamily::Description => String::new(),
             },
         };
@@ -2678,6 +3103,11 @@ fn show_param_snapshot(
             ParamToggle::Phantom => data.is_some_and(|d| d.update_flags & FLAGS_PHANTOM != 0),
             ParamToggle::Flexi => flexi_on,
             ParamToggle::Light => light_on,
+            ParamToggle::AnimatedMesh => animated,
+            ParamToggle::ReflectionProbe => probe.is_some(),
+            ParamToggle::ProbeDynamic => {
+                probe.is_some_and(|probe| probe.flags.contains(ReflectionProbeFlags::DYNAMIC))
+            }
             ParamToggle::NextModify => perm_bit(data, |p| p.next_owner, Permissions::MODIFY),
             ParamToggle::NextCopy => perm_bit(data, |p| p.next_owner, Permissions::COPY),
             ParamToggle::NextTransfer => perm_bit(data, |p| p.next_owner, Permissions::TRANSFER),
@@ -2799,11 +3229,23 @@ fn show_param_snapshot(
             shown.0 = want;
         }
     }
+    // The probe combos follow the probe; with none they keep their last
+    // entry, greyed by their gates.
+    if let Some(probe) = probe {
+        for (combo, mut selection) in &mut widgets.combos {
+            let active = combo.active(probe.flags);
+            if selection.active != active {
+                selection.active = active;
+            }
+        }
+    }
     // The feature sub-sections stay visible (their fields grey out via the
-    // gates, the reference's cleared-and-disabled look).
-    for (_rows, mut shown) in &mut widgets.feature_rows {
-        if !shown.0 {
-            shown.0 = true;
+    // gates, the reference's cleared-and-disabled look), but for the probe's
+    // two update controls, one of which shows per the mirror setting.
+    for (rows, mut shown) in &mut widgets.feature_rows {
+        let want = rows.shown(mirrors);
+        if shown.0 != want {
+            shown.0 = want;
         }
     }
 }
@@ -2852,6 +3294,8 @@ pub(crate) fn fill_param_tabs_specimen(commands: &mut Commands, cx: crate::ui_el
         group_label: String::new(),
         permissions: Some(full),
         land_impact: crate::object_cost::LandImpact::Known(1.0),
+        single_object: true,
+        animesh_ok: true,
     };
     commands.queue(move |world: &mut World| {
         if let Err(error) = world.run_system_cached_with(show_param_specimen, sample) {
@@ -2868,7 +3312,13 @@ fn show_param_specimen(
     mut widgets: ParamWidgets,
     mut commands: Commands,
 ) {
-    show_param_snapshot(Some(&sample), &translator, &mut widgets, &mut commands);
+    show_param_snapshot(
+        Some(&sample),
+        true,
+        &translator,
+        &mut widgets,
+        &mut commands,
+    );
 }
 
 /// Parse a committed numeric field's value.
@@ -3125,6 +3575,290 @@ fn commit_param_field(
                     params: extra,
                 }));
         }
+        CommitFamily::Probe => {
+            let Some(value) = field_value(*field) else {
+                return;
+            };
+            let change = match field {
+                ParamField::ProbeAmbiance => ProbeChange::Ambiance(value),
+                _near_clip => ProbeChange::NearClip(value),
+            };
+            // Neither spinner touches the volume type, so no face rewrite can
+            // follow: the probe block alone goes out.
+            let _volume = commit_probe_change(
+                &mut commit_to.objects,
+                &mut commit_to.snapshot,
+                &mut commit_to.commands,
+                primary_scoped,
+                change,
+            );
+        }
+    }
+}
+
+/// Apply `change` to the reflection probe of `scoped`, echo it locally and send
+/// the object's extra params — the reference's `onCommitProbe`. Returns whether
+/// the edit flipped the box bit, which owes the volume a reshape
+/// ([`probe_volume_commands`]); nothing is sent when the probe is unchanged
+/// (each of the reference's setters returns early on an equal value) or the
+/// object is no probe.
+fn commit_probe_change(
+    objects: &mut ObjectState,
+    snapshot: &mut ShownSnapshot,
+    commands: &mut MessageWriter<SlCommand>,
+    scoped: ScopedObjectId,
+    change: ProbeChange,
+) -> Option<bool> {
+    let data = owned_edit_data(objects, &scoped)?;
+    let current = data.extra.reflection_probe?;
+    let next = apply_probe_change(current, change);
+    if next == current {
+        return None;
+    }
+    let mut extra = data.extra;
+    extra.reflection_probe = Some(next);
+    objects.apply_local_extra_edit(&scoped, extra.clone());
+    snapshot.shown = None;
+    commands.write(SlCommand(Command::SetObjectExtraParams {
+        local_id: scoped,
+        params: extra,
+    }));
+    let boxed = |flags: ReflectionProbeFlags| flags.contains(ReflectionProbeFlags::BOX_VOLUME);
+    Some(boxed(next.flags) != boxed(current.flags))
+}
+
+/// A fresh shape of the reference's `LLVolumeParams` with only the curves set:
+/// a box (line path, square profile) or a sphere (circle path, half-circle
+/// profile), every cut, hollow, twist, taper and shear at its default — what
+/// `updateVolume(params)` sends when a prim becomes a probe.
+fn probe_volume_shape(box_volume: bool) -> PrimShapeParams {
+    let (profile_curve, path_curve) = if box_volume {
+        (ProfileCurve::Square, PathCurve::Line)
+    } else {
+        (ProfileCurve::HalfCircle, PathCurve::Circle)
+    };
+    PrimShapeParams {
+        path_curve: path_curve.to_byte(),
+        profile_curve: profile_curve.to_byte(),
+        path_begin: quantize_cut_begin(0.0),
+        path_end: quantize_cut_end(1.0),
+        path_scale_x: quantize_path_scale(1.0),
+        path_scale_y: quantize_path_scale(1.0),
+        path_shear_x: quantize_shear(0.0),
+        path_shear_y: quantize_shear(0.0),
+        path_twist: quantize_signed(0.0),
+        path_twist_begin: quantize_signed(0.0),
+        path_radius_offset: quantize_signed(0.0),
+        path_taper_x: quantize_signed(0.0),
+        path_taper_y: quantize_signed(0.0),
+        path_revolutions: quantize_revolutions(1.0),
+        path_skew: quantize_signed(0.0),
+        profile_begin: quantize_cut_begin(0.0),
+        profile_end: quantize_cut_end(1.0),
+        profile_hollow: quantize_hollow(0.0),
+    }
+}
+
+/// The object a probe's volume is reshaped on.
+#[derive(Debug)]
+struct ProbeVolumeTarget {
+    /// Its region-scoped id.
+    scoped: ScopedObjectId,
+    /// Its grid-wide key, which the material capability addresses.
+    full: ObjectKey,
+    /// Its editable state.
+    data: OwnedEditData,
+    /// Its faces as rendered ([`PrimFaceLookup::current_faces`]).
+    faces: Vec<TextureFace>,
+    /// Its legacy media URL, which an `ObjectImage` restates.
+    media_url: Option<String>,
+}
+
+/// What making the volume match the probe sends, in the reference's order
+/// (`doSendIsReflectionProbe`, and `onCommitProbe` when the box bit flips):
+/// the phantom flag, the PBR material cleared off every face (only where a
+/// face carries one — there is nothing to clear otherwise, and a grid without
+/// the capability is not asked), every face transparent, for a sphere made by
+/// a volume change the prim's X size on every axis (`rescale_sphere`), and
+/// the fresh box or sphere shape.
+fn probe_volume_commands(
+    target: &ProbeVolumeTarget,
+    box_volume: bool,
+    rescale_sphere: bool,
+) -> Vec<Command> {
+    let mut sent = Vec::new();
+    if target.data.update_flags & FLAGS_PHANTOM == 0 {
+        sent.push(Command::SetObjectFlags {
+            local_id: target.scoped,
+            flags: object_flag_settings(target.data.update_flags | FLAGS_PHANTOM),
+        });
+    }
+    if !target.data.extra.render_material.is_empty() {
+        sent.push(Command::ModifyMaterialParams {
+            updates: vec![MaterialOverrideUpdate {
+                object_id: target.full,
+                side: -1,
+                gltf_json: None,
+                asset_id: Some(Uuid::nil()),
+            }],
+        });
+    }
+    if !target.faces.is_empty() {
+        let mut entry = TextureEntry {
+            faces: target.faces.clone(),
+        };
+        for face in &mut entry.faces {
+            if let Some(alpha) = face.color.get_mut(3) {
+                *alpha = 0;
+            }
+        }
+        sent.push(Command::SetObjectImage {
+            local_id: target.scoped,
+            media_url: target.media_url.clone(),
+            texture_entry: entry,
+        });
+    }
+    if rescale_sphere && !box_volume {
+        let side = target.data.scale.x;
+        sent.push(Command::UpdateObject {
+            local_id: target.scoped,
+            transform: ObjectTransform {
+                scale: Some(Vector {
+                    x: side,
+                    y: side,
+                    z: side,
+                }),
+                ..ObjectTransform::default()
+            },
+        });
+    }
+    sent.push(Command::SetObjectShape {
+        local_id: target.scoped,
+        shape: probe_volume_shape(box_volume),
+    });
+    sent
+}
+
+/// The catalogue's warning about what making a prim a reflection probe does,
+/// answered OK or Cancel.
+const REFLECTION_PROBE_APPLIED: TemplateRef<OkCancel> = TemplateRef::new("ReflectionProbeApplied");
+
+/// The prim a [`REFLECTION_PROBE_APPLIED`] question was asked about, until it is
+/// answered.
+#[derive(Resource, Debug, Default)]
+struct PendingProbeConfirm(Option<ScopedObjectId>);
+
+/// The selection and faces a probe's volume is reshaped from, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam).
+#[derive(bevy::ecs::system::SystemParam)]
+struct ProbeVolumeSources<'w, 's> {
+    /// The selection, for the object's entity and key.
+    selection: Res<'w, SelectionSet>,
+    /// The rendered faces.
+    faces: PrimFaceLookup<'w, 's>,
+}
+
+impl ProbeVolumeSources<'_, '_> {
+    /// The reshape target for `scoped` — while it is still selected — from
+    /// `objects`.
+    fn target(&self, objects: &ObjectState, scoped: ScopedObjectId) -> Option<ProbeVolumeTarget> {
+        let node = self.selection.iter().find(|node| node.scoped == scoped)?;
+        Some(ProbeVolumeTarget {
+            scoped,
+            full: node.full,
+            data: owned_edit_data(objects, &scoped)?,
+            faces: self.faces.current_faces(node.entity),
+            media_url: objects.media_url_of(&scoped),
+        })
+    }
+}
+
+/// Make the prim the question was asked about a reflection probe once OK is
+/// pressed — the reference's `doSendIsReflectionProbe`: the probe block (a box
+/// for a prim on a linear path, a sphere otherwise), then the volume made to
+/// match it.
+fn answer_probe_confirmations(
+    mut responses: MessageReader<NotificationResponse>,
+    mut pending: ResMut<PendingProbeConfirm>,
+    mut objects: ResMut<ObjectState>,
+    mut snapshot: ResMut<ShownSnapshot>,
+    sources: ProbeVolumeSources,
+    mut commands: MessageWriter<SlCommand>,
+) {
+    for response in responses.read() {
+        if !response.is_for(REFLECTION_PROBE_APPLIED) {
+            continue;
+        }
+        let Some(scoped) = pending.0.take() else {
+            continue;
+        };
+        snapshot.shown = None;
+        if response.answer(REFLECTION_PROBE_APPLIED) != Some(OkCancel::Ok) {
+            continue;
+        }
+        let Some(data) = owned_edit_data(&objects, &scoped) else {
+            continue;
+        };
+        if data.pcode != pcode::PRIMITIVE || data.extra.reflection_probe.is_some() {
+            continue;
+        }
+        let box_volume = PrimShapeFloat::from_params(&data.shape).path_curve == PathCurve::Line;
+        let mut probe = PROBE_DEFAULTS;
+        if box_volume {
+            probe.flags |= ReflectionProbeFlags::BOX_VOLUME;
+        }
+        let mut extra = data.extra;
+        extra.reflection_probe = Some(probe);
+        objects.apply_local_extra_edit(&scoped, extra.clone());
+        commands.write(SlCommand(Command::SetObjectExtraParams {
+            local_id: scoped,
+            params: extra,
+        }));
+        if let Some(target) = sources.target(&objects, scoped) {
+            for command in probe_volume_commands(&target, box_volume, false) {
+                commands.write(SlCommand(command));
+            }
+        }
+    }
+}
+
+/// Apply a probe combo's user pick: the probe edit it names, and the volume
+/// reshaped when the edit flipped the box bit. Reads [`ComboChanged`] (a user
+/// pick only), so the sync setting a combo's entry never loops back into a
+/// send.
+fn apply_probe_combo_changes(
+    mut changes: MessageReader<ComboChanged>,
+    combos: Query<&ParamCombo>,
+    mut objects: ResMut<ObjectState>,
+    mut snapshot: ResMut<ShownSnapshot>,
+    sources: ProbeVolumeSources,
+    mut commands: MessageWriter<SlCommand>,
+) {
+    for change in changes.read() {
+        let Ok(combo) = combos.get(change.combo) else {
+            continue;
+        };
+        let Some(edit) = combo.change(change.active) else {
+            continue;
+        };
+        let Some(scoped) = sources.selection.primary().map(|primary| primary.scoped) else {
+            continue;
+        };
+        let reshape = commit_probe_change(&mut objects, &mut snapshot, &mut commands, scoped, edit);
+        if reshape != Some(true) {
+            continue;
+        }
+        let Some(target) = sources.target(&objects, scoped) else {
+            continue;
+        };
+        let box_volume = target
+            .data
+            .extra
+            .reflection_probe
+            .is_some_and(|probe| probe.flags.contains(ReflectionProbeFlags::BOX_VOLUME));
+        for command in probe_volume_commands(&target, box_volume, true) {
+            commands.write(SlCommand(command));
+        }
     }
 }
 
@@ -3171,6 +3905,10 @@ struct ParamEdit<'w> {
     snapshot: ResMut<'w, ShownSnapshot>,
     /// Where the edit goes.
     commands: MessageWriter<'w, SlCommand>,
+    /// Where the reflection-probe warning is raised.
+    notify: MessageWriter<'w, ShowNotification>,
+    /// The prim that warning is about.
+    pending_probe: ResMut<'w, PendingProbeConfirm>,
 }
 
 /// The `ObjectFlagUpdate` settings an object's `PrimFlags` word says, as the
@@ -3204,6 +3942,8 @@ fn handle_toggle_press(
         mut objects,
         mut snapshot,
         mut commands,
+        mut notify,
+        mut pending_probe,
     }) = edit
     else {
         return;
@@ -3334,6 +4074,72 @@ fn handle_toggle_press(
                 params: extra,
             }));
         }
+        ParamToggle::AnimatedMesh => {
+            // The flag lives on the linkset root, which the gate made the
+            // primary; the block stays in use with the bit cleared, as the
+            // reference's `setExtendedMeshFlags` leaves it.
+            let flags = data.extra.extended_mesh.map_or(0, |mesh| mesh.flags);
+            let mut extra = data.extra.clone();
+            extra.extended_mesh = Some(ExtendedMesh {
+                flags: flags ^ ANIMATED_MESH_ENABLED_FLAG,
+            });
+            objects.apply_local_extra_edit(&primary_scoped, extra.clone());
+            snapshot.shown = None;
+            commands.write(SlCommand(Command::SetObjectExtraParams {
+                local_id: primary_scoped,
+                params: extra,
+            }));
+        }
+        ParamToggle::ReflectionProbe => {
+            if data.pcode != pcode::PRIMITIVE {
+                return;
+            }
+            // The tick goes back to what the object says until it changes.
+            snapshot.shown = None;
+            if data.extra.reflection_probe.is_none() {
+                // Ask first; the answer makes it a probe
+                // (`answer_probe_confirmations`).
+                pending_probe.0 = Some(primary_scoped);
+                notify.write(ShowNotification::new(REFLECTION_PROBE_APPLIED.name()));
+                return;
+            }
+            let mut extra = data.extra.clone();
+            extra.reflection_probe = None;
+            objects.apply_local_extra_edit(&primary_scoped, extra.clone());
+            commands.write(SlCommand(Command::SetObjectExtraParams {
+                local_id: primary_scoped,
+                params: extra,
+            }));
+            // A probe made phantom inside a linkset would leave the linkset
+            // phantom: the reference takes the flag off again there.
+            let in_linkset = objects.linkset_prim_count(
+                &objects
+                    .linkset_root_of(&primary_scoped)
+                    .unwrap_or(primary_scoped),
+            ) > 1;
+            if data.update_flags & FLAGS_PHANTOM != 0 && in_linkset {
+                let flags = data.update_flags & !FLAGS_PHANTOM;
+                objects.apply_local_flag_edit(&primary_scoped, FLAGS_PHANTOM, false);
+                commands.write(SlCommand(Command::SetObjectFlags {
+                    local_id: primary_scoped,
+                    flags: object_flag_settings(flags),
+                }));
+            }
+        }
+        ParamToggle::ProbeDynamic => {
+            let on = !data
+                .extra
+                .reflection_probe
+                .is_some_and(|probe| probe.flags.contains(ReflectionProbeFlags::DYNAMIC));
+            // The Dynamic flag is not the volume type: no reshape can follow.
+            let _volume = commit_probe_change(
+                &mut objects,
+                &mut snapshot,
+                &mut commands,
+                primary_scoped,
+                ProbeChange::Dynamic(on),
+            );
+        }
     }
 }
 
@@ -3357,6 +4163,7 @@ fn handle_cycle_press(
         mut objects,
         mut snapshot,
         mut commands,
+        ..
     }) = edit
     else {
         return;
@@ -3945,5 +4752,203 @@ mod tests {
         assert_eq!(LIGHT_DEFAULTS.color, [255, 255, 255, 255]);
         assert!((LIGHT_DEFAULTS.radius - 10.0).abs() < 1.0e-6);
         assert!((LIGHT_DEFAULTS.falloff - 0.75).abs() < 1.0e-6);
+    }
+
+    /// A reshape target: a tapered, hollow box with a PBR material on one
+    /// face, two opaque faces, and a 2 × 3 × 4 m size.
+    fn probe_target(phantom: bool, pbr: bool) -> super::ProbeVolumeTarget {
+        use sl_client_bevy::{
+            CircuitId, ObjectExtraParams, ObjectKey, RegionLocalObjectId, RenderMaterialRef,
+            ScopedObjectId, TextureFace, TextureKey,
+        };
+        let mut extra = ObjectExtraParams::default();
+        if pbr {
+            extra.render_material = vec![RenderMaterialRef {
+                face: 0,
+                material_id: Uuid::from_u128(0xa1),
+            }];
+        }
+        super::ProbeVolumeTarget {
+            scoped: ScopedObjectId::new(CircuitId::new(1), RegionLocalObjectId(7)),
+            full: ObjectKey::from(Uuid::from_u128(0x77)),
+            data: super::OwnedEditData {
+                pcode: sl_client_bevy::pcode::PRIMITIVE,
+                shape: PrimShapeParams {
+                    profile_hollow: 20_000,
+                    path_scale_x: 150,
+                    ..box_params()
+                },
+                material: Material::Wood.to_code(),
+                update_flags: OWNED_SOLID_BOX | if phantom { FLAGS_PHANTOM } else { 0 },
+                extra,
+                scale: bevy::math::Vec3::new(2.0, 3.0, 4.0),
+            },
+            faces: vec![TextureFace::new(TextureKey::from(Uuid::from_u128(0xf0))); 2],
+            media_url: Some("https://example.invalid/media".to_owned()),
+        }
+    }
+
+    /// Making the volume match the probe sends, in the reference's order, the
+    /// phantom flag (unless already phantom), the PBR material cleared off
+    /// every face (only where one is on), every face transparent with its
+    /// media URL kept, and a fresh box — tapered and hollow no more.
+    #[test]
+    fn a_new_probe_is_made_phantom_transparent_and_a_plain_box() -> Result<(), String> {
+        use sl_client_bevy::Command;
+        let target = probe_target(false, true);
+        let sent = super::probe_volume_commands(&target, true, false);
+        let [
+            Command::SetObjectFlags { flags, .. },
+            Command::ModifyMaterialParams { updates },
+            Command::SetObjectImage {
+                texture_entry,
+                media_url,
+                ..
+            },
+            Command::SetObjectShape { shape, .. },
+        ] = sent.as_slice()
+        else {
+            return Err(format!("unexpected sends: {sent:#?}"));
+        };
+        assert!(flags.is_phantom && !flags.use_physics && !flags.is_temporary);
+        assert_eq!(updates.len(), 1);
+        assert_eq!(updates.first().map(|update| update.side), Some(-1));
+        assert_eq!(
+            updates.first().and_then(|update| update.asset_id),
+            Some(Uuid::nil())
+        );
+        assert!(
+            texture_entry
+                .faces
+                .iter()
+                .all(|face| face.color.get(3) == Some(&0))
+        );
+        assert_eq!(texture_entry.faces.len(), 2);
+        assert_eq!(media_url.as_deref(), Some("https://example.invalid/media"));
+        assert_eq!(*shape, super::probe_volume_shape(true));
+        let float = PrimShapeFloat::from_params(shape);
+        assert_eq!(PrimTypeUi::classify(&float, None), PrimTypeUi::Box);
+        assert!(float.hollow.abs() < 1.0e-6);
+        assert!((float.path_scale_x - 1.0).abs() < 1.0e-6);
+
+        // Already phantom and without a PBR material: neither is re-sent.
+        let plain = probe_target(true, false);
+        let sent = super::probe_volume_commands(&plain, true, false);
+        assert!(
+            matches!(
+                sent.as_slice(),
+                [
+                    Command::SetObjectImage { .. },
+                    Command::SetObjectShape { .. }
+                ]
+            ),
+            "{sent:#?}"
+        );
+        Ok(())
+    }
+
+    /// A volume change to a sphere also makes the prim as deep and tall as it
+    /// is wide (its X size, as the reference's `onCommitProbe` does), and the
+    /// fresh sphere classifies as one.
+    #[test]
+    fn a_probe_turned_sphere_takes_its_width_on_every_axis() -> Result<(), String> {
+        use sl_client_bevy::Command;
+        let target = probe_target(true, false);
+        let sent = super::probe_volume_commands(&target, false, true);
+        let [
+            Command::SetObjectImage { .. },
+            Command::UpdateObject { transform, .. },
+            Command::SetObjectShape { shape, .. },
+        ] = sent.as_slice()
+        else {
+            return Err(format!("unexpected sends: {sent:#?}"));
+        };
+        let scale = transform
+            .scale
+            .as_ref()
+            .map(|scale| [scale.x, scale.y, scale.z]);
+        assert_eq!(scale, Some([2.0, 2.0, 2.0]));
+        assert!(transform.position.is_none() && transform.rotation.is_none());
+        let float = PrimShapeFloat::from_params(shape);
+        assert_eq!(PrimTypeUi::classify(&float, None), PrimTypeUi::Sphere);
+        // A new probe is never resized, sphere or not.
+        let fresh = super::probe_volume_commands(&target, false, false);
+        assert!(
+            !fresh
+                .iter()
+                .any(|command| matches!(command, Command::UpdateObject { .. }))
+        );
+        Ok(())
+    }
+
+    /// The probe combos read their entry back off the flags they wrote, and
+    /// one entry past the end edits nothing.
+    #[test]
+    fn a_probe_combo_reads_back_what_it_wrote() -> Result<(), String> {
+        use super::ParamCombo;
+        use crate::edit_probe::{PROBE_DEFAULTS, apply_probe_change};
+        for combo in [ParamCombo::ProbeVolume, ParamCombo::ProbeUpdate] {
+            let entries = combo.label_keys().len();
+            for index in 0..entries {
+                let change = combo.change(index);
+                let Some(change) = change else {
+                    return Err(format!("{combo:?} entry {index} edits nothing"));
+                };
+                let probe = apply_probe_change(PROBE_DEFAULTS, change);
+                assert_eq!(combo.active(probe.flags), index, "{combo:?} entry {index}");
+            }
+            assert_eq!(combo.change(entries), None);
+        }
+        Ok(())
+    }
+
+    /// While realtime mirrors are on the Update Type combo shows and the
+    /// Dynamic checkbox does not, and the other way round while they are off;
+    /// the rest of the Features tab shows either way.
+    #[test]
+    fn the_probe_update_controls_swap_on_the_mirror_setting() {
+        use super::FeatureRows;
+        assert!(FeatureRows::ProbeUpdate.shown(true));
+        assert!(!FeatureRows::ProbeDynamic.shown(true));
+        assert!(!FeatureRows::ProbeUpdate.shown(false));
+        assert!(FeatureRows::ProbeDynamic.shown(false));
+        for rows in [
+            FeatureRows::Flexi,
+            FeatureRows::Light,
+            FeatureRows::Spot,
+            FeatureRows::Probe,
+        ] {
+            assert!(rows.shown(true) && rows.shown(false), "{rows:?}");
+        }
+    }
+
+    /// The probe's controls are gated as the reference's `getState` gates
+    /// them: the toggle on a single volume, the update controls on a probe,
+    /// the volume type and spinners on a probe that is no mirror.
+    #[test]
+    fn the_probe_controls_have_their_own_gates() {
+        use super::{ParamCombo, ParamGate, ParamToggle, toggle_gate};
+        assert_eq!(
+            toggle_gate(ParamToggle::ReflectionProbe),
+            ParamGate::ProbeToggle
+        );
+        assert_eq!(
+            toggle_gate(ParamToggle::ProbeDynamic),
+            ParamGate::ProbeFields
+        );
+        assert_eq!(
+            toggle_gate(ParamToggle::AnimatedMesh),
+            ParamGate::AnimeshToggle
+        );
+        assert_eq!(ParamCombo::ProbeUpdate.gate(), ParamGate::ProbeFields);
+        assert_eq!(ParamCombo::ProbeVolume.gate(), ParamGate::ProbeShapeFields);
+        assert_eq!(
+            ParamField::ProbeAmbiance.gate(),
+            ParamGate::ProbeShapeFields
+        );
+        assert_eq!(
+            ParamField::ProbeNearClip.gate(),
+            ParamGate::ProbeShapeFields
+        );
     }
 }

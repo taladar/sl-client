@@ -157,7 +157,7 @@ pub use crate::probe_sources::{
     SceneWater, SceneWorkReader,
 };
 pub use crate::probes::{
-    ProbeError, read_agent, read_conversations, read_environment, read_inventory,
+    ProbeError, read_agent, read_conversations, read_environment, read_inventory, read_mirrors,
     read_notifications, read_parcel_media, read_quiescence, read_selection, read_status,
     read_world_map,
 };
@@ -187,7 +187,9 @@ pub use crate::world_query::{WorldProgress, WorldQuery, WorldWant, find_world};
 pub use crate::world_sweep::{SweepProgress, SweepTarget, WorldSweep};
 /// What a [`ProbeSources::parcel_media`] reader answers — re-exported so a
 /// viewer can supply one without naming the protocol crate.
-pub use sl_automation_proto::{FeetReadout, FootReadout, ParcelMediaReadout};
+pub use sl_automation_proto::{
+    FeetReadout, FootReadout, MirrorReadout, MirrorsReadout, ParcelMediaReadout,
+};
 
 /// Installs what the state probes record as the app runs: the [`EventLog`],
 /// the render-settle [`PipelineStatus`] and the [`Screenshots`] store. The

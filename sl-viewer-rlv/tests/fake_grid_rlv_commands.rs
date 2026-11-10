@@ -142,6 +142,7 @@ mod test {
                     texture_entry: object.texture_entry.clone(),
                     media_url: None,
                     scale: Vec3::ONE,
+                    local_echo: false,
                 },
             );
         }

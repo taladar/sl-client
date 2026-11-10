@@ -3523,6 +3523,9 @@ fn apply_object(
         existing.click_action = object.click_action;
         existing.material = object.material;
         existing.extra = object.extra.clone();
+        // The update's blocks are applied, local echo or not: the next update
+        // compares with what it brought.
+        existing.local_echo = false;
         existing.texture_animation = object.texture_animation;
         existing.text.clone_from(&object.text);
         existing.text_color = object.text_color;
@@ -3661,6 +3664,7 @@ fn apply_object(
             text: object.text.clone(),
             text_color: object.text_color,
             scale: Vec3::new(object.scale.x, object.scale.y, object.scale.z),
+            local_echo: false,
         },
     );
     debug!(
@@ -4961,6 +4965,7 @@ mod tests {
             texture_entry: Vec::new(),
             media_url: None,
             scale: bevy::prelude::Vec3::ONE,
+            local_echo: false,
         }
     }
 
@@ -5221,6 +5226,52 @@ mod tests {
 
         // A linkset-identity change (unlink/relink).
         assert!(tracked.non_motion_blocks_changed(&object, false, scoped, None));
+    }
+
+    /// The build floater echoes an edit into the tracked object at once, so
+    /// the simulator's echo of it brings blocks equal to the tracked ones: it
+    /// must still refresh the scene's components, or a light retuned, a probe
+    /// made a mirror or a prim made physical would show in the panel and
+    /// nowhere else.
+    #[test]
+    fn a_local_echo_does_not_hide_the_simulators_echo() {
+        use bevy::prelude::World;
+        use sl_viewer_world_api::ObjectState;
+
+        let object = bare_object(pcode::PRIMITIVE);
+        let scoped = object.scoped_id();
+        let mut world = World::new();
+        let entity = world.spawn_empty().id();
+        let geometry = world.spawn_empty().id();
+        let mut state = ObjectState::default();
+        let _replaced = state.insert_tracked(scoped, tracked_stub(&object, entity, geometry));
+
+        let mut lit = object.clone();
+        lit.extra.light = Some(sl_client_bevy::LightData {
+            color: [255, 128, 0, 255],
+            radius: 5.0,
+            cutoff: 0.0,
+            falloff: 0.75,
+        });
+        state.apply_local_extra_edit(&scoped, lit.extra.clone());
+        let echoed = state
+            .tracked_mut(&scoped)
+            .is_some_and(|tracked| tracked.non_motion_blocks_changed(&lit, true, scoped, None));
+        assert!(echoed, "the simulator's echo of a local edit refreshes");
+
+        for edit in [
+            |state: &mut ObjectState, scoped| state.apply_local_flag_edit(&scoped, 1, true),
+            |state: &mut ObjectState, scoped| state.apply_local_material_edit(&scoped, 3),
+        ] {
+            if let Some(mut tracked) = state.tracked_mut(&scoped) {
+                tracked.local_echo = false;
+            }
+            edit(&mut state, scoped);
+            let echoed = state.tracked_mut(&scoped).is_some_and(|tracked| {
+                tracked.local_echo && tracked.non_motion_blocks_changed(&lit, true, scoped, None)
+            });
+            assert!(echoed, "a flag or material echo refreshes too");
+        }
     }
 
     /// The agent-relative permission bits ride the **linkset root**, so a child

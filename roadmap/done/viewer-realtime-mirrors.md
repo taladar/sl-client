@@ -2,7 +2,7 @@
 id: viewer-realtime-mirrors
 title: Real-time mirrors (hero probes)
 topic: viewer
-status: in-progress
+status: done
 origin: render-feature gap analysis vs Firestorm (2026-07)
 ---
 
@@ -119,3 +119,46 @@ for the render correctness, but a screenshot of a real mirror reflecting the
 avatar is the remaining confirmation before this moves to `done`. A provisioned
 OpenSim mirror (rez a prim as a mirror-flagged probe with a reflective PBR face)
 is the fallback if no aditi mirror content turns up.
+
+## Done (2026-11-10)
+
+The live check is automated now, and it found the mirror never reached a prim
+face:
+
+- **Prim faces ignored every placed probe.** On the sky-lit path (every
+  in-world face) `face_material.wgsl`'s PBR branch took its reflection from
+  `sky_probe_radiance`, which sampled only the view's own (default) probe —
+  so neither a mirror's capture nor an ordinary local probe ever showed on a
+  face; the headless check passed because its ball is a plain
+  `StandardMaterial` with no sky. `sky_probe_radiance` now goes through
+  Bevy's per-fragment `compute_radiances`: the probe holding the fragment
+  (blended where volumes overlap), the view's probe elsewhere. The diffuse
+  half has the same gap: [[viewer-sky-irradiance-ignores-local-probes]].
+- **Mirrors ship off**, as the reference ships `RenderMirrors` (`0` in its
+  `settings.xml`; the feature table turns it on only at the top presets, as
+  our quality tiers already did). Off, a mirror probe is an ordinary local
+  probe. The headless readback harness turns them on
+  (`MirrorSettings::new(true)`), the e2e stages with the `render_mirrors`
+  setting.
+- **The probe's build controls** ([[viewer-build-probe-animesh-controls]])
+  make a mirror from the Build window, and the `mirrors` state probe
+  (`Probe::Mirrors`, `sl-viewer-ctl mirrors`) says which mirror is captured
+  and how often.
+
+Verification:
+
+- `a_mirror_shows_the_avatar_on_the_fake_grid` stages a polished PBR pane
+  (served `gltf_polished_metal_asset`) inside a dynamic-mirror probe beside
+  the avatar, waits until the mirror is captured live, and saves `mirror.png`:
+  the avatar shows in the pane.
+- `a_mirror_reflects_the_avatar_on_second_life` (`SL_E2E_GRID=aditi`) builds
+  the same thing through the UI — pane, New PBR material, metallic 1 /
+  roughness 0, probe box round it, Mirror (Everything) — and its `mirror.png`
+  shows the avatar, the trees and the sky in the pane; then deletes both.
+- `a_prim_is_made_a_mirror_and_back_on_the_fake_grid` covers the controls
+  against the grid's record.
+
+The reflection is a cube from the pane's centre, not the reference's planar
+projection, so things land where a cube map puts them:
+[[viewer-mirror-planar-projection]]. A pane that sometimes kept its plywood on
+aditi: [[viewer-pbr-face-shows-legacy-texture-on-aditi]].
