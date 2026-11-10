@@ -372,11 +372,12 @@ fn a_sleep_lasts_as_each_grid_sleeps() -> Result<(), String> {
 
 /// Run the two-script probe `name` — the `Sleeper` saved first, then the
 /// lead `controller` — under every flavour and hold each script's lines to
-/// the transcript's but for `vary`.
+/// the transcript's but for `vary`; with `in_order`, the two scripts' lines
+/// interleaved as the grid printed them too.
 fn replay_pair(
     name: &str,
     (sleeper, lead): (&str, (&str, &str)),
-    vary: &[&str],
+    (vary, in_order): (&[&str], bool),
 ) -> Result<(), String> {
     for (flavour, transcript) in transcripts(name) {
         let mut region = stage(
@@ -385,11 +386,15 @@ fn replay_pair(
             epoch_of(transcript),
         )?;
         run_for(&mut region, flavour, 60)?;
-        assert_eq!(
-            by_record(without(&region.lines(), vary)),
-            by_record(without(&probe_lines(transcript), vary)),
-            "{name} {flavour:?}"
+        let (ours, theirs) = (
+            without(&region.lines(), vary),
+            without(&probe_lines(transcript), vary),
         );
+        if in_order {
+            assert_eq!(ours, theirs, "{name} {flavour:?}");
+        } else {
+            assert_eq!(by_record(ours), by_record(theirs), "{name} {flavour:?}");
+        }
         let ours_debug: Vec<String> = region
             .debug_lines()
             .into_iter()
@@ -411,7 +416,7 @@ fn a_negative_sleep_returns_or_throws_as_each_grid_does() -> Result<(), String> 
                 include_str!("../../../probes/time/sleep-negative/leader.lsl"),
             ),
         ),
-        &["took"],
+        (&["took"], false),
     )
 }
 
@@ -426,10 +431,13 @@ fn a_reset_ends_a_sleep_and_a_stop_lets_it_run_on_but_on_xengine() -> Result<(),
                 include_str!("../../../probes/time/reset-mid-sleep/controller.lsl"),
             ),
         ),
-        &["at", "script_time"],
+        (&["at", "script_time"], false),
     )
 }
 
+/// Run `late` also holds the order: the Sleeper, restarted after its sleep
+/// ran out, wakes inside the Controller's `llSetScriptState`, its `woke` line
+/// before the Controller's `restarted_at` on Second Life and YEngine.
 #[test]
 fn a_sleep_counts_on_while_its_script_is_stopped_but_on_xengine() -> Result<(), String> {
     replay_pair(
@@ -441,6 +449,6 @@ fn a_sleep_counts_on_while_its_script_is_stopped_but_on_xengine() -> Result<(), 
                 include_str!("../../../probes/time/sleep-while-stopped/controller.lsl"),
             ),
         ),
-        &["stopped_at", "after", "restarted_at"],
+        (&["stopped_at", "after", "restarted_at"], true),
     )
 }

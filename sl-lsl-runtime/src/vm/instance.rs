@@ -221,6 +221,11 @@ pub enum Outcome {
     /// The script suspended itself (`llSleep`, or a library function's forced
     /// delay) and is not runnable before this tick.
     Sleeping(Tick),
+    /// The script started another (`llSetScriptState`) that was stopped in
+    /// the middle of a body whose sleep has run out, and stepped aside for it:
+    /// the engine runs that script's turn before this one's next slice, which
+    /// resumes after the call.
+    Handed(CallerId),
     /// The state changed to this one: `state_exit` of the old state has run,
     /// the event queue is empty, and `state_entry` of the new one is next.
     StateChanged(StateId),
@@ -468,6 +473,8 @@ enum Flow {
     Reset,
     /// End the script: its object is leaving the region (`llDie`).
     Died,
+    /// End the slice so the script started by the call runs first.
+    Hand(CallerId),
 }
 
 /// One script instance: a shared compiled program and everything that is this
@@ -1036,7 +1043,8 @@ impl Machine<'_> {
                     Some(Request::Reset) => Flow::Reset,
                     Some(Request::Die) => Flow::Died,
                     Some(Request::Sleep(seconds)) => Flow::Sleep(f64::from(seconds) + after),
-                    None if after > 0.0 => Flow::Sleep(after),
+                    None | Some(Request::Hand(_)) if after > 0.0 => Flow::Sleep(after),
+                    Some(Request::Hand(target)) => Flow::Hand(target),
                     None => Flow::Next,
                 });
             }
@@ -1358,6 +1366,15 @@ impl Instance {
             && (self.activity.is_some()
                 || self.queue.iter().any(|queued| queued.ready <= now)
                 || (self.queue.is_empty() && self.reset_when_idle))
+    }
+
+    /// Whether starting the script would let it run at `now` at once, in the
+    /// middle of the body it was stopped in: it is stopped, not held, has a
+    /// body in progress and no sleep left. XEngine drops the body at the
+    /// stop ([`Self::set_running_as`]), so it never has one there.
+    #[must_use]
+    pub const fn resumes_when_started(&self, now: Tick) -> bool {
+        !self.running && !self.held && self.activity.is_some() && self.wake.0 <= now.0
     }
 
     /// Reset the script as YEngine resets a running script another asks it
@@ -1908,6 +1925,7 @@ impl Instance {
                     self.wake = now.after(ticks);
                     Outcome::Sleeping(self.wake)
                 }
+                Ok(Flow::Hand(target)) => Outcome::Handed(target),
                 Ok(Flow::Reset) => {
                     // A reset drops the library's state; what the call
                     // refused before it is still said, and what it changed

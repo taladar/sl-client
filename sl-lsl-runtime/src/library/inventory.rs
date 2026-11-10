@@ -347,7 +347,11 @@ pub fn ll_set_script_state(
         no_script(ctx, "llSetScriptState", &name);
         return Ok(());
     };
-    ctx.control_script(target, Control::Run(running != 0));
+    if running == 0 {
+        ctx.control_script(target, Control::Run(false));
+    } else {
+        ctx.start_script(target);
+    }
     Ok(())
 }
 

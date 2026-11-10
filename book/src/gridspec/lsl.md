@@ -3029,7 +3029,7 @@ interrupted one second in.
 | stopped a second in, restarted a second later, pinged a second after that | the sleep runs to its end (5 s), then the ping is answered | the same | **the sleeping event is abandoned**: it never wakes, and the ping is answered at once (3 s) | each flavour as its grid |
 | reset after that | `state_entry` at once, and the next ping answered | the same | the same | each flavour as its grid |
 | `llGetTime` of a script stopped three seconds and restarted | 5.0 a second after the restart: **a stopped script's clock runs on** | the same | the same | each flavour as its grid |
-| a sleep stopped and restarted after it would have ended (`time/sleep-while-stopped`) | wakes within a frame of the restart | the same | never wakes | each flavour as its grid |
+| a sleep stopped and restarted after it would have ended (`time/sleep-while-stopped`) | wakes **inside the restarting `llSetScriptState`**: its line comes before the restarter's next | the same | never wakes | each flavour as its grid |
 
 ### What the viewer does with it
 

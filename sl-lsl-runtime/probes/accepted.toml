@@ -1589,24 +1589,6 @@ record = "try"
 fields = { label = "break-all-unpermitted" }
 reason = "Each refused llBreakLink costs the second script OpenSim's second for an error, which puts its third try at the moment the leader's two-second step prints, and which comes first is scheduling"
 
-# The restarted sleeper wakes inside llSetScriptState on both grids.
-
-[[difference]]
-probe = "time/sleep-while-stopped"
-between = ["aditi", "fake-sl"]
-record = "woke"
-fields = { run = "late" }
-reason = "A sleeper restarted after its sleep would have ended wakes inside the controller's llSetScriptState on aditi, before the controller's next line; the fake grid runs it after"
-task = "server-lsl-restarted-sleeper-order"
-
-[[difference]]
-probe = "time/sleep-while-stopped"
-between = ["opensim-yengine", "fake-opensim"]
-record = "woke"
-fields = { run = "late" }
-reason = "A sleeper restarted after its sleep would have ended wakes inside the controller's llSetScriptState on OpenSim, before the controller's next line; the fake grid runs it after"
-task = "server-lsl-restarted-sleeper-order"
-
 # OpenSim raises a link's changed events while its scene is still changing
 # the linkset on another thread, so what each handler reads of it (its link
 # number, the prim count) and in which order the prims print is whichever

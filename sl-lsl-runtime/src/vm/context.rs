@@ -332,6 +332,10 @@ pub(crate) enum Request {
     Reset,
     /// End the script for good: its object is leaving the region (`llDie`).
     Die,
+    /// End the slice and let the script started by the call run before the
+    /// caller goes on: `llSetScriptState` started a script whose sleep ran
+    /// out while it was stopped.
+    Hand(CallerId),
 }
 
 /// The region's other scripts, as a library function may see them: their run
@@ -415,6 +419,15 @@ impl<'run> Peers<'run> {
         self.instances?
             .get(&id)
             .map(|instance| instance.reads_running(self.flavour))
+    }
+
+    /// Whether the instance `id` names would run at once at `now` if it
+    /// were started: it is stopped in the middle of a body whose sleep has
+    /// run out ([`Instance::resumes_when_started`]).
+    fn resumes_when_started(self, id: CallerId, now: Tick) -> bool {
+        self.instances
+            .and_then(|instances| instances.get(&id))
+            .is_some_and(|instance| instance.resumes_when_started(now))
     }
 }
 
@@ -753,6 +766,21 @@ impl<'host> ScriptCtx<'host> {
     /// run flag set reads back at once ([`Self::script_running`]).
     pub fn control_script(&mut self, target: CallerId, control: Control) {
         self.data.raised.push(Raised::Control { target, control });
+    }
+
+    /// Start the stopped script `target` of the caller's prim
+    /// ([`Self::control_script`]), and when it is stopped in the middle of a
+    /// body whose sleep has run out, let it run before the caller goes on:
+    /// on Second Life and OpenSim alike it wakes inside the call, its line
+    /// before the caller's next (`time/sleep-while-stopped`, run `late`).
+    pub fn start_script(&mut self, target: CallerId) {
+        self.control_script(target, Control::Run(true));
+        if target != self.caller
+            && self.request.is_none()
+            && self.peers.resumes_when_started(target, self.now)
+        {
+            self.request = Some(Request::Hand(target));
+        }
     }
 
     /// `llGetStartString`.

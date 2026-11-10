@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 334 |
 | blocked | 39 |
 | in-progress | 7 |
-| bugs | 41 |
-| done | 1532 |
+| bugs | 40 |
+| done | 1533 |
 | deferred | 30 |
 | wont-do | 24 |
 | **total** | **2132** |
@@ -1270,7 +1270,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-text-renderability-axis`](in-progress/viewer-ui-text-renderability-axis.md)
   — Upstream issue — font selection cannot see glyph-format renderability
 
-## bugs (41)
+## bugs (40)
 
 ### protocol
 
@@ -1371,12 +1371,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-lsl-opensim-grow-loop-slow`](bugs/server-lsl-opensim-grow-loop-slow.md)
   — fake-opensim grows memory/collision's Full list four times slower than
   YEngine
-- [`server-lsl-restarted-sleeper-order`](bugs/server-lsl-restarted-sleeper-order.md)
-  — A restarted script whose sleep ran out waits for its restarter's slice
 - [`server-lsl-scripted-teleport-unmodelled`](bugs/server-lsl-scripted-teleport-unmodelled.md)
   — The fake grid ignores llTeleportAgent and llTeleportAgentGlobalCoords
 
-## done (1532)
+## done (1533)
 
 ### protocol
 
@@ -4602,6 +4600,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   copy
 - [`server-lsl-ossl-culture-strings`](done/server-lsl-ossl-culture-strings.md) —
   OSSL's culture-sensitive string search and in-place list sort
+- [`server-lsl-restarted-sleeper-order`](done/server-lsl-restarted-sleeper-order.md)
+  — A restarted script whose sleep ran out waits for its restarter's slice
 - [`server-lsl-runtime-errors`](done/server-lsl-runtime-errors.md) — Run-time
   errors where a resident can see them (blocked by `server-lsl-vm-execution`
   (done))

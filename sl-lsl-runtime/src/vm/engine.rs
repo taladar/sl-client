@@ -1012,6 +1012,7 @@ impl Engine {
             | Outcome::Yielded
             | Outcome::Finished
             | Outcome::Sleeping(_)
+            | Outcome::Handed(_)
             | Outcome::StateChanged(_)
             | Outcome::Reset
             | Outcome::Died => None,
@@ -1433,7 +1434,8 @@ impl Engine {
             let Some(mut instance) = self.instances.remove(id) else {
                 continue;
             };
-            if !instance.is_runnable(now) {
+            // A script another handed its turn to has had this tick's turn.
+            if !instance.is_runnable(now) || left.contains_key(id) {
                 let _none = self.instances.insert(*id, instance);
                 continue;
             }
@@ -1448,7 +1450,7 @@ impl Engine {
             let rest = self.run_share(
                 *id,
                 &mut instance,
-                (share, &mut region_left),
+                (share, &mut region_left, &mut left),
                 &mut report,
                 host,
             );
@@ -1478,7 +1480,7 @@ impl Engine {
                 let rest = self.run_share(
                     *id,
                     &mut instance,
-                    (share, &mut region_left),
+                    (share, &mut region_left, &mut left),
                     &mut report,
                     host,
                 );
@@ -1511,12 +1513,14 @@ impl Engine {
     /// Run the instance `id` for up to `share` instructions of what is left
     /// of the region's budget, slice after slice while it has something to
     /// run, posting what each slice raised; answers what is left of the
-    /// share.
+    /// share. A slice that hands its turn to a script it started
+    /// ([`Outcome::Handed`]) runs that script's turn first, recording what
+    /// is left of its share in `left`, then goes on.
     fn run_share(
         &mut self,
         id: CallerId,
         instance: &mut Instance,
-        (share, region_left): (u32, &mut u64),
+        (share, region_left, left): (u32, &mut u64, &mut BTreeMap<CallerId, u32>),
         report: &mut TickReport,
         host: &mut dyn Host,
     ) -> u32 {
@@ -1549,12 +1553,63 @@ impl Engine {
             // Every body runs at least one instruction, so a slice that
             // charged nothing had nothing to run.
             let stop = slice.used == 0 || matches!(slice.outcome, Outcome::Idle);
+            let handed = match slice.outcome {
+                Outcome::Handed(target) => Some(target),
+                Outcome::Idle
+                | Outcome::Yielded
+                | Outcome::Finished
+                | Outcome::Sleeping(_)
+                | Outcome::StateChanged(_)
+                | Outcome::Reset
+                | Outcome::Died
+                | Outcome::Faulted(_) => None,
+            };
             report.slices.push((id, slice));
             if stop {
                 break;
             }
+            if let Some(target) = handed {
+                // The caller waits in the region's instances meanwhile, so
+                // the script it started sees it, and what that script
+                // raises in it — a link message, a control — reaches it.
+                let _none = self.instances.insert(id, instance.clone());
+                self.run_handed(target, (region_left, left), report, host);
+                if let Some(back) = self.instances.remove(&id) {
+                    *instance = back;
+                }
+            }
         }
         script_left
+    }
+
+    /// Run the turn of the script `target`, which another script started
+    /// and handed the rest of its slice to ([`Outcome::Handed`]): on what is
+    /// left of its share when it was served this tick already, else on a
+    /// fresh share, recorded in `left` either way.
+    fn run_handed(
+        &mut self,
+        target: CallerId,
+        (region_left, left): (&mut u64, &mut BTreeMap<CallerId, u32>),
+        report: &mut TickReport,
+        host: &mut dyn Host,
+    ) {
+        let now = self.now;
+        let Some(mut peer) = self.instances.remove(&target) else {
+            return;
+        };
+        if peer.is_runnable(now) && *region_left > 0 {
+            let share = match left.get(&target) {
+                Some(rest) => *rest,
+                None => {
+                    report.runnable = report.runnable.saturating_add(1);
+                    report.served = report.served.saturating_add(1);
+                    self.repaid_share(&mut peer, region_left)
+                }
+            };
+            let rest = self.run_share(target, &mut peer, (share, region_left, left), report, host);
+            let _was = left.insert(target, rest);
+        }
+        let _none = self.instances.insert(target, peer);
     }
 
     /// Post a `timer` event to every script whose timer is due at `now`.

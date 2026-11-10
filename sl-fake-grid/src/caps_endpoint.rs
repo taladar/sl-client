@@ -56,7 +56,7 @@ pub(crate) async fn dispatch_caps(
             destination: headers.destination,
             body,
         };
-        let dispatch = {
+        let (dispatch, script_answer) = {
             let mut guard = shared.state.lock().await;
             if guard.caps.assets().handles_path(path) {
                 // Session-free binary asset serving out of the **grid-wide**
@@ -109,10 +109,22 @@ pub(crate) async fn dispatch_caps(
                     tracing::warn!("telling an upload's charge failed: {error}");
                 }
             }
+            // A script upload's compile, and the run state it leaves, are
+            // applied before the flush writes the upload's asset into the
+            // prim: a region tick between the two would otherwise start the
+            // new program under the run flag of the save before it, so an
+            // upload asked to leave the script stopped would run it.
+            let script_answer = match &dispatch {
+                CapsDispatch::ScriptUpload(upload) => Some(crate::script_compile::answer_upload(
+                    &mut world.lock(),
+                    upload,
+                )),
+                _other => None,
+            };
             let outcome = shared.flush_locked(&mut guard);
             drop(guard);
             shared.finish_flush(outcome).await;
-            dispatch
+            (dispatch, script_answer)
         };
         match dispatch {
             CapsDispatch::Response(response) => return response,
@@ -134,8 +146,7 @@ pub(crate) async fn dispatch_caps(
             // The compiler is the grid's, and what a compile does to the
             // script is the region's.
             CapsDispatch::ScriptUpload(upload) => {
-                let world = Arc::clone(&shared.state.lock().await.world);
-                let answer = crate::script_compile::answer_upload(&mut world.lock(), &upload);
+                let answer = script_answer.unwrap_or_else(|| upload.compiled_unchecked());
                 return SimCaps::script_upload_response(&answer);
             }
             CapsDispatch::ScriptMetadata { task, item } => {
