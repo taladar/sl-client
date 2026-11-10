@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 39 |
 | in-progress | 6 |
 | bugs | 33 |
-| done | 1539 |
+| done | 1540 |
 | deferred | 30 |
 | wont-do | 24 |
-| **total** | **2130** |
+| **total** | **2131** |
 
 ## ideas (125)
 
@@ -1288,8 +1288,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### viewer
 
-- [`viewer-automation-ground-reveal-eye-under-terrain`](bugs/viewer-automation-ground-reveal-eye-under-terrain.md)
-  — A ground reveal can put the camera under higher ground beside the point
 - [`viewer-camera-framing-ends-inside-the-framed-object`](bugs/viewer-camera-framing-ends-inside-the-framed-object.md)
   — A framing glide can carry the camera inside the object it frames
 - [`viewer-floater-minimize-caps-follow-no-pattern`](bugs/viewer-floater-minimize-caps-follow-no-pattern.md)
@@ -1327,6 +1325,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-sky-irradiance-ignores-local-probes`](bugs/viewer-sky-irradiance-ignores-local-probes.md)
   — Sky-lit faces take their probe ambient from the view's probe, never from a
   placed probe
+- [`viewer-stood-avatar-height-lost-under-load`](bugs/viewer-stood-avatar-height-lost-under-load.md)
+  — Under load the viewer reports a stood-up avatar at 25.95 m, not where the
+  grid stood it
 - [`viewer-terraform-parcel-refusal`](bugs/viewer-terraform-parcel-refusal.md) —
   A brush over a parcel the agent may not terraform warns nothing
 - [`viewer-texture-filtering-in-linear-space`](bugs/viewer-texture-filtering-in-linear-space.md)
@@ -1355,7 +1356,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1539)
+## done (1540)
 
 ### protocol
 
@@ -1899,6 +1900,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (done))
 - [`viewer-automation-ground-aim`](done/viewer-automation-ground-aim.md) —
   Double-click teleport on every surface, and the world actions it needs
+- [`viewer-automation-ground-reveal-eye-under-terrain`](done/viewer-automation-ground-reveal-eye-under-terrain.md)
+  — A ground reveal can put the camera under higher ground beside the point
 - [`viewer-automation-host-thread-per-viewer`](done/viewer-automation-host-thread-per-viewer.md)
   — In-process host — step each viewer on a thread of its own
 - [`viewer-automation-inprocess-transport`](done/viewer-automation-inprocess-transport.md)

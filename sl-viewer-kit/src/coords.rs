@@ -53,6 +53,35 @@ pub fn region_offset_bevy(region: RegionHandle, origin: Option<RegionHandle>) ->
     })
 }
 
+/// The width of a grid cell, metres: a region handle names the 256 m square
+/// whose south-west corner it holds.
+const GRID_CELL_METRES: f64 = 256.0;
+
+/// The grid index of the 256 m cell a global metre coordinate lies in, if it
+/// is on the grid.
+fn grid_index_at(metres: f64) -> Option<u32> {
+    if !metres.is_finite() || !(0.0..1.0e12).contains(&metres) {
+        return None;
+    }
+    #[expect(
+        clippy::as_conversions,
+        clippy::cast_possible_truncation,
+        reason = "range-checked to [0, 1e12) just above, far inside i64"
+    )]
+    let index = (metres / GRID_CELL_METRES).floor() as i64;
+    u32::try_from(index).ok()
+}
+
+/// The handle of the region a global position (`east`, `north`, metres) lies
+/// in, if it is on the grid.
+#[must_use]
+pub fn region_handle_at(east: f64, north: f64) -> Option<RegionHandle> {
+    Some(RegionHandle::from_grid(
+        grid_index_at(east)?,
+        grid_index_at(north)?,
+    ))
+}
+
 /// The Bevy-space shift applied to every origin-anchored entity (camera, terrain
 /// patches, root objects, avatars) when the scene origin moves from `previous` to
 /// `current` — a region crossing or a teleport to an already-connected region.
@@ -187,8 +216,9 @@ pub fn sl_euler_deg_to_quat(euler_deg: [f32; 3]) -> Quat {
 #[cfg(test)]
 mod tests {
     use super::{
-        origin_shift_bevy, region_offset_bevy, sl_euler_deg_to_quat, sl_rotation_to_quat,
-        sl_to_bevy_object_rotation, sl_to_bevy_rotation, sl_to_bevy_vec,
+        grid_index_at, origin_shift_bevy, region_handle_at, region_offset_bevy,
+        sl_euler_deg_to_quat, sl_rotation_to_quat, sl_to_bevy_object_rotation, sl_to_bevy_rotation,
+        sl_to_bevy_vec,
     };
     use pretty_assertions::assert_eq;
     use sl_client_bevy::{RegionHandle, Rotation, Vector};
@@ -197,6 +227,23 @@ mod tests {
     /// (`x` east, `y` north), the `(x << 32) | y` packing.
     fn region_at(x: u32, y: u32) -> RegionHandle {
         RegionHandle::new((u64::from(x) << 32) | u64::from(y))
+    }
+
+    /// A global coordinate falls in the 256 m cell whose south-west corner is
+    /// at or below it; the far edge belongs to the next cell, and nothing
+    /// below zero is on the grid.
+    #[test]
+    fn grid_indexing_matches_regions() {
+        assert_eq!(grid_index_at(0.0), Some(0));
+        assert_eq!(grid_index_at(255.9), Some(0));
+        assert_eq!(grid_index_at(256.0), Some(1));
+        assert_eq!(grid_index_at(-1.0), None);
+        assert_eq!(grid_index_at(f64::NAN), None);
+        let handle = region_handle_at(256_000.0, 256_256.0);
+        assert_eq!(
+            handle.map(|handle| handle.grid_coordinates()),
+            Some((1000, 1001))
+        );
     }
 
     /// A neighbour region east of the origin offsets its objects `+256 m` east

@@ -44,6 +44,9 @@ use sl_settings::{Scope, SettingValue};
 use sl_terrain::TerrainComposition;
 
 use crate::coords::bevy_to_sl_vec;
+/// The region a global position lies in. Shared with the in-world
+/// double-click teleport and the radar.
+pub use crate::coords::region_handle_at;
 use crate::floater::{FloaterCaps, FloaterSpec, spawn_floater};
 use crate::i18n::{TransArgs, Translated, Translator};
 use crate::intents::OpenAddToContactSet;
@@ -1840,30 +1843,6 @@ fn region_water_height(water: Option<&WaterState>, east: f64, north: f64) -> f32
         .zip(water)
         .and_then(|(handle, water)| water.height_of(handle))
         .unwrap_or(DEFAULT_WATER_HEIGHT)
-}
-
-/// The grid index containing a global metre coordinate, if representable.
-fn grid_index_at(value: f64) -> Option<u32> {
-    if !value.is_finite() || !(0.0..1.0e12).contains(&value) {
-        return None;
-    }
-    #[expect(
-        clippy::as_conversions,
-        clippy::cast_possible_truncation,
-        reason = "range-checked to [0, 1e12) just above, far inside i64"
-    )]
-    let index = (value / f64::from(minimap_math::REGION_WIDTH_METRES)).floor() as i64;
-    u32::try_from(index).ok()
-}
-
-/// The region handle containing a global position, if it is on the grid. Shared
-/// with the in-world double-click teleport.
-#[must_use]
-pub fn region_handle_at(east: f64, north: f64) -> Option<RegionHandle> {
-    Some(RegionHandle::from_grid(
-        grid_index_at(east)?,
-        grid_index_at(north)?,
-    ))
 }
 
 /// Build one region's shaded terrain backdrop: 256×256 texels (one per metre,
@@ -4129,8 +4108,7 @@ mod tests {
         COMPASS_MINOR, COMPASS_POINTS, COND_MANY_AVATARS, COND_ONE_AVATAR, DotPalette, MARK_COLORS,
         MINIMAP_ELEMENT, MINIMAP_MENU, MenuDef, MenuDynamicPick, MenuItemDef, MinimapMarks,
         MinimapState, ObjectLayerInput, ObjectPose, ObjectSample, SLOT_PROFILES, avatar_color,
-        grid_index_at, handle_minimap_profile_picks, location_reached, phantom_alpha, range_metres,
-        region_handle_at,
+        handle_minimap_profile_picks, location_reached, phantom_alpha, range_metres,
     };
     use crate::intents::OpenAvatarProfile;
     use crate::minimap_math::{FLAG_YOU_OWNER, ObjectAccents};
@@ -4397,19 +4375,6 @@ mod tests {
                 "compass minor flag mismatched for {key}"
             );
         }
-    }
-
-    #[test]
-    fn grid_indexing_matches_regions() {
-        assert_eq!(grid_index_at(0.0), Some(0));
-        assert_eq!(grid_index_at(255.9), Some(0));
-        assert_eq!(grid_index_at(256.0), Some(1));
-        assert_eq!(grid_index_at(-1.0), None);
-        let handle = region_handle_at(256_000.0, 256_256.0);
-        assert_eq!(
-            handle.map(|handle| handle.grid_coordinates()),
-            Some((1000, 1001))
-        );
     }
 
     #[test]
