@@ -1617,6 +1617,7 @@ pub(crate) fn position_camera(
             rig.smoothed_eye = transform.translation;
             let forward = transform.forward().as_vec3();
             rig.smoothed_focus = vadd(transform.translation, forward);
+            rig.follow_focus = None;
             rig.seeded = true;
         }
         CameraMode::Mouselook => {
@@ -1658,6 +1659,7 @@ pub(crate) fn position_camera(
             };
             rig.smoothed_eye = eye;
             rig.smoothed_focus = vadd(eye, look_forward);
+            rig.follow_focus = None;
             rig.seeded = true;
             // Publish the heading for the avatar body to follow.
             out.aim.sl_yaw = sl_heading_from_bevy_forward(look_forward);
@@ -1786,6 +1788,17 @@ pub(crate) fn position_camera(
                     snap: false,
                 },
             ) {
+                trace!(
+                    target: "camera_glide",
+                    focus_kind = ?*state.focus,
+                    target_eye = ?eye,
+                    target_focus = ?focus,
+                    eased_eye = ?rig.smoothed_eye,
+                    eased_focus = ?rig.smoothed_focus,
+                    framed_center = ?colliders.framed.center,
+                    framed_radius = colliders.framed.radius,
+                    "camera: third-person pose"
+                );
                 *transform = posed;
             }
         }
@@ -1865,8 +1878,12 @@ struct PoseTarget {
 /// and avatar move as a **locked pair**: they can jump together against the world
 /// (whatever the avatar's rendered position does, the camera does too), but never
 /// drift relative to each other — a sustained vertical flight has zero follow lag,
-/// as the reference viewer does. `false` (a fixed focus point) smooths the whole
-/// pose in world space as before — a static point has nothing to trail.
+/// as the reference viewer does. A follow that has just begun (the frame before
+/// was not one, [`CameraRig::follow_focus`]) still starts from where the camera
+/// looked: the look-at point's lag behind the avatar decays, riding with it, so
+/// the eye glides on a straight line from where it was, as the reference's
+/// camera animation does. `false` (a fixed focus point) smooths the whole pose
+/// in world space as before — a static point has nothing to trail.
 fn apply_pose(
     transform: &Transform,
     rig: &mut CameraRig,
@@ -1897,9 +1914,19 @@ fn apply_pose(
             // easing, so the camera never trails the body's translation), and only
             // the eye's offset from the focus is eased — the orbit / zoom / collision
             // geometry — so those changes still glide while the follow stays locked.
+            //
+            // What the look-at point lagged the focus by last frame decays and
+            // rides with the avatar. It is zero in a settled follow, which
+            // stays rigid; a follow that has just begun lags by the whole step
+            // from where the camera looked, so an `Escape` reset from an object
+            // focus glides from the eye it had, where re-applying the old
+            // offset to the avatar's head moved the eye metres in one frame.
+            let lagged_from = rig.follow_focus.unwrap_or(focus);
+            let lag = vscale(vsub(rig.smoothed_focus, lagged_from), 1.0 - t);
+            let eased_focus = vadd(focus, lag);
             let previous_offset = vsub(rig.smoothed_eye, rig.smoothed_focus);
             let offset = vlerp(previous_offset, vsub(eye, focus), t);
-            (vadd(focus, offset), focus)
+            (vadd(eased_focus, offset), eased_focus)
         } else {
             (
                 vlerp(rig.smoothed_eye, eye, t),
@@ -1909,6 +1936,7 @@ fn apply_pose(
     };
     rig.smoothed_eye = final_eye;
     rig.smoothed_focus = final_focus;
+    rig.follow_focus = follow_avatar.then_some(focus);
     rig.seeded = true;
     // A degenerate eye==focus (fully zoomed in) would make `looking_at` fail; nudge
     // the focus a hair forward along the previous forward in that case.
@@ -2614,6 +2642,89 @@ mod tests {
             vsub(rig.smoothed_eye, eye).length() < 1.0e-5,
             "half-life 0 snaps: {:?}",
             rig.smoothed_eye
+        );
+    }
+
+    /// A focus that changes into the avatar follow — the `Escape` reset from a
+    /// framed object — glides from the eye the camera had, on a straight line
+    /// to the rear view, while a settled follow stays rigid.
+    ///
+    /// The follow eased only the eye's offset from its focus, so the reset
+    /// re-applied the eye's offset from the *framed point* to the avatar's
+    /// head: on aditi the eye moved 6 m in one frame, then glided in from
+    /// there.
+    #[test]
+    fn a_reset_into_the_follow_glides_from_the_eye_it_had() {
+        use super::{CameraRig, apply_pose, vadd, vsub};
+        use bevy::prelude::{Time, Transform};
+        use std::time::Duration;
+
+        let mut time = Time::default();
+        time.advance_by(Duration::from_secs_f32(1.0 / 60.0));
+        let mut rig = CameraRig::default();
+        let mut transform = Transform::default();
+        let mut frame = |eye: Vec3, focus: Vec3, follow_avatar: bool| {
+            if let Some(posed) = apply_pose(
+                &transform,
+                &mut rig,
+                &time,
+                &PoseTarget {
+                    eye,
+                    focus,
+                    up: Vec3::Y,
+                    follow_avatar,
+                    half_life: 0.1,
+                    snap: false,
+                },
+            ) {
+                transform = posed;
+            }
+            (rig.smoothed_eye, rig.smoothed_focus)
+        };
+        // Settled on a framed point 9 m ahead of the avatar's head.
+        let point = Vec3::new(135.0, 25.0, -125.0);
+        let framed_eye = vadd(point, Vec3::new(-4.0, 2.0, -6.0));
+        let _seeded = frame(framed_eye, point, false);
+        let head = Vec3::new(128.0, 26.8, -128.0);
+        let rear = vadd(head, Vec3::new(-3.0, 0.75, 0.0));
+
+        let mut eyes = vec![framed_eye];
+        for _frame in 0..120 {
+            let (eye, _focus) = frame(rear, head, true);
+            eyes.push(eye);
+        }
+        let whole = vsub(rear, framed_eye).length();
+        for pair in eyes.windows(2) {
+            let [from, to] = pair else { continue };
+            let step = vsub(*to, *from).length();
+            assert!(
+                step < 0.15 * whole,
+                "the eye moved {step} m in one frame of a {whole} m glide: {from:?} → {to:?}"
+            );
+        }
+        for eye in &eyes {
+            let along = vsub(*eye, framed_eye);
+            let line = vsub(rear, framed_eye).normalize();
+            let off_line = vsub(along, line * along.dot(line)).length();
+            assert!(
+                off_line < 1.0e-3,
+                "the eye leaves the line from where it was to the rear view by {off_line} m"
+            );
+        }
+        let (eye, focus) = frame(rear, head, true);
+        assert!(
+            vsub(eye, rear).length() < 1.0e-3 && vsub(focus, head).length() < 1.0e-3,
+            "the glide ends on the rear view: eye {eye:?}, focus {focus:?}"
+        );
+
+        // Settled, the follow is rigid: the avatar moves and the camera moves
+        // with it in the same frame, by the same amount.
+        let moved = Vec3::new(5.0, 0.0, 0.0);
+        let (eye, focus) = frame(vadd(rear, moved), vadd(head, moved), true);
+        assert!(
+            vsub(eye, vadd(rear, moved)).length() < 1.0e-3
+                && vsub(focus, vadd(head, moved)).length() < 1.0e-3,
+            "a settled follow moves with the avatar at once: eye {eye:?}, focus {focus:?}"
         );
     }
 

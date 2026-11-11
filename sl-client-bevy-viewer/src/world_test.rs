@@ -3994,6 +3994,113 @@ mod camera_tests {
         Ok(())
     }
 
+    /// **A reset and then a framing glide the eye there and never into what
+    /// is framed** — the sequence of viewer-camera-framing-ends-inside-the-
+    /// framed-object: a ground point framed (a rez), `Escape` back to the rear
+    /// view, and a half-metre cube beside the point framed half a second later
+    /// (the automation revealing it for a fresh selection).
+    ///
+    /// The reset used to move the eye metres in one frame — the follow put the
+    /// eye's offset from the framed point onto the avatar's head — before it
+    /// glided at all.
+    #[test]
+    fn a_reset_then_a_framing_glides_and_never_enters_the_framed_box() -> Result<(), TestError> {
+        use crate::world_api::FrameObject;
+
+        let mut app = world_app_with_input();
+        let own = sl_client_bevy::AgentKey::from(sl_client_bevy::Uuid::from_u128(0xC));
+        app.world_mut()
+            .resource_mut::<sl_client_bevy::SlIdentity>()
+            .agent_id = Some(own);
+        super::seed_avatar(
+            &mut app,
+            own,
+            2,
+            sl_client_bevy::Vector {
+                x: 128.0,
+                y: 128.0,
+                z: 30.0,
+            },
+        );
+        install_camera_rig(
+            &mut app,
+            Vec3::new(128.0, 31.0, -128.0),
+            Vec3::new(128.0, 31.0, -120.0),
+        )
+        .ok_or("no camera stood up")?;
+        settle(&mut app, 40);
+
+        // A ground point a few metres ahead and aside, framed as a rez frames
+        // it, and settled.
+        let point = Vec3::new(137.0, 29.5, -119.0);
+        app.world_mut().write_message(FrameObject {
+            center: point,
+            radius: 0.5,
+            passes_through: Vec::new(),
+        });
+        settle(&mut app, 60);
+        let framed = rig(&mut app).ok_or("the camera has no rig")?;
+        let eye_of = |rig: &CameraRig| rig.smoothed_eye;
+
+        // Escape, and the reset's glide, frame by frame.
+        let mut eyes = vec![eye_of(&framed)];
+        interact::key_down(&mut app, KeyCode::Escape, Key::Escape, None);
+        for _frame in 0..4 {
+            settle(&mut app, 1);
+            eyes.push(eye_of(&rig(&mut app).ok_or("the camera has no rig")?));
+        }
+        interact::key_up(&mut app, KeyCode::Escape, Key::Escape);
+        for _frame in 0..30 {
+            settle(&mut app, 1);
+            eyes.push(eye_of(&rig(&mut app).ok_or("the camera has no rig")?));
+        }
+        let reset = rig(&mut app).ok_or("the camera has no rig")?;
+        let whole = (reset.smoothed_eye - framed.smoothed_eye).length();
+        assert!(
+            whole > 2.0,
+            "the reset must take the eye somewhere else for the glide to mean anything: \
+             {whole} m"
+        );
+        // A tenth of what is left goes in a 16 ms frame of the 0.1 s
+        // half-life, and the press itself steps a frame: no step comes near a
+        // third. The jump was nearly all of it.
+        for pair in eyes.windows(2) {
+            let [from, to] = pair else { continue };
+            let step = (*to - *from).length();
+            assert!(
+                step < 0.3 * whole,
+                "the reset moved the eye {step} m in one frame of a {whole} m glide: \
+                 {from:?} → {to:?}"
+            );
+        }
+
+        // The cube beside the point, framed while the reset's glide ends.
+        let cube = Vec3::new(137.5, 29.75, -119.5);
+        let half = Vec3::splat(0.25);
+        app.world_mut().write_message(FrameObject {
+            center: cube,
+            radius: half.length(),
+            passes_through: Vec::new(),
+        });
+        for frame in 0..120 {
+            settle(&mut app, 1);
+            let eye = eye_of(&rig(&mut app).ok_or("the camera has no rig")?);
+            let inside = (eye - cube).abs().cmplt(half).all();
+            assert!(
+                !inside,
+                "frame {frame} of the framing glide put the eye {eye:?} inside the framed \
+                 cube at {cube:?}"
+            );
+        }
+        let settled = rig(&mut app).ok_or("the camera has no rig")?;
+        let distance = (settled.smoothed_eye - cube).length();
+        assert!(
+            distance > half.length(),
+            "the framing settles outside the cube, {distance} m from its centre"
+        );
+        Ok(())
+    }
+
     /// **The camera stops short of a wall**: an obstruction between the avatar's
     /// head and the third-person eye pulls the eye in to just short of it, and
     /// one *behind* the eye — outside the head→eye segment the cast is bounded

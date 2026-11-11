@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 334 |
 | blocked | 39 |
 | in-progress | 6 |
-| bugs | 33 |
-| done | 1540 |
+| bugs | 32 |
+| done | 1541 |
 | deferred | 30 |
 | wont-do | 24 |
 | **total** | **2131** |
@@ -1268,7 +1268,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-text-renderability-axis`](in-progress/viewer-ui-text-renderability-axis.md)
   — Upstream issue — font selection cannot see glyph-format renderability
 
-## bugs (33)
+## bugs (32)
 
 ### protocol
 
@@ -1288,8 +1288,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### viewer
 
-- [`viewer-camera-framing-ends-inside-the-framed-object`](bugs/viewer-camera-framing-ends-inside-the-framed-object.md)
-  — A framing glide can carry the camera inside the object it frames
 - [`viewer-floater-minimize-caps-follow-no-pattern`](bugs/viewer-floater-minimize-caps-follow-no-pattern.md)
   — Which floaters have a minimize button follows no pattern, and most that lack
   one should have it
@@ -1356,7 +1354,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1540)
+## done (1541)
 
 ### protocol
 
@@ -2039,6 +2037,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (done))
 - [`viewer-camera-fov-parity`](done/viewer-camera-fov-parity.md) — The camera's
   field of view is 45° here and 60° in the reference viewer
+- [`viewer-camera-framing-ends-inside-the-framed-object`](done/viewer-camera-framing-ends-inside-the-framed-object.md)
+  — A framing glide can carry the camera inside the object it frames
 - [`viewer-camera-input-interaction-tests`](done/viewer-camera-input-interaction-tests.md)
   — Camera, movement, mouselook and HUD picking under a synthetic pointer
   (blocked by `viewer-world-test-harness` (done), `viewer-cpu-pick-resolver`
