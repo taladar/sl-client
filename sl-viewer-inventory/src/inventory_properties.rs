@@ -231,7 +231,7 @@ pub fn item_properties_floater_spec() -> FloaterSpec {
         dock_host: None,
         caps: FloaterCaps {
             resizable: false,
-            minimizable: false,
+            minimizable: true,
             closable: true,
             dockable: false,
         },
@@ -264,7 +264,7 @@ fn preview_floater_spec(id: &'static str, title: &str) -> FloaterSpec {
         dock_host: None,
         caps: FloaterCaps {
             resizable: false,
-            minimizable: false,
+            minimizable: true,
             closable: true,
             dockable: false,
         },

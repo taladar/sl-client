@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 334 |
 | blocked | 39 |
 | in-progress | 6 |
-| bugs | 32 |
-| done | 1541 |
+| bugs | 31 |
+| done | 1542 |
 | deferred | 30 |
 | wont-do | 24 |
 | **total** | **2131** |
@@ -1268,7 +1268,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-text-renderability-axis`](in-progress/viewer-ui-text-renderability-axis.md)
   — Upstream issue — font selection cannot see glyph-format renderability
 
-## bugs (32)
+## bugs (31)
 
 ### protocol
 
@@ -1288,9 +1288,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### viewer
 
-- [`viewer-floater-minimize-caps-follow-no-pattern`](bugs/viewer-floater-minimize-caps-follow-no-pattern.md)
-  — Which floaters have a minimize button follows no pattern, and most that lack
-  one should have it
 - [`viewer-inventory-settings-subtree-shows-unloaded`](bugs/viewer-inventory-settings-subtree-shows-unloaded.md)
   — The Library root and its Environments subtree never read as loaded in the
   viewer model
@@ -1354,7 +1351,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1541)
+## done (1542)
 
 ### protocol
 
@@ -2244,6 +2241,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-floater-interaction-tests`](done/viewer-floater-interaction-tests.md)
   — Floater chrome under a real pointer (blocked by
   `viewer-ui-interaction-harness` (done), `viewer-floater-registry` (done))
+- [`viewer-floater-minimize-caps-follow-no-pattern`](done/viewer-floater-minimize-caps-follow-no-pattern.md)
+  — Which floaters have a minimize button follows no pattern, and most that lack
+  one should have it
 - [`viewer-floater-registry`](done/viewer-floater-registry.md) — A FLOATERS
   registry, so floaters can be swept at all
 - [`viewer-floater-z-climbs-over-fixed-planes`](done/viewer-floater-z-climbs-over-fixed-planes.md)

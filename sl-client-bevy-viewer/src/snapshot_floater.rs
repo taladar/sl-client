@@ -420,7 +420,7 @@ pub(crate) fn snapshot_floater_spec() -> crate::floater::FloaterSpec {
         dock_host: None,
         caps: crate::floater::FloaterCaps {
             resizable: false,
-            minimizable: false,
+            minimizable: true,
             closable: true,
             dockable: false,
         },

@@ -947,7 +947,7 @@ pub fn emoji_picker_floater_spec() -> FloaterSpec {
         dock_host: None,
         caps: FloaterCaps {
             resizable: false,
-            minimizable: true,
+            minimizable: false,
             closable: true,
             dockable: true,
         },

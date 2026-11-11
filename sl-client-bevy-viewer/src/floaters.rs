@@ -36,9 +36,20 @@
 //! in place of content, and 43 of 56 windows were left that way. A new floater
 //! writes its specimen when it registers.
 //!
+//! # Every window names the reference window it ports
+//!
+//! An entry's `reference` is the reference viewer's XUI file for the same
+//! window and that file's `can_minimize` (true when absent, `LLFloater`'s
+//! default), or the panel the reference shows the content in when it has no
+//! window for it. `a_registered_floater_minimizes_as_its_reference_does`
+//! holds the window's [`FloaterCaps::minimizable`](crate::floater::FloaterCaps)
+//! to it, so a new floater offers the minimize box unless its reference file
+//! turns it off, and the next drift fails a test rather than waiting for
+//! someone to open the gallery and notice.
+//!
 //! [`ELEMENTS`]: crate::ui_elements::ELEMENTS
 
-use crate::floater::FloaterElement;
+use crate::floater::{FloaterElement, ReferenceFloater};
 
 /// **The registry.** Every floater the viewer opens, swept by
 /// the `ui_test` sweep and rendered by `sl-viewer-gallery`.
@@ -52,6 +63,10 @@ pub const FLOATERS: &[FloaterElement] = &[
                   copyable support block, credits and the third-party licenses.",
         spec: crate::about_floater::about_floater_spec,
         content: crate::about_floater::spawn_about_specimen,
+        reference: ReferenceFloater::Xui {
+            file: "floater_about.xml",
+            can_minimize: true,
+        },
     },
     FloaterElement {
         id: "about-land",
@@ -59,6 +74,10 @@ pub const FLOATERS: &[FloaterElement] = &[
                   tabs — the parcel the agent is standing in, or one picked on the map.",
         spec: crate::about_land::about_land_floater_spec,
         content: crate::about_land::spawn_about_land_specimen,
+        reference: ReferenceFloater::Xui {
+            file: "floater_about_land.xml",
+            can_minimize: true,
+        },
     },
     FloaterElement {
         id: "about-landmark",
@@ -66,6 +85,10 @@ pub const FLOATERS: &[FloaterElement] = &[
                   the Teleport / Show on Map actions.",
         spec: crate::about_landmark::about_landmark_floater_spec,
         content: crate::about_landmark::spawn_about_landmark_specimen,
+        reference: ReferenceFloater::Xui {
+            file: "floater_fs_placedetails.xml",
+            can_minimize: true,
+        },
     },
     FloaterElement {
         id: "about-region",
@@ -73,6 +96,10 @@ pub const FLOATERS: &[FloaterElement] = &[
                   — the estate-owner surface behind the region the agent is in.",
         spec: crate::about_region::about_region_floater_spec,
         content: crate::about_region::spawn_about_region_specimen,
+        reference: ReferenceFloater::Xui {
+            file: "floater_region_info.xml",
+            can_minimize: true,
+        },
     },
     FloaterElement {
         id: "add-to-contact-set",
@@ -80,6 +107,10 @@ pub const FLOATERS: &[FloaterElement] = &[
                   row — opened on a chosen resident.",
         spec: crate::contact_sets_panel::add_to_set_floater_spec,
         content: crate::contact_sets_panel::spawn_add_to_set_specimen,
+        reference: ReferenceFloater::Xui {
+            file: "floater_fs_contact_add.xml",
+            can_minimize: true,
+        },
     },
     FloaterElement {
         id: "asset-blacklist",
@@ -87,6 +118,10 @@ pub const FLOATERS: &[FloaterElement] = &[
                   with its count line and the remove actions.",
         spec: crate::asset_blacklist::blacklist_floater_spec,
         content: crate::asset_blacklist::spawn_blacklist_specimen,
+        reference: ReferenceFloater::Xui {
+            file: "floater_fs_asset_blacklist.xml",
+            can_minimize: true,
+        },
     },
     FloaterElement {
         id: "avatar-picker",
@@ -94,6 +129,10 @@ pub const FLOATERS: &[FloaterElement] = &[
                   reply row every consumer is written against.",
         spec: crate::avatar_picker::avatar_picker_floater_spec,
         content: crate::avatar_picker::spawn_avatar_picker_specimen,
+        reference: ReferenceFloater::Xui {
+            file: "floater_avatar_picker.xml",
+            can_minimize: true,
+        },
     },
     FloaterElement {
         id: "avatar-profile",
@@ -101,6 +140,10 @@ pub const FLOATERS: &[FloaterElement] = &[
                   Notes tabs. One window per resident, so its geometry is not persisted.",
         spec: crate::avatar_profile::avatar_profile_floater_spec,
         content: crate::avatar_profile::spawn_avatar_profile_specimen,
+        reference: ReferenceFloater::Xui {
+            file: "floater_profile.xml",
+            can_minimize: true,
+        },
     },
     FloaterElement {
         id: "avatar-render-settings",
@@ -108,6 +151,10 @@ pub const FLOATERS: &[FloaterElement] = &[
                   table, with its count line and the trailing actions.",
         spec: crate::avatar_render_floater::render_settings_floater_spec,
         content: crate::avatar_render_floater::spawn_render_settings_specimen,
+        reference: ReferenceFloater::Xui {
+            file: "floater_fs_avatar_render_settings.xml",
+            can_minimize: true,
+        },
     },
     FloaterElement {
         id: "block-by-name",
@@ -115,6 +162,10 @@ pub const FLOATERS: &[FloaterElement] = &[
                   half of the mute list, which has no picker to open.",
         spec: crate::blocked::block_by_name_floater_spec,
         content: crate::blocked::spawn_block_by_name_specimen,
+        reference: ReferenceFloater::Xui {
+            file: "floater_mute_object.xml",
+            can_minimize: false,
+        },
     },
     FloaterElement {
         id: "build-tools",
@@ -123,6 +174,10 @@ pub const FLOATERS: &[FloaterElement] = &[
                   tabs — the object-edit window with a sample prim selected.",
         spec: crate::edit_tool::build_tools_floater_spec,
         content: crate::edit_tool::spawn_build_tools_specimen,
+        reference: ReferenceFloater::Xui {
+            file: "floater_tools.xml",
+            can_minimize: true,
+        },
     },
     FloaterElement {
         id: "color-picker",
@@ -131,6 +186,10 @@ pub const FLOATERS: &[FloaterElement] = &[
                   and the reply row. Subject-bound to whatever swatch opened it.",
         spec: crate::ui_color_picker::color_picker_floater_spec,
         content: crate::ui_color_picker::spawn_color_picker_specimen,
+        reference: ReferenceFloater::Xui {
+            file: "floater_color_picker.xml",
+            can_minimize: false,
+        },
     },
     FloaterElement {
         id: "contact-set-config",
@@ -138,6 +197,10 @@ pub const FLOATERS: &[FloaterElement] = &[
                   swatch, and Close.",
         spec: crate::contact_sets_panel::contact_set_config_floater_spec,
         content: crate::contact_sets_panel::spawn_contact_set_config_specimen,
+        reference: ReferenceFloater::Xui {
+            file: "floater_fs_contact_set_configuration.xml",
+            can_minimize: true,
+        },
     },
     FloaterElement {
         id: "conversations",
@@ -147,6 +210,10 @@ pub const FLOATERS: &[FloaterElement] = &[
                   nearby-chat bar.",
         spec: crate::conversations::conversations_floater_spec,
         content: crate::conversations::spawn_conversations_specimen,
+        reference: ReferenceFloater::Xui {
+            file: "floater_fs_im_container.xml",
+            can_minimize: true,
+        },
     },
     FloaterElement {
         id: "day-cycle-editor",
@@ -154,6 +221,10 @@ pub const FLOATERS: &[FloaterElement] = &[
                   the knob tabs of the selected keyframe, with Save, Save As and Revert.",
         spec: crate::day_cycle_editor::day_cycle_editor_floater_spec,
         content: crate::day_cycle_editor::spawn_day_cycle_editor_specimen,
+        reference: ReferenceFloater::Xui {
+            file: "floater_edit_ext_day_cycle.xml",
+            can_minimize: true,
+        },
     },
     FloaterElement {
         id: "debug_settings",
@@ -161,6 +232,10 @@ pub const FLOATERS: &[FloaterElement] = &[
                   list beside the per-layer detail column.",
         spec: crate::debug_settings::debug_settings_floater_spec,
         content: crate::debug_settings::spawn_debug_settings_specimen,
+        reference: ReferenceFloater::Xui {
+            file: "floater_settings_debug.xml",
+            can_minimize: true,
+        },
     },
     FloaterElement {
         id: "emoji-picker",
@@ -169,6 +244,10 @@ pub const FLOATERS: &[FloaterElement] = &[
                   field.",
         spec: crate::emoji_picker::emoji_picker_floater_spec,
         content: crate::emoji_picker::spawn_emoji_picker_specimen,
+        reference: ReferenceFloater::Xui {
+            file: "floater_emoji_picker.xml",
+            can_minimize: false,
+        },
     },
     FloaterElement {
         id: "experience-profile",
@@ -177,6 +256,10 @@ pub const FLOATERS: &[FloaterElement] = &[
                   fields. One window per experience, so its geometry is not persisted.",
         spec: crate::experience_profile::experience_profile_floater_spec,
         content: crate::experience_profile::spawn_experience_profile_specimen,
+        reference: ReferenceFloater::Xui {
+            file: "floater_experienceprofile.xml",
+            can_minimize: true,
+        },
     },
     FloaterElement {
         id: "experience-picker",
@@ -185,6 +268,10 @@ pub const FLOATERS: &[FloaterElement] = &[
                   experience list adds through.",
         spec: crate::experience_picker::experience_picker_floater_spec,
         content: crate::experience_picker::spawn_experience_picker_specimen,
+        reference: ReferenceFloater::Xui {
+            file: "floater_experience_search.xml",
+            can_minimize: true,
+        },
     },
     FloaterElement {
         id: "experiences",
@@ -193,6 +280,10 @@ pub const FLOATERS: &[FloaterElement] = &[
                   table over its capability's reply.",
         spec: crate::experiences_floater::experiences_floater_spec,
         content: crate::experiences_floater::spawn_experiences_specimen,
+        reference: ReferenceFloater::Xui {
+            file: "floater_experiences.xml",
+            can_minimize: true,
+        },
     },
     FloaterElement {
         id: "find-replace",
@@ -201,12 +292,20 @@ pub const FLOATERS: &[FloaterElement] = &[
                   Bound to the editor that opened it.",
         spec: crate::ui_code_editor::find_replace_floater_spec,
         content: crate::ui_code_editor::spawn_find_replace_specimen,
+        reference: ReferenceFloater::Xui {
+            file: "floater_search_replace.xml",
+            can_minimize: true,
+        },
     },
     FloaterElement {
         id: "go-to-line",
         summary: "Go to Line: the code editor's line-number prompt and its OK button.",
         spec: crate::ui_code_editor::go_to_line_floater_spec,
         content: crate::ui_code_editor::spawn_go_to_line_specimen,
+        reference: ReferenceFloater::Xui {
+            file: "floater_goto_line.xml",
+            can_minimize: true,
+        },
     },
     FloaterElement {
         id: "group-picker",
@@ -214,6 +313,10 @@ pub const FLOATERS: &[FloaterElement] = &[
                   OK / Cancel reply row every set-group control is written against.",
         spec: crate::group_picker::group_picker_floater_spec,
         content: crate::group_picker::spawn_group_picker_specimen,
+        reference: ReferenceFloater::Xui {
+            file: "floater_choose_group.xml",
+            can_minimize: true,
+        },
     },
     FloaterElement {
         id: "group-profile",
@@ -221,6 +324,10 @@ pub const FLOATERS: &[FloaterElement] = &[
                   One window per group, so its geometry is not persisted.",
         spec: crate::group_profile::group_profile_floater_spec,
         content: crate::group_profile::spawn_group_profile_specimen,
+        reference: ReferenceFloater::Xui {
+            file: "floater_fs_group.xml",
+            can_minimize: true,
+        },
     },
     FloaterElement {
         id: "inventory",
@@ -228,6 +335,10 @@ pub const FLOATERS: &[FloaterElement] = &[
                   virtualized folder tree — the viewer's largest window.",
         spec: crate::inventory::inventory_floater_spec,
         content: crate::inventory::spawn_inventory_specimen,
+        reference: ReferenceFloater::Xui {
+            file: "floater_my_inventory.xml",
+            can_minimize: true,
+        },
     },
     FloaterElement {
         id: "inventory-filters",
@@ -235,6 +346,10 @@ pub const FLOATERS: &[FloaterElement] = &[
                   and the reset row that drives the inventory window's view.",
         spec: crate::inventory_filters::inventory_filters_floater_spec,
         content: crate::inventory_filters::spawn_inventory_filters_specimen,
+        reference: ReferenceFloater::Xui {
+            file: "floater_inventory_view_finder.xml",
+            can_minimize: false,
+        },
     },
     FloaterElement {
         id: "inventory-gallery",
@@ -242,6 +357,9 @@ pub const FLOATERS: &[FloaterElement] = &[
                   tree.",
         spec: crate::inventory_gallery::inventory_gallery_floater_spec,
         content: crate::inventory_gallery::spawn_inventory_gallery_specimen,
+        reference: ReferenceFloater::Panel {
+            shown_in: "the inventory window's gallery view (`panel_inventory_gallery.xml`)",
+        },
     },
     FloaterElement {
         id: "item-properties",
@@ -249,6 +367,10 @@ pub const FLOATERS: &[FloaterElement] = &[
                   permission checkboxes. One window per item, so its geometry is not persisted.",
         spec: crate::inventory_properties::item_properties_floater_spec,
         content: crate::inventory_properties::spawn_item_properties_specimen,
+        reference: ReferenceFloater::Xui {
+            file: "floater_item_properties.xml",
+            can_minimize: true,
+        },
     },
     FloaterElement {
         id: "material-editor",
@@ -258,6 +380,10 @@ pub const FLOATERS: &[FloaterElement] = &[
                   edit.",
         spec: crate::edit_material_asset::material_editor_floater_spec,
         content: crate::edit_material_asset::spawn_material_editor_specimen,
+        reference: ReferenceFloater::Xui {
+            file: "floater_material_editor.xml",
+            can_minimize: true,
+        },
     },
     FloaterElement {
         id: "media-settings",
@@ -266,6 +392,10 @@ pub const FLOATERS: &[FloaterElement] = &[
                   bar and permissions, and the Security tab's white-list.",
         spec: crate::edit_media::media_settings_floater_spec,
         content: crate::edit_media::spawn_media_settings_specimen,
+        reference: ReferenceFloater::Xui {
+            file: "floater_media_settings.xml",
+            can_minimize: true,
+        },
     },
     FloaterElement {
         id: "media-whitelist-entry",
@@ -273,6 +403,10 @@ pub const FLOATERS: &[FloaterElement] = &[
                   Add… opens for a URL pattern.",
         spec: crate::edit_media::whitelist_entry_floater_spec,
         content: crate::edit_media::spawn_whitelist_entry_specimen,
+        reference: ReferenceFloater::Xui {
+            file: "floater_whitelist_entry.xml",
+            can_minimize: false,
+        },
     },
     FloaterElement {
         id: "minimap",
@@ -280,6 +414,10 @@ pub const FLOATERS: &[FloaterElement] = &[
                   and compass labels.",
         spec: crate::minimap::minimap_floater_spec,
         content: crate::minimap::spawn_minimap_specimen,
+        reference: ReferenceFloater::Xui {
+            file: "floater_map.xml",
+            can_minimize: true,
+        },
     },
     FloaterElement {
         id: "my-environments",
@@ -287,6 +425,10 @@ pub const FLOATERS: &[FloaterElement] = &[
                   checkboxes and the name filter, with the creators and the trash under it.",
         spec: crate::my_environments::my_environments_floater_spec,
         content: crate::my_environments::spawn_my_environments_specimen,
+        reference: ReferenceFloater::Xui {
+            file: "floater_my_environments.xml",
+            can_minimize: true,
+        },
     },
     FloaterElement {
         id: "nearby-media",
@@ -295,6 +437,9 @@ pub const FLOATERS: &[FloaterElement] = &[
                   play tick each, and the selected row's transport.",
         spec: crate::nearby_media::nearby_media_floater_spec,
         content: crate::nearby_media::spawn_nearby_media_specimen,
+        reference: ReferenceFloater::Panel {
+            shown_in: "the status bar's nearby-media pop-up (`panel_nearby_media.xml`)",
+        },
     },
     FloaterElement {
         id: "notecard-editor",
@@ -303,6 +448,10 @@ pub const FLOATERS: &[FloaterElement] = &[
                   discard the first's unsaved text.",
         spec: crate::edit_notecard::notecard_editor_floater_spec,
         content: crate::edit_notecard::spawn_notecard_editor_specimen,
+        reference: ReferenceFloater::Xui {
+            file: "floater_preview_notecard.xml",
+            can_minimize: true,
+        },
     },
     FloaterElement {
         id: "object-contents",
@@ -311,6 +460,10 @@ pub const FLOATERS: &[FloaterElement] = &[
                   objects' contents can be side by side.",
         spec: crate::edit_contents::object_contents_floater_spec,
         content: crate::edit_contents::spawn_object_contents_specimen,
+        reference: ReferenceFloater::Xui {
+            file: "floater_openobject.xml",
+            can_minimize: true,
+        },
     },
     FloaterElement {
         id: "panorama",
@@ -318,6 +471,10 @@ pub const FLOATERS: &[FloaterElement] = &[
                   the output format, and the Capture / Save row over a 2:1 preview.",
         spec: crate::panorama::panorama_floater_spec,
         content: crate::panorama::spawn_panorama_specimen,
+        reference: ReferenceFloater::Xui {
+            file: "floater_360capture.xml",
+            can_minimize: true,
+        },
     },
     FloaterElement {
         id: "personal-lighting",
@@ -326,6 +483,10 @@ pub const FLOATERS: &[FloaterElement] = &[
                   water knobs, and Reset.",
         spec: crate::personal_lighting::personal_lighting_floater_spec,
         content: crate::personal_lighting::spawn_personal_lighting_specimen,
+        reference: ReferenceFloater::Xui {
+            file: "floater_adjust_environment.xml",
+            can_minimize: true,
+        },
     },
     FloaterElement {
         id: "phototools",
@@ -334,6 +495,10 @@ pub const FLOATERS: &[FloaterElement] = &[
                   knobs that change the look (reflections, shadows, tone mapping, glow, quality).",
         spec: crate::phototools::phototools_floater_spec,
         content: crate::phototools::spawn_phototools_specimen,
+        reference: ReferenceFloater::Xui {
+            file: "floater_phototools.xml",
+            can_minimize: true,
+        },
     },
     FloaterElement {
         id: "preferences",
@@ -341,6 +506,10 @@ pub const FLOATERS: &[FloaterElement] = &[
                   and the OK / Cancel footer.",
         spec: crate::preferences::preferences_floater_spec,
         content: crate::preferences::spawn_preferences_specimen,
+        reference: ReferenceFloater::Xui {
+            file: "floater_preferences.xml",
+            can_minimize: true,
+        },
     },
     FloaterElement {
         id: "preview-animation",
@@ -348,6 +517,10 @@ pub const FLOATERS: &[FloaterElement] = &[
                   One window per animation asset, so its geometry is not persisted.",
         spec: crate::inventory_properties::animation_preview_floater_spec,
         content: crate::inventory_properties::spawn_animation_preview_specimen,
+        reference: ReferenceFloater::Xui {
+            file: "floater_preview_animation.xml",
+            can_minimize: true,
+        },
     },
     FloaterElement {
         id: "preview-texture",
@@ -356,6 +529,10 @@ pub const FLOATERS: &[FloaterElement] = &[
                   neither persists its geometry.",
         spec: crate::inventory_properties::texture_preview_floater_spec,
         content: crate::inventory_properties::spawn_texture_preview_specimen,
+        reference: ReferenceFloater::Xui {
+            file: "floater_preview_texture.xml",
+            can_minimize: true,
+        },
     },
     FloaterElement {
         id: "quick-preferences",
@@ -363,6 +540,10 @@ pub const FLOATERS: &[FloaterElement] = &[
                   curated setting sliders.",
         spec: crate::quick_preferences::quick_prefs_floater_spec,
         content: crate::quick_preferences::spawn_quick_prefs_specimen,
+        reference: ReferenceFloater::Xui {
+            file: "floater_quickprefs.xml",
+            can_minimize: true,
+        },
     },
     FloaterElement {
         id: "radar",
@@ -370,6 +551,10 @@ pub const FLOATERS: &[FloaterElement] = &[
                   table with its status glyphs and band-coloured ranges, and the action buttons.",
         spec: crate::radar::radar_floater_spec,
         content: crate::radar::spawn_radar_specimen,
+        reference: ReferenceFloater::Xui {
+            file: "floater_fs_radar.xml",
+            can_minimize: true,
+        },
     },
     FloaterElement {
         id: "rlv-behaviours",
@@ -377,6 +562,10 @@ pub const FLOATERS: &[FloaterElement] = &[
                   each, the exceptions poked in them, and the modifier slots.",
         spec: crate::rlv_behaviours::rlv_behaviours_floater_spec,
         content: crate::rlv_behaviours::spawn_rlv_behaviours_specimen,
+        reference: ReferenceFloater::Xui {
+            file: "floater_rlv_behaviours.xml",
+            can_minimize: true,
+        },
     },
     FloaterElement {
         id: "rlv-console",
@@ -384,6 +573,10 @@ pub const FLOATERS: &[FloaterElement] = &[
                   what each one did.",
         spec: crate::rlv_console::rlv_console_floater_spec,
         content: crate::rlv_console::spawn_rlv_console_specimen,
+        reference: ReferenceFloater::Xui {
+            file: "floater_rlv_console.xml",
+            can_minimize: true,
+        },
     },
     FloaterElement {
         id: "rlv-locks",
@@ -391,6 +584,10 @@ pub const FLOATERS: &[FloaterElement] = &[
                   or folder may not be worn on or taken off, and which object decided.",
         spec: crate::rlv_locks::rlv_locks_floater_spec,
         content: crate::rlv_locks::spawn_rlv_locks_specimen,
+        reference: ReferenceFloater::Xui {
+            file: "floater_rlv_locks.xml",
+            can_minimize: true,
+        },
     },
     FloaterElement {
         id: "rlv-strings",
@@ -398,6 +595,10 @@ pub const FLOATERS: &[FloaterElement] = &[
                   of when each is sent and the editor for rewriting it.",
         spec: crate::rlv_strings::rlv_strings_floater_spec,
         content: crate::rlv_strings::spawn_rlv_strings_specimen,
+        reference: ReferenceFloater::Xui {
+            file: "floater_rlv_strings.xml",
+            can_minimize: false,
+        },
     },
     FloaterElement {
         id: "script-editor",
@@ -406,6 +607,10 @@ pub const FLOATERS: &[FloaterElement] = &[
                   several at once.",
         spec: crate::edit_script::script_editor_floater_spec,
         content: crate::edit_script::spawn_script_editor_specimen,
+        reference: ReferenceFloater::Xui {
+            file: "floater_live_lsleditor.xml",
+            can_minimize: true,
+        },
     },
     FloaterElement {
         id: "script-errors",
@@ -414,6 +619,10 @@ pub const FLOATERS: &[FloaterElement] = &[
                   links to the object inspector.",
         spec: crate::script_errors::script_errors_floater_spec,
         content: crate::script_errors::spawn_script_errors_specimen,
+        reference: ReferenceFloater::Xui {
+            file: "floater_script_debug.xml",
+            can_minimize: true,
+        },
     },
     FloaterElement {
         id: "search",
@@ -421,6 +630,10 @@ pub const FLOATERS: &[FloaterElement] = &[
                   directory surface.",
         spec: crate::search::search_floater_spec,
         content: crate::search::spawn_search_specimen,
+        reference: ReferenceFloater::Xui {
+            file: "floater_fs_search.xml",
+            can_minimize: true,
+        },
     },
     FloaterElement {
         id: "settings-editor-sky",
@@ -428,6 +641,10 @@ pub const FLOATERS: &[FloaterElement] = &[
                   an inventory sky asset, with Save, Save As and Revert.",
         spec: crate::settings_editor::sky_settings_editor_floater_spec,
         content: crate::settings_editor::spawn_sky_settings_editor_specimen,
+        reference: ReferenceFloater::Xui {
+            file: "floater_fs_fixedenvironment.xml",
+            can_minimize: true,
+        },
     },
     FloaterElement {
         id: "settings-editor-water",
@@ -435,6 +652,10 @@ pub const FLOATERS: &[FloaterElement] = &[
                   asset, with Save, Save As and Revert.",
         spec: crate::settings_editor::water_settings_editor_floater_spec,
         content: crate::settings_editor::spawn_water_settings_editor_specimen,
+        reference: ReferenceFloater::Xui {
+            file: "floater_fs_fixedenvironment.xml",
+            can_minimize: true,
+        },
     },
     FloaterElement {
         id: "settings-picker",
@@ -443,6 +664,10 @@ pub const FLOATERS: &[FloaterElement] = &[
                   against.",
         spec: crate::settings_picker::settings_picker_floater_spec,
         content: crate::settings_picker::spawn_settings_picker_specimen,
+        reference: ReferenceFloater::Xui {
+            file: "floater_settings_picker.xml",
+            can_minimize: false,
+        },
     },
     FloaterElement {
         id: "snapshot",
@@ -450,6 +675,10 @@ pub const FLOATERS: &[FloaterElement] = &[
                   the destination tabs.",
         spec: crate::snapshot_floater::snapshot_floater_spec,
         content: crate::snapshot_floater::spawn_snapshot_specimen,
+        reference: ReferenceFloater::Xui {
+            file: "floater_snapshot.xml",
+            can_minimize: true,
+        },
     },
     FloaterElement {
         id: "telehub",
@@ -458,6 +687,10 @@ pub const FLOATERS: &[FloaterElement] = &[
                   Remove Spawn.",
         spec: crate::telehub::telehub_floater_spec,
         content: crate::telehub::spawn_telehub_specimen,
+        reference: ReferenceFloater::Xui {
+            file: "floater_telehub.xml",
+            can_minimize: true,
+        },
     },
     FloaterElement {
         id: "texture-picker",
@@ -466,6 +699,10 @@ pub const FLOATERS: &[FloaterElement] = &[
                   window per field, each remembering its own geometry.",
         spec: crate::ui_texture_picker::texture_picker_floater_spec,
         content: crate::ui_texture_picker::spawn_texture_picker_specimen,
+        reference: ReferenceFloater::Xui {
+            file: "floater_texture_ctrl.xml",
+            can_minimize: false,
+        },
     },
     FloaterElement {
         id: "top-colliders",
@@ -474,6 +711,10 @@ pub const FLOATERS: &[FloaterElement] = &[
                   beacon actions over what it lists. One window per region.",
         spec: crate::top_objects::top_colliders_floater_spec,
         content: crate::top_objects::spawn_top_colliders_specimen,
+        reference: ReferenceFloater::Xui {
+            file: "floater_top_objects.xml",
+            can_minimize: true,
+        },
     },
     FloaterElement {
         id: "top-scripts",
@@ -481,6 +722,10 @@ pub const FLOATERS: &[FloaterElement] = &[
                   report with the script memory and public-URL columns. One window per region.",
         spec: crate::top_objects::top_scripts_floater_spec,
         content: crate::top_objects::spawn_top_scripts_specimen,
+        reference: ReferenceFloater::Xui {
+            file: "floater_top_objects.xml",
+            can_minimize: true,
+        },
     },
     FloaterElement {
         id: "wearable-editor",
@@ -489,6 +734,9 @@ pub const FLOATERS: &[FloaterElement] = &[
                   the first's unsaved edit.",
         spec: crate::edit_wearable::wearable_editor_floater_spec,
         content: crate::edit_wearable::spawn_wearable_editor_specimen,
+        reference: ReferenceFloater::Panel {
+            shown_in: "the appearance side bar's wearable editor (`panel_edit_wearable.xml`)",
+        },
     },
     FloaterElement {
         id: "web-browser",
@@ -497,6 +745,10 @@ pub const FLOATERS: &[FloaterElement] = &[
                   page, as the reference opens them, so its geometry is not persisted.",
         spec: crate::web_floater::web_floater_spec,
         content: crate::web_floater::spawn_web_floater_specimen,
+        reference: ReferenceFloater::Xui {
+            file: "floater_web_content.xml",
+            can_minimize: true,
+        },
     },
     FloaterElement {
         id: "worldmap",
@@ -504,6 +756,10 @@ pub const FLOATERS: &[FloaterElement] = &[
                   beside the search side panel.",
         spec: crate::world_map::world_map_floater_spec,
         content: crate::world_map::spawn_world_map_specimen,
+        reference: ReferenceFloater::Xui {
+            file: "floater_world_map.xml",
+            can_minimize: true,
+        },
     },
 ];
 
@@ -571,6 +827,55 @@ mod tests {
                     min_size.x <= default_size.x && min_size.y <= default_size.y,
                     "the `{}` floater opens at {default_size:?}, below its own minimum \
                      {min_size:?}",
+                    floater.id
+                );
+            }
+        }
+    }
+
+    /// A registered floater offers the minimize box exactly when the
+    /// reference window it ports does.
+    ///
+    /// Before this check the choice was made by hand at each spawn site, and
+    /// 27 windows had drifted from the reference (About Land, the radar, the
+    /// profiles, the pickers and more could not be minimized there; the emoji
+    /// picker could here and not there).
+    #[test]
+    fn a_registered_floater_minimizes_as_its_reference_does() {
+        let drifted: Vec<String> = FLOATERS
+            .iter()
+            .filter_map(|floater| {
+                let ours = (floater.spec)().caps.minimizable;
+                let theirs = floater.reference.can_minimize();
+                (ours != theirs).then(|| {
+                    format!(
+                        "`{}`: minimizable {ours}, its reference {:?} says {theirs}",
+                        floater.id, floater.reference
+                    )
+                })
+            })
+            .collect();
+        assert!(
+            drifted.is_empty(),
+            "these floaters' minimize boxes differ from the reference window each ports: \
+             {drifted:#?}"
+        );
+    }
+
+    /// A reference file name names a reference file: the guard above is only
+    /// as good as the table it reads, so a typo'd or non-XUI name is caught
+    /// rather than silently trusted.
+    #[test]
+    fn a_reference_file_is_a_floater_xui_file() {
+        for floater in FLOATERS {
+            if let super::ReferenceFloater::Xui { file, .. } = floater.reference {
+                assert!(
+                    file.starts_with("floater_")
+                        && std::path::Path::new(file)
+                            .extension()
+                            .is_some_and(|extension| extension == "xml")
+                        && !file.contains('/'),
+                    "the `{}` floater's reference `{file}` is not a `floater_*.xml` file name",
                     floater.id
                 );
             }

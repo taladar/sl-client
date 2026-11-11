@@ -905,7 +905,7 @@ pub fn add_to_set_floater_spec() -> FloaterSpec {
         dock_host: None,
         caps: FloaterCaps {
             resizable: false,
-            minimizable: false,
+            minimizable: true,
             closable: true,
             dockable: false,
         },
@@ -1028,7 +1028,7 @@ pub fn contact_set_config_floater_spec() -> FloaterSpec {
         dock_host: None,
         caps: FloaterCaps {
             resizable: false,
-            minimizable: false,
+            minimizable: true,
             closable: true,
             dockable: false,
         },

@@ -807,8 +807,10 @@ pub fn minimap_floater_spec() -> FloaterSpec {
         dock_host: None,
         caps: FloaterCaps {
             resizable: true,
-            // The Vintage-style free-floating map: minimize disabled.
-            minimizable: false,
+            // The default skin's `floater_map.xml` can be minimized; only the
+            // Vintage skin's turns it off, and a skin here does not change
+            // which buttons a window has.
+            minimizable: true,
             closable: true,
             dockable: false,
         },

@@ -473,7 +473,7 @@ pub fn rlv_behaviours_floater_spec() -> FloaterSpec {
         dock_host: None,
         caps: FloaterCaps {
             resizable: true,
-            minimizable: false,
+            minimizable: true,
             closable: true,
             dockable: false,
         },
