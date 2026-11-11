@@ -408,6 +408,10 @@ pub(crate) fn drive_avatar_controls(
         // The fly action toggles flying.
         if input.actions.just_pressed(Action::ToggleFly) {
             controls.flying = !controls.flying;
+            info!(
+                flying = controls.flying,
+                "movement: the fly key toggled flight"
+            );
         }
 
         // Auto-take-off (P31.16): holding ascend engages flight once held past the
@@ -428,6 +432,11 @@ pub(crate) fn drive_avatar_controls(
             controls.ascend_hold_frames,
             world.agent.can_fly,
         ) {
+            info!(
+                held_secs = controls.ascend_hold_secs,
+                held_frames = controls.ascend_hold_frames,
+                "movement: a held ascend took off into flight"
+            );
             controls.flying = true;
             controls.ascend_hold_secs = 0.0;
             controls.ascend_hold_frames = 0;
@@ -448,6 +457,7 @@ pub(crate) fn drive_avatar_controls(
                 ),
             )
         {
+            info!("movement: flight ended on landing");
             controls.flying = false;
         }
     } else {

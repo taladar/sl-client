@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 333 |
 | blocked | 39 |
 | in-progress | 6 |
-| bugs | 31 |
-| done | 1551 |
+| bugs | 30 |
+| done | 1552 |
 | deferred | 30 |
 | wont-do | 24 |
 | **total** | **2143** |
@@ -1274,7 +1274,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-text-renderability-axis`](in-progress/viewer-ui-text-renderability-axis.md)
   — Upstream issue — font selection cannot see glyph-format renderability
 
-## bugs (31)
+## bugs (30)
 
 ### protocol
 
@@ -1294,8 +1294,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### viewer
 
-- [`viewer-e2e-walk-foot-plane-lost-under-load`](bugs/viewer-e2e-walk-foot-plane-lost-under-load.md)
-  — Under heavy load the walking avatar reads no foot plane after a walk
 - [`viewer-live-opensim-world-renders-white`](bugs/viewer-live-opensim-world-renders-white.md)
   — The world renders all white at times on the live OpenSim grid
 - [`viewer-lsl-editor-flags-unserved-functions`](bugs/viewer-lsl-editor-flags-unserved-functions.md)
@@ -1358,7 +1356,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-lsl-mono-collision-model-under-lowered-limit`](bugs/server-lsl-mono-collision-model-under-lowered-limit.md)
   — A script 1 KB over its use collides in the runtime where Mono carries on
 
-## done (1551)
+## done (1552)
 
 ### protocol
 
@@ -2151,6 +2149,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-chat-input-bar` (done))
 - [`viewer-double-click-teleport`](done/viewer-double-click-teleport.md) —
   In-world double-click teleport (blocked by `viewer-input-action-map` (done))
+- [`viewer-e2e-walk-foot-plane-lost-under-load`](done/viewer-e2e-walk-foot-plane-lost-under-load.md)
+  — Under heavy load the walking avatar reads no foot plane after a walk
 - [`viewer-ecs-idiom-audit`](done/viewer-ecs-idiom-audit.md) — Audit the viewer
   for state modelled beside the ECS rather than in it
 - [`viewer-edit-action-disabled-though-editable`](done/viewer-edit-action-disabled-though-editable.md)
