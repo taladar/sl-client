@@ -3147,7 +3147,10 @@ impl Client {
                                     Instant::now(),
                                 )?;
                             }
-                            deliver(&events, Event::InventoryFolderPage { folder, folders: folders.into(), items: items.into(), prev, }).await;
+                            // Read after the fetch above, so a folder it just
+                            // scheduled reports `Fetching`, not `Unknown`.
+                            let state = self.session.folder_fetch_state(folder);
+                            deliver(&events, Event::InventoryFolderPage { folder, state, folders: folders.into(), items: items.into(), prev, }).await;
                         }
                         Some(Command::QueryInventoryRoots) => {
                             // Local query: surface the agent + library roots (both

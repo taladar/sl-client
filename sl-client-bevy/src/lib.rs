@@ -5092,10 +5092,14 @@ fn apply_command(
             ) {
                 fetch_folder_contents(session, *folder, caps, now)?;
             }
+            // Read after the fetch above, so a folder it just scheduled
+            // reports `Fetching`, not `Unknown`.
+            let state = session.folder_fetch_state(*folder);
             report(
                 outbound,
                 NetOutbound::Event(SessionEvent::InventoryFolderPage {
                     folder: *folder,
+                    state,
                     folders: folders.into(),
                     items: items.into(),
                     prev,

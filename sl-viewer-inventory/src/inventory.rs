@@ -745,6 +745,26 @@ impl InventoryModel {
         self.items.insert(folder, owned);
     }
 
+    /// Record a folder's **own** contents state, as a page of that folder
+    /// reports it.
+    ///
+    /// A folder's [`FolderInfo`] otherwise only ever arrives as a child — in its
+    /// parent's page or the login skeleton — carrying the state it had then. So
+    /// a root (which has no parent page) never read as loaded, and nor did a
+    /// folder whose parent was paged before its own fetch finished, which is
+    /// exactly what the settings index's eager fetch of the Library
+    /// `Environments` subtree does. A `Loaded` state brings its version along.
+    /// A folder the mirror does not hold is left alone: the page's sub-folder
+    /// merge is what introduces folders.
+    pub fn set_folder_state(&mut self, folder: InventoryFolderKey, state: FolderState) {
+        if let Some(info) = self.folders.get_mut(&folder) {
+            if let FolderState::Loaded { version } = state {
+                info.version = version;
+            }
+            info.state = state;
+        }
+    }
+
     /// Forget every sub-folder of `folder` that a **complete** page of it no
     /// longer lists, with everything beneath it — its own sub-folders and every
     /// item filed in any of them.
@@ -2582,11 +2602,15 @@ fn ingest_inventory(
             }
             SlSessionEvent::InventoryFolderPage {
                 folder,
+                state,
                 folders,
                 items,
                 prev,
             } => {
                 model.requested.insert(*folder);
+                if let Some(state) = state {
+                    model.set_folder_state(*folder, *state);
+                }
                 // A page carries the folder's sub-folders too; merging them fills
                 // in the Library subtree (whose structure the login skeleton does
                 // not fully carry) as it is browsed.
@@ -5505,6 +5529,87 @@ mod tests {
             .remove_resource::<InventoryModel>()
             .ok_or_else(|| "the model resource survives the run".to_owned())?;
         Ok((model, queried))
+    }
+
+    /// **A page carries the paged folder's own state into the mirror**: the
+    /// Library root, which no parent page ever lists, and a sub-folder its
+    /// parent's page reported while it was still unfetched (the settings index's
+    /// eager `Environments` fetch) both read as loaded once their own pages
+    /// say so. Without it the 32 folders of
+    /// `viewer-inventory-settings-subtree-shows-unloaded` stayed unloaded with
+    /// their items held.
+    #[test]
+    fn a_page_reports_its_own_folders_state() -> Result<(), String> {
+        let key = |id: u128| {
+            sl_client_bevy::InventoryFolderKey::from(sl_client_bevy::Uuid::from_u128(id))
+        };
+        let state_of = |model: &InventoryModel, id: u128| {
+            model
+                .folder_info(key(id))
+                .map(|info| (info.state, info.version))
+        };
+        let mut model = InventoryModel::default();
+        model.merge_library_folders(&[sl_client_bevy::InventoryFolder {
+            folder_id: key(0x50),
+            parent_id: None,
+            name: "Library".to_owned(),
+            folder_type: FolderType::RootInventory.to_code(),
+            version: 1,
+        }]);
+        assert_eq!(state_of(&model, 0x50), Some((FolderState::Unknown, 1)));
+        let mut environments = folder(0x51, Some(0x50), "Environments", FolderType::None);
+        environments.state = FolderState::Fetching;
+        let (model, _) = ingest_one(
+            model,
+            SlSessionEvent::InventoryFolderPage {
+                folder: key(0x50),
+                state: Some(FolderState::Loaded { version: 3 }),
+                folders: vec![environments].into(),
+                items: Vec::new().into(),
+                prev: None,
+            },
+        )?;
+        assert_eq!(
+            state_of(&model, 0x50),
+            Some((FolderState::Loaded { version: 3 }, 3)),
+            "the root reads loaded from its own page"
+        );
+        assert_eq!(
+            state_of(&model, 0x51),
+            Some((FolderState::Fetching, 1)),
+            "the child is as its parent's page listed it"
+        );
+        let (model, _) = ingest_one(
+            model,
+            SlSessionEvent::InventoryFolderPage {
+                folder: key(0x51),
+                state: Some(FolderState::Loaded { version: 5 }),
+                folders: Vec::new().into(),
+                items: vec![item(0x60, 0x51, "Sunrise", InventoryType::Settings)].into(),
+                prev: None,
+            },
+        )?;
+        assert_eq!(
+            state_of(&model, 0x51),
+            Some((FolderState::Loaded { version: 5 }, 5)),
+            "the child reads loaded from its own page, its parent unpaged since"
+        );
+        // A page of a folder the session does not know changes nothing.
+        let (model, _) = ingest_one(
+            model,
+            SlSessionEvent::InventoryFolderPage {
+                folder: key(0x51),
+                state: None,
+                folders: Vec::new().into(),
+                items: Vec::new().into(),
+                prev: None,
+            },
+        )?;
+        assert_eq!(
+            state_of(&model, 0x51),
+            Some((FolderState::Loaded { version: 5 }, 5))
+        );
+        Ok(())
     }
 
     /// The item an upload created, as the runtime assembles it from the

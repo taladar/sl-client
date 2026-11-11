@@ -24671,12 +24671,14 @@ mod test {
         let items: std::sync::Arc<[ItemInfo]> = items.into();
         let page_event = Event::InventoryFolderPage {
             folder: parent_key,
+            state: session.folder_fetch_state(parent_key),
             folders: std::sync::Arc::clone(&folders),
             items: std::sync::Arc::clone(&items),
             prev,
         };
         let Event::InventoryFolderPage {
             folder,
+            state,
             folders: shipped_folders,
             items: shipped_items,
             prev: shipped_prev,
@@ -24685,6 +24687,9 @@ mod test {
             return Err("expected an InventoryFolderPage event".into());
         };
         assert_eq!(*folder, parent_key);
+        // The page reports the paged folder's own state, which no sub-folder
+        // listing carries.
+        assert_eq!(*state, Some(FolderState::Loaded { version: 4 }));
         // Handing the window across the channel is an `Arc` clone, never a deep
         // copy: the shipped event shares the same allocation.
         assert!(std::sync::Arc::ptr_eq(&folders, shipped_folders));

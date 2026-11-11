@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 334 |
 | blocked | 39 |
 | in-progress | 6 |
-| bugs | 31 |
-| done | 1542 |
+| bugs | 30 |
+| done | 1543 |
 | deferred | 30 |
 | wont-do | 24 |
 | **total** | **2131** |
@@ -1268,7 +1268,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-text-renderability-axis`](in-progress/viewer-ui-text-renderability-axis.md)
   — Upstream issue — font selection cannot see glyph-format renderability
 
-## bugs (31)
+## bugs (30)
 
 ### protocol
 
@@ -1288,9 +1288,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### viewer
 
-- [`viewer-inventory-settings-subtree-shows-unloaded`](bugs/viewer-inventory-settings-subtree-shows-unloaded.md)
-  — The Library root and its Environments subtree never read as loaded in the
-  viewer model
 - [`viewer-live-opensim-world-renders-white`](bugs/viewer-live-opensim-world-renders-white.md)
   — The world renders all white at times on the live OpenSim grid
 - [`viewer-lsl-editor-flags-unserved-functions`](bugs/viewer-lsl-editor-flags-unserved-functions.md)
@@ -1351,7 +1348,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1542)
+## done (1543)
 
 ### protocol
 
@@ -2381,6 +2378,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-search-field` (done))
 - [`viewer-inventory-search-filter`](done/viewer-inventory-search-filter.md) —
   Inventory search / filter (blocked by `viewer-inventory-folder-tree` (done))
+- [`viewer-inventory-settings-subtree-shows-unloaded`](done/viewer-inventory-settings-subtree-shows-unloaded.md)
+  — The Library root and its Environments subtree never read as loaded in the
+  viewer model
 - [`viewer-inventory-share-picker`](done/viewer-inventory-share-picker.md) —
   Share (give via avatar picker)
 - [`viewer-inventory-show-in-main-from-worn-recent`](done/viewer-inventory-show-in-main-from-worn-recent.md)
