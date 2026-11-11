@@ -2583,15 +2583,58 @@ mod test {
         Ok(())
     }
 
+    /// What the world map's location line says while the grid is asked about
+    /// a clicked cell, and once it names no region there.
+    const MAP_LOADING: &str = "Loading…";
+
+    /// See [`MAP_LOADING`].
+    const MAP_INVALID: &str = "Invalid location";
+
+    /// Pan `map` (the world-map window) east a region or so at a time and
+    /// click its centre, until a click lands on a cell the grid names no
+    /// region in — the line saying "Loading…" while it asks, then "Invalid
+    /// location". Answers how many pans it took; each read waits up to
+    /// `wait`.
+    async fn click_open_water(map: &UiLocator, wait: Duration) -> Result<usize, BodyError> {
+        let surface = map.test_id("worldmap-surface");
+        let location = map.test_id("worldmap-location");
+        for pans in 1..=60 {
+            let before = location.text().await?.unwrap_or_default();
+            let _dragged = surface.drag_by(-150.0, 0.0).await?;
+            let _clicked = surface.click().await?;
+            let after = tokio::time::timeout(wait, async {
+                loop {
+                    let text = location.text().await?.unwrap_or_default();
+                    if text != before && text != MAP_LOADING {
+                        return Ok::<_, BodyError>(text);
+                    }
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+            })
+            .await
+            .map_err(|_elapsed| {
+                format!("after pan {pans} the location line stayed {before:?} or {MAP_LOADING:?}")
+            })??;
+            if after == MAP_INVALID {
+                return Ok(pans);
+            }
+        }
+        Err("no cell without a region within 60 pans east".into())
+    }
+
     /// **The world map, live**: with Beta beside it, Alpha opens its world
     /// map. The map learns the region Alpha stands in by name, draws tiles
     /// from the grid's tile server, and holds an agent location that counts
     /// somebody for that region — Beta, whom both grids report and neither
     /// reports to itself. A search for the start of the region's name lists
     /// it; on OpenSim, which matches anywhere in a name, so does a search
-    /// for its end (`book/src/gridspec/world-map.md`).
+    /// for its end (`book/src/gridspec/world-map.md`). A click on the map
+    /// selects Alpha's region, one on a cell without a region reads as no
+    /// place, and a search for a name no region has says "None found.".
     #[test]
     fn the_live_world_map_knows_the_region_and_who_is_in_it() -> Result<(), TestError> {
+        /// A search text no region's name begins with or contains.
+        const NO_REGION: &str = "Qzxqv";
         /// The item type of agent locations.
         const AGENT_LOCATIONS: u32 = 6;
         stage("live_world_map", &["Alpha", "Beta"]).run(async |stage: &Stage| {
@@ -2655,12 +2698,47 @@ mod test {
                     .role(Role::Textbox)
                     .fill(&text)
                     .await?;
+                // The map searches on Enter, never as it is typed in.
+                map.test_id("worldmap:search")
+                    .role(Role::Textbox)
+                    .press("Enter")
+                    .await?;
                 let _listed = alpha
                     .expect(&map.get(Locator::role(Role::ListItem).named(&name)))
                     .timeout(LIVE_WAIT)
                     .to_be_visible()
                     .await?;
             }
+
+            // A click on the map's centre selects Alpha's region; panned
+            // east until the grid names no region under the centre, a click
+            // there reads as no place.
+            let _clicked = map.test_id("worldmap-surface").click().await?;
+            let _here = alpha
+                .expect(&map.test_id("worldmap-location"))
+                .timeout(LIVE_WAIT)
+                .to_contain_text(&name)
+                .await?;
+            let _pans = click_open_water(&map, LIVE_WAIT).await?;
+
+            // A search no region matches says so once the grid ends it. Last,
+            // since OpenSim answers it with a modal alert as well.
+            let _typed = map
+                .test_id("worldmap:search")
+                .role(Role::Textbox)
+                .fill(NO_REGION)
+                .await?;
+            map.test_id("worldmap:search")
+                .role(Role::Textbox)
+                .press("Enter")
+                .await?;
+            let _said = alpha
+                .expect(&map.test_id("worldmap-results-none-found"))
+                .timeout(LIVE_WAIT)
+                .to_have_text("None found.")
+                .await?;
+            let rows = map.get(Locator::role(Role::ListItem)).count().await?;
+            assert_eq!(rows, 0, "the rows of a search that matched nothing");
             Ok(())
         })?;
         Ok(())

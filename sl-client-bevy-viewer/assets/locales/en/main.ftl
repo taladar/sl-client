@@ -1422,6 +1422,14 @@ worldmap-tooltip-infohub = Infohub: { $name }
 worldmap-tooltip-land-sale = For sale: { $name } — L$ { $price } ({ $area } m²)
 worldmap-tooltip-event = Event: { $name }
 worldmap-location-none = Click the map to select a location
+# The clicked spot is being asked about; the map knows no region there yet.
+worldmap-location-loading = Loading…
+# The grid says there is no region at the clicked spot.
+worldmap-location-invalid = Invalid location
+# Runs the region-name search in the field beside it.
+worldmap-button-find = Find
+# The grid finished a search and no region matched.
+worldmap-results-none-found = None found.
 worldmap-button-teleport = Teleport
 worldmap-button-copy-slurl = Copy SLURL
 worldmap-layer-people = People

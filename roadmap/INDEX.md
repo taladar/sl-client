@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 333 |
 | blocked | 39 |
 | in-progress | 6 |
-| bugs | 32 |
-| done | 1550 |
+| bugs | 31 |
+| done | 1551 |
 | deferred | 30 |
 | wont-do | 24 |
 | **total** | **2143** |
@@ -1274,7 +1274,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-text-renderability-axis`](in-progress/viewer-ui-text-renderability-axis.md)
   — Upstream issue — font selection cannot see glyph-format renderability
 
-## bugs (32)
+## bugs (31)
 
 ### protocol
 
@@ -1334,9 +1334,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Colour textures are filtered after sRGB decoding, the reference before
 - [`viewer-vintage-radar-range-colours`](bugs/viewer-vintage-radar-range-colours.md)
   — The radar's range column is unreadable on a light list
-- [`viewer-world-map-search-end-and-empty-cells`](bugs/viewer-world-map-search-end-and-empty-cells.md)
-  — World map — say when a search found nothing, and when a clicked cell is
-  empty
 
 ### test
 
@@ -1361,7 +1358,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-lsl-mono-collision-model-under-lowered-limit`](bugs/server-lsl-mono-collision-model-under-lowered-limit.md)
   — A script 1 KB over its use collides in the runtime where Mono carries on
 
-## done (1550)
+## done (1551)
 
 ### protocol
 
@@ -3654,6 +3651,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   floater — MapItem marker layers (blocked by `viewer-world-map-floater` (done))
 - [`viewer-world-map-search`](done/viewer-world-map-search.md) — World-map
   floater — region-name search (blocked by `viewer-world-map-floater` (done))
+- [`viewer-world-map-search-end-and-empty-cells`](done/viewer-world-map-search-end-and-empty-cells.md)
+  — World map — say when a search found nothing, and when a clicked cell is
+  empty
 - [`viewer-world-pie-menu-reactions`](done/viewer-world-pie-menu-reactions.md) —
   Right-click reactions per world target class (blocked by
   `viewer-world-test-harness` (done))

@@ -1558,6 +1558,15 @@ pub(crate) const CONTRACTS: &[ElementContract] = &[
                 ],
             ),
             NodeContract::new(
+                "worldmap-button:find",
+                &[
+                    Row::emits(Gesture::PrimaryClick, &["find"]),
+                    Row::emits(Gesture::DoubleClick, &["find", "find"]),
+                    Row::emits(Gesture::Enter, &["find"]),
+                    Row::emits(Gesture::Space, &["find"]),
+                ],
+            ),
+            NodeContract::new(
                 "worldmap-button:teleport-selected",
                 &[
                     Row::emits(Gesture::PrimaryClick, &["teleport-selected"]),

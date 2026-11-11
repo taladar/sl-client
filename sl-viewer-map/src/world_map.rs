@@ -31,9 +31,10 @@
 //! [`issue_teleport`] backend, so the map, minimap, and in-world double-click all
 //! drive the same teleport + progress path.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use bevy::asset::{RenderAssetUsages, uuid_handle};
+use bevy::input_focus::InputFocus;
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy::tasks::{AsyncComputeTaskPool, Task, block_on, poll_once};
@@ -44,8 +45,9 @@ use bevy::ui_widgets::{Activate, ValueChange};
 use bevy::window::PrimaryWindow;
 use bevy_flair::style::components::ClassList;
 use sl_client_bevy::{
-    Command, GlobalCoordinates, GridCoordinates, MapItem, MapItemType, MapRegionInfo, Maturity,
-    RegionCoordinates, RegionHandle, SlCommand, SlEvent, SlIdentity, SlSessionEvent, Vector,
+    Command, GlobalCoordinates, GridCoordinates, MapBlockBatch, MapBlockKind, MapItem, MapItemType,
+    MapRegionInfo, MapRequestFlags, Maturity, RegionCoordinates, RegionHandle, SlCommand, SlEvent,
+    SlIdentity, SlSessionEvent, Vector,
 };
 use sl_settings::{Scope, SettingValue};
 use sl_types::map::RegionName;
@@ -232,6 +234,45 @@ struct WorldMapResultRow {
     grid_y: u32,
 }
 
+/// The line under the search field that says a search found nothing — the
+/// reference list's comment text (`worldmap_results_none_found`). A fresh set
+/// of results despawns it with the rows.
+#[derive(Component)]
+struct WorldMapResultsNote;
+
+/// What the grid said about a cell a click asked about
+/// ([`CellCheck::verdict`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CellVerdict {
+    /// A region that is up: the click selects it and may teleport there.
+    Region,
+    /// No region, or one that is down: nothing to select or go to.
+    Empty,
+}
+
+/// A click into a cell the map knows no region in, waiting on the grid.
+///
+/// The reference's world map does not take an unknown cell for a place: it
+/// asks about the one cell with the null-sims flag
+/// (`LLFloaterWorldMap::trackLocation` → `sendMapBlockRequest(…, true)`), shows
+/// "Loading..." at the spot meanwhile and "Invalid Location" once the grid
+/// names no region there, and tracks or teleports only once a region is
+/// confirmed (`book/src/gridspec/world-map.md`: both grids answer such a
+/// request with one nameless entry).
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct CellCheck {
+    /// The cell asked about (grid coordinates).
+    cell: (u32, u32),
+    /// The clicked spot, in global metres (east, north).
+    spot: (f64, f64),
+    /// The clicked spot, region-local.
+    local: (u8, u8),
+    /// A double-click asked to teleport there once the region is confirmed.
+    teleport: bool,
+    /// What the grid answered, or `None` while the answer is outstanding.
+    verdict: Option<CellVerdict>,
+}
+
 /// One drawn marker, kept for hover hit-testing.
 #[derive(Debug, Clone)]
 struct MarkerInfo {
@@ -321,6 +362,27 @@ pub fn world_map_readout(world: &mut World) -> sl_automation_proto::WorldMapRead
     readout
 }
 
+/// The region-name search's state: what was asked, what the grid finished,
+/// and the rows the side panel shows.
+#[derive(Debug, Default)]
+struct MapSearch {
+    /// The live search-field text (trimmed).
+    query: String,
+    /// `Enter` in the field or the Find button asked for a search.
+    commit: bool,
+    /// The last query sent to the grid: the search the result rows are for.
+    sent: Option<String>,
+    /// The texts of the searches the grid has finished since the last one was
+    /// sent, lower-cased: the closing entry of a name search carries its text.
+    ended: HashSet<String>,
+    /// The current result rows (name, grid x, grid y).
+    results: Vec<(String, u32, u32)>,
+    /// The result list says the search found nothing.
+    none_found: bool,
+    /// The result rows must be rebuilt.
+    dirty: bool,
+}
+
 /// The world-map floater's live view / interaction state.
 #[derive(Resource)]
 struct WorldMapState {
@@ -359,16 +421,8 @@ struct WorldMapState {
     pending_stamp: Option<WorldMapStamp>,
     /// This frame's markers (hover hit-testing).
     markers: Vec<MarkerInfo>,
-    /// The live search-field text (trimmed).
-    search_query: String,
-    /// Seconds until the query is sent, or `None` when nothing is pending.
-    search_debounce: Option<f32>,
-    /// The last query actually sent to the grid.
-    search_sent: Option<String>,
-    /// The current result rows (name, grid x, grid y).
-    results: Vec<(String, u32, u32)>,
-    /// The result rows must be rebuilt.
-    results_dirty: bool,
+    /// The region-name search.
+    search: MapSearch,
     /// The selected region (grid coordinates), if any.
     selected: Option<(u32, u32)>,
     /// The selection's region-local coordinates, parsed from the X/Y/Z fields.
@@ -379,6 +433,9 @@ struct WorldMapState {
     press_cursor: Option<Vec2>,
     /// The time and cursor of the last single click, for double-click detection.
     last_click: Option<(f64, Vec2)>,
+    /// The click into an unknown cell the grid is being asked about, or whose
+    /// answer was that nothing is there.
+    cell_check: Option<CellCheck>,
 }
 
 impl Default for WorldMapState {
@@ -405,16 +462,13 @@ impl Default for WorldMapState {
             pending: None,
             pending_stamp: None,
             markers: Vec::new(),
-            search_query: String::new(),
-            search_debounce: None,
-            search_sent: None,
-            results: Vec::new(),
-            results_dirty: false,
+            search: MapSearch::default(),
             selected: None,
             selected_local: (128, 128, 0),
             pending_local: None,
             press_cursor: None,
             last_click: None,
+            cell_check: None,
         }
     }
 }
@@ -471,6 +525,7 @@ impl Plugin for WorldMapPlugin {
                 (
                     handle_open_world_map,
                     ingest_world_map_events,
+                    resolve_world_map_cell_check,
                     drive_world_map_view,
                     drive_world_map_location,
                     request_world_map_data,
@@ -478,6 +533,7 @@ impl Plugin for WorldMapPlugin {
                     spawn_world_map_compose,
                     layout_world_map_labels,
                     update_world_map_hover,
+                    enter_to_search_world_map,
                     drive_world_map_search,
                     refresh_world_map_checkboxes,
                     refresh_world_map_result_selection,
@@ -694,15 +750,39 @@ fn spawn_world_map_content(
             ChildOf(content_row),
         ))
         .id();
+    // The field and its Find button: the reference's `location` editor and
+    // `DoSearch` button, a search running on either (never as it is typed).
+    let search_row = commands
+        .spawn((
+            Node {
+                width: Val::Percent(100.0),
+                column_gap: Val::Px(4.0),
+                row_gap: Val::Px(4.0),
+                align_items: AlignItems::Center,
+                // A long translation of "Find" wraps under the field.
+                flex_wrap: FlexWrap::Wrap,
+                ..default()
+            },
+            Name::new("worldmap-search-row"),
+            ChildOf(side),
+        ))
+        .id();
     let search = spawn_search_field(
         commands,
-        side,
+        search_row,
         &SearchFieldSpec {
             font_size,
-            min_width: SIDE_WIDTH - 12.0,
+            min_width: SIDE_WIDTH - 64.0,
             placeholder: String::from("Search regions"),
             ..SearchFieldSpec::new(WORLD_MAP_ELEMENT)
         },
+    );
+    spawn_panel_button(
+        commands,
+        search_row,
+        "worldmap-button-find",
+        "find",
+        font_size,
     );
     // The results and their scrollbar share a row that takes the side
     // panel's spare height.
@@ -1096,7 +1176,21 @@ fn ingest_world_map_events(
                 if changed {
                     model.regions.insert(key, info.as_ref().clone());
                     model.revision = model.revision.saturating_add(1);
-                    state.results_dirty = true;
+                    state.search.dirty = true;
+                }
+            }
+            SlSessionEvent::MapBlockBatch(batch) => {
+                for block in &batch.blocks {
+                    if block.kind() == MapBlockKind::Terminator {
+                        let _new = state.search.ended.insert(search_key(&block.name));
+                        state.search.dirty = true;
+                    }
+                }
+                if let Some(check) = state.cell_check.as_mut()
+                    && check.verdict.is_none()
+                    && let Some(verdict) = cell_verdict(batch, check.cell)
+                {
+                    check.verdict = Some(verdict);
                 }
             }
             SlSessionEvent::MapItems {
@@ -1117,6 +1211,99 @@ fn ingest_world_map_events(
             _other => {}
         }
     }
+}
+
+/// The `Access` byte of a region that is down (the reference's
+/// `SIM_ACCESS_DOWN`): named, but not a place a click selects.
+const ACCESS_DOWN: u8 = 254;
+
+/// What a `MapBlockReply` says about `cell`, or `None` when it says nothing
+/// about it: a region that is up, or no region — a nameless entry, or a
+/// region that is down, as the reference's `LLWorldMap::insertRegion` tells
+/// them apart.
+fn cell_verdict(batch: &MapBlockBatch, cell: (u32, u32)) -> Option<CellVerdict> {
+    let block = batch.blocks.iter().find(|block| {
+        block.kind() != MapBlockKind::Terminator
+            && (block.grid_coordinates.x(), block.grid_coordinates.y()) == cell
+    })?;
+    Some(
+        if block.kind() == MapBlockKind::Region && block.access != ACCESS_DOWN {
+            CellVerdict::Region
+        } else {
+            CellVerdict::Empty
+        },
+    )
+}
+
+/// A search text as the map compares it with the one a search's closing
+/// entry carries: trimmed and lower-cased (both grids ignore case).
+fn search_key(text: &str) -> String {
+    text.trim().to_lowercase()
+}
+
+/// Act on a cell check the grid has answered: a region is tracked (and gone
+/// to, when a double-click asked), as the reference's `processMapBlockReply`
+/// does once the tracked spot turns out valid. An empty cell's check stays,
+/// so the readout can say the spot is no place.
+fn resolve_world_map_cell_check(
+    mut state: ResMut<WorldMapState>,
+    model: Res<WorldMapModel>,
+    mut tracking: ResMut<MapTracking>,
+    mut commands: MessageWriter<SlCommand>,
+    mut begin: MessageWriter<BeginTeleportFlow>,
+) {
+    let Some(check) = state.cell_check else {
+        return;
+    };
+    if check.verdict != Some(CellVerdict::Region) {
+        return;
+    }
+    state.cell_check = None;
+    let (east, north) = check.spot;
+    tracking.target = Some(TrackTarget::Location {
+        east,
+        north,
+        up: f32::from(state.selected_local.2),
+    });
+    if check.teleport {
+        let look_at = map_look_at(state.agent, east, north);
+        teleport_to_spot(
+            &mut commands,
+            &mut begin,
+            &model,
+            check.cell,
+            check.local,
+            look_at,
+        );
+    }
+}
+
+/// Teleport to a clicked spot of `cell` (altitude 0 → the destination ground,
+/// which is all the map knows), labelled with the region's name once known.
+fn teleport_to_spot(
+    commands: &mut MessageWriter<SlCommand>,
+    begin: &mut MessageWriter<BeginTeleportFlow>,
+    model: &WorldMapModel,
+    cell: (u32, u32),
+    local: (u8, u8),
+    look_at: Vector,
+) {
+    let (grid_x, grid_y) = cell;
+    let label = model
+        .regions
+        .get(&cell)
+        .and_then(|info| info.name.as_ref().map(ToString::to_string))
+        .unwrap_or_else(|| format!("({grid_x}, {grid_y})"));
+    issue_teleport(
+        commands,
+        begin,
+        TeleportTarget {
+            region_handle: RegionHandle::from_grid(grid_x, grid_y),
+            position: RegionCoordinates::new(f32::from(local.0), f32::from(local.1), 0.0),
+            look_at,
+        },
+        Some(label),
+    );
 }
 
 /// Folds one `MapItemReply` into the item layers, keyed by the region each
@@ -1235,6 +1422,9 @@ struct WorldMapData<'w> {
     tiles: ResMut<'w, WorldMapTiles>,
 }
 
+/// The filter for the result list's lines: its rows and the "none found" note.
+type ResultLines = Or<(With<WorldMapResultRow>, With<WorldMapResultsNote>)>;
+
 /// The search box's widgets, bundled as one
 /// [`SystemParam`](bevy::ecs::system::SystemParam): the query field, the panel's
 /// show / hide switch, and the result rows a fresh search despawns.
@@ -1244,8 +1434,8 @@ struct WorldMapSearchWidgets<'w, 's> {
     fields: Query<'w, 's, &'static EditableText>,
     /// Whether the panel is shown; a hidden map searches nothing.
     panels: Query<'w, 's, &'static UiPanelShown>,
-    /// The result rows a fresh search despawns.
-    rows: Query<'w, 's, Entity, With<WorldMapResultRow>>,
+    /// The result rows (and the "none found" line) a fresh search despawns.
+    rows: Query<'w, 's, Entity, ResultLines>,
 }
 
 /// The label layer's nodes, bundled as one
@@ -1482,11 +1672,20 @@ fn drive_world_map_location(
             });
         }
     }
-    // The readout: region name once its map block arrived, else coordinates.
-    let line = state.selected.map_or_else(
-        || translator.get("worldmap-location-none"),
-        |selected| location_readout(&model, selected, (x, y, z)),
-    );
+    // The readout: region name once its map block arrived, else coordinates —
+    // or, for a click into a cell the grid is being asked about, what the
+    // reference draws at the spot ("Loading...", "Invalid Location").
+    let check = state
+        .cell_check
+        .filter(|check| state.selected == Some(check.cell));
+    let line = match (state.selected, check.map(|check| check.verdict)) {
+        (None, _) => translator.get("worldmap-location-none"),
+        (Some(_), Some(None)) => translator.get("worldmap-location-loading"),
+        (Some(_), Some(Some(CellVerdict::Empty))) => translator.get("worldmap-location-invalid"),
+        (Some(selected), Some(Some(CellVerdict::Region)) | None) => {
+            location_readout(&model, selected, (x, y, z))
+        }
+    };
     if let Ok(mut text) = texts.get_mut(ui.location_text)
         && text.0 != line
     {
@@ -2586,6 +2785,49 @@ fn on_world_map_click(
     // double-click also teleports, matching the minimap.
     state.selected = Some((grid_x, grid_y));
     state.pending_local = Some((local_x, local_y));
+
+    let now = time.elapsed_secs_f64();
+    let double = state.last_click.is_some_and(|(at, position)| {
+        now - at <= WORLD_MAP_DOUBLE_CLICK_SECONDS
+            && position.distance(cursor) <= WORLD_MAP_DOUBLE_CLICK_SLOP
+    });
+    state.last_click = if double { None } else { Some((now, cursor)) };
+
+    let cell = (grid_x, grid_y);
+    if !model.regions.contains_key(&cell) {
+        // No region known there: ask the grid about the one cell, as the
+        // reference does, and act once it answers
+        // ([`resolve_world_map_cell_check`]). The beacon goes meanwhile, as the
+        // reference's `LLTracker::stopTracking` takes it.
+        tracking.target = None;
+        match state.cell_check.as_mut() {
+            // The second click of a double-click on a cell still being asked
+            // about: go there once it is known to be a region.
+            Some(check) if double && check.cell == cell && check.verdict.is_none() => {
+                check.teleport = true;
+            }
+            // A double-click on a cell already known to be empty goes nowhere.
+            Some(check) if double && check.cell == cell => {}
+            _other => {
+                state.cell_check = Some(CellCheck {
+                    cell,
+                    spot: (east, north),
+                    local: (local_x, local_y),
+                    teleport: false,
+                    verdict: None,
+                });
+                commands.write(SlCommand(Command::RequestMapBlocks {
+                    min_x: grid_x,
+                    max_x: grid_x,
+                    min_y: grid_y,
+                    max_y: grid_y,
+                    flags: MapRequestFlags(MapRequestFlags::RETURN_NULL_SIMS),
+                }));
+            }
+        }
+        return;
+    }
+    state.cell_check = None;
     // Track the clicked spot at the altitude currently in the Z field — the
     // reference's map altitude control moves the beacon's red/blue seam; the field
     // stays put across clicks, so a click adopts the height the user set, and
@@ -2596,38 +2838,18 @@ fn on_world_map_click(
         north,
         up: f32::from(state.selected_local.2),
     });
-
-    let now = time.elapsed_secs_f64();
-    let double = state.last_click.is_some_and(|(at, position)| {
-        now - at <= WORLD_MAP_DOUBLE_CLICK_SECONDS
-            && position.distance(cursor) <= WORLD_MAP_DOUBLE_CLICK_SLOP
-    });
-    if !double {
-        state.last_click = Some((now, cursor));
-        return;
-    }
-    state.last_click = None;
-
-    // Teleport to the clicked point (altitude 0 → the destination ground, which
-    // is all the map knows), aimed from the agent toward the target.
-    let handle = RegionHandle::from_grid(grid_x, grid_y);
-    let position = RegionCoordinates::new(f32::from(local_x), f32::from(local_y), 0.0);
-    let look_at = map_look_at(state.agent, east, north);
-    let label = model
-        .regions
-        .get(&(grid_x, grid_y))
-        .and_then(|info| info.name.as_ref().map(ToString::to_string))
-        .unwrap_or_else(|| format!("({grid_x}, {grid_y})"));
-    issue_teleport(
-        &mut commands,
-        &mut begin,
-        TeleportTarget {
-            region_handle: handle,
-            position,
+    if double {
+        // Teleport to the clicked point, aimed from the agent toward it.
+        let look_at = map_look_at(state.agent, east, north);
+        teleport_to_spot(
+            &mut commands,
+            &mut begin,
+            &model,
+            cell,
+            (local_x, local_y),
             look_at,
-        },
-        Some(label),
-    );
+        );
+    }
 }
 
 /// A level arrival look-at aimed from the agent's global position toward a target
@@ -2748,23 +2970,43 @@ fn on_world_map_context(
 // Search.
 // ---------------------------------------------------------------------------
 
-/// Seconds the search field must be quiet before the query is sent.
-const SEARCH_DEBOUNCE_SECONDS: f32 = 0.6;
+/// Run a region search when `Enter` is pressed in the search field — the
+/// reference's field commit (`WMap.Location`), which its Find button raises
+/// too ([`handle_world_map_actions`]).
+fn enter_to_search_world_map(
+    mut keyboard: ResMut<ButtonInput<KeyCode>>,
+    focus: Option<Res<InputFocus>>,
+    ui: Option<Res<WorldMapUi>>,
+    mut state: ResMut<WorldMapState>,
+) {
+    let (Some(focus), Some(ui)) = (focus, ui) else {
+        return;
+    };
+    if focus.get() != Some(ui.search_field) {
+        return;
+    }
+    for key in [KeyCode::Enter, KeyCode::NumpadEnter] {
+        if keyboard.just_pressed(key) {
+            state.search.commit = true;
+            keyboard.clear_just_pressed(key);
+        }
+    }
+}
 
-/// The shortest query sent to the grid: three characters, because OpenSim
-/// runs no search shorter than that and answers one with an alert instead
-/// (`book/src/gridspec/world-map.md`) — which, from a field that searches as
-/// it is typed in, would be an alert for every second keystroke.
-const SEARCH_MIN_CHARS: usize = 3;
-
-/// Drive the region-name search: debounce the field's text into a
-/// `MapNameRequest`, and rebuild the result rows when the matches change.
+/// Drive the region-name search: send a `MapNameRequest` for the field's text
+/// when a search is asked for (`Enter`, the Find button — never as it is
+/// typed, as in the reference, so OpenSim's alert for a search that matches
+/// nothing comes once for a search that was asked for, not once per pause in
+/// the typing), and rebuild the result rows when the matches change.
+///
+/// The rows are the known regions matching the search sent. Once the grid has
+/// finished that search — its reply's closing entry carries the text — and
+/// nothing matches, the list says so, as the reference's `updateSims` does.
 fn drive_world_map_search(
     mut commands: Commands,
     ui: Option<Res<WorldMapUi>>,
     mut state: ResMut<WorldMapState>,
     model: Res<WorldMapModel>,
-    time: Res<Time>,
     search: WorldMapSearchWidgets,
     mut sl_commands: MessageWriter<SlCommand>,
 ) {
@@ -2779,47 +3021,50 @@ fn drive_world_map_search(
     if !panels.get(ui.root).is_ok_and(|shown| shown.0) {
         return;
     }
-    // Mirror the field text; a change re-arms the debounce.
+    // Mirror the field text; emptying the field (its clear button, `Escape`)
+    // drops the search and its rows.
     if let Ok(field) = fields.get(ui.search_field) {
         let text = field.value().to_string().trim().to_owned();
-        if text != state.search_query {
-            state.search_query = text;
-            state.search_debounce = Some(SEARCH_DEBOUNCE_SECONDS);
-            state.results_dirty = true;
+        if text != state.search.query {
+            if text.is_empty() {
+                state.search.sent = None;
+                state.search.dirty = true;
+            }
+            state.search.query = text;
         }
     }
-    // Debounced send.
-    if let Some(timer) = state.search_debounce {
-        let next = timer - time.delta_secs();
-        if next <= 0.0 {
-            state.search_debounce = None;
-            let query = state.search_query.clone();
-            if query.chars().count() >= SEARCH_MIN_CHARS
-                && state.search_sent.as_deref() != Some(query.as_str())
-            {
-                sl_commands.write(SlCommand(Command::RequestMapByName {
-                    name: query.clone(),
-                }));
-                state.search_sent = Some(query);
-            }
-        } else {
-            state.search_debounce = Some(next);
-        }
+    if std::mem::take(&mut state.search.commit) && !state.search.query.is_empty() {
+        let query = state.search.query.clone();
+        sl_commands.write(SlCommand(Command::RequestMapByName {
+            name: query.clone(),
+        }));
+        state.search.sent = Some(query);
+        state.search.ended.clear();
+        state.search.dirty = true;
     }
     // Rebuild the result rows when the matches changed.
-    if !state.results_dirty {
+    if !state.search.dirty {
         return;
     }
-    state.results_dirty = false;
-    let results = search_results(&state.search_query, model.regions.values());
-    if results == state.results {
+    state.search.dirty = false;
+    let (results, none_found) = state.search.sent.as_deref().map_or_else(
+        || (Vec::new(), false),
+        |query| {
+            let results = search_results(query, model.regions.values());
+            let ended = state.search.ended.contains(&search_key(query));
+            let none_found = ended && results.is_empty();
+            (results, none_found)
+        },
+    );
+    if results == state.search.results && none_found == state.search.none_found {
         return;
     }
-    state.results = results;
+    state.search.results = results;
+    state.search.none_found = none_found;
     for row in &rows {
         commands.entity(row).despawn();
     }
-    for (name, grid_x, grid_y) in &state.results {
+    for (name, grid_x, grid_y) in &state.search.results {
         spawn_result_row(
             &mut commands,
             ui.results,
@@ -2827,6 +3072,18 @@ fn drive_world_map_search(
             (*grid_x, *grid_y),
             PANEL_FONT_SIZE,
         );
+    }
+    if none_found {
+        commands.spawn((
+            Text::default(),
+            Translated::new("worldmap-results-none-found"),
+            UiFont::Sans.at(PANEL_FONT_SIZE),
+            text_role(SkinPalette::FALLBACK.text_muted),
+            Pickable::IGNORE,
+            WorldMapResultsNote,
+            Name::new("worldmap-results-none-found"),
+            ChildOf(ui.results),
+        ));
     }
 }
 
@@ -2872,13 +3129,13 @@ fn spawn_result_row(
 }
 
 /// The regions matching a query, prefix matches first then alphabetical,
-/// capped at [`MAX_RESULTS`]. An empty / too-short query yields no rows.
+/// capped at [`MAX_RESULTS`]. An empty query yields no rows.
 fn search_results<'model>(
     query: &str,
     regions: impl Iterator<Item = &'model MapRegionInfo>,
 ) -> Vec<(String, u32, u32)> {
-    let query = query.trim().to_lowercase();
-    if query.chars().count() < SEARCH_MIN_CHARS {
+    let query = search_key(query);
+    if query.is_empty() {
         return Vec::new();
     }
     let mut matches: Vec<(bool, String, u32, u32)> = regions
@@ -2945,6 +3202,7 @@ fn on_result_click(
     }
     state.selected = Some((row.grid_x, row.grid_y));
     state.pending_local = Some((128, 128));
+    state.cell_check = None;
 }
 
 /// Highlight the selected search-result row (the region the Teleport / Copy
@@ -3086,8 +3344,15 @@ fn handle_world_map_actions(
                     state.center = (east, north);
                 }
             }
+            "find" => state.search.commit = true,
             "teleport-selected" => {
-                if let Some((grid_x, grid_y)) = state.selected {
+                // A spot the grid has not confirmed as a region is no place
+                // to go: the readout says it is loading, or invalid.
+                if let Some((grid_x, grid_y)) = state.selected
+                    && state
+                        .cell_check
+                        .is_none_or(|check| check.cell != (grid_x, grid_y))
+                {
                     let (x, y, z) = state.selected_local;
                     let label = model
                         .regions
@@ -3473,6 +3738,7 @@ mod tests {
     /// The actions [`super::handle_world_map_actions`] dispatches explicitly.
     const HANDLED: &[&str] = &[
         "center-self",
+        "find",
         "teleport-selected",
         "copy-slurl",
         "zoom-close",
@@ -3564,8 +3830,10 @@ mod tests {
         let names: Vec<&str> = results.iter().map(|(name, _x, _y)| name.as_str()).collect();
         // Prefix match ("Dunes") first, then the substring match.
         assert_eq!(names, vec!["Dunes", "Sandy Dune"]);
-        // Too-short queries yield nothing.
-        assert_eq!(search_results("du", regions.iter()).len(), 0);
+        // A short query is a search like any other (Second Life runs one of
+        // two letters); only an empty one yields nothing.
+        assert_eq!(search_results("du", regions.iter()).len(), 2);
+        assert_eq!(search_results("  ", regions.iter()).len(), 0);
     }
 
     /// Every sample marker passes the live marker filter at the default layer
@@ -3699,6 +3967,324 @@ mod tests {
                 (1, vec![([10.0, 10.0], true)]),
                 (6, vec![([128.0, 64.0], true), ([1.0, 1.0], false)]),
             ]
+        );
+    }
+
+    /// A `MapBlockReply` entry at `cell` named `name` with the `Access` byte
+    /// `access` (a terminator at `(0, 0)`, an empty cell with no name).
+    fn record(cell: (u32, u32), name: &str, access: u8) -> sl_client_bevy::MapBlockRecord {
+        sl_client_bevy::MapBlockRecord {
+            grid_coordinates: GridCoordinates::new(cell.0, cell.1),
+            name: name.to_owned(),
+            access,
+            region_flags: 0,
+            water_height: 0,
+            agents: 0,
+            map_image_id: Uuid::nil(),
+            size: None,
+        }
+    }
+
+    /// One reply holding `blocks`, as the session delivers it.
+    fn batch(blocks: Vec<sl_client_bevy::MapBlockRecord>) -> sl_client_bevy::SlEvent {
+        sl_client_bevy::SlEvent(sl_client_bevy::SlSessionEvent::MapBlockBatch(Box::new(
+            sl_client_bevy::MapBlockBatch {
+                flags: sl_client_bevy::MapRequestFlags(0),
+                blocks,
+            },
+        )))
+    }
+
+    /// A reply's region entry as the session also delivers it, one region
+    /// at a time.
+    fn block(name: &str, x: u32, y: u32) -> sl_client_bevy::SlEvent {
+        sl_client_bevy::SlEvent(sl_client_bevy::SlSessionEvent::MapBlock(Box::new(region(
+            name, x, y,
+        ))))
+    }
+
+    /// A cell the grid answers with a region that is up is a place; a
+    /// nameless entry, or a region that is down, is not; an answer about
+    /// other cells, or a search's closing entry, says nothing about it.
+    #[test]
+    fn a_reply_says_whether_a_clicked_cell_is_a_place() {
+        use super::{CellVerdict, cell_verdict};
+        let reply = |blocks| sl_client_bevy::MapBlockBatch {
+            flags: sl_client_bevy::MapRequestFlags(0),
+            blocks,
+        };
+        let cell = (1001, 1000);
+        assert_eq!(
+            cell_verdict(&reply(vec![record(cell, "Neighbour", 13)]), cell),
+            Some(CellVerdict::Region)
+        );
+        assert_eq!(
+            cell_verdict(&reply(vec![record(cell, "", 255)]), cell),
+            Some(CellVerdict::Empty)
+        );
+        assert_eq!(
+            cell_verdict(&reply(vec![record(cell, "Neighbour", 254)]), cell),
+            Some(CellVerdict::Empty),
+            "a region that is down is no place to go"
+        );
+        assert_eq!(
+            cell_verdict(
+                &reply(vec![
+                    record((1000, 1000), "Home", 13),
+                    record((0, 0), "x", 255)
+                ]),
+                cell
+            ),
+            None
+        );
+    }
+
+    /// What the search and cell-check tests read the map's commands from.
+    #[derive(bevy::prelude::Resource, Default)]
+    struct Sent(Vec<sl_client_bevy::Command>);
+
+    /// Keep every command the map sent.
+    fn keep_sent(
+        mut reader: bevy::prelude::MessageReader<sl_client_bevy::SlCommand>,
+        mut sent: bevy::prelude::ResMut<Sent>,
+    ) {
+        sent.0
+            .extend(reader.read().map(|command| command.0.clone()));
+    }
+
+    /// An app running the map's event intake, cell-check resolution and
+    /// search over a stand-in floater whose search field holds `text`;
+    /// answers the app and the field.
+    fn map_app(text: &str) -> (App, bevy::prelude::Entity) {
+        use bevy::prelude::{Entity, IntoScheduleConfigs as _, Update};
+        let mut app = App::new();
+        app.add_message::<sl_client_bevy::SlEvent>()
+            .add_message::<sl_client_bevy::SlCommand>()
+            .add_message::<crate::intents::BeginTeleportFlow>()
+            .init_resource::<super::WorldMapState>()
+            .init_resource::<super::WorldMapModel>()
+            .init_resource::<crate::social::MapTracking>()
+            .init_resource::<Sent>()
+            .add_systems(
+                Update,
+                (
+                    super::ingest_world_map_events,
+                    super::resolve_world_map_cell_check,
+                    super::drive_world_map_search,
+                    keep_sent,
+                )
+                    .chain(),
+            );
+        let world = app.world_mut();
+        let root = world.spawn(crate::ui::UiPanelShown(true)).id();
+        let results = world.spawn_empty().id();
+        let field = world.spawn(bevy::text::EditableText::new(text)).id();
+        world.insert_resource(super::WorldMapUi {
+            root,
+            surface: Entity::PLACEHOLDER,
+            image: bevy::prelude::Handle::default(),
+            tooltip: Entity::PLACEHOLDER,
+            tooltip_text: Entity::PLACEHOLDER,
+            search_field: field,
+            results,
+            location_text: Entity::PLACEHOLDER,
+            field_x: Entity::PLACEHOLDER,
+            field_y: Entity::PLACEHOLDER,
+            field_z: Entity::PLACEHOLDER,
+            labels: Vec::new(),
+        });
+        (app, field)
+    }
+
+    /// The region searches the map sent, in order.
+    fn searches(app: &App) -> Vec<String> {
+        app.world()
+            .resource::<Sent>()
+            .0
+            .iter()
+            .filter_map(|command| match command {
+                sl_client_bevy::Command::RequestMapByName { name } => Some(name.clone()),
+                _other => None,
+            })
+            .collect()
+    }
+
+    /// How many result rows, and "none found" lines, the list holds.
+    fn lines(app: &mut App) -> (usize, usize) {
+        let world = app.world_mut();
+        let rows = world
+            .query::<&super::WorldMapResultRow>()
+            .iter(world)
+            .count();
+        let notes = world
+            .query::<&super::WorldMapResultsNote>()
+            .iter(world)
+            .count();
+        (rows, notes)
+    }
+
+    /// Ask for a search, as `Enter` or the Find button does.
+    fn commit(app: &mut App) {
+        app.world_mut()
+            .resource_mut::<super::WorldMapState>()
+            .search
+            .commit = true;
+    }
+
+    /// A search runs when it is asked for and not as the field is typed in;
+    /// the list says "none found" once the grid's closing entry for that
+    /// search arrives with no region matching, and not before — nor for a
+    /// search that did find its region, nor for an older search's ending.
+    #[test]
+    fn a_search_runs_when_asked_and_says_when_it_found_nothing() {
+        let (mut app, field) = map_app("Nowhere");
+        app.update();
+        assert_eq!(
+            searches(&app),
+            Vec::<String>::new(),
+            "typing searches nothing"
+        );
+
+        commit(&mut app);
+        app.update();
+        assert_eq!(searches(&app), vec!["Nowhere".to_owned()]);
+        assert_eq!(
+            lines(&mut app),
+            (0, 0),
+            "nothing is said before the grid ends it"
+        );
+
+        // Both grids end the reply with the searched text at cell (0, 0);
+        // case is the grid's to choose.
+        app.world_mut()
+            .write_message(batch(vec![record((0, 0), "nowhere", 255)]));
+        app.update();
+        assert_eq!(lines(&mut app), (0, 1), "the finished search found nothing");
+
+        // A new search takes the note away, and an older search's ending
+        // arriving late does not bring it back.
+        let _old = app
+            .world_mut()
+            .entity_mut(field)
+            .insert(bevy::text::EditableText::new("Neigh"));
+        app.update();
+        assert_eq!(
+            searches(&app).len(),
+            1,
+            "editing the field searches nothing"
+        );
+        commit(&mut app);
+        app.update();
+        app.world_mut()
+            .write_message(batch(vec![record((0, 0), "Nowhere", 255)]));
+        app.update();
+        assert_eq!(lines(&mut app), (0, 0));
+
+        app.world_mut()
+            .write_message(block("Neighbour", 1001, 1000));
+        app.world_mut().write_message(batch(vec![
+            record((1001, 1000), "Neighbour", 13),
+            record((0, 0), "Neigh", 255),
+        ]));
+        app.update();
+        assert_eq!(
+            searches(&app),
+            vec!["Nowhere".to_owned(), "Neigh".to_owned()]
+        );
+        assert_eq!(lines(&mut app), (1, 0), "a search that found its region");
+    }
+
+    /// The teleports the map asked for, as (cell, region-local x, y).
+    fn teleports(app: &App) -> Vec<(GridCoordinates, f32, f32)> {
+        app.world()
+            .resource::<Sent>()
+            .0
+            .iter()
+            .filter_map(|command| match command {
+                sl_client_bevy::Command::Teleport {
+                    region_handle,
+                    position,
+                    ..
+                } => Some((
+                    GridCoordinates::from(*region_handle),
+                    position.x(),
+                    position.y(),
+                )),
+                _other => None,
+            })
+            .collect()
+    }
+
+    /// A double-clicked cell the map knew no region in is gone to only once
+    /// the grid names a region there: an empty cell is neither tracked nor
+    /// gone to, and its check stays to say so; a region is tracked at the
+    /// clicked spot and gone to.
+    #[test]
+    fn a_double_clicked_unknown_cell_is_gone_to_only_once_the_grid_names_a_region() {
+        use super::{CellCheck, CellVerdict};
+        let (mut app, _field) = map_app("");
+        let check = |cell: (u32, u32)| CellCheck {
+            cell,
+            spot: (
+                f64::from(cell.0) * 256.0 + 40.0,
+                f64::from(cell.1) * 256.0 + 50.0,
+            ),
+            local: (40, 50),
+            teleport: true,
+            verdict: None,
+        };
+        let ocean = (1002, 1000);
+        app.world_mut()
+            .resource_mut::<super::WorldMapState>()
+            .cell_check = Some(check(ocean));
+        // An answer about another cell leaves it waiting.
+        app.world_mut()
+            .write_message(batch(vec![record((1003, 1000), "", 255)]));
+        app.update();
+        assert_eq!(
+            app.world().resource::<super::WorldMapState>().cell_check,
+            Some(check(ocean))
+        );
+        app.world_mut()
+            .write_message(batch(vec![record(ocean, "", 255)]));
+        app.update();
+        assert_eq!(
+            app.world()
+                .resource::<super::WorldMapState>()
+                .cell_check
+                .and_then(|check| check.verdict),
+            Some(CellVerdict::Empty)
+        );
+        assert_eq!(
+            app.world().resource::<crate::social::MapTracking>().target,
+            None
+        );
+        assert_eq!(teleports(&app), Vec::new(), "an empty cell is gone to");
+
+        let land = (1001, 1000);
+        app.world_mut()
+            .resource_mut::<super::WorldMapState>()
+            .cell_check = Some(check(land));
+        app.world_mut()
+            .write_message(block("Neighbour", 1001, 1000));
+        app.world_mut()
+            .write_message(batch(vec![record(land, "Neighbour", 13)]));
+        app.update();
+        assert_eq!(
+            app.world().resource::<super::WorldMapState>().cell_check,
+            None
+        );
+        assert_eq!(
+            app.world().resource::<crate::social::MapTracking>().target,
+            Some(crate::social::TrackTarget::Location {
+                east: 1001.0 * 256.0 + 40.0,
+                north: 1000.0 * 256.0 + 50.0,
+                up: 0.0,
+            })
+        );
+        assert_eq!(
+            teleports(&app),
+            vec![(GridCoordinates::new(1001, 1000), 40.0, 50.0)]
         );
     }
 }
