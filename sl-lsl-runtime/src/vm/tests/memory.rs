@@ -89,8 +89,7 @@ fn number(line: &Line, key: &str) -> Result<i64, String> {
 /// `num` under `flavour` and run until it is done or stopped.
 fn run_probe(source: &str, name: &str, num: i32, flavour: EngineFlavour) -> Result<Run, String> {
     let mut engine = Engine::new(EngineConfig {
-        flavour,
-        ..EngineConfig::for_step(STEP)
+        ..EngineConfig::for_step(STEP, flavour)
     });
     let mut host = Recorder::default();
     let _none = host.scripts.insert(name.to_owned(), A);
@@ -434,8 +433,7 @@ fn a_list_under_a_lowered_limit_collides_early() -> Result<(), String> {
 /// returning what it printed.
 fn printed(globals: &str, body: &str, flavour: EngineFlavour) -> Result<Vec<String>, String> {
     let mut engine = Engine::new(EngineConfig {
-        flavour,
-        ..EngineConfig::for_step(STEP)
+        ..EngineConfig::for_step(STEP, flavour)
     });
     let mut host = Recorder::default();
     let _none = engine.add(
@@ -566,8 +564,7 @@ fn a_runaway_allocation_stops_the_script_rather_than_the_host() -> Result<(), St
         (EngineFlavour::XEngine, RuntimeError::HostMemory),
     ] {
         let mut engine = Engine::new(EngineConfig {
-            flavour,
-            ..EngineConfig::for_step(STEP)
+            ..EngineConfig::for_step(STEP, flavour)
         });
         let mut host = Recorder::default();
         let _none = engine.add(A, program(source)?);
@@ -611,8 +608,7 @@ fn the_top_scripts_report_ranks_a_busy_script_above_an_idle_one() -> Result<(), 
         EngineFlavour::XEngine,
     ] {
         let mut engine = Engine::new(EngineConfig {
-            flavour,
-            ..EngineConfig::for_step(STEP)
+            ..EngineConfig::for_step(STEP, flavour)
         });
         let mut host = Recorder::default();
         let _none = engine.add(A, program("default { state_entry() { } }")?);
@@ -658,8 +654,7 @@ fn the_active_script_count_is_an_average_on_second_life_and_a_count_on_opensim()
 -> Result<(), String> {
     for flavour in [EngineFlavour::SecondLife, EngineFlavour::YEngine] {
         let mut engine = Engine::new(EngineConfig {
-            flavour,
-            ..EngineConfig::for_step(STEP)
+            ..EngineConfig::for_step(STEP, flavour)
         });
         let mut host = Recorder::default();
         for id in [A, B] {

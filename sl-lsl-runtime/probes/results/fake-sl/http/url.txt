@@ -1,5 +1,5 @@
 grid: fake-sl
-date: 2026-11-09
+date: 2026-11-11
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating Mono
@@ -8,11 +8,11 @@ settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor
 PROBE http/url rec=start region="Fake Region" channel="Second Life Server" version="sl-fake-grid 0.1.0"
 PROBE http/url rec=free when=before free=20000
 PROBE http/url rec=asked kind=plain request=set
-PROBE http/url rec=granted kind=plain granted=1 id_matches=1 used=1 free=19999 scheme=http port=36311 path="/cap/edd233e9-2e43-4c66-a0a0-d58ea41a6025" host=address length=63
+PROBE http/url rec=granted kind=plain granted=1 id_matches=1 used=1 free=19999 scheme=http port=33623 path="/cap/6de611ae-7991-44fa-87cd-5605a5041682" host=address length=63
 PROBE http/url rec=asked kind=secure request=set
 PROBE http/url rec=granted kind=secure granted=0 id_matches=1 used=1 free=19999 reason=""
 PROBE http/url rec=asked kind=third request=set
-PROBE http/url rec=granted kind=third granted=1 id_matches=1 used=2 free=19998 scheme=http port=36311 path="/cap/a4f24243-5049-4a71-bb83-270f793be684" host=address length=63
+PROBE http/url rec=granted kind=third granted=1 id_matches=1 used=2 free=19998 scheme=http port=33623 path="/cap/19508fea-2679-447c-9af9-c7b8a67c2f59" host=address length=63
 PROBE http/url rec=released kind=third used=1
 PROBE http/url rec=free when=later used=1
 PROBE http/url rec=waiting drive=fetch url=<url> method=GET path="/get/a?x=1&y=two%20words" header="X-Probe: one"
@@ -71,6 +71,6 @@ PROBE http/url rec=answer path="/silent" status=none
 PROBE http/url rec=released kind=plain used=0
 PROBE http/url rec=waiting drive=fetch url=<url> method=GET path="/after-release"
 # fetch method=GET path="/after-release" body_length=0
-# fetched status=404 type="" length=54 body="cap not found: 'edd233e9-2e43-4c66-a0a0-d58ea41a6025'\n" seconds=0
+# fetched status=404 type="" length=54 body="cap not found: '6de611ae-7991-44fa-87cd-5605a5041682'\n" seconds=0
 PROBE http/url rec=free when=after used=0
 PROBE http/url rec=end

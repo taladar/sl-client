@@ -405,20 +405,6 @@ reason = "OpenSim sweeps on its 100 ms command loop: a sweep within a pass of th
 # --- the rest of the corpus (test-lsl-differential-corpus-triage) ----------
 
 [[difference]]
-probe = "comms/link-messages"
-between = ["opensim-yengine", "fake-opensim"]
-record = "sent"
-fields = { payload = "odd" }
-reason = "Where the Receiver's lines fall among the Sender's is scheduling: OpenSim ran the Sender's handler to its end on its own thread before the Receiver had a turn, the fake grid gives the Receiver its turn mid-handler, as aditi did (the VM replay compares each script's lines apart)"
-
-[[difference]]
-probe = "comms/link-messages"
-between = ["opensim-yengine", "fake-opensim"]
-record = "got"
-fields = { script = "Receiver", text_length = "3000" }
-reason = "Where the Receiver's lines fall among the Sender's is scheduling: OpenSim ran the Sender's handler to its end on its own thread before the Receiver had a turn, the fake grid gives the Receiver its turn mid-handler, as aditi did (the VM replay compares each script's lines apart)"
-
-[[difference]]
 probe = "data/json"
 between = ["opensim-yengine", "fake-opensim"]
 record = "list2json"
@@ -705,12 +691,6 @@ fields = { script = "\"Doubling" }
 field = "last"
 reason = "In LSO's 16 KB Doubling LSO stops at step 13; run as Mono, at step 15"
 task = "server-lsl-lso-memory"
-
-[[difference]]
-probe = "memory/collision"
-between = ["opensim-yengine", "fake-opensim"]
-reason = "fake-opensim runs Full list's llSetObjectDesc-and-append loop about four times slower than YEngine, so it is still growing when the controller moves on and overwrites Limited list's progress"
-task = "server-lsl-opensim-grow-loop-slow"
 
 [[difference]]
 probe = "memory/recursion"

@@ -1,5 +1,5 @@
 grid: fake-sl
-date: 2026-11-09
+date: 2026-11-11
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating Mono
@@ -16,8 +16,8 @@ PROBE comms/instant-message rec=sent call=im to=other length=12 seconds=2.022223
 PROBE comms/instant-message rec=sent call=im to=null length=9 seconds=2.022222
 PROBE comms/instant-message rec=sent call=im to=unknown length=25 seconds=2.022222
 # im dialog=19 from=owner id=probe name="Object" offline=0 length=1023 message="iiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiii…" bucket=0
-# im dialog=19 from=owner id=probe name="Object" offline=0 length=9 message="two\nlines" bucket=0
 PROBE comms/instant-message rec=sent call=im to=owner length=1100 seconds=2.022223
+# im dialog=19 from=owner id=probe name="Object" offline=0 length=9 message="two\nlines" bucket=0
 # chat type=direct from="Object" length=23 text="region-say-to beside it"
 PROBE comms/instant-message rec=sent call=im to=owner length=9 seconds=2.022223
 # owner-say: from="Object" text="owner-say beside it"

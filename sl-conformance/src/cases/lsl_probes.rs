@@ -257,7 +257,7 @@ impl GridTest for LslProbes {
     }
 
     fn timeout(&self) -> Duration {
-        CORPUS_TIMEOUT
+        corpus_timeout()
     }
 
     fn run<'a>(&'a self, ctx: &'a mut TestContext) -> TestFuture<'a> {
@@ -303,7 +303,7 @@ impl GridTest for XEngineProbes {
     }
 
     fn timeout(&self) -> Duration {
-        CORPUS_TIMEOUT
+        corpus_timeout()
     }
 
     fn run<'a>(&'a self, ctx: &'a mut TestContext) -> TestFuture<'a> {
@@ -311,9 +311,31 @@ impl GridTest for XEngineProbes {
     }
 }
 
-/// The whole corpus's budget: every probe's deadline, with room for the
-/// rezzes and uploads.
+/// The least the whole corpus is given, and all it is given when the corpus
+/// cannot be read (the run then fails on reading it, and says why).
 const CORPUS_TIMEOUT: Duration = Duration::from_secs(60 * 30);
+
+/// The room each probe is given beside its deadline: its rezzes, uploads and
+/// compiles, and the linger after its `end`.
+const PROBE_SETUP: Duration = Duration::from_secs(120);
+
+/// The whole corpus's budget: every probe's deadline, with room for its
+/// rezzes and uploads, and never less than [`CORPUS_TIMEOUT`]. The probes'
+/// own deadlines already end a stuck probe; this only ends a stuck case.
+fn corpus_timeout() -> Duration {
+    load_corpus(&corpus_root()).map_or(CORPUS_TIMEOUT, |probes| {
+        probes
+            .iter()
+            .map(|probe| {
+                probe
+                    .deadline()
+                    .unwrap_or(PROBE_DEADLINE)
+                    .saturating_add(PROBE_SETUP)
+            })
+            .fold(Duration::ZERO, Duration::saturating_add)
+            .max(CORPUS_TIMEOUT)
+    })
+}
 
 /// The instant `wait` from now (now itself, were that past the clock's
 /// range).

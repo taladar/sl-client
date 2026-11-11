@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 334 |
 | blocked | 39 |
 | in-progress | 7 |
-| bugs | 38 |
-| done | 1536 |
+| bugs | 37 |
+| done | 1537 |
 | deferred | 30 |
 | wont-do | 24 |
 | **total** | **2135** |
@@ -1274,7 +1274,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-text-renderability-axis`](in-progress/viewer-ui-text-renderability-axis.md)
   — Upstream issue — font selection cannot see glyph-format renderability
 
-## bugs (38)
+## bugs (37)
 
 ### protocol
 
@@ -1370,11 +1370,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`server-lsl-mono-collision-model-under-lowered-limit`](bugs/server-lsl-mono-collision-model-under-lowered-limit.md)
   — A script 1 KB over its use collides in the runtime where Mono carries on
-- [`server-lsl-opensim-grow-loop-slow`](bugs/server-lsl-opensim-grow-loop-slow.md)
-  — fake-opensim grows memory/collision's Full list four times slower than
-  YEngine
 
-## done (1536)
+## done (1537)
 
 ### protocol
 
@@ -4597,6 +4594,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Life's per-value memory costs and rotation arithmetic on aditi
 - [`server-lsl-opensim-child-move-change-late`](done/server-lsl-opensim-child-move-change-late.md)
   — OpenSim's position change in a moved child comes after the mover's handler
+- [`server-lsl-opensim-grow-loop-slow`](done/server-lsl-opensim-grow-loop-slow.md)
+  — fake-opensim grows memory/collision's Full list four times slower than
+  YEngine
 - [`server-lsl-opensim-pos-local-moved-six`](done/server-lsl-opensim-pos-local-moved-six.md)
   — OpenSim moved prim/params' PRIM_POS_LOCAL prim 6 m, where it moved it 10
 - [`server-lsl-opensim-shared-lists`](done/server-lsl-opensim-shared-lists.md) —

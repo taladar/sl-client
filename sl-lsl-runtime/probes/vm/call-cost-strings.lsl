@@ -1,11 +1,13 @@
 // probe: vm/call-cost-strings
 // vary: calls, seconds, per_second
 // drive: none
+// deadline: 720
 //
 // What a string function costs as its string grows: each function timed at
 // strings of 1, 10, 100 and 1000 characters ("ab," repeated), for a second
 // and a half each, as calls per second, against a loop with an empty body.
-// The clock is read every ten calls, as in vm/call-cost-lists.
+// The clock is read every ten calls, as in vm/call-cost-lists, and the
+// deadline is long for the same reason.
 string ID = "vm/call-cost-strings";
 
 string q(string s)

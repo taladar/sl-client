@@ -1,5 +1,5 @@
 grid: fake-sl
-date: 2026-11-09
+date: 2026-11-11
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating Mono
@@ -88,12 +88,10 @@ PROBE detection/cast-ray rec=ray step=max-hits-0 from=<0.500000,0.000000,0.00000
 PROBE detection/cast-ray rec=ray step=max-hits-negative from=<0.500000,0.000000,0.000000> to=<15.000000,0.000000,0.000000> options="RC_MAX_HITS -1" length=0 status=0
 PROBE detection/cast-ray rec=ray step=max-hits-300 from=<0.500000,0.000000,0.000000> to=<15.000000,0.000000,0.000000> options="RC_MAX_HITS 300" length=0 status=0
 PROBE detection/cast-ray rec=ray step=bad-option from=<0.500000,0.000000,0.000000> to=<15.000000,0.000000,0.000000> options="99 1" length=0 status=0
-PROBE detection/cast-ray rec=ray step=owner from=<0.000000,0.000000,0.600000> to=<0.000000,5.857000,-1.743000> options="RC_MAX_HITS 4" length=5 status=2
+PROBE detection/cast-ray rec=ray step=owner from=<0.000000,0.000000,0.600000> to=<0.000000,5.857000,-1.743000> options="RC_MAX_HITS 4" length=3 status=1
 PROBE detection/cast-ray rec=item step=owner i=0 type=key value=owner
 PROBE detection/cast-ray rec=item step=owner i=1 type=vector agent_at=<0.000000,3.700000,-0.880000>
-PROBE detection/cast-ray rec=item step=owner i=2 type=key value=agent
-PROBE detection/cast-ray rec=item step=owner i=3 type=vector agent_at=<0.000000,3.700000,-0.880000>
-PROBE detection/cast-ray rec=item step=owner i=4 type=integer value=2
+PROBE detection/cast-ray rec=item step=owner i=2 type=integer value=1
 # debug-channel: from="Object" text="You must request at least one result from llCastRay."
 # debug-channel: from="Object" text="Error. No more than 256 hits can be return by llCastRay."
 # debug-channel: from="Object" text="Error. No more than 256 hits can be return by llCastRay."

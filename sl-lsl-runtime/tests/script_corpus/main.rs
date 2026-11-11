@@ -156,9 +156,7 @@ mod tests {
             format!("does not compile:\n{}", shown.join("\n"))
         })?;
         let program = Arc::new(program);
-        let mut config = EngineConfig::for_step(STEP);
-        config.flavour = flavour;
-        let mut engine = Engine::new(config);
+        let mut engine = Engine::new(EngineConfig::for_step(STEP, flavour));
         let _none = engine.add(SCRIPT, Arc::clone(&program));
         let mut host = CorpusHost::new(SCRIPT);
         for tick in 1..=case.ticks {

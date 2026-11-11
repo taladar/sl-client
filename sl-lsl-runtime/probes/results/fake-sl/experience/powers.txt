@@ -1,5 +1,5 @@
 grid: fake-sl
-date: 2026-11-10
+date: 2026-11-11
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating Mono
@@ -8,8 +8,8 @@ settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor
 PROBE experience/powers rec=start region="Fake Region" channel="Second Life Server" version="sl-fake-grid 0.1.0"
 PROBE experience/powers rec=teleport step=1 call=llTeleportAgent of=owner back=0 perms=0 granter=none
 # debug-channel: from="Object" text="Script trying to teleport agent without current permission!"
-# question permissions=4096 object="Object" owner="<first> <last>" experience=none
 PROBE experience/powers rec=after step=1 of=owner landed=0 moved=0 off=3.0 dz=0.0
+# question permissions=4096 object="Object" owner="<first> <last>" experience=none
 PROBE experience/powers rec=waiting drive=answer grant=4096
 # debug-channel by=other: from="Object" text="Script trying to teleport agent without current permission!"
 PROBE experience/powers rec=asked step=2 of=owner mask=4096

@@ -1,11 +1,12 @@
 grid: fake-opensim
-date: 2026-11-10
+date: 2026-11-11
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: unknown (no start record)
 engine: sl-lsl-runtime imitating YEngine
 settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
 complete: no
 
+# animations avatar=other playing="stand"
 # compile error in "Probe": "(69,15) Error: no function `llGetExperienceList`"
 # compile error in "Probe": "(87,4) Error: no function `llClearExperiencePermissions`"
 # compile error in "Probe": "(179,4) Error: `experience_permissions` is not an event"

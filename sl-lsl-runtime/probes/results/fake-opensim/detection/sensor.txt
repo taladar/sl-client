@@ -1,11 +1,10 @@
 grid: fake-opensim
-date: 2026-11-10
+date: 2026-11-11
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating YEngine
 settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
 
-# chat type=say from="Object" length=14 text="Script running"
 PROBE detection/sensor rec=start region="Fake Region" channel="OpenSim" version="sl-fake-grid 0.1.0"
 PROBE detection/sensor rec=sweep step=all name="" key="" type=14 range=96.000000 arc=3.142000
 PROBE detection/sensor rec=swept step=all event=sensor num=16
@@ -174,4 +173,3 @@ PROBE detection/sensor rec=phase phase=9 events=0
 PROBE detection/sensor rec=removed after_phase=9
 PROBE detection/sensor rec=phase phase=10 events=0
 PROBE detection/sensor rec=end
-# chat by=other type=say from="Object" length=14 text="Script running"

@@ -1,5 +1,5 @@
 grid: fake-opensim
-date: 2026-11-10
+date: 2026-11-11
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating YEngine
@@ -15,11 +15,6 @@ PROBE comms/link-messages rec=sent target=1
 PROBE comms/link-messages rec=sent target=0
 PROBE comms/link-messages rec=sent target=1
 PROBE comms/link-messages rec=sent target=2
-PROBE comms/link-messages rec=got script=Receiver target=-4 sender=0 text_length=0 id=""
-PROBE comms/link-messages rec=got script=Receiver target=-1 sender=0 text_length=0 id=""
-PROBE comms/link-messages rec=got script=Receiver target=1 sender=0 text_length=0 id=""
-PROBE comms/link-messages rec=got script=Receiver target=0 sender=0 text_length=0 id=""
-PROBE comms/link-messages rec=got script=Receiver target=1 sender=0 text_length=0 id=""
 PROBE comms/link-messages rec=sent target=-4 payload=odd
 PROBE comms/link-messages rec=got script=Sender target=-4 sender=0 text_length=0 id=""
 PROBE comms/link-messages rec=got script=Sender target=-1 sender=0 text_length=0 id=""
@@ -27,5 +22,10 @@ PROBE comms/link-messages rec=got script=Sender target=1 sender=0 text_length=0 
 PROBE comms/link-messages rec=got script=Sender target=0 sender=0 text_length=0 id=""
 PROBE comms/link-messages rec=got script=Sender target=1 sender=0 text_length=0 id=""
 PROBE comms/link-messages rec=got script=Sender target=-4 sender=0 text_length=3000 id="not a key"
+PROBE comms/link-messages rec=got script=Receiver target=-4 sender=0 text_length=0 id=""
+PROBE comms/link-messages rec=got script=Receiver target=-1 sender=0 text_length=0 id=""
+PROBE comms/link-messages rec=got script=Receiver target=1 sender=0 text_length=0 id=""
+PROBE comms/link-messages rec=got script=Receiver target=0 sender=0 text_length=0 id=""
+PROBE comms/link-messages rec=got script=Receiver target=1 sender=0 text_length=0 id=""
 PROBE comms/link-messages rec=got script=Receiver target=-4 sender=0 text_length=3000 id="not a key"
 PROBE comms/link-messages rec=end

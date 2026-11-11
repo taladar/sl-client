@@ -1,12 +1,11 @@
 grid: fake-opensim
-date: 2026-11-10
+date: 2026-11-11
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating YEngine
 settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
 
 # target: script "Doubling LSO" lsl2
-# chat type=say from="Object" length=14 text="Script running"
 PROBE memory/collision rec=start region="Fake Region" channel="OpenSim" version="sl-fake-grid 0.1.0"
 PROBE memory/collision rec=grow script="Doubling"
 PROBE memory/collision rec=before script=doubling used=48 free=1048528 limit=65536
@@ -28,7 +27,7 @@ PROBE memory/collision rec=grown script=doubling step=15 length=32768 used=65584
 PROBE memory/collision rec=grown script=doubling step=16 length=65536 used=131120 free=917456 limit=65536
 PROBE memory/collision rec=grown script=doubling step=17 length=131072 used=262192 free=786384 limit=65536
 PROBE memory/collision rec=grown script=doubling step=18 length=262144 used=524336 free=524240 limit=65536
-# owner-say: from="Object" text="[YEngine]: Exception while running dfed74c6-497a-eaab-ccb2-da9d6d7bd5be"
+# owner-say: from="Object" text="[YEngine]: Exception while running c9753f23-569f-880c-c0fa-faf92ee9341c"
 # owner-say: from="Object" text="OutOfHeapException: oldtotal=0, newtotal=524288, limit=1048576"
 # owner-say: from="Object" text="Prim: <Object>, Script: <Doubling>, Location: Fake Region <128,124,26>"
 # owner-say: from="Object" text="Script must be Reset to re-enable."
@@ -53,7 +52,7 @@ PROBE memory/collision rec=grown script=doubling-lso step=15 length=32768 used=6
 PROBE memory/collision rec=grown script=doubling-lso step=16 length=65536 used=131128 free=917448 limit=65536
 PROBE memory/collision rec=grown script=doubling-lso step=17 length=131072 used=262200 free=786376 limit=65536
 PROBE memory/collision rec=grown script=doubling-lso step=18 length=262144 used=524344 free=524232 limit=65536
-# owner-say: from="Object" text="[YEngine]: Exception while running 268a981e-9c7c-43f9-c76e-3550fc57653e"
+# owner-say: from="Object" text="[YEngine]: Exception while running 4909b167-953f-ee07-cd54-d91a0818f01b"
 # owner-say: from="Object" text="OutOfHeapException: oldtotal=0, newtotal=524288, limit=1048576"
 # owner-say: from="Object" text="Prim: <Object>, Script: <Doubling LSO>, Location: Fake Region <128,124,26>"
 # owner-say: from="Object" text="Script must be Reset to re-enable."
@@ -77,7 +76,31 @@ PROBE memory/collision rec=grown script=full-list count=7000 used=28050 free=102
 PROBE memory/collision rec=grown script=full-list count=7500 used=30050 free=1018526 limit=65536
 PROBE memory/collision rec=grown script=full-list count=8000 used=32050 free=1016526 limit=65536
 PROBE memory/collision rec=grown script=full-list count=8500 used=34050 free=1014526 limit=65536
-PROBE memory/collision rec=reached script="Full list" last="8730" running=1
+PROBE memory/collision rec=grown script=full-list count=9000 used=36050 free=1012526 limit=65536
+PROBE memory/collision rec=grown script=full-list count=9500 used=38050 free=1010526 limit=65536
+PROBE memory/collision rec=grown script=full-list count=10000 used=40050 free=1008526 limit=65536
+PROBE memory/collision rec=grown script=full-list count=10500 used=42050 free=1006526 limit=65536
+PROBE memory/collision rec=grown script=full-list count=11000 used=44050 free=1004526 limit=65536
+PROBE memory/collision rec=grown script=full-list count=11500 used=46050 free=1002526 limit=65536
+PROBE memory/collision rec=grown script=full-list count=12000 used=48050 free=1000526 limit=65536
+PROBE memory/collision rec=grown script=full-list count=12500 used=50050 free=998526 limit=65536
+PROBE memory/collision rec=grown script=full-list count=13000 used=52050 free=996526 limit=65536
+PROBE memory/collision rec=grown script=full-list count=13500 used=54050 free=994526 limit=65536
+PROBE memory/collision rec=grown script=full-list count=14000 used=56050 free=992526 limit=65536
+PROBE memory/collision rec=grown script=full-list count=14500 used=58050 free=990526 limit=65536
+PROBE memory/collision rec=grown script=full-list count=15000 used=60050 free=988526 limit=65536
+PROBE memory/collision rec=grown script=full-list count=15500 used=62050 free=986526 limit=65536
+PROBE memory/collision rec=grown script=full-list count=16000 used=64050 free=984526 limit=65536
+PROBE memory/collision rec=grown script=full-list count=16500 used=66050 free=982526 limit=65536
+PROBE memory/collision rec=grown script=full-list count=17000 used=68050 free=980526 limit=65536
+PROBE memory/collision rec=grown script=full-list count=17500 used=70050 free=978526 limit=65536
+PROBE memory/collision rec=grown script=full-list count=18000 used=72050 free=976526 limit=65536
+PROBE memory/collision rec=grown script=full-list count=18500 used=74050 free=974526 limit=65536
+PROBE memory/collision rec=grown script=full-list count=19000 used=76050 free=972526 limit=65536
+PROBE memory/collision rec=grown script=full-list count=19500 used=78050 free=970526 limit=65536
+PROBE memory/collision rec=grown script=full-list count=20000 used=80050 free=968526 limit=65536
+PROBE memory/collision rec=no-collision script=full-list count=20000
+PROBE memory/collision rec=reached script="Full list" last="20000" running=1
 PROBE memory/collision rec=grow script="Limited list"
 PROBE memory/collision rec=before script=limited-list used=56 free=1048520 limit=65536
 PROBE memory/collision rec=set-limit script=limited-list asked=used+8192 result=0 used=56 free=1048520 limit=65536
@@ -85,13 +108,10 @@ PROBE memory/collision rec=grown script=limited-list count=500 used=2056 free=10
 PROBE memory/collision rec=grown script=limited-list count=1000 used=4056 free=1044520 limit=65536
 PROBE memory/collision rec=grown script=limited-list count=1500 used=6056 free=1042520 limit=65536
 PROBE memory/collision rec=grown script=limited-list count=2000 used=8056 free=1040520 limit=65536
-PROBE memory/collision rec=grown script=full-list count=9000 used=36050 free=1012526 limit=65536
 PROBE memory/collision rec=grown script=limited-list count=2500 used=10056 free=1038520 limit=65536
 PROBE memory/collision rec=grown script=limited-list count=3000 used=12056 free=1036520 limit=65536
 PROBE memory/collision rec=grown script=limited-list count=3500 used=14056 free=1034520 limit=65536
-PROBE memory/collision rec=grown script=full-list count=9500 used=38050 free=1010526 limit=65536
 PROBE memory/collision rec=grown script=limited-list count=4000 used=16056 free=1032520 limit=65536
 PROBE memory/collision rec=no-collision script=limited-list count=4000
-PROBE memory/collision rec=reached script="Limited list" last="9620" running=1
+PROBE memory/collision rec=reached script="Limited list" last="4000" running=1
 PROBE memory/collision rec=end
-# chat by=other type=say from="Object" length=14 text="Script running"

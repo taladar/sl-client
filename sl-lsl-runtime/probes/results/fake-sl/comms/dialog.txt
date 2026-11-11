@@ -1,5 +1,5 @@
 grid: fake-sl
-date: 2026-11-09
+date: 2026-11-11
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating Mono
@@ -10,8 +10,8 @@ PROBE comms/dialog rec=start region="Fake Region" channel="Second Life Server" v
 PROBE comms/dialog rec=waiting drive=dialog reply="Two"
 PROBE comms/dialog rec=put step=1 to=owner how=answered buttons=3 message_length=8
 # dialog-reply reply="Two" index=1 sent_length=3
-PROBE comms/dialog rec=heard step=1 from=owner name_is_key2name=1 message="Two"
 # dialog object="Object" owner="<first> <last>" channel=-731001 message_length=10 message="No buttons" buttons="OK" count=1
+PROBE comms/dialog rec=heard step=1 from=owner name_is_key2name=1 message="Two"
 PROBE comms/dialog rec=waiting drive=dialog reply="OK"
 PROBE comms/dialog rec=put step=2 to=owner how=answered buttons=0 message_length=10
 # dialog-reply reply="OK" index=0 sent_length=2
@@ -20,8 +20,8 @@ PROBE comms/dialog rec=heard step=2 from=owner name_is_key2name=1 message="OK"
 PROBE comms/dialog rec=waiting drive=dialog reply="Not a button"
 PROBE comms/dialog rec=put step=3 to=owner how=answered buttons=2 message_length=11
 # dialog-reply reply="Not a button" index=0 sent_length=12
-# dialog object="Object" owner="<first> <last>" channel=-731001 message_length=6 message="Twelve" buttons="B1|B2|B3|B4|B5|B6|B7|B8|B9|B10|B11|B12" count=12
 PROBE comms/dialog rec=heard step=3 from=owner name_is_key2name=1 message="Not a button"
+# dialog object="Object" owner="<first> <last>" channel=-731001 message_length=6 message="Twelve" buttons="B1|B2|B3|B4|B5|B6|B7|B8|B9|B10|B11|B12" count=12
 PROBE comms/dialog rec=waiting drive=dialog reply="B12"
 PROBE comms/dialog rec=put step=4 to=owner how=answered buttons=12 message_length=6
 # dialog-reply reply="B12" index=11 sent_length=3

@@ -1,5 +1,5 @@
 grid: fake-sl
-date: 2026-11-09
+date: 2026-11-11
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating Mono
@@ -9,9 +9,9 @@ settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor
 PROBE avatar/controls rec=start region="Fake Region" channel="Second Life Server" version="sl-fake-grid 0.1.0"
 PROBE avatar/controls rec=waiting drive=answer grant=4
 # answer grant=4
+PROBE avatar/controls rec=held answer=4 perms=4
 # script-control-change action=release controls=4294967295 pass_to_agent=0
 # script-control-change action=take controls=524545 pass_to_agent=0
-PROBE avatar/controls rec=held answer=4 perms=4
 PROBE avatar/controls rec=took step=1 controls=257 accept=1 pass_on=0
 PROBE avatar/controls rec=waiting drive=control keys=1
 # control keys=1 held=1s
@@ -29,9 +29,9 @@ PROBE avatar/controls rec=waiting drive=control keys=2
 # control keys=2 held=1s
 # animations avatar=owner playing="walk@other-object"
 # animations avatar=owner playing="stand@other-object"
+PROBE avatar/controls rec=hold-over step=3 repeats=0
 # script-control-change action=release controls=524545 pass_to_agent=0
 # script-control-change action=take controls=4294967039 pass_to_agent=1
-PROBE avatar/controls rec=hold-over step=3 repeats=0
 PROBE avatar/controls rec=took step=4 controls=256 accept=0 pass_on=1
 PROBE avatar/controls rec=waiting drive=control keys=256
 # control keys=256 held=1s

@@ -1,5 +1,5 @@
 grid: fake-opensim
-date: 2026-11-10
+date: 2026-11-11
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating YEngine
@@ -7,11 +7,11 @@ settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor
 
 PROBE land/day-cycle rec=start region="Fake Region" channel="OpenSim" version="sl-fake-grid 0.1.0"
 PROBE land/day-cycle rec=day length=14400 offset=57600 region_length=14400 region_offset=57600
-PROBE land/day-cycle rec=body which=sun scope=parcel sun="<0.878817, 0.000000, -0.477159>" length=1.000 rot_length=1.000 dot_fwd=1.000 dot_left=0.000 dot_up=0.000
-PROBE land/day-cycle rec=body which=sun scope=region sun="<0.878817, 0.000000, -0.477159>" length=1.000 rot_length=1.000 dot_fwd=1.000 dot_left=0.000 dot_up=0.000
-PROBE land/day-cycle rec=body which=moon scope=parcel moon="<-0.878817, 0.000000, 0.477159>" length=1.000 rot_length=1.000 dot_fwd=1.000 dot_left=0.000 dot_up=0.000
-PROBE land/day-cycle rec=body which=moon scope=region moon="<-0.878817, 0.000000, 0.477159>" length=1.000 rot_length=1.000 dot_fwd=1.000 dot_left=0.000 dot_up=0.000
+PROBE land/day-cycle rec=body which=sun scope=parcel sun="<-0.247422, 0.000000, -0.968908>" length=1.000 rot_length=1.000 dot_fwd=1.000 dot_left=0.000 dot_up=0.000
+PROBE land/day-cycle rec=body which=sun scope=region sun="<-0.247422, 0.000000, -0.968908>" length=1.000 rot_length=1.000 dot_fwd=1.000 dot_left=0.000 dot_up=0.000
+PROBE land/day-cycle rec=body which=moon scope=parcel moon="<0.247422, 0.000000, 0.968908>" length=1.000 rot_length=1.000 dot_fwd=1.000 dot_left=0.000 dot_up=0.000
+PROBE land/day-cycle rec=body which=moon scope=region moon="<0.247422, 0.000000, 0.968908>" length=1.000 rot_length=1.000 dot_fwd=1.000 dot_left=0.000 dot_up=0.000
 PROBE land/day-cycle rec=agree sun=1 moon=1 sun_dot_moon=-1.000
-PROBE land/day-cycle rec=time time_of_day=13260.770000 within_day=1 fraction=0.921
-PROBE land/day-cycle rec=time-later advanced=1 time_of_day=13262.790000
+PROBE land/day-cycle rec=time time_of_day=10227.450000 within_day=1 fraction=0.710
+PROBE land/day-cycle rec=time-later advanced=1 time_of_day=10229.460000
 PROBE land/day-cycle rec=end

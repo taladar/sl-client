@@ -231,9 +231,8 @@ fn a_state_change_probe_hears_what_each_grid_heard() -> Result<(), String> {
 fn opensims_delay_factor_scales_a_forced_delay_alone() -> Result<(), String> {
     let flavour = EngineFlavour::YEngine;
     let mut engine = Engine::new(EngineConfig {
-        flavour,
         script_delay_factor: 0.5,
-        ..EngineConfig::for_step(STEP)
+        ..EngineConfig::for_step(STEP, flavour)
     });
     let mut host = Recorder::default();
     let _none = engine.add(

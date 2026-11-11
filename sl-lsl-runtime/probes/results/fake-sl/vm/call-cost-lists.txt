@@ -1,14 +1,14 @@
 grid: fake-sl
-date: 2026-11-09
+date: 2026-11-11
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating Mono
 settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
 
 PROBE vm/call-cost-lists rec=start region="Fake Region" channel="Second Life Server" version="sl-fake-grid 0.1.0"
-PROBE vm/call-cost-lists rec=rate fn=none size=1 calls=618500 seconds=1.511111 per_second=409301
-PROBE vm/call-cost-lists rec=rate fn=llGetListLength size=1 calls=311050 seconds=1.511111 per_second=205842
-PROBE vm/call-cost-lists rec=rate fn=llList2Integer size=1 calls=227490 seconds=1.511111 per_second=150545
+PROBE vm/call-cost-lists rec=rate fn=none size=1 calls=618460 seconds=1.511111 per_second=409275
+PROBE vm/call-cost-lists rec=rate fn=llGetListLength size=1 calls=310940 seconds=1.511111 per_second=205769
+PROBE vm/call-cost-lists rec=rate fn=llList2Integer size=1 calls=227410 seconds=1.511111 per_second=150492
 PROBE vm/call-cost-lists rec=rate fn=llListSort size=1 calls=7550 seconds=1.511111 per_second=4996
 PROBE vm/call-cost-lists rec=rate fn=llList2CSV size=1 calls=14840 seconds=1.511111 per_second=9821
 PROBE vm/call-cost-lists rec=rate fn=llDumpList2String size=1 calls=14430 seconds=1.511111 per_second=9549
@@ -17,12 +17,12 @@ PROBE vm/call-cost-lists rec=rate fn=llList2List size=1 calls=8160 seconds=1.511
 PROBE vm/call-cost-lists rec=rate fn=llDeleteSubList size=1 calls=17030 seconds=1.511111 per_second=11270
 PROBE vm/call-cost-lists rec=rate fn=llListReplaceList size=1 calls=11240 seconds=1.511111 per_second=7438
 PROBE vm/call-cost-lists rec=rate fn=list-plus size=1 calls=8040 seconds=1.511111 per_second=5321
-PROBE vm/call-cost-lists rec=rate fn=llListStatistics size=1 calls=48130 seconds=1.511111 per_second=31851
+PROBE vm/call-cost-lists rec=rate fn=llListStatistics size=1 calls=48120 seconds=1.511111 per_second=31844
 PROBE vm/call-cost-lists rec=rate fn=llCSV2List size=1 calls=8940 seconds=1.511111 per_second=5916
 PROBE vm/call-cost-lists rec=rate fn=llListRandomize size=1 calls=8800 seconds=1.511111 per_second=5824
-PROBE vm/call-cost-lists rec=rate fn=none size=10 calls=617710 seconds=1.511111 per_second=408779
-PROBE vm/call-cost-lists rec=rate fn=llGetListLength size=10 calls=311050 seconds=1.511111 per_second=205842
-PROBE vm/call-cost-lists rec=rate fn=llList2Integer size=10 calls=227490 seconds=1.511111 per_second=150545
+PROBE vm/call-cost-lists rec=rate fn=none size=10 calls=617660 seconds=1.511111 per_second=408746
+PROBE vm/call-cost-lists rec=rate fn=llGetListLength size=10 calls=310940 seconds=1.511111 per_second=205769
+PROBE vm/call-cost-lists rec=rate fn=llList2Integer size=10 calls=227410 seconds=1.511111 per_second=150492
 PROBE vm/call-cost-lists rec=rate fn=llListSort size=10 calls=4490 seconds=1.511111 per_second=2971
 PROBE vm/call-cost-lists rec=rate fn=llList2CSV size=10 calls=4790 seconds=1.511111 per_second=3170
 PROBE vm/call-cost-lists rec=rate fn=llDumpList2String size=10 calls=4150 seconds=1.511111 per_second=2746
@@ -34,9 +34,9 @@ PROBE vm/call-cost-lists rec=rate fn=list-plus size=10 calls=7560 seconds=1.5111
 PROBE vm/call-cost-lists rec=rate fn=llListStatistics size=10 calls=25890 seconds=1.511111 per_second=17133
 PROBE vm/call-cost-lists rec=rate fn=llCSV2List size=10 calls=3710 seconds=1.511111 per_second=2455
 PROBE vm/call-cost-lists rec=rate fn=llListRandomize size=10 calls=4110 seconds=1.511111 per_second=2720
-PROBE vm/call-cost-lists rec=rate fn=none size=100 calls=616040 seconds=1.511111 per_second=407674
-PROBE vm/call-cost-lists rec=rate fn=llGetListLength size=100 calls=311050 seconds=1.511111 per_second=205842
-PROBE vm/call-cost-lists rec=rate fn=llList2Integer size=100 calls=226570 seconds=1.511111 per_second=149936
+PROBE vm/call-cost-lists rec=rate fn=none size=100 calls=616000 seconds=1.511111 per_second=407647
+PROBE vm/call-cost-lists rec=rate fn=llGetListLength size=100 calls=310940 seconds=1.511111 per_second=205769
+PROBE vm/call-cost-lists rec=rate fn=llList2Integer size=100 calls=226420 seconds=1.511111 per_second=149837
 PROBE vm/call-cost-lists rec=rate fn=llListSort size=100 calls=290 seconds=1.533333 per_second=189
 PROBE vm/call-cost-lists rec=rate fn=llList2CSV size=100 calls=620 seconds=1.533333 per_second=404
 PROBE vm/call-cost-lists rec=rate fn=llDumpList2String size=100 calls=520 seconds=1.511111 per_second=344
@@ -48,9 +48,9 @@ PROBE vm/call-cost-lists rec=rate fn=list-plus size=100 calls=1140 seconds=1.511
 PROBE vm/call-cost-lists rec=rate fn=llListStatistics size=100 calls=2940 seconds=1.511111 per_second=1946
 PROBE vm/call-cost-lists rec=rate fn=llCSV2List size=100 calls=350 seconds=1.533333 per_second=228
 PROBE vm/call-cost-lists rec=rate fn=llListRandomize size=100 calls=460 seconds=1.533333 per_second=300
-PROBE vm/call-cost-lists rec=rate fn=none size=500 calls=612840 seconds=1.511111 per_second=405556
-PROBE vm/call-cost-lists rec=rate fn=llGetListLength size=500 calls=311050 seconds=1.511111 per_second=205842
-PROBE vm/call-cost-lists rec=rate fn=llList2Integer size=500 calls=222090 seconds=1.511111 per_second=146971
+PROBE vm/call-cost-lists rec=rate fn=none size=500 calls=612800 seconds=1.511111 per_second=405529
+PROBE vm/call-cost-lists rec=rate fn=llGetListLength size=500 calls=310940 seconds=1.511111 per_second=205769
+PROBE vm/call-cost-lists rec=rate fn=llList2Integer size=500 calls=222030 seconds=1.511111 per_second=146932
 PROBE vm/call-cost-lists rec=rate fn=llListSort size=500 calls=60 seconds=1.644444 per_second=36
 PROBE vm/call-cost-lists rec=rate fn=llList2CSV size=500 calls=120 seconds=1.533333 per_second=78
 PROBE vm/call-cost-lists rec=rate fn=llDumpList2String size=500 calls=60 seconds=1.622222 per_second=37
@@ -62,5 +62,5 @@ PROBE vm/call-cost-lists rec=rate fn=list-plus size=500 calls=200 seconds=1.5555
 PROBE vm/call-cost-lists rec=rate fn=llListStatistics size=500 calls=540 seconds=1.511111 per_second=357
 PROBE vm/call-cost-lists rec=rate fn=llCSV2List size=500 calls=90 seconds=1.688889 per_second=53
 PROBE vm/call-cost-lists rec=rate fn=llListRandomize size=500 calls=80 seconds=1.511111 per_second=53
-PROBE vm/call-cost-lists rec=rate fn=none size=0 calls=618510 seconds=1.511111 per_second=409308
+PROBE vm/call-cost-lists rec=rate fn=none size=0 calls=618460 seconds=1.511111 per_second=409275
 PROBE vm/call-cost-lists rec=end

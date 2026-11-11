@@ -1,5 +1,5 @@
 grid: fake-sl
-date: 2026-11-09
+date: 2026-11-11
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating Mono
@@ -11,5 +11,5 @@ PROBE vm/throughput rec=loop loop=three-ops run=0 iterations=1000000 seconds=2.0
 PROBE vm/throughput rec=loop loop=llAbs run=0 iterations=1000000 seconds=4.422222 per_second=226131
 PROBE vm/throughput rec=loop loop=empty run=1 iterations=1000000 seconds=2.000000 per_second=500000
 PROBE vm/throughput rec=loop loop=three-ops run=1 iterations=1000000 seconds=2.044444 per_second=489130
-PROBE vm/throughput rec=loop loop=llAbs run=1 iterations=1000000 seconds=4.400000 per_second=227273
+PROBE vm/throughput rec=loop loop=llAbs run=1 iterations=1000000 seconds=4.422222 per_second=226131
 PROBE vm/throughput rec=end

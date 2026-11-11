@@ -1,15 +1,15 @@
 grid: fake-opensim
-date: 2026-11-10
+date: 2026-11-11
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating YEngine
 settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
 
 PROBE throttle/cast-ray rec=start region="Fake Region" channel="OpenSim" version="sl-fake-grid 0.1.0"
-PROBE throttle/cast-ray rec=cast kind=cheap rays=50132 per_second=5004
-PROBE throttle/cast-ray rec=status kind=cheap status=0 count=50132
+PROBE throttle/cast-ray rec=cast kind=cheap rays=1434653 per_second=143208
+PROBE throttle/cast-ray rec=status kind=cheap status=0 count=1434653
 PROBE throttle/cast-ray rec=errors kind=cheap first_error_at=none
-PROBE throttle/cast-ray rec=cast kind=expensive rays=50132 per_second=5004
-PROBE throttle/cast-ray rec=status kind=expensive status=0 count=50132
+PROBE throttle/cast-ray rec=cast kind=expensive rays=1434653 per_second=143193
+PROBE throttle/cast-ray rec=status kind=expensive status=0 count=1434653
 PROBE throttle/cast-ray rec=errors kind=expensive first_error_at=none
 PROBE throttle/cast-ray rec=end

@@ -1,5 +1,5 @@
 grid: fake-sl
-date: 2026-11-09
+date: 2026-11-11
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating Mono
@@ -96,8 +96,8 @@ PROBE math/functions rec=modpow case=2,3,-7 value="8"
 PROBE math/functions rec=modpow case=7,1000000007,1000000007 value="7"
 PROBE math/functions rec=modpow case=int-max,int-max,int-max-1 value="1"
 PROBE math/functions rec=modpow case=3,int-max,65537 value="21846"
-PROBE math/functions rec=frand case=one draws=2000 below_zero=0 above_zero=1 zeros=0 min=0.001135 max=0.999635
-PROBE math/functions rec=frand case=minus-one draws=2000 below_zero=1 above_zero=0 zeros=0 min=-0.998664 max=-0.000442
+PROBE math/functions rec=frand case=one draws=2000 below_zero=0 above_zero=1 zeros=0 min=0.000008 max=0.999460
+PROBE math/functions rec=frand case=minus-one draws=2000 below_zero=1 above_zero=0 zeros=0 min=-0.999635 max=-0.000442
 PROBE math/functions rec=frand case=zero draws=2000 below_zero=0 above_zero=0 zeros=2000 min=0.000000 max=0.000000
 PROBE math/functions rec=frand case=1e30 draws=2000 below_zero=0 above_zero=1 zeros=0 min=198304600000000000000000000.000000 max=999919000000000000000000000000.000000
 PROBE math/functions rec=end

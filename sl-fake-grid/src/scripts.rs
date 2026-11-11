@@ -325,7 +325,6 @@ impl RegionScripts {
     pub(crate) fn new(step: Duration, flavour: EngineFlavour, seed: u64) -> Self {
         Self {
             engine: Engine::new(EngineConfig {
-                flavour,
                 // OpenSim merges no event into another, on both engines
                 // (`events/merging`); Second Life's rule is the reference.
                 coalescing: if flavour.is_opensim() {
@@ -333,7 +332,7 @@ impl RegionScripts {
                 } else {
                     sl_lsl_runtime::vm::Coalescing::Reference
                 },
-                ..EngineConfig::for_step(step)
+                ..EngineConfig::for_step(step, flavour)
             }),
             slots: BTreeMap::new(),
             by_item: BTreeMap::new(),

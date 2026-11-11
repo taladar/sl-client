@@ -1,16 +1,18 @@
 grid: fake-opensim
-date: 2026-11-10
+date: 2026-11-11
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating YEngine
 settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
 
+# chat type=say from="Object" length=14 text="Script running"
 PROBE time/sleep-lengths rec=start region="Fake Region" channel="OpenSim" version="sl-fake-grid 0.1.0"
 PROBE time/sleep-lengths rec=sleep asked=0.000000 mean=0.000000 smallest=0.000000 largest=0.000000 script_mean=0.000000 unit=ms
 PROBE time/sleep-lengths rec=sleep asked=0.001000 mean=18.181000 smallest=18.181000 largest=18.182000 script_mean=18.000000 unit=ms
 PROBE time/sleep-lengths rec=sleep asked=0.010000 mean=18.181000 smallest=18.181000 largest=18.182000 script_mean=18.000000 unit=ms
 PROBE time/sleep-lengths rec=sleep asked=0.020000 mean=36.363000 smallest=36.363000 largest=36.364000 script_mean=36.000000 unit=ms
 PROBE time/sleep-lengths rec=sleep asked=0.050000 mean=54.545000 smallest=54.545000 largest=54.546000 script_mean=55.000000 unit=ms
-PROBE time/sleep-lengths rec=sleep asked=0.100000 mean=109.090000 smallest=109.090000 largest=109.091000 script_mean=109.000000 unit=ms
+PROBE time/sleep-lengths rec=sleep asked=0.100000 mean=109.091000 smallest=109.091000 largest=109.091000 script_mean=109.000000 unit=ms
 PROBE time/sleep-lengths rec=sleep asked=0.250000 mean=254.545000 smallest=254.545000 largest=254.546000 script_mean=255.000000 unit=ms
 PROBE time/sleep-lengths rec=end
+# chat by=other type=say from="Object" length=14 text="Script running"

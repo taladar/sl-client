@@ -1,5 +1,5 @@
 grid: fake-sl
-date: 2026-11-09
+date: 2026-11-11
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating Mono
@@ -42,8 +42,8 @@ PROBE errors/flood-paths rec=phase name=X2 t=122.200000
 # debug-channel: from="Object" text="Could not find sound 'X2-5'."
 # debug-channel: from="Object" text="Could not find sound 'X2-6'."
 # debug-channel: from="Object" text="Could not find sound 'X2-7'."
-# debug-channel: from="Object" text="PSYS error: Rule 1 error, PSYS_PART_MAX_AGE needs float data."
 # debug-channel: from="Object" text="Too many errors... dropping further messages until the flood stops"
+# debug-channel: from="Object" text="PSYS error: Rule 1 error, PSYS_PART_MAX_AGE needs float data."
 PROBE errors/flood-paths rec=phase name=X3 t=165.377800
 # debug-channel: from="Object" text="Could not find sound 'X3-1'."
 # debug-channel: from="Object" text="Could not find sound 'X3-2'."
@@ -72,7 +72,7 @@ PROBE errors/flood-paths rec=phase name=X5 t=252.977800
 # debug-channel: from="Object" text="Could not find sound 'X5-5'."
 # debug-channel: from="Object" text="Could not find sound 'X5-6'."
 # debug-channel: from="Object" text="Could not find sound 'X5-7'."
-# debug-channel: from="Object" text="PRIM_MEDIA error: face 9 on object 0b9071b4-5931-70c3-cb63-10e9d60342e2 not found"
+# debug-channel: from="Object" text="PRIM_MEDIA error: face 9 on object 03e1cdf3-f0fc-9ad4-c33c-7a4916a356e1 not found"
 # debug-channel: from="Object" text="Too many errors... dropping further messages until the flood stops"
 PROBE errors/flood-paths rec=phase name=W t=297.177800
 # debug-channel: from="Object" text="Could not find sound 'W1'."
@@ -128,7 +128,7 @@ PROBE errors/flood-paths rec=end
 # debug-channel by=other: from="Object" text="Could not find sound 'X5-5'."
 # debug-channel by=other: from="Object" text="Could not find sound 'X5-6'."
 # debug-channel by=other: from="Object" text="Could not find sound 'X5-7'."
-# debug-channel by=other: from="Object" text="PRIM_MEDIA error: face 9 on object 0b9071b4-5931-70c3-cb63-10e9d60342e2 not found"
+# debug-channel by=other: from="Object" text="PRIM_MEDIA error: face 9 on object 03e1cdf3-f0fc-9ad4-c33c-7a4916a356e1 not found"
 # debug-channel by=other: from="Object" text="Too many errors... dropping further messages until the flood stops"
 # debug-channel by=other: from="Object" text="Could not find sound 'W1'."
 # debug-channel by=other: from="Object" text="Could not find sound 'W2'."

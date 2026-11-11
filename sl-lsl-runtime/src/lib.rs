@@ -26,8 +26,9 @@
 //! explicit, or the [`CompileError`]s a grid would answer an upload with.
 //!
 //! And the **VM** — [`vm`]: an [`Engine`](vm::Engine) that runs a region's
-//! script [`Instance`](vm::Instance)s round-robin in per-tick slices counted
-//! in instructions, each suspendable between any two of them, with every
+//! script [`Instance`](vm::Instance)s round-robin in per-tick slices of the
+//! script time the imitated grid takes for what they do, each suspendable
+//! between any two instructions, with every
 //! library call going through the [`Host`](vm::Host) the grid implements.
 //!
 //! And the **probe format** — [`probe`]: the headers, the `PROBE` lines and

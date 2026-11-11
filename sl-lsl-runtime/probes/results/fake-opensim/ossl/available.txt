@@ -1,5 +1,5 @@
 grid: fake-opensim
-date: 2026-11-10
+date: 2026-11-11
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating YEngine
@@ -17,5 +17,5 @@ PROBE ossl/available rec=allow-true fn=osMatchString value="b, 1, b, 4"
 PROBE ossl/available rec=allow-true fn=osReplaceString value="axcaxc"
 PROBE ossl/available rec=allow-true fn=osRegexIsMatch value=1
 PROBE ossl/available rec=allow-true fn=osUnixTimeToTimestamp value="1970-01-01T00:00:00.0000000Z"
-# debug-channel: from="Object" text="YEngine: osGetWindParam is not implemented by this grid (script: Probe event: state_entry primID: 93b5a08b-7b51-5c11-cb16-a29b27a0dae9 at: <128,124,26>) Script must be Reset to re-enable.\n"
-# debug-channel by=other: from="Object" text="YEngine: osGetWindParam is not implemented by this grid (script: Probe event: state_entry primID: 93b5a08b-7b51-5c11-cb16-a29b27a0dae9 at: <128,124,26>) Script must be Reset to re-enable.\n"
+# debug-channel: from="Object" text="YEngine: osGetWindParam is not implemented by this grid (script: Probe event: state_entry primID: 7aa732ac-a48a-a4cf-cb28-54974f7f6246 at: <128,124,26>) Script must be Reset to re-enable.\n"
+# debug-channel by=other: from="Object" text="YEngine: osGetWindParam is not implemented by this grid (script: Probe event: state_entry primID: 7aa732ac-a48a-a4cf-cb28-54974f7f6246 at: <128,124,26>) Script must be Reset to re-enable.\n"

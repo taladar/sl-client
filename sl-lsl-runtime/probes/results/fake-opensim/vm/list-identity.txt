@@ -1,11 +1,10 @@
 grid: fake-opensim
-date: 2026-11-10
+date: 2026-11-11
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating YEngine
 settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
 
-# dialog object="Object" owner="<first> <last>" channel=7 message_length=16 message="vm/list-identity" buttons="Ok" count=1
 PROBE vm/list-identity rec=start region="Fake Region" channel="OpenSim" version="sl-fake-grid 0.1.0"
 PROBE vm/list-identity rec=list case=json-set name=passed value="0" types=1
 PROBE vm/list-identity rec=list case=json-set-full name=passed value="7" types=1
@@ -13,15 +12,16 @@ PROBE vm/list-identity rec=list case=json-get name=passed value="0" types=1
 PROBE vm/list-identity rec=list case=json-get-array name=passed value="" types=
 PROBE vm/list-identity rec=list case=json-get-blank name=passed value="" types=
 PROBE vm/list-identity rec=list case=json-type name=passed value="0" types=1
+# dialog object="Object" owner="<first> <last>" channel=7 message_length=16 message="vm/list-identity" buttons="Ok" count=1
 PROBE vm/list-identity rec=list case=dialog name=passed value="Ok" types=3
 # debug-channel: from="Object" text="llDialog: First parameter must be a key"
 PROBE vm/list-identity rec=list case=dialog-bad-key name=passed value="" types=
+# dialog object="Object" owner="<first> <last>" channel=7 message_length=16 message="vm/list-identity" buttons="Ok" count=1
 PROBE vm/list-identity rec=list case=pay name=passed value="1, -1, -1, -1, -1" types=11111
 PROBE vm/list-identity rec=list case=pay-full name=passed value="1, 2, 3, 4" types=1111
 PROBE vm/list-identity rec=list case=assign name=passed value="1, -1, -1, -1, -1" types=11111
 PROBE vm/list-identity rec=list case=assign name=other value="1, -1, -1, -1, -1" types=11111
 PROBE vm/list-identity rec=list case=assign-other name=original value="1, -1, -1, -1, -1" types=11111
-# dialog object="Object" owner="<first> <last>" channel=7 message_length=16 message="vm/list-identity" buttons="Ok" count=1
 PROBE vm/list-identity rec=list case=assign-other name=passed value="1, -1, -1, -1, -1" types=11111
 PROBE vm/list-identity rec=list case=assign-json name=other value="0" types=1
 PROBE vm/list-identity rec=list case=assign-dialog name=other value="Ok" types=3

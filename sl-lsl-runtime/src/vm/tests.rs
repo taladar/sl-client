@@ -1571,7 +1571,7 @@ fn program_for(
 
 /// A region with the default budgets for [`STEP`].
 fn engine() -> Engine {
-    Engine::new(EngineConfig::for_step(STEP))
+    Engine::new(EngineConfig::for_step(STEP, EngineFlavour::SecondLife))
 }
 
 /// Run `ticks` ticks, returning each report.
@@ -1672,7 +1672,8 @@ fn a_runaway_loop_uses_its_budget_and_the_tick_still_completes() -> Result<(), S
         // Spent to the last instruction of every share so far, and past it
         // by at most the one back-edge the next tick pays back.
         assert!(
-            (shares..=shares.saturating_add(BACKWARD_JUMP_COST)).contains(&spent),
+            (shares..=shares.saturating_add(cost::speed(EngineFlavour::SecondLife).backward_jump))
+                .contains(&spent),
             "tick {:?} used {spent} of {shares} in all",
             report.tick
         );
@@ -2119,7 +2120,7 @@ fn events_reach_only_a_handler_of_the_current_state() -> Result<(), String> {
 
 #[test]
 fn an_over_budget_region_serves_its_scripts_in_turn() -> Result<(), String> {
-    let config = EngineConfig::for_step(STEP);
+    let config = EngineConfig::for_step(STEP, EngineFlavour::SecondLife);
     // Room for one script's share per tick, and three busy scripts.
     let mut engine = Engine::new(EngineConfig {
         region_budget: u64::from(config.script_budget),
@@ -2142,7 +2143,7 @@ fn an_over_budget_region_serves_its_scripts_in_turn() -> Result<(), String> {
         // The region's budget, give or take the one back-edge a script
         // overran its share by last time it ran and pays back now.
         let budget = u64::from(config.script_budget);
-        let slack = u64::from(BACKWARD_JUMP_COST);
+        let slack = u64::from(cost::speed(EngineFlavour::SecondLife).backward_jump);
         assert!(
             (budget.saturating_sub(slack)..=budget.saturating_add(slack)).contains(&report.used),
             "used {} of {budget}",
@@ -2427,7 +2428,7 @@ fn touches_queued_in_different_ticks_merge_on_second_life_only() -> Result<(), S
     ] {
         let mut engine = Engine::new(EngineConfig {
             coalescing,
-            ..EngineConfig::for_step(STEP)
+            ..EngineConfig::for_step(STEP, EngineFlavour::SecondLife)
         });
         let mut host = Recorder::default();
         let _none = engine.add(
@@ -2633,7 +2634,7 @@ fn every_event_reaches_a_handler_with_its_parameters() -> Result<(), String> {
 fn arrivals(coalescing: Coalescing) -> Result<Vec<String>, String> {
     let mut engine = Engine::new(EngineConfig {
         coalescing,
-        ..EngineConfig::for_step(STEP)
+        ..EngineConfig::for_step(STEP, EngineFlavour::SecondLife)
     });
     let mut host = Recorder::default();
     let _none = engine.add(
@@ -2723,7 +2724,7 @@ fn a_test_can_force_every_arrival_shape_a_script_may_meet() -> Result<(), String
 fn queue_order(coalescing: Coalescing) -> Result<Vec<String>, String> {
     let mut engine = Engine::new(EngineConfig {
         coalescing,
-        ..EngineConfig::for_step(STEP)
+        ..EngineConfig::for_step(STEP, EngineFlavour::SecondLife)
     });
     let mut host = Recorder::default();
     let _none = engine.add(
@@ -2879,9 +2880,7 @@ fn a_later_change_joins_a_queued_one_unless_it_is_next_in_line() -> Result<(), S
 
 /// A region of [`STEP`] ticks imitating `flavour`.
 fn engine_as(flavour: EngineFlavour) -> Engine {
-    let mut config = EngineConfig::for_step(STEP);
-    config.flavour = flavour;
-    Engine::new(config)
+    Engine::new(EngineConfig::for_step(STEP, flavour))
 }
 
 /// Post `link_message(0, num, msg, "")` to `id`.
@@ -3284,27 +3283,29 @@ fn a_script_listening_on_debug_channel_hears_a_fault_and_the_region_ticks_on() -
     Ok(())
 }
 
-/// A region whose budgets never run out, for counting what a script charges.
-fn unbounded() -> Engine {
+/// A region imitating `flavour` whose budgets never run out, for counting
+/// what a script charges.
+fn unbounded(flavour: EngineFlavour) -> Engine {
     Engine::new(EngineConfig {
         script_budget: u32::MAX,
         region_budget: u64::MAX,
-        ..EngineConfig::for_step(STEP)
+        ..EngineConfig::for_step(STEP, flavour)
     })
 }
 
-/// The instructions `source` charges to run its `state_entry` to the end.
-fn charged(source: &str) -> Result<u64, String> {
-    let mut engine = unbounded();
+/// The script time `source` is charged under `flavour` to run its
+/// `state_entry` to the end.
+fn charged(source: &str, flavour: EngineFlavour) -> Result<u64, String> {
+    let mut engine = unbounded(flavour);
     let mut host = Recorder::default();
     let _none = engine.add(A, program(source)?);
     let reports = run(&mut engine, &mut host, 2);
     Ok(reports.iter().map(|report| report.used).sum())
 }
 
-/// The per-call cost above an empty loop of the same shape, in microseconds,
-/// of each `(function, size)` an aditi `vm/call-cost-*` transcript holds:
-/// one call's period less one empty iteration's at the same size.
+/// The per-call cost above an empty loop of the same shape, in nanoseconds,
+/// of each `(function, size)` a `vm/call-cost-*` transcript holds: one call's
+/// period less one empty iteration's at the same size.
 fn measured_costs(transcript: &str) -> Vec<(String, u64, f64)> {
     let field = |line: &str, name: &str| -> Option<String> {
         line.split(' ')
@@ -3320,7 +3321,7 @@ fn measured_costs(transcript: &str) -> Vec<(String, u64, f64)> {
             Some((
                 field(line, "fn")?,
                 field(line, "size")?.parse().ok()?,
-                seconds / calls * 1e6,
+                seconds / calls * 1e9,
             ))
         })
         .collect();
@@ -3359,18 +3360,51 @@ fn call_cost_script(size: u64, count: u32, body: &str) -> String {
     )
 }
 
+/// Each grid's `vm/call-cost-*` transcripts: lists, strings and the newer
+/// functions (OpenSim compiles none of the last three it times, so its newer
+/// transcript stops at the compile error and holds no rates).
+const CALL_COST_TRANSCRIPTS: [(EngineFlavour, [&str; 3]); 3] = [
+    (
+        EngineFlavour::SecondLife,
+        [
+            include_str!("../../probes/results/aditi/vm/call-cost-lists.txt"),
+            include_str!("../../probes/results/aditi/vm/call-cost-strings.txt"),
+            include_str!("../../probes/results/aditi/vm/call-cost-newer.txt"),
+        ],
+    ),
+    (
+        EngineFlavour::YEngine,
+        [
+            include_str!("../../probes/results/opensim-yengine/vm/call-cost-lists.txt"),
+            include_str!("../../probes/results/opensim-yengine/vm/call-cost-strings.txt"),
+            include_str!("../../probes/results/opensim-yengine/vm/call-cost-newer.txt"),
+        ],
+    ),
+    (
+        EngineFlavour::XEngine,
+        [
+            include_str!("../../probes/results/opensim-xengine/vm/call-cost-lists.txt"),
+            include_str!("../../probes/results/opensim-xengine/vm/call-cost-strings.txt"),
+            include_str!("../../probes/results/opensim-xengine/vm/call-cost-newer.txt"),
+        ],
+    ),
+];
+
+/// What one grid's cells are held to.
+struct CostRule {
+    /// The grid.
+    flavour: EngineFlavour,
+    /// The cells left out, as function and size.
+    outliers: &'static [(&'static str, u64)],
+    /// The grid's noise floor, in nanoseconds.
+    noise: f64,
+    /// How many cells are checked.
+    expected: usize,
+}
+
 #[test]
-fn joins_and_library_calls_cost_what_they_cost_on_aditi() -> Result<(), String> {
+fn joins_and_library_calls_cost_what_they_cost_on_each_grid() -> Result<(), String> {
     const CALLS: u32 = 10;
-    let lists = measured_costs(include_str!(
-        "../../probes/results/aditi/vm/call-cost-lists.txt"
-    ));
-    let strings = measured_costs(include_str!(
-        "../../probes/results/aditi/vm/call-cost-strings.txt"
-    ));
-    let newer = measured_costs(include_str!(
-        "../../probes/results/aditi/vm/call-cost-newer.txt"
-    ));
     // The probes' own loop bodies.
     let bodies = [
         ("llGetListLength", "n = llGetListLength(L);"),
@@ -3414,48 +3448,81 @@ fn joins_and_library_calls_cost_what_they_cost_on_aditi() -> Result<(), String> 
         ("llOrd", "n = llOrd(S, -1);"),
         ("llHash", "n = llHash(S);"),
     ];
-    // The committed runs' outliers `vm::cost` leaves out: each far from the
-    // other run of the same cell (book: 4.2–7.9, 113–639, 63–661 µs).
-    let outliers = [
-        ("llList2Integer", 1),
-        ("llList2List", 10),
-        ("llListReplaceList", 1),
+    // Each grid's cells `vm::cost` leaves out, and how near a charge must
+    // come to the rest: within 5 %, or within the noise of the grid's empty
+    // loop. aditi's outliers are each far from the other run of the same cell
+    // (book: 4.2–7.9, 113–639, 63–661 µs); XEngine's empty loop is 2.3 µs and
+    // its cells scatter by some 150 ns around it, YEngine's 35 ns by a few.
+    let rules = [
+        CostRule {
+            flavour: EngineFlavour::SecondLife,
+            outliers: &[
+                ("llList2Integer", 1),
+                ("llList2List", 10),
+                ("llListReplaceList", 1),
+            ],
+            noise: 0.0,
+            expected: 31 * 4 - 3,
+        },
+        CostRule {
+            flavour: EngineFlavour::YEngine,
+            outliers: &[],
+            noise: 20.0,
+            expected: 26 * 4,
+        },
+        CostRule {
+            flavour: EngineFlavour::XEngine,
+            outliers: &[],
+            noise: 150.0,
+            expected: 26 * 4,
+        },
     ];
-    let mut checked = 0_u32;
-    for (function, size, aditi) in lists.iter().chain(&strings).chain(&newer) {
-        if outliers.contains(&(function.as_str(), *size)) {
-            continue;
-        }
-        let Some((_, body)) = bodies.iter().find(|(name, _)| name == function) else {
-            continue;
+    for (flavour, transcripts) in CALL_COST_TRANSCRIPTS {
+        let Some(CostRule {
+            outliers,
+            noise,
+            expected,
+            ..
+        }) = rules.iter().find(|rule| rule.flavour == flavour)
+        else {
+            return Err(format!("no rule for {flavour:?}"));
         };
-        let with = charged(&call_cost_script(*size, CALLS, body))?;
-        let without = charged(&call_cost_script(*size, CALLS, ""))?;
-        let per_call = f64::from(u32::try_from(with.saturating_sub(without)).unwrap_or(u32::MAX))
-            / f64::from(CALLS);
-        let per_microsecond = u32::try_from(SCRIPT_INSTRUCTIONS_PER_SECOND / 1_000_000)
-            .map_err(|error| error.to_string())?;
-        let microseconds = per_call / f64::from(per_microsecond);
-        assert!(
-            (microseconds - aditi).abs() <= aditi * 0.05,
-            "{function} at {size}: charged {microseconds:.2} µs, aditi {aditi:.2} µs"
-        );
-        checked = checked.saturating_add(1);
+        let mut checked = 0_usize;
+        for (function, size, measured) in transcripts.iter().flat_map(|t| measured_costs(t)) {
+            if outliers.contains(&(function.as_str(), size)) {
+                continue;
+            }
+            let Some((_, body)) = bodies.iter().find(|(name, _)| *name == function) else {
+                continue;
+            };
+            let with = charged(&call_cost_script(size, CALLS, body), flavour)?;
+            let without = charged(&call_cost_script(size, CALLS, ""), flavour)?;
+            let per_call =
+                f64::from(u32::try_from(with.saturating_sub(without)).unwrap_or(u32::MAX))
+                    / f64::from(CALLS);
+            assert!(
+                (per_call - measured).abs() <= (measured.abs() * 0.05).max(*noise),
+                "{flavour:?} {function} at {size}: charged {per_call:.0} ns, measured {measured:.0} ns"
+            );
+            checked = checked.saturating_add(1);
+        }
+        // Four sizes of each function timed, but the outliers.
+        assert_eq!(checked, *expected, "{flavour:?}");
     }
-    // Four sizes of each, but the outliers.
-    assert_eq!(checked, 31 * 4 - 3);
     Ok(())
 }
 
 #[test]
 fn a_join_dearer_than_a_share_sits_its_script_out_until_it_is_paid_for() -> Result<(), String> {
     let step = Duration::from_millis(1);
-    let config = EngineConfig::for_step(step);
+    let config = EngineConfig::for_step(step, EngineFlavour::SecondLife);
     let mut engine = Engine::new(config);
     let mut host = Recorder::default();
     let source = call_cost_script(500, 1, "r = L + P; print(\"joined\");");
     let _none = engine.add(A, program(&source)?);
-    let join = super::cost::LIST_JOIN.instructions(501);
+    let join = cost::speed(EngineFlavour::SecondLife)
+        .list_join()
+        .charge(501);
     let share = config.script_budget;
     assert!(
         join > share.saturating_mul(4),
@@ -3477,18 +3544,29 @@ fn a_join_dearer_than_a_share_sits_its_script_out_until_it_is_paid_for() -> Resu
 }
 
 #[test]
-fn a_regions_budget_is_its_shares_whatever_the_step() {
-    for step in [
-        Duration::from_millis(1),
-        Duration::from_millis(22),
-        Duration::from_secs(1),
+fn a_regions_budget_is_its_engines_shares_whatever_the_step() {
+    for (flavour, shares) in [
+        (EngineFlavour::SecondLife, 130),
+        (EngineFlavour::YEngine, 2),
+        (EngineFlavour::XEngine, 100),
     ] {
-        let config = EngineConfig::for_step(step);
-        assert_eq!(
-            config.region_budget,
-            u64::from(config.script_budget).saturating_mul(REGION_SCRIPT_SHARES),
-            "step {step:?}"
-        );
+        for step in [
+            Duration::from_millis(1),
+            Duration::from_millis(22),
+            Duration::from_secs(1),
+        ] {
+            let config = EngineConfig::for_step(step, flavour);
+            assert_eq!(
+                u128::from(config.script_budget),
+                step.as_nanos(),
+                "{flavour:?} step {step:?}"
+            );
+            assert_eq!(
+                config.region_budget,
+                u64::from(config.script_budget).saturating_mul(shares),
+                "{flavour:?} step {step:?}"
+            );
+        }
     }
 }
 

@@ -1,5 +1,5 @@
-//! The scheduler: every script instance of a region, run a bounded number of
-//! instructions per tick, round-robin.
+//! The scheduler: every script instance of a region, run for a bounded share
+//! of script time per tick, round-robin.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -16,6 +16,7 @@ use crate::value::Value;
 use crate::vm::comms::{Heard, Overheard};
 use crate::vm::contents::Control;
 use crate::vm::context::{Peers, Raised, Tick};
+use crate::vm::cost;
 use crate::vm::detected::Detected;
 use crate::vm::experiences::ExperienceError;
 use crate::vm::fault::RuntimeError;
@@ -44,49 +45,16 @@ enum Line {
     ToOwner(String),
 }
 
-/// How many instructions one script may run per second of region time, as
-/// charged — a library call and a loop's back-edge cost more than one
-/// ([`BUILTIN_CALL_COST`](crate::vm::BUILTIN_CALL_COST),
-/// [`BACKWARD_JUMP_COST`](crate::vm::BACKWARD_JUMP_COST)).
-///
-/// It is the per-script share of a tick ([`EngineConfig::script_budget`]),
-/// stated per second so it holds whatever the heartbeat's step is. Counted in
-/// instructions, never in elapsed time — a wall-clock slice would make how far
-/// a script gets, and so the order of what scripts do, depend on the machine.
-///
-/// Measured on aditi (Mono, 2026-09-28, one busy script in a quiet region):
-/// an empty `for` loop of a million iterations, 520 charged instructions
-/// each, runs at 500 000 iterations a second (four runs, 499 806 to
-/// 500 141). 520 × 500 000 is 260 million. A short loop is no measure:
-/// `llGetTime` only moves in whole frames, so 50 000 iterations read as four
-/// frames or five, and the first run after a save is slower still while Mono
-/// compiles the script.
-pub const SCRIPT_INSTRUCTIONS_PER_SECOND: u64 = 260_000_000;
-
-/// How many scripts' full shares the region runs per tick before the rest
-/// wait for the next — the region-wide budget, as a multiple of the
-/// per-script one.
-///
-/// Measured on aditi (Mauve, 2026-10-29, probe `vm/region-budget`): 1, 16,
-/// 64 and 128 busy scripts, each an empty loop of its own, every one of them
-/// keeps the rate one runs at alone (469 680, 476 508, 478 536 and 477 162
-/// iterations a second); 256 run at half that (241 793), the region's total
-/// staying at 61.9 million — 130 one-script shares. An earlier run the same
-/// evening read 134 (64.7 million against 481 455). The region's script time
-/// rose with the scripts to 23.9 ms, a whole frame at 45 frames a second, and
-/// `llGetTime` kept pace with real time throughout: a script sees its rate
-/// fall, not its clock slow. Mauve runs some 2 000 mostly idle scripts of
-/// its own, so a quiet region may have a little more.
-pub const REGION_SCRIPT_SHARES: u64 = 130;
-
 /// A region's scheduling parameters.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct EngineConfig {
     /// The length of one tick.
     pub step: Duration,
-    /// Instructions one script may run per tick.
+    /// The script time one script may run per tick, in nanoseconds as the
+    /// engine [`Self::flavour`] imitates charges them (`vm::cost`).
     pub script_budget: u32,
-    /// Instructions the region's scripts may run per tick together.
+    /// The script time the region's scripts may run per tick together, in
+    /// the same nanoseconds.
     pub region_budget: u64,
     /// Which queued touch, collision or `changed` a new one merges into.
     pub coalescing: Coalescing,
@@ -102,27 +70,25 @@ pub struct EngineConfig {
 }
 
 impl EngineConfig {
-    /// The budgets for a tick of length `step`, from
-    /// [`SCRIPT_INSTRUCTIONS_PER_SECOND`] and [`REGION_SCRIPT_SHARES`]. A
-    /// step so short that a script's share would round to nothing still
-    /// gets one instruction.
+    /// The parameters of a region whose engine imitates `flavour`, ticking
+    /// every `step`. A script's share is the tick's length — what it does is
+    /// charged in the time it takes on that grid, so it gets as far in a tick
+    /// as it would there — and the region's is the engine's number of shares
+    /// (`vm::cost`). A step so short that a share would round to nothing
+    /// still gets a nanosecond; one longer than a `u32` of nanoseconds (some
+    /// four seconds) is held at that.
     #[must_use]
-    pub fn for_step(step: Duration) -> Self {
-        let per_script = u128::from(SCRIPT_INSTRUCTIONS_PER_SECOND)
-            .saturating_mul(step.as_micros())
-            .checked_div(1_000_000)
-            .unwrap_or(0)
-            .max(1);
+    pub fn for_step(step: Duration, flavour: EngineFlavour) -> Self {
+        let per_script = step.as_nanos().max(1);
         let script_budget = u32::try_from(per_script).unwrap_or(u32::MAX);
         let region_budget =
-            u64::try_from(per_script.saturating_mul(u128::from(REGION_SCRIPT_SHARES)))
-                .unwrap_or(u64::MAX);
+            u64::from(script_budget).saturating_mul(cost::speed(flavour).region_shares);
         Self {
             step,
             script_budget,
             region_budget,
             coalescing: Coalescing::Reference,
-            flavour: EngineFlavour::SecondLife,
+            flavour,
             script_delay_factor: 1.0,
         }
     }
@@ -135,7 +101,7 @@ pub struct TickReport {
     pub tick: Tick,
     /// Every slice run, in the order they ran.
     pub slices: Vec<(CallerId, Slice)>,
-    /// Instructions charged, over all scripts.
+    /// Script time charged, over all scripts, in nanoseconds.
     pub used: u64,
     /// How many scripts were runnable when the tick started.
     pub runnable: u32,
@@ -147,7 +113,7 @@ pub struct TickReport {
 /// Every script instance of a region, and the tick they run at.
 ///
 /// Each [`Self::tick`] advances the tick by one and gives every runnable
-/// instance up to [`EngineConfig::script_budget`] instructions, until the
+/// instance up to [`EngineConfig::script_budget`] of script time, until the
 /// region's [`EngineConfig::region_budget`] is spent. Instances are served in
 /// the order of their [`CallerId`]s, starting just after the one the previous
 /// tick served last, so when the region is over budget every script runs
@@ -232,8 +198,7 @@ pub struct ScriptUsage {
     /// ([`Instance::script_memory`]).
     pub memory: u32,
     /// The script time it has been taking each second, averaged over the
-    /// last [`LOAD_WINDOW_SECONDS`]: its load at
-    /// [`SCRIPT_INSTRUCTIONS_PER_SECOND`].
+    /// last [`LOAD_WINDOW_SECONDS`].
     pub time: Duration,
 }
 
@@ -294,8 +259,8 @@ impl Engine {
         let instance = self.instances.get(&id)?;
         let ticks_per_second =
             Duration::from_secs(1).as_secs_f64() / self.config.step.as_secs_f64();
-        let rate = f64::from(u32::try_from(SCRIPT_INSTRUCTIONS_PER_SECOND).unwrap_or(u32::MAX));
-        let seconds = instance.load() * ticks_per_second / rate;
+        // The load is in charged nanoseconds a tick.
+        let seconds = instance.load() * ticks_per_second / 1e9;
         Some(ScriptUsage {
             id,
             memory: instance.script_memory(self.config.flavour),
@@ -1524,7 +1489,7 @@ impl Engine {
         share
     }
 
-    /// Run the instance `id` for up to `share` instructions of what is left
+    /// Run the instance `id` for up to `share` of script time of what is left
     /// of the region's budget, slice after slice while it has something to
     /// run, posting what each slice raised; answers what is left of the
     /// share. A slice that hands its turn to a script it started
@@ -1565,8 +1530,9 @@ impl Engine {
             script_left = script_left.saturating_sub(slice.used);
             *region_left = region_left.saturating_sub(u64::from(slice.used));
             report.used = report.used.saturating_add(u64::from(slice.used));
-            // Every body runs at least one instruction, so a slice that
-            // charged nothing had nothing to run.
+            // Every body runs at least one instruction, and every instruction
+            // is charged something (`vm::cost`), so a slice that charged
+            // nothing had nothing to run.
             let stop = slice.used == 0 || matches!(slice.outcome, Outcome::Idle);
             let handed = match slice.outcome {
                 Outcome::Handed(target) => vec![target],

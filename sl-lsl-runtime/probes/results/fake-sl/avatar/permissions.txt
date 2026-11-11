@@ -1,5 +1,5 @@
 grid: fake-sl
-date: 2026-11-09
+date: 2026-11-11
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating Mono
@@ -31,8 +31,8 @@ PROBE avatar/permissions rec=held step=2 why=answer answer=16 perms=16 granter=o
 PROBE avatar/permissions rec=waiting drive=answer grant=0
 PROBE avatar/permissions rec=asked step=3 of=owner mask=1044
 # answer grant=0
-# question permissions=16 object="Object" owner="<first> <last>" experience=none
 PROBE avatar/permissions rec=held step=3 why=answer answer=0 perms=0 granter=owner
+# question permissions=16 object="Object" owner="<first> <last>" experience=none
 PROBE avatar/permissions rec=waiting drive=answer grant=1044
 PROBE avatar/permissions rec=asked step=4 of=owner mask=16
 # answer grant=1044

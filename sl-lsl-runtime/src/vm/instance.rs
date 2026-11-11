@@ -1,5 +1,5 @@
 //! One running script: its instance state, and the interpreter that advances
-//! it a bounded number of instructions at a time.
+//! it for a bounded share of script time at a time.
 
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -31,30 +31,6 @@ use crate::vm::report::Warning;
 mod saved;
 
 pub(crate) use saved::{restore, save};
-
-/// Instructions charged for calling a library function, on top of the one the
-/// `CallBuiltin` instruction itself costs (book chapter
-/// `simulator/lsl-engine.md`, section 3).
-///
-/// Measured on aditi (Mono, 2026-09-28, loops of 400 000 and 1 000 000
-/// iterations, about two seconds each, so `llGetTime`'s whole-frame steps
-/// are a 1% error): a loop calling `llAbs` runs at 226 400 iterations a
-/// second where the same loop empty runs at 500 000, so one of its iterations
-/// costs 2.21 empty ones — 1148 charged instructions against 520. The `llAbs`
-/// iteration is eleven instructions and a back-edge (523) plus this.
-pub const BUILTIN_CALL_COST: u32 = 625;
-
-/// Instructions charged for a jump taken backwards — a loop going round
-/// again — on top of the one the jump itself costs.
-///
-/// Measured on aditi (the same runs as [`BUILTIN_CALL_COST`]): an empty `for`
-/// loop, eight of our instructions an iteration, runs at 500 000 iterations
-/// a second, and one that also assigns, multiplies and adds (fourteen) at
-/// 494 300 — six more instructions cost barely one per cent. Mono's time is in
-/// the scheduler check at each loop back-edge, not in the arithmetic between
-/// them. With this, the two loops charge 520 and 526 an iteration, which
-/// predicts 494 300 for the second exactly.
-pub const BACKWARD_JUMP_COST: u32 = 512;
 
 /// The deepest the call stack may grow. A frame costs a Mono script at least
 /// sixteen bytes of its 64 KiB, so no script can recurse deeper than this on
@@ -255,9 +231,10 @@ pub enum Outcome {
 pub struct Slice {
     /// How it ended.
     pub outcome: Outcome,
-    /// Instructions charged, counting each library call and each loop
-    /// back-edge at its cost. May exceed the budget by the cost of the one
-    /// instruction that crossed it, never by more.
+    /// Script time charged, in nanoseconds as the region's engine charges
+    /// them (`vm::cost`): each instruction, library call and loop back-edge
+    /// at its cost. May exceed the budget by the cost of the one instruction
+    /// that crossed it, never by more.
     pub used: u32,
     /// What library calls of the slice said refusing their arguments
     /// (`Could not find script 'Nope'.`), in order, for the engine to say on
@@ -526,15 +503,15 @@ pub struct Instance {
     /// What the library may read and write: the detected block, the timer
     /// and the start parameter.
     data: ScriptData,
-    /// Instructions charged past the share of a tick already served — one
+    /// Script time charged past the share of a tick already served — one
     /// operation that cost more than was left, a join of a long list — and
     /// owed out of the shares of the ticks that follow.
     overdraft: u32,
     /// What the script's memory holds and may hold, as its grid counts it.
     memory: Memory,
-    /// Instructions charged in the tick under way, for [`Self::load`].
+    /// Script time charged in the tick under way, for [`Self::load`].
     charged: u64,
-    /// The instructions the script runs a tick, averaged over
+    /// The script time the script runs a tick, averaged over
     /// [`LOAD_WINDOW_SECONDS`] of ticks: its share of the region's script
     /// time.
     load: f64,
@@ -760,7 +737,8 @@ impl Machine<'_> {
             .get(index(frame.pc))
             .ok_or_else(|| internal("ran past the end of a body"))?;
         frame.pc = frame.pc.saturating_add(1);
-        *used = used.saturating_add(1);
+        let speed = cost::speed(self.memory.flavour());
+        *used = used.saturating_add(speed.instruction);
         match instr {
             Instr::Const(id) => stack.push(
                 program
@@ -878,7 +856,7 @@ impl Machine<'_> {
                     _ => operand::binary(op, left, right)?,
                 };
                 if let Operand::Value(value) = &result {
-                    *used = used.saturating_add(cost::operator(op, value));
+                    *used = used.saturating_add(speed.operator(op, value));
                     self.memory.made(value)?;
                 }
                 let result = match (in_place, result) {
@@ -981,8 +959,8 @@ impl Machine<'_> {
                         .into_iter()
                         .unzip();
                 *used = used
-                    .saturating_add(BUILTIN_CALL_COST)
-                    .saturating_add(cost::call(id, &args));
+                    .saturating_add(speed.builtin_call)
+                    .saturating_add(speed.call(id, &args));
                 let mut ctx = ScriptCtx::new(
                     self.caller,
                     self.now,
@@ -1090,15 +1068,15 @@ impl Machine<'_> {
                     Some(objects::operand(value, object)),
                 ));
             }
-            Instr::Jump(target) => Self::jump(frame, target, used),
+            Instr::Jump(target) => Self::jump(frame, target, speed.backward_jump, used),
             Instr::JumpIfFalse(target) => {
                 if !pop_operand(stack)?.is_true(self.memory.flavour().is_opensim()) {
-                    Self::jump(frame, target, used);
+                    Self::jump(frame, target, speed.backward_jump, used);
                 }
             }
             Instr::JumpIfTrue(target) => {
                 if pop_operand(stack)?.is_true(self.memory.flavour().is_opensim()) {
-                    Self::jump(frame, target, used);
+                    Self::jump(frame, target, speed.backward_jump, used);
                 }
             }
             Instr::StateChange(target) => {
@@ -1139,12 +1117,13 @@ impl Machine<'_> {
         Ok(Flow::Next)
     }
 
-    /// Continue at `target`, charging a loop's back-edge its cost.
-    const fn jump(frame: &mut Frame, target: CodeOffset, used: &mut u32) {
+    /// Continue at `target`, charging a loop's back-edge `backward` on top
+    /// of the jump's instruction.
+    const fn jump(frame: &mut Frame, target: CodeOffset, backward: u32, used: &mut u32) {
         // `pc` already points past the jump, so a target at or before the
         // jump itself goes back.
         if target.0 < frame.pc {
-            *used = used.saturating_add(BACKWARD_JUMP_COST);
+            *used = used.saturating_add(backward);
         }
         frame.pc = target.0;
     }
@@ -1226,14 +1205,14 @@ impl Instance {
         share.saturating_sub(paid)
     }
 
-    /// Owe `instructions` charged past this tick's share, out of the next.
-    pub(crate) const fn overdraw(&mut self, instructions: u32) {
-        self.overdraft = self.overdraft.saturating_add(instructions);
+    /// Owe `charged` script time past this tick's share, out of the next.
+    pub(crate) const fn overdraw(&mut self, charged: u32) {
+        self.overdraft = self.overdraft.saturating_add(charged);
     }
 
-    /// Count `instructions` charged to the script in the tick under way.
-    pub(crate) fn charge(&mut self, instructions: u32) {
-        self.charged = self.charged.saturating_add(u64::from(instructions));
+    /// Count `charged` script time to the script in the tick under way.
+    pub(crate) fn charge(&mut self, charged: u32) {
+        self.charged = self.charged.saturating_add(u64::from(charged));
     }
 
     /// The tick is over: fold what it charged into [`Self::load`], `weight`
@@ -1244,9 +1223,9 @@ impl Instance {
         self.charged = 0;
     }
 
-    /// The instructions the script has been running a tick, averaged over the
-    /// last [`LOAD_WINDOW_SECONDS`]: what the region's top-scripts report
-    /// ranks it by.
+    /// The script time, in charged nanoseconds, the script has been running a
+    /// tick, averaged over the last [`LOAD_WINDOW_SECONDS`]: what the region's
+    /// top-scripts report ranks it by.
     #[must_use]
     pub const fn load(&self) -> f64 {
         self.load
@@ -1834,7 +1813,8 @@ impl Instance {
         })
     }
 
-    /// Run at most `budget` instructions at tick `now`, stopping early at the
+    /// Run for at most `budget` nanoseconds of script time, as the script's
+    /// engine charges them, at tick `now`, stopping early at the
     /// end of a body, a sleep, a state change, a reset or an error. `step` is
     /// the length of a tick, which turns a sleep's seconds into ticks.
     ///

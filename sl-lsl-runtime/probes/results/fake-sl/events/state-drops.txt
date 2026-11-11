@@ -1,12 +1,12 @@
 grid: fake-sl
-date: 2026-11-09
+date: 2026-11-11
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating Mono
 settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
 
-PROBE events/state-drops rec=start region="Fake Region" channel="Second Life Server" version="sl-fake-grid 0.1.0"
 # question permissions=4 object="Object" owner="<first> <last>" experience=none
+PROBE events/state-drops rec=start region="Fake Region" channel="Second Life Server" version="sl-fake-grid 0.1.0"
 PROBE events/state-drops rec=waiting drive=answer grant=4
 # answer grant=4
 PROBE events/state-drops rec=held perms=4
@@ -25,6 +25,6 @@ PROBE events/state-drops rec=waiting drive=chat channel=8 text="from state_exit"
 # chat channel=7 text="after"
 # chat channel=8 text="from state_exit"
 PROBE events/state-drops rec=two sensed=0 sensors=0 presses=1 heard7=0 heard8=0 at_target=1 at_rot_target=1 ticks=14
-PROBE events/state-drops rec=fresh sensed=1 at_target=1 at_rot_target=1
 # script-control-change action=release controls=256 pass_to_agent=0
+PROBE events/state-drops rec=fresh sensed=1 at_target=1 at_rot_target=1
 PROBE events/state-drops rec=end

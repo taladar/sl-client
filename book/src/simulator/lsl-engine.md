@@ -299,9 +299,11 @@ One region, one heartbeat, N script instances.
 
 - **Each tick, each runnable instance gets at most a fixed number of
   instructions** (a per-script budget), and the region as a whole a fixed
-  total. Both are counted in instructions, never in elapsed time: a
-  wall-clock slice would make how far a script gets depend on the machine
-  and its load, and with it the *order* of observable effects. This is the
+  total. Both are counted in instructions (as built, in the script time each
+  instruction is charged by the imitated grid's measured speed), never in
+  elapsed time: a wall-clock slice would make how far a script gets depend on
+  the machine and its load, and with it the *order* of observable effects.
+  This is the
   determinism rule of `roadmap/context/lsl.md`, and the one decision most
   likely to be made wrongly by reflex.
 - **Runnable** means: running (the run flag is set), not sleeping past
@@ -354,35 +356,59 @@ its share while the region's lasts; its `TickReport` carries every slice,
 the instructions used, and the runnable and served counts behind the
 scripts-run percentage.
 
-- **Costs.** Every instruction is one; a library call adds `BUILTIN_CALL_COST`,
-  and a jump taken backwards — a loop going round — adds `BACKWARD_JUMP_COST`,
-  because on aditi Mono's time goes into the scheduler check at each loop
-  back-edge, not into the arithmetic between them — six more instructions in a
-  loop body cost it one per cent. So a back-edge is charged 513, a call 626, and
-  a script runs 260 million a second (`SCRIPT_INSTRUCTIONS_PER_SECOND`): an
-  empty loop at the 500 000 iterations a second aditi runs it at. The doc
-  comments carry the measurements.
+- **Costs are each engine's measured time** (`vm/cost.rs`, `Speed`). The
+  scheduler charges what a script does in nanoseconds of script time — what
+  the operation took on the grid the region imitates — and a share is a
+  length of that time, so a script gets as far in a tick as it would there.
+  The time is the model's, never the machine's. The three engines differ by
+  orders of magnitude, so each has its own profile, fitted to its own
+  transcripts:
+
+  | | Second Life (Mono) | YEngine | XEngine |
+  | --- | --- | --- | --- |
+  | an instruction | 4 ns | 1 ns | 1 ns |
+  | a back-edge, on top | 1 968 ns | 27 ns | 2 281 ns |
+  | an empty loop | 500 000 a second | 28.6 million | 437 000 |
+  | a library call, on top | 2 405 ns | 4 ns | 21 ns |
+  | `list + list`, 1/500 long | 186/7 776 µs | 7.0/9.6 µs | 0.18/2.2 µs |
+  | region shares | 130 | 2 | 100 |
+
+  On aditi Mono's time goes into the scheduler check at each loop back-edge,
+  not into the arithmetic between them — six more instructions in a loop body
+  cost it one per cent — and OpenSim's engines, which compile to CIL, show no
+  cost for the arithmetic at all. An instruction is still charged at least a
+  nanosecond, because the scheduler takes a slice that charged nothing for one
+  that had nothing to run; under YEngine that charges a loop of three
+  operations a sixth more than measured. The doc comments carry the
+  measurements.
 - **Size-proportional charges** (`vm/cost.rs`). Joining lists or strings with
-  `+` costs what aditi measured for the length of the result, through the
-  measured points joined by straight lines and on along the last one's slope:
-  a new list 186 µs before it holds anything and some 16 µs an element after,
-  a string 11 µs and some 0.19 µs a character (`LIST_JOIN`, `STRING_JOIN`).
-  `llGetListLength` is flat there, as the flat call cost charges it. A test
-  runs the probes' own loops in the VM and holds every charge to its aditi
-  transcript within 5 %. The library's size-dependent functions get their
-  charges from the same table as they are written (book: gridspec `lsl.md`,
-  § *What a call costs*).
+  `+` costs what the grid measured for the length of the result, through the
+  measured points joined by straight lines and on along the last one's slope.
+  On Second Life a new list costs 186 µs before it holds anything and some
+  16 µs an element after, a string 11 µs and some 0.19 µs a character, so a
+  list built with `+=` in a loop is quadratic and as slow as on the grid;
+  YEngine's list costs 7 µs and some 5 ns an element. The library's
+  size-dependent functions get their charges from each engine's table of the
+  same probes (book: gridspec `lsl.md`, § *What a call costs*); a function
+  whose cost does not grow, or is lost in the empty loop's noise, is charged
+  the flat call. A test runs the probes' own loops in the VM under each
+  flavour and holds every charge to that grid's transcript within 5 %, or
+  within the noise of its empty loop (some 20 ns under YEngine, 150 ns under
+  XEngine).
 - **Overdraft.** A slice stops at the instruction that crosses its budget, and
-  that one may cost more than was left — a join of a long list costs millions.
-  What it overdrew comes out of the instance's next shares, and the region's
-  budget alike, so a script sits out the ticks its operation would still be
-  running for, and doing its work in large pieces never makes it faster.
-- **Budgets.** `EngineConfig::for_step(step)` derives the per-script share
-  from `SCRIPT_INSTRUCTIONS_PER_SECOND` and the region's from
-  `REGION_SCRIPT_SHARES` shares, so the numbers hold whatever step the
-  heartbeat picks. 130 shares is aditi's: 128 busy scripts each kept the rate
-  of one, 256 ran at half (book: gridspec `lsl.md`, § *How many scripts a
-  region runs*).
+  that one may cost more than was left — a join of a long list costs
+  milliseconds. What it overdrew comes out of the instance's next shares, and
+  the region's budget alike, so a script sits out the ticks its operation would
+  still be running for, and doing its work in large pieces never makes it
+  faster.
+- **Budgets.** `EngineConfig::for_step(step, flavour)` makes a script's share
+  the tick's length and the region's that many times the engine's shares, so
+  the numbers hold whatever step the heartbeat picks. 130 shares is aditi's:
+  128 busy scripts each kept the rate of one, 256 ran at half (book: gridspec
+  `lsl.md`, § *How many scripts a region runs*). YEngine runs its scripts on
+  `NumThreadScriptWorkers` threads, two by default, and 16 busy scripts on the
+  local OpenSim shared 2.2 scripts' rate; XEngine's pool holds up to
+  `MaxThreads`, a hundred, and its total rose to 83 shares under 128 scripts.
 - **Sleeping** (`llSleep`, and a call's forced delay) is
   `wake = now + ceil(seconds / step)`, the seconds rounded to whole
   microseconds first so `0.2` as an `f32` — a hair above a fifth — is not

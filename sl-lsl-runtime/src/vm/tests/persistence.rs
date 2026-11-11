@@ -147,8 +147,7 @@ fn kept_held() -> String {
 
 /// A region imitating `flavour`, merging events as that grid does.
 fn region(flavour: EngineFlavour) -> Engine {
-    let mut config = EngineConfig::for_step(STEP);
-    config.flavour = flavour;
+    let mut config = EngineConfig::for_step(STEP, flavour);
     if flavour.is_opensim() {
         config.coalescing = Coalescing::Never;
     }

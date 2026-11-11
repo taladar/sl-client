@@ -1,9 +1,10 @@
 grid: fake-opensim
-date: 2026-11-10
+date: 2026-11-11
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: unknown (no start record)
 engine: sl-lsl-runtime imitating YEngine
 settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
 complete: no
 
+# animations avatar=other playing="land"
 # compile error in "Probe": "(76,19) Error: no function `llSitOnLink`"

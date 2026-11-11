@@ -1,15 +1,15 @@
 grid: fake-opensim
-date: 2026-11-10
+date: 2026-11-11
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating YEngine
 settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
 
 PROBE vm/throughput rec=start region="Fake Region" channel="OpenSim" version="sl-fake-grid 0.1.0"
-PROBE vm/throughput rec=loop loop=empty run=0 iterations=1000000 seconds=2.000000 per_second=500000
-PROBE vm/throughput rec=loop loop=three-ops run=0 iterations=1000000 seconds=2.036000 per_second=491159
-PROBE vm/throughput rec=loop loop=llAbs run=0 iterations=1000000 seconds=4.418000 per_second=226347
-PROBE vm/throughput rec=loop loop=empty run=1 iterations=1000000 seconds=2.000000 per_second=500000
-PROBE vm/throughput rec=loop loop=three-ops run=1 iterations=1000000 seconds=2.055000 per_second=486618
-PROBE vm/throughput rec=loop loop=llAbs run=1 iterations=1000000 seconds=4.418000 per_second=226347
+PROBE vm/throughput rec=loop loop=empty run=0 iterations=1000000 seconds=0.018000 per_second=55555556
+PROBE vm/throughput rec=loop loop=three-ops run=0 iterations=1000000 seconds=0.055000 per_second=18181818
+PROBE vm/throughput rec=loop loop=llAbs run=0 iterations=1000000 seconds=0.036000 per_second=27777778
+PROBE vm/throughput rec=loop loop=empty run=1 iterations=1000000 seconds=0.036000 per_second=27777778
+PROBE vm/throughput rec=loop loop=three-ops run=1 iterations=1000000 seconds=0.055000 per_second=18181818
+PROBE vm/throughput rec=loop loop=llAbs run=1 iterations=1000000 seconds=0.036000 per_second=27777778
 PROBE vm/throughput rec=end

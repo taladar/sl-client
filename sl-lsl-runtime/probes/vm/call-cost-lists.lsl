@@ -1,13 +1,16 @@
 // probe: vm/call-cost-lists
 // vary: calls, seconds, per_second
 // drive: none
+// deadline: 720
 //
 // What a list function costs as its list grows: each function timed at
 // lists of 1, 10, 100 and 500 integers, for a second and a half each, as
 // calls per second. A loop with an empty body is the baseline the cost of a
 // call is read against. The clock is read every ten calls rather than after
 // a fixed count, since llGetTime moves in 1/45 s frames on Second Life and
-// one frame is about 1.5 % of the run.
+// one frame is about 1.5 % of the run. The deadline is for the fake grid
+// imitating YEngine: an empty loop there runs some 30 million times a
+// second of script time, which takes the runtime longer than real time.
 string ID = "vm/call-cost-lists";
 
 string q(string s)

@@ -12,10 +12,10 @@
 //!
 //! - [`Instance`] — one script: a shared program plus its own globals,
 //!   state, event queue, run flag and the body in progress;
-//!   [`Instance::run_slice`] advances it by at most a budget of instructions
+//!   [`Instance::run_slice`] advances it by at most a budget of script time
 //!   and says how it stopped ([`Outcome`]).
 //! - [`Engine`] — a region's instances, served round-robin each
-//!   [`Engine::tick`] with a per-script and a region-wide instruction budget
+//!   [`Engine::tick`] with a per-script and a region-wide budget
 //!   ([`EngineConfig`]).
 //! - [`Host`] — the world, as the library reaches it; [`ScriptCtx`] — the
 //!   calling script, as a library function sees it.
@@ -52,8 +52,9 @@
 //!   [`DEBUG_CHANNEL`] in the words of the grid it imitates
 //!   ([`EngineFlavour`]) through [`Host::say`].
 //!
-//! Time is counted in [`Tick`]s, never read from a clock, and budgets in
-//! instructions, never in elapsed time: a script's observable behaviour must
+//! Time is counted in [`Tick`]s, never read from a clock, and budgets in the
+//! script time each operation is charged by the grid's measured speed
+//! (`vm::cost`), never in elapsed time: a script's observable behaviour must
 //! not depend on the machine it runs on.
 
 pub mod avatars;
@@ -100,10 +101,7 @@ pub use economy::{
     MoneyRefusal, PAY_DEFAULT, PAY_HIDE, PAYMENT_STOPPED, PayPrice, Payment, PaymentAdmission,
     SECOND_LIFE_DEFAULT_BUTTONS, TransactionResult,
 };
-pub use engine::{
-    Engine, EngineConfig, REGION_SCRIPT_SHARES, SCRIPT_INSTRUCTIONS_PER_SECOND, ScriptUsage,
-    TickReport,
-};
+pub use engine::{Engine, EngineConfig, ScriptUsage, TickReport};
 pub use experiences::{
     Admission, EXPERIENCE_PERMISSIONS, ExperienceDetails, ExperienceError, ExperienceQuestion,
     KeyValueStore, ScriptExperience, SitRefusal,
@@ -112,8 +110,8 @@ pub use fault::{Fault, RuntimeError};
 pub use flavour::EngineFlavour;
 pub use host::{CallerId, Host};
 pub use instance::{
-    Arrival, BACKWARD_JUMP_COST, BUILTIN_CALL_COST, Coalescing, Instance, LOAD_WINDOW_SECONDS,
-    MAX_CALL_DEPTH, MAX_QUEUED, OPENSIM_SCRIPT_MEMORY, Outcome, PostError, Posted, Slice,
+    Arrival, Coalescing, Instance, LOAD_WINDOW_SECONDS, MAX_CALL_DEPTH, MAX_QUEUED,
+    OPENSIM_SCRIPT_MEMORY, Outcome, PostError, Posted, Slice,
 };
 pub use linkset_data::{Answer, LinksetAction, LinksetChange, LinksetData, LinksetId};
 #[cfg(test)]

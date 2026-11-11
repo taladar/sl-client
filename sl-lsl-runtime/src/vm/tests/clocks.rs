@@ -89,8 +89,7 @@ pub(super) fn stage(
     epoch: i64,
 ) -> Result<Region, String> {
     let mut region = Region::new(flavour);
-    let mut config = EngineConfig::for_step(frame(flavour));
-    config.flavour = flavour;
+    let mut config = EngineConfig::for_step(frame(flavour), flavour);
     if flavour.is_opensim() {
         config.coalescing = crate::vm::Coalescing::Never;
     }

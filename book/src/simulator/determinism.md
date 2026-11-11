@@ -32,14 +32,17 @@ How ticks relate to the client's input is the one place time enters. A
 free-running one ticks on tokio's timer, so a run that must be comparable
 either steps the region or pauses tokio's clock (`tokio_clock`).
 
-## The budget is counted in instructions
+## The budget is counted in modelled time
 
-Each tick, each runnable instance gets at most a fixed number of
-instructions, and the region a fixed total ([the
+Each tick, each runnable instance gets at most a fixed share, and the region a
+fixed total ([the
 engine](lsl-engine.md#3-scheduling-an-instruction-budget-round-robin-per-tick)).
-A slice measured in microseconds would make how far a script gets — and so the
-order of what it says — depend on the machine and its load. This is the one
-decision most likely to be made wrongly by reflex.
+The share is counted in the script time each operation is *charged* — what the
+imitated grid was measured to take for it, from a table (`vm/cost.rs`) — never
+in the time the machine took. A slice measured on the host's clock would make
+how far a script gets — and so the order of what it says — depend on the
+machine and its load. This is the one decision most likely to be made wrongly
+by reflex.
 
 ## Randomness comes from the seed
 

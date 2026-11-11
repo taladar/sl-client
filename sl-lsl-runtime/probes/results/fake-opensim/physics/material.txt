@@ -1,5 +1,5 @@
 grid: fake-opensim
-date: 2026-11-10
+date: 2026-11-11
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating YEngine
@@ -7,5 +7,5 @@ settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor
 complete: no
 
 PROBE physics/material rec=start region="Fake Region" channel="OpenSim" version="sl-fake-grid 0.1.0"
-# debug-channel: from="Object" text="YEngine: llGetCenterOfMass is not implemented by this grid (script: Probe event: state_entry primID: d1ac1b6d-25d8-a061-cb37-07c7cf752961 at: <128,124,26>) Script must be Reset to re-enable.\n"
-# debug-channel by=other: from="Object" text="YEngine: llGetCenterOfMass is not implemented by this grid (script: Probe event: state_entry primID: d1ac1b6d-25d8-a061-cb37-07c7cf752961 at: <128,124,26>) Script must be Reset to re-enable.\n"
+# debug-channel: from="Object" text="YEngine: llGetCenterOfMass is not implemented by this grid (script: Probe event: state_entry primID: d4106609-9999-90a7-c641-4a240a566a46 at: <128,124,26>) Script must be Reset to re-enable.\n"
+# debug-channel by=other: from="Object" text="YEngine: llGetCenterOfMass is not implemented by this grid (script: Probe event: state_entry primID: d4106609-9999-90a7-c641-4a240a566a46 at: <128,124,26>) Script must be Reset to re-enable.\n"

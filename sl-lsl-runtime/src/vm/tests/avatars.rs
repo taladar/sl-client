@@ -45,8 +45,7 @@ fn transcripts(name: &str) -> [(EngineFlavour, &'static str); 3] {
 fn avatar_runner(flavour: EngineFlavour) -> Runner {
     let mut runner = Runner::new(flavour);
     // The grids' own frames: a held key repeats by them.
-    let mut config = EngineConfig::for_step(super::clocks::frame(flavour));
-    config.flavour = flavour;
+    let mut config = EngineConfig::for_step(super::clocks::frame(flavour), flavour);
     if flavour.is_opensim() {
         config.coalescing = crate::vm::Coalescing::Never;
     }

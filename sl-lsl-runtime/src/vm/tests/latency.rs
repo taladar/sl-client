@@ -17,13 +17,12 @@ fn staged(
     scripts: &[(CallerId, &str)],
 ) -> Result<(Engine, Recorder), String> {
     let mut engine = Engine::new(EngineConfig {
-        flavour,
         coalescing: if flavour.is_opensim() {
             Coalescing::Never
         } else {
             Coalescing::Reference
         },
-        ..EngineConfig::for_step(step)
+        ..EngineConfig::for_step(step, flavour)
     });
     let mut host = Recorder::default();
     let _none = host
