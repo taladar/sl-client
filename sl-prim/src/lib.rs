@@ -9,7 +9,8 @@
 //!
 //! The pieces (added over the course of the viewer road map) are:
 //!
-//! - [`lod`] — the [`PrimLod`] level newtype and its detail→step-count map.
+//! - [`lod`] — the [`PrimLod`] level newtype and its detail→step-count map,
+//!   and the [`LodScaleBias`] that sizes a volume for level selection.
 //! - [`shape`] — the dequantized float [`PrimShape`] tessellation input and its
 //!   [`PathCurve`] / [`ProfileCurve`] / [`HoleType`] curve enums.
 //! - [`geometry`] — the [`PrimMesh`] / [`PrimFace`] output types.
@@ -33,10 +34,10 @@ pub mod volume;
 
 pub use flexi::{FlexiAttributes, FlexiChain};
 pub use geometry::{PrimFace, PrimFaceId, PrimMesh};
-pub use lod::{MIN_DETAIL_FACES, PRIM_LOD_COUNT, PrimLod};
+pub use lod::{LodScaleBias, MIN_DETAIL_FACES, PRIM_LOD_COUNT, PrimLod};
 pub use path::{Path, PathPoint};
 pub use profile::{Profile, ProfileFace, ProfileFaceId, ProfilePoint};
-pub use shape::{HoleType, PathCurve, PrimShape, ProfileCurve};
+pub use shape::{HoleType, PathByteForm, PathCurve, PrimShape, ProfileCurve};
 pub use volume::{
     SculptSeams, SculptStitching, lod_triangle_counts, tessellate, tessellate_sculpted,
     tessellate_with_path,

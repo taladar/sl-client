@@ -12,8 +12,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::probe::{
     AgentReadout, ConversationReadout, EnvironmentReadout, InventoryFolderReadout, InventoryRoot,
-    LogEntry, LogStream, NotificationReadout, ParcelMediaReadout, QuiescenceReadout,
-    SelectedObject, StatusReadout, WorldMapReadout,
+    LogEntry, LogStream, MirrorsReadout, NotificationReadout, ParcelMediaReadout,
+    QuiescenceReadout, SelectedObject, StatusReadout, WorldMapReadout,
 };
 
 /// One of the viewer's state readouts.
@@ -61,6 +61,8 @@ pub enum Probe {
     WorldMap,
     /// The agent parcel's legacy media ([`ParcelMediaReadout`]).
     ParcelMedia,
+    /// The realtime mirrors captured live ([`MirrorsReadout`]).
+    Mirrors,
 }
 
 impl fmt::Display for Probe {
@@ -86,6 +88,7 @@ impl fmt::Display for Probe {
             Self::Environment => f.write_str("environment"),
             Self::WorldMap => f.write_str("world map"),
             Self::ParcelMedia => f.write_str("parcel media"),
+            Self::Mirrors => f.write_str("mirrors"),
         }
     }
 }
@@ -120,6 +123,8 @@ pub enum ProbeReadout {
     WorldMap(WorldMapReadout),
     /// The agent parcel's legacy media.
     ParcelMedia(ParcelMediaReadout),
+    /// The realtime mirrors.
+    Mirrors(MirrorsReadout),
 }
 
 /// A test of the JSON value a [`StateCondition::Probe`]'s pointer selects in a

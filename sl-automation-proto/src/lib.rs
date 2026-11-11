@@ -100,9 +100,10 @@ pub use crate::probe::{
     AgentReadout, CameraView, ChatKind, ClockTime, ConversationReadout, ConversationRef,
     DiagnosticLine, DiagnosticsReadout, EnvironmentReadout, FeetReadout, FootReadout,
     InventoryEntry, InventoryFolderReadout, InventoryRoot, LogEntry, LogLevel, LogPage, LogStream,
-    MapItemLayerReadout, MapItemReadout, MapRegionReadout, NotificationReadout, OfferedButton,
-    ParcelMediaReadout, QuiescenceReadout, RegionReadout, SelectedObject, SkyReadout, SpeakerKind,
-    StatusReadout, TeleportReadout, TeleportState, TranscriptLine, WaterReadout, WorldMapReadout,
+    MapItemLayerReadout, MapItemReadout, MapRegionReadout, MirrorReadout, MirrorsReadout,
+    NotificationReadout, OfferedButton, ParcelMediaReadout, QuiescenceReadout, RegionReadout,
+    SelectedObject, SkyReadout, SpeakerKind, StatusReadout, TeleportReadout, TeleportState,
+    TranscriptLine, WaterReadout, WorldMapReadout,
 };
 pub use crate::report::FailureReport;
 pub use crate::selector::SelectorError;

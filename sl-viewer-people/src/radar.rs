@@ -992,7 +992,7 @@ pub fn radar_floater_spec() -> FloaterSpec {
         dock_host: None,
         caps: FloaterCaps {
             resizable: true,
-            minimizable: false,
+            minimizable: true,
             closable: true,
             dockable: false,
         },

@@ -12,9 +12,9 @@ use bevy::ecs::system::SystemState;
 use bevy::prelude::*;
 use sl_automation_proto::{
     AgentReadout, CameraView, ClockTime, ConversationReadout, EnvironmentReadout, InventoryEntry,
-    InventoryFolderReadout, InventoryRoot, NotificationReadout, OfferedButton, ParcelMediaReadout,
-    QuiescenceReadout, RegionReadout, SelectedObject, SkyReadout, StatusReadout, WaterReadout,
-    WorldMapReadout,
+    InventoryFolderReadout, InventoryRoot, MirrorsReadout, NotificationReadout, OfferedButton,
+    ParcelMediaReadout, QuiescenceReadout, RegionReadout, SelectedObject, SkyReadout,
+    StatusReadout, WaterReadout, WorldMapReadout,
 };
 use sl_client_bevy::{
     FolderState, InventoryFolderKey, SlAgentParcel, SlCurrentRegion, SlIdentity, SlRegion,
@@ -308,6 +308,16 @@ pub fn read_world_map(world: &mut World) -> WorldMapReadout {
 pub fn read_parcel_media(world: &mut World) -> ParcelMediaReadout {
     ProbeSources::of(world)
         .parcel_media
+        .map(|reader| reader(world))
+        .unwrap_or_default()
+}
+
+/// The realtime mirrors captured live, through [`ProbeSources::mirrors`]. An
+/// app that renders no mirrors captures none, and draws none.
+#[must_use]
+pub fn read_mirrors(world: &mut World) -> MirrorsReadout {
+    ProbeSources::of(world)
+        .mirrors
         .map(|reader| reader(world))
         .unwrap_or_default()
 }

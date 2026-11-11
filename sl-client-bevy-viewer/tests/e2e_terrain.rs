@@ -240,6 +240,46 @@ mod test {
         Ok(())
     }
 
+    /// Low ground behind the agent, below the terrace it stands on: 2.4 m
+    /// and 12 m west of the terrace wall at 102.4 m, which stands between
+    /// the point and the camera behind an agent that faces east.
+    const BELOW_THE_WALL: [(f32, f32); 2] = [(100.0, 120.0), (90.0, 128.0)];
+
+    /// **Low ground at the foot of a rise is reached**: the pointer rests on
+    /// a point of the lower terrace close under the wall of the one the agent
+    /// stands on. The camera has to frame the point from where the terrace
+    /// does not hide it; framed from the side it was on, its eye ended inside
+    /// the terrace and no click reached the point
+    /// ([[viewer-automation-ground-reveal-eye-under-terrain]]).
+    #[test]
+    fn low_ground_under_a_terrace_wall_is_reached() -> Result<(), TestError> {
+        stage("terrain_below_the_wall", ImitatedGrid::SecondLife).run(async |stage: &Stage| {
+            let alpha = &stage.viewer("Alpha")?;
+            arrived(alpha).await?;
+            let region = terrain();
+            for (east, north) in BELOW_THE_WALL {
+                let [hit_east, hit_north, height] = alpha
+                    .world()
+                    .ground(stage.home_region(), east, north)
+                    .timeout(WAIT)
+                    .hover()
+                    .await?;
+                let declared = region.height_at(east, north);
+                if (hit_east - east).hypot(hit_north - north) > AIM_SLOP
+                    || (height - declared).abs() > HEIGHT_SLOP
+                {
+                    return Err(format!(
+                        "asked for the ground at <{east}, {north}, {declared}>, the pointer \
+                         landed on <{hit_east}, {hit_north}, {height}>"
+                    )
+                    .into());
+                }
+            }
+            Ok(())
+        })?;
+        Ok(())
+    }
+
     /// **The ground as Second Life sends it**: outwards from where the agent
     /// stands, a message kept within 1,200 bytes, every patch transformed.
     #[test]

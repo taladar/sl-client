@@ -6,6 +6,7 @@ mod test {
     use std::time::Duration;
 
     use pretty_assertions::{assert_eq, assert_ne};
+    use sl_client_tokio::Permissions;
     use sl_client_tokio::{
         Arrival, ChatChannel, ChatType, Client, Command, Event, ExperienceKey,
         ExperiencePermission, LoginParams, LoginRequest, StartLocation, VoiceProvisionRequest,
@@ -1720,9 +1721,9 @@ mod test {
                     inventory_type,
                     name: "created-by-upload".to_owned(),
                     description: "the item whose announcement is under test".to_owned(),
-                    next_owner_mask: 0x0008_e000,
-                    group_mask: 0,
-                    everyone_mask: 0,
+                    next_owner_mask: Permissions::DEFAULT_NEXT_OWNER,
+                    group_mask: Permissions::NONE,
+                    everyone_mask: Permissions::NONE,
                     expected_upload_cost,
                     data,
                 })
@@ -8599,9 +8600,9 @@ default
             rez_selected: false,
             remove_item: false,
             item_flags: item.flags,
-            group_mask: item.permissions.group.bits(),
-            everyone_mask: item.permissions.everyone.bits(),
-            next_owner_mask: item.permissions.next_owner.bits(),
+            group_mask: item.permissions.group,
+            everyone_mask: item.permissions.everyone,
+            next_owner_mask: item.permissions.next_owner,
             item: task_item(item),
         }
     }

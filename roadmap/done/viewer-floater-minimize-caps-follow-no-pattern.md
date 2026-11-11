@@ -2,7 +2,7 @@
 id: viewer-floater-minimize-caps-follow-no-pattern
 title: Which floaters have a minimize button follows no pattern, and most that lack one should have it
 topic: viewer
-status: bugs
+status: done
 origin: the user opening the gallery's floaters while checking viewer-skin-glyphs-from-content (2026-09-24)
 refs: [viewer-skin-glyphs-from-content]
 ---
@@ -50,3 +50,35 @@ item properties are all minimizable there.
 
 Every floater's minimize box matches the reference floater it ports, and the
 rule is written down where the next floater author will meet it.
+
+## Resolution (2026-11-11)
+
+Every registered floater now names the reference window it ports:
+`FloaterElement` gained a required `reference: ReferenceFloater`, either
+`Xui { file, can_minimize }` (the default skin's file and its attribute, true
+when absent) or `Panel { shown_in }` for the three windows the reference shows
+as a panel (inventory gallery, nearby media, wearable editor), which take
+`LLFloater`'s default. `a_registered_floater_minimizes_as_its_reference_does`
+in `sl-client-bevy-viewer/src/floaters.rs` fails on any floater whose
+`FloaterCaps::minimizable` differs; it failed on the radar with its flip
+reverted. The rule is stated on `FloaterCaps::minimizable`, on
+`ReferenceFloater` and in the registry's module documentation.
+
+Checked against the reference's default skin (`skins/default/xui/en`; the
+`firestorm` skin Firestorm ships selected overrides no floater file), 27 spawn
+sites changed: 26 become minimizable (About, About Land, About Landmark,
+Region / Estate, both contact-set windows, the asset blacklist, the avatar and
+group pickers, both profiles, avatar render settings, the three experience
+windows, Search / Replace, Go to Line, item properties and both item
+previews, the mini-map, the panorama, the radar, three of the four RLVa
+floaters and the snapshot floater), and the emoji picker stops being
+minimizable, as `floater_emoji_picker.xml` says. The colour, texture and
+settings pickers, the inventory filters, Block by Name, the white-list entry
+and RLVa Strings stay unminimizable, as their reference files are. The
+mini-map's old comment cited the Vintage skin, the only one whose
+`floater_map.xml` turns minimize off.
+
+Not done: making the reference default the `FloaterCaps` default. Every spawn
+site already spells out all four caps, and a `Default` used by none of them
+would be dead API; the required `reference` field is what a new floater author
+meets, and the test is what catches a disagreement.

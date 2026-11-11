@@ -34,6 +34,7 @@
 
 use std::time::{Duration, Instant};
 
+use sl_client_tokio::Permissions;
 use sl_client_tokio::{
     AssetType, Command, Event, GestureActivation, InventoryFolderKey, InventoryItem, InventoryKey,
     InventoryType, NewInventoryItem, Throttle, Uuid, WearableType,
@@ -52,7 +53,7 @@ const GESTURE_ACTIVE_FLAG: u32 = 1;
 
 /// The next-owner permission mask a viewer sends for a fresh item (move / modify
 /// / copy / transfer) — matches the notecard/asset-upload cases.
-const NEXT_OWNER_MASK: u32 = 0x0008_e000;
+const NEXT_OWNER_MASK: Permissions = Permissions::from_bits(0x0008_e000);
 
 /// How long a verification poll keeps re-fetching the folder before giving up.
 const VERIFY_TIMEOUT: Duration = Duration::from_secs(30);

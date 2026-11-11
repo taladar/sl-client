@@ -44,8 +44,8 @@ use bevy::ui_widgets::ValueChange;
 use sl_client_bevy::{
     AssetKey, AssetType, Command, FaceMaterialPut, GltfAlphaMode, GltfMaterial, GltfTexture,
     GltfTextureTransform, InventoryType, LegacyMaterial, MaterialOverride, MaterialOverrideUpdate,
-    ObjectKey, SlCommand, TextureFace, TextureKey, TextureOverride, TextureTransformOverride, Uuid,
-    encode_override_gltf_json, upload_decoded,
+    ObjectKey, Permissions, SlCommand, TextureFace, TextureKey, TextureOverride,
+    TextureTransformOverride, Uuid, encode_override_gltf_json, upload_decoded,
 };
 
 use crate::edit_texture::{
@@ -111,10 +111,6 @@ const SLOT_NORMAL: usize = 1;
 const SLOT_METALLIC_ROUGHNESS: usize = 2;
 /// The emissive texture slot index.
 const SLOT_EMISSIVE: usize = 3;
-
-/// The next-owner permission mask a saved material grants: copy + modify +
-/// transfer (`PERM_COPY | PERM_MODIFY | PERM_TRANSFER`).
-const PERM_COPY_MODIFY_TRANSFER: u32 = 0x0000_8000 | 0x0000_4000 | 0x0000_2000;
 
 /// The reference's blank GLTF material asset (`BLANK_MATERIAL_ASSET_ID`,
 /// `indra_constants.cpp`): assigning it to a face gives it a default PBR material
@@ -2783,9 +2779,9 @@ fn handle_pbr_save_press(
         inventory_type: InventoryType::Material,
         name: "New Material".to_owned(),
         description: String::new(),
-        next_owner_mask: PERM_COPY_MODIFY_TRANSFER,
-        group_mask: 0,
-        everyone_mask: 0,
+        next_owner_mask: Permissions::DEFAULT_NEXT_OWNER,
+        group_mask: Permissions::NONE,
+        everyone_mask: Permissions::NONE,
         expected_upload_cost: 0,
         data,
     }));

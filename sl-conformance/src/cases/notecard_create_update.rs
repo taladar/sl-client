@@ -43,6 +43,7 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use sl_client_tokio::Permissions;
 use sl_client_tokio::{
     AssetCacheLimits, AssetKey, AssetType, AssetUpdateLocation, Command, Event, InventoryKey,
     InventoryType, NewInventoryItem, ReqwestAssetFetcher, Throttle, UpdatableAssetType, Uuid,
@@ -63,7 +64,7 @@ const CREATE_SETTLE: Duration = Duration::from_secs(5);
 
 /// The next-owner permission mask a viewer sends for a fresh notecard
 /// (move / modify / copy / transfer) — mirrors `asset-upload`.
-const NEXT_OWNER_MASK: u32 = 0x0008_e000;
+const NEXT_OWNER_MASK: Permissions = Permissions::from_bits(0x0008_e000);
 
 /// Creates an empty notecard and sets its body over `UpdateNotecardAgentInventory`.
 #[derive(Debug)]

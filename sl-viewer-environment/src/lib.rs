@@ -171,13 +171,17 @@ pub(crate) mod specimen {
         world.init_resource::<Messages<M>>();
     }
 
-    /// Write every slider's value readout, as the shared rows plugin's
-    /// [`sync_slider_rows`](crate::rows::sync_slider_rows) does each frame in
-    /// the viewer — it composes every environment window's sliders, and no
-    /// specimen host adds it. Run after the window's reseed has put its
-    /// sliders on the sample values, or the readouts beside them stay blank.
+    /// Write every slider's value readout and bounds, as the slider widget's
+    /// [`label_sliders`](sl_viewer_ui_widgets::ui_slider::label_sliders) does
+    /// each frame in the viewer — a specimen host need not add its plugin. Run
+    /// after the window's reseed has put its sliders on the sample values, or
+    /// the readouts beside them stay blank.
     pub(crate) fn draw_slider_readouts(world: &mut World, window: &str) {
-        run_once(world, window, crate::rows::sync_slider_rows);
+        run_once(
+            world,
+            window,
+            sl_viewer_ui_widgets::ui_slider::label_sliders,
+        );
     }
 
     /// Log a specimen system's failure, naming the window it was drawing.
@@ -230,6 +234,7 @@ mod tests {
     use sl_viewer_ui_core::virtual_list::VirtualRow;
     use sl_viewer_ui_widgets::floater::FloaterPlugin;
     use sl_viewer_ui_widgets::ui_color_picker::ColorPicked;
+    use sl_viewer_ui_widgets::ui_slider::SliderLabelParts;
 
     /// **Every window in this crate can actually be scheduled.**
     ///
@@ -338,10 +343,10 @@ mod tests {
     fn readout_named(app: &mut App, name: &str) -> Option<String> {
         let readout = app
             .world_mut()
-            .query::<(&Name, &crate::rows::SliderRow)>()
+            .query::<(&Name, &SliderLabelParts)>()
             .iter(app.world())
-            .find(|(node, _row)| node.as_str() == name)
-            .map(|(_node, row)| row.readout)?;
+            .find(|(node, _parts)| node.as_str() == name)
+            .and_then(|(_node, parts)| parts.readout)?;
         app.world().get::<Text>(readout).map(|text| text.0.clone())
     }
 
@@ -374,8 +379,8 @@ mod tests {
         for (spawn, slider) in knob_windows {
             let mut app = specimen_app(spawn);
             assert_eq!(slider_named(&mut app, slider), Some(wanted), "{slider}");
-            // The readout is the shared rows plugin's to write, not the
-            // window's: a blank one means the specimen skipped that half.
+            // The readout is the slider widget's to write, not the window's:
+            // a blank one means the specimen skipped that half.
             let shown = readout_named(&mut app, slider).unwrap_or_default();
             assert!(!shown.is_empty(), "{slider}: its readout was never written");
         }
@@ -388,7 +393,7 @@ mod tests {
     /// **The day-cycle specimen is drawn by all four of the live systems it
     /// runs**: the name field (the reseed), the readout (the chrome sync), the
     /// keyframe markers (the marker rebuild — the default keyframe, the three
-    /// sample ones and the scrubber) and every slider's value (the shared rows
+    /// sample ones and the scrubber) and every slider's value (the slider
     /// sync).
     #[test]
     fn the_day_cycle_specimen_shows_its_sample_cycle() {
@@ -398,14 +403,15 @@ mod tests {
         assert!(!readout.is_empty(), "the readout was never written");
         let blank_sliders = app
             .world_mut()
-            .query::<(&Name, &crate::rows::SliderRow)>()
+            .query::<(&Name, &SliderLabelParts)>()
             .iter(app.world())
-            .filter(|(_name, row)| {
-                app.world()
-                    .get::<Text>(row.readout)
+            .filter(|(_name, parts)| {
+                parts
+                    .readout
+                    .and_then(|readout| app.world().get::<Text>(readout))
                     .is_none_or(|text| text.0.is_empty())
             })
-            .map(|(name, _row)| name.to_string())
+            .map(|(name, _parts)| name.to_string())
             .collect::<Vec<_>>();
         assert_eq!(
             blank_sliders,

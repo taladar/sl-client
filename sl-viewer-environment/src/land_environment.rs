@@ -96,10 +96,10 @@ use sl_viewer_ui_core::ui::{column, row};
 use sl_viewer_ui_core::ui_font::UiFont;
 use sl_viewer_ui_core::ui_text::set_node_text;
 use sl_viewer_ui_widgets::ui_checkbox::{CheckboxSpec, spawn_checkbox};
-use sl_viewer_ui_widgets::ui_slider::{SliderStyle, spawn_slider};
+use sl_viewer_ui_widgets::ui_slider::{SliderFormat, SliderLabels, SliderStyle, spawn_slider};
 use sl_viewer_ui_widgets::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 
-use crate::rows::{SliderRow, spawn_action_button};
+use crate::rows::spawn_action_button;
 use crate::style::{DIM_LABEL_COLOR, FONT_SIZE, HEADING_SIZE, LABEL_COLOR};
 use sl_viewer_ui_core::skin::{DisabledButtons, set_action_button_enabled, text_role};
 
@@ -925,15 +925,12 @@ fn spawn_day_slider(
         style,
         *tab,
         0.0,
+        SliderLabels::written_into(readout, SliderFormat::Decimal(1)),
         (
             bevy::ui_widgets::Slider::default(),
             SliderValue(min),
             SliderRange::new(min, max),
             bevy::ui_widgets::SliderStep(0.5),
-            SliderRow {
-                readout,
-                decimals: 1,
-            },
             PanelOf(panel),
             which,
             // Called what its row says: the slider draws no caption.
@@ -1943,7 +1940,7 @@ struct CheckMarkers {
 /// the grid's answer: `subject` written on it as the hosting floater writes
 /// it, `settings` taken as the reply `ingest_land_environment` takes, and the
 /// panel then drawn by its own `reseed_land_widgets` and
-/// `paint_land_controls`, its day sliders' readouts by the shared rows sync.
+/// `paint_land_controls`, its day sliders' readouts by the slider widget.
 ///
 /// For a host floater's gallery / `ui_test` specimen. Neither specimen host
 /// adds [`LandEnvironmentPlugin`], so without this the panel shows none of the

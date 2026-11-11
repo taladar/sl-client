@@ -25,7 +25,9 @@
 use std::io::Read as _;
 
 use flate2::read::ZlibDecoder;
-use sl_proto::MeshLod;
+use sl_proto::{MESH_LOD_COUNT, MeshLod};
+
+use crate::cost::est_triangles_by_lod;
 use sl_wire::{Llsd, parse_llsd_binary, parse_llsd_binary_prefix};
 
 /// The viewer's `MESH_HEADER_SIZE`: the initial byte-range probe read to obtain
@@ -160,6 +162,24 @@ impl MeshHeader {
             .into_iter()
             .rev()
             .find(|&lod| self.lod(lod).is_some())
+    }
+
+    /// Each geometry level's compressed block size in bytes, coarsest first;
+    /// `0` for a level the asset omits.
+    #[must_use]
+    pub fn lod_bytes(&self) -> [u32; MESH_LOD_COUNT] {
+        self.lods
+            .map(|block| block.map_or(0, |block| u32::try_from(block.size).unwrap_or(u32::MAX)))
+    }
+
+    /// The largest per-level triangle estimate ([`est_triangles_by_lod`]) — the
+    /// reference's `LLMeshCostData::getEstTrisMax`, which an animated object's
+    /// triangle budget is checked against.
+    #[must_use]
+    pub fn est_triangles_max(&self) -> f32 {
+        est_triangles_by_lod(self.lod_bytes())
+            .into_iter()
+            .fold(0.0, f32::max)
     }
 }
 

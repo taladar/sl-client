@@ -12142,7 +12142,7 @@ impl Session {
         folder_id: InventoryFolderKey,
         name: &str,
         description: &str,
-        next_owner_mask: u32,
+        next_owner_mask: Permissions,
         language: ScriptLanguage,
         now: Instant,
     ) -> Result<InventoryCallbackId, Error> {

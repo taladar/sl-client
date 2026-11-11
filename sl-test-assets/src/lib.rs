@@ -325,6 +325,18 @@ pub fn gltf_material_asset(base_color: [f32; 4], base_color_texture: Option<Uuid
     })
 }
 
+/// A serialized `AT_MATERIAL` asset of a mirror finish: white, fully metallic
+/// and perfectly smooth, untextured — what a realtime mirror's glass wears.
+#[must_use]
+pub fn gltf_polished_metal_asset() -> Vec<u8> {
+    sl_material::encode_material_asset(&sl_material::GltfMaterial {
+        base_color: [1.0, 1.0, 1.0, 1.0],
+        metallic_factor: 1.0,
+        roughness_factor: 0.0,
+        ..sl_material::GltfMaterial::default()
+    })
+}
+
 /// The side, in pixels, of the terrain detail textures below.
 const TERRAIN_DETAIL_SIZE: u32 = 32;
 

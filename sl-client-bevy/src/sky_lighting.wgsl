@@ -22,6 +22,11 @@
 #define_import_path sl_client_bevy::sky_lighting
 
 #import bevy_pbr::mesh_view_bindings as sky_view_bindings
+#import bevy_pbr::clustered_forward as sky_clustering
+#import bevy_pbr::lighting as sky_lighting_functions
+#ifdef ENVIRONMENT_MAP
+#import bevy_pbr::environment_map as sky_environment_map
+#endif
 
 // `SkyLightingMode` (sky_lighting.rs), as the texture stores it.
 const SKY_LIGHTING_MODE_EEP: f32 = 1.0;
@@ -339,42 +344,63 @@ fn sky_env_brdf(nv: f32, perceptual_roughness: f32) -> vec2<f32> {
     return vec2<f32>(-1.04, 1.04) * a004 + r.zw;
 }
 
-// The view's reflection probe radiance along the reflection of the eye ray about
-// `n` (`sampleProbes`), at the mip the roughness selects — the reference's
-// `(1 - glossiness) * max_probe_lod` is the same linear map from perceptual
-// roughness onto the probe's mip chain. Zero with no probe; at scene scale like
-// `sky_probe_irradiance`.
-fn sky_probe_radiance(n: vec3<f32>, v: vec3<f32>, perceptual_roughness: f32) -> vec3<f32> {
+// Where a fragment is, for the reflection-probe lookup: its world position, and
+// the screen position and orthographic flag that find its cluster.
+struct SkyFragment {
+    world_position: vec3<f32>,
+    frag_coord: vec2<f32>,
+    is_orthographic: bool,
+}
+
+// The specular radiance reflected toward `v` off a surface of normal `n`, from the
+// reflection probe that holds the fragment — a placed probe or a realtime mirror
+// where one's volume holds it, blended across overlapping volumes, and the view's
+// own (default) probe elsewhere — scaled by the probe intensity and the view
+// exposure. This is Bevy's own per-fragment lookup (`compute_radiances`), the
+// reference's `sampleReflectionProbes`: a surface inside a probe's volume reflects
+// what that probe captured, which is what makes a mirror show the room.
+fn sky_probe_radiance(
+    n: vec3<f32>,
+    v: vec3<f32>,
+    perceptual_roughness: f32,
+    fragment: SkyFragment,
+) -> vec3<f32> {
 #ifdef ENVIRONMENT_MAP
-    let probes = sky_view_bindings::light_probes;
-    if (probes.view_cubemap_index >= 0) {
-        var dir = sky_quat_rotate(probes.view_rotation, reflect(-v, n));
-        // Cube maps are left-handed, so negate z.
-        dir.z = -dir.z;
-#ifdef MULTIPLE_LIGHT_PROBES_IN_ARRAY
-        let map_index = u32(probes.view_cubemap_index);
-        let lod = perceptual_roughness * f32(
-            textureNumLevels(sky_view_bindings::specular_environment_maps[map_index]) - 1u
-        );
-        let probe_sample = textureSampleLevel(
-            sky_view_bindings::specular_environment_maps[map_index],
-            sky_view_bindings::environment_map_sampler,
-            dir,
-            lod,
-        ).rgb;
+    let view_from_world = sky_view_bindings::view.view_from_world;
+    let view_z = dot(
+        vec4<f32>(
+            view_from_world[0].z,
+            view_from_world[1].z,
+            view_from_world[2].z,
+            view_from_world[3].z,
+        ),
+        vec4<f32>(fragment.world_position, 1.0),
+    );
+    let cluster_index = sky_clustering::view_fragment_cluster_index(
+        fragment.frag_coord,
+        view_z,
+        fragment.is_orthographic,
+    );
+    var ranges = sky_clustering::unpack_clusterable_object_index_ranges(cluster_index);
+    var input: sky_lighting_functions::LayerLightingInput;
+    input.N = n;
+    input.R = reflect(-v, n);
+    input.NdotV = max(dot(n, v), 0.0001);
+    input.perceptual_roughness = perceptual_roughness;
+    input.roughness = sky_lighting_functions::perceptualRoughnessToRoughness(
+        perceptual_roughness,
+    );
+    // Only the radiance is wanted here: the irradiance is `sky_irradiance`'s.
+    let radiances = sky_environment_map::compute_radiances(
+        input,
+        &ranges,
+        fragment.world_position,
+        /*found_diffuse_indirect=*/ true,
+    );
+    return radiances.radiance * sky_view_bindings::view.exposure;
 #else
-        let lod = perceptual_roughness * f32(probes.smallest_specular_mip_level_for_view);
-        let probe_sample = textureSampleLevel(
-            sky_view_bindings::specular_environment_map,
-            sky_view_bindings::environment_map_sampler,
-            dir,
-            lod,
-        ).rgb;
-#endif
-        return probe_sample * probes.intensity_for_view * sky_view_bindings::view.exposure;
-    }
-#endif
     return vec3<f32>(0.0);
+#endif
 }
 
 // The reference `pbrBaseLight`, image-based and sun terms together, with the
@@ -384,7 +410,8 @@ fn sky_probe_radiance(n: vec3<f32>, v: vec3<f32>, perceptual_roughness: f32) -> 
 //
 // `colors` from `sky_pbr_colors`; `v` toward the eye; `shadow` the sun's shadow
 // term; `irradiance` from `sky_irradiance`; `ao` the material's occlusion;
-// `emissive` linear.
+// `emissive` linear; `fragment` where the surface is, for the reflection probe
+// that holds it.
 fn sky_pbr_base_light(
     lighting: SkyLighting,
     light: SurfaceSkyLight,
@@ -397,12 +424,13 @@ fn sky_pbr_base_light(
     irradiance: vec3<f32>,
     ao: vec3<f32>,
     emissive: vec3<f32>,
+    fragment: SkyFragment,
 ) -> vec3<f32> {
     // `pbrIbl`: the probe's radiance through the split-sum BRDF, and (for an EEP
     // sky) the irradiance through the diffuse colour, both occluded.
     let nv = clamp(abs(dot(n, v)), 0.001, 1.0);
     let brdf = sky_env_brdf(nv, perceptual_roughness);
-    let radiance = sky_probe_radiance(n, v, perceptual_roughness);
+    let radiance = sky_probe_radiance(n, v, perceptual_roughness, fragment);
     let ibl_specular = radiance * (colors.specular * brdf.x + brdf.y) * ao;
 
     let punctual = sky_pbr_punctual(colors, perceptual_roughness, n, v, normalize(light_dir));

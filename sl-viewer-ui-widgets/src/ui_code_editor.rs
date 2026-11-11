@@ -863,7 +863,7 @@ pub fn find_replace_floater_spec() -> FloaterSpec {
         dock_host: None,
         caps: FloaterCaps {
             resizable: false,
-            minimizable: false,
+            minimizable: true,
             closable: true,
             dockable: false,
         },
@@ -882,7 +882,7 @@ pub fn go_to_line_floater_spec() -> FloaterSpec {
         dock_host: None,
         caps: FloaterCaps {
             resizable: false,
-            minimizable: false,
+            minimizable: true,
             closable: true,
             dockable: false,
         },

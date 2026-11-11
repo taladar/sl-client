@@ -68,7 +68,9 @@ use sl_viewer_ui_widgets::floater::{
 use sl_viewer_ui_widgets::menu::{MenuCommand, MenuDef, MenuItemDef, OpenContextMenu};
 use sl_viewer_ui_widgets::ui_checkbox::{CheckboxSpec, spawn_checkbox};
 use sl_viewer_ui_widgets::ui_combo::{ComboChanged, ComboSelection, ComboSpec, spawn_combo};
-use sl_viewer_ui_widgets::ui_slider::{SliderStyle, SliderWidgetPlugin, spawn_slider};
+use sl_viewer_ui_widgets::ui_slider::{
+    SliderFormat, SliderLabels, SliderStyle, SliderWidgetPlugin, spawn_slider,
+};
 use sl_viewer_ui_widgets::ui_table::{
     TableAlign, TableColumn, TableColumnKind, TableColumnWidth, TableRowCells, TableSelectionMode,
     TableSpec, set_table_cell, spawn_specimen_table_rows, spawn_table, spawn_table_row,
@@ -109,6 +111,7 @@ const VOLUME_SLIDER: SliderStyle = SliderStyle {
     track_fill: Color::srgb(0.16, 0.19, 0.25),
     thumb_width: 10.0,
     thumb_fill: Color::srgb(0.62, 0.72, 0.86),
+    font_size: FONT_SIZE,
 };
 
 /// Column index of the play tick.
@@ -726,9 +729,13 @@ fn spawn_transport(commands: &mut Commands, parent: Entity, font_size: f32) -> T
     let volume = spawn_slider(
         commands,
         bar,
-        VOLUME_SLIDER,
+        SliderStyle {
+            font_size,
+            ..VOLUME_SLIDER
+        },
         13,
         0.0,
+        SliderLabels::value_only(SliderFormat::Percent),
         (
             Slider::default(),
             SliderValue(0.0),

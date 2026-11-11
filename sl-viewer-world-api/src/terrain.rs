@@ -17,6 +17,7 @@ use std::collections::HashMap;
 use bevy::prelude::*;
 use sl_client_bevy::{RegionHandle, TerrainPatch, TextureKey};
 use sl_terrain::TerrainComposition;
+use sl_viewer_kit::coords::{bevy_to_sl_vec, region_handle_at, region_offset_bevy};
 
 /// The number of ground ("detail") textures a region blends between.
 pub const DETAIL_COUNT: usize = 4;
@@ -24,39 +25,76 @@ pub const DETAIL_COUNT: usize = 4;
 /// A patch's key: its region plus grid position within that region.
 pub type PatchKey = (RegionHandle, u32, u32);
 
+/// The edge of a standard land patch, metres: 16 one-metre cells.
+const STANDARD_PATCH_METRES: f32 = 16.0;
+
+/// The height `patch` holds at region-local `(x, y)`, or `None` when the
+/// patch is not land or does not cover the point.
+fn patch_height(patch: &TerrainPatch, x: f32, y: f32) -> Option<f32> {
+    if !patch.layer.is_land() {
+        return None;
+    }
+    let span = f32::from(u16::try_from(patch.size).unwrap_or(u16::MAX));
+    let x0 = f32::from(u16::try_from(patch.patch_x).unwrap_or(u16::MAX)) * span;
+    let y0 = f32::from(u16::try_from(patch.patch_y).unwrap_or(u16::MAX)) * span;
+    if x < x0 || y < y0 || x >= x0 + span || y >= y0 + span {
+        return None;
+    }
+    // The floored offset into the patch, in `0..size`. The subtraction is
+    // non-negative (guarded above) and below `size`, so the truncating cast
+    // is exact.
+    #[expect(
+        clippy::as_conversions,
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "the offset is in 0.0..size, so it fits u32 exactly"
+    )]
+    let (cell_x, cell_y) = ((x - x0).floor() as u32, (y - y0).floor() as u32);
+    let last = patch.size.saturating_sub(1);
+    patch.value(cell_x.min(last), cell_y.min(last))
+}
+
+/// The key of the standard 16 m patch that would cover region-local
+/// `(x, y)`, for `x` and `y` non-negative and finite.
+fn standard_patch_key(region: RegionHandle, x: f32, y: f32) -> Option<PatchKey> {
+    let index = |metres: f32| {
+        let index = (metres / STANDARD_PATCH_METRES).floor();
+        (0.0..65_536.0).contains(&index).then(|| {
+            #[expect(
+                clippy::as_conversions,
+                clippy::cast_possible_truncation,
+                clippy::cast_sign_loss,
+                reason = "range-checked to 0..65536 just above"
+            )]
+            let index = index as u32;
+            index
+        })
+    };
+    Some((region, index(x)?, index(y)?))
+}
+
 /// Resolve the land height at region-local `(x, y)` from a patch map (the live
 /// [`TerrainState::raw_patches`] or the retained [`TerrainState::land_cache`]).
 /// `None` when no land patch in that map covers the point.
+///
+/// The standard 16 m patch is looked up by its key; a map holding patches of
+/// another size is searched.
 fn land_height_in(
     patches: &HashMap<PatchKey, TerrainPatch>,
     region: RegionHandle,
     x: f32,
     y: f32,
 ) -> Option<f32> {
-    for (&(patch_region, _, _), patch) in patches {
-        if patch_region != region || !patch.layer.is_land() {
-            continue;
-        }
-        let span = f32::from(u16::try_from(patch.size).unwrap_or(u16::MAX));
-        let x0 = f32::from(u16::try_from(patch.patch_x).unwrap_or(u16::MAX)) * span;
-        let y0 = f32::from(u16::try_from(patch.patch_y).unwrap_or(u16::MAX)) * span;
-        if x < x0 || y < y0 || x >= x0 + span || y >= y0 + span {
-            continue;
-        }
-        // The floored offset into the patch, in `0..size`. The subtraction is
-        // non-negative (guarded above) and below `size`, so the truncating cast
-        // is exact.
-        #[expect(
-            clippy::as_conversions,
-            clippy::cast_possible_truncation,
-            clippy::cast_sign_loss,
-            reason = "the offset is in 0.0..size, so it fits u32 exactly"
-        )]
-        let (cell_x, cell_y) = ((x - x0).floor() as u32, (y - y0).floor() as u32);
-        let last = patch.size.saturating_sub(1);
-        return patch.value(cell_x.min(last), cell_y.min(last));
+    if let Some(height) = standard_patch_key(region, x, y)
+        .and_then(|key| patches.get(&key))
+        .and_then(|patch| patch_height(patch, x, y))
+    {
+        return Some(height);
     }
-    None
+    patches
+        .iter()
+        .filter(|&(&(patch_region, _, _), _patch)| patch_region == region)
+        .find_map(|(_key, patch)| patch_height(patch, x, y))
 }
 
 /// Per-region terrain-compositing state: the elevation bands and the
@@ -198,6 +236,35 @@ impl TerrainState {
         land_height_in(&self.raw_patches, region, x, y)
             .or_else(|| land_height_in(&self.land_cache, region, x, y))
     }
+
+    /// The ground height under a Bevy-space `point`, as a Bevy `y` (the
+    /// scene's heights are the regions' own, so it is the region height too):
+    /// from the scene-origin region, or the neighbour on the grid the point
+    /// lies over. `None` before the origin is known, and where no land patch
+    /// covers the point.
+    ///
+    /// The origin region is asked first and with no bound on its extent, so
+    /// a region wider than a grid cell answers for all of its own ground.
+    #[must_use]
+    pub fn ground_at(&self, point: Vec3) -> Option<f32> {
+        let origin = self.origin?;
+        let at = bevy_to_sl_vec(point);
+        if let Some(height) = self.land_height(origin, at.x, at.y) {
+            return Some(height);
+        }
+        let (origin_east, origin_north) = origin.global_coordinates();
+        let region = region_handle_at(
+            f64::from(origin_east) + f64::from(at.x),
+            f64::from(origin_north) + f64::from(at.y),
+        )?;
+        let corner = region_offset_bevy(region, Some(origin));
+        let local = bevy_to_sl_vec(Vec3::new(
+            point.x - corner.x,
+            point.y - corner.y,
+            point.z - corner.z,
+        ));
+        self.land_height(region, local.x, local.y)
+    }
 }
 
 impl crate::world_scoped::WorldScoped for TerrainState {
@@ -264,6 +331,52 @@ mod tests {
             state.map_revision() > global_before,
             "the global revision advances on any per-region bump"
         );
+    }
+
+    /// A Bevy-space point finds the ground of the region it lies over: the
+    /// origin region's for a point over it, the east neighbour's 256 m on,
+    /// and nothing over a region with no ground or before the origin is
+    /// known.
+    #[test]
+    fn ground_at_reads_the_region_under_a_scene_point() {
+        let origin = RegionHandle((256_000_u64 << 32) | 256_000);
+        let east = RegionHandle((256_256_u64 << 32) | 256_000);
+        let mut state = TerrainState::default();
+        let patch = |region: RegionHandle, height: f32| TerrainPatch {
+            region_handle: region,
+            layer: TerrainLayerType::Land,
+            patch_x: 1,
+            patch_y: 2,
+            size: 16,
+            values: vec![height; 256],
+        };
+        let _old = state
+            .raw_patches
+            .insert((origin, 1, 2), patch(origin, 21.0));
+        let _old = state.raw_patches.insert((east, 1, 2), patch(east, 33.0));
+        // Region (20, 35) is Bevy (20, _, -35).
+        let over_origin = bevy::math::Vec3::new(20.5, 99.0, -35.5);
+        let over_east = bevy::math::Vec3::new(276.5, 0.0, -35.5);
+        assert_eq!(state.ground_at(over_origin), None, "no origin yet");
+        state.origin = Some(origin);
+        assert_eq!(state.ground_at(over_origin), Some(21.0));
+        assert_eq!(state.ground_at(over_east), Some(33.0));
+        assert_eq!(
+            state.ground_at(bevy::math::Vec3::new(20.5, 0.0, 220.0)),
+            None,
+            "the region south of the origin has no ground"
+        );
+    }
+
+    /// A patch of another size than the standard 16 m is still found.
+    #[test]
+    fn land_height_finds_a_patch_of_another_size() {
+        let state = TerrainState {
+            raw_patches: one_patch_map(32, |x, _y| f32::from(u16::try_from(x).unwrap_or(0))),
+            ..TerrainState::default()
+        };
+        // Patch (1, 2) of 32 m spans x 32..64, y 64..96.
+        assert_eq!(state.land_height(RegionHandle(0), 40.5, 70.5), Some(8.0));
     }
 
     #[test]

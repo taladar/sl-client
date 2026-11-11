@@ -196,6 +196,12 @@ pub struct CameraRig {
     pub smoothed_eye: Vec3,
     /// The last rendered look-at point, eased toward the mode's desired focus.
     pub smoothed_focus: Vec3,
+    /// The focus the last frame's rigid avatar follow eased toward, or `None`
+    /// when the last frame was not an avatar follow. The follow carries how
+    /// far its look-at point still lags this focus along with the avatar, so
+    /// a focus that changes into the follow (an `Escape` reset from an object
+    /// focus) glides over from where the camera looked instead of jumping.
+    pub follow_focus: Option<Vec3>,
     /// Whether the smoothed pose has been seeded yet (so the first valid frame
     /// snaps rather than gliding in from an arbitrary origin).
     pub seeded: bool,
@@ -218,6 +224,7 @@ impl Default for CameraRig {
             point_up: None,
             smoothed_eye: Vec3::ZERO,
             smoothed_focus: Vec3::ZERO,
+            follow_focus: None,
             seeded: false,
         }
     }

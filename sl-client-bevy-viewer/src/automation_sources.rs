@@ -33,6 +33,33 @@ pub(crate) fn probe_sources() -> ProbeSources {
         world_map: Some(sl_viewer_map::world_map::world_map_readout),
         parcel_media: Some(parcel_media),
         own_feet: Some(own_feet),
+        mirrors: Some(mirrors),
+    }
+}
+
+/// The realtime mirrors the hero probes capture, each by its prim's full id.
+fn mirrors(world: &mut World) -> sl_viewer_automation::MirrorsReadout {
+    let Some(live) = sl_viewer_world_scene::probes::live_mirrors(world) else {
+        return sl_viewer_automation::MirrorsReadout::default();
+    };
+    let objects = world.get_resource::<sl_viewer_world_api::ObjectState>();
+    let mirrors = live
+        .bound
+        .into_iter()
+        .filter_map(|(entity, captures)| {
+            let scoped = world
+                .get::<sl_viewer_world_api::SceneObject>(entity)?
+                .scoped_id;
+            let full = objects?.full_key(&scoped)?;
+            Some(sl_viewer_automation::MirrorReadout {
+                full_id: full.uuid(),
+                captures,
+            })
+        })
+        .collect();
+    sl_viewer_automation::MirrorsReadout {
+        enabled: live.enabled,
+        mirrors,
     }
 }
 

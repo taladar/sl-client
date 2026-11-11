@@ -35,6 +35,11 @@ pub enum Need {
     /// leaves out, such as the viewer-side bake upload. The fake grid provides
     /// it imitating OpenSim, which a stage that needs it starts it as.
     OpenSim(&'static str),
+    /// What only Second Life does, described, that the fake grid's Second
+    /// Life flavour does not serve either: a PBR material edit over
+    /// `ModifyMaterialParams`, which OpenSim does not grant and the fake grid
+    /// names without taking. Only Aditi provides it.
+    SecondLife(&'static str),
 }
 
 impl Need {
@@ -45,6 +50,7 @@ impl Need {
             Self::GridControl | Self::DictatedGrid(_) | Self::Content(_) => !grid.is_live(),
             Self::LiveGrid(_) => grid.is_live(),
             Self::OpenSim(_) => matches!(grid, Grid::OpenSim | Grid::Fake),
+            Self::SecondLife(_) => matches!(grid, Grid::Aditi),
         }
     }
 }
@@ -57,6 +63,7 @@ impl fmt::Display for Need {
             Self::Content(what) => write!(f, "content only its own scene has: {what}"),
             Self::LiveGrid(what) => write!(f, "a live grid: {what}"),
             Self::OpenSim(what) => write!(f, "OpenSim: {what}"),
+            Self::SecondLife(what) => write!(f, "Second Life: {what}"),
         }
     }
 }
@@ -127,6 +134,22 @@ mod tests {
         );
         // The fake grid shows it, imitating OpenSim for the stage.
         assert_eq!(unmet(&opensim, 1, Grid::Fake, None), None);
+    }
+
+    /// What only Second Life does, and the fake grid does not imitate, runs
+    /// on Aditi alone.
+    #[test]
+    fn a_second_life_need_runs_on_aditi_alone() {
+        let pbr = [Need::SecondLife("a PBR material edit")];
+        assert_eq!(unmet(&pbr, 1, Grid::Aditi, Some(3)), None);
+        for grid in [Grid::OpenSim, Grid::Fake] {
+            let accounts = (grid != Grid::Fake).then_some(3);
+            assert_eq!(
+                unmet(&pbr, 1, grid, accounts).as_deref(),
+                Some("it needs Second Life: a PBR material edit"),
+                "{grid:?}"
+            );
+        }
     }
 
     /// A test with no needs runs on a live grid while it has an account per

@@ -269,7 +269,7 @@ pub struct NewInventoryItem {
     /// fills in).
     pub transaction_id: Uuid,
     /// The next-owner permissions mask for the new item.
-    pub next_owner_mask: u32,
+    pub next_owner_mask: Permissions,
     /// The asset class of the new item ([`AssetType`]).
     pub asset_type: AssetType,
     /// The inventory class of the new item ([`InventoryType`]).
@@ -292,7 +292,7 @@ impl Default for NewInventoryItem {
         Self {
             folder_id: InventoryFolderKey::from(Uuid::nil()),
             transaction_id: Uuid::nil(),
-            next_owner_mask: 0,
+            next_owner_mask: Permissions::NONE,
             asset_type: AssetType::Texture,
             inv_type: InventoryType::Texture,
             wearable_type: WearableType::Shape,

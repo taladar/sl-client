@@ -19,12 +19,14 @@
 //! * **Shiny** (none / low / medium / high) — an environment-reflection specular
 //!   sheen. The reference packs it as an environment intensity
 //!   (`SHININESS_TO_ALPHA` = `[0, .25, .5, .75]`) that a cube-map shiny pass
-//!   reflects. This viewer has no reflection probe (a metallic surface would read
-//!   black), so shiny is approximated with an *analytic-light* highlight instead:
-//!   raise [`StandardMaterial::reflectance`] and lower
+//!   reflects. Here shiny is approximated with an *analytic-light* highlight
+//!   instead: raise [`StandardMaterial::reflectance`] and lower
 //!   [`StandardMaterial::perceptual_roughness`] with the shiny level, so the sun /
 //!   moon directional light throws a progressively sharper, brighter specular
-//!   highlight. Metallic is left at zero.
+//!   highlight (and the reflection probes' image-based specular, which every
+//!   surface samples by its roughness, sharpens with it). Metallic is left at
+//!   zero; the reference's own blend is
+//!   `viewer-legacy-material-exact-port`'s.
 //! * **Bump** (brightness / darkness / one of the standard emboss textures) — a
 //!   per-face surface relief. This module generates a tangent-space **normal
 //!   map** from a source texture's luminance (Sobel height field) and drops it

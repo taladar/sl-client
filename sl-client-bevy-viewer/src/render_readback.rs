@@ -435,6 +435,10 @@ pub(crate) fn build_posed_app(
             brightness: 0.0,
             ..default()
         })
+        // Realtime mirrors on, which the viewer ships off as the reference does:
+        // the mirror scene exists to check the hero path, and with mirrors off its
+        // probe would be an ordinary local one.
+        .insert_resource(sl_viewer_world_scene::probes::MirrorSettings::new(true))
         .init_resource::<Captured>();
 
     let captured = app.world().resource::<Captured>().clone();

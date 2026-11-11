@@ -82,7 +82,7 @@ use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_combo::{ComboSelection, ComboSpec, spawn_combo};
 use crate::ui_element::ElementCx;
 use crate::ui_font::UiFont;
-use crate::ui_slider::{SliderStyle, spawn_slider};
+use crate::ui_slider::{SliderFormat, SliderLabels, SliderStyle, spawn_slider};
 use crate::ui_spawn::{self, UiLabel};
 use crate::ui_spinner::{SpinStep, Spinner, SpinnerSpec, format_spin_value, spawn_spinner};
 use crate::ui_tab::{
@@ -111,16 +111,13 @@ const SLIDER: SliderStyle = SliderStyle {
     track_fill: TRACK_FILL,
     thumb_width: 12.0,
     thumb_fill: THUMB_FILL,
+    font_size: FONT,
 };
-/// The minimum width of a slider row's trailing value readout.
-const VALUE_WIDTH: f32 = 44.0;
 
 /// A section label — the heading role.
 const SECTION_COLOR: Color = SkinPalette::FALLBACK.text_heading;
 /// A row label's colour.
 const LABEL_COLOR: Color = SkinPalette::FALLBACK.text_primary;
-/// A row's value read-out: quieter than its label, which is the muted role.
-const VALUE_COLOR: Color = SkinPalette::FALLBACK.text_muted;
 /// A control's border.
 const CONTROL_BORDER: Color = Color::srgb(0.4, 0.5, 0.62);
 /// A slider track's fill.
@@ -1122,15 +1119,6 @@ fn push_photo_aim(mut edit: ResMut<PhotoAimEdit>, environment: Option<ResMut<Env
 // The plugin.
 // ---------------------------------------------------------------------------
 
-/// A setting slider's trailing readout, tagged with what it shows.
-#[derive(Component, Debug, Clone)]
-struct PhotoValueLabel {
-    /// The setting the readout shows.
-    setting: String,
-    /// Whether it shows a whole number.
-    integer: bool,
-}
-
 /// Owns the Phototools window: the floater chrome and deferred content, the
 /// environment controls, and the control visuals.
 #[derive(Debug, Clone, Copy, Default)]
@@ -1149,7 +1137,7 @@ impl Plugin for PhototoolsPlugin {
                 Startup,
                 spawn_phototools_floater.after(UiScaffoldSystems::SpawnRoot),
             )
-            .add_systems(Update, (sync_environment_controls, update_photo_values))
+            .add_systems(Update, sync_environment_controls)
             // Chained, and push first: the push is what sets the `ours` latch
             // the capture consumes in the same frame, so a drag never reads its
             // own write back through the lossy rotation round trip.
@@ -1439,7 +1427,7 @@ fn spawn_slider_row(
         spin,
     } = shape;
     let row_entity = spawn_row_shell(commands, parent, row_def);
-    // A trailing group keeps the slider and its readout together, so the label
+    // A trailing group keeps the slider and its spinner together, so the label
     // sits at the leading edge and the control at the trailing one.
     let group = commands
         .spawn((
@@ -1451,12 +1439,25 @@ fn spawn_slider_row(
             ChildOf(row_entity),
         ))
         .id();
+    let format = if integer {
+        SliderFormat::Decimal(0)
+    } else {
+        SliderFormat::for_step(step)
+    };
+    // The spinner, when there is one, is the value's readout — one a user can
+    // type into — so the slider shows only its bounds beside it.
+    let labels = if spin.is_some() {
+        SliderLabels::bounds_only(format)
+    } else {
+        SliderLabels::beside(format)
+    };
     let track = spawn_slider(
         commands,
         group,
         SLIDER,
         0,
         0.0,
+        labels,
         bound_slider(
             row_binding(row_def),
             SliderRange::new(min, max),
@@ -1489,34 +1490,7 @@ fn spawn_slider_row(
         .field;
         // Seeded empty; the binding's sync pass writes the stored value in.
         commands.entity(field).insert(row_binding(row_def));
-        return;
     }
-    // A right-aligning slot with a *minimum* width, so the readout column lines
-    // up but a long value or a large UI font grows it rather than clipping. The
-    // `Text` itself stays content-sized: a width on the leaf makes bevy_text
-    // wrap instead of growing the box.
-    let slot = commands
-        .spawn((
-            Node {
-                min_width: Val::Px(VALUE_WIDTH),
-                justify_content: JustifyContent::FlexEnd,
-                flex_shrink: 0.0,
-                ..default()
-            },
-            ChildOf(group),
-        ))
-        .id();
-    commands.spawn((
-        Text::default(),
-        UiFont::Sans.at(FONT),
-        text_role(VALUE_COLOR),
-        PhotoValueLabel {
-            setting: row_def.setting.to_owned(),
-            integer,
-        },
-        Pickable::IGNORE,
-        ChildOf(slot),
-    ));
 }
 
 /// Spawn a combo row over a shared option list.
@@ -1611,76 +1585,6 @@ fn spawn_photo_button(
 }
 
 // ---------------------------------------------------------------------------
-// Control visuals.
-// ---------------------------------------------------------------------------
-
-/// Keep each slider's readout current from the store.
-fn update_photo_values(
-    settings: Option<Res<ViewerSettings>>,
-    mut labels: Query<(&mut Text, &PhotoValueLabel)>,
-) {
-    let Some(settings) = settings else {
-        return;
-    };
-    for (mut text, label) in &mut labels {
-        let Some(value) = settings
-            .store()
-            .get(&label.setting)
-            .and_then(setting_as_f32)
-        else {
-            continue;
-        };
-        show_value(&mut text, label, value);
-    }
-}
-
-/// Write `value` into one slider's readout, formatted as its label asks. The
-/// drawing half of [`update_photo_values`], shared with the specimen.
-fn show_value(text: &mut Mut<'_, Text>, label: &PhotoValueLabel, value: f32) {
-    let wanted = if label.integer {
-        format!("{}", value.round())
-    } else {
-        format!("{value:.2}")
-    };
-    if text.0 != wanted {
-        text.0 = wanted;
-    }
-}
-
-/// A setting's value as the `f32` a readout shows, or `None` for a non-numeric
-/// setting.
-const fn setting_as_f32(value: &SettingValue) -> Option<f32> {
-    match *value {
-        SettingValue::F32(v) => Some(v),
-        SettingValue::I32(v) => Some(i32_to_f32(v)),
-        SettingValue::U32(v) => Some(u32_to_f32(v)),
-        _ => None,
-    }
-}
-
-/// Widen an `i32` setting to the `f32` a readout shows.
-#[expect(
-    clippy::cast_precision_loss,
-    clippy::as_conversions,
-    reason = "a Phototools integer setting's magnitude is small; the readout only shows whole \
-              numbers"
-)]
-const fn i32_to_f32(value: i32) -> f32 {
-    value as f32
-}
-
-/// Widen a `u32` setting to the `f32` a readout shows.
-#[expect(
-    clippy::cast_precision_loss,
-    clippy::as_conversions,
-    reason = "a Phototools integer setting's magnitude is small; the readout only shows whole \
-              numbers"
-)]
-const fn u32_to_f32(value: u32) -> f32 {
-    value as f32
-}
-
-// ---------------------------------------------------------------------------
 // The gallery specimen.
 // ---------------------------------------------------------------------------
 
@@ -1706,9 +1610,9 @@ pub fn spawn_phototools_specimen(commands: &mut Commands, parent: Entity, cx: El
     commands.run_system_cached_with(compose_environment_specimen, parent);
     commands.run_system_cached_with(compose_aim_specimen, parent);
     commands.run_system_cached_with(compose_values_specimen, parent);
-    // After the thumbs above have moved: the environment rows' readouts follow
-    // their sliders' values.
-    commands.run_system_cached(sl_viewer_environment::rows::sync_slider_rows);
+    // After the values above have landed: every slider's readout and bounds,
+    // which the slider widget's plugin writes in the viewer.
+    commands.run_system_cached(crate::ui_slider::label_sliders);
     parent
 }
 
@@ -1781,12 +1685,11 @@ fn compose_aim_specimen(
 
 /// The specimen's values pass: each setting slider under `slot` at a sample
 /// value ([`crate::quick_preferences::sample_slider_value`]), where the
-/// binding layer's sync would put a stored one, and its readout through
-/// [`show_value`] — or its spinner, as the binding would show it.
+/// binding layer's sync would put a stored one (the slider writes its own
+/// readout from it), and its spinner as the binding would show it.
 fn compose_values_specimen(
     In(slot): In<Entity>,
     sliders: Query<(Entity, &SettingBinding, &SliderRange, &SliderStep), With<Slider>>,
-    mut labels: Query<(Entity, &mut Text, &PhotoValueLabel)>,
     mut spinners: Query<(Entity, &SettingBinding, &Spinner, &mut EditableText)>,
     parents: Query<&ChildOf>,
     mut commands: Commands,
@@ -1804,14 +1707,6 @@ fn compose_values_specimen(
         let value = crate::quick_preferences::sample_slider_value(range, step.0);
         commands.entity(slider).insert(SliderValue(value));
         values.push((binding.name(), value));
-    }
-    for (entity, mut text, label) in &mut labels {
-        if !under_slot(entity) {
-            continue;
-        }
-        if let Some((_name, value)) = values.iter().find(|(name, _value)| *name == label.setting) {
-            show_value(&mut text, label, *value);
-        }
     }
     for (entity, binding, spinner, mut editor) in &mut spinners {
         if !under_slot(entity) {

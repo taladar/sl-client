@@ -440,7 +440,7 @@ impl SkyKnob {
     /// Rayleigh linear term rounded to two decimals is the string `0.00` at
     /// every position of its slider.
     #[must_use]
-    pub const fn decimals(self) -> usize {
+    pub const fn decimals(self) -> u8 {
         match self {
             Self::RayleighLinear | Self::MieLinear => 8,
             Self::RayleighExpScale | Self::MieExpScale => 6,
@@ -883,7 +883,7 @@ impl WaterKnob {
     /// How many decimals the value readout shows — see [`SkyKnob::decimals`].
     /// Every water knob is a quantity a person reads at two.
     #[must_use]
-    pub const fn decimals(self) -> usize {
+    pub const fn decimals(self) -> u8 {
         2
     }
 

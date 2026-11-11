@@ -34,7 +34,7 @@ use crate::skin_palette::SkinPalette;
 use crate::ui::BottomArea;
 use crate::ui::{UiPanelShown, column, row};
 use crate::ui_font::UiFont;
-use crate::ui_slider::{SliderStyle, SliderWidgetPlugin, spawn_slider};
+use crate::ui_slider::{SliderFormat, SliderLabels, SliderStyle, SliderWidgetPlugin, spawn_slider};
 use crate::ui_spawn::{self, ButtonKind, ButtonSpec, UiLabel};
 
 /// The persisted-settings section the bus levels live under (`[audio.bus]`),
@@ -65,6 +65,7 @@ const SLIDER: SliderStyle = SliderStyle {
     track_fill: TRACK_FILL,
     thumb_width: 10.0,
     thumb_fill: THUMB_FILL,
+    font_size: FONT_SIZE,
 };
 /// The pulldown / bar background.
 const PANEL_BACKGROUND: Color = Color::srgba(0.08, 0.09, 0.12, 0.96);
@@ -372,6 +373,7 @@ fn spawn_bound_slider(commands: &mut Commands, parent: Entity, bus: Bus, tab_ind
         SLIDER,
         tab_index,
         0.0,
+        SliderLabels::value_only(SliderFormat::Percent),
         (
             bound_slider(
                 SettingBinding::global(volume_key(bus)),

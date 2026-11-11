@@ -2,7 +2,7 @@
 id: viewer-camera-framing-ends-inside-the-framed-object
 title: A framing glide can carry the camera inside the object it frames
 topic: viewer
-status: bugs
+status: done
 origin: viewer-automation-host-thread-per-viewer aditi runs (2026-10-02)
 refs: [viewer-automation-host-thread-per-viewer, test-e2e-sweep-live-grid]
 ---
@@ -61,3 +61,39 @@ explained.
   of them enters the cube's box.
 - Fix that cause, and add a test with the same reset-then-frame sequence that
   asserts the eased eye never enters the framed box.
+
+## What was found (2026-11-11)
+
+The third-person pose now has a per-frame trace (target `camera_glide`, at
+`trace`: focus, target and eased eye and focus, framed sphere), on every
+frame the pose moves. Three aditi runs of the test (process backend,
+`RUST_LOG=info,camera_glide=trace`) all passed; one went through the exact
+sequence, a rez framing at 7.42 m, `Escape`, and the cube revealed at
+1.61 m 0.8 s later. Its framing glide ran radially in from the rear view and
+stopped at 1.61 m. **The eye entered no box on any frame.**
+
+The likeliest cause of what was seen on 2026-10-02 is the one
+[[test-e2e-objects-live-opensim-intermittent]] fixed nine days later. The
+live tests then left their prims behind on the spot the next run aimed at
+(that fix added the sweep of leftovers). A leftover touching the fresh cube
+was not among the framed prims. Collision from the cube's centre stopped at
+it, inside the cube, and the eased eye glided smoothly there. The reveal
+framing again later took it back out. Collision now leaves the framed
+sphere clear and passes what touches it.
+
+The trace did show one defect in every run, the fake grid's too: **the
+`Escape` reset moved the eye 6–7 m in one frame** before it glided. The
+avatar follow eased only the eye's offset from its focus and held the focus
+rigidly on the avatar's head, so the eye's offset from the *framed point*
+was put onto the head. That was the "different on-screen motion" after a
+reset. The follow now carries the look-at point's lag behind the avatar
+(`CameraRig::follow_focus`), decaying and riding with the avatar. A settled
+follow stays rigid, and a follow that has just begun glides on a straight
+line from the eye it had, as the reference's camera animation does.
+
+Tests: `a_reset_into_the_follow_glides_from_the_eye_it_had` (camera unit:
+no frame's step over 15% of the glide, a straight path, a rigid settled
+follow) and `a_reset_then_a_framing_glides_and_never_enters_the_framed_box`
+(world fixture: a rezzed point framed, `Escape`, then a half-metre cube
+beside it framed; no frame of the reset jumps and no frame of the framing
+puts the eye in the cube).

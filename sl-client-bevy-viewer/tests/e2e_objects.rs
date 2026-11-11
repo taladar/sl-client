@@ -56,6 +56,13 @@
 //! ([[gridspec-lsl-runtime-errors]]), in each grid's own words: on a live
 //! grid, a script saved from the editor that divides by zero has to open the
 //! Script Errors window on them.
+//!
+//! And a prim is made a reflection probe from the Build window
+//! ([[viewer-build-probe-animesh-controls]], [[viewer-realtime-mirrors]]): the
+//! grid has to come to hold the phantom, transparent box probe the viewer
+//! asked for, and a probe made a mirror has to be re-rendered by the viewer
+//! frame after frame — on Second Life round a polished pane that shows the
+//! avatar standing before it.
 
 #[cfg(test)]
 mod test {
@@ -68,7 +75,7 @@ mod test {
     };
     use sl_e2e::{BodyError, Grid, Need, Stage, StageBuilder};
     use sl_fake_grid::{ImitatedGrid, RegionConfig};
-    use sl_proto::{RegionLocalObjectId, ServerEvent};
+    use sl_proto::{RegionCoordinates, RegionLocalObjectId, ServerEvent};
     use sl_viewer_driver::UiLocator;
     use sl_viewer_driver::Viewer;
 
@@ -400,11 +407,18 @@ mod test {
     }
 
     /// Whether `node` could be a prim one of these tests left: a root of the
-    /// default half-metre size, within [`LEFTOVER_RANGE_M`] of `at`.
+    /// default half-metre size — or of the mirror test's pane or probe —
+    /// within [`LEFTOVER_RANGE_M`] of `at`.
     fn could_be_a_leftover(node: &WorldNode, at: [f32; 3]) -> bool {
-        let default_size = node
-            .scale
-            .is_some_and(|scale| scale.iter().all(|side| (side - 0.5).abs() < 0.01));
+        let sizes = [[FRESH_SIDE_M; 3], GLASS_SIZE, [PROBE_SIDE_M; 3]];
+        let default_size = node.scale.is_some_and(|scale| {
+            sizes.iter().any(|size| {
+                scale
+                    .iter()
+                    .zip(size)
+                    .all(|(side, wanted)| (side - wanted).abs() < 0.01)
+            })
+        });
         let near = node.position.is_some_and(|position| {
             (position[0] - at[0]).hypot(position[1] - at[1]) < LEFTOVER_RANGE_M
         });
@@ -2273,6 +2287,618 @@ mod test {
                 "a grid's own attachments, re-sent under new local ids by a teleport",
             ))
             .run(a_worn_prim_follows_the_avatar)?;
+        Ok(())
+    }
+
+    // ---- Reflection probes and mirrors ------------------------------------
+
+    /// The setting that turns realtime mirrors on, which the viewer ships off.
+    const RENDER_MIRRORS: &str = "render_mirrors";
+
+    /// Turn realtime mirrors on in `alpha`: the viewer ships them off, as the
+    /// reference does, and a mirror is then an ordinary probe.
+    async fn mirrors_on(alpha: &Viewer) -> Result<(), BodyError> {
+        let _on = alpha.set_setting(RENDER_MIRRORS, json!(true)).await?;
+        Ok(())
+    }
+
+    /// The Build window's Reflection Probe checkbox.
+    fn probe_checkbox(build: &UiLocator) -> UiLocator {
+        build.get(Locator::role(Role::Checkbox).name_key("build-feature-probe"))
+    }
+
+    /// Make the selected prim a realtime mirror from the Features tab: tick
+    /// Reflection Probe, answer the warning it raises with OK, and pick Mirror
+    /// (Everything) — after which the volume type, a mirror's to fix, greys.
+    async fn make_it_a_mirror(alpha: &Viewer, build: &UiLocator) -> Result<(), BodyError> {
+        let _features = build
+            .get(Locator::role(Role::Tab).name_key("build-tab-features"))
+            .click()
+            .await?;
+        let probe = probe_checkbox(build);
+        let _live = alpha.expect(&probe).timeout(WAIT).to_be_enabled().await?;
+        // Not `check`: the tick waits for the answer to the warning.
+        let _ticked = probe.click().await?;
+        let _asked = alpha
+            .expect_notification()
+            .timeout(WAIT)
+            .to_show("ReflectionProbeApplied")
+            .await?;
+        let _ok = alpha.ui().test_id("toast-button:OK").click().await?;
+        let _probe = alpha.expect(&probe).timeout(WAIT).to_be_checked().await?;
+        let update = build.test_id("build-probe-update:combo");
+        let _offered = alpha.expect(&update).timeout(WAIT).to_be_enabled().await?;
+        let _mirror = update
+            .select_option(
+                Locator::role(Role::ListItem).name_key("build-probe-update-dynamic-mirror"),
+            )
+            .await?;
+        let _fixed = alpha
+            .expect(&build.test_id("build-probe-volume:combo"))
+            .timeout(WAIT)
+            .to_be_disabled()
+            .await?;
+        Ok(())
+    }
+
+    /// How often the viewer has re-rendered the mirror `mirror`, which must be
+    /// one it captures live.
+    async fn captures_of(alpha: &Viewer, mirror: sl_proto::Uuid) -> Result<u64, BodyError> {
+        let readout = alpha.mirrors().await?;
+        if !readout.enabled {
+            return Err("realtime mirrors are off".into());
+        }
+        readout
+            .mirrors
+            .iter()
+            .find(|captured| captured.full_id == mirror)
+            .map(|captured| captured.captures)
+            .ok_or_else(|| format!("the mirror is not captured: {readout:?}").into())
+    }
+
+    /// Wait until the viewer captures the mirror `mirror` live: bound to a
+    /// capture rig, and re-rendered again after it was first seen bound.
+    async fn captured_live(alpha: &Viewer, mirror: sl_proto::Uuid) -> Result<(), BodyError> {
+        let _bound = alpha
+            .expect_state(Probe::Mirrors)
+            .at("/mirrors/0/full_id")
+            .timeout(WAIT)
+            .to_equal(json!(mirror))
+            .await?;
+        let first = captures_of(alpha, mirror).await?;
+        let rendered = tokio::time::timeout(WAIT, async {
+            loop {
+                if let Ok(now) = captures_of(alpha, mirror).await
+                    && now > first
+                {
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(250)).await;
+            }
+        })
+        .await;
+        rendered.map_err(|_elapsed| {
+            format!("the mirror was bound but never re-rendered past {first} captures").into()
+        })
+    }
+
+    /// What the fake grid holds of prim `local_id`: its reflection probe, its
+    /// `PrimFlags` and its texture entry's faces.
+    async fn grid_holds(
+        stage: &Stage,
+        local_id: u32,
+    ) -> Result<
+        (
+            Option<sl_proto::ReflectionProbe>,
+            u32,
+            Vec<sl_proto::TextureFace>,
+        ),
+        BodyError,
+    > {
+        stage
+            .agent("Alpha")
+            .await?
+            .with_world(|world, _sim| {
+                world
+                    .objects
+                    .get(RegionLocalObjectId(local_id))
+                    .map(|object| {
+                        (
+                            object.extra.reflection_probe,
+                            object.update_flags,
+                            // A box has six faces.
+                            sl_proto::decode_texture_entry(&object.texture_entry, 6).faces,
+                        )
+                    })
+            })
+            .await
+            .ok_or_else(|| "the grid holds no such prim".into())
+    }
+
+    /// Wait until the fake grid holds what `wanted` accepts of prim
+    /// `local_id`.
+    async fn grid_comes_to_hold(
+        stage: &Stage,
+        local_id: u32,
+        what: &str,
+        wanted: impl Fn(
+            &(
+                Option<sl_proto::ReflectionProbe>,
+                u32,
+                Vec<sl_proto::TextureFace>,
+            ),
+        ) -> bool
+        + Send
+        + Sync,
+    ) -> Result<(), BodyError> {
+        let held = tokio::time::timeout(WAIT, async {
+            loop {
+                if let Ok(held) = grid_holds(stage, local_id).await
+                    && wanted(&held)
+                {
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(250)).await;
+            }
+        })
+        .await;
+        if held.is_err() {
+            let held = grid_holds(stage, local_id).await?;
+            return Err(format!("{what}: the grid holds {held:?}").into());
+        }
+        Ok(())
+    }
+
+    /// Rez a prim and make it a realtime mirror from the Build window, then
+    /// a plain prim again: the grid comes to hold a phantom, transparent box
+    /// probe flagged a dynamic mirror, and the viewer captures it live; once
+    /// unticked the grid holds no probe and the viewer captures nothing.
+    async fn a_prim_is_made_a_mirror_and_back(stage: &Stage) -> Result<(), BodyError> {
+        let alpha = &stage.viewer("Alpha")?;
+        arrived(alpha).await?;
+        mirrors_on(alpha).await?;
+        let (build, _spot) = rez_a_prim(stage, alpha).await?;
+        let field = build.test_id("build-name:field");
+        let _live = alpha.expect(&field).timeout(WAIT).to_be_enabled().await?;
+        let selected = alpha.selection().await?;
+        let [prim] = selected.as_slice() else {
+            return Err(format!("the rez left {selected:?} selected").into());
+        };
+        let (prim_id, local_id) = (prim.full_id, prim.local_id);
+
+        make_it_a_mirror(alpha, &build).await?;
+        let mirror_flags = sl_proto::ReflectionProbeFlags::BOX_VOLUME
+            | sl_proto::ReflectionProbeFlags::DYNAMIC
+            | sl_proto::ReflectionProbeFlags::MIRROR;
+        grid_comes_to_hold(stage, local_id, "a mirror made", |(probe, flags, faces)| {
+            probe.is_some_and(|probe| probe.flags == mirror_flags)
+                && flags & sl_proto::prim_flags::PHANTOM != 0
+                && !faces.is_empty()
+                && faces.iter().all(|face| face.color.get(3) == Some(&0))
+        })
+        .await?;
+        captured_live(alpha, prim_id).await?;
+
+        // A plain prim again, with no question asked.
+        probe_checkbox(&build).uncheck().await?;
+        grid_comes_to_hold(stage, local_id, "the probe taken off", |(probe, _, _)| {
+            probe.is_none()
+        })
+        .await?;
+        let _released = alpha
+            .expect_state(Probe::Mirrors)
+            .at("/mirrors")
+            .timeout(WAIT)
+            .to_be_absent()
+            .await?;
+        Ok(())
+    }
+
+    /// **A prim made a mirror and back, on the fake grid** (imitating Second
+    /// Life): the Features tab's Reflection Probe checkbox asks first, then
+    /// makes the prim a phantom, transparent box probe; Mirror (Everything)
+    /// makes it a dynamic mirror the viewer re-renders every frame; and the
+    /// checkbox unticked takes the probe off again.
+    #[test]
+    fn a_prim_is_made_a_mirror_and_back_on_the_fake_grid() -> Result<(), TestError> {
+        StageBuilder::new("mirror_fake")
+            .viewer_binary(VIEWER)
+            .viewer("Alpha")
+            .needs(Need::Content("the stock scene's unnamed box, to rez on"))
+            .needs(Need::GridControl)
+            .configure_grid(|grid| grid.imitates(ImitatedGrid::SecondLife))
+            .run(a_prim_is_made_a_mirror_and_back)?;
+        Ok(())
+    }
+
+    /// How far to the camera's right of the avatar the mirror stands, metres.
+    const MIRROR_ASIDE_M: f32 = 2.5;
+
+    /// How far ahead of the avatar it stands, metres.
+    const MIRROR_AHEAD_M: f32 = 3.0;
+
+    /// The glass's thickness, width and height, metres.
+    const GLASS_SIZE: [f32; 3] = [0.05, 2.5, 2.5];
+
+    /// How far above the ground the glass's lower edge stands, metres.
+    const GLASS_LIFT_M: f32 = 0.1;
+
+    /// The side of the probe's box round the glass, metres.
+    const PROBE_SIDE_M: f32 = 3.0;
+
+    /// The side a fresh prim is rezzed with, metres.
+    const FRESH_SIDE_M: f32 = 0.5;
+
+    /// Type `value` into the Object tab field `field` and wait for it to read
+    /// back.
+    async fn type_into(build: &UiLocator, field: &str, value: f32) -> Result<(), BodyError> {
+        let input = build.test_id(field);
+        let _typed = input.fill(&format!("{value:.3}")).await?;
+        input.press("Enter").await?;
+        reads(&input, value, field).await
+    }
+
+    /// Size, turn and place the selected prim from the Object tab: `size` in
+    /// metres, turned `yaw_deg` about the vertical, centred on `at`.
+    async fn shape_and_place(
+        build: &UiLocator,
+        size: [f32; 3],
+        yaw_deg: f32,
+        at: [f32; 3],
+    ) -> Result<(), BodyError> {
+        let _object = build
+            .get(Locator::role(Role::Tab).name_key("build-tab-object"))
+            .click()
+            .await?;
+        for (field, value) in [
+            "build-size-x:field",
+            "build-size-y:field",
+            "build-size-z:field",
+        ]
+        .into_iter()
+        .zip(size)
+        {
+            type_into(build, field, value).await?;
+        }
+        // Read back as the grid states it, which may be the same turn written
+        // another way: only the write is checked here, the drawn mirror by
+        // the probe and the screenshot.
+        let yaw = build.test_id("build-rot-z:field");
+        let _typed = yaw.fill(&format!("{yaw_deg:.1}")).await?;
+        yaw.press("Enter").await?;
+        for (field, value) in [
+            "build-pos-x:field",
+            "build-pos-y:field",
+            "build-pos-z:field",
+        ]
+        .into_iter()
+        .zip(at)
+        {
+            type_into(build, field, value).await?;
+        }
+        Ok(())
+    }
+
+    /// Give the selected prim a new PBR material made a mirror finish — fully
+    /// metallic, perfectly smooth — from the Texture tab.
+    async fn polish(alpha: &Viewer, build: &UiLocator) -> Result<(), BodyError> {
+        let _texture = build
+            .get(Locator::role(Role::Tab).name_key("build-tab-texture"))
+            .click()
+            .await?;
+        let _pbr = build
+            .get(Locator::role(Role::Tab).name_key("build-tex-matmedia-pbr"))
+            .click()
+            .await?;
+        let _new = build.test_id("build-pbr:build-pbr-new").click().await?;
+        let _channel = build
+            .get(Locator::role(Role::Radio).name_key("build-tex-pbrtype-metallic"))
+            .click()
+            .await?;
+        let metallic = build.test_id("build-pbr-metallic-factor:field");
+        let roughness = build.test_id("build-pbr-roughness-factor:field");
+        // Live once the grid has put the new material on the faces.
+        let _material = alpha
+            .expect(&metallic)
+            .timeout(WAIT)
+            .to_be_enabled()
+            .await?;
+        for (field, value) in [(&metallic, "1"), (&roughness, "0")] {
+            let _typed = field.fill(value).await?;
+            field.press("Enter").await?;
+        }
+        reads(&metallic, 1.0, "the metallic factor").await?;
+        reads(&roughness, 0.0, "the roughness factor").await
+    }
+
+    /// Name the selected prim `label` (with this run's stamp) on the General
+    /// tab.
+    async fn name_it(
+        stage: &Stage,
+        alpha: &Viewer,
+        build: &UiLocator,
+        label: &str,
+    ) -> Result<String, BodyError> {
+        let _general = build
+            .get(Locator::role(Role::Tab).name_key("build-tab-general"))
+            .click()
+            .await?;
+        let name = run_name(stage, label)?;
+        let field = build.test_id("build-name:field");
+        let _live = alpha.expect(&field).timeout(WAIT).to_be_enabled().await?;
+        let _typed = field.fill(&name).await?;
+        field.press("Enter").await?;
+        let _kept = alpha
+            .expect(&field)
+            .timeout(WAIT)
+            .to_have_text(&name)
+            .await?;
+        Ok(name)
+    }
+
+    /// The selected prim's full id, the one prim selected.
+    async fn the_selected_prim(alpha: &Viewer) -> Result<sl_proto::Uuid, BodyError> {
+        let selected = alpha.selection().await?;
+        let [prim] = selected.as_slice() else {
+            return Err(format!("{selected:?} is selected, not one prim").into());
+        };
+        Ok(prim.full_id)
+    }
+
+    /// A unit vector along `(x, y)`.
+    fn unit(x: f32, y: f32) -> (f32, f32) {
+        let length = x.hypot(y).max(0.001);
+        (x / length, y / length)
+    }
+
+    /// Build a mirror beside the avatar — a polished pane, and round it a
+    /// probe made a dynamic mirror — turned so the camera behind the avatar
+    /// sees the avatar in it; wait until the viewer captures it live; and save
+    /// a screenshot of the view, `mirror.png` among the viewer's artifacts.
+    /// Both prims are deleted afterwards.
+    async fn a_mirror_reflects_the_avatar(stage: &Stage) -> Result<(), BodyError> {
+        let alpha = &stage.viewer("Alpha")?;
+        arrived(alpha).await?;
+        mirrors_on(alpha).await?;
+        let readout = alpha.agent().await?;
+        let avatar = readout.position.ok_or("Alpha has no position")?;
+        let eye = readout.camera_eye.ok_or("Alpha has no camera")?;
+        let (ahead_x, ahead_y) = unit(avatar[0] - eye[0], avatar[1] - eye[1]);
+        let centre = [
+            avatar[0] + MIRROR_ASIDE_M * ahead_y + MIRROR_AHEAD_M * ahead_x,
+            avatar[1] - MIRROR_ASIDE_M * ahead_x + MIRROR_AHEAD_M * ahead_y,
+        ];
+        // The pane faces halfway between the eye and the avatar, so the eye
+        // sees the avatar at the pane's centre.
+        let to_eye = unit(eye[0] - centre[0], eye[1] - centre[1]);
+        let to_avatar = unit(avatar[0] - centre[0], avatar[1] - centre[1]);
+        let facing = unit(to_eye.0 + to_avatar.0, to_eye.1 + to_avatar.1);
+        let yaw_deg = facing.1.atan2(facing.0).to_degrees();
+
+        // The pane: rezzed on the ground, then stood up beside the avatar.
+        let (build, _spot) = rez_a_prim(stage, alpha).await?;
+        let glass = the_selected_prim(alpha).await?;
+        let _glass_name = name_it(stage, alpha, &build, "Mirror Glass").await?;
+        let rezzed = alpha
+            .world()
+            .locator(WorldLocator::full_id(glass))
+            .timeout(WAIT)
+            .node()
+            .await?;
+        let ground = rezzed
+            .position
+            .map(|at| at[2] - FRESH_SIDE_M / 2.0)
+            .ok_or("the pane has no position")?;
+        let [_thickness, _width, height] = GLASS_SIZE;
+        let at = [centre[0], centre[1], ground + GLASS_LIFT_M + height / 2.0];
+        shape_and_place(&build, GLASS_SIZE, yaw_deg, at).await?;
+        polish(alpha, &build).await?;
+
+        // The probe: rezzed on the pane, made a box round it, then a mirror.
+        let _spot = place_a_prim(stage, alpha, &build, Some(glass)).await?;
+        let probe = the_selected_prim(alpha).await?;
+        let _probe_name = name_it(stage, alpha, &build, "Mirror Probe").await?;
+        shape_and_place(&build, [PROBE_SIDE_M; 3], yaw_deg, at).await?;
+        make_it_a_mirror(alpha, &build).await?;
+
+        // Out of build mode, the camera behind the avatar again.
+        alpha.press("Escape").await?;
+        alpha.press("Escape").await?;
+        let _cleared = alpha
+            .expect_state(Probe::Selection)
+            .timeout(WAIT)
+            .to_equal(json!([]))
+            .await?;
+        alpha.press("Ctrl+B").await?;
+        let _closed = alpha.expect(&build).timeout(WAIT).to_be_hidden().await?;
+        captured_live(alpha, probe).await?;
+        // A few seconds for the pane's material and the reflection to settle
+        // before the picture.
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        let artifacts = stage.artifacts("Alpha")?.to_path_buf();
+        let _shot = alpha
+            .screenshot(&artifacts.join("mirror.png"), None)
+            .await?;
+
+        // Taken down again: the probe first, which no pie reaches through the
+        // pane it surrounds, from a selection; then the pane from its pie.
+        alpha.press("Ctrl+B").await?;
+        let _open = alpha.expect(&build).timeout(WAIT).to_be_visible().await?;
+        // The window reopens on the Create tool it was left on, which selects
+        // nothing.
+        let _move = build
+            .get(Locator::role(Role::Radio).name_key("build-tool-move"))
+            .click()
+            .await?;
+        let probe_prim = alpha
+            .world()
+            .locator(WorldLocator::full_id(probe))
+            .timeout(WAIT);
+        let _selected = probe_prim.select().await?;
+        alpha.press("Delete").await?;
+        let _gone = alpha
+            .expect_world(&probe_prim)
+            .timeout(SETTLE)
+            .to_be_detached()
+            .await?;
+        let glass_prim = alpha
+            .world()
+            .locator(WorldLocator::full_id(glass))
+            .timeout(WAIT);
+        pie(alpha, &glass_prim, &DELETE).await?;
+        let _gone = alpha
+            .expect_world(&glass_prim)
+            .timeout(SETTLE)
+            .to_be_detached()
+            .await?;
+        Ok(())
+    }
+
+    /// **A mirror reflects the avatar, on Second Life**
+    /// (`SL_E2E_GRID=aditi`, where the avatar stands on land it may build
+    /// on): a pane given a polished PBR material and, round it, a probe made a
+    /// dynamic mirror from the Build window; the viewer captures the mirror
+    /// live, and `mirror.png` shows what the camera sees of it.
+    #[test]
+    fn a_mirror_reflects_the_avatar_on_second_life() -> Result<(), TestError> {
+        StageBuilder::new("mirror_live")
+            .viewer_binary(VIEWER)
+            .viewer("Alpha")
+            .needs(Need::LiveGrid(
+                "a grid's own rez, material and probe answers",
+            ))
+            .needs(Need::SecondLife("a PBR material edit"))
+            .run(a_mirror_reflects_the_avatar)?;
+        Ok(())
+    }
+
+    /// Where the fake mirror scene's avatar stands: the region's centre, on the
+    /// stock ground.
+    const MIRROR_SCENE_AVATAR: [f32; 3] = [128.0, 128.0, 26.0];
+
+    /// The polished-metal material the fake mirror scene's pane wears.
+    const MIRROR_MATERIAL: sl_proto::Uuid =
+        sl_proto::Uuid::from_u128(0x0313_7a11_0000_0000_0000_0000_0000_0001);
+
+    /// The fake mirror scene's pane and probe, by local id.
+    const MIRROR_PANE_LOCAL_ID: u32 = 0x3131_0001;
+
+    /// See [`MIRROR_PANE_LOCAL_ID`].
+    const MIRROR_PROBE_LOCAL_ID: u32 = 0x3131_0002;
+
+    /// The fake mirror scene's probe's full id.
+    const MIRROR_PROBE_KEY: sl_proto::Uuid = sl_proto::Uuid::from_u128(0x0313_9b0e);
+
+    /// The rotation `yaw` radians about the vertical.
+    fn yaw_rotation(yaw: f32) -> sl_proto::Rotation {
+        let (sin, cos) = (yaw / 2.0).sin_cos();
+        sl_proto::Rotation {
+            x: 0.0,
+            y: 0.0,
+            z: sin,
+            s: cos,
+        }
+    }
+
+    /// The fake mirror scene: the stock region with, to the right ahead of an
+    /// avatar facing east, a polished pane turned to show the camera behind
+    /// the avatar the avatar, and round it a probe flagged a dynamic mirror.
+    fn mirror_scene() -> RegionConfig {
+        use sl_fake_grid::fixtures::prims::{FaceStyle, PrimFixture};
+        use sl_fake_grid::scenario::Scenario;
+
+        let [east, north, up] = MIRROR_SCENE_AVATAR;
+        // The viewer's camera starts behind an avatar facing east (+X), a few
+        // metres back.
+        let eye = (east - 4.0, north);
+        let centre = (east + MIRROR_AHEAD_M, north - MIRROR_ASIDE_M);
+        let to_eye = unit(eye.0 - centre.0, eye.1 - centre.1);
+        let to_avatar = unit(east - centre.0, north - centre.1);
+        let facing = unit(to_eye.0 + to_avatar.0, to_eye.1 + to_avatar.1);
+        let rotation = yaw_rotation(facing.1.atan2(facing.0));
+        let [thickness, width, height] = GLASS_SIZE;
+        let at = sl_proto::Vector {
+            x: centre.0,
+            y: centre.1,
+            z: up - 1.0 + GLASS_LIFT_M + height / 2.0,
+        };
+        let owner = sl_proto::AgentKey::from(sl_proto::Uuid::from_u128(0x0313_0a11));
+        let mut pane = PrimFixture::boxed(
+            RegionLocalObjectId(MIRROR_PANE_LOCAL_ID),
+            sl_proto::ObjectKey::from(sl_proto::Uuid::from_u128(0x0313_9a4e)),
+            owner,
+            at.clone(),
+            sl_proto::Vector {
+                x: thickness,
+                y: width,
+                z: height,
+            },
+        )
+        .rotated(rotation.clone());
+        for face in 0..6 {
+            pane = pane.pbr(face, MIRROR_MATERIAL);
+        }
+        let probe = PrimFixture::boxed(
+            RegionLocalObjectId(MIRROR_PROBE_LOCAL_ID),
+            sl_proto::ObjectKey::from(MIRROR_PROBE_KEY),
+            owner,
+            at,
+            sl_proto::Vector {
+                x: PROBE_SIDE_M,
+                y: PROBE_SIDE_M,
+                z: PROBE_SIDE_M,
+            },
+        )
+        .rotated(rotation)
+        .faces(&FaceStyle {
+            alpha: 0.0,
+            ..FaceStyle::default()
+        })
+        .reflection_probe(sl_proto::ReflectionProbe {
+            ambiance: 0.0,
+            clip_distance: 0.0,
+            flags: sl_proto::ReflectionProbeFlags::BOX_VOLUME
+                | sl_proto::ReflectionProbeFlags::DYNAMIC
+                | sl_proto::ReflectionProbeFlags::MIRROR,
+        });
+        let mut scenario = Scenario::default();
+        let _previous = scenario.assets.insert(
+            sl_proto::AssetKey::from(MIRROR_MATERIAL),
+            sl_test_assets::gltf_polished_metal_asset(),
+        );
+        scenario.world.objects.push(pane.build());
+        scenario.world.objects.push(probe.build());
+        RegionConfig {
+            scenario: Some(scenario),
+            ..RegionConfig::default()
+        }
+    }
+
+    /// **A mirror shows the avatar, on the fake grid**: a polished pane and,
+    /// round it, a probe flagged a dynamic mirror stand to the right ahead of
+    /// the avatar, turned so the camera behind it sees the avatar in the pane;
+    /// with realtime mirrors on the viewer captures the probe live, and
+    /// `mirror.png` among the viewer's artifacts shows what the camera sees.
+    #[test]
+    fn a_mirror_shows_the_avatar_on_the_fake_grid() -> Result<(), TestError> {
+        let [east, north, up] = MIRROR_SCENE_AVATAR;
+        StageBuilder::new("mirror_scene_fake")
+            .viewer_binary(VIEWER)
+            .viewer("Alpha")
+            .region(mirror_scene())
+            .start_position(RegionCoordinates::new(east, north, up))
+            .run(async |stage: &Stage| {
+                let alpha = &stage.viewer("Alpha")?;
+                arrived(alpha).await?;
+                mirrors_on(alpha).await?;
+                captured_live(alpha, MIRROR_PROBE_KEY).await?;
+                tokio::time::sleep(Duration::from_secs(5)).await;
+                let artifacts = stage.artifacts("Alpha")?.to_path_buf();
+                let _shot = alpha
+                    .screenshot(&artifacts.join("mirror.png"), None)
+                    .await?;
+                Ok(())
+            })?;
         Ok(())
     }
 }

@@ -9023,9 +9023,9 @@ mod test {
                 rez_selected: false,
                 remove_item: false,
                 item_flags: 0,
-                group_mask: 0,
-                everyone_mask: 0,
-                next_owner_mask: 0x0008_e000,
+                group_mask: Permissions::NONE,
+                everyone_mask: Permissions::NONE,
+                next_owner_mask: Permissions::from_bits(0x0008_e000),
                 notecard_item_id: InventoryKey::from(uuid::Uuid::from_u128(0xCA5E)),
                 object_id: ObjectKey::from(uuid::Uuid::nil()),
                 item_ids: vec![
@@ -9116,9 +9116,9 @@ mod test {
                 rez_selected: false,
                 remove_item: false,
                 item_flags: 0,
-                group_mask: 0,
-                everyone_mask: 0,
-                next_owner_mask: 0x0008_e000,
+                group_mask: Permissions::NONE,
+                everyone_mask: Permissions::NONE,
+                next_owner_mask: Permissions::from_bits(0x0008_e000),
                 item: item.clone(),
             },
             now,
@@ -22698,7 +22698,7 @@ mod test {
         let new = NewInventoryItem {
             folder_id: InventoryFolderKey::from(uuid::Uuid::from_u128(0x11)),
             transaction_id: uuid::Uuid::nil(),
-            next_owner_mask: 0x0008_e000,
+            next_owner_mask: Permissions::from_bits(0x0008_e000),
             asset_type: AssetType::Notecard,
             inv_type: InventoryType::Notecard,
             wearable_type: WearableType::Shape,
@@ -24671,12 +24671,14 @@ mod test {
         let items: std::sync::Arc<[ItemInfo]> = items.into();
         let page_event = Event::InventoryFolderPage {
             folder: parent_key,
+            state: session.folder_fetch_state(parent_key),
             folders: std::sync::Arc::clone(&folders),
             items: std::sync::Arc::clone(&items),
             prev,
         };
         let Event::InventoryFolderPage {
             folder,
+            state,
             folders: shipped_folders,
             items: shipped_items,
             prev: shipped_prev,
@@ -24685,6 +24687,9 @@ mod test {
             return Err("expected an InventoryFolderPage event".into());
         };
         assert_eq!(*folder, parent_key);
+        // The page reports the paged folder's own state, which no sub-folder
+        // listing carries.
+        assert_eq!(*state, Some(FolderState::Loaded { version: 4 }));
         // Handing the window across the channel is an `Arc` clone, never a deep
         // copy: the shipped event shares the same allocation.
         assert!(std::sync::Arc::ptr_eq(&folders, shipped_folders));

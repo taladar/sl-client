@@ -1302,6 +1302,7 @@ mod tests {
             texture_entry: Vec::new(),
             media_url: None,
             scale: Vec3::ONE,
+            local_echo: false,
         }
     }
 

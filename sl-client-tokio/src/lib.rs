@@ -2620,7 +2620,8 @@ impl Client {
                                     asset_type: asset_name.to_owned(),
                                     inventory_type: inv_name.to_owned(),
                                     name, description,
-                                    next_owner_mask, group_mask, everyone_mask, expected_upload_cost,
+                                    next_owner_mask: next_owner_mask.bits(), group_mask: group_mask.bits(),
+                                    everyone_mask: everyone_mask.bits(), expected_upload_cost,
                                 };
                                 let body = build_new_file_agent_inventory_request(&request);
                                 // The request is kept for the completion: this is
@@ -3146,7 +3147,10 @@ impl Client {
                                     Instant::now(),
                                 )?;
                             }
-                            deliver(&events, Event::InventoryFolderPage { folder, folders: folders.into(), items: items.into(), prev, }).await;
+                            // Read after the fetch above, so a folder it just
+                            // scheduled reports `Fetching`, not `Unknown`.
+                            let state = self.session.folder_fetch_state(folder);
+                            deliver(&events, Event::InventoryFolderPage { folder, state, folders: folders.into(), items: items.into(), prev, }).await;
                         }
                         Some(Command::QueryInventoryRoots) => {
                             // Local query: surface the agent + library roots (both

@@ -1610,6 +1610,19 @@ build-light-intensity-label = Intensity
 build-light-radius-label = Radius (m)
 build-light-falloff-label = Falloff
 build-spot-label = Spot (FOV/Focus/Amb)
+build-feature-animesh = Animated Mesh
+build-feature-probe = Reflection Probe
+build-probe-volume-label = Volume
+build-probe-volume-sphere = Sphere
+build-probe-volume-box = Box
+build-probe-dynamic = Dynamic
+build-probe-update-label = Probe Update
+build-probe-update-static = Static
+build-probe-update-dynamic = Dynamic
+build-probe-update-mirror = Mirror (Environment)
+build-probe-update-dynamic-mirror = Mirror (Everything)
+build-probe-ambiance-label = Ambiance
+build-probe-near-clip-label = Near Clip
 build-tool-select-face = Select Face
 build-tool-select-land = Land
 build-land-select = Select Land
@@ -1754,6 +1767,13 @@ trackball-west = W
 # control itself shows only the compass letters.
 trackball-sun = Sun direction
 trackball-moon = Moon direction
+# A slider's value as a percentage, in its readout and at the ends of its
+# track. $percent is the number already written for the locale; the sign's
+# side and spacing are the translation's.
+slider-percent = { $percent }%
+# The tooltip over a slider's track: how far one notch (an arrow key) moves
+# it. $step is the number already written as the slider writes its value.
+slider-step = Step: { $step }
 texture-picker-title = Pick: Texture
 texture-picker-title-material = Pick: Material
 texture-picker-search = Search

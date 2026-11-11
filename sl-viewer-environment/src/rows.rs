@@ -6,12 +6,12 @@
 //! differs per window: which knob a control drives and which buffer it writes
 //! are the window's business, the geometry and the thumb-following are not.
 //!
-//! [`SliderRow`] is the piece that makes that split work. A slider's thumb
-//! position and its value readout are the same job in every window — read
-//! `SliderValue`, place the thumb, format the number — so one system
-//! ([`sync_slider_rows`]) does it for all of them, and a new window gets it
-//! without a line of code. What a window keeps for itself is the component
-//! naming its own knob, which is what its write-back and its re-seed query on.
+//! A slider's thumb position and its value readout are the same job in every
+//! window — read `SliderValue`, place the thumb, format the number — so the
+//! shared slider widget does both for all of them, the readout into the
+//! caption line [`spawn_slider_row`] places, and a new window gets it without a
+//! line of code. What a window keeps for itself is the component naming its own
+//! knob, which is what its write-back and its re-seed query on.
 
 use bevy::prelude::*;
 use bevy::ui_widgets::{Slider, SliderRange, SliderStep, SliderValue};
@@ -24,7 +24,9 @@ use sl_viewer_ui_core::ui::{LogicalMargin, LogicalRect, column, row};
 use sl_viewer_ui_core::ui_font::UiFont;
 use sl_viewer_ui_core::ui_spawn::{self, ButtonKind, ButtonSpec, UiLabel};
 use sl_viewer_ui_widgets::ui_color_picker::spawn_color_swatch;
-use sl_viewer_ui_widgets::ui_slider::{SliderStyle, SliderWidgetPlugin, spawn_slider};
+use sl_viewer_ui_widgets::ui_slider::{
+    SliderFormat, SliderLabels, SliderStyle, SliderWidgetPlugin, spawn_slider,
+};
 use sl_viewer_ui_widgets::ui_trackball::{TrackballAim, TrackballPlugin, spawn_trackball};
 
 use crate::knobs::{AimKnobs, ColorKnob, SkyKnob, TextureKnob, label_key};
@@ -52,27 +54,12 @@ pub(crate) const SLIDER: SliderStyle = SliderStyle {
     track_fill: TRACK_FILL,
     thumb_width: 9.0,
     thumb_fill: THUMB_FILL,
+    font_size: FONT_SIZE,
 };
 
-/// A value readout's width, logical px — right of the label, on its line.
+/// A value readout's narrowest width, logical px — right of the label, on its
+/// line.
 const READOUT_WIDTH: f32 = 44.0;
-
-/// A slider that shows its value: the readout beside its label.
-///
-/// Carried by every environment slider whatever window it is in, so one system
-/// keeps every thumb and every number in step.
-#[derive(Component, Debug, Clone, Copy)]
-pub struct SliderRow {
-    /// The `Text` entity showing the value.
-    pub readout: Entity,
-    /// How many decimals the readout shows.
-    ///
-    /// Per row rather than one format for the widget, because the environment's
-    /// knobs are not one scale: a haze density reads at two decimals and a
-    /// Rayleigh linear term is `0.00` at every position of its slider unless it
-    /// gets eight.
-    pub decimals: usize,
-}
 
 /// One labelled control: a caption line, then the control under it. Returns the
 /// node the control is parented into, and the caption row a readout can join.
@@ -136,15 +123,20 @@ pub fn spawn_labelled_block(
     (block, caption)
 }
 
-/// A labelled slider over `range`, named `{element}-{slug}:slider`. Returns the
-/// track, which the caller tags with the knob it drives and an observer.
+/// A labelled slider over `range`, named `{element}-{slug}:slider`, its value
+/// read at `decimals` places on its caption line. Returns the track, which the
+/// caller tags with the knob it drives and an observer.
+///
+/// The decimals are per row rather than the step's, because the environment's
+/// knobs are not one scale: a haze density reads at two decimals and a Rayleigh
+/// linear term is `0.00` at every position of its slider unless it gets eight.
 pub fn spawn_slider_row(
     commands: &mut Commands,
     parent: Entity,
     element: &str,
     slug: &str,
     range: (f32, f32),
-    decimals: usize,
+    decimals: u8,
     tab: &mut i32,
 ) -> Entity {
     let (block, caption) = spawn_labelled_block(commands, parent, label_key(slug));
@@ -180,12 +172,12 @@ pub fn spawn_slider_row(
         SLIDER,
         *tab,
         0.0,
+        SliderLabels::written_into(readout, SliderFormat::Decimal(decimals)),
         (
             Slider::default(),
             SliderValue(min),
             SliderRange::new(min, max),
             SliderStep((max - min) / 100.0),
-            SliderRow { readout, decimals },
             Name::new(format!("{element}-{slug}:slider")),
         ),
     );
@@ -386,7 +378,7 @@ pub fn spawn_action_button(
     .button
 }
 
-/// The one system every environment window's sliders share.
+/// The systems every environment window's sliders and trackballs share.
 ///
 /// Added by each window's plugin rather than by a plugin group, because the
 /// viewer adds those windows individually — so each one guards with
@@ -406,37 +398,11 @@ impl Plugin for RowsPlugin {
             Update,
             // Ordered: a slider drag has to reach the trackball and the
             // trackball's own drag has to reach the sliders in the frame it
-            // happened, and `sync_slider_rows` draws whatever the pair settled
-            // on — an unordered tuple would leave one of the two a frame behind
-            // the hand.
-            (
-                aim_sliders_drive_trackballs,
-                trackballs_drive_aim_sliders,
-                sync_slider_rows,
-            )
-                .chain(),
+            // happened — an unordered pair would leave one of the two a frame
+            // behind the hand. The slider widget draws whatever they settled on
+            // in `PostUpdate`.
+            (aim_sliders_drive_trackballs, trackballs_drive_aim_sliders).chain(),
         );
-    }
-}
-
-/// Keep every environment slider's **readout** in step with its value.
-///
-/// It used to place the thumb as well; that half is
-/// [`sl_viewer_ui_widgets::ui_slider`]'s now, and belongs there because every
-/// slider in the viewer needed it and each one had written it out again.
-pub fn sync_slider_rows(sliders: Query<(&SliderRow, &SliderValue)>, mut texts: Query<&mut Text>) {
-    for (row_info, value) in &sliders {
-        write_readout(row_info.readout, value.0, row_info.decimals, &mut texts);
-    }
-}
-
-/// Write a slider's value into its readout, only when the text would change.
-fn write_readout(readout: Entity, value: f32, decimals: usize, texts: &mut Query<&mut Text>) {
-    if let Ok(mut text) = texts.get_mut(readout) {
-        let wanted = format!("{value:.decimals$}");
-        if text.0 != wanted {
-            text.0 = wanted;
-        }
     }
 }
 

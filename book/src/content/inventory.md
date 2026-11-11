@@ -170,9 +170,12 @@ synthesize a reply from the in-memory model with no wire send:
 - `Command::QueryInventoryRoots` → `Event::InventoryRoots { agent_root,
   library_root }`. Both keys are `Copy`, so the reply is trivially cheap.
 - `Command::QueryInventoryFolder { folder, before, limit }` →
-  `Event::InventoryFolderPage { folder, folders, items, prev }`, built from
-  `inventory_folder_page`. If the folder's contents are still `Unknown` the
+  `Event::InventoryFolderPage { folder, state, folders, items, prev }`, built
+  from `inventory_folder_page`. If the folder's contents are still `Unknown` the
   runtime also schedules its on-demand fetch, so a later query sees them loaded.
+  `state` is the paged folder's own `FolderState`, read after that fetch is
+  scheduled: a sub-folder's state rides in `folders`, but only this field
+  reports a root's, or a folder's whose parent was paged before it loaded.
 
 The page payloads are `Arc<[FolderInfo]>` / `Arc<[ItemInfo]>` — an `Arc` clone
 crosses the channel, never a deep copy of the window, keeping the copy budget to

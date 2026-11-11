@@ -2,7 +2,7 @@
 id: viewer-sliders-show-no-value
 title: A slider shows no value, and no bounds or step either
 topic: viewer
-status: bugs
+status: done
 origin: live check of viewer-render-resolution-divisor (2026-09-20)
 refs: [viewer-render-resolution-divisor, viewer-ui-widget-scaffold]
 ---
@@ -62,3 +62,43 @@ existing sliders get it at once:
 
 Per [context/parallel-work-plan.md](../context/parallel-work-plan.md) this is
 **B**'s (the UI shell owns `sl-viewer-ui-widgets` and the preferences tabs).
+
+## Done
+
+The readout, the bounds and the step are the widget's
+(`sl-viewer-ui-widgets/src/ui_slider.rs`), so every slider has them:
+
+- `spawn_slider` takes a `SliderLabels`: `beside` (a readout at the track's
+  trailing end and the bounds under it — every preferences row, Phototools,
+  Quick Preferences, the Land tool, the wearable editor), `written_into` (the
+  value in a `Text` the caller placed — the environment editors' caption line
+  and the land-environment day sliders), `bounds_only` (the Phototools rows
+  whose spinner already shows the value), `value_only` (the volumes, whose
+  0–100 % ends say nothing, in bars with no room for a second line) and `None`
+  (the media scrubber, whose clock text is its readout);
+- a `SliderFormat` per slider — `Decimal(n)` in the locale's decimal mark and
+  grouping, or `Percent` through the `slider-percent` Fluent key —
+  writes the value and both bounds, so they agree;
+  `SliderFormat::for_step` picks the decimals one notch needs, which is what
+  `spawn_pref_slider` uses;
+- the step is in a tooltip over the track (`slider-step`), written at the
+  slider's format or finer, so an environment knob read at two decimals still
+  says its 1 %-of-range notch;
+- `label_sliders` writes the numbers beside `place_slider_thumbs`, on a change
+  of value, range or locale. The four hand-rolled readouts it replaces are gone
+  (the environment rows' `SliderRow`, Quick Preferences' and Phototools' value
+  labels, the wearable editor's), along with their sync systems; the specimens
+  run `label_sliders` once after composing their sample values.
+
+The sky / water editor's default height grew from 520 to 590 px for the line
+of bounds under each slider (`every_floater_default_size_shows_its_content`).
+
+Verified by automation: the `a_slider_shows_its_value_bounds_and_step` stage
+(`e2e_preferences.rs`, fake grid, both backends) reads the draw-distance row's
+value and bounds (`32`, `1,024` — the locale groups them), nudges it with an
+arrow key and sees the readout follow, hovers the track for `Step: 8`, and
+leaves screenshots of Preferences ▸ Graphics and Personal Lighting in its
+artifacts, which show the layout holding at both widths.
+
+The reference's *editable* value field stays a second step:
+[[viewer-slider-editable-value-field]].

@@ -30,6 +30,7 @@ use super::{
     TaskInventoryReply, TelehubInfo, TeleportFlags, TerrainLayerBatch, TerrainPatch, Texture,
     ThumbnailTarget, TransferStatus, UserInfo, ViewerEffect, Wearable,
 };
+use crate::FolderState;
 use crate::bookkeeping_ids::ImSessionId;
 use crate::marketplace::{
     Listing, ListingId, MarketplaceApiError, MarketplaceOperation, MerchantStatus,
@@ -1610,6 +1611,13 @@ pub enum Event {
     InventoryFolderPage {
         /// Which folder this page is of (echoes the query).
         folder: InventoryFolderKey,
+        /// The paged folder's **own** contents state when the page was built
+        /// (after any on-demand fetch the query scheduled), or `None` if the
+        /// session does not know the folder. A sub-folder's state rides in
+        /// `folders`, but nothing else ever reports the paged folder's: a root
+        /// has no parent page, and a parent paged before its child finished
+        /// loading reported the child as it was then.
+        state: Option<FolderState>,
         /// The page's sub-folders (resolved view types), bounded to the limit.
         folders: Arc<[FolderInfo]>,
         /// The page's items (resolved view types), bounded to the limit.

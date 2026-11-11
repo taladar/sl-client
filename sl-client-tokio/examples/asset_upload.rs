@@ -22,7 +22,7 @@ use std::time::Duration;
 
 use sl_client_tokio::{
     AssetType, Client, Command, DisconnectReason, Error, Event, InventoryFolderKey, InventoryType,
-    LoginParams, LoginRequest, Throttle,
+    LoginParams, LoginRequest, Permissions, Throttle,
 };
 use tokio::sync::mpsc;
 use tokio::time::sleep;
@@ -106,9 +106,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 inventory_type: InventoryType::Notecard,
                                 name: "sl-client upload #23".to_owned(),
                                 description: "uploaded over NewFileAgentInventory".to_owned(),
-                                next_owner_mask: 0x0008_e000,
-                                group_mask: 0,
-                                everyone_mask: 0,
+                                next_owner_mask: Permissions::DEFAULT_NEXT_OWNER,
+                                group_mask: Permissions::NONE,
+                                everyone_mask: Permissions::NONE,
                                 expected_upload_cost: 0,
                                 data: asset_data.clone(),
                             })

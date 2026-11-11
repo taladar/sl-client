@@ -14,6 +14,8 @@
 //!   edit made in Preferences shows in the open editor;
 //! - in a right-to-left language, a tab strip that overflows to the left
 //!   still scrolls to its far end;
+//! - a slider shows its value beside the track and its bounds under it, the
+//!   readout follows a keyboard nudge, and hovering the track shows its step;
 //! - with web media on, the web browser window and the search window's web
 //!   tab load a page, and every page keeps a browser window of its own — two
 //!   menu opens are two windows, a page's named link a third, and closing one
@@ -29,7 +31,7 @@ mod test {
     use std::sync::Arc;
 
     use pretty_assertions::assert_eq;
-    use sl_automation_proto::{Locator, NodeVisibility, Role};
+    use sl_automation_proto::{Locator, NodeValue, NodeVisibility, Role, UiNode};
     use sl_e2e::{BodyError, Stage, StageBuilder};
     use sl_fake_grid::RegionConfig;
     use sl_fake_grid::scenario::Scenario;
@@ -834,6 +836,126 @@ mod test {
                     .await?;
                 Ok(())
             })?;
+        Ok(())
+    }
+
+    // ---- Slider readouts --------------------------------------------------
+
+    /// The graphics tab.
+    const GRAPHICS_TAB: &str = "preferences-tab-graphics";
+
+    /// The draw-distance row: a slider over 32…1024 in steps of 8.
+    const DRAW_DISTANCE_ROW: &str = "preferences:row:preferences-row-draw-distance";
+
+    /// The text of every text node under `node`, in reading order.
+    fn texts_under(node: &UiNode, out: &mut Vec<String>) {
+        for child in &node.children {
+            if child.role == Role::Text
+                && let Some(name) = &child.name
+            {
+                out.push(name.clone());
+            }
+            texts_under(child, out);
+        }
+    }
+
+    /// The draw-distance slider's value and every text its row shows.
+    async fn draw_distance_row(window: &UiLocator) -> Result<(f32, Vec<String>), BodyError> {
+        let row = window.test_id(DRAW_DISTANCE_ROW);
+        let value = match row.role(Role::Slider).value().await? {
+            Some(NodeValue::Number(value)) => value,
+            other => return Err(format!("the draw-distance slider reads {other:?}").into()),
+        };
+        let mut texts = Vec::new();
+        texts_under(&row.node().await?, &mut texts);
+        Ok((value, texts))
+    }
+
+    /// Read the draw-distance row until its readout shows the slider's value
+    /// as a whole number (a step of 8 has no decimals), or [`WAIT`] runs out.
+    /// The texts come back with the locale's grouping taken out — English
+    /// writes the upper bound `1,024`.
+    async fn draw_distance_shown(window: &UiLocator) -> Result<(f32, Vec<String>), BodyError> {
+        let started = tokio::time::Instant::now();
+        loop {
+            let (value, texts) = draw_distance_row(window).await?;
+            let texts: Vec<String> = texts.iter().map(|text| text.replace(',', "")).collect();
+            if texts.contains(&format!("{value:.0}")) {
+                return Ok((value, texts));
+            }
+            if started.elapsed() >= WAIT {
+                return Err(format!(
+                    "the draw-distance readout never showed {value}; the row reads {texts:?}"
+                )
+                .into());
+            }
+            tokio::time::sleep(FILE_POLL).await;
+        }
+    }
+
+    /// **A slider says what it holds** (`viewer-sliders-show-no-value`): the
+    /// draw-distance row shows the slider's value and its two bounds, the
+    /// readout follows an arrow key, and the pointer on the track brings up
+    /// the step. Screenshots of Preferences and of Personal Lighting (the
+    /// environment knobs, read at up to eight decimals in narrow columns) are
+    /// left in the artifacts for the layout.
+    #[test]
+    fn a_slider_shows_its_value_bounds_and_step() -> Result<(), TestError> {
+        stage("slider_readout").run(async |stage: &Stage| {
+            let alpha = &stage.viewer("Alpha")?;
+            let artifacts = stage.artifacts("Alpha")?.to_path_buf();
+            let window = preferences_tab(alpha, GRAPHICS_TAB).await?;
+            let (before, texts) = draw_distance_shown(&window).await?;
+            for bound in ["32", "1024"] {
+                assert!(
+                    texts.iter().any(|text| text == bound),
+                    "the draw-distance row shows no bound {bound}: {texts:?}"
+                );
+            }
+            let _shot = alpha
+                .screenshot(&artifacts.join("preferences-graphics.png"), None)
+                .await?;
+
+            // A click on the track and an arrow key: the readout follows the
+            // value wherever they put it.
+            let slider = window.test_id(DRAW_DISTANCE_ROW).role(Role::Slider);
+            slider.press("ArrowRight").await?;
+            let (after, _texts) = draw_distance_shown(&window).await?;
+            assert!(
+                (after - before).abs() > f32::EPSILON,
+                "the slider did not move from {before}"
+            );
+
+            let _hovered = slider.hover().await?;
+            let tooltip = alpha.ui().test_id("slider-step-tooltip");
+            let _shown = alpha.expect(&tooltip).timeout(WAIT).to_be_visible().await?;
+            let mut tip = Vec::new();
+            texts_under(&tooltip.node().await?, &mut tip);
+            // Fluent wraps the interpolated number in bidi isolation marks.
+            let tip: Vec<String> = tip
+                .iter()
+                .map(|text| text.replace(['\u{2068}', '\u{2069}'], ""))
+                .collect();
+            assert_eq!(tip, vec!["Step: 8".to_owned()]);
+            let _tip_shot = alpha
+                .screenshot(&artifacts.join("preferences-step-tooltip.png"), None)
+                .await?;
+
+            let _closed = preferences_button(&window, "preferences-cancel")
+                .click()
+                .await?;
+            let lighting = alpha.open_floater("personal-lighting").await?;
+            // Seeded and translated, not caught mid-open.
+            let _captioned = alpha
+                .expect(&lighting.get(Locator::role(Role::Text).name_key("env-knob-haze-density")))
+                .timeout(WAIT)
+                .to_be_visible()
+                .await?;
+            let _lighting_shot = alpha
+                .screenshot(&artifacts.join("personal-lighting.png"), None)
+                .await?;
+            Ok(())
+        })?;
         Ok(())
     }
 }

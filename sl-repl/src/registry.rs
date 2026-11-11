@@ -1431,7 +1431,13 @@ fn build_new_inventory_item(
     Ok(NewInventoryItem {
         folder_id: InventoryFolderKey::from(args.uuid_or_nil(ctx, "folder_id", 0)?),
         transaction_id: args.uuid_or_nil(ctx, "transaction_id", 1)?,
-        next_owner_mask: args.parse_or(ctx, "next_owner_mask", 2, "u32", 0)?,
+        next_owner_mask: Permissions::from_bits(args.parse_or(
+            ctx,
+            "next_owner_mask",
+            2,
+            "u32",
+            0,
+        )?),
         asset_type: enum_arg_or(
             args,
             ctx,
@@ -5016,9 +5022,27 @@ fn all_specs() -> Vec<CommandSpec> {
                         rez_selected: args.bool_or(ctx, "rez_selected", 106, false)?,
                         remove_item: args.bool_or(ctx, "remove_item", 107, false)?,
                         item_flags: args.parse_or(ctx, "item_flags", 108, "u32", 0)?,
-                        group_mask: args.parse_or(ctx, "group_mask", 109, "u32", 0)?,
-                        everyone_mask: args.parse_or(ctx, "everyone_mask", 110, "u32", 0)?,
-                        next_owner_mask: args.parse_or(ctx, "next_owner_mask", 111, "u32", 0)?,
+                        group_mask: Permissions::from_bits(args.parse_or(
+                            ctx,
+                            "group_mask",
+                            109,
+                            "u32",
+                            0,
+                        )?),
+                        everyone_mask: Permissions::from_bits(args.parse_or(
+                            ctx,
+                            "everyone_mask",
+                            110,
+                            "u32",
+                            0,
+                        )?),
+                        next_owner_mask: Permissions::from_bits(args.parse_or(
+                            ctx,
+                            "next_owner_mask",
+                            111,
+                            "u32",
+                            0,
+                        )?),
                     },
                 })
             },
@@ -5065,15 +5089,27 @@ fn all_specs() -> Vec<CommandSpec> {
                         rez_selected: args.bool_or(ctx, "rez_selected", 105, false)?,
                         remove_item: args.bool_or(ctx, "remove_item", 106, false)?,
                         item_flags: args.parse_or(ctx, "item_flags", 107, "u32", 0)?,
-                        group_mask: args.parse_or(ctx, "apply_group_mask", 108, "u32", 0)?,
-                        everyone_mask: args.parse_or(ctx, "apply_everyone_mask", 109, "u32", 0)?,
-                        next_owner_mask: args.parse_or(
+                        group_mask: Permissions::from_bits(args.parse_or(
+                            ctx,
+                            "apply_group_mask",
+                            108,
+                            "u32",
+                            0,
+                        )?),
+                        everyone_mask: Permissions::from_bits(args.parse_or(
+                            ctx,
+                            "apply_everyone_mask",
+                            109,
+                            "u32",
+                            0,
+                        )?),
+                        next_owner_mask: Permissions::from_bits(args.parse_or(
                             ctx,
                             "apply_next_owner_mask",
                             110,
                             "u32",
                             0,
-                        )?,
+                        )?),
                         item: restore_item_from_args(args, ctx, item_id, 120)?,
                     }),
                 })
@@ -5788,9 +5824,27 @@ fn all_specs() -> Vec<CommandSpec> {
                     )?,
                     name: args.str_or(ctx, "name", 103, "")?,
                     description: args.str_or(ctx, "description", 104, "")?,
-                    next_owner_mask: args.parse_or(ctx, "next_owner_mask", 105, "u32", 0)?,
-                    group_mask: args.parse_or(ctx, "group_mask", 106, "u32", 0)?,
-                    everyone_mask: args.parse_or(ctx, "everyone_mask", 107, "u32", 0)?,
+                    next_owner_mask: Permissions::from_bits(args.parse_or(
+                        ctx,
+                        "next_owner_mask",
+                        105,
+                        "u32",
+                        0,
+                    )?),
+                    group_mask: Permissions::from_bits(args.parse_or(
+                        ctx,
+                        "group_mask",
+                        106,
+                        "u32",
+                        0,
+                    )?),
+                    everyone_mask: Permissions::from_bits(args.parse_or(
+                        ctx,
+                        "everyone_mask",
+                        107,
+                        "u32",
+                        0,
+                    )?),
                     expected_upload_cost: args.parse_or(
                         ctx,
                         "expected_upload_cost",
@@ -5902,7 +5956,13 @@ fn all_specs() -> Vec<CommandSpec> {
                     folder_id: InventoryFolderKey::from(args.req_uuid(ctx, "folder_id", 0)?),
                     name: args.req_str(ctx, "name", 1)?,
                     description: args.opt_str(ctx, "description", 2)?.unwrap_or_default(),
-                    next_owner_mask: args.parse_or(ctx, "next_owner_mask", 3, "u32", 0)?,
+                    next_owner_mask: Permissions::from_bits(args.parse_or(
+                        ctx,
+                        "next_owner_mask",
+                        3,
+                        "u32",
+                        0,
+                    )?),
                     language: enum_arg_or(
                         args,
                         ctx,
@@ -7551,7 +7611,7 @@ mod tests {
             Ok(Command::RezObjectFromInventory { params })
                 if params.item.item_id == InventoryKey::from(uuid(ONE))
                     && params.ray_end_is_intersection
-                    && params.next_owner_mask == 581_632
+                    && params.next_owner_mask == sl_proto::Permissions::from_bits(581_632)
                     && params.item.asset_type == 6
         ));
     }

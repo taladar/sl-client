@@ -114,7 +114,7 @@ use tracing::{debug, info};
 use sl_client_bevy::{
     AgentKey, MeshHeader, MeshKey, PRIM_LOD_COUNT, PrimShapeParams, ScopedObjectId, SlEvent,
     SlIdentity, SlSessionEvent, TextureEntry, TextureKey, decode_texture_entry,
-    lod_triangle_counts,
+    est_triangles_by_lod, lod_triangle_counts,
 };
 
 use crate::avatars::AvatarBodyPart;
@@ -301,18 +301,6 @@ const ANIMESH_COST_PER_KTRI: f32 = 1.5;
 /// The streaming-cost denominator the animated-object charges are normalised by
 /// (the reference's literal `0.06`).
 const ANIMESH_COST_SCALE: f32 = 0.06;
-
-/// Bytes discounted from each mesh level's block size before triangles are
-/// estimated (`MeshMetaDataDiscount`).
-const MESH_METADATA_DISCOUNT: f32 = 384.0;
-
-/// The floor a mesh level's discounted size is raised to (`MeshMinimumByteSize`),
-/// so nothing is free.
-const MESH_MINIMUM_BYTE_SIZE: f32 = 16.0;
-
-/// Bytes per triangle in the mesh size → triangle estimate
-/// (`MeshBytesPerTriangle`).
-const MESH_BYTES_PER_TRIANGLE: f32 = 16.0;
 
 /// The bytes-per-triangle a **prim**'s analytic level counts are inflated to
 /// before going through the same estimator (`LLVOVolume::getCostData`'s
@@ -638,26 +626,6 @@ impl ParticleBurst {
     }
 }
 
-/// The estimated triangle count of each level of detail, from the per-level
-/// block byte sizes — the reference's `LLMeshCostData::init`.
-fn est_tris_by_lod(lod_bytes: [u32; PRIM_LOD_COUNT]) -> [f32; PRIM_LOD_COUNT] {
-    // A level the asset omits inherits the next finer one's size, so a
-    // single-level mesh is charged for that level at every distance.
-    let mut bytes = lod_bytes;
-    for index in (0..PRIM_LOD_COUNT.saturating_sub(1)).rev() {
-        let finer = bytes.get(index.saturating_add(1)).copied().unwrap_or(0);
-        if let Some(slot) = bytes.get_mut(index)
-            && *slot == 0
-        {
-            *slot = finer;
-        }
-    }
-    bytes.map(|size| {
-        (f32_from_u32(size) - MESH_METADATA_DISCOUNT).max(MESH_MINIMUM_BYTE_SIZE)
-            / MESH_BYTES_PER_TRIANGLE
-    })
-}
-
 /// The reference's `LLMeshCostData::getRadiusWeightedTris`: the triangle count an
 /// object of this radius costs *on average over a region*, weighting each level
 /// by the area of the annulus it is displayed in. For a small attachment the
@@ -720,7 +688,7 @@ fn prim_render_cost(
     let triangles = match facts.mesh {
         Some(mesh) => match lookup.mesh_lod_bytes(mesh) {
             Some(bytes) => {
-                let tris = est_tris_by_lod(bytes);
+                let tris = est_triangles_by_lod(bytes);
                 if animesh_mesh {
                     // An animated object is charged proportionally to its
                     // streaming cost rather than its on-screen size.
@@ -813,7 +781,7 @@ fn prim_est_tris(shape: PrimShapeParams) -> [f32; PRIM_LOD_COUNT] {
         clippy::as_conversions,
         reason = "a prim's triangle count times ten is non-negative and far inside u32"
     )]
-    est_tris_by_lod(counts.map(|count| (f32_from_u32(count) * PRIM_BYTES_PER_TRIANGLE) as u32))
+    est_triangles_by_lod(counts.map(|count| (f32_from_u32(count) * PRIM_BYTES_PER_TRIANGLE) as u32))
 }
 
 /// The per-face render-cost flags of one prim, folded over its texture entry.
@@ -1237,11 +1205,7 @@ struct SceneLookup<'world> {
 impl CostLookup for SceneLookup<'_> {
     fn mesh_lod_bytes(&self, mesh: MeshKey) -> Option<[u32; PRIM_LOD_COUNT]> {
         let header: &MeshHeader = self.meshes.header(mesh)?;
-        let mut bytes = [0_u32; PRIM_LOD_COUNT];
-        for (slot, block) in bytes.iter_mut().zip(header.lods.iter()) {
-            *slot = block.map_or(0, |block| u32::try_from(block.size).unwrap_or(u32::MAX));
-        }
-        Some(bytes)
+        Some(header.lod_bytes())
     }
 
     fn mesh_rigged(&self, mesh: MeshKey) -> bool {
@@ -1613,12 +1577,14 @@ pub(crate) const fn jellied_region_visible(region: BodyRegion) -> bool {
 mod tests {
     use super::{
         AvatarComplexity, AvatarComplexityModel, ComplexityLimits, ComplexityMode, JellyReason,
-        ParticleBurst, PendingCostAssets, RenderOverride, avatar_complexity, est_tris_by_lod,
-        jelly_reason, radius_weighted_tris, texture_cost,
+        ParticleBurst, PendingCostAssets, RenderOverride, avatar_complexity, jelly_reason,
+        radius_weighted_tris, texture_cost,
     };
     use bevy::prelude::{Entity, Vec3};
     use pretty_assertions::{assert_eq, assert_ne};
-    use sl_client_bevy::{AgentKey, MeshKey, PRIM_LOD_COUNT, PrimShapeParams, TextureKey, Uuid};
+    use sl_client_bevy::{
+        AgentKey, MeshKey, PRIM_LOD_COUNT, PrimShapeParams, TextureKey, Uuid, est_triangles_by_lod,
+    };
     use sl_viewer_world_api::PrimComplexityFacts;
     use std::collections::HashMap;
 
@@ -1798,7 +1764,7 @@ mod tests {
     /// discounts the header bytes, as the reference does.
     #[test]
     fn level_estimates_backfill_and_discount() {
-        let tris = est_tris_by_lod([0, 0, 0, 0x4000]);
+        let tris = est_triangles_by_lod([0, 0, 0, 0x4000]);
         let finest = tris.last().copied().unwrap_or(0.0);
         assert!((finest - (16_384.0 - 384.0) / 16.0).abs() < 0.01);
         assert!(

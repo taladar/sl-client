@@ -298,7 +298,7 @@ pub fn avatar_picker_floater_spec() -> FloaterSpec {
         dock_host: None,
         caps: FloaterCaps {
             resizable: false,
-            minimizable: false,
+            minimizable: true,
             closable: true,
             dockable: false,
         },

@@ -245,6 +245,7 @@ pub use sl_mesh::{
     AssetBytes, CacheLimits as MeshCacheLimits, DEFAULT_LOD_FACTOR, DecodedMesh, MeshDiskCache,
     MeshEntry, MeshError, MeshFetcher, MeshHeader, MeshLod, MeshPhysics, MeshProgress,
     MeshReadLease, MeshRequest, MeshSkin, MeshStore, PhysicsConvex, Submesh, VertexWeights,
+    est_triangles_by_lod,
 };
 
 // The generic-asset store (the opaque-blob counterpart of the texture/mesh
@@ -277,9 +278,9 @@ pub use sl_material::{
 // dequantized float shape is aliased `PrimShapeFloat` so it does not collide
 // with `sl_proto`'s quantized rez-params `PrimShape`.
 pub use sl_prim::{
-    FlexiAttributes, FlexiChain, HoleType, PRIM_LOD_COUNT, PathCurve, PrimFace, PrimFaceId,
-    PrimLod, PrimMesh, PrimShape as PrimShapeFloat, ProfileCurve, lod_triangle_counts, tessellate,
-    tessellate_with_path,
+    FlexiAttributes, FlexiChain, HoleType, LodScaleBias, PRIM_LOD_COUNT, PathByteForm, PathCurve,
+    PrimFace, PrimFaceId, PrimLod, PrimMesh, PrimShape as PrimShapeFloat, ProfileCurve,
+    lod_triangle_counts, tessellate, tessellate_with_path,
 };
 
 // The pure sculpt-texture tessellation geometry (the sculpt counterpart of
@@ -4200,9 +4201,9 @@ fn apply_command(
                     inventory_type: inv_name.to_owned(),
                     name: name.clone(),
                     description: description.clone(),
-                    next_owner_mask: *next_owner_mask,
-                    group_mask: *group_mask,
-                    everyone_mask: *everyone_mask,
+                    next_owner_mask: next_owner_mask.bits(),
+                    group_mask: group_mask.bits(),
+                    everyone_mask: everyone_mask.bits(),
                     expected_upload_cost: *expected_upload_cost,
                 };
                 spawn_new_file_upload(caps, session.agent_id(), &request, data.clone());
@@ -5091,10 +5092,14 @@ fn apply_command(
             ) {
                 fetch_folder_contents(session, *folder, caps, now)?;
             }
+            // Read after the fetch above, so a folder it just scheduled
+            // reports `Fetching`, not `Unknown`.
+            let state = session.folder_fetch_state(*folder);
             report(
                 outbound,
                 NetOutbound::Event(SessionEvent::InventoryFolderPage {
                     folder: *folder,
+                    state,
                     folders: folders.into(),
                     items: items.into(),
                     prev,

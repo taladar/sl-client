@@ -1763,6 +1763,11 @@ pub struct FloaterCaps {
     /// Build / offer the resize grip.
     pub resizable: bool,
     /// Build / offer the minimize button.
+    ///
+    /// Take it from the reference window the floater ports: true unless that
+    /// window's XUI file says `can_minimize="false"`. A registered floater
+    /// names that file in its [`ReferenceFloater`], and the registry's test
+    /// fails when the two disagree.
     pub minimizable: bool,
     /// Build / offer the close button (and honour `Ctrl+W`).
     pub closable: bool,
@@ -2693,6 +2698,55 @@ pub struct FloaterElement {
     /// skin author, and the layout sweep, a sentence instead of the window. A
     /// window that registers writes its content.
     pub content: FloaterContentFn,
+    /// The reference viewer's window this one ports, which its
+    /// [`FloaterCaps`] are checked against.
+    pub reference: ReferenceFloater,
+}
+
+/// **The reference viewer's window a registered floater ports**, and the one
+/// piece of its chrome the registry checks: whether it can be minimized.
+///
+/// The reference's `LLFloater` takes `can_minimize` from the floater's XUI
+/// file and **defaults it to true** (`llfloater.cpp`); 65 of the default
+/// skin's 258 `floater_*.xml` files turn it off. A window here offers the
+/// minimize box exactly when its reference file does, so a registered
+/// floater states which file that is and what it says, and the registry's
+/// test holds [`FloaterCaps::minimizable`] to it.
+///
+/// The authority is the reference's **default** skin
+/// (`skins/default/xui/en`): the `firestorm` skin it ships selected
+/// overrides no floater file. The Vintage skin turns minimize off on the
+/// mini-map, but a skin here restyles chrome, it does not change which
+/// buttons a window has.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReferenceFloater {
+    /// Ported from the reference XUI file `file`.
+    Xui {
+        /// The file name under `skins/default/xui/en`, e.g.
+        /// `floater_about_land.xml`.
+        file: &'static str,
+        /// That file's `can_minimize`, true when the attribute is absent.
+        can_minimize: bool,
+    },
+    /// The reference has no window of its own for this; it shows the same
+    /// content in a panel or a side bar. The window gets `LLFloater`'s
+    /// default, minimizable.
+    Panel {
+        /// Where the reference shows this content instead.
+        shown_in: &'static str,
+    },
+}
+
+impl ReferenceFloater {
+    /// Whether the reference's window can be minimized — the value
+    /// [`FloaterCaps::minimizable`] must match.
+    #[must_use]
+    pub const fn can_minimize(self) -> bool {
+        match self {
+            Self::Xui { can_minimize, .. } => can_minimize,
+            Self::Panel { .. } => true,
+        }
+    }
 }
 
 /// A registered floater's content builder: spawns the window's content into the

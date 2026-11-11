@@ -48,3 +48,12 @@ swap the `Mesh3d` handle to the chosen LOD. Interacts with:
 mesh LOD (no perceptible pop at sensible thresholds), `render_system` /
 `camera_driver` draw cost falls materially vs full-LOD, near copies stay crisp.
 A `CROWD=0` vs `CROWD=100` A/B isolates the marginal draw saving.
+
+## The reference's radius for a rigged mesh
+
+`LLVOVolume::calcLOD` does not rank a rigged mesh by its scale. On an animated
+object it takes half the diagonal of the control avatar's animation extents;
+on a worn rigged mesh it takes the **whole** diagonal of the wearer's
+`getLastAnimExtents()` (*"preserve old BinRadius behavior - 2x off"*). Use that
+radius here, not the `LodScaleBias` the unrigged volumes take
+([[prim-shape-exact-curve-byte-checks]]).

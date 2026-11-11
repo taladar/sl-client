@@ -11,17 +11,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 127 |
-| ready | 334 |
+| ideas | 129 |
+| ready | 333 |
 | blocked | 39 |
-| in-progress | 7 |
-| bugs | 37 |
-| done | 1537 |
+| in-progress | 6 |
+| bugs | 32 |
+| done | 1550 |
 | deferred | 30 |
 | wont-do | 24 |
-| **total** | **2135** |
+| **total** | **2143** |
 
-## ideas (127)
+## ideas (129)
 
 ### protocol
 
@@ -99,6 +99,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-minimized-floaters-move-to-a-shelf`](ideas/viewer-minimized-floaters-move-to-a-shelf.md)
   — A minimized floater should move to a shelf of minimized windows, not
   collapse where it stands
+- [`viewer-mirror-planar-projection`](ideas/viewer-mirror-planar-projection.md)
+  — Realtime mirrors as a planar projection, not a cube from the mirror's centre
 - [`viewer-mouselook-combat`](ideas/viewer-mouselook-combat.md) — Mouselook
   combat conveniences
 - [`viewer-mouselook-ui-options`](ideas/viewer-mouselook-ui-options.md) —
@@ -174,6 +176,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   shadow tuning (bias / blur / softness)
 - [`viewer-sit-across-region-border-auto-approach`](ideas/viewer-sit-across-region-border-auto-approach.md)
   — Sit on an object across a region border by moving into its region first
+- [`viewer-slider-editable-value-field`](ideas/viewer-slider-editable-value-field.md)
+  — A slider's readout a user can type into, as the reference's LLSliderCtrl
 - [`viewer-snapshot-scene-sidecar`](ideas/viewer-snapshot-scene-sidecar.md) —
   Say what a snapshot is a picture of
 - [`viewer-stars-srgb-linearize`](ideas/viewer-stars-srgb-linearize.md) —
@@ -310,7 +314,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-lsl-opensim-function-set`](ideas/gridspec-lsl-opensim-function-set.md)
   — Measure which library functions OpenSim's engines compile
 
-## ready (334)
+## ready (333)
 
 ### protocol
 
@@ -419,8 +423,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-transform-gizmos` (done))
 - [`viewer-build-physics-params`](ready/viewer-build-physics-params.md) —
   Features tab — physics shape type & material params
-- [`viewer-build-probe-animesh-controls`](ready/viewer-build-probe-animesh-controls.md)
-  — Features tab — reflection-probe & animated-mesh controls
 - [`viewer-build-sculpt-controls`](ready/viewer-build-sculpt-controls.md) —
   Object tab — sculpt editing controls
 - [`viewer-build-selection-filters`](ready/viewer-build-selection-filters.md) —
@@ -1254,7 +1256,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-voice`](blocked/gridspec-voice.md) — Voice provisioning and
   signalling on each grid (blocked by `viewer-voice-audio`)
 
-## in-progress (7)
+## in-progress (6)
 
 ### viewer
 
@@ -1263,8 +1265,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   the sim reacts)
 - [`viewer-perf-pbr-shadow-cluster-rez`](in-progress/viewer-perf-pbr-shadow-cluster-rez.md)
   — Tune main-view shadow specialization + clustered lighting during rez
-- [`viewer-realtime-mirrors`](in-progress/viewer-realtime-mirrors.md) —
-  Real-time mirrors (hero probes)
 - [`viewer-ui-text-caret-grapheme-motion`](in-progress/viewer-ui-text-caret-grapheme-motion.md)
   — Upstream issue — parley caret motion steps one codepoint, not one grapheme
 - [`viewer-ui-text-parley-pr-backdelete`](in-progress/viewer-ui-text-parley-pr-backdelete.md)
@@ -1274,7 +1274,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-text-renderability-axis`](in-progress/viewer-ui-text-renderability-axis.md)
   — Upstream issue — font selection cannot see glyph-format renderability
 
-## bugs (37)
+## bugs (32)
 
 ### protocol
 
@@ -1294,25 +1294,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### viewer
 
-- [`prim-path-curve-byte-ignores-reference-mask`](bugs/prim-path-curve-byte-ignores-reference-mask.md)
-  — PathCurve::from_byte matches the exact byte where the reference masks 0xf0
-- [`viewer-automation-ground-reveal-eye-under-terrain`](bugs/viewer-automation-ground-reveal-eye-under-terrain.md)
-  — A ground reveal can put the camera under higher ground beside the point
-- [`viewer-camera-framing-ends-inside-the-framed-object`](bugs/viewer-camera-framing-ends-inside-the-framed-object.md)
-  — A framing glide can carry the camera inside the object it frames
-- [`viewer-day-cycle-strip-click-mirrored-rtl`](bugs/viewer-day-cycle-strip-click-mirrored-rtl.md)
-  — In a right-to-left layout a click on the day-cycle timeline lands mirrored
-  from the markers
-- [`viewer-default-next-owner-mask-diverges`](bugs/viewer-default-next-owner-mask-diverges.md)
-  — Three different default next-owner masks, two without PERM_MOVE
 - [`viewer-e2e-walk-foot-plane-lost-under-load`](bugs/viewer-e2e-walk-foot-plane-lost-under-load.md)
   — Under heavy load the walking avatar reads no foot plane after a walk
-- [`viewer-floater-minimize-caps-follow-no-pattern`](bugs/viewer-floater-minimize-caps-follow-no-pattern.md)
-  — Which floaters have a minimize button follows no pattern, and most that lack
-  one should have it
-- [`viewer-inventory-settings-subtree-shows-unloaded`](bugs/viewer-inventory-settings-subtree-shows-unloaded.md)
-  — The Library root and its Environments subtree never read as loaded in the
-  viewer model
 - [`viewer-live-opensim-world-renders-white`](bugs/viewer-live-opensim-world-renders-white.md)
   — The world renders all white at times on the live OpenSim grid
 - [`viewer-lsl-editor-flags-unserved-functions`](bugs/viewer-lsl-editor-flags-unserved-functions.md)
@@ -1329,6 +1312,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Own avatar looks broken after a teleport
 - [`viewer-parcel-audio-bar-backing-unskinned`](bugs/viewer-parcel-audio-bar-backing-unskinned.md)
   — The parcel audio bar's backing is a colour no skin can reach
+- [`viewer-pbr-face-shows-legacy-texture-on-aditi`](bugs/viewer-pbr-face-shows-legacy-texture-on-aditi.md)
+  — A prim given a PBR material from the Build window sometimes keeps drawing
+  its plywood
 - [`viewer-perf-steady-state-46fps-ceiling`](bugs/viewer-perf-steady-state-46fps-ceiling.md)
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
 - [`viewer-refused-capability-silent-drops`](bugs/viewer-refused-capability-silent-drops.md)
@@ -1336,8 +1322,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-retired-neighbour-stays-drawn`](bugs/viewer-retired-neighbour-stays-drawn.md)
   — A neighbour the simulator retired stays drawn — its ground, water and map
   tile outlive its circuit
-- [`viewer-sliders-show-no-value`](bugs/viewer-sliders-show-no-value.md) — A
-  slider shows no value, and no bounds or step either
+- [`viewer-sky-irradiance-ignores-local-probes`](bugs/viewer-sky-irradiance-ignores-local-probes.md)
+  — Sky-lit faces take their probe ambient from the view's probe, never from a
+  placed probe
+- [`viewer-stood-avatar-height-lost-under-load`](bugs/viewer-stood-avatar-height-lost-under-load.md)
+  — Under load the viewer reports a stood-up avatar at 25.95 m, not where the
+  grid stood it
 - [`viewer-terraform-parcel-refusal`](bugs/viewer-terraform-parcel-refusal.md) —
   A brush over a parcel the agent may not terraform warns nothing
 - [`viewer-texture-filtering-in-linear-space`](bugs/viewer-texture-filtering-in-linear-space.md)
@@ -1371,7 +1361,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-lsl-mono-collision-model-under-lowered-limit`](bugs/server-lsl-mono-collision-model-under-lowered-limit.md)
   — A script 1 KB over its use collides in the runtime where Mono carries on
 
-## done (1537)
+## done (1550)
 
 ### protocol
 
@@ -1686,6 +1676,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`build-structural-encapsulation-audit`](done/build-structural-encapsulation-audit.md)
   — Audit the workspace for structural and encapsulation improvements the crate
   split exposed (blocked by `build-split-viewer-crate` (done))
+- [`prim-path-curve-byte-ignores-reference-mask`](done/prim-path-curve-byte-ignores-reference-mask.md)
+  — PathCurve::from_byte matches the exact byte where the reference masks 0xf0
+- [`prim-shape-exact-curve-byte-checks`](done/prim-shape-exact-curve-byte-checks.md)
+  — Tessellation shortcuts compare decoded curve kinds where the reference
+  compares whole bytes
 - [`viewer-360-snapshot`](done/viewer-360-snapshot.md) — 360-degree
   (equirectangular) snapshot
 - [`viewer-about-floater`](done/viewer-about-floater.md) — About floater —
@@ -1910,6 +1905,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (done))
 - [`viewer-automation-ground-aim`](done/viewer-automation-ground-aim.md) —
   Double-click teleport on every surface, and the world actions it needs
+- [`viewer-automation-ground-reveal-eye-under-terrain`](done/viewer-automation-ground-reveal-eye-under-terrain.md)
+  — A ground reveal can put the camera under higher ground beside the point
 - [`viewer-automation-host-thread-per-viewer`](done/viewer-automation-host-thread-per-viewer.md)
   — In-process host — step each viewer on a thread of its own
 - [`viewer-automation-inprocess-transport`](done/viewer-automation-inprocess-transport.md)
@@ -2022,6 +2019,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   reference spinner)
 - [`viewer-build-phantom-flag-wrong-bit`](done/viewer-build-phantom-flag-wrong-bit.md)
   — Build floater's Phantom checkbox reads and writes the any-owner bit
+- [`viewer-build-probe-animesh-controls`](done/viewer-build-probe-animesh-controls.md)
+  — Features tab — reflection-probe & animated-mesh controls
 - [`viewer-build-systems-gate-on-build-mode`](done/viewer-build-systems-gate-on-build-mode.md)
   — Performance — gate all build-tool systems on build mode being active
 - [`viewer-build-tool-modify-permission-gate`](done/viewer-build-tool-modify-permission-gate.md)
@@ -2045,6 +2044,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (done))
 - [`viewer-camera-fov-parity`](done/viewer-camera-fov-parity.md) — The camera's
   field of view is 45° here and 60° in the reference viewer
+- [`viewer-camera-framing-ends-inside-the-framed-object`](done/viewer-camera-framing-ends-inside-the-framed-object.md)
+  — A framing glide can carry the camera inside the object it frames
 - [`viewer-camera-input-interaction-tests`](done/viewer-camera-input-interaction-tests.md)
   — Camera, movement, mouselook and HUD picking under a synthetic pointer
   (blocked by `viewer-world-test-harness` (done), `viewer-cpu-pick-resolver`
@@ -2129,8 +2130,13 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   specular
 - [`viewer-cut-prim-cap-missing-triangle`](done/viewer-cut-prim-cap-missing-triangle.md)
   — Cut-prim path caps drop a triangle (filed as "prim LOD not reacting")
+- [`viewer-day-cycle-strip-click-mirrored-rtl`](done/viewer-day-cycle-strip-click-mirrored-rtl.md)
+  — In a right-to-left layout a click on the day-cycle timeline lands mirrored
+  from the markers
 - [`viewer-debug-screenshot-offthread-save`](done/viewer-debug-screenshot-offthread-save.md)
   — Offload the debug screenshot PNG encode off the main thread
+- [`viewer-default-next-owner-mask-diverges`](done/viewer-default-next-owner-mask-diverges.md)
+  — Three different default next-owner masks, two without PERM_MOVE
 - [`viewer-derender-blacklist`](done/viewer-derender-blacklist.md) — Derender +
   asset blacklist (blocked by `viewer-object-context-menu` (done))
 - [`viewer-dialog-lldialog`](done/viewer-dialog-lldialog.md) — llDialog script
@@ -2245,6 +2251,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-floater-interaction-tests`](done/viewer-floater-interaction-tests.md)
   — Floater chrome under a real pointer (blocked by
   `viewer-ui-interaction-harness` (done), `viewer-floater-registry` (done))
+- [`viewer-floater-minimize-caps-follow-no-pattern`](done/viewer-floater-minimize-caps-follow-no-pattern.md)
+  — Which floaters have a minimize button follows no pattern, and most that lack
+  one should have it
 - [`viewer-floater-registry`](done/viewer-floater-registry.md) — A FLOATERS
   registry, so floaters can be swept at all
 - [`viewer-floater-z-climbs-over-fixed-planes`](done/viewer-floater-z-climbs-over-fixed-planes.md)
@@ -2382,6 +2391,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-search-field` (done))
 - [`viewer-inventory-search-filter`](done/viewer-inventory-search-filter.md) —
   Inventory search / filter (blocked by `viewer-inventory-folder-tree` (done))
+- [`viewer-inventory-settings-subtree-shows-unloaded`](done/viewer-inventory-settings-subtree-shows-unloaded.md)
+  — The Library root and its Environments subtree never read as loaded in the
+  viewer model
 - [`viewer-inventory-share-picker`](done/viewer-inventory-share-picker.md) —
   Share (give via avatar picker)
 - [`viewer-inventory-show-in-main-from-worn-recent`](done/viewer-inventory-show-in-main-from-worn-recent.md)
@@ -3122,6 +3134,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   unconfirmed
 - [`viewer-radar-multi-select`](done/viewer-radar-multi-select.md) — Radar
   multi-row selection and its multi-avatar menu
+- [`viewer-realtime-mirrors`](done/viewer-realtime-mirrors.md) — Real-time
+  mirrors (hero probes)
 - [`viewer-reattached-rigged-mesh-renders-static-mislocated`](done/viewer-reattached-rigged-mesh-renders-static-mislocated.md)
   — Re-attached rigged mesh renders static and mislocated (fine at login)
 - [`viewer-region-environment-panel`](done/viewer-region-environment-panel.md) —
@@ -3337,6 +3351,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-sliced-art-seam-at-fractional-ui-scale`](done/viewer-sliced-art-seam-at-fractional-ui-scale.md)
   — A nine-sliced button's frame changes thickness along the quad's diagonal at
   a fractional UI scale
+- [`viewer-slider-click-mirrored-rtl`](done/viewer-slider-click-mirrored-rtl.md)
+  — In a right-to-left layout a slider's track click and drag run mirrored from
+  its thumb
+- [`viewer-slider-thumb-offset-by-track-border`](done/viewer-slider-thumb-offset-by-track-border.md)
+  — A slider's thumb is drawn one track border width off the value the pointer
+  set
+- [`viewer-sliders-show-no-value`](done/viewer-sliders-show-no-value.md) — A
+  slider shows no value, and no bounds or step either
 - [`viewer-slurl-parse-dispatch`](done/viewer-slurl-parse-dispatch.md) — SLURL
   parsing & action dispatch
 - [`viewer-snapshot-chat-overlay-not-hidden`](done/viewer-snapshot-chat-overlay-not-hidden.md)

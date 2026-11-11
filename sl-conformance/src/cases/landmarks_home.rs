@@ -35,6 +35,7 @@
 use std::time::{Duration, Instant};
 
 use reqwest::header::CONTENT_TYPE;
+use sl_client_tokio::Permissions;
 use sl_client_tokio::{
     AnyMessage, AssetKey, AssetType, Command, Diagnostic, Event, FolderType, HomeLocationAnswer,
     InventoryFolderKey, InventoryType, NewInventoryItem, RegionCoordinates, Reliability,
@@ -82,7 +83,7 @@ const LANDMARK_DESCRIPTION: &str = "sl-conformance landmarks census";
 
 /// The reference viewer's `PERM_ALL`, the next-owner mask it creates a
 /// landmark with.
-const PERM_ALL: u32 = 0x7fff_ffff;
+const PERM_ALL: Permissions = Permissions::from_bits(0x7fff_ffff);
 
 /// How far from a position an arrival may land and still be "there".
 const THERE_M: f32 = 2.0;

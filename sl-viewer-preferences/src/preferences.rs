@@ -71,7 +71,7 @@ use crate::ui_combo::{ComboSpec, spawn_combo};
 use crate::ui_element::ElementCx;
 use crate::ui_font::UiFont;
 use crate::ui_search::{SearchFieldSpec, spawn_search_field};
-use crate::ui_slider::{SliderStyle, spawn_slider};
+use crate::ui_slider::{SliderFormat, SliderLabels, SliderStyle, spawn_slider};
 use crate::ui_spinner::{SpinStep, SpinnerSpec, spawn_spinner};
 use crate::ui_tab::{
     DEFAULT_ELLIPSIS, TabButton, TabPanel, TabPlacement, TabSpec, TabStrip, fill_tab_container,
@@ -132,6 +132,7 @@ const SLIDER: SliderStyle = SliderStyle {
     track_fill: TRACK_FILL,
     thumb_width: 14.0,
     thumb_fill: THUMB_FILL,
+    font_size: FONT,
 };
 
 /// The leading tab strip's fixed width, in logical pixels — near the
@@ -432,7 +433,8 @@ pub(crate) fn spawn_pref_checkbox(
 }
 
 /// Spawn a searchable row holding a translated label and a settings-bound
-/// **slider**, returning the row node (see `spawn_pref_checkbox`).
+/// **slider**, returning the row node (see `spawn_pref_checkbox`). Its numbers
+/// are written at the precision of its step ([`SliderFormat::for_step`]).
 pub(crate) fn spawn_pref_slider(
     commands: &mut Commands,
     parent: Entity,
@@ -440,6 +442,20 @@ pub(crate) fn spawn_pref_slider(
     binding: SettingBinding,
     range: SliderRange,
     step: SliderStep,
+) -> Entity {
+    let labels = SliderLabels::beside(SliderFormat::for_step(step.0));
+    spawn_pref_slider_as(commands, parent, label_key, binding, (range, step), labels)
+}
+
+/// [`spawn_pref_slider`] with the numbers `labels` asks for — a volume as a
+/// bare percentage, say, rather than a fraction between its bounds.
+pub(crate) fn spawn_pref_slider_as(
+    commands: &mut Commands,
+    parent: Entity,
+    label_key: &'static str,
+    binding: SettingBinding,
+    (range, step): (SliderRange, SliderStep),
+    labels: SliderLabels,
 ) -> Entity {
     let row = commands
         .spawn((
@@ -455,6 +471,7 @@ pub(crate) fn spawn_pref_slider(
         SLIDER,
         0,
         0.0,
+        labels,
         bound_slider(binding, range, step),
     );
     // The slider draws no caption: the row's label names it.

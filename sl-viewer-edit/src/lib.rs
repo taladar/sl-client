@@ -3,8 +3,10 @@
 //! What the reference calls the Build floater, split by tab: the selection
 //! itself and the gizmos that move, rotate and stretch it ([`edit_selection`],
 //! [`gizmos`], [`edit_tool`]); the object tab's position, rotation, size and
-//! physics ([`edit_params`]); the texture and material tabs, both the
-//! Blinn-Phong maps and the PBR ones ([`edit_texture`], [`edit_material`],
+//! physics, and the features tab's flexi, light, reflection-probe and
+//! animated-mesh blocks ([`edit_params`], its rules in `edit_probe`); the
+//! texture and material tabs, both the Blinn-Phong maps and the PBR ones
+//! ([`edit_texture`], [`edit_material`],
 //! [`edit_texture_align`], [`edit_material_asset`]); an object's contents
 //! ([`edit_contents`]); rez ([`edit_create`]); link and unlink
 //! ([`edit_link`]); the land tool -- the ground drag-select, the terraform
@@ -69,6 +71,7 @@ pub mod edit_math;
 pub mod edit_media;
 pub(crate) mod edit_media_model;
 pub mod edit_params;
+pub(crate) mod edit_probe;
 pub mod edit_selection;
 pub mod edit_texture;
 pub mod edit_texture_align;

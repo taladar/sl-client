@@ -51,6 +51,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt::Write as _;
 use std::time::{Duration, Instant};
 
+use sl_client_tokio::Permissions;
 use sl_client_tokio::{
     AgentKey, AnyMessage, AssetType, AssetUpdateLocation, CircuitProbe, Command, Diagnostic, Event,
     FolderType, ImDialog, InventoryCallbackId, InventoryFolderKey, InventoryItem, InventoryKey,
@@ -105,10 +106,10 @@ const SAVE_TIMEOUT: Duration = Duration::from_secs(60);
 const PERM_COPY: i64 = 0x8000;
 
 /// The next-owner mask of the no-copy notecard: move, modify, transfer.
-const NEXT_OWNER_NO_COPY: u32 = 0x0008_6000;
+const NEXT_OWNER_NO_COPY: Permissions = Permissions::from_bits(0x0008_6000);
 
 /// The next-owner mask of every other notecard: move, copy, modify, transfer.
-const NEXT_OWNER_FULL: u32 = 0x0008_e000;
+const NEXT_OWNER_FULL: Permissions = Permissions::from_bits(0x0008_e000);
 
 /// The flags the flags leg sets (the reference's landmark "visited" bit, the
 /// only value it ever sends).
@@ -2381,8 +2382,7 @@ async fn ais(
             let renamed = run.census.name("ais-whole");
             whole.name.clone_from(&renamed);
             "changed whole by AIS3".clone_into(&mut whole.description);
-            whole.permissions.next_owner =
-                sl_client_tokio::Permissions::from_bits(NEXT_OWNER_NO_COPY);
+            whole.permissions.next_owner = NEXT_OWNER_NO_COPY;
             let body =
                 sl_client_tokio::ais_item_update_body(&whole, TransactionId::from(Uuid::nil()))
                     .map_err(|error| {
@@ -2429,7 +2429,7 @@ async fn ais(
                             } else {
                                 "unchanged"
                             },
-                            if state.next_mask == Some(i64::from(NEXT_OWNER_NO_COPY)) {
+                            if state.next_mask == Some(i64::from(NEXT_OWNER_NO_COPY.bits())) {
                                 "set".to_owned()
                             } else {
                                 mask_text(state.next_mask)
@@ -2974,7 +2974,7 @@ async fn gift(
     run: &mut Run<'_, '_>,
     metrics: &mut Metrics,
     word: &str,
-    next_owner_mask: u32,
+    next_owner_mask: Permissions,
     notecards: Uuid,
 ) -> Result<Option<Uuid>, TestFailure> {
     let a_id = AgentKey::from(run.census.agent);

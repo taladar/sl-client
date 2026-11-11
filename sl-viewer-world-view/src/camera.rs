@@ -62,6 +62,7 @@ use sl_viewer_kit::coords::{bevy_to_sl_vec, sl_to_bevy_vec};
 use sl_viewer_spacenav::{FlycamAxisSettings, SpacenavInput};
 use sl_viewer_world_api::AvatarState;
 use sl_viewer_world_api::InputContext;
+use sl_viewer_world_api::TerrainState;
 use sl_viewer_world_api::rlv::RlvExtFacts;
 use sl_viewer_world_api::{
     AvatarMotion, CameraMode, CameraRig, FrameObject, MAX_DISTANCE, MAX_PITCH,
@@ -134,6 +135,10 @@ const MOUSELOOK_EYE_HALF_LIFE: f32 = 0.06;
 /// The clearance kept between the third-person camera and an obstruction it would
 /// otherwise clip through, so the pulled-in camera sits just short of the wall.
 const COLLISION_PADDING: f32 = 0.2;
+
+/// How far above the ground under it the third-person eye stays at the least,
+/// metres: the reference's `getCameraMinOffGround` outside mouselook.
+const CAMERA_MIN_OFF_GROUND: f32 = 0.5;
 
 /// The user-tunable camera parameters, refreshed every frame from the typed
 /// settings store by the camera & movement preferences tab
@@ -1055,16 +1060,120 @@ fn framing_side(eye: Vec3, center: Vec3, back: Vec3) -> Vec3 {
     vadd(vscale(level, along), vscale(Vec3::Y, FRAMING_MIN_RISE))
 }
 
+/// The rises a framing tries in turn when the ground hides the centre from
+/// the side it would look from, as the vertical part of the unit vector from
+/// the centre to the eye: 30°, 45°, 60° and 75° above level.
+const FRAMING_RISES: [f32; 4] = [0.5, 0.71, 0.87, 0.97];
+
+/// The turns about the vertical a framing tries at each rise, radians: the
+/// side it would look from first, then further round either way, the far
+/// side last.
+const FRAMING_TURNS: [f32; 8] = [
+    0.0,
+    core::f32::consts::FRAC_PI_4,
+    -core::f32::consts::FRAC_PI_4,
+    core::f32::consts::FRAC_PI_2,
+    -core::f32::consts::FRAC_PI_2,
+    3.0 * core::f32::consts::FRAC_PI_4,
+    -3.0 * core::f32::consts::FRAC_PI_4,
+    core::f32::consts::PI,
+];
+
+/// How far from a framed centre its line of sight starts to be held to the
+/// ground, metres: closer in, the ground the centre lies on is what is
+/// framed, not what hides it.
+const SIGHT_START: f32 = 1.0;
+
+/// How far apart the points of a line of sight held to the ground are,
+/// metres: half a height cell, so a terrace edge cannot fall between two.
+const SIGHT_STEP: f32 = 0.5;
+
+/// Whether an eye at `center + offset` sees `center` past the ground — the
+/// line between them stays above the ground from [`SIGHT_START`] out — and
+/// stands [`CAMERA_MIN_OFF_GROUND`] above the ground under it, where the
+/// camera would lift it to anyway. `ground` is the ground height under a
+/// point; where it is not known, nothing is in the way.
+fn sight_clears_ground(center: Vec3, offset: Vec3, ground: &impl Fn(Vec3) -> Option<f32>) -> bool {
+    let eye = vadd(center, offset);
+    if ground(eye).is_some_and(|height| eye.y < height + CAMERA_MIN_OFF_GROUND) {
+        return false;
+    }
+    let distance = offset.length();
+    let Some(direction) = offset.try_normalize() else {
+        return true;
+    };
+    let mut along = SIGHT_START;
+    while along < distance {
+        let point = vadd(center, vscale(direction, along));
+        if ground(point).is_some_and(|height| point.y < height) {
+            return false;
+        }
+        along += SIGHT_STEP;
+    }
+    true
+}
+
+/// The side a framing at `distance` from `center` looks from, so that the
+/// ground does not hide the centre: `side` itself where its line of sight is
+/// clear ([`sight_clears_ground`]); else the first clear one of the same rise
+/// turned further round ([`FRAMING_TURNS`]), then of each steeper rise
+/// ([`FRAMING_RISES`]) in turn; and `side` when none is clear.
+///
+/// A framing that only looks from the side the camera was on can look from
+/// inside a hill. Seen on the fake grid: a point of low ground 2.4 m from the
+/// foot of a 2 m terrace wall, framed from the terrace, put the eye over the
+/// terrace below its top, and no click from there reached the point.
+fn clear_framing_side(
+    center: Vec3,
+    distance: f32,
+    side: Vec3,
+    ground: &impl Fn(Vec3) -> Option<f32>,
+) -> Vec3 {
+    if sight_clears_ground(center, vscale(side, distance), ground) {
+        return side;
+    }
+    let level = Vec3::new(side.x, 0.0, side.z)
+        .try_normalize()
+        .unwrap_or(Vec3::X);
+    let rises =
+        core::iter::once(side.y).chain(FRAMING_RISES.into_iter().filter(|rise| *rise > side.y));
+    for rise in rises {
+        let across = rise.mul_add(-rise, 1.0).max(0.0).sqrt();
+        for turn in FRAMING_TURNS {
+            let turned = Quat::from_rotation_y(turn).mul_vec3(level);
+            let candidate = vadd(vscale(turned, across), vscale(Vec3::Y, rise));
+            if sight_clears_ground(center, vscale(candidate, distance), ground) {
+                return candidate;
+            }
+        }
+    }
+    side
+}
+
+/// The third-person `eye` lifted to [`CAMERA_MIN_OFF_GROUND`] above the
+/// `ground` height under it, as the reference keeps its camera out of the
+/// land; unchanged where it is that high already, or the ground is not known.
+fn lift_above_ground(eye: Vec3, ground: Option<f32>) -> Vec3 {
+    match ground {
+        Some(height) if eye.y < height + CAMERA_MIN_OFF_GROUND => {
+            Vec3::new(eye.x, height + CAMERA_MIN_OFF_GROUND, eye.z)
+        }
+        _other => eye,
+    }
+}
+
 /// **Frame an object** on a [`FrameObject`] request: focus the camera on its
 /// centre from the side the camera is on — never from below it
-/// ([`framing_side`]) — at [`framing_distance`], in third person. The eye
-/// then glides there like any focus change, and camera collision pulls it in
-/// front of anything between that side and the framed sphere.
+/// ([`framing_side`]), nor from where the ground hides it
+/// ([`clear_framing_side`]) — at [`framing_distance`], in third person. The
+/// eye then glides there like any focus change, and camera collision pulls it
+/// in front of anything between that side and the framed sphere.
 pub(crate) fn frame_object(
     mut requests: MessageReader<FrameObject>,
     mut mode: ResMut<CameraMode>,
     mut focus: ResMut<FocusTarget>,
     mut framed: ResMut<FramedObject>,
+    terrain: Option<Res<TerrainState>>,
     mut cameras: Query<(&GlobalTransform, Option<&Projection>, &mut CameraRig), With<ViewerCamera>>,
 ) {
     let Some(request) = requests.read().last().cloned() else {
@@ -1081,7 +1190,20 @@ pub(crate) fn frame_object(
     let eye = camera_transform.translation();
     // From the side the camera is already on, and from above; a camera
     // sitting at the centre backs out along its own view.
-    let away = framing_side(eye, request.center, camera_transform.back().as_vec3());
+    let preferred = framing_side(eye, request.center, camera_transform.back().as_vec3());
+    let ground = |point: Vec3| {
+        terrain
+            .as_ref()
+            .and_then(|terrain| terrain.ground_at(point))
+    };
+    let away = clear_framing_side(request.center, distance, preferred, &ground);
+    if away != preferred {
+        debug!(
+            ?preferred,
+            ?away,
+            "camera: the ground hides the framed centre from the side the eye was on"
+        );
+    }
     rig.set_point_offset(vscale(away, distance));
     *focus = FocusTarget::Point(request.center);
     framed.center = request.center;
@@ -1430,6 +1552,8 @@ pub(crate) struct CameraColliders<'w> {
     /// The object a [`FrameObject`] request framed, whose own colliders the
     /// camera passes through while it is the focus.
     framed: Res<'w, FramedObject>,
+    /// The ground, which the third-person eye is kept above.
+    terrain: Option<Res<'w, TerrainState>>,
 }
 
 /// The object the last [`FrameObject`] request framed: its centre (the focus
@@ -1493,6 +1617,7 @@ pub(crate) fn position_camera(
             rig.smoothed_eye = transform.translation;
             let forward = transform.forward().as_vec3();
             rig.smoothed_focus = vadd(transform.translation, forward);
+            rig.follow_focus = None;
             rig.seeded = true;
         }
         CameraMode::Mouselook => {
@@ -1534,6 +1659,7 @@ pub(crate) fn position_camera(
             };
             rig.smoothed_eye = eye;
             rig.smoothed_focus = vadd(eye, look_forward);
+            rig.follow_focus = None;
             rig.seeded = true;
             // Publish the heading for the avatar body to follow.
             out.aim.sl_yaw = sl_heading_from_bevy_forward(look_forward);
@@ -1639,6 +1765,13 @@ pub(crate) fn position_camera(
                     &ignored,
                 );
             }
+            // Out of the land, as the reference keeps it — the scripted sit
+            // camera too, which is otherwise left where the script put it.
+            let ground = colliders
+                .terrain
+                .as_ref()
+                .and_then(|terrain| terrain.ground_at(eye));
+            eye = lift_above_ground(eye, ground);
             // `&transform` reads through the `Mut` without marking it; the write
             // below is the only mutable deref, so a settled camera stays
             // unchanged for this frame's change-driven consumers.
@@ -1655,6 +1788,17 @@ pub(crate) fn position_camera(
                     snap: false,
                 },
             ) {
+                trace!(
+                    target: "camera_glide",
+                    focus_kind = ?*state.focus,
+                    target_eye = ?eye,
+                    target_focus = ?focus,
+                    eased_eye = ?rig.smoothed_eye,
+                    eased_focus = ?rig.smoothed_focus,
+                    framed_center = ?colliders.framed.center,
+                    framed_radius = colliders.framed.radius,
+                    "camera: third-person pose"
+                );
                 *transform = posed;
             }
         }
@@ -1734,8 +1878,12 @@ struct PoseTarget {
 /// and avatar move as a **locked pair**: they can jump together against the world
 /// (whatever the avatar's rendered position does, the camera does too), but never
 /// drift relative to each other — a sustained vertical flight has zero follow lag,
-/// as the reference viewer does. `false` (a fixed focus point) smooths the whole
-/// pose in world space as before — a static point has nothing to trail.
+/// as the reference viewer does. A follow that has just begun (the frame before
+/// was not one, [`CameraRig::follow_focus`]) still starts from where the camera
+/// looked: the look-at point's lag behind the avatar decays, riding with it, so
+/// the eye glides on a straight line from where it was, as the reference's
+/// camera animation does. `false` (a fixed focus point) smooths the whole pose
+/// in world space as before — a static point has nothing to trail.
 fn apply_pose(
     transform: &Transform,
     rig: &mut CameraRig,
@@ -1766,9 +1914,19 @@ fn apply_pose(
             // easing, so the camera never trails the body's translation), and only
             // the eye's offset from the focus is eased — the orbit / zoom / collision
             // geometry — so those changes still glide while the follow stays locked.
+            //
+            // What the look-at point lagged the focus by last frame decays and
+            // rides with the avatar. It is zero in a settled follow, which
+            // stays rigid; a follow that has just begun lags by the whole step
+            // from where the camera looked, so an `Escape` reset from an object
+            // focus glides from the eye it had, where re-applying the old
+            // offset to the avatar's head moved the eye metres in one frame.
+            let lagged_from = rig.follow_focus.unwrap_or(focus);
+            let lag = vscale(vsub(rig.smoothed_focus, lagged_from), 1.0 - t);
+            let eased_focus = vadd(focus, lag);
             let previous_offset = vsub(rig.smoothed_eye, rig.smoothed_focus);
             let offset = vlerp(previous_offset, vsub(eye, focus), t);
-            (vadd(focus, offset), focus)
+            (vadd(eased_focus, offset), eased_focus)
         } else {
             (
                 vlerp(rig.smoothed_eye, eye, t),
@@ -1778,6 +1936,7 @@ fn apply_pose(
     };
     rig.smoothed_eye = final_eye;
     rig.smoothed_focus = final_focus;
+    rig.follow_focus = follow_avatar.then_some(focus);
     rig.seeded = true;
     // A degenerate eye==focus (fully zoomed in) would make `looking_at` fail; nudge
     // the focus a hair forward along the previous forward in that case.
@@ -2267,6 +2426,92 @@ mod tests {
         assert!(at.y > 0.0 && at.is_finite(), "{at:?}");
     }
 
+    /// The fake grid's terraced ground ([[gridspec-terrain]]) along Bevy `x`:
+    /// 24 m west of the terrace wall at 102.4 m, 26 m east of it.
+    fn terraced(point: Vec3) -> Option<f32> {
+        Some(if point.x < 102.4 { 24.0 } else { 26.0 })
+    }
+
+    /// A ground point 2.4 m from the foot of a 2 m terrace wall, framed from
+    /// the terrace as the automation's ground reveal did: the side the eye was
+    /// on looks through the terrace, and the framing turns to a side whose
+    /// line of sight clears the ground and whose eye stands above it.
+    #[test]
+    fn a_framing_turns_away_from_ground_that_hides_its_centre() {
+        use super::{
+            CAMERA_MIN_OFF_GROUND, clear_framing_side, framing_distance, framing_side,
+            sight_clears_ground,
+        };
+
+        // Region <100, 120, 24> and the eye the reveal left at
+        // <107.1, 121.8, 25.16>, in Bevy space.
+        let center = Vec3::new(100.0, 24.0, -120.0);
+        let eye = Vec3::new(107.1, 25.16, -121.8);
+        let distance = framing_distance(2.0, core::f32::consts::FRAC_PI_3, 16.0 / 9.0);
+        let preferred = framing_side(eye, center, Vec3::Z);
+        assert!(
+            !sight_clears_ground(center, preferred * distance, &terraced),
+            "the side the eye was on looks through the terrace: {preferred:?}"
+        );
+        let chosen = clear_framing_side(center, distance, preferred, &terraced);
+        assert!(
+            (chosen.length() - 1.0).abs() < 1.0e-5,
+            "a unit vector: {chosen:?}"
+        );
+        assert!(
+            sight_clears_ground(center, chosen * distance, &terraced),
+            "{chosen:?}"
+        );
+        let framed_eye = center + chosen * distance;
+        assert!(
+            framed_eye.y >= terraced(framed_eye).unwrap_or(0.0) + CAMERA_MIN_OFF_GROUND,
+            "the eye stands above the ground: {framed_eye:?}"
+        );
+        assert!(
+            (chosen.y - preferred.y).abs() < 1.0e-5,
+            "turning round at the same rise was enough: {chosen:?} from {preferred:?}"
+        );
+    }
+
+    /// Over level ground, and where nothing is known of the ground, a framing
+    /// looks from the side the eye was on; where every side is hidden — a
+    /// centre in a pit — it still does.
+    #[test]
+    fn a_framing_keeps_its_side_unless_the_ground_hides_the_centre() {
+        use super::{clear_framing_side, framing_side};
+        use pretty_assertions::assert_eq;
+
+        let center = Vec3::new(100.0, 24.0, -120.0);
+        let side = framing_side(Vec3::new(107.0, 26.0, -121.0), center, Vec3::Z);
+        let level = |_point: Vec3| Some(24.0);
+        assert_eq!(clear_framing_side(center, 7.0, side, &level), side);
+        assert_eq!(clear_framing_side(center, 7.0, side, &|_point| None), side);
+        let pit = |point: Vec3| {
+            Some(if (point.x - center.x).hypot(point.z - center.z) < 0.5 {
+                24.0
+            } else {
+                60.0
+            })
+        };
+        assert_eq!(clear_framing_side(center, 7.0, side, &pit), side);
+    }
+
+    /// The third-person eye is kept half a metre above the ground under it,
+    /// and left alone where it is higher or the ground is not known.
+    #[test]
+    fn the_eye_is_lifted_out_of_the_ground() {
+        use super::lift_above_ground;
+        use pretty_assertions::assert_eq;
+
+        let eye = Vec3::new(107.1, 25.16, -121.8);
+        assert_eq!(
+            lift_above_ground(eye, Some(26.0)),
+            Vec3::new(107.1, 26.5, -121.8)
+        );
+        assert_eq!(lift_above_ground(eye, Some(24.0)), eye);
+        assert_eq!(lift_above_ground(eye, None), eye);
+    }
+
     /// Camera collision leaves a framed sphere clear: a collider the focus
     /// sits on does not bring the eye in, one outside the sphere stops it
     /// short of itself, and one right at the sphere's surface leaves the eye
@@ -2397,6 +2642,89 @@ mod tests {
             vsub(rig.smoothed_eye, eye).length() < 1.0e-5,
             "half-life 0 snaps: {:?}",
             rig.smoothed_eye
+        );
+    }
+
+    /// A focus that changes into the avatar follow — the `Escape` reset from a
+    /// framed object — glides from the eye the camera had, on a straight line
+    /// to the rear view, while a settled follow stays rigid.
+    ///
+    /// The follow eased only the eye's offset from its focus, so the reset
+    /// re-applied the eye's offset from the *framed point* to the avatar's
+    /// head: on aditi the eye moved 6 m in one frame, then glided in from
+    /// there.
+    #[test]
+    fn a_reset_into_the_follow_glides_from_the_eye_it_had() {
+        use super::{CameraRig, apply_pose, vadd, vsub};
+        use bevy::prelude::{Time, Transform};
+        use std::time::Duration;
+
+        let mut time = Time::default();
+        time.advance_by(Duration::from_secs_f32(1.0 / 60.0));
+        let mut rig = CameraRig::default();
+        let mut transform = Transform::default();
+        let mut frame = |eye: Vec3, focus: Vec3, follow_avatar: bool| {
+            if let Some(posed) = apply_pose(
+                &transform,
+                &mut rig,
+                &time,
+                &PoseTarget {
+                    eye,
+                    focus,
+                    up: Vec3::Y,
+                    follow_avatar,
+                    half_life: 0.1,
+                    snap: false,
+                },
+            ) {
+                transform = posed;
+            }
+            (rig.smoothed_eye, rig.smoothed_focus)
+        };
+        // Settled on a framed point 9 m ahead of the avatar's head.
+        let point = Vec3::new(135.0, 25.0, -125.0);
+        let framed_eye = vadd(point, Vec3::new(-4.0, 2.0, -6.0));
+        let _seeded = frame(framed_eye, point, false);
+        let head = Vec3::new(128.0, 26.8, -128.0);
+        let rear = vadd(head, Vec3::new(-3.0, 0.75, 0.0));
+
+        let mut eyes = vec![framed_eye];
+        for _frame in 0..120 {
+            let (eye, _focus) = frame(rear, head, true);
+            eyes.push(eye);
+        }
+        let whole = vsub(rear, framed_eye).length();
+        for pair in eyes.windows(2) {
+            let [from, to] = pair else { continue };
+            let step = vsub(*to, *from).length();
+            assert!(
+                step < 0.15 * whole,
+                "the eye moved {step} m in one frame of a {whole} m glide: {from:?} → {to:?}"
+            );
+        }
+        for eye in &eyes {
+            let along = vsub(*eye, framed_eye);
+            let line = vsub(rear, framed_eye).normalize();
+            let off_line = vsub(along, line * along.dot(line)).length();
+            assert!(
+                off_line < 1.0e-3,
+                "the eye leaves the line from where it was to the rear view by {off_line} m"
+            );
+        }
+        let (eye, focus) = frame(rear, head, true);
+        assert!(
+            vsub(eye, rear).length() < 1.0e-3 && vsub(focus, head).length() < 1.0e-3,
+            "the glide ends on the rear view: eye {eye:?}, focus {focus:?}"
+        );
+
+        // Settled, the follow is rigid: the avatar moves and the camera moves
+        // with it in the same frame, by the same amount.
+        let moved = Vec3::new(5.0, 0.0, 0.0);
+        let (eye, focus) = frame(vadd(rear, moved), vadd(head, moved), true);
+        assert!(
+            vsub(eye, vadd(rear, moved)).length() < 1.0e-3
+                && vsub(focus, vadd(head, moved)).length() < 1.0e-3,
+            "a settled follow moves with the avatar at once: eye {eye:?}, focus {focus:?}"
         );
     }
 

@@ -153,10 +153,9 @@ impl PrimLod {
     /// the tier maps one-to-one.
     ///
     /// `lod_factor` is the viewer's `RenderVolumeLODFactor` (default
-    /// [`sl_proto::DEFAULT_LOD_FACTOR`]); `radius` is the prim's full scale-vector
-    /// length (`getScale().length()`, the box diagonal), the same quantity
-    /// [`sl_proto::MeshLod::for_distance`] expects (**not** the half-diagonal
-    /// bounding-sphere radius used for pixel area). A degenerate input (a
+    /// [`sl_proto::DEFAULT_LOD_FACTOR`]); `radius` is the prim's scale biased by
+    /// its shape ([`LodScaleBias::radius`]), the same quantity
+    /// [`sl_proto::MeshLod::for_distance`] expects. A degenerate input (a
     /// non-finite or non-positive radius, distance, or LOD factor) yields the
     /// finest level, matching the reference's close-object bias.
     #[must_use]
@@ -165,6 +164,44 @@ impl PrimLod {
         // Both enums index 0 (coarsest) ..= 3 (finest), so the tier always maps;
         // the finest level is the natural fallback for the unreachable arm.
         Self::from_index(tier.index()).unwrap_or(Self::FINEST)
+    }
+}
+
+/// The per-axis weights the reference applies to an object's scale before it
+/// picks a level of detail (`LLVolume::mLODScaleBias`): `calcLOD` ranks a
+/// volume by `mLODScaleBias.scaledVec(getScale()).length()`.
+///
+/// `LLVolume::generate` sets it for every volume, mesh included, so the
+/// unweighted scale length is only the reference's fallback for an object with
+/// no volume at all. A prim's bias comes from its shape
+/// ([`PrimShape::lod_scale_bias`](crate::PrimShape::lod_scale_bias)); a mesh
+/// always takes [`DEFAULT`](Self::DEFAULT).
+#[derive(Clone, Copy, PartialEq, Debug)]
+#[expect(
+    clippy::module_name_repetitions,
+    reason = "re-exported at the crate root, where `LodScaleBias` reads clearly"
+)]
+pub struct LodScaleBias([f32; 3]);
+
+impl LodScaleBias {
+    /// Half of every axis — the bias of a mesh and of most prims.
+    pub const DEFAULT: Self = Self([0.5, 0.5, 0.5]);
+
+    /// A cylinder (a circle profile on a line path) ignores its height:
+    /// *"cylinders don't care about Z-Axis"*.
+    pub(crate) const CYLINDER: Self = Self([0.6, 0.6, 0.0]);
+
+    /// Anything swept along a circle path (torus, tube, ring).
+    pub(crate) const CIRCLE_PATH: Self = Self([0.6, 0.6, 0.6]);
+
+    /// The radius level-of-detail selection ranks an object of `scale`
+    /// (metres per axis) by: the length of the scale weighted per axis.
+    #[must_use]
+    pub fn radius(self, scale: [f32; 3]) -> f32 {
+        let [bx, by, bz] = self.0;
+        let [sx, sy, sz] = scale;
+        let (x, y, z) = (bx * sx, by * sy, bz * sz);
+        (x * x + y * y + z * z).sqrt()
     }
 }
 
@@ -184,8 +221,31 @@ const fn round_to_u32(value: f32) -> u32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{MIN_DETAIL_FACES, PRIM_LOD_COUNT, PrimLod};
+    use super::{LodScaleBias, MIN_DETAIL_FACES, PRIM_LOD_COUNT, PrimLod};
     use pretty_assertions::assert_eq;
+
+    /// The LOD radius is the scale weighted per axis: half the diagonal by
+    /// default, and a cylinder's height counts for nothing, so a 10 m tall
+    /// pole ranks like a short disc of the same width.
+    #[test]
+    fn lod_radius_weights_the_scale_per_axis() {
+        let close = |actual: f32, expected: f32| {
+            assert!((actual - expected).abs() < 1.0e-5, "{actual} vs {expected}");
+        };
+        close(
+            LodScaleBias::DEFAULT.radius([2.0, 2.0, 2.0]),
+            3.0_f32.sqrt(),
+        );
+        close(
+            LodScaleBias::CYLINDER.radius([1.0, 1.0, 10.0]),
+            0.72_f32.sqrt(),
+        );
+        close(
+            LodScaleBias::CYLINDER.radius([1.0, 1.0, 10.0]),
+            LodScaleBias::CYLINDER.radius([1.0, 1.0, 0.1]),
+        );
+        close(LodScaleBias::CIRCLE_PATH.radius([0.0, 0.0, 5.0]), 3.0);
+    }
 
     #[test]
     fn ordering_is_lowest_to_high() {

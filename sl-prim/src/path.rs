@@ -5,7 +5,8 @@
 //! [`PathPoint`]s, each carrying a position, a per-step X/Y scale, a rotation,
 //! and a sweep parameter (`tex_t`). A straight [`PathCurve::Line`] gives a box /
 //! cylinder / prism; a [`PathCurve::Circle`] gives a torus / tube / ring; and
-//! [`PathCurve::Circle2`] is the sphere path.
+//! [`PathCurve::Circle2`] is the sphere path. [`PathCurve::Test`] is the
+//! reference's five-frame test path, which no build tool makes.
 //!
 //! It is a faithful, idiomatic re-implementation of Firestorm
 //! `indra/llmath/llvolume.cpp` — `LLPath::generate` and `LLPath::genNGon` —
@@ -62,6 +63,10 @@ const HALF: f32 = 0.5;
 /// The alternating X coordinate a `Circle2` (sphere) path snaps its points to
 /// (Firestorm's `toggle` of `±0.5`), collapsing the circle onto two planes.
 const SPHERE_TOGGLE: f32 = 0.5;
+
+/// The fixed frame count of the test path (Firestorm's `np = 5` in the
+/// `LL_PCODE_PATH_TEST` branches of `LLPath::generate` / `getNumPoints`).
+const TEST_PATH_POINTS: usize = 5;
 
 /// One point along the extrusion path: a frame the profile ring is placed into.
 ///
@@ -144,8 +149,9 @@ impl Path {
     /// twist / taper); pass `0` for the un-split minimum of two frames.
     ///
     /// This mirrors `LLPath::generate`: it dispatches on the path curve, builds
-    /// a straight line, a `genNGon` circle, or the sphere `Circle2` path, and
-    /// finally forces the path open when its begin and end twist differ.
+    /// a straight line, a `genNGon` circle, the sphere `Circle2` path or the
+    /// five-frame test path, and finally forces the path open when its begin
+    /// and end twist differ.
     #[must_use]
     pub fn generate(shape: &PrimShape, lod: PrimLod, split: u32) -> Self {
         Self::generate_inner(shape, lod, usize_from_u32(split), None)
@@ -181,6 +187,7 @@ impl Path {
             PathCurve::Line | PathCurve::Flexible => builder.build_line(detail, split),
             PathCurve::Circle => builder.build_circle(detail, sculpt_size),
             PathCurve::Circle2 => builder.build_circle2(detail),
+            PathCurve::Test => builder.build_test(),
         }
 
         // The final override in `LLPath::generate`: any twist along the path
@@ -290,6 +297,36 @@ impl<'shape> Builder<'shape> {
             }
             toggle = -toggle;
         }
+    }
+
+    /// Build the test path (Firestorm's `LL_PCODE_PATH_TEST` branch): always
+    /// [`TEST_PATH_POINTS`] frames that ignore the cut, the shear and the
+    /// split. Frame `t` turns about X by `pi * twist_end * t` and sits on the
+    /// lerp from the bottom centre (`z = -0.5`) towards the point that angle
+    /// reaches on a half-unit circle, its scale lerping from `1` to the top
+    /// size. The path stays open.
+    fn build_test(&mut self) {
+        let shape = self.shape;
+        let steps = TEST_PATH_POINTS.saturating_sub(1);
+        let step = 1.0 / usize_to_f32(steps);
+        for i in 0..TEST_PATH_POINTS {
+            let t = usize_to_f32(i) * step;
+            let angle = PI * shape.twist_end * t;
+            self.path.points.push(PathPoint {
+                position: [
+                    0.0,
+                    lerp(0.0, -angle.sin() * HALF, t),
+                    lerp(-HALF, angle.cos() * HALF, t),
+                ],
+                scale: [
+                    lerp(1.0, shape.path_scale_x, t),
+                    lerp(1.0, shape.path_scale_y, t),
+                ],
+                rotation: quat_axis_x(angle),
+                tex_t: t,
+            });
+        }
+        self.path.open = true;
     }
 
     /// Generate an `sides`-sided circular path, from the begin cut to the end
@@ -674,6 +711,67 @@ mod tests {
         }
         // A full-width, uncut sphere path is closed.
         assert!(!path.is_open());
+    }
+
+    /// The test path (`0x40`, here with low bits set) is five frames
+    /// whatever the level of detail; with a half turn of end twist the
+    /// profile curls from the bottom centre up and back towards `-Y`,
+    /// following the reference's `LL_PCODE_PATH_TEST` formulas, while its
+    /// scale lerps to the top size. It tessellates like any other path.
+    #[test]
+    fn test_path_curls_five_frames_through_the_end_twist() {
+        let mut params = default_box_params();
+        params.path_curve = 0x45;
+        // End twist 100 * 0.01 = 1.0 ⇒ the last frame has turned by pi.
+        params.path_twist = 100;
+        // Top size 50 ⇒ scale (200 - 50) * 0.01 = 1.5.
+        params.path_scale_x = 50;
+        let shape = PrimShape::from_params(&params);
+        for lod in [PrimLod::Lowest, PrimLod::High] {
+            assert_eq!(Path::generate(&shape, lod, 3).point_count(), 5);
+        }
+        let path = Path::generate(&shape, PrimLod::High, 0);
+        assert!(path.is_open());
+        let expected = [
+            (0.0, [0.0, 0.0, -0.5], 1.0),
+            (
+                0.25,
+                [
+                    0.0,
+                    -0.25 * (PI * 0.25).sin() * 0.5,
+                    -0.375 + 0.25 * (PI * 0.25).cos() * 0.5,
+                ],
+                1.125,
+            ),
+            (0.5, [0.0, -0.25, -0.25], 1.25),
+            (
+                0.75,
+                [
+                    0.0,
+                    -0.75 * (PI * 0.75).sin() * 0.5,
+                    -0.125 + 0.75 * (PI * 0.75).cos() * 0.5,
+                ],
+                1.375,
+            ),
+            (1.0, [0.0, 0.0, -0.5], 1.5),
+        ];
+        for (point, (t, position, scale_x)) in path.points.iter().zip(expected) {
+            assert_close(point.tex_t, t);
+            for (actual, wanted) in point.position.iter().zip(position) {
+                assert_close(*actual, wanted);
+            }
+            assert_close(point.scale[0], scale_x);
+            assert_close(point.scale[1], 1.0);
+            // The frame turns about X by pi * twist * t: +Y goes to
+            // (0, cos, sin) of that angle, and X stays put.
+            let turned = point.rotate([0.0, 1.0, 0.0]);
+            let angle = PI * t;
+            assert_close(turned[0], 0.0);
+            assert_close(turned[1], angle.cos());
+            assert_close(turned[2], angle.sin());
+            assert_close(point.rotate([1.0, 0.0, 0.0])[0], 1.0);
+        }
+        assert!(crate::tessellate(&shape, PrimLod::High).face_count() > 0);
     }
 
     #[test]

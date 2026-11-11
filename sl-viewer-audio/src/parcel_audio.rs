@@ -88,7 +88,7 @@ use crate::ui::BottomArea;
 use crate::ui::{UiPanelShown, row};
 use crate::ui_element::{ElementCx, UiAction};
 use crate::ui_font::UiFont;
-use crate::ui_slider::{SliderStyle, SliderWidgetPlugin, spawn_slider};
+use crate::ui_slider::{SliderFormat, SliderLabels, SliderStyle, SliderWidgetPlugin, spawn_slider};
 use crate::volume_panel::{bus_mute_setting, bus_volume_setting};
 
 /// The `element` the bar attributes its actions to.
@@ -119,6 +119,7 @@ const SLIDER: SliderStyle = SliderStyle {
     track_fill: TRACK_FILL,
     thumb_width: 10.0,
     thumb_fill: THUMB_FILL,
+    font_size: BAR_FONT_SIZE,
 };
 
 /// The cluster's backdrop (matches the toolbar's dark surface).
@@ -470,6 +471,7 @@ fn spawn_parcel_audio_cluster(
         SLIDER,
         22,
         volume,
+        SliderLabels::value_only(SliderFormat::Percent),
         (
             bound_slider(
                 // The inline stream volume *is* the music bus (the volume

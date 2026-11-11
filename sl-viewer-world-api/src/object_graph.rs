@@ -89,6 +89,10 @@ impl ShapeFingerprint {
 /// Per-object viewer-side bookkeeping, paired with the object's `SceneObject`
 /// entity.
 #[derive(Debug)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "independent facts about one object (root, parented, animated, a local echo               pending), not a state machine folded into flags"
+)]
 pub struct TrackedObject {
     /// The entity rendering this object: carries its position/rotation and is the
     /// parent linkset children and attachments hang off. It has **no scale** (see
@@ -217,6 +221,18 @@ pub struct TrackedObject {
     /// (`crate::avatar_complexity`), whose triangle estimate is weighted by the
     /// prim's radius and whose surface-area trigger is in square metres.
     pub scale: Vec3,
+    /// Whether the build floater echoed an edit into [`update_flags`],
+    /// [`material`] or [`extra`] since the last update was applied
+    /// ([`ObjectState::apply_local_flag_edit`] and its siblings). The echo
+    /// makes the tracked values the edited ones, so the simulator's own echo
+    /// of the edit compares equal to them — and without this the update would
+    /// be taken for motion only and the scene's components (the light, the
+    /// reflection probe, the physics marker…) would never learn of the edit.
+    ///
+    /// [`update_flags`]: Self::update_flags
+    /// [`material`]: Self::material
+    /// [`extra`]: Self::extra
+    pub local_echo: bool,
 }
 
 impl TrackedObject {
@@ -237,7 +253,8 @@ impl TrackedObject {
         parent: ScopedObjectId,
         attachment_point: Option<u8>,
     ) -> bool {
-        self.update_flags != object.update_flags
+        self.local_echo
+            || self.update_flags != object.update_flags
             || self.material != object.material
             || self.is_root != is_root
             || self.parent != parent
@@ -648,6 +665,36 @@ impl ObjectState {
         }
     }
 
+    /// Whether `scoped` heads its linkset: a free-standing root, or the root of a
+    /// worn attachment (whose parent is the avatar, not a prim). The reference's
+    /// `getRootEdit() == this`, which gates what only a linkset as a whole can
+    /// be — an animated object.
+    #[must_use]
+    pub fn heads_linkset(&self, scoped: &ScopedObjectId) -> bool {
+        self.objects
+            .get(scoped)
+            .is_some_and(|tracked| tracked.is_root || tracked.attachment_point.is_some())
+    }
+
+    /// How many animated attachments the avatar wearing the attachment root
+    /// `root` has on — HUD attachments included, as the reference's
+    /// `getNumAnimatedObjectAttachments` counts every attachment point — or
+    /// `None` when `root` is not a worn attachment root.
+    #[must_use]
+    pub fn animated_attachments_beside(&self, root: &ScopedObjectId) -> Option<usize> {
+        let tracked = self.objects.get(root)?;
+        tracked.attachment_point?;
+        let wearer = tracked.parent;
+        Some(
+            self.objects
+                .values()
+                .filter(|other| {
+                    other.attachment_point.is_some() && other.parent == wearer && other.animated
+                })
+                .count(),
+        )
+    }
+
     /// The number of prims in the linkset rooted at `root` — the reference's
     /// per-linkset prim count. Drives the link-limit guard
     /// (`viewer-prim-linking`): a Second Life linkset may hold at most 255
@@ -879,9 +926,10 @@ impl ObjectState {
     /// physical / temporary / phantom toggles) so the checkbox flips
     /// immediately; the simulator's own `ObjectUpdate` echo confirms (or
     /// reverts) it. Display-only: the physics / render systems re-sync from
-    /// the echoed update, not from this.
+    /// the echoed update, not from this ([`TrackedObject::local_echo`]).
     pub fn apply_local_flag_edit(&mut self, scoped: &ScopedObjectId, bit: u32, on: bool) {
         if let Some(tracked) = self.objects.get_mut(scoped) {
+            tracked.local_echo = true;
             if on {
                 tracked.update_flags |= bit;
             } else {
@@ -894,6 +942,7 @@ impl ObjectState {
     /// cycle); display-only, confirmed by the simulator's echo.
     pub fn apply_local_material_edit(&mut self, scoped: &ScopedObjectId, material: u8) {
         if let Some(tracked) = self.objects.get_mut(scoped) {
+            tracked.local_echo = true;
             tracked.material = material;
         }
     }
@@ -901,10 +950,12 @@ impl ObjectState {
     /// Locally echo an edited extra-parameter set (the build floater's flexi /
     /// light editors) so the Features tab reflects the send immediately;
     /// display-only — the renderers' components re-sync from the simulator's
-    /// echoed update, and the shape fingerprint is deliberately untouched so
-    /// that echo still triggers the re-tessellation it needs.
+    /// echoed update ([`TrackedObject::local_echo`]), and the shape fingerprint
+    /// is deliberately untouched so that echo still triggers the
+    /// re-tessellation it needs.
     pub fn apply_local_extra_edit(&mut self, scoped: &ScopedObjectId, extra: ObjectExtraParams) {
         if let Some(tracked) = self.objects.get_mut(scoped) {
+            tracked.local_echo = true;
             tracked.extra = extra;
         }
     }
@@ -921,6 +972,7 @@ impl ObjectState {
             material: tracked.material,
             update_flags: tracked.update_flags,
             extra: &tracked.extra,
+            scale: tracked.scale,
         })
     }
 
@@ -1351,6 +1403,8 @@ pub struct ObjectEditData<'state> {
     pub update_flags: u32,
     /// The object's complete extra parameters (flexi, light, sculpt, …).
     pub extra: &'state ObjectExtraParams,
+    /// The object's size in Second Life metres, as the simulator last sent it.
+    pub scale: Vec3,
 }
 
 /// What [`ObjectState::pick_summary`] resolves a picked prim to: the identities
@@ -1481,6 +1535,7 @@ mod tests {
                 texture_entry: Vec::new(),
                 media_url: None,
                 scale: Vec3::ONE,
+                local_echo: false,
             };
             let _replaced = self.state.insert_tracked(id, tracked);
             id

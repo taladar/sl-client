@@ -42,6 +42,7 @@
     water_fog_no_clip,
 }
 #import sl_client_bevy::sky_lighting::{
+    SkyFragment,
     SkyLighting,
     sky_irradiance,
     sky_legacy_diffuse,
@@ -699,6 +700,11 @@ fn fragment(
             color = sky_legacy_finish(sky, sky_pbr_base_light(
                 sky, light, colors, pbr_input.material.perceptual_roughness, n, pbr_input.V,
                 light_dir, shadow, irradiance, pbr_input.diffuse_occlusion, emissive_rgb,
+                SkyFragment(
+                    pbr_input.world_position.xyz,
+                    pbr_input.frag_coord.xy,
+                    pbr_input.is_orthographic,
+                ),
             ));
             color += sl_local_lights(pbr_input);
         } else {

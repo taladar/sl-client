@@ -44,6 +44,14 @@ impl Permissions {
     pub const ITEM_UNRESTRICTED: Self = Self {
         bits: (1 << 14) | (1 << 15) | (1 << 13),
     };
+    /// The next-owner mask a newly created or uploaded item is given: move,
+    /// copy, modify and transfer. It is what the reference's
+    /// `LLFloaterPerms::getNextOwnerPerms` returns for every category under the
+    /// stock `*NextOwnerCopy` / `*NextOwnerModify` / `*NextOwnerTransfer`
+    /// settings, which all start from `PERM_MOVE` and default on.
+    pub const DEFAULT_NEXT_OWNER: Self = Self {
+        bits: (1 << 19) | (1 << 14) | (1 << 15) | (1 << 13),
+    };
 
     /// The empty permission set.
     #[must_use]
@@ -220,6 +228,12 @@ mod tests {
         assert_eq!(
             Permissions::ITEM_UNRESTRICTED,
             Permissions::MODIFY | Permissions::COPY | Permissions::TRANSFER
+        );
+        // `getNextOwnerPerms` under the stock settings.
+        assert_eq!(Permissions::DEFAULT_NEXT_OWNER.bits(), 0x0008_e000);
+        assert_eq!(
+            Permissions::DEFAULT_NEXT_OWNER,
+            Permissions::MOVE | Permissions::ITEM_UNRESTRICTED
         );
     }
 
