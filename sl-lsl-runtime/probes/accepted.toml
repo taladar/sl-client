@@ -655,17 +655,10 @@ reason = "Under its lowered limit aditi collects garbage and grows to 540 elemen
 probe = "memory/collision"
 between = ["aditi", "fake-sl"]
 record = "reached"
-fields = { script = "\"Full" }
-field = "last"
-reason = "aditi's Full list collides making 3 660 elements, the runtime's 3 650: the fitted code model's offset in a 64 KB budget"
-
-[[difference]]
-probe = "memory/collision"
-between = ["aditi", "fake-sl"]
-record = "reached"
 fields = { script = "\"Limited" }
 field = "last"
 reason = "Under its lowered limit aditi collects garbage and grows to 540 elements; the runtime, which has no garbage, collides at 500 (vm/memory.rs)"
+task = "server-lsl-mono-garbage-room"
 
 [[difference]]
 probe = "memory/collision"
@@ -732,8 +725,8 @@ probe = "memory/recursion"
 between = ["aditi", "fake-sl"]
 record = "depth"
 fields = { script = "limited" }
-reason = "Under a limit lowered to 4 096 over the use aditi goes deeper (129 to 253, here 151) than the stack model (73)"
-task = "server-lsl-mono-collision-model-under-lowered-limit"
+reason = "Under a limit lowered to 4 096 over the use aditi goes deeper (129 to 253, here 151) than the stack model (118): the garbage aditi's reading carried when the limit was set is room the runtime does not have"
+task = "server-lsl-mono-garbage-room"
 
 [[difference]]
 probe = "memory/recursion"
@@ -847,16 +840,67 @@ reason = "Second Life counts the LSO script Idle LSO at LSO's 16 384; the fake g
 task = "server-lsl-lso-memory"
 
 [[difference]]
-probe = "memory/budget-lso"
+probe = "memory/budget"
 between = ["aditi", "fake-sl"]
-reason = "Second Life runs the probe as LSO, with its fixed 16 KB, 16 384 used and limit and a low-water free; the fake grid compiles every script as Mono"
-task = "server-lsl-lso-memory"
+field = "used"
+reason = "The fitted Mono code model, within 300 bytes of aditi's reading, and aditi's garbage"
 
 [[difference]]
 probe = "memory/budget"
 between = ["aditi", "fake-sl"]
-reason = "The runtime's Mono collision model charges a call more than the 1 KB the probe leaves over its use, so it stops at a stack-heap collision where aditi goes on; used and free otherwise differ by the fitted code model"
-task = "server-lsl-mono-collision-model-under-lowered-limit"
+field = "free"
+reason = "The fitted Mono code model, within 300 bytes of aditi's reading, and aditi's garbage"
+
+[[difference]]
+probe = "memory/budget"
+between = ["aditi", "fake-sl"]
+field = "value"
+reason = "An asked limit made from the use the probe read: the fitted Mono code model's offset"
+
+[[difference]]
+probe = "memory/budget"
+between = ["aditi", "fake-sl"]
+field = "limit"
+reason = "A limit set from the use the probe read: the fitted Mono code model's offset"
+
+[[difference]]
+probe = "memory/budget"
+between = ["aditi", "fake-sl"]
+field = "limit_then"
+reason = "The limit set to the use read in the same expression: the fitted Mono code model's offset"
+
+[[difference]]
+probe = "memory/budget"
+between = ["aditi", "fake-sl"]
+field = "sp_max_after"
+reason = "The most used while profiling: the fitted Mono code model's offset"
+
+[[difference]]
+probe = "memory/stack"
+between = ["aditi", "fake-sl"]
+record = "before"
+field = "used"
+reason = "The fitted Mono code model, within 300 bytes of aditi's reading"
+
+[[difference]]
+probe = "memory/stack"
+between = ["aditi", "fake-sl"]
+record = "before"
+field = "free"
+reason = "The fitted Mono code model, within 300 bytes of aditi's reading"
+
+[[difference]]
+probe = "memory/stack"
+between = ["aditi", "fake-sl"]
+record = "set-limit"
+field = "limit"
+reason = "A limit set from the use the probe read: the fitted Mono code model's offset"
+
+[[difference]]
+probe = "memory/budget-lso"
+between = ["aditi", "fake-sl"]
+reason = "Second Life runs the probe as LSO, with its fixed 16 KB, 16 384 used and limit and a low-water free; the fake grid compiles every script as Mono"
+task = "server-lsl-lso-memory"
 
 # --- LSO maths errors (server-lsl-lso-memory) ---
 

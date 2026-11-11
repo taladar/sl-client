@@ -1,5 +1,5 @@
 grid: fake-sl
-date: 2026-11-09
+date: 2026-11-11
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating Mono
@@ -9,83 +9,83 @@ settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor
 # target: script "Wide LSO" lsl2
 PROBE memory/recursion rec=start region="Fake Region" channel="Second Life Server" version="sl-fake-grid 0.1.0"
 PROBE memory/recursion rec=recurse script="Narrow"
-PROBE memory/recursion rec=before script=narrow used=6333 free=59203 limit=65536
+PROBE memory/recursion rec=before script=narrow used=6303 free=59233 limit=65536
 PROBE memory/recursion rec=depth script=narrow depth=0 used=6333 free=59203 limit=65536
-PROBE memory/recursion rec=depth script=narrow depth=1 used=6333 free=59203 limit=65536
-PROBE memory/recursion rec=depth script=narrow depth=2 used=6333 free=59203 limit=65536
-PROBE memory/recursion rec=depth script=narrow depth=4 used=6333 free=59203 limit=65536
-PROBE memory/recursion rec=depth script=narrow depth=8 used=6333 free=59203 limit=65536
-PROBE memory/recursion rec=depth script=narrow depth=16 used=6333 free=59203 limit=65536
-PROBE memory/recursion rec=depth script=narrow depth=32 used=6333 free=59203 limit=65536
-PROBE memory/recursion rec=depth script=narrow depth=64 used=6333 free=59203 limit=65536
-PROBE memory/recursion rec=depth script=narrow depth=128 used=6333 free=59203 limit=65536
-PROBE memory/recursion rec=depth script=narrow depth=256 used=6333 free=59203 limit=65536
-PROBE memory/recursion rec=depth script=narrow depth=512 used=6333 free=59203 limit=65536
-PROBE memory/recursion rec=depth script=narrow depth=1024 used=6333 free=59203 limit=65536
+PROBE memory/recursion rec=depth script=narrow depth=1 used=6363 free=59173 limit=65536
+PROBE memory/recursion rec=depth script=narrow depth=2 used=6393 free=59143 limit=65536
+PROBE memory/recursion rec=depth script=narrow depth=4 used=6453 free=59083 limit=65536
+PROBE memory/recursion rec=depth script=narrow depth=8 used=6573 free=58963 limit=65536
+PROBE memory/recursion rec=depth script=narrow depth=16 used=6813 free=58723 limit=65536
+PROBE memory/recursion rec=depth script=narrow depth=32 used=7293 free=58243 limit=65536
+PROBE memory/recursion rec=depth script=narrow depth=64 used=8253 free=57283 limit=65536
+PROBE memory/recursion rec=depth script=narrow depth=128 used=10173 free=55363 limit=65536
+PROBE memory/recursion rec=depth script=narrow depth=256 used=14013 free=51523 limit=65536
+PROBE memory/recursion rec=depth script=narrow depth=512 used=21693 free=43843 limit=65536
+PROBE memory/recursion rec=depth script=narrow depth=1024 used=37053 free=28483 limit=65536
 # debug-channel: from="Object" text="Object [script:Narrow] Script run-time error"
 # debug-channel: from="Object" text="Stack-Heap Collision"
-PROBE memory/recursion rec=reached script="Narrow" depth="1093" running=0
+PROBE memory/recursion rec=reached script="Narrow" depth="1095" running=0
 PROBE memory/recursion rec=recurse script="Wide"
-PROBE memory/recursion rec=before script=wide used=6725 free=58811 limit=65536
+PROBE memory/recursion rec=before script=wide used=6695 free=58841 limit=65536
 PROBE memory/recursion rec=depth script=wide depth=0 used=6725 free=58811 limit=65536
-PROBE memory/recursion rec=depth script=wide depth=1 used=6725 free=58811 limit=65536
-PROBE memory/recursion rec=depth script=wide depth=2 used=6725 free=58811 limit=65536
-PROBE memory/recursion rec=depth script=wide depth=4 used=6725 free=58811 limit=65536
-PROBE memory/recursion rec=depth script=wide depth=8 used=6725 free=58811 limit=65536
-PROBE memory/recursion rec=depth script=wide depth=16 used=6725 free=58811 limit=65536
-PROBE memory/recursion rec=depth script=wide depth=32 used=6725 free=58811 limit=65536
-PROBE memory/recursion rec=depth script=wide depth=64 used=6725 free=58811 limit=65536
-PROBE memory/recursion rec=depth script=wide depth=128 used=6725 free=58811 limit=65536
-PROBE memory/recursion rec=depth script=wide depth=256 used=6725 free=58811 limit=65536
+PROBE memory/recursion rec=depth script=wide depth=1 used=6755 free=58781 limit=65536
+PROBE memory/recursion rec=depth script=wide depth=2 used=6785 free=58751 limit=65536
+PROBE memory/recursion rec=depth script=wide depth=4 used=6845 free=58691 limit=65536
+PROBE memory/recursion rec=depth script=wide depth=8 used=6965 free=58571 limit=65536
+PROBE memory/recursion rec=depth script=wide depth=16 used=7205 free=58331 limit=65536
+PROBE memory/recursion rec=depth script=wide depth=32 used=7685 free=57851 limit=65536
+PROBE memory/recursion rec=depth script=wide depth=64 used=8645 free=56891 limit=65536
+PROBE memory/recursion rec=depth script=wide depth=128 used=10565 free=54971 limit=65536
+PROBE memory/recursion rec=depth script=wide depth=256 used=14405 free=51131 limit=65536
 # debug-channel: from="Object" text="Object [script:Wide] Script run-time error"
 # debug-channel: from="Object" text="Stack-Heap Collision"
-PROBE memory/recursion rec=reached script="Wide" depth="424" running=0
+PROBE memory/recursion rec=reached script="Wide" depth="425" running=0
 PROBE memory/recursion rec=recurse script="Limited"
-PROBE memory/recursion rec=before script=limited used=6569 free=58967 limit=65536
-PROBE memory/recursion rec=set-limit script=limited asked=used+4096 result=1 used=6569 free=4096 limit=10665
-PROBE memory/recursion rec=depth script=limited depth=0 used=6569 free=4096 limit=10665
-PROBE memory/recursion rec=depth script=limited depth=1 used=6569 free=4096 limit=10665
-PROBE memory/recursion rec=depth script=limited depth=2 used=6569 free=4096 limit=10665
-PROBE memory/recursion rec=depth script=limited depth=4 used=6569 free=4096 limit=10665
-PROBE memory/recursion rec=depth script=limited depth=8 used=6569 free=4096 limit=10665
-PROBE memory/recursion rec=depth script=limited depth=16 used=6569 free=4096 limit=10665
-PROBE memory/recursion rec=depth script=limited depth=32 used=6569 free=4096 limit=10665
-PROBE memory/recursion rec=depth script=limited depth=64 used=6569 free=4096 limit=10665
+PROBE memory/recursion rec=before script=limited used=6539 free=58997 limit=65536
+PROBE memory/recursion rec=set-limit script=limited asked=used+4096 result=1 used=6569 free=4066 limit=10635
+PROBE memory/recursion rec=depth script=limited depth=0 used=6599 free=4036 limit=10635
+PROBE memory/recursion rec=depth script=limited depth=1 used=6629 free=4006 limit=10635
+PROBE memory/recursion rec=depth script=limited depth=2 used=6659 free=3976 limit=10635
+PROBE memory/recursion rec=depth script=limited depth=4 used=6719 free=3916 limit=10635
+PROBE memory/recursion rec=depth script=limited depth=8 used=6839 free=3796 limit=10635
+PROBE memory/recursion rec=depth script=limited depth=16 used=7079 free=3556 limit=10635
+PROBE memory/recursion rec=depth script=limited depth=32 used=7559 free=3076 limit=10635
+PROBE memory/recursion rec=depth script=limited depth=64 used=8519 free=2116 limit=10635
 # debug-channel: from="Object" text="Object [script:Limited] Script run-time error"
 # debug-channel: from="Object" text="Stack-Heap Collision"
-PROBE memory/recursion rec=reached script="Limited" depth="73" running=0
+PROBE memory/recursion rec=reached script="Limited" depth="118" running=0
 PROBE memory/recursion rec=recurse script="Narrow LSO"
-PROBE memory/recursion rec=before script=narrow-lso used=6341 free=59195 limit=65536
+PROBE memory/recursion rec=before script=narrow-lso used=6311 free=59225 limit=65536
 PROBE memory/recursion rec=depth script=narrow-lso depth=0 used=6341 free=59195 limit=65536
-PROBE memory/recursion rec=depth script=narrow-lso depth=1 used=6341 free=59195 limit=65536
-PROBE memory/recursion rec=depth script=narrow-lso depth=2 used=6341 free=59195 limit=65536
-PROBE memory/recursion rec=depth script=narrow-lso depth=4 used=6341 free=59195 limit=65536
-PROBE memory/recursion rec=depth script=narrow-lso depth=8 used=6341 free=59195 limit=65536
-PROBE memory/recursion rec=depth script=narrow-lso depth=16 used=6341 free=59195 limit=65536
-PROBE memory/recursion rec=depth script=narrow-lso depth=32 used=6341 free=59195 limit=65536
-PROBE memory/recursion rec=depth script=narrow-lso depth=64 used=6341 free=59195 limit=65536
-PROBE memory/recursion rec=depth script=narrow-lso depth=128 used=6341 free=59195 limit=65536
-PROBE memory/recursion rec=depth script=narrow-lso depth=256 used=6341 free=59195 limit=65536
-PROBE memory/recursion rec=depth script=narrow-lso depth=512 used=6341 free=59195 limit=65536
-PROBE memory/recursion rec=depth script=narrow-lso depth=1024 used=6341 free=59195 limit=65536
+PROBE memory/recursion rec=depth script=narrow-lso depth=1 used=6371 free=59165 limit=65536
+PROBE memory/recursion rec=depth script=narrow-lso depth=2 used=6401 free=59135 limit=65536
+PROBE memory/recursion rec=depth script=narrow-lso depth=4 used=6461 free=59075 limit=65536
+PROBE memory/recursion rec=depth script=narrow-lso depth=8 used=6581 free=58955 limit=65536
+PROBE memory/recursion rec=depth script=narrow-lso depth=16 used=6821 free=58715 limit=65536
+PROBE memory/recursion rec=depth script=narrow-lso depth=32 used=7301 free=58235 limit=65536
+PROBE memory/recursion rec=depth script=narrow-lso depth=64 used=8261 free=57275 limit=65536
+PROBE memory/recursion rec=depth script=narrow-lso depth=128 used=10181 free=55355 limit=65536
+PROBE memory/recursion rec=depth script=narrow-lso depth=256 used=14021 free=51515 limit=65536
+PROBE memory/recursion rec=depth script=narrow-lso depth=512 used=21701 free=43835 limit=65536
+PROBE memory/recursion rec=depth script=narrow-lso depth=1024 used=37061 free=28475 limit=65536
 # debug-channel: from="Object" text="Object [script:Narrow LSO] Script run-time error"
 # debug-channel: from="Object" text="Stack-Heap Collision"
-PROBE memory/recursion rec=reached script="Narrow LSO" depth="1093" running=0
+PROBE memory/recursion rec=reached script="Narrow LSO" depth="1095" running=0
 PROBE memory/recursion rec=recurse script="Wide LSO"
-PROBE memory/recursion rec=before script=wide-lso used=6733 free=58803 limit=65536
+PROBE memory/recursion rec=before script=wide-lso used=6703 free=58833 limit=65536
 PROBE memory/recursion rec=depth script=wide-lso depth=0 used=6733 free=58803 limit=65536
-PROBE memory/recursion rec=depth script=wide-lso depth=1 used=6733 free=58803 limit=65536
-PROBE memory/recursion rec=depth script=wide-lso depth=2 used=6733 free=58803 limit=65536
-PROBE memory/recursion rec=depth script=wide-lso depth=4 used=6733 free=58803 limit=65536
-PROBE memory/recursion rec=depth script=wide-lso depth=8 used=6733 free=58803 limit=65536
-PROBE memory/recursion rec=depth script=wide-lso depth=16 used=6733 free=58803 limit=65536
-PROBE memory/recursion rec=depth script=wide-lso depth=32 used=6733 free=58803 limit=65536
-PROBE memory/recursion rec=depth script=wide-lso depth=64 used=6733 free=58803 limit=65536
-PROBE memory/recursion rec=depth script=wide-lso depth=128 used=6733 free=58803 limit=65536
-PROBE memory/recursion rec=depth script=wide-lso depth=256 used=6733 free=58803 limit=65536
+PROBE memory/recursion rec=depth script=wide-lso depth=1 used=6763 free=58773 limit=65536
+PROBE memory/recursion rec=depth script=wide-lso depth=2 used=6793 free=58743 limit=65536
+PROBE memory/recursion rec=depth script=wide-lso depth=4 used=6853 free=58683 limit=65536
+PROBE memory/recursion rec=depth script=wide-lso depth=8 used=6973 free=58563 limit=65536
+PROBE memory/recursion rec=depth script=wide-lso depth=16 used=7213 free=58323 limit=65536
+PROBE memory/recursion rec=depth script=wide-lso depth=32 used=7693 free=57843 limit=65536
+PROBE memory/recursion rec=depth script=wide-lso depth=64 used=8653 free=56883 limit=65536
+PROBE memory/recursion rec=depth script=wide-lso depth=128 used=10573 free=54963 limit=65536
+PROBE memory/recursion rec=depth script=wide-lso depth=256 used=14413 free=51123 limit=65536
 # debug-channel: from="Object" text="Object [script:Wide LSO] Script run-time error"
 # debug-channel: from="Object" text="Stack-Heap Collision"
-PROBE memory/recursion rec=reached script="Wide LSO" depth="424" running=0
+PROBE memory/recursion rec=reached script="Wide LSO" depth="425" running=0
 PROBE memory/recursion rec=end
 # debug-channel by=other: from="Object" text="Object [script:Narrow] Script run-time error"
 # debug-channel by=other: from="Object" text="Stack-Heap Collision"

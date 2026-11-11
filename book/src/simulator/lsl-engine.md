@@ -522,8 +522,9 @@ memory as its flavour's engine does (`vm::memory`, on top of the per-value
 costs of `value::memory`; the measurements are `gridspec/lsl.md` § Memory and
 limits):
 
-- **What a script reads.** On Mono `llGetUsedMemory` is the script's code and
-  what its globals reach — never a local, an argument or a frame —
+- **What a script reads.** On Mono `llGetUsedMemory` is the script's code,
+  what its globals reach and the call context of each frame that has made a
+  library call — never a local, an argument or a frame's slots —
   `llGetFreeMemory` the limit less the most used since the limit was set (a
   low-water mark), and `llSetMemoryLimit` takes anything from the current use
   to 65 536 and restarts the mark. On YEngine the reading is the heap
@@ -535,13 +536,18 @@ limits):
   the runtime runs its own bytecode — so it is costed as a constant, a cost
   per function or handler and a cost per instruction, fitted to eight probe
   scripts' first readings on aditi (all within 300 bytes, about the grid's own
-  wander). Mono's stack never shows in a reading yet collides, so a frame
-  costs a fixed amount plus its slots toward the collision only, fitted to the
-  depths aditi's recursions reached at the default limit.
+  wander). Mono's stack is fitted to the depths aditi's recursions reached
+  (`memory/recursion`, `memory/stack`): a frame costs a fixed amount and its
+  slots, which never show in a reading, and a frame that has made a library
+  call holds a call context on the heap besides, which does. The frames, the
+  heap and the locals meet in the script's 64 KB; against a lowered limit
+  only the slots and the heap count.
 - **Where a script runs out** is checked where memory grows — a global or a
-  local stored, a call made, a value made that alone could never fit —
-  which is what makes aditi's list collide at its measured length although
-  appending copies the list. Mono stops and holds the script with its two
+  local stored bigger, a call made, a frame's first library call, a value made
+  that alone could never fit — which is what makes aditi's list collide at its
+  measured length although appending copies the list. A store that makes nothing
+  bigger cannot collide, so a script whose limit is exactly its use carries on
+  storing integers, as aditi's did. Mono stops and holds the script with its two
   `Stack-Heap Collision` lines; YEngine follows its own source
   (`XMRInstArrays.PopString`'s check of a global's growth, and
   `UpdateLocalsHeapUse`'s of the locals) and leaves the script reading as
@@ -563,8 +569,10 @@ limits):
   `OBJECT_SCRIPT_TIME` is still 0.
 - **Not modelled:** Second Life's LSO and its 16 KB, since the fake grid
   compiles every script from source; and the garbage Mono's readings carry,
-  which is why a reading here sits a couple of hundred bytes under aditi's and
-  a recursion under a lowered limit stops shallower than aditi's.
+  which is why a reading here wanders where aditi's does not, and why under a
+  lowered limit aditi has some 600 to 1 000 bytes more room (the garbage its
+  reading carried when the limit was set) and a recursion that calls the
+  library at every level, or a list, goes a little further there.
 
 ### As built: events and states
 

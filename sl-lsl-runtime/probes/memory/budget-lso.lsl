@@ -8,7 +8,8 @@
 // each count, then clears it; grows a global string of ASCII, two-byte and
 // three-byte characters; runs the memory profiler over a growth; and asks
 // llSetMemoryLimit for limits above, at and below what the script uses,
-// reading what it answered and what the limit became.
+// reading what it answered and what the limit became, and once for exactly
+// what it uses, read in the same expression.
 //
 // The two- and three-byte characters are U+00E9 and U+20AC, made with
 // llUnescapeURL so the source stays ASCII. This is memory/budget compiled
@@ -144,6 +145,16 @@ default
         ask_limit("1", 1);
         ask_limit("0", 0);
         ask_limit("-1", -1);
+
+        // The use asked for with nothing made between the read and the ask,
+        // and the limit put back at once: whether the stack counts.
+        integer now = llSetMemoryLimit(llGetUsedMemory());
+        integer limit_then = llGetMemoryLimit();
+        integer back = llSetMemoryLimit(65536);
+        read("set-limit-now", " result=" + (string)now
+            + " limit_then=" + (string)limit_then
+            + " restored=" + (string)back);
+
         ask_limit("65536", 65536);
         read("read", " when=last");
         emit("end", "");

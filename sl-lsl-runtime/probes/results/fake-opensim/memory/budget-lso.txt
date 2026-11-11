@@ -87,6 +87,7 @@ PROBE memory/budget-lso rec=set-limit asked=used-1024 value=-990 result=0 used=3
 PROBE memory/budget-lso rec=set-limit asked=1 value=1 result=0 used=34 free=1048542 limit=65536
 PROBE memory/budget-lso rec=set-limit asked=0 value=0 result=0 used=34 free=1048542 limit=65536
 PROBE memory/budget-lso rec=set-limit asked=-1 value=-1 result=0 used=34 free=1048542 limit=65536
+PROBE memory/budget-lso rec=set-limit-now result=0 limit_then=65536 restored=0 used=34 free=1048542 limit=65536
 PROBE memory/budget-lso rec=set-limit asked=65536 value=65536 result=0 used=34 free=1048542 limit=65536
 PROBE memory/budget-lso rec=read when=last used=34 free=1048542 limit=65536
 PROBE memory/budget-lso rec=end

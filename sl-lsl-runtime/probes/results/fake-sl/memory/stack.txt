@@ -1,0 +1,38 @@
+grid: fake-sl
+date: 2026-11-11
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Fake Region
+engine: sl-lsl-runtime imitating Mono
+settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
+
+PROBE memory/stack rec=start region="Fake Region" channel="Second Life Server" version="sl-fake-grid 0.1.0"
+PROBE memory/stack rec=recurse script="Quiet"
+PROBE memory/stack rec=before script=quiet used=6149 free=59387 limit=65536
+# debug-channel: from="Object" text="Object [script:Quiet] Script run-time error"
+# debug-channel: from="Object" text="Stack-Heap Collision"
+PROBE memory/stack rec=reached script="Quiet" depth="2288" running=0
+PROBE memory/stack rec=recurse script="Quiet limited"
+PROBE memory/stack rec=before script=quiet-limited used=6399 free=59137 limit=65536
+PROBE memory/stack rec=set-limit script=quiet-limited asked=used+4096 result=1 used=6429 free=4066 limit=10495
+# debug-channel: from="Object" text="Object [script:Quiet limited] Script run-time error"
+# debug-channel: from="Object" text="Stack-Heap Collision"
+PROBE memory/stack rec=reached script="Quiet limited" depth="672" running=0
+PROBE memory/stack rec=recurse script="Heavy"
+PROBE memory/stack rec=before script=heavy count=2000 used=38857 free=26679 limit=65536
+# debug-channel: from="Object" text="Object [script:Heavy] Script run-time error"
+# debug-channel: from="Object" text="Stack-Heap Collision"
+PROBE memory/stack rec=reached script="Heavy" depth="1024" running=0
+PROBE memory/stack rec=recurse script="Litter"
+PROBE memory/stack rec=before script=litter used=6781 free=58755 limit=65536
+# debug-channel: from="Object" text="Object [script:Litter] Script run-time error"
+# debug-channel: from="Object" text="Stack-Heap Collision"
+PROBE memory/stack rec=reached script="Litter" depth="1072" running=0
+PROBE memory/stack rec=end
+# debug-channel by=other: from="Object" text="Object [script:Quiet] Script run-time error"
+# debug-channel by=other: from="Object" text="Stack-Heap Collision"
+# debug-channel by=other: from="Object" text="Object [script:Quiet limited] Script run-time error"
+# debug-channel by=other: from="Object" text="Stack-Heap Collision"
+# debug-channel by=other: from="Object" text="Object [script:Heavy] Script run-time error"
+# debug-channel by=other: from="Object" text="Stack-Heap Collision"
+# debug-channel by=other: from="Object" text="Object [script:Litter] Script run-time error"
+# debug-channel by=other: from="Object" text="Stack-Heap Collision"

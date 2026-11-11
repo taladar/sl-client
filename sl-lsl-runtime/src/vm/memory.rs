@@ -18,27 +18,48 @@
 //!   aditi (`memory/sizes`' Globals none, `memory/recursion`'s Narrow, Wide
 //!   and Limited, `memory/collision`'s Doubling, Full list and Limited list,
 //!   `memory/budget`): every one within 300 bytes, about the reading's own
-//!   wander on the grid. A string literal costs nothing of its own — the
-//!   eight scripts fit as well without it, and the one row that seemed to
-//!   say otherwise is a global's value, which is costed as one.
-//! - **Mono's stack.** No local, argument or call frame shows in Mono's
-//!   `llGetUsedMemory`, yet a recursion collides and a lowered limit cuts
-//!   its depth. A frame is costed [`MONO_FRAME`] and the size of each of its
-//!   slots ([`slot_size`]) toward the collision only, fitted to the depths
-//!   aditi reached at the default limit — 1 039 to 1 116 for one integer
-//!   argument (`Narrow`), 413 to 518 for five arguments and two locals
-//!   (`Wide`); the probes themselves, run here, reach 1 093 and 424. Under a
-//!   limit lowered to 4 096 bytes over the use, aditi went deeper (129 to
-//!   253) than the model does (73): the grid's garbage, which a lowered limit
-//!   makes it collect, is in the default-limit depths and in no model here.
+//!   wander on the grid, once the two call contexts each first reading
+//!   carries (below) are taken off. A string literal costs nothing of its
+//!   own — the eight scripts fit as well without it, and the one row that
+//!   seemed to say otherwise is a global's value, which is costed as one.
+//! - **Mono's stack.** Fitted to the depths aditi reached in `memory/stack`
+//!   (five runs, 2026-11-11) and `memory/recursion`, it has two parts:
+//!   - A frame is [`MONO_FRAME`] and the size of each of its slots
+//!     ([`slot_size`]), which never show in `llGetUsedMemory`. Frame,
+//!     slots, heap and locals meet in the script's 64 KB whatever its limit;
+//!     against a limit `llSetMemoryLimit` lowered only the slots count.
+//!   - A frame that has made a library call holds [`MONO_CALL_CONTEXT`]
+//!     more on the heap until it returns, which `llGetUsedMemory` reads:
+//!     Narrow's use rose 30 a level on aditi.
 //!
-//! What collides is checked where memory grows: a global or a local stored,
-//! a call made, and a value made that alone could never fit. That is enough
-//! to match the measured cases — aditi's Full list collides making 3 660
-//! elements, as it does here, although appending makes a second copy of the
-//! list, so a value on its way to a store is not counted beside the one it
-//! replaces; the Limited list collides making 500 here and 540 there, the
-//! grid's garbage again.
+//!   So a recursion that calls the library at every level goes half as deep
+//!   as one that calls it every sixteenth: aditi's Quiet reached 2 256 to
+//!   2 464 (2 272 here), Narrow 1 039 to 1 116 (1 092) and Litter, which
+//!   drops a 104-character string at every level too, 1 040 to 1 280
+//!   (1 072). Garbage does not cut the depth (Litter's is collected). Over
+//!   32 KB of heap Heavy reached 912 to 1 712 (1 024), and Wide, five
+//!   arguments and two locals, 413 to 518 (424). Under a limit lowered 4 096
+//!   bytes over the use, Quiet limited reached 560 to 928 (672). There
+//!   aditi's Limited, which calls the library at every level, reached 129 to
+//!   253 (118 here), and the Limited list 540 elements under 8 192 (500):
+//!   some 600 to 1 000 bytes more room than the model's, likely the garbage
+//!   aditi's reading carried when the limit was set, collected later, which
+//!   has no model here.
+//!
+//! What collides is checked where memory grows: a global or a local stored
+//! bigger, a call made, a frame's first library call, and a value made that
+//! alone could never fit. A store that makes nothing bigger cannot collide,
+//! even past the limit. That is enough to match the measured cases —
+//! aditi's Full list collides making 3 660 elements, as it does on the fake
+//! grid (3 650 in the unit test's rewrite of the probe), although
+//! appending makes a second copy of the list, so a value on its way to a
+//! store is not counted beside the one it replaces.
+//!
+//! `llSetMemoryLimit` takes a limit down to the use `llGetUsedMemory`
+//! reads, call contexts included. Asked for exactly the use it read in the
+//! same expression, aditi took it; asked for a use read before a call whose
+//! frame has since made its call context, it refused, as it does here
+//! (`memory/budget`).
 //!
 //! Second Life's LSO, with its 16 KB, is not modelled: the fake grid
 //! compiles every script from source, so every script is Mono's.
@@ -54,7 +75,7 @@ use crate::vm::persistence::SavedMemory;
 
 /// Mono: what the code of any script costs, before its bodies and
 /// instructions — the fitted constant of the code model (module docs).
-pub const MONO_SCRIPT_CODE: u32 = 3_269;
+pub const MONO_SCRIPT_CODE: u32 = 3_209;
 
 /// Mono: what each function and event handler's code costs over its
 /// instructions.
@@ -64,9 +85,14 @@ pub const MONO_BODY_CODE: u32 = 342;
 /// Mono's code.
 pub const MONO_INSTRUCTION_CODE: u32 = 18;
 
-/// Mono: what a call frame costs toward a stack-heap collision, over its
-/// slots ([`slot_size`]).
-pub const MONO_FRAME: u32 = 50;
+/// Mono: what a call frame costs toward a stack-heap collision in the
+/// script's 64 KB, over its slots ([`slot_size`]).
+pub const MONO_FRAME: u32 = 20;
+
+/// Mono: what a frame holds on the heap from its first library call until
+/// it returns — read by `llGetUsedMemory` and counted against the limit
+/// (module docs).
+pub const MONO_CALL_CONTEXT: u32 = 30;
 
 /// The most any one script may hold where its grid sets no limit of its own
 /// — XEngine, and a single value on YEngine before it is stored. It is not a
@@ -122,16 +148,39 @@ pub fn code_cost(program: &Program, flavour: EngineFlavour) -> u32 {
 }
 
 /// What a frame of `body` costs toward running out in `flavour`: Mono's stack
-/// model ([`MONO_FRAME`] and its slots); nothing on OpenSim, whose engines
-/// keep their call stack apart from the heap they count.
+/// model, [`MONO_FRAME`] and its slots against the script's 64 KB and the
+/// slots alone against its limit; nothing on OpenSim, whose engines keep
+/// their call stack apart from the heap they count.
 #[must_use]
-pub fn frame_cost(body: &Body, flavour: EngineFlavour) -> u32 {
+pub(crate) fn frame_cost(body: &Body, flavour: EngineFlavour) -> Stack {
     if flavour != EngineFlavour::SecondLife {
-        return 0;
+        return Stack::default();
     }
-    body.locals.iter().fold(MONO_FRAME, |sum, local| {
-        sum.saturating_add(slot_size(local.ty))
-    })
+    let slots = body
+        .locals
+        .iter()
+        .fold(0_u32, |sum, local| sum.saturating_add(slot_size(local.ty)));
+    Stack {
+        frames: MONO_FRAME.saturating_add(slots),
+        slots,
+        locals: 0,
+        contexts: 0,
+    }
+}
+
+/// What a frame's first library call adds to the call stack in `flavour`:
+/// Mono's call context ([`MONO_CALL_CONTEXT`]); nothing on OpenSim.
+#[must_use]
+pub(crate) const fn context_cost(flavour: EngineFlavour) -> Stack {
+    Stack {
+        frames: 0,
+        slots: 0,
+        locals: 0,
+        contexts: match flavour {
+            EngineFlavour::SecondLife => MONO_CALL_CONTEXT,
+            EngineFlavour::YEngine | EngineFlavour::XEngine => 0,
+        },
+    }
 }
 
 /// A length as a `u32`, saturating.
@@ -143,16 +192,38 @@ fn saturate(length: usize) -> u32 {
 /// the locals stored in them hold.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct Stack {
-    /// Every frame's own cost ([`frame_cost`]).
+    /// Every frame's own cost against the script's 64 KB, [`MONO_FRAME`] and
+    /// its slots ([`frame_cost`]).
     pub(crate) frames: u32,
+    /// Every frame's slots alone, what the frames cost against a limit
+    /// `llSetMemoryLimit` lowered.
+    pub(crate) slots: u32,
     /// What every frame's stored locals hold ([`Memory::local_cost`]).
     pub(crate) locals: u32,
+    /// Mono: the call contexts of the frames that have made a library call
+    /// ([`MONO_CALL_CONTEXT`]), which are heap.
+    pub(crate) contexts: u32,
 }
 
 impl Stack {
-    /// Both together.
-    const fn total(self) -> u32 {
-        self.frames.saturating_add(self.locals)
+    /// This and `frame`'s frame cost pushed on it.
+    pub(crate) const fn push(self, frame: Self) -> Self {
+        Self {
+            frames: self.frames.saturating_add(frame.frames),
+            slots: self.slots.saturating_add(frame.slots),
+            locals: self.locals.saturating_add(frame.locals),
+            contexts: self.contexts.saturating_add(frame.contexts),
+        }
+    }
+
+    /// This with `frame`'s frame cost popped off it.
+    pub(crate) const fn pop(self, frame: Self) -> Self {
+        Self {
+            frames: self.frames.saturating_sub(frame.frames),
+            slots: self.slots.saturating_sub(frame.slots),
+            locals: self.locals.saturating_sub(frame.locals),
+            contexts: self.contexts.saturating_sub(frame.contexts),
+        }
     }
 }
 
@@ -287,15 +358,16 @@ impl Memory {
         self.peak = self.heap(Stack::default());
     }
 
-    /// What the code and globals cost, and on YEngine the locals the stack
-    /// holds too: the heap as the model counts it.
+    /// What the code and globals cost, on Mono the frames' call contexts
+    /// and on YEngine the locals the stack holds: the heap as the model
+    /// counts it.
     const fn heap(&self, stack: Stack) -> u32 {
         let globals = self
             .code
             .saturating_add(self.declared)
             .saturating_add(self.held);
         match self.model {
-            EngineFlavour::SecondLife => globals,
+            EngineFlavour::SecondLife => globals.saturating_add(stack.contexts),
             EngineFlavour::YEngine | EngineFlavour::XEngine => globals.saturating_add(stack.locals),
         }
     }
@@ -391,12 +463,16 @@ impl Memory {
     }
 
     /// Whether `stack` and the heap as it stands fit, or the script has run
-    /// out: Mono's collision is the heap and the stack past the limit;
-    /// XEngine's backstop is the heap past [`HOST_MEMORY_CAP`].
+    /// out: Mono's collision is the heap, the locals and either the frames
+    /// past the script's 64 KB or their slots past its limit; XEngine's
+    /// backstop is the heap past [`HOST_MEMORY_CAP`].
     const fn fits(&self, stack: Stack) -> Result<(), RuntimeError> {
         match self.flavour {
             EngineFlavour::SecondLife => {
-                if self.heap(stack).saturating_add(stack.total()) > self.limit {
+                let heap = self.heap(stack).saturating_add(stack.locals);
+                if heap.saturating_add(stack.frames) > MEMORY_LIMIT
+                    || heap.saturating_add(stack.slots) > self.limit
+                {
                     return Err(RuntimeError::StackHeapCollision);
                 }
             }
@@ -436,7 +512,7 @@ impl Memory {
         }
         let held = self.held.saturating_sub(old).saturating_add(cost);
         let before = core::mem::replace(&mut self.held, held);
-        if let Err(error) = self.fits(stack) {
+        if let Err(error) = self.grown(cost > old, stack) {
             self.held = before;
             return Err(error);
         }
@@ -465,7 +541,7 @@ impl Memory {
                 limit: YENGINE_HEAP,
             });
         }
-        self.fits(stack)?;
+        self.grown(stack.locals > before, stack)?;
         self.observe(stack);
         Ok(())
     }
@@ -473,6 +549,26 @@ impl Memory {
     /// The call stack is about to hold `stack` with a new frame pushed:
     /// whether it fits.
     pub(crate) const fn call(&self, stack: Stack) -> Result<(), RuntimeError> {
+        self.fits(stack)
+    }
+
+    /// A frame made its first library call and the call stack now holds
+    /// `stack`, its call context included: whether it fits.
+    pub(crate) fn library_call(&mut self, stack: Stack) -> Result<(), RuntimeError> {
+        self.fits(stack)?;
+        self.observe(stack);
+        Ok(())
+    }
+
+    /// A store left the call stack holding `stack`: whether it fits, where
+    /// it `grew` what is held. A store that makes nothing bigger cannot
+    /// collide, even where the script already sits past its limit — asked
+    /// for exactly what it uses, aditi took the limit and stored integers
+    /// under it (`memory/budget`'s `set-limit-now`).
+    const fn grown(&self, grew: bool, stack: Stack) -> Result<(), RuntimeError> {
+        if !grew && matches!(self.flavour, EngineFlavour::SecondLife) {
+            return Ok(());
+        }
         self.fits(stack)
     }
 

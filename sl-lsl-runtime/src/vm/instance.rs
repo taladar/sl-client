@@ -22,7 +22,7 @@ use crate::vm::detected::{Detected, MAX_DETECTED, is_detection_event};
 use crate::vm::fault::{Fault, RuntimeError};
 use crate::vm::flavour::EngineFlavour;
 use crate::vm::host::{CallerId, Host};
-use crate::vm::memory::{Memory, Stack, frame_cost};
+use crate::vm::memory::{Memory, Stack, context_cost, frame_cost};
 use crate::vm::objects::{self, ListId, ListObjects};
 use crate::vm::ossl::{self, Admitted};
 use crate::vm::permissions::Permissions;
@@ -359,7 +359,10 @@ struct Frame {
     /// stored to, holding what its caller holds.
     costs: Vec<u32>,
     /// What the frame itself costs toward running out ([`frame_cost`]).
-    cost: u32,
+    cost: Stack,
+    /// Mono's call context ([`context_cost`]), held from the frame's first
+    /// library call until it returns; [`None`] before that call.
+    context: Option<Stack>,
 }
 
 /// The body in progress: the call stack and the operand stack.
@@ -385,10 +388,7 @@ struct Activity {
 impl Activity {
     /// A body with `frame` at the bottom of its call stack.
     fn new(phase: Phase, frame: Frame) -> Self {
-        let held = Stack {
-            frames: frame.cost,
-            locals: 0,
-        };
+        let held = Stack::default().push(frame.cost);
         Self {
             phase,
             frames: vec![frame],
@@ -571,6 +571,7 @@ fn new_frame(
         objects: vec![None; locals.len()],
         locals,
         cost: frame_cost(code, flavour),
+        context: None,
     })
 }
 
@@ -941,6 +942,12 @@ impl Machine<'_> {
                     return Ok(Flow::Sleep(forced));
                 }
                 let after = if sleeps_first { 0.0 } else { forced };
+                if frame.context.is_none() {
+                    let context = context_cost(self.memory.flavour());
+                    frame.context = Some(context);
+                    *held = held.push(context);
+                    self.memory.library_call(*held)?;
+                }
                 // A call that may decide to sleep first keeps its arguments,
                 // to be made again with them once the script wakes.
                 let replay = (flavour == EngineFlavour::XEngine
@@ -1049,10 +1056,7 @@ impl Machine<'_> {
                 for (slot, object) in callee.objects.iter_mut().zip(arg_objects) {
                     *slot = object;
                 }
-                let deeper = Stack {
-                    frames: held.frames.saturating_add(callee.cost),
-                    locals: held.locals,
-                };
+                let deeper = held.push(callee.cost);
                 self.memory.call(deeper)?;
                 *held = deeper;
                 frames.push(callee);
@@ -1137,7 +1141,10 @@ impl Machine<'_> {
         value: Option<Operand>,
     ) -> Flow {
         if let Some(left) = frames.pop() {
-            held.frames = held.frames.saturating_sub(left.cost);
+            *held = held.pop(left.cost);
+            if let Some(context) = left.context {
+                *held = held.pop(context);
+            }
             held.locals = left
                 .costs
                 .iter()

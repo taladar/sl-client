@@ -1,0 +1,37 @@
+grid: fake-opensim
+date: 2026-11-11
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Fake Region
+engine: sl-lsl-runtime imitating YEngine
+settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
+
+# skipped: script "Quiet" (skip-on: opensim-yengine)
+# skipped: script "Quiet limited" (skip-on: opensim-yengine)
+# skipped: script "Heavy" (skip-on: opensim-yengine)
+# skipped: script "Litter" (skip-on: opensim-yengine)
+PROBE memory/stack rec=start region="Fake Region" channel="OpenSim" version="sl-fake-grid 0.1.0"
+PROBE memory/stack rec=recurse script="Quiet"
+# debug-channel: from="Object" text="llGetScriptState: Can't find script 'Quiet'"
+# debug-channel: from="Object" text="llGetScriptState: Can't find script 'Quiet'"
+PROBE memory/stack rec=reached script="Quiet" depth="" running=0
+PROBE memory/stack rec=recurse script="Quiet limited"
+# debug-channel: from="Object" text="llGetScriptState: Can't find script 'Quiet limited'"
+# debug-channel: from="Object" text="llGetScriptState: Can't find script 'Quiet limited'"
+PROBE memory/stack rec=reached script="Quiet limited" depth="" running=0
+PROBE memory/stack rec=recurse script="Heavy"
+# debug-channel: from="Object" text="llGetScriptState: Can't find script 'Heavy'"
+# debug-channel: from="Object" text="llGetScriptState: Can't find script 'Heavy'"
+PROBE memory/stack rec=reached script="Heavy" depth="" running=0
+PROBE memory/stack rec=recurse script="Litter"
+# debug-channel: from="Object" text="llGetScriptState: Can't find script 'Litter'"
+# debug-channel: from="Object" text="llGetScriptState: Can't find script 'Litter'"
+PROBE memory/stack rec=reached script="Litter" depth="" running=0
+PROBE memory/stack rec=end
+# debug-channel by=other: from="Object" text="llGetScriptState: Can't find script 'Quiet'"
+# debug-channel by=other: from="Object" text="llGetScriptState: Can't find script 'Quiet'"
+# debug-channel by=other: from="Object" text="llGetScriptState: Can't find script 'Quiet limited'"
+# debug-channel by=other: from="Object" text="llGetScriptState: Can't find script 'Quiet limited'"
+# debug-channel by=other: from="Object" text="llGetScriptState: Can't find script 'Heavy'"
+# debug-channel by=other: from="Object" text="llGetScriptState: Can't find script 'Heavy'"
+# debug-channel by=other: from="Object" text="llGetScriptState: Can't find script 'Litter'"
+# debug-channel by=other: from="Object" text="llGetScriptState: Can't find script 'Litter'"

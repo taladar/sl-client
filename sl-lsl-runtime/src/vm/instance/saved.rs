@@ -250,12 +250,15 @@ fn restored_activity(
         .iter()
         .map(|frame| restored_frame(program, frame, flavour))
         .collect::<Result<Vec<_>, _>>()?;
-    let held = frames.iter().fold(Stack::default(), |held, frame| Stack {
-        frames: held.frames.saturating_add(frame.cost),
-        locals: frame
-            .costs
-            .iter()
-            .fold(held.locals, |locals, cost| locals.saturating_add(*cost)),
+    let held = frames.iter().fold(Stack::default(), |held, frame| {
+        let held = held.push(frame.cost);
+        Stack {
+            locals: frame
+                .costs
+                .iter()
+                .fold(held.locals, |locals, cost| locals.saturating_add(*cost)),
+            ..held
+        }
     });
     let phase = match saved.phase {
         SavedPhase::Init => Phase::Init,
@@ -318,6 +321,9 @@ fn restored_frame(
         objects: saved.objects.clone(),
         costs: saved.costs.clone(),
         cost: frame_cost(code, flavour),
+        // A saved frame keeps no call context; its next library call makes
+        // one again.
+        context: None,
     })
 }
 

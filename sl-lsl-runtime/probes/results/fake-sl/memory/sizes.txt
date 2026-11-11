@@ -1,5 +1,5 @@
 grid: fake-sl
-date: 2026-11-09
+date: 2026-11-11
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating Mono
@@ -124,51 +124,51 @@ PROBE memory/sizes rec=text class=three-byte length=256 deltas=512,512,512
 PROBE memory/sizes rec=global-key from=generated deltas=0,0,0
 PROBE memory/sizes rec=global-key from=cast deltas=0,0,0
 PROBE memory/sizes rec=global-key from=null deltas=0,0,0
-PROBE memory/sizes rec=local kind=none count=4 deltas=0,0,0
-PROBE memory/sizes rec=local kind=integer count=4 deltas=0,0,0
-PROBE memory/sizes rec=local kind=float count=4 deltas=0,0,0
-PROBE memory/sizes rec=local kind=vector count=4 deltas=0,0,0
-PROBE memory/sizes rec=local kind=rotation count=4 deltas=0,0,0
-PROBE memory/sizes rec=local kind=string count=4 deltas=0,0,0
-PROBE memory/sizes rec=local kind=key count=4 deltas=0,0,0
-PROBE memory/sizes rec=local kind=list count=4 deltas=0,0,0
-PROBE memory/sizes rec=argument kind=none count=4 deltas=0,0,0
-PROBE memory/sizes rec=argument kind=integer count=4 deltas=0,0,0
-PROBE memory/sizes rec=argument kind=float count=4 deltas=0,0,0
-PROBE memory/sizes rec=argument kind=vector count=4 deltas=0,0,0
-PROBE memory/sizes rec=argument kind=rotation count=4 deltas=0,0,0
-PROBE memory/sizes rec=argument kind=string count=4 deltas=0,0,0
-PROBE memory/sizes rec=argument kind=key count=4 deltas=0,0,0
-PROBE memory/sizes rec=argument kind=list count=4 deltas=0,0,0
-PROBE memory/sizes rec=frames depth=0 deltas=0,0,0
-PROBE memory/sizes rec=frames depth=1 deltas=0,0,0
-PROBE memory/sizes rec=frames depth=2 deltas=0,0,0
-PROBE memory/sizes rec=frames depth=4 deltas=0,0,0
-PROBE memory/sizes rec=frames depth=8 deltas=0,0,0
-PROBE memory/sizes rec=frames depth=16 deltas=0,0,0
-PROBE memory/sizes rec=frames depth=32 deltas=0,0,0
-PROBE memory/sizes rec=globals kind=none count=32 used=4413,4413
-PROBE memory/sizes rec=globals kind=integer count=32 used=5059,5059
-PROBE memory/sizes rec=globals kind=float count=32 used=5055,5055
-PROBE memory/sizes rec=globals kind=vector count=32 used=6337,6337
-PROBE memory/sizes rec=globals kind=rotation count=32 used=6469,6469
-PROBE memory/sizes rec=globals kind=string count=32 used=5505,5505
-PROBE memory/sizes rec=globals kind=key count=32 used=5051,5051
-PROBE memory/sizes rec=globals kind=list count=32 used=6205,6205
-PROBE memory/sizes rec=globals kind=none count=32 used=4413,4413
-PROBE memory/sizes rec=globals kind=integer count=32 used=5059,5059
-PROBE memory/sizes rec=globals kind=float count=32 used=5055,5055
-PROBE memory/sizes rec=globals kind=vector count=32 used=6337,6337
-PROBE memory/sizes rec=globals kind=rotation count=32 used=6469,6469
-PROBE memory/sizes rec=globals kind=string count=32 used=5505,5505
-PROBE memory/sizes rec=globals kind=key count=32 used=5051,5051
-PROBE memory/sizes rec=globals kind=list count=32 used=6205,6205
-PROBE memory/sizes rec=globals kind=none count=32 used=4413,4413
-PROBE memory/sizes rec=globals kind=integer count=32 used=5059,5059
-PROBE memory/sizes rec=globals kind=float count=32 used=5055,5055
-PROBE memory/sizes rec=globals kind=vector count=32 used=6337,6337
-PROBE memory/sizes rec=globals kind=rotation count=32 used=6469,6469
-PROBE memory/sizes rec=globals kind=string count=32 used=5505,5505
-PROBE memory/sizes rec=globals kind=key count=32 used=5051,5051
-PROBE memory/sizes rec=globals kind=list count=32 used=6205,6205
+PROBE memory/sizes rec=local kind=none count=4 deltas=30,30,30
+PROBE memory/sizes rec=local kind=integer count=4 deltas=30,30,30
+PROBE memory/sizes rec=local kind=float count=4 deltas=30,30,30
+PROBE memory/sizes rec=local kind=vector count=4 deltas=30,30,30
+PROBE memory/sizes rec=local kind=rotation count=4 deltas=30,30,30
+PROBE memory/sizes rec=local kind=string count=4 deltas=30,30,30
+PROBE memory/sizes rec=local kind=key count=4 deltas=30,30,30
+PROBE memory/sizes rec=local kind=list count=4 deltas=30,30,30
+PROBE memory/sizes rec=argument kind=none count=4 deltas=30,30,30
+PROBE memory/sizes rec=argument kind=integer count=4 deltas=30,30,30
+PROBE memory/sizes rec=argument kind=float count=4 deltas=30,30,30
+PROBE memory/sizes rec=argument kind=vector count=4 deltas=30,30,30
+PROBE memory/sizes rec=argument kind=rotation count=4 deltas=30,30,30
+PROBE memory/sizes rec=argument kind=string count=4 deltas=30,30,30
+PROBE memory/sizes rec=argument kind=key count=4 deltas=30,30,30
+PROBE memory/sizes rec=argument kind=list count=4 deltas=30,30,30
+PROBE memory/sizes rec=frames depth=0 deltas=30,30,30
+PROBE memory/sizes rec=frames depth=1 deltas=30,30,30
+PROBE memory/sizes rec=frames depth=2 deltas=30,30,30
+PROBE memory/sizes rec=frames depth=4 deltas=30,30,30
+PROBE memory/sizes rec=frames depth=8 deltas=30,30,30
+PROBE memory/sizes rec=frames depth=16 deltas=30,30,30
+PROBE memory/sizes rec=frames depth=32 deltas=30,30,30
+PROBE memory/sizes rec=globals kind=none count=32 used=4383,4383
+PROBE memory/sizes rec=globals kind=integer count=32 used=5029,5029
+PROBE memory/sizes rec=globals kind=float count=32 used=5025,5025
+PROBE memory/sizes rec=globals kind=vector count=32 used=6307,6307
+PROBE memory/sizes rec=globals kind=rotation count=32 used=6439,6439
+PROBE memory/sizes rec=globals kind=string count=32 used=5475,5475
+PROBE memory/sizes rec=globals kind=key count=32 used=5021,5021
+PROBE memory/sizes rec=globals kind=list count=32 used=6175,6175
+PROBE memory/sizes rec=globals kind=none count=32 used=4383,4383
+PROBE memory/sizes rec=globals kind=integer count=32 used=5029,5029
+PROBE memory/sizes rec=globals kind=float count=32 used=5025,5025
+PROBE memory/sizes rec=globals kind=vector count=32 used=6307,6307
+PROBE memory/sizes rec=globals kind=rotation count=32 used=6439,6439
+PROBE memory/sizes rec=globals kind=string count=32 used=5475,5475
+PROBE memory/sizes rec=globals kind=key count=32 used=5021,5021
+PROBE memory/sizes rec=globals kind=list count=32 used=6175,6175
+PROBE memory/sizes rec=globals kind=none count=32 used=4383,4383
+PROBE memory/sizes rec=globals kind=integer count=32 used=5029,5029
+PROBE memory/sizes rec=globals kind=float count=32 used=5025,5025
+PROBE memory/sizes rec=globals kind=vector count=32 used=6307,6307
+PROBE memory/sizes rec=globals kind=rotation count=32 used=6439,6439
+PROBE memory/sizes rec=globals kind=string count=32 used=5475,5475
+PROBE memory/sizes rec=globals kind=key count=32 used=5021,5021
+PROBE memory/sizes rec=globals kind=list count=32 used=6175,6175
 PROBE memory/sizes rec=end

@@ -1276,7 +1276,9 @@ Life; OpenSim ignores the upload's target, so there the LSO twins run as
 every other script does and answer alike. The exact per-value costs are
 `memory/sizes`' ([What a value costs, exactly](#what-a-value-costs-exactly),
 measured on 2026-10-30); the first table of costs below is what the earlier
-probes saw on the way.
+probes saw on the way. `memory/stack` (2026-11-11, five runs on aditi)
+splits what a recursion's depth is made of, and `memory/budget` gained a
+last limit asked for in the same expression as the use it reads.
 
 ### The memory functions
 
@@ -1341,16 +1343,19 @@ A character is a UTF-16 code unit on both grids: U+00E9 and U+20AC cost what
 `a` costs. Every grid's `llGetMemoryLimit` starts at `65536`; XEngine counts
 nothing and answers `65536` to every read.
 
-So Second Life's Mono counts what the script's globals reach — a list's
-boxes, a string's characters — and its code, but no value on the stack; a
-recursion still collides (§ Running out), so the stack is checked
-elsewhere. The literal row cannot say whether the two bytes a character are
-the code's or the global's: eight probe scripts' first readings fit a code
-model with no charge for literals as well as one with it, so `sl-lsl-runtime`
-charges the global's value and costs the code by its size alone
-(`vm::memory`). YEngine's numbers are its heap tracker's own
-(`XMRHeapTracker.Size`, `LSL_List.Size`), which charges a string in a list
-half what it charges the same string anywhere else.
+So Second Life's Mono counts what the script's globals reach — a list's boxes, a
+string's characters — and its code, but no value on the stack; a recursion still
+collides (§ Running out), so the stack is checked elsewhere. One thing a frame
+does show: once it has made a library call it holds some 30 bytes on the heap
+until it returns, so `memory/recursion`'s Narrow, which calls one at every
+level, read 30 and a quarter bytes more a level (6 726 at depth 0, 37 704 at
+depth 1 024). The literal row cannot say whether the two bytes a character are
+the code's or the global's: eight probe scripts' first readings fit a code model
+with no charge for literals as well as one with it, so `sl-lsl-runtime` charges
+the global's value and costs the code by its size alone (`vm::memory`).
+YEngine's numbers are its heap tracker's own (`XMRHeapTracker.Size`,
+`LSL_List.Size`), which charges a string in a list half what it charges the same
+string anywhere else.
 
 ### `llSetMemoryLimit`
 
@@ -1361,6 +1366,8 @@ half what it charges the same string anywhere else.
 | less, but not below what the script uses (`32768`, used + 1024) | `TRUE`; the limit is the number asked, and `llGetFreeMemory` is reset to the new limit less what is used now | `FALSE` | `FALSE` | no scripts |
 | exactly `16384` | `TRUE` when the script uses less | `TRUE`, the one value LSO takes | `FALSE` | no scripts |
 | below what the script uses, `1`, `0`, `-1` | `FALSE`, the limit unchanged | `FALSE` | `FALSE` | no scripts |
+| exactly what the script uses, read in the same expression (`llSetMemoryLimit(llGetUsedMemory())`) | `TRUE`: the limit is the use, and the integers stored after it collide with nothing | `TRUE` once the limit is `16384` | `FALSE` | no scripts |
+| the use read earlier, asked for from a function | `FALSE`: the use has risen since, by the function's frame at least (above) | `TRUE` (`16384`) | `FALSE` | no scripts |
 
 ### Running out
 
@@ -1369,6 +1376,10 @@ half what it charges the same string anywhere else.
 | recursion, one integer argument (`Narrow`) | `Stack-Heap Collision` at a depth that differs from run to run: 1 085, 1 039 and 1 116 in three runs | at depth 763, every run | **the simulator aborts**: with a library call at every level the native stack overflows inside YEngine's own stack check (`CheckRunStack`) — `skip-on` | the simulator aborts — `skip-on` | no scripts |
 | recursion, five arguments and two locals (`Wide`) | at 512, 413 and 518 | at 208 | `skip-on` | `skip-on` | no scripts |
 | recursion under `llSetMemoryLimit(used + 4096)` | at 253, 129 and 151: the stack counts against the lowered limit | — | `skip-on` | `skip-on` | no scripts |
+| recursion, one integer argument, a library call every sixteenth level (`memory/stack`'s Quiet) | at 2 288, 2 256, 2 368, 2 464 and 2 256: twice Narrow's depth, so a frame that has made a library call costs about twice one that has not | — | `skip-on` | `skip-on` | no scripts |
+| the same under `llSetMemoryLimit(used + 4096)` (Quiet limited) | at 880, 928, 832, 560 and 736: against a lowered limit the frame itself costs only a few bytes, its call context the rest | — | `skip-on` | `skip-on` | no scripts |
+| the same over 32 000 bytes of global list (Heavy) | at 1 712, 1 008, 1 088, 1 184 and 912: the stack and the heap share the 64 KB | — | `skip-on` | `skip-on` | no scripts |
+| a library call and a dropped 104-character string at every level (Litter) | at 1 280, 1 072, 1 088, 1 216 and 1 040: Narrow's depth, so the garbage does not cut it | — | `skip-on` | `skip-on` | no scripts |
 | a string doubled from one character | `Stack-Heap Collision` making 32 768 characters (step 15) | making 8 192 (step 13) | an `OutOfHeapException` making 524 288 (step 19), against the 1 MiB heap | never: 4 194 304 characters and on | no scripts |
 | a list of integers, ten at a time | `Stack-Heap Collision` making 3 660 | — | never within 20 000 (80 KB of its 1 MiB) | never within 20 000 | no scripts |
 | the same under `llSetMemoryLimit(used + 8192)` | at 540 | — | `llSetMemoryLimit` refused: never within 4 000 | the same | no scripts |

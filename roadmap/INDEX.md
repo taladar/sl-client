@@ -11,17 +11,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 129 |
+| ideas | 130 |
 | ready | 333 |
 | blocked | 39 |
 | in-progress | 6 |
 | bugs | 32 |
-| done | 1550 |
+| done | 1551 |
 | deferred | 30 |
 | wont-do | 24 |
-| **total** | **2143** |
+| **total** | **2145** |
 
-## ideas (129)
+## ideas (130)
 
 ### protocol
 
@@ -285,6 +285,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Library tranche — status flags, forces, targets and vehicles (blocked by
   `server-lsl-vm-execution` (done), `server-world-collision-and-physics`,
   `gridspec-lsl-physics-vehicles` (done))
+- [`server-lsl-mono-garbage-room`](ideas/server-lsl-mono-garbage-room.md) —
+  Under a lowered limit, Mono has the room its reading's garbage gave it
 - [`server-lsl-opensim-teleport-by-region-name`](ideas/server-lsl-opensim-teleport-by-region-name.md)
   — OpenSim's llTeleportAgent to a region named in place of a landmark
 - [`server-map-service`](ideas/server-map-service.md) — Map service — tiles and
@@ -1350,18 +1352,15 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   fail as "operation timed out"
 - [`test-e2e-relog-gesture-wait-margin`](bugs/test-e2e-relog-gesture-wait-margin.md)
   — e2e_relog's active-gesture test runs at the edge of its 60 s wait
+- [`test-e2e-web-browser-typed-address-lost-under-load`](bugs/test-e2e-web-browser-typed-address-lost-under-load.md)
+  — e2e_preferences' web browser test sees the home page, not the typed address
 - [`test-fake-grid-tests-stop-reading-client-events`](bugs/test-fake-grid-tests-stop-reading-client-events.md)
   — Fake-grid integration tests stop reading the client's events and can stall
   it
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-### server
-
-- [`server-lsl-mono-collision-model-under-lowered-limit`](bugs/server-lsl-mono-collision-model-under-lowered-limit.md)
-  — A script 1 KB over its use collides in the runtime where Mono carries on
-
-## done (1550)
+## done (1551)
 
 ### protocol
 
@@ -4614,6 +4613,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `gridspec-lsl-memory-limits` (done))
 - [`server-lsl-memory-sizes`](done/server-lsl-memory-sizes.md) — Measure Second
   Life's per-value memory costs and rotation arithmetic on aditi
+- [`server-lsl-mono-collision-model-under-lowered-limit`](done/server-lsl-mono-collision-model-under-lowered-limit.md)
+  — A script 1 KB over its use collides in the runtime where Mono carries on
 - [`server-lsl-opensim-child-move-change-late`](done/server-lsl-opensim-child-move-change-late.md)
   — OpenSim's position change in a moved child comes after the mover's handler
 - [`server-lsl-opensim-grow-loop-slow`](done/server-lsl-opensim-grow-loop-slow.md)

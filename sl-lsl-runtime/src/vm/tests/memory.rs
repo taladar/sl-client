@@ -1,8 +1,8 @@
 //! Script memory against the acceptance of `server-lsl-memory-and-limits`,
 //! held to the transcripts of the `memory/*` probes: the probes' own scripts
 //! run in the VM, each `llOwnerSay` and `llSetObjectDesc` turned into a
-//! `print` (one instruction for one), and what they print is set beside what
-//! each grid printed.
+//! `print` ([`runnable`]), and what they print is set beside what each grid
+//! printed.
 //!
 //! Mono's readings carry the grid's garbage, which wanders by a couple of
 //! hundred bytes ([`WANDER`]); YEngine's are its heap tracker's and match
@@ -14,24 +14,26 @@ use super::*;
 use crate::probe::Line;
 use crate::value::NULL_KEY;
 use crate::value::memory::{MEMORY_LIMIT, YENGINE_HEAP};
-use crate::vm::memory::HOST_MEMORY_CAP;
+use crate::vm::memory::{HOST_MEMORY_CAP, MONO_CALL_CONTEXT};
 
 /// How far a Mono reading here may sit from aditi's: the code model's fit
 /// (`vm::memory`) and the grid's own garbage.
 const WANDER: i64 = 300;
 
-/// A probe script made runnable here: its `llOwnerSay` lines, and the
-/// `llSetObjectDesc` this runtime does not have yet, turned into `print`s for
-/// the test to read, and its closing link message to its controller, which
-/// has no script here, dropped.
+/// A probe script made runnable here: its `llOwnerSay` lines and its
+/// `llSetObjectDesc` marks turned into `print`s for the test to read, each
+/// still making a library call (`llToLower("")`, which adds nothing to the
+/// text) as the call it replaces does, since a frame's first library call
+/// costs it memory on Mono (`vm::memory`); and its closing link message to
+/// its controller, which has no script here, dropped.
 fn runnable(source: &str) -> String {
     source
         .lines()
         .filter(|line| !line.contains("llMessageLinked"))
         .collect::<Vec<_>>()
         .join("\n")
-        .replace("llOwnerSay(", "print(")
-        .replace("llSetObjectDesc(", "print(")
+        .replace("llOwnerSay(", "print(llToLower(\"\") + ")
+        .replace("llSetObjectDesc(", "print(llToLower(\"\") + ")
         .replace("llStringLength(text)", "0")
 }
 
@@ -282,16 +284,41 @@ fn a_recursion_collides_at_the_depth_aditi_reached() -> Result<(), String> {
         );
         let instance = run.engine.instance(A).ok_or("no instance")?;
         assert!(!instance.reads_running(EngineFlavour::SecondLife), "{name}");
-        // The stack never shows in a reading: every one is what it was
-        // before the recursion, so free stays the limit less that.
-        let before = run.first("before", "used")?;
-        assert!(
-            run.records("depth")
-                .iter()
-                .all(|line| number(line, "used") == Ok(before)),
-            "{name}"
-        );
     }
+    // The frames' slots never show in a reading, but each level's call
+    // context does: Narrow's use rises by it a level, as aditi's rose by 30
+    // and a quarter between depths 0 and 1 024.
+    let run = run_probe(NARROW, "Narrow", 1, EngineFlavour::SecondLife)?;
+    let at = |line: &&Line| {
+        line.field("depth")
+            .and_then(|depth| depth.parse::<i64>().ok())
+    };
+    let rise = |lines: Vec<(i64, i64)>| -> Result<i64, String> {
+        let (zero, deep) = match (lines.first(), lines.last()) {
+            (Some(zero), Some(deep)) if zero.0 == 0 && deep.0 == 1_024 => (zero.1, deep.1),
+            _ => return Err(format!("no depths 0 and 1024 in {lines:?}")),
+        };
+        Ok(deep - zero)
+    };
+    let ours = rise(
+        run.records("depth")
+            .iter()
+            .filter_map(|line| Some((at(line)?, number(line, "used").ok()?)))
+            .collect(),
+    )?;
+    assert_eq!(ours, 1_024 * i64::from(MONO_CALL_CONTEXT));
+    let theirs = rise(
+        RECURSION
+            .lines()
+            .filter_map(|line| Line::parse(line).ok())
+            .filter(|line| line.rec == "depth" && line.field("script") == Some("narrow"))
+            .filter_map(|line| Some((at(&&line)?, number(&line, "used").ok()?)))
+            .collect(),
+    )?;
+    assert!(
+        (ours - theirs).abs() <= 1_024,
+        "{ours} here, {theirs} on aditi"
+    );
     Ok(())
 }
 
@@ -303,13 +330,100 @@ fn a_lowered_limit_cuts_the_recursion() -> Result<(), String> {
     let set = set.first().ok_or("no set-limit")?;
     assert_eq!(number(set, "result"), Ok(1));
     assert_eq!(number(set, "limit"), Ok(used + 4_096));
-    assert_eq!(number(set, "free"), Ok(4_096));
+    // The reading's own frame made its call context after the use was read
+    // (aditi: 4 040).
+    assert_eq!(
+        number(set, "free"),
+        Ok(4_096 - i64::from(MONO_CALL_CONTEXT))
+    );
     assert_eq!(run.fault, Some(RuntimeError::StackHeapCollision));
-    // Aditi reached 129 to 253; the model, which has no garbage to collect,
-    // stops shallower (`vm::memory`). Either way far short of the 1 000 or
-    // so the default limit allows.
+    // Aditi reached 129 to 253: each level's call context and slot against
+    // the 4 KB, with the garbage aditi's reading carried when the limit was
+    // set as room the model does not have, so it stops a little shallower
+    // (`vm::memory`). Either way far short of the 1 000 or so the default
+    // limit allows.
     let depth = run.last_mark()?;
-    assert!((50..=253).contains(&depth), "depth {depth}");
+    assert!((110..=253).contains(&depth), "depth {depth}");
+    Ok(())
+}
+
+/// `memory/stack`'s aditi transcript (its last run of five).
+const STACK: &str = include_str!("../../../probes/results/aditi/memory/stack.txt");
+
+#[test]
+fn the_stack_meets_the_heap_where_aditi_said() -> Result<(), String> {
+    // The depths aditi reached in five runs on 2026-11-11 (the transcript
+    // holds the last): at the default limit the frames, their call contexts
+    // and the heap meet in 64 KB; under Quiet limited's lowered limit the
+    // slots and the call contexts meet the limit.
+    let quiet = include_str!("../../../probes/memory/stack/quiet.lsl");
+    let quiet_limited = include_str!("../../../probes/memory/stack/quiet-limited.lsl");
+    let heavy = include_str!("../../../probes/memory/stack/heavy.lsl");
+    let litter = include_str!("../../../probes/memory/stack/litter.lsl");
+    for (source, name, num, script, depths) in [
+        // Every sixteenth level calls a library function: the frames alone.
+        (quiet, "Quiet", 1, "quiet", 2_256..=2_464),
+        (
+            quiet_limited,
+            "Quiet limited",
+            2,
+            "quiet-limited",
+            560..=928,
+        ),
+        // The same frames over 32 KB of heap: half the depth.
+        (heavy, "Heavy", 3, "heavy", 912..=1_712),
+        // A library call at every level, and garbage: Narrow's depth, the
+        // garbage collected.
+        (litter, "Litter", 4, "litter", 1_040..=1_280),
+    ] {
+        let run = run_probe(source, name, num, EngineFlavour::SecondLife)?;
+        let depth = run.last_mark()?;
+        assert!(depths.contains(&depth), "{name}: depth {depth}");
+        assert_eq!(run.fault, Some(RuntimeError::StackHeapCollision), "{name}");
+        let used = run.first("before", "used")?;
+        let theirs = transcript_reading(STACK, "before", script, "used")?;
+        assert!(
+            near(used, theirs),
+            "{script}: {used} here, {theirs} on aditi"
+        );
+    }
+    Ok(())
+}
+
+const BUDGET: &str = include_str!("../../../probes/results/aditi/memory/budget.txt");
+
+#[test]
+fn a_limit_asked_for_what_the_script_used_is_refused_after_a_call() -> Result<(), String> {
+    // `memory/budget` reads its use in `state_entry` and asks for exactly
+    // that from `ask_limit`, whose first library call has made its call
+    // context since: refused, on aditi as here. Asked in the same expression
+    // as the read, in `state_entry`, it is taken, and storing integers under
+    // it collides with nothing. Every `set-limit` answer is aditi's, and the
+    // probe runs to its end.
+    let source = include_str!("../../../probes/memory/budget.lsl");
+    let run = run_probe(source, "Probe", 1, EngineFlavour::SecondLife)?;
+    assert_eq!(run.fault, None);
+    assert_eq!(run.records("end").len(), 1);
+    let answers = |lines: Vec<Line>| -> Vec<(String, String)> {
+        lines
+            .iter()
+            .filter(|line| line.rec.starts_with("set-limit"))
+            .map(|line| {
+                (
+                    line.field("asked").unwrap_or("now").to_owned(),
+                    line.field("result").unwrap_or_default().to_owned(),
+                )
+            })
+            .collect()
+    };
+    let theirs = BUDGET
+        .lines()
+        .filter_map(|line| Line::parse(line).ok())
+        .collect();
+    assert_eq!(answers(run.lines.clone()), answers(theirs));
+    let now = run.records("set-limit-now");
+    let now = now.first().ok_or("no set-limit-now")?;
+    assert_eq!(number(now, "restored"), Ok(1));
     Ok(())
 }
 
