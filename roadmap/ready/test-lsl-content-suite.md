@@ -2,7 +2,7 @@
 id: test-lsl-content-suite
 title: A test harness for somebody else's LSL content
 topic: test
-status: blocked
+status: ready
 origin: LSL-on-the-fake-grid audit (2026-09-20); use case raised by the user
 points: 8
 blocked_by: [server-fake-grid-scripted-avatars]

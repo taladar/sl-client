@@ -3698,13 +3698,23 @@ async fn deliver(core: &Arc<GridCore>, index: usize, deliveries: Vec<Delivery>) 
     }
 }
 
-/// States the agent's animation set to its viewer, as a change to it is.
+/// States the agent's animation set to its viewer, as a change to it is, and
+/// to the region's other viewers: a pose ball's pose is seen by everybody
+/// standing round it, as the agent's own animations are.
 fn state_animations(
     state: &mut crate::driver::SimState,
     now: Instant,
 ) -> Result<(), sl_proto::Error> {
     let agent = state.avatar.agent_id;
     let playing = state.animations.playing(state.animation_policy, agent);
+    let statement = state.animations.observed(state.animation_policy, agent);
+    state.tell_others(|resident| {
+        resident.animations.clone_from(&statement);
+        RegionChange::ResidentAnimated {
+            agent,
+            statement: Box::new(statement),
+        }
+    });
     state.sim.send_avatar_animation_with_events(
         agent,
         &playing,

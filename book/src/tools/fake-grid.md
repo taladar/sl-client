@@ -189,7 +189,7 @@ teleport between the regions from its map — see below.
 ### Named scenarios
 
 `--scenario <name>` picks the scene every region shows, from the registry
-in `fixtures::scenarios`. Five exist today: `stock` (the default — one
+in `fixtures::scenarios`. Six exist today: `stock` (the default — one
 region-wide parcel, one scripted box, an arrival greeting), `catalogue`
 (the named prim catalogue: one prim per rendering feature, plus two NPCs
 — one standing, one sitting on a bench — with every asset they reference
@@ -197,10 +197,14 @@ served — see below), `catalogue-eep` (the same catalogue under an **EEP**
 sky, `sl_test_assets::environment::eep_sky`, with the sun fixed in the
 south-east), `far-floor` (one 64 m fullbright black-and-white checker
 slab with quarter-metre cells, landmarks `floor-near-edge` and
-`floor-far-edge`, for looking along at a grazing angle) and `border` (one
+`floor-far-edge`, for looking along at a grazing angle), `border` (one
 checkered marker pillar floating just inside the region's west edge, which
 with two adjacent `--region`s is a scene for looking across — and walking
-over — a border).
+over — a border) and `scripted-avatar` (a pose ball, a vendor, a
+permission prim and a dialog menu, each scripted to ask an avatar
+something, and a [scripted avatar](#scripted-avatars) the grid logs in
+itself, which sits on the pose ball and is posed by it; landmarks `pose-ball`,
+`vendor`, `permission-prim` and `menu`).
 
 `far-floor` exists for texture **minification**. Every other scene frames
 its subject square on from a few metres, where a texture's full-resolution
@@ -2383,7 +2387,9 @@ let timeline = Timeline::new()
 
 A step is an `At` and an `Action`. The `At` is a duration from the
 session's arrival (`AfterArrival`), a duration from the previous step
-(`AfterPrevious`), a `ServerEvent` the session drains (`OnEvent`, tested
+(`AfterPrevious`), a number of the region's ticks from when the wait began
+(`AfterTicks`, counted by the tick's own number, so two ticks between two
+wakeups are still two), a `ServerEvent` the session drains (`OnEvent`, tested
 against every event since the script started, so a step waiting for
 something that already happened runs at once), or the client's own
 acknowledgement of the last marker (`OnMarkerAck`).
@@ -2483,6 +2489,87 @@ replaced it.
 A runner stops when its session closes, when the grid shuts down, or when
 the agent stops being the root agent there — which is what a crossing
 makes of the region left behind.
+
+## Scripted avatars
+
+Most of what a script does to an avatar needs the avatar to answer back:
+`llRequestPermissions` waits for a `ScriptAnswerYes`, `llDialog` for a
+button on its hidden channel, `money` for somebody to pay, a pose ball's
+`llAvatarOnSitTarget` for somebody to sit. An NPC fixture cannot — it is an
+avatar-shaped object with no circuit behind it. A `ScriptedAvatar`
+(`scripted_avatars.rs`) is a headless `sl-client-tokio` session the grid
+logs in **itself**, as one of its own accounts, and drives from a short
+script: the second half of a two-party protocol test, stated beside the
+first.
+
+It is stated on the `RegionConfig` it logs into
+(`RegionConfig::scripted_avatars`); the builder registers its account after
+its own (so a seeded grid mints the ids it always did), with that region as
+its start, and logs it in as soon as the grid is up.
+`FakeGrid::scripted_avatars` and `scripted_avatar(name)` hand back a handle
+that reads its progress (`arrived()`, `finished()`), its transcript, and logs
+it out (`log_out()`); a grid that shuts down stops it.
+
+Its steps are a timeline's seen from the other side. An `AvatarStep` is the
+**same** `At` — waited on against the avatar's own session on the grid, by
+the code a timeline waits with — and an `AvatarAction` it takes as a client:
+`Walk` (face the point and hold the forward key, checked each tick, until
+within half a metre or it stops getting closer), `Touch`, `Sit`, `Stand`,
+`Say`, `Pay`, `AnswerDialog` (by index, by label, or a text box's text),
+`AnswerPermissions` and `AwaitChat`. An object is named by key or by its
+name in the avatar's region. `AfterTicks` is the wait to write: a script
+runs on the region's ticks, so "two ticks after the touch" is the same
+moment on every run and under a heartbeat a test steps by hand.
+
+What no step answers, an `AnswerPolicy` answers: grant every permission or
+refuse it, take every dialog's first button, pay a vendor (an object whose
+click action is pay) what its pay window offers first when touching it.
+`AnswerPolicy::agreeable()` does all three; the default answers nothing,
+which is itself a case worth writing (the question stays open). A prompt
+goes to the step being run when that step is the one that answers it — an
+`AnswerDialog` takes the next dialog, even one that arrived while it was
+waiting for its `At` — and to the policy otherwise.
+
+Everything it was asked and did goes into its **transcript**, one `Entry`
+per line: names, labels and amounts, never a time — so two runs of one seed
+write the same one (`tests/scripted_avatars.rs` runs it twice). A line reads
+as what happened:
+
+```text
+arrived
+walked to <126, 130, 25.15>
+sat on Pose ball
+heard Pose ball: Posing Scripted Sitter
+paid Vendor L$50
+heard Vendor: Thank you Scripted Sitter for L$50
+touched Permission prim
+Permission prim asked for permissions 0x404
+granted Permission prim permissions 0x404
+heard Permission prim: Granted 1028
+touched Menu
+Menu showed a dialog "Pick a colour" ["Red", "Green", "Blue"]
+answered Menu with "Blue"
+heard Menu: Scripted Sitter chose Blue
+```
+
+Note what is **not** there: the pose ball's script asks its sitter for
+`PERMISSION_TRIGGER_ANIMATION`, and no question appears, because both grids
+grant a seated avatar's own seat that permission without asking.
+
+The `scripted-avatar` scene (`fixtures::scripted_avatar`) is the four props
+of that transcript and an avatar, `sitter()`, that sits on the pose ball
+ten ticks after it arrives with the agreeable policy — so a viewer logged
+in to the scene sees an avatar seated and posing. A script's animation of
+an avatar is stated to every viewer in the region, as the avatar's own
+animations are. The pose is an animation in the pose ball's own contents
+(the fixture chest twist), as a real pose ball's is, rather than a built-in
+such as `dance1`: a viewer fetches a downloadable built-in over
+`ViewerAsset` like any uploaded animation, and this grid serves no Linden
+animation assets, so a viewer of ours could not play one here.
+
+It stays a client and a script: not a load generator, and nothing that
+decides for itself. It follows its agent's root session wherever a script
+sends it, and resolves a named object in whichever region that is.
 
 ## The Bevy smoke tier
 

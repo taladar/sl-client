@@ -16,13 +16,19 @@ use std::time::Duration;
 
 use bytes::Bytes;
 use http::header::CONTENT_TYPE;
-use http::status::StatusCode as HttpStatusCode;
 use http_body_util::{BodyExt as _, Full};
 use hyper::body::Incoming;
 use hyper::{Request, Response};
 use sl_proto::{AssetKey, AssetSource as _, CapsResponse};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore, watch};
+
+/// `http`'s status code under the name the workspace gives it.
+///
+/// An alias rather than a renamed import: `reqwest::StatusCode` is the same
+/// type, and with a client in this crate's graph clippy's enforced rename
+/// for the reqwest path claims an `http` import too.
+type HttpStatusCode = http::StatusCode;
 
 use crate::caps_endpoint::dispatch_caps;
 use crate::economy_endpoint::{handle_helper, is_helper_path};

@@ -172,6 +172,15 @@ pub enum At {
     /// This long after the previous step ran — or after the arrival, for the
     /// first step a session runs.
     AfterPrevious(Duration),
+    /// After this many more ticks of the region the session is in
+    /// ([`crate::heartbeat`]), counted from when the wait began.
+    ///
+    /// The wait to prefer whenever a step follows what a **script** does: a
+    /// script runs on the region's ticks, so "two ticks after the touch" is the
+    /// same moment on every run and under a heartbeat a test steps by hand,
+    /// where a duration is a guess at how long the region took. Zero runs at
+    /// once.
+    AfterTicks(u32),
     /// As soon as the client acknowledges the most recent [`Action::Marker`].
     ///
     /// The one wait that is a *happens-before* rather than a duration: a client
@@ -192,6 +201,7 @@ impl std::fmt::Debug for At {
         match self {
             Self::AfterArrival(after) => f.debug_tuple("AfterArrival").field(after).finish(),
             Self::AfterPrevious(after) => f.debug_tuple("AfterPrevious").field(after).finish(),
+            Self::AfterTicks(ticks) => f.debug_tuple("AfterTicks").field(ticks).finish(),
             Self::OnMarkerAck => f.write_str("OnMarkerAck"),
             Self::OnEvent(_) => f.write_str("OnEvent(<predicate>)"),
         }
@@ -546,7 +556,7 @@ pub(crate) async fn hand_over(source: &SharedSim, destination: &SharedSim) {
 }
 
 /// What a wait ended in.
-enum Wait {
+pub(crate) enum Wait {
     /// The step may run.
     Ready,
     /// The script is over: the session closed, the grid is shutting down, or
@@ -624,6 +634,7 @@ pub(crate) fn run_timeline(
                 return;
             };
             let waited = wait_until(
+                &core,
                 &shared,
                 &step.at,
                 arrival,
@@ -695,7 +706,10 @@ async fn claim(shared: &SharedSim, cursor: Cursor) -> Claim {
 /// Every wait below selects on this rather than on the two watch channels
 /// directly, because a `changed()` that reports a *false* flag must go back to
 /// waiting rather than let the wait fall through.
-async fn stopped(closed_rx: &mut watch::Receiver<bool>, shutdown_rx: &mut watch::Receiver<bool>) {
+pub(crate) async fn stopped(
+    closed_rx: &mut watch::Receiver<bool>,
+    shutdown_rx: &mut watch::Receiver<bool>,
+) {
     loop {
         if *closed_rx.borrow_and_update() || *shutdown_rx.borrow_and_update() {
             return;
@@ -724,7 +738,7 @@ async fn park(
 ///
 /// A child circuit never sees one until a crossing promotes it, so a neighbour's
 /// runner simply waits here for as long as the circuit lives.
-async fn wait_for_arrival(
+pub(crate) async fn wait_for_arrival(
     events: &mut broadcast::Receiver<ServerEvent>,
     closed_rx: &mut watch::Receiver<bool>,
     shutdown_rx: &mut watch::Receiver<bool>,
@@ -750,17 +764,19 @@ async fn wait_for_arrival(
 /// against, and the two cancels every wait gives up on — the circuit closing
 /// and the sim shutting down.
 #[derive(Debug)]
-struct WaitChannels<'a> {
+pub(crate) struct WaitChannels<'a> {
     /// The server events an `At::OnEvent` predicate is matched against.
-    events: &'a mut broadcast::Receiver<ServerEvent>,
+    pub(crate) events: &'a mut broadcast::Receiver<ServerEvent>,
     /// The circuit-closed signal, which ends a wait wherever it is.
-    closed_rx: &'a mut watch::Receiver<bool>,
+    pub(crate) closed_rx: &'a mut watch::Receiver<bool>,
     /// The sim-shutdown signal, likewise.
-    shutdown_rx: &'a mut watch::Receiver<bool>,
+    pub(crate) shutdown_rx: &'a mut watch::Receiver<bool>,
 }
 
-/// Waits for a step's [`At`].
-async fn wait_until(
+/// Waits for a step's [`At`]: a timeline's, and a scripted avatar's
+/// ([`crate::scripted_avatars`]), whose steps wait on its own session.
+pub(crate) async fn wait_until(
+    core: &GridCore,
     shared: &SharedSim,
     at: &At,
     arrival: Instant,
@@ -776,6 +792,7 @@ async fn wait_until(
     match at {
         At::AfterArrival(after) => sleep_past(arrival, *after, closed_rx, shutdown_rx).await,
         At::AfterPrevious(after) => sleep_past(previous, *after, closed_rx, shutdown_rx).await,
+        At::AfterTicks(ticks) => wait_for_ticks(core, shared, *ticks, closed_rx, shutdown_rx).await,
         At::OnMarkerAck => wait_for_marker_ack(shared, marker, closed_rx, shutdown_rx).await,
         At::OnEvent(predicate) => wait_for_event(predicate, events, closed_rx, shutdown_rx).await,
     }
@@ -798,6 +815,44 @@ async fn sleep_past(
     tokio::select! {
         () = tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)) => Wait::Ready,
         () = stopped(closed_rx, shutdown_rx) => Wait::Stop,
+    }
+}
+
+/// Waits until the region the session is in has ticked `ticks` more times.
+///
+/// Counted by the tick's own number, not by wakeups: a watch keeps only the
+/// latest tick, so two ticks between two polls are one wakeup and still two
+/// ticks. A session in a region the grid does not hold has no clock to wait
+/// on, which ends the script.
+async fn wait_for_ticks(
+    core: &GridCore,
+    shared: &SharedSim,
+    ticks: u32,
+    closed_rx: &mut watch::Receiver<bool>,
+    shutdown_rx: &mut watch::Receiver<bool>,
+) -> Wait {
+    if ticks == 0 {
+        return Wait::Ready;
+    }
+    let region = shared.state.lock().await.region;
+    let Some(mut clock) = core.region(region).map(|entry| entry.heartbeat.subscribe()) else {
+        tracing::warn!(
+            "a scripted wait for ticks is in region {region}, which the grid does not hold"
+        );
+        return Wait::Stop;
+    };
+    let until = clock
+        .borrow_and_update()
+        .number
+        .saturating_add(u64::from(ticks));
+    loop {
+        if clock.borrow_and_update().number >= until {
+            return Wait::Ready;
+        }
+        tokio::select! {
+            changed = clock.changed() => if changed.is_err() { return Wait::Stop },
+            () = stopped(closed_rx, shutdown_rx) => return Wait::Stop,
+        }
     }
 }
 

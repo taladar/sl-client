@@ -133,6 +133,11 @@ pub struct RegionConfig {
     /// `osslDefaultEnable.ini` the local OpenSim runs. Read by the OpenSim
     /// flavour's engine; Second Life compiles none of the functions.
     pub ossl: Option<sl_lsl_runtime::vm::ossl::Settings>,
+    /// The avatars the grid logs in to this region itself and drives from a
+    /// script of their own ([`crate::scripted_avatars`]): the second party a
+    /// script that asks an avatar something needs. Their accounts are
+    /// registered when the grid starts, starting here; none by default.
+    pub scripted_avatars: Vec<crate::scripted_avatars::ScriptedAvatar>,
 }
 
 impl RegionConfig {
@@ -192,6 +197,7 @@ impl Default for RegionConfig {
             capacity: None,
             heartbeat: HeartbeatConfig::default(),
             ossl: None,
+            scripted_avatars: Vec::new(),
         }
     }
 }
@@ -624,7 +630,7 @@ pub(crate) struct GridCore {
     /// The bound HTTP port (fixed after `start`).
     pub(crate) http_port: u16,
     /// The login URI (`http://127.0.0.1:<port>/`), parsed once at start.
-    login_uri: url::Url,
+    pub(crate) login_uri: url::Url,
     /// The grid's self-description.
     pub(crate) identity: GridIdentity,
     /// The `get_grid_info` document, derived once at start.
@@ -2377,9 +2383,21 @@ impl FakeGridBuilder {
     /// Returns a [`Error`] when the configuration is inconsistent
     /// (no regions, duplicate names, unknown start region) or the listener
     /// cannot bind.
-    pub async fn start(self) -> Result<FakeGrid, Error> {
+    pub async fn start(mut self) -> Result<FakeGrid, Error> {
         if self.regions.is_empty() {
             return Err(Error::NoRegions);
+        }
+        // A scripted avatar is an account like any other, registered after
+        // the builder's own so a seeded grid mints those the ids it did before.
+        let mut scripted = Vec::new();
+        for region in &mut self.regions {
+            for mut avatar in std::mem::take(&mut region.scripted_avatars) {
+                if avatar.account.start_region.is_none() {
+                    avatar.account.start_region = Some(region.name.clone());
+                }
+                self.accounts.push(avatar.account.clone());
+                scripted.push(avatar);
+            }
         }
         check_duplicates(&self.accounts, &self.regions)?;
         check_heartbeats(&self.regions)?;
@@ -2720,7 +2738,11 @@ impl FakeGridBuilder {
         for index in 0..core.regions.len() {
             tokio::spawn(crate::heartbeat::run_heartbeat(Arc::clone(&core), index));
         }
-        Ok(FakeGrid { core })
+        let scripted = scripted
+            .into_iter()
+            .map(|avatar| crate::scripted_avatars::spawn(Arc::clone(&core), avatar))
+            .collect();
+        Ok(FakeGrid { core, scripted })
     }
 }
 
@@ -2776,9 +2798,29 @@ fn check_duplicates(accounts: &[AccountConfig], regions: &[RegionConfig]) -> Res
 pub struct FakeGrid {
     /// The shared core the HTTP endpoints also hold.
     core: Arc<GridCore>,
+    /// The avatars the grid logged in itself, in the order their regions
+    /// stated them.
+    scripted: Vec<crate::scripted_avatars::ScriptedAvatarHandle>,
 }
 
 impl FakeGrid {
+    /// The avatars the grid logged in itself
+    /// ([`RegionConfig::scripted_avatars`]), in the order their regions and
+    /// the regions themselves were stated.
+    #[must_use]
+    pub fn scripted_avatars(&self) -> &[crate::scripted_avatars::ScriptedAvatarHandle] {
+        &self.scripted
+    }
+
+    /// The scripted avatar called `name` (`First Last`), or `None`.
+    #[must_use]
+    pub fn scripted_avatar(
+        &self,
+        name: &str,
+    ) -> Option<&crate::scripted_avatars::ScriptedAvatarHandle> {
+        self.scripted.iter().find(|avatar| avatar.name() == name)
+    }
+
     /// Every URL the grid's scripts hold (`llRequestURL`), in no particular
     /// order: what a test sends a request from outside to.
     #[must_use]

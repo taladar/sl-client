@@ -38,6 +38,8 @@ parking_lot = { workspace = true }
 sl-avatar = { workspace = true }
 # The central bake service composites with the client's own baker.
 sl-bake = { path = "../sl-bake", version = "0.1.0" }
+# A scripted avatar is a real client the grid logs in itself.
+sl-client-tokio = { workspace = true }
 # Compiling a script upload as the imitated grid does, and finding where
 # Linden's parser stood for an error.
 sl-lsl = { workspace = true }
@@ -64,7 +66,6 @@ uuid = { workspace = true, features = ["v4"] }
 pretty_assertions = { workspace = true }
 reqwest = { workspace = true }
 sl-anim = { workspace = true }
-sl-client-tokio = { workspace = true }
 # The catalogue's rigged mesh asset is read back through the viewer's decoder.
 sl-mesh = { workspace = true }
 # `test-util` for the paused clock the injectable-clock tests run on.

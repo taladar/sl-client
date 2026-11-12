@@ -141,7 +141,10 @@ below.
    animation all need something with a **circuit** on the other end, and
    the grid's NPC fixtures are avatar-shaped objects with no session
    behind them. A scenario that exercises those paths has to bring a
-   second real client and say what it does.
+   second real client and say what it does. (Since 2026-11-12 a region
+   states the avatars the grid logs in and drives itself, answering by
+   policy or by script, each writing a transcript:
+   [[server-fake-grid-scripted-avatars]].)
 
 ## The determinism rule
 

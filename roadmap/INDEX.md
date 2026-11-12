@@ -13,13 +13,13 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | --- | --- |
 | ideas | 130 |
 | ready | 333 |
-| blocked | 39 |
+| blocked | 38 |
 | in-progress | 6 |
-| bugs | 32 |
-| done | 1551 |
+| bugs | 34 |
+| done | 1552 |
 | deferred | 30 |
 | wont-do | 24 |
-| **total** | **2145** |
+| **total** | **2147** |
 
 ## ideas (130)
 
@@ -1041,6 +1041,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-handover-distant-and-vehicle-aditi`](ready/test-handover-distant-and-vehicle-aditi.md)
   — Live-test distant teleport (world_reset) and vehicle corner crossings, incl.
   on aditi
+- [`test-lsl-content-suite`](ready/test-lsl-content-suite.md) — A test harness
+  for somebody else's LSL content (blocked by
+  `server-fake-grid-scripted-avatars` (done))
 
 ### repl
 
@@ -1097,9 +1100,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (done))
 - [`server-fake-grid-parcel-divide-join`](ready/server-fake-grid-parcel-divide-join.md)
   — Fake grid — divide and join parcels
-- [`server-fake-grid-scripted-avatars`](ready/server-fake-grid-scripted-avatars.md)
-  — Scripted avatars — a client that grants, pays, sits and answers (blocked by
-  `server-fake-grid-script-engine-wiring` (done))
 - [`server-fake-grid-terraform`](ready/server-fake-grid-terraform.md) — Fake
   grid — terraforming, undo and bake (blocked by `gridspec-terrain-editing`
   (done))
@@ -1127,7 +1127,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-sl-mfa-challenge`](ready/gridspec-sl-mfa-challenge.md) — Record
   Second Life's MFA challenge and whether a remembered mfa_hash gets past it
 
-## blocked (39)
+## blocked (38)
 
 ### viewer
 
@@ -1229,9 +1229,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-lsl-offline-cases`](blocked/test-fake-grid-lsl-offline-cases.md)
   — Move the script and chat conformance cases offline (blocked by
   `server-fake-grid-scripted-scenario`)
-- [`test-lsl-content-suite`](blocked/test-lsl-content-suite.md) — A test harness
-  for somebody else's LSL content (blocked by
-  `server-fake-grid-scripted-avatars`)
 - [`test-voice-account`](blocked/test-voice-account-provision-a-voice-account.md)
   — provision a voice account (blocked by `viewer-voice-audio`)
 - [`test-voice-signaling`](blocked/test-voice-signaling-exchange-voice-signalling.md)
@@ -1276,7 +1273,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-text-renderability-axis`](in-progress/viewer-ui-text-renderability-axis.md)
   — Upstream issue — font selection cannot see glyph-format renderability
 
-## bugs (32)
+## bugs (34)
 
 ### protocol
 
@@ -1360,7 +1357,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1551)
+### server
+
+- [`server-fake-grid-prim-sit-states-no-sit-animation`](bugs/server-fake-grid-prim-sit-states-no-sit-animation.md)
+  — A sit on a prim states no sit animation, to the sitter or anyone else
+- [`server-fake-grid-scripted-avatar-clothes-not-shown`](bugs/server-fake-grid-scripted-avatar-clothes-not-shown.md)
+  — A dressed scripted avatar is drawn without its clothes
+
+## done (1552)
 
 ### protocol
 
@@ -4509,6 +4513,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Wire the script engine into the fake grid (blocked by
   `server-lsl-vm-execution` (done), `server-world-heartbeat` (done),
   `server-world-ecs-store` (done))
+- [`server-fake-grid-scripted-avatars`](done/server-fake-grid-scripted-avatars.md)
+  — Scripted avatars — a client that grants, pays, sits and answers (blocked by
+  `server-fake-grid-script-engine-wiring` (done))
 - [`server-fake-grid-top-objects-report`](done/server-fake-grid-top-objects-report.md)
   — Fake grid — a top-objects report with rows in it, and a return that finds
   them

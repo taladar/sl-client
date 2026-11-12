@@ -23,6 +23,7 @@ pub mod far_floor;
 pub mod npcs;
 pub mod prims;
 pub mod scenarios;
+pub mod scripted_avatar;
 
 use std::sync::Arc;
 

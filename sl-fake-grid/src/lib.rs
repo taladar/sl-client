@@ -50,6 +50,7 @@ pub mod scene_store;
 pub mod script_compile;
 pub mod script_http;
 pub mod script_syntax;
+pub mod scripted_avatars;
 pub mod scripts;
 mod seating;
 pub mod social;
@@ -118,6 +119,10 @@ pub use script_compile::{
     CompileOutcome, CompilePolicy, FailedScript, ScriptCompiler, TaskNewAsset, compile_source,
 };
 pub use script_syntax::{LslSyntaxDocument, LslSyntaxPolicy};
+pub use scripted_avatars::{
+    AnswerPolicy, AvatarAction, AvatarStep, DialogAnswer, DialogChoice, PaymentAnswer,
+    PermissionAnswer, Progress, ScriptedAvatar, ScriptedAvatarHandle, Target, Transcript,
+};
 pub use scripts::{REGION_SOURCE, RegionScripts};
 pub use teleport::TELEPORT_ARRIVAL_TIMEOUT;
 pub use terrain::{Heightfield, TerrainFixture};

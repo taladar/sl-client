@@ -150,7 +150,7 @@ fn border_landmarks() -> Vec<Landmark> {
 }
 
 /// Every named scene, in the order the binary's help lists them.
-const ALL: [NamedScenario; 5] = [
+const ALL: [NamedScenario; 6] = [
     NamedScenario {
         name: "stock",
         summary: "the standard region: one region-wide parcel, one scripted box, \
@@ -199,7 +199,42 @@ const ALL: [NamedScenario; 5] = [
             far: border_far,
         }),
     },
+    NamedScenario {
+        name: "scripted-avatar",
+        summary: "four prims whose scripts ask an avatar something (a pose ball, a \
+                  vendor, a permission prim, a dialog menu) and a scripted avatar \
+                  the grid logs in itself, which sits on the pose ball, grants it \
+                  its animation and is posed",
+        dress: scripted_avatar,
+        landmarks: scripted_avatar_landmarks,
+        pair: None,
+    },
 ];
+
+/// The scripted-avatar scene: the region's content replaced by
+/// [`super::scripted_avatar::region()`], and its sitter logged in.
+fn scripted_avatar(region: RegionConfig) -> RegionConfig {
+    let mut region = super::scripted_avatar::region().into_region(region);
+    region
+        .scripted_avatars
+        .push(super::scripted_avatar::sitter());
+    region
+}
+
+/// The scripted-avatar scene's four props, west to east, by their names in
+/// lower case and hyphenated.
+fn scripted_avatar_landmarks() -> Vec<Landmark> {
+    use super::scripted_avatar::{MENU, PERMISSION_PRIM, POSE_BALL, VENDOR, position};
+    [POSE_BALL, VENDOR, PERMISSION_PRIM, MENU]
+        .into_iter()
+        .filter_map(|name| {
+            position(name).map(|position| Landmark {
+                name: name.to_lowercase().replace(' ', "-"),
+                position,
+            })
+        })
+        .collect()
+}
 
 /// The far-floor scene: the region's content replaced by
 /// [`super::far_floor()`].

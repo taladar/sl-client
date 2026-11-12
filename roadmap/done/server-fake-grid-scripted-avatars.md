@@ -2,12 +2,13 @@
 id: server-fake-grid-scripted-avatars
 title: Scripted avatars — a client that grants, pays, sits and answers
 topic: server
-status: ready
+status: done
 origin: LSL-on-the-fake-grid audit (2026-09-20); raised by the user while
   scoping the scripts scenario
 points: 8
 blocked_by: [server-fake-grid-script-engine-wiring]
 refs: [test-e2e-stage, server-fake-grid-scripted-scenario, server-lsl-lib-money-permissions,
+  server-fake-grid-prim-sit-states-no-sit-animation, server-fake-grid-scripted-avatar-clothes-not-shown,
   server-lsl-lib-avatar-control, test-fake-grid-npc-avatars]
 ---
 
@@ -65,3 +66,42 @@ prim are all exercised end to end in a `cargo test` with no human; a
 case can assert that a specific button was answered and that the script
 saw it; the scripted avatar appears in a `sl-crosscheck` frame seated
 and animated; and two runs of one seed produce the same transcript.
+
+## Progress (2026-11-12)
+
+Implemented in `sl-fake-grid/src/scripted_avatars.rs`: a `ScriptedAvatar`
+stated on a `RegionConfig` (`scripted_avatars`), whose account the builder
+registers and which the grid logs in itself as an `sl-client-tokio` client
+(now a normal dependency of `sl-fake-grid`). Its steps reuse the timeline's
+`At` and the timeline's own wait code, against the avatar's own session;
+`At::AfterTicks` is new and shared with timelines. Actions: walk, touch, sit,
+stand, say, pay, answer a dialog (index, label or text), answer a permission
+question, await a chat line. `AnswerPolicy` (grant/refuse permissions, first
+button, pay a pay-click vendor its default price) answers what no step does.
+Every prompt and answer goes into a transcript of names, labels and amounts.
+`FakeGrid::scripted_avatars()` hands back handles (progress, transcript,
+log-out); a grid shutdown stops them.
+
+`fixtures::scripted_avatar` is the scene: a pose ball (carrying its own
+animation), a vendor, a permission prim and a dialog menu, and the named
+scenario `scripted-avatar` adds `sitter()`. `tests/scripted_avatars.rs`
+holds the whole conversation end to end on both flavours, a specific dialog
+button answered and heard by its script, an ignored question and a refusal,
+two seeded runs giving one transcript, and a late viewer told the sitter's
+pose. Fixed on the way: a script's animation of an avatar
+(`scripts.rs` `state_animations`) was stated only to that avatar's own
+viewer, never to the region's others.
+
+Differences from the acceptance as written:
+
+- The `scripts` scenario does not exist yet
+  (`server-fake-grid-scripted-scenario` is blocked), so the pose ball, vendor
+  and permission prim are this task's own `scripted-avatar` scene.
+- The `sl-crosscheck` frame (sl-client side only) shows the avatar on the
+  pose ball and animated (its torso twists between frames), but standing
+  upright: the fake grid states no sit animation
+  (`server-fake-grid-prim-sit-states-no-sit-animation`). The pose is a
+  fixture animation, not `dance1`, because the fake grid serves no Linden
+  animation assets for a viewer to fetch.
+- The avatar's account is `dressed`, but its clothes do not show in the
+  frame (`server-fake-grid-scripted-avatar-clothes-not-shown`).
