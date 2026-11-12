@@ -46,6 +46,15 @@ baked texture set and visual parameters); the client can also answer
 cached-texture queries (`Command::RequestCachedTextures` →
 `Event::CachedTextureResponse`) so unchanged bakes are not recomputed.
 
+Whoever composites, a worn layer the wearable names **no texture** for is still
+drawn, with the slot's default (`avatar_texture::default_layer_texture`, the
+reference's `getDefaultTextureImageID`): plain white (`IMG_WHITE`) for every
+clothing and alpha layer, the stock iris and hair grain for the eyes and hair.
+So a pair of pants with no texture is plain fabric in its colour, not bare
+legs. The skin's body paint and the tattoo layers have no default and are left
+off. `sl-bake` draws the white default without fetching it; the viewer's own
+bake and the fake grid's central one both go through it.
+
 How each grid answers both roads — the cache, the publish, the COF-version
 handshake and the appearance service — is measured in the *Grid behaviour*
 part's [appearance chapter](../gridspec/appearance.md#baking).

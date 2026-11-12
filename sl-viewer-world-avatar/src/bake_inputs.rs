@@ -972,11 +972,17 @@ fn parse_and_request_textures(
     // not fetched (the perf gate). The wearable asset itself is still parsed and
     // kept for its shape params.
     if !state.server_bake_grid {
-        for &(slot, _name, _wearable) in &avatar_texture::LAYER_TEXTURES {
-            if !asset.supplies_layer(slot) {
+        for &(slot, _name, wearable) in &avatar_texture::LAYER_TEXTURES {
+            if wearable != asset.wearable_type {
                 continue;
             }
-            if let Some(id) = asset.layer_texture(slot) {
+            // A layer the wearable names no texture for is drawn with the
+            // slot's default; the white one every clothing layer has is drawn
+            // without a fetch (`sl-bake`'s `assemble_layers`).
+            if let Some(id) = asset
+                .drawn_layer_texture(slot)
+                .filter(|id| *id != avatar_texture::IMG_WHITE)
+            {
                 let key = TextureKey::from(id);
                 if store.get(key).is_none() {
                     state.pending_textures.insert(key);

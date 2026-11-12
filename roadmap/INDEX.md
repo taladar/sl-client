@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 333 |
 | blocked | 38 |
 | in-progress | 6 |
-| bugs | 33 |
-| done | 1554 |
+| bugs | 32 |
+| done | 1555 |
 | deferred | 30 |
 | wont-do | 24 |
 | **total** | **2148** |
@@ -1273,7 +1273,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-text-renderability-axis`](in-progress/viewer-ui-text-renderability-axis.md)
   — Upstream issue — font selection cannot see glyph-format renderability
 
-## bugs (33)
+## bugs (32)
 
 ### protocol
 
@@ -1357,12 +1357,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-### server
-
-- [`server-fake-grid-scripted-avatar-clothes-not-shown`](bugs/server-fake-grid-scripted-avatar-clothes-not-shown.md)
-  — A dressed scripted avatar is drawn without its clothes
-
-## done (1554)
+## done (1555)
 
 ### protocol
 
@@ -4515,6 +4510,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Wire the script engine into the fake grid (blocked by
   `server-lsl-vm-execution` (done), `server-world-heartbeat` (done),
   `server-world-ecs-store` (done))
+- [`server-fake-grid-scripted-avatar-clothes-not-shown`](done/server-fake-grid-scripted-avatar-clothes-not-shown.md)
+  — A dressed scripted avatar is drawn without its clothes
 - [`server-fake-grid-scripted-avatars`](done/server-fake-grid-scripted-avatars.md)
   — Scripted avatars — a client that grants, pays, sits and answers (blocked by
   `server-fake-grid-script-engine-wiring` (done))

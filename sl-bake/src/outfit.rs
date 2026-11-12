@@ -22,7 +22,7 @@ use sl_avatar::{
     AppearanceValues, ResolvedParams, VisualParams, WearableAsset, combine_layer_color,
     global_color,
 };
-use sl_proto::{DiscardLevel, WearableType};
+use sl_proto::{DiscardLevel, WearableType, avatar_texture};
 use sl_texture::DecodedImage;
 use uuid::Uuid;
 
@@ -44,6 +44,12 @@ const RGBA_CHANNELS: usize = 4;
 /// `assets` is in **worn order**: of two wearables of one type, the earlier is
 /// the one underneath. Every worn wearable is drawn — two shirts are two
 /// layers, the second over the first — each tinted and cut by its own params.
+///
+/// A layer whose wearable names no texture for it is drawn with the slot's
+/// default ([`WearableAsset::drawn_layer_texture`]), as the reference draws
+/// it: a pair of pants with no texture is plain fabric in its colour, not
+/// bare legs. The white default every clothing layer has is drawn whether or
+/// not `image_for` has it.
 ///
 /// - `image_for(id)` — the decoded layer texture `id`, or `None` when it is
 ///   not in hand (that layer is then left out);
@@ -70,8 +76,8 @@ pub fn assemble_layers(
                 |wearable| worn_of_type(assets, wearable).count(),
                 |slot, worn| {
                     worn_asset(assets, worn)
-                        .and_then(|asset| asset.layer_texture(slot))
-                        .and_then(&image_for)
+                        .and_then(|asset| asset.drawn_layer_texture(slot))
+                        .and_then(|id| image_for(id).or_else(|| default_image(id)))
                 },
                 &static_image,
                 |tint, worn| layer_tint(worn_asset(assets, worn), params, tint),
@@ -84,18 +90,35 @@ pub fn assemble_layers(
 
 /// The layer texture ids the worn `assets` supply to `region`'s plan, in plan
 /// order and, within one slot, in worn order — what a grid's bake of the
-/// region is made of.
+/// region is made of. A layer drawn with its slot's default names the
+/// default, as [`assemble_layers`] draws it.
 #[must_use]
 pub fn region_texture_ids(region: BakeRegion, assets: &[WearableAsset]) -> Vec<Uuid> {
     crate::plan::region_plan(region)
         .iter()
         .flat_map(|planned| match planned.source {
             crate::plan::LayerSource::Wearable(slot) => worn_of_type(assets, planned.wearable)
-                .filter_map(|asset| asset.layer_texture(slot))
+                .filter_map(|asset| asset.drawn_layer_texture(slot))
                 .collect(),
             _ => Vec::new(),
         })
         .collect()
+}
+
+/// The image of a default layer texture no caller has to fetch: plain opaque
+/// white for [`avatar_texture::IMG_WHITE`] (one texel, which the compositor
+/// stretches over the region), `None` for any other id.
+fn default_image(id: Uuid) -> Option<DecodedImage> {
+    (id == avatar_texture::IMG_WHITE).then(|| {
+        DecodedImage::new(
+            1,
+            1,
+            4,
+            DiscardLevel::FULL,
+            bytes::Bytes::from_static(&[u8::MAX; RGBA_CHANNELS]),
+            None,
+        )
+    })
 }
 
 /// The worn wearables of `wearable`'s type, bottom first.
@@ -316,8 +339,37 @@ fn decode_tga(bytes: &[u8]) -> Result<DecodedImage, image::ImageError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{flip_rows_vertically, force_alpha_opaque};
+    use super::{
+        BakeRegion, assemble_layers, flip_rows_vertically, force_alpha_opaque, region_texture_ids,
+    };
     use pretty_assertions::assert_eq;
+    use sl_avatar::WearableAsset;
+    use sl_proto::avatar_texture;
+
+    /// **A pair of pants with no texture is drawn**, plain white under its
+    /// tint, as the reference draws it (`setTexturesToDefaults`), where it
+    /// used to be left off and the legs baked bare: it adds a layer to the
+    /// lower body, none of whose images the caller had to supply, and the
+    /// lower body's bake is made of the default.
+    #[test]
+    fn a_textureless_garment_is_drawn_with_its_default() -> Result<(), Box<dyn core::error::Error>>
+    {
+        let pants =
+            WearableAsset::parse("LLWearable version 22\n\ntype 5\nparameters 0\ntextures 0\n")?;
+        let layers = assemble_layers(
+            core::slice::from_ref(&pants),
+            None,
+            |_id| None,
+            |_file| None,
+        );
+        assert_eq!(layers.get(&BakeRegion::LowerBody).map(Vec::len), Some(1));
+        assert_eq!(layers.get(&BakeRegion::UpperBody).map(Vec::len), Some(0));
+        assert_eq!(
+            region_texture_ids(BakeRegion::LowerBody, &[pants]),
+            vec![avatar_texture::IMG_WHITE]
+        );
+        Ok(())
+    }
 
     /// Rows are mirrored top to bottom; a buffer too short for its declared
     /// geometry is left as it is.

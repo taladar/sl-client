@@ -495,6 +495,93 @@ mod test {
         Ok(())
     }
 
+    /// The lower-body bake a viewer beside the scripted avatar `avatar` is
+    /// shown, decoded, on a Second-Life-flavoured grid: what it is told of the
+    /// avatar's appearance, fetched from the appearance service its login
+    /// named.
+    async fn lower_bake_seen_beside(avatar: ScriptedAvatar) -> Result<Vec<u8>, TestError> {
+        let grid = grid(ImitatedGrid::SecondLife, avatar).await?;
+        let scripted = grid
+            .scripted_avatars()
+            .first()
+            .ok_or("the grid logged in no avatar")?
+            .clone();
+        let arrived = tokio::time::timeout(WAIT, scripted.arrived()).await?;
+        if arrived != Progress::Running && arrived != Progress::Finished {
+            return Err(format!("the avatar did not arrive: {arrived:?}").into());
+        }
+        let agent = scripted.agent_id().ok_or("the avatar has no agent id")?;
+        let viewer = Client::connect(LoginParams {
+            login_uri: grid.login_uri(),
+            request: LoginRequest::new(
+                "Test",
+                "User",
+                "password",
+                StartLocation::Last,
+                "sl-fake-grid-scripted-avatars",
+                "0.0",
+            ),
+        })
+        .await?;
+        let service = viewer
+            .login_success()
+            .and_then(|success| success.agent_appearance_service.clone())
+            .ok_or("a central-baking login named no appearance service")?;
+        let (event_tx, mut told) = mpsc::channel::<Event>(256);
+        let (_command_tx, command_rx) = mpsc::channel::<Command>(8);
+        let (diag_tx, _diag_rx) = mpsc::channel(16);
+        let run = tokio::spawn(async move {
+            let _ended = viewer.run(event_tx, diag_tx, command_rx).await;
+        });
+        let appearance = tokio::time::timeout(WAIT, async {
+            while let Some(event) = told.recv().await {
+                if let Event::AvatarAppearance(appearance) = event
+                    && appearance.avatar_id == agent
+                {
+                    return Some(appearance);
+                }
+            }
+            None
+        })
+        .await
+        .map_err(|_elapsed| "the viewer was never told the avatar's appearance")?
+        .ok_or("the viewer's client stopped")?;
+        let lower = appearance
+            .texture_entry
+            .texture_id(sl_proto::avatar_texture::LOWER_BAKED)
+            .ok_or("the appearance names no lower-body bake")?;
+        let url = service.join(&format!("texture/{}/lower/{}", agent.uuid(), lower.uuid()))?;
+        let bytes = reqwest::get(url).await?.error_for_status()?.bytes().await?;
+        let decoded = sl_texture::decode_j2c(&bytes, sl_proto::j2c::DiscardLevel::FULL)
+            .map_err(|error| format!("the lower-body bake did not decode: {error}"))?;
+        grid.shutdown();
+        run.abort();
+        Ok(decoded.pixels.to_vec())
+    }
+
+    /// **A dressed scripted avatar is shown in its clothes.** The dressed
+    /// account's pants and shoes name no texture, and the bake left such a
+    /// layer off, so a viewer beside it saw the bare legs an undressed avatar
+    /// has; the reference draws the layer with the slot's default, plain white
+    /// fabric, and so does the grid's bake now, so the two avatars' lower-body
+    /// bakes differ.
+    #[tokio::test]
+    async fn a_dressed_scripted_avatar_is_shown_in_its_clothes() -> Result<(), TestError> {
+        let bare = lower_bake_seen_beside(ScriptedAvatar::new("Scripted", "Sitter")).await?;
+        let dressed =
+            lower_bake_seen_beside(ScriptedAvatar::new("Scripted", "Sitter").dressed()).await?;
+        assert_eq!(
+            bare.len(),
+            dressed.len(),
+            "the bakes are of different sizes"
+        );
+        assert!(
+            bare != dressed,
+            "the dressed avatar's lower body is baked bare"
+        );
+        Ok(())
+    }
+
     /// **Two runs of one seed write one transcript.**
     #[tokio::test]
     async fn two_runs_of_one_seed_write_one_transcript() -> Result<(), TestError> {

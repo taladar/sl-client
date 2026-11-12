@@ -358,6 +358,39 @@ pub mod avatar_texture {
             .find_map(|&(index, _, wearable)| (index == slot).then_some(wearable))
     }
 
+    /// The texture a worn wearable's layer at `slot` is drawn with when the
+    /// wearable names none there, or `None` for a slot with no default (the
+    /// skin's body paint and the tattoo layers, which are then not drawn).
+    ///
+    /// The reference's `LLViewerWearable::getDefaultTextureImageID`: the
+    /// dictionary's `mDefaultImageName` setting per slot
+    /// (`llavatarappearancedefines.cpp`), which is [`IMG_WHITE`] for every
+    /// clothing and alpha layer — so a pair of pants with no texture is drawn
+    /// as plain fabric in its colour, not left off.
+    #[must_use]
+    pub fn default_layer_texture(slot: usize) -> Option<Uuid> {
+        match layer_wearable_type(slot)? {
+            WearableType::Eyes => Some(IMG_DEFAULT_EYES),
+            WearableType::Hair => Some(IMG_DEFAULT_HAIR),
+            WearableType::Shirt
+            | WearableType::Pants
+            | WearableType::Shoes
+            | WearableType::Socks
+            | WearableType::Jacket
+            | WearableType::Gloves
+            | WearableType::Undershirt
+            | WearableType::Underpants
+            | WearableType::Skirt
+            | WearableType::Alpha => Some(IMG_WHITE),
+            WearableType::Shape
+            | WearableType::Skin
+            | WearableType::Tattoo
+            | WearableType::Universal
+            | WearableType::Physics
+            | WearableType::Other(_) => None,
+        }
+    }
+
     /// Each baked slot's wearables-hash seed (`BakedEntry::mWearablesHashID`)
     /// and the wearable types whose worn assets feed its hash, in the order the
     /// reference hashes them (`llavatarappearancedefines.cpp`).
@@ -497,6 +530,15 @@ pub mod avatar_texture {
     /// The fully-transparent "invisible" texture id (`IMG_INVISIBLE`): a baked
     /// slot set to this renders nothing.
     pub const IMG_INVISIBLE: Uuid = Uuid::from_u128(0x3a36_7d1c_bef1_6d43_7595_e88c_1e3a_adb3);
+    /// The plain white texture (`IMG_WHITE`, the `UIImgDefault…UUID` of every
+    /// clothing and alpha layer): what a clothing layer with no texture of its
+    /// own is drawn with ([`default_layer_texture`]). Opaque white throughout,
+    /// so a client draws it without fetching it.
+    pub const IMG_WHITE: Uuid = Uuid::from_u128(0x5748_decc_f629_461c_9a36_a35a_221f_e21f);
+    /// The eyes' default iris (`UIImgDefaultEyesUUID`).
+    pub const IMG_DEFAULT_EYES: Uuid = Uuid::from_u128(0x6522_e74d_1660_4e7f_b601_6f48_c165_9a77);
+    /// The hair's default grain (`UIImgDefaultHairUUID`).
+    pub const IMG_DEFAULT_HAIR: Uuid = Uuid::from_u128(0x7ca3_9b4c_bd19_4699_aff7_f93f_d03d_3e7b);
 
     /// `IMG_USE_BAKED_HEAD`: an attachment face carrying this sentinel signals a
     /// mesh replaces the avatar's baked head region (hide the base head mesh).

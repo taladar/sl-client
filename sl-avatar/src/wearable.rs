@@ -185,14 +185,19 @@ impl WearableAsset {
         self.textures.get(&slot).copied().filter(|id| !id.is_nil())
     }
 
-    /// Whether this asset supplies the layer texture for avatar `TextureEntry`
-    /// `slot` *and* the slot's canonical wearable type matches this asset (so a
-    /// mislabeled texture on the wrong wearable is ignored). Used by the baker to
-    /// pick the wearable feeding each bake layer.
+    /// The texture a bake draws this asset's layer at `slot` with: its own
+    /// ([`layer_texture`](Self::layer_texture)), or — when it names none and
+    /// `slot` is one of its type's layers — the slot's default
+    /// ([`avatar_texture::default_layer_texture`]), as the reference's
+    /// `LLViewerWearable::setTexturesToDefaults` fills every layer the asset
+    /// leaves out. `None` for a slot of another type, or one with no default.
     #[must_use]
-    pub fn supplies_layer(&self, slot: usize) -> bool {
-        avatar_texture::layer_wearable_type(slot) == Some(self.wearable_type)
-            && self.layer_texture(slot).is_some()
+    pub fn drawn_layer_texture(&self, slot: usize) -> Option<Uuid> {
+        self.layer_texture(slot).or_else(|| {
+            (avatar_texture::layer_wearable_type(slot) == Some(self.wearable_type))
+                .then(|| avatar_texture::default_layer_texture(slot))
+                .flatten()
+        })
     }
 
     /// Serialize this asset back into the `LLWearable` text form, mirroring the
@@ -402,10 +407,8 @@ mod tests {
             asset.layer_texture(avatar_texture::HEAD_BODYPAINT),
             Some(Uuid::parse_str("5748decc-f629-461c-9a36-a35a221fe21f")?)
         );
-        // The skin supplies the head-bodypaint layer (right type + a texture).
-        assert!(asset.supplies_layer(avatar_texture::HEAD_BODYPAINT));
-        // It does not supply a shirt layer (wrong wearable type).
-        assert!(!asset.supplies_layer(avatar_texture::UPPER_SHIRT));
+        // It draws no shirt layer (wrong wearable type).
+        assert_eq!(asset.drawn_layer_texture(avatar_texture::UPPER_SHIRT), None);
         Ok(())
     }
 
@@ -425,6 +428,33 @@ mod tests {
         Ok(())
     }
 
+    /// A layer the asset names no texture for is drawn with its slot's
+    /// default — plain white for pants — and a layer of another type, or of a
+    /// type with no default, with nothing.
+    #[test]
+    fn a_missing_layer_is_drawn_with_its_default() -> Result<(), TestError> {
+        let pants =
+            WearableAsset::parse("LLWearable version 22\n\ntype 5\nparameters 0\ntextures 0\n")?;
+        assert_eq!(
+            pants.drawn_layer_texture(avatar_texture::LOWER_PANTS),
+            Some(avatar_texture::IMG_WHITE)
+        );
+        assert_eq!(pants.drawn_layer_texture(avatar_texture::UPPER_SHIRT), None);
+        let skin =
+            WearableAsset::parse("LLWearable version 22\n\ntype 1\nparameters 0\ntextures 0\n")?;
+        assert_eq!(
+            skin.drawn_layer_texture(avatar_texture::HEAD_BODYPAINT),
+            None
+        );
+        // A texture of its own wins over the default.
+        let named = WearableAsset::parse(SKIN)?;
+        assert_eq!(
+            named.drawn_layer_texture(avatar_texture::HEAD_BODYPAINT),
+            named.layer_texture(avatar_texture::HEAD_BODYPAINT)
+        );
+        Ok(())
+    }
+
     #[test]
     fn nil_texture_is_not_supplied() -> Result<(), TestError> {
         let text = "LLWearable version 22\n\
@@ -436,7 +466,11 @@ mod tests {
         let asset = WearableAsset::parse(text)?;
         assert_eq!(asset.wearable_type, WearableType::Alpha);
         assert_eq!(asset.layer_texture(avatar_texture::HEAD_ALPHA), None);
-        assert!(!asset.supplies_layer(avatar_texture::HEAD_ALPHA));
+        // The nil texture is no texture: the slot's default is drawn.
+        assert_eq!(
+            asset.drawn_layer_texture(avatar_texture::HEAD_ALPHA),
+            Some(avatar_texture::IMG_WHITE)
+        );
         Ok(())
     }
 
