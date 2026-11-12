@@ -436,7 +436,10 @@ pub struct Listens {
     /// The last id handed out.
     last: u64,
     /// The listens, by id.
-    listens: BTreeMap<ListenId, Listen>,
+    registered: BTreeMap<ListenId, Listen>,
+    /// Who overhears every line said in the region, wherever and on whatever
+    /// channel ([`tap`](Self::tap)).
+    taps: Vec<mpsc::UnboundedSender<Line>>,
 }
 
 impl Listens {
@@ -450,7 +453,7 @@ impl Listens {
         self.last = self.last.saturating_add(1);
         let id = ListenId(self.last);
         let (heard, receiver) = mpsc::unbounded_channel();
-        drop(self.listens.insert(
+        drop(self.registered.insert(
             id,
             Listen {
                 listener,
@@ -464,23 +467,36 @@ impl Listens {
 
     /// Remove a listen (`llListenRemove`); whether there was one.
     pub fn remove(&mut self, id: ListenId) -> bool {
-        self.listens.remove(&id).is_some()
+        self.registered.remove(&id).is_some()
     }
 
     /// Turn a listen off or back on (`llListenControl`); whether there was
     /// one.
     pub fn set_active(&mut self, id: ListenId, active: bool) -> bool {
-        self.listens
+        self.registered
             .get_mut(&id)
             .map(|listen| listen.active = active)
             .is_some()
     }
 
-    /// Offer `line` to every listen, each at the position `where_is` gives
-    /// for its object; a listen whose object is not in the region hears
-    /// nothing. A listen whose consumer has gone is dropped.
+    /// Every line said in the region from now on — by an avatar or an
+    /// object, on any channel and of any type, the typing notices included —
+    /// with no range and no filter: what a test harness reads to say what was
+    /// said, which no avatar standing anywhere hears all of. Nothing is
+    /// dropped; the tap goes when its receiver does.
+    pub fn tap(&mut self) -> mpsc::UnboundedReceiver<Line> {
+        let (tap, receiver) = mpsc::unbounded_channel();
+        self.taps.push(tap);
+        receiver
+    }
+
+    /// Offer `line` to every tap, and to every listen, each at the position
+    /// `where_is` gives for its object; a listen whose object is not in the
+    /// region hears nothing. A listen or a tap whose consumer has gone is
+    /// dropped.
     pub(crate) fn hear(&mut self, line: &Line, where_is: impl Fn(ObjectKey) -> Option<Vector>) {
-        self.listens.retain(|_id, listen| {
+        self.taps.retain(|tap| tap.send(line.clone()).is_ok());
+        self.registered.retain(|_id, listen| {
             let hears = listen.active
                 && listen.filter.admits(line)
                 && where_is(listen.listener)
@@ -689,5 +705,26 @@ mod test {
         assert!(listens.remove(id));
         listens.hear(&on_seven, elsewhere);
         assert!(heard.try_recv().is_err(), "a removed listen hears nothing");
+    }
+
+    /// A tap overhears every line, however far and on whatever channel, and
+    /// goes with its receiver.
+    #[test]
+    fn a_tap_overhears_every_line() {
+        let nowhere = |_key: ObjectKey| None;
+        let mut listens = Listens::default();
+        let mut tap = listens.tap();
+        let mut far = line(ChatType::Whisper, ChatChannel(-5));
+        far.position = at(200.0);
+        listens.hear(&far, nowhere);
+        listens.hear(&line(ChatType::Normal, PUBLIC_CHANNEL), nowhere);
+        assert_eq!(tap.try_recv().ok(), Some(far));
+        assert_eq!(
+            tap.try_recv().ok().map(|heard| heard.channel),
+            Some(PUBLIC_CHANNEL)
+        );
+        drop(tap);
+        listens.hear(&line(ChatType::Normal, PUBLIC_CHANNEL), nowhere);
+        assert!(listens.taps.is_empty(), "a dropped tap is let go");
     }
 }

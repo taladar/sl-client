@@ -272,6 +272,11 @@ impl Host for CorpusHost {
         self.line(format_args!("owner-say {text:?}"));
     }
 
+    fn faulted(&mut self, _caller: CallerId, _fault: &sl_lsl_runtime::vm::Fault) {
+        // A corpus script's fault is read from its debug-channel lines, as a
+        // resident reads it.
+    }
+
     fn whereabouts(&self, _caller: CallerId) -> Whereabouts {
         Whereabouts {
             object: PRIM.to_owned(),

@@ -986,6 +986,9 @@ impl Engine {
         if slice.refusals.is_empty() && fault.is_none() {
             return;
         }
+        if let Some(fault) = fault {
+            host.faulted(id, fault);
+        }
         let at = host.whereabouts(id);
         for line in fault
             .map(|fault| owner_lines(flavour, fault, &at))

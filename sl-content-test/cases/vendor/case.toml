@@ -1,0 +1,76 @@
+# A vendor shaped like third-party content: a linkset whose root reads its
+# price and colours from a notecard, menus whoever touches it for a colour
+# and, paid, gives the chosen gadget and thanks the buyer; and whose child
+# shows the colour chosen, told by link message.
+name = "Gadget vendor: menu, notecard price, payment, delivery"
+# Second Life alone: OpenSim tells a payer nothing of a payment to an object,
+# so a scripted avatar's pay never hears that it went through.
+grids = ["second-life"]
+
+[[object]]
+name = "Gadget Vendor"
+position = [128.0, 131.0, 25.25]
+contents = [
+  { script = "vendor.lsl" },
+  { notecard = "config.txt" },
+  { object = "Red gadget" },
+  { object = "Blue gadget" },
+]
+
+[[object.link]]
+name = "Display"
+offset = [0.0, 0.0, 0.5]
+size = [0.5, 0.1, 0.3]
+contents = [{ script = "display.lsl" }]
+
+[[avatar]]
+name = "Buyer Resident"
+steps = [
+  { await_chat = "Ready" },
+  { touch = "Gadget Vendor" },
+  { answer_dialog = "Blue" },
+  { await_chat = "Showing" },
+  { pay = "Gadget Vendor" },
+  { await_chat = "Enjoy" },
+]
+
+# The notecard was read: its price and both its colours.
+[[expect]]
+by = "Gadget Vendor"
+says = "Ready: 2 colours at L$50"
+channel = 0
+
+# The menu's answer reached the child by link message.
+[[expect]]
+by = "Display"
+says = "Showing the Blue gadget for Buyer Resident"
+
+# The payment was taken as enough, for the colour chosen.
+[[expect]]
+by = "Gadget Vendor"
+says = "Thank you, Buyer Resident! Enjoy your Blue gadget."
+heard_by = "Buyer Resident"
+
+[[expect]]
+by = "Gadget Vendor"
+says_containing = "not enough"
+never = true
+
+# What the buyer was shown, paid and offered.
+[[expect]]
+transcript = "Buyer Resident"
+lines = [
+  'Gadget Vendor showed a dialog "Choose a colour" ["Red", "Blue"]',
+  'answered Gadget Vendor with "Blue"',
+  "paid Gadget Vendor L$50",
+  "Gadget Vendor offered Blue gadget",
+]
+
+# Nothing moved the vendor, or its display off its top.
+[[expect]]
+object = "Gadget Vendor"
+at = [128.0, 131.0, 25.25]
+
+[[expect]]
+object = "Display"
+at = [128.0, 131.0, 25.75]

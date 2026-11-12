@@ -3,6 +3,7 @@
 use sl_types::lsl::Vector;
 
 use crate::library::BuiltinId;
+use crate::vm::Fault;
 use crate::vm::comms::{
     Dialog, InstantMessage, InvalidLinkTarget, Links, LoadUrl, MapDestination, Overheard,
 };
@@ -166,6 +167,13 @@ pub trait Host {
     /// Where the script `caller` is, for the words of its error lines and
     /// the object its flood is counted against.
     fn whereabouts(&self, caller: CallerId) -> Whereabouts;
+
+    /// The script `caller` hit the run-time error `fault`: it is already
+    /// stopped or held as its engine does, and its error lines already said
+    /// (or dropped by Second Life's flood limit). The whole fault, with the
+    /// source position no grid tells a resident, for the host's own record —
+    /// what a test harness reports a broken script by.
+    fn faulted(&mut self, caller: CallerId, fault: &Fault);
 
     /// A random number for `caller`, every value of the 32 bits equally
     /// likely (`llListRandomize`'s shuffle). It comes from the region's

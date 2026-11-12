@@ -97,7 +97,7 @@ use sl_lsl_runtime::library::BuiltinId;
 use sl_lsl_runtime::vm::land::{Environment, LandChange, Parcel, ParcelMedia, Region, SimData};
 use sl_lsl_runtime::vm::{
     Admission, Allowed, CallerId, Dialog, Engine, EngineConfig, EngineFlavour, ExperienceDetails,
-    ExperienceError, ExperienceQuestion, Heard, Host, InstantMessage, InvalidLinkTarget,
+    ExperienceError, ExperienceQuestion, Fault, Heard, Host, InstantMessage, InvalidLinkTarget,
     KeyValueStore, LinkedAvatar, LinkedPrim, Links, LinksetData, LinksetId, LoadUrl,
     MapDestination, MoneyRefusal, Overheard, PayPrice, Payment, Question, SavedScript,
     ScriptExperience, ScriptUsage, Simulator, SitRefusal, Speech, Standing, Tick, TickReport,
@@ -123,6 +123,63 @@ use crate::world::{AvatarIdentity, RegionChange, RegionUpdate, SceneFixtures};
 /// than a session — a script's line, an object a script removed. Session
 /// numbers start at one, so no session's watcher takes it for its own.
 pub const REGION_SOURCE: u64 = 0;
+
+/// A run-time error a script in one of the grid's regions hit, as the grid
+/// records it for whoever subscribes ([`FakeGrid::script_faults`]): where it
+/// was, the error, and the line it happened on — which no grid tells a
+/// resident, and which a test harness reports a broken script by.
+///
+/// [`FakeGrid::script_faults`]: crate::FakeGrid::script_faults
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScriptFault {
+    /// The region's name.
+    pub region: String,
+    /// The name of the prim the script is in.
+    pub object: String,
+    /// The key of the prim the script is in.
+    pub prim: Option<ObjectKey>,
+    /// The script's inventory name.
+    pub script: String,
+    /// The error, in the words the runtime gives it (`Math Error`).
+    pub error: String,
+    /// The 1-based source line and column of the instruction that failed,
+    /// when the script's source map has one.
+    pub position: Option<(u32, u32)>,
+    /// The event whose handler was running, or [`None`] for the global
+    /// initialisers.
+    pub event: Option<&'static str>,
+}
+
+impl std::fmt::Display for ScriptFault {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "script {:?} in {:?} stopped", self.script, self.object)?;
+        if let Some((line, column)) = self.position {
+            write!(f, " at line {line}, column {column}")?;
+        }
+        if let Some(event) = self.event {
+            write!(f, " in {event}")?;
+        }
+        write!(f, " with {}", self.error)
+    }
+}
+
+/// A call a script made to a library function this grid only stubs, which
+/// answered its default and did nothing else — told to whoever subscribes
+/// ([`FakeGrid::stubbed_calls`]), so nobody mistakes the default for the
+/// function's real answer.
+///
+/// [`FakeGrid::stubbed_calls`]: crate::FakeGrid::stubbed_calls
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StubbedCall {
+    /// The region's name.
+    pub region: String,
+    /// The name of the prim the script is in.
+    pub object: String,
+    /// The script's inventory name.
+    pub script: String,
+    /// The function (`llSetVehicleType`).
+    pub function: &'static str,
+}
 
 mod avatars;
 pub(crate) mod http;
@@ -1844,6 +1901,13 @@ impl Host for RegionHost<'_> {
             ?id,
             "a stubbed library function answered its default"
         );
+        let at = self.whereabouts(caller);
+        self.core.tell_stubbed_call(&StubbedCall {
+            region: at.region,
+            object: at.name,
+            script: at.script,
+            function: id.descriptor().name,
+        });
     }
 
     fn die(&mut self, caller: CallerId) -> bool {
@@ -2254,6 +2318,23 @@ impl Host for RegionHost<'_> {
             region,
             position,
         }
+    }
+
+    fn faulted(&mut self, caller: CallerId, fault: &Fault) {
+        let at = self.whereabouts(caller);
+        let recorded = ScriptFault {
+            region: at.region,
+            object: at.name,
+            prim: uuid::Uuid::parse_str(&at.prim).ok().map(ObjectKey::from),
+            script: at.script,
+            error: fault.error.to_string(),
+            position: fault
+                .position
+                .map(|position| (position.line, position.column)),
+            event: fault.event,
+        };
+        tracing::debug!(%recorded, "a script faulted");
+        self.core.tell_script_fault(&recorded);
     }
 
     fn random_bits(&mut self, _caller: CallerId) -> u32 {

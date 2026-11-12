@@ -120,10 +120,10 @@ pub use script_compile::{
 };
 pub use script_syntax::{LslSyntaxDocument, LslSyntaxPolicy};
 pub use scripted_avatars::{
-    AnswerPolicy, AvatarAction, AvatarStep, DialogAnswer, DialogChoice, PaymentAnswer,
-    PermissionAnswer, Progress, ScriptedAvatar, ScriptedAvatarHandle, Target, Transcript,
+    AnswerPolicy, AvatarAction, AvatarStep, DialogAnswer, DialogChoice, HeardLine, PaymentAnswer,
+    PermissionAnswer, Progress, ScriptedAvatar, ScriptedAvatarHandle, Target, Telling, Transcript,
 };
-pub use scripts::{REGION_SOURCE, RegionScripts};
+pub use scripts::{REGION_SOURCE, RegionScripts, ScriptFault, StubbedCall};
 pub use teleport::TELEPORT_ARRIVAL_TIMEOUT;
 pub use terrain::{Heightfield, TerrainFixture};
 pub use time::{Now, SEEDED_EPOCH_SECONDS, WallClock, system_clock, tokio_clock};

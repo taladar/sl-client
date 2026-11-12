@@ -279,6 +279,8 @@ struct Recorder {
     addresses: std::collections::BTreeMap<String, String>,
     /// `(tick, caller)` per `llDie` the host agreed to.
     died: Vec<(u64, CallerId)>,
+    /// `(caller, fault)` per run-time error handed over.
+    faults: Vec<(CallerId, Fault)>,
     /// Each prim's seat settings, by number.
     seats: std::collections::BTreeMap<u64, crate::vm::seating::Seat>,
     /// The avatars sitting on every script's object, in the order they sat.
@@ -456,6 +458,10 @@ impl Host for Recorder {
 
     fn owner_say(&mut self, caller: CallerId, text: &str) {
         self.told.push((self.now, caller, text.to_owned()));
+    }
+
+    fn faulted(&mut self, caller: CallerId, fault: &Fault) {
+        self.faults.push((caller, fault.clone()));
     }
 
     fn say_to(
@@ -2932,6 +2938,22 @@ fn second_life_says_two_lines_stops_and_holds_the_script_until_a_reset() -> Resu
             "Faulty prim [script:Div int] Script run-time error",
             "Math Error"
         ]
+    );
+    // The host is handed the fault itself, with the line no grid tells.
+    assert_eq!(
+        host.faults
+            .iter()
+            .map(|(caller, fault)| (*caller, fault.to_string(), fault.position, fault.event))
+            .collect::<Vec<_>>(),
+        vec![(
+            A,
+            "Math Error".to_owned(),
+            Some(Position {
+                line: 5,
+                column: 39
+            }),
+            Some("link_message")
+        )]
     );
     assert!(host.said.iter().all(|(_, _, speech)| {
         speech.channel == DEBUG_CHANNEL

@@ -1,0 +1,44 @@
+[package]
+name = "sl-content-test"
+version = { workspace = true }
+authors = { workspace = true }
+edition = { workspace = true }
+rust-version = { workspace = true }
+description = "Tests somebody else's LSL content offline: a data file names the objects, their scripts and contents, the avatars and what they do, and what should happen; the runner plays it on an in-process fake grid and reports what did"
+readme = { workspace = true }
+repository = { workspace = true }
+license = { workspace = true }
+keywords = ["lsl", "secondlife", "opensim", "testing", "scripting"]
+categories = ["command-line-utilities", "development-tools::testing", "simulation"]
+exclude = { workspace = true }
+publish = { workspace = true }
+
+[[bin]]
+name = "sl-content-test"
+path = "src/bin/sl-content-test.rs"
+
+[dependencies]
+clap = { workspace = true, features = ["cargo", "derive", "env"] }
+fs-err = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+# The built-in animations a script may name by key without a case supplying
+# them.
+sl-anim = { workspace = true }
+# The grid a case plays on, and the scripted avatars that play it.
+sl-fake-grid = { path = "../sl-fake-grid", version = "0.1.0" }
+# A notecard's text is stored as the notecard asset a script reads.
+sl-notecard = { path = "../sl-notecard", version = "0.1.0" }
+sl-proto = { workspace = true }
+sl-types = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "sync", "time"] }
+toml = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter", "tracing-log"] }
+uuid = { workspace = true }
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }
+
+[lints]
+workspace = true

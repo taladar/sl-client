@@ -9124,6 +9124,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "sl-content-test"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "fs-err",
+ "pretty_assertions",
+ "serde",
+ "sl-anim",
+ "sl-fake-grid",
+ "sl-notecard",
+ "sl-proto",
+ "sl-types",
+ "thiserror 2.0.19",
+ "tokio",
+ "toml",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
 name = "sl-crosscheck"
 version = "0.1.0"
 dependencies = [

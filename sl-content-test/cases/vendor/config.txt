@@ -1,0 +1,4 @@
+# Gadget Vendor configuration
+price = 50
+colours = Red,Blue
+thanks = Thank you

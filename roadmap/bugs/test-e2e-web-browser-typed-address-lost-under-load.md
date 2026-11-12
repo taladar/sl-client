@@ -27,6 +27,10 @@ or Enter reaches the field before the floater takes the address. Passing alone
 and failing under load points at ordering, not at a wait that is too short,
 since the home page did load.
 
+It failed the same way again in the hook's full run while landing
+test-lsl-content-suite (2026-11-13), test 1246 of 8441, the document reading
+`https://secondlife.com/` for the whole wait.
+
 Also worth noting: the test reaches the public internet (secondlife.com)
 through the home page. An offline run would fail this way every time.
 

@@ -29,7 +29,10 @@ Today the only way to test a scripted product is to rez it on a live
 region and click it. [[test-lsl-content-suite]] is that deliverable, and
 taking it seriously changes the priority order of the library tranches:
 what real content calls most matters more than completeness for its own
-sake.
+sake. (Since 2026-11-12 the harness exists: `sl-content-test` plays a TOML
+case of objects, contents, scripted avatars and expectations on an
+in-process grid and reports each unmet expectation, compile error and
+run-time error by script and line — book chapter `tools/content-test.md`.)
 
 ## What the audit found (2026-09-20)
 

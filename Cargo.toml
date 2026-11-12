@@ -15,6 +15,7 @@ members = [
   "sl-client-common",
   "sl-client-tokio",
   "sl-conformance",
+  "sl-content-test",
   "sl-crosscheck",
   "sl-e2e",
   "sl-emoji",

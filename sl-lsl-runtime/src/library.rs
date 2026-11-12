@@ -591,6 +591,8 @@ mod tests {
 
         fn owner_say(&mut self, _caller: CallerId, _text: &str) {}
 
+        fn faulted(&mut self, _caller: CallerId, _fault: &crate::vm::Fault) {}
+
         fn say_to(
             &mut self,
             _caller: CallerId,

@@ -49,8 +49,8 @@ use sl_client_tokio::{
     CircuitId, Client, Command, Event, LoginParams, LoginRequest, ScopedObjectId, StartLocation,
 };
 use sl_proto::{
-    ChatType, ClickAction, LindenAmount, MoneyTransactionType, RegionLocalObjectId, ScriptDialog,
-    ScriptPermissionRequest,
+    ChatType, ClickAction, ImDialog, LindenAmount, MoneyTransactionType, RegionLocalObjectId,
+    ScriptDialog, ScriptPermissionRequest,
 };
 use sl_types::chat::ChatChannel;
 use sl_types::key::{AgentKey, ObjectKey};
@@ -389,6 +389,14 @@ pub enum Entry {
         /// The line.
         message: String,
     },
+    /// An object offered it an item (`llGiveInventory`), which it neither
+    /// takes nor declines: filing a gift is not the grid's yet.
+    Offered {
+        /// The object.
+        object: String,
+        /// What it offered, as the offer names it.
+        item: String,
+    },
 }
 
 impl std::fmt::Display for Entry {
@@ -440,12 +448,55 @@ impl std::fmt::Display for Entry {
                 write!(f, "found no button {choice:?} on {object}'s dialog")
             }
             Self::Heard { from, message } => write!(f, "heard {from}: {message}"),
+            Self::Offered { object, item } => write!(f, "{object} offered {item}"),
         }
     }
 }
 
 /// What a scripted avatar was asked and did, in order.
 pub type Transcript = Vec<Entry>;
+
+/// One line a scripted avatar was told, whether or not a step waited for it:
+/// local chat in earshot, the debug channel, an owner-say, a line said to it
+/// alone, an object's instant message.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HeardLine {
+    /// Who or what said it.
+    pub from: String,
+    /// How it was told.
+    pub how: Telling,
+    /// What was said.
+    pub message: String,
+}
+
+/// How a [`HeardLine`] reached a scripted avatar.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Telling {
+    /// As chat of this type (`llSay`, `llOwnerSay`, `llRegionSayTo`, …).
+    Chat(ChatType),
+    /// As an instant message of this dialog (`llInstantMessage`, an
+    /// inventory offer).
+    InstantMessage(ImDialog),
+}
+
+impl std::fmt::Display for HeardLine {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let how = match self.how {
+            Telling::Chat(ChatType::Whisper) => "whispers",
+            Telling::Chat(ChatType::Normal) => "says",
+            Telling::Chat(ChatType::Shout) => "shouts",
+            Telling::Chat(ChatType::Region) => "says to the region",
+            Telling::Chat(ChatType::Owner) => "tells its owner",
+            Telling::Chat(ChatType::Direct) => "says to it",
+            Telling::Chat(ChatType::DebugChannel) => "says on the debug channel",
+            Telling::Chat(_) => "chats",
+            Telling::InstantMessage(ImDialog::TaskInventoryOffered) => "offers",
+            Telling::InstantMessage(_) => "messages",
+        };
+        write!(f, "{} {how}: {}", self.from, self.message)
+    }
+}
 
 /// How far a scripted avatar has got.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -461,13 +512,25 @@ pub enum Progress {
     Stopped(String),
 }
 
+/// What a scripted avatar's run keeps for its handle to read: what it has
+/// been asked, done and told, and the step it is on.
+#[derive(Clone, Debug, Default)]
+struct Records {
+    /// What it was asked and did so far.
+    transcript: Arc<parking_lot::Mutex<Transcript>>,
+    /// Every line it was told so far.
+    heard: Arc<parking_lot::Mutex<Vec<HeardLine>>>,
+    /// The index of the step it is waiting for or taking.
+    step: Arc<parking_lot::Mutex<Option<usize>>>,
+}
+
 /// A running scripted avatar, as a test or a tool reads it.
 #[derive(Clone)]
 pub struct ScriptedAvatarHandle {
     /// Its full name.
     name: String,
-    /// What it was asked and did so far.
-    transcript: Arc<parking_lot::Mutex<Transcript>>,
+    /// What it has been asked, done and told so far, and where it is.
+    records: Records,
     /// How far it has got.
     progress: watch::Receiver<Progress>,
     /// Its agent id, once it has logged in.
@@ -501,7 +564,22 @@ impl ScriptedAvatarHandle {
     /// What it was asked and did so far.
     #[must_use]
     pub fn transcript(&self) -> Transcript {
-        self.transcript.lock().clone()
+        self.records.transcript.lock().clone()
+    }
+
+    /// The index in its script of the step it is waiting for or taking,
+    /// from 0, or `None` before its first and once it has finished: where a
+    /// script that never finishes is stuck.
+    #[must_use]
+    pub fn step(&self) -> Option<usize> {
+        *self.records.step.lock()
+    }
+
+    /// Every line it was told so far, in the order its client was told
+    /// them.
+    #[must_use]
+    pub fn heard(&self) -> Vec<HeardLine> {
+        self.records.heard.lock().clone()
     }
 
     /// How far it has got.
@@ -543,28 +621,20 @@ impl ScriptedAvatarHandle {
 
 /// Starts `avatar` against the grid `core` runs.
 pub(crate) fn spawn(core: Arc<GridCore>, avatar: ScriptedAvatar) -> ScriptedAvatarHandle {
-    let transcript = Arc::new(parking_lot::Mutex::new(Transcript::new()));
+    let records = Records::default();
     let (progress_tx, progress) = watch::channel(Progress::LoggingIn);
     let (agent_tx, agent) = watch::channel(None);
     let (log_out, log_out_rx) = mpsc::channel(1);
     let handle = ScriptedAvatarHandle {
         name: avatar.name(),
-        transcript: Arc::clone(&transcript),
+        records: records.clone(),
         progress,
         agent,
         log_out,
     };
     let name = avatar.name();
     drop(tokio::spawn(async move {
-        let reason = run(
-            core,
-            avatar,
-            &transcript,
-            &progress_tx,
-            &agent_tx,
-            log_out_rx,
-        )
-        .await;
+        let reason = run(core, avatar, records, &progress_tx, &agent_tx, log_out_rx).await;
         tracing::debug!("scripted avatar {name} stopped: {reason}");
         progress_tx.send_replace(Progress::Stopped(reason));
     }));
@@ -589,6 +659,8 @@ enum Told {
     /// A money transfer's outcome: whether it went through, and what the grid
     /// said.
     Money(bool, String),
+    /// An object's inventory offer: the object, and what it offered.
+    Offer(String, String),
     /// The client's session ended.
     Ended,
 }
@@ -598,7 +670,7 @@ enum Told {
 async fn run(
     core: Arc<GridCore>,
     avatar: ScriptedAvatar,
-    transcript: &Arc<parking_lot::Mutex<Transcript>>,
+    records: Records,
     progress: &watch::Sender<Progress>,
     agent_tx: &watch::Sender<Option<AgentKey>>,
     mut log_out: mpsc::Receiver<()>,
@@ -653,7 +725,7 @@ async fn run(
         let _ended = client.run(event_tx, diag_tx, command_rx).await;
     });
     let (told_tx, told) = mpsc::unbounded_channel();
-    let forward = tokio::spawn(forward(event_rx, diag_rx, told_tx));
+    let forward = tokio::spawn(forward(event_rx, diag_rx, told_tx, records.heard));
     let mut runner = Runner {
         core,
         agent,
@@ -662,7 +734,8 @@ async fn run(
         told,
         policy: avatar.policy,
         pending: VecDeque::new(),
-        transcript: Arc::clone(transcript),
+        transcript: records.transcript,
+        step: records.step,
     };
     let reason = tokio::select! {
         reason = runner.play(session, &avatar.steps, progress) => reason,
@@ -687,6 +760,7 @@ async fn forward(
     mut events: mpsc::Receiver<Event>,
     mut diagnostics: mpsc::Receiver<sl_client_tokio::Diagnostic>,
     told: mpsc::UnboundedSender<Told>,
+    heard: Arc<parking_lot::Mutex<Vec<HeardLine>>>,
 ) {
     loop {
         let event = tokio::select! {
@@ -701,7 +775,27 @@ async fn forward(
         let passed = match event {
             Event::ScriptDialog(dialog) => Told::Dialog(dialog),
             Event::ScriptPermissionRequest(question) => Told::Question(question),
-            Event::ChatReceived(chat) => Told::Chat(chat.from_name, chat.message),
+            Event::ChatReceived(chat) => {
+                if !matches!(chat.chat_type, ChatType::StartTyping | ChatType::StopTyping) {
+                    heard.lock().push(HeardLine {
+                        from: chat.from_name.clone(),
+                        how: Telling::Chat(chat.chat_type),
+                        message: chat.message.clone(),
+                    });
+                }
+                Told::Chat(chat.from_name, chat.message)
+            }
+            Event::InstantMessageReceived(message) => {
+                heard.lock().push(HeardLine {
+                    from: message.from_agent_name.clone(),
+                    how: Telling::InstantMessage(message.dialog),
+                    message: message.message.clone(),
+                });
+                if message.dialog != ImDialog::TaskInventoryOffered {
+                    continue;
+                }
+                Told::Offer(message.from_agent_name, offered_item(&message.message))
+            }
             Event::SitResult { sit_object, .. } => Told::Sat(sit_object),
             Event::AlertMessage { message, .. } => Told::Alert(message),
             Event::PayPriceReply {
@@ -751,6 +845,8 @@ struct Runner {
     pending: VecDeque<Told>,
     /// Its transcript.
     transcript: Arc<parking_lot::Mutex<Transcript>>,
+    /// The index of the step being waited for or taken.
+    step: Arc<parking_lot::Mutex<Option<usize>>>,
 }
 
 impl Runner {
@@ -790,6 +886,7 @@ impl Runner {
         let mut previous = arrival;
         let mut session = shared;
         for (index, step) in steps.iter().enumerate() {
+            *self.step.lock() = Some(index);
             let upcoming = steps.get(index..).unwrap_or_default();
             if let Err(reason) = self.wait(&session, step, arrival, previous, upcoming).await {
                 return reason;
@@ -804,6 +901,7 @@ impl Runner {
                 Err(reason) => return reason,
             };
         }
+        *self.step.lock() = None;
         progress.send_replace(Progress::Finished);
         // Policy prompts still arrive; a dialog after the script ended is
         // answered as one before it would have been.
@@ -971,6 +1069,7 @@ impl Runner {
                     self.reply(&dialog, 0).await;
                 }
             }
+            Told::Offer(object, item) => self.note(Entry::Offered { object, item }),
             Told::Chat(..)
             | Told::Sat(_)
             | Told::Alert(_)
@@ -1367,6 +1466,16 @@ impl Runner {
     }
 }
 
+/// The item an inventory offer's text names: the quoted name both grids
+/// begin it with (`'Box'  ( http://slurl.com/… )`, `'Box'. (Vendor is located
+/// at …)`), or the whole text when it has none.
+fn offered_item(message: &str) -> String {
+    message
+        .strip_prefix('\'')
+        .and_then(|rest| rest.split_once('\''))
+        .map_or_else(|| message.to_owned(), |(item, _rest)| item.to_owned())
+}
+
 /// Whether `dialog` is a text box rather than a choice of buttons.
 fn is_text_box(dialog: &ScriptDialog) -> bool {
     dialog.buttons.len() == 1
@@ -1466,6 +1575,20 @@ mod test {
             avatar.steps.get(1).map(|step| &step.action),
             Some(&AvatarAction::Stand)
         );
+    }
+
+    /// An offer's item is the quoted name either grid begins its text with.
+    #[test]
+    fn an_offer_names_its_quoted_item() {
+        assert_eq!(
+            offered_item("'Red box'  ( http://slurl.com/secondlife/Fake%20Region/128/131/21 )"),
+            "Red box"
+        );
+        assert_eq!(
+            offered_item("'Red box'. (Vendor is located at Fake Region <128, 131, 21>)"),
+            "Red box"
+        );
+        assert_eq!(offered_item("no quotes"), "no quotes");
     }
 
     /// Only a lone text-box button makes a dialog a text box.

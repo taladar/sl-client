@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 130 |
-| ready | 333 |
+| ready | 332 |
 | blocked | 38 |
 | in-progress | 6 |
 | bugs | 32 |
-| done | 1555 |
+| done | 1556 |
 | deferred | 30 |
 | wont-do | 24 |
 | **total** | **2148** |
@@ -316,7 +316,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-lsl-opensim-function-set`](ideas/gridspec-lsl-opensim-function-set.md)
   — Measure which library functions OpenSim's engines compile
 
-## ready (333)
+## ready (332)
 
 ### protocol
 
@@ -1041,9 +1041,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-handover-distant-and-vehicle-aditi`](ready/test-handover-distant-and-vehicle-aditi.md)
   — Live-test distant teleport (world_reset) and vehicle corner crossings, incl.
   on aditi
-- [`test-lsl-content-suite`](ready/test-lsl-content-suite.md) — A test harness
-  for somebody else's LSL content (blocked by
-  `server-fake-grid-scripted-avatars` (done))
 
 ### repl
 
@@ -1357,7 +1354,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1555)
+## done (1556)
 
 ### protocol
 
@@ -4245,6 +4242,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — fetch the read-only Library tree
 - [`test-logout-clean`](done/test-logout-clean-request-logout-assert-clean-logoutreply-shutdown.md)
   — request logout, assert clean LogoutReply / shutdown
+- [`test-lsl-content-suite`](done/test-lsl-content-suite.md) — A test harness
+  for somebody else's LSL content (blocked by
+  `server-fake-grid-scripted-avatars` (done))
 - [`test-lsl-differential-corpus-triage`](done/test-lsl-differential-corpus-triage.md)
   — Triage every probe's differences between each grid and its fake flavour
 - [`test-lsl-differential-opensim`](done/test-lsl-differential-opensim.md) — Run

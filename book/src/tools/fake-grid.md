@@ -2556,6 +2556,15 @@ Note what is **not** there: the pose ball's script asks its sitter for
 `PERMISSION_TRIGGER_ANIMATION`, and no question appears, because both grids
 grant a seated avatar's own seat that permission without asking.
 
+An object's inventory offer (`llGiveInventory` to the avatar) is a line too,
+`Vendor offered Blue gadget`, though the avatar neither takes nor declines
+it. Beside the transcript the handle keeps two more things a harness reads:
+`heard()`, every line the avatar's client was told whether or not a step
+waited for it — local chat in earshot, the debug channel, an owner-say, a
+line said to it alone, an object's instant message — and `step()`, the step
+it is waiting for or taking, which is where a script that never finishes is
+stuck.
+
 The `scripted-avatar` scene (`fixtures::scripted_avatar`) is the four props
 of that transcript and an avatar, `sitter()`, that sits on the pose ball
 ten ticks after it arrives with the agreeable policy — so a viewer logged
@@ -2566,6 +2575,14 @@ animations are. The pose is an animation in the pose ball's own contents
 such as `dance1`: a viewer fetches a downloadable built-in over
 `ViewerAsset` like any uploaded animation, and this grid serves no Linden
 animation assets, so a viewer of ours could not play one here.
+
+Two more subscriptions report what no avatar could, for a harness to judge
+a run by: `FakeGrid::overhear(region)`, every line said in the region on
+every channel at any distance (a tap on the region's listens), and
+`FakeGrid::script_faults()`, every script's run-time error in any region with
+the source line it happened on, which no grid tells a resident. Both are
+lossless. The content harness (`sl-content-test`, the
+[content testing](content-test.md) chapter) is built on all three.
 
 It stays a client and a script: not a load generator, and nothing that
 decides for itself. It follows its agent's root session wherever a script

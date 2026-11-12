@@ -93,6 +93,7 @@
 - [Build performance & memory](tools/build-performance.md)
 - [Avatar state capture & replay](tools/avatar-replay.md)
 - [The fake grid](tools/fake-grid.md)
+- [Testing LSL content](tools/content-test.md)
 - [The viewer test harness](tools/test-harness.md)
 - [Driving the viewer: automation & end-to-end tests](tools/viewer-automation.md)
 

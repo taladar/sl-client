@@ -686,6 +686,13 @@ pub(crate) struct GridCore {
     pub(crate) teleports_tx: broadcast::Sender<TeleportNotice>,
     /// Publishes completed border crossings.
     pub(crate) crossings_tx: broadcast::Sender<CrossingNotice>,
+    /// Who is told of every script's run-time error, in every region
+    /// ([`FakeGrid::script_faults`]). Unbounded and lossless, unlike the
+    /// notices above: a harness that lost one would pass a broken script.
+    script_faults: Taps<crate::scripts::ScriptFault>,
+    /// Who is told of every call a script makes to a stubbed library
+    /// function, in every region ([`FakeGrid::stubbed_calls`]).
+    stubbed_calls: Taps<crate::scripts::StubbedCall>,
     /// Each experience's key-value store, by the experience's key: the
     /// grid's, so every object of an experience in every region shares one
     /// and it outlives them all. Taken by a region's script tick under the
@@ -717,6 +724,16 @@ pub(crate) struct PreparedSession {
 }
 
 impl GridCore {
+    /// Tells every subscriber of [`FakeGrid::script_faults`] of `fault`.
+    pub(crate) fn tell_script_fault(&self, fault: &crate::scripts::ScriptFault) {
+        self.script_faults.tell(fault);
+    }
+
+    /// Tells every subscriber of [`FakeGrid::stubbed_calls`] of `call`.
+    pub(crate) fn tell_stubbed_call(&self, call: &crate::scripts::StubbedCall) {
+        self.stubbed_calls.tell(call);
+    }
+
     /// The buddy list of `agent`'s login response: every account it is
     /// friends with, and the rights each grants the other.
     pub(crate) fn buddies_of(&self, agent: AgentKey) -> Vec<sl_wire::BuddyListEntry> {
@@ -2717,6 +2734,8 @@ impl FakeGridBuilder {
             economy_tx,
             teleports_tx,
             crossings_tx,
+            script_faults: Taps::default(),
+            stubbed_calls: Taps::default(),
             experience_stores: parking_lot::Mutex::new(BTreeMap::new()),
             script_http: parking_lot::Mutex::new(crate::script_http::ScriptHttp::new(
                 self.http_responder,
@@ -2743,6 +2762,34 @@ impl FakeGridBuilder {
             .map(|avatar| crate::scripted_avatars::spawn(Arc::clone(&core), avatar))
             .collect();
         Ok(FakeGrid { core, scripted })
+    }
+}
+
+/// Subscribers each told every one of a kind of record, losslessly: unlike a
+/// broadcast, a subscriber that falls behind loses nothing, which is what a
+/// harness judging a run by them needs.
+struct Taps<T>(parking_lot::Mutex<Vec<tokio::sync::mpsc::UnboundedSender<T>>>);
+
+impl<T> Default for Taps<T> {
+    fn default() -> Self {
+        Self(parking_lot::Mutex::new(Vec::new()))
+    }
+}
+
+impl<T: Clone> Taps<T> {
+    /// A new subscriber, told of every record from now on.
+    fn subscribe(&self) -> tokio::sync::mpsc::UnboundedReceiver<T> {
+        let (tell, told) = tokio::sync::mpsc::unbounded_channel();
+        self.0.lock().push(tell);
+        told
+    }
+
+    /// Tells every subscriber of `record`, letting go of those whose
+    /// receiver has gone.
+    fn tell(&self, record: &T) {
+        self.0
+            .lock()
+            .retain(|tell| tell.send(record.clone()).is_ok());
     }
 }
 
@@ -2868,6 +2915,75 @@ impl FakeGrid {
     #[must_use]
     pub fn economy_events(&self) -> broadcast::Receiver<EconomyEvent> {
         self.core.economy_tx.subscribe()
+    }
+
+    /// Every run-time error a script hits in any region from now on, with
+    /// the line it happened on ([`crate::scripts::ScriptFault`]) — told
+    /// whether or not its error lines were said, so Second Life's flood limit
+    /// hides none. Nothing is dropped; the subscription goes with its
+    /// receiver.
+    #[must_use]
+    pub fn script_faults(
+        &self,
+    ) -> tokio::sync::mpsc::UnboundedReceiver<crate::scripts::ScriptFault> {
+        self.core.script_faults.subscribe()
+    }
+
+    /// Every call a script makes to a library function this grid only stubs
+    /// from now on, in any region ([`crate::scripts::StubbedCall`]): a default
+    /// answered in place of what the live grid would do. Nothing is dropped;
+    /// the subscription goes with its receiver.
+    #[must_use]
+    pub fn stubbed_calls(
+        &self,
+    ) -> tokio::sync::mpsc::UnboundedReceiver<crate::scripts::StubbedCall> {
+        self.core.stubbed_calls.subscribe()
+    }
+
+    /// Every line said in the region called `region` from now on, by an
+    /// avatar or an object, on every channel and at any distance
+    /// ([`crate::chat::Listens::tap`]): what no one avatar hears all of. A
+    /// line told one avatar alone — an owner-say, `llRegionSayTo`, an
+    /// instant message — is that avatar's, and not here.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::UnknownRegion`] when the grid has no region by that name.
+    pub fn overhear(
+        &self,
+        region: &str,
+    ) -> Result<tokio::sync::mpsc::UnboundedReceiver<crate::chat::Line>, Error> {
+        let index = self.region_index(region)?;
+        let entry = self
+            .core
+            .region(index)
+            .ok_or_else(|| Error::UnknownRegion {
+                region: region.to_owned(),
+            })?;
+        Ok(entry.world.lock().listens.tap())
+    }
+
+    /// Runs `f` over the region called `region` as it is now — its objects,
+    /// their contents, its avatars — under the region's lock: what a test
+    /// harness reads the end of a run from.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::UnknownRegion`] when the grid has no region by that name.
+    pub fn with_region_world<R>(
+        &self,
+        region: &str,
+        f: impl FnOnce(&crate::world::SceneFixtures) -> R,
+    ) -> Result<R, Error> {
+        let index = self.region_index(region)?;
+        let entry = self
+            .core
+            .region(index)
+            .ok_or_else(|| Error::UnknownRegion {
+                region: region.to_owned(),
+            })?;
+        let world = entry.world.lock();
+        Ok(f(&world))
     }
 
     /// The `get_grid_info` document the grid serves.
