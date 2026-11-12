@@ -326,13 +326,17 @@ the two animation refusals' words on `FakeSl`.
   `Event::PostcardFailed`. Each fails at once where the region grants no
   such capability, the flag aside: there nothing is answered, and the
   reference viewer takes that for leave to upload.
-- **The viewer makes new wearables and new materials over
-  `NewFileAgentInventory`**, stating a cost of `0`. OpenSim takes both (and
-  files the material as a texture); Second Life refuses the material by name
-  and the wearable for its price. The reference viewer creates the item
-  first and saves into it. Both are filed as bugs
-  (`viewer-new-wearable-refused-on-second-life`,
-  `viewer-new-material-refused-on-second-life`).
+- **The viewer makes new wearables over `NewFileAgentInventory`**, stating a
+  cost of `0`. OpenSim takes them; Second Life refuses them for their price.
+  The reference viewer creates the item first and saves into it. Filed as a
+  bug (`viewer-new-wearable-refused-on-second-life`).
+- **A material saved from the Build window is created, then saved into**, as
+  the reference's `LLMaterialEditor::createInventoryItem` does: an empty
+  material item from `CreateInventoryItem` (no transaction, no subtype), and
+  the encoded material written into it over `UpdateMaterialAgentInventory`
+  once `UpdateCreateInventoryItem` names it. It used to be a
+  `NewFileAgentInventory` upload, which Second Life refuses by name
+  (`viewer-new-material-refused-on-second-life`).
 
 ### Not measured about uploads
 

@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 333 |
 | blocked | 39 |
 | in-progress | 6 |
-| bugs | 29 |
-| done | 1553 |
+| bugs | 28 |
+| done | 1554 |
 | deferred | 30 |
 | wont-do | 24 |
 | **total** | **2143** |
@@ -1274,7 +1274,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-text-renderability-axis`](in-progress/viewer-ui-text-renderability-axis.md)
   — Upstream issue — font selection cannot see glyph-format renderability
 
-## bugs (29)
+## bugs (28)
 
 ### protocol
 
@@ -1300,8 +1300,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Some worn mesh hair does not render (visible in Firestorm)
 - [`viewer-near-avatar-stuck-coarse-sphere`](bugs/viewer-near-avatar-stuck-coarse-sphere.md)
   — A nearby avatar stays a coarse sphere even as the camera closes in
-- [`viewer-new-material-refused-on-second-life`](bugs/viewer-new-material-refused-on-second-life.md)
-  — Saving a PBR material to inventory is refused on Second Life
 - [`viewer-new-wearable-refused-on-second-life`](bugs/viewer-new-wearable-refused-on-second-life.md)
   — New wearables and a wearable's Save As are refused on Second Life
 - [`viewer-own-avatar-broken-after-teleport`](bugs/viewer-own-avatar-broken-after-teleport.md)
@@ -1354,7 +1352,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-lsl-mono-collision-model-under-lowered-limit`](bugs/server-lsl-mono-collision-model-under-lowered-limit.md)
   — A script 1 KB over its use collides in the runtime where Mono carries on
 
-## done (1553)
+## done (1554)
 
 ### protocol
 
@@ -2543,6 +2541,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-neighbour-object-caps-use-root-region`](done/viewer-neighbour-object-caps-use-root-region.md)
   — Per-object capability requests ask the root region about a neighbour's
   objects
+- [`viewer-new-material-refused-on-second-life`](done/viewer-new-material-refused-on-second-life.md)
+  — Saving a PBR material to inventory is refused on Second Life
 - [`viewer-new-notecard-unreadable-on-opensim`](done/viewer-new-notecard-unreadable-on-opensim.md)
   — A notecard created on OpenSim opened as "could not be read"
 - [`viewer-nonblocking-overlay-steals-focus`](done/viewer-nonblocking-overlay-steals-focus.md)
