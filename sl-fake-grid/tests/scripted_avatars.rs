@@ -305,6 +305,123 @@ mod test {
         Ok(())
     }
 
+    /// **A sit plays `sit` until the seat's script replaces it**, on both
+    /// flavours, as a viewer beside the sitter is told it: seated on the pose
+    /// ball, the sitter plays the built-in `sit` alone; the ball's
+    /// `llStopAnimation("sit")` leaves it playing nothing and its
+    /// `llStartAnimation` the pose; and standing up brings `stand` back under
+    /// the pose, which the stand does not stop (`avatar/sit-animation`,
+    /// 2026-11-12: OpenSim states each of these, and Second Life the start,
+    /// the stop and the pose kept past the stand).
+    #[tokio::test]
+    async fn a_sitter_plays_sit_until_its_seat_poses_it() -> Result<(), TestError> {
+        /// The built-in `sit`.
+        const SIT: uuid::Uuid = uuid::uuid!("1a5fe8ac-a804-8a5d-7cbd-56bd83184568");
+        let pose = sl_fake_grid::fixtures::scripted_avatar::POSE_ANIMATION;
+        let stand = sl_fake_grid::animations::STAND;
+        for imitated in [ImitatedGrid::SecondLife, ImitatedGrid::OpenSim] {
+            let avatar = ScriptedAvatar::new("Scripted", "Sitter")
+                .answering(AnswerPolicy::agreeable())
+                .after_ticks(
+                    1,
+                    AvatarAction::Walk {
+                        to: beside_the_pose_ball()?,
+                    },
+                )
+                .after_ticks(1, AvatarAction::Sit(named(POSE_BALL)))
+                .after_ticks(0, AvatarAction::AwaitChat("Posing".to_owned()))
+                .after_ticks(5, AvatarAction::Stand);
+            let grid = grid(imitated, avatar).await?;
+            let observer = Client::connect(LoginParams {
+                login_uri: grid.login_uri(),
+                request: LoginRequest::new(
+                    "Test",
+                    "User",
+                    "password",
+                    StartLocation::Last,
+                    "sl-fake-grid-scripted-avatars",
+                    "0.0",
+                ),
+            })
+            .await?;
+            let (event_tx, mut events) = mpsc::channel::<Event>(256);
+            let (_command_tx, command_rx) = mpsc::channel::<Command>(8);
+            let (diag_tx, _diag_rx) = mpsc::channel(16);
+            let run = tokio::spawn(async move {
+                let _ended = observer.run(event_tx, diag_tx, command_rx).await;
+            });
+            // Every set the observer is told, read on as the grid ticks so
+            // the client never waits on a full channel.
+            let (sets_tx, mut sets) = mpsc::unbounded_channel();
+            let watch = tokio::spawn(async move {
+                while let Some(event) = events.recv().await {
+                    if let Event::AvatarAnimation {
+                        avatar_id,
+                        animations,
+                        ..
+                    } = event
+                        && sets_tx
+                            .send((
+                                avatar_id,
+                                animations
+                                    .iter()
+                                    .map(|playing| playing.anim_id)
+                                    .collect::<Vec<_>>(),
+                            ))
+                            .is_err()
+                    {
+                        return;
+                    }
+                }
+            });
+
+            let _transcript = play(&grid).await?;
+            let sitter = grid
+                .scripted_avatar("Scripted Sitter")
+                .and_then(sl_fake_grid::ScriptedAvatarHandle::agent_id)
+                .ok_or("the scripted avatar has no agent id")?;
+            // The sitter's sets, from the first that holds `sit`, until it
+            // stands again under its pose.
+            let mut told: Vec<Vec<uuid::Uuid>> = Vec::new();
+            tokio::time::timeout(WAIT, async {
+                while told.last() != Some(&vec![stand, pose]) {
+                    while let Ok((avatar, set)) = sets.try_recv() {
+                        if avatar == sitter
+                            && (!told.is_empty() || set.contains(&SIT))
+                            && told.last() != Some(&set)
+                        {
+                            told.push(set);
+                        }
+                    }
+                    grid.advance_one_tick(REGION)
+                        .await
+                        .map_err(|error| error.to_string())?;
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+                Ok::<(), String>(())
+            })
+            .await
+            .map_err(|_elapsed| format!("{imitated:?}: the sitter was told {told:#?}"))??;
+            // A stand that puts the avatar above the ground (OpenSim's) drops
+            // it first: its fall and landing under the pose are its posture's.
+            let told: Vec<Vec<uuid::Uuid>> = told
+                .into_iter()
+                .filter(|set| {
+                    !matches!(set.as_slice(), [first, second] if *second == pose && *first != stand)
+                })
+                .collect();
+            assert_eq!(
+                told,
+                vec![vec![SIT], vec![], vec![pose], vec![stand, pose]],
+                "{imitated:?}"
+            );
+            grid.shutdown();
+            run.abort();
+            watch.abort();
+        }
+        Ok(())
+    }
+
     /// **The named scene, as a harness runs it**: its region ticking by itself,
     /// its sitter seated on the pose ball, and a viewer that logs in well after
     /// the pose ball has posed it, as `sl-crosscheck`'s does, told on arrival

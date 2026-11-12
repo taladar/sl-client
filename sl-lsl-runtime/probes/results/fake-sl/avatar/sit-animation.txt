@@ -1,0 +1,34 @@
+grid: fake-sl
+date: 2026-11-12
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Fake Region
+engine: sl-lsl-runtime imitating Mono
+settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
+
+PROBE avatar/sit-animation rec=start region="Fake Region" channel="Second Life Server" version="sl-fake-grid 0.1.0"
+PROBE avatar/sit-animation rec=playing step=0 why=before has_sit=0 has_dance=0 info_sitting=0 info_on_object=0
+PROBE avatar/sit-animation rec=waiting drive=sit
+# sit sit_position=<0.000, 0.000, 0.850> sit_rotation=<0.000, 0.000, 0.000, 1.000> camera_eye=<0.000, 0.000, 0.000> camera_at=<0.000, 0.000, 0.000> force_mouselook=0 autopilot=1
+# animations avatar=owner playing="sit@other-object"
+PROBE avatar/sit-animation rec=asked step=0 mask=16
+PROBE avatar/sit-animation rec=held step=0 answer=16 perms=16
+# animations avatar=owner playing=""
+PROBE avatar/sit-animation rec=playing step=1 why=seated state="Sitting" has_sit=1 has_dance=0 info_sitting=1 info_on_object=1
+PROBE avatar/sit-animation rec=did step=1 call=llStopAnimation anim=sit
+PROBE avatar/sit-animation rec=playing step=2 why=sit-stopped state="Sitting" has_sit=0 has_dance=0 info_sitting=1 info_on_object=1
+# animations avatar=owner playing="sit"
+PROBE avatar/sit-animation rec=did step=2 call=llStartAnimation anim=sit
+# animations avatar=owner playing=""
+PROBE avatar/sit-animation rec=playing step=3 why=sit-started state="Sitting" has_sit=1 has_dance=0 info_sitting=1 info_on_object=1
+# animations avatar=owner playing="dance1"
+PROBE avatar/sit-animation rec=did step=3 call=llStopAnimation anim=sit call=llStartAnimation anim=dance1
+PROBE avatar/sit-animation rec=playing step=4 why=posed state="Sitting" has_sit=0 has_dance=1 info_sitting=1 info_on_object=1
+PROBE avatar/sit-animation rec=waiting drive=stand
+# stand
+# animations avatar=owner playing="dance1,stand@other-object"
+# animations avatar=owner playing="dance1,falldown@other-object"
+# animations avatar=owner playing="dance1,land@other-object"
+# animations avatar=owner playing="dance1,stand@other-object"
+# animations avatar=owner playing="stand@other-object"
+PROBE avatar/sit-animation rec=playing step=5 why=stood has_sit=0 has_dance=1 info_sitting=0 info_on_object=0
+PROBE avatar/sit-animation rec=end

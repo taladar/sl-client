@@ -39,6 +39,22 @@ pub(crate) struct RegionAvatars {
     overrides: BTreeMap<AgentKey, BTreeMap<String, (String, String)>>,
 }
 
+impl RegionAvatars {
+    /// What `agent` plays in `posture`: a script's override of the
+    /// posture's state, or the built-in.
+    pub(crate) fn posture_animation(
+        &self,
+        agent: AgentKey,
+        posture: crate::movement::Posture,
+    ) -> uuid::Uuid {
+        self.overrides
+            .get(&agent)
+            .and_then(|overrides| overrides.get(posture.state_name()))
+            .and_then(|(_name, asset)| uuid::Uuid::parse_str(asset).ok())
+            .unwrap_or_else(|| posture.animation())
+    }
+}
+
 /// The rotation whose forward, left and up axes are `at`, `left` and `up`
 /// (`llAxes2Rot`).
 fn axes_to_rotation(at: &Vector, left: &Vector, up: &Vector) -> Rotation {
@@ -210,16 +226,7 @@ impl RegionHost<'_> {
                 let _gone = overrides.remove(state);
             }
         }
-        if state == "Standing" {
-            let standing = overrides
-                .get("Standing")
-                .and_then(|(_, asset)| uuid::Uuid::parse_str(asset).ok())
-                .unwrap_or(crate::animations::STAND);
-            self.deliveries.push(Delivery::StandAs {
-                agent: key,
-                animation: standing,
-            });
-        }
+        self.deliveries.push(Delivery::Overridden { agent: key });
     }
 
     /// `llGetAnimationOverride`.

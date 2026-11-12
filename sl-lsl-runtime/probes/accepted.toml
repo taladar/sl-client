@@ -1692,3 +1692,13 @@ between = ["opensim-yengine", "fake-opensim"]
 record = "changed"
 fields = { bits = "LINK", link = "0", prims = "1" }
 reason = "The unlink raises changed in both prims in the same frame, and which prints first is scheduling"
+
+# --- avatars: the test account's own animation overrider ---
+
+[[difference]]
+probe = "avatar/sit-animation"
+between = ["aditi", "fake-sl"]
+record = "playing"
+fields = { why = "seated" }
+field = "has_sit"
+reason = "the aditi account wears a scripted animation overrider, which in two of three runs played its own asset for Sitting in place of the built-in sit; the run without it showed sit, as OpenSim does and the fake grid models"

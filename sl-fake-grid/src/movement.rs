@@ -156,6 +156,8 @@ pub enum Posture {
     Flying,
     /// Sitting on the ground.
     SittingOnGround,
+    /// Sitting on a prim.
+    SittingOnPrim,
 }
 
 impl Posture {
@@ -178,6 +180,7 @@ impl Posture {
             Self::HoverDown => "Hovering Down",
             Self::Flying => "Flying",
             Self::SittingOnGround => "Sitting on Ground",
+            Self::SittingOnPrim => "Sitting",
         }
     }
 
@@ -201,7 +204,7 @@ impl Posture {
             Self::CrouchWalking => WALKING | CROUCHING,
             Self::Crouching => CROUCHING,
             Self::PreJump | Self::Jumping | Self::Falling => IN_AIR,
-            Self::SittingOnGround => SITTING,
+            Self::SittingOnGround | Self::SittingOnPrim => SITTING,
             Self::Standing | Self::Landing | Self::StandingUp => 0,
         }
     }
@@ -225,6 +228,7 @@ impl Posture {
             Self::HoverDown => "hover_down",
             Self::Flying => "fly",
             Self::SittingOnGround => "sit_ground_constrained",
+            Self::SittingOnPrim => "sit",
         }
     }
 
@@ -247,6 +251,7 @@ impl Posture {
             Self::HoverDown => uuid::uuid!("20f063ea-8306-2562-0b07-5c853b37b31e"),
             Self::Flying => uuid::uuid!("aec4610c-757f-bc4e-c092-c6e9caf18daf"),
             Self::SittingOnGround => uuid::uuid!("1a2bd58e-87ff-0df8-0b4c-53e047b0bb6e"),
+            Self::SittingOnPrim => uuid::uuid!("1a5fe8ac-a804-8a5d-7cbd-56bd83184568"),
         }
     }
 
@@ -455,15 +460,24 @@ impl Motion {
         }
     }
 
-    /// Holds the avatar still: what a seat does to it.
-    pub fn halt(&mut self) {
+    /// Holds the avatar still and sits it: what a seat does to it. Returns
+    /// whether the posture changed, so the animation set is to be stated
+    /// again: both grids put a seated avatar in the built-in `sit`
+    /// (`avatar/sit`, `avatar/sit-animation`).
+    pub fn halt(&mut self) -> bool {
         self.velocity = Vector {
             x: 0.0,
             y: 0.0,
             z: 0.0,
         };
         self.braking = 0.0;
-        self.set_posture(Posture::Standing);
+        self.set_posture(Posture::SittingOnPrim)
+    }
+
+    /// Stands up an avatar its seat let go of, and says whether it was
+    /// sitting on one.
+    pub fn rise(&mut self) -> bool {
+        self.posture == Posture::SittingOnPrim && self.set_posture(Posture::Standing)
     }
 
     /// Moves the posture on, restarting its clock when it changes, and says
@@ -523,6 +537,9 @@ impl Motion {
         self.in_posture = self.in_posture.saturating_add(step);
         let finished = core::mem::take(&mut self.finish_owed);
         let tapped = core::mem::take(&mut self.jump_tapped);
+        // A tick that steps the avatar finds it on no seat: one it sat on has
+        // let it go, and it stands where the stand put it.
+        let _rose = self.rise();
         let mut at = position.clone();
         let floor = ground.height_at(at.x, at.y) + AVATAR_CENTRE_ABOVE_GROUND_M;
         let flying = self.controls.contains(ControlFlags::FLY);
@@ -889,6 +906,55 @@ fn ground_plane(ground: &impl Ground, at: &Vector) -> [f32; 4] {
     [nx, ny, nz, nz.mul_add(foot_z, nx.mul_add(at.x, ny * at.y))]
 }
 
+/// Puts the default of the animation set of the agent in session `state` at
+/// what its posture plays — a script's override of the posture's state
+/// (`llSetAnimationOverride`), or the built-in — and states the set to its
+/// viewer and to the region's others when that changed it.
+pub(crate) fn state_posture(state: &mut SimState, now: Instant) {
+    let agent = state.avatar.agent_id;
+    let animation = state
+        .world
+        .lock()
+        .script_instances
+        .posture_animation(agent, state.motion.posture());
+    if !state.animations.set_default(animation) {
+        return;
+    }
+    crate::world::push_own_animation(
+        &state.avatar,
+        &state.animations,
+        state.animation_policy,
+        &mut state.sim,
+        now,
+    );
+    // Every statement the agent is sent, the others are sent too.
+    let statement = state.animations.observed(state.animation_policy, agent);
+    state.tell_others(|resident| {
+        resident.animations.clone_from(&statement);
+        RegionChange::ResidentAnimated {
+            agent,
+            statement: Box::new(statement),
+        }
+    });
+}
+
+/// Sits the agent in session `state`, which a seat has just taken, and states
+/// its `sit`: at once, as OpenSim's `HandleAgentSit` does, so the seat's
+/// script, which hears `changed` in a later tick, finds it playing.
+pub(crate) fn seat(state: &mut SimState, now: Instant) {
+    if state.motion.halt() {
+        state_posture(state, now);
+    }
+}
+
+/// Stands up the agent in session `state`, which its seat has just let go
+/// of, and states its stand at once, as both grids do.
+pub(crate) fn rise(state: &mut SimState, now: Instant) {
+    if state.motion.rise() {
+        state_posture(state, now);
+    }
+}
+
 /// Runs one tick of the agent's avatar in session `state`: moves it, states
 /// its animations when they change, reports it when an update is due, and
 /// pushes the parcel it walks onto. A child circuit, an agent that has not
@@ -898,7 +964,7 @@ pub(crate) fn advance(state: &mut SimState, step: Duration, now: Instant) {
         return;
     }
     if state.sim.seated_on().is_some() {
-        state.motion.halt();
+        seat(state, now);
         return;
     }
     let placement = state.sim.arrival_position().clone();
@@ -936,30 +1002,8 @@ pub(crate) fn advance(state: &mut SimState, step: Duration, now: Instant) {
     if to != from {
         crate::driver::refresh_privacy(state, now);
     }
-    if stepped.posture_changed
-        && state
-            .animations
-            .set_default(state.motion.posture().animation())
-    {
-        crate::world::push_own_animation(
-            &state.avatar,
-            &state.animations,
-            state.animation_policy,
-            &mut state.sim,
-            now,
-        );
-        // Every statement the agent is sent, the others are sent too.
-        let statement = state
-            .animations
-            .observed(state.animation_policy, state.avatar.agent_id);
-        let agent = state.avatar.agent_id;
-        state.tell_others(|resident| {
-            resident.animations.clone_from(&statement);
-            RegionChange::ResidentAnimated {
-                agent,
-                statement: Box::new(statement),
-            }
-        });
+    if stepped.posture_changed {
+        state_posture(state, now);
     }
     if let Some(motion) = stepped.update {
         let update = sl_proto::TerseUpdate {
@@ -1101,6 +1145,7 @@ mod test {
             Posture::HoverDown,
             Posture::Flying,
             Posture::SittingOnGround,
+            Posture::SittingOnPrim,
         ] {
             assert_eq!(
                 sl_anim::builtin_animation_by_name(posture.animation_name())

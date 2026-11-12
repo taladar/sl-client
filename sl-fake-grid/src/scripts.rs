@@ -319,6 +319,17 @@ impl Default for RegionScripts {
 }
 
 impl RegionScripts {
+    /// What `agent` plays in `posture`: a script's override of the
+    /// posture's state (`llSetAnimationOverride`), or the built-in.
+    #[must_use]
+    pub(crate) fn posture_animation(
+        &self,
+        agent: AgentKey,
+        posture: crate::movement::Posture,
+    ) -> uuid::Uuid {
+        self.avatars.posture_animation(agent, posture)
+    }
+
     /// No scripts yet, an engine of `flavour` ticking every `step`, and the
     /// random draws seeded with `seed`.
     #[must_use]
@@ -1236,12 +1247,11 @@ enum Delivery {
         /// Whether it starts.
         start: bool,
     },
-    /// What the avatar stands as (`llSetAnimationOverride` of `Standing`).
-    StandAs {
+    /// The avatar's animation overrides changed (`llSetAnimationOverride`,
+    /// `llResetAnimationOverride`): what its posture plays may have.
+    Overridden {
         /// The avatar.
         agent: AgentKey,
-        /// The animation.
-        animation: uuid::Uuid,
     },
     /// The avatar's controls taken or released (`llTakeControls`,
     /// `llReleaseControls`).
@@ -3643,7 +3653,7 @@ async fn deliver(core: &Arc<GridCore>, index: usize, deliveries: Vec<Delivery>) 
             | Delivery::Parcel { agent, .. }
             | Delivery::Media { agent, .. }
             | Delivery::Animate { agent, .. }
-            | Delivery::StandAs { agent, .. }
+            | Delivery::Overridden { agent }
             | Delivery::Controls { agent, .. }
             | Delivery::FollowCam { agent, .. }
             | Delivery::Teleport { agent, .. } => *agent,
@@ -3674,18 +3684,13 @@ async fn deliver(core: &Arc<GridCore>, index: usize, deliveries: Vec<Delivery>) 
                     Delivery::Animate {
                         animation, start, ..
                     } => {
-                        if state
-                            .animations
-                            .apply(&[(sl_proto::AnimationKey::from(*animation), *start)])
-                        {
+                        if state.animations.apply_scripted(*animation, *start) {
                             state_animations(state, now)?;
                         }
                         Ok(())
                     }
-                    Delivery::StandAs { animation, .. } => {
-                        if state.animations.set_default(*animation) {
-                            state_animations(state, now)?;
-                        }
+                    Delivery::Overridden { .. } => {
+                        crate::movement::state_posture(state, now);
                         Ok(())
                     }
                     _ => send(&mut state.sim, &delivery, now),
@@ -3775,7 +3780,9 @@ fn send(sim: &mut SimSession, delivery: &Delivery, now: Instant) -> Result<(), s
         },
         // Sent with the session's animation set, above; a teleport is the
         // grid's, not the session's.
-        Delivery::Animate { .. } | Delivery::StandAs { .. } | Delivery::Teleport { .. } => Ok(()),
+        Delivery::Animate { .. } | Delivery::Overridden { .. } | Delivery::Teleport { .. } => {
+            Ok(())
+        }
         Delivery::Parcel { parcel, .. } => {
             // Both grids push a changed parcel down the event queue.
             sim.enqueue_parcel_properties(parcel);

@@ -19,7 +19,10 @@
 //! - leave a start of something already playing, a stop of something not
 //!   playing and a stop of the nil id (the reference viewer's reset of the
 //!   animation-state overrides) changing nothing;
-//! - keep the default when it is stopped by hand;
+//! - keep the default when it is stopped by hand, but drop it when a script
+//!   stops it (`llStopAnimation("sit")` on a seated avatar leaves nothing
+//!   playing until the posture changes: `avatar/sit-animation`, 2026-11-12,
+//!   on OpenSim, after `ScenePresenceAnimator.RemoveAnimation(id, true)`);
 //! - start nothing of their own for typing or for the away control;
 //! - never drop a one-shot by themselves: the viewer that plays it says when
 //!   it has run out.
@@ -118,8 +121,8 @@ struct Entry {
 /// One avatar's animation set.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AnimationSet {
-    /// The posture the avatar is in.
-    default: Entry,
+    /// The posture the avatar is in; [`None`] once a script stopped it.
+    default: Option<Entry>,
     /// What was started on top of it, in the order it was.
     started: Vec<Entry>,
     /// The sequence number the next start is given.
@@ -137,10 +140,10 @@ impl AnimationSet {
     #[must_use]
     pub const fn arriving() -> Self {
         Self {
-            default: Entry {
+            default: Some(Entry {
                 anim_id: STAND,
                 sequence_id: 1,
-            },
+            }),
             started: Vec::new(),
             next_sequence: 2,
         }
@@ -151,17 +154,19 @@ impl AnimationSet {
     #[must_use]
     pub fn playing(&self, policy: AnimationPolicy, agent: AgentKey) -> Vec<PlayingAnimation> {
         let source = |id: Uuid| policy.names_sources.then(|| ObjectKey::from(id));
-        core::iter::once(PlayingAnimation {
-            anim_id: self.default.anim_id,
-            sequence_id: self.default.sequence_id,
-            source_id: source(Uuid::nil()),
-        })
-        .chain(self.started.iter().map(|entry| PlayingAnimation {
-            anim_id: entry.anim_id,
-            sequence_id: entry.sequence_id,
-            source_id: source(agent.uuid()),
-        }))
-        .collect()
+        self.default
+            .iter()
+            .map(|entry| PlayingAnimation {
+                anim_id: entry.anim_id,
+                sequence_id: entry.sequence_id,
+                source_id: source(Uuid::nil()),
+            })
+            .chain(self.started.iter().map(|entry| PlayingAnimation {
+                anim_id: entry.anim_id,
+                sequence_id: entry.sequence_id,
+                source_id: source(agent.uuid()),
+            }))
+            .collect()
     }
 
     /// The set as the region's other viewers are told it under `policy`
@@ -176,7 +181,7 @@ impl AnimationSet {
             animations,
             // The grid that names sources to the agent itself names the
             // default's alone to anybody else.
-            sources: if policy.names_sources {
+            sources: if policy.names_sources && self.default.is_some() {
                 vec![ObjectKey::from(Uuid::nil())]
             } else {
                 Vec::new()
@@ -189,16 +194,37 @@ impl AnimationSet {
     /// under its sequence number so a statement lists one locomotion state at
     /// a time. Returns whether the set changed.
     pub fn set_default(&mut self, anim_id: Uuid) -> bool {
-        if self.default.anim_id == anim_id {
-            return false;
+        match &mut self.default {
+            Some(entry) if entry.anim_id == anim_id => false,
+            Some(entry) => {
+                entry.anim_id = anim_id;
+                true
+            }
+            None => {
+                self.default = Some(Entry {
+                    anim_id,
+                    sequence_id: 1,
+                });
+                true
+            }
         }
-        self.default.anim_id = anim_id;
-        true
     }
 
     /// Whether `anim_id` is in the set.
     fn holds(&self, anim_id: Uuid) -> bool {
-        self.default.anim_id == anim_id || self.started.iter().any(|entry| entry.anim_id == anim_id)
+        self.default.is_some_and(|entry| entry.anim_id == anim_id)
+            || self.started.iter().any(|entry| entry.anim_id == anim_id)
+    }
+
+    /// Folds in a script's `llStartAnimation` or `llStopAnimation` of
+    /// `anim_id` and returns whether the set changed: as a viewer's request,
+    /// but a stop of the default drops it.
+    pub fn apply_scripted(&mut self, anim_id: Uuid, start: bool) -> bool {
+        if !start && self.default.is_some_and(|entry| entry.anim_id == anim_id) {
+            self.default = None;
+            return true;
+        }
+        self.apply(&[(AnimationKey::from(anim_id), start)])
     }
 
     /// Folds one request's `(animation, start)` pairs in, in order, and returns
@@ -333,6 +359,24 @@ mod tests {
             ]
         );
         assert_eq!(sources(crate::ImitatedGrid::OpenSim), vec![None, None]);
+    }
+
+    #[test]
+    fn a_script_stops_the_default_until_the_posture_changes() {
+        let sit = Uuid::from_u128(5);
+        let mut set = AnimationSet::arriving();
+        assert!(set.set_default(sit));
+        assert!(
+            set.apply_scripted(sit, false),
+            "the seat's script stops sit"
+        );
+        assert_eq!(stated(&set), vec![]);
+        assert!(set.apply_scripted(sit, true), "and starts it as its own");
+        assert_eq!(stated(&set), vec![(sit, 2)]);
+        assert!(set.apply_scripted(sit, false));
+        assert!(set.apply_scripted(Uuid::from_u128(6), true), "the pose");
+        assert!(set.set_default(STAND), "the stand");
+        assert_eq!(stated(&set), vec![(STAND, 1), (Uuid::from_u128(6), 3)]);
     }
 
     #[test]

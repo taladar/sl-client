@@ -1,5 +1,5 @@
 grid: fake-opensim
-date: 2026-11-11
+date: 2026-11-12
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating YEngine
@@ -10,9 +10,9 @@ PROBE avatar/animation rec=start region="Fake Region" channel="OpenSim" version=
 PROBE avatar/animation rec=playing step=0 of=owner why=before state="Standing" has_dance=0
 PROBE avatar/animation rec=waiting drive=answer grant=32784
 # answer grant=32784
+# animations avatar=owner playing="dance1,stand"
 PROBE avatar/animation rec=held step=0 answer=32784 perms=32784
 PROBE avatar/animation rec=did step=1 call=llStartAnimation anim=dance1
-# animations avatar=owner playing="dance1,stand"
 # animations avatar=owner playing="stand"
 PROBE avatar/animation rec=playing step=2 of=owner why=started state="Standing" has_dance=1
 PROBE avatar/animation rec=did step=2 call=llStopAnimation anim=dance1
@@ -33,7 +33,9 @@ PROBE avatar/animation rec=waiting drive=answer by=other grant=16
 # answer by=other grant=16
 PROBE avatar/animation rec=held step=7 answer=16 perms=16
 PROBE avatar/animation rec=did step=8 call=llStartAnimation anim=dance1
+# animations avatar=other playing="dance1,stand"
 PROBE avatar/animation rec=playing step=9 of=other why=started state="Standing" has_dance=1
 PROBE avatar/animation rec=did step=9 call=llStopAnimation anim=dance1
+# animations avatar=other playing="stand"
 PROBE avatar/animation rec=playing step=10 of=other why=stopped state="Standing" has_dance=0
 PROBE avatar/animation rec=end

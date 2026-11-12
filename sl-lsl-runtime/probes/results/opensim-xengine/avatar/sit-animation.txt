@@ -1,0 +1,36 @@
+grid: opensim-xengine
+date: 2026-11-12
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Default Region
+engine: XEngine
+settings: OpenSimDefaults.ini: [YEngine] MinTimerInterval=0.1; [XEngine] MinTimerInterval unset (LSL_Api default 0.5); ScriptDelayFactor=1.0, SensorMaxRange=96, SensorMaxResults=16, UseLlCastRayV3=false (defaults) on both; [YEngine] ScriptHeapSize=1024 KiB, ScriptStackSize=2048 KiB (defaults); OpenSim.ini [Network] OutboundDisallowForUserScriptsExcept=127.0.0.1:9000 (the simulator itself), [ScriptsHttpRequestModule] and llHTTPRequest limits at their defaults
+
+# chat type=say from="Object" length=14 text="Script running"
+PROBE avatar/sit-animation rec=start region="Default Region" channel="OpenSim" version="OpenSim 0.9.2.1 Yeti Dev   36f6d16 (Unix/Mono)"
+PROBE avatar/sit-animation rec=playing step=0 why=before has_sit=0 has_dance=0 info_sitting=0 info_on_object=0
+PROBE avatar/sit-animation rec=waiting drive=sit
+# chat by=other type=say from="Object" length=14 text="Script running"
+# sit sit_position=<0.000, 0.000, 0.500> sit_rotation=<0.000, 0.000, 0.000, 1.000> camera_eye=<0.000, 0.000, 0.000> camera_at=<0.000, 0.000, 0.000> force_mouselook=0 autopilot=1
+PROBE avatar/sit-animation rec=asked step=0 mask=16
+PROBE avatar/sit-animation rec=held step=0 answer=16 perms=16
+# animations avatar=owner playing="sit"
+PROBE avatar/sit-animation rec=playing step=1 why=seated state="Sitting" has_sit=1 has_dance=0 info_sitting=1 info_on_object=1
+PROBE avatar/sit-animation rec=did step=1 call=llStopAnimation anim=sit
+PROBE avatar/sit-animation rec=playing step=2 why=sit-stopped state="Sitting" has_sit=0 has_dance=0 info_sitting=1 info_on_object=1
+PROBE avatar/sit-animation rec=did step=2 call=llStartAnimation anim=sit
+# animations avatar=owner playing="sit@probe"
+PROBE avatar/sit-animation rec=playing step=3 why=sit-started state="Sitting" has_sit=1 has_dance=0 info_sitting=1 info_on_object=1
+PROBE avatar/sit-animation rec=did step=3 call=llStopAnimation anim=sit call=llStartAnimation anim=dance1
+# animations avatar=owner playing=""
+# animations avatar=owner playing="dance1@probe"
+PROBE avatar/sit-animation rec=playing step=4 why=posed state="Sitting" has_sit=0 has_dance=1 info_sitting=1 info_on_object=1
+PROBE avatar/sit-animation rec=waiting drive=stand
+# stand
+# follow-cam-clear object=probe
+# animations avatar=owner playing="dance1@probe,stand"
+# animations avatar=owner playing="dance1@probe,falldown"
+PROBE avatar/sit-animation rec=playing step=5 why=stood has_sit=0 has_dance=1 info_sitting=0 info_on_object=0
+PROBE avatar/sit-animation rec=end
+# animations avatar=owner playing="falldown"
+# animations avatar=owner playing="land"
+# animations avatar=owner playing="stand"

@@ -65,7 +65,27 @@ the script's view of it.
 | what is held after `llUnSit` or standing up | 1040: `TAKE_CONTROLS` and `CONTROL_CAMERA` are dropped, `TRIGGER_ANIMATION` and `TRACK_CAMERA` kept, the key unchanged | the same | the same |
 | a follow camera when the sitter stands | nothing sent | a `ClearFollowCamProperties` for the seat, whether a camera was set or not | — |
 | a sit on the prim with its target cleared (`llSitTarget(ZERO_VECTOR, …)`) | seated (2 prims, the avatar the last link) but `llAvatarOnSitTarget` `NULL_KEY`; the response puts the seat at `<-0.34, 0, 0.55>`, turned half round | the same to the script; the response says `<0.415, 0, 0.9>`, unturned | each flavour's |
-| the sitter's animation | the built-in `sit`, sourced from an object that is not the seat | `sit`, with no source | none |
+| the sitter's animation | the built-in `sit`, sourced from an object that is not the seat | `sit`, with no source | `sit`, stated as the avatar is seated, before the seat's script hears `changed` |
+
+On 2026-11-12 the probe `avatar/sit-animation` sat the owner on a prim
+with a sit target and had the seat's script read and change the sitter's
+animations a second apart (aditi's Mauve, `2026-11-10.42914476267`; OpenSim
+0.9.2.1, both engines agreeing; and both fake flavours, which agree with
+their grids on every record but the one below the table):
+
+| behaviour | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| seated: `llGetAnimation`, `llGetAgentInfo` | `Sitting`; `AGENT_SITTING` and `AGENT_ON_OBJECT` set; `sit` in `llGetAnimationList` | the same | the same |
+| `llStopAnimation("sit")` by the seat's script | `sit` gone, nothing in its place: the avatar plays nothing, still `Sitting` | the same (`RemoveAnimation(id, true)` drops the default) | the same |
+| then `llStartAnimation("sit")` | `sit` again, sourced from the seat as any started animation | the same | the same |
+| stopping `sit` and starting `dance1` (a pose ball's pose) | `dance1` alone | the same | the same |
+| standing up | the posture's `stand` back, and `dance1` **kept**: a stand does not stop what the seat started | the same | the same |
+
+An animation overrider hides the built-in: of three aditi runs only the
+second showed `sit` seated; in the first and in the committed third the
+account's overrider (`gridspec-animations`) played its own asset for
+`Sitting`, so that result reads `has_sit=0` once seated
+(`probes/accepted.toml` against `fake-sl`). Every other record agrees.
 
 ### Controls
 

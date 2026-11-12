@@ -824,6 +824,15 @@ impl SharedSim {
                     }));
                 }
                 drop(world);
+                // A sit or a stand changes the posture with it, before the
+                // seat's script hears of it.
+                match &event {
+                    ServerEvent::SitRequested { .. } if state.sim.seated_on().is_some() => {
+                        crate::movement::seat(state, now);
+                    }
+                    ServerEvent::StoodUp { .. } => crate::movement::rise(state, now),
+                    _other => {}
+                }
             }
             crate::economy_policy::answer_economy_request(
                 &state.economy,
@@ -1399,6 +1408,7 @@ pub(crate) async fn run_region_watcher(
                                             state.publish(shown);
                                         }
                                         drop(world);
+                                        crate::movement::rise(state, now);
                                         Ok(())
                                     }
                                     RegionChange::Seated {
@@ -1429,6 +1439,7 @@ pub(crate) async fn run_region_watcher(
                                             state.publish(shown);
                                         }
                                         drop(world);
+                                        crate::movement::seat(state, now);
                                         sent
                                     }
                                     // Whoever is shown the wearer is shown
