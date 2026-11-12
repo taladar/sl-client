@@ -96,7 +96,9 @@ compiles all five, under Mono and LSL2 (measured on aditi on 2026-10-30 by
 `llRemoteLoadScript`, `llClearExperiencePermissions` and
 `llGetExperienceList`. They come from `keywords_lsl_unserved.xml`, a document
 of the same format holding only a `functions` map, kept apart so that a
-refresh of the served document stays a copy: signatures and argument names
+refresh of the served document stays a copy, and kept in `sl-lsl`
+(`sl_lsl::SECOND_LIFE_UNSERVED`) because the script editor adds it to the
+table a Second Life region serves as well: signatures and argument names
 from tailslide's `builtins.txt`, the 3-second delay of `llRemoteLoadScript`
 from LSL PyOptimizer's `fndata.txt`, and the energy of 10 every served
 function carries. `build.rs` merges the two and stops if a function is in

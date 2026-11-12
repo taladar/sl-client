@@ -171,6 +171,9 @@ pub use sl_proto::{WireLandmarkAsset, landmark_to_wire, parse_landmark};
 // The two encodings of an inventory item update: the AIS3 `PATCH` body this
 // runtime sends where the region grants AIS3, and the legacy UDP message.
 pub use sl_proto::{ais_item_update_body, update_inventory_item_message};
+// The functions Second Life compiles and leaves out of the `LSLSyntax` document
+// it serves, for the script editor to add to that table.
+pub use sl_proto::second_life_unserved_syntax;
 // The `GetTexture` capability name, so a frontend driving the texture store
 // directly (rather than the `Command::FetchTexture` path) can resolve the cap
 // URL from an [`SlCapabilities`] map and hand it to a [`BevyTextureFetcher`].

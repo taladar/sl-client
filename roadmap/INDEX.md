@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 333 |
 | blocked | 39 |
 | in-progress | 6 |
-| bugs | 30 |
-| done | 1552 |
+| bugs | 29 |
+| done | 1553 |
 | deferred | 30 |
 | wont-do | 24 |
 | **total** | **2143** |
@@ -1274,7 +1274,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-text-renderability-axis`](in-progress/viewer-ui-text-renderability-axis.md)
   — Upstream issue — font selection cannot see glyph-format renderability
 
-## bugs (30)
+## bugs (29)
 
 ### protocol
 
@@ -1296,8 +1296,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`viewer-live-opensim-world-renders-white`](bugs/viewer-live-opensim-world-renders-white.md)
   — The world renders all white at times on the live OpenSim grid
-- [`viewer-lsl-editor-flags-unserved-functions`](bugs/viewer-lsl-editor-flags-unserved-functions.md)
-  — The script editor marks five functions Second Life compiles as undefined
 - [`viewer-mesh-hair-not-rendering`](bugs/viewer-mesh-hair-not-rendering.md) —
   Some worn mesh hair does not render (visible in Firestorm)
 - [`viewer-near-avatar-stuck-coarse-sphere`](bugs/viewer-near-avatar-stuck-coarse-sphere.md)
@@ -1356,7 +1354,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-lsl-mono-collision-model-under-lowered-limit`](bugs/server-lsl-mono-collision-model-under-lowered-limit.md)
   — A script 1 KB over its use collides in the runtime where Mono carries on
 
-## done (1552)
+## done (1553)
 
 ### protocol
 
@@ -2442,6 +2440,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-lsl-semantic-pass` (done))
 - [`viewer-lsl-editor-completion`](done/viewer-lsl-editor-completion.md) — LSL
   editor autocomplete and signature help from the grid's table
+- [`viewer-lsl-editor-flags-unserved-functions`](done/viewer-lsl-editor-flags-unserved-functions.md)
+  — The script editor marks five functions Second Life compiles as undefined
 - [`viewer-lsl-editor-highlight`](done/viewer-lsl-editor-highlight.md) — LSL
   editor highlighting — colour, folding, brace match, outline (blocked by
   `viewer-lsl-editor-widget` (done), `viewer-lsl-lexer` (done))

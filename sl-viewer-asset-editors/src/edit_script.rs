@@ -34,7 +34,11 @@
 //! [`GridLslSyntax`], kept from the `LSLSyntax` document the session fetches —
 //! so a function the grid adds colours with no change here, and OpenSim's
 //! `os*` functions colour on OpenSim. When the table arrives (or changes, on a
-//! grid that serves another), every open script is coloured again.
+//! grid that serves another), every open script is coloured again. On Second
+//! Life the table also carries the five functions the grid compiles and leaves
+//! out of the document it serves (`sl_lsl::SECOND_LIFE_UNSERVED`), so a call to
+//! `llPointAt` is not flagged as undefined; a region whose features carry
+//! `OpenSimExtras` is OpenSim's, whose document is its own.
 //!
 //! Above the editor, an **outline** lists the script's globals, functions,
 //! states and their event handlers; picking one puts the caret on its name.
@@ -159,15 +163,17 @@ impl Plugin for EditScriptPlugin {
     /// script is open, so `open_script` spawns the instance and builds its
     /// content. The per-window systems are gated on there being a window.
     fn build(&self, app: &mut App) {
-        app.init_resource::<GridLslSyntax>().add_systems(
-            Update,
-            (
-                track_grid_lsl_syntax,
-                highlight_script_bodies,
-                (sync_script_outlines, jump_to_outline_item).chain(),
-            )
-                .chain(),
-        );
+        app.init_resource::<GridLslSyntax>()
+            .init_resource::<LslSyntaxSources>()
+            .add_systems(
+                Update,
+                (
+                    track_grid_lsl_syntax,
+                    highlight_script_bodies,
+                    (sync_script_outlines, jump_to_outline_item).chain(),
+                )
+                    .chain(),
+            );
         app.add_message::<OpenScript>().add_systems(
             Update,
             (
@@ -198,13 +204,69 @@ impl Plugin for EditScriptPlugin {
 #[derive(Resource, Debug, Clone, Default)]
 pub struct GridLslSyntax(pub Arc<LslSyntax>);
 
-/// Keep [`GridLslSyntax`] at the table the session last decoded.
-fn track_grid_lsl_syntax(mut events: MessageReader<SlEvent>, mut grid: ResMut<GridLslSyntax>) {
+/// What [`GridLslSyntax`] is made of: the table the session last decoded, and
+/// whether the region is OpenSim's — read from its simulator features, which
+/// only OpenSim fills `OpenSimExtras` in, so it reads Second Life until the
+/// first region's features arrive.
+#[derive(Resource, Debug)]
+struct LslSyntaxSources {
+    /// The table the grid served.
+    served: LslSyntax,
+    /// Whether the current region is an OpenSim one.
+    opensim: bool,
+    /// The functions Second Life compiles and leaves out of the document it
+    /// serves.
+    unserved: LslSyntax,
+}
+
+impl Default for LslSyntaxSources {
+    /// Nothing served yet, on Second Life, with the shipped supplement decoded.
+    fn default() -> Self {
+        let unserved = sl_client_bevy::second_life_unserved_syntax().unwrap_or_else(|error| {
+            error!("the shipped LSLSyntax supplement does not decode: {error}");
+            LslSyntax::default()
+        });
+        Self {
+            served: LslSyntax::default(),
+            opensim: false,
+            unserved,
+        }
+    }
+}
+
+impl LslSyntaxSources {
+    /// The table the editor works from: the served one, plus on Second Life
+    /// the functions the grid compiles and leaves out of it. A table not yet
+    /// served stays empty, since the semantic pass checks symbols only against
+    /// a table that has some — five functions alone would make every other
+    /// call undefined.
+    fn table(&self) -> LslSyntax {
+        let mut table = self.served.clone();
+        if !self.opensim && !table.is_empty() {
+            table.supplement(&self.unserved);
+        }
+        table
+    }
+}
+
+/// Keep [`GridLslSyntax`] at the table the session last decoded, for the
+/// grid the region is on.
+fn track_grid_lsl_syntax(
+    mut events: MessageReader<SlEvent>,
+    mut sources: ResMut<LslSyntaxSources>,
+    mut grid: ResMut<GridLslSyntax>,
+) {
     for event in events.read() {
-        if let SlSessionEvent::LslSyntax(syntax) = &event.0
-            && *grid.0 != **syntax
-        {
-            grid.0 = Arc::new((**syntax).clone());
+        match &event.0 {
+            SlSessionEvent::LslSyntax(syntax) => sources.served = (**syntax).clone(),
+            SlSessionEvent::SimulatorFeatures(features) => {
+                sources.opensim = features.open_sim_extras.is_some();
+            }
+            _ => continue,
+        }
+        let table = sources.table();
+        if *grid.0 != table {
+            grid.0 = Arc::new(table);
         }
     }
 }
@@ -1404,6 +1466,135 @@ mod tests {
                     experience,
                 }
             );
+        }
+    }
+
+    /// The editor's table: Second Life's served document plus the functions it
+    /// compiles and leaves out, so a call to one is not undefined; OpenSim's
+    /// document alone; nothing before a document is served.
+    mod grid_table {
+        use super::super::{GridLslSyntax, LslSyntaxSources, track_grid_lsl_syntax};
+        use bevy::prelude::*;
+        use pretty_assertions::assert_eq;
+        use sl_client_bevy::{OpenSimExtras, SimulatorFeatures, SlEvent, SlSessionEvent};
+        use sl_lsl::ast::TypeName;
+        use sl_lsl::{DiagnosticKind, LslArgument, LslFunction, LslSyntax, analyze, parse};
+
+        /// A served table holding `llSay` alone.
+        fn served() -> LslSyntax {
+            let mut syntax = LslSyntax::default();
+            let _prev = syntax.functions.insert(
+                "llSay".to_owned(),
+                LslFunction {
+                    arguments: vec![
+                        LslArgument {
+                            name: "channel".to_owned(),
+                            arg_type: Some(TypeName::Integer),
+                            tooltip: None,
+                        },
+                        LslArgument {
+                            name: "msg".to_owned(),
+                            arg_type: Some(TypeName::String),
+                            tooltip: None,
+                        },
+                    ],
+                    ..LslFunction::default()
+                },
+            );
+            syntax
+        }
+
+        /// The functions `source` calls that `syntax` reports undefined.
+        fn undefined(source: &str, syntax: &LslSyntax) -> Vec<String> {
+            analyze(&parse(source).script, syntax)
+                .into_iter()
+                .filter_map(|diagnostic| match diagnostic.kind {
+                    DiagnosticKind::UndefinedFunction { name } => Some(name),
+                    _ => None,
+                })
+                .collect()
+        }
+
+        /// A script calling one served and one unserved function.
+        const SCRIPT: &str = "default { state_entry() { llSay(0, \"hi\"); \
+                              llPointAt(<1.0, 2.0, 3.0>); llStopPointAt(); } }";
+
+        /// An app running the tracker alone.
+        fn tracker_app() -> App {
+            let mut app = App::new();
+            app.add_message::<SlEvent>()
+                .init_resource::<GridLslSyntax>()
+                .init_resource::<LslSyntaxSources>()
+                .add_systems(Update, track_grid_lsl_syntax);
+            app
+        }
+
+        /// Deliver `event` and run a frame.
+        fn deliver(app: &mut App, event: SlSessionEvent) {
+            app.world_mut().write_message(SlEvent(event));
+            app.update();
+        }
+
+        /// The table the editor holds now.
+        fn table(app: &App) -> LslSyntax {
+            (*app.world().resource::<GridLslSyntax>().0).clone()
+        }
+
+        /// On Second Life the five unserved functions are in the table, so
+        /// the semantic pass leaves a call to one alone; the served table
+        /// alone flags it, which is the bug.
+        #[test]
+        fn second_life_accepts_the_unserved_functions() {
+            assert_eq!(undefined(SCRIPT, &served()), ["llPointAt", "llStopPointAt"]);
+            let mut app = tracker_app();
+            deliver(&mut app, SlSessionEvent::LslSyntax(Box::new(served())));
+            let table = table(&app);
+            assert_eq!(undefined(SCRIPT, &table), Vec::<String>::new());
+            assert_eq!(table.functions.len(), 6);
+            // A call that is in neither stays undefined.
+            assert_eq!(
+                undefined("default { state_entry() { llNoSuch(); } }", &table),
+                ["llNoSuch"]
+            );
+        }
+
+        /// On OpenSim the table is the served one, whichever of the two
+        /// arrives first.
+        #[test]
+        fn opensim_keeps_its_own_document() {
+            let opensim = SimulatorFeatures {
+                open_sim_extras: Some(OpenSimExtras::default()),
+                ..SimulatorFeatures::default()
+            };
+            let mut app = tracker_app();
+            deliver(&mut app, SlSessionEvent::LslSyntax(Box::new(served())));
+            deliver(
+                &mut app,
+                SlSessionEvent::SimulatorFeatures(Box::new(opensim.clone())),
+            );
+            assert_eq!(table(&app), served());
+
+            let mut app = tracker_app();
+            deliver(
+                &mut app,
+                SlSessionEvent::SimulatorFeatures(Box::new(opensim)),
+            );
+            deliver(&mut app, SlSessionEvent::LslSyntax(Box::new(served())));
+            assert_eq!(table(&app), served());
+
+            // Back on Second Life, the supplement returns.
+            deliver(&mut app, SlSessionEvent::SimulatorFeatures(Box::default()));
+            assert_eq!(table(&app).functions.len(), 6);
+        }
+
+        /// Before a document is served the table stays empty, which keeps
+        /// the semantic pass from checking symbols at all.
+        #[test]
+        fn nothing_served_stays_empty() {
+            let mut app = tracker_app();
+            deliver(&mut app, SlSessionEvent::SimulatorFeatures(Box::default()));
+            assert!(table(&app).is_empty());
+            assert_eq!(undefined(SCRIPT, &table(&app)), Vec::<String>::new());
         }
     }
 

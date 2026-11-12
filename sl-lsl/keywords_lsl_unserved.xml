@@ -3,10 +3,15 @@
 serves lists (measured by sl-conformance's script-compile census on aditi).
 Signatures and argument names from tailslide's builtins.txt, the forced delay
 from LSL PyOptimizer's fndata.txt, the energy every served function carries.
-build.rs merges these into the library table; one that turns up in
-keywords_lsl_default.xml stops the build, and goes from here. -->
+An LSLSyntax document of its own, holding only functions: the script editor
+adds it to the table a Second Life region serves (sl_lsl::SECOND_LIFE_UNSERVED,
+decoded by sl-wire), and sl-lsl-runtime's build.rs merges it into the library
+table; one that turns up in keywords_lsl_default.xml stops that build, and goes
+from here. -->
 <llsd>
   <map>
+    <key>llsd-lsl-syntax-version</key>
+    <integer>2</integer>
     <key>functions</key>
     <map>
       <key>llClearExperiencePermissions</key>
