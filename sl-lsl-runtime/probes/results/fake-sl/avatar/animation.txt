@@ -5,16 +5,16 @@ region: Fake Region
 engine: sl-lsl-runtime imitating Mono
 settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
 
-# question permissions=32784 object="Object" owner="<first> <last>" experience=none
 PROBE avatar/animation rec=start region="Fake Region" channel="Second Life Server" version="sl-fake-grid 0.1.0"
+# question permissions=32784 object="Object" owner="<first> <last>" experience=none
 PROBE avatar/animation rec=playing step=0 of=owner why=before state="Standing" has_dance=0
 PROBE avatar/animation rec=waiting drive=answer grant=32784
 # answer grant=32784
-# animations avatar=owner playing="dance1,stand@other-object"
+# animations avatar=owner playing="dance1@probe,stand@other-object"
 PROBE avatar/animation rec=held step=0 answer=32784 perms=32784
 PROBE avatar/animation rec=did step=1 call=llStartAnimation anim=dance1
-# animations avatar=owner playing="stand@other-object"
 PROBE avatar/animation rec=playing step=2 of=owner why=started state="Standing" has_dance=1
+# animations avatar=owner playing="stand@other-object"
 PROBE avatar/animation rec=did step=2 call=llStopAnimation anim=dance1
 PROBE avatar/animation rec=playing step=3 of=owner why=stopped state="Standing" has_dance=0
 PROBE avatar/animation rec=did step=3 call=llStartAnimation anim=missing

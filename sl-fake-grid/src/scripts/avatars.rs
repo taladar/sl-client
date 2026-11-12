@@ -185,8 +185,15 @@ impl RegionHost<'_> {
         Some((account.agent_id.to_string(), here))
     }
 
-    /// `llStartAnimation`, `llStopAnimation`.
-    pub(super) fn animate_agent(&mut self, agent: &str, animation: &str, start: bool) {
+    /// `llStartAnimation`, `llStopAnimation` by a script in the prim
+    /// `object`.
+    pub(super) fn animate_agent(
+        &mut self,
+        agent: &str,
+        animation: &str,
+        start: bool,
+        object: sl_types::key::ObjectKey,
+    ) {
         let (Some(agent), Ok(animation)) =
             (Self::agent_named(agent), uuid::Uuid::parse_str(animation))
         else {
@@ -196,6 +203,7 @@ impl RegionHost<'_> {
             agent,
             animation,
             start,
+            object,
         });
     }
 

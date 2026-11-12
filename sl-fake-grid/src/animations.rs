@@ -45,11 +45,11 @@ pub struct AnimationPolicy {
     /// (`ScenePresenceAnimator.avnChangeAnim` ends in `SendAnimPack` whatever
     /// the blocks did).
     pub restates_unchanged: bool,
-    /// Whether a statement names a source for every entry — the nil id for
-    /// the default, the agent for what it started — as Second Life's
-    /// statements to the agent itself do. OpenSim names none for what the
-    /// agent started (`LLClientView.SendAnimations` lists the objects'
-    /// entries only).
+    /// Whether a statement to the agent itself names a source for every
+    /// entry — the nil id for the default, the agent for what it started, the
+    /// prim for what a script started — as Second Life's do. OpenSim names
+    /// the objects' entries only, and lists them first
+    /// (`LLClientView.SendAnimations`).
     pub names_sources: bool,
     /// Whether a statement carries one empty `PhysicalAvatarEventList` block,
     /// as Second Life's all do. OpenSim's carry none.
@@ -68,17 +68,11 @@ impl AnimationPolicy {
     }
 }
 
-/// An avatar's set as the region's **other** viewers are told it: the same
-/// entries under the same sequence numbers as its own viewer is told, with
-/// the sources and the physical block of a statement to somebody else.
-///
-/// Second Life names only the first entry's source, and that one nil, and
-/// carries one empty `PhysicalAvatarEventList` block; OpenSim names none and
-/// carries none (`animations`, 2026-10-19, `book/src/gridspec/avatars.md`
-/// § Animations). The source list is positional, so Second Life's one block
-/// is the default's.
+/// One `AvatarAnimation` statement of an avatar's set: to its own viewer
+/// ([`AnimationSet::own`]) or to the region's others
+/// ([`AnimationSet::observed`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Observed {
+pub struct Statement {
     /// The entries, in statement order, their own sources unread.
     pub animations: Vec<PlayingAnimation>,
     /// The `AnimationSourceList`, block for block.
@@ -87,7 +81,7 @@ pub struct Observed {
     pub physical_events: Vec<Vec<u8>>,
 }
 
-impl Observed {
+impl Statement {
     /// Sends this statement of `agent`'s set down `sim`.
     ///
     /// # Errors
@@ -116,6 +110,9 @@ struct Entry {
     anim_id: Uuid,
     /// The sequence number it was started under.
     sequence_id: i32,
+    /// The prim whose script started it; [`None`] for the default and for
+    /// what the agent's viewer started.
+    object: Option<ObjectKey>,
 }
 
 /// One avatar's animation set.
@@ -143,42 +140,105 @@ impl AnimationSet {
             default: Some(Entry {
                 anim_id: STAND,
                 sequence_id: 1,
+                object: None,
             }),
             started: Vec::new(),
             next_sequence: 2,
         }
     }
 
-    /// The set as a statement of `agent`'s avatar states it under `policy`:
-    /// the default first, then everything started, in order.
-    #[must_use]
-    pub fn playing(&self, policy: AnimationPolicy, agent: AgentKey) -> Vec<PlayingAnimation> {
-        let source = |id: Uuid| policy.names_sources.then(|| ObjectKey::from(id));
+    /// Every entry with its source, in the set's order: the default first,
+    /// sourced from the nil id, then everything started, sourced from the
+    /// prim whose script started it or else from `agent`.
+    fn sourced(&self, agent: AgentKey) -> impl Iterator<Item = (Entry, ObjectKey)> + '_ {
         self.default
             .iter()
-            .map(|entry| PlayingAnimation {
-                anim_id: entry.anim_id,
-                sequence_id: entry.sequence_id,
-                source_id: source(Uuid::nil()),
-            })
-            .chain(self.started.iter().map(|entry| PlayingAnimation {
-                anim_id: entry.anim_id,
-                sequence_id: entry.sequence_id,
-                source_id: source(agent.uuid()),
+            .map(|entry| (*entry, ObjectKey::from(Uuid::nil())))
+            .chain(self.started.iter().map(move |entry| {
+                (
+                    *entry,
+                    entry
+                        .object
+                        .unwrap_or_else(|| ObjectKey::from(agent.uuid())),
+                )
             }))
+    }
+
+    /// The set, in its order, each entry with its source: what a script reads
+    /// of `agent`'s avatar.
+    #[must_use]
+    pub fn playing(&self, agent: AgentKey) -> Vec<PlayingAnimation> {
+        self.sourced(agent)
+            .map(|(entry, source)| PlayingAnimation {
+                anim_id: entry.anim_id,
+                sequence_id: entry.sequence_id,
+                source_id: Some(source),
+            })
             .collect()
     }
 
-    /// The set as the region's other viewers are told it under `policy`
-    /// ([`Observed`]).
+    /// The set as a statement to `agent`'s own viewer states it under
+    /// `policy`.
+    ///
+    /// Second Life lists the set in order and names every entry's source: the
+    /// nil id for the default, the agent for what its viewer started, the
+    /// prim for what a script started (`dance1@probe` in `avatar/animation`
+    /// and `sit@probe` in `avatar/sit-animation`, aditi). OpenSim lists the
+    /// entries an object started first, names their sources alone, then the
+    /// rest (`LLClientView.SendAnimations`; the same two probes on both its
+    /// engines).
     #[must_use]
-    pub fn observed(&self, policy: AnimationPolicy, agent: AgentKey) -> Observed {
-        let mut animations = self.playing(policy, agent);
-        for entry in &mut animations {
-            entry.source_id = None;
-        }
-        Observed {
+    pub fn own(&self, policy: AnimationPolicy, agent: AgentKey) -> Statement {
+        let entry = |(entry, _source): &(Entry, ObjectKey)| PlayingAnimation {
+            anim_id: entry.anim_id,
+            sequence_id: entry.sequence_id,
+            source_id: None,
+        };
+        let sourced: Vec<(Entry, ObjectKey)> = self.sourced(agent).collect();
+        let (animations, sources) = if policy.names_sources {
+            (
+                sourced.iter().map(entry).collect(),
+                sourced.iter().map(|(_entry, source)| *source).collect(),
+            )
+        } else {
+            let (objects, rest): (Vec<_>, Vec<_>) = sourced
+                .into_iter()
+                .partition(|(entry, _source)| entry.object.is_some());
+            (
+                objects.iter().chain(&rest).map(entry).collect(),
+                objects.iter().map(|(_entry, source)| *source).collect(),
+            )
+        };
+        Statement {
             animations,
+            sources,
+            physical_events: policy.physical_events(),
+        }
+    }
+
+    /// The set as the region's **other** viewers are told it under `policy`:
+    /// the same entries under the same sequence numbers as its own viewer is
+    /// told, with the sources and the physical block of a statement to
+    /// somebody else.
+    ///
+    /// Second Life names only the first entry's source, and that one nil, and
+    /// carries one empty `PhysicalAvatarEventList` block; OpenSim names none
+    /// and carries none (`animations`, 2026-10-19,
+    /// `book/src/gridspec/avatars.md` § Animations). The source list is
+    /// positional, so Second Life's one block is the default's. Neither names
+    /// the prim of what a script started (`avatar/animation`'s `of=other`
+    /// steps, aditi and OpenSim).
+    #[must_use]
+    pub fn observed(&self, policy: AnimationPolicy, agent: AgentKey) -> Statement {
+        Statement {
+            animations: self
+                .sourced(agent)
+                .map(|(entry, _source)| PlayingAnimation {
+                    anim_id: entry.anim_id,
+                    sequence_id: entry.sequence_id,
+                    source_id: None,
+                })
+                .collect(),
             // The grid that names sources to the agent itself names the
             // default's alone to anybody else.
             sources: if policy.names_sources && self.default.is_some() {
@@ -204,6 +264,7 @@ impl AnimationSet {
                 self.default = Some(Entry {
                     anim_id,
                     sequence_id: 1,
+                    object: None,
                 });
                 true
             }
@@ -216,15 +277,16 @@ impl AnimationSet {
             || self.started.iter().any(|entry| entry.anim_id == anim_id)
     }
 
-    /// Folds in a script's `llStartAnimation` or `llStopAnimation` of
-    /// `anim_id` and returns whether the set changed: as a viewer's request,
-    /// but a stop of the default drops it.
-    pub fn apply_scripted(&mut self, anim_id: Uuid, start: bool) -> bool {
+    /// Folds in an `llStartAnimation` or `llStopAnimation` of `anim_id` by a
+    /// script in the prim `object` and returns whether the set changed: as a
+    /// viewer's request, but a stop of the default drops it, and a start is
+    /// the prim's (OpenSim's `LSL_Api` adds it under `m_host.UUID`).
+    pub fn apply_scripted(&mut self, anim_id: Uuid, start: bool, object: ObjectKey) -> bool {
         if !start && self.default.is_some_and(|entry| entry.anim_id == anim_id) {
             self.default = None;
             return true;
         }
-        self.apply(&[(AnimationKey::from(anim_id), start)])
+        self.fold(AnimationKey::from(anim_id), start, Some(object))
     }
 
     /// Folds one request's `(animation, start)` pairs in, in order, and returns
@@ -235,30 +297,41 @@ impl AnimationSet {
     pub fn apply(&mut self, requests: &[(AnimationKey, bool)]) -> bool {
         let mut changed = false;
         for &(animation, start) in requests {
-            let anim_id = animation.uuid();
-            if anim_id.is_nil() {
-                continue;
-            }
-            if start {
-                if self.holds(anim_id) {
-                    continue;
-                }
-                self.started.push(Entry {
-                    anim_id,
-                    sequence_id: self.next_sequence,
-                });
-                self.next_sequence = self.next_sequence.saturating_add(1);
-                changed = true;
-            } else if let Some(index) = self
-                .started
-                .iter()
-                .position(|entry| entry.anim_id == anim_id)
-            {
-                let _stopped = self.started.remove(index);
-                changed = true;
-            }
+            changed |= self.fold(animation, start, None);
         }
         changed
+    }
+
+    /// Folds one start or stop of `animation` in, a start as `object`'s
+    /// ([`None`] for the agent's viewer), and returns whether the set
+    /// changed. A start of something playing keeps whose it was; a stop
+    /// stops it whoever started it.
+    fn fold(&mut self, animation: AnimationKey, start: bool, object: Option<ObjectKey>) -> bool {
+        let anim_id = animation.uuid();
+        if anim_id.is_nil() {
+            return false;
+        }
+        if start {
+            if self.holds(anim_id) {
+                return false;
+            }
+            self.started.push(Entry {
+                anim_id,
+                sequence_id: self.next_sequence,
+                object,
+            });
+            self.next_sequence = self.next_sequence.saturating_add(1);
+            true
+        } else if let Some(index) = self
+            .started
+            .iter()
+            .position(|entry| entry.anim_id == anim_id)
+        {
+            let _stopped = self.started.remove(index);
+            true
+        } else {
+            false
+        }
     }
 }
 
@@ -274,7 +347,7 @@ pub(crate) fn answer(
     sim: &mut SimSession,
     event: &ServerEvent,
     now: Instant,
-) -> Option<Observed> {
+) -> Option<Statement> {
     let ServerEvent::AgentAnimation { animations, .. } = event else {
         return None;
     };
@@ -282,12 +355,7 @@ pub(crate) fn answer(
     if !changed && !policy.restates_unchanged {
         return None;
     }
-    if let Err(error) = sim.send_avatar_animation_with_events(
-        agent,
-        &set.playing(policy, agent),
-        &policy.physical_events(),
-        now,
-    ) {
+    if let Err(error) = set.own(policy, agent).send(agent, sim, now) {
         tracing::warn!("stating the agent's animations failed: {error}");
     }
     Some(set.observed(policy, agent))
@@ -295,10 +363,15 @@ pub(crate) fn answer(
 
 #[cfg(test)]
 mod tests {
-    use super::{AnimationSet, STAND};
+    use super::{AnimationSet, STAND, Statement};
     use pretty_assertions::assert_eq;
     use sl_proto::{AgentKey, AnimationKey, ObjectKey};
     use uuid::Uuid;
+
+    /// The prim a test's script is in.
+    fn prim() -> ObjectKey {
+        ObjectKey::from(Uuid::from_u128(0xB))
+    }
 
     /// An animation id for a test.
     fn animation(n: u128) -> AnimationKey {
@@ -307,13 +380,10 @@ mod tests {
 
     /// The set's ids and sequence numbers, in statement order.
     fn stated(set: &AnimationSet) -> Vec<(Uuid, i32)> {
-        set.playing(
-            crate::ImitatedGrid::OpenSim.animation_policy(),
-            AgentKey::from(Uuid::from_u128(0xA)),
-        )
-        .into_iter()
-        .map(|entry| (entry.anim_id, entry.sequence_id))
-        .collect()
+        set.playing(AgentKey::from(Uuid::from_u128(0xA)))
+            .into_iter()
+            .map(|entry| (entry.anim_id, entry.sequence_id))
+            .collect()
     }
 
     #[test]
@@ -340,25 +410,78 @@ mod tests {
         assert_eq!(stated(&set), vec![(STAND, 1), (Uuid::from_u128(3), 4)]);
     }
 
+    /// A statement's ids and sequence numbers, in its order, and its sources.
+    fn listed(statement: &Statement) -> (Vec<(Uuid, i32)>, Vec<ObjectKey>) {
+        (
+            statement
+                .animations
+                .iter()
+                .map(|entry| (entry.anim_id, entry.sequence_id))
+                .collect(),
+            statement.sources.clone(),
+        )
+    }
+
     #[test]
-    fn second_life_names_a_source_for_every_entry() {
+    fn the_own_viewer_is_told_whose_each_entry_is_as_its_grid_says() {
+        let agent = AgentKey::from(Uuid::from_u128(0xA));
+        let nil = ObjectKey::from(Uuid::nil());
+        let mut set = AnimationSet::arriving();
+        assert!(set.apply(&[(animation(1), true)]));
+        assert!(set.apply_scripted(Uuid::from_u128(2), true, prim()));
+        let own = |grid: crate::ImitatedGrid| listed(&set.own(grid.animation_policy(), agent));
+        // Second Life: in order, a source for every entry.
+        assert_eq!(
+            own(crate::ImitatedGrid::SecondLife),
+            (
+                vec![(STAND, 1), (Uuid::from_u128(1), 2), (Uuid::from_u128(2), 3)],
+                vec![nil, ObjectKey::from(agent.uuid()), prim()]
+            )
+        );
+        // OpenSim: the object's entries first, and their sources alone.
+        assert_eq!(
+            own(crate::ImitatedGrid::OpenSim),
+            (
+                vec![(Uuid::from_u128(2), 3), (STAND, 1), (Uuid::from_u128(1), 2)],
+                vec![prim()]
+            )
+        );
+        // Nobody else is told the prim: Second Life names the default's nil,
+        // OpenSim nothing, both in the set's order.
+        let observed =
+            |grid: crate::ImitatedGrid| listed(&set.observed(grid.animation_policy(), agent));
+        let order = vec![(STAND, 1), (Uuid::from_u128(1), 2), (Uuid::from_u128(2), 3)];
+        assert_eq!(
+            observed(crate::ImitatedGrid::SecondLife),
+            (order.clone(), vec![nil])
+        );
+        assert_eq!(observed(crate::ImitatedGrid::OpenSim), (order, vec![]));
+    }
+
+    #[test]
+    fn a_start_of_what_plays_keeps_whose_it_was() {
         let agent = AgentKey::from(Uuid::from_u128(0xA));
         let mut set = AnimationSet::arriving();
         assert!(set.apply(&[(animation(1), true)]));
-        let sources = |grid: crate::ImitatedGrid| -> Vec<Option<ObjectKey>> {
-            set.playing(grid.animation_policy(), agent)
-                .into_iter()
-                .map(|entry| entry.source_id)
-                .collect()
-        };
+        assert!(!set.apply_scripted(Uuid::from_u128(1), true, prim()));
+        assert!(set.apply_scripted(Uuid::from_u128(2), true, prim()));
+        assert!(!set.apply(&[(animation(2), true)]));
+        let sources: Vec<Option<ObjectKey>> = set
+            .playing(agent)
+            .into_iter()
+            .map(|entry| entry.source_id)
+            .collect();
         assert_eq!(
-            sources(crate::ImitatedGrid::SecondLife),
+            sources,
             vec![
                 Some(ObjectKey::from(Uuid::nil())),
-                Some(ObjectKey::from(agent.uuid()))
+                Some(ObjectKey::from(agent.uuid())),
+                Some(prim())
             ]
         );
-        assert_eq!(sources(crate::ImitatedGrid::OpenSim), vec![None, None]);
+        // A viewer's stop stops the script's start too.
+        assert!(set.apply(&[(animation(2), false)]));
+        assert_eq!(stated(&set), vec![(STAND, 1), (Uuid::from_u128(1), 2)]);
     }
 
     #[test]
@@ -367,14 +490,20 @@ mod tests {
         let mut set = AnimationSet::arriving();
         assert!(set.set_default(sit));
         assert!(
-            set.apply_scripted(sit, false),
+            set.apply_scripted(sit, false, prim()),
             "the seat's script stops sit"
         );
         assert_eq!(stated(&set), vec![]);
-        assert!(set.apply_scripted(sit, true), "and starts it as its own");
+        assert!(
+            set.apply_scripted(sit, true, prim()),
+            "and starts it as its own"
+        );
         assert_eq!(stated(&set), vec![(sit, 2)]);
-        assert!(set.apply_scripted(sit, false));
-        assert!(set.apply_scripted(Uuid::from_u128(6), true), "the pose");
+        assert!(set.apply_scripted(sit, false, prim()));
+        assert!(
+            set.apply_scripted(Uuid::from_u128(6), true, prim()),
+            "the pose"
+        );
         assert!(set.set_default(STAND), "the stand");
         assert_eq!(stated(&set), vec![(STAND, 1), (Uuid::from_u128(6), 3)]);
     }

@@ -15,20 +15,20 @@ PROBE avatar/sit-animation rec=held step=0 answer=16 perms=16
 # animations avatar=owner playing=""
 PROBE avatar/sit-animation rec=playing step=1 why=seated state="Sitting" has_sit=1 has_dance=0 info_sitting=1 info_on_object=1
 PROBE avatar/sit-animation rec=did step=1 call=llStopAnimation anim=sit
-# animations avatar=owner playing="sit"
 PROBE avatar/sit-animation rec=playing step=2 why=sit-stopped state="Sitting" has_sit=0 has_dance=0 info_sitting=1 info_on_object=1
 PROBE avatar/sit-animation rec=did step=2 call=llStartAnimation anim=sit
-# animations avatar=owner playing=""
+# animations avatar=owner playing="sit@probe"
 PROBE avatar/sit-animation rec=playing step=3 why=sit-started state="Sitting" has_sit=1 has_dance=0 info_sitting=1 info_on_object=1
-# animations avatar=owner playing="dance1"
 PROBE avatar/sit-animation rec=did step=3 call=llStopAnimation anim=sit call=llStartAnimation anim=dance1
+# animations avatar=owner playing=""
+# animations avatar=owner playing="dance1@probe"
 PROBE avatar/sit-animation rec=playing step=4 why=posed state="Sitting" has_sit=0 has_dance=1 info_sitting=1 info_on_object=1
 PROBE avatar/sit-animation rec=waiting drive=stand
 # stand
-# animations avatar=owner playing="dance1,stand"
-# animations avatar=owner playing="dance1,falldown"
-# animations avatar=owner playing="dance1,land"
-PROBE avatar/sit-animation rec=playing step=5 why=stood has_sit=0 has_dance=1 info_sitting=0 info_on_object=0
+# animations avatar=owner playing="dance1@probe,stand"
+# animations avatar=owner playing="dance1@probe,falldown"
+# animations avatar=owner playing="dance1@probe,land"
 # animations avatar=owner playing="land"
+PROBE avatar/sit-animation rec=playing step=5 why=stood has_sit=0 has_dance=1 info_sitting=0 info_on_object=0
 PROBE avatar/sit-animation rec=end
 # animations avatar=owner playing="stand"

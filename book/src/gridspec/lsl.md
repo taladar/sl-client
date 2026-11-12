@@ -119,9 +119,9 @@ runner holds each down for a second (`Command::SetControls`).
 | behaviour | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
 | `TRIGGER_ANIMATION` and `OVERRIDE_ANIMATIONS` asked of the owner by an unattached prim | asked (32784); granted | the same | each flavour as its grid |
-| `llStartAnimation("dance1")` | an `AvatarAnimation` adding `dance1`, sourced from the prim; `llGetAnimationList` has it, `llGetAnimation` still `Standing` | the same | `Action::AnimateAvatar` plays a list |
-| who is told the source | the animated avatar's own viewer; another viewer has `dance1` with no source | the same | — |
-| `llStopAnimation("dance1")` | gone from both | the same | — |
+| `llStartAnimation("dance1")` | an `AvatarAnimation` adding `dance1`, sourced from the prim; `llGetAnimationList` has it, `llGetAnimation` still `Standing` | the same | the same, sourced from the script's prim, on both flavours |
+| who is told the source | the animated avatar's own viewer; another viewer has `dance1` with no source | the same | the same |
+| `llStopAnimation("dance1")` | gone from both | the same | the same |
 | `llStartAnimation` of a name the prim does not hold and no built-in has | `Could not find animation 'no such animation'` on `DEBUG_CHANNEL` | nothing | each flavour as its grid |
 | `llSetAnimationOverride("Standing", "dance1")` — a built-in's name, the prim holding no animation | accepted: the standing animation becomes `dance1`, `llGetAnimationOverride("Standing")` says `dance1` | the same (`DefaultAvatarAnimations` names it) | each flavour as its grid |
 | `llGetAnimationOverride("Standing")` after `llResetAnimationOverride("ALL")` | `stand` | `Standing` | each flavour as its grid |

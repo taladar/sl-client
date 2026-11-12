@@ -102,10 +102,16 @@ mod test {
         Ok(())
     }
 
-    /// Where `flavour` puts an avatar that stands up from [`SEAT`], a box
-    /// with no sit target: in front of where the grid's plain seat put it,
-    /// which on Second Life faces back out over its edge.
-    fn stands_at(flavour: ImitatedGrid) -> [f32; 3] {
+    /// Where on the ground plan `flavour` puts an avatar that stands up from
+    /// [`SEAT`], a box with no sit target: in front of where the grid's plain
+    /// seat put it, which on Second Life faces back out over its edge.
+    ///
+    /// The height it stands at is not part of it: the avatar falls from there
+    /// to the ground at once, on both grids, so a viewer read at the wrong
+    /// moment has it anywhere on the way down. The stand's height is measured
+    /// from the grid's own statements by the `sit_stand` conformance case,
+    /// which the offline suite runs on both fake flavours.
+    fn stands_at(flavour: ImitatedGrid) -> [f32; 2] {
         let policy = flavour.sit_policy();
         let plain = policy.plain_seat;
         let forward = if plain.faces_outwards {
@@ -113,11 +119,16 @@ mod test {
         } else {
             policy.stand_forward_m
         };
-        [
-            SEAT_AT.x + plain.off_centre_m + forward,
-            SEAT_AT.y,
-            SEAT_AT.z + plain.above_m + policy.stand_up_m,
-        ]
+        [SEAT_AT.x + plain.off_centre_m + forward, SEAT_AT.y]
+    }
+
+    /// The height the grid has the avatar of the viewer `label` at now.
+    async fn grid_height(stage: &Stage, label: &str) -> Result<f32, BodyError> {
+        Ok(stage
+            .agent(label)
+            .await?
+            .with_sim(|sim| sim.arrival_position().position.z())
+            .await)
     }
 
     /// The largest difference between two positions along any axis.
@@ -174,13 +185,18 @@ mod test {
                         .timeout(WAIT)
                         .to_be_absent()
                         .await?;
-                    let expected = stands_at(flavour);
+                    // Where it stood on the ground plan, at the height the
+                    // grid has it now: the stand, then wherever its fall has
+                    // got to.
+                    let [x, y] = stands_at(flavour);
                     let started = std::time::Instant::now();
+                    let mut expected = [x, y, grid_height(stage, "Alpha").await?];
                     let mut placed = alpha.agent().await?.position;
                     while placed.is_none_or(|at| apart(at, expected) > PLACED_WITHIN)
                         && started.elapsed() < WAIT
                     {
                         tokio::time::sleep(Duration::from_millis(50)).await;
+                        expected = [x, y, grid_height(stage, "Alpha").await?];
                         placed = alpha.agent().await?.position;
                     }
                     let placed = placed.ok_or("the viewer reports no position")?;

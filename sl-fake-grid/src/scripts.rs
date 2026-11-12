@@ -1246,6 +1246,8 @@ enum Delivery {
         animation: uuid::Uuid,
         /// Whether it starts.
         start: bool,
+        /// The prim of the script that asked, whose the animation is.
+        object: ObjectKey,
     },
     /// The avatar's animation overrides changed (`llSetAnimationOverride`,
     /// `llResetAnimationOverride`): what its posture plays may have.
@@ -3046,8 +3048,11 @@ impl Host for RegionHost<'_> {
         self.agent_called(name)
     }
 
-    fn animate(&mut self, _caller: CallerId, agent: &str, animation: &str, start: bool) {
-        self.animate_agent(agent, animation, start);
+    fn animate(&mut self, caller: CallerId, agent: &str, animation: &str, start: bool) {
+        let Some(object) = self.slot(caller).map(|slot| slot.prim) else {
+            return;
+        };
+        self.animate_agent(agent, animation, start, object);
     }
 
     fn set_animation_override(
@@ -3198,7 +3203,7 @@ async fn presence(core: &GridCore, index: usize) -> (Vec<Present>, Vec<Present>)
                         posture_info: state.motion.posture().agent_info(),
                         animations: state
                             .animations
-                            .playing(state.animation_policy, state.avatar.agent_id)
+                            .playing(state.avatar.agent_id)
                             .iter()
                             .map(|playing| playing.anim_id.to_string())
                             .collect(),
@@ -3682,9 +3687,12 @@ async fn deliver(core: &Arc<GridCore>, index: usize, deliveries: Vec<Delivery>) 
                 }
                 match &delivery {
                     Delivery::Animate {
-                        animation, start, ..
+                        animation,
+                        start,
+                        object,
+                        ..
                     } => {
-                        if state.animations.apply_scripted(*animation, *start) {
+                        if state.animations.apply_scripted(*animation, *start, *object) {
                             state_animations(state, now)?;
                         }
                         Ok(())
@@ -3711,7 +3719,7 @@ fn state_animations(
     now: Instant,
 ) -> Result<(), sl_proto::Error> {
     let agent = state.avatar.agent_id;
-    let playing = state.animations.playing(state.animation_policy, agent);
+    let own = state.animations.own(state.animation_policy, agent);
     let statement = state.animations.observed(state.animation_policy, agent);
     state.tell_others(|resident| {
         resident.animations.clone_from(&statement);
@@ -3720,12 +3728,7 @@ fn state_animations(
             statement: Box::new(statement),
         }
     });
-    state.sim.send_avatar_animation_with_events(
-        agent,
-        &playing,
-        &state.animation_policy.physical_events(),
-        now,
-    )
+    own.send(agent, &mut state.sim, now)
 }
 
 /// Sends one `delivery` down `sim`.

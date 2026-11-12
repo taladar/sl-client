@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 333 |
 | blocked | 38 |
 | in-progress | 6 |
-| bugs | 34 |
-| done | 1553 |
+| bugs | 33 |
+| done | 1554 |
 | deferred | 30 |
 | wont-do | 24 |
 | **total** | **2148** |
@@ -1273,7 +1273,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-text-renderability-axis`](in-progress/viewer-ui-text-renderability-axis.md)
   — Upstream issue — font selection cannot see glyph-format renderability
 
-## bugs (34)
+## bugs (33)
 
 ### protocol
 
@@ -1359,12 +1359,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### server
 
-- [`server-fake-grid-script-animation-source-is-the-avatar`](bugs/server-fake-grid-script-animation-source-is-the-avatar.md)
-  — An animation a script starts is stated as the avatar's, not the prim's
 - [`server-fake-grid-scripted-avatar-clothes-not-shown`](bugs/server-fake-grid-scripted-avatar-clothes-not-shown.md)
   — A dressed scripted avatar is drawn without its clothes
 
-## done (1553)
+## done (1554)
 
 ### protocol
 
@@ -4508,6 +4506,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   environments
 - [`server-fake-grid-prim-sit-states-no-sit-animation`](done/server-fake-grid-prim-sit-states-no-sit-animation.md)
   — A sit on a prim states no sit animation, to the sitter or anyone else
+- [`server-fake-grid-script-animation-source-is-the-avatar`](done/server-fake-grid-script-animation-source-is-the-avatar.md)
+  — An animation a script starts is stated as the avatar's, not the prim's
 - [`server-fake-grid-script-compile-on-upload`](done/server-fake-grid-script-compile-on-upload.md)
   — A script upload is accepted and never compiled (blocked by
   `server-lsl-compiler-ir` (done), `gridspec-lsl-compile` (done))

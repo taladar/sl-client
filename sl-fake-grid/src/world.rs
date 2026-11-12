@@ -285,7 +285,7 @@ pub(crate) struct Resident {
     /// Its appearance as the others are sent it.
     pub(crate) appearance: sl_proto::AvatarAppearance,
     /// Its animations as the others are told them.
-    pub(crate) animations: crate::animations::Observed,
+    pub(crate) animations: crate::animations::Statement,
 }
 
 /// One parcel's two access lists: who may come in, and who may not.
@@ -608,12 +608,12 @@ pub enum RegionChange {
     /// `agent`'s animations were stated to its own viewer: every other viewer
     /// is told the same set under the same sequence numbers, in the shape a
     /// statement to somebody else takes
-    /// ([`Observed`](crate::animations::Observed)).
+    /// ([`Statement`](crate::animations::Statement)).
     ResidentAnimated {
         /// The avatar.
         agent: AgentKey,
         /// The statement.
-        statement: Box<crate::animations::Observed>,
+        statement: Box<crate::animations::Statement>,
     },
     /// An avatar's appearance changed — a bake the grid accepted on Second
     /// Life, a publish on OpenSim: every other viewer is sent the record.
@@ -2732,13 +2732,10 @@ pub(crate) fn push_own_animation(
     sim: &mut SimSession,
     now: Instant,
 ) {
-    let playing = animations.playing(policy, identity.agent_id);
-    if let Err(error) = sim.send_avatar_animation_with_events(
-        identity.agent_id,
-        &playing,
-        &policy.physical_events(),
-        now,
-    ) {
+    if let Err(error) = animations
+        .own(policy, identity.agent_id)
+        .send(identity.agent_id, sim, now)
+    {
         tracing::warn!("sending the arriving agent's own animation failed: {error}");
     }
 }
