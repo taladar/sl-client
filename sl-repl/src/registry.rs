@@ -5949,6 +5949,16 @@ fn all_specs() -> Vec<CommandSpec> {
             },
         },
         CommandSpec {
+            name: "create_inventory_item_with_asset",
+            usage: "transaction_id=<id> [folder_id=] [name=] [asset_type=] … data=<hex>",
+            build: |args, ctx| {
+                Ok(Command::CreateInventoryItemWithAsset {
+                    item: Box::new(build_new_inventory_item(args, ctx)?),
+                    data: args.bytes_or_empty(ctx, "data", 100)?,
+                })
+            },
+        },
+        CommandSpec {
             name: "create_script",
             usage: "<folder_id> name=<n> description=<d> next_owner_mask=<u32> language=<lsl|luau>",
             build: |args, ctx| {
@@ -8269,6 +8279,20 @@ mod tests {
             )),
             Ok(Command::SaveInventoryAsset { item, data, .. })
                 if item.name == "shirt" && data == vec![0x00, 0xff]
+        ));
+    }
+
+    #[test]
+    fn create_inventory_item_with_asset_reuses_the_new_item_grammar() {
+        assert!(matches!(
+            build(&format!(
+                "create_inventory_item_with_asset transaction_id={TWO} name=shirt \
+                 asset_type=5 data=00ff"
+            )),
+            Ok(Command::CreateInventoryItemWithAsset { item, data })
+                if item.name == "shirt"
+                    && item.transaction_id.to_string() == TWO
+                    && data == vec![0x00, 0xff]
         ));
     }
 

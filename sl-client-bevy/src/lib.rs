@@ -2394,6 +2394,9 @@ fn apply_command(
         } => {
             session.save_inventory_asset(item, *asset_type, data.clone(), *transaction_id, now)?;
         }
+        Command::CreateInventoryItemWithAsset { item, data } => {
+            session.create_inventory_item_with_asset(item, data.clone(), now)?;
+        }
         Command::MoveInventoryItem {
             item_id,
             folder_id,

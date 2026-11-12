@@ -1543,6 +1543,9 @@ impl Client {
                         Some(Command::SaveInventoryAsset { item, asset_type, transaction_id, data }) => {
                             self.session.save_inventory_asset(&item, asset_type, data, transaction_id, Instant::now())?;
                         }
+                        Some(Command::CreateInventoryItemWithAsset { item, data }) => {
+                            self.session.create_inventory_item_with_asset(&item, data, Instant::now())?;
+                        }
                         Some(Command::MoveInventoryItem { item_id, folder_id, new_name }) => {
                             // UDP on every grid, as the reference moves an item: Second
                             // Life's AIS3 refuses a `PATCH` of `parent_id` ("Use MOVE

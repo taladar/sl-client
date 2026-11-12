@@ -230,10 +230,16 @@ grids:
   above: `AssetUploadRequest` (+ the `UpdateInventoryItem` binding the
   transaction to the item), the simulator's Xfer pull for an oversized asset,
   and `Event::InventoryAssetSaved` on the `AssetUploadComplete`.
+- **New wearables** take the same upload with a `CreateInventoryItem` naming
+  the transaction in place of the update
+  (`Session::create_inventory_item_with_asset`), as the reference's
+  `createWearable` does: Second Life's `NewFileAgentInventory` takes a
+  wearable only at a price.
 
-So the Xfer upload machinery stays for terrain RAW and the in-place wearable
-save — the two riders with no CAPS equivalent on either grid — while
-everything with a both-grids modern path uses it.
+So the Xfer upload machinery stays for terrain RAW and the wearable uploads
+(an in-place save and a new wearable) — the riders with no free CAPS
+equivalent on either grid — while everything with a both-grids modern path
+uses it.
 
 ## The server side
 
@@ -298,8 +304,10 @@ flight is an `Error::UnknownXfer`, not a silent no-op.
 >   `Session::fetch_task_inventory` (→ `Event::TaskInventoryContents`),
 >   `Session::request_region_terrain_download` (→ `Event::ServerFileDownloaded`,
 >   after the simulator's `InitiateDownload` the handler follows automatically),
->   `Session::request_region_terrain_upload` (→ `Event::XferUploaded`), and
->   `Session::save_inventory_asset` (→ `Event::InventoryAssetSaved`).
+>   `Session::request_region_terrain_upload` (→ `Event::XferUploaded`),
+>   `Session::save_inventory_asset` (→ `Event::InventoryAssetSaved`), and
+>   `Session::create_inventory_item_with_asset` (→
+>   `Event::InventoryItemCreated` and `Event::InventoryAssetSaved`).
 >   The runtime commands are `Command::RequestXfer` /
 >   `Command::FetchTaskInventory` / `Command::RequestRegionTerrainDownload`,
 >   wired identically in `sl-client-tokio` and `sl-client-bevy`.

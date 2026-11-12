@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 333 |
 | blocked | 39 |
 | in-progress | 6 |
-| bugs | 28 |
-| done | 1554 |
+| bugs | 27 |
+| done | 1555 |
 | deferred | 30 |
 | wont-do | 24 |
 | **total** | **2143** |
@@ -1274,7 +1274,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-text-renderability-axis`](in-progress/viewer-ui-text-renderability-axis.md)
   — Upstream issue — font selection cannot see glyph-format renderability
 
-## bugs (28)
+## bugs (27)
 
 ### protocol
 
@@ -1300,8 +1300,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Some worn mesh hair does not render (visible in Firestorm)
 - [`viewer-near-avatar-stuck-coarse-sphere`](bugs/viewer-near-avatar-stuck-coarse-sphere.md)
   — A nearby avatar stays a coarse sphere even as the camera closes in
-- [`viewer-new-wearable-refused-on-second-life`](bugs/viewer-new-wearable-refused-on-second-life.md)
-  — New wearables and a wearable's Save As are refused on Second Life
 - [`viewer-own-avatar-broken-after-teleport`](bugs/viewer-own-avatar-broken-after-teleport.md)
   — Own avatar looks broken after a teleport
 - [`viewer-parcel-audio-bar-backing-unskinned`](bugs/viewer-parcel-audio-bar-backing-unskinned.md)
@@ -1352,7 +1350,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-lsl-mono-collision-model-under-lowered-limit`](bugs/server-lsl-mono-collision-model-under-lowered-limit.md)
   — A script 1 KB over its use collides in the runtime where Mono carries on
 
-## done (1554)
+## done (1555)
 
 ### protocol
 
@@ -2545,6 +2543,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Saving a PBR material to inventory is refused on Second Life
 - [`viewer-new-notecard-unreadable-on-opensim`](done/viewer-new-notecard-unreadable-on-opensim.md)
   — A notecard created on OpenSim opened as "could not be read"
+- [`viewer-new-wearable-refused-on-second-life`](done/viewer-new-wearable-refused-on-second-life.md)
+  — New wearables and a wearable's Save As are refused on Second Life
 - [`viewer-nonblocking-overlay-steals-focus`](done/viewer-nonblocking-overlay-steals-focus.md)
   — A see-through container in front of a field clears its focus, at random
 - [`viewer-notecard-body-draws-a-giant-artifact`](done/viewer-notecard-body-draws-a-giant-artifact.md)

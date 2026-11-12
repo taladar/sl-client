@@ -10,9 +10,10 @@ use std::collections::VecDeque;
 
 use bevy::prelude::*;
 use sl_client_bevy::{
-    AgentKey, AssetUpdateLocation, Command, ExperienceKey, ImSessionId, InventoryFolderKey,
-    InventoryKey, InventoryType, ItemInfo, ObjectKey, RestoreItem, ScopedObjectId, ScriptLanguage,
-    ScriptTarget, ScriptUploadLocation, SettingsKind, TaskInventoryKey, Uuid,
+    AgentKey, AssetType, AssetUpdateLocation, Command, ExperienceKey, ImSessionId,
+    InventoryFolderKey, InventoryKey, InventoryType, ItemInfo, NewInventoryItem, ObjectKey,
+    Permissions, RestoreItem, ScopedObjectId, ScriptLanguage, ScriptTarget, ScriptUploadLocation,
+    SettingsKind, TaskInventoryKey, TransactionId, Uuid, WearableType,
 };
 
 /// A description of an item added to a prim's contents, for the pending-add
@@ -131,56 +132,38 @@ pub struct OpenNotecard {
     pub source: NotecardSource,
 }
 
-/// The item-minting uploads whose reply has not arrived yet, oldest first.
+/// The wearable creations whose item has not arrived yet, by the transaction
+/// each was made with.
 ///
-/// `NewFileAgentInventory` creates the item server-side but leaves its **flags**
-/// empty, and for several classes that byte is the item's subtype: a wearable's
-/// slot, a settings item's sky / water / day-cycle kind. So every such upload is
-/// followed by a `ChangeInventoryItemFlags` carrying it — matched FIFO, because
-/// the reply carries no correlation id.
+/// A new wearable, or a wearable's Save As, is made the reference's way
+/// ([`new_wearable_command`]): its bytes go up over `AssetUploadRequest` under a
+/// fresh transaction and a `CreateInventoryItem` naming that transaction asks
+/// for the item, which the simulator stamps with the wearable slot itself. The
+/// item's `UpdateCreateInventoryItem` echoes the transaction, and so does the
+/// upload's completion, so each answer names the creation it belongs to — no
+/// arrival-order guessing, and nobody else's item can be taken for it.
 ///
-/// One queue for the whole viewer rather than one per feature, and that is the
-/// point: two queues watching the same untagged reply stream would each pop on
-/// the other's upload, and stamp an item with the wrong subtype. The producers
-/// (the inventory's New-Clothes / New-Body-Parts / New-Settings creators, the
-/// appearance editor's Save As, the settings editors' Save As) only enqueue;
-/// the inventory owns the single consumer, since finishing a creation also
-/// means refreshing the folder it landed in.
+/// One registry for the whole viewer rather than one per feature: the
+/// producers (the inventory's New Clothes / New Body Parts creators and the
+/// appearance editor's Save As) only enqueue, and the inventory owns the single
+/// consumer, which also tells the resident when an upload is refused — the
+/// reference's `CannotSaveToAssetStore`, raised for both.
 #[derive(Resource, Debug, Default)]
 pub struct PendingItemCreations {
     /// The in-flight creations, oldest first.
-    queue: VecDeque<PendingItemCreation>,
-    /// The next ticket to hand out.
-    next_ticket: u64,
+    pending: Vec<PendingItemCreation>,
 }
 
-/// One in-flight item-minting upload.
-#[derive(Debug, Clone, Copy)]
+/// One in-flight wearable creation.
+#[derive(Debug, Clone)]
 pub struct PendingItemCreation {
-    /// This creation's ticket, echoed on the [`ItemCreationFinished`] that
-    /// answers it.
-    pub ticket: ItemCreationTicket,
-    /// The `flags` byte to stamp on the fresh item — a wearable's slot code, a
-    /// settings kind's subtype.
-    pub flags: u32,
-    /// The folder to refresh once it lands.
-    pub folder: InventoryFolderKey,
+    /// The transaction its upload and its create both name.
+    pub transaction: TransactionId,
+    /// The name the item is made under, for the notice a refusal raises.
+    pub name: String,
 }
 
-/// A claim on one queued creation, handed out by
-/// [`PendingItemCreations::enqueue`] and echoed back on the
-/// [`ItemCreationFinished`] that answers it.
-///
-/// The upload reply carries no correlation id of its own, and the queue is
-/// shared: the inventory's New Clothes creator and the appearance editor's Save
-/// As both put wearable creations through it. A ticket is what lets a producer
-/// say "that one was mine" without either guessing from the flags (two
-/// creations of one slot are indistinguishable) or counting replies (which is
-/// only true while nobody else is uploading).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct ItemCreationTicket(u64);
-
-/// What became of one queued creation, published by the single consumer of
+/// What became of one wearable creation, published by the single consumer of
 /// [`PendingItemCreations`] so whoever started it can say so.
 ///
 /// Without this an upload that mints an item has no outcome at all on the
@@ -189,31 +172,71 @@ pub struct ItemCreationTicket(u64);
 /// claim about something that had not happened yet and might not.
 #[derive(Message, Debug, Clone, Copy)]
 pub struct ItemCreationFinished {
-    /// The creation this answers.
-    pub ticket: ItemCreationTicket,
+    /// The transaction of the creation this answers.
+    pub transaction: TransactionId,
     /// The fresh item, or `None` when the upload failed.
     pub item: Option<InventoryKey>,
 }
 
 impl PendingItemCreations {
-    /// Enqueue a creation so the fresh item's flags are stamped and its folder
-    /// refreshed when the upload reply lands, returning the ticket its
-    /// [`ItemCreationFinished`] will carry.
-    pub fn enqueue(&mut self, flags: u32, folder: InventoryFolderKey) -> ItemCreationTicket {
-        let ticket = ItemCreationTicket(self.next_ticket);
-        self.next_ticket = self.next_ticket.saturating_add(1);
-        self.queue.push_back(PendingItemCreation {
-            ticket,
-            flags,
-            folder,
+    /// Register a creation made with `transaction`, so the item that names it
+    /// (or the refusal of its upload) is matched to it.
+    pub fn enqueue(&mut self, transaction: TransactionId, name: &str) {
+        self.pending.push(PendingItemCreation {
+            transaction,
+            name: name.to_owned(),
         });
-        ticket
     }
 
-    /// Take the oldest in-flight creation — the reply that just landed is its
-    /// own, since replies arrive in the order the uploads were made.
-    pub fn take_next(&mut self) -> Option<PendingItemCreation> {
-        self.queue.pop_front()
+    /// Take the creation made with `transaction`, if one is in flight.
+    pub fn take(&mut self, transaction: TransactionId) -> Option<PendingItemCreation> {
+        let index = self
+            .pending
+            .iter()
+            .position(|creation| creation.transaction == transaction)?;
+        Some(self.pending.remove(index))
+    }
+}
+
+/// The command that makes a new wearable item of `slot` named `name` in
+/// `folder`, holding the wearable asset `data`, under the freshly minted
+/// `transaction` — the reference's `LLAgentWearables::createWearable`, which
+/// stores the asset under the wearable's transaction (`saveNewAsset`) and
+/// creates the item naming it (`create_inventory_wearable`).
+///
+/// Not `NewFileAgentInventory`: Second Life takes clothing and body parts
+/// there only at a price (L$ 10, refused as `Upload_UploadPriceDiffers` when a
+/// client states 0; `book/src/gridspec/assets.md` § Uploads), and no viewer
+/// charges for a new shirt. The slot rides the create's subtype byte, which the
+/// simulator stamps into the item's flags.
+///
+/// A function because two surfaces make wearables — the inventory's create
+/// menus and the appearance editor's Save As — and two copies would be two
+/// places for the asset class or the permission mask to drift.
+#[must_use]
+pub fn new_wearable_command(
+    folder: InventoryFolderKey,
+    slot: WearableType,
+    name: &str,
+    data: Vec<u8>,
+    transaction: TransactionId,
+) -> Command {
+    Command::CreateInventoryItemWithAsset {
+        item: Box::new(NewInventoryItem {
+            folder_id: folder,
+            transaction_id: transaction.get(),
+            next_owner_mask: Permissions::DEFAULT_NEXT_OWNER,
+            asset_type: if slot.is_body_part() {
+                AssetType::Bodypart
+            } else {
+                AssetType::Clothing
+            },
+            inv_type: InventoryType::Wearable,
+            wearable_type: slot,
+            name: name.to_owned(),
+            description: String::new(),
+        }),
+        data,
     }
 }
 
@@ -223,9 +246,10 @@ impl PendingItemCreations {
 /// A settings item is minted by `CreateInventoryItem` rather than by an upload —
 /// the simulator authors the default asset for the kind and stamps the subtype
 /// byte — and its `UpdateCreateInventoryItem` reply names the item but not who
-/// asked for it. So this is the viewer's **one** queue for those replies, for
-/// exactly the reason [`PendingItemCreations`] is the one queue for the upload
-/// kind: two queues watching the same untagged reply stream would each pop on
+/// asked for it — a create with no upload behind it carries a nil transaction,
+/// so unlike a wearable's ([`PendingItemCreations`]) it has nothing to be
+/// matched by. So this is the viewer's **one** queue for those replies: two
+/// queues watching the same untagged reply stream would each pop on
 /// the other's creation, and a Save As would write its body onto somebody else's
 /// fresh item.
 ///

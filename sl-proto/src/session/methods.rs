@@ -12288,11 +12288,83 @@ impl Session {
         transaction_id: TransactionId,
         now: Instant,
     ) -> Result<(), Error> {
+        let callback_id = self.next_inventory_callback();
+        self.send_transaction_upload(transaction_id, asset_type, data, now)?;
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_update_inventory_item(item, transaction_id.get(), callback_id, now)?;
+        self.cache_inventory_item(item.clone());
+        Ok(())
+    }
+
+    /// Creates a **new** inventory item holding fresh asset bytes over the
+    /// legacy transaction upload path — the reference viewer's
+    /// `LLAgentWearables::createWearable` shape (`LLViewerWearable::saveNewAsset`
+    /// followed at once by `create_inventory_wearable`), used for a new
+    /// wearable or a wearable's copy. Second Life's `NewFileAgentInventory`
+    /// takes a body part or clothing only at a price (L$ 10, refused as
+    /// `Upload_UploadPriceDiffers` when the client states 0); this road is free
+    /// on both grids.
+    ///
+    /// It sends an `AssetUploadRequest` carrying `new.transaction_id` (inlined or
+    /// held for an `Xfer` pull, as [`Self::save_inventory_asset`] does), then a
+    /// `CreateInventoryItem` naming the same transaction, so the simulator
+    /// creates the item on the asset it derives as
+    /// `combine(transaction_id, secure_session_id)`. The caller mints a fresh,
+    /// non-nil transaction id. The item arrives as
+    /// [`Event::InventoryItemCreated`] echoing that transaction and the returned
+    /// callback id; the upload's own completion surfaces as
+    /// [`Event::InventoryAssetSaved`](crate::Event::InventoryAssetSaved), whose
+    /// failure is the only word a refused upload gets — the simulator then
+    /// creates nothing.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::InvalidInventoryOperation`] for a nil transaction id
+    /// (which would ask for an empty item instead), [`Error::NoCircuit`] if no
+    /// circuit is established, or [`Error::Wire`] on an encode failure.
+    pub fn create_inventory_item_with_asset(
+        &mut self,
+        new: &NewInventoryItem,
+        data: Vec<u8>,
+        now: Instant,
+    ) -> Result<InventoryCallbackId, Error> {
+        if new.transaction_id.is_nil() {
+            return Err(Error::InvalidInventoryOperation(
+                "an item created on an upload needs the upload's transaction id",
+            ));
+        }
+        let callback_id = self.next_inventory_callback();
+        self.send_transaction_upload(
+            TransactionId::from(new.transaction_id),
+            new.asset_type,
+            data,
+            now,
+        )?;
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_create_inventory_item(new, callback_id, now)?;
+        Ok(callback_id)
+    }
+
+    /// Sends the `AssetUploadRequest` half of a legacy transaction upload and
+    /// registers its completion — the part [`Self::save_inventory_asset`] and
+    /// [`Self::create_inventory_item_with_asset`] share; each then names the
+    /// transaction in its own inventory message.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established, or
+    /// [`Error::Wire`] on an encode failure.
+    fn send_transaction_upload(
+        &mut self,
+        transaction_id: TransactionId,
+        asset_type: AssetType,
+        data: Vec<u8>,
+        now: Instant,
+    ) -> Result<(), Error> {
         // The predicted stored asset id — the `VFileID` an `Xfer` fallback is
         // matched by, and the id the simulator will bind to the item.
         let asset_id = combine_uuids(transaction_id.get(), self.secure_session_id);
         let type_code = i8::try_from(asset_type.to_code()).unwrap_or_default();
-        let callback_id = self.next_inventory_callback();
         // Inline the bytes when they fit a single reliable packet; otherwise send
         // an empty `AssetData` and hold the bytes for the simulator's Xfer pull.
         let inline = data.len() <= ASSET_UPLOAD_INLINE_LIMIT;
@@ -12306,10 +12378,9 @@ impl Session {
             inline_data,
             now,
         )?;
-        circuit.send_update_inventory_item(item, transaction_id.get(), callback_id, now)?;
-        // Register the save under the id its completion will name, so the result
-        // can be handed back to *this* caller rather than to whoever happens to
-        // be waiting when some other save completes.
+        // Register the upload under the id its completion will name, so the
+        // result can be handed back to *this* caller rather than to whoever
+        // happens to be waiting when some other upload completes.
         let _prev = self.transfers.pending_inventory_saves.insert(
             asset_id,
             PendingInventorySave {
@@ -12326,7 +12397,6 @@ impl Session {
                 },
             );
         }
-        self.cache_inventory_item(item.clone());
         Ok(())
     }
 

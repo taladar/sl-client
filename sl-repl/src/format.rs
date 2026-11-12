@@ -537,6 +537,7 @@ const fn command_name(command: &Command) -> &'static str {
         Command::LinkInventoryItem(..) => "link_inventory_item",
         Command::UpdateInventoryItem { .. } => "update_inventory_item",
         Command::SaveInventoryAsset { .. } => "save_inventory_asset",
+        Command::CreateInventoryItemWithAsset { .. } => "create_inventory_item_with_asset",
         Command::MoveInventoryItem { .. } => "move_inventory_item",
         Command::CopyInventoryItem { .. } => "copy_inventory_item",
         Command::RemoveInventoryItems(..) => "remove_inventory_items",
