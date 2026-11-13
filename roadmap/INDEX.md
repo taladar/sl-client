@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 39 |
 | in-progress | 6 |
 | bugs | 22 |
-| done | 1562 |
+| done | 1563 |
 | deferred | 30 |
 | wont-do | 24 |
-| **total** | **2145** |
+| **total** | **2146** |
 
 ## ideas (129)
 
@@ -1294,6 +1294,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### viewer
 
+- [`viewer-driver-pie-wait-wall-clock`](bugs/viewer-driver-pie-wait-wall-clock.md)
+  — Under load the driver's pie wait gives up on a pie that is still opening,
+  and the replayed click never settles
 - [`viewer-live-opensim-world-renders-white`](bugs/viewer-live-opensim-world-renders-white.md)
   — The world renders all white at times on the live OpenSim grid
 - [`viewer-mesh-hair-not-rendering`](bugs/viewer-mesh-hair-not-rendering.md) —
@@ -1310,9 +1313,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-sky-irradiance-ignores-local-probes`](bugs/viewer-sky-irradiance-ignores-local-probes.md)
   — Sky-lit faces take their probe ambient from the view's probe, never from a
   placed probe
-- [`viewer-stood-avatar-height-lost-under-load`](bugs/viewer-stood-avatar-height-lost-under-load.md)
-  — Under load the viewer reports a stood-up avatar at 25.95 m, not where the
-  grid stood it
 - [`viewer-texture-filtering-in-linear-space`](bugs/viewer-texture-filtering-in-linear-space.md)
   — Colour textures are filtered after sRGB decoding, the reference before
 
@@ -1339,7 +1339,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-lsl-mono-collision-model-under-lowered-limit`](bugs/server-lsl-mono-collision-model-under-lowered-limit.md)
   — A script 1 KB over its use collides in the runtime where Mono carries on
 
-## done (1562)
+## done (1563)
 
 ### protocol
 
@@ -3391,6 +3391,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — SpaceNavigator drives the viewer even when its window is not focused
 - [`viewer-static-asset-library`](done/viewer-static-asset-library.md) — Ship
   the viewer's static assets and answer every fetch from them first
+- [`viewer-stood-avatar-height-lost-under-load`](done/viewer-stood-avatar-height-lost-under-load.md)
+  — Under load the viewer reports a stood-up avatar at 25.95 m, not where the
+  grid stood it
 - [`viewer-straddling-transparency-oit`](done/viewer-straddling-transparency-oit.md)
   — A translucent prim straddling the waterline loses its emergent half
 - [`viewer-streaming-audio`](done/viewer-streaming-audio.md) — Parcel
