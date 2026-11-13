@@ -26,6 +26,7 @@ implemented llDetectedTouchUV
 implemented llDetectedType
 implemented llDetectedVel
 implemented llPassTouches
+implemented llPassCollisions
 implemented llGetScriptState
 implemented llGetStartParameter
 implemented llGetOwner
@@ -37,6 +38,9 @@ implemented llTarget
 implemented llTargetRemove
 implemented llRotTarget
 implemented llRotTargetRemove
+implemented llMoveToTarget
+implemented llStopMoveToTarget
+implemented llSetBuoyancy
 implemented llSetTimerEvent
 implemented llGetTime
 implemented llResetTime

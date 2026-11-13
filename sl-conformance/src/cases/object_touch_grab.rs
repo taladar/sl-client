@@ -34,7 +34,8 @@
 //!
 //! The script is the probe: it says each event it is handed, with the
 //! detected values, to its owner. The fake grid runs it, so legs 1 to 9 are
-//! asked of both fake flavours; it has no physics engine, so leg 10 is not.
+//! asked of both fake flavours; its kinematic physics applies no grab's
+//! force or spin, so leg 10 is not.
 //!
 //! What each live grid answered is stated as a [`Measured`] and written up in
 //! `book/src/gridspec/building.md` § Touch and grab; every run is held to it.
@@ -757,7 +758,7 @@ const MEASURED_SCRIPTED: &[(&str, Measured<Answer>)] = &[
 ];
 
 /// What each live grid was measured to answer of a physical prim: a fake
-/// grid has no physics engine to ask.
+/// grid's kinematic physics applies no grab's force to ask.
 const MEASURED_PHYSICAL: &[(&str, Measured<Answer>)] = &[
     (
         "physical_owner_drag_leaves_the_prim",

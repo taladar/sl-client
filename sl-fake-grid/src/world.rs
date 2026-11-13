@@ -258,6 +258,10 @@ pub struct SceneFixtures {
     /// The touches held open in the region and its prims' `llPassTouches`
     /// settings ([`crate::touches`]). Not a fixture.
     pub touches: crate::touches::Touches,
+    /// What its scripts set on its objects that physics reads, how each
+    /// physical object moves and what each prim touches
+    /// ([`crate::physics`]). Not a fixture.
+    pub physics: crate::physics::Physics,
     /// The grid's wall clock, which the region stamps calendar times from (an
     /// access pass's expiry). The grid hands every region its own; a world
     /// built by hand reads the machine's.
@@ -955,6 +959,7 @@ impl SceneFixtures {
             script_instances: crate::scripts::RegionScripts::default(),
             experience_land: crate::experiences::ExperienceLand::default(),
             touches: crate::touches::Touches::default(),
+            physics: crate::physics::Physics::default(),
             wall: crate::time::WallClock::default(),
         }
     }

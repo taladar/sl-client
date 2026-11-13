@@ -4578,4 +4578,396 @@ default
     async fn a_scripted_teleport_lands_at_the_aim_on_opensim() -> Result<(), TestError> {
         a_scripted_teleport_routes_to_the_landing_point(ImitatedGrid::OpenSim).await
     }
+
+    /// The struck box of [`a_falling_box_collides`]: counts the collision
+    /// events it runs and, on channel 7, turns on `llVolumeDetect` or says
+    /// what it counted and what the first thing to strike it was.
+    const STRUCK_SOURCE: &str = "integer starts;
+integer ends;
+integer collisions;
+integer type;
+
+default
+{
+    state_entry()
+    {
+        llListen(7, \"\", NULL_KEY, \"\");
+    }
+
+    listen(integer channel, string name, key id, string message)
+    {
+        if (message == \"detect\")
+        {
+            llVolumeDetect(TRUE);
+        }
+        else if (message == \"report\")
+        {
+            llShout(0, \"struck \" + (string)starts + \" \" + (string)ends + \" \"
+                + (string)collisions + \" \" + (string)type);
+        }
+    }
+
+    collision_start(integer n)
+    {
+        if (starts == 0)
+        {
+            type = llDetectedType(0);
+        }
+        ++starts;
+    }
+
+    collision(integer n)
+    {
+        ++collisions;
+    }
+
+    collision_end(integer n)
+    {
+        ++ends;
+    }
+}
+";
+
+    /// The falling box of [`a_falling_box_collides`]: on channel 7 it turns
+    /// physical or back, or says what it counted of its own collisions, its
+    /// landings and its movement.
+    const FALLING_SOURCE: &str = "integer starts;
+integer ends;
+integer collisions;
+integer lands;
+integer lifts;
+integer moves;
+integer stops;
+
+default
+{
+    state_entry()
+    {
+        llListen(7, \"\", NULL_KEY, \"\");
+    }
+
+    listen(integer channel, string name, key id, string message)
+    {
+        if (message == \"drop\")
+        {
+            llSetStatus(STATUS_PHYSICS, TRUE);
+        }
+        else if (message == \"stop\")
+        {
+            llSetStatus(STATUS_PHYSICS, FALSE);
+        }
+        else if (message == \"report\")
+        {
+            llShout(0, \"falling \" + (string)starts + \" \" + (string)ends + \" \"
+                + (string)collisions + \" \" + (string)lands + \" \" + (string)lifts
+                + \" \" + (string)moves + \" \" + (string)stops);
+        }
+    }
+
+    collision_start(integer n)
+    {
+        ++starts;
+    }
+
+    collision(integer n)
+    {
+        ++collisions;
+    }
+
+    collision_end(integer n)
+    {
+        ++ends;
+    }
+
+    land_collision_start(vector at)
+    {
+        ++lands;
+    }
+
+    land_collision_end(vector at)
+    {
+        ++lifts;
+    }
+
+    moving_start()
+    {
+        ++moves;
+    }
+
+    moving_end()
+    {
+        ++stops;
+    }
+}
+";
+
+    /// The struck box's region-local id in [`a_falling_box_collides`].
+    const STRUCK: sl_proto::RegionLocalObjectId = sl_proto::RegionLocalObjectId(0xC00);
+
+    /// The falling box's region-local id in [`a_falling_box_collides`].
+    const FALLING: sl_proto::RegionLocalObjectId = sl_proto::RegionLocalObjectId(0xC01);
+
+    /// A region holding the struck box and, two metres above it, the falling
+    /// one, as `events/collision` sets them.
+    fn collision_region() -> Result<sl_fake_grid::RegionFixture, TestError> {
+        let mut fixture = region_of(&[
+            ScriptedBox {
+                local_id: STRUCK,
+                source: STRUCK_SOURCE.to_owned(),
+                experience: None,
+            },
+            ScriptedBox {
+                local_id: FALLING,
+                source: FALLING_SOURCE.to_owned(),
+                experience: None,
+            },
+        ])?;
+        let mut falling = fixture
+            .world
+            .objects
+            .get_mut(FALLING)
+            .ok_or("the falling box is not in the region")?;
+        falling.motion.position = sl_types::lsl::Vector {
+            x: 132.2,
+            y: 128.0,
+            z: 27.5,
+        };
+        drop(falling);
+        Ok(fixture)
+    }
+
+    /// The `events/collision` probe's drop, on the fake grid: a box turned
+    /// physical two metres above a scripted one falls onto it, and both hear
+    /// the collision as their grid raises it — once on Second Life, whose
+    /// box at rest sleeps and stops touching; twice on OpenSim, whose box
+    /// bounces once and keeps touching until it is no longer physical, which
+    /// only the struck box hears end. Under `llVolumeDetect` the box falls
+    /// through, the struck one hearing a start and an end and no
+    /// `collision`, the falling one nothing of it and the ground instead —
+    /// on a grid imitating `imitated`.
+    async fn a_falling_box_collides(imitated: ImitatedGrid) -> Result<(), TestError> {
+        let second_life = imitated == ImitatedGrid::SecondLife;
+        for detect in [false, true] {
+            let first = drop_onto(imitated, detect).await?;
+            // Two runs of one region raise exactly the same events.
+            assert_eq!(drop_onto(imitated, detect).await?, first);
+            // How many `collision` events ran is the tick rate's; whether any
+            // ran is the grid's.
+            let heard: Vec<String> = first
+                .iter()
+                .map(|line| {
+                    line.split(' ')
+                        .enumerate()
+                        .map(|(at, field)| match (at, field) {
+                            (3, "0") => "0",
+                            (3, _some) => "1",
+                            (_at, field) => field,
+                        })
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                })
+                .collect();
+            let expected = match (second_life, detect) {
+                (true, false) => ["falling 1 1 1 0 0 1 1", "struck 1 1 1 10"],
+                (false, false) => ["falling 2 1 1 0 0 1 1", "struck 2 2 1 10"],
+                (true, true) => ["falling 0 0 0 1 1 1 1", "struck 1 1 0 10"],
+                (false, true) => ["falling 0 0 0 1 0 1 1", "struck 1 1 0 10"],
+            };
+            assert_eq!(heard, expected, "volume detect {detect}");
+        }
+        Ok(())
+    }
+
+    /// The two boxes' reports of a drop, under `llVolumeDetect` for `detect`,
+    /// in order of their text.
+    async fn drop_onto(imitated: ImitatedGrid, detect: bool) -> Result<Vec<String>, TestError> {
+        let fixture = collision_region()?;
+        let mut scene = scene_of(imitated, fixture).await?;
+        scene.tick(2).await?;
+        if detect {
+            scene.shout("detect").await?;
+            scene.tick(2).await?;
+        }
+        scene.shout("drop").await?;
+        scene.tick(40).await?;
+        scene.shout("stop").await?;
+        scene.tick(2).await?;
+        scene.shout("report").await?;
+        scene.tick(3).await?;
+        let mut heard = shouted(&mut scene).await;
+        heard.sort();
+        scene.stop();
+        Ok(heard)
+    }
+
+    /// On a grid imitating Second Life.
+    #[tokio::test]
+    async fn a_falling_box_collides_on_second_life() -> Result<(), TestError> {
+        a_falling_box_collides(ImitatedGrid::SecondLife).await
+    }
+
+    /// On a grid imitating OpenSim.
+    #[tokio::test]
+    async fn a_falling_box_collides_on_opensim() -> Result<(), TestError> {
+        a_falling_box_collides(ImitatedGrid::OpenSim).await
+    }
+
+    /// The box of [`an_avatar_passes_through_a_volume_detect_prim`]: on
+    /// channel 7 it goes to whoever spoke, or back, and says who it detected.
+    const DETECTOR_SOURCE: &str = "vector home;
+
+default
+{
+    state_entry()
+    {
+        home = llGetPos();
+        llVolumeDetect(TRUE);
+        llListen(7, \"\", NULL_KEY, \"\");
+    }
+
+    listen(integer channel, string name, key id, string message)
+    {
+        if (message == \"come\")
+        {
+            llSetRegionPos(llList2Vector(llGetObjectDetails(id, [OBJECT_POS]), 0));
+        }
+        else if (message == \"go\")
+        {
+            llSetRegionPos(home);
+        }
+    }
+
+    collision_start(integer n)
+    {
+        llShout(0, \"start \" + llDetectedName(0) + \" \" + (string)llDetectedType(0));
+    }
+
+    collision(integer n)
+    {
+        llShout(0, \"collision\");
+    }
+
+    collision_end(integer n)
+    {
+        llShout(0, \"end \" + llDetectedName(0));
+    }
+}
+";
+
+    /// A volume-detecting prim moved onto the avatar hears it come in, as its
+    /// grid types an avatar, and hears it leave when moved away, with no
+    /// `collision` between; the avatar is not moved — on a grid imitating
+    /// `imitated`.
+    async fn an_avatar_passes_through_a_volume_detect_prim(
+        imitated: ImitatedGrid,
+    ) -> Result<(), TestError> {
+        let fixture = region_of(&[ScriptedBox {
+            local_id: sl_proto::RegionLocalObjectId(0xC10),
+            source: DETECTOR_SOURCE.to_owned(),
+            experience: None,
+        }])?;
+        let mut scene = scene_of(imitated, fixture).await?;
+        scene.tick(2).await?;
+        let before = scene
+            .agent
+            .with_sim(|sim| sim.arrival_position().position)
+            .await;
+        scene.shout("come").await?;
+        scene.tick(5).await?;
+        scene.shout("go").await?;
+        scene.tick(5).await?;
+        let kind = if imitated == ImitatedGrid::SecondLife {
+            3
+        } else {
+            1
+        };
+        assert_eq!(
+            shouted(&mut scene).await,
+            vec![
+                format!("start Test User {kind}"),
+                "end Test User".to_owned()
+            ]
+        );
+        let after = scene
+            .agent
+            .with_sim(|sim| sim.arrival_position().position)
+            .await;
+        assert_eq!(after, before);
+        scene.stop();
+        Ok(())
+    }
+
+    /// On a grid imitating Second Life.
+    #[tokio::test]
+    async fn an_avatar_passes_through_a_volume_detect_prim_on_second_life() -> Result<(), TestError>
+    {
+        an_avatar_passes_through_a_volume_detect_prim(ImitatedGrid::SecondLife).await
+    }
+
+    /// On a grid imitating OpenSim.
+    #[tokio::test]
+    async fn an_avatar_passes_through_a_volume_detect_prim_on_opensim() -> Result<(), TestError> {
+        an_avatar_passes_through_a_volume_detect_prim(ImitatedGrid::OpenSim).await
+    }
+
+    /// The mover of [`move_to_target_reaches_its_target`]: on channel 7 it
+    /// turns physical and weightless and moves a metre up, saying when a
+    /// target a tenth of a metre round the point is reached.
+    const MOVER_SOURCE: &str = "vector home;
+
+default
+{
+    state_entry()
+    {
+        home = llGetPos();
+        llListen(7, \"\", NULL_KEY, \"\");
+    }
+
+    listen(integer channel, string name, key id, string message)
+    {
+        llSetBuoyancy(1.0);
+        llSetStatus(STATUS_PHYSICS, TRUE);
+        llTarget(home + <0.0, 0.0, 1.0>, 0.1);
+        llMoveToTarget(home + <0.0, 0.0, 1.0>, 0.3);
+        llResetTime();
+    }
+
+    at_target(integer handle, vector target, vector at)
+    {
+        llTargetRemove(handle);
+        llShout(0, \"reached \" + (string)llRound(llGetTime() * 10.0) + \" \"
+            + (string)llRound((at.z - home.z) * 10.0));
+    }
+}
+";
+
+    /// `llMoveToTarget` with a tau of 0.3 draws a physical, weightless box a
+    /// metre up to within a tenth of a metre in some seven tenths of a second,
+    /// as `physics/targets` measured — on a grid imitating `imitated`.
+    async fn move_to_target_reaches_its_target(imitated: ImitatedGrid) -> Result<(), TestError> {
+        let fixture = region_of(&[ScriptedBox {
+            local_id: sl_proto::RegionLocalObjectId(0xC20),
+            source: MOVER_SOURCE.to_owned(),
+            experience: None,
+        }])?;
+        let mut scene = scene_of(imitated, fixture).await?;
+        scene.tick(2).await?;
+        scene.shout("go").await?;
+        scene.tick(20).await?;
+        assert_eq!(shouted(&mut scene).await, vec!["reached 7 9".to_owned()]);
+        scene.stop();
+        Ok(())
+    }
+
+    /// On a grid imitating Second Life.
+    #[tokio::test]
+    async fn move_to_target_reaches_its_target_on_second_life() -> Result<(), TestError> {
+        move_to_target_reaches_its_target(ImitatedGrid::SecondLife).await
+    }
+
+    /// On a grid imitating OpenSim.
+    #[tokio::test]
+    async fn move_to_target_reaches_its_target_on_opensim() -> Result<(), TestError> {
+        move_to_target_reaches_its_target(ImitatedGrid::OpenSim).await
+    }
 }

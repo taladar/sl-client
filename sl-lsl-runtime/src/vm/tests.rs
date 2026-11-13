@@ -236,6 +236,12 @@ struct Recorder {
     pay_prices: std::collections::BTreeMap<u64, PayPrice>,
     /// What each prim's scripts last set `llPassTouches` to, by number.
     passes: std::collections::BTreeMap<u64, i32>,
+    /// What each prim's scripts last set `llPassCollisions` to, by number.
+    collision_passes: std::collections::BTreeMap<u64, i32>,
+    /// Each `llMoveToTarget` and `llStopMoveToTarget` handed on, in order.
+    move_targets: Vec<(CallerId, Option<crate::vm::prim::MoveTarget>)>,
+    /// Each `llSetBuoyancy` handed on, in order.
+    buoyancies: Vec<(CallerId, f32)>,
     /// The experience each script was compiled into; none when not listed.
     experiences: std::collections::BTreeMap<CallerId, ScriptExperience>,
     /// The experiences the grid knows, by key; an id not listed is no
@@ -686,6 +692,19 @@ impl Host for Recorder {
     fn pass_touches(&mut self, caller: CallerId, pass: i32) {
         let prim = self.prim_of(caller);
         let _old = self.passes.insert(prim, pass);
+    }
+
+    fn pass_collisions(&mut self, caller: CallerId, pass: i32) {
+        let prim = self.prim_of(caller);
+        let _old = self.collision_passes.insert(prim, pass);
+    }
+
+    fn move_to_target(&mut self, caller: CallerId, target: Option<crate::vm::prim::MoveTarget>) {
+        self.move_targets.push((caller, target));
+    }
+
+    fn set_buoyancy(&mut self, caller: CallerId, buoyancy: f32) {
+        self.buoyancies.push((caller, buoyancy));
     }
 
     fn experience(&self, caller: CallerId) -> Option<ScriptExperience> {
@@ -2194,17 +2213,14 @@ fn every_value_type_survives_a_round_trip_through_the_machine() -> Result<(), St
 fn a_call_to_a_function_nobody_wrote_stops_the_script() -> Result<(), String> {
     let mut engine = engine();
     let mut host = Recorder::default();
-    let _none = engine.add(
-        A,
-        program("default { state_entry() { llSetBuoyancy(1.0); } }")?,
-    );
+    let _none = engine.add(A, program("default { state_entry() { llStopHover(); } }")?);
     let reports = run(&mut engine, &mut host, 1);
     assert!(matches!(
         reports.first().map(|report| outcomes(report, A)).as_deref(),
         Some([
             Outcome::Finished,
             Outcome::Faulted(Fault {
-                error: RuntimeError::Unimplemented(BuiltinId::LlSetBuoyancy),
+                error: RuntimeError::Unimplemented(BuiltinId::LlStopHover),
                 ..
             })
         ])
@@ -2823,6 +2839,56 @@ fn pass_touches_is_handed_to_the_host_as_the_script_gave_it() -> Result<(), Stri
     let _reports = run(&mut engine, &mut host, 2);
     let prim = host.prim_of(A);
     assert_eq!(host.passes.get(&prim), Some(&7));
+    Ok(())
+}
+
+#[test]
+fn pass_collisions_is_handed_to_the_host_as_the_script_gave_it() -> Result<(), String> {
+    let mut engine = engine();
+    let mut host = Recorder::default();
+    let _none = engine.add(
+        A,
+        program("default { state_entry() { llPassCollisions(PASS_ALWAYS); } }")?,
+    );
+    let _reports = run(&mut engine, &mut host, 2);
+    let prim = host.prim_of(A);
+    assert_eq!(host.collision_passes.get(&prim), Some(&1));
+    Ok(())
+}
+
+/// The movers of `physics/targets`: a tau of 0 moves nothing on either
+/// grid, a target 70 m off moves nothing on Second Life and is gone to on
+/// OpenSim, and a stop and a buoyancy are handed on as given.
+#[test]
+fn move_to_target_refuses_what_each_grid_refuses() -> Result<(), String> {
+    let source = "default { state_entry() {
+        llMoveToTarget(llGetPos() + <0.0, 0.0, 1.0>, 0.0);
+        llMoveToTarget(llGetPos() + <0.0, 0.0, 70.0>, 0.3);
+        llMoveToTarget(llGetPos() + <0.0, 0.0, 1.0>, 0.3);
+        llStopMoveToTarget();
+        llSetBuoyancy(1.0);
+    } }";
+    for (flavour, far_kept) in [
+        (EngineFlavour::SecondLife, false),
+        (EngineFlavour::YEngine, true),
+    ] {
+        let mut engine = engine_as(flavour);
+        let mut host = Recorder::default();
+        let _none = engine.add(A, program_for(source, flavour)?);
+        let _reports = run(&mut engine, &mut host, 2);
+        let rises: Vec<Option<f32>> = host
+            .move_targets
+            .iter()
+            .map(|(_caller, target)| target.as_ref().map(|target| target.tau))
+            .collect();
+        let mut expected = Vec::new();
+        if far_kept {
+            expected.push(Some(0.3));
+        }
+        expected.extend([Some(0.3), None]);
+        assert_eq!(rises, expected, "{flavour:?}");
+        assert_eq!(host.buoyancies, vec![(A, 1.0)], "{flavour:?}");
+    }
     Ok(())
 }
 

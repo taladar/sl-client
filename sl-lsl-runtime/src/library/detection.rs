@@ -229,3 +229,16 @@ pub fn ll_pass_touches(ctx: &mut ScriptCtx<'_>, pass: i32) -> Result<(), CallErr
     ctx.host().pass_touches(caller, pass);
     Ok(())
 }
+
+/// `llPassCollisions`: whether a collision of the prim the script is in also
+/// reaches its linkset's root, with the values and the keeping of
+/// [`ll_pass_touches`]. The host routes the collisions.
+///
+/// # Errors
+///
+/// None; the signature is the library's.
+pub fn ll_pass_collisions(ctx: &mut ScriptCtx<'_>, pass: i32) -> Result<(), CallError> {
+    let caller = ctx.caller();
+    ctx.host().pass_collisions(caller, pass);
+    Ok(())
+}

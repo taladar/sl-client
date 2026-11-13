@@ -23,8 +23,10 @@ only the I/O those cores deliberately leave to a runtime:
   expect next to the login URI (see below): `get_grid_info`, the
   map-tile files, and the economy helper scripts.
 
-There is deliberately **no world authority**: no physics, no persistence,
-no inter-client broadcast beyond what a test scripts. The fake grid is
+There is deliberately **no world authority**: no persistence and no
+inter-client broadcast beyond what a test scripts, and only a kinematic
+physics ([physics](../simulator/physics.md)) — enough for a physical prim to
+fall and its collisions to reach scripts. The fake grid is
 "real I/O glue, scripted content, no authority" — the half-way point
 between the in-memory loopback tests (`sl-proto/tests/sim_session.rs`)
 and a real grid.
@@ -113,8 +115,8 @@ contract](../simulator/determinism.md).
 Every region has a loop of its own (`sl_fake_grid::heartbeat`), started
 with the grid and ticking whether or not anybody is standing in it. It is
 where the work that belongs to the region rather than to a session runs:
-today the region's `SimStats`, and later the script slice, movement and
-physics, each between the clock and the statistics as it is built.
+physics, then the region's scripts (which hear in the same tick what
+physics did), then agent movement, and the region's `SimStats`.
 
 - **The tick is the clock.** Each tick advances the region clock by
   exactly one step, never by the time measured since the last one, so a

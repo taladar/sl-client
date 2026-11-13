@@ -716,7 +716,8 @@ it is handed, with what it detects, to its owner. It ran seven times on
 aditi (Mauve, the public sandbox parcel) and eight on the local OpenSim
 (YEngine). Every row below is checked on every run of both live grids, but
 for the ones marked **not held**, and on both fake flavours, but for those
-of *A physical prim*: the fake grid has no physics engine.
+of *A physical prim*: the fake grid's kinematic physics applies no grab's
+force or spin.
 
 ### The events of a touch
 

@@ -376,6 +376,18 @@ pub struct Omega {
     pub gain: f32,
 }
 
+/// Where `llMoveToTarget` draws an object, and how fast: the distance left
+/// shrinks by `e` every `tau` seconds, so a target a metre away is within a
+/// tenth of a metre after `tau × ln 10` (`physics/targets`: 0.69 s for a tau
+/// of 0.3 on Second Life, 0.71 s on OpenSim).
+#[derive(Debug, Clone, PartialEq)]
+pub struct MoveTarget {
+    /// The point, region coordinates.
+    pub target: Vector,
+    /// The time constant, in seconds; positive.
+    pub tau: f32,
+}
+
 /// A prim's reflection probe (`PRIM_REFLECTION_PROBE`).
 #[derive(Debug, Clone, PartialEq)]
 pub struct ReflectionProbe {

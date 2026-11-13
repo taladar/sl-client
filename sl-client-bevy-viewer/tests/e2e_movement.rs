@@ -302,14 +302,22 @@ mod test {
         Ok(gone.max(ground_distance(to, from)))
     }
 
+    /// Where the walking stage's avatar starts: open ground well south of the
+    /// stock box east of the landing point, which two walks east from the
+    /// landing point would meet and be stopped by, as at a live grid's prim.
+    const IN_THE_OPEN: (f32, f32) = (100.0, 100.0);
+
     /// **Walking and jumping**: the forward key walks the
     /// avatar from where the login put it, a tap of the jump key takes it off
     /// the ground, and the forward key walks it again once it is down.
     #[test]
     fn the_own_avatar_walks_and_jumps_on_a_grid_that_moves_it() -> Result<(), TestError> {
+        let (east, north) = IN_THE_OPEN;
+        let ground = RegionConfig::default().terrain.height_at(east, north);
         StageBuilder::new("movement")
             .viewer_binary(VIEWER)
             .viewer("Alpha")
+            .start_position(RegionCoordinates::new(east, north, ground + 1.0))
             .run(async |stage: &Stage| {
                 let alpha = &stage.viewer("Alpha")?;
 

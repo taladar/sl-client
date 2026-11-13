@@ -1,12 +1,12 @@
 grid: fake-opensim
-date: 2026-11-10
+date: 2026-11-13
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating YEngine
 settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
 
 PROBE events/collision rec=start region="Fake Region" channel="OpenSim" version="sl-fake-grid 0.1.0"
-PROBE events/collision rec=phase phase=1 name=solid events="" collisions=0 faller_start=0 faller_end=0 faller_land_start=0 faller_land_end=0 faller_collisions=0 faller_hit_probe=0
-PROBE events/collision rec=phase phase=2 name=volume-detect events="" collisions=0 faller_start=0 faller_end=0 faller_land_start=0 faller_land_end=0 faller_collisions=0 faller_hit_probe=0
-PROBE events/collision rec=phase phase=3 name=asleep events="" collisions=0 faller_start=0 faller_end=0 faller_land_start=0 faller_land_end=0 faller_collisions=0 faller_hit_probe=0
+PROBE events/collision rec=phase phase=1 name=solid events="collision_start1,collision_end1,collision_start1,collision_end1" first_is_faller=1 first_type=10 collisions=231 faller_start=2 faller_end=1 faller_land_start=0 faller_land_end=0 faller_collisions=231 faller_hit_probe=1
+PROBE events/collision rec=phase phase=2 name=volume-detect events="collision_start1,collision_end1" first_is_faller=1 first_type=10 collisions=0 faller_start=0 faller_end=0 faller_land_start=1 faller_land_end=0 faller_collisions=0 faller_hit_probe=0
+PROBE events/collision rec=phase phase=3 name=asleep events="collision_start1,collision_end1,collision_start1,collision_end1" first_is_faller=1 first_type=10 collisions=341 faller_start=2 faller_end=1 faller_land_start=0 faller_land_end=0 faller_collisions=396 faller_hit_probe=1
 PROBE events/collision rec=end

@@ -1056,7 +1056,8 @@ mod test {
 
     /// A region split down `x = 136` into West, where the login lands at the
     /// centre facing east, and East, whose own environment draws
-    /// [`PARCEL_SKY`]; the estate allows parcel environments.
+    /// [`PARCEL_SKY`]; the estate allows parcel environments, and no prim
+    /// stands in the way east.
     fn two_parcel_region() -> RegionConfig {
         use sl_proto::{AgentKey, EnvironmentSettings, OwnerKey, ParcelKey, RegionLocalParcelId};
         let owner = OwnerKey::Agent(AgentKey::from(Uuid::from_u128(0x0E)));
@@ -1066,6 +1067,9 @@ mod test {
         };
         fixture.world.parcels.clear();
         fixture.world.listings.clear();
+        // Nothing in the walk's way: the stock box east of the landing point
+        // would stop it, as a prim stops a walk on a live grid.
+        fixture.world.objects.retain(|_object| false);
         fixture.world.allow_parcel_environments();
         for (id, name, west, east) in [(1, "West", 0.0, 136.0), (2, "East", 136.0, 256.0)] {
             fixture.world.add_parcel(

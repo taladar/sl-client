@@ -10,9 +10,11 @@
 //! It is a kinematic character, not a physics solver: it walks, runs,
 //! crouches, flies, climbs, descends, jumps and falls, keeps a walking avatar
 //! on the region's heightfield and inside the region, and stops when the keys
-//! are let go. What it does not do — collide with prims, be pushed, stand on a
-//! floor that is not the ground, walk over a region border — is the roadmap's
-//! `server-world-collision-and-physics` and the crossing tasks.
+//! are let go. Solid prims ([`Ground::blocks`]) stop it as walls, are climbed
+//! as steps up to [`STEP_UP_M`] high, are stood on and stop a jump at their
+//! underside; a phantom or volume-detecting prim is walked through. What it
+//! does not do — be pushed, walk over a region border — is the roadmap's
+//! physics and crossing tasks.
 //!
 //! Each tick advances by exactly the heartbeat's step, never by the time
 //! measured since the last, so two runs of one scenario put the avatar in the
@@ -269,10 +271,160 @@ impl Posture {
     }
 }
 
-/// The region's ground, for the controller: the height at a point.
+/// The region's ground, for the controller: the height at a point, and the
+/// solid prims an avatar stands on and is stopped by.
 pub trait Ground {
     /// The ground height, metres, at region-local (`x`, `y`).
     fn height_at(&self, x: f32, y: f32) -> f32;
+
+    /// The solid prims near the avatar, each as the box it fills; none
+    /// unless the ground says otherwise.
+    fn blocks(&self) -> &[Block] {
+        &[]
+    }
+}
+
+/// A solid prim as the controller meets it: the axis-aligned box it fills,
+/// region coordinates.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Block {
+    /// Its south-west-lower corner.
+    pub min: Vector,
+    /// Its north-east-upper corner.
+    pub max: Vector,
+}
+
+/// The heightfield and the solid prims round an avatar.
+pub(crate) struct Surroundings<'ground> {
+    /// The heightfield.
+    pub(crate) terrain: &'ground crate::terrain::TerrainFixture,
+    /// The prims.
+    pub(crate) blocks: Vec<Block>,
+}
+
+impl Ground for Surroundings<'_> {
+    fn height_at(&self, x: f32, y: f32) -> f32 {
+        self.terrain.height_at(x, y)
+    }
+
+    fn blocks(&self) -> &[Block] {
+        &self.blocks
+    }
+}
+
+/// Half the width and depth of the box an avatar fills, metres: it is
+/// 0.5 × 0.5 m across and twice [`AVATAR_CENTRE_ABOVE_GROUND_M`] high, its
+/// turn ignored.
+pub const AVATAR_HALF_WIDTH_M: f32 = 0.25;
+
+/// The highest prim top a walking avatar steps up on to rather than being
+/// stopped by, metres above its feet. Not measured on either grid.
+pub const STEP_UP_M: f32 = 0.35;
+
+/// The box an avatar centred at `at` fills.
+fn avatar_box(at: &Vector) -> Block {
+    Block {
+        min: Vector {
+            x: at.x - AVATAR_HALF_WIDTH_M,
+            y: at.y - AVATAR_HALF_WIDTH_M,
+            z: at.z - AVATAR_CENTRE_ABOVE_GROUND_M,
+        },
+        max: Vector {
+            x: at.x + AVATAR_HALF_WIDTH_M,
+            y: at.y + AVATAR_HALF_WIDTH_M,
+            z: at.z + AVATAR_CENTRE_ABOVE_GROUND_M,
+        },
+    }
+}
+
+/// Whether the two boxes overlap on every axis.
+fn overlaps(a: &Block, b: &Block) -> bool {
+    a.min.x < b.max.x
+        && b.min.x < a.max.x
+        && a.min.y < b.max.y
+        && b.min.y < a.max.y
+        && a.min.z < b.max.z
+        && b.min.z < a.max.z
+}
+
+/// What an avatar whose feet are at `foot` stands on at (`x`, `y`): the
+/// height of the highest surface under it no higher than a step up — the
+/// ground, or the top of a prim over whose footprint the avatar's centre
+/// stands — and that top when it is a prim's.
+fn floor_under(ground: &impl Ground, x: f32, y: f32, foot: f32) -> (f32, Option<f32>) {
+    let mut height = ground.height_at(x, y);
+    let mut on_block = None;
+    for block in ground.blocks() {
+        let under =
+            (block.min.x..=block.max.x).contains(&x) && (block.min.y..=block.max.y).contains(&y);
+        let top = block.max.z;
+        if under && top <= foot + STEP_UP_M && top > height {
+            height = top;
+            on_block = Some(top);
+        }
+    }
+    (height, on_block)
+}
+
+/// How far an avatar centred at `at` may move `by` metres east (`east`) or
+/// north before a prim too tall to step on to stops it, and whether one did.
+/// A prim it already stands in does not hold it.
+fn walk_reach(ground: &impl Ground, at: &Vector, east: bool, by: f32) -> (f32, bool) {
+    let here = avatar_box(at);
+    let foot = here.min.z;
+    let mut allowed = by;
+    let mut stopped = false;
+    for block in ground.blocks() {
+        if block.max.z <= foot + STEP_UP_M || overlaps(&here, block) {
+            continue;
+        }
+        let across = if east {
+            here.min.y < block.max.y && block.min.y < here.max.y
+        } else {
+            here.min.x < block.max.x && block.min.x < here.max.x
+        };
+        if !across || here.max.z <= block.min.z || block.max.z <= here.min.z {
+            continue;
+        }
+        let (low, high, near_low, near_high) = if east {
+            (block.min.x, block.max.x, here.min.x, here.max.x)
+        } else {
+            (block.min.y, block.max.y, here.min.y, here.max.y)
+        };
+        if by > 0.0 && low >= near_high {
+            let gap = low - near_high;
+            if gap < allowed {
+                allowed = gap;
+                stopped = true;
+            }
+        } else if by < 0.0 && high <= near_low {
+            let gap = high - near_low;
+            if gap > allowed {
+                allowed = gap;
+                stopped = true;
+            }
+        }
+    }
+    (allowed, stopped)
+}
+
+/// The lowest underside of a prim above the head of an avatar centred at
+/// `at`, over its footprint, that rising to `to` would push it into.
+fn ceiling(ground: &impl Ground, at: &Vector, to: f32) -> Option<f32> {
+    let here = avatar_box(at);
+    ground
+        .blocks()
+        .iter()
+        .filter(|block| {
+            here.min.x < block.max.x
+                && block.min.x < here.max.x
+                && here.min.y < block.max.y
+                && block.min.y < here.max.y
+                && block.min.z >= here.max.z
+                && block.min.z < to + AVATAR_CENTRE_ABOVE_GROUND_M
+        })
+        .map(|block| block.min.z)
+        .reduce(f32::min)
 }
 
 impl Ground for crate::terrain::TerrainFixture {
@@ -541,7 +693,9 @@ impl Motion {
         // let it go, and it stands where the stand put it.
         let _rose = self.rise();
         let mut at = position.clone();
-        let floor = ground.height_at(at.x, at.y) + AVATAR_CENTRE_ABOVE_GROUND_M;
+        let foot = position.z - AVATAR_CENTRE_ABOVE_GROUND_M;
+        let (surface, was_on_block) = floor_under(ground, at.x, at.y, foot);
+        let floor = surface + AVATAR_CENTRE_ABOVE_GROUND_M;
         let flying = self.controls.contains(ControlFlags::FLY);
         let (dir_x, dir_y) = self.wanted_direction();
         let steering = dir_x != 0.0 || dir_y != 0.0;
@@ -568,9 +722,26 @@ impl Motion {
             self.walk(policy, (dir_x, dir_y), steering, (finished, tapped), dt);
         }
 
-        at.x = self.velocity.x.mul_add(dt, at.x);
-        at.y = self.velocity.y.mul_add(dt, at.y);
-        at.z = self.velocity.z.mul_add(dt, at.z);
+        // Walls stop the avatar where it meets them; a step it climbs.
+        let (east, stopped) = walk_reach(ground, &at, true, self.velocity.x * dt);
+        at.x += east;
+        if stopped {
+            self.velocity.x = 0.0;
+        }
+        let (north, stopped) = walk_reach(ground, &at, false, self.velocity.y * dt);
+        at.y += north;
+        if stopped {
+            self.velocity.y = 0.0;
+        }
+        let rise = self.velocity.z * dt;
+        at.z += rise;
+        if rise > 0.0
+            && let Some(underside) = ceiling(ground, position, at.z)
+        {
+            // A head against a prim's underside goes no higher.
+            at.z = underside - AVATAR_CENTRE_ABOVE_GROUND_M;
+            self.velocity.z = 0.0;
+        }
         // The region's edges stop the avatar: a border is crossed, not walked
         // through, and this controller crosses nothing.
         let inside = EDGE_MARGIN_M..=(REGION_WIDTH_M - EDGE_MARGIN_M);
@@ -582,8 +753,12 @@ impl Motion {
             at.y = at.y.clamp(*inside.start(), *inside.end());
             self.velocity.y = 0.0;
         }
-        let floor = ground.height_at(at.x, at.y) + AVATAR_CENTRE_ABOVE_GROUND_M;
-        let grounded = !self.posture.airborne() && !flying;
+        let reach = position.z.max(at.z) - AVATAR_CENTRE_ABOVE_GROUND_M;
+        let (surface, on_block) = floor_under(ground, at.x, at.y, reach);
+        let floor = surface + AVATAR_CENTRE_ABOVE_GROUND_M;
+        // Walking off a prim more than a step high is a fall, not a step down.
+        let off_a_ledge = was_on_block.is_some() && at.z - floor > STEP_UP_M;
+        let grounded = !self.posture.airborne() && !flying && !off_a_ledge;
         if grounded || at.z < floor {
             // On the ground, or come down to it this tick.
             if self.posture.airborne() {
@@ -594,7 +769,9 @@ impl Motion {
         }
 
         let posture_changed = self.posture != before;
-        let update = self.report(policy, ground, &at, step);
+        let on_block =
+            on_block.filter(|top| (at.z - AVATAR_CENTRE_ABOVE_GROUND_M - top).abs() <= ON_GROUND_M);
+        let update = self.report(policy, (ground, on_block), &at, step);
         Stepped {
             position: at,
             posture_changed,
@@ -781,7 +958,7 @@ impl Motion {
     fn report(
         &mut self,
         policy: &MovementPolicy,
-        ground: &impl Ground,
+        (ground, on_block): (&impl Ground, Option<f32>),
         at: &Vector,
         step: Duration,
     ) -> Option<sl_proto::ObjectMotion> {
@@ -824,10 +1001,11 @@ impl Motion {
                 y: 0.0,
                 z: 0.0,
             },
-            collision_plane: Some(if airborne {
-                [0.0, 0.0, 0.0, 1.0]
-            } else {
-                ground_plane(ground, at)
+            collision_plane: Some(match (airborne, on_block) {
+                (true, _on_block) => [0.0, 0.0, 0.0, 1.0],
+                // A prim's top is level: the box it is drawn as.
+                (false, Some(top)) => [0.0, 0.0, 1.0, top],
+                (false, None) => ground_plane(ground, at),
             }),
         })
     }
@@ -974,7 +1152,11 @@ pub(crate) fn advance(state: &mut SimState, step: Duration, now: Instant) {
         z: placement.position.z(),
     };
     let policy = state.movement_policy;
-    let stepped = state.motion.step(&policy, &state.terrain, &from, step);
+    let surroundings = Surroundings {
+        terrain: &state.terrain,
+        blocks: crate::physics::avatar_blocks(&state.world.lock(), &from),
+    };
+    let stepped = state.motion.step(&policy, &surroundings, &from, step);
     let to = stepped.position;
     if stepped.posture_changed {
         tracing::debug!(posture = ?state.motion.posture(), ?to, "the avatar's posture changed");
@@ -1049,7 +1231,7 @@ mod test {
     use sl_proto::{AgentUpdateInfo, ControlFlags, MovementMode, RegionLocalParcelId, ServerEvent};
     use sl_types::lsl::{Rotation, Vector};
 
-    use super::{Ground, Motion, MovementPolicy, Posture};
+    use super::{Block, Ground, Motion, MovementPolicy, Posture};
     use crate::ImitatedGrid;
     use crate::world::AVATAR_CENTRE_ABOVE_GROUND_M;
 
@@ -1068,6 +1250,35 @@ mod test {
     impl Ground for Slope {
         fn height_at(&self, x: f32, _y: f32) -> f32 {
             x / 10.0
+        }
+    }
+
+    /// Level ground at 25 m with prims standing on it.
+    struct Built(Vec<Block>);
+
+    impl Ground for Built {
+        fn height_at(&self, _x: f32, _y: f32) -> f32 {
+            25.0
+        }
+
+        fn blocks(&self) -> &[Block] {
+            &self.0
+        }
+    }
+
+    /// The box from `(x0, y0, z0)` to `(x1, y1, z1)`.
+    const fn block((x0, y0, z0): (f32, f32, f32), (x1, y1, z1): (f32, f32, f32)) -> Block {
+        Block {
+            min: Vector {
+                x: x0,
+                y: y0,
+                z: z0,
+            },
+            max: Vector {
+                x: x1,
+                y: y1,
+                z: z1,
+            },
         }
     }
 
@@ -1462,5 +1673,75 @@ mod test {
         assert_eq!(second_life.crossed_into(east, true), Some(1));
         assert_eq!(second_life.crossed_into(west, true), Some(2));
         assert_eq!(second_life.crossed_into(None, true), None);
+    }
+
+    /// A prim too tall to step on stops a walk where the avatar meets it.
+    #[test]
+    fn a_wall_stops_a_walk_where_it_meets_it() {
+        let policy = ImitatedGrid::SecondLife.movement_policy();
+        let wall = Built(vec![block((130.0, 120.0, 25.0), (131.0, 136.0, 28.0))]);
+        let mut motion = Motion::default();
+        hold(&mut motion, ControlFlags::AT_POS, 0.0);
+        let at = run(&mut motion, &policy, &wall, standing(), 20);
+        assert!(same(at.x, 130.0 - super::AVATAR_HALF_WIDTH_M), "{at:?}");
+        assert!(same(at.z, standing().z), "{at:?}");
+        assert!(same(motion.velocity().x, 0.0), "{:?}", motion.velocity());
+    }
+
+    /// A prim lower than a step is walked on to and stood on, and the
+    /// avatar's collision plane is its top.
+    #[test]
+    fn a_low_prim_is_stepped_on_and_stood_on() {
+        let policy = ImitatedGrid::SecondLife.movement_policy();
+        let step = Built(vec![block((129.0, 126.0, 25.0), (133.0, 130.0, 25.3))]);
+        let mut motion = Motion::default();
+        hold(&mut motion, ControlFlags::AT_POS, 0.0);
+        let mut at = standing();
+        let mut plane = None;
+        for _tick in 0..8 {
+            let stepped = motion.step(&policy, &step, &at, STEP);
+            at = stepped.position;
+            if let Some(update) = stepped.update {
+                plane = update.collision_plane;
+            }
+        }
+        assert!(at.x > 129.5 && at.x < 133.0, "{at:?}");
+        assert!(same(at.z, 25.3 + AVATAR_CENTRE_ABOVE_GROUND_M), "{at:?}");
+        assert_eq!(plane, Some([0.0, 0.0, 1.0, 25.3]));
+    }
+
+    /// Walking off a prim more than a step high falls to the ground rather
+    /// than stepping down.
+    #[test]
+    fn walking_off_a_tall_prim_falls() {
+        let policy = ImitatedGrid::OpenSim.movement_policy();
+        let platform = Built(vec![block((120.0, 120.0, 25.0), (130.0, 136.0, 28.0))]);
+        let mut motion = Motion::default();
+        hold(&mut motion, ControlFlags::AT_POS, 0.0);
+        let on_top = Vector {
+            x: 129.5,
+            z: 28.0 + AVATAR_CENTRE_ABOVE_GROUND_M,
+            ..standing()
+        };
+        let mut at = on_top;
+        let mut fell = false;
+        for _tick in 0..40 {
+            at = motion.step(&policy, &platform, &at, STEP).position;
+            fell |= motion.posture() == Posture::Falling;
+        }
+        assert!(fell, "never fell");
+        assert!(at.x > 130.0, "{at:?}");
+        assert!(same(at.z, standing().z), "{at:?}");
+    }
+
+    /// A climb in flight stops with the head against a prim's underside.
+    #[test]
+    fn a_climb_stops_at_a_roof() {
+        let policy = ImitatedGrid::SecondLife.movement_policy();
+        let roof = Built(vec![block((120.0, 120.0, 30.0), (136.0, 136.0, 30.5))]);
+        let mut motion = Motion::default();
+        hold(&mut motion, ControlFlags::FLY | ControlFlags::UP_POS, 0.0);
+        let at = run(&mut motion, &policy, &roof, standing(), 10);
+        assert!(same(at.z, 30.0 - AVATAR_CENTRE_ABOVE_GROUND_M), "{at:?}");
     }
 }

@@ -2,7 +2,7 @@
 id: server-world-collision-and-physics
 title: Enough physics for the collision, target and volume-detect events
 topic: server
-status: ready
+status: done
 origin: LSL-on-the-fake-grid audit (2026-09-20)
 points: 13
 blocked_by: [server-world-heartbeat, server-world-ecs-store]
@@ -75,3 +75,49 @@ event at all on waking — and queued in full on OpenSim (82–132 `collision`
 events). From `events/state-drops`: an `llTarget` and `llRotTarget` set
 just before a state change keep raising `at_target` / `at_rot_target` in the
 new state on Second Life and are dropped on OpenSim.
+
+## Done (2026-11-13)
+
+The decision: **a kinematic solver**, `sl_fake_grid::physics`, run each
+heartbeat tick before the scripts, inside their update burst (and on its own
+in a region with no script), documented in the book's `simulator/physics.md`.
+Prims collide as the boxes their scale and rotation bound, a physical object
+as the union of its prims'; each tick moves it by gravity (less
+`llSetBuoyancy`'s share) or `llMoveToTarget`'s pull, axis by axis against
+solid prims and the ground. Contacts within a centimetre raise
+`collision_start` / `collision` / `collision_end` on both sides,
+`land_collision_*` at the root, a volume-detecting prim a start and an end
+with the physical object or avatar passing through it unaware, and
+`moving_start` / `moving_end` as an object starts and stops. A child's
+collision is routed by `llPassCollisions` with the grid's touch-passing rule.
+
+Each flavour as `events/collision` measured it (`PhysicsPolicy`): Second
+Life's object sleeps a quarter of a second after coming to rest and its
+contacts end, and a script busy when a collision began hears none of it;
+OpenSim's bounces at ubODE's material restitutions above 1.5 m/s, keeps
+touching, and queues everything. `fake-sl`'s `events/collision` now agrees
+with aditi's (eleven `collision` events included), and `fake-opensim`'s with
+OpenSim's but for the volume-detect phase's landing, where the local region
+has a prim under the probe (a deliberate entry in `accepted.toml`).
+
+The runtime gained `Host::pass_collisions`, `Host::move_to_target` and
+`Host::set_buoyancy`, and the library `llPassCollisions`, `llMoveToTarget`
+(refusing a tau of 0, and on Second Life a target past 65 m),
+`llStopMoveToTarget` and `llSetBuoyancy`. `llCastRay` and `llGetStatus`
+were already in place. `tests/scripts.rs` holds the drop on both flavours
+(twice, the same events each time), an avatar passing through a
+volume-detecting prim, and `llMoveToTarget` reaching its target in 0.7 s.
+
+Avatars and prims, which [[server-world-agent-movement]] left here ("no
+prims to stand on or bump into"): the controller is handed the solid prims
+within 16 m (`Ground::blocks`, `physics::avatar_blocks`). A prim more than a
+step (0.35 m, not measured) above the feet stops a walk where the avatar meets
+it, a lower one is stepped on to, a prim's top is stood on with the collision
+plane level at it, walking off one higher than a step is a fall, and a climb
+stops at a prim's underside. Phantom and volume-detecting prims are walked
+through. The avatar is a 0.5 × 0.5 × 1.9 m box for both the controller and
+the collisions it raises.
+
+Left to [[server-lsl-lib-physics-vehicles]]: forces and impulses, the
+look-at functions, keyframed motion, vehicles, characters, material and mass,
+and a physical prim pulled by a grab (`object-touch-grab` leg 10).

@@ -1,5 +1,5 @@
 grid: fake-sl
-date: 2026-11-11
+date: 2026-11-13
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating Mono
@@ -13,7 +13,8 @@ PROBE physics/targets rec=ranges ranges="0,-1" fired="1" not_at=0
 PROBE physics/targets rec=rot-handles after_position_target=1
 PROBE physics/targets rec=rot-targets steps="1" fired="0" at=22 not_at=0 position_events=0 first_handle_is=0 ours_is_rot=1
 PROBE physics/targets rec=ten-rot-targets fired="2,3,4,5,6,7,8,9" not_at=0
+PROBE physics/targets rec=non-physical call=llMoveToTarget moved=0 turned=0
 # debug-channel: from="Object" text="Object [script:Probe] Script run-time error"
-# debug-channel: from="Object" text="llMoveToTarget is not implemented by this grid"
+# debug-channel: from="Object" text="llStopLookAt is not implemented by this grid"
 # debug-channel by=other: from="Object" text="Object [script:Probe] Script run-time error"
-# debug-channel by=other: from="Object" text="llMoveToTarget is not implemented by this grid"
+# debug-channel by=other: from="Object" text="llStopLookAt is not implemented by this grid"

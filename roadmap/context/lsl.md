@@ -70,13 +70,15 @@ What is missing is the middle:
   each row: [[server-world-ecs-store]]; since 2026-11-03 each root holds its
   link order there and scripts read and change it:
   [[server-world-link-sets]].)
-- There is **no simulation loop**. A change is published by the session
-  that made it and streamed to the region's other sessions; nothing
-  sweeps, nothing ticks, nothing moves on its own. (Since 2026-11-02 a
-  heartbeat ticks every region, [[server-world-heartbeat]], and runs its
-  scripts: [[server-fake-grid-script-engine-wiring]]. Since 2026-11-04 what
-  a tick changes in the region's prims goes out as one burst per tick, terse
-  for a prim that only moved: [[server-world-update-scheduling]].)
+- There is **no simulation loop**. A change is published by the session that
+  made it and streamed to the region's other sessions; nothing sweeps, nothing
+  ticks, nothing moves on its own. (Since 2026-11-02 a heartbeat ticks every
+  region, [[server-world-heartbeat]], and runs its scripts:
+  [[server-fake-grid-script-engine-wiring]]. Since 2026-11-04 what a tick
+  changes in the region's prims goes out as one burst per tick, terse for a prim
+  that only moved: [[server-world-update-scheduling]]. Since 2026-11-13 the tick
+  moves physical objects and raises their collisions:
+  [[server-world-collision-and-physics]].)
 - The agent's position is "the position the session was opened at"
   (`driver.rs`'s `stands_on`). `ServerEvent::AgentUpdate` is never
   consumed. (Since 2026-11-06 the heartbeat's avatar controller walks, flies

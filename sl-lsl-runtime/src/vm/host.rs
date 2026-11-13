@@ -17,7 +17,7 @@ use crate::vm::land::{Environment, LandChange, Parcel, ParcelMedia, Region, SimD
 use crate::vm::linkset_data::{LinksetData, LinksetId};
 use crate::vm::ossl::{Simulator, Standing};
 use crate::vm::permissions::Question;
-use crate::vm::prim::{ObjectDetails, Prim, SoundCue};
+use crate::vm::prim::{MoveTarget, ObjectDetails, Prim, SoundCue};
 use crate::vm::report::{Speech, Whereabouts};
 use crate::vm::seating::{Placement, Seat};
 use crate::vm::sensing::{RayHit, Sensed};
@@ -238,6 +238,22 @@ pub trait Host {
     /// prim's, so a reset leaves it. What a value means is the grid's: the
     /// host routes the touches.
     fn pass_touches(&mut self, caller: CallerId, pass: i32);
+
+    /// `llPassCollisions`: whether a collision of the prim `caller` is in
+    /// also reaches its linkset's root is now `pass`, as the script gave it
+    /// (`PASS_IF_NOT_HANDLED` 0, `PASS_ALWAYS` 1, `PASS_NEVER` 2) — the
+    /// prim's, so a reset leaves it. The host routes the collisions.
+    fn pass_collisions(&mut self, caller: CallerId, pass: i32);
+
+    /// `llMoveToTarget` and `llStopMoveToTarget`: the object `caller` is in
+    /// is drawn towards `target` while it is physical, or no longer drawn for
+    /// [`None`]. The object's, so a reset leaves it; the library has already
+    /// refused what the grid refuses.
+    fn move_to_target(&mut self, caller: CallerId, target: Option<MoveTarget>);
+
+    /// `llSetBuoyancy`: the share of gravity the object `caller` is in no
+    /// longer feels while physical — 1 floats, above 1 rises. The object's.
+    fn set_buoyancy(&mut self, caller: CallerId, buoyancy: f32);
 
     /// The experience the script `caller` was compiled into (the upload's
     /// experience, kept on its inventory item), and whether it may run where

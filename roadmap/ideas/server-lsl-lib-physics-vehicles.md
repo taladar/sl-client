@@ -157,3 +157,15 @@ triage, each held to its probe by a VM replay:
 What remains: forces and impulses, `llMoveToTarget` and the look-at
 functions, keyframed motion, vehicles, characters, material and mass, and
 volume detect's collisions.
+
+## From server-world-collision-and-physics (2026-11-13)
+
+The kinematic solver is in (`sl_fake_grid::physics`, book
+`simulator/physics.md`): a physical prim falls, lands, bounces as OpenSim's
+does, rests, collides and passes through a volume-detecting prim, with every
+collision, land collision and moving event. `llMoveToTarget`,
+`llStopMoveToTarget`, `llSetBuoyancy` and `llPassCollisions` landed with it;
+`physics/targets` now stops at `llLookAt` on both fake flavours. The solver's
+`Body` holds a velocity, so the force and impulse functions add to it, and a
+look-at turns the root where the solver moves it. Rotation is not simulated
+at all yet.

@@ -1509,6 +1509,12 @@ impl RegionHost<'_> {
         })
     }
 
+    /// The key of the root of the object `caller` is in.
+    fn object_of(&self, caller: CallerId) -> Option<ObjectKey> {
+        let origin = self.origin(caller)?;
+        self.world.objects.get(origin.root).map(|root| root.full_id)
+    }
+
     /// Where `caller`'s prim hears and speaks from.
     fn position(&self, caller: CallerId) -> Vector {
         self.slot(caller)
@@ -2407,6 +2413,28 @@ impl Host for RegionHost<'_> {
     fn pass_touches(&mut self, caller: CallerId, pass: i32) {
         if let Some(origin) = self.origin(caller) {
             self.world.touches.set_pass(origin.prim, pass);
+        }
+    }
+
+    fn pass_collisions(&mut self, caller: CallerId, pass: i32) {
+        if let Some(origin) = self.origin(caller) {
+            self.world.physics.set_pass(origin.prim, pass);
+        }
+    }
+
+    fn move_to_target(
+        &mut self,
+        caller: CallerId,
+        target: Option<sl_lsl_runtime::vm::prim::MoveTarget>,
+    ) {
+        if let Some(object) = self.object_of(caller) {
+            self.world.physics.set_target(object, target);
+        }
+    }
+
+    fn set_buoyancy(&mut self, caller: CallerId, buoyancy: f32) {
+        if let Some(object) = self.object_of(caller) {
+            self.world.physics.set_buoyancy(object, buoyancy);
         }
     }
 
@@ -3327,7 +3355,25 @@ pub(crate) async fn run_tick(core: &Arc<GridCore>, index: usize) -> Option<TickR
         }));
     }
     if !scripted {
-        crate::attachments::finish_leaving(&mut region.world.lock(), &core.assets, (core.clock)());
+        // Physics runs whether or not a script is there to hear of it.
+        let changes = {
+            let mut world = region.world.lock();
+            crate::updates::begin(&mut world);
+            let step = world.script_instances.engine.config().step;
+            crate::physics::step(&mut world, &[], step, &|x, y| {
+                region.config.terrain.height_at(x, y)
+            });
+            let changes = crate::updates::finish(&mut world, Vec::new());
+            crate::attachments::finish_leaving(&mut world, &core.assets, (core.clock)());
+            drop(world);
+            changes
+        };
+        for change in changes {
+            drop(region.changes.send(RegionUpdate {
+                source: REGION_SOURCE,
+                change,
+            }));
+        }
         return None;
     }
     let (present, children) = presence(core, index).await;
@@ -3377,6 +3423,23 @@ fn tick_locked(
     // A touch held open is due its `touch` before the scripts run.
     let agents: Vec<AgentKey> = present.iter().map(|present| present.agent).collect();
     crate::touches::tick(world, config.step, &agents);
+    // What physics does in the tick, the scripts hear of in it.
+    let avatars: Vec<crate::physics::Avatar> = present
+        .iter()
+        .map(|present| crate::physics::Avatar {
+            agent: present.agent,
+            name: core.account_by_agent(present.agent).map_or_else(
+                || present.agent.uuid().to_string(),
+                |account| format!("{} {}", account.config.first_name, account.config.last_name),
+            ),
+            position: present.position.clone(),
+        })
+        .collect();
+    if let Some(region) = core.region(index) {
+        crate::physics::step(world, &avatars, config.step, &|x, y| {
+            region.config.terrain.height_at(x, y)
+        });
+    }
     // A prim that comes into the region from here to the next tick came in
     // in the tick about to run.
     world

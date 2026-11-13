@@ -56,3 +56,55 @@ pub fn ll_rot_target_remove(ctx: &mut ScriptCtx<'_>, handle: i32) -> Result<(), 
     ctx.remove_rotation_target(handle);
     Ok(())
 }
+
+/// How far away Second Life's `llMoveToTarget` still moves towards a target:
+/// one 70 m off did not move the prim, as the documented 65 m limit says
+/// (`physics/targets`).
+const MOVE_TO_TARGET_REACH: f32 = 65.0;
+
+/// `llMoveToTarget`: the object is drawn to `target` with the time constant
+/// `tau` while it is physical. A tau of 0 or less moves nothing, on every
+/// grid; a target beyond 65 m moves nothing on Second Life and is gone to
+/// all the same on OpenSim, 27 m in half a second towards one 70 m up
+/// (`physics/targets`). On a prim that is not physical the target is kept and
+/// nothing moves.
+///
+/// # Errors
+///
+/// None; the signature is the library's.
+pub fn ll_move_to_target(
+    ctx: &mut ScriptCtx<'_>,
+    target: Vector,
+    tau: f32,
+) -> Result<(), CallError> {
+    if tau.is_nan() || tau <= 0.0 {
+        return Ok(());
+    }
+    if !ctx.flavour().is_opensim()
+        && let Some(prim) = crate::library::prim_state::own(ctx)
+    {
+        let (dx, dy, dz) = (
+            target.x - prim.position.x,
+            target.y - prim.position.y,
+            target.z - prim.position.z,
+        );
+        if (dx * dx + dy * dy + dz * dz).sqrt() > MOVE_TO_TARGET_REACH {
+            return Ok(());
+        }
+    }
+    let caller = ctx.caller();
+    ctx.host()
+        .move_to_target(caller, Some(crate::vm::prim::MoveTarget { target, tau }));
+    Ok(())
+}
+
+/// `llStopMoveToTarget`: the object is no longer drawn to a target.
+///
+/// # Errors
+///
+/// None; the signature is the library's.
+pub fn ll_stop_move_to_target(ctx: &mut ScriptCtx<'_>) -> Result<(), CallError> {
+    let caller = ctx.caller();
+    ctx.host().move_to_target(caller, None);
+    Ok(())
+}

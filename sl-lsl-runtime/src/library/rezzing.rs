@@ -369,7 +369,7 @@ fn read_rules(
 /// type follows it, not measured. Second Life's, which OpenSim does not
 /// compile. The rules that act only on a physical object — acceleration,
 /// spin, damage, sounds, locked axes — are read and checked and change
-/// nothing on the fake grid, which has no physics.
+/// nothing on the fake grid, whose kinematic physics applies none of them.
 ///
 /// # Errors
 ///

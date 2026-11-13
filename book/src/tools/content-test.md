@@ -240,8 +240,11 @@ like each live grid and the [probe corpus](lsl-probes.md) the
 library's behaviour against them; within that, these surfaces are known to be
 approximate:
 
-- **physics and vehicles**: there is no physics engine — a physical object
-  does not fall, collide or ride;
+- **physics and vehicles**: physics is kinematic
+  ([physics](../simulator/physics.md)) — a physical object falls, lands,
+  bounces where OpenSim's would, collides, passes through a volume-detecting
+  prim and is drawn by `llMoveToTarget`, but it does not tumble, slide, stack
+  or ride, and forces, impulses and vehicles are not implemented;
 - **timing under load**: a script's speed is charged as each engine was
   measured to run on an idle region, and the region never lags, drops events
   under load, or runs a script slower because its neighbours are busy;

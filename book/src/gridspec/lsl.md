@@ -712,15 +712,18 @@ physical, falls onto it and comes to rest; five seconds later it is put back.
 
 | behaviour | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
-| a physical prim falling onto the scripted one | `collision_start` and `collision_end` once each, with 11 `collision` events between (a measurement) | each **twice** — it bounced — with 66–76 `collision` events | no scripts |
-| `llDetectedType` of the falling prim | 10 (`ACTIVE \| SCRIPTED`) | the same | no scripts |
-| the scripted prim under `llVolumeDetect(TRUE)` | `collision_start` and `collision_end` as the prim falls through, no `collision` | the same | no scripts |
-| the falling prim's own events, landing on the solid prim | `collision_start`, `collision_end` and `collision` of its own | the same | no scripts |
-| the scripted prim asleep three seconds while it is hit | **nothing at all**: no `collision_start`, `collision` or `collision_end` on waking, though the falling prim's own events show it hit | all of it queued: each start and end twice, 82–132 `collision` events | no scripts |
+| a physical prim falling onto the scripted one | `collision_start` and `collision_end` once each, with 11 `collision` events between (a measurement) | each **twice** — it bounced — with 66–76 `collision` events | each flavour as its grid: Second Life's prim sleeps a quarter of a second after it comes to rest and stops touching, OpenSim's bounces at ubODE's wood-on-wood 0.25 above 1.5 m/s and keeps touching |
+| `llDetectedType` of the falling prim | 10 (`ACTIVE \| SCRIPTED`) | the same | the same |
+| the scripted prim under `llVolumeDetect(TRUE)` | `collision_start` and `collision_end` as the prim falls through, no `collision` | the same | the same |
+| the falling prim's own events, landing on the solid prim | `collision_start`, `collision_end` and `collision` of its own | the same | the same; on OpenSim the end of the second landing only once it is put back, and then unheard by the faller |
+| the scripted prim asleep three seconds while it is hit | **nothing at all**: no `collision_start`, `collision` or `collision_end` on waking, though the falling prim's own events show it hit | all of it queued: each start and end twice, 82–132 `collision` events | each flavour as its grid: on Second Life a script busy when a collision begins hears none of it |
 
 Where the falling prim lands after a volume-detect pass is the region's: on
 aditi it fell on to land (`land_collision_start`), on the local OpenSim on
-to the region's reference prim beneath (another `collision_start`).
+to the region's reference prim beneath (another `collision_start`). The fake
+region has only the ground there, so both fake flavours land as aditi did,
+and `fake-opensim`'s landing on the ground never ends, as OpenSim's touching
+does not ([physics](../simulator/physics.md)).
 
 ### Attached, dropped, taken and rezzed again
 
@@ -1908,11 +1911,11 @@ physical and weightless.
 | a range of 0, at the target | **never reached** | reached: the distance squared is compared with the range squared, `<=` | no scripts |
 | a range of −1 | reached: the range is squared | reached | no scripts |
 | rotation targets | handles from the same counter as position targets (the next one); eight kept, the same arguments | handles from the scene's counter (one or two on); eight kept | no scripts |
-| `llMoveToTarget` on a prim that is not physical | it does not move | the same | no scripts |
+| `llMoveToTarget` on a prim that is not physical | it does not move | the same | the same |
 | `llLookAt`, `llRotLookAt` on a prim that is not physical | **turn it** | the same | no scripts |
-| `llMoveToTarget` a metre up with a tau of 0.3, physical | reaches a 0.1 m target in 0.69 s | 0.71 s | no scripts |
-| a target 70 m up (the documented limit is 65 m) | it does not move | **it moves**: 27 m in half a second | no scripts |
-| a tau of 0 | it does not move | the same | no scripts |
+| `llMoveToTarget` a metre up with a tau of 0.3, physical | reaches a 0.1 m target in 0.69 s | 0.71 s | the distance left shrinks by `e` every tau: 0.7 s at ten ticks a second |
+| a target 70 m up (the documented limit is 65 m) | it does not move | **it moves**: 27 m in half a second | each flavour as its grid |
+| a tau of 0 | it does not move | the same | the same |
 | `llRotLookAt` a quarter round, physical | reaches a 0.1 rad rotation target in 1.36 s | 0.87 s | no scripts |
 
 ### Keyframed motion
@@ -2801,7 +2804,7 @@ box with its script, a removal sent to the viewer).
 | start parameter, `llGetStartParameter`, `OBJECT_REZZER_KEY` | as passed, both; the rezzer | the same | each flavour as its grid |
 | `llRezAtRoot` of one prim | as `llRezObject` | the same | each flavour as its grid |
 | a rotation that is not unit length | normalised | normalised | each flavour as its grid |
-| a velocity, the child not physical | 0 | 0 | 0: the fake grid has no physics |
+| a velocity, the child not physical | 0 | 0 | 0: the fake grid keeps no rez velocity |
 | `STATUS_DIE_AT_EDGE` of the child | 0 | **1** | each flavour hands the rez its grid's flag; the fake grid keeps no status flags yet (`server-lsl-lib-physics-vehicles`) |
 | 11 m from the rezzer | nothing, silently | nothing, silently, and no forced delay | each flavour as its grid |
 | a name that is not there | `Could not find object 'Nope'.`, 1.1 s | `llRez(AtRoot/Object): Can't find object 'Nope'`, 1 s | each flavour as its grid |

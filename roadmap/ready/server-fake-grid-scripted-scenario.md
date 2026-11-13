@@ -2,13 +2,13 @@
 id: server-fake-grid-scripted-scenario
 title: A scripts scenario — one prim per scripted behaviour
 topic: server
-status: blocked
+status: ready
 origin: LSL-on-the-fake-grid audit (2026-09-20)
 points: 5
 blocked_by: [server-fake-grid-script-engine-wiring, server-lsl-lib-prim-state,
   server-lsl-lib-detection-sensors, server-lsl-lib-avatar-control,
   server-fake-grid-money-ledger, server-lsl-lib-task-inventory,
-  server-lsl-lib-physics-vehicles]
+  server-world-collision-and-physics]
 refs: [viewer-fake-grid-render-catalogue, test-fake-grid-lsl-offline-cases,
   test-firestorm-fake-grid-crosscheck, server-fake-grid-scripted-avatars]
 ---
@@ -100,3 +100,13 @@ viewers' frames agreeing. `sl-fake-grid/tests/scripts.rs`'s
 A rezzer is ready to stand in the scenario: a scripted prim holding an object
 the grid took (dropped in by a viewer, or by the scenario through the take
 path) rezzes it with its scripts and a start parameter.
+
+## From server-world-collision-and-physics (2026-11-13)
+
+The physical prim is ready to stand in the scenario:
+`llSetStatus(STATUS_PHYSICS, TRUE)` makes a prim fall, land and rest, and it and
+what it lands on hear `collision_start`, `collision`, `collision_end` and
+`land_collision_*` as each grid raises them (`tests/scripts.rs`,
+`a_falling_box_collides`). This task's block on
+[[server-lsl-lib-physics-vehicles]] was for exactly that and is replaced by the
+collision task; the scenario needs nothing else of that tranche.

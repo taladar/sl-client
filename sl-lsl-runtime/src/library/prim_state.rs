@@ -1311,8 +1311,8 @@ const fn status_of(prim: &Prim) -> i32 {
 /// them for a `value` of 0 (any other value sets). `STATUS_CAST_SHADOWS`
 /// cannot be set on Second Life, and is set for good by either value on
 /// OpenSim; a phantom clear leaves a prim under `llVolumeDetect` phantom
-/// (`physics/status`, on every grid). The fake grid runs no physics, so a
-/// physical prim only reads as one.
+/// (`physics/status`, on every grid). A physical prim is moved by the
+/// host's physics.
 ///
 /// # Errors
 ///
@@ -1366,7 +1366,8 @@ pub fn ll_get_status(ctx: &mut ScriptCtx<'_>, mask: i32) -> Result<i32, CallErro
 /// `llVolumeDetect`: on, the prim reads as phantom, through `STATUS_PHANTOM`
 /// and `PRIM_PHANTOM`, and a phantom clear leaves it so; off, it is not
 /// phantom, even if it was before (`physics/status`, on every grid). The
-/// collisions it turns into detections are the physics tranche's.
+/// host turns what passes through it into `collision_start` and
+/// `collision_end`.
 ///
 /// # Errors
 ///
@@ -1376,5 +1377,18 @@ pub fn ll_volume_detect(ctx: &mut ScriptCtx<'_>, detect: i32) -> Result<(), Call
         prim.volume_detect = detect != 0;
         prim.phantom = prim.volume_detect;
     });
+    Ok(())
+}
+
+/// `llSetBuoyancy`: the share of gravity the object no longer feels while it
+/// is physical — 0 falls, 1 floats (`physics/targets` makes its prim
+/// weightless so), more rises.
+///
+/// # Errors
+///
+/// None; the signature is the library's.
+pub fn ll_set_buoyancy(ctx: &mut ScriptCtx<'_>, buoyancy: f32) -> Result<(), CallError> {
+    let caller = ctx.caller();
+    ctx.host().set_buoyancy(caller, buoyancy);
     Ok(())
 }

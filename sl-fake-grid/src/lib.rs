@@ -41,6 +41,7 @@ pub mod neighbours;
 mod notecards;
 mod object_edits;
 mod parcel_edits;
+pub mod physics;
 pub(crate) mod prim_state;
 pub mod relays;
 mod render_info;

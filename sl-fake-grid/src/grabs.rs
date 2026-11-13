@@ -19,8 +19,8 @@
 //!   button is the script's, and the prim stays.
 //! - **And only for somebody who may move it**: its owner, or anybody where
 //!   its record lets everyone move it.
-//! - **A physical prim is pulled, not placed** — by a force, which this grid
-//!   has no physics to apply. It stays.
+//! - **A physical prim is pulled, not placed** — by a force, which this
+//!   grid's kinematic physics ([`crate::physics`]) does not apply. It stays.
 //!
 //! The grids differ in one thing: OpenSim sends its terse update for every
 //! `ObjectGrabUpdate` whether the prim moved or not, and Second Life only

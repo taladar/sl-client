@@ -8,7 +8,8 @@
 //! fields that pick it out, and the field that differs — and why. With a
 //! `task` it is a known defect a roadmap task will fix; without one it is a
 //! **deliberate** difference: the fake grid answers otherwise on purpose
-//! (it runs no physics, it prints a float where the grid printed a double).
+//! (its physics is kinematic, it prints a float where the grid printed a
+//! double).
 //! An entry with no `record` covers the whole pair: a probe the fake grid
 //! cannot run yet.
 //!

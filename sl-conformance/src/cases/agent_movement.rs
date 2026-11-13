@@ -56,6 +56,12 @@ use crate::support::{REGION_TIMEOUT, check, is_opensim};
 /// block is hills, and a slope changes every speed measured on it).
 const OPENSIM_START: &str = "uri:Northeast Region&70&180&26";
 
+/// Where the avatar logs in on a fake grid: the corner of the legs' home
+/// square nearest the region's south-west, well clear of the catalogue's row
+/// and the stock box east of the landing point, which its prims would stop a
+/// walk at as a live grid's do.
+const FAKE_START: &str = "uri:Fake Region&80&80&26";
+
 /// How long the scene is left to settle after the arrival before anything is
 /// measured: a region still streaming its objects reports its avatars late.
 const SETTLE: Duration = Duration::from_secs(15);
@@ -152,6 +158,8 @@ impl GridTest for AgentMovement {
     fn start_location(&self, grid: Grid) -> &'static str {
         if is_opensim(grid) {
             OPENSIM_START
+        } else if grid.is_fake() {
+            FAKE_START
         } else {
             "last"
         }

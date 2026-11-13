@@ -79,6 +79,7 @@
 
 - [LSL engine architecture](simulator/lsl-engine.md)
 - [Determinism](simulator/determinism.md)
+- [Physics](simulator/physics.md)
 
 ## Authoring
 

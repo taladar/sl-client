@@ -488,7 +488,7 @@ fn prim_position(world: &SceneFixtures, local_id: RegionLocalObjectId) -> Vector
 
 /// The link number of the prim `local_id`: `0` for a prim alone — no other
 /// prim and nobody sitting — else its place in link order, the root first.
-fn link_number(world: &SceneFixtures, local_id: RegionLocalObjectId) -> i32 {
+pub(crate) fn link_number(world: &SceneFixtures, local_id: RegionLocalObjectId) -> i32 {
     let root = world.root_of(local_id);
     let prims: Vec<RegionLocalObjectId> = std::iter::once(root)
         .chain(crate::link_sets::children_in_order(world, root))

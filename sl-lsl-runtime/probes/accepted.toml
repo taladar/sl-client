@@ -471,7 +471,7 @@ reason = "OpenSim compiles none of the newer list and string functions, so the p
 [[difference]]
 probe = "physics/forces"
 between = ["aditi", "fake-sl"]
-reason = "Forces, impulses, buoyancy, hover and the velocity setters move a physical prim, and the fake grid runs no physics: its prims never move under a force"
+reason = "Forces, impulses, hover and the velocity setters are not implemented on the fake grid, whose kinematic physics moves a physical prim by gravity, buoyancy and llMoveToTarget alone: its prims never move under a force"
 task = "server-lsl-lib-physics-vehicles"
 
 [[difference]]
@@ -483,25 +483,25 @@ task = "server-lsl-lib-physics-vehicles"
 [[difference]]
 probe = "physics/material"
 between = ["aditi", "fake-sl"]
-reason = "Physics material, mass and density are not modelled: the fake grid runs no physics"
+reason = "Physics material, mass and density are not modelled by the fake grid's kinematic physics"
 task = "server-lsl-lib-physics-vehicles"
 
 [[difference]]
 probe = "physics/vehicles"
 between = ["aditi", "fake-sl"]
-reason = "Vehicles are not modelled: the fake grid runs no physics, and the vehicle decision is still open"
+reason = "Vehicles are not modelled by the fake grid's kinematic physics, and the vehicle decision is still open"
 task = "server-lsl-lib-physics-vehicles"
 
 [[difference]]
 probe = "physics/targets"
 between = ["aditi", "fake-sl"]
-reason = "llMoveToTarget and the look-at functions do not move a prim on the fake grid, which runs no physics, so the probe waits in its move phase and never ends; its target phases agree"
+reason = "llLookAt, llRotLookAt and llStopLookAt are not implemented on the fake grid, so the probe stops at its first look-at call after llMoveToTarget; its target phases agree"
 task = "server-lsl-lib-physics-vehicles"
 
 [[difference]]
 probe = "physics/forces"
 between = ["opensim-yengine", "fake-opensim"]
-reason = "Forces, impulses, buoyancy, hover and the velocity setters move a physical prim, and the fake grid runs no physics: its prims never move under a force"
+reason = "Forces, impulses, hover and the velocity setters are not implemented on the fake grid, whose kinematic physics moves a physical prim by gravity, buoyancy and llMoveToTarget alone: its prims never move under a force"
 task = "server-lsl-lib-physics-vehicles"
 
 [[difference]]
@@ -513,19 +513,19 @@ task = "server-lsl-lib-physics-vehicles"
 [[difference]]
 probe = "physics/material"
 between = ["opensim-yengine", "fake-opensim"]
-reason = "Physics material, mass and density are not modelled: the fake grid runs no physics"
+reason = "Physics material, mass and density are not modelled by the fake grid's kinematic physics"
 task = "server-lsl-lib-physics-vehicles"
 
 [[difference]]
 probe = "physics/vehicles"
 between = ["opensim-yengine", "fake-opensim"]
-reason = "Vehicles are not modelled: the fake grid runs no physics, and the vehicle decision is still open"
+reason = "Vehicles are not modelled by the fake grid's kinematic physics, and the vehicle decision is still open"
 task = "server-lsl-lib-physics-vehicles"
 
 [[difference]]
 probe = "physics/targets"
 between = ["opensim-yengine", "fake-opensim"]
-reason = "llMoveToTarget and the look-at functions do not move a prim on the fake grid, which runs no physics, so the probe waits in its move phase and never ends; its target phases agree"
+reason = "llLookAt, llRotLookAt and llStopLookAt are not implemented on the fake grid, so the probe stops at its first look-at call after llMoveToTarget; its target phases agree"
 task = "server-lsl-lib-physics-vehicles"
 
 [[difference]]
@@ -1421,17 +1421,10 @@ reason = "A G phase complains every 2 s until 60 s have passed since its first: 
 
 [[difference]]
 probe = "events/collision"
-between = ["aditi", "fake-sl"]
-record = "phase"
-reason = "A falling physical prim makes the collisions, and the fake grid runs no physics: its faller never falls"
-task = "server-world-collision-and-physics"
-
-[[difference]]
-probe = "events/collision"
 between = ["opensim-yengine", "fake-opensim"]
 record = "phase"
-reason = "A falling physical prim makes the collisions, and the fake grid runs no physics: its faller never falls"
-task = "server-world-collision-and-physics"
+fields = { name = "volume-detect" }
+reason = "Falling through the volume-detecting prim, the local OpenSim's faller lands on the region's reference prim beneath (more collision_start and collision_end), where the fake region has only the ground under it (a land_collision_start)"
 
 [[difference]]
 probe = "ossl/available"

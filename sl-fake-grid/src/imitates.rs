@@ -1648,6 +1648,23 @@ impl ImitatedGrid {
         }
     }
 
+    /// How this grid's physics shows in what its scripts hear — measured by
+    /// the `events/collision` probe on aditi and the local OpenSim under both
+    /// engines (2026-10-25, `book/src/gridspec/lsl.md` § Collisions), and
+    /// applied by [`crate::physics`].
+    ///
+    /// Second Life's object at rest sleeps and stops touching what it lies
+    /// on, and a script busy when a collision began hears none of it;
+    /// OpenSim's bounces off what it lands on, keeps touching it, and queues
+    /// everything for a busy script.
+    #[must_use]
+    pub const fn physics_policy(self) -> crate::physics::PhysicsPolicy {
+        match self {
+            Self::SecondLife => crate::physics::PhysicsPolicy::SECOND_LIFE,
+            Self::OpenSim => crate::physics::PhysicsPolicy::OPENSIM,
+        }
+    }
+
     /// How this grid passes a viewer's effects and sounds on to the other
     /// viewers — measured by the `effects-sounds` conformance case on aditi
     /// and the local OpenSim (2026-10-13, `book/src/gridspec/avatars.md`

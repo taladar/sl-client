@@ -17,7 +17,7 @@ use sl_lsl_runtime::value::Element;
 use sl_lsl_runtime::vm::comms::{
     Dialog, InstantMessage, InvalidLinkTarget, LinkedPrim, Links, LoadUrl, MapDestination,
 };
-use sl_lsl_runtime::vm::prim::{ObjectDetails, Prim, SoundCue};
+use sl_lsl_runtime::vm::prim::{MoveTarget, ObjectDetails, Prim, SoundCue};
 use sl_lsl_runtime::vm::seating::{Placement, Seat};
 use sl_lsl_runtime::vm::{
     Admission, CallerId, ExperienceDetails, ExperienceError, ExperienceQuestion, Host, Item,
@@ -345,6 +345,24 @@ impl Host for CorpusHost {
 
     fn pass_touches(&mut self, _caller: CallerId, pass: i32) {
         self.line(format_args!("pass-touches {pass}"));
+    }
+
+    fn pass_collisions(&mut self, _caller: CallerId, pass: i32) {
+        self.line(format_args!("pass-collisions {pass}"));
+    }
+
+    fn move_to_target(&mut self, _caller: CallerId, target: Option<MoveTarget>) {
+        match target {
+            Some(target) => self.line(format_args!(
+                "move-to-target <{}, {}, {}> {}",
+                target.target.x, target.target.y, target.target.z, target.tau
+            )),
+            None => self.line(format_args!("stop-move-to-target")),
+        }
+    }
+
+    fn set_buoyancy(&mut self, _caller: CallerId, buoyancy: f32) {
+        self.line(format_args!("buoyancy {buoyancy}"));
     }
 
     fn experience(&self, _caller: CallerId) -> Option<ScriptExperience> {

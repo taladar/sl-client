@@ -13,10 +13,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | --- | --- |
 | ideas | 130 |
 | ready | 332 |
-| blocked | 38 |
+| blocked | 37 |
 | in-progress | 6 |
 | bugs | 32 |
-| done | 1556 |
+| done | 1557 |
 | deferred | 30 |
 | wont-do | 24 |
 | **total** | **2148** |
@@ -283,7 +283,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   llCastRay what each grid charges
 - [`server-lsl-lib-physics-vehicles`](ideas/server-lsl-lib-physics-vehicles.md)
   — Library tranche — status flags, forces, targets and vehicles (blocked by
-  `server-lsl-vm-execution` (done), `server-world-collision-and-physics`,
+  `server-lsl-vm-execution` (done), `server-world-collision-and-physics` (done),
   `gridspec-lsl-physics-vehicles` (done))
 - [`server-lsl-mono-garbage-room`](ideas/server-lsl-mono-garbage-room.md) —
   Under a lowered limit, Mono has the room its reading's garbage gave it
@@ -1097,6 +1097,13 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (done))
 - [`server-fake-grid-parcel-divide-join`](ready/server-fake-grid-parcel-divide-join.md)
   — Fake grid — divide and join parcels
+- [`server-fake-grid-scripted-scenario`](ready/server-fake-grid-scripted-scenario.md)
+  — A scripts scenario — one prim per scripted behaviour (blocked by
+  `server-fake-grid-script-engine-wiring` (done), `server-lsl-lib-prim-state`
+  (done), `server-lsl-lib-detection-sensors` (done),
+  `server-lsl-lib-avatar-control` (done), `server-fake-grid-money-ledger`
+  (done), `server-lsl-lib-task-inventory` (done),
+  `server-world-collision-and-physics` (done))
 - [`server-fake-grid-terraform`](ready/server-fake-grid-terraform.md) — Fake
   grid — terraforming, undo and bake (blocked by `gridspec-terrain-editing`
   (done))
@@ -1112,9 +1119,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-world-changed-owner-deed`](ready/server-world-changed-owner-deed.md)
   — Measure and raise CHANGED_OWNER when an object is deeded to a group (blocked
   by `server-fake-grid-groups` (done))
-- [`server-world-collision-and-physics`](ready/server-world-collision-and-physics.md)
-  — Enough physics for the collision, target and volume-detect events (blocked
-  by `server-world-heartbeat` (done), `server-world-ecs-store` (done))
 
 ### gridspec
 
@@ -1124,7 +1128,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-sl-mfa-challenge`](ready/gridspec-sl-mfa-challenge.md) — Record
   Second Life's MFA challenge and whether a remembered mfa_hash gets past it
 
-## blocked (38)
+## blocked (37)
 
 ### viewer
 
@@ -1239,13 +1243,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-fake-grid-profiles`](blocked/server-fake-grid-profiles.md) — Fake
   grid — profiles, picks, classifieds and notes with each grid's quirks (blocked
   by `gridspec-profiles` (done), `protocol-sim-profile-messages`)
-- [`server-fake-grid-scripted-scenario`](blocked/server-fake-grid-scripted-scenario.md)
-  — A scripts scenario — one prim per scripted behaviour (blocked by
-  `server-fake-grid-script-engine-wiring` (done), `server-lsl-lib-prim-state`
-  (done), `server-lsl-lib-detection-sensors` (done),
-  `server-lsl-lib-avatar-control` (done), `server-fake-grid-money-ledger`
-  (done), `server-lsl-lib-task-inventory` (done),
-  `server-lsl-lib-physics-vehicles`)
 
 ### gridspec
 
@@ -1354,7 +1351,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1556)
+## done (1557)
 
 ### protocol
 
@@ -4663,6 +4660,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `server-fake-grid-script-engine-wiring` (done), `gridspec-lsl-events` (done))
 - [`server-world-chat-routing`](done/server-world-chat-routing.md) — The fake
   grid hears local chat and drops it
+- [`server-world-collision-and-physics`](done/server-world-collision-and-physics.md)
+  — Enough physics for the collision, target and volume-detect events (blocked
+  by `server-world-heartbeat` (done), `server-world-ecs-store` (done))
 - [`server-world-determinism-contract`](done/server-world-determinism-contract.md)
   — Keep the fake grid reproducible once it runs scripts (blocked by
   `server-world-heartbeat` (done))

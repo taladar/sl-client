@@ -761,10 +761,11 @@ impl GridCore {
     ///
     /// The avatar stands on the ground at the named spot whatever height it
     /// names. That is where a live grid's physics leaves it — dropped onto
-    /// the ground from above, pushed out of it from below — and the fake
-    /// grid has no floor but the ground, so landing there directly is the
-    /// same end without a fall's animations in every login that names a
-    /// height a little off the terrain.
+    /// the ground from above, pushed out of it from below — so landing there
+    /// directly is the same end without a fall's animations in every login
+    /// that names a height a little off the terrain. A prim at the spot does
+    /// not hold it up: the avatar controller lets an avatar out of a prim it
+    /// stands in ([`crate::movement`]).
     pub(crate) fn login_arrival(
         &self,
         start: &Result<sl_wire::StartLocation, String>,
@@ -2504,6 +2505,7 @@ impl FakeGridBuilder {
                 fixtures.chat = self.imitates.chat_policy();
                 fixtures.region_info = self.imitates.region_info_policy();
                 fixtures.touches = crate::touches::Touches::new(self.imitates.touch_policy());
+                fixtures.physics = crate::physics::Physics::new(self.imitates.physics_policy());
                 fixtures.wall = wall.clone();
                 fixtures.script_instances = crate::scripts::RegionScripts::new(
                     config.heartbeat.step,

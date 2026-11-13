@@ -12,11 +12,14 @@
 //! 1. the region clock advances by exactly one [step](HeartbeatConfig::step),
 //!    never by the time measured since the last tick, so the region's notion
 //!    of elapsed time is `ticks × step` on every machine;
-//! 2. the region's scripts run their slice (`scripts::run_tick`):
-//!    the instances are brought in line with what the prims hold, every
-//!    runnable one runs its share of the tick, and what they said and did
-//!    reaches the region — what they changed in its prims as one update
-//!    burst ([`crate::updates`]), a terse update for a prim that only moved;
+//! 2. the region's physics moves its physical objects one step and raises
+//!    in their scripts what each prim began, went on and stopped touching
+//!    ([`crate::physics`]), then the region's scripts run their slice
+//!    (`scripts::run_tick`): the instances are brought in line with what the
+//!    prims hold, every runnable one runs its share of the tick, and what
+//!    they said and did reaches the region — what physics and they changed in
+//!    its prims as one update burst ([`crate::updates`]), a terse update for a
+//!    prim that only moved;
 //! 3. every root agent's avatar moves one step (`movement::advance`): what
 //!    its viewer's held keys ask for, kept on the ground, reported back at
 //!    the imitated grid's cadence, and the parcel it walks onto pushed. It
@@ -25,9 +28,6 @@
 //!    region is sent a `SimStats` whose time dilation says whether the steps
 //!    kept up with the grid's clock ([`TimeDilation`]), with the region's
 //!    active scripts and the share of them that ran.
-//!
-//! The rest of the work the loop exists for — physics — slots in beside these
-//! as it is built, inside the same update bracket as the scripts' slice.
 //!
 //! # The step
 //!

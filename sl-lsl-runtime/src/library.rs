@@ -660,6 +660,17 @@ mod tests {
 
         fn pass_touches(&mut self, _caller: CallerId, _pass: i32) {}
 
+        fn pass_collisions(&mut self, _caller: CallerId, _pass: i32) {}
+
+        fn move_to_target(
+            &mut self,
+            _caller: CallerId,
+            _target: Option<crate::vm::prim::MoveTarget>,
+        ) {
+        }
+
+        fn set_buoyancy(&mut self, _caller: CallerId, _buoyancy: f32) {}
+
         fn placement(&self, _caller: CallerId) -> crate::vm::seating::Placement {
             crate::vm::seating::Placement {
                 position: crate::value::ZERO_VECTOR,
@@ -1101,8 +1112,8 @@ mod tests {
             })
         );
         assert_eq!(
-            call(BuiltinId::LlSetBuoyancy, &mut ctx, vec![Value::Float(1.0)]),
-            Err(CallError::Missing(BuiltinId::LlSetBuoyancy))
+            call(BuiltinId::LlStopHover, &mut ctx, vec![]),
+            Err(CallError::Missing(BuiltinId::LlStopHover))
         );
     }
 
