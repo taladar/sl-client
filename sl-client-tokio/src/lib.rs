@@ -220,7 +220,7 @@ mod voice;
 use crate::appearance::{increment_cof_version, request_server_appearance_update};
 use crate::caps::{
     CAPS_FAILURE_PREFIX, abort_task, deliver, fetch_capabilities, make_sleep, refetch_capabilities,
-    report_caps_failure, spawn_event_queue, spawn_simulator_features,
+    spawn_event_queue, spawn_simulator_features,
 };
 use crate::experiences::{
     fetch_experience_admin, fetch_experience_contributor, fetch_group_experiences,
@@ -276,6 +276,36 @@ enum Ais3Verb {
 /// (mirroring the reference viewer's `AISAPI::isAvailable`).
 fn has_ais3(caps: &HashMap<String, String>) -> bool {
     caps.contains_key(CAP_INVENTORY_API_V3)
+}
+
+/// Say that a command which can only go over `cap` was not sent, because the
+/// agent's region does not grant that capability (a stock OpenSim grants no
+/// experience, voice or AIS3 capability) or has not sent its map yet: log it,
+/// and surface it as a [`Diagnostic::ExpectedReplyMissing`] when diagnostics
+/// are on, so a caller waiting for the reply learns that none is coming.
+///
+/// Reported straight from the run loop rather than through the caps channel's
+/// failure sentinel: that channel is bounded and drained by this same loop, so
+/// sending into it here could wait on itself.
+async fn report_capability_not_granted(
+    session: &Session,
+    diagnostics: &mpsc::Sender<Diagnostic>,
+    cap: &str,
+) {
+    tracing::warn!(
+        capability = cap,
+        "the region does not grant the capability this command needs; not sent"
+    );
+    if session.diagnostics_enabled() {
+        deliver(
+            diagnostics,
+            Diagnostic::ExpectedReplyMissing {
+                request: cap.to_owned(),
+                sequence: None,
+            },
+        )
+        .await;
+    }
 }
 
 /// Reads `group`'s ban list over the `GroupAPIv1` capability, after POSTing
@@ -1614,12 +1644,16 @@ impl Client {
                                 let url = format!("{base}{}", ais_create_category_url(parent_id, Uuid::new_v4()));
                                 let body = build_ais_create_category_body(parent_id, folder_type, &name);
                                 tokio::spawn(post_voice_cap(url, body, CAP_INVENTORY_API_V3, http.clone(), caps_tx.clone()));
+                            } else {
+                                report_capability_not_granted(&self.session, &diagnostics, CAP_INVENTORY_API_V3).await;
                             }
                         }
                         Some(Command::Ais3RenameFolder { folder_id, name }) => {
                             if let Some(base) = caps.get(CAP_INVENTORY_API_V3).cloned() {
                                 let url = format!("{base}{}", ais_category_url(folder_id));
                                 tokio::spawn(patch_caps_llsd(url, build_ais_rename_category_body(&name), CAP_INVENTORY_API_V3, http.clone(), caps_tx.clone()));
+                            } else {
+                                report_capability_not_granted(&self.session, &diagnostics, CAP_INVENTORY_API_V3).await;
                             }
                         }
                         // No AIS3 move commands: Second Life refuses AIS3's `PATCH` of a
@@ -1629,12 +1663,16 @@ impl Client {
                             if let Some(base) = caps.get(CAP_INVENTORY_API_V3).cloned() {
                                 let url = format!("{base}{}", ais_category_url(folder_id));
                                 tokio::spawn(delete_caps_llsd(url, CAP_INVENTORY_API_V3, http.clone(), caps_tx.clone()));
+                            } else {
+                                report_capability_not_granted(&self.session, &diagnostics, CAP_INVENTORY_API_V3).await;
                             }
                         }
                         Some(Command::Ais3PurgeFolder(folder_id)) => {
                             if let Some(base) = caps.get(CAP_INVENTORY_API_V3).cloned() {
                                 let url = format!("{base}{}", ais_category_children_url(folder_id));
                                 tokio::spawn(delete_caps_llsd(url, CAP_INVENTORY_API_V3, http.clone(), caps_tx.clone()));
+                            } else {
+                                report_capability_not_granted(&self.session, &diagnostics, CAP_INVENTORY_API_V3).await;
                             }
                         }
                         Some(Command::Ais3FetchFolderChildren { folder_id, depth }) => {
@@ -1648,24 +1686,32 @@ impl Client {
                             if let Some(base) = caps.get(cap).cloned() {
                                 let url = format!("{base}{}", ais_category_children_fetch_url(folder_id, depth));
                                 tokio::spawn(get_caps_llsd(url, cap, http.clone(), caps_tx.clone()));
+                            } else {
+                                report_capability_not_granted(&self.session, &diagnostics, cap).await;
                             }
                         }
                         Some(Command::Ais3UpdateItem { item_id, name, description }) => {
                             if let Some(base) = caps.get(CAP_INVENTORY_API_V3).cloned() {
                                 let url = format!("{base}{}", ais_item_url(item_id));
                                 tokio::spawn(patch_caps_llsd(url, build_ais_update_item_body(&name, &description), CAP_INVENTORY_API_V3, http.clone(), caps_tx.clone()));
+                            } else {
+                                report_capability_not_granted(&self.session, &diagnostics, CAP_INVENTORY_API_V3).await;
                             }
                         }
                         Some(Command::Ais3RemoveItem(item_id)) => {
                             if let Some(base) = caps.get(CAP_INVENTORY_API_V3).cloned() {
                                 let url = format!("{base}{}", ais_item_url(item_id));
                                 tokio::spawn(delete_caps_llsd(url, CAP_INVENTORY_API_V3, http.clone(), caps_tx.clone()));
+                            } else {
+                                report_capability_not_granted(&self.session, &diagnostics, CAP_INVENTORY_API_V3).await;
                             }
                         }
                         Some(Command::Ais3FetchItem(item_id)) => {
                             if let Some(base) = caps.get(CAP_INVENTORY_API_V3).cloned() {
                                 let url = format!("{base}{}", ais_item_url(item_id));
                                 tokio::spawn(get_caps_llsd(url, CAP_INVENTORY_API_V3, http.clone(), caps_tx.clone()));
+                            } else {
+                                report_capability_not_granted(&self.session, &diagnostics, CAP_INVENTORY_API_V3).await;
                             }
                         }
                         Some(Command::FetchGroupMembers(group_id)) => {
@@ -2270,7 +2316,7 @@ impl Client {
                             if let Some(url) = caps.get(CAP_MODIFY_REGION).cloned() {
                                 tokio::spawn(get_caps_llsd(url, CAP_MODIFY_REGION, http.clone(), caps_tx.clone()));
                             } else {
-                                report_caps_failure(&caps_tx, CAP_MODIFY_REGION).await;
+                                report_capability_not_granted(&self.session, &diagnostics, CAP_MODIFY_REGION).await;
                             }
                         }
                         Some(Command::SetTerrainMaterialOverrides(overrides)) => {
@@ -2278,7 +2324,7 @@ impl Client {
                                 let body = build_modify_region_request(&overrides);
                                 tokio::spawn(set_terrain_material_overrides(url, body, http.clone(), caps_tx.clone()));
                             } else {
-                                report_caps_failure(&caps_tx, CAP_MODIFY_REGION).await;
+                                report_capability_not_granted(&self.session, &diagnostics, CAP_MODIFY_REGION).await;
                             }
                         }
                         Some(Command::SetRegionDebug(update)) => {
@@ -2738,25 +2784,31 @@ impl Client {
                             } else {
                                 // No PBR material overrides on this grid (a stock
                                 // OpenSim grants none): say so rather than drop the edit.
-                                report_caps_failure(&caps_tx, CAP_MODIFY_MATERIAL_PARAMS).await;
+                                report_capability_not_granted(&self.session, &diagnostics, CAP_MODIFY_MATERIAL_PARAMS).await;
                             }
                         }
                         Some(Command::RequestVoiceAccount { request }) => {
                             if let Some(url) = caps.get(CAP_PROVISION_VOICE_ACCOUNT).cloned() {
                                 let body = build_provision_voice_account_request(&request);
                                 tokio::spawn(post_voice_cap(url, body, CAP_PROVISION_VOICE_ACCOUNT, http.clone(), caps_tx.clone()));
+                            } else {
+                                report_capability_not_granted(&self.session, &diagnostics, CAP_PROVISION_VOICE_ACCOUNT).await;
                             }
                         }
                         Some(Command::RequestParcelVoiceInfo) => {
                             if let Some(url) = caps.get(CAP_PARCEL_VOICE_INFO).cloned() {
                                 let body = build_parcel_voice_info_request();
                                 tokio::spawn(post_voice_cap(url, body, CAP_PARCEL_VOICE_INFO, http.clone(), caps_tx.clone()));
+                            } else {
+                                report_capability_not_granted(&self.session, &diagnostics, CAP_PARCEL_VOICE_INFO).await;
                             }
                         }
                         Some(Command::SendVoiceSignaling { viewer_session, candidates, completed }) => {
                             if let Some(url) = caps.get(CAP_VOICE_SIGNALING).cloned() {
                                 let body = build_voice_signaling_request(&viewer_session, &candidates, completed);
                                 tokio::spawn(post_voice_signaling(url, body, http.clone()));
+                            } else {
+                                report_capability_not_granted(&self.session, &diagnostics, CAP_VOICE_SIGNALING).await;
                             }
                         }
                         Some(Command::RequestDisplayNames(agent_ids)) => {
@@ -2831,17 +2883,23 @@ impl Client {
                             if let Some(base) = caps.get(CAP_GET_EXPERIENCE_INFO).cloned() {
                                 let url = format!("{base}{}", experience_info_query(&experience_ids));
                                 tokio::spawn(get_caps_llsd(url, CAP_GET_EXPERIENCE_INFO, http.clone(), caps_tx.clone()));
+                            } else {
+                                report_capability_not_granted(&self.session, &diagnostics, CAP_GET_EXPERIENCE_INFO).await;
                             }
                         }
                         Some(Command::FindExperiences { query, page }) => {
                             if let Some(base) = caps.get(CAP_FIND_EXPERIENCE_BY_NAME).cloned() {
                                 let url = format!("{base}{}", find_experience_query(&query, page));
                                 tokio::spawn(get_caps_llsd(url, CAP_FIND_EXPERIENCE_BY_NAME, http.clone(), caps_tx.clone()));
+                            } else {
+                                report_capability_not_granted(&self.session, &diagnostics, CAP_FIND_EXPERIENCE_BY_NAME).await;
                             }
                         }
                         Some(Command::RequestExperiencePermissions) => {
                             if let Some(url) = caps.get(CAP_GET_EXPERIENCES).cloned() {
                                 tokio::spawn(get_caps_llsd(url, CAP_GET_EXPERIENCES, http.clone(), caps_tx.clone()));
+                            } else {
+                                report_capability_not_granted(&self.session, &diagnostics, CAP_GET_EXPERIENCES).await;
                             }
                         }
                         Some(Command::SetExperiencePermission { experience_id, permission }) => {
@@ -2853,45 +2911,61 @@ impl Client {
                                     let body = build_set_experience_permission_request(experience_id, permission);
                                     tokio::spawn(put_caps_llsd(base, body, CAP_EXPERIENCE_PREFERENCES, http.clone(), caps_tx.clone()));
                                 }
+                            } else {
+                                report_capability_not_granted(&self.session, &diagnostics, CAP_EXPERIENCE_PREFERENCES).await;
                             }
                         }
                         Some(Command::RequestOwnedExperiences) => {
                             if let Some(url) = caps.get(CAP_AGENT_EXPERIENCES).cloned() {
                                 tokio::spawn(get_caps_llsd(url, CAP_AGENT_EXPERIENCES, http.clone(), caps_tx.clone()));
+                            } else {
+                                report_capability_not_granted(&self.session, &diagnostics, CAP_AGENT_EXPERIENCES).await;
                             }
                         }
                         Some(Command::RequestAdminExperiences) => {
                             if let Some(url) = caps.get(CAP_GET_ADMIN_EXPERIENCES).cloned() {
                                 tokio::spawn(get_caps_llsd(url, CAP_GET_ADMIN_EXPERIENCES, http.clone(), caps_tx.clone()));
+                            } else {
+                                report_capability_not_granted(&self.session, &diagnostics, CAP_GET_ADMIN_EXPERIENCES).await;
                             }
                         }
                         Some(Command::RequestCreatorExperiences) => {
                             if let Some(url) = caps.get(CAP_GET_CREATOR_EXPERIENCES).cloned() {
                                 tokio::spawn(get_caps_llsd(url, CAP_GET_CREATOR_EXPERIENCES, http.clone(), caps_tx.clone()));
+                            } else {
+                                report_capability_not_granted(&self.session, &diagnostics, CAP_GET_CREATOR_EXPERIENCES).await;
                             }
                         }
                         Some(Command::RequestGroupExperiences { group_id }) => {
                             if let Some(base) = caps.get(CAP_GROUP_EXPERIENCES).cloned() {
                                 let url = format!("{base}{}", group_experiences_query(group_id.uuid()));
                                 tokio::spawn(fetch_group_experiences(url, group_id, http.clone(), events.clone()));
+                            } else {
+                                report_capability_not_granted(&self.session, &diagnostics, CAP_GROUP_EXPERIENCES).await;
                             }
                         }
                         Some(Command::RequestExperienceAdmin { experience_id }) => {
                             if let Some(base) = caps.get(CAP_IS_EXPERIENCE_ADMIN).cloned() {
                                 let url = format!("{base}{}", experience_id_query(experience_id));
                                 tokio::spawn(fetch_experience_admin(url, experience_id, http.clone(), events.clone()));
+                            } else {
+                                report_capability_not_granted(&self.session, &diagnostics, CAP_IS_EXPERIENCE_ADMIN).await;
                             }
                         }
                         Some(Command::RequestExperienceContributor { experience_id }) => {
                             if let Some(base) = caps.get(CAP_IS_EXPERIENCE_CONTRIBUTOR).cloned() {
                                 let url = format!("{base}{}", experience_id_query(experience_id));
                                 tokio::spawn(fetch_experience_contributor(url, experience_id, http.clone(), events.clone()));
+                            } else {
+                                report_capability_not_granted(&self.session, &diagnostics, CAP_IS_EXPERIENCE_CONTRIBUTOR).await;
                             }
                         }
                         Some(Command::UpdateExperience { update }) => {
                             if let Some(url) = caps.get(CAP_UPDATE_EXPERIENCE).cloned() {
                                 let body = build_update_experience_request(&update);
                                 tokio::spawn(post_voice_cap(url, body, CAP_UPDATE_EXPERIENCE, http.clone(), caps_tx.clone()));
+                            } else {
+                                report_capability_not_granted(&self.session, &diagnostics, CAP_UPDATE_EXPERIENCE).await;
                             }
                         }
                         Some(Command::RequestEstateAccessLists) => {
@@ -2902,18 +2976,24 @@ impl Client {
                         Some(Command::RequestRegionExperiences) => {
                             if let Some(url) = caps.get(CAP_REGION_EXPERIENCES).cloned() {
                                 tokio::spawn(get_caps_llsd(url, CAP_REGION_EXPERIENCES, http.clone(), caps_tx.clone()));
+                            } else {
+                                report_capability_not_granted(&self.session, &diagnostics, CAP_REGION_EXPERIENCES).await;
                             }
                         }
                         Some(Command::SetRegionExperiences { allowed, blocked, trusted }) => {
                             if let Some(url) = caps.get(CAP_REGION_EXPERIENCES).cloned() {
                                 let body = build_region_experiences_request(&allowed, &blocked, &trusted);
                                 tokio::spawn(post_voice_cap(url, body, CAP_REGION_EXPERIENCES, http.clone(), caps_tx.clone()));
+                            } else {
+                                report_capability_not_granted(&self.session, &diagnostics, CAP_REGION_EXPERIENCES).await;
                             }
                         }
                         Some(Command::QueryParcelExperiences { parcel_id, experiences }) => {
                             if let Some(base) = caps.get(CAP_EXPERIENCE_QUERY).cloned() {
                                 let url = format!("{base}{}", experience_query(parcel_id, &experiences));
                                 tokio::spawn(get_experience_query(url, parcel_id, http.clone(), caps_tx.clone()));
+                            } else {
+                                report_capability_not_granted(&self.session, &diagnostics, CAP_EXPERIENCE_QUERY).await;
                             }
                         }
                         Some(Command::OfferTeleport { targets, message }) => {

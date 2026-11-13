@@ -19,6 +19,9 @@
 //!   the Key list with no Remove, two About Region windows on two regions each
 //!   get a picker of their own and only the one that asked takes the pick, and
 //!   a picker closes with its window;
+//! - on a grid with no experiences, About Region's Experiences tab shows a
+//!   note in place of its lists, and the Experiences window and its search say
+//!   experiences are not available instead of waiting;
 //! - an experience's profile shows the word Second Life stores for a home
 //!   location, and a group's experience its Group row;
 //! - a sky editor with unsaved changes asks before its ✕ closes it;
@@ -1929,6 +1932,70 @@ mod test {
                             .get(Locator::role(Role::ListItem).name_containing(DEFAULT_EXPERIENCE)),
                     )
                     .to_be_detached()
+                    .await?;
+                Ok(())
+            })?;
+        Ok(())
+    }
+
+    /// The notice an experience surface raises on a grid with no experiences.
+    const EXPERIENCES_UNAVAILABLE: &str = "ViewerExperiencesUnavailable";
+
+    /// **Experiences on a grid that has none**
+    /// (`viewer-refused-capability-silent-drops`): the OpenSim flavour grants
+    /// no experience capability, as a stock OpenSim does not. Region /
+    /// Estate's Experiences tab shows a note in place of its three lists; the
+    /// Experiences window says experiences are not available as it opens,
+    /// instead of five lists waiting for replies that never come; and its
+    /// search says so too, instead of "Searching…".
+    ///
+    /// Region / Estate first: its note follows the region's grants whenever
+    /// they arrive, so seeing it is what says they have — the Experiences
+    /// window reads them once, as it opens.
+    #[test]
+    fn experiences_say_they_are_unavailable_on_the_opensim_flavour() -> Result<(), TestError> {
+        stage("experiences_unavailable_opensim")
+            .region(home())
+            .estate_manager("Alpha")
+            .configure_grid(|grid| grid.imitates(ImitatedGrid::OpenSim))
+            .run(async |stage: &Stage| {
+                let alpha = &stage.viewer("Alpha")?;
+                let region = experiences_tab(alpha, HOME_ID).await?;
+                let _note = alpha
+                    .expect(&region.get(
+                        Locator::role(Role::Text).name_key("about-region-experiences-unavailable"),
+                    ))
+                    .timeout(WAIT)
+                    .to_be_visible()
+                    .await?;
+                let _no_lists = alpha
+                    .expect(&region.test_id("about-region-experiences-trusted:table"))
+                    .to_be_hidden()
+                    .await?;
+                close_window(alpha, &region).await?;
+
+                let _opened = alpha.menu_path(&EXPERIENCES).await?;
+                let window = alpha.ui().window("experiences");
+                let _shown = alpha.expect(&window).timeout(WAIT).to_be_visible().await?;
+                let _said = alpha
+                    .expect_notification()
+                    .timeout(WAIT)
+                    .to_show(EXPERIENCES_UNAVAILABLE)
+                    .await?;
+                // The window opens on Allowed, as the reference's does.
+                let _search = window
+                    .get(Locator::role(Role::Tab).name_key("experiences-tab-search"))
+                    .click()
+                    .await?;
+                let query = window.test_id("experiences-query:field");
+                let _typed = query.fill("Fake Grid").await?;
+                query.press("Enter").await?;
+                let _status = alpha
+                    .expect(&window.get(
+                        Locator::role(Role::Text).name_containing("not available on this grid"),
+                    ))
+                    .timeout(WAIT)
+                    .to_be_visible()
                     .await?;
                 Ok(())
             })?;

@@ -88,7 +88,8 @@ use sl_viewer_ui_core::skin::{
 
 use bevy::ecs::system::RunSystemOnce as _;
 use sl_client_bevy::{
-    AgentKey, Command, ExperienceInfo, ExperienceKey, SlCommand, SlEvent, SlSessionEvent, Uuid,
+    AgentKey, ExperienceInfo, ExperienceKey, SlCommand, SlEvent, SlGrantedCapabilities,
+    SlSessionEvent, Uuid,
 };
 use sl_settings::{Scope, SettingValue};
 
@@ -105,7 +106,7 @@ use crate::floater::{
     Floater, FloaterCaps, FloaterCommand, FloaterHost, FloaterOp, FloaterOwner, FloaterSpec,
     FloaterSystems, KeyedFloaterOpen, KeyedFloaters, host_floater, picker_identity,
 };
-use crate::i18n::{TransArgs, Translated, Translator};
+use crate::i18n::{Translated, Translator};
 use crate::intents::{ExperiencePicked, ExperiencePickerFilter, OpenExperiencePicker};
 use crate::settings::ViewerSettings;
 use crate::skin_palette::SkinPalette;
@@ -291,6 +292,7 @@ impl Plugin for ExperiencePickerPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<OpenExperiencePicker>()
             .add_message::<ExperiencePicked>()
+            .init_resource::<SlGrantedCapabilities>()
             .add_systems(
                 Update,
                 // After the manager's command pass — see `FloaterSystems`: the
@@ -585,8 +587,8 @@ fn build_picker_content(
 /// group-name cache, here a local one holding the sample group), sorted by the
 /// same `sort_experience_rows`, and pooled / bound into the real table by the
 /// table widget's specimen helper with the cells `bind_picker_rows` writes.
-/// The first row is selected, and the status line is `status_line`'s for a
-/// landed page one. That needs the translator, so it runs as a one-shot system
+/// The first row is selected, and the status line is
+/// `SearchProgress::status_line`'s for a landed page one. That needs the translator, so it runs as a one-shot system
 /// once the content exists. It carries no `ExperiencePickerState`: the live
 /// view systems read session resources a specimen host need not have.
 pub fn spawn_experience_picker_specimen(
@@ -662,7 +664,7 @@ pub fn spawn_experience_picker_specimen(
             };
             commands
                 .entity(status)
-                .insert(Text::new(status_line(progress, 1, &translator)));
+                .insert(Text::new(progress.status_line(1, &translator)));
         });
         if let Err(error) = drawn {
             error!("experience-picker specimen: its sample data could not be drawn: {error}");
@@ -756,6 +758,7 @@ fn picker_search_on_enter(
     focus: Res<InputFocus>,
     mut windows: Query<(&ExperiencePickerUi, &mut ExperiencePickerState)>,
     fields: Query<&EditableText>,
+    granted: Res<SlGrantedCapabilities>,
     mut sl: MessageWriter<SlCommand>,
 ) {
     if !keyboard.just_pressed(KeyCode::Enter) {
@@ -772,7 +775,7 @@ fn picker_search_on_enter(
             .get(ui.search_field)
             .map(|field| field.value().to_string())
             .unwrap_or_default();
-        run_picker_search(&mut state, query, 1, &mut sl);
+        run_picker_search(&mut state, query, 1, &granted, &mut sl);
         keyboard.clear_just_pressed(KeyCode::Enter);
         return;
     }
@@ -841,17 +844,14 @@ fn run_picker_search(
     state: &mut ExperiencePickerState,
     query: String,
     page: i32,
+    granted: &SlGrantedCapabilities,
     sl: &mut MessageWriter<SlCommand>,
 ) {
     state.query = query;
     state.page = page.max(1);
-    state.progress = SearchProgress::Searching;
+    state.progress = SearchProgress::start(granted, &state.query, state.page, sl);
     state.results.clear();
     state.touch();
-    sl.write(SlCommand(Command::FindExperiences {
-        query: state.query.clone(),
-        page: state.page,
-    }));
 }
 
 // ---------------------------------------------------------------------------
@@ -1019,25 +1019,12 @@ fn paint_picker_actions(
                 }
             }
         }
-        let line = status_line(state.progress, state.page, &translator);
+        let line = state.progress.status_line(state.page, &translator);
         if let Ok(mut text) = texts.get_mut(ui.status)
             && text.0 != line
         {
             text.0 = line;
         }
-    }
-}
-
-/// A window's status line for a search at `progress` on `page`: empty before
-/// any search, "searching" while one is out, and the page number once it lands.
-fn status_line(progress: SearchProgress, page: i32, translator: &Translator) -> String {
-    match progress {
-        SearchProgress::Idle => String::new(),
-        SearchProgress::Searching => translator.get("experiences-searching"),
-        SearchProgress::Done { .. } => translator.format(
-            "experiences-search-page",
-            &TransArgs::new().int("page", i64::from(page)),
-        ),
     }
 }
 
@@ -1061,6 +1048,8 @@ struct PickerOut<'w> {
     chrome: MessageWriter<'w, FloaterCommand>,
     /// The wire a fresh search goes out on.
     sl: MessageWriter<'w, SlCommand>,
+    /// What the region grants — whether a search has anywhere to go.
+    granted: Res<'w, SlGrantedCapabilities>,
 }
 
 /// Every button, resolved by its [`PickerButton`] kind, in the window it was
@@ -1083,6 +1072,7 @@ fn on_picker_button(
         mut picked,
         mut chrome,
         mut sl,
+        granted,
     } = out;
     let Ok(button) = buttons.get(activate.entity) else {
         return;
@@ -1100,12 +1090,12 @@ fn on_picker_button(
                 .get(ui.search_field)
                 .map(|field| field.value().to_string())
                 .unwrap_or_default();
-            run_picker_search(&mut state, query, 1, &mut sl);
+            run_picker_search(&mut state, query, 1, &granted, &mut sl);
         }
         PickerButton::Page(forward) => {
             let page = stepped_page(state.page, forward);
             let query = state.query.clone();
-            run_picker_search(&mut state, query, page, &mut sl);
+            run_picker_search(&mut state, query, page, &granted, &mut sl);
         }
         PickerButton::Profile => {
             if let Some(row) = row {

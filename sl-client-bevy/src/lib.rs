@@ -16,22 +16,21 @@ use sl_proto::{
     CAP_ACCEPT_FRIENDSHIP, CAP_ACCEPT_GROUP_INVITE, CAP_AGENT_EXPERIENCES, CAP_AGENT_PREFERENCES,
     CAP_AGENT_PROFILE, CAP_ATTACHMENT_RESOURCES, CAP_AVATAR_PICKER_SEARCH, CAP_AVATAR_RENDER_INFO,
     CAP_CHAT_SESSION_REQUEST, CAP_COPY_INVENTORY_FROM_NOTECARD, CAP_CREATE_INVENTORY_CATEGORY,
-    CAP_DECLINE_FRIENDSHIP, CAP_DECLINE_GROUP_INVITE, CAP_DIRECT_DELIVERY, CAP_ESTATE_ACCESS,
+    CAP_DECLINE_FRIENDSHIP, CAP_DECLINE_GROUP_INVITE, CAP_ESTATE_ACCESS,
     CAP_EXPERIENCE_PREFERENCES, CAP_EXPERIENCE_QUERY, CAP_EXT_ENVIRONMENT, CAP_FETCH_INVENTORY,
-    CAP_FETCH_LIBRARY, CAP_FIND_EXPERIENCE_BY_NAME, CAP_GET_ADMIN_EXPERIENCES,
-    CAP_GET_CREATOR_EXPERIENCES, CAP_GET_DISPLAY_NAMES, CAP_GET_EXPERIENCE_INFO,
-    CAP_GET_EXPERIENCES, CAP_GET_METADATA, CAP_GROUP_API_V1, CAP_GROUP_EXPERIENCES,
+    CAP_FETCH_LIBRARY, CAP_GET_ADMIN_EXPERIENCES, CAP_GET_CREATOR_EXPERIENCES,
+    CAP_GET_DISPLAY_NAMES, CAP_GET_METADATA, CAP_GROUP_API_V1, CAP_GROUP_EXPERIENCES,
     CAP_GROUP_MEMBER_DATA, CAP_HOME_LOCATION, CAP_INTEREST_LIST, CAP_INVENTORY_API_V3,
     CAP_INVENTORY_THUMBNAIL_UPLOAD, CAP_IS_EXPERIENCE_ADMIN, CAP_IS_EXPERIENCE_CONTRIBUTOR,
     CAP_LAND_RESOURCES, CAP_LIBRARY_API_V3, CAP_LSL_SYNTAX, CAP_MESH_UPLOAD_FLAG,
     CAP_NEW_FILE_AGENT_INVENTORY, CAP_OBJECT_MEDIA_NAVIGATE, CAP_PARCEL_PROPERTIES_UPDATE,
     CAP_PARCEL_VOICE_INFO, CAP_PRODUCT_INFO_REQUEST, CAP_PROVISION_VOICE_ACCOUNT,
-    CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES, CAP_REGION_SCHEDULE, CAP_REMOTE_PARCEL_REQUEST,
-    CAP_RENDER_MATERIALS, CAP_REQUEST_TASK_INVENTORY, CAP_SEARCH_STAT_REQUEST, CAP_SEND_POSTCARD,
-    CAP_SEND_USER_REPORT, CAP_SEND_USER_REPORT_WITH_SCREENSHOT, CAP_SET_DISPLAY_NAME,
-    CAP_SIMULATOR_FEATURES, CAP_UNTRUSTED_SIMULATOR_MESSAGE, CAP_UPDATE_EXPERIENCE,
-    CAP_UPDATE_SCRIPT_AGENT, CAP_UPDATE_SCRIPT_TASK, CAP_UPLOAD_AGENT_PROFILE_IMAGE, CAP_USER_INFO,
-    CAP_VOICE_SIGNALING, CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE, CHAT_SESSION_DECLINE_P2P_VOICE,
+    CAP_READ_OFFLINE_MSGS, CAP_REGION_SCHEDULE, CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS,
+    CAP_REQUEST_TASK_INVENTORY, CAP_SEARCH_STAT_REQUEST, CAP_SEND_POSTCARD, CAP_SEND_USER_REPORT,
+    CAP_SEND_USER_REPORT_WITH_SCREENSHOT, CAP_SET_DISPLAY_NAME, CAP_SIMULATOR_FEATURES,
+    CAP_UNTRUSTED_SIMULATOR_MESSAGE, CAP_UPDATE_EXPERIENCE, CAP_UPDATE_SCRIPT_AGENT,
+    CAP_UPDATE_SCRIPT_TASK, CAP_UPLOAD_AGENT_PROFILE_IMAGE, CAP_USER_INFO, CAP_VOICE_SIGNALING,
+    CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE, CHAT_SESSION_DECLINE_P2P_VOICE,
     CHAT_SESSION_FETCH_HISTORY, CHAT_SESSION_INVITE, CHAT_SESSION_START_CONFERENCE,
     Event as SessionEvent, HomeLocationRequest, INVENTORY_FETCH_MAX_IN_FLIGHT, LoginResponse,
     MODIFY_REGION_WRITE_TAG, NeighbourCaps, NewFileAgentInventoryRequest,
@@ -226,6 +225,14 @@ pub use sl_proto::CAP_MODIFY_REGION;
 // a frontend greys what would send one. `Command::ModifyMaterialParams`
 // resolves the cap.
 pub use sl_proto::CAP_MODIFY_MATERIAL_PARAMS;
+// The experience capability names a frontend asks [`SlGrantedCapabilities`]
+// about before it waits on an experience list, search or record: a region that
+// grants none (a stock OpenSim) answers none, so the surface says experiences
+// are not available here. The experience commands resolve the caps.
+pub use sl_proto::{
+    CAP_FIND_EXPERIENCE_BY_NAME, CAP_GET_EXPERIENCE_INFO, CAP_GET_EXPERIENCES,
+    CAP_REGION_EXPERIENCES,
+};
 pub use sl_proto::{DisconnectReason as SessionDisconnectReason, Event as SlSessionEvent};
 // The decoding, LOD-aware texture store, re-exported so a Bevy app can build and
 // drive one (`sl_texture::TextureEntry`/`TextureReadLease` stay accessible as
@@ -653,6 +660,7 @@ impl Plugin for SlClientPlugin {
                 }),
             })
             .init_resource::<SlIdentity>()
+            .init_resource::<SlGrantedCapabilities>()
             .init_resource::<SlAgentParcel>()
             .init_resource::<SlParcelOverlay>()
             .init_resource::<SlRegionIndex>()
@@ -717,6 +725,52 @@ pub struct SlCommandFailed {
 /// symbolizing `$cap:Name` placeholders in a REPL or diagnostic consumer.
 #[derive(Message, Debug, Clone)]
 pub struct SlCapabilities(pub HashMap<String, String>);
+
+/// The names of the capabilities the agent's region granted — the last
+/// [`SlCapabilities`] map, kept as a resource so a surface can ask whether a
+/// request it is about to make has anywhere to go, as the reference asks
+/// `LLViewerRegion::isCapabilityAvailable`. Holds no map until the first one
+/// arrives, and then neither grants nor refuses anything.
+///
+/// A command whose only road is a capability the region does not grant is not
+/// sent: the driver logs it and reports a
+/// [`Diagnostic::ExpectedReplyMissing`]. A surface that would otherwise wait
+/// for its reply reads this first and says the feature is not available here.
+#[derive(Resource, Debug, Default, Clone, PartialEq, Eq)]
+pub struct SlGrantedCapabilities {
+    /// The granted names; `None` until a map has arrived.
+    names: Option<BTreeSet<String>>,
+}
+
+impl SlGrantedCapabilities {
+    /// The grants of a region whose map named exactly `names`.
+    #[must_use]
+    pub fn from_names<I, S>(names: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        Self {
+            names: Some(names.into_iter().map(Into::into).collect()),
+        }
+    }
+
+    /// Whether the region's map has arrived and names `cap`.
+    #[must_use]
+    pub fn grants(&self, cap: &str) -> bool {
+        self.names.as_ref().is_some_and(|names| names.contains(cap))
+    }
+
+    /// Whether the region's map has arrived **without** `cap` — a request over
+    /// it has nowhere to go. `false` before any map arrives, when nothing is
+    /// known yet.
+    #[must_use]
+    pub fn refuses(&self, cap: &str) -> bool {
+        self.names
+            .as_ref()
+            .is_some_and(|names| !names.contains(cap))
+    }
+}
 
 /// Emitted when the grid requires a multi-factor one-time code. To answer it,
 /// re-add the plugin with login parameters prepared via
@@ -800,6 +854,7 @@ struct NetLink {
 
 /// One message from the network thread to the Bevy side, drained by
 /// [`drive`] into the corresponding message writer or resource.
+#[derive(Debug)]
 enum NetOutbound {
     /// A session event, surfaced as [`SlEvent`].
     Event(SessionEvent),
@@ -1037,6 +1092,8 @@ struct SlSinks<'w> {
     command_failed: MessageWriter<'w, SlCommandFailed>,
     /// The capability grants, as they arrive.
     capabilities: MessageWriter<'w, SlCapabilities>,
+    /// The names of the last capability grants.
+    granted: ResMut<'w, SlGrantedCapabilities>,
     /// An MFA challenge the login stopped on.
     mfa: MessageWriter<'w, SlMfaChallenge>,
     /// A login the grid refused.
@@ -1063,6 +1120,7 @@ fn drive(
         mut diagnostics,
         mut command_failed,
         mut capabilities,
+        mut granted,
         mut mfa,
         mut rejected,
     } = sinks;
@@ -1096,6 +1154,7 @@ fn drive(
                 command_failed.write(SlCommandFailed { command, error });
             }
             Ok(NetOutbound::Capabilities(map)) => {
+                granted.set_if_neq(SlGrantedCapabilities::from_names(map.keys().cloned()));
                 capabilities.write(SlCapabilities(map));
             }
             Ok(NetOutbound::Identity(new_identity)) => *identity = *new_identity,
@@ -1184,6 +1243,30 @@ fn report_command_failed(
 ) {
     tracing::warn!("command {command} failed to send: {error}");
     report(outbound, NetOutbound::CommandFailed { command, error });
+}
+
+/// Say that a command which can only go over `cap` was not sent, because the
+/// agent's region does not grant that capability (a stock OpenSim grants no
+/// experience, voice or AIS3 capability) or has not sent its map yet: log it,
+/// and surface it as a [`Diagnostic::ExpectedReplyMissing`] when diagnostics
+/// are on, so a caller waiting for the reply learns that none is coming.
+///
+/// Reported straight to the app side rather than through the caps channel's
+/// failure sentinel, which does not exist before the region's capabilities do.
+fn report_capability_not_granted(session: &Session, outbound: &Sender<NetOutbound>, cap: &str) {
+    tracing::warn!(
+        capability = cap,
+        "the region does not grant the capability this command needs; not sent"
+    );
+    if session.diagnostics_enabled() {
+        report(
+            outbound,
+            NetOutbound::Diagnostic(Diagnostic::ExpectedReplyMissing {
+                request: cap.to_owned(),
+                sequence: None,
+            }),
+        );
+    }
 }
 
 /// Send a synthetic [`SessionEvent::Disconnected`] to the app side.
@@ -2527,6 +2610,8 @@ fn apply_command(
                 crate::log_context::spawn_thread(move || {
                     run_voice_cap(&url, body, CAP_INVENTORY_API_V3, &events_tx);
                 });
+            } else {
+                report_capability_not_granted(session, outbound, CAP_INVENTORY_API_V3);
             }
         }
         Command::Ais3RenameFolder { folder_id, name } => {
@@ -2539,6 +2624,8 @@ fn apply_command(
                 crate::log_context::spawn_thread(move || {
                     run_patch_caps_llsd(&url, body, CAP_INVENTORY_API_V3, &events_tx);
                 });
+            } else {
+                report_capability_not_granted(session, outbound, CAP_INVENTORY_API_V3);
             }
         }
         // No AIS3 move commands: Second Life refuses AIS3's `PATCH` of a
@@ -2553,6 +2640,8 @@ fn apply_command(
                 crate::log_context::spawn_thread(move || {
                     run_delete_caps_llsd(&url, CAP_INVENTORY_API_V3, &events_tx);
                 });
+            } else {
+                report_capability_not_granted(session, outbound, CAP_INVENTORY_API_V3);
             }
         }
         Command::Ais3PurgeFolder(folder_id) => {
@@ -2564,6 +2653,8 @@ fn apply_command(
                 crate::log_context::spawn_thread(move || {
                     run_delete_caps_llsd(&url, CAP_INVENTORY_API_V3, &events_tx);
                 });
+            } else {
+                report_capability_not_granted(session, outbound, CAP_INVENTORY_API_V3);
             }
         }
         Command::Ais3FetchFolderChildren { folder_id, depth } => {
@@ -2585,6 +2676,8 @@ fn apply_command(
                 crate::log_context::spawn_thread(move || {
                     run_get_caps_llsd(&url, cap, &events_tx);
                 });
+            } else {
+                report_capability_not_granted(session, outbound, cap);
             }
         }
         Command::Ais3UpdateItem {
@@ -2601,6 +2694,8 @@ fn apply_command(
                 crate::log_context::spawn_thread(move || {
                     run_patch_caps_llsd(&url, body, CAP_INVENTORY_API_V3, &events_tx);
                 });
+            } else {
+                report_capability_not_granted(session, outbound, CAP_INVENTORY_API_V3);
             }
         }
         Command::Ais3RemoveItem(item_id) => {
@@ -2612,6 +2707,8 @@ fn apply_command(
                 crate::log_context::spawn_thread(move || {
                     run_delete_caps_llsd(&url, CAP_INVENTORY_API_V3, &events_tx);
                 });
+            } else {
+                report_capability_not_granted(session, outbound, CAP_INVENTORY_API_V3);
             }
         }
         Command::Ais3FetchItem(item_id) => {
@@ -2623,6 +2720,8 @@ fn apply_command(
                 crate::log_context::spawn_thread(move || {
                     run_get_caps_llsd(&url, CAP_INVENTORY_API_V3, &events_tx);
                 });
+            } else {
+                report_capability_not_granted(session, outbound, CAP_INVENTORY_API_V3);
             }
         }
         Command::FetchGroupMembers(group_id) => {
@@ -4172,7 +4271,7 @@ fn apply_command(
             // compile result is surfaced; the generic create-with-body path
             // would discard it.
             emit_upload_failure(
-                caps,
+                outbound,
                 "scripts must be uploaded with UploadScript (create the item with \
                     create_inventory_item first)"
                     .to_owned(),
@@ -4215,7 +4314,7 @@ fn apply_command(
                 spawn_new_file_upload(caps, session.agent_id(), &request, data.clone());
             } else {
                 emit_upload_failure(
-                    caps,
+                    outbound,
                     "NewFileAgentInventory capability not available".to_owned(),
                 );
             }
@@ -4232,7 +4331,7 @@ fn apply_command(
                     deliver(&asset_tx, event);
                 });
             } else {
-                emit_upload_unavailable(caps, "UploadBakedTexture");
+                emit_upload_unavailable(outbound, "UploadBakedTexture");
             }
         }
         Command::UpdateInventoryAsset {
@@ -4287,7 +4386,7 @@ fn apply_command(
                     deliver(&asset_tx, event);
                 });
             } else {
-                emit_upload_unavailable(caps, cap);
+                emit_upload_unavailable(outbound, cap);
             }
         }
         Command::UploadScript {
@@ -4348,7 +4447,7 @@ fn apply_command(
                     deliver(&asset_tx, event);
                 });
             } else {
-                emit_upload_unavailable(caps, cap);
+                emit_upload_unavailable(outbound, cap);
             }
         }
         Command::RequestObjectMedia { object_id } => {
@@ -4408,22 +4507,18 @@ fn apply_command(
             }
         }
         Command::ModifyMaterialParams { updates } => {
-            if let Some(caps) = caps {
-                if let Some(url) = caps.map.get(CAP_MODIFY_MATERIAL_PARAMS).cloned() {
-                    let body = build_modify_material_params_request(updates);
-                    let events_tx = caps.events_tx.clone();
-                    crate::log_context::spawn_thread(move || {
-                        run_modify_material_params(&url, body, &events_tx);
-                    });
-                } else {
-                    // No PBR material overrides on this grid (a stock OpenSim
-                    // grants none): say so rather than drop the edit.
-                    crate::caps::report_caps_failure(&caps.events_tx, CAP_MODIFY_MATERIAL_PARAMS);
-                }
+            if let Some(caps) = caps
+                && let Some(url) = caps.map.get(CAP_MODIFY_MATERIAL_PARAMS).cloned()
+            {
+                let body = build_modify_material_params_request(updates);
+                let events_tx = caps.events_tx.clone();
+                crate::log_context::spawn_thread(move || {
+                    run_modify_material_params(&url, body, &events_tx);
+                });
             } else {
-                tracing::warn!(
-                    "a material edit before the region's capabilities arrived was not sent"
-                );
+                // No PBR material overrides on this grid (a stock OpenSim
+                // grants none): say so rather than drop the edit.
+                report_capability_not_granted(session, outbound, CAP_MODIFY_MATERIAL_PARAMS);
             }
         }
         Command::RequestVoiceAccount { request } => {
@@ -4435,6 +4530,8 @@ fn apply_command(
                 crate::log_context::spawn_thread(move || {
                     run_voice_cap(&url, body, CAP_PROVISION_VOICE_ACCOUNT, &events_tx);
                 });
+            } else {
+                report_capability_not_granted(session, outbound, CAP_PROVISION_VOICE_ACCOUNT);
             }
         }
         Command::RequestParcelVoiceInfo => {
@@ -4446,6 +4543,8 @@ fn apply_command(
                 crate::log_context::spawn_thread(move || {
                     run_voice_cap(&url, body, CAP_PARCEL_VOICE_INFO, &events_tx);
                 });
+            } else {
+                report_capability_not_granted(session, outbound, CAP_PARCEL_VOICE_INFO);
             }
         }
         Command::SendVoiceSignaling {
@@ -4460,6 +4559,8 @@ fn apply_command(
                 crate::log_context::spawn_thread(move || {
                     run_voice_signaling(&url, body);
                 });
+            } else {
+                report_capability_not_granted(session, outbound, CAP_VOICE_SIGNALING);
             }
         }
         Command::RequestDisplayNames(agent_ids) => {
@@ -4597,6 +4698,8 @@ fn apply_command(
                 crate::log_context::spawn_thread(move || {
                     run_get_caps_llsd(&url, CAP_GET_EXPERIENCE_INFO, &events_tx);
                 });
+            } else {
+                report_capability_not_granted(session, outbound, CAP_GET_EXPERIENCE_INFO);
             }
         }
         Command::FindExperiences { query, page } => {
@@ -4608,6 +4711,8 @@ fn apply_command(
                 crate::log_context::spawn_thread(move || {
                     run_get_caps_llsd(&url, CAP_FIND_EXPERIENCE_BY_NAME, &events_tx);
                 });
+            } else {
+                report_capability_not_granted(session, outbound, CAP_FIND_EXPERIENCE_BY_NAME);
             }
         }
         Command::RequestExperiencePermissions => {
@@ -4618,6 +4723,8 @@ fn apply_command(
                 crate::log_context::spawn_thread(move || {
                     run_get_caps_llsd(&url, CAP_GET_EXPERIENCES, &events_tx);
                 });
+            } else {
+                report_capability_not_granted(session, outbound, CAP_GET_EXPERIENCES);
             }
         }
         Command::SetExperiencePermission {
@@ -4639,6 +4746,8 @@ fn apply_command(
                         run_put_caps_llsd(&base, body, CAP_EXPERIENCE_PREFERENCES, &events_tx);
                     });
                 }
+            } else {
+                report_capability_not_granted(session, outbound, CAP_EXPERIENCE_PREFERENCES);
             }
         }
         Command::RequestOwnedExperiences => {
@@ -4649,6 +4758,8 @@ fn apply_command(
                 crate::log_context::spawn_thread(move || {
                     run_get_caps_llsd(&url, CAP_AGENT_EXPERIENCES, &events_tx);
                 });
+            } else {
+                report_capability_not_granted(session, outbound, CAP_AGENT_EXPERIENCES);
             }
         }
         Command::RequestAdminExperiences => {
@@ -4659,6 +4770,8 @@ fn apply_command(
                 crate::log_context::spawn_thread(move || {
                     run_get_caps_llsd(&url, CAP_GET_ADMIN_EXPERIENCES, &events_tx);
                 });
+            } else {
+                report_capability_not_granted(session, outbound, CAP_GET_ADMIN_EXPERIENCES);
             }
         }
         Command::RequestCreatorExperiences => {
@@ -4669,6 +4782,8 @@ fn apply_command(
                 crate::log_context::spawn_thread(move || {
                     run_get_caps_llsd(&url, CAP_GET_CREATOR_EXPERIENCES, &events_tx);
                 });
+            } else {
+                report_capability_not_granted(session, outbound, CAP_GET_CREATOR_EXPERIENCES);
             }
         }
         Command::RequestGroupExperiences { group_id } => {
@@ -4681,6 +4796,8 @@ fn apply_command(
                 crate::log_context::spawn_thread(move || {
                     run_group_experiences(&url, group_id, &asset_tx);
                 });
+            } else {
+                report_capability_not_granted(session, outbound, CAP_GROUP_EXPERIENCES);
             }
         }
         Command::RequestExperienceAdmin { experience_id } => {
@@ -4693,6 +4810,8 @@ fn apply_command(
                 crate::log_context::spawn_thread(move || {
                     run_experience_status(&url, experience_id, true, &asset_tx);
                 });
+            } else {
+                report_capability_not_granted(session, outbound, CAP_IS_EXPERIENCE_ADMIN);
             }
         }
         Command::RequestExperienceContributor { experience_id } => {
@@ -4705,6 +4824,8 @@ fn apply_command(
                 crate::log_context::spawn_thread(move || {
                     run_experience_status(&url, experience_id, false, &asset_tx);
                 });
+            } else {
+                report_capability_not_granted(session, outbound, CAP_IS_EXPERIENCE_CONTRIBUTOR);
             }
         }
         Command::UpdateExperience { update } => {
@@ -4716,6 +4837,8 @@ fn apply_command(
                 crate::log_context::spawn_thread(move || {
                     run_voice_cap(&url, body, CAP_UPDATE_EXPERIENCE, &events_tx);
                 });
+            } else {
+                report_capability_not_granted(session, outbound, CAP_UPDATE_EXPERIENCE);
             }
         }
         Command::RequestEstateAccessLists => {
@@ -4736,6 +4859,8 @@ fn apply_command(
                 crate::log_context::spawn_thread(move || {
                     run_get_caps_llsd(&url, CAP_REGION_EXPERIENCES, &events_tx);
                 });
+            } else {
+                report_capability_not_granted(session, outbound, CAP_REGION_EXPERIENCES);
             }
         }
         Command::SetRegionExperiences {
@@ -4751,6 +4876,8 @@ fn apply_command(
                 crate::log_context::spawn_thread(move || {
                     run_voice_cap(&url, body, CAP_REGION_EXPERIENCES, &events_tx);
                 });
+            } else {
+                report_capability_not_granted(session, outbound, CAP_REGION_EXPERIENCES);
             }
         }
         Command::QueryParcelExperiences {
@@ -4766,6 +4893,8 @@ fn apply_command(
                 crate::log_context::spawn_thread(move || {
                     run_experience_query(&url, parcel_id, &events_tx);
                 });
+            } else {
+                report_capability_not_granted(session, outbound, CAP_EXPERIENCE_QUERY);
             }
         }
         Command::OfferTeleport { targets, message } => {
@@ -5312,74 +5441,60 @@ fn apply_command(
             session.viewer_start_auction(*parcel, *snapshot, now)?;
         }
         Command::MarketplaceMerchantStatus => {
-            if let Some(caps) = caps {
-                dispatch_marketplace_request(
-                    caps.map.get(CAP_DIRECT_DELIVERY).cloned(),
-                    MarketplaceOperation::MerchantStatus,
-                    Ok(merchant_status_request()),
-                    &caps.asset_tx,
-                );
-            }
+            dispatch_marketplace_request(
+                caps,
+                MarketplaceOperation::MerchantStatus,
+                Ok(merchant_status_request()),
+                outbound,
+            );
         }
         Command::MarketplaceListings => {
-            if let Some(caps) = caps {
-                dispatch_marketplace_request(
-                    caps.map.get(CAP_DIRECT_DELIVERY).cloned(),
-                    MarketplaceOperation::GetListings,
-                    Ok(listings_request()),
-                    &caps.asset_tx,
-                );
-            }
+            dispatch_marketplace_request(
+                caps,
+                MarketplaceOperation::GetListings,
+                Ok(listings_request()),
+                outbound,
+            );
         }
         Command::MarketplaceListing(id) => {
-            if let Some(caps) = caps {
-                dispatch_marketplace_request(
-                    caps.map.get(CAP_DIRECT_DELIVERY).cloned(),
-                    MarketplaceOperation::GetListing(*id),
-                    Ok(listing_request(*id)),
-                    &caps.asset_tx,
-                );
-            }
+            dispatch_marketplace_request(
+                caps,
+                MarketplaceOperation::GetListing(*id),
+                Ok(listing_request(*id)),
+                outbound,
+            );
         }
         Command::MarketplaceCreateListing(payload) => {
-            if let Some(caps) = caps {
-                dispatch_marketplace_request(
-                    caps.map.get(CAP_DIRECT_DELIVERY).cloned(),
-                    MarketplaceOperation::CreateListing,
-                    create_listing_request(payload),
-                    &caps.asset_tx,
-                );
-            }
+            dispatch_marketplace_request(
+                caps,
+                MarketplaceOperation::CreateListing,
+                create_listing_request(payload),
+                outbound,
+            );
         }
         Command::MarketplaceUpdateListing(payload) => {
-            if let Some(caps) = caps {
-                dispatch_marketplace_request(
-                    caps.map.get(CAP_DIRECT_DELIVERY).cloned(),
-                    MarketplaceOperation::UpdateListing(payload.id),
-                    update_listing_request(payload),
-                    &caps.asset_tx,
-                );
-            }
+            dispatch_marketplace_request(
+                caps,
+                MarketplaceOperation::UpdateListing(payload.id),
+                update_listing_request(payload),
+                outbound,
+            );
         }
         Command::MarketplaceAssociateListing(payload) => {
-            if let Some(caps) = caps {
-                dispatch_marketplace_request(
-                    caps.map.get(CAP_DIRECT_DELIVERY).cloned(),
-                    MarketplaceOperation::AssociateInventory(payload.id),
-                    associate_inventory_request(payload),
-                    &caps.asset_tx,
-                );
-            }
+            dispatch_marketplace_request(
+                caps,
+                MarketplaceOperation::AssociateInventory(payload.id),
+                associate_inventory_request(payload),
+                outbound,
+            );
         }
         Command::MarketplaceDeleteListing(id) => {
-            if let Some(caps) = caps {
-                dispatch_marketplace_request(
-                    caps.map.get(CAP_DIRECT_DELIVERY).cloned(),
-                    MarketplaceOperation::DeleteListing(*id),
-                    Ok(delete_listing_request(*id)),
-                    &caps.asset_tx,
-                );
-            }
+            dispatch_marketplace_request(
+                caps,
+                MarketplaceOperation::DeleteListing(*id),
+                Ok(delete_listing_request(*id)),
+                outbound,
+            );
         }
         Command::Logout => session.initiate_logout(now),
     }
@@ -5397,7 +5512,10 @@ mod tests {
         RegionLocalObjectId, ScopedObjectId, Session, StartLocation,
     };
 
-    use super::{NetOutbound, SessionError, apply_command, report_command_failed};
+    use super::{
+        Diagnostic, NetOutbound, SessionError, SessionEvent, SlGrantedCapabilities, apply_command,
+        report_command_failed,
+    };
     use sl_client_common::chat_log::ChatLog;
 
     /// A boxed error so tests can use `?` instead of the disallowed
@@ -5448,6 +5566,111 @@ mod tests {
             "a circuitless delete must report NoCircuit, got {outcome:?}"
         );
         Ok(())
+    }
+
+    /// Apply `command` to a circuitless session with no capabilities yet,
+    /// diagnostics as given, and collect everything the dispatcher reported.
+    fn reports_without_caps(
+        command: &Command,
+        diagnostics: bool,
+    ) -> Result<Vec<NetOutbound>, TestError> {
+        let mut session = circuitless_session()?;
+        session.set_diagnostics(diagnostics);
+        let mut chat_log = ChatLog::new(ChatLogConfig::default(), None, String::new(), None);
+        let (outbound, outbound_rx) = unbounded();
+        apply_command(
+            command,
+            &mut session,
+            None,
+            &mut NeighbourCaps::default(),
+            &mut chat_log,
+            Instant::now(),
+            &outbound,
+        )?;
+        Ok(outbound_rx.try_iter().collect())
+    }
+
+    /// A command whose only road is a capability the region has not granted
+    /// is not dropped without a word: it is reported as the reply that will
+    /// not come, naming the capability — for an experience list, a voice
+    /// request and an explicit AIS3 command alike.
+    #[test]
+    fn a_command_needing_an_ungranted_capability_reports_it() -> Result<(), TestError> {
+        for (command, cap) in [
+            (Command::RequestExperiencePermissions, "GetExperiences"),
+            (Command::RequestParcelVoiceInfo, "ParcelVoiceInfoRequest"),
+            (
+                Command::Ais3FetchItem(sl_proto::InventoryKey::from(uuid::Uuid::nil())),
+                "InventoryAPIv3",
+            ),
+        ] {
+            let reports = reports_without_caps(&command, true)?;
+            let [NetOutbound::Diagnostic(Diagnostic::ExpectedReplyMissing { request, sequence })] =
+                reports.as_slice()
+            else {
+                return Err(
+                    format!("{command:?}: expected one missing reply, got {reports:?}").into(),
+                );
+            };
+            assert_eq!(request, cap, "{command:?}");
+            assert_eq!(*sequence, None, "{command:?}");
+        }
+        Ok(())
+    }
+
+    /// With diagnostics off the refusal is only logged, as every other
+    /// diagnostic is, and the command still succeeds.
+    #[test]
+    fn without_diagnostics_an_ungranted_capability_is_only_logged() -> Result<(), TestError> {
+        let reports = reports_without_caps(&Command::RequestExperiencePermissions, false)?;
+        assert!(reports.is_empty(), "{reports:?}");
+        Ok(())
+    }
+
+    /// An upload asked for before the region's capabilities arrive fails out
+    /// loud, as it does on a region without the capability — there is no asset
+    /// channel yet, so the failure goes to the app side directly.
+    #[test]
+    fn an_upload_before_the_capabilities_arrive_fails() -> Result<(), TestError> {
+        let reports = reports_without_caps(&Command::UploadBakedTexture { data: vec![1] }, false)?;
+        let [NetOutbound::Event(SessionEvent::AssetUploadFailed { reason })] = reports.as_slice()
+        else {
+            return Err(format!("expected one upload failure, got {reports:?}").into());
+        };
+        assert_eq!(reason, "UploadBakedTexture capability not available");
+        Ok(())
+    }
+
+    /// Likewise a marketplace request: it answers with the operation's failure
+    /// event instead of never answering.
+    #[test]
+    fn a_marketplace_request_before_the_capabilities_arrive_fails() -> Result<(), TestError> {
+        let reports = reports_without_caps(&Command::MarketplaceListings, false)?;
+        let [NetOutbound::Event(event)] = reports.as_slice() else {
+            return Err(format!("expected one marketplace failure, got {reports:?}").into());
+        };
+        assert_eq!(
+            *event,
+            sl_proto::marketplace_failure_event(
+                sl_proto::MarketplaceOperation::GetListings,
+                "the region's capabilities have not arrived yet".to_owned(),
+            )
+        );
+        Ok(())
+    }
+
+    /// No map yet grants and refuses nothing; a map grants what it names and
+    /// refuses the rest.
+    #[test]
+    fn granted_capabilities_know_nothing_before_a_map() {
+        let unknown = SlGrantedCapabilities::default();
+        assert!(!unknown.grants("GetExperiences"));
+        assert!(!unknown.refuses("GetExperiences"));
+        let granted = SlGrantedCapabilities::from_names(["EventQueueGet"]);
+        assert!(granted.grants("EventQueueGet"));
+        assert!(!granted.refuses("EventQueueGet"));
+        assert!(!granted.grants("GetExperiences"));
+        assert!(granted.refuses("GetExperiences"));
     }
 
     /// The failure crosses to the Bevy side as a [`NetOutbound::CommandFailed`]

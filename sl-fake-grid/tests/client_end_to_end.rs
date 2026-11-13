@@ -3,6 +3,7 @@
 
 #[cfg(test)]
 mod test {
+    use std::collections::BTreeSet;
     use std::time::Duration;
 
     use pretty_assertions::{assert_eq, assert_ne};
@@ -2276,6 +2277,58 @@ mod test {
                 && request == "ModifyMaterialParams"
             {
                 break;
+            }
+        }
+
+        drop(command_tx);
+        run.abort();
+        Ok(())
+    }
+
+    /// **Experience, voice and AIS3 commands on a grid without their
+    /// capabilities are reported, not dropped.** A stock OpenSim grants none
+    /// of them (`seed-capabilities`, 2026-10-04), and none has another road:
+    /// the client used to send each nowhere and say nothing, so the
+    /// Experiences floater waited for lists that never came. Each is now the
+    /// reply that is not coming, naming its capability.
+    #[tokio::test]
+    async fn commands_without_their_capability_are_reported() -> Result<(), TestError> {
+        let (_grid, mut client, _agent) =
+            connect_configured(vec![RegionConfig::default()], None, ImitatedGrid::OpenSim).await?;
+        client.set_diagnostics(true);
+        let (event_tx, _event_rx) = mpsc::channel::<Event>(256);
+        let (command_tx, command_rx) = mpsc::channel::<Command>(8);
+        let (diag_tx, mut diag_rx) = mpsc::channel(64);
+        let run = tokio::spawn(client.run(event_tx, diag_tx, command_rx));
+
+        let mut expected: BTreeSet<&str> = BTreeSet::new();
+        for (command, cap) in [
+            (Command::RequestExperiencePermissions, "GetExperiences"),
+            (Command::RequestOwnedExperiences, "AgentExperiences"),
+            (
+                Command::FindExperiences {
+                    query: "anything".to_owned(),
+                    page: 1,
+                },
+                "FindExperienceByName",
+            ),
+            (Command::RequestRegionExperiences, "RegionExperiences"),
+            (Command::RequestParcelVoiceInfo, "ParcelVoiceInfoRequest"),
+            (
+                Command::Ais3FetchItem(sl_proto::InventoryKey::from(sl_proto::Uuid::nil())),
+                "InventoryAPIv3",
+            ),
+        ] {
+            command_tx.send(command).await?;
+            expected.insert(cap);
+        }
+        let deadline = whole_wait();
+        while !expected.is_empty() {
+            let diagnostic = tokio::time::timeout_at(deadline, diag_rx.recv())
+                .await?
+                .ok_or("the diagnostics stream ended early")?;
+            if let sl_proto::Diagnostic::ExpectedReplyMissing { request, .. } = diagnostic {
+                expected.remove(request.as_str());
             }
         }
 

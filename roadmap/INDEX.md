@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 333 |
 | blocked | 39 |
 | in-progress | 6 |
-| bugs | 26 |
-| done | 1557 |
+| bugs | 25 |
+| done | 1558 |
 | deferred | 30 |
 | wont-do | 24 |
 | **total** | **2144** |
@@ -1274,7 +1274,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-text-renderability-axis`](in-progress/viewer-ui-text-renderability-axis.md)
   — Upstream issue — font selection cannot see glyph-format renderability
 
-## bugs (26)
+## bugs (25)
 
 ### protocol
 
@@ -1309,8 +1309,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   its plywood
 - [`viewer-perf-steady-state-46fps-ceiling`](bugs/viewer-perf-steady-state-46fps-ceiling.md)
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
-- [`viewer-refused-capability-silent-drops`](bugs/viewer-refused-capability-silent-drops.md)
-  — Commands for a capability the grid refuses are dropped without a word
 - [`viewer-retired-neighbour-stays-drawn`](bugs/viewer-retired-neighbour-stays-drawn.md)
   — A neighbour the simulator retired stays drawn — its ground, water and map
   tile outlive its circuit
@@ -1348,7 +1346,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-lsl-mono-collision-model-under-lowered-limit`](bugs/server-lsl-mono-collision-model-under-lowered-limit.md)
   — A script 1 KB over its use collides in the runtime where Mono carries on
 
-## done (1557)
+## done (1558)
 
 ### protocol
 
@@ -3136,6 +3134,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   mirrors (hero probes)
 - [`viewer-reattached-rigged-mesh-renders-static-mislocated`](done/viewer-reattached-rigged-mesh-renders-static-mislocated.md)
   — Re-attached rigged mesh renders static and mislocated (fine at login)
+- [`viewer-refused-capability-silent-drops`](done/viewer-refused-capability-silent-drops.md)
+  — Commands for a capability the grid refuses are dropped without a word
 - [`viewer-region-environment-panel`](done/viewer-region-environment-panel.md) —
   Region / parcel environment settings panel (blocked by
   `viewer-region-options-general` (done), `viewer-environment-my-environments`

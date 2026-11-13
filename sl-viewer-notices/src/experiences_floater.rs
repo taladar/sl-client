@@ -98,8 +98,8 @@ use sl_viewer_ui_core::skin::{DISABLED_TEXT_CLASS, TEXT_CLASS, set_state_class, 
 use std::collections::BTreeSet;
 
 use sl_client_bevy::{
-    AgentKey, Command, ExperienceInfo, ExperienceKey, ExperiencePermission, SlCommand, SlEvent,
-    SlSessionEvent, Uuid,
+    AgentKey, CAP_GET_EXPERIENCES, Command, ExperienceInfo, ExperienceKey, ExperiencePermission,
+    SlCommand, SlEvent, SlGrantedCapabilities, SlSessionEvent, Uuid,
 };
 use sl_l10n::{DateTimeLength, DateTimeStyle};
 use sl_settings::{Scope, SettingValue};
@@ -112,12 +112,13 @@ use crate::experience_profile::{
     maturity_from_index, maturity_index, maturity_key,
 };
 use crate::experience_search::{
-    COL_SEARCH_NAME, COL_SEARCH_OWNER, COL_SEARCH_RATING, ExperienceInfos, ExperienceRow,
-    SEARCH_COLUMNS, SearchProgress, compare_ci, experience_label, render_rows,
+    COL_SEARCH_NAME, COL_SEARCH_OWNER, COL_SEARCH_RATING, EXPERIENCES_UNAVAILABLE, ExperienceInfos,
+    ExperienceRow, SEARCH_COLUMNS, SearchProgress, compare_ci, experience_label, render_rows,
     sort_experience_rows,
 };
 use crate::floater::{FloaterCaps, FloaterSpec, spawn_floater};
 use crate::i18n::{TransArgs, Translated, Translator};
+use crate::notifications::ShowNotification;
 use crate::settings::ViewerSettings;
 use crate::settings_binding::{SettingBinding, bound_checkbox};
 use crate::skin_palette::SkinPalette;
@@ -701,6 +702,8 @@ impl Plugin for ExperiencesPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ExperiencesState>()
             .init_resource::<ExperiencesView>()
+            .init_resource::<SlGrantedCapabilities>()
+            .add_message::<ShowNotification>()
             .add_systems(
                 Startup,
                 spawn_experiences_floater.after(UiScaffoldSystems::SpawnRoot),
@@ -1228,7 +1231,21 @@ fn spawn_action(
 
 /// Issue every list GET, counting the permissions one so its reply is accepted
 /// as authoritative (see `ExperiencesState::pending_full_list`).
-fn request_lists(state: &mut ExperiencesState, sl: &mut MessageWriter<SlCommand>) {
+///
+/// A region that grants no `GetExperiences` (a stock OpenSim, which has no
+/// experiences) would answer none of them, and the reference then shows five
+/// empty lists with nothing to say why: this window sends nothing and raises
+/// [`EXPERIENCES_UNAVAILABLE`] instead.
+fn request_lists(
+    state: &mut ExperiencesState,
+    granted: &SlGrantedCapabilities,
+    sl: &mut MessageWriter<SlCommand>,
+    notices: &mut MessageWriter<ShowNotification>,
+) {
+    if granted.refuses(CAP_GET_EXPERIENCES) {
+        notices.write(ShowNotification::new(EXPERIENCES_UNAVAILABLE));
+        return;
+    }
     state.pending_full_list = state.pending_full_list.saturating_add(1);
     sl.write(SlCommand(Command::RequestExperiencePermissions));
     sl.write(SlCommand(Command::RequestOwnedExperiences));
@@ -1244,14 +1261,16 @@ fn request_lists_on_show(
     panels: Query<&UiPanelShown>,
     mut was_shown: Local<bool>,
     mut state: ResMut<ExperiencesState>,
+    granted: Res<SlGrantedCapabilities>,
     mut sl: MessageWriter<SlCommand>,
+    mut notices: MessageWriter<ShowNotification>,
 ) {
     let Some(ui) = ui else {
         return;
     };
     let shown = panels.get(ui.panel).is_ok_and(|panel| panel.0);
     if shown && !*was_shown {
-        request_lists(&mut state, &mut sl);
+        request_lists(&mut state, &granted, &mut sl, &mut notices);
     }
     *was_shown = shown;
 }
@@ -1396,6 +1415,10 @@ struct ExperiencesOut<'w> {
     profiles: MessageWriter<'w, OpenExperienceProfile>,
     /// The wire a fetch goes out on.
     sl: MessageWriter<'w, SlCommand>,
+    /// What the region grants — whether a fetch has anywhere to go.
+    granted: Res<'w, SlGrantedCapabilities>,
+    /// The notice a fetch with nowhere to go raises instead.
+    notices: MessageWriter<'w, ShowNotification>,
 }
 
 /// Rebuild every pane's rendered rows when anything they derive from moved: the
@@ -1659,14 +1682,7 @@ fn paint_experience_actions(
             }
         }
     }
-    let line = match state.progress {
-        SearchProgress::Idle => String::new(),
-        SearchProgress::Searching => translator.get("experiences-searching"),
-        SearchProgress::Done { .. } => translator.format(
-            "experiences-search-page",
-            &TransArgs::new().int("page", i64::from(state.page)),
-        ),
-    };
+    let line = state.progress.status_line(state.page, &translator);
     if let Ok(mut text) = texts.get_mut(ui.search_status)
         && text.0 != line
     {
@@ -1702,12 +1718,14 @@ fn on_experiences_button(
     let ExperiencesOut {
         mut profiles,
         mut sl,
+        granted,
+        mut notices,
     } = out;
     let Ok(button) = buttons.get(activate.entity) else {
         return;
     };
     match *button {
-        ExperiencesButton::Refresh => request_lists(&mut state, &mut sl),
+        ExperiencesButton::Refresh => request_lists(&mut state, &granted, &mut sl, &mut notices),
         ExperiencesButton::Profile(pane) => {
             if let Some(index) = selected_row(&ui, &tables, pane)
                 && let Some(row) = view.rows(pane).get(index)
@@ -1733,7 +1751,7 @@ fn on_experiences_button(
                 .get(ui.search_field)
                 .map(|field| field.value().to_string())
                 .unwrap_or_default();
-            run_search(&mut state, query, 1, &mut sl);
+            run_search(&mut state, query, 1, &granted, &mut sl);
         }
         ExperiencesButton::Page(forward) => {
             let page = if forward {
@@ -1742,7 +1760,7 @@ fn on_experiences_button(
                 state.page.saturating_sub(1).max(1)
             };
             let query = state.query.clone();
-            run_search(&mut state, query, page, &mut sl);
+            run_search(&mut state, query, page, &granted, &mut sl);
         }
         ExperiencesButton::ClearEvents => log.clear(),
     }
@@ -1754,17 +1772,14 @@ fn run_search(
     state: &mut ExperiencesState,
     query: String,
     page: i32,
+    granted: &SlGrantedCapabilities,
     sl: &mut MessageWriter<SlCommand>,
 ) {
     state.query = query;
     state.page = page.max(1);
-    state.progress = SearchProgress::Searching;
+    state.progress = SearchProgress::start(granted, &state.query, state.page, sl);
     state.search.clear();
     state.touch();
-    sl.write(SlCommand(Command::FindExperiences {
-        query: state.query.clone(),
-        page: state.page,
-    }));
 }
 
 /// `Enter` in the query field runs the search — the reference's default button
@@ -1775,6 +1790,7 @@ fn find_experiences_on_enter(
     ui: Option<Res<ExperiencesUi>>,
     fields: Query<&EditableText>,
     mut state: ResMut<ExperiencesState>,
+    granted: Res<SlGrantedCapabilities>,
     mut sl: MessageWriter<SlCommand>,
 ) {
     if !keyboard.just_pressed(KeyCode::Enter) {
@@ -1790,7 +1806,7 @@ fn find_experiences_on_enter(
         .get(ui.search_field)
         .map(|field| field.value().to_string())
         .unwrap_or_default();
-    run_search(&mut state, query, 1, &mut sl);
+    run_search(&mut state, query, 1, &granted, &mut sl);
     keyboard.clear_just_pressed(KeyCode::Enter);
 }
 
@@ -1931,9 +1947,96 @@ pub fn spawn_experiences_specimen(
 
 #[cfg(test)]
 mod tests {
-    use super::{ExperiencesState, ListTab, Pane, list_index, pane_index};
+    use super::{
+        EXPERIENCES_UNAVAILABLE, ExperiencesState, ListTab, Pane, list_index, pane_index,
+        request_lists,
+    };
+    use bevy::prelude::*;
     use pretty_assertions::{assert_eq, assert_ne};
-    use sl_client_bevy::{ExperienceKey, Uuid};
+    use sl_client_bevy::{
+        CAP_GET_EXPERIENCES, Command, ExperienceKey, SlCommand, SlGrantedCapabilities, Uuid,
+    };
+
+    use crate::notifications::ShowNotification;
+
+    /// Run [`request_lists`] once on a region granting `granted`, returning the
+    /// commands it sent, the notices it raised and the permissions GETs it
+    /// counted as outstanding.
+    fn request_lists_on(granted: SlGrantedCapabilities) -> (Vec<String>, Vec<&'static str>, u32) {
+        let mut app = App::new();
+        app.add_message::<SlCommand>()
+            .add_message::<ShowNotification>()
+            .init_resource::<ExperiencesState>()
+            .insert_resource(granted)
+            .add_systems(
+                Update,
+                |mut state: ResMut<ExperiencesState>,
+                 granted: Res<SlGrantedCapabilities>,
+                 mut sl: MessageWriter<SlCommand>,
+                 mut notices: MessageWriter<ShowNotification>| {
+                    request_lists(&mut state, &granted, &mut sl, &mut notices);
+                },
+            );
+        app.update();
+        let world = app.world();
+        let sent = world.resource::<Messages<SlCommand>>();
+        let sent = sent
+            .get_cursor()
+            .read(sent)
+            .map(|command| command.0.name().to_owned())
+            .collect();
+        let raised = world.resource::<Messages<ShowNotification>>();
+        let raised = raised
+            .get_cursor()
+            .read(raised)
+            .map(|notice| notice.template)
+            .collect();
+        (
+            sent,
+            raised,
+            world.resource::<ExperiencesState>().pending_full_list,
+        )
+    }
+
+    /// A region that grants `GetExperiences` is asked for all four lists, and
+    /// the permissions GET is counted so its reply is taken as the full pair.
+    #[test]
+    fn a_region_with_experiences_is_asked_for_every_list() {
+        let (sent, raised, pending) =
+            request_lists_on(SlGrantedCapabilities::from_names([CAP_GET_EXPERIENCES]));
+        assert_eq!(
+            sent,
+            vec![
+                Command::RequestExperiencePermissions.name(),
+                Command::RequestOwnedExperiences.name(),
+                Command::RequestAdminExperiences.name(),
+                Command::RequestCreatorExperiences.name(),
+            ]
+        );
+        assert!(raised.is_empty());
+        assert_eq!(pending, 1);
+    }
+
+    /// A region that grants none (a stock OpenSim) is asked for nothing — no
+    /// list would come back — and the window says experiences are not
+    /// available instead of showing five lists waiting.
+    #[test]
+    fn a_region_without_experiences_says_so_instead_of_asking() {
+        let (sent, raised, pending) =
+            request_lists_on(SlGrantedCapabilities::from_names(["EventQueueGet"]));
+        assert!(sent.is_empty(), "{sent:?}");
+        assert_eq!(raised, vec![EXPERIENCES_UNAVAILABLE]);
+        assert_eq!(pending, 0);
+    }
+
+    /// Before the region's capabilities arrive nothing is known: the lists are
+    /// asked for, and the driver reports any it then cannot send.
+    #[test]
+    fn before_the_capabilities_arrive_every_list_is_asked_for() {
+        let (sent, raised, _pending) = request_lists_on(SlGrantedCapabilities::default());
+        assert_eq!(sent.len(), 4, "{sent:?}");
+        assert!(raised.is_empty());
+    }
 
     /// A forget drops the experience from whichever preference list held it and
     /// bumps the revision so the view rebuild reacts — and leaves the

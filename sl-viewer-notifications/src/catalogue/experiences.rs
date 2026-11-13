@@ -150,4 +150,22 @@ pub(crate) const ENTRIES: &[NotificationTemplate] = &[
         form: NO_FORM,
         input: None,
     },
+    // Viewer-original (no reference counterpart, which shows empty experience
+    // lists and says nothing): an experience surface opened on a region that
+    // grants no experience capability, so nothing it would show can arrive.
+    // `unique`, so reopening the window replaces the toast instead of stacking.
+    NotificationTemplate {
+        name: "ViewerExperiencesUnavailable",
+        kind: NotificationKind::Notify,
+        message_key: "notification-viewer-experiences-unavailable",
+        title_key: None,
+        priority: NotificationPriority::Normal,
+        persist: false,
+        log_to_chat: false,
+        unique: true,
+        ignore: NotificationIgnore::None,
+        ignore_key: None,
+        form: NO_FORM,
+        input: None,
+    },
 ];

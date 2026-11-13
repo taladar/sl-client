@@ -1,7 +1,8 @@
 //! Two-step asset upload over NewFileAgentInventory / UploadBakedTexture.
 
-use crate::{Caps, EVENT_QUEUE_TIMEOUT, deliver};
+use crate::{Caps, EVENT_QUEUE_TIMEOUT, NetOutbound, deliver, report};
 use bevy::prelude::*;
+use crossbeam_channel::Sender;
 use sl_proto::Event as SessionEvent;
 use sl_proto::{
     AgentKey, AssetType, AssetUploadResponse, CAP_NEW_FILE_AGENT_INVENTORY, InventoryType,
@@ -64,18 +65,20 @@ pub(crate) fn upload_type_names(
     asset_type.caps_asset_name().zip(inventory_type.caps_name())
 }
 
-/// Emits an [`SlSessionEvent::AssetUploadFailed`] over the asset channel naming a
-/// capability that is not available on the current region.
-pub(crate) fn emit_upload_unavailable(caps: Option<&Caps>, cap: &str) {
-    emit_upload_failure(caps, format!("{cap} capability not available"));
+/// Emits an [`SlSessionEvent::AssetUploadFailed`] naming a capability that is
+/// not available on the current region.
+pub(crate) fn emit_upload_unavailable(outbound: &Sender<NetOutbound>, cap: &str) {
+    emit_upload_failure(outbound, format!("{cap} capability not available"));
 }
 
-/// Emits an [`SlSessionEvent::AssetUploadFailed`] over the asset channel with the
-/// given reason (a no-op if no capabilities are established yet).
-pub(crate) fn emit_upload_failure(caps: Option<&Caps>, reason: String) {
-    if let Some(caps) = caps {
-        deliver(&caps.asset_tx, SessionEvent::AssetUploadFailed { reason });
-    }
+/// Emits an [`SlSessionEvent::AssetUploadFailed`] with the given reason,
+/// straight to the app side: before the region's capabilities arrive there is
+/// no asset channel to carry it, and an upload refused then must still say so.
+pub(crate) fn emit_upload_failure(outbound: &Sender<NetOutbound>, reason: String) {
+    report(
+        outbound,
+        NetOutbound::Event(SessionEvent::AssetUploadFailed { reason }),
+    );
 }
 
 /// Runs both steps of a modern CAPS asset upload synchronously (on the calling

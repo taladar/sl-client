@@ -37,8 +37,8 @@ What OpenSim refuses, grouped by what a viewer loses:
 | area | refused on OpenSim | what a viewer does instead |
 | --- | --- | --- |
 | inventory | `InventoryAPIv3`, `LibraryAPIv3`, `FetchLib2`, `FetchLibDescendents2` | `FetchInventoryDescendents2` / `FetchInventory2` for the agent's tree and its background crawl, UDP `FetchInventoryDescendents` for the Library |
-| experiences | `AgentExperiences`, `ExperiencePreferences`, `ExperienceQuery`, `FindExperienceByName`, `GetAdminExperiences`, `GetCreatorExperiences`, `GetExperienceInfo`, `GetExperiences`, `GroupExperiences`, `IsExperienceAdmin`, `IsExperienceContributor`, `RegionExperiences`, `UpdateExperience` | nothing: stock OpenSim has no experiences (the client drops the requests without a word — `viewer-refused-capability-silent-drops`) |
-| voice | `ProvisionVoiceAccountRequest`, `ParcelVoiceInfoRequest`, `VoiceSignalingRequest` | nothing: a stock region loads no voice module (dropped silently, as above) |
+| experiences | `AgentExperiences`, `ExperiencePreferences`, `ExperienceQuery`, `FindExperienceByName`, `GetAdminExperiences`, `GetCreatorExperiences`, `GetExperienceInfo`, `GetExperiences`, `GroupExperiences`, `IsExperienceAdmin`, `IsExperienceContributor`, `RegionExperiences`, `UpdateExperience` | nothing: stock OpenSim has no experiences; the client reports each request it cannot send, and the viewer says experiences are not available here (since 2026-11-13, below) |
+| voice | `ProvisionVoiceAccountRequest`, `ParcelVoiceInfoRequest`, `VoiceSignalingRequest` | nothing: a stock region loads no voice module (each request reported, as above) |
 | groups and chat | `AcceptGroupInvite`, `DeclineGroupInvite`, `ChatSessionRequest` | the UDP `ImprovedInstantMessage` forms; a session's server-side history is not available |
 | messages | `ReadOfflineMsgs` | the UDP `RetrieveInstantMessages` (the client falls back itself since 2026-10-04) |
 | account | `UserInfo` | the UDP `UserInfoRequest` / `UpdateUserInfo` |
@@ -57,6 +57,20 @@ both runtimes alike. The three gaps it found — the report and offline-message
 fallbacks and the dropped material edit — are fixed and tested against the
 OpenSim-flavoured fake grid (`client_end_to_end`) or live OpenSim
 (`offline-msg-fetch`).
+
+The commands it found with no fallback at all — every experience request, the
+three voice requests and the explicit `Ais3*` commands — are no longer dropped
+without a word (2026-11-13). Each runtime logs one it cannot send and reports
+it as `Diagnostic::ExpectedReplyMissing` naming the capability, straight from
+the command loop rather than through the caps channel (which is bounded in
+`sl-client-tokio`, drained by that same loop, and in `sl-client-bevy` absent
+before the region's capabilities arrive). `sl-client-bevy` also reports an
+upload or a marketplace request made before then, where it used to skip both.
+The viewer reads the region's grants (`SlGrantedCapabilities`) before it would
+wait: the Experiences floater and an experience profile raise
+`ViewerExperiencesUnavailable` instead of asking, an experience search says
+"not available" instead of "Searching…", and Region / Estate's Experiences tab
+shows a note in place of its lists — the reference removes that tab.
 
 `ObjectAnimation` is refused by both grids: it is a name our list carries that
 neither grid offers.
