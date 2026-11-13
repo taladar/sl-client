@@ -93,6 +93,29 @@ pub struct Scenario {
     /// Empty by default. Everything else in a scenario answers something a
     /// client asked for; this is the only part that acts on its own.
     pub timeline: Timeline,
+    /// The objects the region's prims hold in their contents and their scripts
+    /// can rez, each the linkset an object item stands for
+    /// ([`HeldObject`]), folded into the grid when it starts.
+    pub held_objects: Vec<HeldObject>,
+}
+
+/// An object a prim holds in its contents, as the linkset its object item
+/// stands for: what `llRezObject` puts in the world, scripts and all.
+///
+/// A grid rezzes an object item's scripts back only from a linkset it took
+/// itself (`crate::assets`), and no object body carries a script in a form a
+/// rez could run. So a fixture whose script rezzes something states what it
+/// rezzes here, and the grid files it as though it had taken it: the scripts
+/// come back fresh, with `on_rez` and the start parameter they were rezzed
+/// with.
+#[derive(Debug, Clone)]
+pub struct HeldObject {
+    /// The object item, in some prim's contents, the linkset stands for.
+    pub item: InventoryKey,
+    /// Its prims, root first: each record (the root's position is replaced
+    /// by where it is rezzed, a child's is its offset from the root) and its
+    /// contents, if anything is in it.
+    pub prims: Vec<(sl_proto::Object, Option<TaskInventory>)>,
 }
 
 impl std::fmt::Debug for Scenario {
@@ -111,6 +134,7 @@ impl std::fmt::Debug for Scenario {
             .field("udp_assets", &self.udp_assets)
             .field("world", &self.world)
             .field("timeline", &self.timeline)
+            .field("held_objects", &self.held_objects)
             .finish_non_exhaustive()
     }
 }
@@ -128,6 +152,7 @@ impl Scenario {
             udp_assets: UdpAssetFixtures::new(),
             world: SceneFixtures::new(),
             timeline: Timeline::new(),
+            held_objects: Vec::new(),
         }
     }
 }
@@ -149,6 +174,7 @@ impl Default for Scenario {
             udp_assets: default_udp_assets(),
             world: default_world(),
             timeline: Timeline::new(),
+            held_objects: Vec::new(),
         }
     }
 }

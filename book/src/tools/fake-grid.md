@@ -191,7 +191,7 @@ teleport between the regions from its map — see below.
 ### Named scenarios
 
 `--scenario <name>` picks the scene every region shows, from the registry
-in `fixtures::scenarios`. Six exist today: `stock` (the default — one
+in `fixtures::scenarios`. Eight exist today: `stock` (the default — one
 region-wide parcel, one scripted box, an arrival greeting), `catalogue`
 (the named prim catalogue: one prim per rendering feature, plus two NPCs
 — one standing, one sitting on a bench — with every asset they reference
@@ -206,7 +206,10 @@ over — a border) and `scripted-avatar` (a pose ball, a vendor, a
 permission prim and a dialog menu, each scripted to ask an avatar
 something, and a [scripted avatar](#scripted-avatars) the grid logs in
 itself, which sits on the pose ball and is posed by it; landmarks `pose-ball`,
-`vendor`, `permission-prim` and `menu`).
+`vendor`, `permission-prim` and `menu`), `scripts` (one scripted prim per
+behaviour in a row, for a person to drive — see
+[the scripts scene](#the-scripts-scene)) and `scripts-avatars` (the same row
+and a scripted avatar that works along it unattended).
 
 `far-floor` exists for texture **minification**. Every other scene frames
 its subject square on from a few metres, where a texture's full-resolution
@@ -2528,9 +2531,12 @@ refuse it, take every dialog's first button, pay a vendor (an object whose
 click action is pay) what its pay window offers first when touching it.
 `AnswerPolicy::agreeable()` does all three; the default answers nothing,
 which is itself a case worth writing (the question stays open). A prompt
-goes to the step being run when that step is the one that answers it — an
+goes to the step about to run when that step is the one that answers it — an
 `AnswerDialog` takes the next dialog, even one that arrived while it was
-waiting for its `At` — and to the policy otherwise.
+waiting for its `At` — and to the policy otherwise. While a step *acts*, the
+step about to run is the one after it, so an `AwaitChat` after a `Walk` hears
+the line the walk drew (a sensor's, said while the avatar was still walking)
+rather than losing it.
 
 Everything it was asked and did goes into its **transcript**, one `Entry`
 per line: names, labels and amounts, never a time — so two runs of one seed
@@ -2589,6 +2595,51 @@ lossless. The content harness (`sl-content-test`, the
 It stays a client and a script: not a load generator, and nothing that
 decides for itself. It follows its agent's root session wherever a script
 sends it, and resolves a named object in whichever region that is.
+
+### The scripts scene
+
+The `scripts` scene (`fixtures::scripts_scene`) is the behaviour counterpart
+of the rendering catalogue: one prim per scripted behaviour, in a row four
+metres north of the region's centre, each at a landmark named after it and
+running its script from the start. West to east: a `sensor` (who came within
+four metres, who went away), a `touch-prim` (who touched which face, where),
+a `dialog-prim` (a colour menu for the toucher, the colour taken), a
+`listener` (`hello` in local chat; `spin` and `stop` on channel 42), a
+`vendor` (clicked to pay, L$50 or L$100, the payer thanked), a `pose-ball`
+(sit, permission, its own pose played), a `rezzer` (rezzes the scripted
+`Spark` it holds with a start parameter; the spark says it and dies five
+seconds later), a `notecard-reader` (its `Greetings` notecard over the
+dataserver, line by line), a `timer-prim` (spins, and steps through four
+colours and heights once a second), a `physical-box` (falls on to its
+`plinth`, says what it hit; touched, lifted three metres and dropped again),
+a `linkset-root` with two scripted children (touched, it pings them by link
+message and says which link answered) and a `broken-script-prim` whose script
+does not compile, the editor's error specimen. That prim and its script
+grant everyone modify, so whoever logs in can save the script and be shown its
+errors; the other props are not theirs to change. Every answer is local chat.
+
+The scripts are LSL files beside the module (`fixtures/scripts_scene/*.lsl`,
+and the notecard's text in `greetings.txt`), so each can be opened in a
+viewer's editor, saved back, or rezzed on a live grid as it stands.
+
+The rezzer's spark is a **held object** (`HeldObject`, on `RegionFixture` and
+`Scenario`): the linkset an object item in a prim's contents stands for,
+filed when the grid starts as though the grid had taken it. A grid rezzes an
+object item's scripts back only from a linkset it took itself, since no object
+body carries a script in a form a rez could run, so a fixture states what its
+rezzer rezzes this way, and the scripts in it start afresh with `on_rez`.
+
+The prims need nobody to run, which is the mode a person drives by hand.
+`scripts-avatars` adds `visitor()`, a dressed agreeable avatar that walks
+past the sensor and back, touches, picks Green, says `hello` and `/42 spin`,
+pays the vendor, has the spark rezzed, the notecard read, the box dropped and
+the linkset pinged, and ends seated on the pose ball, posing — each step
+waiting for the line its prim answers with. `visitor_on(grid)` is the same
+avatar for either flavour; on OpenSim it does not pay, since that grid drops
+a payment to an object without a word and raises no `money` event.
+`tests/scripts_scene.rs` plays it on both flavours and checks every
+behaviour's line in order, no fault and no stubbed call, and the same lines
+from two runs of one seed.
 
 ## The Bevy smoke tier
 

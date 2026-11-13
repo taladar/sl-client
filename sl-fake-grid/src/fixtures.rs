@@ -24,6 +24,7 @@ pub mod npcs;
 pub mod prims;
 pub mod scenarios;
 pub mod scripted_avatar;
+pub mod scripts_scene;
 
 use std::sync::Arc;
 
@@ -34,7 +35,7 @@ use sl_types::key::ObjectKey;
 use sl_wire::LegacyMaterial;
 
 use crate::runtime::RegionConfig;
-use crate::scenario::Scenario;
+use crate::scenario::{HeldObject, Scenario};
 use crate::terrain::TerrainFixture;
 use crate::timeline::Timeline;
 use crate::world::SceneFixtures;
@@ -92,6 +93,9 @@ pub struct RegionFixture {
     /// prim over there moves two seconds after you arrive" is as much a
     /// property of the scene as where the prim is.
     pub timeline: Timeline,
+    /// The objects the region's prims hold for their scripts to rez
+    /// ([`HeldObject`]).
+    pub held_objects: Vec<HeldObject>,
 }
 
 impl RegionFixture {
@@ -208,6 +212,7 @@ impl RegionFixture {
             assets,
             world: self.world,
             timeline: self.timeline,
+            held_objects: self.held_objects,
             ..Scenario::empty()
         }
     }

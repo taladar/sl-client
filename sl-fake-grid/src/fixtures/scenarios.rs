@@ -150,7 +150,7 @@ fn border_landmarks() -> Vec<Landmark> {
 }
 
 /// Every named scene, in the order the binary's help lists them.
-const ALL: [NamedScenario; 6] = [
+const ALL: [NamedScenario; 8] = [
     NamedScenario {
         name: "stock",
         summary: "the standard region: one region-wide parcel, one scripted box, \
@@ -209,7 +209,82 @@ const ALL: [NamedScenario; 6] = [
         landmarks: scripted_avatar_landmarks,
         pair: None,
     },
+    NamedScenario {
+        name: "scripts",
+        summary: "one scripted prim per behaviour in a west-to-east row: a sensor, \
+                  touch, dialog, listen, a vendor, a pose ball, a rezzer, a \
+                  notecard reader, a timer, a physical box on a plinth, a \
+                  three-prim linkset and a script that does not compile — for a \
+                  person to drive by hand",
+        dress: scripts,
+        landmarks: scripts_landmarks,
+        pair: None,
+    },
+    NamedScenario {
+        name: "scripts-avatars",
+        summary: "the scripts scene with a scripted avatar the grid logs in itself, \
+                  which walks past the sensor and works along the row — touch, \
+                  menu, chat, pay, rez, read, drop, ping — and ends seated on the \
+                  pose ball, posing",
+        dress: scripts_avatars,
+        landmarks: scripts_landmarks,
+        pair: None,
+    },
 ];
+
+/// The scripts scene: the region's content replaced by
+/// [`super::scripts_scene::region()`].
+fn scripts(region: RegionConfig) -> RegionConfig {
+    super::scripts_scene::region().into_region(region)
+}
+
+/// The scripts scene, and its visitor logged in.
+fn scripts_avatars(region: RegionConfig) -> RegionConfig {
+    let mut region = scripts(region);
+    region
+        .scripted_avatars
+        .push(super::scripts_scene::visitor());
+    region
+}
+
+/// The scripts scene's row, west to east, by its prims' names in lower case
+/// and hyphenated, with the plinth after the physical box it holds up.
+fn scripts_landmarks() -> Vec<Landmark> {
+    use super::scripts_scene::{
+        BROKEN, DIALOG, LINKSET, LISTENER, NOTECARD_READER, PHYSICAL, POSE_BALL, REZZER, SENSOR,
+        TIMER, TOUCH, VENDOR, plinth_position, position,
+    };
+    let landmark = |name: &str, position: Vector| Landmark {
+        name: name.to_lowercase().replace(' ', "-"),
+        position,
+    };
+    let mut landmarks: Vec<Landmark> = [
+        SENSOR,
+        TOUCH,
+        DIALOG,
+        LISTENER,
+        VENDOR,
+        POSE_BALL,
+        REZZER,
+        NOTECARD_READER,
+        TIMER,
+        PHYSICAL,
+        LINKSET,
+        BROKEN,
+    ]
+    .into_iter()
+    .filter_map(|name| position(name).map(|position| landmark(name, position)))
+    .collect();
+    let after_physical = landmarks
+        .iter()
+        .position(|found| found.name == "physical-box")
+        .map_or(landmarks.len(), |index| index.saturating_add(1));
+    landmarks.insert(
+        after_physical,
+        landmark(super::scripts_scene::PLINTH, plinth_position()),
+    );
+    landmarks
+}
 
 /// The scripted-avatar scene: the region's content replaced by
 /// [`super::scripted_avatar::region()`], and its sitter logged in.

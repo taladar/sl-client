@@ -1350,7 +1350,11 @@ is.
   `FLAGS_HANDLE_TOUCH` true of its scripted prims — a running script with a
   touch handler in its current state — with each grid's rule for a child of
   such a root: both flags, quietly, on Second Life; `FLAGS_SCRIPTED` and the
-  child sent again in full as the root's scripts change, on OpenSim.
+  child sent again in full as the root's scripts change, on OpenSim. A prim
+  whose own running script has a `money` handler carries `FLAGS_TAKES_MONEY`,
+  which a viewer's pay click action needs, on both flavours. That is
+  OpenSim's `SceneObjectPart.aggregateScriptEvents`, which a child does not
+  inherit; Second Life's rule for a child has not been measured.
 - **Prims** (`sl_fake_grid::prim_state`, `server-lsl-lib-prim-state`). A
   prim is lent to the library read out of its `Object` — the volume
   parameters, the texture entry, the extra parameters, the hover text, the

@@ -2,7 +2,7 @@
 id: test-fake-grid-lsl-offline-cases
 title: Move the script and chat conformance cases offline
 topic: test
-status: blocked
+status: ready
 origin: LSL-on-the-fake-grid audit (2026-09-20)
 points: 3
 blocked_by: [server-fake-grid-scripted-scenario]
@@ -86,3 +86,10 @@ A script's `llGiveInventory` and `llGiveInventoryList` to an avatar send the
 nothing is filed: the accept (`TaskInventoryAccepted`) is not answered on
 Second Life and nothing is filed at the offer on OpenSim. That is this task's,
 with the census's `object_` exemption.
+
+## From server-fake-grid-scripted-scenario (2026-11-13)
+
+The `scripts` scene (`fixtures::scripts_scene`) holds a prim for most of the
+cases above — a dialog prim, a touch prim, a listener, a vendor raising
+`money` — and `scripts-avatars` a scripted avatar that answers them, so a
+case can log in to it rather than stand up a fixture of its own.

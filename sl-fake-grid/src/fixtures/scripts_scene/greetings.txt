@@ -1,0 +1,3 @@
+Welcome to the scripts scene.
+Every prim here runs a script.
+Touch them, sit on them, pay them.

@@ -115,7 +115,7 @@ pub use runtime::{
     CrossingNotice, FakeAgent, FakeGrid, FakeGridBuilder, GridIdentity, LoginNotice, RegionConfig,
     RiddenCrossing, TeleportNotice,
 };
-pub use scenario::{Scenario, SimEventHook, SimHook};
+pub use scenario::{HeldObject, Scenario, SimEventHook, SimHook};
 pub use script_compile::{
     CompileOutcome, CompilePolicy, FailedScript, ScriptCompiler, TaskNewAsset, compile_source,
 };

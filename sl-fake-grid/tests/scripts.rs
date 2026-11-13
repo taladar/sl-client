@@ -2089,6 +2089,41 @@ default
         a_held_touch(ImitatedGrid::OpenSim).await
     }
 
+    /// A prim whose script has a `money` handler and no touch handler is
+    /// flagged as taking money and not as taking touches, on both grids —
+    /// what a viewer's pay click action needs.
+    #[tokio::test]
+    async fn a_money_handler_flags_the_prim_as_taking_money() -> Result<(), TestError> {
+        const PAID_SOURCE: &str = "default\n{\n    money(key payer, integer amount)\n    {\n        llSay(0, \"paid\");\n    }\n}\n";
+        for imitated in [ImitatedGrid::SecondLife, ImitatedGrid::OpenSim] {
+            let region = region_of(&[ScriptedBox {
+                local_id: TOUCHED,
+                source: PAID_SOURCE.to_owned(),
+                experience: None,
+            }])?;
+            let mut scene = scene_of(imitated, region).await?;
+            scene.tick(2).await?;
+            let flagged = scene
+                .next("the paid box flagged", |seen| match seen {
+                    Seen::Updated(object) if object.local_id == TOUCHED => {
+                        Some(object.update_flags)
+                    }
+                    _other => None,
+                })
+                .await?;
+            let mask = sl_proto::prim_flags::SCRIPTED
+                | sl_proto::prim_flags::HANDLE_TOUCH
+                | sl_proto::prim_flags::TAKES_MONEY;
+            assert_eq!(
+                flagged & mask,
+                sl_proto::prim_flags::SCRIPTED | sl_proto::prim_flags::TAKES_MONEY,
+                "on {imitated:?}"
+            );
+            scene.stop();
+        }
+        Ok(())
+    }
+
     /// A click on a child whose script takes no touch and said `PASS_NEVER`
     /// reaches nobody on Second Life and the root on OpenSim, as link 2; a
     /// click on the root reaches it as link 1 on both.

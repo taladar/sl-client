@@ -511,6 +511,21 @@ fn scripts_of(world: &SceneFixtures, prim: ObjectKey) -> Vec<CallerId> {
 /// Whether one of the running scripts of `prim` takes a touch: has a handler
 /// for any of the three touch events in its current state.
 pub(crate) fn takes_touches(world: &SceneFixtures, prim: ObjectKey) -> bool {
+    handles_any(world, prim, &TOUCH_EVENTS)
+}
+
+/// Whether one of the running scripts of `prim` takes money: has a `money`
+/// handler in its current state, which both grids flag the prim for
+/// (`FLAGS_TAKES_MONEY`, OpenSim's `PrimFlags.Money` from the part's own
+/// scripts in `SceneObjectPart.aggregateScriptEvents`) — what a viewer's pay
+/// click action needs.
+fn takes_money(world: &SceneFixtures, prim: ObjectKey) -> bool {
+    handles_any(world, prim, &["money"])
+}
+
+/// Whether one of the running, unheld scripts of `prim` has a handler for
+/// any of `events` in its current state.
+fn handles_any(world: &SceneFixtures, prim: ObjectKey, events: &[&str]) -> bool {
     scripts_of(world, prim).into_iter().any(|id| {
         world
             .script_instances
@@ -519,7 +534,7 @@ pub(crate) fn takes_touches(world: &SceneFixtures, prim: ObjectKey) -> bool {
             .is_some_and(|instance| {
                 instance.is_running()
                     && !instance.is_held()
-                    && TOUCH_EVENTS.iter().any(|event| instance.handles(event))
+                    && events.iter().any(|event| instance.handles(event))
             })
     })
 }
@@ -591,7 +606,8 @@ fn raise(
 /// to be sent again for it, each in full.
 ///
 /// A prim carries `FLAGS_HANDLE_TOUCH` when one of its running scripts takes a
-/// touch, and `FLAGS_SCRIPTED` when it holds a script; a child of a root that
+/// touch, `FLAGS_TAKES_MONEY` when one takes money, and `FLAGS_SCRIPTED` when
+/// it holds a script; a child of a root that
 /// takes touches carries what [`ChildFlags`] says. Only the prims the region
 /// runs scripts in, the ones it flagged before, and their linksets are
 /// looked at: a fixture flagged by hand keeps its flags.
@@ -661,6 +677,9 @@ pub(crate) fn refresh_flags(world: &mut SceneFixtures) -> Vec<RegionChange> {
             if own_takes {
                 wanted |= prim_flags::HANDLE_TOUCH;
             }
+            if takes_money(world, key) {
+                wanted |= prim_flags::TAKES_MONEY;
+            }
             // A flag the prim's own contents do not explain is the region's
             // to clear again later.
             if wanted & !own_contents != 0 {
@@ -669,7 +688,7 @@ pub(crate) fn refresh_flags(world: &mut SceneFixtures) -> Vec<RegionChange> {
             let Some(mut object) = world.object_mut(local_id) else {
                 continue;
             };
-            let mask = prim_flags::SCRIPTED | prim_flags::HANDLE_TOUCH;
+            let mask = prim_flags::SCRIPTED | prim_flags::HANDLE_TOUCH | prim_flags::TAKES_MONEY;
             let had = object.update_flags & mask;
             let resent_with_root = child && root_changed && resend_inherited;
             if had == wanted && !resent_with_root {

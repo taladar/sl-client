@@ -13,13 +13,13 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | --- | --- |
 | ideas | 130 |
 | ready | 332 |
-| blocked | 37 |
+| blocked | 36 |
 | in-progress | 6 |
-| bugs | 32 |
-| done | 1557 |
+| bugs | 34 |
+| done | 1558 |
 | deferred | 30 |
 | wont-do | 24 |
-| **total** | **2148** |
+| **total** | **2150** |
 
 ## ideas (130)
 
@@ -1038,6 +1038,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Factor the repeated session/id acquisition out of the conformance cases
 - [`test-e2e-sweep-live-grid`](ready/test-e2e-sweep-live-grid.md) — End-to-end
   tests for what only a live grid has
+- [`test-fake-grid-lsl-offline-cases`](ready/test-fake-grid-lsl-offline-cases.md)
+  — Move the script and chat conformance cases offline (blocked by
+  `server-fake-grid-scripted-scenario` (done))
 - [`test-handover-distant-and-vehicle-aditi`](ready/test-handover-distant-and-vehicle-aditi.md)
   — Live-test distant teleport (world_reset) and vehicle corner crossings, incl.
   on aditi
@@ -1097,13 +1100,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (done))
 - [`server-fake-grid-parcel-divide-join`](ready/server-fake-grid-parcel-divide-join.md)
   — Fake grid — divide and join parcels
-- [`server-fake-grid-scripted-scenario`](ready/server-fake-grid-scripted-scenario.md)
-  — A scripts scenario — one prim per scripted behaviour (blocked by
-  `server-fake-grid-script-engine-wiring` (done), `server-lsl-lib-prim-state`
-  (done), `server-lsl-lib-detection-sensors` (done),
-  `server-lsl-lib-avatar-control` (done), `server-fake-grid-money-ledger`
-  (done), `server-lsl-lib-task-inventory` (done),
-  `server-world-collision-and-physics` (done))
 - [`server-fake-grid-terraform`](ready/server-fake-grid-terraform.md) — Fake
   grid — terraforming, undo and bake (blocked by `gridspec-terrain-editing`
   (done))
@@ -1128,7 +1124,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-sl-mfa-challenge`](ready/gridspec-sl-mfa-challenge.md) — Record
   Second Life's MFA challenge and whether a remembered mfa_hash gets past it
 
-## blocked (37)
+## blocked (36)
 
 ### viewer
 
@@ -1227,9 +1223,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### test
 
-- [`test-fake-grid-lsl-offline-cases`](blocked/test-fake-grid-lsl-offline-cases.md)
-  — Move the script and chat conformance cases offline (blocked by
-  `server-fake-grid-scripted-scenario`)
 - [`test-voice-account`](blocked/test-voice-account-provision-a-voice-account.md)
   — provision a voice account (blocked by `viewer-voice-audio`)
 - [`test-voice-signaling`](blocked/test-voice-signaling-exchange-voice-signalling.md)
@@ -1267,7 +1260,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-text-renderability-axis`](in-progress/viewer-ui-text-renderability-axis.md)
   — Upstream issue — font selection cannot see glyph-format renderability
 
-## bugs (32)
+## bugs (34)
 
 ### protocol
 
@@ -1287,8 +1280,13 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### viewer
 
+- [`viewer-capture-world-only-draws-hover-text-and-tags`](bugs/viewer-capture-world-only-draws-hover-text-and-tags.md)
+  — A world-only capture holds hover text and name tags, which Firestorm draws
+  only with the UI
 - [`viewer-e2e-walk-foot-plane-lost-under-load`](bugs/viewer-e2e-walk-foot-plane-lost-under-load.md)
   — Under heavy load the walking avatar reads no foot plane after a walk
+- [`viewer-harness-status-counts-before-last-frame`](bugs/viewer-harness-status-counts-before-last-frame.md)
+  — The screenshot harness writes its status before the last frame is saved
 - [`viewer-live-opensim-world-renders-white`](bugs/viewer-live-opensim-world-renders-white.md)
   — The world renders all white at times on the live OpenSim grid
 - [`viewer-lsl-editor-flags-unserved-functions`](bugs/viewer-lsl-editor-flags-unserved-functions.md)
@@ -1351,7 +1349,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1557)
+## done (1558)
 
 ### protocol
 
@@ -4512,6 +4510,13 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-fake-grid-scripted-avatars`](done/server-fake-grid-scripted-avatars.md)
   — Scripted avatars — a client that grants, pays, sits and answers (blocked by
   `server-fake-grid-script-engine-wiring` (done))
+- [`server-fake-grid-scripted-scenario`](done/server-fake-grid-scripted-scenario.md)
+  — A scripts scenario — one prim per scripted behaviour (blocked by
+  `server-fake-grid-script-engine-wiring` (done), `server-lsl-lib-prim-state`
+  (done), `server-lsl-lib-detection-sensors` (done),
+  `server-lsl-lib-avatar-control` (done), `server-fake-grid-money-ledger`
+  (done), `server-lsl-lib-task-inventory` (done),
+  `server-world-collision-and-physics` (done))
 - [`server-fake-grid-top-objects-report`](done/server-fake-grid-top-objects-report.md)
   — Fake grid — a top-objects report with rows in it, and a return that finds
   them

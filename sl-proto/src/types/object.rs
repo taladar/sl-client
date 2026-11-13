@@ -53,6 +53,9 @@ pub mod prim_flags {
     pub const HANDLE_TOUCH: u32 = 1 << 7;
     /// The receiving agent may move the object (`FLAGS_OBJECT_MOVE`).
     pub const OBJECT_MOVE: u32 = 1 << 8;
+    /// A script in the object takes money — has a `money` handler
+    /// (`FLAGS_TAKES_MONEY`): what a viewer's pay click action needs.
+    pub const TAKES_MONEY: u32 = 1 << 9;
     /// The object is phantom — no collisions (`FLAGS_PHANTOM`).
     pub const PHANTOM: u32 = 1 << 10;
     /// The prim's contents are empty (`FLAGS_INVENTORY_EMPTY`): both grids

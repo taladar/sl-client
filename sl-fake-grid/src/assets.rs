@@ -232,6 +232,28 @@ impl GridAssets {
             .insert(item, linkset);
     }
 
+    /// Files a fixture's [`HeldObject`](crate::HeldObject) as though this grid
+    /// had taken it at `now`, its scripts with nothing saved, so a rez of its
+    /// item starts them afresh.
+    pub(crate) fn insert_held_object(&self, held: &crate::HeldObject, now: std::time::Instant) {
+        let prims = held
+            .prims
+            .iter()
+            .map(|(object, contents)| TakenPrim {
+                object: object.clone(),
+                contents: contents.clone(),
+                scripts: std::collections::BTreeMap::new(),
+            })
+            .collect();
+        self.insert_taken_linkset(
+            held.item,
+            TakenLinkset {
+                prims,
+                taken_at: now,
+            },
+        );
+    }
+
     /// The linkset filed under `item`, if this grid is the one that took it.
     ///
     /// [`None`] for an item no take made — a fixture's seeded object item —

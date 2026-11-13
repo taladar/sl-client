@@ -2,7 +2,7 @@
 id: server-fake-grid-scripted-scenario
 title: A scripts scenario — one prim per scripted behaviour
 topic: server
-status: ready
+status: done
 origin: LSL-on-the-fake-grid audit (2026-09-20)
 points: 5
 blocked_by: [server-fake-grid-script-engine-wiring, server-lsl-lib-prim-state,
@@ -110,3 +110,49 @@ what it lands on hear `collision_start`, `collision`, `collision_end` and
 `a_falling_box_collides`). This task's block on
 [[server-lsl-lib-physics-vehicles]] was for exactly that and is replaced by the
 collision task; the scenario needs nothing else of that tranche.
+
+## Done (2026-11-13)
+
+Two named scenes, `scripts` and `scripts-avatars`
+(`fixtures::scripts_scene`, book `tools/fake-grid.md` § The scripts scene).
+The row, west to east at `y = 132`, one landmark each: a sensor, a touch
+prim, a dialog prim, a listener (channel 0 and 42), a vendor, a pose ball
+with its own pose, a rezzer holding a scripted `Spark`, a notecard reader, a
+timer prim (spin, colour, height, floating text), a physical box over a
+plinth, a three-prim linkset and a broken-script prim. The scripts are
+`.lsl` files beside the module, the notecard a `.txt`.
+
+The rezzer needed something the grid lacked: an object item a fixture can
+state *with* its scripts. A fixture's object item rezzed from its body only,
+which carries no script, and only a linkset the grid took came back scripted.
+`HeldObject` (on `RegionFixture` and `Scenario`) is that linkset, filed when
+the grid starts as though taken, its scripts starting afresh with `on_rez`.
+
+`scripts-avatars` brings `visitor()`, which exercises the grant, pay, sit and
+animate paths (and every other behaviour of the row) unattended;
+`visitor_on(grid)` drops the payment on OpenSim, which raises no `money`
+event. Writing it found a scripted-avatar defect: a line that arrived while a
+step *acted* was kept only if the acting step answered it, so an `AwaitChat`
+after a `Walk` lost the sensor's line said mid-walk. During an act the step
+about to run is now the next one.
+
+`tests/scripts_scene.rs` plays the visitor on both flavours (every
+behaviour's line in order, no fault, no stubbed call, two seeded runs alike)
+and the bare scene with nobody in it. The scenario's prims have no
+determinism exception: the binary's grid is not seeded, a test's is.
+
+The viewer drives the scene too:
+`sl-client-bevy-viewer/tests/e2e_scripts_scene.rs` touches, menus, chats with,
+rezzes from, reads, pings, clicks to pay, sits on and drops every prop on both
+flavours, and opens the broken script from the Build window's Content tab and
+saves it to be shown its error at line 8. Two fake-grid changes came out of it.
+A prim whose running script has a `money` handler now carries
+`FLAGS_TAKES_MONEY`, which a viewer's pay click action needs and the fake grid
+never set (`a_money_handler_flags_the_prim_as_taking_money`). The broken prim
+and its script grant everyone modify, a fixture affordance (OpenSim honours such
+a mask, SL never lets an owner grant it), so whoever logs in can save it. This
+viewer has no pay window yet ([[viewer-money-economy-ui]]), so the stage checks
+the pay-unavailable notice; paying by hand waits on that. The cross-check frame
+pair is filed as two bugs: [[viewer-harness-status-counts-before-last-frame]]
+and
+[[viewer-capture-world-only-draws-hover-text-and-tags]].

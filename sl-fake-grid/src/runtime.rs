@@ -2546,6 +2546,9 @@ impl FakeGridBuilder {
         let assets = GridAssets::default();
         for region in &regions {
             assets.extend(&region.scenario.assets);
+            for held in &region.scenario.held_objects {
+                assets.insert_held_object(held, (self.clock)());
+            }
         }
         // The world map is the same catalogue for every session, and the
         // region table never changes after start, so it is built once here

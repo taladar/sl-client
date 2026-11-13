@@ -143,3 +143,7 @@ sl-lsl-runtime/opensim/LICENSE-OpenSim.txt -whitespace
 # Mono's collation table (sl-lsl-runtime/mono/README.md), copied out of
 # mscorlib.dll byte for byte: binary data the script engine includes as it is.
 sl-lsl-runtime/mono/collation.core.bin binary
+
+# The scripts scene's broken specimen does not compile on purpose: it is the
+# script a viewer's editor shows its errors for.
+sl-fake-grid/src/fixtures/scripts_scene/broken.lsl skipchecks=lsl:::lslint;;;deliberately[[space]]does[[space]]not[[space]]compile

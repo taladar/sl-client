@@ -892,7 +892,11 @@ impl Runner {
                 return reason;
             }
             previous = session.now();
-            if let Err(reason) = self.act(&step.action, upcoming).await {
+            // While a step acts, the step about to run is the one after it: a
+            // line its act draws (a sensor's, said while a walk is under way)
+            // is kept for that step rather than answered by policy and lost.
+            let following = steps.get(index.saturating_add(1)..).unwrap_or_default();
+            if let Err(reason) = self.act(&step.action, following).await {
                 return reason;
             }
             // A step may have carried it to another region.
