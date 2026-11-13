@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 333 |
 | blocked | 39 |
 | in-progress | 6 |
-| bugs | 24 |
-| done | 1559 |
+| bugs | 23 |
+| done | 1560 |
 | deferred | 30 |
 | wont-do | 24 |
 | **total** | **2144** |
@@ -1274,7 +1274,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-text-renderability-axis`](in-progress/viewer-ui-text-renderability-axis.md)
   — Upstream issue — font selection cannot see glyph-format renderability
 
-## bugs (24)
+## bugs (23)
 
 ### protocol
 
@@ -1307,9 +1307,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   its plywood
 - [`viewer-perf-steady-state-46fps-ceiling`](bugs/viewer-perf-steady-state-46fps-ceiling.md)
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
-- [`viewer-retired-neighbour-stays-drawn`](bugs/viewer-retired-neighbour-stays-drawn.md)
-  — A neighbour the simulator retired stays drawn — its ground, water and map
-  tile outlive its circuit
 - [`viewer-sky-irradiance-ignores-local-probes`](bugs/viewer-sky-irradiance-ignores-local-probes.md)
   — Sky-lit faces take their probe ambient from the view's probe, never from a
   placed probe
@@ -1344,7 +1341,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-lsl-mono-collision-model-under-lowered-limit`](bugs/server-lsl-mono-collision-model-under-lowered-limit.md)
   — A script 1 KB over its use collides in the runtime where Mono carries on
 
-## done (1559)
+## done (1560)
 
 ### protocol
 
@@ -3198,6 +3195,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-render-test-harness`](done/viewer-render-test-harness.md) — 3D render
   test harness — render one object without a grid, assert automatically, catch
   regressions
+- [`viewer-retired-neighbour-stays-drawn`](done/viewer-retired-neighbour-stays-drawn.md)
+  — A neighbour the simulator retired stays drawn — its ground, water and map
+  tile outlive its circuit
 - [`viewer-rigged-attachments-wearer-not-resolved`](done/viewer-rigged-attachments-wearer-not-resolved.md)
   — Worn rigged attachments (e.g. own shoes) don't render — wearer never
   resolved / too many rigged-pending objects

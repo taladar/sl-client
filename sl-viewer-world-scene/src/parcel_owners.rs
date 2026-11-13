@@ -42,6 +42,8 @@ use sl_client_bevy::{
     SlParcelOverlay, TerrainMaterial, TerrainOwnership,
 };
 use sl_viewer_settings::ViewerSettings;
+use sl_viewer_world_api::region_scoped::RegionScopedAppExt as _;
+use sl_viewer_world_api::world_scoped::WorldScopedAppExt as _;
 
 use crate::parcel_borders::{SETTING_SHOW_PARCEL_OWNERS, ownership_color};
 use crate::terrain::TerrainTextures;
@@ -73,6 +75,30 @@ pub struct ParcelOwnerOverlay {
     blank: Option<Handle<Image>>,
     /// Whether the tint was on last time the materials were written.
     active: bool,
+}
+
+impl sl_viewer_world_api::world_scoped::WorldScoped for ParcelOwnerOverlay {
+    /// Forget every region's map: a distant teleport took the regions, and the
+    /// materials they were bound into with them. The blank map and the switch
+    /// state are kept — the destination's materials are bound afresh as they
+    /// appear.
+    fn purge_world(
+        &mut self,
+        _purge: sl_viewer_world_api::world_scoped::WorldPurge,
+        _commands: &mut Commands,
+    ) {
+        self.images.clear();
+        self.built_from.clear();
+    }
+}
+
+impl sl_viewer_world_api::region_scoped::RegionScoped for ParcelOwnerOverlay {
+    /// Forget a retired neighbour's map; a region that comes back has its map
+    /// built again from the grid it re-sends.
+    fn forget_region(&mut self, region: RegionHandle, _commands: &mut Commands) {
+        let _image = self.images.remove(&region);
+        let _grid = self.built_from.remove(&region);
+    }
 }
 
 /// Build and bind each region's parcel-ownership map, and switch the tint on and
@@ -248,7 +274,8 @@ pub struct ParcelOwnerOverlayPlugin;
 
 impl Plugin for ParcelOwnerOverlayPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<ParcelOwnerOverlay>()
+        app.init_world_scoped::<ParcelOwnerOverlay>()
+            .register_region_scoped::<ParcelOwnerOverlay>()
             // After the terrain update, so a region's material exists (and its
             // overlay grid has been folded in) by the time the tint is bound.
             .add_systems(
@@ -267,6 +294,47 @@ mod tests {
     /// A boxed error so tests can use `?` instead of the disallowed
     /// `unwrap` / `expect`.
     type TestError = Box<dyn core::error::Error>;
+
+    /// A retired neighbour's map and the grid it was built from go; another
+    /// region's stay, and a world reset takes them all.
+    #[test]
+    fn a_retired_region_s_map_is_forgotten() {
+        use super::ParcelOwnerOverlay;
+        use bevy::prelude::{Commands, Handle, World};
+        use sl_client_bevy::RegionHandle;
+        use sl_viewer_world_api::region_scoped::RegionScoped as _;
+        use sl_viewer_world_api::world_scoped::{WorldPurge, WorldScoped as _};
+
+        let home = RegionHandle::from_global(256_000, 256_000);
+        let east = RegionHandle::from_global(256_256, 256_000);
+        let mut overlay = ParcelOwnerOverlay::default();
+        for region in [home, east] {
+            let _old = overlay.images.insert(region, Handle::default());
+            let _old = overlay.built_from.insert(region, ParcelOverlayGrid::new(8));
+        }
+        let mut world = World::new();
+        let mut queue = bevy::ecs::world::CommandQueue::default();
+        {
+            let mut commands = Commands::new(&mut queue, &world);
+            overlay.forget_region(east, &mut commands);
+        }
+        queue.apply(&mut world);
+        assert_eq!(
+            overlay.images.keys().copied().collect::<Vec<_>>(),
+            vec![home]
+        );
+        assert_eq!(
+            overlay.built_from.keys().copied().collect::<Vec<_>>(),
+            vec![home]
+        );
+
+        {
+            let mut commands = Commands::new(&mut queue, &world);
+            overlay.purge_world(WorldPurge::default(), &mut commands);
+        }
+        queue.apply(&mut world);
+        assert!(overlay.images.is_empty() && overlay.built_from.is_empty());
+    }
 
     /// A channel byte saturates rather than wrapping at either end.
     #[test]

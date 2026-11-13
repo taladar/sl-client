@@ -2410,6 +2410,236 @@ mod tests {
         harness.logout()
     }
 
+    /// How far west of the border the camera framing the eastern region's
+    /// ground stands, and how high: above the ground, looking down over the
+    /// border onto the neighbour's land.
+    const GROUND_CAMERA_WEST: f32 = 12.0;
+
+    /// The eye height of the ground framing, metres.
+    const GROUND_EYE_Z: f32 = 45.0;
+
+    /// The point of the eastern region's ground the ground framing aims at,
+    /// in the western region's frame: thirty metres past the border, on the
+    /// stock ground, well clear of the marker pillar's disc.
+    fn east_ground_seen_from_west() -> Vector {
+        Vector {
+            x: 256.0 + 30.0,
+            y: sl_fake_grid::fixtures::border::MARKER_Y - 20.0,
+            z: f32::from(sl_fake_grid::scenario::STOCK_TERRAIN_HEIGHT_M),
+        }
+    }
+
+    /// Aim the camera down over the border at [`east_ground_seen_from_west`]
+    /// and return the disc of ground it is judged on.
+    fn frame_the_east_ground(harness: &mut ViewerHarness) -> Result<Silhouette, TestError> {
+        let at = east_ground_seen_from_west();
+        harness.look_from(
+            Vector {
+                x: 256.0 - GROUND_CAMERA_WEST,
+                y: at.y,
+                z: GROUND_EYE_Z,
+            },
+            east_ground_seen_from_west(),
+        );
+        // Four metres across the line of sight, so the disc is ground and
+        // nothing but ground.
+        let edge = Vector {
+            y: at.y + 4.0,
+            ..east_ground_seen_from_west()
+        };
+        disc_from(&harness.project(&[at, edge]))
+    }
+
+    /// The pixels inside `disc`, so a count of differing ones can be read as a
+    /// share of it.
+    fn disc_area(disc: Silhouette) -> f32 {
+        std::f32::consts::PI * disc.radius * disc.radius
+    }
+
+    /// Whether the session still holds anything of the region `handle` the
+    /// world fold or the scene keeps per region: its region entity, its live
+    /// land patches (data or drawn), its sea level, its splat material.
+    fn region_held(
+        harness: &mut ViewerHarness,
+        handle: sl_proto::RegionHandle,
+    ) -> Vec<&'static str> {
+        let mut held = Vec::new();
+        let world = harness.app_world_mut();
+        if world
+            .query::<&sl_client_bevy::SlRegion>()
+            .iter(world)
+            .any(|region| region.handle == handle)
+        {
+            held.push("its region entity");
+        }
+        let terrain = world.resource::<sl_viewer_world_api::TerrainState>();
+        if terrain.raw_patches.keys().any(|key| key.0 == handle) {
+            held.push("its land patches");
+        }
+        if terrain.patches.keys().any(|key| key.0 == handle) {
+            held.push("its drawn ground");
+        }
+        if terrain.regions.contains_key(&handle) {
+            held.push("its terrain composition");
+        }
+        if world
+            .get_resource::<sl_viewer_world_scene::water::WaterState>()
+            .is_some_and(|water| water.height_of(handle).is_some())
+        {
+            held.push("its sea level");
+        }
+        if world
+            .get_resource::<sl_viewer_world_scene::terrain::TerrainTextures>()
+            .is_some_and(|textures| {
+                textures
+                    .materials_by_region()
+                    .any(|(region, _)| region == handle)
+            })
+        {
+            held.push("its ground material");
+        }
+        held
+    }
+
+    /// **A neighbour the draw distance stops reaching is taken out of the
+    /// picture, and put back when it reaches again.**
+    ///
+    /// The grid retires a neighbour with a `DisableSimulator` once the agent's
+    /// draw distance stops reaching it, and the reference then shows water
+    /// where its ground was (`LLWorld::removeRegion`). Before this, only the
+    /// region's objects went: its land, its sea level and its material stayed,
+    /// frozen, until the next distant teleport. The draw distance is stepped
+    /// down to 32 m — which on OpenSim's reckoning (64 m added, at least 96 m
+    /// around the avatar, standing mid-region) no longer reaches the east
+    /// region — and back up to the default.
+    ///
+    /// Asserted three ways each time: the stores (nothing of the region left,
+    /// then all of it back), the marker pillar (gone, then drawn again) and a
+    /// disc of the region's ground (different from before once it is gone,
+    /// the same again once it is back).
+    #[test]
+    fn a_retired_neighbour_leaves_the_picture_and_comes_back() -> Result<(), TestError> {
+        use sl_viewer_world_view::session::SETTING_DRAW_DISTANCE;
+
+        let mut harness = ViewerHarness::start_in_with(
+            border_grid(),
+            HarnessOptions::imitating(sl_fake_grid::ImitatedGrid::OpenSim),
+        )?;
+        harness.login()?;
+        harness.wait_neighbour(EAST_REGION)?;
+        wait_for_the_marker(&mut harness)?;
+        let east = harness
+            .region_handle(EAST_REGION)
+            .ok_or("the grid serves no eastern region")?;
+        let all_held =
+            |harness: &mut ViewerHarness| (region_held(harness, east).len() == 6).then_some(());
+        harness.run_until("the eastern region's ground and sea", all_held)?;
+        let default_distance = harness
+            .world()
+            .resource::<crate::settings::ViewerSettings>()
+            .store()
+            .get_f32(SETTING_DRAW_DISTANCE)?;
+
+        let ground = frame_the_east_ground(&mut harness)?;
+        let Some(ground_before) = harness.capture()? else {
+            no_adapter("the retired neighbour check");
+            return Ok(());
+        };
+        frame_the_border(&mut harness);
+        let marker_before = harness
+            .capture()?
+            .ok_or("the adapter answered the first capture and not the second")?;
+        let disc = marker_disc(&mut harness, WEST_REGION)?;
+        for marker in [Marker::Red, Marker::Green] {
+            let share = coverage(&marker_before, disc, marker);
+            assert!(
+                share > CHECKER_SHARE,
+                "the neighbour's marker is not in the picture to begin with ({share} of its disc \
+                 in {}), so its leaving would prove nothing",
+                marker.name()
+            );
+        }
+
+        // Out of reach: the grid retires the region, and nothing of it stays.
+        harness.set_setting(SETTING_DRAW_DISTANCE, sl_settings::SettingValue::F32(32.0));
+        harness.run_until(
+            "the eastern region to be retired and forgotten",
+            |harness| region_held(harness, east).is_empty().then_some(()),
+        )?;
+        let marker_gone = harness.capture()?.ok_or("the adapter stopped answering")?;
+        for marker in [Marker::Red, Marker::Green] {
+            let share = coverage(&marker_gone, disc, marker);
+            assert!(
+                share < KILLED_SHARE,
+                "the retired neighbour's marker still paints {share} of its disc in {}",
+                marker.name()
+            );
+        }
+        let area = disc_area(ground);
+        let _same_pose = frame_the_east_ground(&mut harness)?;
+        let ground_gone = harness.capture()?.ok_or("the adapter stopped answering")?;
+        let changed = crate::pixel_oracle::f32_from_u32(differing_pixels(
+            &ground_before,
+            &ground_gone,
+            Some(ground),
+        ));
+        assert!(
+            changed > 0.5 * area,
+            "only {changed} px of the retired neighbour's {area} px ground disc changed — its \
+             land is still drawn"
+        );
+
+        // Back in reach: announced again, and all of it streams back.
+        let retired_at = harness.world().resource::<Recorded>().events.len();
+        harness.set_setting(
+            SETTING_DRAW_DISTANCE,
+            sl_settings::SettingValue::F32(default_distance),
+        );
+        harness.run_until("the eastern region's marker to come back", |harness| {
+            harness
+                .world()
+                .resource::<Recorded>()
+                .events
+                .get(retired_at..)
+                .is_some_and(|events| {
+                    events.iter().any(|event| {
+                        matches!(
+                            event,
+                            sl_client_bevy::SlSessionEvent::ObjectAdded(object)
+                                if object.local_id
+                                    == sl_fake_grid::fixtures::border::MARKER_LOCAL_ID
+                                    && object.region_handle == east
+                        )
+                    })
+                })
+                .then_some(())
+        })?;
+        harness.run_until("the eastern region's ground and sea to come back", all_held)?;
+        frame_the_border(&mut harness);
+        let marker_back = harness.capture()?.ok_or("the adapter stopped answering")?;
+        for marker in [Marker::Red, Marker::Green] {
+            let share = coverage(&marker_back, disc, marker);
+            assert!(
+                share > CHECKER_SHARE,
+                "the neighbour came back but its marker paints only {share} of its disc in {}",
+                marker.name()
+            );
+        }
+        let _same_pose = frame_the_east_ground(&mut harness)?;
+        let ground_back = harness.capture()?.ok_or("the adapter stopped answering")?;
+        let still_changed = crate::pixel_oracle::f32_from_u32(differing_pixels(
+            &ground_before,
+            &ground_back,
+            Some(ground),
+        ));
+        assert!(
+            still_changed < 0.1 * area,
+            "{still_changed} px of the neighbour's {area} px ground disc differ from before it \
+             was retired — its land did not come back as it was"
+        );
+        harness.logout()
+    }
+
     /// The border grid with a rideable vehicle in the west. The east region
     /// receives it at the handover, numbered its own way — which is what makes
     /// a ridden crossing a handover rather than two copies of one prim.

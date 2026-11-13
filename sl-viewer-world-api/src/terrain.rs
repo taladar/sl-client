@@ -177,6 +177,29 @@ impl TerrainState {
         self.origin = None;
     }
 
+    /// Despawn `region`'s rendered land patches and forget its live terrain —
+    /// the terrain half of a neighbour's retirement
+    /// ([`Event::NeighborRetired`](sl_client_bevy::SlSessionEvent)). The
+    /// retained [`land_cache`](Self::land_cache) keeps its patches, as it does
+    /// through a world reset: a stale ground height is still the better
+    /// answer. Bumps the global revision, so the minimap's backdrop is rebuilt
+    /// without the region; its own revision restarts from nothing, so a region
+    /// that comes back reads as new to every per-region consumer.
+    pub fn forget_region(&mut self, region: RegionHandle, commands: &mut Commands) {
+        self.patches.retain(|&(patch_region, _, _), entity| {
+            if patch_region != region {
+                return true;
+            }
+            commands.entity(*entity).try_despawn();
+            false
+        });
+        self.raw_patches
+            .retain(|&(patch_region, _, _), _patch| patch_region != region);
+        let _terrain = self.regions.remove(&region);
+        let _revision = self.region_revisions.remove(&region);
+        self.map_revision = self.map_revision.wrapping_add(1);
+    }
+
     /// The terrain-data revision — bumped on every ingested patch and learned
     /// composition, so a derived map texture knows when to rebuild.
     #[must_use]
@@ -273,6 +296,12 @@ impl crate::world_scoped::WorldScoped for TerrainState {
     }
 }
 
+impl crate::region_scoped::RegionScoped for TerrainState {
+    fn forget_region(&mut self, region: RegionHandle, commands: &mut Commands) {
+        Self::forget_region(self, region, commands);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
@@ -365,6 +394,67 @@ mod tests {
             state.ground_at(bevy::math::Vec3::new(20.5, 0.0, 220.0)),
             None,
             "the region south of the origin has no ground"
+        );
+    }
+
+    /// A retired neighbour's patches leave the scene and the live maps, its
+    /// compositing entry and revision go, and the global revision moves on;
+    /// the region the agent stands in and the retained land cache are kept.
+    #[test]
+    #[expect(
+        clippy::expect_used,
+        reason = "a failed expectation is the intended failure signal in a unit test"
+    )]
+    fn forgetting_a_region_drops_its_live_terrain_and_keeps_the_cache() {
+        let home = RegionHandle((256_000_u64 << 32) | 256_000);
+        let east = RegionHandle((256_256_u64 << 32) | 256_000);
+        let mut world = bevy::prelude::World::new();
+        let mut state = TerrainState::default();
+        for region in [home, east] {
+            let key = (region, 1, 2);
+            let entity = world.spawn_empty().id();
+            let _old = state.patches.insert(key, entity);
+            let patch = TerrainPatch {
+                region_handle: region,
+                layer: TerrainLayerType::Land,
+                patch_x: 1,
+                patch_y: 2,
+                size: 16,
+                values: vec![22.0; 256],
+            };
+            let _old = state.raw_patches.insert(key, patch.clone());
+            let _old = state.land_cache.insert(key, patch);
+            let _old = state
+                .regions
+                .insert(region, super::RegionTerrain::default());
+            state.bump_revision(region);
+        }
+        let entity_of = |state: &TerrainState, region| state.patches.get(&(region, 1, 2)).copied();
+        let east_entity = entity_of(&state, east).expect("east has a patch");
+        let home_entity = entity_of(&state, home).expect("home has a patch");
+        let before = state.map_revision();
+
+        state.forget_region(east, &mut world.commands());
+        world.flush();
+
+        assert!(
+            world.get_entity(east_entity).is_err(),
+            "east's patch despawned"
+        );
+        assert!(world.get_entity(home_entity).is_ok(), "home's patch kept");
+        assert_eq!(entity_of(&state, east), None);
+        assert!(!state.raw_patches.contains_key(&(east, 1, 2)));
+        assert!(!state.regions.contains_key(&east));
+        assert_eq!(state.region_revision(east), 0, "a return reads as new");
+        assert_eq!(state.region_revision(home), 1);
+        assert!(
+            state.map_revision() > before,
+            "the minimap backdrop rebuilds"
+        );
+        assert_eq!(
+            state.land_height(east, 20.5, 35.5),
+            Some(22.0),
+            "the retained cache still answers the ground height"
         );
     }
 

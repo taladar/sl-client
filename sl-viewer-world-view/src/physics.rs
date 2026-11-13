@@ -92,6 +92,7 @@ use sl_viewer_world_objects::objects::{
 
 use sl_viewer_world_api::AvatarState;
 use sl_viewer_world_api::TerrainState;
+use sl_viewer_world_api::region_scoped::{RegionScoped, RegionScopedAppExt as _};
 use sl_viewer_world_api::world_scoped::{WorldPurge, WorldScoped, WorldScopedAppExt as _};
 use sl_viewer_world_api::{
     AvatarControls, AvatarInterp, AvatarMotion, MotionState, PhysicalObject, ViewerCamera,
@@ -134,6 +135,15 @@ impl WorldScoped for RegionTimeDilation {
     }
 }
 
+impl RegionScoped for RegionTimeDilation {
+    /// Forget a retired neighbour's dilation, so [`neighbours_known`] stops
+    /// counting it as present and a mover heading for it is clipped at the
+    /// void edge again, as it is where no neighbour was ever announced.
+    fn forget_region(&mut self, region: RegionHandle, _commands: &mut Commands) {
+        let _dilation = self.per_region.remove(&region);
+    }
+}
+
 /// The viewer's physics plugin: dead-reckoning of kinematic movers + building
 /// collision geometry for the custom raycast index. No physics *engine* — see
 /// the module docs; the viewer simulates nothing, so there is no solver, no
@@ -144,6 +154,7 @@ pub struct PhysicsPlugin;
 impl Plugin for PhysicsPlugin {
     fn build(&self, app: &mut App) {
         app.init_world_scoped::<RegionTimeDilation>()
+            .register_region_scoped::<RegionTimeDilation>()
             .init_resource::<CircuitLiveness>()
             .init_world_scoped::<ObjectPhysicsShapes>()
             .add_systems(
@@ -2629,6 +2640,7 @@ mod tests {
         MeshPhysics, ObjectKey, PhysicsConvex, PhysicsShapeType, RegionHandle, Rotation, Submesh,
         Vector,
     };
+    use sl_viewer_world_api::region_scoped::RegionScoped;
     use sl_viewer_world_api::world_scoped::{WorldPurge, WorldScoped as _};
     use sl_viewer_world_objects::objects::ObjectCategory;
 
@@ -2847,6 +2859,34 @@ mod tests {
         assert_eq!(
             neighbours_known(&dilations, home),
             [false, true, false, false]
+        );
+    }
+
+    /// A retired neighbour's dilation goes, so the mover heading for it is
+    /// clipped at the void edge again; the other regions' stay.
+    #[test]
+    fn a_retired_neighbour_s_dilation_is_forgotten() {
+        let width = 256_u32;
+        let home = RegionHandle::from_global(1000 * width, 1000 * width);
+        let east = RegionHandle::from_global(1001 * width, 1000 * width);
+        let north = RegionHandle::from_global(1000 * width, 1001 * width);
+        let mut dilations = RegionTimeDilation::default();
+        for region in [home, east, north] {
+            dilations.per_region.insert(region, 1.0);
+        }
+
+        let mut world = World::new();
+        let mut queue = CommandQueue::default();
+        {
+            let mut commands = Commands::new(&mut queue, &world);
+            RegionScoped::forget_region(&mut dilations, east, &mut commands);
+        }
+        queue.apply(&mut world);
+
+        assert_eq!(
+            neighbours_known(&dilations, home),
+            [false, false, false, true],
+            "only the northern neighbour is still known"
         );
     }
 

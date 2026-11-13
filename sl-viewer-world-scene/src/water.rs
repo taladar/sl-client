@@ -56,6 +56,7 @@ use crate::environment::EnvironmentState;
 use crate::sky::day_position;
 use crate::water_fog::WaterFogSettings;
 use sl_viewer_kit::probe_layers::environment_render_layers;
+use sl_viewer_world_api::region_scoped::RegionScopedAppExt as _;
 use sl_viewer_world_api::world_scoped::WorldScopedAppExt as _;
 use sl_viewer_world_api::{DecodedTextures, SKY_BOOST_PRIORITY, ViewerCamera, WorldPhase};
 use sl_viewer_world_objects::textures::{TextureDecoded, TextureManager};
@@ -72,9 +73,10 @@ pub struct WaterPlugin;
 impl Plugin for WaterPlugin {
     fn build(&self, app: &mut App) {
         // `WaterState` is inserted by `setup_water` (it needs the shared material
-        // and mesh), so only its purge is registered here.
+        // and mesh), so only its purges are registered here.
         app.init_resource::<WaterLevel>()
             .register_world_scoped::<WaterState>()
+            .register_region_scoped::<WaterState>()
             .add_systems(Startup, setup_water)
             .add_systems(
                 Update,
@@ -222,6 +224,16 @@ impl sl_viewer_world_api::world_scoped::WorldScoped for WaterState {
             commands.entity(entity).try_despawn();
         }
         self.region_heights.clear();
+    }
+}
+
+impl sl_viewer_world_api::region_scoped::RegionScoped for WaterState {
+    /// Forget a retired neighbour's sea level. Its square of the sea grid is
+    /// not despawned: with no height known for the region it is void water
+    /// from the next frame on, at the level of the regions around it — the
+    /// reference's hole water where `LLWorld::removeRegion` took a region.
+    fn forget_region(&mut self, region: RegionHandle, _commands: &mut Commands) {
+        let _height = self.region_heights.remove(&region);
     }
 }
 
@@ -936,6 +948,45 @@ mod tests {
     /// A region handle at the given grid coordinates (in region units).
     fn region(x: u32, y: u32) -> RegionHandle {
         RegionHandle::from_global(x.saturating_mul(256), y.saturating_mul(256))
+    }
+
+    /// A retired neighbour's sea level is forgotten and nothing else: its cell
+    /// stays spawned, and with no height known for the region it takes the
+    /// level of the regions around it, as void water does.
+    #[test]
+    fn a_retired_neighbour_s_sea_becomes_void_water() {
+        use sl_viewer_world_api::region_scoped::RegionScoped as _;
+
+        let mut world = World::new();
+        let east_cell = world
+            .spawn(WaterCell {
+                cell: IVec2::new(1, 0),
+            })
+            .id();
+        let home = region(1000, 1000);
+        let east = region(1001, 1000);
+        let mut state = WaterState {
+            material: Handle::default(),
+            cell_mesh: Handle::default(),
+            cells: HashMap::from([(IVec2::new(1, 0), east_cell)]),
+            region_heights: HashMap::from([(home, 20.0), (east, 35.0)]),
+            normal_key: None,
+        };
+        let loaded = |state: &WaterState| super::loaded_cells(&state.region_heights, home);
+        assert_height(cell_height(IVec2::new(1, 0), &loaded(&state), 20.0), 35.0);
+
+        let mut queue = CommandQueue::default();
+        {
+            let mut commands = Commands::new(&mut queue, &world);
+            state.forget_region(east, &mut commands);
+        }
+        queue.apply(&mut world);
+
+        assert_eq!(state.height_of(east), None);
+        assert!(state.height_of(home).is_some(), "home keeps its sea level");
+        assert!(world.get_entity(east_cell).is_ok(), "the cell is kept");
+        // The cell falls back to the surrounding sea level.
+        assert_height(cell_height(IVec2::new(1, 0), &loaded(&state), 20.0), 20.0);
     }
 
     /// A distant teleport must leave no learned height and no spawned sea behind:
