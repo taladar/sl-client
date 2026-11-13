@@ -15,11 +15,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 333 |
 | blocked | 39 |
 | in-progress | 6 |
-| bugs | 23 |
-| done | 1560 |
+| bugs | 22 |
+| done | 1562 |
 | deferred | 30 |
 | wont-do | 24 |
-| **total** | **2144** |
+| **total** | **2145** |
 
 ## ideas (129)
 
@@ -1274,7 +1274,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-text-renderability-axis`](in-progress/viewer-ui-text-renderability-axis.md)
   — Upstream issue — font selection cannot see glyph-format renderability
 
-## bugs (23)
+## bugs (22)
 
 ### protocol
 
@@ -1315,8 +1315,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   grid stood it
 - [`viewer-texture-filtering-in-linear-space`](bugs/viewer-texture-filtering-in-linear-space.md)
   — Colour textures are filtered after sRGB decoding, the reference before
-- [`viewer-vintage-radar-range-colours`](bugs/viewer-vintage-radar-range-colours.md)
-  — The radar's range column is unreadable on a light list
 
 ### test
 
@@ -1341,7 +1339,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-lsl-mono-collision-model-under-lowered-limit`](bugs/server-lsl-mono-collision-model-under-lowered-limit.md)
   — A script 1 KB over its use collides in the runtime where Mono carries on
 
-## done (1560)
+## done (1562)
 
 ### protocol
 
@@ -3605,6 +3603,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   & other text contexts (blocked by `viewer-ui-text-foundation` (done))
 - [`viewer-video-playback`](done/viewer-video-playback.md) — Video playback
   backend (a second media engine, not the browser)
+- [`viewer-vintage-radar-friend-name-contrast`](done/viewer-vintage-radar-friend-name-contrast.md)
+  — A friend's name in the radar vanishes on Vintage's selected row
+- [`viewer-vintage-radar-range-colours`](done/viewer-vintage-radar-range-colours.md)
+  — The radar's range column is unreadable on a light list
 - [`viewer-vintage-skin`](done/viewer-vintage-skin.md) — Ship a Vintage-alike
   skin (blocked by `viewer-skin-light-surface-roles` (done),
   `viewer-skin-image-backed-widgets` (done))

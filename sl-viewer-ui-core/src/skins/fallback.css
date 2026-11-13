@@ -232,6 +232,16 @@
   /* An inventory folder's label — gold, the reference's own. */
   --folder-label: #fadb8c;
 
+  /* The radar's range cell, by band: within chat range, within shout range,
+   * beyond it (AvatarListItemChatRange / ShoutRange / BeyondShoutRange). A
+   * list colour, not the name tags' distance colours, though the flat skins
+   * start from those two; beyond reads as the list's own text, and a range
+   * the viewer does not know as its muted text. */
+  --radar-range-chat: #00ff00;
+  --radar-range-shout: #ffff00;
+  --radar-range-beyond: var(--field-text);
+  --radar-range-unknown: var(--field-placeholder);
+
   /* The checkbox: its resting well, its frame, and the two the tick shows
    * against. A light box with a dark frame is the classic look, which a skin
    * gets by redefining these four and nothing else. */

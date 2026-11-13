@@ -240,6 +240,11 @@
   /* An inventory folder's label — gold, the reference's own. */
   --folder-label: #fadb8c;
 
+  --radar-range-chat: #00ff00;
+  --radar-range-shout: #ffff00;
+  --radar-range-beyond: var(--field-text);
+  --radar-range-unknown: var(--field-placeholder);
+
   /* The checkbox: its resting well, its frame, and the two the tick shows
    * against. A light box with a dark frame is the classic look, which a skin
    * gets by redefining these four and nothing else. */

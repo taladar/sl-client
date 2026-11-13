@@ -2252,6 +2252,105 @@ mod test {
         Ok(())
     }
 
+    /// **The radar's range bands are the skin's**, on a resting row and on a
+    /// selected one: Vintage gives them the reference's dark list colours —
+    /// alpha included, which is why they are class rules and not palette
+    /// settings — and a flat skin keeps the green and yellow it always drew,
+    /// with beyond and an unknown range reading as the list's own text and its
+    /// muted text (tokens that name other tokens, so a theme that moves the
+    /// text moves them too).
+    ///
+    /// The selected row is the assertion that pays for itself: the selected
+    /// row's text rule is (0,3,0) as well, so a band rule ahead of it in the
+    /// sheet would hand every selected range to `--list-row-selected-text`.
+    #[test]
+    fn the_radar_range_bands_are_the_skins() -> Result<(), TestError> {
+        // (skin, chat, shout, beyond, unknown)
+        let cases = [
+            (
+                "vintage",
+                Srgba::rgba_u8(0x00, 0x00, 0x00, 0xff),
+                Srgba::rgba_u8(0x00, 0x00, 0x00, 0x80),
+                Srgba::rgba_u8(0x66, 0x00, 0x00, 0x66),
+                Srgba::rgba_u8(0x66, 0x00, 0x00, 0x66),
+            ),
+            (
+                "graphite",
+                Srgba::rgba_u8(0x00, 0xff, 0x00, 0xff),
+                Srgba::rgba_u8(0xff, 0xff, 0x00, 0xff),
+                Srgba::rgba_u8(0xff, 0xff, 0xff, 0xff),
+                Srgba::rgba_u8(0xcb, 0xd5, 0xe2, 0xff),
+            ),
+        ];
+        for (skin, chat, shout, beyond, unknown) in cases {
+            let mut app = app();
+            let handle: Handle<StyleSheet> = app
+                .world()
+                .resource::<AssetServer>()
+                .load(format!("skins/{skin}/skin.css"));
+            let root = app
+                .world_mut()
+                .spawn((Node::default(), Styled::new(handle.clone())))
+                .id();
+            let list = app
+                .world_mut()
+                .spawn((
+                    Node::default(),
+                    ClassList::new("sk-list-surface"),
+                    ChildOf(root),
+                ))
+                .id();
+            // (row is selected, band, expected colour, cell) — the beyond
+            // and unknown cells also wear `sk-text` / `sk-title`, as live ones
+            // do: their fallback colours are those text roles'.
+            let mut cells = Vec::new();
+            for selected in [false, true] {
+                let row_classes = if selected {
+                    "sk-table-row sk-selected"
+                } else {
+                    "sk-table-row"
+                };
+                let row = app
+                    .world_mut()
+                    .spawn((Node::default(), ClassList::new(row_classes), ChildOf(list)))
+                    .id();
+                for (band, classes, want) in [
+                    ("chat", "sk-radar-range sk-radar-range-chat", chat),
+                    ("shout", "sk-radar-range sk-radar-range-shout", shout),
+                    (
+                        "beyond",
+                        "sk-text sk-radar-range sk-radar-range-beyond",
+                        beyond,
+                    ),
+                    (
+                        "unknown",
+                        "sk-title sk-radar-range sk-radar-range-unknown",
+                        unknown,
+                    ),
+                ] {
+                    let cell = app
+                        .world_mut()
+                        .spawn((Text::new("12.34"), ClassList::new(classes), ChildOf(row)))
+                        .id();
+                    cells.push((selected, band, want, cell));
+                }
+            }
+            load(&mut app, &handle)?;
+            app.update();
+
+            for (selected, band, want, cell) in cells {
+                assert_eq!(
+                    text_of(&app, cell),
+                    Some(want),
+                    "{skin}: the {band} band on a {} row did not take \
+                     `--radar-range-{band}`",
+                    if selected { "selected" } else { "resting" }
+                );
+            }
+        }
+        Ok(())
+    }
+
     /// A refused action button greys — **both** halves of it.
     ///
     /// This is the pair that broke once already: `set_action_button_enabled`

@@ -2082,6 +2082,33 @@
   color: var(--text-primary);
 }
 
+/* The radar's range cell, by the band its avatar is in — the reference's
+ * `AvatarListItemChatRange` / `…ShoutRange` / `…BeyondShoutRange`. A list
+ * colour, read against the list's face, and roles of their own rather than the
+ * name-tag distance colours, which are tuned for text over the world.
+ *
+ * (0,3,0) and after the selected-row text rule, so a selected row keeps its
+ * range in its band's colour as the reference's does (a cell with a colour of
+ * its own keeps it when its row is selected) — and so it beats
+ * `.sk-list-surface .sk-text` and `.sk-list-surface .sk-title`, which the
+ * beyond and unknown cells also wear. An unknown range (the `>draw-distance`
+ * form) is a band of its own: the reference paints it as beyond. */
+.sk-table-row .sk-radar-range.sk-radar-range-chat {
+  color: var(--radar-range-chat);
+}
+
+.sk-table-row .sk-radar-range.sk-radar-range-shout {
+  color: var(--radar-range-shout);
+}
+
+.sk-table-row .sk-radar-range.sk-radar-range-beyond {
+  color: var(--radar-range-beyond);
+}
+
+.sk-table-row .sk-radar-range.sk-radar-range-unknown {
+  color: var(--radar-range-unknown);
+}
+
 /* The row a drag is over. Compound and after the selection, so dragging onto
  * the folder that happens to be selected still shows where the drop lands —
  * which the inventory used to arrange by switching its selection system off

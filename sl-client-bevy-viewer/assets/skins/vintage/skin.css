@@ -281,6 +281,15 @@
 
   --folder-label: #fadb8c;
 
+  /* The radar's range bands, dark on the light list: the reference's
+   * AvatarListItemChatRange (Black), ShoutRange (Black_50) and
+   * BeyondShoutRange (0.4 0 0 0.4), which also paints a range it does not
+   * know. */
+  --radar-range-chat: #000000;
+  --radar-range-shout: #00000080;
+  --radar-range-beyond: #66000066;
+  --radar-range-unknown: #66000066;
+
   /* The checkbox: a light box (#d8d8d8) in an ORANGE ring, a black tick. The
    * radio: a white disc in an orange ring, a black pip. Checkbox_* and
    * RadioButton_* in the reference's art. */
