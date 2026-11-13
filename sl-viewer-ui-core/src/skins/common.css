@@ -1791,6 +1791,13 @@
   background-color: var(--surface-bg);
 }
 
+/* The parcel streaming-audio cluster's backing strip (viewer-streaming-audio):
+ * the toolbar's surface, so it reads as the same chrome in every skin. Its
+ * buttons are `.sk-action-button` and its labels text roles. */
+.sk-parcel-audio-bar {
+  background-color: var(--surface-bg);
+}
+
 /* A bottom-toolbar button at rest, and its states. They are all the engine's
  * own now, set by src/bottom_toolbar.rs `update_toolbar_button_states`: lit
  * (its floater is open) is `:checked`, because a toolbar button is a toggle;

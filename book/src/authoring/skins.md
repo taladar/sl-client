@@ -454,6 +454,7 @@ the stock look rather than to black.
 | `.sk-search-field` / `.sk-search-clear` | the shared search box and its `×` button |
 | `.sk-field-box` | any other box around a bare editor — the chat bar and every chat input, a rich-text field (a notecard's body) and a code editor; the search box's well, focus face and ring, with `.sk-focus-within` stamped while its field has focus and `.sk-read-only` while its field is read-only |
 | `.sk-toolbar-bar` / `.sk-toolbar-button` / `.sk-toolbar-label` | the bottom toolbar strip, its buttons — `:checked` while the floater a button toggles is open, `:active` held down, `:checked:active` both, `:disabled` for a target that has not landed — and their labels, which the button's states reach as descendant rules |
+| `.sk-parcel-audio-bar` | the parcel streaming-audio cluster's backing strip beside the chat bar (its buttons are `.sk-action-button`) |
 | `.sk-toast` / `.sk-toast-text` | a notification toast card and its text |
 | `.sk-toast-tip` / `.sk-toast-notify` / `.sk-toast-alert` / `.sk-toast-modal` | worn with `.sk-toast`: its kind, which frames the card |
 | `.sk-toast-default` | the card's default button (the one Enter or expiry takes), framed in its kind's colour |

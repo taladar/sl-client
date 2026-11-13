@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 333 |
 | blocked | 39 |
 | in-progress | 6 |
-| bugs | 25 |
-| done | 1558 |
+| bugs | 24 |
+| done | 1559 |
 | deferred | 30 |
 | wont-do | 24 |
 | **total** | **2144** |
@@ -1274,7 +1274,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-text-renderability-axis`](in-progress/viewer-ui-text-renderability-axis.md)
   — Upstream issue — font selection cannot see glyph-format renderability
 
-## bugs (25)
+## bugs (24)
 
 ### protocol
 
@@ -1302,8 +1302,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A nearby avatar stays a coarse sphere even as the camera closes in
 - [`viewer-own-avatar-broken-after-teleport`](bugs/viewer-own-avatar-broken-after-teleport.md)
   — Own avatar looks broken after a teleport
-- [`viewer-parcel-audio-bar-backing-unskinned`](bugs/viewer-parcel-audio-bar-backing-unskinned.md)
-  — The parcel audio bar's backing is a colour no skin can reach
 - [`viewer-pbr-face-shows-legacy-texture-on-aditi`](bugs/viewer-pbr-face-shows-legacy-texture-on-aditi.md)
   — A prim given a PBR material from the Build window sometimes keeps drawing
   its plywood
@@ -1346,7 +1344,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-lsl-mono-collision-model-under-lowered-limit`](bugs/server-lsl-mono-collision-model-under-lowered-limit.md)
   — A script 1 KB over its use collides in the runtime where Mono carries on
 
-## done (1558)
+## done (1559)
 
 ### protocol
 
@@ -2863,6 +2861,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-p8-2`](done/viewer-p8-2-stitch-modes.md) — Stitch modes
 - [`viewer-p8-3`](done/viewer-p8-3-stitch-tests.md) — Stitch tests
 - [`viewer-p9-1`](done/viewer-p9-1-sculpt-objects.md) — Sculpt objects
+- [`viewer-parcel-audio-bar-backing-unskinned`](done/viewer-parcel-audio-bar-backing-unskinned.md)
+  — The parcel audio bar's backing is a colour no skin can reach
 - [`viewer-parcel-borders-render`](done/viewer-parcel-borders-render.md) —
   In-world parcel borders (property lines) (blocked by
   `viewer-parcel-overlay-decode` (done))

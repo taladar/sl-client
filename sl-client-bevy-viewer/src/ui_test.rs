@@ -510,7 +510,13 @@ mod tests {
         ("emoji-picker", &["sk-tile"]),
         (
             "parcel-audio-bar",
-            &["sk-action-button", "sk-glyph-music", "sk-text", "sk-slider"],
+            &[
+                "sk-parcel-audio-bar",
+                "sk-action-button",
+                "sk-glyph-music",
+                "sk-text",
+                "sk-slider",
+            ],
         ),
     ];
 
