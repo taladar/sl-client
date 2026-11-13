@@ -149,7 +149,7 @@ use sl_client_bevy::{
     SlRegionIdentity, SlRegionLimits, SlSessionEvent, TextureKey, Uuid,
 };
 use sl_viewer_notices::experience_profile::{OpenExperienceProfile, maturity_key};
-use sl_viewer_notices::god_mode::AgentGodLevel;
+use sl_viewer_social::AgentGodLevel;
 
 mod estate_prompts;
 mod terrain_pbr;
@@ -6213,7 +6213,7 @@ mod tests {
             RegionHandle, RegionIdentity, RegionName, RegionTerrainComposition, SlCommand,
             SlCurrentRegion, SlEvent, SlRegionIdentity, Uuid,
         };
-        use sl_viewer_notices::god_mode::AgentGodLevel;
+        use sl_viewer_social::AgentGodLevel;
 
         /// A boxed error so tests use `?` rather than the disallowed
         /// `unwrap` / `expect`.

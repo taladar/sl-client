@@ -76,6 +76,7 @@ use crate::world_api::ObjectDebugInfo;
 use crate::world_api::ObjectState;
 use crate::world_api::TerrainState;
 use crate::world_api::{CameraMode, ViewerCamera};
+use sl_viewer_ui_core::double_click::DoubleClickWindow;
 use sl_viewer_ui_core::skin;
 
 /// The `element` tag the minimap attributes its [`UiAction`]s to.
@@ -2881,9 +2882,6 @@ fn parcel_tooltip_lines(
 // Input observers.
 // ---------------------------------------------------------------------------
 
-/// Seconds within which two clicks are a double-click.
-const DOUBLE_CLICK_SECONDS: f64 = 0.4;
-
 /// Pixels within which two clicks are a double-click.
 const DOUBLE_CLICK_SLOP: f32 = 6.0;
 
@@ -2895,6 +2893,7 @@ const DOUBLE_CLICK_SLOP: f32 = 6.0;
 fn on_minimap_click(
     click: On<Pointer<Click>>,
     time: Option<Res<Time>>,
+    double_click: DoubleClickWindow,
     state: Option<ResMut<MinimapState>>,
     settings: Option<Res<ViewerSettings>>,
     world: Option<ClickWorld>,
@@ -2923,7 +2922,7 @@ fn on_minimap_click(
     };
     let now = time.elapsed_secs_f64();
     let double = state.last_click.is_some_and(|(at, position)| {
-        now - at <= DOUBLE_CLICK_SECONDS && position.distance(cursor) <= DOUBLE_CLICK_SLOP
+        double_click.holds(now - at) && position.distance(cursor) <= DOUBLE_CLICK_SLOP
     });
     if !double {
         state.last_click = Some((now, cursor));

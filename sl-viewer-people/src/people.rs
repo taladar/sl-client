@@ -89,6 +89,7 @@ use crate::ui_table::{
 };
 use crate::ui_text::set_text;
 use crate::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists};
+use sl_viewer_ui_core::double_click::DoubleClickWindow;
 use sl_viewer_ui_core::glyph;
 
 /// A friend-list row's uniform height, in logical pixels — matched to the
@@ -307,11 +308,6 @@ const FRIENDS_TABLE: TableSpec = TableSpec {
     sort_setting: None,
     widths_setting: Some(FRIENDS_WIDTHS_SETTING),
 };
-
-/// The longest gap between two clicks on the same row still counted as a
-/// double-click, in seconds — a double-click opens a one-to-one IM, like the IM
-/// button (the reference viewer's list double-click).
-const DOUBLE_CLICK_SECS: f32 = 0.4;
 
 // ---------------------------------------------------------------------------
 // Pure model
@@ -1042,15 +1038,16 @@ impl SelectedFriend {
 }
 
 /// The last friend-row click, for detecting a double-click (two presses on the
-/// same friend within [`DOUBLE_CLICK_SECS`] open a one-to-one IM, like the IM
+/// same friend within the app's double-click window ([`DoubleClickWindow`]) open a one-to-one IM, like the IM
 /// button). Tracked by friend id, not row entity, since the virtualized rows are
 /// recycled.
 #[derive(Resource, Debug, Default)]
 pub(crate) struct FriendClickTracker {
     /// The friend the last press selected, if any.
     friend: Option<FriendKey>,
-    /// When that press landed, in seconds since startup ([`Time::elapsed_secs`]).
-    time: f32,
+    /// When that press landed, in seconds since startup
+    /// ([`DoubleClickWindow::now_secs`]).
+    time: f64,
 }
 
 /// A pending, not-yet-confirmed grant of the **edit-my-objects** right — the one
@@ -2723,7 +2720,7 @@ fn bind_friend_rows(
 
 /// A friend row was clicked: focus the list (so the wheel scrolls it) and — on a
 /// **double-click** (two presses on the same friend within
-/// [`DOUBLE_CLICK_SECS`]) — open a one-to-one IM, exactly like the IM button.
+/// the app's double-click window ([`DoubleClickWindow`])) — open a one-to-one IM, exactly like the IM button.
 ///
 /// The *selection* is not set here: the table widget's own row observer owns the
 /// Ctrl / Shift click algebra now that the list is multi-select, and
@@ -2732,7 +2729,7 @@ fn on_friend_row_press(
     press: On<Pointer<Press>>,
     rows: Query<&BoundFriend>,
     ui: Res<PeopleUi>,
-    time: Res<Time>,
+    double_click: DoubleClickWindow,
     mut tracker: ResMut<FriendClickTracker>,
     mut focus: ResMut<InputFocus>,
     mut open: MessageWriter<OpenConversation>,
@@ -2747,8 +2744,8 @@ fn on_friend_row_press(
     let Some(friend) = bound.0 else {
         return;
     };
-    let now = time.elapsed_secs();
-    if tracker.friend == Some(friend) && now - tracker.time <= DOUBLE_CLICK_SECS {
+    let now = double_click.now_secs();
+    if tracker.friend == Some(friend) && double_click.holds(now - tracker.time) {
         // Second quick click on the same friend: open the one-to-one IM. Clear the
         // tracker so a third click does not re-fire.
         open.write(OpenConversation {

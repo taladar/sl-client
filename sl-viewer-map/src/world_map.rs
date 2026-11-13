@@ -76,6 +76,7 @@ use crate::world_map_math::{
     self, TileRaster, WorldMapView, tile_corner, tile_level, tile_span_regions,
 };
 use crate::world_map_tiles::{TileKey, TileState, WorldMapTiles};
+use sl_viewer_ui_core::double_click::DoubleClickWindow;
 use sl_viewer_ui_core::scrollbar::{ScrollTarget, spawn_scrollbar};
 use sl_viewer_ui_core::semantic::LabelledBy;
 use sl_viewer_ui_core::skin::{self, LIST_ROW_CLASS, SELECTED_CLASS, text_role};
@@ -2723,9 +2724,6 @@ const CLICK_SLOP: f32 = 4.0;
 /// X/Y fields, so they agree only within a metre or so.
 const BEACON_MATCH_METRES: f64 = 2.0;
 
-/// The maximum interval (seconds) between the two clicks of a map double-click.
-const WORLD_MAP_DOUBLE_CLICK_SECONDS: f64 = 0.4;
-
 /// The maximum cursor travel (pixels) between the two clicks of a map
 /// double-click.
 const WORLD_MAP_DOUBLE_CLICK_SLOP: f32 = 6.0;
@@ -2735,21 +2733,15 @@ const WORLD_MAP_DOUBLE_CLICK_SLOP: f32 = 6.0;
 /// (the reference's map click driving the location spinners).
 fn on_world_map_click(
     click: On<Pointer<Click>>,
-    time: Option<Res<Time>>,
+    double_click: DoubleClickWindow,
     state: Option<ResMut<WorldMapState>>,
     model: Option<Res<WorldMapModel>>,
     tracking: Option<ResMut<MapTracking>>,
     commands: Option<MessageWriter<SlCommand>>,
     begin: Option<MessageWriter<BeginTeleportFlow>>,
 ) {
-    let (
-        Some(time),
-        Some(mut state),
-        Some(model),
-        Some(mut tracking),
-        Some(mut commands),
-        Some(mut begin),
-    ) = (time, state, model, tracking, commands, begin)
+    let (Some(mut state), Some(model), Some(mut tracking), Some(mut commands), Some(mut begin)) =
+        (state, model, tracking, commands, begin)
     else {
         return;
     };
@@ -2786,10 +2778,9 @@ fn on_world_map_click(
     state.selected = Some((grid_x, grid_y));
     state.pending_local = Some((local_x, local_y));
 
-    let now = time.elapsed_secs_f64();
+    let now = double_click.now_secs();
     let double = state.last_click.is_some_and(|(at, position)| {
-        now - at <= WORLD_MAP_DOUBLE_CLICK_SECONDS
-            && position.distance(cursor) <= WORLD_MAP_DOUBLE_CLICK_SLOP
+        double_click.holds(now - at) && position.distance(cursor) <= WORLD_MAP_DOUBLE_CLICK_SLOP
     });
     state.last_click = if double { None } else { Some((now, cursor)) };
 

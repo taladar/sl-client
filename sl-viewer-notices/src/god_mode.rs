@@ -13,13 +13,9 @@
 use bevy::prelude::*;
 
 use sl_client_bevy::{SlEvent, SlSessionEvent};
+use sl_viewer_social::AgentGodLevel;
 
 use crate::notifications::{NotificationArgs, ShowNotification};
-
-/// The agent's god level as the simulator last granted it (`0`: not a god);
-/// the reference's `gAgent.getGodLevel()`.
-#[derive(Resource, Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub struct AgentGodLevel(pub u8);
 
 /// The tip a grant of `granted` raises for an agent that was at `previous`:
 /// `EnteringGodMode` at the new level, or `LeavingGodMode` at the old one.

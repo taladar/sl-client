@@ -169,9 +169,15 @@ the agent's).
   does, with the radius and force the panel sets; the limits are the region's
   own and only show in the Terrain tab, which reads them from `RegionInfo`.
 - A brush in a region that blocks terraforming is refused before anything is
-  sent, with `RegionNoTerraforming`, unless the agent manages the estate. The
-  parcel check (`ParcelNoTerraforming`) waits on a hover parcel the viewer does
-  not ask for yet (`viewer-terraform-parcel-refusal`).
+  sent, with `RegionNoTerraforming`, unless the agent manages the estate.
+- While a brush is picked the Land tool asks for the parcel under the cursor
+  (a `ParcelPropertiesRequest` for the 4 m square around it, sequence ids from
+  −50000 down) whenever the cursor crosses a parcel line on the overlay, as the
+  reference's hover parcel does. A press on a parcel the agent may not
+  terraform — not its own, not the region owner's, not its group's with
+  "Bypass Edit Land Restriction", and the agent no estate manager or god —
+  raises `ParcelNoTerraforming` naming the parcel, and the strokes go out all
+  the same, as the reference's do; nothing is said while the answer is out.
 - Undo sends `UndoLand` and expects nothing: on OpenSim nothing comes, and the
   viewer draws whatever patches arrive.
 - The About Region Terrain tab's **Download / Upload RAW terrain…** and

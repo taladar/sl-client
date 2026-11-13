@@ -24,6 +24,11 @@
 //!   ground height under the cursor (the brush's reference `Height`) and every
 //!   frame the button is held sends one `ModifyLand` at the rounded cursor
 //!   point — the reference's per-frame `brush()` idle callback.
+//! - While a brush is picked the tool keeps the **hover parcel**
+//!   (`request_hover_parcel`): it asks the simulator about the parcel under the
+//!   cursor whenever the cursor crosses a parcel line, so a press on land the
+//!   agent may not terraform warns `ParcelNoTerraforming` — and, as in the
+//!   reference, strokes anyway, since the simulator says nothing of a refusal.
 //! - The **Land panel** (`spawn_land_panel`) stands in for the per-aspect tabs
 //!   while the Land tool is active, exactly as the Create panel does. It carries
 //!   the action radio, the size / strength sliders, **Apply** (run the brush
@@ -56,9 +61,9 @@ use bevy::ui_widgets::{SliderRange, SliderStep};
 use bevy::window::PrimaryWindow;
 use bevy_flair::style::components::ClassList;
 use sl_client_bevy::{
-    Command, ParcelInfo, ParcelRequestResult, RegionFlags, RegionHandle, RegionLocalParcelId,
-    SlCommand, SlCurrentRegion, SlEvent, SlIdentity, SlParcelOverlay, SlRegionFlags,
-    SlRegionIdentity, SlSessionEvent, Vector,
+    AgentKey, Command, OwnerKey, ParcelInfo, ParcelOverlayGrid, ParcelRequestResult, RegionFlags,
+    RegionHandle, RegionLocalParcelId, SlCommand, SlCurrentRegion, SlEvent, SlIdentity,
+    SlParcelOverlay, SlRegionFlags, SlRegionIdentity, SlSessionEvent, Uuid, Vector, group_powers,
 };
 use sl_client_bevy::{LandBrushAction, LandBrushRadius, LandEdit, TerraformArea};
 use sl_settings::{Scope, SettingValue};
@@ -76,6 +81,7 @@ use crate::gizmos::{GizmoInteraction, on_gizmo_layer};
 use crate::i18n::{TransArgs, Translator};
 use crate::intents::{AboutLandSubject, OpenAboutLand};
 use crate::objects::SceneObject;
+use crate::social::{AgentGodLevel, GroupsModel};
 use crate::ui::{UiPanelShown, UiPointerClaim, column, row};
 use crate::ui_font::UiFont;
 use crate::ui_radio::{RadioLayout, RadioSelection, RadioSpec, spawn_radio_group};
@@ -146,6 +152,15 @@ const FALLBACK_FPS: f32 = 30.0;
 /// grid's own pushes (0 and up on Second Life) and of About Land's counter,
 /// which runs down from -100000 — while making each request distinguishable.
 const LAND_SELECTION_SEQ_ID: i32 = -10_000;
+
+/// The `ParcelPropertiesRequest` sequence id the *first* hover request asks
+/// with; each later one takes the next one below it.
+///
+/// The reference's `HOVERED_PARCEL_SEQ_ID` (-50000), counted down for the
+/// reason [`LAND_SELECTION_SEQ_ID`] is: so an answer for ground the cursor has
+/// since left is not taken for the ground it is over now. The two ranges would
+/// only meet after forty thousand land selections in one session.
+const LAND_HOVER_SEQ_ID: i32 = -50_000;
 
 /// The smallest area, in m², that counts as a land selection worth joining —
 /// one 4 m × 4 m parcel grid square (the reference's `PARCEL_UNIT_AREA`).
@@ -483,6 +498,240 @@ struct LandDrag {
 #[derive(Resource, Debug, Default)]
 struct LandHover(Option<Vec2>);
 
+/// One 4 m parcel-grid square of a region: the unit the hover request tracks
+/// the cursor in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct HoverCell {
+    /// The region the square is in.
+    region: RegionHandle,
+    /// The square's column, west to east.
+    col: usize,
+    /// The square's row, south to north.
+    row: usize,
+}
+
+impl HoverCell {
+    /// The square under the region-local `point` of a region `width` metres
+    /// across, or `None` when the point is off that region.
+    fn at(region: RegionHandle, point: Vec2, width: f32) -> Option<Self> {
+        Some(Self {
+            region,
+            col: grid_step_index(point.x, width)?,
+            row: grid_step_index(point.y, width)?,
+        })
+    }
+}
+
+/// The parcel-grid step a region-local coordinate falls in, or `None` when the
+/// coordinate is off a region `width` metres across.
+fn grid_step_index(coord: f32, width: f32) -> Option<usize> {
+    if !coord.is_finite() || coord < 0.0 || coord >= width {
+        return None;
+    }
+    let step = (coord / PARCEL_GRID_STEP_METRES).floor();
+    #[expect(
+        clippy::as_conversions,
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "step is finite, non-negative and floored, and below the region's \
+                  grid count, so the conversion is exact"
+    )]
+    let step = step as usize;
+    Some(step)
+}
+
+/// The parcel under the cursor while a brush is picked — the reference's
+/// `LLViewerParcelMgr` hover parcel, which its `LLToolBrushLand` asks for on
+/// every hover and consults on every press.
+#[derive(Resource, Debug)]
+struct LandHoverParcel {
+    /// The grid square the cursor was last over.
+    cell: Option<HoverCell>,
+    /// The sequence id of the request awaiting its answer.
+    pending: Option<i32>,
+    /// The answer for the ground under the cursor, `None` while a request is
+    /// out or when the simulator had no data — as the reference's
+    /// `getHoverParcel` is null until `mHoverRequestResult` is a success.
+    parcel: Option<ParcelInfo>,
+    /// The sequence id the next request will use, counting down from
+    /// [`LAND_HOVER_SEQ_ID`].
+    next_sequence: i32,
+}
+
+impl Default for LandHoverParcel {
+    fn default() -> Self {
+        Self {
+            cell: None,
+            pending: None,
+            parcel: None,
+            next_sequence: LAND_HOVER_SEQ_ID,
+        }
+    }
+}
+
+impl LandHoverParcel {
+    /// Note that the cursor is over the region-local `point`, and return the
+    /// request to send when that has taken it onto ground the last answer may
+    /// not describe (the reference's `setHoverParcel`).
+    ///
+    /// The request names the 4 m square around the point, so the answer is at
+    /// least that square; `grid` is the region's parcel overlay, whose lines
+    /// say whether a move inside the region crossed into another parcel.
+    fn hover(
+        &mut self,
+        region: RegionHandle,
+        point: Vec2,
+        width: f32,
+        grid: Option<&ParcelOverlayGrid>,
+    ) -> Option<Command> {
+        let cell = HoverCell::at(region, point, width)?;
+        let ask = hover_crosses_parcel(self.cell, cell, grid);
+        self.cell = Some(cell);
+        if !ask {
+            return None;
+        }
+        let sequence_id = self.next_sequence;
+        self.next_sequence = self.next_sequence.wrapping_sub(1);
+        self.pending = Some(sequence_id);
+        self.parcel = None;
+        let west = (point.x / PARCEL_GRID_STEP_METRES).floor() * PARCEL_GRID_STEP_METRES;
+        let south = (point.y / PARCEL_GRID_STEP_METRES).floor() * PARCEL_GRID_STEP_METRES;
+        Some(Command::RequestParcelProperties {
+            west,
+            south,
+            east: west + PARCEL_GRID_STEP_METRES,
+            north: south + PARCEL_GRID_STEP_METRES,
+            sequence_id,
+            snap_selection: false,
+        })
+    }
+
+    /// Take `parcel` as the hover parcel when it answers the request awaited;
+    /// whether it did.
+    fn receive(&mut self, parcel: &ParcelInfo) -> bool {
+        if !self.answers(parcel.sequence_id) {
+            return false;
+        }
+        if parcel.request_result != ParcelRequestResult::NoData {
+            self.parcel = Some(parcel.clone());
+        }
+        true
+    }
+
+    /// Whether a reply with `sequence_id` answers the request awaited, which
+    /// it then stops awaiting.
+    fn answers(&mut self, sequence_id: i32) -> bool {
+        if self.pending != Some(sequence_id) {
+            return false;
+        }
+        self.pending = None;
+        true
+    }
+
+    /// Forget the cursor and its parcel, so the next hover asks afresh — when
+    /// the brush is put down, the land under it may change hands before it is
+    /// picked up again.
+    fn forget(&mut self) {
+        self.cell = None;
+        self.pending = None;
+        self.parcel = None;
+    }
+}
+
+/// Whether the cursor's move from the square `last` to `next` may have taken it
+/// into another parcel: the reference's `setHoverParcel` test.
+///
+/// A first hover, a new region, or a region whose overlay has not arrived
+/// always asks; the same square never does. Otherwise the move is walked in two
+/// straight lines along the overlay — across the columns on the new row, then
+/// across the rows on the new column — and any parcel line on the way asks.
+/// Like the reference's, the walk can see a line a curved path would have
+/// missed (a small parcel inside a large one), which costs one request too
+/// many, never one too few.
+fn hover_crosses_parcel(
+    last: Option<HoverCell>,
+    next: HoverCell,
+    grid: Option<&ParcelOverlayGrid>,
+) -> bool {
+    let Some(last) = last else {
+        return true;
+    };
+    if last == next {
+        return false;
+    }
+    if last.region != next.region {
+        return true;
+    }
+    let Some(grid) = grid else {
+        return true;
+    };
+    // A square off the overlay reads as a line: an answer is cheaper than a
+    // parcel the agent may not terraform passing unremarked.
+    let west_line = |row: usize, col: usize| grid.cell(row, col).is_none_or(|cell| cell.west_line);
+    let south_line =
+        |row: usize, col: usize| grid.cell(row, col).is_none_or(|cell| cell.south_line);
+    let (west, east) = (last.col.min(next.col), last.col.max(next.col));
+    if (west.saturating_add(1)..=east).any(|col| west_line(next.row, col)) {
+        return true;
+    }
+    let (south, north) = (last.row.min(next.row), last.row.max(next.row));
+    (south.saturating_add(1)..=north).any(|row| south_line(row, next.col))
+}
+
+/// What the agent is to the land under a brush: the inputs of the reference's
+/// `LLToolBrushLand::canTerraformParcel`.
+#[derive(Debug, Clone, Copy)]
+struct TerraformRights<'a> {
+    /// The agent's own id, once the session has one.
+    agent: Option<AgentKey>,
+    /// Whether the agent manages the region's estate.
+    estate_manager: bool,
+    /// The region's owner.
+    region_owner: Uuid,
+    /// Whether the agent is a god.
+    god: bool,
+    /// The agent's group memberships and their powers.
+    groups: Option<&'a GroupsModel>,
+}
+
+/// Whether the agent may terraform a parcel `owner` owns: it manages the estate, the parcel
+/// belongs to the region's owner, or the agent owns it — itself, as a god, or
+/// through a group that gives it "Bypass Edit Land Restriction" (the
+/// reference's `canTerraformParcel` over `isParcelOwnedByAgent`).
+///
+/// The parcel's own "edit terrain" flag is not consulted, here as there: a
+/// resident terraforming land that allows it is left to the simulator.
+fn parcel_permits_terraform(owner: OwnerKey, rights: &TerraformRights) -> bool {
+    rights.estate_manager
+        || owner.uuid() == rights.region_owner
+        || parcel_owned_by_agent(owner, rights)
+}
+
+/// Whether the agent counts as the owner of a parcel `owner` owns, for
+/// terraforming: a god always, `owner` itself, or — unless the land is public — a member holding
+/// [`group_powers::LAND_ALLOW_EDIT_LAND`] in the group that owns it (the
+/// reference's `isParcelOwnedByAgent`).
+fn parcel_owned_by_agent(owner: OwnerKey, rights: &TerraformRights) -> bool {
+    if rights.god {
+        return true;
+    }
+    if rights
+        .agent
+        .is_some_and(|agent| owner == OwnerKey::Agent(agent))
+    {
+        return true;
+    }
+    if owner.uuid().is_nil() {
+        return false;
+    }
+    match owner {
+        OwnerKey::Group(group) => rights
+            .groups
+            .is_some_and(|groups| groups.has_power(group, group_powers::LAND_ALLOW_EDIT_LAND)),
+        OwnerKey::Agent(_) => false,
+    }
+}
+
 /// Which land action a panel button runs.
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 enum LandButton {
@@ -579,6 +828,7 @@ impl Plugin for EditLandPlugin {
             .init_resource::<LandSelection>()
             .init_resource::<LandDrag>()
             .init_resource::<LandHover>()
+            .init_resource::<LandHoverParcel>()
             .init_resource::<PendingLandConfirm>()
             .add_systems(
                 Update,
@@ -588,6 +838,7 @@ impl Plugin for EditLandPlugin {
                     sync_radio_from_land_action,
                     apply_parcel_reply,
                     handle_land_pointer.after(crate::gizmos::drive_gizmo_interaction),
+                    request_hover_parcel,
                     apply_land_confirmations,
                     sync_land_panel,
                 )
@@ -810,7 +1061,7 @@ fn handle_land_pointer(
     mut selection: ResMut<LandSelection>,
     mut commands: MessageWriter<SlCommand>,
     mut notify: MessageWriter<ShowNotification>,
-    current: Query<(&SlRegionFlags, &SlRegionIdentity), With<SlCurrentRegion>>,
+    rights: LandRights,
 ) {
     // Leaving the Land tool cancels any live gesture and drops the hover, so
     // neither the half-drawn rectangle nor the bulldozer footprint is still on
@@ -845,11 +1096,17 @@ fn handle_land_pointer(
     {
         // A brush in a region that blocks terraforming is refused before it
         // sends anything, as the reference's `handleMouseDown` refuses it.
-        if land.action.brush().is_some()
-            && let Some(name) = refuses_terraform(&current)
-        {
-            notify.write(ShowNotification::new("RegionNoTerraforming").arg("REGION", name));
-            return;
+        if land.action.brush().is_some() {
+            if let Some(name) = refuses_terraform(&rights.current) {
+                notify.write(ShowNotification::new("RegionNoTerraforming").arg("REGION", name));
+                return;
+            }
+            // A parcel the agent may not terraform is only warned about: the
+            // reference still sends the strokes and leaves the refusal to the
+            // simulator, which answers it with nothing at all.
+            if let Some(parcel) = rights.refused_parcel(region.identity.agent_id) {
+                notify.write(ShowNotification::new("ParcelNoTerraforming").arg("PARCEL", parcel));
+            }
         }
         drag.start = Some(point);
         drag.current = Some(point);
@@ -907,6 +1164,74 @@ fn handle_land_pointer(
             return;
         }
         commands.write(SlCommand(selection.select(rect, click)));
+    }
+}
+
+/// Ask for the parcel under the cursor while a brush is picked, as the
+/// reference's `LLToolBrushLand::handleHover` does, and forget it otherwise.
+///
+/// The point is rounded to the whole metre first, as the reference rounds the
+/// hover and the press alike, so the parcel asked about is the one a press
+/// there would stroke.
+fn request_hover_parcel(
+    tool: Res<EditToolState>,
+    land: Res<LandToolState>,
+    hover: Res<LandHover>,
+    region: LandRegion,
+    mut parcel: ResMut<LandHoverParcel>,
+    mut commands: MessageWriter<SlCommand>,
+) {
+    let brushing =
+        tool.active && tool.tool == EditTool::SelectLand && land.action.brush().is_some();
+    if !brushing {
+        if parcel.cell.is_some() || parcel.pending.is_some() || parcel.parcel.is_some() {
+            parcel.forget();
+        }
+        return;
+    }
+    let (Some(handle), Some(point)) = (region.handle(), hover.0) else {
+        return;
+    };
+    let grid = region.overlay.grid_of(handle);
+    if let Some(request) = parcel.hover(handle, point.round(), region.width_metres(), grid) {
+        commands.write(SlCommand(request));
+    }
+}
+
+/// What a brush press consults about the agent's rights over the land under
+/// it, bundled as one [`SystemParam`]: the region's terraform flag and owner,
+/// the hover parcel, the agent's groups and its god level.
+#[derive(SystemParam)]
+struct LandRights<'w, 's> {
+    /// The current region's flags and identity (owner, estate manager).
+    current:
+        Query<'w, 's, (&'static SlRegionFlags, &'static SlRegionIdentity), With<SlCurrentRegion>>,
+    /// The parcel under the cursor, once the simulator has said.
+    hover: Res<'w, LandHoverParcel>,
+    /// The agent's group memberships and powers. Absent in a host without the
+    /// social models, which then grants no group rights.
+    groups: Option<Res<'w, GroupsModel>>,
+    /// The god level the simulator last granted. Absent in a host without the
+    /// notices, which then counts the agent as no god.
+    god: Option<Res<'w, AgentGodLevel>>,
+}
+
+impl LandRights<'_, '_> {
+    /// The name of the parcel under the cursor when the agent may not
+    /// terraform it, `None` when it may or the parcel is not known yet — the
+    /// reference's `canTerraformParcel` and `alertNoTerraformParcel`, which
+    /// likewise warns about nothing while its hover parcel is unanswered.
+    fn refused_parcel(&self, agent: Option<AgentKey>) -> Option<String> {
+        let parcel = self.hover.parcel.as_ref()?;
+        let (_flags, identity) = self.current.iter().next()?;
+        let rights = TerraformRights {
+            agent,
+            estate_manager: identity.0.is_estate_manager,
+            region_owner: identity.0.sim_owner,
+            god: self.god.as_deref().is_some_and(|level| level.is_god()),
+            groups: self.groups.as_deref(),
+        };
+        (!parcel_permits_terraform(parcel.owner, &rights)).then(|| parcel.name.clone())
     }
 }
 
@@ -980,18 +1305,26 @@ fn is_bare_terrain(entity: Entity, scene: &LandScene) -> bool {
 // The parcel reply.
 // ---------------------------------------------------------------------------
 
-/// Fold the `ParcelProperties` answering the selection's request into it.
+/// Fold the `ParcelProperties` answering the selection's request into it, and
+/// the one answering the hover request into the hover parcel.
 ///
 /// A reply whose sequence id is not the one this selection asked for belongs to
 /// another window's question (About Land's, the agent-parcel probe's) or to a
 /// superseded selection, and is ignored. A `snap_selection` reply replaces the
 /// drawn rectangle with the parcel's own bounds, which is what makes a click
 /// select a whole parcel — the reference's `processParcelProperties` branch.
-fn apply_parcel_reply(mut events: MessageReader<SlEvent>, mut selection: ResMut<LandSelection>) {
+fn apply_parcel_reply(
+    mut events: MessageReader<SlEvent>,
+    mut selection: ResMut<LandSelection>,
+    mut hover: ResMut<LandHoverParcel>,
+) {
     for event in events.read() {
         let SlSessionEvent::ParcelProperties(parcel) = &event.0 else {
             continue;
         };
+        if hover.receive(parcel) {
+            continue;
+        }
         if selection.pending != Some(parcel.sequence_id) {
             continue;
         }
@@ -1730,14 +2063,232 @@ fn apply_land_confirmations(
 #[cfg(test)]
 mod tests {
     use super::{
-        APPLY_SCALE, LAND_ACTIONS, LandAction, LandRect, LandSelection, LandToolState,
-        PARCEL_UNIT_AREA, can_divide, can_join, outline_steps, region_refuses_terraform,
+        APPLY_SCALE, HoverCell, LAND_ACTIONS, LandAction, LandHoverParcel, LandRect, LandSelection,
+        LandToolState, PARCEL_UNIT_AREA, TerraformRights, can_divide, can_join,
+        hover_crosses_parcel, outline_steps, parcel_permits_terraform, region_refuses_terraform,
     };
+    use crate::social::GroupsModel;
     use bevy::prelude::Vec2;
     use pretty_assertions::{assert_eq, assert_ne};
-    use sl_client_bevy::Command;
     use sl_client_bevy::LandBrushAction;
     use sl_client_bevy::RegionFlags;
+    use sl_client_bevy::{
+        AgentKey, Command, GroupKey, GroupMembership, LandArea, OwnerKey, ParcelOverlayGrid,
+        RegionHandle, TextureKey, Uuid, group_powers,
+    };
+
+    /// The region the hover tests stand in.
+    fn region() -> RegionHandle {
+        RegionHandle::from_global(256_000, 256_000)
+    }
+
+    /// A square of [`region`].
+    fn cell(col: usize, row: usize) -> HoverCell {
+        HoverCell {
+            region: region(),
+            col,
+            row,
+        }
+    }
+
+    /// A 256 m region's overlay holding one parcel line: the western edge of
+    /// column 10, from south to north. Everything else is one parcel.
+    fn overlay_with_west_line_at_col_10() -> Result<ParcelOverlayGrid, Box<dyn core::error::Error>>
+    {
+        /// The overlay byte's `PARCEL_WEST_LINE` bit.
+        const WEST_LINE: u8 = 0x40;
+        let mut packed = vec![0_u8; 4096];
+        for byte in packed.iter_mut().skip(10).step_by(64) {
+            *byte = WEST_LINE;
+        }
+        let mut grid = ParcelOverlayGrid::new(64);
+        grid.ingest_chunk(0, &packed)?;
+        Ok(grid)
+    }
+
+    /// The hover asks on its first square, never twice for one square, on a new
+    /// region, on any move with no overlay to read, and within the region only
+    /// when the move crosses a parcel line — in either direction, on the row or
+    /// the column it moved along.
+    #[test]
+    fn the_hover_asks_only_when_it_may_have_changed_parcel()
+    -> Result<(), Box<dyn core::error::Error>> {
+        let grid = overlay_with_west_line_at_col_10()?;
+        assert!(hover_crosses_parcel(None, cell(3, 3), Some(&grid)));
+        assert!(!hover_crosses_parcel(
+            Some(cell(3, 3)),
+            cell(3, 3),
+            Some(&grid)
+        ));
+        assert!(hover_crosses_parcel(Some(cell(3, 3)), cell(4, 3), None));
+        let elsewhere = HoverCell {
+            region: RegionHandle::from_global(256_256, 256_000),
+            ..cell(3, 3)
+        };
+        assert!(hover_crosses_parcel(
+            Some(elsewhere),
+            cell(3, 3),
+            Some(&grid)
+        ));
+
+        // Moves on one side of the line, however far, stay in the parcel.
+        assert!(!hover_crosses_parcel(
+            Some(cell(3, 3)),
+            cell(9, 40),
+            Some(&grid)
+        ));
+        assert!(!hover_crosses_parcel(
+            Some(cell(10, 3)),
+            cell(30, 3),
+            Some(&grid)
+        ));
+        // Crossing it, east or west, asks.
+        assert!(hover_crosses_parcel(
+            Some(cell(9, 3)),
+            cell(10, 3),
+            Some(&grid)
+        ));
+        assert!(hover_crosses_parcel(
+            Some(cell(30, 50)),
+            cell(2, 1),
+            Some(&grid)
+        ));
+        Ok(())
+    }
+
+    /// A hover request names the 4 m square around the point, never snaps, takes
+    /// a fresh sequence id below the last, and clears the old answer until its
+    /// own arrives; only that answer is taken, and only once.
+    #[test]
+    fn a_hover_request_is_answered_by_its_own_reply_only() {
+        let mut hover = LandHoverParcel::default();
+        let Some(Command::RequestParcelProperties {
+            west,
+            south,
+            east,
+            north,
+            sequence_id: first,
+            snap_selection,
+        }) = hover.hover(region(), Vec2::new(70.0, 33.0), 256.0, None)
+        else {
+            unreachable!("the first hover asks");
+        };
+        assert_eq!(
+            [west, south, east, north].map(f32::to_bits),
+            [68.0_f32, 32.0, 72.0, 36.0].map(f32::to_bits)
+        );
+        assert!(!snap_selection);
+        assert_eq!(first, super::LAND_HOVER_SEQ_ID);
+        assert!(
+            hover
+                .hover(region(), Vec2::new(71.0, 35.0), 256.0, None)
+                .is_none(),
+            "the same square does not ask again"
+        );
+        assert!(
+            hover
+                .hover(region(), Vec2::new(300.0, 35.0), 256.0, None)
+                .is_none(),
+            "ground off the region is not asked about"
+        );
+        let Some(Command::RequestParcelProperties {
+            sequence_id: second,
+            ..
+        }) = hover.hover(region(), Vec2::new(90.0, 35.0), 256.0, None)
+        else {
+            unreachable!("a move with no overlay asks");
+        };
+        assert!(second < first);
+        assert!(
+            !hover.answers(first),
+            "a superseded request's reply is not taken"
+        );
+        assert!(hover.answers(second));
+        assert!(!hover.answers(second), "a reply is taken once");
+
+        hover.forget();
+        assert!(
+            hover
+                .hover(region(), Vec2::new(90.0, 35.0), 256.0, None)
+                .is_some(),
+            "after the brush is put down the same square asks again"
+        );
+    }
+
+    /// The reference's `canTerraformParcel`: the estate's managers, the region
+    /// owner's land, the agent's own land, a god anywhere, and group land where
+    /// the agent's role bypasses the edit-land restriction; never someone
+    /// else's land, public land, or a group's without that power.
+    #[test]
+    fn parcel_terraform_rights_match_the_reference() {
+        let agent = AgentKey::from(Uuid::from_u128(1));
+        let stranger = OwnerKey::Agent(AgentKey::from(Uuid::from_u128(2)));
+        let region_owner = Uuid::from_u128(3);
+        let builders = GroupKey::from(Uuid::from_u128(4));
+        let chatters = GroupKey::from(Uuid::from_u128(5));
+        let public = OwnerKey::Agent(AgentKey::from(Uuid::nil()));
+        let mut groups = GroupsModel::default();
+        groups.apply_memberships(&[
+            GroupMembership {
+                group_id: builders,
+                group_powers: group_powers::LAND_ALLOW_EDIT_LAND,
+                accept_notices: true,
+                group_insignia_id: TextureKey::from(Uuid::nil()),
+                contribution: LandArea::ZERO,
+                group_name: "Builders".to_owned(),
+            },
+            GroupMembership {
+                group_id: chatters,
+                group_powers: group_powers::NOTICES_SEND,
+                accept_notices: true,
+                group_insignia_id: TextureKey::from(Uuid::nil()),
+                contribution: LandArea::ZERO,
+                group_name: "Chatters".to_owned(),
+            },
+        ]);
+        let resident = TerraformRights {
+            agent: Some(agent),
+            estate_manager: false,
+            region_owner,
+            god: false,
+            groups: Some(&groups),
+        };
+        assert!(parcel_permits_terraform(OwnerKey::Agent(agent), &resident));
+        assert!(parcel_permits_terraform(
+            OwnerKey::Agent(AgentKey::from(region_owner)),
+            &resident
+        ));
+        assert!(parcel_permits_terraform(
+            OwnerKey::Group(builders),
+            &resident
+        ));
+        assert!(!parcel_permits_terraform(stranger, &resident));
+        assert!(!parcel_permits_terraform(public, &resident));
+        assert!(!parcel_permits_terraform(
+            OwnerKey::Group(chatters),
+            &resident
+        ));
+
+        let manager = TerraformRights {
+            estate_manager: true,
+            ..resident
+        };
+        assert!(parcel_permits_terraform(stranger, &manager));
+        let god = TerraformRights {
+            god: true,
+            ..resident
+        };
+        assert!(parcel_permits_terraform(stranger, &god));
+        assert!(parcel_permits_terraform(public, &god));
+        let no_groups = TerraformRights {
+            groups: None,
+            ..resident
+        };
+        assert!(!parcel_permits_terraform(
+            OwnerKey::Group(builders),
+            &no_groups
+        ));
+    }
 
     /// A region that blocks terraforming refuses a resident's brush before
     /// anything is sent, and an estate manager's never; a region that does not

@@ -48,6 +48,7 @@ use bevy::input_focus::{FocusCause, InputFocus};
 use bevy::prelude::*;
 use bevy::text::EditableText;
 use bevy_flair::style::components::{ClassList, PseudoElementsSupport};
+use sl_viewer_ui_core::double_click::DoubleClickWindow;
 use sl_viewer_ui_core::glyph;
 use sl_viewer_ui_core::semantic::{LabelledBy, Role, Semantic};
 
@@ -120,9 +121,6 @@ const SWEEP_SECONDS: f32 = 1.0;
 /// At most this many `RequestAvatarProperties` go out per sweep (age /
 /// payment backfill), so a crowded region does not burst the grid.
 const PROPERTIES_PER_SWEEP: usize = 5;
-
-/// Seconds within which a second press on the same row is a double-click.
-const DOUBLE_CLICK_SECS: f32 = 0.4;
 
 // --- Settings ([`RADAR_SECTION`], account scope on write) -----------------
 
@@ -732,6 +730,8 @@ impl RadarNames<'_> {
 struct RadarClick<'w, 's> {
     /// The clock the double-click window is measured on.
     time: Res<'w, Time>,
+    /// The app's double-click window.
+    double_click: DoubleClickWindow<'w>,
     /// The keyboard focus, which the clicked viewport takes.
     focus: ResMut<'w, InputFocus>,
     /// The radar's own selection.
@@ -2091,7 +2091,9 @@ fn on_radar_row_press(
     match press.button {
         PointerButton::Primary => {
             let now = click.time.elapsed_secs();
-            if click.clicks.agent == Some(agent) && now - click.clicks.time <= DOUBLE_CLICK_SECS {
+            if click.clicks.agent == Some(agent)
+                && click.double_click.holds(f64::from(now - click.clicks.time))
+            {
                 out.profiles.write(OpenAvatarProfile { agent });
                 click.clicks.agent = None;
             } else {

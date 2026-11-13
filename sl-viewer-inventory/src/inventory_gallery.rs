@@ -25,6 +25,7 @@ use bevy::picking::hover::HoverMap;
 use bevy::prelude::*;
 use bevy_flair::style::components::ClassList;
 use sl_client_bevy::{FolderType, InventoryFolderKey, InventoryType, SlCommand, TextureKey};
+use sl_viewer_ui_core::double_click::DoubleClickWindow;
 use sl_viewer_ui_core::scrollbar::{ScrollTarget, spawn_scrollbar};
 use sl_viewer_ui_core::skin::SELECTED_CLASS;
 use sl_viewer_ui_core::skin::text_role;
@@ -78,10 +79,6 @@ const BUTTON_BORDER: Color = Color::srgb(0.34, 0.40, 0.52);
 /// than transparent (`--tile-bg`), so a thumbnail reads against whatever is
 /// behind the panel; a selected tile adds [`SELECTED_CLASS`].
 const TILE_CLASS: &str = "sk-gallery-tile";
-
-/// Two clicks on the same tile within this window are a double-click, in
-/// seconds.
-const DOUBLE_CLICK_SECS: f64 = 0.35;
 
 /// The gallery's live state: the shown folder and the navigation history.
 #[derive(Resource, Debug, Default)]
@@ -655,7 +652,7 @@ fn on_tile_press(
     press: On<Pointer<Press>>,
     tiles: Query<&TileKey>,
     model: Res<InventoryModel>,
-    time: Res<Time>,
+    double_click: DoubleClickWindow,
     mut state: ResMut<GalleryState>,
     mut selection: ResMut<InventorySelection>,
     mut previews: MessageWriter<OpenItemPreview>,
@@ -667,10 +664,10 @@ fn on_tile_press(
         return;
     };
     let key = tile.0;
-    let now = time.elapsed_secs_f64();
+    let now = double_click.now_secs();
     let double = state
         .last_click
-        .is_some_and(|(at, last)| last == key && now - at <= DOUBLE_CLICK_SECS);
+        .is_some_and(|(at, last)| last == key && double_click.holds(now - at));
     state.last_click = Some((now, key));
     selection.select_single(key, 0);
     if !double {

@@ -15,11 +15,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 333 |
 | blocked | 39 |
 | in-progress | 6 |
-| bugs | 27 |
-| done | 1555 |
+| bugs | 26 |
+| done | 1557 |
 | deferred | 30 |
 | wont-do | 24 |
-| **total** | **2143** |
+| **total** | **2144** |
 
 ## ideas (129)
 
@@ -1274,7 +1274,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-text-renderability-axis`](in-progress/viewer-ui-text-renderability-axis.md)
   — Upstream issue — font selection cannot see glyph-format renderability
 
-## bugs (27)
+## bugs (26)
 
 ### protocol
 
@@ -1320,8 +1320,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-stood-avatar-height-lost-under-load`](bugs/viewer-stood-avatar-height-lost-under-load.md)
   — Under load the viewer reports a stood-up avatar at 25.95 m, not where the
   grid stood it
-- [`viewer-terraform-parcel-refusal`](bugs/viewer-terraform-parcel-refusal.md) —
-  A brush over a parcel the agent may not terraform warns nothing
 - [`viewer-texture-filtering-in-linear-space`](bugs/viewer-texture-filtering-in-linear-space.md)
   — Colour textures are filtered after sRGB decoding, the reference before
 - [`viewer-vintage-radar-range-colours`](bugs/viewer-vintage-radar-range-colours.md)
@@ -1350,7 +1348,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-lsl-mono-collision-model-under-lowered-limit`](bugs/server-lsl-mono-collision-model-under-lowered-limit.md)
   — A script 1 KB over its use collides in the runtime where Mono carries on
 
-## done (1555)
+## done (1557)
 
 ### protocol
 
@@ -2143,6 +2141,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-chat-input-bar` (done))
 - [`viewer-double-click-teleport`](done/viewer-double-click-teleport.md) —
   In-world double-click teleport (blocked by `viewer-input-action-map` (done))
+- [`viewer-double-click-window-frame-clock`](done/viewer-double-click-window-frame-clock.md)
+  — Lists time double clicks with a constant on the frame clock, so a slow
+  viewer loses them
 - [`viewer-e2e-walk-foot-plane-lost-under-load`](done/viewer-e2e-walk-foot-plane-lost-under-load.md)
   — Under heavy load the walking avatar reads no foot plane after a walk
 - [`viewer-ecs-idiom-audit`](done/viewer-ecs-idiom-audit.md) — Audit the viewer
@@ -3416,6 +3417,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-teleport-never-resets-the-world`](done/viewer-teleport-never-resets-the-world.md)
   — A teleport never set world_reset, because the fake grid announced the
   destination first
+- [`viewer-terraform-parcel-refusal`](done/viewer-terraform-parcel-refusal.md) —
+  A brush over a parcel the agent may not terraform warns nothing
 - [`viewer-terrain-ambient-probe-classic-fidelity`](done/viewer-terrain-ambient-probe-classic-fidelity.md)
   — Terrain lighting — add the reference probe term + classic-mode blend
 - [`viewer-terrain-edit-bake-revert`](done/viewer-terrain-edit-bake-revert.md) —
