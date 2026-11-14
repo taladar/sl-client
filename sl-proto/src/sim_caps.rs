@@ -2270,17 +2270,24 @@ impl SimCaps {
     ///
     /// A request naming the serial the prim is at is answered `304` with no
     /// body, a prim the region does not have `404`, and anything else the
-    /// listing.
+    /// listing, each item as `dialect` lists it
+    /// ([`InventoryDialect::listed_task_item`](crate::InventoryDialect::listed_task_item):
+    /// Second Life withholds a script's asset id).
     #[must_use]
     pub fn task_inventory_response(
         query: TaskInventoryCapQuery,
         contents: Option<(i16, &[TaskInventoryItem])>,
+        dialect: crate::InventoryDialect,
     ) -> CapsResponse {
         match contents {
             None => CapsResponse::not_found(),
             Some((serial, _items)) if query.held_serial == Some(serial) => CapsResponse::empty(304),
             Some((serial, items)) => {
-                CapsResponse::llsd_xml(build_task_inventory_cap_reply(serial, items))
+                let listed: Vec<TaskInventoryItem> = items
+                    .iter()
+                    .map(|item| dialect.listed_task_item(item))
+                    .collect();
+                CapsResponse::llsd_xml(build_task_inventory_cap_reply(serial, &listed))
             }
         }
     }
@@ -4553,6 +4560,7 @@ fn decorate_ais(body: &mut Llsd, cap: &str, agent: Uuid, top: AisTop) {
                     let _dropped = map.remove(key);
                 }
             }
+            crate::InventoryDialect::SecondLife.hide_listed_script_asset(map);
             stringify(map, &["item_id", "parent_id", "asset_id", "linked_id"]);
             if let Some(Llsd::Map(permissions)) = map.get_mut("permissions") {
                 let _group = permissions.remove("is_owner_group");

@@ -4703,8 +4703,9 @@ impl SimSession {
 
     /// Sets which grid's inventory answers this session gives (default
     /// Second Life's): the shape of a folder or item fetch, what a UDP
-    /// folder removal does to the parent's version, and whether a UDP
-    /// `FetchInventory` is answered.
+    /// folder removal does to the parent's version, whether a UDP
+    /// `FetchInventory` is answered, and whether a script's asset id is
+    /// listed ([`InventoryDialect::lists_asset_of`](crate::InventoryDialect::lists_asset_of)).
     pub const fn set_inventory_dialect(&mut self, dialect: crate::InventoryDialect) {
         self.inventory_dialect = dialect;
     }
@@ -10125,7 +10126,7 @@ impl SimSession {
                 everyone_mask: item.permissions.everyone.bits(),
                 next_owner_mask: item.permissions.next_owner.bits(),
                 group_owned: item.owner.is_group(),
-                asset_id: item.asset_id,
+                asset_id: self.inventory_dialect.listed_asset_id(item),
                 r#type: item.item_type,
                 inv_type: item.inv_type,
                 flags: item.flags,
@@ -10185,7 +10186,7 @@ impl SimSession {
                 everyone_mask: item.permissions.everyone.bits(),
                 next_owner_mask: item.permissions.next_owner.bits(),
                 group_owned: item.owner.is_group(),
-                asset_id: item.asset_id,
+                asset_id: self.inventory_dialect.listed_asset_id(item),
                 r#type: item.item_type,
                 inv_type: item.inv_type,
                 flags: item.flags,
@@ -10301,7 +10302,7 @@ impl SimSession {
                 everyone_mask: item.permissions.everyone.bits(),
                 next_owner_mask: item.permissions.next_owner.bits(),
                 group_owned: item.owner.is_group(),
-                asset_id: item.asset_id,
+                asset_id: self.inventory_dialect.listed_asset_id(item),
                 r#type: item.item_type,
                 inv_type: item.inv_type,
                 flags: item.flags,
@@ -10382,7 +10383,11 @@ impl SimSession {
         folders: &[InventoryFolder],
         items: &[InventoryItem],
     ) -> Result<(), sl_wire::WireError> {
-        let body = crate::bulk_update_inventory_to_llsd(transaction.get(), folders, items)?;
+        let listed: Vec<InventoryItem> = items
+            .iter()
+            .map(|item| self.inventory_dialect.listed_item(item))
+            .collect();
+        let body = crate::bulk_update_inventory_to_llsd(transaction.get(), folders, &listed)?;
         self.enqueue_caps_event("BulkUpdateInventory", body);
         Ok(())
     }
@@ -10435,7 +10440,7 @@ impl SimSession {
                 everyone_mask: item.permissions.everyone.bits(),
                 next_owner_mask: item.permissions.next_owner.bits(),
                 group_owned: item.owner.is_group(),
-                asset_id: item.asset_id,
+                asset_id: self.inventory_dialect.listed_asset_id(item),
                 r#type: item.item_type,
                 inv_type: item.inv_type,
                 flags: item.flags,
@@ -10691,7 +10696,11 @@ impl SimSession {
     /// registers it under the deterministic name
     /// `inventory_<task>.tmp` (a real simulator mints a random temp name; the
     /// client treats it as opaque, and a sans-I/O session has no randomness),
-    /// and sends the `ReplyTaskInventory` naming it. Pass the current contents
+    /// and sends the `ReplyTaskInventory` naming it. Each item is listed as the
+    /// session's [`inventory_dialect`](Self::inventory_dialect) lists it:
+    /// Second Life withholds a script's asset id
+    /// ([`InventoryDialect::listed_task_item`](crate::InventoryDialect::listed_task_item)).
+    /// Pass the current contents
     /// `serial`. For a task whose inventory is empty a real simulator sends an
     /// empty filename instead — use
     /// [`send_reply_task_inventory`](Self::send_reply_task_inventory) directly
@@ -10709,7 +10718,11 @@ impl SimSession {
         now: Instant,
     ) -> Result<(), Error> {
         let filename = format!("inventory_{}.tmp", task.uuid());
-        let listing = build_task_inventory(task, items);
+        let listed: Vec<TaskInventoryItem> = items
+            .iter()
+            .map(|item| self.inventory_dialect.listed_task_item(item))
+            .collect();
+        let listing = build_task_inventory(task, &listed);
         self.register_xfer_file(filename.clone(), listing.into_bytes());
         self.send_reply_task_inventory(
             &TaskInventoryReply {

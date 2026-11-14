@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 130 |
-| ready | 331 |
+| ready | 330 |
 | blocked | 36 |
 | in-progress | 6 |
 | bugs | 34 |
-| done | 1559 |
+| done | 1560 |
 | deferred | 30 |
 | wont-do | 24 |
 | **total** | **2150** |
@@ -316,7 +316,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-lsl-opensim-function-set`](ideas/gridspec-lsl-opensim-function-set.md)
   — Measure which library functions OpenSim's engines compile
 
-## ready (331)
+## ready (330)
 
 ### protocol
 
@@ -1066,9 +1066,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-fake-grid-group-chat`](ready/server-fake-grid-group-chat.md) — Fake
   grid — group chat sessions and conferences (blocked by
   `gridspec-group-chat-and-conference` (done))
-- [`server-fake-grid-hide-script-asset-ids`](ready/server-fake-grid-hide-script-asset-ids.md)
-  — Hide a script's asset id from task listings and inventory fetches, as Second
-  Life does
 - [`server-fake-grid-inventory-persists-across-logins`](ready/server-fake-grid-inventory-persists-across-logins.md)
   — Fake grid — keep an account's inventory, versions included, from one login
   to the next (blocked by `gridspec-inventory-fetch` (done))
@@ -1346,7 +1343,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1559)
+## done (1560)
 
 ### protocol
 
@@ -4470,6 +4467,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-fake-grid-groups`](done/server-fake-grid-groups.md) — Fake grid — a
   group store: membership, roles, notices, invitations and group sessions
   (blocked by `gridspec-groups` (done))
+- [`server-fake-grid-hide-script-asset-ids`](done/server-fake-grid-hide-script-asset-ids.md)
+  — Hide a script's asset id from task listings and inventory fetches, as Second
+  Life does
 - [`server-fake-grid-im-relay`](done/server-fake-grid-im-relay.md) — Fake grid —
   relay IMs and offers between its sessions (blocked by
   `gridspec-teleport-lures` (done), `gridspec-instant-messages` (done))

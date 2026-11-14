@@ -9589,11 +9589,28 @@ mod test {
     /// `fetch_task_inventory` sends the request, the driver answers with
     /// `serve_task_inventory` (listing writer + `Xfer` registration +
     /// `ReplyTaskInventory`), and the client downloads and parses the listing
-    /// back into the exact served items.
+    /// back into the served items — each as the session's inventory dialect
+    /// lists it: Second Life withholds a script's asset id and lists a
+    /// notecard's, OpenSim lists both (`book/src/gridspec/lsl.md`
+    /// § `new_asset` and the item).
     #[test]
     fn task_inventory_fetch_round_trips() -> Result<(), TestError> {
+        for dialect in [
+            sl_proto::InventoryDialect::SecondLife,
+            sl_proto::InventoryDialect::OpenSim,
+        ] {
+            task_inventory_fetch_round_trips_as(dialect)?;
+        }
+        Ok(())
+    }
+
+    /// [`task_inventory_fetch_round_trips`] for one dialect.
+    fn task_inventory_fetch_round_trips_as(
+        dialect: sl_proto::InventoryDialect,
+    ) -> Result<(), TestError> {
         let now = Instant::now();
         let (mut client, mut sim) = setup(now)?;
+        sim.set_inventory_dialect(dialect);
         drain_server(&mut sim);
         let circuit = client.root_circuit_id().ok_or("no circuit")?;
 
@@ -9613,9 +9630,25 @@ mod test {
         );
 
         let task = ObjectKey::from(uuid::Uuid::from_u128(0x2222));
-        let items = vec![task_script_item(task)];
-        sim.serve_task_inventory(task, 5, &items, now)?;
+        let script = task_script_item(task);
+        let notecard = TaskInventoryItem {
+            item_id: InventoryKey::from(uuid::Uuid::from_u128(0x34)),
+            asset_id: Some(AssetKey::from(uuid::Uuid::from_u128(0x56))),
+            asset_type: AssetType::Notecard,
+            inv_type: InventoryType::Notecard,
+            name: "Notes".to_owned(),
+            ..script.clone()
+        };
+        sim.serve_task_inventory(task, 5, &[script.clone(), notecard.clone()], now)?;
         pump(&mut client, &mut sim, now)?;
+        let listed_script = match dialect {
+            sl_proto::InventoryDialect::SecondLife => TaskInventoryItem {
+                asset_id: None,
+                ..script
+            },
+            sl_proto::InventoryDialect::OpenSim => script,
+        };
+        let items = vec![listed_script, notecard];
 
         let client_events = drain_client(&mut client);
         assert!(
@@ -9632,7 +9665,7 @@ mod test {
                 Event::TaskInventoryContents { task: got, serial: 5, items: parsed }
                     if *got == task && *parsed == items
             )),
-            "expected the parsed task inventory, got {client_events:?}"
+            "{dialect:?}: expected the parsed task inventory, got {client_events:?}"
         );
         Ok(())
     }

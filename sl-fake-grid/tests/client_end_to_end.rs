@@ -1228,15 +1228,22 @@ mod test {
             })
             .await?;
         assert_eq!(serial, 1);
+        // The grid imitates Second Life, which lists no script's asset id,
+        // even to its owner (`book/src/gridspec/lsl.md` § `new_asset` and the
+        // item); the source is read by the item.
+        let withheld = |item: sl_proto::TaskInventoryItem| sl_proto::TaskInventoryItem {
+            asset_id: None,
+            ..item
+        };
         assert_eq!(
             items,
             vec![
-                script.clone(),
-                sl_fake_grid::scenario::stock_broken_script_item()
+                withheld(script.clone()),
+                withheld(sl_fake_grid::scenario::stock_broken_script_item())
             ]
         );
 
-        let asset_id = script.asset_id.ok_or("stock script has no asset id")?;
+        let asset_id = sl_proto::AssetKey::from(uuid::Uuid::nil());
         running
             .commands
             .send(Command::FetchTaskItemAsset {

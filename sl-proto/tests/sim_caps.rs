@@ -1066,11 +1066,23 @@ mod test {
         assert_eq!(query.task, task);
         assert_eq!(query.held_serial, Some(4));
 
-        assert_eq!(SimCaps::task_inventory_response(query, None).status, 404);
-        let unchanged = SimCaps::task_inventory_response(query, Some((4, &[])));
+        assert_eq!(
+            SimCaps::task_inventory_response(query, None, sl_proto::InventoryDialect::SecondLife)
+                .status,
+            404
+        );
+        let unchanged = SimCaps::task_inventory_response(
+            query,
+            Some((4, &[])),
+            sl_proto::InventoryDialect::SecondLife,
+        );
         assert_eq!(unchanged.status, 304);
         assert!(unchanged.body.is_empty());
-        let listing = SimCaps::task_inventory_response(query, Some((5, &[])));
+        let listing = SimCaps::task_inventory_response(
+            query,
+            Some((5, &[])),
+            sl_proto::InventoryDialect::SecondLife,
+        );
         assert_eq!(listing.status, 200);
         let body = parse_llsd_xml(&String::from_utf8(listing.body)?)?;
         let reply = sl_proto::parse_task_inventory_cap_reply(

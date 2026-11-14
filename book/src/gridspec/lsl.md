@@ -453,6 +453,15 @@ stopped script with the broken source, which the next open shows.
 | the item id after any upload | unchanged | unchanged |
 | `is_script_running` | echoed | echoed |
 
+The fake grid imitating Second Life withholds a script's asset id wherever
+it lists an item to a viewer (`InventoryDialect::lists_asset_of`): the task
+listing, over `Xfer` and over the capability, the folder and item fetches,
+the UDP fetches and `UpdateCreateInventoryItem`, and — by extension, not
+measured — AIS3 answers and `BulkUpdateInventory`. It still resolves a
+script's source by its item, task or agent, so a viewer reads a script as it
+has to on Second Life; the census's Second Life legs agree with aditi's on
+`item_asset` and `new_asset`. Its OpenSim flavour lists every asset.
+
 ### Running, re-uploading, sizes, targets
 
 | behaviour | Second Life | OpenSim YEngine | OpenSim XEngine |

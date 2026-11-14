@@ -56,7 +56,7 @@ pub(crate) async fn dispatch_caps(
             destination: headers.destination,
             body,
         };
-        let (dispatch, script_answer) = {
+        let (dispatch, script_answer, dialect) = {
             let mut guard = shared.state.lock().await;
             if guard.caps.assets().handles_path(path) {
                 // Session-free binary asset serving out of the **grid-wide**
@@ -87,6 +87,7 @@ pub(crate) async fn dispatch_caps(
             let held = core.ledger.lock().balance(agent);
             sim.set_money_balance(held);
             let dispatch = caps.dispatch(sim, &request);
+            let dialect = sim.inventory_dialect();
             if let (Some(before), Some(after)) = (held, sim.money_balance())
                 && before != after
             {
@@ -124,7 +125,7 @@ pub(crate) async fn dispatch_caps(
             let outcome = shared.flush_locked(&mut guard);
             drop(guard);
             shared.finish_flush(outcome).await;
-            (dispatch, script_answer)
+            (dispatch, script_answer, dialect)
         };
         match dispatch {
             CapsDispatch::Response(response) => return response,
@@ -139,7 +140,7 @@ pub(crate) async fn dispatch_caps(
                         .contents(local_id)
                         .map_or((0, &[][..]), |held| (held.serial, held.items.as_slice()))
                 });
-                let response = SimCaps::task_inventory_response(query, contents);
+                let response = SimCaps::task_inventory_response(query, contents, dialect);
                 drop(world);
                 return response;
             }

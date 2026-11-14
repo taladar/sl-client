@@ -807,6 +807,50 @@ mod tests {
         }
     }
 
+    /// A fetched item's asset id as each grid states it: Second Life's is nil
+    /// for a script and the asset for anything else, OpenSim's always the
+    /// asset (`book/src/gridspec/lsl.md` § `new_asset` and the item).
+    #[test]
+    fn a_fetched_script_names_no_asset_on_second_life() {
+        let asset = Uuid::from_u128(0x55);
+        let item = |asset_type: AssetType| {
+            sl_wire::Llsd::Map(
+                [
+                    ("asset_id".to_owned(), sl_wire::Llsd::Uuid(asset)),
+                    (
+                        "type".to_owned(),
+                        sl_wire::Llsd::Integer(asset_type.to_code()),
+                    ),
+                ]
+                .into_iter()
+                .collect(),
+            )
+        };
+        let stated = |dialect: super::InventoryDialect, asset_type: AssetType| {
+            let mut fetched = item(asset_type);
+            dialect.fetched_item(&mut fetched, Uuid::from_u128(0xa));
+            match fetched {
+                sl_wire::Llsd::Map(map) => match map.get("asset_id") {
+                    Some(sl_wire::Llsd::Uuid(id)) => Some(*id),
+                    Some(sl_wire::Llsd::String(text)) => Uuid::parse_str(text).ok(),
+                    _ => None,
+                },
+                _ => None,
+            }
+        };
+        let (second_life, open_sim) = (
+            super::InventoryDialect::SecondLife,
+            super::InventoryDialect::OpenSim,
+        );
+        assert_eq!(
+            stated(second_life, AssetType::ScriptText),
+            Some(Uuid::nil())
+        );
+        assert_eq!(stated(second_life, AssetType::Notecard), Some(asset));
+        assert_eq!(stated(open_sim, AssetType::ScriptText), Some(asset));
+        assert_eq!(stated(open_sim, AssetType::Notecard), Some(asset));
+    }
+
     /// The folder/parent ids on an [`InventoryFolder`] survive a wrap/unwrap
     /// round trip unchanged — the typed keys hold exactly the wire uuids, and the
     /// nil-parent root convention is preserved.
@@ -1074,6 +1118,7 @@ impl InventoryDialect {
         let sl_wire::Llsd::Map(map) = item else {
             return;
         };
+        self.hide_listed_script_asset(map);
         match self {
             Self::SecondLife => {
                 let _agent = map.insert("agent_id".to_owned(), self.id(agent));
@@ -1095,6 +1140,70 @@ impl InventoryDialect {
                     let _last_owner = permissions.remove("last_owner_id");
                 }
             }
+        }
+    }
+
+    /// Whether this grid states the asset id of an item of asset type
+    /// `asset_type` to a viewer: Second Life lists a script's as nil — in a
+    /// task listing, in an inventory fetch and in every item it announces,
+    /// even to its owner with full permissions — and OpenSim lists every one
+    /// (`book/src/gridspec/lsl.md` § `new_asset` and the item, measured by the
+    /// `script-compile` census). A script is read by its item, which the
+    /// simulator resolves to the asset itself.
+    #[must_use]
+    pub const fn lists_asset_of(self, asset_type: AssetType) -> bool {
+        !matches!(
+            (self, asset_type),
+            (Self::SecondLife, AssetType::ScriptText)
+        )
+    }
+
+    /// `item` as this grid lists it to a viewer: its asset id nil where the
+    /// grid withholds it ([`lists_asset_of`](Self::lists_asset_of)).
+    #[must_use]
+    pub fn listed_item(self, item: &InventoryItem) -> InventoryItem {
+        InventoryItem {
+            asset_id: self.listed_asset_id(item),
+            ..item.clone()
+        }
+    }
+
+    /// The asset id this grid states for `item` to a viewer: nil where the
+    /// grid withholds it ([`lists_asset_of`](Self::lists_asset_of)).
+    #[must_use]
+    pub fn listed_asset_id(self, item: &InventoryItem) -> Uuid {
+        if self.lists_asset_of(AssetType::from_code(i32::from(item.item_type))) {
+            item.asset_id
+        } else {
+            Uuid::nil()
+        }
+    }
+
+    /// The task-inventory `item` as this grid lists it to a viewer: its asset
+    /// id withheld where the grid withholds it
+    /// ([`lists_asset_of`](Self::lists_asset_of)).
+    #[must_use]
+    pub fn listed_task_item(self, item: &crate::TaskInventoryItem) -> crate::TaskInventoryItem {
+        let mut listed = item.clone();
+        if !self.lists_asset_of(item.asset_type) {
+            listed.asset_id = None;
+        }
+        listed
+    }
+
+    /// States one LLSD item's `asset_id` as nil where this grid withholds it
+    /// ([`lists_asset_of`](Self::lists_asset_of)), reading its asset type
+    /// from `type`.
+    pub fn hide_listed_script_asset(
+        self,
+        map: &mut std::collections::HashMap<String, sl_wire::Llsd>,
+    ) {
+        let withheld = match map.get("type") {
+            Some(sl_wire::Llsd::Integer(code)) => !self.lists_asset_of(AssetType::from_code(*code)),
+            _ => false,
+        };
+        if withheld {
+            let _asset = map.insert("asset_id".to_owned(), sl_wire::Llsd::Uuid(Uuid::nil()));
         }
     }
 

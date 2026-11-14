@@ -4271,10 +4271,6 @@ const KNOWN_DEVIATIONS: &[(&str, &str)] = &[
 /// What the fake grid imitating Second Life still answers otherwise than
 /// aditi, by the end of a metric's key, and the task that closes the gap.
 const FAKE_SL_PENDING: &[(&str, &str)] = &[
-    // Second Life lists a script with a nil asset id and names another in the
-    // upload's answer; the fake grid lists the real one.
-    ("_item_asset", "server-fake-grid-hide-script-asset-ids"),
-    ("_new_asset", "server-fake-grid-hide-script-asset-ids"),
     // LSL2's 1203 errors of no position, as `lsl2_large_code_errors_count`
     // in [`KNOWN_DEVIATIONS`].
     ("lsl2_large_code_error_0_at", "server-lsl-lso-memory"),
