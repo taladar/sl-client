@@ -141,15 +141,16 @@ use bevy::ui::{Checked, InteractionDisabled};
 use bevy::ui_widgets::ValueChange;
 use bevy_flair::style::components::ClassList;
 use sl_client_bevy::{
-    AgentKey, CAP_DISPATCH_REGION_INFO, Command, EstateAccessDelta, EstateAccessKind,
-    EstateAccessLists, EstateBan, EstateCovenant, EstateInfo, EstateInfoUpdate, ExperienceInfo,
-    ExperienceKey, GroupKey, InventoryType, LandArea, LandStatReportType, Maturity, OwnerKey,
-    ProductType, RegionDebugUpdate, RegionFlags, RegionIdentity, RegionInfoUpdate, RegionName,
-    RegionTerrainUpdate, SlCapabilities, SlCommand, SlCurrentRegion, SlEvent, SlIdentity,
-    SlRegionIdentity, SlRegionLimits, SlSessionEvent, TextureKey, Uuid,
+    AgentKey, CAP_DISPATCH_REGION_INFO, CAP_REGION_EXPERIENCES, Command, EstateAccessDelta,
+    EstateAccessKind, EstateAccessLists, EstateBan, EstateCovenant, EstateInfo, EstateInfoUpdate,
+    ExperienceInfo, ExperienceKey, GroupKey, InventoryType, LandArea, LandStatReportType, Maturity,
+    OwnerKey, ProductType, RegionDebugUpdate, RegionFlags, RegionIdentity, RegionInfoUpdate,
+    RegionName, RegionTerrainUpdate, SlCapabilities, SlCommand, SlCurrentRegion, SlEvent,
+    SlGrantedCapabilities, SlIdentity, SlRegionIdentity, SlRegionLimits, SlSessionEvent,
+    TextureKey, Uuid,
 };
 use sl_viewer_notices::experience_profile::{OpenExperienceProfile, maturity_key};
-use sl_viewer_notices::god_mode::AgentGodLevel;
+use sl_viewer_social::AgentGodLevel;
 
 mod estate_prompts;
 mod terrain_pbr;
@@ -1081,6 +1082,10 @@ struct ExperienceHandles {
     viewports: [Option<Entity>; 3],
     /// Each list's table root.
     tables: [Option<Entity>; 3],
+    /// The grid holding the three lists, hidden where the region has none.
+    grid: Option<Entity>,
+    /// The note saying the region has no experiences, shown in the grid's place.
+    unavailable_note: Option<Entity>,
 }
 
 impl ExperienceHandles {
@@ -1597,6 +1602,7 @@ impl Plugin for AboutRegionPlugin {
         }
         app.add_message::<OpenAboutRegion>()
             .add_message::<SlCapabilities>()
+            .init_resource::<SlGrantedCapabilities>()
             .init_resource::<RegionDispatchSupport>()
             .init_resource::<ModifyRegionSupport>()
             .add_message::<crate::world_api::BoostTexture>()
@@ -1655,6 +1661,7 @@ impl Plugin for AboutRegionPlugin {
             .add_systems(
                 Update,
                 (
+                    show_region_experiences_availability,
                     request_region_experiences,
                     request_unknown_region_experience_infos,
                     sync_experiences_view,
@@ -2676,7 +2683,30 @@ fn build_experiences_tab(
         "about-region-experiences-caption",
         font_size,
     );
+    // Shown instead of the lists on a region that grants no
+    // `RegionExperiences` (`show_region_experiences_availability`).
+    handles.unavailable_note = Some(
+        commands
+            .spawn((
+                Node {
+                    width: Val::Percent(100.0),
+                    display: Display::None,
+                    ..column(Val::Px(0.0))
+                },
+                Name::new("about-region-experiences:unavailable"),
+                ChildOf(panel),
+            ))
+            .with_child((
+                Text::default(),
+                Translated::new("about-region-experiences-unavailable"),
+                UiFont::Sans.at(font_size),
+                text_role(LABEL_COLOR),
+                Pickable::IGNORE,
+            ))
+            .id(),
+    );
     let grid = spawn_list_grid(commands, panel, "about-region-experiences:grid");
+    handles.grid = Some(grid);
     for (offset, list) in ExperienceList::ALL.into_iter().enumerate() {
         let cell = spawn_list_cell(
             commands,
@@ -4253,16 +4283,57 @@ fn bind_access_rows(
 /// along — the experience lists are their own capability, and nothing else asks
 /// for them. The GET is estate-gated on the region side, so a window that is
 /// not managing does not ask: a refusal is not data.
+///
+/// Nor does a window whose region does not grant the capability — a stock
+/// OpenSim has no experiences, and its tab says so instead
+/// ([`show_region_experiences_availability`]). One whose region has not sent
+/// its capabilities yet waits for them rather than asking into nothing.
 fn request_region_experiences(
     mut windows: Query<&mut AboutRegionState>,
+    granted: Res<SlGrantedCapabilities>,
     mut commands: MessageWriter<SlCommand>,
 ) {
     for mut state in &mut windows {
-        if state.experiences_requested || !state.is_current || !state.can_manage {
+        if state.experiences_requested
+            || !state.is_current
+            || !state.can_manage
+            || !granted.grants(CAP_REGION_EXPERIENCES)
+        {
             continue;
         }
         state.experiences_requested = true;
         commands.write(SlCommand(Command::RequestRegionExperiences));
+    }
+}
+
+/// Show the Experiences tab's lists where the agent's region grants
+/// `RegionExperiences`, and a note in their place where it does not — the
+/// reference removes the tab outright there (`LLFloaterRegionInfo::postBuild`).
+/// Before the region's capabilities arrive nothing is known, and the lists
+/// stay.
+fn show_region_experiences_availability(
+    granted: Res<SlGrantedCapabilities>,
+    windows: Query<Ref<AboutRegionUi>>,
+    mut nodes: Query<&mut Node>,
+) {
+    let unavailable = granted.refuses(CAP_REGION_EXPERIENCES);
+    for ui in &windows {
+        if !granted.is_changed() && !ui.is_added() {
+            continue;
+        }
+        let handles = &ui.experiences;
+        for (entity, shown) in [
+            (handles.grid, !unavailable),
+            (handles.unavailable_note, unavailable),
+        ] {
+            let display = if shown { Display::Flex } else { Display::None };
+            if let Some(entity) = entity
+                && let Ok(mut node) = nodes.get_mut(entity)
+                && node.display != display
+            {
+                node.display = display;
+            }
+        }
     }
 }
 
@@ -6209,11 +6280,12 @@ mod tests {
         use pretty_assertions::assert_eq;
         use sl_client_bevy::AgentKey;
         use sl_client_bevy::{
-            Command, EstateAccessDelta, GridCoordinates, GroupKey, Maturity, OwnerKey, ProductType,
-            RegionHandle, RegionIdentity, RegionName, RegionTerrainComposition, SlCommand,
-            SlCurrentRegion, SlEvent, SlRegionIdentity, Uuid,
+            CAP_REGION_EXPERIENCES, Command, EstateAccessDelta, GridCoordinates, GroupKey,
+            Maturity, OwnerKey, ProductType, RegionHandle, RegionIdentity, RegionName,
+            RegionTerrainComposition, SlCommand, SlCurrentRegion, SlEvent, SlGrantedCapabilities,
+            SlRegionIdentity, Uuid,
         };
-        use sl_viewer_notices::god_mode::AgentGodLevel;
+        use sl_viewer_social::AgentGodLevel;
 
         /// A boxed error so tests use `?` rather than the disallowed
         /// `unwrap` / `expect`.
@@ -6305,6 +6377,74 @@ mod tests {
                 .iter(app.world())
                 .map(|(entity, state)| (entity, state.region, state.is_current))
                 .collect()
+        }
+
+        /// How many `RegionExperiences` GETs the last two frames sent.
+        fn region_experience_asks(app: &App) -> usize {
+            let sent = app.world().resource::<Messages<SlCommand>>();
+            sent.get_cursor()
+                .read(sent)
+                .filter(|command| matches!(command.0, Command::RequestRegionExperiences))
+                .count()
+        }
+
+        /// Whether the open window's Experiences tab shows its lists and its
+        /// unavailable note, in that order.
+        fn experiences_tab_shows(app: &mut App) -> Result<(bool, bool), TestError> {
+            let handles: Vec<(Option<Entity>, Option<Entity>)> = app
+                .world_mut()
+                .query::<&AboutRegionUi>()
+                .iter(app.world())
+                .map(|ui| (ui.experiences.grid, ui.experiences.unavailable_note))
+                .collect();
+            let [(Some(grid), Some(note))] = handles.as_slice() else {
+                return Err(format!("expected one window's tab, got {handles:?}").into());
+            };
+            let shown = |entity: Entity| {
+                app.world()
+                    .get::<Node>(entity)
+                    .is_some_and(|node| node.display != Display::None)
+            };
+            Ok((shown(*grid), shown(*note)))
+        }
+
+        /// A managing window asks for the estate's experience lists only once
+        /// the region is known to grant `RegionExperiences`, and shows them.
+        #[test]
+        fn region_experiences_wait_for_the_capability() -> Result<(), TestError> {
+            let here = region(0xA1, "Alpha");
+            let mut app = region_app();
+            stand_in(&mut app, &here);
+            open(&mut app);
+            app.update();
+            assert_eq!(
+                region_experience_asks(&app),
+                0,
+                "asked before the caps came"
+            );
+            assert_eq!(experiences_tab_shows(&mut app)?, (true, false));
+
+            app.insert_resource(SlGrantedCapabilities::from_names([CAP_REGION_EXPERIENCES]));
+            app.update();
+            assert_eq!(region_experience_asks(&app), 1);
+            assert_eq!(experiences_tab_shows(&mut app)?, (true, false));
+            Ok(())
+        }
+
+        /// On a region that grants no `RegionExperiences` (a stock OpenSim)
+        /// nothing is asked for, and the tab says experiences are not available
+        /// in place of three lists that would wait for ever.
+        #[test]
+        fn a_region_without_experiences_says_so() -> Result<(), TestError> {
+            let here = region(0xA1, "Alpha");
+            let mut app = region_app();
+            app.insert_resource(SlGrantedCapabilities::from_names(["EventQueueGet"]));
+            stand_in(&mut app, &here);
+            open(&mut app);
+            app.update();
+            assert_eq!(region_experience_asks(&app), 0);
+            assert_eq!(experiences_tab_shows(&mut app)?, (false, true));
+            Ok(())
         }
 
         /// Two regions are two windows, each keyed by its own region.

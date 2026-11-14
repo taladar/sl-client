@@ -3,7 +3,7 @@
 //!
 //! **The table** is generated at build time from the vendored
 //! `keywords_lsl_default.xml` — Linden Lab's own `LSLSyntax` document as
-//! Second Life serves it — and `keywords_lsl_unserved.xml`, the five
+//! Second Life serves it — and `sl-lsl`'s `keywords_lsl_unserved.xml`, the five
 //! functions the grid compiles and that document leaves out (provenance of
 //! both in the crate `README.md`). It yields one
 //! [`BuiltinId`] and one [`Builtin`] descriptor per function (name, typed
@@ -909,8 +909,8 @@ mod tests {
 
     /// The names of the functions `keywords_lsl_unserved.xml` adds.
     fn unserved() -> Result<Vec<String>, String> {
-        let source = include_str!("../keywords_lsl_unserved.xml");
-        let document = sl_wire::parse_llsd_xml(source).map_err(|error| error.to_string())?;
+        let document = sl_wire::parse_llsd_xml(sl_lsl::SECOND_LIFE_UNSERVED)
+            .map_err(|error| error.to_string())?;
         let functions = document
             .get("functions")
             .and_then(sl_wire::Llsd::as_map)

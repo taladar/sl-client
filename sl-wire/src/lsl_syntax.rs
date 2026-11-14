@@ -260,6 +260,18 @@ pub fn parse_lsl_syntax(body: &Llsd) -> Result<LslSyntax, WireError> {
     })
 }
 
+/// Decodes [`sl_lsl::SECOND_LIFE_UNSERVED`], the functions Second Life compiles
+/// and leaves out of the document it serves, for a Second Life table to be
+/// [`LslSyntax::supplement`]ed with.
+///
+/// # Errors
+/// Returns [`WireError::Llsd`] if the shipped document does not parse, or the
+/// version refusal [`parse_lsl_syntax`] makes; neither happens to the document
+/// this crate is built with, as its test proves.
+pub fn second_life_unserved_syntax() -> Result<LslSyntax, WireError> {
+    parse_lsl_syntax(&crate::llsd::parse_llsd_xml(sl_lsl::SECOND_LIFE_UNSERVED)?)
+}
+
 // ---------------------------------------------------------------------------
 // The inverse: build an `LSLSyntax` document (server side / round-trip).
 // ---------------------------------------------------------------------------
@@ -410,7 +422,7 @@ mod tests {
     use sl_lsl::ast::TypeName;
     use sl_lsl::{LslArgument, LslConstant, LslFunction, LslKeyword, LslSyntax, SymbolKind};
 
-    use super::{build_lsl_syntax_document, parse_lsl_syntax};
+    use super::{build_lsl_syntax_document, parse_lsl_syntax, second_life_unserved_syntax};
     use crate::WireError;
     use crate::llsd::parse_llsd_xml;
 
@@ -534,6 +546,46 @@ mod tests {
             Err(WireError::UnsupportedLslSyntaxVersion { version, .. }) => assert_eq!(version, -1),
             other => return Err(format!("expected missing-version rejection, got {other:?}")),
         }
+        Ok(())
+    }
+
+    /// The shipped supplement decodes to the five functions Second Life
+    /// compiles from no served document, with their signatures.
+    #[test]
+    fn the_second_life_supplement_decodes() -> Result<(), String> {
+        let syntax = second_life_unserved_syntax().map_err(|error| format!("{error:?}"))?;
+        let mut names: Vec<&str> = syntax.functions.keys().map(String::as_str).collect();
+        names.sort_unstable();
+        assert_eq!(
+            names,
+            [
+                "llClearExperiencePermissions",
+                "llGetExperienceList",
+                "llPointAt",
+                "llRemoteLoadScript",
+                "llStopPointAt",
+            ]
+        );
+        assert_eq!(syntax.len(), 5);
+        let remote = syntax
+            .function("llRemoteLoadScript")
+            .ok_or("expected llRemoteLoadScript")?;
+        let types: Vec<Option<TypeName>> = remote.arguments.iter().map(|a| a.arg_type).collect();
+        assert_eq!(
+            types,
+            [
+                Some(TypeName::Key),
+                Some(TypeName::String),
+                Some(TypeName::Integer),
+                Some(TypeName::Integer),
+            ]
+        );
+        assert_eq!(remote.sleep, Some(3.0));
+        assert!(remote.deprecated);
+        let list = syntax
+            .function("llGetExperienceList")
+            .ok_or("expected llGetExperienceList")?;
+        assert_eq!(list.return_type, Some(TypeName::List));
         Ok(())
     }
 

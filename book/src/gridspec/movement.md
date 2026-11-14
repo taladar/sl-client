@@ -193,9 +193,12 @@ have ended, and the avatar had come down up to eleven metres from there.
   `Diagnostic::ExpectedReplyMissing`. The viewer shows nothing for it, as
   the reference shows nothing.
 - `e2e_sit` drives the viewer against each fake flavour: *Sit Here* seats
-  the avatar, *Stand Up* leaves it where that grid puts a standing avatar,
-  and a sit on an object the grid has dropped raises `SitFailNotSameRegion`
-  on the Second Life flavour and nothing on the OpenSim one.
+  the avatar, *Stand Up* leaves it where that grid puts a standing avatar
+  and then on the ground beneath (a slow viewer may only ever be read after
+  the drop, so the test waits for where it comes to rest and checks every
+  position on the way lies on the drop), and a sit on an object the grid
+  has dropped raises `SitFailNotSameRegion` on the Second Life flavour and
+  nothing on the OpenSim one.
 
 ### Not measured
 

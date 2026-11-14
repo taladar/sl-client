@@ -40,6 +40,17 @@ use crate::ast::TypeName;
 /// (`llsyntaxid.cpp`).
 pub const LSL_SYNTAX_VERSION: i32 = 2;
 
+/// The library functions Second Life compiles that no `LSLSyntax` document it
+/// serves lists — `llPointAt`, `llStopPointAt`, `llRemoteLoadScript`,
+/// `llClearExperiencePermissions` and `llGetExperienceList`, all five compiled
+/// on aditi under Mono and LSL2 (`book/src/gridspec/lsl.md`) — as an
+/// `LSLSyntax` document of their own holding only `functions`. A Second Life
+/// table is the served document [`LslSyntax::supplement`]ed with this one
+/// (decoded by `sl-wire`); `sl-lsl-runtime` builds its library table from the
+/// two the same way. OpenSim serves its own document, and compiles neither
+/// experience function.
+pub const SECOND_LIFE_UNSERVED: &str = include_str!("../keywords_lsl_unserved.xml");
+
 /// Which of the five groups a library symbol belongs to — the classification a
 /// syntax highlighter colours by. Returned by [`LslSyntax::classify`] for a word
 /// the grid's table knows; a user-defined global, function, `state` or local is
@@ -254,6 +265,24 @@ impl LslSyntax {
             && self.controls.is_empty()
             && self.types.is_empty()
     }
+
+    /// Add every symbol of `other` this table lacks, keeping this table's own
+    /// entry wherever both name one — how a served document gains the
+    /// functions the grid compiles and leaves out of it
+    /// ([`SECOND_LIFE_UNSERVED`]).
+    pub fn supplement(&mut self, other: &Self) {
+        /// Insert each of `from`'s entries `into` lacks.
+        fn missing<T: Clone>(into: &mut HashMap<String, T>, from: &HashMap<String, T>) {
+            for (name, entry) in from {
+                let _entry = into.entry(name.clone()).or_insert_with(|| entry.clone());
+            }
+        }
+        missing(&mut self.functions, &other.functions);
+        missing(&mut self.constants, &other.constants);
+        missing(&mut self.events, &other.events);
+        missing(&mut self.controls, &other.controls);
+        missing(&mut self.types, &other.types);
+    }
 }
 
 #[cfg(test)]
@@ -319,5 +348,40 @@ mod tests {
         assert_eq!(syntax.len(), 5);
         assert!(!syntax.is_empty());
         assert!(LslSyntax::default().is_empty());
+    }
+
+    /// A supplement adds the symbols the table lacks and leaves the ones it
+    /// has as they were.
+    #[test]
+    fn supplement_adds_only_what_is_missing() {
+        let served_say = LslFunction {
+            tooltip: Some("served".to_owned()),
+            ..LslFunction::default()
+        };
+        let mut syntax = LslSyntax::default();
+        let _prev = syntax
+            .functions
+            .insert("llSay".to_owned(), served_say.clone());
+        let mut extra = LslSyntax::default();
+        let _prev = extra.functions.insert(
+            "llSay".to_owned(),
+            LslFunction {
+                tooltip: Some("supplement".to_owned()),
+                ..LslFunction::default()
+            },
+        );
+        let _prev = extra
+            .functions
+            .insert("llPointAt".to_owned(), LslFunction::default());
+        let _prev = extra
+            .constants
+            .insert("TRUE".to_owned(), LslConstant::default());
+
+        syntax.supplement(&extra);
+
+        assert_eq!(syntax.function("llSay"), Some(&served_say));
+        assert_eq!(syntax.function("llPointAt"), Some(&LslFunction::default()));
+        assert_eq!(syntax.classify("TRUE"), Some(SymbolKind::Constant));
+        assert_eq!(syntax.len(), 3);
     }
 }

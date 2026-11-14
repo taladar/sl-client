@@ -120,6 +120,7 @@
 //! `floater_top_objects.xml`, `llfloaterregioninfo.cpp`
 //! (`LLPanelRegionDebugInfo::onClickTopScripts`), `llparcel.h` (`RT_NONE`).
 
+use sl_viewer_ui_core::double_click::DoubleClickWindow;
 use sl_viewer_ui_core::semantic::LabelledBy;
 use sl_viewer_ui_core::skin::TEXT_CLASS;
 use sl_viewer_ui_core::skin::text_role;
@@ -216,10 +217,6 @@ const ROW_HEIGHT: f32 = 20.0;
 /// translation or a large font wraps the rows under it until there is no slack
 /// left and the list is a header over a sliver.
 const LIST_MIN_HEIGHT: f32 = ROW_HEIGHT * 6.0;
-
-/// Seconds within which a second press on the same row is a double-click (the
-/// radar's value, so the two lists feel the same).
-const DOUBLE_CLICK_SECS: f32 = 0.4;
 
 /// Bytes in a kibibyte — the unit the reference shows script memory in.
 const BYTES_PER_KIB: f32 = 1024.0;
@@ -730,8 +727,9 @@ struct TopObjectsView {
 struct TopObjectsClicks {
     /// The object pressed last.
     object: Option<ObjectKey>,
-    /// When it was pressed, in seconds since startup.
-    time: f32,
+    /// When it was pressed, in seconds since startup
+    /// ([`DoubleClickWindow::now_secs`]).
+    time: f64,
 }
 
 /// The confirmation in flight, if any, and the window that asked for it.
@@ -1992,7 +1990,7 @@ fn on_top_objects_row_press(
     rows: Query<&VirtualRow>,
     host: FloaterHost,
     mut windows: Query<(&TopObjectsState, &TopObjectsView, &mut TopObjectsClicks)>,
-    time: Res<Time>,
+    double_click: DoubleClickWindow,
     identity: Res<SlIdentity>,
     mut tracking: ResMut<MapTracking>,
 ) {
@@ -2016,8 +2014,8 @@ fn on_top_objects_row_press(
         return;
     };
     press.propagate(false);
-    let now = time.elapsed_secs();
-    if clicks.object == Some(item.task_id) && now - clicks.time <= DOUBLE_CLICK_SECS {
+    let now = double_click.now_secs();
+    if clicks.object == Some(item.task_id) && double_click.holds(now - clicks.time) {
         clicks.object = None;
         track_item(&item, &identity, &mut tracking);
     } else {

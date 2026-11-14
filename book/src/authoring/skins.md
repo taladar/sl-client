@@ -133,6 +133,7 @@ Defined by every skin's `skin.css`, consumed by `common.css`:
 | `--text-error` / `--text-warn` / `--text-note` | text that reports a failure, a warning, or a note asking for the eye — roles of their own so a colour-blind overlay can keep them apart |
 | `--experience-accent` | the experience family's accent text |
 | `--folder-label` | an inventory folder's label, set apart from an item's (gold in the reference) |
+| `--radar-range-chat` / `--radar-range-shout` / `--radar-range-beyond` / `--radar-range-unknown` | the radar's range cell within chat range, within shout range, beyond it, and at a range the viewer does not know (the reference's `AvatarListItemChatRange` / `…ShoutRange` / `…BeyondShoutRange`, the last also its unknown) — list colours, apart from the name tags' distance colours; alpha is honoured, and a value may name another token (`var(--field-text)`) |
 | `--console-info` / `--console-error` | an RLVa console line that reports, or fails; a reply takes `--text-muted` |
 | `--control-bg` | a button's / combo's resting background |
 | `--control-bg-hover` | the background under the pointer (hovered button, highlighted menu entry) |
@@ -376,6 +377,7 @@ the stock look rather than to black.
 | `.sk-text` | primary body text |
 | `.sk-error` / `.sk-warn` / `.sk-note` / `.sk-experience` | worn with `.sk-text`: a failure, a warning, a note, the experience accent |
 | `.sk-folder-label` | worn with `.sk-text`: an inventory folder's label |
+| `.sk-radar-range` + `.sk-radar-range-chat` / `.sk-radar-range-shout` / `.sk-radar-range-beyond` / `.sk-radar-range-unknown` | the radar's range cell, by the band its avatar is in; the band keeps its colour on a selected row |
 | `.sk-console-reply` / `.sk-console-info` / `.sk-console-error` | worn with `.sk-text`: an RLVa console line by kind (a typed command wears none) |
 | `.sk-match` | text that matched an active filter term |
 | `.sk-heading` | a heading inside a page |
@@ -454,6 +456,7 @@ the stock look rather than to black.
 | `.sk-search-field` / `.sk-search-clear` | the shared search box and its `×` button |
 | `.sk-field-box` | any other box around a bare editor — the chat bar and every chat input, a rich-text field (a notecard's body) and a code editor; the search box's well, focus face and ring, with `.sk-focus-within` stamped while its field has focus and `.sk-read-only` while its field is read-only |
 | `.sk-toolbar-bar` / `.sk-toolbar-button` / `.sk-toolbar-label` | the bottom toolbar strip, its buttons — `:checked` while the floater a button toggles is open, `:active` held down, `:checked:active` both, `:disabled` for a target that has not landed — and their labels, which the button's states reach as descendant rules |
+| `.sk-parcel-audio-bar` | the parcel streaming-audio cluster's backing strip beside the chat bar (its buttons are `.sk-action-button`) |
 | `.sk-toast` / `.sk-toast-text` | a notification toast card and its text |
 | `.sk-toast-tip` / `.sk-toast-notify` / `.sk-toast-alert` / `.sk-toast-modal` | worn with `.sk-toast`: its kind, which frames the card |
 | `.sk-toast-default` | the card's default button (the one Enter or expiry takes), framed in its kind's colour |

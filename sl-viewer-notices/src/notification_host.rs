@@ -312,7 +312,7 @@ pub struct NotificationSourcesPlugin;
 
 impl Plugin for NotificationSourcesPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<crate::god_mode::AgentGodLevel>()
+        app.init_resource::<sl_viewer_social::AgentGodLevel>()
             .init_resource::<crate::payment_notices::PaymentNotices>();
         app.add_systems(
             Update,

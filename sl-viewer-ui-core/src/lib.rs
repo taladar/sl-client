@@ -56,6 +56,7 @@
               this codebase does not follow"
 )]
 
+pub mod double_click;
 pub mod glyph;
 pub mod hold_repeat;
 pub mod i18n;

@@ -22,10 +22,14 @@
 
 use std::collections::BTreeMap;
 
-use sl_client_bevy::{AgentKey, ExperienceInfo, ExperienceKey, ExperienceSearchPage};
+use bevy::ecs::message::MessageWriter;
+use sl_client_bevy::{
+    AgentKey, CAP_FIND_EXPERIENCE_BY_NAME, Command, ExperienceInfo, ExperienceKey,
+    ExperienceSearchPage, SlCommand, SlGrantedCapabilities,
+};
 
 use crate::experience_profile::maturity_key;
-use crate::i18n::Translator;
+use crate::i18n::{TransArgs, Translator};
 use crate::intents::ExperiencePickerFilter;
 use crate::ui_table::{
     TableAlign, TableColumn, TableColumnKind, TableColumnWidth, keep_order, order_by_sort_keys,
@@ -78,6 +82,11 @@ pub(crate) static SEARCH_COLUMNS: [TableColumn; 3] = [
     },
 ];
 
+/// The notice a surface raises in place of waiting on experience data the
+/// region cannot send — it grants none of the experience capabilities (a stock
+/// OpenSim has no experiences).
+pub(crate) const EXPERIENCES_UNAVAILABLE: &str = "ViewerExperiencesUnavailable";
+
 /// A search's progress, which is what a results table's status line says.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) enum SearchProgress {
@@ -86,6 +95,9 @@ pub(crate) enum SearchProgress {
     Idle,
     /// A query is out.
     Searching,
+    /// The region grants no `FindExperienceByName`, so nothing was sent and no
+    /// answer is coming — a stock OpenSim has no experiences at all.
+    Unavailable,
     /// A page came back, with the grid's word on what lies on either side of
     /// it — which is what enables the two arrows.
     Done {
@@ -97,6 +109,41 @@ pub(crate) enum SearchProgress {
 }
 
 impl SearchProgress {
+    /// Send a search for `query` from `page` where the region can answer one,
+    /// and return the progress that leaves the search in: [`Self::Searching`]
+    /// with the query out, or [`Self::Unavailable`] with nothing sent when the
+    /// region grants no `FindExperienceByName` — so the status line says so,
+    /// rather than "Searching…" for ever.
+    pub(crate) fn start(
+        granted: &SlGrantedCapabilities,
+        query: &str,
+        page: i32,
+        sl: &mut MessageWriter<SlCommand>,
+    ) -> Self {
+        if granted.refuses(CAP_FIND_EXPERIENCE_BY_NAME) {
+            return Self::Unavailable;
+        }
+        sl.write(SlCommand(Command::FindExperiences {
+            query: query.to_owned(),
+            page,
+        }));
+        Self::Searching
+    }
+
+    /// The status line a results table shows for this progress, `page` being
+    /// the page the search is on.
+    pub(crate) fn status_line(self, page: i32, translator: &Translator) -> String {
+        match self {
+            Self::Idle => String::new(),
+            Self::Searching => translator.get("experiences-searching"),
+            Self::Unavailable => translator.get("experiences-unavailable"),
+            Self::Done { .. } => translator.format(
+                "experiences-search-page",
+                &TransArgs::new().int("page", i64::from(page)),
+            ),
+        }
+    }
+
     /// The progress an arrived page puts the search in: done, remembering the
     /// grid's two paging markers verbatim.
     pub(crate) const fn from_page(page: &ExperienceSearchPage) -> Self {
@@ -355,11 +402,68 @@ mod tests {
         assert!(!progress(false, false).offers_previous());
     }
 
+    /// Start a search from page 2 on a region granting `granted`, returning
+    /// the progress it is left in and the commands it sent.
+    fn start_on(granted: SlGrantedCapabilities) -> (SearchProgress, Vec<String>) {
+        use bevy::ecs::system::RunSystemOnce as _;
+        use bevy::prelude::*;
+        let mut app = App::new();
+        app.add_message::<SlCommand>().insert_resource(granted);
+        let progress = app
+            .world_mut()
+            .run_system_once(
+                |granted: Res<SlGrantedCapabilities>, mut sl: MessageWriter<SlCommand>| {
+                    SearchProgress::start(&granted, "garden", 2, &mut sl)
+                },
+            )
+            .unwrap_or(SearchProgress::Idle);
+        let sent = app.world().resource::<Messages<SlCommand>>();
+        let sent = sent
+            .get_cursor()
+            .read(sent)
+            .map(|command| format!("{:?}", command.0))
+            .collect();
+        (progress, sent)
+    }
+
+    /// A region that answers experience searches is sent the query, and the
+    /// search is out.
+    #[test]
+    fn a_search_goes_out_where_the_region_answers_it() {
+        let (progress, sent) = start_on(SlGrantedCapabilities::from_names([
+            CAP_FIND_EXPERIENCE_BY_NAME,
+        ]));
+        assert_eq!(progress, SearchProgress::Searching);
+        assert_eq!(
+            sent,
+            vec![format!(
+                "{:?}",
+                Command::FindExperiences {
+                    query: "garden".to_owned(),
+                    page: 2,
+                }
+            )]
+        );
+    }
+
+    /// A region that grants no `FindExperienceByName` is sent nothing, and the
+    /// search says it is unavailable rather than searching for ever.
+    #[test]
+    fn a_search_where_the_region_cannot_answer_is_unavailable() {
+        let (progress, sent) = start_on(SlGrantedCapabilities::from_names(["EventQueueGet"]));
+        assert_eq!(progress, SearchProgress::Unavailable);
+        assert!(sent.is_empty(), "{sent:?}");
+    }
+
     /// A search that has not answered offers no paging in either direction —
     /// there is no page to be on the far side of.
     #[test]
     fn an_unanswered_search_offers_no_paging() {
-        for progress in [SearchProgress::Idle, SearchProgress::Searching] {
+        for progress in [
+            SearchProgress::Idle,
+            SearchProgress::Searching,
+            SearchProgress::Unavailable,
+        ] {
             assert!(!progress.offers_next(), "{progress:?}");
             assert!(!progress.offers_previous(), "{progress:?}");
         }

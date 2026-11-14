@@ -122,6 +122,7 @@ use crate::world_api::EditToolState;
 use crate::world_api::InputContext;
 use crate::world_api::ObjectState;
 use crate::world_api::SelectionSet;
+use sl_viewer_ui_core::double_click::DoubleClickWindow;
 use sl_viewer_ui_core::skin::{
     LIST_ROW_CLASS, LIST_SURFACE_CLASS, SELECTED_CLASS, set_role_class, set_state_class, text_role,
 };
@@ -548,10 +549,6 @@ struct ContentsSurfaceView {
     unreadable: bool,
 }
 
-/// How long after a click a second click on the **same** item still counts as a
-/// double-click (the reference's open gesture), in seconds.
-const DOUBLE_CLICK_SECONDS: f32 = 0.4;
-
 /// One contents list's state: what it shows, which row is picked, and the last
 /// click on it. The Build tab has one ([`BuildContents`]); each Object Contents
 /// window has its own ([`ContentsWindow`]).
@@ -562,22 +559,22 @@ struct ContentsPane {
     /// The selected item (for open / rename / remove).
     selection: Option<InventoryKey>,
     /// The most recent row click — the item and the time (seconds since
-    /// startup) — so a second click on the same item within
-    /// [`DOUBLE_CLICK_SECONDS`] is a double-click Open. Per pane, so a click
+    /// startup) — so a second click on the same item within the app's
+    /// double-click window ([`DoubleClickWindow`]) is a double-click Open. Per pane, so a click
     /// in one list and a click in another never make a double-click.
     last_click: Option<(InventoryKey, f32)>,
 }
 
 impl ContentsPane {
     /// A primary click on `item` at `now`: select it, and answer whether it
-    /// completes a double-click (a second click on the same item within
-    /// [`DOUBLE_CLICK_SECONDS`]). A double-click is consumed, so a third click
-    /// starts a new pair.
-    fn click(&mut self, item: InventoryKey, now: f32) -> bool {
+    /// completes a double-click (a second click on the same item at most
+    /// `interval_secs` after the first — the app's double-click window). A
+    /// double-click is consumed, so a third click starts a new pair.
+    fn click(&mut self, item: InventoryKey, now: f32, interval_secs: f64) -> bool {
         self.selection = Some(item);
         let double = self
             .last_click
-            .is_some_and(|(prev, at)| prev == item && now - at < DOUBLE_CLICK_SECONDS);
+            .is_some_and(|(prev, at)| prev == item && f64::from(now - at) <= interval_secs);
         self.last_click = if double { None } else { Some((item, now)) };
         double
     }
@@ -1941,6 +1938,8 @@ struct ContentsRowClick<'w, 's> {
     windows: Query<'w, 's, (Entity, &'static mut ContentsWindow)>,
     /// The clock the double-click window is measured on.
     time: Res<'w, Time>,
+    /// The app's double-click window.
+    double_click: DoubleClickWindow<'w>,
     /// Where a double-click's Open goes.
     requests: MessageWriter<'w, ContentsActionRequest>,
     /// Focused on a click, so the wheel scrolls the list.
@@ -2040,6 +2039,7 @@ fn dress_contents_row(
                     mut build,
                     mut windows,
                     time,
+                    double_click,
                     mut requests,
                     mut focus,
                 }) = click
@@ -2075,7 +2075,7 @@ fn dress_contents_row(
                 focus.set(press.entity, FocusCause::Navigated);
                 // A second primary click on the same item within the
                 // double-click window opens it (the reference's openItem).
-                if pane.click(item, time.elapsed_secs()) {
+                if pane.click(item, time.elapsed_secs(), double_click.interval_secs()) {
                     requests.write(ContentsActionRequest {
                         pane: pane_ref,
                         action: ContentsAction::Open,
@@ -3599,23 +3599,28 @@ mod tests {
         /// selects only there.
         #[test]
         fn clicks_in_two_panes_never_make_a_double_click() {
+            /// The double-click window the clicks are judged by.
+            const WINDOW: f64 = 0.4;
             let mut first = ContentsPane::default();
             let mut second = ContentsPane::default();
             let item = item_key(1);
 
-            assert!(!first.click(item, 0.0), "a first click is no double-click");
             assert!(
-                !second.click(item, 0.1),
+                !first.click(item, 0.0, WINDOW),
+                "a first click is no double-click"
+            );
+            assert!(
+                !second.click(item, 0.1, WINDOW),
                 "a click in another pane completed the first pane's double-click"
             );
             assert_eq!(first.selection, Some(item));
-            assert!(first.click(item, 0.2), "two clicks in one pane");
+            assert!(first.click(item, 0.2, WINDOW), "two clicks in one pane");
             assert!(
-                !first.click(item, 0.3),
+                !first.click(item, 0.3, WINDOW),
                 "a double-click is consumed: a third click starts a new pair"
             );
             assert!(
-                !second.click(item_key(2), 0.4),
+                !second.click(item_key(2), 0.4, WINDOW),
                 "a click on another item is no double-click"
             );
             assert_eq!(second.selection, Some(item_key(2)));

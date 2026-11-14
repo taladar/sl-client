@@ -68,6 +68,7 @@
 mod test {
     use core::time::Duration;
 
+    use pretty_assertions::assert_eq;
     use serde_json::json;
     use sl_automation_proto::{
         Locator, LogStream, NodeValue, ObjectBehaviour, Probe, Role, WorldKind, WorldLocator,
@@ -1005,6 +1006,476 @@ mod test {
                     Ok(())
                 })?;
         }
+        Ok(())
+    }
+
+    /// The polished-metal material the saved-material scene's box wears.
+    const SAVED_MATERIAL: sl_proto::Uuid =
+        sl_proto::Uuid::from_u128(0x05a7_ed00_0000_0000_0000_0000_0000_0001);
+
+    /// The saved-material scene's box's full id.
+    const SAVED_MATERIAL_BOX: sl_proto::Uuid = sl_proto::Uuid::from_u128(0x05a7_ed00_b0c5);
+
+    /// The fake saved-material scene: the stock region with, a few metres
+    /// ahead of the avatar, a box whose every face wears a polished-metal PBR
+    /// material.
+    fn saved_material_scene() -> RegionConfig {
+        use sl_fake_grid::fixtures::prims::PrimFixture;
+        use sl_fake_grid::scenario::Scenario;
+
+        let [east, north, up] = MIRROR_SCENE_AVATAR;
+        let mut prim = PrimFixture::boxed(
+            RegionLocalObjectId(0x05a7_0001),
+            sl_proto::ObjectKey::from(SAVED_MATERIAL_BOX),
+            sl_proto::AgentKey::from(sl_proto::Uuid::from_u128(0x05a7_0a11)),
+            sl_proto::Vector {
+                x: east + 3.0,
+                y: north,
+                z: up,
+            },
+            sl_proto::Vector {
+                x: 1.0,
+                y: 1.0,
+                z: 1.0,
+            },
+        );
+        for face in 0..6 {
+            prim = prim.pbr(face, SAVED_MATERIAL);
+        }
+        let mut scenario = Scenario::default();
+        let _previous = scenario.assets.insert(
+            sl_proto::AssetKey::from(SAVED_MATERIAL),
+            sl_test_assets::gltf_polished_metal_asset(),
+        );
+        // Anyone may modify and copy it, so the Texture tab is live for the
+        // avatar, who does not own it.
+        let mut object = prim.build();
+        let mut properties = sl_fake_grid::world::default_object_properties(&object);
+        properties.permissions.everyone = sl_proto::Permissions::ALL;
+        object.properties = Some(properties);
+        scenario.world.objects.push(object);
+        RegionConfig {
+            scenario: Some(scenario),
+            ..RegionConfig::default()
+        }
+    }
+
+    /// The name the Build window files a saved material under.
+    const SAVED_MATERIAL_NAME: &str = "New Material";
+
+    /// The material the grid's material item named [`SAVED_MATERIAL_NAME`]
+    /// holds, decoded — `None` while there is no such item, or it does not yet
+    /// hold a decodable material (it is made empty, and filled afterwards).
+    async fn grid_saved_material(
+        stage: &Stage,
+    ) -> Result<Option<sl_client_bevy::GltfMaterial>, BodyError> {
+        let agent = stage.agent("Alpha").await?;
+        let material_code = sl_proto::AssetType::Material.to_code();
+        let assets: Vec<sl_proto::AssetKey> = agent
+            .with_sim(|sim| {
+                sim.agent_inventory()
+                    .items()
+                    .filter(|item| {
+                        i32::from(item.item_type) == material_code
+                            && item.name == SAVED_MATERIAL_NAME
+                    })
+                    .map(|item| sl_proto::AssetKey::from(item.asset_id))
+                    .collect()
+            })
+            .await;
+        for asset in assets {
+            if let Some(bytes) = agent.stored_asset(asset).await
+                && let Ok(material) = sl_client_bevy::parse_material_asset(&bytes)
+            {
+                return Ok(Some(material));
+            }
+        }
+        Ok(None)
+    }
+
+    /// The Texture tab's PBR page on the Metallic channel, with the selected
+    /// face's material decoded into it.
+    async fn show_metallic(alpha: &Viewer, build: &UiLocator) -> Result<(), BodyError> {
+        let _texture = build
+            .get(Locator::role(Role::Tab).name_key("build-tab-texture"))
+            .click()
+            .await?;
+        let _pbr = build
+            .get(Locator::role(Role::Tab).name_key("build-tex-matmedia-pbr"))
+            .click()
+            .await?;
+        let _channel = build
+            .get(Locator::role(Role::Radio).name_key("build-tex-pbrtype-metallic"))
+            .click()
+            .await?;
+        let _live = alpha
+            .expect(&build.test_id("build-pbr-metallic-factor:field"))
+            .timeout(WAIT)
+            .to_be_enabled()
+            .await?;
+        Ok(())
+    }
+
+    /// The inventory window, open and narrowed to the saved material's name.
+    /// The search is what fetches a folder nobody has opened.
+    async fn saved_material_search(alpha: &Viewer) -> Result<UiLocator, BodyError> {
+        let inventory = alpha.ui().window("inventory");
+        if !inventory.is_visible().await? {
+            let _clicked = alpha
+                .ui()
+                .test_id("bottom-toolbar-button:toggle-inventory")
+                .click()
+                .await?;
+            let _shown = alpha.expect(&inventory).to_be_visible().await?;
+        }
+        let _searched = inventory
+            .test_id("inventory:search")
+            .role(Role::Textbox)
+            .fill(SAVED_MATERIAL_NAME)
+            .await?;
+        Ok(inventory)
+    }
+
+    /// The ids of the material items named [`SAVED_MATERIAL_NAME`] the viewer
+    /// lists in the top-level folder `folder`, once it has the folder's
+    /// contents.
+    async fn saved_materials_in(
+        alpha: &Viewer,
+        folder: &str,
+    ) -> Result<Vec<sl_proto::Uuid>, BodyError> {
+        let path = [folder];
+        let loaded = tokio::time::timeout(WAIT, async {
+            loop {
+                match alpha
+                    .inventory(sl_automation_proto::InventoryRoot::Agent, &path)
+                    .await
+                {
+                    Ok(Some(listed)) if listed.loaded => return Ok(listed),
+                    Ok(_unloaded) => tokio::time::sleep(Duration::from_millis(250)).await,
+                    Err(error) => return Err(error),
+                }
+            }
+        })
+        .await
+        .map_err(|_elapsed| format!("the viewer never had the {folder} folder's contents"))??;
+        Ok(loaded
+            .items
+            .iter()
+            .filter(|item| item.name == SAVED_MATERIAL_NAME && item.kind == "material")
+            .map(|item| item.id)
+            .collect())
+    }
+
+    /// The ids of the saved material items in the Materials folder.
+    async fn saved_material_items(alpha: &Viewer) -> Result<Vec<sl_proto::Uuid>, BodyError> {
+        saved_materials_in(alpha, "Materials").await
+    }
+
+    /// How many saved material items the Materials folder and the Trash
+    /// hold, once the viewer has both folders' contents: a Trash not yet
+    /// fetched would hide a leftover there until after the sweep.
+    async fn saved_material_rows(alpha: &Viewer) -> Result<(usize, usize), BodyError> {
+        Ok((
+            saved_material_items(alpha).await?.len(),
+            saved_materials_in(alpha, "Trash").await?.len(),
+        ))
+    }
+
+    /// The most saved material rows [`clear_saved_materials`] takes away.
+    const SAVED_MATERIAL_SWEEP: usize = 8;
+
+    /// Take every [`SAVED_MATERIAL_NAME`] item away for good — to the Trash,
+    /// then out of it — through the inventory window `inventory`, already
+    /// narrowed to that name. On a live grid these are the stage's own
+    /// leftovers, from a run that stopped before its cleanup: the name is
+    /// the one every save is filed under, so a second item of it would make
+    /// the read-back's row ambiguous.
+    async fn clear_saved_materials(alpha: &Viewer, inventory: &UiLocator) -> Result<(), BodyError> {
+        let rows = inventory.get(Locator::role(Role::TreeItem).named(SAVED_MATERIAL_NAME));
+        for _step in 0..SAVED_MATERIAL_SWEEP {
+            let was = saved_material_rows(alpha).await?;
+            if was == (0, 0) {
+                return Ok(());
+            }
+            let _menu = rows.nth(0).timeout(WAIT).right_click().await?;
+            // A row in the Trash offers Purge, any other Delete; the menu
+            // holds only the entry it offers.
+            let purge = alpha
+                .ui()
+                .locator(Locator::role(Role::MenuItem).name_key("menu-inv-purge-item"));
+            let delete = alpha
+                .ui()
+                .locator(Locator::role(Role::MenuItem).name_key("menu-inv-delete"));
+            let entry = tokio::time::timeout(WAIT, async {
+                loop {
+                    if purge.count().await.unwrap_or(0) > 0 {
+                        return purge.clone();
+                    }
+                    if delete.count().await.unwrap_or(0) > 0 {
+                        return delete.clone();
+                    }
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+            })
+            .await
+            .map_err(|_elapsed| "the row's menu offered neither Delete nor Purge")?;
+            let _picked = entry.click().await?;
+            let changed = tokio::time::timeout(WAIT, async {
+                while saved_material_rows(alpha).await.is_ok_and(|now| now == was) {
+                    tokio::time::sleep(Duration::from_millis(250)).await;
+                }
+            })
+            .await;
+            if changed.is_err() {
+                return Err(format!(
+                    "a {SAVED_MATERIAL_NAME:?} row stayed where it was ({was:?} in Materials and \
+                     the Trash)"
+                )
+                .into());
+            }
+        }
+        Err(
+            format!("more than {SAVED_MATERIAL_SWEEP} {SAVED_MATERIAL_NAME:?} rows to clear")
+                .into(),
+        )
+    }
+
+    /// Wait until the viewer lists a saved material item that is not one of
+    /// `before`, and return its id.
+    async fn new_saved_material(
+        alpha: &Viewer,
+        before: &[sl_proto::Uuid],
+    ) -> Result<sl_proto::Uuid, BodyError> {
+        let found = tokio::time::timeout(WAIT, async {
+            loop {
+                match saved_material_items(alpha).await {
+                    Ok(items) => {
+                        if let Some(id) = items.into_iter().find(|id| !before.contains(id)) {
+                            return Ok(id);
+                        }
+                        tokio::time::sleep(Duration::from_millis(250)).await;
+                    }
+                    Err(error) => return Err(error),
+                }
+            }
+        })
+        .await;
+        match found {
+            Ok(result) => result,
+            Err(_elapsed) => Err(format!(
+                "no new {SAVED_MATERIAL_NAME:?} item came to the Materials folder"
+            )
+            .into()),
+        }
+    }
+
+    /// Wait until the viewer's log, from `cursor`, shows a material written
+    /// into an item and the grid's answer that it took it — and no refusal.
+    async fn material_filled(alpha: &Viewer, cursor: u64) -> Result<(), BodyError> {
+        let streams = [LogStream::Command, LogStream::Event];
+        let filled = tokio::time::timeout(WAIT, async {
+            loop {
+                let page = alpha.read_log(cursor, &streams).await?;
+                if let Some(failure) = page
+                    .entries
+                    .iter()
+                    .find(|entry| entry.kind == "AssetUploadFailed")
+                {
+                    return Err::<(), BodyError>(
+                        format!("the material save failed: {}", failure.detail).into(),
+                    );
+                }
+                let written = page
+                    .entries
+                    .iter()
+                    .position(|entry| entry.kind == "UpdateInventoryAsset");
+                if let Some(at) = written
+                    && page
+                        .entries
+                        .iter()
+                        .skip(at)
+                        .any(|entry| entry.kind == "AssetUploaded")
+                {
+                    return Ok(());
+                }
+                tokio::time::sleep(Duration::from_millis(250)).await;
+            }
+        })
+        .await;
+        match filled {
+            Ok(result) => result,
+            Err(_elapsed) => {
+                let page = alpha.read_log(cursor, &streams).await?;
+                let kinds: Vec<&str> = page
+                    .entries
+                    .iter()
+                    .map(|entry| entry.kind.as_str())
+                    .collect();
+                Err(
+                    format!("the material was never written into its item; logged {kinds:?}")
+                        .into(),
+                )
+            }
+        }
+    }
+
+    /// **Save a face's PBR material from the Build window** and read it back:
+    /// on the fake grid the scene's polished-metal box, on a live one a box
+    /// rezzed and polished for the run. Save makes a new item in the
+    /// Materials folder, the viewer writes the material into it and the grid
+    /// takes it, and the material editor opened on the item reads the face's
+    /// metallic and roughness. The item (with any a stopped run left) and
+    /// the rezzed box are deleted afterwards.
+    async fn a_material_is_saved_from_the_build_window(stage: &Stage) -> Result<(), BodyError> {
+        let alpha = &stage.viewer("Alpha")?;
+        arrived(alpha).await?;
+        let (build, rezzed) = if stage.on_grid() == Grid::Fake {
+            alpha.press("Ctrl+B").await?;
+            let build = alpha.ui().window("build-tools");
+            let _open = alpha.expect(&build).timeout(WAIT).to_be_visible().await?;
+            let _moving = build
+                .get(Locator::role(Role::Radio).name_key("build-tool-move"))
+                .click()
+                .await?;
+            let _selected = alpha
+                .world()
+                .locator(WorldLocator::full_id(SAVED_MATERIAL_BOX))
+                .timeout(WAIT)
+                .select()
+                .await?;
+            show_metallic(alpha, &build).await?;
+            (build, None)
+        } else {
+            let (build, _spot) = rez_a_prim(stage, alpha).await?;
+            let prim = the_selected_prim(alpha).await?;
+            polish(alpha, &build).await?;
+            (build, Some(prim))
+        };
+        reads(
+            &build.test_id("build-pbr-metallic-factor:field"),
+            1.0,
+            "the face's metallic factor",
+        )
+        .await?;
+        reads(
+            &build.test_id("build-pbr-roughness-factor:field"),
+            0.0,
+            "the face's roughness factor",
+        )
+        .await?;
+
+        // What the folder held before, read with the inventory open (its
+        // search fetches the folder) and then closed again, since it opens
+        // over the Build window.
+        let inventory = saved_material_search(alpha).await?;
+        let _listed = saved_material_items(alpha).await?;
+        clear_saved_materials(alpha, &inventory).await?;
+        let before = saved_material_items(alpha).await?;
+        let _closed = inventory.test_id("floater-button:close").click().await?;
+        let _hidden = alpha.expect(&inventory).to_be_hidden().await?;
+        let cursor = alpha.read_log(0, &[LogStream::Command]).await?.next;
+        // Save sits with the material swatch, on the Material channel.
+        let _material = build
+            .get(Locator::role(Role::Radio).name_key("build-tex-pbrtype-material"))
+            .click()
+            .await?;
+        let _saved = build.test_id("build-pbr:build-pbr-save").click().await?;
+        let item = new_saved_material(alpha, &before).await?;
+        material_filled(alpha, cursor).await?;
+        let inventory = saved_material_search(alpha).await?;
+        if stage.on_grid() == Grid::Fake {
+            let held = grid_saved_material(stage)
+                .await?
+                .ok_or("the grid holds no saved material")?;
+            assert_eq!(
+                (
+                    held.metallic_factor.to_bits(),
+                    held.roughness_factor.to_bits()
+                ),
+                (1.0_f32.to_bits(), 0.0_f32.to_bits()),
+                "the grid holds the box's polished metal"
+            );
+        }
+
+        // Read back: the material editor on the new item.
+        let row = inventory
+            .get(Locator::role(Role::TreeItem).named(SAVED_MATERIAL_NAME))
+            .timeout(WAIT);
+        let _menu = row.right_click().await?;
+        let _edit = alpha
+            .ui()
+            .locator(Locator::role(Role::MenuItem).name_key("menu-inv-edit"))
+            .click()
+            .await?;
+        let editor = alpha.ui().window(&format!("material-editor#{item}"));
+        let metallic = editor.test_id("material-metallic:field");
+        let _built = alpha
+            .expect(&metallic)
+            .timeout(WAIT)
+            .to_be_visible()
+            .await?;
+        reads(&metallic, 1.0, "the saved material's metallic factor").await?;
+        reads(
+            &editor.test_id("material-roughness:field"),
+            0.0,
+            "the saved material's roughness factor",
+        )
+        .await?;
+        let _closed = editor.test_id("floater-button:close").click().await?;
+        let _gone = alpha.expect(&editor).to_be_hidden().await?;
+
+        // Taken away again: the item for good, the rezzed box deleted.
+        clear_saved_materials(alpha, &inventory).await?;
+        let _closed = inventory.test_id("floater-button:close").click().await?;
+        let _hidden = alpha.expect(&inventory).to_be_hidden().await?;
+        if let Some(prim) = rezzed {
+            let box_prim = alpha
+                .world()
+                .locator(WorldLocator::full_id(prim))
+                .timeout(WAIT);
+            pie(alpha, &box_prim, &DELETE).await?;
+            let _gone = alpha
+                .expect_world(&box_prim)
+                .timeout(SETTLE)
+                .to_be_detached()
+                .await?;
+        }
+        Ok(())
+    }
+
+    /// **The Build window's material Save, on the Second-Life-flavoured fake
+    /// grid**: that grid refuses `NewFileAgentInventory` for a material, as
+    /// Second Life does (`book/src/gridspec/assets.md` § Uploads), so the
+    /// viewer has to make the item with `CreateInventoryItem` and save the
+    /// bytes into it over `UpdateMaterialAgentInventory`, as the reference
+    /// does; the grid has to come to hold the box's material under the item.
+    #[test]
+    fn a_pbr_material_is_saved_to_inventory_on_the_second_life_flavour() -> Result<(), TestError> {
+        let [east, north, up] = MIRROR_SCENE_AVATAR;
+        StageBuilder::new("pbr_save_second_life")
+            .viewer_binary(VIEWER)
+            .viewer("Alpha")
+            .region(saved_material_scene())
+            .start_position(RegionCoordinates::new(east, north, up))
+            .configure_grid(|grid| grid.imitates(ImitatedGrid::SecondLife))
+            .run(a_material_is_saved_from_the_build_window)?;
+        Ok(())
+    }
+
+    /// **The Build window's material Save, on Second Life**
+    /// (`SL_E2E_GRID=aditi`, where the avatar stands on land it may build
+    /// on): a rezzed box given a polished PBR material, saved to inventory
+    /// and read back in the material editor.
+    #[test]
+    fn a_pbr_material_is_saved_to_inventory_on_second_life() -> Result<(), TestError> {
+        StageBuilder::new("pbr_save_live")
+            .viewer_binary(VIEWER)
+            .viewer("Alpha")
+            .needs(Need::LiveGrid(
+                "a grid's own rez, material and inventory answers",
+            ))
+            .needs(Need::SecondLife("a PBR material edit"))
+            .run(a_material_is_saved_from_the_build_window)?;
         Ok(())
     }
 
@@ -2081,6 +2552,11 @@ mod test {
             .test_id("worldmap:search")
             .role(Role::Textbox)
             .fill(region)
+            .await?;
+        // The map searches on Enter, never as it is typed in.
+        map.test_id("worldmap:search")
+            .role(Role::Textbox)
+            .press("Enter")
             .await?;
         let _picked = map
             .get(Locator::role(Role::ListItem).named(region))

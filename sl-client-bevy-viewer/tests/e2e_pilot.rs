@@ -26,7 +26,7 @@ mod test {
     use sl_fake_grid::fixtures::scenarios;
     use sl_fake_grid::{ImitatedGrid, RegionConfig};
     use sl_proto::{AgentKey, ObjectKey, RegionLocalObjectId, ServerEvent, prim_flags};
-    use sl_viewer_driver::Viewer;
+    use sl_viewer_driver::{UiLocator, Viewer};
 
     /// A failed stage, or a test that could not set one up.
     type TestError = Box<dyn core::error::Error>;
@@ -499,14 +499,55 @@ mod test {
         Ok(())
     }
 
+    /// What the world map's location line says while the grid is asked about
+    /// a clicked cell, and once it names no region there.
+    const MAP_LOADING: &str = "Loading…";
+
+    /// See [`MAP_LOADING`].
+    const MAP_INVALID: &str = "Invalid location";
+
+    /// Pan `map` (the world-map window) east a region or so at a time and
+    /// click its centre, until a click lands on a cell the grid names no
+    /// region in — the line saying "Loading…" while it asks, then "Invalid
+    /// location". Answers how many pans it took; each read waits up to
+    /// `wait`.
+    async fn click_open_water(map: &UiLocator, wait: Duration) -> Result<usize, BodyError> {
+        let surface = map.test_id("worldmap-surface");
+        let location = map.test_id("worldmap-location");
+        for pans in 1..=60 {
+            let before = location.text().await?.unwrap_or_default();
+            let _dragged = surface.drag_by(-150.0, 0.0).await?;
+            let _clicked = surface.click().await?;
+            let after = tokio::time::timeout(wait, async {
+                loop {
+                    let text = location.text().await?.unwrap_or_default();
+                    if text != before && text != MAP_LOADING {
+                        return Ok::<_, BodyError>(text);
+                    }
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+            })
+            .await
+            .map_err(|_elapsed| {
+                format!("after pan {pans} the location line stayed {before:?} or {MAP_LOADING:?}")
+            })??;
+            if after == MAP_INVALID {
+                return Ok(pans);
+            }
+        }
+        Err("no cell without a region within 60 pans east".into())
+    }
+
     /// The region the teleport test starts in.
     const HOME: &str = "Catalogue";
 
     /// The region east of it.
     const NEIGHBOUR: &str = "Neighbour";
 
-    /// **Two regions**, on a grid of each flavour: from the catalogue region,
-    /// the world map's search finds the neighbouring region, and its Teleport
+    /// **Two regions**, on a grid of each flavour: a click on the world map
+    /// selects the region under it, and one on open water reads as no place;
+    /// from the catalogue region, the map's search finds the neighbouring
+    /// region, and its Teleport
     /// button takes the viewer there; the status bar and the agent probe
     /// agree on where it arrived.
     ///
@@ -514,7 +555,8 @@ mod test {
     /// OpenSim matches anywhere in a name, so there the middle of the
     /// neighbour's name finds it too; Second Life matches the start alone.
     /// Both end a search with an entry that is no region, which must not
-    /// become a row.
+    /// become a row — and which, for a search that matched nothing, makes
+    /// the list say so.
     #[test]
     fn the_world_map_teleports_to_the_neighbouring_region() -> Result<(), TestError> {
         for (flavour, name) in [
@@ -542,11 +584,26 @@ mod test {
                         .menu_path(&["menu-bar-world", "menu-bar-world-map"])
                         .await?;
                     let map = alpha.ui().window("worldmap");
+                    // A click on the map's centre selects the region Alpha
+                    // stands in; panned out over open water, a click asks
+                    // the grid about the cell, which names no region there.
+                    let _clicked = map.test_id("worldmap-surface").click().await?;
+                    let _home = alpha
+                        .expect(&map.test_id("worldmap-location"))
+                        .timeout(WAIT)
+                        .to_contain_text(HOME)
+                        .await?;
+                    let _pans = click_open_water(&map, WAIT).await?;
                     if flavour == ImitatedGrid::OpenSim {
                         let _typed = map
                             .test_id("worldmap:search")
                             .role(Role::Textbox)
                             .fill("ighbou")
+                            .await?;
+                        // The map searches on Enter, never as it is typed in.
+                        map.test_id("worldmap:search")
+                            .role(Role::Textbox)
+                            .press("Enter")
                             .await?;
                         let _found = alpha
                             .expect(&map.get(Locator::role(Role::ListItem).named(NEIGHBOUR)))
@@ -558,6 +615,11 @@ mod test {
                         .test_id("worldmap:search")
                         .role(Role::Textbox)
                         .fill(NEIGHBOUR)
+                        .await?;
+                    // The map searches on Enter, never as it is typed in.
+                    map.test_id("worldmap:search")
+                        .role(Role::Textbox)
+                        .press("Enter")
                         .await?;
                     let _picked = map
                         .get(Locator::role(Role::ListItem).named(NEIGHBOUR))
@@ -588,6 +650,34 @@ mod test {
                         Some(NEIGHBOUR),
                         "the status probe"
                     );
+                    // A search that matches nothing says so once the grid has
+                    // ended it. Last, since OpenSim answers it with a modal
+                    // alert as well.
+                    let _typed = map
+                        .test_id("worldmap:search")
+                        .role(Role::Textbox)
+                        .fill("Nowhere")
+                        .await?;
+                    map.test_id("worldmap:search")
+                        .role(Role::Textbox)
+                        .press("Enter")
+                        .await?;
+                    let _said = alpha
+                        .expect(&map.test_id("worldmap-results-none-found"))
+                        .timeout(WAIT)
+                        .to_have_text("None found.")
+                        .await?;
+                    let rows = map.get(Locator::role(Role::ListItem)).count().await?;
+                    assert_eq!(
+                        rows, 0,
+                        "{flavour:?}: the rows of a search that matched nothing"
+                    );
+                    // The search row (field and Find button) and the note, for
+                    // a look at the layout.
+                    let artifacts = stage.artifacts("Alpha")?.to_path_buf();
+                    let _shot = alpha
+                        .screenshot(&artifacts.join("world-map.png"), None)
+                        .await?;
                     Ok(())
                 })?;
         }
@@ -608,6 +698,11 @@ mod test {
             .test_id("worldmap:search")
             .role(Role::Textbox)
             .fill(region)
+            .await?;
+        // The map searches on Enter, never as it is typed in.
+        map.test_id("worldmap:search")
+            .role(Role::Textbox)
+            .press("Enter")
             .await?;
         let _picked = map
             .get(Locator::role(Role::ListItem).named(region))

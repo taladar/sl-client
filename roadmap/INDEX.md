@@ -15,11 +15,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 330 |
 | blocked | 36 |
 | in-progress | 6 |
-| bugs | 34 |
-| done | 1560 |
+| bugs | 23 |
+| done | 1574 |
 | deferred | 30 |
 | wont-do | 24 |
-| **total** | **2150** |
+| **total** | **2153** |
 
 ## ideas (130)
 
@@ -1254,7 +1254,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-text-renderability-axis`](in-progress/viewer-ui-text-renderability-axis.md)
   — Upstream issue — font selection cannot see glyph-format renderability
 
-## bugs (34)
+## bugs (23)
 
 ### protocol
 
@@ -1277,51 +1277,26 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-capture-world-only-draws-hover-text-and-tags`](bugs/viewer-capture-world-only-draws-hover-text-and-tags.md)
   — A world-only capture holds hover text and name tags, which Firestorm draws
   only with the UI
-- [`viewer-e2e-walk-foot-plane-lost-under-load`](bugs/viewer-e2e-walk-foot-plane-lost-under-load.md)
-  — Under heavy load the walking avatar reads no foot plane after a walk
 - [`viewer-harness-status-counts-before-last-frame`](bugs/viewer-harness-status-counts-before-last-frame.md)
   — The screenshot harness writes its status before the last frame is saved
 - [`viewer-live-opensim-world-renders-white`](bugs/viewer-live-opensim-world-renders-white.md)
   — The world renders all white at times on the live OpenSim grid
-- [`viewer-lsl-editor-flags-unserved-functions`](bugs/viewer-lsl-editor-flags-unserved-functions.md)
-  — The script editor marks five functions Second Life compiles as undefined
 - [`viewer-mesh-hair-not-rendering`](bugs/viewer-mesh-hair-not-rendering.md) —
   Some worn mesh hair does not render (visible in Firestorm)
 - [`viewer-near-avatar-stuck-coarse-sphere`](bugs/viewer-near-avatar-stuck-coarse-sphere.md)
   — A nearby avatar stays a coarse sphere even as the camera closes in
-- [`viewer-new-material-refused-on-second-life`](bugs/viewer-new-material-refused-on-second-life.md)
-  — Saving a PBR material to inventory is refused on Second Life
-- [`viewer-new-wearable-refused-on-second-life`](bugs/viewer-new-wearable-refused-on-second-life.md)
-  — New wearables and a wearable's Save As are refused on Second Life
 - [`viewer-own-avatar-broken-after-teleport`](bugs/viewer-own-avatar-broken-after-teleport.md)
   — Own avatar looks broken after a teleport
-- [`viewer-parcel-audio-bar-backing-unskinned`](bugs/viewer-parcel-audio-bar-backing-unskinned.md)
-  — The parcel audio bar's backing is a colour no skin can reach
 - [`viewer-pbr-face-shows-legacy-texture-on-aditi`](bugs/viewer-pbr-face-shows-legacy-texture-on-aditi.md)
   — A prim given a PBR material from the Build window sometimes keeps drawing
   its plywood
 - [`viewer-perf-steady-state-46fps-ceiling`](bugs/viewer-perf-steady-state-46fps-ceiling.md)
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
-- [`viewer-refused-capability-silent-drops`](bugs/viewer-refused-capability-silent-drops.md)
-  — Commands for a capability the grid refuses are dropped without a word
-- [`viewer-retired-neighbour-stays-drawn`](bugs/viewer-retired-neighbour-stays-drawn.md)
-  — A neighbour the simulator retired stays drawn — its ground, water and map
-  tile outlive its circuit
 - [`viewer-sky-irradiance-ignores-local-probes`](bugs/viewer-sky-irradiance-ignores-local-probes.md)
   — Sky-lit faces take their probe ambient from the view's probe, never from a
   placed probe
-- [`viewer-stood-avatar-height-lost-under-load`](bugs/viewer-stood-avatar-height-lost-under-load.md)
-  — Under load the viewer reports a stood-up avatar at 25.95 m, not where the
-  grid stood it
-- [`viewer-terraform-parcel-refusal`](bugs/viewer-terraform-parcel-refusal.md) —
-  A brush over a parcel the agent may not terraform warns nothing
 - [`viewer-texture-filtering-in-linear-space`](bugs/viewer-texture-filtering-in-linear-space.md)
   — Colour textures are filtered after sRGB decoding, the reference before
-- [`viewer-vintage-radar-range-colours`](bugs/viewer-vintage-radar-range-colours.md)
-  — The radar's range column is unreadable on a light list
-- [`viewer-world-map-search-end-and-empty-cells`](bugs/viewer-world-map-search-end-and-empty-cells.md)
-  — World map — say when a search found nothing, and when a clicked cell is
-  empty
 
 ### test
 
@@ -1343,7 +1318,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1560)
+## done (1574)
 
 ### protocol
 
@@ -2136,6 +2111,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-chat-input-bar` (done))
 - [`viewer-double-click-teleport`](done/viewer-double-click-teleport.md) —
   In-world double-click teleport (blocked by `viewer-input-action-map` (done))
+- [`viewer-double-click-window-frame-clock`](done/viewer-double-click-window-frame-clock.md)
+  — Lists time double clicks with a constant on the frame clock, so a slow
+  viewer loses them
+- [`viewer-driver-pie-wait-wall-clock`](done/viewer-driver-pie-wait-wall-clock.md)
+  — Under load the driver's pie wait gives up on a pie that is still opening,
+  and the replayed click never settles
+- [`viewer-e2e-walk-foot-plane-lost-under-load`](done/viewer-e2e-walk-foot-plane-lost-under-load.md)
+  — Under heavy load the walking avatar reads no foot plane after a walk
 - [`viewer-ecs-idiom-audit`](done/viewer-ecs-idiom-audit.md) — Audit the viewer
   for state modelled beside the ECS rather than in it
 - [`viewer-edit-action-disabled-though-editable`](done/viewer-edit-action-disabled-though-editable.md)
@@ -2427,6 +2410,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-lsl-semantic-pass` (done))
 - [`viewer-lsl-editor-completion`](done/viewer-lsl-editor-completion.md) — LSL
   editor autocomplete and signature help from the grid's table
+- [`viewer-lsl-editor-flags-unserved-functions`](done/viewer-lsl-editor-flags-unserved-functions.md)
+  — The script editor marks five functions Second Life compiles as undefined
 - [`viewer-lsl-editor-highlight`](done/viewer-lsl-editor-highlight.md) — LSL
   editor highlighting — colour, folding, brace match, outline (blocked by
   `viewer-lsl-editor-widget` (done), `viewer-lsl-lexer` (done))
@@ -2528,8 +2513,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-neighbour-object-caps-use-root-region`](done/viewer-neighbour-object-caps-use-root-region.md)
   — Per-object capability requests ask the root region about a neighbour's
   objects
+- [`viewer-new-material-refused-on-second-life`](done/viewer-new-material-refused-on-second-life.md)
+  — Saving a PBR material to inventory is refused on Second Life
 - [`viewer-new-notecard-unreadable-on-opensim`](done/viewer-new-notecard-unreadable-on-opensim.md)
   — A notecard created on OpenSim opened as "could not be read"
+- [`viewer-new-wearable-refused-on-second-life`](done/viewer-new-wearable-refused-on-second-life.md)
+  — New wearables and a wearable's Save As are refused on Second Life
 - [`viewer-nonblocking-overlay-steals-focus`](done/viewer-nonblocking-overlay-steals-focus.md)
   — A see-through container in front of a field clears its focus, at random
 - [`viewer-notecard-body-draws-a-giant-artifact`](done/viewer-notecard-body-draws-a-giant-artifact.md)
@@ -2849,6 +2838,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-p8-2`](done/viewer-p8-2-stitch-modes.md) — Stitch modes
 - [`viewer-p8-3`](done/viewer-p8-3-stitch-tests.md) — Stitch tests
 - [`viewer-p9-1`](done/viewer-p9-1-sculpt-objects.md) — Sculpt objects
+- [`viewer-parcel-audio-bar-backing-unskinned`](done/viewer-parcel-audio-bar-backing-unskinned.md)
+  — The parcel audio bar's backing is a colour no skin can reach
 - [`viewer-parcel-borders-render`](done/viewer-parcel-borders-render.md) —
   In-world parcel borders (property lines) (blocked by
   `viewer-parcel-overlay-decode` (done))
@@ -3120,6 +3111,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   mirrors (hero probes)
 - [`viewer-reattached-rigged-mesh-renders-static-mislocated`](done/viewer-reattached-rigged-mesh-renders-static-mislocated.md)
   — Re-attached rigged mesh renders static and mislocated (fine at login)
+- [`viewer-refused-capability-silent-drops`](done/viewer-refused-capability-silent-drops.md)
+  — Commands for a capability the grid refuses are dropped without a word
 - [`viewer-region-environment-panel`](done/viewer-region-environment-panel.md) —
   Region / parcel environment settings panel (blocked by
   `viewer-region-options-general` (done), `viewer-environment-my-environments`
@@ -3182,6 +3175,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-render-test-harness`](done/viewer-render-test-harness.md) — 3D render
   test harness — render one object without a grid, assert automatically, catch
   regressions
+- [`viewer-retired-neighbour-stays-drawn`](done/viewer-retired-neighbour-stays-drawn.md)
+  — A neighbour the simulator retired stays drawn — its ground, water and map
+  tile outlive its circuit
 - [`viewer-rigged-attachments-wearer-not-resolved`](done/viewer-rigged-attachments-wearer-not-resolved.md)
   — Worn rigged attachments (e.g. own shoes) don't render — wearer never
   resolved / too many rigged-pending objects
@@ -3377,6 +3373,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — SpaceNavigator drives the viewer even when its window is not focused
 - [`viewer-static-asset-library`](done/viewer-static-asset-library.md) — Ship
   the viewer's static assets and answer every fetch from them first
+- [`viewer-stood-avatar-height-lost-under-load`](done/viewer-stood-avatar-height-lost-under-load.md)
+  — Under load the viewer reports a stood-up avatar at 25.95 m, not where the
+  grid stood it
 - [`viewer-straddling-transparency-oit`](done/viewer-straddling-transparency-oit.md)
   — A translucent prim straddling the waterline loses its emergent half
 - [`viewer-streaming-audio`](done/viewer-streaming-audio.md) — Parcel
@@ -3401,6 +3400,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-teleport-never-resets-the-world`](done/viewer-teleport-never-resets-the-world.md)
   — A teleport never set world_reset, because the fake grid announced the
   destination first
+- [`viewer-terraform-parcel-refusal`](done/viewer-terraform-parcel-refusal.md) —
+  A brush over a parcel the agent may not terraform warns nothing
 - [`viewer-terrain-ambient-probe-classic-fidelity`](done/viewer-terrain-ambient-probe-classic-fidelity.md)
   — Terrain lighting — add the reference probe term + classic-mode blend
 - [`viewer-terrain-edit-bake-revert`](done/viewer-terrain-edit-bake-revert.md) —
@@ -3587,6 +3588,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   & other text contexts (blocked by `viewer-ui-text-foundation` (done))
 - [`viewer-video-playback`](done/viewer-video-playback.md) — Video playback
   backend (a second media engine, not the browser)
+- [`viewer-vintage-radar-friend-name-contrast`](done/viewer-vintage-radar-friend-name-contrast.md)
+  — A friend's name in the radar vanishes on Vintage's selected row
+- [`viewer-vintage-radar-range-colours`](done/viewer-vintage-radar-range-colours.md)
+  — The radar's range column is unreadable on a light list
 - [`viewer-vintage-skin`](done/viewer-vintage-skin.md) — Ship a Vintage-alike
   skin (blocked by `viewer-skin-light-surface-roles` (done),
   `viewer-skin-image-backed-widgets` (done))
@@ -3636,6 +3641,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   floater — MapItem marker layers (blocked by `viewer-world-map-floater` (done))
 - [`viewer-world-map-search`](done/viewer-world-map-search.md) — World-map
   floater — region-name search (blocked by `viewer-world-map-floater` (done))
+- [`viewer-world-map-search-end-and-empty-cells`](done/viewer-world-map-search-end-and-empty-cells.md)
+  — World map — say when a search found nothing, and when a clicked cell is
+  empty
 - [`viewer-world-pie-menu-reactions`](done/viewer-world-pie-menu-reactions.md) —
   Right-click reactions per world target class (blocked by
   `viewer-world-test-harness` (done))

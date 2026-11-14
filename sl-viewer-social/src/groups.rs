@@ -46,6 +46,12 @@ pub struct GroupsModel {
     /// `AgentGroupDataUpdate` — the source the group-notice toast
     /// (`group_notice`) reads the notice's group image from.
     insignia: BTreeMap<GroupKey, TextureKey>,
+    /// The agent's powers in each member group (a [`group_powers`] bitfield),
+    /// from the same `AgentGroupDataUpdate` — what the Land tool asks before
+    /// warning that a group parcel may not be terraformed.
+    ///
+    /// [`group_powers`]: sl_client_bevy::group_powers
+    powers: BTreeMap<GroupKey, u64>,
     /// The currently-active (worn) group, if any.
     active: Option<GroupKey>,
     /// The own agent's active group **title** (e.g. `"Officer"`), from the
@@ -72,6 +78,7 @@ impl GroupsModel {
         self.groups.clear();
         self.accept_notices.clear();
         self.insignia.clear();
+        self.powers.clear();
         for membership in memberships {
             self.groups
                 .insert(membership.group_id, membership.group_name.clone());
@@ -79,8 +86,23 @@ impl GroupsModel {
                 .insert(membership.group_id, membership.accept_notices);
             self.insignia
                 .insert(membership.group_id, membership.group_insignia_id);
+            self.powers
+                .insert(membership.group_id, membership.group_powers);
         }
         self.touch();
+    }
+
+    /// Whether the agent holds `power` (a
+    /// [`group_powers`](sl_client_bevy::group_powers) value) in `group` — the
+    /// reference's `LLAgent::hasPowerInGroup`, short of its god bypass, which
+    /// the caller decides. Like the reference, any one bit of a combined
+    /// `power` is enough, no power grants nothing, and a group the agent is not
+    /// in grants nothing.
+    #[must_use]
+    pub fn has_power(&self, group: GroupKey, power: u64) -> bool {
+        self.powers
+            .get(&group)
+            .is_some_and(|powers| powers & power != 0)
     }
 
     /// The insignia texture of a member `group`, if known — the group-notice toast
@@ -307,4 +329,52 @@ pub struct GroupRow {
     /// Whether this is the agent's active (worn) choice — for
     /// [`GroupChoice::NoGroup`], whether no group is worn.
     pub active: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::GroupsModel;
+    use sl_client_bevy::{GroupKey, GroupMembership, LandArea, TextureKey, Uuid, group_powers};
+
+    /// A membership in group `id` holding `powers`.
+    fn membership(id: u128, powers: u64) -> GroupMembership {
+        GroupMembership {
+            group_id: GroupKey::from(Uuid::from_u128(id)),
+            group_powers: powers,
+            accept_notices: true,
+            group_insignia_id: TextureKey::from(Uuid::nil()),
+            contribution: LandArea::ZERO,
+            group_name: format!("group {id}"),
+        }
+    }
+
+    /// A power is held in the group that grants it and nowhere else, any one
+    /// bit of a combined power is enough, no power is never held, and a fresh
+    /// membership list replaces the powers of the one before — the reference's
+    /// `hasPowerInGroup`.
+    #[test]
+    fn powers_are_per_group_and_replaced_with_the_list() {
+        let land = GroupKey::from(Uuid::from_u128(1));
+        let other = GroupKey::from(Uuid::from_u128(2));
+        let stranger = GroupKey::from(Uuid::from_u128(3));
+        let mut model = GroupsModel::default();
+        model.apply_memberships(&[
+            membership(
+                1,
+                group_powers::LAND_ALLOW_EDIT_LAND | group_powers::LAND_DEED,
+            ),
+            membership(2, group_powers::NOTICES_SEND),
+        ]);
+        assert!(model.has_power(land, group_powers::LAND_ALLOW_EDIT_LAND));
+        assert!(model.has_power(
+            other,
+            group_powers::NOTICES_SEND | group_powers::LAND_ALLOW_EDIT_LAND
+        ));
+        assert!(!model.has_power(other, group_powers::LAND_ALLOW_EDIT_LAND));
+        assert!(!model.has_power(stranger, group_powers::LAND_ALLOW_EDIT_LAND));
+        assert!(!model.has_power(land, group_powers::NONE));
+
+        model.apply_memberships(&[membership(2, group_powers::NOTICES_SEND)]);
+        assert!(!model.has_power(land, group_powers::LAND_ALLOW_EDIT_LAND));
+    }
 }

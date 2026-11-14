@@ -20,12 +20,14 @@ use bevy::ecs::schedule::ScheduleConfigs;
 use bevy::ecs::system::ScheduleSystem;
 use bevy::prelude::*;
 use sl_viewer_world_api::TerrainState;
+use sl_viewer_world_api::region_scoped::RegionScopedAppExt as _;
 use sl_viewer_world_api::world_scoped::{WorldResetSystems, WorldScopedAppExt as _};
 use sl_viewer_world_objects::objects::{apply_object_meshes, update_objects};
 
 use crate::environment::{EnvironmentState, ingest_environment, request_environment};
 use crate::terrain::{
-    PendingPatchRebuilds, TerrainTextures, drain_patch_rebuilds, recenter_terrain, update_terrain,
+    PendingPatchRebuilds, TerrainTextures, drain_patch_rebuilds, rebuild_retired_seams,
+    recenter_terrain, update_terrain,
 };
 
 /// The scene layer's fold: terrain, the region environment, and the settings
@@ -44,6 +46,12 @@ impl Plugin for WorldScenePlugin {
         app.init_world_scoped::<TerrainState>();
         app.init_world_scoped::<TerrainTextures>();
         app.init_resource::<PendingPatchRebuilds>();
+        // And a neighbour the simulator retires takes its own patches, its
+        // material and its queued rebuilds with it; the patches that were
+        // stitched to it are re-seamed in the terrain fold.
+        app.register_region_scoped::<TerrainState>();
+        app.register_region_scoped::<TerrainTextures>();
+        app.register_region_scoped::<PendingPatchRebuilds>();
         // Not world-scoped: the disk cache outlives a teleport, and what it
         // restores is the land cache a teleport keeps too. The viewer replaces
         // this default (nothing on disk) with its grid's directory.
@@ -96,8 +104,16 @@ impl Plugin for WorldScenePlugin {
 /// missing ground plane is far more visible than a few deferred prims, and
 /// terrain is a small, bursty set (a region's 16×16 patches) that at most defers
 /// objects for a few frames per region connect.
+///
+/// A retired neighbour's surviving seams are queued first, after the purge
+/// that took its patches, so the drain below can rebuild them this frame.
 fn terrain_fold_pipeline() -> ScheduleConfigs<ScheduleSystem> {
-    (recenter_terrain, update_terrain, drain_patch_rebuilds)
+    (
+        rebuild_retired_seams.after(WorldResetSystems::Purge),
+        recenter_terrain,
+        update_terrain,
+        drain_patch_rebuilds,
+    )
         .chain()
         .before(update_objects)
         .before(apply_object_meshes)
@@ -197,7 +213,9 @@ mod tests {
     use sl_viewer_world_objects::objects::{apply_object_meshes, update_objects};
 
     use crate::environment::{ingest_environment, request_environment};
-    use crate::terrain::{drain_patch_rebuilds, recenter_terrain, update_terrain};
+    use crate::terrain::{
+        drain_patch_rebuilds, rebuild_retired_seams, recenter_terrain, update_terrain,
+    };
 
     /// The scene layer's fold, reduced to what an ordering assertion needs.
     ///
@@ -246,12 +264,14 @@ mod tests {
         ]);
     }
 
-    /// Terrain re-bases before it folds, drains its rebuild queue after, and
+    /// Terrain re-seams a retired neighbour's borders, re-bases before it
+    /// folds, drains its rebuild queue after, and
     /// takes the frame's mesh-upload budget ahead of the object layer.
     #[test]
     fn terrain_folds_before_the_objects_spend_the_budget() {
         let fold = fold();
         fold.assert_pipeline(&[
+            stage!(rebuild_retired_seams),
             stage!(recenter_terrain),
             stage!(update_terrain),
             stage!(drain_patch_rebuilds),

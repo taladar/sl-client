@@ -7028,6 +7028,94 @@ mod test {
         Ok(())
     }
 
+    /// A new item made on an upload — a new wearable, the reference's
+    /// `createWearable` — sends the bytes over `AssetUploadRequest` and then a
+    /// `CreateInventoryItem` naming the same transaction, so the simulator
+    /// creates the item on the asset it derives from it, answering the
+    /// callback id the client was handed.
+    #[test]
+    fn an_item_created_on_an_upload_binds_its_asset() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+        sim.set_secure_session_id(secure_session());
+
+        let txn = TransactionId::new(uuid::Uuid::from_u128(0xC0A7));
+        let data = vec![9_u8; 64];
+        let new = NewInventoryItem {
+            folder_id: InventoryFolderKey::from(uuid::Uuid::from_u128(0xF01D)),
+            transaction_id: txn.get(),
+            asset_type: AssetType::Clothing,
+            inv_type: InventoryType::Wearable,
+            wearable_type: WearableType::Shirt,
+            name: "New Shirt".to_owned(),
+            ..NewInventoryItem::default()
+        };
+        let callback = client.create_inventory_item_with_asset(&new, data.clone(), now)?;
+        pump(&mut client, &mut sim, now)?;
+
+        let expected_asset = sl_wire::combine_uuids(txn.get(), secure_session());
+        let server_events = drain_server(&mut sim);
+        let uploaded = server_events.iter().position(|event| {
+            matches!(
+                event,
+                ServerEvent::AssetUploaded {
+                    asset_id,
+                    asset_type: AssetType::Clothing,
+                    transaction_id,
+                    data: got,
+                } if asset_id.uuid() == expected_asset && *transaction_id == txn && *got == data
+            )
+        });
+        let created = server_events.iter().position(|event| {
+            matches!(
+                event,
+                ServerEvent::CreateInventoryItem {
+                    item,
+                    bound_asset: Some(bound),
+                    callback_id,
+                } if *item == new && bound.uuid() == expected_asset && *callback_id == callback
+            )
+        });
+        assert!(
+            uploaded.is_some() && created.is_some() && uploaded < created,
+            "expected the upload and then the create bound to it, got {server_events:?}"
+        );
+        Ok(())
+    }
+
+    /// An item asked to be made on an upload with a nil transaction is refused
+    /// before anything is sent: a nil transaction asks the simulator for an
+    /// empty item, and the bytes would be stored under no item at all.
+    #[test]
+    fn an_item_created_on_an_upload_needs_a_transaction() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+        let refused = client.create_inventory_item_with_asset(
+            &NewInventoryItem {
+                asset_type: AssetType::Clothing,
+                ..NewInventoryItem::default()
+            },
+            vec![1_u8; 4],
+            now,
+        );
+        assert!(
+            matches!(refused, Err(sl_proto::Error::InvalidInventoryOperation(_))),
+            "a nil transaction was taken: {refused:?}"
+        );
+        pump(&mut client, &mut sim, now)?;
+        let server_events = drain_server(&mut sim);
+        assert!(
+            !server_events.iter().any(|event| matches!(
+                event,
+                ServerEvent::AssetUploadRequested { .. } | ServerEvent::CreateInventoryItem { .. }
+            )),
+            "something was sent: {server_events:?}"
+        );
+        Ok(())
+    }
+
     /// A metadata-only item edit (a rename) binds **no** asset: its transaction
     /// id is nil, so there is no upload to correlate with, and a simulator that
     /// derived an id from a nil transaction would repoint the item at a

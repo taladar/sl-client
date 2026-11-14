@@ -6,10 +6,11 @@
 //! arity or argument types fail to compile.
 //!
 //! The served document leaves out functions the grid still compiles; those
-//! come from `keywords_lsl_unserved.xml`, a document of the same format
-//! holding only a `functions` map, kept apart so a refresh of the served one
-//! stays a copy. A function in both stops the build: the grid serves it
-//! again, and the supplement's entry should go.
+//! come from `sl-lsl`'s `keywords_lsl_unserved.xml` (`sl_lsl::SECOND_LIFE_UNSERVED`,
+//! there because the script editor adds it to a Second Life table too), a
+//! document of the same format holding only a `functions` map, kept apart so
+//! a refresh of the served one stays a copy. A function in both stops the
+//! build: the grid serves it again, and the supplement's entry should go.
 //!
 //! OpenSim's engines compile more: the OSSL (`os*`), LightShare (`ls*`) and
 //! MOD (`mod*`) families and a few `ll*` functions and constants Second Life
@@ -33,9 +34,9 @@ use sl_llsd::{Llsd, parse_llsd_xml};
 /// The vendored document, at the crate root.
 const SOURCE: &str = "keywords_lsl_default.xml";
 
-/// The functions the grid compiles and [`SOURCE`] does not list, at the
-/// crate root.
-const SUPPLEMENT: &str = "keywords_lsl_unserved.xml";
+/// What errors name the functions the grid compiles and [`SOURCE`] does not
+/// list: `sl_lsl::SECOND_LIFE_UNSERVED`, a file of `sl-lsl`'s.
+const SUPPLEMENT: &str = "sl-lsl's keywords_lsl_unserved.xml";
 
 /// OpenSim's served document, its first line the syntax id.
 const OPENSIM: &str = "opensim/ScriptSyntax.xml";
@@ -53,7 +54,6 @@ type BoxError = Box<dyn std::error::Error>;
 /// Entry point: read the document, generate code, write it to `OUT_DIR`.
 fn main() -> Result<(), BoxError> {
     println!("cargo:rerun-if-changed={SOURCE}");
-    println!("cargo:rerun-if-changed={SUPPLEMENT}");
     println!("cargo:rerun-if-changed={OPENSIM}");
     println!("cargo:rerun-if-changed={OPENSIM_SUPPLEMENT}");
     println!("cargo:rerun-if-changed={OSSL_CHECKS}");
@@ -62,7 +62,7 @@ fn main() -> Result<(), BoxError> {
     let manifest_dir = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR")?);
     let read = |name: &str| fs_err::read_to_string(manifest_dir.join(name));
     let document = parse_llsd_xml(&read(SOURCE)?)?;
-    let supplement = parse_llsd_xml(&read(SUPPLEMENT)?)?;
+    let supplement = parse_llsd_xml(sl_lsl::SECOND_LIFE_UNSERVED)?;
     let opensim_file = read(OPENSIM)?;
     let (_id, opensim_text) = opensim_file
         .split_once('\n')
@@ -353,7 +353,9 @@ fn f32_expr(value: f64) -> String {
     format!("f32::from_bits(0x{:08x})", single.to_bits())
 }
 
-/// The `functions` map of a supplement, which holds nothing else.
+/// The `functions` map of a supplement, which holds nothing else (but may
+/// declare its `llsd-lsl-syntax-version`, as Second Life's does so the
+/// script editor can decode it as a document).
 fn supplement_functions<'a>(
     supplement: &'a Llsd,
     what: &str,
@@ -361,7 +363,10 @@ fn supplement_functions<'a>(
     let map = supplement
         .as_map()
         .ok_or_else(|| format!("{what}: not a map"))?;
-    if let Some(other) = map.keys().find(|key| *key != "functions") {
+    if let Some(other) = map
+        .keys()
+        .find(|key| *key != "functions" && *key != "llsd-lsl-syntax-version")
+    {
         return Err(format!("{what}: `{other}` — it holds functions only").into());
     }
     supplement

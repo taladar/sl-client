@@ -361,8 +361,8 @@ struct SettingsEditors {
     /// by the item each names.
     ///
     /// A Save As is **not** here: minting an item is the whole viewer's shared
-    /// FIFO ([`PendingItemCreations`]), because the flags stamp that follows it
-    /// must not be popped by somebody else's upload.
+    /// queue ([`PendingSettingsCreations`]), because its untagged reply must not
+    /// be claimed by somebody else's creation.
     saves: VecDeque<PendingSave>,
 }
 

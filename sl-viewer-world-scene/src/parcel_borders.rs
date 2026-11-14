@@ -607,10 +607,16 @@ fn update_parcel_borders(
     let overlay_changed = overlay.is_changed();
     let current: HashSet<RegionHandle> = regions.iter().map(|region| region.handle).collect();
 
-    // Despawn (and forget) regions that are no longer loaded.
+    // Despawn (and forget) regions that are no longer loaded — every region
+    // the state knows, not only those that drew bands: a stamp left behind for
+    // a retired neighbour that drew nothing would match the region's state
+    // when it is announced again (an equal grid, its terrain revision counting
+    // from one again) and keep it from ever being built.
     let gone: Vec<RegionHandle> = state
         .entities
         .keys()
+        .chain(state.stamps.keys())
+        .chain(state.pending.iter())
         .copied()
         .filter(|region| !current.contains(region))
         .collect();
@@ -942,6 +948,56 @@ mod tests {
                 .is_some(),
             "the retry ran and stamped the grid it saw",
         );
+    }
+
+    /// A region that leaves the loaded set takes its stamp with it even when it
+    /// drew nothing, so the same region announced again is built rather than
+    /// matched against what it was before it left.
+    #[test]
+    fn a_departed_region_that_drew_nothing_leaves_no_stamp() {
+        use bevy::prelude::*;
+        use sl_client_bevy::{RegionHandle, SlParcelOverlay, SlRegion};
+        use sl_settings::SettingsStore;
+
+        use super::{ParcelBorderMaterial, ParcelBorderState, update_parcel_borders};
+        use sl_viewer_settings::ViewerSettings;
+        use sl_viewer_world_api::TerrainState;
+
+        let region = RegionHandle::from_global(256_256, 256_000);
+        let mut app = App::new();
+        app.insert_resource(ViewerSettings::from_store_for_test(SettingsStore::new()))
+            .init_resource::<SlParcelOverlay>()
+            .init_resource::<TerrainState>()
+            .init_resource::<ParcelBorderState>()
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<ParcelBorderMaterial>>()
+            .add_systems(Update, update_parcel_borders);
+        let entity = app
+            .world_mut()
+            .spawn(SlRegion {
+                handle: region,
+                sim: "127.0.0.1:9001".parse().expect("a literal socket address"),
+            })
+            .id();
+        app.update();
+        assert!(
+            app.world()
+                .resource::<ParcelBorderState>()
+                .stamps
+                .contains_key(&region),
+            "the region drew nothing and was stamped",
+        );
+
+        app.world_mut().despawn(entity);
+        app.update();
+
+        let state = app.world().resource::<ParcelBorderState>();
+        assert!(
+            !state.stamps.contains_key(&region),
+            "{:?}",
+            state.stamps.keys()
+        );
+        assert!(!state.pending.contains(&region));
     }
 
     /// The low-bits ownership class for "owned by you".

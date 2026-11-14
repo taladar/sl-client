@@ -67,6 +67,8 @@
 
 use bevy::prelude::*;
 
+use crate::experience_search::EXPERIENCES_UNAVAILABLE;
+use crate::notifications::ShowNotification;
 use crate::ui_spawn::{self, ButtonKind, ButtonSpec, UiLabel};
 use bevy::ui::Checked;
 use bevy::ui_widgets::ValueChange;
@@ -83,9 +85,9 @@ use sl_viewer_ui_core::skin::{
 
 use bevy::ecs::system::RunSystemOnce as _;
 use sl_client_bevy::{
-    AgentKey, Command, ExperienceInfo, ExperienceKey, ExperienceLocation, ExperiencePermission,
-    ExperienceProperties, ExperienceUpdate, SlCommand, SlCurrentRegion, SlEvent, SlRegionIdentity,
-    SlSessionEvent, Uuid,
+    AgentKey, CAP_GET_EXPERIENCE_INFO, Command, ExperienceInfo, ExperienceKey, ExperienceLocation,
+    ExperiencePermission, ExperienceProperties, ExperienceUpdate, SlCommand, SlCurrentRegion,
+    SlEvent, SlGrantedCapabilities, SlRegionIdentity, SlSessionEvent, Uuid,
 };
 
 use crate::floater::{
@@ -485,37 +487,50 @@ pub struct ExperienceProfilePlugin;
 impl Plugin for ExperienceProfilePlugin {
     /// Register the open path and the per-window systems.
     fn build(&self, app: &mut App) {
-        app.add_message::<OpenExperienceProfile>().add_systems(
-            Update,
-            (
-                // After the manager's command pass: the click that opens a
-                // profile usually raises the window it landed in too, and the
-                // later raise wins (`FloaterSystems`).
-                open_experience_profile.after(FloaterSystems::Commands),
+        app.add_message::<OpenExperienceProfile>()
+            .add_message::<ShowNotification>()
+            .init_resource::<SlGrantedCapabilities>()
+            .add_systems(
+                Update,
                 (
-                    ingest_profile_events,
-                    track_profile_maturity_combo,
-                    paint_profile_windows,
+                    // After the manager's command pass: the click that opens a
+                    // profile usually raises the window it landed in too, and the
+                    // later raise wins (`FloaterSystems`).
+                    open_experience_profile.after(FloaterSystems::Commands),
+                    (
+                        ingest_profile_events,
+                        track_profile_maturity_combo,
+                        paint_profile_windows,
+                    )
+                        .chain()
+                        .run_if(any_with_component::<ExperienceProfileState>),
                 )
-                    .chain()
-                    .run_if(any_with_component::<ExperienceProfileState>),
-            )
-                .chain(),
-        );
+                    .chain(),
+            );
     }
 }
 
 /// Open the window for each requested experience, building its content on the
 /// first open and asking the grid for everything it shows.
+///
+/// A region that grants no `GetExperienceInfo` (a stock OpenSim, which has no
+/// experiences) can answer none of it: the window opens all the same, empty,
+/// as the reference's does, and [`EXPERIENCES_UNAVAILABLE`] says why rather
+/// than leaving it waiting.
 fn open_experience_profile(
     mut opens: MessageReader<OpenExperienceProfile>,
     mut floaters: KeyedFloaters,
     mut states: Query<&mut ExperienceProfileState>,
     mut commands: Commands,
+    granted: Res<SlGrantedCapabilities>,
     mut sl: MessageWriter<SlCommand>,
+    mut notices: MessageWriter<ShowNotification>,
 ) {
     for open in opens.read().copied() {
         let experience = open.experience;
+        if granted.refuses(CAP_GET_EXPERIENCE_INFO) {
+            notices.write(ShowNotification::new(EXPERIENCES_UNAVAILABLE));
+        }
         let opened = floaters.open(experience_profile_floater_spec(), profile_key(experience));
         let KeyedFloaterOpen::Spawned(handle) = opened else {
             // Already up: repaint from what it holds, and re-ask, so an open
@@ -523,17 +538,24 @@ fn open_experience_profile(
             if let Ok(mut state) = states.get_mut(opened.root()) {
                 state.touch();
             }
-            request_profile(experience, &mut sl);
+            request_profile(experience, &granted, &mut sl);
             continue;
         };
         build_profile_content(&mut commands, &handle, experience);
-        request_profile(experience, &mut sl);
+        request_profile(experience, &granted, &mut sl);
     }
 }
 
 /// Ask the grid for everything one profile window shows: the metadata, whether
 /// the agent administers it, and the agent's own preferences.
-fn request_profile(experience: ExperienceKey, sl: &mut MessageWriter<SlCommand>) {
+fn request_profile(
+    experience: ExperienceKey,
+    granted: &SlGrantedCapabilities,
+    sl: &mut MessageWriter<SlCommand>,
+) {
+    if granted.refuses(CAP_GET_EXPERIENCE_INFO) {
+        return;
+    }
     sl.write(SlCommand(Command::RequestExperienceInfo {
         experience_ids: vec![experience],
     }));

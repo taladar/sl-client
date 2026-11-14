@@ -10,7 +10,8 @@
 //!
 //! - where the avatar is put when it stands up: a third of a metre in front
 //!   of where it sat on Second Life, two thirds of a metre in front and more
-//!   than half a metre up on OpenSim;
+//!   than half a metre up on OpenSim, from where both drop it to the
+//!   ground;
 //! - what the response says of a scripted seat's position, which the viewer
 //!   must not place the avatar by;
 //! - and a sit on an object the region does not have, which Second Life
@@ -18,8 +19,9 @@
 //!
 //! Each flavour is run through the same steps: sit by the object's pie, be
 //! shown seated, stand by the same pie, be shown standing where that grid
-//! puts an avatar; then sit on an object the grid has dropped without a word,
-//! and be told so on the one grid that says it.
+//! puts an avatar and come to rest on the ground beneath it; then sit on an
+//! object the grid has dropped without a word, and be told so on the one grid
+//! that says it.
 
 #[cfg(test)]
 mod test {
@@ -29,7 +31,7 @@ mod test {
     use serde_json::json;
     use sl_automation_proto::{Locator, Probe};
     use sl_e2e::{BodyError, Stage, StageBuilder};
-    use sl_fake_grid::ImitatedGrid;
+    use sl_fake_grid::{AVATAR_CENTRE_ABOVE_GROUND_M, ImitatedGrid, TerrainFixture};
     use sl_proto::{AgentKey, ObjectKey, RegionLocalObjectId, Uuid, Vector};
 
     /// A failed stage, or a test that could not set one up.
@@ -102,16 +104,10 @@ mod test {
         Ok(())
     }
 
-    /// Where on the ground plan `flavour` puts an avatar that stands up from
-    /// [`SEAT`], a box with no sit target: in front of where the grid's plain
-    /// seat put it, which on Second Life faces back out over its edge.
-    ///
-    /// The height it stands at is not part of it: the avatar falls from there
-    /// to the ground at once, on both grids, so a viewer read at the wrong
-    /// moment has it anywhere on the way down. The stand's height is measured
-    /// from the grid's own statements by the `sit_stand` conformance case,
-    /// which the offline suite runs on both fake flavours.
-    fn stands_at(flavour: ImitatedGrid) -> [f32; 2] {
+    /// Where `flavour` puts an avatar that stands up from [`SEAT`], a box
+    /// with no sit target: in front of where the grid's plain seat put it,
+    /// which on Second Life faces back out over its edge.
+    fn stands_at(flavour: ImitatedGrid) -> [f32; 3] {
         let policy = flavour.sit_policy();
         let plain = policy.plain_seat;
         let forward = if plain.faces_outwards {
@@ -119,16 +115,38 @@ mod test {
         } else {
             policy.stand_forward_m
         };
-        [SEAT_AT.x + plain.off_centre_m + forward, SEAT_AT.y]
+        [
+            SEAT_AT.x + plain.off_centre_m + forward,
+            SEAT_AT.y,
+            SEAT_AT.z + plain.above_m + policy.stand_up_m,
+        ]
     }
 
-    /// The height the grid has the avatar of the viewer `label` at now.
-    async fn grid_height(stage: &Stage, label: &str) -> Result<f32, BodyError> {
-        Ok(stage
-            .agent(label)
-            .await?
-            .with_sim(|sim| sim.arrival_position().position.z())
-            .await)
+    /// Where an avatar stood up from [`SEAT`] by `flavour` comes to rest: on
+    /// the stock ground beneath [`stands_at`]. Both grids put a standing
+    /// avatar in the air beside the box and drop it from there
+    /// (`book/src/gridspec/movement.md` § The ground, standing up and
+    /// teleporting), so the stand point itself lasts only as long as the fall
+    /// takes, about a third of a second: a viewer read later than that is
+    /// rightly showing the ground.
+    fn comes_down_at(flavour: ImitatedGrid) -> [f32; 3] {
+        let [x, y, _] = stands_at(flavour);
+        [
+            x,
+            y,
+            TerrainFixture::default().height_at(x, y) + AVATAR_CENTRE_ABOVE_GROUND_M,
+        ]
+    }
+
+    /// Whether `at` lies on the drop from where `flavour` stands an avatar up
+    /// to where it comes down, within [`PLACED_WITHIN`].
+    fn on_the_drop(at: [f32; 3], flavour: ImitatedGrid) -> bool {
+        let [x, y, top] = stands_at(flavour);
+        let [_, _, bottom] = comes_down_at(flavour);
+        let [at_x, at_y, at_z] = at;
+        (at_x - x).abs() <= PLACED_WITHIN
+            && (at_y - y).abs() <= PLACED_WITHIN
+            && ((bottom - PLACED_WITHIN)..=(top + PLACED_WITHIN)).contains(&at_z)
     }
 
     /// The largest difference between two positions along any axis.
@@ -141,8 +159,9 @@ mod test {
 
     /// **Sitting and standing on each flavour**: the pie's *Sit Here* seats
     /// the avatar, its *Stand Up* puts it where that grid puts a standing
-    /// avatar, and a sit on an object the grid no longer has is refused aloud
-    /// on Second Life and met with silence on OpenSim.
+    /// avatar and lets it drop to the ground from there, and a sit on an
+    /// object the grid no longer has is refused aloud on Second Life and met
+    /// with silence on OpenSim.
     #[test]
     fn the_avatar_sits_stands_and_is_refused_as_each_grid_does() -> Result<(), TestError> {
         for (flavour, name) in [
@@ -185,25 +204,38 @@ mod test {
                         .timeout(WAIT)
                         .to_be_absent()
                         .await?;
-                    // Where it stood on the ground plan, at the height the
-                    // grid has it now: the stand, then wherever its fall has
-                    // got to.
-                    let [x, y] = stands_at(flavour);
+                    // The viewer may still report the seated offset until the
+                    // grid's stand arrives; from then on every position it
+                    // reports is on the drop to the ground, wherever a slow
+                    // viewer happens to be read along it.
+                    let expected = comes_down_at(flavour);
                     let started = std::time::Instant::now();
-                    let mut expected = [x, y, grid_height(stage, "Alpha").await?];
                     let mut placed = alpha.agent().await?.position;
+                    let mut freed = false;
                     while placed.is_none_or(|at| apart(at, expected) > PLACED_WITHIN)
                         && started.elapsed() < WAIT
                     {
+                        if let Some(at) = placed {
+                            if on_the_drop(at, flavour) {
+                                freed = true;
+                            } else {
+                                assert!(
+                                    !freed,
+                                    "{flavour:?} drops a stood avatar from {:?} to {expected:?}; \
+                                     the viewer had it at {at:?} on the way",
+                                    stands_at(flavour)
+                                );
+                            }
+                        }
                         tokio::time::sleep(Duration::from_millis(50)).await;
-                        expected = [x, y, grid_height(stage, "Alpha").await?];
                         placed = alpha.agent().await?.position;
                     }
                     let placed = placed.ok_or("the viewer reports no position")?;
                     assert!(
                         apart(placed, expected) <= PLACED_WITHIN,
-                        "{flavour:?} stands an avatar at {expected:?}; the viewer has it at \
-                         {placed:?}"
+                        "{flavour:?} stands an avatar at {:?} and drops it to {expected:?}; the \
+                         viewer has it at {placed:?}",
+                        stands_at(flavour)
                     );
 
                     // The grid drops the seat and tells nobody, so the viewer

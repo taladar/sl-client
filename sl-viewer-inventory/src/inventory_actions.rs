@@ -57,7 +57,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::intents::StartConference;
 use crate::intents::{ConversationKey, OpenConversation};
-use crate::intents::{ItemCreationFinished, PendingItemCreations};
+use crate::intents::{ItemCreationFinished, PendingItemCreations, new_wearable_command};
 use crate::intents::{PendingSettingsCreations, SettingsItemCreated};
 use crate::inventory::{
     InlineRename, InventoryModel, InventorySelection, InventoryUi, InventoryView, MAX_FOLDER_DEPTH,
@@ -3330,51 +3330,57 @@ pub(crate) fn default_wearable_asset(
     text
 }
 
-/// Finish an in-flight item creation when its upload reply lands: stamp the
-/// fresh item's flags with its subtype (the uploader path leaves them empty,
-/// which reads as a Shape for a wearable and as no kind at all for a settings
-/// item) and refresh its folder. Matched FIFO against
-/// [`PendingItemCreations`]; an upload failure drops the oldest pending entry.
+/// Finish an in-flight wearable creation when its item arrives — or say so
+/// when its upload is refused, which is the only answer a refused one gets:
+/// the simulator then creates nothing. Both answers name the creation's
+/// transaction, so each is matched to its own entry in
+/// [`PendingItemCreations`] and an item nobody here asked for is left alone.
 ///
-/// The consumer lives here, in the inventory, because finishing a creation is
-/// half an inventory refresh — the producers are wherever the uploads are
-/// started (the creators below, the appearance editor, the settings editors).
+/// The item needs nothing more: the simulator stamped the slot from the
+/// create, and the session has filed it in its folder. A refusal raises the
+/// reference's `CannotSaveToAssetStore` (`onSaveNewAssetComplete`), whoever
+/// started the creation.
+///
+/// The consumer lives here, in the inventory, because it is the inventory that
+/// has to hear about a new item — the producers are wherever the creations are
+/// started (the creators below, the appearance editor's Save As).
 fn handle_item_creations(
     mut events: MessageReader<SlEvent>,
     mut pending: ResMut<PendingItemCreations>,
     mut finished: MessageWriter<ItemCreationFinished>,
-    mut commands: MessageWriter<SlCommand>,
+    mut notify: MessageWriter<sl_viewer_notifications::ShowNotification>,
 ) {
     for event in events.read() {
         match &event.0 {
-            // Only an upload that **created** an item can be the wearable
-            // creation this queue is waiting for; a save (which also completes
-            // as `AssetUploaded`, naming the item it rebound) must not pop the
-            // queue and stamp an unrelated item's flags with a wearable slot.
-            SlSessionEvent::AssetUploaded {
-                new_inventory_item: Some(item),
-                created: Some(_),
+            SlSessionEvent::InventoryItemCreated {
+                transaction_id,
+                item,
                 ..
             } => {
-                if let Some(creation) = pending.take_next() {
-                    let item_id = InventoryKey::from(*item);
-                    commands.write(SlCommand(Command::ChangeInventoryItemFlags {
-                        item_id,
-                        flags: creation.flags,
-                    }));
-                    query_folder_page(creation.folder, &mut commands);
-                    // Tell whoever asked for it that it landed; the reply names
-                    // no requester, so the ticket is the only thing that can.
+                let transaction = TransactionId::from(*transaction_id);
+                if let Some(creation) = pending.take(transaction) {
                     finished.write(ItemCreationFinished {
-                        ticket: creation.ticket,
-                        item: Some(item_id),
+                        transaction: creation.transaction,
+                        item: Some(item.item_id),
                     });
                 }
             }
-            SlSessionEvent::AssetUploadFailed { .. } => {
-                if let Some(creation) = pending.take_next() {
+            SlSessionEvent::InventoryAssetSaved {
+                transaction_id: Some(transaction),
+                success: false,
+                ..
+            } => {
+                if let Some(creation) = pending.take(*transaction) {
+                    warn!(
+                        "the upload of the new wearable {:?} was refused",
+                        creation.name
+                    );
+                    notify.write(
+                        sl_viewer_notifications::ShowNotification::new("CannotSaveToAssetStore")
+                            .arg("NAME", creation.name),
+                    );
                     finished.write(ItemCreationFinished {
-                        ticket: creation.ticket,
+                        transaction: creation.transaction,
                         item: None,
                     });
                 }
@@ -3489,9 +3495,8 @@ fn handle_settings_creations(
 /// `wearable_type` is the wire's generic **subtype byte**, not specifically a
 /// wearable slot: `create_inventory_settings` puts `static_cast<U8>(settype)`
 /// there. Because the simulator stamps the item's `flags` from it, a settings
-/// item needs no follow-up `ChangeInventoryItemFlags` — unlike the wearable
-/// creators above, which mint their item through an upload and must stamp it
-/// afterwards on [`PendingItemCreations`].
+/// item needs no follow-up `ChangeInventoryItemFlags`, just as a wearable
+/// created by [`new_wearable_command`] does not.
 ///
 /// A function rather than a branch of the private `dispatch_create` because two
 /// surfaces mint these — the inventory's create menus and the My Environments
@@ -3548,28 +3553,20 @@ fn dispatch_create(
         ui_actions,
         rename,
     } = sinks;
-    // The wearable creators: author the slot's default asset, upload it (the
-    // uploader creates the item), and stamp the flags when the reply lands.
+    // The wearable creators: author the slot's default asset and make the
+    // item on it, the reference's `createWearable` (see
+    // [`new_wearable_command`]).
     if let Some((slot, name)) = wearable_slot_of(action) {
-        let asset_type = if slot.is_body_part() {
-            AssetType::Bodypart
-        } else {
-            AssetType::Clothing
-        };
         let text = default_wearable_asset(name, slot, own_agent, params);
-        commands.write(SlCommand(Command::UploadAsset {
-            folder_id: dest,
-            asset_type,
-            inventory_type: InventoryType::Wearable,
-            name: name.to_owned(),
-            description: String::new(),
-            next_owner_mask: Permissions::DEFAULT_NEXT_OWNER,
-            group_mask: Permissions::NONE,
-            everyone_mask: Permissions::NONE,
-            expected_upload_cost: 0,
-            data: text.into_bytes(),
-        }));
-        let _ticket = pending_creations.enqueue(u32::from(slot.to_code()), dest);
+        let transaction = TransactionId::from(Uuid::new_v4());
+        commands.write(SlCommand(new_wearable_command(
+            dest,
+            slot,
+            name,
+            text.into_bytes(),
+            transaction,
+        )));
+        pending_creations.enqueue(transaction, name);
         return true;
     }
     // The settings creators. Shared with the My Environments library window,
@@ -4079,6 +4076,233 @@ mod tests {
         Ok(())
     }
 
+    /// **A new wearable is made the reference's way, never uploaded.**
+    ///
+    /// Second Life takes clothing and body parts over `NewFileAgentInventory`
+    /// only at L$ 10, so New Shirt / New Shape upload the default asset under a
+    /// fresh transaction and create the item naming it, with the slot on the
+    /// subtype byte — and register that transaction, which is what the item's
+    /// arrival will be matched by.
+    #[test]
+    fn a_new_wearable_is_created_on_its_upload() -> Result<(), String> {
+        use super::{CreateSinks, SettingsInventorySupport, dispatch_create};
+        use bevy::ecs::message::{MessageWriter, Messages};
+        use bevy::ecs::system::{ResMut, RunSystemOnce as _};
+        use bevy::prelude::World;
+        use sl_client_bevy::{SlCommand, TransactionId};
+
+        let dest = InventoryFolderKey::from(Uuid::from_u128(0x5E));
+        let mut world = World::new();
+        world.init_resource::<crate::intents::PendingItemCreations>();
+        world.init_resource::<PendingSettingsCreations>();
+        world.init_resource::<crate::inventory::InlineRename>();
+        world.init_resource::<Messages<SlCommand>>();
+        world.init_resource::<Messages<crate::inventory::InventoryUiAction>>();
+        for (action, slot, asset_type) in [
+            ("new-shirt", WearableType::Shirt, AssetType::Clothing),
+            ("new-shape", WearableType::Shape, AssetType::Bodypart),
+        ] {
+            let handled =
+                world
+                    .run_system_once(
+                        move |mut pending_creations: ResMut<
+                            crate::intents::PendingItemCreations,
+                        >,
+                              mut settings_creations: ResMut<PendingSettingsCreations>,
+                              mut rename: ResMut<crate::inventory::InlineRename>,
+                              mut commands: MessageWriter<SlCommand>,
+                              mut ui_actions: MessageWriter<
+                            crate::inventory::InventoryUiAction,
+                        >| {
+                            dispatch_create(
+                                action,
+                                dest,
+                                None,
+                                None,
+                                SettingsInventorySupport::new(true),
+                                CreateSinks {
+                                    pending_creations: &mut pending_creations,
+                                    settings_creations: &mut settings_creations,
+                                    commands: &mut commands,
+                                    ui_actions: &mut ui_actions,
+                                    rename: &mut rename,
+                                },
+                            )
+                        },
+                    )
+                    .map_err(|error| error.to_string())?;
+            assert!(handled, "{action} is a creator");
+            let sent: Vec<Command> = world
+                .resource_mut::<Messages<SlCommand>>()
+                .drain()
+                .map(|SlCommand(command)| command)
+                .collect();
+            let [Command::CreateInventoryItemWithAsset { item: new, data }] = sent.as_slice()
+            else {
+                return Err(format!("{action} sent {sent:?}"));
+            };
+            assert_eq!(
+                (
+                    new.folder_id,
+                    new.asset_type,
+                    new.inv_type,
+                    new.wearable_type
+                ),
+                (dest, asset_type, InventoryType::Wearable, slot),
+                "{action}"
+            );
+            assert!(!new.transaction_id.is_nil(), "{action} bound no upload");
+            let asset = sl_client_bevy::WearableAsset::parse(&String::from_utf8_lossy(data))
+                .map_err(|error| format!("{action}'s asset does not parse: {error:?}"))?;
+            assert_eq!(asset.wearable_type, slot);
+            let registered = world
+                .resource_mut::<crate::intents::PendingItemCreations>()
+                .take(TransactionId::from(new.transaction_id));
+            assert_eq!(
+                registered.map(|creation| creation.name),
+                Some(new.name.clone()),
+                "{action}'s transaction was not registered"
+            );
+        }
+        Ok(())
+    }
+
+    /// A wearable item announced with transaction `transaction`.
+    fn wearable_created(id: u128, transaction: Uuid) -> sl_client_bevy::SlEvent {
+        let agent = AgentKey::from(Uuid::from_u128(0xA9));
+        sl_client_bevy::SlEvent(sl_client_bevy::SlSessionEvent::InventoryItemCreated {
+            sim_approved: true,
+            transaction_id: transaction,
+            callback_id: None,
+            item: sl_client_bevy::InventoryItem {
+                item_id: InventoryKey::from(Uuid::from_u128(id)),
+                folder_id: InventoryFolderKey::from(Uuid::from_u128(0xF0)),
+                name: "New Shirt".to_owned(),
+                description: String::new(),
+                asset_id: Uuid::from_u128(0xA55E7),
+                item_type: i8::try_from(AssetType::Clothing.to_code()).unwrap_or(-1),
+                inv_type: i8::try_from(InventoryType::Wearable.to_code()).unwrap_or(-1),
+                flags: u32::from(WearableType::Shirt.to_code()),
+                sale_type: 0,
+                sale_price: None,
+                creation_date: 0,
+                owner: sl_client_bevy::OwnerKey::Agent(agent),
+                last_owner_id: Uuid::nil(),
+                creator_id: agent,
+                group: None,
+                permissions: Permissions5 {
+                    base: Permissions::empty(),
+                    owner: Permissions::empty(),
+                    group: Permissions::empty(),
+                    everyone: Permissions::empty(),
+                    next_owner: Permissions::empty(),
+                },
+            },
+        })
+    }
+
+    /// Feed `events` to the wearable-creation consumer with creations under
+    /// `transactions` in flight, returning what it published and the
+    /// notifications it raised.
+    fn wearable_creations(
+        transactions: &[u128],
+        events: Vec<sl_client_bevy::SlEvent>,
+    ) -> (
+        Vec<(Uuid, Option<InventoryKey>)>,
+        Vec<sl_viewer_notifications::ShowNotification>,
+    ) {
+        use crate::intents::{ItemCreationFinished, PendingItemCreations};
+        use bevy::prelude::{App, Update};
+        use sl_client_bevy::TransactionId;
+
+        let mut app = App::new();
+        app.add_message::<sl_client_bevy::SlEvent>()
+            .add_message::<ItemCreationFinished>()
+            .add_message::<sl_viewer_notifications::ShowNotification>()
+            .init_resource::<PendingItemCreations>()
+            .add_systems(Update, super::handle_item_creations);
+        for transaction in transactions {
+            app.world_mut()
+                .resource_mut::<PendingItemCreations>()
+                .enqueue(
+                    TransactionId::from(Uuid::from_u128(*transaction)),
+                    "New Shirt",
+                );
+        }
+        for event in events {
+            app.world_mut().write_message(event);
+        }
+        app.update();
+        let finished = app
+            .world_mut()
+            .resource_mut::<bevy::ecs::message::Messages<ItemCreationFinished>>()
+            .drain()
+            .map(|done| (done.transaction.get(), done.item))
+            .collect();
+        let notices = app
+            .world_mut()
+            .resource_mut::<bevy::ecs::message::Messages<sl_viewer_notifications::ShowNotification>>()
+            .drain()
+            .collect();
+        (finished, notices)
+    }
+
+    /// **A wearable creation is finished by the item that names its
+    /// transaction**, whatever order the items arrive in — and an item nobody
+    /// here asked for (a nil transaction: an accepted offer, a New Script) is
+    /// left alone.
+    #[test]
+    fn a_wearable_creation_is_matched_by_its_transaction() {
+        let (finished, notices) = wearable_creations(
+            &[0x71, 0x72],
+            vec![
+                wearable_created(0xB1, Uuid::nil()),
+                wearable_created(0xB2, Uuid::from_u128(0x72)),
+                wearable_created(0xB3, Uuid::from_u128(0x71)),
+            ],
+        );
+        assert_eq!(
+            finished,
+            vec![
+                (
+                    Uuid::from_u128(0x72),
+                    Some(InventoryKey::from(Uuid::from_u128(0xB2)))
+                ),
+                (
+                    Uuid::from_u128(0x71),
+                    Some(InventoryKey::from(Uuid::from_u128(0xB3)))
+                ),
+            ]
+        );
+        assert!(notices.is_empty(), "a success raised {notices:?}");
+    }
+
+    /// **A refused wearable upload says so** — the reference's
+    /// `CannotSaveToAssetStore` — and finishes its creation empty, while a
+    /// refused upload that is not a creation (an in-place save) is not this
+    /// consumer's to report.
+    #[test]
+    fn a_refused_wearable_upload_says_so() {
+        let refused = |transaction: u128| {
+            sl_client_bevy::SlEvent(sl_client_bevy::SlSessionEvent::InventoryAssetSaved {
+                transaction_id: Some(sl_client_bevy::TransactionId::from(Uuid::from_u128(
+                    transaction,
+                ))),
+                asset_id: Uuid::from_u128(0xA5),
+                success: false,
+            })
+        };
+        let (finished, notices) = wearable_creations(&[0x71], vec![refused(0x99), refused(0x71)]);
+        assert_eq!(finished, vec![(Uuid::from_u128(0x71), None)]);
+        assert_eq!(
+            notices
+                .iter()
+                .map(|notice| notice.template)
+                .collect::<Vec<_>>(),
+            vec!["CannotSaveToAssetStore"]
+        );
+    }
+
     /// A minimal item of the given types, owned with the given owner mask.
     fn item(id: u128, inv_type: InventoryType, asset_type: AssetType, owner_mask: u32) -> ItemInfo {
         ItemInfo {
@@ -4517,11 +4741,9 @@ mod tests {
             .filter_map(|SlCommand(command)| match command {
                 Command::CreateScript {
                     next_owner_mask, ..
-                }
-                | Command::UploadAsset {
-                    next_owner_mask, ..
                 } => Some(next_owner_mask),
                 Command::CreateInventoryItem(new) => Some(new.next_owner_mask),
+                Command::CreateInventoryItemWithAsset { item, .. } => Some(item.next_owner_mask),
                 _ => None,
             })
             .collect();

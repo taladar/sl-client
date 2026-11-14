@@ -496,6 +496,19 @@ region, and what either grid does with the other start-location slots.
   region, so a mirror of the regions kept one the draw distance had stopped
   reaching until the next world reset; the Bevy plugin's region index now
   drops it, and its parcel overlay with it.
+- **The viewer draws water where a retired neighbour was**, as the
+  reference's `LLWorld::removeRegion` does. Every store the viewer keeps per
+  region declares itself region-scoped (`sl_viewer_world_api::region_scoped`,
+  the per-region twin of the world-reset purge) and forgets the region on
+  `NeighborRetired`: its land patches and their material, its queued patch
+  rebuilds, its sea level (its square of sea becomes void water at the level
+  around it), its time dilation and its Land Owners map; the patches of the
+  regions still held that were stitched to it are rebuilt to the edge of the
+  loaded world. The minimap's backdrop and the property lines rebuild from the
+  regions still held. The retained land cache keeps the region's heights, as
+  it does through a world reset. A full-stack test steps the draw distance
+  down on the OpenSim flavour and watches the neighbour's marker and ground
+  leave the picture, then come back.
 - **A repeated announcement is not news.** An `EnableSimulator` for a region
   already held and an `EstablishAgentCommunication` naming a seed already
   held raise no event. Second Life's five-second repeat used to have the

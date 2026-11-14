@@ -76,6 +76,6 @@ pub use render::{
 pub use semantics::{Diagnostic, DiagnosticKind, Severity, analyze};
 pub use syntax::{
     LSL_SYNTAX_VERSION, LslArgument, LslConstant, LslEvent, LslFunction, LslKeyword, LslSyntax,
-    SymbolKind,
+    SECOND_LIFE_UNSERVED, SymbolKind,
 };
 pub use token::Token;

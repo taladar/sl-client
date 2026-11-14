@@ -188,7 +188,7 @@ pub use login_llsd::{
     build_login_request_llsd, build_login_response_llsd, parse_login_request_llsd,
     parse_login_response_llsd,
 };
-pub use lsl_syntax::{build_lsl_syntax_document, parse_lsl_syntax};
+pub use lsl_syntax::{build_lsl_syntax_document, parse_lsl_syntax, second_life_unserved_syntax};
 pub use map_tile::{MAP_TILE_CONTENT_TYPE, MAP_TILE_MAX_ZOOM, MAP_TILE_MIN_ZOOM, MapTileRef};
 pub use material::{
     FaceMaterialPut, GLTF_MATERIAL_OVERRIDE_METHOD, GltfMaterialOverride, LegacyMaterial,

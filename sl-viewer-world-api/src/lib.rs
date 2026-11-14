@@ -34,6 +34,7 @@ pub mod phases;
 pub mod pick_probe;
 pub mod prim_clicks;
 pub mod probe_queue;
+pub mod region_scoped;
 pub mod rlv;
 pub mod schedule_order;
 pub mod settings;

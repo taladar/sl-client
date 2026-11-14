@@ -504,13 +504,28 @@ mod tests {
         ("radio-group-row", &["sk-radio-group", "sk-radio"]),
         ("combo-box", &["sk-combo"]),
         ("notification-overflow", &["sk-button", "sk-glyph-cycle"]),
-        ("radar", &["sk-table-row"]),
+        (
+            "radar",
+            &[
+                "sk-table-row",
+                "sk-radar-range",
+                "sk-radar-range-chat",
+                "sk-radar-range-shout",
+                "sk-radar-range-unknown",
+            ],
+        ),
         ("worldmap", &["sk-list-row", "sk-selected"]),
         ("experiences-floater", &["sk-table-row"]),
         ("emoji-picker", &["sk-tile"]),
         (
             "parcel-audio-bar",
-            &["sk-action-button", "sk-glyph-music", "sk-text", "sk-slider"],
+            &[
+                "sk-parcel-audio-bar",
+                "sk-action-button",
+                "sk-glyph-music",
+                "sk-text",
+                "sk-slider",
+            ],
         ),
     ];
 

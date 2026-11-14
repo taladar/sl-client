@@ -556,3 +556,62 @@ async fn a_file_dialog_is_answered_with_an_absolute_path_or_cancelled() -> Resul
     assert_eq!(paths, vec![Some(expected), None]);
     Ok(())
 }
+
+#[tokio::test]
+async fn a_pie_is_waited_for_in_frames_and_a_click_replayed_only_when_none_opens()
+-> Result<(), String> {
+    let waits = Arc::new(Mutex::new(0_u32));
+    let (viewer, seen) = viewer(
+        ViewerOptions::new("one"),
+        Arc::new(move |body| match body {
+            RequestBody::GroundAction { .. } => Some(Ok(ResponseBody::GroundDone {
+                hit_point: [1.0, 2.0, 25.0],
+            })),
+            // The first click's pie never shows; the second's does.
+            RequestBody::WaitFor { locator, .. } => {
+                let mut waits = waits.lock().ok()?;
+                *waits = waits.saturating_add(1);
+                Some(if *waits == 1 {
+                    Err(AutomationError::TimedOut {
+                        locator: locator.clone(),
+                        condition: Some(WaitCondition::Visible),
+                        failed_check: None,
+                        last_observed: Vec::new(),
+                        frames: 30,
+                        millis: 10_000,
+                    })
+                } else {
+                    Ok(ResponseBody::Satisfied { nodes: Vec::new() })
+                })
+            }
+            _ => None,
+        }),
+    )
+    .await
+    .map_err(|error| error.to_string())?;
+    let _hit = viewer
+        .world()
+        .ground("Here", 1.0, 2.0)
+        .open_pie()
+        .await
+        .map_err(|error| error.to_string())?;
+    let seen = seen.lock().map_err(|error| error.to_string())?.clone();
+    let clicks = seen
+        .iter()
+        .filter(|body| matches!(body, RequestBody::GroundAction { .. }))
+        .count();
+    assert_eq!(clicks, 2, "{seen:?}");
+    let frames: Vec<Option<u32>> = seen
+        .iter()
+        .filter_map(|body| match body {
+            RequestBody::WaitFor {
+                condition: WaitCondition::Visible,
+                deadline,
+                ..
+            } => Some(deadline.frames),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(frames, vec![Some(30), Some(30)]);
+    Ok(())
+}

@@ -41,11 +41,15 @@ use bevy::prelude::*;
 use bevy::text::{EditableText, FontCx, LayoutCx};
 use bevy::ui::Checked;
 use bevy::ui_widgets::ValueChange;
+use std::collections::{HashSet, VecDeque};
+
 use sl_client_bevy::{
-    AssetKey, AssetType, Command, FaceMaterialPut, GltfAlphaMode, GltfMaterial, GltfTexture,
-    GltfTextureTransform, InventoryType, LegacyMaterial, MaterialOverride, MaterialOverrideUpdate,
-    ObjectKey, Permissions, SlCommand, TextureFace, TextureKey, TextureOverride,
-    TextureTransformOverride, Uuid, encode_override_gltf_json, upload_decoded,
+    AssetKey, AssetType, AssetUpdateLocation, Command, FaceMaterialPut, GltfAlphaMode,
+    GltfMaterial, GltfTexture, GltfTextureTransform, InventoryFolderKey, InventoryKey,
+    InventoryType, LegacyMaterial, MaterialOverride, MaterialOverrideUpdate, NewInventoryItem,
+    ObjectKey, Permissions, SlCommand, SlEvent, SlSessionEvent, TextureFace, TextureKey,
+    TextureOverride, TextureTransformOverride, UpdatableAssetType, Uuid, WearableType,
+    encode_override_gltf_json, upload_decoded,
 };
 
 use crate::edit_texture::{
@@ -610,6 +614,8 @@ impl Plugin for EditMaterialPlugin {
         app.add_message::<LocalChatNotice>()
             .init_resource::<MatShownSnapshot>()
             .init_resource::<LegacyPreview>()
+            .init_resource::<PendingMaterialCreations>()
+            .add_systems(Update, finish_material_creations)
             .add_systems(
                 Update,
                 (
@@ -2712,6 +2718,7 @@ type PbrSaveSession<'w> = (
     Res<'w, SelectionSet>,
     Res<'w, MaterialManager>,
     Res<'w, crate::inventory::InventoryModel>,
+    ResMut<'w, PendingMaterialCreations>,
     MessageWriter<'w, SlCommand>,
 );
 
@@ -2743,10 +2750,23 @@ fn handle_pbr_new_press(
 }
 
 /// Save the primary face's effective PBR material to inventory as a new
-/// `AT_MATERIAL` asset (the reference material editor's Save): encode it and
-/// upload it into the agent's Materials folder over `NewFileAgentInventory`. The
-/// new asset lands in inventory; the user assigns it to faces via the
-/// render-material swatch (auto-assign-on-save is not wired).
+/// `AT_MATERIAL` item (the reference's `LLMaterialEditor::saveObjectsMaterialAs`):
+/// mint an empty material item in the agent's Materials folder with
+/// `CreateInventoryItem`, and hold the encoded material on
+/// [`PendingMaterialCreations`] until the grid names the item, when
+/// [`finish_material_creations`] writes it in. The user assigns the saved
+/// material to faces via the render-material swatch (auto-assign-on-save is
+/// not wired).
+///
+/// # Why not an upload
+///
+/// This was an `UploadAsset` (`NewFileAgentInventory`, class `material`), and
+/// Second Life — the one grid with PBR materials — refuses that class
+/// outright: `Upload_InvalidAssetType`, *Invalid asset type: material*
+/// (`book/src/gridspec/assets.md` § Uploads). The reference never uploads a
+/// material that way; `LLMaterialEditor::createInventoryItem` creates the
+/// item and its callback saves the bytes over `UpdateMaterialAgentInventory`,
+/// which is what this does.
 fn handle_pbr_save_press(
     press: On<Pointer<Press>>,
     buttons: Query<(), With<PbrSaveButton>>,
@@ -2757,7 +2777,7 @@ fn handle_pbr_save_press(
         return;
     }
     // Absent only in the gallery / `ui_test` hosts.
-    let Some((selection, material_manager, inventory, mut commands)) = session else {
+    let Some((selection, material_manager, inventory, mut pending, mut commands)) = session else {
         return;
     };
     let (material_id, base, over) = representative_pbr(&selection, &material_manager, &faces);
@@ -2772,19 +2792,106 @@ fn handle_pbr_save_press(
     else {
         return;
     };
-    let data = sl_client_bevy::encode_material_asset(&effective);
-    commands.write(SlCommand(Command::UploadAsset {
-        folder_id,
-        asset_type: AssetType::Material,
-        inventory_type: InventoryType::Material,
-        name: "New Material".to_owned(),
-        description: String::new(),
+    pending.enqueue(sl_client_bevy::encode_material_asset(&effective));
+    commands.write(SlCommand(new_material_item(NEW_MATERIAL_NAME, folder_id)));
+}
+
+/// The name a material saved from the Build window is filed under — the
+/// reference's `SaveMaterialAs` default, its *New Material* string.
+const NEW_MATERIAL_NAME: &str = "New Material";
+
+/// The `CreateInventoryItem` that mints an empty **material** item named
+/// `name` in `folder` — the reference's `LLMaterialEditor::createInventoryItem`:
+/// no transaction (no asset of ours is bound to it; the body is saved over it
+/// afterwards) and no subtype.
+fn new_material_item(name: &str, folder: InventoryFolderKey) -> Command {
+    Command::CreateInventoryItem(NewInventoryItem {
+        folder_id: folder,
+        transaction_id: Uuid::nil(),
         next_owner_mask: Permissions::DEFAULT_NEXT_OWNER,
-        group_mask: Permissions::NONE,
-        everyone_mask: Permissions::NONE,
-        expected_upload_cost: 0,
-        data,
-    }));
+        asset_type: AssetType::Material,
+        inv_type: InventoryType::Material,
+        // `NO_INV_SUBTYPE`: the byte is the generic subtype, and 0 is none.
+        wearable_type: WearableType::from_code(0),
+        name: name.to_owned(),
+        description: String::new(),
+    })
+}
+
+/// The **material** items the Build window's Save asked the grid for and has
+/// not yet seen named, oldest first, each with the encoded material to write
+/// into it.
+///
+/// `UpdateCreateInventoryItem` names the fresh item but not which request it
+/// answers (the callback id is the session's own), so replies are matched in
+/// order, as the settings creators match theirs
+/// (`sl_viewer_intents::PendingSettingsCreations`). The two queues never take
+/// each other's replies: each reads only items of its own asset type.
+#[derive(Resource, Debug, Default)]
+struct PendingMaterialCreations {
+    /// The bodies of the creations in flight, oldest first.
+    queue: VecDeque<Vec<u8>>,
+    /// The items this queue has already filled. Second Life announces an item
+    /// again with the same message when a capability save rewrites it — which
+    /// the fill itself is — and that announcement must not spend the entry of
+    /// a creation still in flight.
+    filled: HashSet<InventoryKey>,
+}
+
+impl PendingMaterialCreations {
+    /// Enqueue a creation's body, so the reply that names its item is matched
+    /// to it.
+    fn enqueue(&mut self, body: Vec<u8>) {
+        self.queue.push_back(body);
+    }
+
+    /// Match an announced material item to the oldest creation in flight,
+    /// returning the body to write into it — `None` for an item this queue
+    /// did not ask for (an accepted offer, a rewrite of one it already filled,
+    /// an item the inventory already held).
+    fn claim(&mut self, item: InventoryKey, known: bool) -> Option<Vec<u8>> {
+        if known || self.filled.contains(&item) {
+            return None;
+        }
+        let body = self.queue.pop_front()?;
+        let _new = self.filled.insert(item);
+        Some(body)
+    }
+}
+
+/// Finish a Build-window material Save when its item is announced: write the
+/// encoded material into it over `UpdateMaterialAgentInventory`
+/// ([`Command::UpdateInventoryAsset`]) — the second half of
+/// [`handle_pbr_save_press`], as `LLObjectsMaterialItemCallback::fire` is the
+/// second half of `LLMaterialEditor::createInventoryItem`.
+fn finish_material_creations(
+    mut events: MessageReader<SlEvent>,
+    inventory: Option<Res<crate::inventory::InventoryModel>>,
+    mut pending: ResMut<PendingMaterialCreations>,
+    mut commands: MessageWriter<SlCommand>,
+) {
+    for event in events.read() {
+        let SlSessionEvent::InventoryItemCreated { item, .. } = &event.0 else {
+            continue;
+        };
+        // The wire item carries raw type codes, not the typed enums.
+        if i32::from(item.item_type) != AssetType::Material.to_code() {
+            continue;
+        }
+        let known = inventory
+            .as_ref()
+            .is_some_and(|model| model.find_item(item.item_id).is_some());
+        let Some(data) = pending.claim(item.item_id, known) else {
+            continue;
+        };
+        commands.write(SlCommand(Command::UpdateInventoryAsset {
+            location: AssetUpdateLocation::AgentInventory {
+                item_id: item.item_id,
+            },
+            asset_type: UpdatableAssetType::Material,
+            data,
+        }));
+    }
 }
 
 /// Apply `edit` to every selected face's resolved legacy material and send them
@@ -2889,9 +2996,18 @@ fn byte_at(color: [u8; 4], index: usize) -> u8 {
 
 #[cfg(test)]
 mod tests {
+    use bevy::prelude::*;
     use pretty_assertions::assert_eq;
+    use sl_client_bevy::{
+        AgentKey, AssetType, AssetUpdateLocation, Command, InventoryFolderKey, InventoryItem,
+        InventoryKey, InventoryType, OwnerKey, Permissions, Permissions5, SlCommand, SlEvent,
+        SlSessionEvent, UpdatableAssetType, Uuid,
+    };
 
-    use super::{LegacyField, default_legacy_material, round_to_byte};
+    use super::{
+        LegacyField, NEW_MATERIAL_NAME, PendingMaterialCreations, default_legacy_material,
+        finish_material_creations, new_material_item, round_to_byte,
+    };
 
     /// A legacy transform field round-trips degrees ⇔ radians.
     #[test]
@@ -2923,5 +3039,144 @@ mod tests {
         assert_eq!(round_to_byte(-5.0), 0);
         assert_eq!(round_to_byte(300.0), 255);
         assert_eq!(round_to_byte(127.6), 128);
+    }
+
+    /// **A material Save asks for an empty material item, never an upload**:
+    /// Second Life refuses `NewFileAgentInventory` for the material class, so
+    /// the item is made with `CreateInventoryItem`, binding no transaction.
+    #[test]
+    fn a_material_save_creates_an_empty_material_item() -> Result<(), String> {
+        let folder = InventoryFolderKey::from(Uuid::from_u128(0xF0));
+        let command = new_material_item("Polished", folder);
+        let Command::CreateInventoryItem(new) = command else {
+            return Err(format!("a material is saved with {command:?}"));
+        };
+        assert_eq!(
+            (
+                new.folder_id,
+                new.asset_type,
+                new.inv_type,
+                new.transaction_id,
+                new.wearable_type.to_code(),
+                new.name.as_str(),
+            ),
+            (
+                folder,
+                AssetType::Material,
+                InventoryType::Material,
+                Uuid::nil(),
+                0,
+                "Polished",
+            )
+        );
+        Ok(())
+    }
+
+    /// An announced wire item `id` of `asset_type`.
+    fn announced(id: u128, asset_type: AssetType) -> SlEvent {
+        let agent = AgentKey::from(Uuid::from_u128(0xA9));
+        SlEvent(SlSessionEvent::InventoryItemCreated {
+            sim_approved: true,
+            transaction_id: Uuid::nil(),
+            callback_id: None,
+            item: InventoryItem {
+                item_id: InventoryKey::from(Uuid::from_u128(id)),
+                folder_id: InventoryFolderKey::from(Uuid::from_u128(0xF0)),
+                name: NEW_MATERIAL_NAME.to_owned(),
+                description: String::new(),
+                asset_id: Uuid::from_u128(0xA55E7),
+                item_type: i8::try_from(asset_type.to_code()).unwrap_or(-1),
+                inv_type: 0,
+                flags: 0,
+                sale_type: 0,
+                sale_price: None,
+                creation_date: 0,
+                owner: OwnerKey::Agent(agent),
+                last_owner_id: Uuid::nil(),
+                creator_id: agent,
+                group: None,
+                permissions: Permissions5 {
+                    base: Permissions::empty(),
+                    owner: Permissions::empty(),
+                    group: Permissions::empty(),
+                    everyone: Permissions::empty(),
+                    next_owner: Permissions::empty(),
+                },
+            },
+        })
+    }
+
+    /// Feed `events` to [`finish_material_creations`] with `bodies` in flight,
+    /// returning every `(item, body)` it wrote into a material item.
+    fn finished(bodies: &[&[u8]], events: Vec<SlEvent>) -> Vec<(u128, Vec<u8>)> {
+        let mut app = App::new();
+        app.add_message::<SlEvent>()
+            .add_message::<SlCommand>()
+            .init_resource::<PendingMaterialCreations>()
+            .add_systems(Update, finish_material_creations);
+        for body in bodies {
+            app.world_mut()
+                .resource_mut::<PendingMaterialCreations>()
+                .enqueue(body.to_vec());
+        }
+        for event in events {
+            let _id = app.world_mut().write_message(event);
+        }
+        app.update();
+        let written = app.world().resource::<Messages<SlCommand>>();
+        written
+            .iter_current_update_messages()
+            .filter_map(|command| match &command.0 {
+                Command::UpdateInventoryAsset {
+                    location: AssetUpdateLocation::AgentInventory { item_id },
+                    asset_type: UpdatableAssetType::Material,
+                    data,
+                } => Some((item_id.uuid().as_u128(), data.clone())),
+                _other => None,
+            })
+            .collect()
+    }
+
+    /// **Each announced material item gets the body of the Save that asked for
+    /// it, in order**, and nothing else spends an entry: an item of another
+    /// type (a settings item, another queue's reply), and Second Life's second
+    /// announcement of an item the fill itself rewrote.
+    #[test]
+    fn announced_material_items_are_filled_in_order() {
+        let written = finished(
+            &[b"first", b"second"],
+            vec![
+                announced(0x51, AssetType::Settings),
+                announced(0x1, AssetType::Material),
+                announced(0x1, AssetType::Material),
+                announced(0x2, AssetType::Material),
+            ],
+        );
+        assert_eq!(
+            written,
+            vec![(0x1, b"first".to_vec()), (0x2, b"second".to_vec())]
+        );
+    }
+
+    /// A material item nobody here asked for — an accepted offer — is left
+    /// alone.
+    #[test]
+    fn an_unasked_material_item_is_left_alone() {
+        assert_eq!(
+            finished(&[], vec![announced(0x1, AssetType::Material)]),
+            vec![]
+        );
+    }
+
+    /// An item the inventory already holds is a rewrite, not the creation in
+    /// flight, and keeps that creation's body for the item still to come.
+    #[test]
+    fn a_known_item_does_not_spend_a_creation() {
+        let mut pending = PendingMaterialCreations::default();
+        pending.enqueue(b"body".to_vec());
+        let known = InventoryKey::from(Uuid::from_u128(0x7));
+        let fresh = InventoryKey::from(Uuid::from_u128(0x8));
+        assert_eq!(pending.claim(known, true), None);
+        assert_eq!(pending.claim(fresh, false), Some(b"body".to_vec()));
     }
 }

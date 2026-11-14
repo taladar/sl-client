@@ -29,11 +29,12 @@
 //! Deliberate divergences from the reference radar: no voice / notes columns
 //! (no voice or notes support yet), no per-column show / hide bitmask, no
 //! LSL-bridge altitude correction, no script-channel (Phoenix) alerts, and no
-//! camera-zoom action (no focus-other-avatar camera primitive yet); friend /
-//! muted name styling is colour-only (table cells have no bold / italic).
-//! The range cell's chat / shout colours follow the name tag's distance
-//! palette (green / yellow); beyond-shout keeps the plain cell colour, like
-//! the reference radar's silver. Both row menus are missing the reference's
+//! camera-zoom action (no focus-other-avatar camera primitive yet), and no
+//! contact-set name colours (no contact sets yet). As the reference draws
+//! them, a name is in the list's own text colour, a friend's **bold** and a
+//! muted avatar's *italic*, and a range is bold while its avatar is drawn
+//! (`set_row_styles`); the range bands are skin roles (`RANGE_CLASS`).
+//! Both row menus are missing the reference's
 //! parcel / estate moderation entries (Freeze, Parcel Eject, Estate Kick /
 //! Teleport Home / Ban), which no viewer surface offers per avatar yet — they
 //! are `viewer-avatar-moderation-actions`, and light up in the pie, here and
@@ -48,6 +49,7 @@ use bevy::input_focus::{FocusCause, InputFocus};
 use bevy::prelude::*;
 use bevy::text::EditableText;
 use bevy_flair::style::components::{ClassList, PseudoElementsSupport};
+use sl_viewer_ui_core::double_click::DoubleClickWindow;
 use sl_viewer_ui_core::glyph;
 use sl_viewer_ui_core::semantic::{LabelledBy, Role, Semantic};
 
@@ -121,9 +123,6 @@ const SWEEP_SECONDS: f32 = 1.0;
 /// payment backfill), so a crowded region does not burst the grid.
 const PROPERTIES_PER_SWEEP: usize = 5;
 
-/// Seconds within which a second press on the same row is a double-click.
-const DOUBLE_CLICK_SECS: f32 = 0.4;
-
 // --- Settings ([`RADAR_SECTION`], account scope on write) -----------------
 
 /// The persisted-settings section the radar's knobs live under (`[radar]`).
@@ -155,42 +154,154 @@ const LABEL_COLOR: Color = SkinPalette::FALLBACK.text_primary;
 /// The dimmed header / secondary colour.
 const DIM_LABEL_COLOR: Color = SkinPalette::FALLBACK.text_muted;
 
-/// The four colours a radar row borrows from the **name-tag palette**, read
-/// from the settings store so the list agrees with the tags over the avatars'
-/// heads.
+/// The weight and slant of one row's name and range cells, the reference's
+/// `name_style` / `range_style` (`FSRadar::updateRadarList`).
 ///
-/// They used to be four local constants holding the palette's *fallback*
-/// values, which is the failure this exists to prevent: a user who retuned
-/// `NameTagColorFriend` saw it in the world and not in the radar, and nothing
-/// said the two were meant to be the same colour. `setting_color` carries the
-/// same fallbacks, so a viewer with no store still draws what those constants
-/// did.
-#[derive(Debug, Clone, Copy)]
-struct RadarTagColors {
-    /// A friend's name (`NameTagColorFriend`).
-    friend: Color,
-    /// A muted avatar's name (`NameTagColorMuted`).
-    muted: Color,
-    /// The range cell inside chat range (`NameTagDistanceColorChat`).
-    chat_range: Color,
-    /// The range cell inside shout range (`NameTagDistanceColorShout`).
-    shout_range: Color,
+/// A friend is told apart by a **bold** name and a muted avatar by an
+/// *italic* one, never by a colour: the reference draws every name in
+/// `AvatarListItemIconDefaultColor`, the list's own text, and only a contact
+/// set colours one. The radar used to tint them with the name-tag friend and
+/// muted colours instead, tuned for text over the world, and the friend green
+/// all but vanished on a light skin's selected row. A range is bold while its
+/// avatar is drawn — within draw distance with a body in the scene, which a
+/// coarse-only entry is not.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct RowStyles {
+    /// The name cell's weight and slant.
+    name: (FontWeight, FontStyle),
+    /// The range cell's weight.
+    range: FontWeight,
 }
 
-impl RadarTagColors {
-    /// Resolve the four from the store, or from the name-tag palette's own
-    /// fallbacks where there is none.
-    fn from_settings(settings: Option<&ViewerSettings>) -> Self {
-        use sl_viewer_ui_core::skin_colors::{
-            SETTING_NAME_TAG_DISTANCE_CHAT, SETTING_NAME_TAG_DISTANCE_SHOUT,
-            SETTING_NAME_TAG_FRIEND, SETTING_NAME_TAG_MUTED, setting_color,
+impl RowStyles {
+    /// The plain styles of a row that presents nobody.
+    const PLAIN: Self = Self {
+        name: (FontWeight::NORMAL, FontStyle::Normal),
+        range: FontWeight::NORMAL,
+    };
+
+    /// The styles of the row presenting `data`.
+    fn of(data: &RadarRow) -> Self {
+        let weight = |bold: bool| {
+            if bold {
+                FontWeight::BOLD
+            } else {
+                FontWeight::NORMAL
+            }
+        };
+        let slant = if data.muted {
+            FontStyle::Italic
+        } else {
+            FontStyle::Normal
         };
         Self {
-            friend: setting_color(settings, SETTING_NAME_TAG_FRIEND),
-            muted: setting_color(settings, SETTING_NAME_TAG_MUTED),
-            chat_range: setting_color(settings, SETTING_NAME_TAG_DISTANCE_CHAT),
-            shout_range: setting_color(settings, SETTING_NAME_TAG_DISTANCE_SHOUT),
+            name: (weight(data.friend), slant),
+            range: weight(data.distance.is_some() && !data.coarse_only),
         }
+    }
+}
+
+/// Give a row's name and range cells their [`RowStyles`], write-guarded so an
+/// unchanged style does not re-measure the text.
+fn set_row_styles(fonts: &mut Query<&mut TextFont>, cells: &TableRowCells, styles: RowStyles) {
+    if let Some(mut font) = cells
+        .cell(COL_NAME)
+        .and_then(|cell| fonts.get_mut(cell).ok())
+    {
+        set_font_style(&mut font, styles.name.0, styles.name.1);
+    }
+    if let Some(mut font) = cells
+        .cell(COL_RANGE)
+        .and_then(|cell| fonts.get_mut(cell).ok())
+    {
+        set_font_style(&mut font, styles.range, FontStyle::Normal);
+    }
+}
+
+/// Set one cell font's weight and slant where they differ.
+fn set_font_style(font: &mut Mut<'_, TextFont>, weight: FontWeight, slant: FontStyle) {
+    if font.weight != weight {
+        font.weight = weight;
+    }
+    if font.style != slant {
+        font.style = slant;
+    }
+}
+
+/// The CSS class on a range cell that is in one of the three range bands, worn
+/// with the band's own class ([`RANGE_CHAT_CLASS`], [`RANGE_SHOUT_CLASS`],
+/// [`RANGE_BEYOND_CLASS`], [`RANGE_UNKNOWN_CLASS`]).
+///
+/// The bands are skin roles of their own, `--radar-range-chat` / `-shout` /
+/// `-beyond` / `-unknown`, the reference's `AvatarListItemChatRange` /
+/// `AvatarListItemShoutRange` / `AvatarListItemBeyondShoutRange`: a list
+/// colour, read against the list's face, which a light skin has to be able to
+/// darken without touching the name tags over the world. Two classes rather
+/// than one so `common.css` can write the rule at a specificity that beats a
+/// selected row's text, as the reference keeps a cell's own colour on a
+/// selected row.
+///
+/// A range the viewer does not know (the `>draw-distance` form) has a role of
+/// its own: the reference paints it in the beyond colour, which the flat skins'
+/// muted look for it would lose.
+const RANGE_CLASS: &str = "sk-radar-range";
+
+/// The band class of a range within chat range.
+const RANGE_CHAT_CLASS: &str = "sk-radar-range-chat";
+
+/// The band class of a range within shout range.
+const RANGE_SHOUT_CLASS: &str = "sk-radar-range-shout";
+
+/// The band class of a range beyond shout range.
+const RANGE_BEYOND_CLASS: &str = "sk-radar-range-beyond";
+
+/// The band class of a range the viewer does not know.
+const RANGE_UNKNOWN_CLASS: &str = "sk-radar-range-unknown";
+
+/// The skinless colour of a range within chat range — the flat skins'
+/// `--radar-range-chat`, which is the name-tag palette's chat green.
+const RANGE_CHAT_COLOR: Color = Color::srgb(0.0, 1.0, 0.0);
+
+/// The skinless colour of a range within shout range — the flat skins'
+/// `--radar-range-shout`, the name-tag palette's shout yellow.
+const RANGE_SHOUT_COLOR: Color = Color::srgb(1.0, 1.0, 0.0);
+
+/// The band class a range band wears.
+const fn range_band_class(band: RangeBand) -> &'static str {
+    match band {
+        RangeBand::Chat => RANGE_CHAT_CLASS,
+        RangeBand::Shout => RANGE_SHOUT_CLASS,
+        RangeBand::Beyond => RANGE_BEYOND_CLASS,
+        RangeBand::Unknown => RANGE_UNKNOWN_CLASS,
+    }
+}
+
+/// Put a range cell's classes in `band`'s state: [`RANGE_CLASS`] and the one
+/// band class for a bound row, none of them for an empty one.
+fn range_classes(classes: &mut Mut<'_, ClassList>, band: Option<RangeBand>) {
+    let wanted = band.map(range_band_class);
+    set_state_class(classes, RANGE_CLASS, wanted.is_some());
+    for class in [
+        RANGE_CHAT_CLASS,
+        RANGE_SHOUT_CLASS,
+        RANGE_BEYOND_CLASS,
+        RANGE_UNKNOWN_CLASS,
+    ] {
+        set_state_class(classes, class, wanted == Some(class));
+    }
+}
+
+/// [`range_classes`] for the range cell of a pooled row.
+fn set_range_classes(
+    texts: &mut Query<(&mut Text, &mut TextColor, Option<&mut ClassList>)>,
+    cells: &TableRowCells,
+    band: Option<RangeBand>,
+) {
+    let Some(cell) = cells.cell(COL_RANGE) else {
+        return;
+    };
+    if let Ok((_, _, Some(mut classes))) = texts.get_mut(cell) {
+        range_classes(&mut classes, band);
     }
 }
 
@@ -732,6 +843,8 @@ impl RadarNames<'_> {
 struct RadarClick<'w, 's> {
     /// The clock the double-click window is measured on.
     time: Res<'w, Time>,
+    /// The app's double-click window.
+    double_click: DoubleClickWindow<'w>,
     /// The keyboard focus, which the clicked viewport takes.
     focus: ResMut<'w, InputFocus>,
     /// The radar's own selection.
@@ -1721,7 +1834,7 @@ fn status_cell_text(row: &RadarRow) -> String {
 }
 
 /// Bind each pooled radar row to the [`RadarRow`] it now presents: the cell
-/// texts and the per-cell colours (range band, friend / muted name).
+/// texts, the per-cell colours and the name / range styles ([`RowStyles`]).
 ///
 /// The selection **highlight** is not here: the table is a
 /// [`TableSelectionMode::Multi`] one now, so the widget paints its own selected
@@ -1730,16 +1843,15 @@ fn bind_radar_rows(
     view: Res<RadarView>,
     state: Res<RadarState>,
     ui: Option<Res<RadarUi>>,
-    settings: Option<Res<ViewerSettings>>,
     mut rows: Query<(Ref<VirtualRow>, &ChildOf, &TableRowCells, &mut BoundRadar)>,
     mut texts: Query<(&mut Text, &mut TextColor, Option<&mut ClassList>)>,
+    mut fonts: Query<&mut TextFont>,
     mut commands: Commands,
 ) {
     let Some(ui) = ui else {
         return;
     };
     let refresh_all = view.is_changed();
-    let tags = RadarTagColors::from_settings(settings.as_deref());
     for (row, child_of, cells, mut bound) in &mut rows {
         if child_of.parent() != ui.viewport {
             continue;
@@ -1756,37 +1868,33 @@ fn bind_radar_rows(
                 }
             }
             set_position_mark(&mut texts, &mut commands, cells, None);
+            set_range_classes(&mut texts, cells, None);
+            set_row_styles(&mut fonts, cells, RowStyles::PLAIN);
             continue;
         };
-        let cell_values = radar_row_values(data, tags, &state);
+        let cell_values = radar_row_values(data, &state);
         for (column, value, color) in cell_values {
             if let Some(cell) = cells.cell(column) {
                 set_table_cell(&mut texts, cell, &value, color);
             }
         }
         set_position_mark(&mut texts, &mut commands, cells, Some(!data.coarse_only));
+        let band = range_band(data.distance, state.chat_range, state.shout_range);
+        set_range_classes(&mut texts, cells, Some(band));
+        set_row_styles(&mut fonts, cells, RowStyles::of(data));
     }
 }
 
-/// The `(column, value, colour)` cells of one radar row: the name in its friend /
-/// muted tint, the region dot's role colour, the status glyphs, and the range in
-/// its chat / shout band — the projection [`bind_radar_rows`] paints a pooled row
+/// The `(column, value, colour)` cells of one radar row: the name in the list's
+/// text colour (its friend / muted look is a style, [`RowStyles`]), the region
+/// dot's role colour, the status glyphs, and the range in its band — the projection [`bind_radar_rows`] paints a pooled row
 /// with, and the specimen its sample rows.
-fn radar_row_values(
-    data: &RadarRow,
-    tags: RadarTagColors,
-    state: &RadarState,
-) -> [(usize, String, Color); 10] {
-    let name_color = if data.muted {
-        tags.muted
-    } else if data.friend {
-        tags.friend
-    } else {
-        LABEL_COLOR
-    };
+fn radar_row_values(data: &RadarRow, state: &RadarState) -> [(usize, String, Color); 10] {
+    // The skinless fallback of each band; a skin paints the band's class
+    // (`range_classes`) over it.
     let range_color = match range_band(data.distance, state.chat_range, state.shout_range) {
-        RangeBand::Chat => tags.chat_range,
-        RangeBand::Shout => tags.shout_range,
+        RangeBand::Chat => RANGE_CHAT_COLOR,
+        RangeBand::Shout => RANGE_SHOUT_COLOR,
         RangeBand::Beyond => LABEL_COLOR,
         RangeBand::Unknown => DIM_LABEL_COLOR,
     };
@@ -1806,7 +1914,7 @@ fn radar_row_values(
         LABEL_COLOR
     };
     [
-        (COL_NAME, name_cell_text(data), name_color),
+        (COL_NAME, name_cell_text(data), LABEL_COLOR),
         (COL_REGION, String::new(), region_color),
         (COL_STATUS, status_cell_text(data), DIM_LABEL_COLOR),
         (COL_TITLE, data.title.clone(), LABEL_COLOR),
@@ -1926,12 +2034,11 @@ pub fn spawn_radar_specimen(
         })
         .collect();
     sort_rows(&mut rows, &keys);
-    let tags = RadarTagColors::from_settings(None);
     let values: Vec<Vec<(String, Color)>> = rows
         .iter()
         .map(|data| {
             let mut cells = vec![(String::new(), LABEL_COLOR); RADAR_TABLE.columns.len()];
-            for (column, value, color) in radar_row_values(data, tags, &state) {
+            for (column, value, color) in radar_row_values(data, &state) {
                 if let Some(cell) = cells.get_mut(column) {
                     *cell = (value, color);
                 }
@@ -1955,6 +2062,25 @@ pub fn spawn_radar_specimen(
                 ))
                 .entry::<ClassList>()
                 .and_modify(move |mut classes| position_mark_classes(&mut classes, precise));
+        }
+        if let Some(cell) = cells.cell(COL_RANGE) {
+            let band = range_band(data.distance, state.chat_range, state.shout_range);
+            commands
+                .entity(cell)
+                .entry::<ClassList>()
+                .and_modify(move |mut classes| range_classes(&mut classes, Some(band)));
+        }
+        let styles = RowStyles::of(data);
+        for (column, weight, slant) in [
+            (COL_NAME, styles.name.0, styles.name.1),
+            (COL_RANGE, styles.range, FontStyle::Normal),
+        ] {
+            if let Some(cell) = cells.cell(column) {
+                commands
+                    .entity(cell)
+                    .entry::<TextFont>()
+                    .and_modify(move |mut font| set_font_style(&mut font, weight, slant));
+            }
         }
         commands.entity(*row).insert(BoundRadar(Some(data.agent)));
     }
@@ -2091,7 +2217,9 @@ fn on_radar_row_press(
     match press.button {
         PointerButton::Primary => {
             let now = click.time.elapsed_secs();
-            if click.clicks.agent == Some(agent) && now - click.clicks.time <= DOUBLE_CLICK_SECS {
+            if click.clicks.agent == Some(agent)
+                && click.double_click.holds(f64::from(now - click.clicks.time))
+            {
                 out.profiles.write(OpenAvatarProfile { agent });
                 click.clicks.agent = None;
             } else {
@@ -2772,5 +2900,124 @@ mod tests {
         let mut cursor = messages.get_cursor();
         let opened: Vec<AgentKey> = cursor.read(messages).map(|open| open.agent).collect();
         assert_eq!(opened, vec![agent(3)]);
+    }
+
+    /// A friend's name is bold and a muted avatar's italic, in the list's own
+    /// text colour rather than a tint, and a range is bold only while its
+    /// avatar is drawn — the reference's `name_style` / `range_style`.
+    #[test]
+    fn a_friend_is_bold_a_muted_avatar_italic_and_a_drawn_range_bold() {
+        use super::{COL_NAME, LABEL_COLOR, RowStyles, radar_row_values};
+
+        let plain = (FontWeight::NORMAL, FontStyle::Normal);
+        let stranger = row(1);
+        assert_eq!(RowStyles::of(&stranger), RowStyles::PLAIN);
+
+        let friend = RadarRow {
+            friend: true,
+            ..row(2)
+        };
+        assert_eq!(
+            RowStyles::of(&friend).name,
+            (FontWeight::BOLD, FontStyle::Normal)
+        );
+        let muted = RadarRow {
+            muted: true,
+            ..row(3)
+        };
+        assert_eq!(
+            RowStyles::of(&muted).name,
+            (FontWeight::NORMAL, FontStyle::Italic)
+        );
+        let muted_friend = RadarRow {
+            friend: true,
+            muted: true,
+            ..row(4)
+        };
+        assert_eq!(
+            RowStyles::of(&muted_friend).name,
+            (FontWeight::BOLD, FontStyle::Italic)
+        );
+
+        let drawn = RadarRow {
+            distance: Some(12.0),
+            ..row(5)
+        };
+        assert_eq!(RowStyles::of(&drawn).range, FontWeight::BOLD);
+        assert_eq!(RowStyles::of(&drawn).name, plain);
+        let coarse = RadarRow {
+            distance: Some(300.0),
+            coarse_only: true,
+            ..row(6)
+        };
+        assert_eq!(RowStyles::of(&coarse).range, FontWeight::NORMAL);
+        assert_eq!(RowStyles::of(&stranger).range, FontWeight::NORMAL);
+
+        let state = RadarState::default();
+        for data in [&stranger, &friend, &muted, &muted_friend] {
+            let name_color = radar_row_values(data, &state)
+                .into_iter()
+                .find(|(column, _, _)| *column == COL_NAME)
+                .map(|(_, _, color)| color);
+            assert_eq!(name_color, Some(LABEL_COLOR), "names are never tinted");
+        }
+    }
+
+    /// A range cell wears the band its row is in and **only** that one, and
+    /// takes it off again when the row moves or empties — which is what lets a
+    /// skin colour the bands without the cell keeping a band it has left.
+    #[test]
+    fn a_range_cell_wears_exactly_its_band() -> Result<(), String> {
+        use super::{
+            RANGE_BEYOND_CLASS, RANGE_CHAT_CLASS, RANGE_CLASS, RANGE_SHOUT_CLASS,
+            RANGE_UNKNOWN_CLASS, RangeBand, range_classes,
+        };
+        use bevy_flair::style::components::ClassList;
+
+        let mut world = World::new();
+        let cell = world.spawn(ClassList::new("sk-text")).id();
+        let mut worn = |band: Option<RangeBand>| -> Result<Vec<&'static str>, String> {
+            let mut entity = world.entity_mut(cell);
+            let mut classes = entity
+                .get_mut::<ClassList>()
+                .ok_or("the cell lost its ClassList")?;
+            range_classes(&mut classes, band);
+            Ok([
+                "sk-text",
+                RANGE_CLASS,
+                RANGE_CHAT_CLASS,
+                RANGE_SHOUT_CLASS,
+                RANGE_BEYOND_CLASS,
+                RANGE_UNKNOWN_CLASS,
+            ]
+            .into_iter()
+            .filter(|&class| classes.contains(class))
+            .collect())
+        };
+
+        assert_eq!(
+            worn(Some(RangeBand::Chat))?,
+            vec!["sk-text", RANGE_CLASS, RANGE_CHAT_CLASS]
+        );
+        assert_eq!(
+            worn(Some(RangeBand::Shout))?,
+            vec!["sk-text", RANGE_CLASS, RANGE_SHOUT_CLASS],
+            "moving out of chat range must take the chat band off"
+        );
+        assert_eq!(
+            worn(Some(RangeBand::Beyond))?,
+            vec!["sk-text", RANGE_CLASS, RANGE_BEYOND_CLASS]
+        );
+        assert_eq!(
+            worn(Some(RangeBand::Unknown))?,
+            vec!["sk-text", RANGE_CLASS, RANGE_UNKNOWN_CLASS]
+        );
+        assert_eq!(worn(Some(RangeBand::Chat))?.len(), 3);
+        assert_eq!(
+            worn(None)?,
+            vec!["sk-text"],
+            "an emptied row's cell must keep no band"
+        );
+        Ok(())
     }
 }

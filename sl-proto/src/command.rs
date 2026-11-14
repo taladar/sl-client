@@ -2523,6 +2523,25 @@ pub enum Command {
         /// The raw asset bytes.
         data: Vec<u8>,
     },
+    /// Create a **new** agent-inventory item holding fresh asset bytes over the
+    /// legacy UDP transaction path (`AssetUploadRequest` + a
+    /// `CreateInventoryItem` naming the same transaction) — how a new
+    /// **wearable** or a wearable's copy is made (the reference viewer's
+    /// `LLAgentWearables::createWearable`). Second Life's
+    /// [`UploadAsset`](Self::UploadAsset) takes clothing and body parts only at
+    /// a price; this road is free on both grids. The item arrives as
+    /// [`Event::InventoryItemCreated`](crate::Event::InventoryItemCreated)
+    /// echoing the transaction; the upload's completion as
+    /// [`Event::InventoryAssetSaved`](crate::Event::InventoryAssetSaved), whose
+    /// failure means no item will come.
+    CreateInventoryItemWithAsset {
+        /// The item to create. Its `transaction_id` must be freshly minted and
+        /// non-nil: it binds the upload to the item, and the simulator derives
+        /// the stored asset id as `combine(transaction_id, secure_session_id)`.
+        item: Box<NewInventoryItem>,
+        /// The raw asset bytes.
+        data: Vec<u8>,
+    },
     /// Upload new source into an existing script inventory item and have the
     /// **simulator compile it** (the `UpdateScriptAgent` / `UpdateScriptTask`
     /// capability, chosen by `location`). The viewer never compiles locally — it
@@ -3501,6 +3520,7 @@ impl Command {
             Self::UploadBakedTexture { .. } => "UploadBakedTexture",
             Self::UpdateInventoryAsset { .. } => "UpdateInventoryAsset",
             Self::SaveInventoryAsset { .. } => "SaveInventoryAsset",
+            Self::CreateInventoryItemWithAsset { .. } => "CreateInventoryItemWithAsset",
             Self::UploadScript { .. } => "UploadScript",
             Self::RequestObjectMedia { .. } => "RequestObjectMedia",
             Self::SetObjectMedia { .. } => "SetObjectMedia",

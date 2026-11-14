@@ -10,42 +10,50 @@
 //! direct-event side channel the binary asset fetches and experience
 //! fetches use.
 
-use crate::{EVENT_QUEUE_TIMEOUT, deliver};
+use crate::{Caps, EVENT_QUEUE_TIMEOUT, NetOutbound, deliver, report};
 use crossbeam_channel::Sender;
 use reqwest::blocking::Client as ReqwestBlockingClient;
 use sl_proto::Event as SessionEvent;
 use sl_proto::{
-    MarketplaceBuildRequestError, MarketplaceMethod, MarketplaceOperation, MarketplaceRequest,
-    marketplace_failure_event, marketplace_reply_event,
+    CAP_DIRECT_DELIVERY, MarketplaceBuildRequestError, MarketplaceMethod, MarketplaceOperation,
+    MarketplaceRequest, marketplace_failure_event, marketplace_reply_event,
 };
 
-/// Dispatch one SLM command: spawn the HTTP request thread when the
+/// Dispatch one SLM command: spawn the HTTP request thread when the region's
 /// `DirectDelivery` capability is present and the request body built,
-/// otherwise send the per-operation failure event inline (viewer
-/// parity: the reference viewer's empty-capability-URL path reports a
-/// connection failure rather than dropping the command silently —
-/// this keeps the commands observable on grids without the
-/// capability, e.g. OpenSim).
+/// otherwise send the per-operation failure event inline (viewer parity: the
+/// reference viewer's empty-capability-URL path reports a connection failure
+/// rather than dropping the command silently — this keeps the commands
+/// observable on grids without the capability, e.g. OpenSim, and before the
+/// region's capabilities have arrived at all).
+///
+/// The inline failure goes straight to the app side over `outbound`, since
+/// before the capabilities arrive there is no asset channel to carry it.
 pub(crate) fn dispatch_marketplace_request(
-    cap_url: Option<String>,
+    caps: Option<&Caps>,
     operation: MarketplaceOperation,
     request: Result<MarketplaceRequest, MarketplaceBuildRequestError>,
-    asset_tx: &Sender<SessionEvent>,
+    outbound: &Sender<NetOutbound>,
 ) {
-    let failure_reason = match (cap_url, request) {
-        (Some(url), Ok(request)) => {
-            let asset_tx = asset_tx.clone();
+    let target = caps.and_then(|caps| {
+        caps.map
+            .get(CAP_DIRECT_DELIVERY)
+            .map(|url| (url.clone(), caps.asset_tx.clone()))
+    });
+    let failure_reason = match (target, request) {
+        (Some((url, asset_tx)), Ok(request)) => {
             crate::log_context::spawn_thread(move || {
                 run_marketplace_request(&url, operation, request, &asset_tx);
             });
             return;
         }
+        (None, _) if caps.is_none() => "the region's capabilities have not arrived yet".to_owned(),
         (None, _) => "no DirectDelivery capability (not granted by this region/grid)".to_owned(),
         (_, Err(e)) => e.to_string(),
     };
-    deliver(
-        asset_tx,
-        marketplace_failure_event(operation, failure_reason),
+    report(
+        outbound,
+        NetOutbound::Event(marketplace_failure_event(operation, failure_reason)),
     );
 }
 

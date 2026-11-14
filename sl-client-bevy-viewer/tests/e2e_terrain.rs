@@ -15,15 +15,26 @@
 //! And the ground outlives the session: a viewer that relogs into a region
 //! whose ground has not streamed yet still knows the height it stands on,
 //! from the land it kept on disk ([[viewer-terrain-land-cache-on-disk]]).
+//!
+//! And the Land tool's brushes say when the land under them is not the
+//! agent's to terraform: a press on a stranger's parcel warns
+//! `ParcelNoTerraforming` and strokes anyway, a press on the agent's own land
+//! says nothing ([[viewer-terraform-parcel-refusal]]) — on both fake flavours,
+//! and on Second Life's own land.
 
 #[cfg(test)]
 mod test {
     use core::time::Duration;
 
-    use sl_automation_proto::Probe;
-    use sl_e2e::{BodyError, Stage, StageBuilder};
-    use sl_fake_grid::{Heightfield, ImitatedGrid, RegionConfig, TerrainFixture};
-    use sl_viewer_driver::Viewer;
+    use sl_automation_proto::{Locator, Probe, Role};
+    use sl_e2e::{BodyError, Need, Stage, StageBuilder};
+    use sl_fake_grid::world::rect_parcel;
+    use sl_fake_grid::{Heightfield, ImitatedGrid, RegionConfig, RegionFixture, TerrainFixture};
+    use sl_proto::{
+        AgentKey, LandBrushAction, OwnerKey, ParcelKey, RegionLocalParcelId, ServerEvent, Uuid,
+    };
+    use sl_viewer_driver::{GroundHandle, Viewer};
+    use tokio::sync::broadcast;
 
     /// A failed stage, or a test that could not set one up.
     type TestError = Box<dyn core::error::Error>;
@@ -293,6 +304,313 @@ mod test {
     #[test]
     fn an_opensim_flavoured_ground_has_the_regions_heights() -> Result<(), TestError> {
         stage("terrain_open_sim", ImitatedGrid::OpenSim).run(the_ground_is_the_regions)?;
+        Ok(())
+    }
+
+    // ---- The Land tool's parcel refusal -----------------------------------
+
+    /// The Build window's floater id.
+    const BUILD_WINDOW: &str = "build-tools";
+
+    /// The template a press on land the agent may not terraform raises.
+    const PARCEL_REFUSAL: &str = "ParcelNoTerraforming";
+
+    /// The stranger's parcel: the region's northern half.
+    const STRANGERS: RegionLocalParcelId = RegionLocalParcelId(1);
+
+    /// The stranger's parcel's name, which the warning names.
+    const STRANGERS_NAME: &str = "Elsewhere";
+
+    /// Alpha's own parcel: the region's southern half.
+    const ALPHAS: RegionLocalParcelId = RegionLocalParcelId(2);
+
+    /// Where the brush is pressed on the stranger's land, ahead of an agent
+    /// that logs in at the centre facing east.
+    const ON_THE_STRANGERS: (f32, f32) = (140.0, 136.0);
+
+    /// Where the brush is pressed on Alpha's own land.
+    const ON_ALPHAS: (f32, f32) = (140.0, 120.0);
+
+    /// How many presses a warning is given to come: the first press can beat
+    /// the answer to the hover's question about the parcel, and is then
+    /// silent, as the reference's is.
+    const PRESSES: usize = 5;
+
+    /// How long one press's warning is given.
+    const PER_PRESS: Duration = Duration::from_secs(3);
+
+    /// How long after the grid answered the hover request a press on Alpha's
+    /// own land is left before it, and how long its silence is watched.
+    const SETTLE: Duration = Duration::from_secs(2);
+
+    /// A region split east-west at its middle: the north half a stranger's,
+    /// the south half to be handed to Alpha once its id is known.
+    fn split_region() -> RegionConfig {
+        let stranger = AgentKey::from(Uuid::from_u128(0x7E44_0001));
+        let mut fixture = RegionFixture::new();
+        fixture.world.add_parcel(
+            rect_parcel(
+                STRANGERS,
+                OwnerKey::Agent(stranger),
+                STRANGERS_NAME,
+                0.0,
+                128.0,
+                256.0,
+                256.0,
+            ),
+            ParcelKey::from(Uuid::from_u128(0x7E44_000A)),
+            0.0,
+        );
+        fixture.world.add_parcel(
+            rect_parcel(
+                ALPHAS,
+                OwnerKey::Agent(stranger),
+                "Home",
+                0.0,
+                0.0,
+                256.0,
+                128.0,
+            ),
+            ParcelKey::from(Uuid::from_u128(0x7E44_000B)),
+            0.0,
+        );
+        fixture.into_region(RegionConfig::default())
+    }
+
+    /// Open the Build window on the Land tool with the Revert brush picked —
+    /// the brush that does nothing to land never edited, so a stroke the grid
+    /// takes is harmless on any grid.
+    async fn pick_the_revert_brush(alpha: &Viewer) -> Result<(), BodyError> {
+        alpha.press("Ctrl+B").await?;
+        let build = alpha.ui().window(BUILD_WINDOW);
+        let _open = alpha.expect(&build).timeout(WAIT).to_be_visible().await?;
+        let _land = build
+            .get(Locator::role(Role::Radio).name_key("build-tool-select-land"))
+            .click()
+            .await?;
+        let revert = build.get(Locator::role(Role::Radio).name_key("build-land-revert"));
+        let _shown = alpha.expect(&revert).timeout(WAIT).to_be_visible().await?;
+        let _picked = revert.click().await?;
+        let _checked = alpha.expect(&revert).timeout(WAIT).to_be_checked().await?;
+        Ok(())
+    }
+
+    /// Press the brush on `ground` until the refusal shows, and return its
+    /// text.
+    async fn press_until_refused(
+        alpha: &Viewer,
+        ground: &GroundHandle,
+    ) -> Result<String, BodyError> {
+        for _press in 0..PRESSES {
+            let _hit = ground.click().await?;
+            if alpha
+                .expect_notification()
+                .timeout(PER_PRESS)
+                .to_show(PARCEL_REFUSAL)
+                .await
+                .is_ok()
+            {
+                let shown = alpha.notifications().await?;
+                return shown
+                    .into_iter()
+                    .find(|notification| notification.template == PARCEL_REFUSAL)
+                    .map(|notification| notification.text)
+                    .ok_or_else(|| "the refusal went before it could be read".into());
+            }
+        }
+        let shown = alpha.notifications().await?;
+        Err(format!(
+            "{PRESSES} presses of the brush raised no {PARCEL_REFUSAL}; the notifications are \
+             {shown:?}"
+        )
+        .into())
+    }
+
+    /// Wait until the grid's session reports an event `wanted` accepts.
+    async fn grid_hears(
+        heard: &mut broadcast::Receiver<ServerEvent>,
+        what: &str,
+        wanted: impl Fn(&ServerEvent) -> bool + Send + Sync,
+    ) -> Result<(), BodyError> {
+        let seen = tokio::time::timeout(WAIT, async {
+            loop {
+                match heard.recv().await {
+                    Ok(event) if wanted(&event) => return Ok(()),
+                    Ok(_) | Err(broadcast::error::RecvError::Lagged(_)) => {}
+                    Err(error) => return Err(error),
+                }
+            }
+        })
+        .await;
+        match seen {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(error)) => Err(format!("the grid's event stream: {error}").into()),
+            Err(_elapsed) => Err(format!("the grid never heard {what}").into()),
+        }
+    }
+
+    /// Whether `event` is a revert stroke.
+    const fn is_revert_stroke(event: &ServerEvent) -> bool {
+        matches!(event, ServerEvent::ModifyLand { edit } if matches!(edit.action, LandBrushAction::Revert))
+    }
+
+    /// Whether `event` is the Land tool's hover question about a square of
+    /// the half of the region `north_half` names: a request from the hover's
+    /// own sequence range, never a snapping one.
+    ///
+    /// Any square of the half, not the one aimed at: while the camera frames
+    /// the point the cursor sweeps the ground, and the question goes out for
+    /// the first square past the parcel line — the one under the point is
+    /// then in a parcel already answered, and rightly asks nothing.
+    fn is_hover_request(event: &ServerEvent, north_half: bool) -> bool {
+        matches!(
+            event,
+            ServerEvent::RequestParcelProperties { south, north, sequence_id, snap_selection: false, .. }
+                if *sequence_id <= -50_000
+                    && if north_half { *south >= 128.0 } else { *north <= 128.0 }
+        )
+    }
+
+    /// The fake-grid stage: Alpha is handed the south half, its own land
+    /// draws no word from a press, the stranger's north half draws the
+    /// warning naming it, and the warned press still strokes.
+    async fn the_brush_warns_on_a_strangers_parcel(stage: &Stage) -> Result<(), BodyError> {
+        let alpha = &stage.viewer("Alpha")?;
+        arrived(alpha).await?;
+        let me = stage.agent_id("Alpha")?;
+        let session = stage.agent("Alpha").await?;
+        session
+            .with_world(|world, _sim| {
+                if let Some(parcel) = world
+                    .parcels
+                    .iter_mut()
+                    .find(|parcel| parcel.local_id == ALPHAS)
+                {
+                    parcel.owner = OwnerKey::Agent(me);
+                }
+            })
+            .await;
+        let mut heard = session.events();
+        pick_the_revert_brush(alpha).await?;
+
+        // Alpha's own land: the hover asks, the answer comes, and a press
+        // strokes without a word.
+        let home = alpha
+            .world()
+            .ground(stage.home_region(), ON_ALPHAS.0, ON_ALPHAS.1)
+            .timeout(WAIT);
+        let _rested = home.hover().await?;
+        grid_hears(
+            &mut heard,
+            "the hover's question about Alpha's land",
+            |event| is_hover_request(event, false),
+        )
+        .await?;
+        tokio::time::sleep(SETTLE).await;
+        let _hit = home.click().await?;
+        grid_hears(&mut heard, "the stroke on Alpha's land", is_revert_stroke).await?;
+        tokio::time::sleep(SETTLE).await;
+        let shown = alpha.notifications().await?;
+        if shown
+            .iter()
+            .any(|notification| notification.template == PARCEL_REFUSAL)
+        {
+            return Err(format!("a press on Alpha's own land was refused: {shown:?}").into());
+        }
+
+        // The stranger's land: the warning, naming the parcel, and the stroke
+        // all the same.
+        let elsewhere = alpha
+            .world()
+            .ground(stage.home_region(), ON_THE_STRANGERS.0, ON_THE_STRANGERS.1)
+            .timeout(WAIT);
+        let _rested = elsewhere.hover().await?;
+        grid_hears(
+            &mut heard,
+            "the hover's question about the stranger's land",
+            |event| is_hover_request(event, true),
+        )
+        .await?;
+        let text = press_until_refused(alpha, &elsewhere).await?;
+        if !text.contains(STRANGERS_NAME) {
+            return Err(format!("the refusal does not name {STRANGERS_NAME}: {text:?}").into());
+        }
+        grid_hears(
+            &mut heard,
+            "the stroke on the stranger's land",
+            is_revert_stroke,
+        )
+        .await?;
+        Ok(())
+    }
+
+    /// **A brush on a stranger's land, as Second Life's flavour answers**.
+    #[test]
+    fn a_brush_on_a_strangers_parcel_warns_on_second_life() -> Result<(), TestError> {
+        StageBuilder::new("terraform_parcel_second_life")
+            .viewer_binary(VIEWER)
+            .viewer("Alpha")
+            .region(split_region())
+            .configure_grid(|grid| grid.imitates(ImitatedGrid::SecondLife))
+            .needs(Need::GridControl)
+            .run(the_brush_warns_on_a_strangers_parcel)?;
+        Ok(())
+    }
+
+    /// **A brush on a stranger's land, as OpenSim's flavour answers**.
+    #[test]
+    fn a_brush_on_a_strangers_parcel_warns_on_opensim() -> Result<(), TestError> {
+        StageBuilder::new("terraform_parcel_open_sim")
+            .viewer_binary(VIEWER)
+            .viewer("Alpha")
+            .region(split_region())
+            .configure_grid(|grid| grid.imitates(ImitatedGrid::OpenSim))
+            .needs(Need::GridControl)
+            .run(the_brush_warns_on_a_strangers_parcel)?;
+        Ok(())
+    }
+
+    /// **A brush on Second Life's own land**: on aditi the avatar is a
+    /// resident standing on land that is neither its own nor its region
+    /// owner's, so a revert pressed beside it warns `ParcelNoTerraforming`
+    /// naming the parcel there — where the grid itself would say nothing.
+    #[test]
+    fn a_brush_beside_a_resident_on_second_life_warns() -> Result<(), TestError> {
+        StageBuilder::new("terraform_parcel_live")
+            .viewer_binary(VIEWER)
+            .viewer("Alpha")
+            .needs(Need::SecondLife("a resident on land not its own"))
+            .run(async |stage: &Stage| {
+                let alpha = &stage.viewer("Alpha")?;
+                arrived(alpha).await?;
+                // A live region is up before the avatar stands in it.
+                let _placed = alpha
+                    .expect_state(Probe::Agent)
+                    .at("/position")
+                    .timeout(WAIT)
+                    .to_be_present()
+                    .await?;
+                let readout = alpha.agent().await?;
+                let spot = readout.position.ok_or("Alpha has no position")?;
+                let eye = readout.camera_eye.ok_or("Alpha has no camera")?;
+                let (ahead_x, ahead_y) = (spot[0] - eye[0], spot[1] - eye[1]);
+                let length = ahead_x.hypot(ahead_y).max(0.001);
+                let (ahead_x, ahead_y) = (ahead_x / length, ahead_y / length);
+                // Ahead and to the right, as the ground-beside stage aims: the
+                // avatar's own body hides the ground straight ahead of it, and
+                // the Build window sits on the left.
+                let east = (spot[0] + BESIDE * ahead_x + BESIDE * ahead_y).clamp(1.0, 254.0);
+                let north = (spot[1] + BESIDE * ahead_y - BESIDE * ahead_x).clamp(1.0, 254.0);
+                pick_the_revert_brush(alpha).await?;
+                let ground = alpha
+                    .world()
+                    .ground(stage.home_region(), east, north)
+                    .timeout(WAIT);
+                let _rested = ground.hover().await?;
+                let text = press_until_refused(alpha, &ground).await?;
+                tracing::info!("the brush beside Alpha was refused: {text}");
+                Ok(())
+            })?;
         Ok(())
     }
 }

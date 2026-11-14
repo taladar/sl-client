@@ -61,6 +61,7 @@ use sl_client_bevy::{
     PickUpdate, ProfileUpdate, RegionCoordinates, RegionHandle, SlCommand, SlEvent, SlIdentity,
     SlSessionEvent, TextureKey, Uuid, Vector,
 };
+use sl_viewer_ui_core::double_click::DoubleClickWindow;
 use sl_viewer_ui_core::scrollbar::{ScrollTarget, spawn_scrollbar};
 use sl_viewer_ui_core::semantic::{Role, Semantic};
 
@@ -106,10 +107,6 @@ const GROUP_LINK_COLOR: Color = Color::srgb(0.52, 0.68, 0.95);
 
 /// The 2nd-Life group list's bounded scroll height, in logical pixels.
 const GROUP_LIST_HEIGHT: f32 = 120.0;
-
-/// The longest gap between two clicks on the same group row still counted as a
-/// double-click (which opens the group profile), in seconds.
-const GROUP_DOUBLE_CLICK_SECS: f32 = 0.4;
 
 /// A button's background.
 const BUTTON_BACKGROUND: Color = Color::srgb(0.13, 0.15, 0.20);
@@ -2540,7 +2537,7 @@ fn request_ui_texture(commands: &mut Commands, image_id: Option<TextureKey>, nod
 struct ProfileGroupRow(GroupKey);
 
 /// The last group-row press, for detecting a double-click (two presses on the same
-/// group within [`GROUP_DOUBLE_CLICK_SECS`] open its profile). Tracked by group id.
+/// group within the app's double-click window ([`DoubleClickWindow`]) open its profile). Tracked by group id.
 #[derive(Resource, Debug, Default)]
 struct ProfileGroupClick {
     /// The group the last press landed on, if any.
@@ -2580,12 +2577,13 @@ fn spawn_profile_group_row(
 }
 
 /// Open the group profile floater when a profile group row is **double-clicked**
-/// (two primary presses on the same group within [`GROUP_DOUBLE_CLICK_SECS`]) —
+/// (two primary presses on the same group within the app's double-click window ([`DoubleClickWindow`])) —
 /// matching the reference's group-list double-click.
 fn on_profile_group_open(
     press: On<Pointer<Press>>,
     rows: Query<&ProfileGroupRow>,
     time: Res<Time>,
+    double_click: DoubleClickWindow,
     mut tracker: ResMut<ProfileGroupClick>,
     mut groups: MessageWriter<OpenGroupProfile>,
 ) {
@@ -2597,7 +2595,7 @@ fn on_profile_group_open(
     };
     let group = row.0;
     let now = time.elapsed_secs();
-    if tracker.group == Some(group) && now - tracker.time <= GROUP_DOUBLE_CLICK_SECS {
+    if tracker.group == Some(group) && double_click.holds(f64::from(now - tracker.time)) {
         groups.write(OpenGroupProfile { group });
         tracker.group = None;
     } else {

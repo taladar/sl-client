@@ -326,13 +326,27 @@ the two animation refusals' words on `FakeSl`.
   `Event::PostcardFailed`. Each fails at once where the region grants no
   such capability, the flag aside: there nothing is answered, and the
   reference viewer takes that for leave to upload.
-- **The viewer makes new wearables and new materials over
-  `NewFileAgentInventory`**, stating a cost of `0`. OpenSim takes both (and
-  files the material as a texture); Second Life refuses the material by name
-  and the wearable for its price. The reference viewer creates the item
-  first and saves into it. Both are filed as bugs
-  (`viewer-new-wearable-refused-on-second-life`,
-  `viewer-new-material-refused-on-second-life`).
+- **A new wearable, and a wearable's Save As, is made on a transaction
+  upload**, as the reference's `LLAgentWearables::createWearable` makes one:
+  the asset goes up over the legacy UDP `AssetUploadRequest` under a fresh
+  transaction, and a `CreateInventoryItem` naming that transaction, with the
+  slot on its subtype byte, asks for the item
+  (`Command::CreateInventoryItemWithAsset`). The simulator creates the item on
+  the stored asset, stamps the slot into its flags and announces it with an
+  `UpdateCreateInventoryItem` echoing the transaction, which is what the
+  viewer matches it by, on OpenSim as on aditi (`e2e_windows`' new-shirt
+  stage, 2026-11-12); a refused upload is answered by its
+  `AssetUploadComplete` alone, and the viewer raises `CannotSaveToAssetStore`.
+  Neither grid states or asks a price on this road. It used to be a
+  `NewFileAgentInventory` upload stating a cost of `0`, which Second Life
+  refuses for its L$ 10 price (`viewer-new-wearable-refused-on-second-life`).
+- **A material saved from the Build window is created, then saved into**, as
+  the reference's `LLMaterialEditor::createInventoryItem` does: an empty
+  material item from `CreateInventoryItem` (no transaction, no subtype), and
+  the encoded material written into it over `UpdateMaterialAgentInventory`
+  once `UpdateCreateInventoryItem` names it. It used to be a
+  `NewFileAgentInventory` upload, which Second Life refuses by name
+  (`viewer-new-material-refused-on-second-life`).
 
 ### Not measured about uploads
 
@@ -341,5 +355,6 @@ account. A postcard's second request. A thumbnail for a folder nobody has,
 and for an item in a prim that exists. An upload into a folder of another
 agent's. A texture above 2048 pixels, a sound in another codec inside an Ogg
 container, an animation with constraints. What OpenSim charges under a money
-module that charges. The legacy UDP `AssetUploadRequest`, which wearables
-are saved by.
+module that charges. What Second Life answers a refused transaction upload
+with, and whether its balance moves for an accepted one: the new-shirt run
+reads no balance.

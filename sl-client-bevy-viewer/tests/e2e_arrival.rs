@@ -162,6 +162,11 @@ mod test {
             .role(Role::Textbox)
             .fill(region)
             .await?;
+        // The map searches on Enter, never as it is typed in.
+        map.test_id("worldmap:search")
+            .role(Role::Textbox)
+            .press("Enter")
+            .await?;
         let _picked = map
             .get(Locator::role(Role::ListItem).named(region))
             .timeout(WAIT)

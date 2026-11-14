@@ -122,8 +122,12 @@ const SLIDER: SliderStyle = SliderStyle {
     font_size: BAR_FONT_SIZE,
 };
 
-/// The cluster's backdrop (matches the toolbar's dark surface).
+/// The cluster's fallback backdrop, used when no skin is loaded — the skin's
+/// `.sk-parcel-audio-bar` (`var(--surface-bg)`, the toolbar strip's surface)
+/// overrides it.
 const BAR_BACKGROUND: Color = Color::srgba(0.08, 0.09, 0.12, 0.92);
+/// The CSS class on the cluster's backing strip, so a skin colours it.
+const BAR_CLASS: &str = "sk-parcel-audio-bar";
 /// The bar's quieter second line — the muted role.
 const BAR_LABEL_DIM: Color = SkinPalette::FALLBACK.text_muted;
 /// Button borders.
@@ -425,6 +429,7 @@ fn spawn_parcel_audio_cluster(
                 ..row(Val::Px(6.0))
             },
             BackgroundColor(BAR_BACKGROUND),
+            ClassList::new_with_classes([BAR_CLASS]),
             Pickable {
                 should_block_lower: true,
                 is_hoverable: true,

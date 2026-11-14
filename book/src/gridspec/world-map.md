@@ -117,24 +117,31 @@ dot for each avatar.
   sale — some twelve thousand items — for each of them. A reply of anything
   but agent locations is added to what is known, since one region's parcels
   arrive spread over hundreds of replies.
-- Its search sends nothing shorter than three characters, so that typing
-  does not raise OpenSim's alert, and lists a match anywhere in a name. The
-  entry that ends a search is no region and makes no row.
+- Its search runs on `Enter` or its Find button, never as the field is
+  typed in, as the reference viewer's does, so OpenSim's alert for a search
+  that matches nothing — and for one under three characters — comes once
+  for a search that was asked for. It lists a known region matching
+  anywhere in a name. The entry that ends a search is no region and makes
+  no row; once it arrives for the search in the field and nothing matches,
+  the list says "None found.", as the reference's does.
   `Event::MapBlockBatch` carries each reply whole — that entry and the
-  empty cells included — for a client that wants to know a search is over.
+  empty cells included.
+- A click into a cell it knows no region in asks the grid about that one
+  cell with the null-sims flag, as the reference viewer does. Until the
+  answer comes the selection reads "Loading…" and nothing is tracked; an
+  empty cell, or a region that is down, reads "Invalid location" and is
+  neither tracked nor gone to, and its Teleport button does nothing. A
+  region is tracked at the clicked spot, and gone to if the click was a
+  double-click.
 - A tile answered `403` is a failed fetch: it is tried again a few times
   and then left undrawn. OpenSim's water tile is drawn as any other.
 
 Checked through the viewer automation, which reads what the map knows with
 its `world_map` probe: on each fake flavour the map's search finds the
 neighbouring region and its Teleport button goes there
-(`e2e_pilot`); and with two viewers on each live grid
+(`e2e_pilot`), and a search for a name no region has says "None
+found."; and with two viewers on each live grid
 (`SL_E2E_GRID=opensim` and `=aditi`, `e2e_two_avatars`) the map names the
 region it is opened in, draws a tile from the grid's tile server, holds an
 agent location counting the other resident, and lists the region for a
 search of the start of its name — on OpenSim for its end as well.
-
-Still open: the modal alert OpenSim sends for a search that matches nothing
-is raised on every such search as it is typed, and nothing in the map says
-that a search has finished or that a clicked cell is empty
-(`viewer-world-map-search-end-and-empty-cells`).

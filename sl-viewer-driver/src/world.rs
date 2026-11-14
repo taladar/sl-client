@@ -11,8 +11,8 @@
 use std::time::{Duration, Instant};
 
 use sl_automation_proto::{
-    GroundPoint, Locator, NodeVisibility, RequestBody, ResponseBody, Role, UiNode, WorldAction,
-    WorldKind, WorldLocator, WorldNode, WorldWaitCondition,
+    AutomationError, Deadline, GroundPoint, Locator, RequestBody, ResponseBody, Role, UiNode,
+    WaitCondition, WorldAction, WorldKind, WorldLocator, WorldNode, WorldWaitCondition,
 };
 
 use crate::artifacts::Subject;
@@ -30,12 +30,21 @@ const SIT_DOWN: &str = "pie-avatar-sit-down";
 /// `sl_viewer_ui_pie_menu::pie_menu::PIE_MENU_NAME`.
 const PIE_MENU: &str = "pie-menu";
 
-/// How long a right click is given to put a pie up before it is played
-/// again. A click that lands is answered within a frame or two.
-const PIE_OPENS_WITHIN: Duration = Duration::from_secs(3);
+/// How many frames a right click is given to put a pie up before it is
+/// played again. A click that lands is answered within a frame or two.
+///
+/// Frames, not time: a starved viewer drawing three frames a second spent a
+/// three-second wait in nine frames, gave up on a pie that was still opening
+/// and played the click again over it.
+const PIE_OPENS_WITHIN_FRAMES: u32 = 30;
 
-/// How often the tree is read for a pie while one is waited for.
-const PIE_POLL: Duration = Duration::from_millis(100);
+/// The least wall-clock time a right click is given to put a pie up, when the
+/// action's own wait is nearly spent: the wait in frames stops at whichever
+/// comes first.
+const PIE_OPENS_AT_LEAST: Duration = Duration::from_secs(3);
+
+/// How long the failure of a pie that never opened looks for one last time.
+const PIE_LAST_LOOK: Duration = Duration::from_millis(100);
 
 /// The open pie menu of `viewer`.
 fn pie_of(viewer: &Viewer) -> UiLocator {
@@ -45,14 +54,33 @@ fn pie_of(viewer: &Viewer) -> UiLocator {
     })
 }
 
-/// Whether `viewer` shows a pie menu now.
-async fn pie_is_open(viewer: &Viewer) -> Result<bool, DriverError> {
-    Ok(pie_of(viewer).nodes().await?.iter().any(|node| {
-        matches!(
-            node.visibility,
-            NodeVisibility::Visible | NodeVisibility::Covered
+/// Wait in `viewer` for a pie menu to show, for
+/// [`PIE_OPENS_WITHIN_FRAMES`] frames or `within`, whichever passes first;
+/// whether one did. `what` names the action for a failure.
+async fn pie_opens(viewer: &Viewer, within: Duration, what: &str) -> Result<bool, DriverError> {
+    let locator = pie_of(viewer).as_locator().clone();
+    let action = format!("wait for the pie menu of {what}");
+    let response = viewer
+        .respond(
+            RequestBody::WaitFor {
+                locator: locator.clone(),
+                condition: WaitCondition::Visible,
+                deadline: Deadline {
+                    frames: Some(PIE_OPENS_WITHIN_FRAMES),
+                    millis: Some(u64::try_from(within.as_millis()).unwrap_or(u64::MAX)),
+                },
+            },
+            within,
         )
-    }))
+        .await?;
+    match response.result {
+        Ok(ResponseBody::Satisfied { .. }) => Ok(true),
+        Ok(other) => Err(viewer.unexpected(&action, &other)),
+        Err(AutomationError::TimedOut { .. }) => Ok(false),
+        Err(error) => Err(viewer
+            .fail(&action, error, response.report, Subject::Ui(&locator))
+            .await),
+    }
 }
 
 /// Play `right_click` until a pie is open, for `wait` at most, and return
@@ -72,12 +100,11 @@ async fn open_a_pie<T>(
     loop {
         let clicked = right_click().await?;
         clicks = clicks.saturating_add(1);
-        let played = Instant::now();
-        while played.elapsed() < PIE_OPENS_WITHIN {
-            if pie_is_open(viewer).await? {
-                return Ok(clicked);
-            }
-            tokio::time::sleep(PIE_POLL).await;
+        let within = wait
+            .saturating_sub(started.elapsed())
+            .max(PIE_OPENS_AT_LEAST);
+        if pie_opens(viewer, within, what).await? {
+            return Ok(clicked);
         }
         if started.elapsed() >= wait {
             tracing::warn!(what, clicks, "no right click opened a pie menu");
@@ -85,7 +112,7 @@ async fn open_a_pie<T>(
             // tree and the screenshot that go with one.
             let _pie = viewer
                 .expect(&pie_of(viewer))
-                .timeout(PIE_POLL)
+                .timeout(PIE_LAST_LOOK)
                 .to_be_visible()
                 .await?;
             return Ok(clicked);

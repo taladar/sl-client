@@ -68,6 +68,7 @@ use crate::virtual_list::{
     spawn_specimen_row, spawn_virtual_scrollbar,
 };
 use bevy_flair::style::components::{ClassList, PseudoElementsSupport};
+use sl_viewer_ui_core::double_click::DoubleClickWindow;
 use sl_viewer_ui_core::glyph;
 use sl_viewer_ui_core::semantic::{Expanded, Role, Semantic, sync_expanded};
 use sl_viewer_ui_core::skin::{
@@ -212,10 +213,6 @@ const ROW_FONT_SIZE: f32 = 14.0;
 /// resolved `i18n`'s `ui-ellipsis` — the Latin single ellipsis, matching the
 /// table cells' and tab strips' default.
 const FALLBACK_ELLIPSIS: &str = "\u{2026}";
-
-/// Two clicks on the same row within this window are a double-click (which
-/// toggles a folder), in seconds.
-const DOUBLE_CLICK_SECS: f64 = 0.35;
 
 /// The plugin that owns the inventory window.
 #[derive(Debug)]
@@ -3637,6 +3634,8 @@ struct RowPressState<'w, 's> {
     keyboard: Res<'w, ButtonInput<KeyCode>>,
     /// The clock the double-click window is measured on.
     time: Res<'w, Time>,
+    /// The app's double-click window.
+    double_click: DoubleClickWindow<'w>,
     /// The last press, for the double-click test.
     last_click: Local<'s, Option<(f64, usize)>>,
     /// The selection the press moves.
@@ -3663,6 +3662,7 @@ fn on_row_press(
     let RowPressState {
         keyboard,
         time,
+        double_click,
         mut last_click,
         mut selection,
         mut focus,
@@ -3685,7 +3685,7 @@ fn on_row_press(
     // A folder toggles on its expand arrow, or on a double-click anywhere.
     let now = time.elapsed_secs_f64();
     let double = last_click
-        .is_some_and(|(at, last_index)| last_index == index && now - at <= DOUBLE_CLICK_SECS);
+        .is_some_and(|(at, last_index)| last_index == index && double_click.holds(now - at));
     *last_click = Some((now, index));
     if let RowKey::Folder(folder) = key {
         let on_arrow = arrows.get(parts.arrow).is_ok_and(|(computed, transform)| {

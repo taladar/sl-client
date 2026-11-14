@@ -30,8 +30,11 @@
 //! **Save** authors the edited `.wearable` asset ([`WearableAsset::to_text`]) and
 //! writes it back onto the *same* item over the legacy transaction upload
 //! ([`Command::SaveInventoryAsset`]) — the reference's
-//! `LLAgentWearables::saveWearable`. **Save As** mints a fresh item via the CAPS
-//! uploader. **Revert** restores the asset the editor opened on.
+//! `LLAgentWearables::saveWearable`. **Save As** makes a fresh item the way a
+//! new wearable is made ([`new_wearable_command`]: the asset over the same
+//! transaction upload, and a `CreateInventoryItem` naming it) — the
+//! reference's `LLWearableList::createCopy`. **Revert** restores the asset the
+//! editor opened on.
 //!
 //! # One window per wearable
 //!
@@ -57,9 +60,9 @@
 //!   on the avatar. Two layers of one type preview independently too: the
 //!   composite draws every worn wearable of a type, in worn order, each from
 //!   its own asset (`sl-bake`'s `WornLayer`).
-//! - **Save.** An in-place save is matched back by the transaction it minted,
-//!   a Save As by its ticket in the shared creation queue — both carried by the
-//!   window that sent them, so a reply lands in the window that saved.
+//! - **Save.** An in-place save and a Save As are each matched back by the
+//!   transaction they minted, carried by the window that sent them, so a reply
+//!   lands in the window that saved.
 //!
 //! Reference (Firestorm, read-only): `llpaneleditwearable.cpp`,
 //! `llfloatercustomize.cpp`, `llwearabletype.cpp`.
@@ -73,10 +76,10 @@ use bevy::picking::hover::HoverMap;
 use bevy::prelude::*;
 use bevy::ui_widgets::{Activate, Slider, SliderRange, SliderStep, SliderValue, ValueChange};
 use sl_client_bevy::{
-    ASSET_CODE_LINK, AssetType, Command, InventoryKey, InventoryType, ItemInfo, JointOverrides,
-    ParamEffect, ParamGroup, ParamSex, Permissions, ResolvedParams, SkeletalDeformations,
-    SlCommand, SlEvent, SlSessionEvent, TextureKey, TransactionId, Uuid, WearableAsset,
-    WearablePermissions, WearableSaleType, WearableType,
+    ASSET_CODE_LINK, AssetType, Command, InventoryKey, ItemInfo, JointOverrides, ParamEffect,
+    ParamGroup, ParamSex, ResolvedParams, SkeletalDeformations, SlCommand, SlEvent, SlSessionEvent,
+    TextureKey, TransactionId, Uuid, WearableAsset, WearablePermissions, WearableSaleType,
+    WearableType,
 };
 use sl_client_bevy::{SaleType, avatar_texture};
 
@@ -89,7 +92,7 @@ use crate::floater::{
     KeyedFloaterOpen, KeyedFloaters,
 };
 use crate::intents::TexturePicked;
-use crate::intents::{ItemCreationFinished, ItemCreationTicket, PendingItemCreations};
+use crate::intents::{ItemCreationFinished, PendingItemCreations, new_wearable_command};
 use crate::inventory::{InventoryModel, OpenWearableEditor};
 use crate::inventory_actions::{wearable_param_group, wearable_type_of};
 use crate::inventory_properties::to_wire_item;
@@ -226,14 +229,13 @@ struct WearEdit {
     /// another save's — matching on "a save completed while we were saving"
     /// reports whichever one finishes first, whosever it was.
     saving: Option<TransactionId>,
-    /// This editor's claim on the shared creation queue for a **Save As** in
-    /// flight, or `None` when none is — which is also how "a copy is on the
-    /// wire" is known, since the two are the same fact.
+    /// The transaction of this editor's **Save As** in flight, or `None` when
+    /// none is — which is also how "a copy is on the wire" is known, since the
+    /// two are the same fact.
     ///
-    /// The copy is minted by the CAPS uploader, whose reply carries no
-    /// correlation id, so the viewer's one ordered creation queue is what says
-    /// which creation is whose, and this is the editor's place in it.
-    creation: Option<ItemCreationTicket>,
+    /// The copy's item and its upload's refusal both name the transaction, so
+    /// it is what tells *this* editor's copy from another creation.
+    creation: Option<TransactionId>,
     /// Whether the edit has moved since it was opened, reverted, or last saved —
     /// what the close guard asks about, and what a Revert has to undo.
     dirty: bool,
@@ -1105,26 +1107,22 @@ fn on_wear_button(
             let mut copy = edit.edited.clone();
             copy.name.clone_from(&name);
             let data = copy.to_text(&perms).into_bytes();
-            commands.write(SlCommand(Command::UploadAsset {
-                folder_id: edit.item.folder_id,
-                asset_type: asset_type_of(edit.wearable_type),
-                inventory_type: InventoryType::Wearable,
-                name,
-                description: String::new(),
-                next_owner_mask: Permissions::DEFAULT_NEXT_OWNER,
-                group_mask: Permissions::NONE,
-                everyone_mask: Permissions::NONE,
-                expected_upload_cost: 0,
+            let transaction = TransactionId::from(Uuid::new_v4());
+            commands.write(SlCommand(new_wearable_command(
+                edit.item.folder_id,
+                edit.wearable_type,
+                &name,
                 data,
-            }));
+                transaction,
+            )));
             // The copy has been *asked for*, not made: the bytes are on their way
-            // to the CAPS uploader and the grid has yet to say whether it kept
-            // them. Announcing the copy here — which is what this did — is a
-            // claim about something that has not happened, and a refused upload
-            // left it standing. The ticket is this editor's claim on the one
-            // ordered creation queue; `report_wearable_save_as` answers on it.
-            edit.creation =
-                Some(pending.enqueue(u32::from(edit.wearable_type.to_code()), edit.item.folder_id));
+            // and the grid has yet to say whether it kept them. Announcing the
+            // copy here — which is what this did — is a claim about something
+            // that has not happened, and a refused upload left it standing. The
+            // transaction is registered with the viewer's one creation consumer;
+            // `report_wearable_save_as` answers on what it publishes.
+            pending.enqueue(transaction, &name);
+            edit.creation = Some(transaction);
             set_status(&mut texts, edit.status, "Saving a copy…");
         }
         WearButton::Revert => {
@@ -1144,15 +1142,15 @@ fn on_wear_button(
 }
 
 /// Where a save leaves, bundled as one
-/// [`SystemParam`](bevy::ecs::system::SystemParam): the ordered creation queue
-/// a Save As takes a ticket in, the session the upload goes out on, and the
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the creation registry a
+/// Save As's transaction goes into, the session the copy goes out on, and the
 /// in-place save request the Save button raises.
 #[derive(bevy::ecs::system::SystemParam)]
 struct WearSaveOut<'w> {
-    /// The ordered creation queue a Save As claims a ticket in, so the reply
-    /// can be told from somebody else's.
+    /// The creation registry a Save As's transaction goes into, so its answer
+    /// is published for this editor to read.
     pending: ResMut<'w, PendingItemCreations>,
-    /// The session a Save As's upload goes out on.
+    /// The session a Save As's copy goes out on.
     commands: MessageWriter<'w, SlCommand>,
     /// The in-place save request, which is also what the unsaved-work
     /// confirmation's "Save" answer writes.
@@ -1321,8 +1319,8 @@ fn report_wearable_save(
     }
 }
 
-/// Report a **Save As** landing — or failing — on the ticket this editor took
-/// out of the shared creation queue.
+/// Report a **Save As** landing — or failing — on the transaction this editor
+/// registered with the shared creation consumer.
 fn report_wearable_save_as(
     mut finished: MessageReader<ItemCreationFinished>,
     mut edits: Query<&mut WearEdit>,
@@ -1331,7 +1329,7 @@ fn report_wearable_save_as(
     for creation in finished.read() {
         let Some(mut edit) = edits
             .iter_mut()
-            .find(|edit| edit.creation == Some(creation.ticket))
+            .find(|edit| edit.creation == Some(creation.transaction))
         else {
             continue;
         };
@@ -1682,27 +1680,14 @@ mod tests {
     #[test]
     fn save_as_reports_the_copy_it_actually_got() -> Result<(), TestError> {
         let (mut app, window, status) = editor_app();
-        // The ticket comes out of the real queue, the way the button takes one.
-        let ticket = app
-            .world_mut()
-            .resource_mut::<PendingItemCreations>()
-            .enqueue(
-                u32::from(WearableType::Shirt.to_code()),
-                InventoryFolderKey::from(Uuid::from_u128(0x22)),
-            );
-        let other = app
-            .world_mut()
-            .resource_mut::<PendingItemCreations>()
-            .enqueue(
-                u32::from(WearableType::Pants.to_code()),
-                InventoryFolderKey::from(Uuid::from_u128(0x99)),
-            );
-        edit_mut(&mut app, window)?.creation = Some(ticket);
+        let ours = TransactionId::from(Uuid::from_u128(0x22));
+        let other = TransactionId::from(Uuid::from_u128(0x99));
+        edit_mut(&mut app, window)?.creation = Some(ours);
 
-        // Somebody else's creation on the shared queue is not this Save As.
+        // Somebody else's creation is not this Save As.
         app.world_mut()
             .write_message(crate::intents::ItemCreationFinished {
-                ticket: other,
+                transaction: other,
                 item: Some(InventoryKey::from(Uuid::from_u128(0xEE))),
             });
         app.update();
@@ -1714,7 +1699,7 @@ mod tests {
 
         app.world_mut()
             .write_message(crate::intents::ItemCreationFinished {
-                ticket,
+                transaction: ours,
                 item: Some(InventoryKey::from(Uuid::from_u128(0xFF))),
             });
         app.update();
@@ -1727,16 +1712,13 @@ mod tests {
     #[test]
     fn a_refused_save_as_says_so() -> Result<(), TestError> {
         let (mut app, window, status) = editor_app();
-        let ticket = app
-            .world_mut()
-            .resource_mut::<PendingItemCreations>()
-            .enqueue(
-                u32::from(WearableType::Shirt.to_code()),
-                InventoryFolderKey::from(Uuid::from_u128(0x22)),
-            );
-        edit_mut(&mut app, window)?.creation = Some(ticket);
+        let ours = TransactionId::from(Uuid::from_u128(0x22));
+        edit_mut(&mut app, window)?.creation = Some(ours);
         app.world_mut()
-            .write_message(crate::intents::ItemCreationFinished { ticket, item: None });
+            .write_message(crate::intents::ItemCreationFinished {
+                transaction: ours,
+                item: None,
+            });
         app.update();
         assert_eq!(status_of(&app, status), "Saving a copy failed.");
         Ok(())
@@ -1765,7 +1747,8 @@ mod tests {
         type Gesture = fn(&mut App, Entity) -> Result<(), String>;
 
         /// What one gesture on the button named `node` left behind: the
-        /// windows asked to save, the uploads sent, and the status line.
+        /// windows asked to save, the copies sent under the transaction the
+        /// edit holds and registered, and the status line.
         type Outcome = (Vec<Entity>, usize, String);
 
         /// A primary click on the button's centre.
@@ -1840,11 +1823,27 @@ mod tests {
                 .into_iter()
                 .map(|save| save.window)
                 .collect();
-            let uploads = drain::<SlCommand>(&mut app)
+            // A copy counts only when it names the transaction the edit holds,
+            // and that transaction is the one registered for its answer.
+            let creation = edit_of(&app, window)?.creation;
+            let registered = creation.is_some_and(|transaction| {
+                app.world_mut()
+                    .resource_mut::<PendingItemCreations>()
+                    .take(transaction)
+                    .is_some()
+            });
+            let copies = drain::<SlCommand>(&mut app)
                 .into_iter()
-                .filter(|command| matches!(command.0, Command::UploadAsset { .. }))
+                .filter(|command| match &command.0 {
+                    Command::CreateInventoryItemWithAsset { item, .. } => {
+                        registered
+                            && creation == Some(TransactionId::from(item.transaction_id))
+                            && item.name.ends_with(" (copy)")
+                    }
+                    _other => false,
+                })
                 .count();
-            Ok((window, (saves, uploads, status_of(&app, status))))
+            Ok((window, (saves, copies, status_of(&app, status))))
         }
 
         let gestures: [(&str, Gesture); 3] = [("click", click), ("Enter", enter), ("Space", space)];
@@ -1859,7 +1858,7 @@ mod tests {
             assert_eq!(
                 copied,
                 (Vec::new(), 1, "Saving a copy…".to_owned()),
-                "Save As by {how} sends one upload"
+                "Save As by {how} sends one copy"
             );
         }
         Ok(())

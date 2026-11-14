@@ -716,6 +716,7 @@ about-region-rating-unknown = Unknown
 # reference viewer's own explanations of where each list applies; they are the
 # only place the rules are written down, so keep them complete when translating.
 about-region-experiences-caption = Changes on this tab affect every region in the estate.
+about-region-experiences-unavailable = Experiences are not available on this grid.
 about-region-experiences-trusted = Key experiences
 about-region-experiences-allowed = Allowed experiences
 about-region-experiences-blocked = Blocked experiences
@@ -1422,6 +1423,14 @@ worldmap-tooltip-infohub = Infohub: { $name }
 worldmap-tooltip-land-sale = For sale: { $name } — L$ { $price } ({ $area } m²)
 worldmap-tooltip-event = Event: { $name }
 worldmap-location-none = Click the map to select a location
+# The clicked spot is being asked about; the map knows no region there yet.
+worldmap-location-loading = Loading…
+# The grid says there is no region at the clicked spot.
+worldmap-location-invalid = Invalid location
+# Runs the region-name search in the field beside it.
+worldmap-button-find = Find
+# The grid finished a search and no region matched.
+worldmap-results-none-found = None found.
 worldmap-button-teleport = Teleport
 worldmap-button-copy-slurl = Copy SLURL
 worldmap-layer-people = People
@@ -3512,6 +3521,7 @@ notification-teleported-home-experience-removed = You have been teleported from 
 notification-trusted-experience-entry = You have been allowed into the region [region_name] by participating in the key experience secondlife:///app/experience/[public_id]/profile removing this experience may kick you from the region.
 notification-experience-event = An object was allowed to [EventType] by the secondlife:///app/experience/[public_id]/profile experience. Owner: secondlife:///app/agent/[OwnerID]/inspect Object Name: [ObjectName] Parcel Name: [ParcelName]
 notification-experience-event-attachment = An attachment was allowed to [EventType] by the secondlife:///app/experience/[public_id]/profile experience. Owner: secondlife:///app/agent/[OwnerID]/inspect
+notification-viewer-experiences-unavailable = Experiences are not available on this grid: the region offers none of the services they are read through.
 
 ## RLV (viewer-notification-catalogue-rlv). Bodies follow
 ## the reference notifications.xml with the standard trims (KB URLs,
@@ -3813,6 +3823,7 @@ experiences-find = Find
 experiences-search-placeholder = Experience name
 experiences-search-rating = Max rating
 experiences-searching = Searching…
+experiences-unavailable = Experiences are not available on this grid.
 experiences-search-page = Page { $page }
 experiences-page-previous = ◀ Previous
 experiences-page-next = Next ▶

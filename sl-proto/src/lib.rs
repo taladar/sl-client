@@ -374,7 +374,7 @@ pub use sl_wire::{
     parse_send_user_report, parse_set_experience_permission_request, parse_simulator_features,
     parse_untrusted_message, parse_update_experience_request, parse_user_info_reply,
     parse_user_info_update, parse_voice_signaling_request, region_name_from_wire,
-    region_name_to_wire, sim_access, stamp_remote_parcel_request,
+    region_name_to_wire, second_life_unserved_syntax, sim_access, stamp_remote_parcel_request,
 };
 // Re-export the chat channel type used by the local-chat / script-dialog APIs.
 pub use sl_types::chat::ChatChannel;

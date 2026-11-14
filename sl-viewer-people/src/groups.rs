@@ -68,6 +68,7 @@ use crate::virtual_list::{
     VirtualList, VirtualRow, VirtualViewport, amend_row_node, layout_virtual_lists,
     spawn_virtual_scrollbar,
 };
+use sl_viewer_ui_core::double_click::DoubleClickWindow;
 use sl_viewer_ui_core::glyph;
 
 /// A group-list row's uniform height, in logical pixels — matched to the friends
@@ -99,11 +100,6 @@ const HEADER_BACKGROUND: Color = Color::srgb(0.14, 0.17, 0.22);
 
 /// The table header / count text colour — dim, so it reads as chrome.
 const HEADER_TEXT_COLOR: Color = SkinPalette::FALLBACK.text_muted;
-
-/// The longest gap between two clicks on the same row still counted as a
-/// double-click, in seconds — a double-click opens the group's IM, like the IM
-/// button (the reference viewer's list double-click).
-const DOUBLE_CLICK_SECS: f32 = 0.4;
 
 /// The modal dim behind the leave-confirm dialog.
 const CONFIRM_SCRIM: Color = Color::srgba(0.0, 0.0, 0.0, 0.55);
@@ -283,7 +279,7 @@ pub(crate) struct GroupsView {
 pub(crate) struct SelectedGroup(Option<GroupChoice>);
 
 /// The last group-row click, for detecting a double-click (two presses on the same
-/// group within [`DOUBLE_CLICK_SECS`] open its IM). Tracked by choice, not row
+/// group within the app's double-click window ([`DoubleClickWindow`]) open its IM). Tracked by choice, not row
 /// entity, since the virtualized rows are recycled.
 #[derive(Resource, Debug, Default)]
 pub(crate) struct GroupClickTracker {
@@ -1135,6 +1131,8 @@ fn open_group_im(
 struct GroupRowClick<'w> {
     /// The clock the double-click window is measured on.
     time: Res<'w, Time>,
+    /// The app's double-click window.
+    double_click: DoubleClickWindow<'w>,
     /// The last click, for the double-click test.
     tracker: ResMut<'w, GroupClickTracker>,
     /// The keyboard focus, which the clicked viewport takes.
@@ -1145,7 +1143,7 @@ struct GroupRowClick<'w> {
 
 /// A group row was clicked: focus the list (so the wheel scrolls it), select the
 /// group it presents, and — on a **double-click** (two presses on the same group
-/// within [`DOUBLE_CLICK_SECS`]) — open its IM, exactly like the IM button.
+/// within the app's double-click window ([`DoubleClickWindow`])) — open its IM, exactly like the IM button.
 fn on_group_row_press(
     press: On<Pointer<Press>>,
     rows: Query<&BoundGroup>,
@@ -1166,7 +1164,11 @@ fn on_group_row_press(
     };
     click.selected.0 = Some(choice);
     let now = click.time.elapsed_secs();
-    if click.tracker.group == Some(choice) && now - click.tracker.time <= DOUBLE_CLICK_SECS {
+    if click.tracker.group == Some(choice)
+        && click
+            .double_click
+            .holds(f64::from(now - click.tracker.time))
+    {
         // Second quick click on the same row: open its IM — for a real group only,
         // since the "no group" row has no conversation to open. Clear the tracker
         // so a third click does not re-fire either way.

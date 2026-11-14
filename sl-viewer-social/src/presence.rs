@@ -137,3 +137,21 @@ impl PresenceState {
         self.idle_secs = 0.0;
     }
 }
+
+/// The agent's god level as the simulator last granted it (`0`: not a god);
+/// the reference's `gAgent.getGodLevel()`.
+///
+/// `sl-viewer-notices` keeps it (and raises the reference's tip on each grant);
+/// it lives here because surfaces far from the notices ask it — About Region
+/// greys its owner-only buttons on it, the Land tool lets a god terraform any
+/// parcel.
+#[derive(Resource, Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct AgentGodLevel(pub u8);
+
+impl AgentGodLevel {
+    /// Whether the agent is a god at all (the reference's `isGodlike`).
+    #[must_use]
+    pub const fn is_god(self) -> bool {
+        self.0 > 0
+    }
+}

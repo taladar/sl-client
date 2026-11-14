@@ -19,6 +19,9 @@
 //!   the Key list with no Remove, two About Region windows on two regions each
 //!   get a picker of their own and only the one that asked takes the pick, and
 //!   a picker closes with its window;
+//! - on a grid with no experiences, About Region's Experiences tab shows a
+//!   note in place of its lists, and the Experiences window and its search say
+//!   experiences are not available instead of waiting;
 //! - an experience's profile shows the word Second Life stores for a home
 //!   location, and a group's experience its Group row;
 //! - a sky editor with unsaved changes asks before its ✕ closes it;
@@ -454,6 +457,11 @@ mod test {
             .role(Role::Textbox)
             .fill(region)
             .await?;
+        // The map searches on Enter, never as it is typed in.
+        map.test_id("worldmap:search")
+            .role(Role::Textbox)
+            .press("Enter")
+            .await?;
         let _picked = map
             .get(Locator::role(Role::ListItem).named(region))
             .timeout(WAIT)
@@ -814,6 +822,345 @@ mod test {
                 close_window(alpha, &pants).await?;
                 Ok(())
             })?;
+        Ok(())
+    }
+
+    // ---- A new wearable, and its copy -------------------------------------
+
+    /// The name New Clothes ▸ New Shirt files a shirt under.
+    const NEW_SHIRT: &str = "New Shirt";
+
+    /// The name the editor's Save As files the shirt's copy under.
+    const SHIRT_COPY: &str = "New Shirt (copy)";
+
+    /// The glyph an inventory row of a shirt shows (`inventory.rs`'s
+    /// `wearable_icon`), which it reads off the item's flags.
+    const SHIRT_GLYPH: &str = "\u{1f455}";
+
+    /// The ids and names of the shirts this stage makes — clothing items named
+    /// [`NEW_SHIRT`] or [`SHIRT_COPY`] — that the viewer lists in the top-level
+    /// folder `folder`, once it has the folder's contents.
+    async fn stage_shirts_in(
+        alpha: &Viewer,
+        folder: &str,
+    ) -> Result<Vec<(Uuid, String)>, BodyError> {
+        let path = [folder];
+        let loaded = tokio::time::timeout(WAIT, async {
+            loop {
+                match alpha.inventory(InventoryRoot::Agent, &path).await {
+                    Ok(Some(listed)) if listed.loaded => return Ok(listed),
+                    Ok(_unloaded) => tokio::time::sleep(Duration::from_millis(250)).await,
+                    Err(error) => return Err(error),
+                }
+            }
+        })
+        .await
+        .map_err(|_elapsed| format!("the viewer never had the {folder} folder's contents"))??;
+        Ok(loaded
+            .items
+            .into_iter()
+            .filter(|item| {
+                item.kind == "clothing" && [NEW_SHIRT, SHIRT_COPY].contains(&&*item.name)
+            })
+            .map(|item| (item.id, item.name))
+            .collect())
+    }
+
+    /// How many of the stage's shirts the Clothing folder and the Trash hold.
+    async fn stage_shirt_rows(alpha: &Viewer) -> Result<(usize, usize), BodyError> {
+        Ok((
+            stage_shirts_in(alpha, "Clothing").await?.len(),
+            stage_shirts_in(alpha, "Trash").await?.len(),
+        ))
+    }
+
+    /// The most shirt rows [`clear_stage_shirts`] takes away.
+    const SHIRT_SWEEP: usize = 8;
+
+    /// Take every shirt this stage makes away for good — to the Trash, then
+    /// out of it — through the inventory window `inventory`, already narrowed
+    /// to [`NEW_SHIRT`] (which both names start with). On a live grid these are
+    /// the stage's own leftovers, from a run that stopped before its cleanup:
+    /// a second item of either name would make the stage's rows ambiguous.
+    async fn clear_stage_shirts(alpha: &Viewer, inventory: &UiLocator) -> Result<(), BodyError> {
+        for _step in 0..SHIRT_SWEEP {
+            let was = stage_shirt_rows(alpha).await?;
+            if was == (0, 0) {
+                return Ok(());
+            }
+            let copies = inventory.get(Locator::role(Role::TreeItem).named(SHIRT_COPY));
+            let row = if copies.count().await? > 0 {
+                copies
+            } else {
+                inventory.get(Locator::role(Role::TreeItem).named(NEW_SHIRT))
+            };
+            let _menu = row.nth(0).timeout(WAIT).right_click().await?;
+            // A row in the Trash offers Purge, any other Delete; the menu
+            // holds only the entry it offers.
+            let purge = alpha
+                .ui()
+                .locator(Locator::role(Role::MenuItem).name_key("menu-inv-purge-item"));
+            let delete = alpha
+                .ui()
+                .locator(Locator::role(Role::MenuItem).name_key("menu-inv-delete"));
+            let entry = tokio::time::timeout(WAIT, async {
+                loop {
+                    if purge.count().await.unwrap_or(0) > 0 {
+                        return purge.clone();
+                    }
+                    if delete.count().await.unwrap_or(0) > 0 {
+                        return delete.clone();
+                    }
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+            })
+            .await
+            .map_err(|_elapsed| "the row's menu offered neither Delete nor Purge")?;
+            let _picked = entry.click().await?;
+            let changed = tokio::time::timeout(WAIT, async {
+                while stage_shirt_rows(alpha).await.is_ok_and(|now| now == was) {
+                    tokio::time::sleep(Duration::from_millis(250)).await;
+                }
+            })
+            .await;
+            if changed.is_err() {
+                return Err(format!(
+                    "a shirt row stayed where it was ({was:?} in Clothing and the Trash)"
+                )
+                .into());
+            }
+        }
+        Err(format!("more than {SHIRT_SWEEP} shirt rows to clear").into())
+    }
+
+    /// Wait until the viewer lists a shirt named `name` in the Clothing
+    /// folder, and return its id.
+    async fn stage_shirt_named(alpha: &Viewer, name: &str) -> Result<Uuid, BodyError> {
+        let found = tokio::time::timeout(WAIT, async {
+            loop {
+                match stage_shirts_in(alpha, "Clothing").await {
+                    Ok(shirts) => {
+                        if let Some((id, _name)) =
+                            shirts.into_iter().find(|(_id, each)| each == name)
+                        {
+                            return Ok(id);
+                        }
+                        tokio::time::sleep(Duration::from_millis(250)).await;
+                    }
+                    Err(error) => return Err(error),
+                }
+            }
+        })
+        .await;
+        match found {
+            Ok(result) => result,
+            Err(_elapsed) => Err(format!("no {name:?} came to the Clothing folder").into()),
+        }
+    }
+
+    /// Check on the fake grid that the item `id` is a shirt in the grid's own
+    /// records — its flags carry the shirt slot, which the viewer never sends
+    /// separately — and that the asset it names is a shirt called `name`.
+    async fn grid_holds_a_shirt(stage: &Stage, id: Uuid, name: &str) -> Result<(), BodyError> {
+        let agent = stage.agent("Alpha").await?;
+        let held = agent
+            .with_sim(|sim| {
+                sim.agent_inventory()
+                    .items()
+                    .find(|item| item.item_id.uuid() == id)
+                    .map(|item| (item.flags, item.item_type, item.asset_id))
+            })
+            .await
+            .ok_or_else(|| format!("the grid holds no item {id}"))?;
+        let (flags, item_type, asset) = held;
+        assert_eq!(
+            (flags, i32::from(item_type)),
+            (
+                u32::from(WearableType::Shirt.to_code()),
+                AssetType::Clothing.to_code()
+            ),
+            "the grid's {name:?} is not a clothing item of the shirt slot"
+        );
+        let bytes = agent
+            .stored_asset(AssetKey::from(asset))
+            .await
+            .ok_or_else(|| format!("the grid stores no asset for {name:?}"))?;
+        let wearable = sl_client_bevy::WearableAsset::parse(&String::from_utf8_lossy(&bytes))
+            .map_err(|error| format!("{name:?}'s asset is not a wearable: {error:?}"))?;
+        assert_eq!(
+            (wearable.wearable_type, wearable.name.as_str()),
+            (WearableType::Shirt, name),
+            "the asset the grid holds for {name:?}"
+        );
+        Ok(())
+    }
+
+    /// Wait until the inventory row `name` shows the shirt glyph: the viewer
+    /// reads the slot off the item's flags, so this is the slot the grid
+    /// stamped, on any grid.
+    async fn shows_a_shirt(
+        alpha: &Viewer,
+        inventory: &UiLocator,
+        name: &str,
+    ) -> Result<(), BodyError> {
+        let row = item_row(inventory, name);
+        let _icon = alpha
+            .expect(&row.get(Locator::role(Role::Text).named(SHIRT_GLYPH)))
+            .timeout(WAIT)
+            .to_be_attached()
+            .await
+            .map_err(|error| format!("{name:?} shows no shirt icon: {error}"))?;
+        Ok(())
+    }
+
+    /// Wait until the Current Outfit Folder no longer links [`NEW_SHIRT`].
+    async fn shirt_taken_off(alpha: &Viewer) -> Result<(), BodyError> {
+        let path = ["Current Outfit"];
+        let off = tokio::time::timeout(WAIT, async {
+            loop {
+                if let Ok(Some(listed)) = alpha.inventory(InventoryRoot::Agent, &path).await
+                    && listed.loaded
+                    && !listed.items.iter().any(|item| item.name == NEW_SHIRT)
+                {
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(250)).await;
+            }
+        })
+        .await;
+        off.map_err(|_elapsed| format!("{NEW_SHIRT:?} stayed in the outfit").into())
+    }
+
+    /// **A new shirt, and a copy of it**: New Clothes ▸ New Shirt on the
+    /// Clothing folder makes a shirt there, which the viewer shows as a shirt;
+    /// worn and opened in the appearance editor, its Save As makes "New Shirt
+    /// (copy)" beside it and says so. Both are made the reference's way — the
+    /// asset over `AssetUploadRequest`, the item by a `CreateInventoryItem`
+    /// naming it — since Second Life takes a wearable over
+    /// `NewFileAgentInventory` only at L$ 10. On the fake grid both items are
+    /// checked as shirts in the grid's own records. The shirt is taken off and
+    /// both items (with any a stopped run left) deleted afterwards.
+    async fn a_new_shirt_is_made_and_copied(stage: &Stage) -> Result<(), BodyError> {
+        let alpha = &stage.viewer("Alpha")?;
+        let inventory = inventory(alpha, NEW_SHIRT).await?;
+        clear_stage_shirts(alpha, &inventory).await?;
+
+        // New Clothes ▸ New Shirt, on the Clothing folder's own row.
+        let _searched = inventory
+            .test_id("inventory:search")
+            .role(Role::Textbox)
+            .fill("Clothing")
+            .await?;
+        let _menu = item_row(&inventory, "Clothing")
+            .nth(0)
+            .right_click()
+            .await?;
+        let _hovered = alpha
+            .ui()
+            .locator(Locator::role(Role::MenuItem).name_key("menu-inv-new-clothes"))
+            .timeout(WAIT)
+            .hover()
+            .await?;
+        let _picked = alpha
+            .ui()
+            .locator(Locator::role(Role::MenuItem).name_key("menu-inv-new-shirt"))
+            .timeout(WAIT)
+            .click()
+            .await?;
+        let shirt = stage_shirt_named(alpha, NEW_SHIRT).await?;
+        let _searched = inventory
+            .test_id("inventory:search")
+            .role(Role::Textbox)
+            .fill(NEW_SHIRT)
+            .await?;
+        shows_a_shirt(alpha, &inventory, NEW_SHIRT).await?;
+        if stage.on_grid() == Grid::Fake {
+            grid_holds_a_shirt(stage, shirt, NEW_SHIRT).await?;
+        }
+
+        // Worn, then opened in the appearance editor: Edit is offered once
+        // the outfit says the shirt is worn, a moment after the Wear.
+        let _menu = item_row(&inventory, NEW_SHIRT).nth(0).right_click().await?;
+        let _worn = alpha
+            .ui()
+            .locator(Locator::role(Role::MenuItem).name_key("menu-inv-wear"))
+            .click()
+            .await?;
+        let edit = alpha
+            .ui()
+            .locator(Locator::role(Role::MenuItem).name_key("menu-inv-edit"));
+        let started = tokio::time::Instant::now();
+        loop {
+            let _menu = item_row(&inventory, NEW_SHIRT).nth(0).right_click().await?;
+            let shown = alpha.expect(&edit).timeout(WAIT).to_be_visible().await?;
+            if shown
+                .first()
+                .is_some_and(|node| !node.has_state(NodeState::Disabled))
+            {
+                break;
+            }
+            alpha.press("Escape").await?;
+            if started.elapsed() > WAIT {
+                return Err(format!("{NEW_SHIRT:?} never became editable: is it worn?").into());
+            }
+            tokio::time::sleep(Duration::from_millis(250)).await;
+        }
+        let _picked = edit.click().await?;
+        close_window(alpha, &inventory).await?;
+        let editor = alpha.ui().window(&format!("wearable-editor#{shirt}"));
+        let save_as = editor.test_id("wearable-button:Save As");
+        let _built = alpha.expect(&save_as).timeout(WAIT).to_be_visible().await?;
+        let _copied = save_as.click().await?;
+        let _reported = alpha
+            .expect(&editor.test_id("wearable-status"))
+            .timeout(WAIT)
+            .to_have_text("Saved a copy to inventory.")
+            .await?;
+        let copy = stage_shirt_named(alpha, SHIRT_COPY).await?;
+        close_window(alpha, &editor).await?;
+        let inventory = self::inventory(alpha, NEW_SHIRT).await?;
+        shows_a_shirt(alpha, &inventory, SHIRT_COPY).await?;
+        if stage.on_grid() == Grid::Fake {
+            grid_holds_a_shirt(stage, copy, SHIRT_COPY).await?;
+        }
+
+        // Taken off, then both gone for good.
+        let _menu = item_row(&inventory, NEW_SHIRT).nth(0).right_click().await?;
+        let _off = alpha
+            .ui()
+            .locator(Locator::role(Role::MenuItem).name_key("menu-inv-take-off"))
+            .click()
+            .await?;
+        shirt_taken_off(alpha).await?;
+        clear_stage_shirts(alpha, &inventory).await?;
+        close_window(alpha, &inventory).await?;
+        Ok(())
+    }
+
+    /// **A new shirt and its copy, on the Second-Life-flavoured fake grid**:
+    /// that grid refuses a wearable over `NewFileAgentInventory` at no price,
+    /// as Second Life does (`book/src/gridspec/assets.md` § Uploads), so both
+    /// the New Shirt and the editor's Save As have to go the reference's
+    /// transaction road for either item to exist.
+    #[test]
+    fn a_new_shirt_and_its_copy_are_made_on_the_second_life_flavour() -> Result<(), TestError> {
+        stage("new_shirt_second_life")
+            .configure_grid(|grid| grid.imitates(ImitatedGrid::SecondLife))
+            .run(a_new_shirt_is_made_and_copied)?;
+        Ok(())
+    }
+
+    /// **A new shirt and its copy, on Second Life** (`SL_E2E_GRID=aditi`).
+    #[test]
+    fn a_new_shirt_and_its_copy_are_made_on_second_life() -> Result<(), TestError> {
+        stage("new_shirt_live")
+            .needs(Need::LiveGrid(
+                "a grid's own upload, create and inventory answers",
+            ))
+            .needs(Need::SecondLife(
+                "the price Second Life puts on a wearable upload",
+            ))
+            .run(a_new_shirt_is_made_and_copied)?;
         Ok(())
     }
 
@@ -1585,6 +1932,70 @@ mod test {
                             .get(Locator::role(Role::ListItem).name_containing(DEFAULT_EXPERIENCE)),
                     )
                     .to_be_detached()
+                    .await?;
+                Ok(())
+            })?;
+        Ok(())
+    }
+
+    /// The notice an experience surface raises on a grid with no experiences.
+    const EXPERIENCES_UNAVAILABLE: &str = "ViewerExperiencesUnavailable";
+
+    /// **Experiences on a grid that has none**
+    /// (`viewer-refused-capability-silent-drops`): the OpenSim flavour grants
+    /// no experience capability, as a stock OpenSim does not. Region /
+    /// Estate's Experiences tab shows a note in place of its three lists; the
+    /// Experiences window says experiences are not available as it opens,
+    /// instead of five lists waiting for replies that never come; and its
+    /// search says so too, instead of "Searching…".
+    ///
+    /// Region / Estate first: its note follows the region's grants whenever
+    /// they arrive, so seeing it is what says they have — the Experiences
+    /// window reads them once, as it opens.
+    #[test]
+    fn experiences_say_they_are_unavailable_on_the_opensim_flavour() -> Result<(), TestError> {
+        stage("experiences_unavailable_opensim")
+            .region(home())
+            .estate_manager("Alpha")
+            .configure_grid(|grid| grid.imitates(ImitatedGrid::OpenSim))
+            .run(async |stage: &Stage| {
+                let alpha = &stage.viewer("Alpha")?;
+                let region = experiences_tab(alpha, HOME_ID).await?;
+                let _note = alpha
+                    .expect(&region.get(
+                        Locator::role(Role::Text).name_key("about-region-experiences-unavailable"),
+                    ))
+                    .timeout(WAIT)
+                    .to_be_visible()
+                    .await?;
+                let _no_lists = alpha
+                    .expect(&region.test_id("about-region-experiences-trusted:table"))
+                    .to_be_hidden()
+                    .await?;
+                close_window(alpha, &region).await?;
+
+                let _opened = alpha.menu_path(&EXPERIENCES).await?;
+                let window = alpha.ui().window("experiences");
+                let _shown = alpha.expect(&window).timeout(WAIT).to_be_visible().await?;
+                let _said = alpha
+                    .expect_notification()
+                    .timeout(WAIT)
+                    .to_show(EXPERIENCES_UNAVAILABLE)
+                    .await?;
+                // The window opens on Allowed, as the reference's does.
+                let _search = window
+                    .get(Locator::role(Role::Tab).name_key("experiences-tab-search"))
+                    .click()
+                    .await?;
+                let query = window.test_id("experiences-query:field");
+                let _typed = query.fill("Fake Grid").await?;
+                query.press("Enter").await?;
+                let _status = alpha
+                    .expect(&window.get(
+                        Locator::role(Role::Text).name_containing("not available on this grid"),
+                    ))
+                    .timeout(WAIT)
+                    .to_be_visible()
                     .await?;
                 Ok(())
             })?;

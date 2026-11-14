@@ -32,7 +32,7 @@
 //! out and the grid still compiles (`llPointAt`, `llStopPointAt`,
 //! `llRemoteLoadScript`, `llClearExperiencePermissions`,
 //! `llGetExperienceList`, measured on aditi by `script-compile`), from the
-//! crate's `keywords_lsl_unserved.xml`. A script that lands there names a
+//! `keywords_lsl_unserved.xml` `sl-lsl` ships. A script that lands there names a
 //! function a later document dropped.
 //!
 //! And one error sits on a different line by design: "Not all code paths

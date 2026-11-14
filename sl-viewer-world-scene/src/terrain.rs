@@ -135,6 +135,77 @@ impl sl_viewer_world_api::world_scoped::WorldScoped for TerrainTextures {
     }
 }
 
+impl sl_viewer_world_api::region_scoped::RegionScoped for TerrainTextures {
+    /// Forget a retired neighbour's splat material; the decoded detail
+    /// textures stay, for the same reason a world reset keeps them.
+    fn forget_region(&mut self, region: RegionHandle, _commands: &mut Commands) {
+        let _material = self.materials.remove(&region);
+    }
+}
+
+impl sl_viewer_world_api::region_scoped::RegionScoped for PendingPatchRebuilds {
+    /// Drop the queued rebuilds of a retired neighbour's patches: there is no
+    /// patch left to build them from.
+    fn forget_region(&mut self, region: RegionHandle, _commands: &mut Commands) {
+        self.queue
+            .retain(|&(patch_region, _, _)| patch_region != region);
+        self.queued
+            .retain(|&(patch_region, _, _)| patch_region != region);
+    }
+}
+
+/// Queue a rebuild of every surviving patch whose far (east / north /
+/// north-east) edge was stitched to a neighbour retired this frame, so it
+/// falls back to the flat 1 m lip a patch on the edge of the loaded world has
+/// instead of keeping the departed region's heights — the seam half of
+/// `LLWorld::removeRegion`, which disconnects the region from its neighbours'
+/// surfaces. Runs after [`WorldResetSystems::Purge`], once the retired region's
+/// patches are gone.
+///
+/// [`WorldResetSystems::Purge`]: sl_viewer_world_api::world_scoped::WorldResetSystems::Purge
+pub fn rebuild_retired_seams(
+    retired: Option<Res<sl_viewer_world_api::region_scoped::RetiredRegionsFrame>>,
+    state: Res<TerrainState>,
+    mut rebuilds: ResMut<PendingPatchRebuilds>,
+) {
+    let Some(retired) = retired else {
+        return;
+    };
+    if retired.regions().is_empty() {
+        return;
+    }
+    for (&key, patch) in &state.raw_patches {
+        if retired
+            .regions()
+            .iter()
+            .any(|&gone| stitched_to(key, patch.size, gone))
+        {
+            rebuilds.push(key);
+        }
+    }
+}
+
+/// Whether the patch at `key` (of edge `size`) borrows any of its far-edge
+/// samples from a patch of `region` — the same resolution [`resolved_height`]
+/// makes when it builds the mesh.
+fn stitched_to(key: PatchKey, size: u32, region: RegionHandle) -> bool {
+    let (patch_region, patch_x, patch_y) = key;
+    if patch_region == region {
+        return false;
+    }
+    let (global_x, global_y) = patch_region.global_coordinates();
+    [(size, 0), (0, size), (size, size)]
+        .into_iter()
+        .any(|(x, y)| {
+            let (shift_x, _, _) = resolve_axis(patch_x, size, x);
+            let (shift_y, _, _) = resolve_axis(patch_y, size, y);
+            RegionHandle::from_global(
+                global_x.saturating_add(shift_x),
+                global_y.saturating_add(shift_y),
+            ) == region
+        })
+}
+
 /// Keep the scene origin on the root region: when a border crossing promotes a
 /// neighbour to root, re-centre every terrain patch on the new region and shift
 /// the camera by the same delta, so coordinates stay small while the world stays
@@ -1252,6 +1323,94 @@ mod tests {
             (height_at(16, 16) - 100.0).abs() < 1.0e-4,
             "corner {} folded down instead of extending the sloped east edge",
             height_at(16, 16)
+        );
+    }
+
+    /// A patch is stitched to a region exactly when one of its far edges — east,
+    /// north, or the north-east corner — reads from that region: a region's
+    /// east-edge patches to the east neighbour, its north-east corner patch to
+    /// the north-east one, and no interior patch to anything.
+    #[test]
+    fn stitched_to_names_only_the_far_edge_regions() {
+        let home = RegionHandle::from_global(256_000, 256_000);
+        let east = RegionHandle::from_global(256_256, 256_000);
+        let north = RegionHandle::from_global(256_000, 256_256);
+        let north_east = RegionHandle::from_global(256_256, 256_256);
+        let west = RegionHandle::from_global(255_744, 256_000);
+        assert!(super::stitched_to((home, 15, 3), 16, east));
+        assert!(!super::stitched_to((home, 15, 3), 16, north));
+        assert!(super::stitched_to((home, 4, 15), 16, north));
+        assert!(super::stitched_to((home, 15, 15), 16, east));
+        assert!(super::stitched_to((home, 15, 15), 16, north));
+        assert!(super::stitched_to((home, 15, 15), 16, north_east));
+        assert!(!super::stitched_to((home, 14, 14), 16, north_east));
+        assert!(
+            !super::stitched_to((home, 0, 3), 16, west),
+            "a west neighbour reads from this region, not the other way round"
+        );
+        assert!(!super::stitched_to((east, 0, 0), 16, east), "itself");
+    }
+
+    /// A neighbour's retirement drops its queued rebuilds and queues the
+    /// surviving patches stitched to it, so their far edge falls back to the
+    /// lip instead of keeping the departed ground's heights.
+    #[test]
+    fn a_retired_neighbour_reseams_the_patches_bordering_it() {
+        use bevy::prelude::*;
+        use sl_viewer_world_api::TerrainState;
+        use sl_viewer_world_api::region_scoped::RegionScopedAppExt as _;
+
+        let home = RegionHandle::from_global(256_000, 256_000);
+        let east = RegionHandle::from_global(256_256, 256_000);
+        let mut app = App::new();
+        app.add_message::<sl_client_bevy::SlEvent>()
+            .init_resource::<sl_client_bevy::SlIdentity>()
+            .init_resource::<TerrainState>()
+            .init_resource::<super::PendingPatchRebuilds>()
+            .register_region_scoped::<TerrainState>()
+            .register_region_scoped::<super::PendingPatchRebuilds>()
+            .add_systems(
+                Update,
+                super::rebuild_retired_seams
+                    .after(sl_viewer_world_api::world_scoped::WorldResetSystems::Purge),
+            );
+        app.world_mut()
+            .resource_mut::<sl_client_bevy::SlIdentity>()
+            .region_handle = Some(home);
+        {
+            let mut state = app.world_mut().resource_mut::<TerrainState>();
+            for key in [(home, 15, 3), (home, 7, 3), (east, 0, 3)] {
+                insert_patch(&mut state.raw_patches, key.0, key.1, key.2, 16, |_x, _y| {
+                    1.0
+                });
+            }
+        }
+        app.world_mut()
+            .resource_mut::<super::PendingPatchRebuilds>()
+            .push((east, 1, 3));
+
+        app.world_mut().write_message(sl_client_bevy::SlEvent(
+            sl_client_bevy::SlSessionEvent::NeighborRetired {
+                region_handle: Some(east),
+                sim: std::net::SocketAddr::from(([127, 0, 0, 1], 9001)),
+                circuit: sl_client_bevy::CircuitId::new(2),
+                reason: sl_client_bevy::NeighborRetirement::Disabled,
+            },
+        ));
+        app.update();
+
+        let rebuilds = app.world().resource::<super::PendingPatchRebuilds>();
+        assert_eq!(
+            rebuilds.queue.iter().copied().collect::<Vec<_>>(),
+            vec![(home, 15, 3)],
+            "only the east-edge patch is re-seamed, and the east region's own \
+             queued rebuild is gone"
+        );
+        assert!(
+            !app.world()
+                .resource::<TerrainState>()
+                .raw_patches
+                .contains_key(&(east, 0, 3))
         );
     }
 

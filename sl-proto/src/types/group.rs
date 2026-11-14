@@ -657,6 +657,9 @@ pub mod group_powers {
     pub const GROUP_CHANGE_IDENTITY: u64 = 1 << 11;
     /// Deed land and buy land for the group.
     pub const LAND_DEED: u64 = 1 << 12;
+    /// Terraform group land even where the parcel forbids it (the reference's
+    /// `GP_LAND_ALLOW_EDIT_LAND`, "Bypass Edit Land Restriction").
+    pub const LAND_ALLOW_EDIT_LAND: u64 = 1 << 23;
     /// Send group notices.
     pub const NOTICES_SEND: u64 = 1 << 42;
     /// Receive group notices and view notice history.

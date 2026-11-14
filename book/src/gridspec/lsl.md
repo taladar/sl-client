@@ -477,9 +477,12 @@ has to on Second Life; the census's Second Life legs agree with aditi's on
 | the `luau` target | the Luau compiler: `:2: Expected identifier when parsing expression, got '='`, a **one-based** line, no column; the item's subtype becomes Luau; LSL source under it compiles, since `default { state_entry() … }` happens to parse as Lua, and fails as it starts: `lua_script:3: attempt to call a nil value` | ignored: Luau source is read as LSL and refused, the subtype stays LSL | — |
 
 The library table `sl-lsl-runtime` compiles against is the document Second
-Life serves plus those five, from its `keywords_lsl_unserved.xml`; the
-fake grid's OpenSim flavour should refuse the two experience functions
-when it compiles on upload, and does.
+Life serves plus those five, from `sl-lsl`'s `keywords_lsl_unserved.xml`;
+the fake grid's OpenSim flavour should refuse the two experience functions
+when it compiles on upload, and does. The script editor adds the same five
+to the document a Second Life region serves, so its semantic pass does not
+flag a call to one as undefined; on a region whose features carry
+`OpenSimExtras` it keeps OpenSim's document as served.
 
 ### The Luau target
 
