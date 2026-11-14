@@ -370,6 +370,14 @@ pub(crate) struct ScreenshotSchedule {
     /// reports: a frame captured is not a frame written, and the difference is
     /// the whole reason a harness reads the counts rather than the run's word.
     written: usize,
+    /// How many captured frames failed on their way to the disk (an undecodable
+    /// readback or a failed write), so that `index - written - failed` is the
+    /// number of captures whose outcome is still unknown.
+    failed: usize,
+    /// When the run stopped capturing and started waiting for its frames'
+    /// outcomes (elapsed seconds), once it has — the start of
+    /// [`DRAIN_TIMEOUT_SECS`].
+    drain_started_at: Option<f32>,
     /// When the region came up (elapsed seconds), once it has.
     region_seen_at: Option<f32>,
     /// Consecutive frames the scene has been quiet.
@@ -421,6 +429,12 @@ const MIN_SETTLE_SECS: f32 = 5.0;
 /// the same 180 s.
 const DEFAULT_LOGIN_TIMEOUT_SECS: f32 = 180.0;
 
+/// How long a run that has stopped capturing waits for its captured frames to be
+/// read back and written before it gives up on the rest and fails. A readback
+/// takes a frame or two and a write well under a second, so this only ever runs
+/// out on a capture that is never coming back.
+const DRAIN_TIMEOUT_SECS: f32 = 30.0;
+
 impl ScreenshotSchedule {
     /// A schedule writing `SL_VIEWER_SCREENSHOT_FRAMES` frames (default 30) at
     /// `SL_VIEWER_SCREENSHOT_INTERVAL` s (default 0.5), the first once the
@@ -450,6 +464,8 @@ impl ScreenshotSchedule {
             next_at: None,
             index: 0,
             written: 0,
+            failed: 0,
+            drain_started_at: None,
             region_seen_at: None,
             quiet_frames: 0,
             login_timeout: env_f32("SL_VIEWER_LOGIN_TIMEOUT", DEFAULT_LOGIN_TIMEOUT_SECS),
@@ -485,6 +501,51 @@ impl ScreenshotSchedule {
         });
     }
 
+    /// A captured frame reached the disk.
+    const fn record_written(&mut self) {
+        self.written = self.written.saturating_add(1);
+    }
+
+    /// A captured frame will never reach the disk, for `reason`. The run is short
+    /// by that frame, and the first such reason is the one the status reports.
+    fn record_failed(&mut self, reason: String) {
+        self.failed = self.failed.saturating_add(1);
+        self.failure.get_or_insert(reason);
+    }
+
+    /// How many captured frames have neither been written nor failed yet: a
+    /// capture's save task only exists once its readback has arrived, a frame
+    /// or more after the capture, so the save tasks in flight undercount this.
+    const fn outstanding(&self) -> usize {
+        self.index
+            .saturating_sub(self.written)
+            .saturating_sub(self.failed)
+    }
+
+    /// Whether every captured frame has an outcome, so the status can be
+    /// written with counts that match the disk.
+    ///
+    /// The first call that finds frames outstanding starts a
+    /// [`DRAIN_TIMEOUT_SECS`] clock; when it runs out the frames still missing
+    /// are written off as a failure, so a capture that never reads back fails
+    /// the run instead of hanging it.
+    fn drained(&mut self, now: f32) -> bool {
+        let outstanding = self.outstanding();
+        if outstanding == 0 {
+            return true;
+        }
+        let started = *self.drain_started_at.get_or_insert(now);
+        if now - started < DRAIN_TIMEOUT_SECS {
+            return false;
+        }
+        let reason =
+            format!("{outstanding} captured frame(s) not written within {DRAIN_TIMEOUT_SECS:.0} s");
+        error!("screenshot: {reason}");
+        self.failed = self.failed.saturating_add(outstanding);
+        self.failure.get_or_insert(reason);
+        true
+    }
+
     /// Write `harness-status.json` for this run, once.
     ///
     /// Called before the logout rather than after it: a status written on the
@@ -496,8 +557,30 @@ impl ScreenshotSchedule {
             return;
         }
         self.status_written = true;
+        if let Err(error) = self.status().write(&self.dir) {
+            // The frames are already on disk and the run is over; a harness that
+            // finds no status treats this as a run that did not happen, which is
+            // the right conclusion from an unwritable directory.
+            error!("screenshot: {error}");
+        }
+    }
+
+    /// The status this run reports, from what it has recorded so far.
+    ///
+    /// A run is only `complete` with every expected frame written: whatever
+    /// lost the others, a short set is not a successful comparison.
+    fn status(&self) -> HarnessStatus {
         let status = match &self.failure {
             Some(reason) => HarnessStatus::new(false, reason, self.written, self.max_frames),
+            None if self.written < self.max_frames => HarnessStatus::new(
+                false,
+                format!(
+                    "only {} of {} frames were written",
+                    self.written, self.max_frames
+                ),
+                self.written,
+                self.max_frames,
+            ),
             None if self.settled => {
                 HarnessStatus::new(true, "complete", self.written, self.max_frames)
             }
@@ -511,15 +594,9 @@ impl ScreenshotSchedule {
         // After the frame counts, so a pin that could not be honoured overrides
         // "complete": the frames are there and they are not of the asked-for
         // scene, which is the more important of the two things to say first.
-        let status = match self.day_position.clone() {
+        match self.day_position.clone() {
             Some(day_position) => status.with_day_position(day_position),
             None => status,
-        };
-        if let Err(error) = status.write(&self.dir) {
-            // The frames are already on disk and the run is over; a harness that
-            // finds no status treats this as a run that did not happen, which is
-            // the right conclusion from an unwritable directory.
-            error!("screenshot: {error}");
         }
     }
 }
@@ -885,7 +962,7 @@ pub(crate) struct ScreenshotSaveTask(Task<Result<PathBuf, String>>);
 
 /// The capture rig, bundled as one
 /// [`SystemParam`](bevy::ecs::system::SystemParam): the session and command
-/// channel the run logs out through, the saves still in flight, the pinned
+/// channel the run logs out through, the pinned
 /// render target frames are taken from and the overlay cameras aimed at it, the
 /// scene dump the last frame asks for, and the commands that spawn the capture.
 #[derive(bevy::ecs::system::SystemParam)]
@@ -894,8 +971,6 @@ pub(crate) struct CaptureRig<'w, 's> {
     session: ResMut<'w, ViewerSession>,
     /// The command channel that logout goes out on.
     sl_commands: MessageWriter<'w, SlCommand>,
-    /// The saves still writing to disk, which the run waits out.
-    pending_saves: Query<'w, 's, (), With<ScreenshotSaveTask>>,
     /// The pinned render target the frames are taken from.
     pinned: Option<ResMut<'w, PinnedCapture>>,
     /// The scene dump the last frame asks for, when one was requested.
@@ -922,9 +997,11 @@ pub(crate) struct CaptureRig<'w, 's> {
 /// is the one that was asked for and its content is the layers that were asked
 /// for — see [the module docs](self).
 ///
-/// The PNG encode + disk write is offloaded to [`IoTaskPool`]; the logout is held
-/// until every pending [`ScreenshotSaveTask`] has drained so a race between the
-/// last frame's write and process exit can't truncate the final PNG(s).
+/// The PNG encode + disk write is offloaded to [`IoTaskPool`]; the logout and the
+/// status are held until every captured frame has been written or has failed
+/// ([`ScreenshotSchedule::drained`]), so a race between the last frame's
+/// readback or write and process exit can neither truncate the final PNG(s) nor
+/// leave the status counting fewer frames than the disk holds.
 ///
 /// The logout (rather than an immediate `AppExit`) is what lets the run leave the
 /// avatar cleanly logged out: an abrupt process exit strands the grid session, and
@@ -949,10 +1026,10 @@ pub(crate) fn capture_screenshots(
     // A run that cannot capture is over: say so in the status file and log out,
     // rather than filling the directory with frames of whatever is on screen.
     if schedule.failure.is_some() {
-        // Hold the logout until every write in flight has drained, as the normal
-        // end of a run does: an abrupt exit truncates the last PNG, and a
+        // Hold the logout until every captured frame has an outcome, as the
+        // normal end of a run does: an abrupt exit truncates the last PNG, and a
         // truncated frame is a rendering bug that never happened.
-        if rig.pending_saves.is_empty() {
+        if schedule.drained(now) {
             schedule.write_status();
             request_logout(&mut rig.session, &mut rig.sl_commands, now);
         }
@@ -1015,15 +1092,21 @@ pub(crate) fn capture_screenshots(
         return;
     }
     if schedule.index >= schedule.max_frames {
-        // Don't log out (and so quit) while a frame's PNG is still being written
-        // off-thread — dropping the task at exit would truncate the file.
-        if !rig.pending_saves.is_empty() {
+        // Don't log out (and so quit) while a frame is still being read back or
+        // its PNG written off-thread — dropping the task at exit would truncate
+        // the file, and the status would count one frame fewer than the disk.
+        // A save task only exists once its readback arrives, so the wait is on
+        // the schedule's own count of frames without an outcome.
+        if !schedule.drained(now) {
             return;
         }
-        info!(
-            "screenshot: captured {} frames; logging out",
-            schedule.index
-        );
+        // This branch is reached on every frame of the logout; say it once.
+        if !schedule.status_written {
+            info!(
+                "screenshot: captured {} frames ({} written); logging out",
+                schedule.index, schedule.written
+            );
+        }
         // Before the logout, not after it: a harness reads this file to tell a
         // run that happened from one that did not, and a viewer that dies during
         // its logout must leave the run looking like what it was.
@@ -1076,14 +1159,19 @@ pub(crate) fn capture_screenshots(
 /// HDR alpha, which carries brightness — the same as Bevy's `save_to_disk`), then
 /// the heavy PNG deflate + disk write is handed to [`IoTaskPool`] via a
 /// [`ScreenshotSaveTask`] that [`poll_screenshot_saves`] drains.
-fn save_off_thread(path: PathBuf) -> impl FnMut(On<ScreenshotCaptured>, Commands) {
-    move |captured, mut commands| {
+fn save_off_thread(
+    path: PathBuf,
+) -> impl FnMut(On<ScreenshotCaptured>, Commands, ResMut<ScreenshotSchedule>) {
+    move |captured, mut commands, mut schedule| {
         let capture_entity = captured.entity;
         let dynamic = match captured.image.clone().try_into_dynamic() {
             // Discard the alpha channel (HDR brightness) so the PNG looks right.
             Ok(dynamic) => image::DynamicImage::ImageRgb8(dynamic.to_rgb8()),
             Err(error) => {
                 error!("screenshot: cannot decode capture: {error}");
+                schedule.record_failed(format!(
+                    "a frame could not be decoded from its capture: {error}"
+                ));
                 commands.entity(capture_entity).despawn();
                 return;
             }
@@ -1117,16 +1205,14 @@ pub(crate) fn poll_screenshot_saves(
         match result {
             Ok(path) => {
                 info!("screenshot: saved {}", path.display());
-                schedule.written = schedule.written.saturating_add(1);
+                schedule.record_written();
             }
             Err(error) => {
                 error!("screenshot: save failed: {error}");
                 // A frame the harness thinks it captured but that never reached
                 // the disk is exactly the gap the status file exists to close:
                 // the run is short by one frame, and it must say so.
-                schedule
-                    .failure
-                    .get_or_insert_with(|| format!("a frame failed to reach the disk: {error}"));
+                schedule.record_failed(format!("a frame failed to reach the disk: {error}"));
             }
         }
         commands.entity(entity).despawn();
@@ -1179,6 +1265,84 @@ mod tests {
         assert_eq!(
             schedule.day_position.as_ref().map(|pin| pin.honoured),
             Some(false)
+        );
+    }
+
+    /// A schedule that has captured `captured` of `expected` frames, settled.
+    fn captured(captured: usize, expected: usize) -> ScreenshotSchedule {
+        let mut schedule = ScreenshotSchedule::new(std::env::temp_dir(), true);
+        schedule.max_frames = expected;
+        schedule.index = captured;
+        schedule.settled = true;
+        schedule
+    }
+
+    /// The observed failure: the last frame captured but not yet read back, so
+    /// no save task exists for it. The run is not drained, and once it is the
+    /// status counts every frame.
+    #[test]
+    fn a_frame_not_yet_read_back_holds_the_status() {
+        let mut schedule = captured(3, 3);
+        schedule.record_written();
+        schedule.record_written();
+        assert_eq!(schedule.outstanding(), 1);
+        assert!(!schedule.drained(0.0), "the third frame has no outcome yet");
+        schedule.record_written();
+        assert!(schedule.drained(0.1));
+        let status = schedule.status();
+        assert_eq!(
+            (status.ok, status.reason.as_str(), status.frames_written),
+            (true, "complete", 3)
+        );
+    }
+
+    /// A short set is never `complete`, whatever else the run recorded.
+    #[test]
+    fn fewer_frames_written_than_expected_is_not_complete() {
+        let mut schedule = captured(30, 30);
+        for _ in 0..29 {
+            schedule.record_written();
+        }
+        let status = schedule.status();
+        assert_eq!(
+            (status.ok, status.reason.as_str(), status.frames_written),
+            (false, "only 29 of 30 frames were written", 29)
+        );
+    }
+
+    /// A frame that failed on its way to the disk is an outcome: the run is
+    /// drained without waiting for it, and fails with the reason it recorded.
+    #[test]
+    fn a_failed_frame_counts_as_an_outcome() {
+        let mut schedule = captured(2, 2);
+        schedule.record_written();
+        schedule.record_failed("a frame could not be decoded from its capture: bad".to_owned());
+        assert!(schedule.drained(0.0));
+        let status = schedule.status();
+        assert_eq!(
+            (status.ok, status.reason.as_str(), status.frames_written),
+            (
+                false,
+                "a frame could not be decoded from its capture: bad",
+                1
+            )
+        );
+    }
+
+    /// A capture that never reads back fails the run once the drain timeout
+    /// runs out, rather than hanging it.
+    #[test]
+    fn a_capture_that_never_reads_back_times_out() {
+        let mut schedule = captured(2, 2);
+        schedule.record_written();
+        assert!(!schedule.drained(10.0));
+        assert!(!schedule.drained(10.0 + super::DRAIN_TIMEOUT_SECS - 1.0));
+        assert!(schedule.drained(10.0 + super::DRAIN_TIMEOUT_SECS));
+        assert_eq!(schedule.outstanding(), 0);
+        let status = schedule.status();
+        assert_eq!(
+            (status.ok, status.reason.as_str(), status.frames_written),
+            (false, "1 captured frame(s) not written within 30 s", 1)
         );
     }
 

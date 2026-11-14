@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 330 |
 | blocked | 36 |
 | in-progress | 5 |
-| bugs | 23 |
-| done | 1575 |
+| bugs | 22 |
+| done | 1576 |
 | deferred | 30 |
 | wont-do | 24 |
 | **total** | **2153** |
@@ -1252,7 +1252,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-text-renderability-axis`](in-progress/viewer-ui-text-renderability-axis.md)
   — Upstream issue — font selection cannot see glyph-format renderability
 
-## bugs (23)
+## bugs (22)
 
 ### protocol
 
@@ -1275,8 +1275,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-capture-world-only-draws-hover-text-and-tags`](bugs/viewer-capture-world-only-draws-hover-text-and-tags.md)
   — A world-only capture holds hover text and name tags, which Firestorm draws
   only with the UI
-- [`viewer-harness-status-counts-before-last-frame`](bugs/viewer-harness-status-counts-before-last-frame.md)
-  — The screenshot harness writes its status before the last frame is saved
 - [`viewer-live-opensim-world-renders-white`](bugs/viewer-live-opensim-world-renders-white.md)
   — The world renders all white at times on the live OpenSim grid
 - [`viewer-mesh-hair-not-rendering`](bugs/viewer-mesh-hair-not-rendering.md) —
@@ -1316,7 +1314,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1575)
+## done (1576)
 
 ### protocol
 
@@ -2257,6 +2255,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-audio-backend` (done))
 - [`viewer-hair-dome-stays-grey`](done/viewer-hair-dome-stays-grey.md) — The
   default hair dome intermittently stays grey for a whole session
+- [`viewer-harness-status-counts-before-last-frame`](done/viewer-harness-status-counts-before-last-frame.md)
+  — The screenshot harness writes its status before the last frame is saved
 - [`viewer-horizon-thin-line-flashes`](done/viewer-horizon-thin-line-flashes.md)
   — Flashes along a thin line near the horizon
 - [`viewer-hover-text`](done/viewer-hover-text.md) — Object hover text
