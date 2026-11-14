@@ -11,7 +11,7 @@ use sl_automation_proto::{
     AgentReadout, AutomationError, ConversationReadout, Deadline, DiagnosticsReadout,
     EnvironmentReadout, InventoryFolderReadout, InventoryRoot, Locator, LogEntry, LogPage,
     LogStream, MirrorsReadout, NotificationReadout, PROTOCOL_VERSION, ParcelMediaReadout, Probe,
-    ProbeReadout, QuiescenceReadout, Request, RequestBody, ResponseBody, SelectedObject,
+    ProbeReadout, QuiescenceReadout, Request, RequestBody, Response, ResponseBody, SelectedObject,
     StateCondition, StateObservation, StatusReadout, UiNode, ViewerIdentity, ViewerMessage,
     WorldMapReadout,
 };
@@ -203,8 +203,7 @@ impl Viewer {
         action: &str,
         subject: Subject<'_>,
     ) -> Result<ResponseBody, DriverError> {
-        let patience = timeout.saturating_add(self.inner.options.grace);
-        let response = self.inner.connection.request(body, patience).await?;
+        let response = self.respond(body, timeout).await?;
         match response.result {
             Ok(body) => Ok(body),
             Err(error) => Err(self.fail(action, error, response.report, subject).await),
@@ -217,12 +216,19 @@ impl Viewer {
         &self,
         body: RequestBody,
     ) -> Result<Result<ResponseBody, AutomationError>, DriverError> {
-        let response = self
-            .inner
-            .connection
-            .request(body, self.inner.options.grace)
-            .await?;
-        Ok(response.result)
+        Ok(self.respond(body, Duration::ZERO).await?.result)
+    }
+
+    /// Send `body`, waiting up to `timeout` in the viewer, and return the
+    /// response as it came — a failure saves nothing, so the caller may take
+    /// one as an answer.
+    pub(crate) async fn respond(
+        &self,
+        body: RequestBody,
+        timeout: Duration,
+    ) -> Result<Response, DriverError> {
+        let patience = timeout.saturating_add(self.inner.options.grace);
+        self.inner.connection.request(body, patience).await
     }
 
     /// Send `body`, answered at once by the viewer.

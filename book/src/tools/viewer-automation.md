@@ -102,7 +102,10 @@ nothing runs while none are queued.
   pick resolver confirms lands on the target; a target nothing reaches is
   framed by the camera ("reveal") and looked at again until the deadline,
   and framed again where the camera has settled and still no click reaches
-  it. `open_pie` ends when a pie is open, not when the click is played.
+  it. `open_pie` ends when a pie is open, not when the click is played: a
+  click that puts none up within 30 viewer frames is played again, counted
+  in frames rather than seconds so a starved viewer's slow pie is not
+  clicked over.
 - **Ground actions** — the same gestures (but no select) on a point of the
   ground: `viewer.world().ground("Next Door", 20.0, 128.0).double_click()`.
   Bare ground has no id, so it is addressed by a region's name and a

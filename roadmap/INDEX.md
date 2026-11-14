@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 333 |
 | blocked | 39 |
 | in-progress | 6 |
-| bugs | 22 |
-| done | 1563 |
+| bugs | 21 |
+| done | 1564 |
 | deferred | 30 |
 | wont-do | 24 |
 | **total** | **2146** |
@@ -1274,7 +1274,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-text-renderability-axis`](in-progress/viewer-ui-text-renderability-axis.md)
   — Upstream issue — font selection cannot see glyph-format renderability
 
-## bugs (22)
+## bugs (21)
 
 ### protocol
 
@@ -1294,9 +1294,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### viewer
 
-- [`viewer-driver-pie-wait-wall-clock`](bugs/viewer-driver-pie-wait-wall-clock.md)
-  — Under load the driver's pie wait gives up on a pie that is still opening,
-  and the replayed click never settles
 - [`viewer-live-opensim-world-renders-white`](bugs/viewer-live-opensim-world-renders-white.md)
   — The world renders all white at times on the live OpenSim grid
 - [`viewer-mesh-hair-not-rendering`](bugs/viewer-mesh-hair-not-rendering.md) —
@@ -1339,7 +1336,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-lsl-mono-collision-model-under-lowered-limit`](bugs/server-lsl-mono-collision-model-under-lowered-limit.md)
   — A script 1 KB over its use collides in the runtime where Mono carries on
 
-## done (1563)
+## done (1564)
 
 ### protocol
 
@@ -2135,6 +2132,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-double-click-window-frame-clock`](done/viewer-double-click-window-frame-clock.md)
   — Lists time double clicks with a constant on the frame clock, so a slow
   viewer loses them
+- [`viewer-driver-pie-wait-wall-clock`](done/viewer-driver-pie-wait-wall-clock.md)
+  — Under load the driver's pie wait gives up on a pie that is still opening,
+  and the replayed click never settles
 - [`viewer-e2e-walk-foot-plane-lost-under-load`](done/viewer-e2e-walk-foot-plane-lost-under-load.md)
   — Under heavy load the walking avatar reads no foot plane after a walk
 - [`viewer-ecs-idiom-audit`](done/viewer-ecs-idiom-audit.md) — Audit the viewer
