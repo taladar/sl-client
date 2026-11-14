@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 330 |
 | blocked | 36 |
 | in-progress | 5 |
-| bugs | 22 |
-| done | 1576 |
+| bugs | 21 |
+| done | 1577 |
 | deferred | 30 |
 | wont-do | 24 |
 | **total** | **2153** |
@@ -1252,7 +1252,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-text-renderability-axis`](in-progress/viewer-ui-text-renderability-axis.md)
   — Upstream issue — font selection cannot see glyph-format renderability
 
-## bugs (22)
+## bugs (21)
 
 ### protocol
 
@@ -1272,9 +1272,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### viewer
 
-- [`viewer-capture-world-only-draws-hover-text-and-tags`](bugs/viewer-capture-world-only-draws-hover-text-and-tags.md)
-  — A world-only capture holds hover text and name tags, which Firestorm draws
-  only with the UI
 - [`viewer-live-opensim-world-renders-white`](bugs/viewer-live-opensim-world-renders-white.md)
   — The world renders all white at times on the live OpenSim grid
 - [`viewer-mesh-hair-not-rendering`](bugs/viewer-mesh-hair-not-rendering.md) —
@@ -1314,7 +1311,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1576)
+## done (1577)
 
 ### protocol
 
@@ -2019,6 +2016,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   teleport spree, freezing the avatar at a crossing
 - [`viewer-capture-layers`](done/viewer-capture-layers.md) — UI, HUD and gizmos
   as independent switches in both viewers' captures
+- [`viewer-capture-world-only-draws-hover-text-and-tags`](done/viewer-capture-world-only-draws-hover-text-and-tags.md)
+  — A world-only capture holds hover text and name tags, which Firestorm draws
+  only with the UI
 - [`viewer-cef-audio-mixer-handoff`](done/viewer-cef-audio-mixer-handoff.md) —
   CEF page audio into the shared mixer (OnAudioStreamPacket) (blocked by
   `viewer-audio-backend` (done))

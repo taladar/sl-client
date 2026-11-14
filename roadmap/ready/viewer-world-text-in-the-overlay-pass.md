@@ -65,6 +65,16 @@ is in giving it somewhere to move **to**:
   and looked at, because it also means text in front of a wall no longer sorts
   against anything.
 
+**Since then** ([[viewer-capture-world-only-draws-hover-text-and-tags]]):
+`tag_render_layers()` returns `probe_layers::WORLD_UI_LAYER` (9), which the
+world camera renders only while `WorldUiVisibility` shows it, so captures and
+snapshots without the UI already leave text out. The tracking beam, the debug
+beacons and the parcel borders sit on that layer too, but call
+`world_ui_render_layers()` directly, so moving the text does not move them.
+The overlay camera this task adds would render the text's layer, and the
+world camera would stop rendering it. Whatever hides the text today has to
+hide it from the new camera as well.
+
 Fiddly enough to want its own live round: the tag renderer's known traps are
 per-font-size atlas pages carried as `MeshTag`'d children, the anti-overlap
 screen offset packed into that same `MeshTag`, the glow-mask alpha on a

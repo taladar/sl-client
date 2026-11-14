@@ -24,6 +24,7 @@
 //! | static world geometry (prims/meshes/sculpts/trees/grass) | `0` + [`PROBE_GEOM_LAYER`] | main, local probes |
 //! | dynamic content (avatars, particles) | `0` + [`PROBE_DYNAMIC_LAYER`] | main, local probes *(when the setting includes it)* |
 //! | the own avatar's head in mouselook | [`SUN_SHADOW_ONLY_LAYER`] + [`PROBE_DYNAMIC_LAYER`] | the sun's shadow, local probes |
+//! | the world-anchored UI (hover text, name tags, the tracking beam, debug beacons, parcel borders) | [`WORLD_UI_LAYER`] | main, while the UI is shown |
 //!
 //! The shadow-casting sun stays on layer `0` (so the main view is untouched and
 //! world geometry still casts real shadows there), plus
@@ -80,6 +81,38 @@ pub const WATER_EXCLUSION_LAYER: usize = 7;
 /// the directional caster cull (`shadow_visibility`) drops anything not
 /// inherited-visible.
 pub const SUN_SHADOW_ONLY_LAYER: usize = 8;
+
+/// Render layer for the **world-anchored part of the UI**: an object's hover
+/// text, the name tags, the tracking beacon's beam, the debug beacons and the
+/// parcel borders.
+///
+/// The reference draws all of them in its UI pass, not its world pass —
+/// `LLHUDObject::renderAll()` (hover text and tags), `render_hud_elements` (the
+/// tracker beacon, property lines) and `renderObjectBeacons` all run only under
+/// `RENDER_DEBUG_FEATURE_UI` — so a snapshot taken without the UI, and the
+/// viewer with its UI hidden, show none of them. They are still drawn by the
+/// world camera here, for their depth behaviour against the scene, but on a
+/// layer of their own that the main camera renders only while the UI is shown
+/// ([`main_camera_render_layers`]). No probe camera and no light is on it.
+pub const WORLD_UI_LAYER: usize = 9;
+
+/// Render layers for the world-anchored UI: [`WORLD_UI_LAYER`] alone.
+#[must_use]
+pub const fn world_ui_render_layers() -> RenderLayers {
+    RenderLayers::layer(WORLD_UI_LAYER)
+}
+
+/// Render layers for the **main viewer camera**: [`MAIN_LAYER`], plus
+/// [`WORLD_UI_LAYER`] while the world-anchored UI is shown (`world_ui`).
+#[must_use]
+pub fn main_camera_render_layers(world_ui: bool) -> RenderLayers {
+    let layers = RenderLayers::layer(MAIN_LAYER);
+    if world_ui {
+        layers.with(WORLD_UI_LAYER)
+    } else {
+        layers
+    }
+}
 
 /// Render layers for static world geometry: the main layer plus
 /// [`PROBE_GEOM_LAYER`].
@@ -182,15 +215,17 @@ mod tests {
 
     use super::{
         MAIN_LAYER, PROBE_DYNAMIC_LAYER, PROBE_ENV_LAYER, PROBE_GEOM_LAYER, SUN_SHADOW_ONLY_LAYER,
-        WATER_EXCLUSION_LAYER, all_render_layers, default_probe_camera_render_layers,
-        dynamic_probe_only_render_layers, dynamic_render_layers, dynamic_shadow_only_render_layers,
-        environment_render_layers, local_probe_camera_render_layers, mirror_sun_render_layers,
-        scene_sun_render_layers, world_geom_render_layers,
+        WATER_EXCLUSION_LAYER, WORLD_UI_LAYER, all_render_layers,
+        default_probe_camera_render_layers, dynamic_probe_only_render_layers,
+        dynamic_render_layers, dynamic_shadow_only_render_layers, environment_render_layers,
+        local_probe_camera_render_layers, main_camera_render_layers, mirror_sun_render_layers,
+        scene_sun_render_layers, world_geom_render_layers, world_ui_render_layers,
     };
 
-    /// The main camera, which renders [`MAIN_LAYER`] and nothing else.
+    /// The main camera with the UI shown, which renders [`MAIN_LAYER`] and the
+    /// world-anchored UI.
     fn main_camera() -> RenderLayers {
-        RenderLayers::layer(MAIN_LAYER)
+        main_camera_render_layers(true)
     }
 
     /// Every probe capture camera the scheme can build, named for the assertion
@@ -338,6 +373,33 @@ mod tests {
     }
 
     #[test]
+    /// The world-anchored UI is the reference's UI pass: in the main view only
+    /// while the UI is shown, never in a probe capture (a reflection holding a
+    /// name tag), and neither lit nor shadowed by either sun.
+    fn the_world_ui_is_drawn_only_by_the_main_camera_and_only_with_the_ui() {
+        let world_ui = world_ui_render_layers();
+        assert!(world_ui.intersects(&main_camera_render_layers(true)));
+        assert!(
+            !world_ui.intersects(&main_camera_render_layers(false)),
+            "a frame without the UI still draws hover text and name tags"
+        );
+        assert!(!world_ui.intersects(&scene_sun_render_layers()));
+        assert!(!world_ui.intersects(&mirror_sun_render_layers()));
+        for (name, camera) in probe_cameras() {
+            assert!(
+                !world_ui.intersects(&camera),
+                "{name} captures the world-anchored UI"
+            );
+        }
+        for (name, layers) in content() {
+            assert!(
+                layers.intersects(&main_camera_render_layers(false)),
+                "hiding the UI hides {name}"
+            );
+        }
+    }
+
+    #[test]
     /// The headless harnesses build a synthetic scene outside the real pipeline
     /// and propagate one layer set onto its root, so that set has to reach the
     /// main camera and every probe camera at once.
@@ -363,6 +425,7 @@ mod tests {
             PROBE_DYNAMIC_LAYER,
             WATER_EXCLUSION_LAYER,
             SUN_SHADOW_ONLY_LAYER,
+            WORLD_UI_LAYER,
         ];
         let mut distinct = roles.to_vec();
         distinct.sort_unstable();

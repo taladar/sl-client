@@ -9,6 +9,7 @@
 //! does nothing — which is exactly how a harness ends up asserting on a frame
 //! the viewer would never show.
 
+use bevy::camera::visibility::{RenderLayers, VisibilitySystems};
 use bevy::camera::{Exposure, Hdr, ShadowLodOrigin};
 use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::light::cluster::{ClusterConfig, ClusterFarZMode, ClusterZConfig};
@@ -20,7 +21,8 @@ use crate::glow::SlGlow;
 use crate::tonemap::SlTonemap;
 use crate::underwater_fog::UnderwaterFog;
 use crate::water_scene_depth::WaterSceneDepthView;
-use sl_viewer_world_api::ViewerCamera;
+use sl_viewer_kit::probe_layers::main_camera_render_layers;
+use sl_viewer_world_api::{ViewerCamera, WorldUiVisibility};
 
 /// The reference viewer's default vertical field of view, in radians
 /// (`DEFAULT_FIELD_OF_VIEW`, `llcamera.h`): **60°**, and the default of its
@@ -191,16 +193,122 @@ pub fn viewer_camera_bundle(transform: Transform) -> impl Bundle {
         // marker Bevy takes a window camera, else *any* camera — a reflection
         // probe's capture camera, when this one renders into an image (the
         // render tiers) or no window is primary — and warns that it had to.
-        ShadowLodOrigin,
+        //
+        // Paired with the layers only because the bundle tuple is at its limit:
+        // the world, plus the world-anchored UI (hover text, name tags), which
+        // [`apply_world_ui_visibility`] takes off again whenever a frame leaves
+        // the UI out.
+        (ShadowLodOrigin, main_camera_render_layers(true)),
     )
+}
+
+/// Keeps the main camera's layers in step with [`WorldUiVisibility`]: the
+/// world-anchored UI's layer is on the [`ViewerCamera`] exactly while no hider
+/// holds it off.
+///
+/// Add it to any app whose frames can leave the UI out — the capture harness's
+/// world-only runs and the snapshot floater's shots without the UI — so hover
+/// text and name tags leave the frame with the rest of the UI, as in the
+/// reference.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct WorldUiLayerPlugin;
+
+impl Plugin for WorldUiLayerPlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<WorldUiVisibility>().add_systems(
+            PostUpdate,
+            apply_world_ui_visibility.before(VisibilitySystems::CheckVisibility),
+        );
+    }
+}
+
+/// Put the world-anchored UI's layer on the main camera, or take it off, to
+/// match [`WorldUiVisibility`].
+///
+/// Every frame rather than on a change to the resource, so a camera spawned
+/// after the last change is put right too; the comparison keeps an unchanged
+/// camera from being marked changed. In `PostUpdate` before Bevy decides what
+/// each camera sees, so the frame a hider takes is already without the UI.
+pub fn apply_world_ui_visibility(
+    visibility: Res<WorldUiVisibility>,
+    mut cameras: Query<&mut RenderLayers, With<ViewerCamera>>,
+) {
+    let wanted = main_camera_render_layers(visibility.shown());
+    for mut layers in &mut cameras {
+        layers.set_if_neq(wanted.clone());
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use bevy::camera::visibility::RenderLayers;
+    use bevy::prelude::*;
+    use sl_viewer_kit::probe_layers::{main_camera_render_layers, world_ui_render_layers};
+    use sl_viewer_world_api::{ViewerCamera, WorldUiHider, WorldUiVisibility};
+
     use super::{
-        DEFAULT_FIELD_OF_VIEW, MAX_FIELD_OF_VIEW, MIN_FIELD_OF_VIEW, clamp_field_of_view,
-        viewer_projection,
+        DEFAULT_FIELD_OF_VIEW, MAX_FIELD_OF_VIEW, MIN_FIELD_OF_VIEW, WorldUiLayerPlugin,
+        clamp_field_of_view, viewer_projection,
     };
+
+    /// Whether the app's one viewer camera draws the world-anchored UI after a
+    /// frame.
+    fn camera_draws_world_ui(app: &mut App) -> bool {
+        app.update();
+        let mut cameras = app
+            .world_mut()
+            .query_filtered::<&RenderLayers, With<ViewerCamera>>();
+        cameras
+            .iter(app.world())
+            .all(|layers| layers.intersects(&world_ui_render_layers()))
+    }
+
+    /// Set the app's world-UI holds.
+    fn hold(app: &mut App, change: impl FnOnce(&mut WorldUiVisibility)) {
+        change(&mut app.world_mut().resource_mut::<WorldUiVisibility>());
+    }
+
+    /// The camera draws hover text and name tags by default, drops them while
+    /// any hider holds them off, and draws them again only once every hider has
+    /// let go — a snapshot restoring inside a world-only capture run leaves the
+    /// run world-only.
+    #[test]
+    fn the_world_ui_leaves_the_view_while_any_hider_holds_it() {
+        let mut app = App::new();
+        app.add_plugins(WorldUiLayerPlugin);
+        app.world_mut()
+            .spawn((ViewerCamera, main_camera_render_layers(true)));
+        assert!(camera_draws_world_ui(&mut app), "drawn with nothing held");
+
+        hold(&mut app, |ui| ui.hide(WorldUiHider::Capture));
+        assert!(
+            !camera_draws_world_ui(&mut app),
+            "a world-only capture draws it"
+        );
+
+        hold(&mut app, |ui| ui.hide(WorldUiHider::Snapshot));
+        hold(&mut app, |ui| ui.release(WorldUiHider::Snapshot));
+        assert!(
+            !camera_draws_world_ui(&mut app),
+            "the snapshot's restore showed it inside a world-only capture"
+        );
+
+        hold(&mut app, |ui| ui.release(WorldUiHider::Capture));
+        assert!(camera_draws_world_ui(&mut app), "not drawn once released");
+    }
+
+    /// A camera spawned while the UI is held off (a capture run hides it before
+    /// the viewer's camera exists) is put right too.
+    #[test]
+    fn a_camera_spawned_while_the_ui_is_held_off_does_not_draw_it() {
+        let mut app = App::new();
+        app.add_plugins(WorldUiLayerPlugin);
+        hold(&mut app, |ui| ui.hide(WorldUiHider::Capture));
+        app.update();
+        app.world_mut()
+            .spawn((ViewerCamera, main_camera_render_layers(true)));
+        assert!(!camera_draws_world_ui(&mut app));
+    }
 
     /// The default is the reference's 60°, not the engine's 45°.
     ///

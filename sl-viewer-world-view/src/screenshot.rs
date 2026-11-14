@@ -54,6 +54,14 @@
 //! with the HUD in and the UI out, and neither answer should require the other
 //! layer to be in the picture.
 //!
+//! The UI is more than its camera. Hover text, name tags, the tracking beacon's
+//! beam, the debug beacons and the parcel borders are drawn by the *world*
+//! camera, for their depth against the scene, but the reference draws them in
+//! its UI pass (`LLHUDObject::renderAll`, `render_hud_elements`), so a frame
+//! without the UI holds none of them. They sit on a layer of their own, and a
+//! run without `--capture-ui` takes that layer off the world camera for the
+//! whole run ([`WorldUiVisibility`]).
+//!
 //! A layer that is not in the frame keeps the window where it can be watched —
 //! with one exception. The HUD layer and the UI are one camera, so a run that
 //! asks for exactly one of them **hides** the other rather than leaving it
@@ -96,7 +104,7 @@ use sl_client_bevy::SlCommand;
 use crate::harness_status::{DayPositionStatus, HarnessStatus};
 use crate::quiescence::SceneQuiescence;
 use crate::session::{ViewerSession, request_logout};
-use sl_viewer_world_api::{OverlayCamera, ViewerCamera};
+use sl_viewer_world_api::{OverlayCamera, ViewerCamera, WorldUiHider, WorldUiVisibility};
 
 /// The offline-inspection screenshot harness (R11): capture a numbered PNG
 /// sequence into `dir` after a startup delay, then quit.
@@ -142,7 +150,16 @@ impl Plugin for ScreenshotPlugin {
             self.grid_expected,
         ))
         .insert_resource(self.content)
-        .insert_resource(CaptureTargetMode(self.target));
+        .insert_resource(CaptureTargetMode(self.target))
+        .init_resource::<WorldUiVisibility>();
+        if !self.content.ui {
+            // Hover text and name tags are part of the UI, not the world: the
+            // world camera draws them, so leaving the UI's cameras out of the
+            // frame is not enough.
+            app.world_mut()
+                .resource_mut::<WorldUiVisibility>()
+                .hide(WorldUiHider::Capture);
+        }
         match self.target {
             CaptureTarget::PinnedImage => {
                 app
@@ -622,7 +639,8 @@ pub(crate) struct PinnedCapture {
 /// invisible to the world, to the probes and to the capture itself.
 ///
 /// Layer `2` is the one gap in the workspace's assignment — `0` world, `1` HUD,
-/// `3` edit gizmos, `4`–`6` reflection probes, `7` water exclusion.
+/// `3` edit gizmos, `4`–`6` reflection probes, `7` water exclusion, `8` the
+/// sun's shadow alone, `9` the world-anchored UI.
 const CAPTURE_PREVIEW_RENDER_LAYER: usize = 2;
 
 /// Point the world camera at an off-screen image of the pinned size, and put a
@@ -1221,12 +1239,19 @@ pub(crate) fn poll_screenshot_saves(
 
 #[cfg(test)]
 mod tests {
+    use bevy::app::App;
+    use bevy::camera::visibility::RenderLayers;
+    use bevy::ecs::system::RunSystemOnce as _;
     use pretty_assertions::assert_eq;
 
-    use sl_viewer_world_api::OverlayCamera;
+    use sl_viewer_kit::probe_layers::main_camera_render_layers;
+    use sl_viewer_world_api::{OverlayCamera, ViewerCamera};
+    use sl_viewer_world_objects::name_tag_billboard::tag_render_layers;
+    use sl_viewer_world_scene::viewer_camera::apply_world_ui_visibility;
 
     use super::{
-        CaptureContent, CaptureSize, MAX_CAPTURE_DIMENSION, ScreenshotSchedule, parse_capture_size,
+        CaptureContent, CaptureSize, CaptureTarget, MAX_CAPTURE_DIMENSION, ScreenshotPlugin,
+        ScreenshotSchedule, parse_capture_size,
     };
     use sl_viewer_world_scene::environment::DayPositionPin;
 
@@ -1443,6 +1468,53 @@ mod tests {
             hud,
             gizmos,
         }
+    }
+
+    /// Whether the world camera of a capture run with `content` draws the hover
+    /// text / name-tag layer, after the scene layer has applied the run's
+    /// world-UI holds to it.
+    fn capture_draws_tags(content: CaptureContent) -> Result<bool, TestError> {
+        let mut app = App::new();
+        app.add_plugins(ScreenshotPlugin {
+            dir: std::env::temp_dir(),
+            content,
+            grid_expected: true,
+            target: CaptureTarget::PinnedImage,
+        });
+        let camera = app
+            .world_mut()
+            .spawn((ViewerCamera, main_camera_render_layers(true)))
+            .id();
+        app.world_mut()
+            .run_system_once(apply_world_ui_visibility)
+            .map_err(|error| error.to_string())?;
+        let layers = app
+            .world()
+            .entity(camera)
+            .get::<RenderLayers>()
+            .ok_or("the viewer camera lost its render layers")?;
+        Ok(layers.intersects(&tag_render_layers()))
+    }
+
+    /// Hover text and name tags are UI, as in the reference (whose
+    /// `LLHUDObject::renderAll` runs only with the UI): a world-only capture's
+    /// world camera does not draw them, and a capture with the UI does — and
+    /// the HUD alone does not bring them back.
+    #[test]
+    fn hover_text_and_name_tags_are_in_a_capture_exactly_with_the_ui() -> Result<(), TestError> {
+        assert!(
+            !capture_draws_tags(CaptureContent::WORLD_ONLY)?,
+            "a world-only capture draws hover text and name tags"
+        );
+        assert!(
+            !capture_draws_tags(content(false, true, true))?,
+            "a HUD and gizmo capture without the UI draws hover text and name tags"
+        );
+        assert!(
+            capture_draws_tags(content(true, false, false))?,
+            "a capture with the UI leaves hover text and name tags out"
+        );
+        Ok(())
     }
 
     /// The default is the world alone at 1080p — the comparison the cross-check

@@ -122,6 +122,55 @@ pub enum OverlayCamera {
     HudAndUi,
 }
 
+/// Something that takes the **world-anchored UI** — hover text, name tags, the
+/// tracking beacon's beam, the debug beacons, the parcel borders — out of the
+/// main camera's view.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorldUiHider {
+    /// A capture run that did not ask for the UI (`--capture-ui` off): its
+    /// frames hold the world alone, for the whole run.
+    Capture,
+    /// The snapshot floater taking a shot with **Include UI** off, for the
+    /// frames of the shot.
+    Snapshot,
+}
+
+/// Whether the main camera draws the world-anchored UI, and who has hidden it.
+///
+/// The reference draws hover text, name tags, the tracker beacon, debug beacons
+/// and property lines in its UI pass, under `RENDER_DEBUG_FEATURE_UI`, so whatever leaves
+/// the UI out of a frame leaves them out too. Here they are drawn by the world
+/// camera on a layer of their own (`sl_viewer_kit::probe_layers::WORLD_UI_LAYER`),
+/// and the scene layer keeps that layer on the [`ViewerCamera`] exactly while
+/// no hider holds it off. One hider letting go does not show it while another
+/// still holds it: a snapshot restoring its shot inside a world-only capture
+/// run leaves the run's frames world-only.
+#[derive(Resource, Debug, Clone, Default, PartialEq, Eq)]
+pub struct WorldUiVisibility {
+    /// Every hider currently holding the world-anchored UI off.
+    hidden_by: Vec<WorldUiHider>,
+}
+
+impl WorldUiVisibility {
+    /// Take the world-anchored UI out of the view on behalf of `hider`.
+    pub fn hide(&mut self, hider: WorldUiHider) {
+        if !self.hidden_by.contains(&hider) {
+            self.hidden_by.push(hider);
+        }
+    }
+
+    /// Let go of `hider`'s hold; the UI shows again once no hider holds it.
+    pub fn release(&mut self, hider: WorldUiHider) {
+        self.hidden_by.retain(|held| *held != hider);
+    }
+
+    /// Whether the main camera draws the world-anchored UI.
+    #[must_use]
+    pub const fn shown(&self) -> bool {
+        self.hidden_by.is_empty()
+    }
+}
+
 /// Marks an entity that draws a **second copy of another entity's skinned
 /// geometry** and names the entity it copies — so the avatar layer poses the two
 /// alike.

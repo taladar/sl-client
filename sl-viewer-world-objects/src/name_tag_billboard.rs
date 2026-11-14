@@ -26,7 +26,9 @@
 //! (roadmap `viewer-name-tags-lost-to-probe-cameras`). Tag entities are
 //! **top-level** (never children of the avatar anchor, whose
 //! `Propagate(dynamic_render_layers())` would leak the probe layer onto them)
-//! and carry [`RenderLayers`] layer 0 only, so probe cameras never see a tag.
+//! and carry the world-anchored UI's layer only
+//! ([`WORLD_UI_LAYER`](sl_viewer_kit::probe_layers::WORLD_UI_LAYER)), so probe
+//! cameras never see a tag and a frame taken without the UI holds none.
 //!
 //! # Why this is in the object layer
 //!
@@ -1936,12 +1938,15 @@ impl Plugin for NameTagBillboardPlugin {
     }
 }
 
-/// The render layers a tag entity lives on: the main viewpoint layer **only**.
-/// Deliberately not derived from any avatar subtree propagation — probe
-/// cameras (layers 4/5/6) and the HUD camera (layer 1) must never see tags.
+/// The render layers a tag entity — and an object's hover text — lives on: the
+/// world-anchored UI's layer **only**, which the main camera draws while the UI
+/// is shown and drops from a frame that leaves the UI out, as the reference
+/// draws this text in its UI pass. Deliberately not derived from any avatar
+/// subtree propagation — probe cameras (layers 4/5/6) and the HUD camera
+/// (layer 1) must never see tags.
 #[must_use]
 pub const fn tag_render_layers() -> RenderLayers {
-    RenderLayers::layer(sl_viewer_kit::probe_layers::MAIN_LAYER)
+    sl_viewer_kit::probe_layers::world_ui_render_layers()
 }
 
 #[cfg(test)]
