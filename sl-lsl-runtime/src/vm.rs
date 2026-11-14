@@ -75,6 +75,7 @@ mod instance;
 pub mod land;
 pub mod linkset_data;
 pub mod memory;
+pub mod npcs;
 pub(crate) mod objects;
 pub mod ossl;
 pub mod permissions;

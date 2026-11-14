@@ -1429,7 +1429,7 @@ reason = "Falling through the volume-detecting prim, the local OpenSim's faller 
 [[difference]]
 probe = "ossl/available"
 between = ["opensim-yengine", "fake-opensim"]
-reason = "osGetWindParam is not implemented, so the probe's script stops at it and never prints its end (osGetGender, osGetHealth and osIsNpc after it are server-lsl-lib-ossl-avatars'); osGetGridName and osGetGridNick name the fake grid"
+reason = "osGetWindParam is not implemented, so the probe's script stops at it and never prints its end (osGetGender, osGetHealth and osIsNpc after it); osGetGridName and osGetGridNick name the fake grid"
 task = "server-lsl-lib-ossl-land-writers"
 
 [[difference]]

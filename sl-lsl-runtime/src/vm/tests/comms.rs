@@ -34,7 +34,7 @@ pub(super) fn name_of(agent: &str) -> &'static str {
 }
 
 /// The key of the prim numbered `prim`.
-fn prim_key(prim: u64) -> String {
+pub(super) fn prim_key(prim: u64) -> String {
     format!("00000000-0000-4000-8000-{prim:012}")
 }
 

@@ -79,7 +79,7 @@ fn line(flavour: EngineFlavour, text: &str) -> String {
 
 /// Say `text` on `channel` as far as `volume` carries, to avatars and
 /// scripts alike.
-fn speak(ctx: &mut ScriptCtx<'_>, channel: i32, text: &str, volume: ChatVolume) {
+pub(crate) fn speak(ctx: &mut ScriptCtx<'_>, channel: i32, text: &str, volume: ChatVolume) {
     let speech = Speech {
         channel,
         text: line(ctx.flavour(), text),
@@ -104,7 +104,7 @@ pub fn ll_whisper(ctx: &mut ScriptCtx<'_>, channel: i32, text: String) -> Result
 /// two seconds before the line is said. Whether the call returns now, to be
 /// made again when the script wakes (XEngine, whose thread sleeps first);
 /// YEngine says the line and then sleeps. Second Life has no throttle.
-fn waits_for_throttle(ctx: &mut ScriptCtx<'_>, channel: i32) -> bool {
+pub(crate) fn waits_for_throttle(ctx: &mut ScriptCtx<'_>, channel: i32) -> bool {
     if !ctx.flavour().is_opensim() || ctx.woke() {
         return false;
     }

@@ -675,17 +675,118 @@ pub trait Host {
     /// script may see, or [`None`] when it is not in the region.
     fn attached_list(&self, caller: CallerId, agent: &str) -> Option<Vec<String>>;
 
+    /// The objects `agent` wears that a script may see, each with the point
+    /// it is worn on, or [`None`] when it is not in the region
+    /// (`osGetNumberOfAttachments`, `osMessageAttachments`).
+    fn attachments(&self, caller: CallerId, agent: &str) -> Option<Vec<(i32, String)>>;
+
+    /// `osForceAttachToAvatarFromInventory` and its twin for another avatar:
+    /// move the object item named `item`, which the library found in
+    /// `caller`'s prim, into the inventory of `agent`, who is in the region,
+    /// and wear it from there on `point` (0 for the point it was last worn
+    /// on), as a viewer's wear from its inventory would.
+    fn attach_from_inventory(&mut self, caller: CallerId, agent: &str, item: &str, point: i32);
+
+    /// `osDropAttachment`, `osDropAttachmentAt`: take `caller`'s worn object
+    /// off and put it down in the region — where its wearer stands, or at
+    /// `at` — as a viewer's Drop would. Nothing for an object not worn.
+    fn drop_attachment(&mut self, caller: CallerId, at: Option<&crate::vm::npcs::DropAt>);
+
+    /// `osForceOtherSit`, `osNpcSit`: seat `agent`, an avatar or an NPC in
+    /// the region, on the prim keyed `prim` as the avatar's own sit request
+    /// on it would — the next free sit target of its linkset, the prim's sit
+    /// range honoured. With `target_free`, nothing when somebody sits on the
+    /// prim's own sit target (`osForceOtherSit`). Nothing for a key that is
+    /// neither, or a prim the region does not have.
+    fn sit(&mut self, caller: CallerId, agent: &str, prim: &str, target_free: bool);
+
+    /// `osNpcCreate`: put an NPC into `caller`'s region as `spec` says and
+    /// show it to the region's viewers, as an avatar arriving; its key.
+    ///
+    /// # Errors
+    ///
+    /// [`NpcRefusal`](crate::vm::npcs::NpcRefusal) when the region creates
+    /// none.
+    fn create_npc(
+        &mut self,
+        caller: CallerId,
+        spec: &crate::vm::npcs::NpcSpec,
+    ) -> Result<String, crate::vm::npcs::NpcRefusal>;
+
+    /// The NPCs of `caller`'s region, in the order they were created.
+    fn npcs(&self, caller: CallerId) -> Vec<crate::vm::npcs::Npc>;
+
+    /// Make the NPC keyed `npc` do `action`, which the library has checked
+    /// `caller`'s owner may ask of it. Nothing for a key no NPC of the region
+    /// has.
+    fn npc_act(&mut self, caller: CallerId, npc: &str, action: &crate::vm::npcs::NpcAction);
+
+    /// The NPC keyed `npc` says `speech`, as an avatar's line: the avatars in
+    /// earshot see it as chat from an agent, and the host answers the scripts
+    /// to offer it to — all those in earshot, or the one prim's of a line said
+    /// to it; [`None`] when none.
+    fn npc_say(
+        &mut self,
+        caller: CallerId,
+        npc: &str,
+        speech: &crate::vm::npcs::NpcSpeech,
+    ) -> Option<Overheard>;
+
+    /// How `agent`, an avatar or an NPC in the region, looks, or [`None`]
+    /// when it is neither (`osGetGender`, the appearance saves).
+    fn appearance(&self, caller: CallerId, agent: &str) -> Option<crate::vm::npcs::Appearance>;
+
+    /// What the region keeps of the health of `agent`, an avatar or an NPC in
+    /// the region, or [`None`] when it is neither.
+    fn vitals(&self, caller: CallerId, agent: &str) -> Option<crate::vm::npcs::Vitals>;
+
+    /// `agent`'s health is now `vitals`, which the library has clamped; its
+    /// viewer is told its health (`HealthMessage`). The region heals it at
+    /// the rate given from then on.
+    fn set_vitals(&mut self, caller: CallerId, agent: &str, vitals: crate::vm::npcs::Vitals);
+
+    /// Send `agent`'s viewer the alert `text`, modal or not
+    /// (`AgentAlertMessage`), as `osCauseDamage` tells a dead avatar.
+    fn alert(&mut self, caller: CallerId, agent: &str, text: &str, modal: bool);
+
+    /// `osSetSpeed`: `agent`'s movement is now `factor` times as fast.
+    fn set_speed(&mut self, caller: CallerId, agent: &str, factor: f32);
+
+    /// `osKickAvatar`: send `agent`'s viewer `alert` as the reason it is
+    /// kicked (`KickUser`) and close its circuit with the region. Nothing for
+    /// an avatar not in the region.
+    fn kick(&mut self, caller: CallerId, agent: &str, alert: &str);
+
+    /// The powers `agent` holds in the group keyed `group`, its roles'
+    /// together, or [`None`] when it is no member (`osInviteToGroup`,
+    /// `osEjectFromGroup`).
+    fn group_powers(&self, group: &str, agent: &str) -> Option<u64>;
+
+    /// The name of the group keyed `group`, or [`None`] for a key no group
+    /// has (an NPC created into its prim's group is titled with it).
+    fn group_name(&self, group: &str) -> Option<String>;
+
+    /// `osInviteToGroup`: invite `agent` into the group keyed `group` in the
+    /// name of `caller`'s owner, as the owner's own invitation would.
+    fn invite_to_group(&mut self, caller: CallerId, group: &str, agent: &str);
+
+    /// `osEjectFromGroup`: eject `agent` from the group keyed `group` in the
+    /// name of `caller`'s owner, as the owner's own ejection would.
+    fn eject_from_group(&mut self, caller: CallerId, group: &str, agent: &str);
+
     /// The key of the map texture of the grid's region named, or keyed,
     /// `region` — of the caller's own region for an empty `region` — or
     /// [`None`] for a region the grid does not know (`osGetMapTexture`,
     /// `osGetRegionMapTexture`).
     fn map_texture(&self, caller: CallerId, region: &str) -> Option<String>;
 
-    /// `osMakeNotecard`: write a notecard of `text` into `caller`'s prim
-    /// under `name`, or the first `name N` the prim does not hold, described
-    /// `description`, its owner the prim's owner and its creator too, and
-    /// raise `changed(bits)` in the prim's scripts once per element of
-    /// `changed`.
+    /// `osMakeNotecard` and the appearance saves: write a notecard of `text`
+    /// into `caller`'s prim under `name` — replacing an item of that name when
+    /// `replace` is set (OpenSim's `AddInventoryItemExclusive`), else under
+    /// the first `name N` the prim does not hold — described `description`,
+    /// its owner the prim's owner and its creator too, raise `changed(bits)`
+    /// in the prim's scripts once per element of `changed`, and answer the
+    /// new notecard's asset key.
     fn make_notecard(
         &mut self,
         caller: CallerId,
@@ -693,7 +794,8 @@ pub trait Host {
         description: &str,
         text: &str,
         changed: &[i32],
-    );
+        replace: bool,
+    ) -> String;
 
     /// The region's calendar time at its tick 0, in microseconds since the
     /// UNIX epoch: what every date a script reads counts on from by its

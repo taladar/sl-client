@@ -32,7 +32,7 @@ const OPENSIM_LINE_UNITS: usize = 255;
 /// Where the notecard a script names is: the asset of the notecard item of
 /// that name, or of that asset key, in the caller's prim — and on OpenSim any
 /// key at all, which it reads as an asset key whatever the prim holds.
-fn notecard_asset(ctx: &mut ScriptCtx<'_>, name: &str) -> Option<String> {
+pub(crate) fn notecard_asset(ctx: &mut ScriptCtx<'_>, name: &str) -> Option<String> {
     if let Some(item) = named(ctx, name).filter(|item| item.kind == INVENTORY_NOTECARD) {
         return Some(item.asset);
     }
@@ -223,18 +223,27 @@ pub fn os_get_notecard_line(
 ///
 /// None; the signature is the library's.
 pub fn os_get_notecard(ctx: &mut ScriptCtx<'_>, name: String) -> Result<String, CallError> {
-    let text = notecard_asset(ctx, &name).and_then(|asset| ctx.host().notecard_text(&asset));
-    let Some(text) = text else {
+    let Some(text) = load_notecard(ctx, &name) else {
         not_found(ctx, &name);
         return Ok("ERROR!".to_owned());
     };
-    Ok(notecard_lines(&text, true)
-        .iter()
-        .fold(String::new(), |mut all, line| {
-            all.push_str(line);
-            all.push('\n');
-            all
-        }))
+    Ok(text)
+}
+
+/// OpenSim's `LoadNotecard`: the whole of the notecard a script names by
+/// name or key, its lines each ended by a newline; [`None`] for one it
+/// cannot find.
+pub(crate) fn load_notecard(ctx: &mut ScriptCtx<'_>, name: &str) -> Option<String> {
+    let text = notecard_asset(ctx, name).and_then(|asset| ctx.host().notecard_text(&asset))?;
+    Some(
+        notecard_lines(&text, true)
+            .iter()
+            .fold(String::new(), |mut all, line| {
+                all.push_str(line);
+                all.push('\n');
+                all
+            }),
+    )
 }
 
 /// `osGetNumberOfNotecardLines`: how many lines the notecard `name` has, at

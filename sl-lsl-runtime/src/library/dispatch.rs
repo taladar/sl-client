@@ -89,7 +89,7 @@ pub enum CallError {
 }
 
 /// A .NET exception OpenSim's library throws out of a function.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Exception {
     /// `System.IndexOutOfRangeException`: an index past an array's end —
     /// `llList2ListStrided` of a range that starts and ends past the list,
@@ -150,12 +150,21 @@ pub enum Exception {
     /// of a face the texture entry cannot index (`prim/params-rules`: face
     /// 100, and −2 as the unsigned 4294967294).
     FaceOutOfRange(u32),
+    /// `System.FormatException` from OpenMetaverse's `UUID(string)`: an
+    /// `osNpc*` function given a key that is none (`new UUID(npc)`).
+    InvalidUuid,
+    /// `System.Exception` from `osForceAttachToAvatarFromInventory`: no item
+    /// of that name in the prim.
+    ItemNotFound(String),
+    /// `System.Exception` from `osForceAttachToAvatarFromInventory`: the item
+    /// of that name is no object.
+    ItemNotObject(String),
 }
 
 impl Exception {
     /// The exception's class name, without its namespace.
     #[must_use]
-    pub const fn class(self) -> &'static str {
+    pub const fn class(&self) -> &'static str {
         match self {
             Self::IndexOutOfRange => "IndexOutOfRangeException",
             Self::Overflow | Self::ArithmeticOverflow => "OverflowException",
@@ -163,32 +172,39 @@ impl Exception {
             Self::InvalidCast | Self::VectorNotInteger | Self::RotationNotInteger => {
                 "InvalidCastException"
             }
-            Self::FormatIndex | Self::FormatInvalid => "FormatException",
+            Self::FormatIndex | Self::FormatInvalid | Self::InvalidUuid => "FormatException",
             Self::InvalidPattern => "ArgumentException",
             Self::CountOutOfRange
             | Self::StartIndexOutOfRange
             | Self::ItemIndexOutOfRange
             | Self::SleepTimeout => "ArgumentOutOfRangeException",
-            Self::FaceOutOfRange(_) => "Exception",
+            Self::FaceOutOfRange(_) | Self::ItemNotFound(_) | Self::ItemNotObject(_) => "Exception",
             Self::NullReference => "NullReferenceException",
         }
     }
 
     /// The exception's message.
     #[must_use]
-    pub fn message(self) -> std::borrow::Cow<'static, str> {
+    pub fn message(&self) -> std::borrow::Cow<'static, str> {
         match self {
             Self::FaceOutOfRange(face) => {
                 std::borrow::Cow::Owned(format!("{face} is outside the range of MAX_FACES"))
+            }
+            Self::ItemNotFound(item) => {
+                std::borrow::Cow::Owned(format!("The inventory item '{item}' could not be found"))
+            }
+            Self::ItemNotObject(item) => {
+                std::borrow::Cow::Owned(format!("The inventory item '{item}' is not an object"))
             }
             other => std::borrow::Cow::Borrowed(other.fixed_message()),
         }
     }
 
     /// The message of an exception whose message names nothing of the call.
-    const fn fixed_message(self) -> &'static str {
+    const fn fixed_message(&self) -> &'static str {
         match self {
-            Self::FaceOutOfRange(_) => "",
+            Self::FaceOutOfRange(_) | Self::ItemNotFound(_) | Self::ItemNotObject(_) => "",
+            Self::InvalidUuid => "Invalid UUID",
             Self::IndexOutOfRange => "Index was outside the bounds of the array.",
             Self::Overflow => "Value was either too large or too small for an Int32.",
             Self::ArithmeticOverflow => "Arithmetic operation resulted in an overflow.",

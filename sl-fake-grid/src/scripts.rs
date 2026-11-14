@@ -184,6 +184,7 @@ pub struct StubbedCall {
 mod avatars;
 pub(crate) mod http;
 mod land;
+mod npcs;
 mod sensing;
 mod task_inventory;
 
@@ -312,6 +313,9 @@ pub struct RegionScripts {
     http: http::RegionHttp,
     /// What scripts hold of the region's avatars ([`avatars::RegionAvatars`]).
     avatars: avatars::RegionAvatars,
+    /// The NPCs scripts made, and every avatar's health
+    /// ([`npcs::RegionNpcs`]).
+    npcs: npcs::RegionNpcs,
     /// While the engine is lent to a tick, the calls into it that a change
     /// made under the tick asked for, in order, to be made once it is back;
     /// [`None`] while it is in place.
@@ -423,6 +427,7 @@ impl RegionScripts {
             epoch_micros: None,
             http: http::RegionHttp::default(),
             avatars: avatars::RegionAvatars::default(),
+            npcs: npcs::RegionNpcs::default(),
             deferred: None,
         }
     }
@@ -1175,6 +1180,30 @@ enum Effect {
     },
     /// The avatar is stood up (`llUnSit`).
     Unsit(AgentKey),
+    /// An NPC clicks the prim (`osNpcTouch`), once the engine is back to
+    /// take the touch events.
+    NpcTouch {
+        /// The NPC.
+        agent: AgentKey,
+        /// Its name, `First Last`.
+        name: String,
+        /// Where it stands.
+        at: Vector,
+        /// The prim.
+        prim: RegionLocalObjectId,
+    },
+    /// The avatar is seated on the prim as its own sit request would seat
+    /// it (`osForceOtherSit`): the next free sit target of the linkset, the
+    /// prim's sit range honoured; with `target_free`, nobody may sit on the
+    /// prim's own target.
+    ForceSit {
+        /// The avatar.
+        agent: AgentKey,
+        /// The prim.
+        prim: RegionLocalObjectId,
+        /// Whether a sitter on the prim's target refuses it.
+        target_free: bool,
+    },
     /// The avatar is seated on the prim (`llSitOnLink`).
     Sit {
         /// The avatar.
@@ -1360,6 +1389,79 @@ enum Delivery {
         destination: Box<sl_lsl_runtime::vm::avatars::Destination>,
         /// The alert it is sent once it has moved, on a grid that sends one.
         alert: Option<String>,
+    },
+    /// The avatar's health, changed by a script or healed by the region
+    /// (`osCauseDamage` and its kin): a `HealthMessage`.
+    Health {
+        /// The avatar.
+        agent: AgentKey,
+        /// Its health.
+        health: f32,
+    },
+    /// An alert to the avatar (`AgentAlertMessage`): `osCauseDamage`'s
+    /// "You died!".
+    Alert {
+        /// The avatar.
+        agent: AgentKey,
+        /// The text.
+        text: String,
+        /// Whether the viewer is to show it modally.
+        modal: bool,
+    },
+    /// The avatar kicked off the grid with the reason (`osKickAvatar`).
+    Kick {
+        /// The avatar.
+        agent: AgentKey,
+        /// The reason its viewer shows.
+        reason: String,
+    },
+    /// The avatar moves this many times as fast (`osSetSpeed`).
+    Speed {
+        /// The avatar.
+        agent: AgentKey,
+        /// The factor.
+        factor: f32,
+    },
+    /// The avatar invited into a group by an object of `owner`'s
+    /// (`osInviteToGroup`).
+    GroupInvite {
+        /// The invitee.
+        agent: AgentKey,
+        /// The object's owner, in whose name the invitation goes.
+        owner: AgentKey,
+        /// The group.
+        group: sl_types::key::GroupKey,
+    },
+    /// The avatar ejected from a group by an object of `owner`'s
+    /// (`osEjectFromGroup`).
+    GroupEject {
+        /// The member.
+        agent: AgentKey,
+        /// The object's owner, in whose name the ejection goes.
+        owner: AgentKey,
+        /// The group.
+        group: sl_types::key::GroupKey,
+    },
+    /// A copy of a prim's object item filed in the avatar's inventory and
+    /// worn from there (`osForceAttachToAvatarFromInventory`).
+    WearFromContents {
+        /// The avatar.
+        agent: AgentKey,
+        /// The prim's item.
+        item: Box<TaskInventoryItem>,
+        /// The attachment point; 0 for the object's own.
+        point: u8,
+    },
+    /// The avatar's worn object put down in the region, its item gone from
+    /// the avatar's inventory (`osDropAttachment`).
+    Drop {
+        /// The wearer.
+        agent: AgentKey,
+        /// The worn root.
+        root: RegionLocalObjectId,
+        /// Where and how turned it is put down, or [`None`] for where its
+        /// wearer stands.
+        at: Option<(Vector, Rotation)>,
     },
     /// The media of the parcel the avatar stands on, changed or commanded by
     /// a script (`llParcelMediaCommandList`).
@@ -1870,13 +1972,30 @@ impl RegionHost<'_> {
     fn avatar_details(&self, present: &Present) -> sl_lsl_runtime::vm::prim::ObjectDetails {
         let agent = present.agent.uuid();
         let (first, last) = self.name_of(agent);
-        let worn = self.world.objects.worn_by(present.agent);
-        let key = agent.to_string();
+        self.avatar_like_details(
+            &agent.to_string(),
+            &format!("{first} {last}"),
+            &present.position,
+        )
+    }
+
+    /// What `llGetObjectDetails` reads of an avatar — an agent or an NPC —
+    /// keyed `key`, called `name`, standing at `position`, unturned and still.
+    fn avatar_like_details(
+        &self,
+        key: &str,
+        name: &str,
+        position: &Vector,
+    ) -> sl_lsl_runtime::vm::prim::ObjectDetails {
+        let worn = Self::agent_named(key)
+            .map(|agent| self.world.objects.worn_by(agent))
+            .unwrap_or_default();
+        let key = key.to_owned();
         sl_lsl_runtime::vm::prim::ObjectDetails {
             avatar: true,
-            name: format!("{first} {last}"),
+            name: name.to_owned(),
             description: String::new(),
-            position: present.position.clone(),
+            position: position.clone(),
             rotation: Rotation {
                 x: 0.0,
                 y: 0.0,
@@ -2886,6 +3005,9 @@ impl Host for RegionHost<'_> {
         if let Some(present) = self.present(key) {
             return Some(self.avatar_details(present));
         }
+        if let Some(npc) = self.npc_details(key) {
+            return Some(npc);
+        }
         // OpenSim keeps a child agent's `ScenePresence` in the region and
         // answers `llGetObjectDetails` from it (`comms/owner-away`: the owner
         // in a neighbour still has its `OBJECT_POS`); Second Life answers
@@ -3339,7 +3461,7 @@ impl Host for RegionHost<'_> {
     }
 
     fn agent(&self, _caller: CallerId, agent: &str) -> Option<sl_lsl_runtime::vm::avatars::Agent> {
-        self.agent_of(agent)
+        self.agent_of(agent).or_else(|| self.npc_agent(agent))
     }
 
     fn agent_record(
@@ -3358,6 +3480,10 @@ impl Host for RegionHost<'_> {
         let Some(object) = self.slot(caller).map(|slot| slot.prim) else {
             return;
         };
+        if self.npc_body(agent).is_some() {
+            self.animate_npc(agent, animation, start, object);
+            return;
+        }
         self.animate_agent(agent, animation, start, object);
     }
 
@@ -3418,6 +3544,24 @@ impl Host for RegionHost<'_> {
         agent: &str,
         destination: &sl_lsl_runtime::vm::avatars::Destination,
     ) {
+        // An NPC has no client to teleport: it is put where a teleport within
+        // its region would put it, and goes nowhere else.
+        if self.npc_body(agent).is_some() {
+            let npc = Self::agent_named(agent);
+            match (destination, npc) {
+                (sl_lsl_runtime::vm::avatars::Destination::Local { position, .. }, Some(npc)) => {
+                    self.place_npc(npc, position, None);
+                }
+                (
+                    sl_lsl_runtime::vm::avatars::Destination::Moved {
+                        position, velocity, ..
+                    },
+                    Some(npc),
+                ) => self.place_npc(npc, position, velocity.as_ref()),
+                _other => self.refuse_unmodelled(caller, "an NPC's teleport out of its region"),
+            }
+            return;
+        }
         // The grid's teleport machinery runs outside the tick, and waits on
         // the client: the teleport is handed to it once the tick is over.
         let Some(present) = self.present(agent) else {
@@ -3446,8 +3590,9 @@ impl Host for RegionHost<'_> {
         description: &str,
         text: &str,
         changed: &[i32],
-    ) {
-        self.make_notecard_in(caller, (name, description, text), changed);
+        replace: bool,
+    ) -> String {
+        self.make_notecard_in(caller, (name, description, text), changed, replace)
     }
 
     fn epoch_micros(&self) -> i64 {
@@ -3474,6 +3619,232 @@ impl Host for RegionHost<'_> {
         end: &Vector,
     ) -> Vec<sl_lsl_runtime::vm::sensing::RayHit> {
         self.ray_hits(caller, start, end)
+    }
+
+    fn attachments(&self, _caller: CallerId, agent: &str) -> Option<Vec<(i32, String)>> {
+        let key = Self::agent_named(agent)?;
+        if self.present(agent).is_none() && self.npc_body(agent).is_none() {
+            return None;
+        }
+        Some(
+            self.world
+                .objects
+                .worn_by(key)
+                .into_iter()
+                .filter_map(|root| {
+                    let attached = self.world.objects.attached_to(root)?;
+                    let object = self.world.objects.get(root)?;
+                    Some((i32::from(attached.point), object.full_id.uuid().to_string()))
+                })
+                .collect(),
+        )
+    }
+
+    fn attach_from_inventory(&mut self, caller: CallerId, agent: &str, item: &str, point: i32) {
+        let (Some(origin), Some(present)) = (self.origin(caller), self.present(agent)) else {
+            return;
+        };
+        let agent = present.agent;
+        let Some(contents) = self.world.objects.contents_mut(origin.local_id) else {
+            return;
+        };
+        let Some(held) = contents
+            .items
+            .iter()
+            .find(|held| held.name == item)
+            .cloned()
+        else {
+            return;
+        };
+        // `MoveTaskInventoryItem`: an item the owner may not copy leaves the
+        // prim with the move.
+        if !held.permissions.owner.contains(sl_wire::Permissions::COPY) {
+            let _taken = contents.remove(held.item_id);
+            self.effects.push(Effect::Told {
+                prim: origin.local_id,
+                script: false,
+            });
+        }
+        self.deliveries.push(Delivery::WearFromContents {
+            agent,
+            item: Box::new(held),
+            point: u8::try_from(point).unwrap_or(0),
+        });
+    }
+
+    fn drop_attachment(&mut self, caller: CallerId, at: Option<&sl_lsl_runtime::vm::npcs::DropAt>) {
+        let (Some(origin), Some(agent)) = (self.origin(caller), self.wearer(caller)) else {
+            return;
+        };
+        self.deliveries.push(Delivery::Drop {
+            agent,
+            root: origin.root,
+            at: at.map(|at| (at.position.clone(), at.rotation.clone())),
+        });
+    }
+
+    fn sit(&mut self, _caller: CallerId, agent: &str, prim: &str, target_free: bool) {
+        let Some(local_id) = self.prim_keyed(prim) else {
+            return;
+        };
+        if let Some(npc) = Self::agent_named(agent).filter(|_| self.npc_body(agent).is_some()) {
+            if target_free
+                && self
+                    .world
+                    .objects
+                    .sitters(local_id)
+                    .iter()
+                    .any(|sitter| sitter.on_target)
+            {
+                return;
+            }
+            let chosen = crate::seating::next_free_target(self.world, local_id);
+            let standing = self.npc_body(agent).map(|(at, _body)| at);
+            let reaches = match (self.world.objects.get(chosen), standing) {
+                (Some(seat), Some(at)) => crate::seating::answers(self.world, seat, &at),
+                _ => false,
+            };
+            if reaches {
+                self.sit_npc(npc, chosen);
+            }
+            return;
+        }
+        let Some(present) = self.present(agent) else {
+            return;
+        };
+        self.effects.push(Effect::ForceSit {
+            agent: present.agent,
+            prim: local_id,
+            target_free,
+        });
+    }
+
+    fn create_npc(
+        &mut self,
+        caller: CallerId,
+        spec: &sl_lsl_runtime::vm::npcs::NpcSpec,
+    ) -> Result<String, sl_lsl_runtime::vm::npcs::NpcRefusal> {
+        self.create_npc_as(caller, spec)
+    }
+
+    fn npcs(&self, _caller: CallerId) -> Vec<sl_lsl_runtime::vm::npcs::Npc> {
+        self.npc_list()
+    }
+
+    fn npc_act(
+        &mut self,
+        caller: CallerId,
+        npc: &str,
+        action: &sl_lsl_runtime::vm::npcs::NpcAction,
+    ) {
+        self.act_npc(caller, npc, action);
+    }
+
+    fn npc_say(
+        &mut self,
+        _caller: CallerId,
+        npc: &str,
+        speech: &sl_lsl_runtime::vm::npcs::NpcSpeech,
+    ) -> Option<Overheard> {
+        self.npc_says(npc, speech)
+    }
+
+    fn appearance(
+        &self,
+        _caller: CallerId,
+        agent: &str,
+    ) -> Option<sl_lsl_runtime::vm::npcs::Appearance> {
+        self.appearance_of(agent)
+    }
+
+    fn vitals(&self, _caller: CallerId, agent: &str) -> Option<sl_lsl_runtime::vm::npcs::Vitals> {
+        self.vitals_of(agent)
+    }
+
+    fn set_vitals(
+        &mut self,
+        _caller: CallerId,
+        agent: &str,
+        vitals: sl_lsl_runtime::vm::npcs::Vitals,
+    ) {
+        self.keep_vitals(agent, vitals);
+    }
+
+    fn alert(&mut self, _caller: CallerId, agent: &str, text: &str, modal: bool) {
+        let Some(present) = self.present(agent) else {
+            return;
+        };
+        self.deliveries.push(Delivery::Alert {
+            agent: present.agent,
+            text: text.to_owned(),
+            modal,
+        });
+    }
+
+    fn set_speed(&mut self, _caller: CallerId, agent: &str, factor: f32) {
+        let Some(key) = Self::agent_named(agent) else {
+            return;
+        };
+        if self.npc_body(agent).is_some() {
+            self.speed_npc(key, factor);
+        } else if self.present(agent).is_some() {
+            self.deliveries.push(Delivery::Speed { agent: key, factor });
+        }
+    }
+
+    fn kick(&mut self, _caller: CallerId, agent: &str, alert: &str) {
+        let Some(key) = Self::agent_named(agent) else {
+            return;
+        };
+        // An NPC's presence closed is the NPC gone.
+        if self.npc_body(agent).is_some() {
+            self.remove_npc(key);
+        } else if self.present(agent).is_some() {
+            self.deliveries.push(Delivery::Kick {
+                agent: key,
+                reason: alert.to_owned(),
+            });
+        }
+    }
+
+    fn group_powers(&self, group: &str, agent: &str) -> Option<u64> {
+        let group = sl_types::key::GroupKey::from(uuid::Uuid::parse_str(group).ok()?);
+        crate::groups::powers_of(self.core, group, Self::agent_named(agent)?)
+    }
+
+    fn group_name(&self, group: &str) -> Option<String> {
+        let group = sl_types::key::GroupKey::from(uuid::Uuid::parse_str(group).ok()?);
+        self.core.groups.lock().name_of(group).map(str::to_owned)
+    }
+
+    fn invite_to_group(&mut self, caller: CallerId, group: &str, agent: &str) {
+        let (Some(origin), Some(agent), Ok(group)) = (
+            self.origin(caller),
+            Self::agent_named(agent),
+            uuid::Uuid::parse_str(group),
+        ) else {
+            return;
+        };
+        self.deliveries.push(Delivery::GroupInvite {
+            agent,
+            owner: AgentKey::from(origin.object.owner_id),
+            group: sl_types::key::GroupKey::from(group),
+        });
+    }
+
+    fn eject_from_group(&mut self, caller: CallerId, group: &str, agent: &str) {
+        let (Some(origin), Some(agent), Ok(group)) = (
+            self.origin(caller),
+            Self::agent_named(agent),
+            uuid::Uuid::parse_str(group),
+        ) else {
+            return;
+        };
+        self.deliveries.push(Delivery::GroupEject {
+            agent,
+            owner: AgentKey::from(origin.object.owner_id),
+            group: sl_types::key::GroupKey::from(group),
+        });
     }
 }
 
@@ -3552,18 +3923,21 @@ pub(crate) async fn run_tick(core: &Arc<GridCore>, index: usize) -> Option<TickR
         }));
     }
     if !scripted {
-        // Physics runs whether or not a script is there to hear of it.
-        let changes = {
+        // Physics runs whether or not a script is there to hear of it, and
+        // what scripts set going — an NPC's walk, an avatar's healing — goes
+        // on without them.
+        let (changes, healed) = {
             let mut world = region.world.lock();
             crate::updates::begin(&mut world);
             let step = world.script_instances.engine.config().step;
             crate::physics::step(&mut world, &[], step, &|x, y| {
                 region.config.terrain.height_at(x, y)
             });
-            let changes = crate::updates::finish(&mut world, Vec::new());
+            let (walked, healed) = region_life(core, &region.config, &mut world, step);
+            let changes = crate::updates::finish(&mut world, walked);
             crate::attachments::finish_leaving(&mut world, &core.assets, (core.clock)());
             drop(world);
-            changes
+            (changes, healed)
         };
         for change in changes {
             drop(region.changes.send(RegionUpdate {
@@ -3571,6 +3945,7 @@ pub(crate) async fn run_tick(core: &Arc<GridCore>, index: usize) -> Option<TickR
                 change,
             }));
         }
+        deliver(core, index, healed).await;
         return None;
     }
     let (present, children) = presence(core, index).await;
@@ -3698,7 +4073,13 @@ fn tick_locked(
     world.script_instances.last_load = (report.runnable, report.served);
     http::hand_out(core, index, &mut world.script_instances);
     tell_rezzers(world);
+    let mut deliveries = deliveries;
     let mut changes = Vec::new();
+    if let Some(region) = core.region(index) {
+        let (walked, healed) = region_life(core, &region.config, world, config.step);
+        changes.extend(walked);
+        deliveries.extend(healed);
+    }
     for effect in effects {
         match effect {
             Effect::Changed { prim, bits } => raise_changed_in(world, &[prim], bits),
@@ -3732,6 +4113,29 @@ fn tick_locked(
             Effect::Unsit(agent) => {
                 if let Some(stands_at) = crate::seating::stand(world, agent) {
                     changes.push(RegionChange::Unseated { agent, stands_at });
+                }
+            }
+            Effect::NpcTouch {
+                agent,
+                name,
+                at,
+                prim,
+            } => {
+                let (first, last) = name.split_once(' ').unwrap_or((name.as_str(), ""));
+                let identity = AvatarIdentity::new(agent, first, last);
+                let toucher = crate::touches::Toucher {
+                    identity: &identity,
+                    group: None,
+                };
+                let _touched = crate::touches::click(world, &toucher, &at, prim);
+            }
+            Effect::ForceSit {
+                agent,
+                prim,
+                target_free,
+            } => {
+                if let Some(change) = force_sit(world, agent, prim, target_free) {
+                    changes.push(change);
                 }
             }
             Effect::Sit { agent, prim } => {
@@ -3810,6 +4214,64 @@ fn tick_locked(
     // touches now, or no longer.
     changes.extend(crate::touches::refresh_flags(world));
     (report, changes, deliveries)
+}
+
+/// `osForceOtherSit` of an agent: seated on the next free sit target of the
+/// prim's linkset, or the prim itself, as its own sit request would seat it —
+/// nothing when `target_free` and somebody sits on the prim's own target, or
+/// when it stands out of the chosen prim's sit range. What its session is to
+/// be told.
+fn force_sit(
+    world: &mut SceneFixtures,
+    agent: AgentKey,
+    prim: RegionLocalObjectId,
+    target_free: bool,
+) -> Option<RegionChange> {
+    if target_free
+        && world
+            .objects
+            .sitters(prim)
+            .iter()
+            .any(|sitter| sitter.on_target)
+    {
+        return None;
+    }
+    let chosen = crate::seating::next_free_target(world, prim);
+    let seat = world.objects.get(chosen).cloned()?;
+    let standing = world.resident(agent)?.at.clone();
+    if !crate::seating::answers(world, &seat, &standing) {
+        return None;
+    }
+    let transform = crate::seating::sit(world, agent, &seat)?;
+    let (_seat, sitter) = world.objects.seat_of(agent)?;
+    Some(RegionChange::Seated {
+        agent,
+        offset: sitter.offset.clone(),
+        rotation: sitter.rotation.clone(),
+        seat: Box::new(seat),
+        transform: Box::new(transform),
+    })
+}
+
+/// One tick of `step` of what goes on in a region by itself once a script set
+/// it going: its NPCs walk ([`npcs::step`]), and its avatars heal
+/// ([`npcs::heal`]). What the region's sessions are to be told, and the
+/// health to send.
+fn region_life(
+    core: &GridCore,
+    config: &crate::runtime::RegionConfig,
+    world: &mut SceneFixtures,
+    step: Duration,
+) -> (Vec<RegionChange>, Vec<Delivery>) {
+    let policy = core.imitated.movement_policy();
+    let walked = npcs::step(world, step, (&policy, core.animation_policy), &|x, y| {
+        config.terrain.height_at(x, y)
+    });
+    let healed = npcs::heal(world, step)
+        .into_iter()
+        .map(|(agent, health)| Delivery::Health { agent, health })
+        .collect();
+    (walked, healed)
 }
 
 /// `ticks` ticks of `step`, in microseconds.
@@ -4003,8 +4465,33 @@ async fn deliver(core: &Arc<GridCore>, index: usize, deliveries: Vec<Delivery>) 
             | Delivery::Overridden { agent }
             | Delivery::Controls { agent, .. }
             | Delivery::FollowCam { agent, .. }
-            | Delivery::Teleport { agent, .. } => *agent,
+            | Delivery::Teleport { agent, .. }
+            | Delivery::Health { agent, .. }
+            | Delivery::Alert { agent, .. }
+            | Delivery::Kick { agent, .. }
+            | Delivery::Speed { agent, .. }
+            | Delivery::GroupInvite { agent, .. }
+            | Delivery::GroupEject { agent, .. }
+            | Delivery::WearFromContents { agent, .. }
+            | Delivery::Drop { agent, .. } => *agent,
         };
+        match &delivery {
+            Delivery::Kick { reason, .. } => {
+                let _was_in_world = crate::login_endpoint::kick(core, agent, reason).await;
+                continue;
+            }
+            Delivery::GroupInvite { owner, group, .. } => {
+                let here = object_whereabouts(core, index, *owner);
+                crate::groups::invite_from_object(core, &here, *owner, *group, agent).await;
+                continue;
+            }
+            Delivery::GroupEject { owner, group, .. } => {
+                let here = object_whereabouts(core, index, *owner);
+                crate::groups::eject_from_object(core, &here, *owner, *group, agent).await;
+                continue;
+            }
+            _other => {}
+        }
         if let Delivery::Teleport {
             destination, alert, ..
         } = delivery
@@ -4052,6 +4539,33 @@ async fn deliver(core: &Arc<GridCore>, index: usize, deliveries: Vec<Delivery>) 
                         crate::movement::state_posture(state, now);
                         Ok(())
                     }
+                    Delivery::Speed { factor, .. } => {
+                        state.speed = *factor;
+                        Ok(())
+                    }
+                    Delivery::WearFromContents { item, point, .. } => {
+                        wear_from_contents(core, state, item, *point, now);
+                        Ok(())
+                    }
+                    Delivery::Drop { root, at, .. } => {
+                        let agent = state.avatar.agent_id;
+                        let mut world = state.world.lock();
+                        let changes = crate::world::drop_worn(
+                            &mut world,
+                            agent,
+                            (
+                                core::slice::from_ref(root),
+                                at.as_ref().map(|(position, rotation)| (position, rotation)),
+                            ),
+                            &mut state.sim,
+                            now,
+                        );
+                        drop(world);
+                        for change in changes {
+                            state.publish(change);
+                        }
+                        Ok(())
+                    }
                     Delivery::Gift { offer, gift, .. } => {
                         state.sim.send_instant_message(offer, now)?;
                         crate::gifts::object_offered(
@@ -4071,6 +4585,87 @@ async fn deliver(core: &Arc<GridCore>, index: usize, deliveries: Vec<Delivery>) 
             tracing::warn!(%agent, %error, "sending what a script said failed");
         }
     }
+}
+
+/// Where an object of `owner`'s in the region at `index` speaks from, as
+/// the groups service names an invitation's or an ejection's sender: the
+/// owner, by name, in that region.
+fn object_whereabouts(
+    core: &GridCore,
+    index: usize,
+    owner: AgentKey,
+) -> crate::social::Whereabouts {
+    let name = core.account_by_agent(owner).map_or_else(
+        || owner.uuid().to_string(),
+        |account| format!("{} {}", account.config.first_name, account.config.last_name),
+    );
+    let (region_id, handle) = core.region(index).map_or_else(
+        || (uuid::Uuid::nil(), sl_wire::RegionHandle::default()),
+        |region| (region.region_id, region.handle()),
+    );
+    crate::social::Whereabouts {
+        agent: owner,
+        name,
+        region_id,
+        position: sl_types::map::RegionCoordinates::new(0.0, 0.0, 0.0),
+        handle,
+    }
+}
+
+/// `osForceAttachToAvatarFromInventory` in the wearer's session: a copy of
+/// the prim's object `item` filed in its Objects folder and announced, as a
+/// copy out of a prim is, then worn from there on `point` as a wear from the
+/// inventory is — the region's other viewers told.
+fn wear_from_contents(
+    core: &GridCore,
+    state: &mut crate::driver::SimState,
+    item: &TaskInventoryItem,
+    point: u8,
+    now: Instant,
+) {
+    let Some(folder) = crate::world::folder_of_type(&state.sim, sl_proto::FolderType::Object)
+    else {
+        tracing::warn!("a wear from a prim's contents found no Objects folder");
+        return;
+    };
+    let mint = || core.minter.uuid();
+    let filed = crate::task_contents::agent_item_from(item, folder, &mint);
+    state.sim.agent_inventory_mut().insert_item(filed.clone());
+    crate::world::announce_created_items(
+        state.inventory_announcement,
+        &mut state.sim,
+        core::slice::from_ref(&filed),
+        sl_proto::TransactionId::from(uuid::Uuid::nil()),
+        now,
+    );
+    let agent = state.avatar.agent_id;
+    let position = state.sim.arrival_position().position;
+    let wearer = crate::attachments::Wearer {
+        identity: &state.avatar,
+        at: Vector {
+            x: position.x(),
+            y: position.y(),
+            z: position.z(),
+        },
+        region_handle: state.sim.region_handle(),
+    };
+    let mut world = state.world.lock();
+    let worn = crate::attachments::wear_item(
+        &mut world,
+        &core.assets,
+        (&wearer, &mint),
+        &filed,
+        point,
+        now,
+    );
+    drop(world);
+    let Some(objects) = worn else {
+        return;
+    };
+    if let Err(error) = crate::world::send_objects(&mut state.sim, &objects, now) {
+        tracing::warn!("wearing an object from a prim's contents failed: {error}");
+    }
+    state.publish(RegionChange::Worn { agent, objects });
 }
 
 /// States the agent's animation set to its viewer, as a change to it is, and
@@ -4148,7 +4743,17 @@ fn send(sim: &mut SimSession, delivery: &Delivery, now: Instant) -> Result<(), s
         Delivery::Animate { .. }
         | Delivery::Overridden { .. }
         | Delivery::Teleport { .. }
-        | Delivery::Gift { .. } => Ok(()),
+        | Delivery::Gift { .. }
+        | Delivery::Kick { .. }
+        | Delivery::Speed { .. }
+        | Delivery::GroupInvite { .. }
+        | Delivery::GroupEject { .. }
+        | Delivery::WearFromContents { .. }
+        | Delivery::Drop { .. } => Ok(()),
+        Delivery::Health { health, .. } => sim.send_health_message(*health, now),
+        Delivery::Alert {
+            agent, text, modal, ..
+        } => sim.send_agent_alert_message(*agent, *modal, text, now),
         Delivery::Parcel { parcel, .. } => {
             // Both grids push a changed parcel down the event queue.
             sim.enqueue_parcel_properties(parcel);

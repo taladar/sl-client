@@ -432,6 +432,7 @@ fn region_queries_answer_as_each_grid_did() -> Result<(), String> {
             agent: true,
             physical: true,
             scripted: false,
+            npc: None,
         }];
         // OpenSim writes a vector cast to a string with six decimals, the
         // value model Second Life's five on every grid (`EngineFlavour`): the

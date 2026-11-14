@@ -627,8 +627,14 @@ impl Host for CorpusHost {
         _description: &str,
         text: &str,
         changed: &[i32],
-    ) {
-        self.line(format_args!("make-notecard {name} {text:?} {changed:?}"));
+        replace: bool,
+    ) -> String {
+        if replace {
+            self.line(format_args!("replace-notecard {name} {text:?} {changed:?}"));
+        } else {
+            self.line(format_args!("make-notecard {name} {text:?} {changed:?}"));
+        }
+        "0e0e0e0e-0000-4000-8000-000000000000".to_owned()
     }
 
     fn epoch_micros(&self) -> i64 {
@@ -845,5 +851,111 @@ impl Host for CorpusHost {
         _end: &Vector,
     ) -> Vec<sl_lsl_runtime::vm::sensing::RayHit> {
         Vec::new()
+    }
+
+    fn attachments(&self, _caller: CallerId, _agent: &str) -> Option<Vec<(i32, String)>> {
+        None
+    }
+
+    fn attach_from_inventory(&mut self, _caller: CallerId, agent: &str, item: &str, point: i32) {
+        self.line(format_args!(
+            "attach-from-contents {agent} {item:?} {point}"
+        ));
+    }
+
+    fn drop_attachment(
+        &mut self,
+        _caller: CallerId,
+        at: Option<&sl_lsl_runtime::vm::npcs::DropAt>,
+    ) {
+        self.line(format_args!("drop-attachment {at:?}"));
+    }
+
+    fn sit(&mut self, _caller: CallerId, agent: &str, prim: &str, target_free: bool) {
+        self.line(format_args!("sit {agent} {prim} {target_free}"));
+    }
+
+    fn create_npc(
+        &mut self,
+        _caller: CallerId,
+        spec: &sl_lsl_runtime::vm::npcs::NpcSpec,
+    ) -> Result<String, sl_lsl_runtime::vm::npcs::NpcRefusal> {
+        self.line(format_args!(
+            "create-npc {} {} {:?}",
+            spec.first, spec.last, spec.position
+        ));
+        Err(sl_lsl_runtime::vm::npcs::NpcRefusal::Full)
+    }
+
+    fn npcs(&self, _caller: CallerId) -> Vec<sl_lsl_runtime::vm::npcs::Npc> {
+        Vec::new()
+    }
+
+    fn npc_act(
+        &mut self,
+        _caller: CallerId,
+        npc: &str,
+        action: &sl_lsl_runtime::vm::npcs::NpcAction,
+    ) {
+        self.line(format_args!("npc {npc} {action:?}"));
+    }
+
+    fn npc_say(
+        &mut self,
+        _caller: CallerId,
+        npc: &str,
+        speech: &sl_lsl_runtime::vm::npcs::NpcSpeech,
+    ) -> Option<sl_lsl_runtime::vm::Overheard> {
+        self.line(format_args!("npc-say {npc} {speech:?}"));
+        None
+    }
+
+    fn appearance(
+        &self,
+        _caller: CallerId,
+        _agent: &str,
+    ) -> Option<sl_lsl_runtime::vm::npcs::Appearance> {
+        None
+    }
+
+    fn vitals(&self, _caller: CallerId, _agent: &str) -> Option<sl_lsl_runtime::vm::npcs::Vitals> {
+        None
+    }
+
+    fn set_vitals(
+        &mut self,
+        _caller: CallerId,
+        agent: &str,
+        vitals: sl_lsl_runtime::vm::npcs::Vitals,
+    ) {
+        self.line(format_args!("vitals {agent} {vitals:?}"));
+    }
+
+    fn alert(&mut self, _caller: CallerId, agent: &str, text: &str, modal: bool) {
+        self.line(format_args!("alert {agent} {text:?} {modal}"));
+    }
+
+    fn set_speed(&mut self, _caller: CallerId, agent: &str, factor: f32) {
+        self.line(format_args!("speed {agent} {factor}"));
+    }
+
+    fn kick(&mut self, _caller: CallerId, agent: &str, alert: &str) {
+        self.line(format_args!("kick {agent} {alert:?}"));
+    }
+
+    fn group_powers(&self, _group: &str, _agent: &str) -> Option<u64> {
+        None
+    }
+
+    fn group_name(&self, _group: &str) -> Option<String> {
+        None
+    }
+
+    fn invite_to_group(&mut self, _caller: CallerId, group: &str, agent: &str) {
+        self.line(format_args!("invite {group} {agent}"));
+    }
+
+    fn eject_from_group(&mut self, _caller: CallerId, group: &str, agent: &str) {
+        self.line(format_args!("eject {group} {agent}"));
     }
 }

@@ -105,6 +105,24 @@ pub struct MovementPolicy {
 }
 
 impl MovementPolicy {
+    /// This policy with every speed an avatar's controls drive it at — a
+    /// walk, a run, a crouched walk, a flight up, down and along — `factor`
+    /// times as fast, as OpenSim's `SpeedModifier` (`osSetSpeed`) scales a
+    /// presence's movement; a jump and a fall are not controls, and keep
+    /// theirs.
+    #[must_use]
+    pub fn scaled(self, factor: f32) -> Self {
+        Self {
+            walk_speed: self.walk_speed * factor,
+            run_speed: self.run_speed * factor,
+            crouch_walk_speed: self.crouch_walk_speed * factor,
+            fly_speed: self.fly_speed * factor,
+            climb_speed: self.climb_speed * factor,
+            descent_speed: self.descent_speed * factor,
+            ..self
+        }
+    }
+
     /// Whether the grid waits for the viewer's `FINISH_ANIM` before it lets a
     /// held avatar go.
     #[must_use]
@@ -610,6 +628,13 @@ impl Motion {
             }
             _other => false,
         }
+    }
+
+    /// Sets the avatar going at `velocity`, as OpenSim's
+    /// `PhysicsActor.SetMomentum` does for `osLocalTeleportAgent`: the
+    /// controls then brake it as they brake any motion they did not drive.
+    pub const fn launch(&mut self, velocity: Vector) {
+        self.velocity = velocity;
     }
 
     /// Holds the avatar still and sits it: what a seat does to it. Returns
@@ -1151,7 +1176,7 @@ pub(crate) fn advance(state: &mut SimState, step: Duration, now: Instant) {
         y: placement.position.y(),
         z: placement.position.z(),
     };
-    let policy = state.movement_policy;
+    let policy = state.movement_policy.scaled(state.speed);
     let surroundings = Surroundings {
         terrain: &state.terrain,
         blocks: crate::physics::avatar_blocks(&state.world.lock(), &from),

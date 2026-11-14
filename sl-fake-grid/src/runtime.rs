@@ -798,6 +798,14 @@ impl GridCore {
             .position(|entry| entry.config.name == name)
     }
 
+    /// The index of the region called `name`, matched without regard to
+    /// case, as OpenSim's grid service finds a region by name.
+    pub(crate) fn region_named(&self, name: &str) -> Option<usize> {
+        self.regions
+            .iter()
+            .position(|entry| entry.config.name.to_lowercase() == name.to_lowercase())
+    }
+
     /// The index of the region with the given handle.
     pub(crate) fn region_by_handle(&self, handle: RegionHandle) -> Option<usize> {
         self.regions
@@ -1279,6 +1287,7 @@ impl GridCore {
             animation_policy: self.animation_policy,
             animations: crate::animations::AnimationSet::arriving(),
             movement_policy: self.imitated.movement_policy(),
+            speed: 1.0,
             parcel_environments_need_estate: self.imitated.parcel_environments_need_estate(),
             motion: crate::movement::Motion::default(),
             estate_policy: self.estate_policy,

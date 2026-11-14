@@ -883,6 +883,14 @@ impl<'host> ScriptCtx<'host> {
         }
     }
 
+    /// Offer the scripts in `overheard` a line the host had said for the
+    /// script — an NPC's (`osNpcSay`) — as [`Self::say`] offers its own.
+    pub fn overhear(&mut self, overheard: Option<Overheard>) {
+        if let Some(overheard) = overheard {
+            self.data.raised.push(Raised::Heard(overheard));
+        }
+    }
+
     /// `llRegionSayTo` from the caller's object, heard as [`Self::say`] is.
     pub fn say_to(&mut self, target: &str, channel: i32, text: &str) {
         let caller = self.caller;

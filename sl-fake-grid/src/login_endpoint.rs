@@ -216,6 +216,13 @@ fn bad_credentials(core: &GridCore) -> LoginFailure {
 /// must not refuse the login that follows. They are ended all the same, since
 /// the new login is about to be given neighbours of its own.
 async fn kick_live_sessions(core: &Arc<GridCore>, agent_id: sl_proto::AgentKey) -> bool {
+    kick(core, agent_id, core.login_refusals.second_login_kick_reason).await
+}
+
+/// Kicks `agent_id` off the grid with `reason` — every session it has, root
+/// and child, sent `KickUser` and ended — as a second login and a script's
+/// `osKickAvatar` do; whether the avatar was in world.
+pub(crate) async fn kick(core: &Arc<GridCore>, agent_id: sl_proto::AgentKey, reason: &str) -> bool {
     let root = core.root_session_of(agent_id).await;
     let in_world = root.is_some();
     // What the session in world held is what the next one starts from.
@@ -225,7 +232,7 @@ async fn kick_live_sessions(core: &Arc<GridCore>, agent_id: sl_proto::AgentKey) 
     }
     let kick = sl_proto::Kick {
         agent: agent_id,
-        reason: core.login_refusals.second_login_kick_reason.to_owned(),
+        reason: reason.to_owned(),
     };
     for shared in core.sessions_of(agent_id).await {
         shared

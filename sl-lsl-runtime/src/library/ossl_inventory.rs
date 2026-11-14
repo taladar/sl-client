@@ -201,12 +201,13 @@ pub fn os_make_notecard(
         all
     });
     let caller = ctx.caller();
-    ctx.host().make_notecard(
+    let _asset = ctx.host().make_notecard(
         caller,
         &name,
         "Script generated notecard",
         &text,
         &[CHANGED_INVENTORY],
+        false,
     );
     Ok(())
 }

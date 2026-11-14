@@ -742,12 +742,20 @@ async fn answer(core: &Arc<GridCore>, shared: &SharedSim, agent: AgentKey, event
             group_id,
             member_ids,
         } => {
+            let here = {
+                let state = shared.state.lock().await;
+                Whereabouts::of(&state)
+            };
             for member in member_ids {
-                eject(core, shared, agent, group_id, member).await;
+                eject(core, (&here, Some(shared)), agent, group_id, member).await;
             }
         }
         ServerEvent::InviteToGroup { group_id, invitees } => {
-            invite(core, shared, agent, group_id, &invitees).await;
+            let here = {
+                let state = shared.state.lock().await;
+                Whereabouts::of(&state)
+            };
+            invite(core, (&here, Some(shared)), agent, group_id, &invitees).await;
         }
         ServerEvent::ActivateGroup { group_id } => activate(core, agent, group_id).await,
         ServerEvent::SetGroupAcceptNotices {
@@ -1203,10 +1211,12 @@ async fn leave(core: &Arc<GridCore>, shared: &SharedSim, agent: AgentKey, group_
         .await;
 }
 
-/// An avatar ejected a member from a group.
+/// An avatar ejected a member from a group — from where `here` says, its
+/// session `ejector_session` answered; with none, an object of the avatar's
+/// (`osEjectFromGroup`), whose owner is told wherever it is.
 async fn eject(
     core: &Arc<GridCore>,
-    shared: &SharedSim,
+    (here, ejector_session): (&Whereabouts, Option<&SharedSim>),
     agent: AgentKey,
     group_id: GroupKey,
     member: AgentKey,
@@ -1215,25 +1225,23 @@ async fn eject(
     let left = take_out(core, member, group_id);
     sync(core, member).await;
     let Some((name, members)) = left else {
-        let now = shared.now();
-        shared
-            .with_sim(|sim| {
-                warn_on(
-                    sim.send_eject_group_member_reply(group_id, false, now),
-                    "an ejection",
-                );
-            })
-            .await;
+        if let Some(shared) = ejector_session {
+            let now = shared.now();
+            shared
+                .with_sim(|sim| {
+                    warn_on(
+                        sim.send_eject_group_member_reply(group_id, false, now),
+                        "an ejection",
+                    );
+                })
+                .await;
+        }
         return;
     };
     let ejector = legacy_name(core, agent);
     let ejected = legacy_name(core, member);
-    let here = {
-        let state = shared.state.lock().await;
-        Whereabouts::of(&state)
-    };
     let message = |to: AgentKey, text: String, id: Uuid| {
-        let mut im = message_from(&here, to, ImDialog::Message, &text);
+        let mut im = message_from(here, to, ImDialog::Message, &text);
         im.id = id;
         if policy.told_by_alerts {
             im.binary_bucket = vec![0];
@@ -1270,16 +1278,26 @@ async fn eject(
             ),
         )
     };
-    let now = shared.now();
-    shared
-        .with_sim(|sim| {
-            warn_on(sim.send_instant_message(&told_ejector, now), "an ejection");
+    if let Some(shared) = ejector_session {
+        let now = shared.now();
+        shared
+            .with_sim(|sim| {
+                warn_on(sim.send_instant_message(&told_ejector, now), "an ejection");
+                warn_on(
+                    sim.send_eject_group_member_reply(group_id, true, now),
+                    "an ejection",
+                );
+            })
+            .await;
+    } else {
+        let _told = tell(core, agent, |state, now| {
             warn_on(
-                sim.send_eject_group_member_reply(group_id, true, now),
+                state.sim.send_instant_message(&told_ejector, now),
                 "an ejection",
             );
         })
         .await;
+    }
     tell(core, member, |state, now| {
         warn_on(
             state.sim.send_instant_message(&told_member, now),
@@ -1959,10 +1977,12 @@ async fn notice_again(
         .await;
 }
 
-/// An avatar invited others into a group, each into a role.
+/// An avatar invited others into a group, each into a role — from where
+/// `here` says, its session `inviter_session` told of a banned invitee; with
+/// none, an object of the avatar's (`osInviteToGroup`).
 async fn invite(
     core: &Arc<GridCore>,
-    shared: &SharedSim,
+    (here, inviter_session): (&Whereabouts, Option<&SharedSim>),
     agent: AgentKey,
     group_id: GroupKey,
     invitees: &[(AgentKey, Option<GroupRoleKey>)],
@@ -1976,10 +1996,6 @@ async fn invite(
         .map(|group| (group.name.clone(), group.charter.clone(), group.fee.clone()))
     else {
         return;
-    };
-    let here = {
-        let state = shared.state.lock().await;
-        Whereabouts::of(&state)
     };
     let mut refused_a_banned = false;
     for (invitee, role) in invitees.iter().copied() {
@@ -2083,7 +2099,10 @@ async fn invite(
                 .keep(invitee, KeptMessage { message, record });
         }
     }
-    if refused_a_banned && policy.told_by_alerts {
+    if refused_a_banned
+        && policy.told_by_alerts
+        && let Some(shared) = inviter_session
+    {
         let now = shared.now();
         shared
             .with_sim(|sim| {
@@ -2096,6 +2115,45 @@ async fn invite(
             })
             .await;
     }
+}
+
+/// `osInviteToGroup`: an object of `owner`'s, standing as `here` says,
+/// invites `invitee` into `group_id` in the owner's name, as the owner's own
+/// invitation would, with no role.
+pub(crate) async fn invite_from_object(
+    core: &Arc<GridCore>,
+    here: &Whereabouts,
+    owner: AgentKey,
+    group_id: GroupKey,
+    invitee: AgentKey,
+) {
+    invite(core, (here, None), owner, group_id, &[(invitee, None)]).await;
+}
+
+/// `osEjectFromGroup`: an object of `owner`'s, standing as `here` says,
+/// ejects `member` from `group_id` in the owner's name.
+pub(crate) async fn eject_from_object(
+    core: &Arc<GridCore>,
+    here: &Whereabouts,
+    owner: AgentKey,
+    group_id: GroupKey,
+    member: AgentKey,
+) {
+    eject(core, (here, None), owner, group_id, member).await;
+}
+
+/// The powers `agent` holds in `group_id`, its roles' together, or [`None`]
+/// when it is no member.
+pub(crate) fn powers_of(core: &GridCore, group_id: GroupKey, agent: AgentKey) -> Option<u64> {
+    let groups = core.groups.lock();
+    let powers = groups.groups.get(&group_id).and_then(|group| {
+        group
+            .members
+            .contains_key(&agent)
+            .then(|| group.powers(agent, &core.groups_policy))
+    });
+    drop(groups);
+    powers
 }
 
 /// Takes the invitation sent under `id` to `invitee`, if there is one.

@@ -245,32 +245,87 @@ pub(crate) fn observe(
     sim: &SimSession,
     event: &ServerEvent,
 ) -> bool {
+    let at = crate::chat::agent_position(sim);
     match event {
         ServerEvent::ObjectGrabbed(press) => {
-            press_on(world, toucher, sim, press);
+            press_on(world, toucher, &at, press);
             true
         }
         ServerEvent::ObjectGrabMoved(update) => {
-            update_on(world, toucher, sim, update);
+            update_on(world, toucher, &at, update);
             false
         }
         ServerEvent::ObjectReleased(release) => {
-            release_on(world, toucher, sim, release);
+            release_on(world, toucher, &at, release);
             true
         }
         _ => false,
     }
 }
 
-/// A press on a prim: `touch_start`, unless Second Life has a touch open.
-fn press_on(
+/// An avatar with no viewer — an NPC (`osNpcTouch`) — standing at `at`
+/// clicks the prim `local_id`, as OpenSim's `NPCAvatar.Touch` does: a press,
+/// an update at the prim's own position and a release, with no surface. Only
+/// a prim whose scripts, or whose root's, take touches is touched; whether
+/// one was.
+pub(crate) fn click(
     world: &mut SceneFixtures,
     toucher: &Toucher<'_>,
-    sim: &SimSession,
-    press: &ObjectGrabbed,
-) {
+    at: &Vector,
+    local_id: RegionLocalObjectId,
+) -> bool {
+    let Some(prim) = world.objects.get(local_id).map(|prim| prim.full_id) else {
+        return false;
+    };
+    let root = world.root_of(local_id);
+    let root_key = world.objects.get(root).map(|root| root.full_id);
+    if !takes_touches(world, prim) && !root_key.is_some_and(|root| takes_touches(world, root)) {
+        return false;
+    }
+    let zero = Vector {
+        x: 0.0,
+        y: 0.0,
+        z: 0.0,
+    };
+    press_on(
+        world,
+        toucher,
+        at,
+        &ObjectGrabbed {
+            local_id,
+            grab_offset: zero.clone(),
+            surfaces: Vec::new(),
+        },
+    );
+    let grab_position = prim_position(world, root);
+    update_on(
+        world,
+        toucher,
+        at,
+        &ObjectGrabMoved {
+            object_id: prim,
+            grab_offset_initial: zero,
+            grab_position,
+            time_since_last: Duration::ZERO,
+            surfaces: Vec::new(),
+        },
+    );
+    release_on(
+        world,
+        toucher,
+        at,
+        &ObjectReleased {
+            local_id,
+            surfaces: Vec::new(),
+        },
+    );
+    true
+}
+
+/// A press on a prim: `touch_start`, unless Second Life has a touch open.
+fn press_on(world: &mut SceneFixtures, toucher: &Toucher<'_>, at: &Vector, press: &ObjectGrabbed) {
     let local_id = press.local_id;
-    let Some(base) = detect(world, toucher, sim, local_id) else {
+    let Some(base) = detect(world, toucher, at, local_id) else {
         return;
     };
     let policy = world.touches.policy;
@@ -304,13 +359,13 @@ fn press_on(
 fn update_on(
     world: &mut SceneFixtures,
     toucher: &Toucher<'_>,
-    sim: &SimSession,
+    at: &Vector,
     update: &ObjectGrabMoved,
 ) {
     let Some(local_id) = world.local_id_of(update.object_id) else {
         return;
     };
-    let Some(base) = detect(world, toucher, sim, local_id) else {
+    let Some(base) = detect(world, toucher, at, local_id) else {
         return;
     };
     let policy = world.touches.policy;
@@ -355,11 +410,11 @@ fn update_on(
 fn release_on(
     world: &mut SceneFixtures,
     toucher: &Toucher<'_>,
-    sim: &SimSession,
+    at: &Vector,
     release: &ObjectReleased,
 ) {
     let local_id = release.local_id;
-    let Some(base) = detect(world, toucher, sim, local_id) else {
+    let Some(base) = detect(world, toucher, at, local_id) else {
         return;
     };
     if let Some(held) = world
@@ -408,7 +463,7 @@ pub(crate) fn tick(world: &mut SceneFixtures, step: Duration, present: &[AgentKe
 fn detect(
     world: &SceneFixtures,
     toucher: &Toucher<'_>,
-    sim: &SimSession,
+    at: &Vector,
     local_id: RegionLocalObjectId,
 ) -> Option<Detected> {
     world.objects.get(local_id)?;
@@ -428,7 +483,7 @@ fn detect(
         kind: world.touches.policy.agent_type,
         same_group,
         link_number: link_number(world, local_id),
-        position: crate::chat::agent_position(sim),
+        position: at.clone(),
         ..Detected::blank()
     })
 }

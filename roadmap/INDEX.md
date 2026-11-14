@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 130 |
-| ready | 329 |
+| ready | 328 |
 | blocked | 36 |
 | in-progress | 6 |
 | bugs | 23 |
-| done | 1575 |
+| done | 1576 |
 | deferred | 30 |
 | wont-do | 24 |
 | **total** | **2153** |
@@ -316,7 +316,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-lsl-opensim-function-set`](ideas/gridspec-lsl-opensim-function-set.md)
   — Measure which library functions OpenSim's engines compile
 
-## ready (329)
+## ready (328)
 
 ### protocol
 
@@ -1094,9 +1094,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-fake-grid-terraform`](ready/server-fake-grid-terraform.md) — Fake
   grid — terraforming, undo and bake (blocked by `gridspec-terrain-editing`
   (done))
-- [`server-lsl-lib-ossl-avatars`](ready/server-lsl-lib-ossl-avatars.md) —
-  Library tranche — OpenSim's NPC and avatar functions (blocked by
-  `server-lsl-lib-avatar-control` (done))
 - [`server-lsl-lib-ossl-land-writers`](ready/server-lsl-lib-ossl-land-writers.md)
   — Library tranche — OpenSim's land, terrain, wind and environment writers
   (blocked by `server-lsl-lib-land-region-env` (done))
@@ -1315,7 +1312,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1575)
+## done (1576)
 
 ### protocol
 
@@ -4593,6 +4590,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-lsl-lib-ossl`](done/server-lsl-lib-ossl.md) — Scope the OSSL (os*)
   surface — how much, and why (blocked by `server-lsl-library-surface-table`
   (done), `gridspec-lsl-ossl` (done))
+- [`server-lsl-lib-ossl-avatars`](done/server-lsl-lib-ossl-avatars.md) — Library
+  tranche — OpenSim's NPC and avatar functions (blocked by
+  `server-lsl-lib-avatar-control` (done))
 - [`server-lsl-lib-prim-state`](done/server-lsl-lib-prim-state.md) — Library
   tranche — reading and writing the prim (blocked by `server-lsl-vm-execution`
   (done), `server-world-ecs-store` (done), `server-world-link-sets` (done),

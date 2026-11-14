@@ -3417,35 +3417,11 @@ pub(crate) fn answer_world_request(
         // Worn objects put back on the ground where the avatar stands, under
         // the same ids, and their items gone from the inventory.
         ServerEvent::DropAttachments(local_ids) => {
-            let mut changes = Vec::new();
-            let mut removed = Vec::new();
-            for local_id in local_ids {
-                let root = world.root_of(*local_id);
-                let Some((objects, item)) =
-                    crate::seating::drop_off(world, identity.agent_id, root)
-                else {
-                    continue;
-                };
-                if let crate::scene_store::WornItem::Item(item) = item
-                    && sim.agent_inventory_mut().take_item(item).is_some()
-                {
-                    removed.push(item);
-                }
-                if let Err(error) = send_objects(sim, &objects, now) {
-                    tracing::warn!("dropping a worn object failed: {error}");
-                }
-                changes.extend(
-                    objects
-                        .into_iter()
-                        .map(|object| RegionChange::Rezzed(Box::new(object))),
-                );
-            }
-            if !removed.is_empty()
-                && let Err(error) = sim.send_remove_inventory_item(&removed, now)
-            {
-                tracing::warn!("removing a dropped object's item failed: {error}");
-            }
-            return changes;
+            let roots: Vec<RegionLocalObjectId> = local_ids
+                .iter()
+                .map(|local_id| world.root_of(*local_id))
+                .collect();
+            return drop_worn(world, identity.agent_id, (&roots, None), sim, now);
         }
         // Worn objects taken off into the inventory: each killed, one item
         // restated, as both grids answer an `ObjectDetach`.
@@ -3924,6 +3900,49 @@ fn wear_items(
     };
     let (changes, _wore) =
         crate::attachments::wear_items(world, assets, (&wearer, mint), sim, rezzes, now);
+    changes
+}
+
+/// Puts `agent`'s worn `roots` back on the ground — where it stands, or at
+/// the place and turn `at` gives — under the same ids, takes their items out
+/// of its inventory, and sends its viewer the objects and the removal, as a
+/// viewer's Drop (`ObjectDrop`) and a script's (`osDropAttachment`) are
+/// answered: what the region's other sessions are to be told.
+pub(crate) fn drop_worn(
+    world: &mut SceneFixtures,
+    agent: AgentKey,
+    (roots, at): (
+        &[RegionLocalObjectId],
+        Option<(&Vector, &sl_types::lsl::Rotation)>,
+    ),
+    sim: &mut SimSession,
+    now: Instant,
+) -> Vec<RegionChange> {
+    let mut changes = Vec::new();
+    let mut removed = Vec::new();
+    for root in roots {
+        let Some((objects, item)) = crate::seating::drop_off(world, agent, *root, at) else {
+            continue;
+        };
+        if let crate::scene_store::WornItem::Item(item) = item
+            && sim.agent_inventory_mut().take_item(item).is_some()
+        {
+            removed.push(item);
+        }
+        if let Err(error) = send_objects(sim, &objects, now) {
+            tracing::warn!("dropping a worn object failed: {error}");
+        }
+        changes.extend(
+            objects
+                .into_iter()
+                .map(|object| RegionChange::Rezzed(Box::new(object))),
+        );
+    }
+    if !removed.is_empty()
+        && let Err(error) = sim.send_remove_inventory_item(&removed, now)
+    {
+        tracing::warn!("removing a dropped object's item failed: {error}");
+    }
     changes
 }
 

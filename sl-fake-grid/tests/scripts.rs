@@ -47,6 +47,8 @@ mod test {
         Removed(sl_proto::RegionLocalObjectId),
         /// An object came into it.
         Added(sl_proto::RegionLocalObjectId),
+        /// An avatar came into it: its local id and its name-values.
+        AddedAvatar(sl_proto::RegionLocalObjectId, String),
         /// An object item was filed in the agent's inventory.
         Filed(Box<sl_client_tokio::InventoryItem>),
         /// A script asked for permissions.
@@ -191,6 +193,9 @@ mod test {
                     Event::ChatReceived(chat) => Seen::Chat(chat.chat_type, chat.message),
                     Event::ScriptRunning { running, .. } => Seen::Running(running),
                     Event::ObjectRemoved { local_id, .. } => Seen::Removed(local_id.id()),
+                    Event::ObjectAdded(object) if object.pcode == sl_proto::pcode::AVATAR => {
+                        Seen::AddedAvatar(object.local_id, object.name_value.clone())
+                    }
                     Event::ObjectAdded(object) => Seen::Added(object.local_id),
                     Event::ObjectUpdated(object) => Seen::Updated(object),
                     Event::SitResult {
@@ -5004,5 +5009,253 @@ default
     #[tokio::test]
     async fn move_to_target_reaches_its_target_on_opensim() -> Result<(), TestError> {
         move_to_target_reaches_its_target(ImitatedGrid::OpenSim).await
+    }
+
+    // ---- OpenSim's NPCs and avatar functions ------------------------------
+
+    /// A box that makes an NPC and drives it from what is said on channel 7:
+    /// "make", "talk", "walk", "where", "sit", "touch", "gone".
+    fn npc_source(seat: uuid::Uuid, touched: uuid::Uuid) -> String {
+        format!(
+            "key npc;
+default
+{{
+    state_entry()
+    {{
+        llListen(7, \"\", NULL_KEY, \"\");
+    }}
+
+    listen(integer channel, string name, key id, string message)
+    {{
+        if (message == \"make\")
+        {{
+            npc = osNpcCreate(\"Nancy\", \"Bot\", <130.0, 130.0, 25.0>, \"\");
+            llShout(0, \"made \" + (string)osIsNpc(npc) + \" \" + llKey2Name(npc));
+        }}
+        else if (message == \"talk\")
+        {{
+            osNpcSay(npc, \"hello from the npc\");
+        }}
+        else if (message == \"walk\")
+        {{
+            osNpcMoveTo(npc, <135.0, 130.0, 25.0>);
+        }}
+        else if (message == \"where\")
+        {{
+            vector at = osNpcGetPos(npc);
+            llShout(0, \"at \" + (string)llRound(at.x) + \" \" + (string)llRound(at.y));
+        }}
+        else if (message == \"sit\")
+        {{
+            osNpcSit(npc, \"{seat}\", OS_NPC_SIT_NOW);
+        }}
+        else if (message == \"touch\")
+        {{
+            osNpcTouch(npc, \"{touched}\", LINK_THIS);
+        }}
+        else if (message == \"gone\")
+        {{
+            osNpcRemove(npc);
+            llShout(0, \"left \" + (string)llGetListLength(osGetNPCList()));
+        }}
+    }}
+}}
+"
+        )
+    }
+
+    /// A box that says who touched it.
+    const NPC_TOUCHED_SOURCE: &str = "default
+{
+    touch_start(integer count)
+    {
+        llShout(0, \"touched by \" + llDetectedName(0));
+    }
+}
+";
+
+    /// The NPC maker's region-local id.
+    const NPC_MAKER: sl_proto::RegionLocalObjectId = sl_proto::RegionLocalObjectId(0x800);
+
+    /// The seat the NPC sits on.
+    const NPC_SEAT: sl_proto::RegionLocalObjectId = sl_proto::RegionLocalObjectId(0x801);
+
+    /// The box the NPC touches.
+    const NPC_TOUCHED: sl_proto::RegionLocalObjectId = sl_proto::RegionLocalObjectId(0x802);
+
+    /// A region holding the NPC maker, a seat and a box that says who touched
+    /// it, every OSSL function allowed, the client's account owning them.
+    async fn npc_scene() -> Result<Scene, TestError> {
+        let region = region_of(&[
+            ScriptedBox {
+                local_id: NPC_MAKER,
+                source: npc_source(key_of(NPC_SEAT), key_of(NPC_TOUCHED)),
+                experience: None,
+            },
+            ScriptedBox {
+                local_id: NPC_SEAT,
+                source: SEAT_SOURCE.to_owned(),
+                experience: None,
+            },
+            ScriptedBox {
+                local_id: NPC_TOUCHED,
+                source: NPC_TOUCHED_SOURCE.to_owned(),
+                experience: None,
+            },
+        ])?;
+        let scene = scene_with(
+            ImitatedGrid::OpenSim,
+            region,
+            RegionConfig {
+                heartbeat: HeartbeatConfig::stepped(Duration::from_millis(100)),
+                ossl: Some(sl_lsl_runtime::vm::ossl::Settings {
+                    threat_level: sl_lsl_runtime::library::ThreatLevel::Severe,
+                    ..sl_lsl_runtime::vm::ossl::Settings::default()
+                }),
+                ..RegionConfig::default()
+            },
+            AccountConfig {
+                agent_id: Some(box_owner()),
+                ..AccountConfig::new("Test", "User", "password")
+            },
+        )
+        .await?;
+        scene.tick(2).await?;
+        Ok(scene)
+    }
+
+    /// Says `message` on channel 7 and runs the ticks it takes to be heard.
+    async fn tell_npc_maker(scene: &mut Scene, message: &str) -> Result<(), TestError> {
+        scene.shout(message).await?;
+        scene.tick(2).await
+    }
+
+    /// An NPC a script makes is shown to the viewer as an avatar named as the
+    /// script named it, says what it is told to as an avatar's chat, walks
+    /// where it is sent, sits as a sit request would seat it, touches as a
+    /// click would, and leaves the viewer's view when removed.
+    #[tokio::test]
+    async fn an_npc_appears_speaks_walks_sits_touches_and_leaves() -> Result<(), TestError> {
+        let mut scene = npc_scene().await?;
+        tell_npc_maker(&mut scene, "make").await?;
+        let (npc, names) = scene
+            .next("the NPC's avatar", |seen| match seen {
+                Seen::AddedAvatar(local_id, names) if names.contains("Nancy") => {
+                    Some((local_id, names))
+                }
+                _other => None,
+            })
+            .await?;
+        assert!(names.contains("LastName STRING RW SV Bot"), "{names}");
+        assert_eq!(scene.line("made ").await?, "made 1 Nancy Bot");
+
+        tell_npc_maker(&mut scene, "talk").await?;
+        assert_eq!(scene.line("hello from").await?, "hello from the npc");
+
+        tell_npc_maker(&mut scene, "walk").await?;
+        scene.tick(30).await?;
+        tell_npc_maker(&mut scene, "where").await?;
+        assert_eq!(scene.line("at ").await?, "at 135 130");
+
+        tell_npc_maker(&mut scene, "sit").await?;
+        let link = scene.line("link ").await?;
+        assert!(link.starts_with("link 2 "), "{link}");
+        assert!(
+            !link.contains("00000000-0000-0000-0000-000000000000"),
+            "{link}"
+        );
+
+        tell_npc_maker(&mut scene, "touch").await?;
+        assert_eq!(scene.line("touched by ").await?, "touched by Nancy Bot");
+
+        // The NPC's kill goes out before the line the script says after it.
+        tell_npc_maker(&mut scene, "gone").await?;
+        let removed = scene
+            .next("the NPC's removal", |seen| match seen {
+                Seen::Removed(local_id) if local_id == npc => Some(local_id),
+                _other => None,
+            })
+            .await?;
+        assert_eq!(removed, npc);
+        assert_eq!(scene.line("left ").await?, "left 0");
+        scene.stop();
+        Ok(())
+    }
+
+    /// A box whose script moves its owner on channel 7: "local" a local
+    /// teleport looking north, "nowhere" a teleport to a region the grid does
+    /// not have.
+    const OSSL_MOVER_SOURCE: &str = "default
+{
+    state_entry()
+    {
+        llListen(7, \"\", NULL_KEY, \"\");
+    }
+
+    listen(integer channel, string name, key id, string message)
+    {
+        if (message == \"local\")
+        {
+            osLocalTeleportAgent(llGetOwner(), <140.0, 140.0, 40.0>, ZERO_VECTOR, <0.0, 1.0, 0.0>,
+                OS_LTPAG_USELOOKAT);
+        }
+        else if (message == \"nowhere\")
+        {
+            osTeleportAgent(llGetOwner(), \"Nowhere\", <128.0, 128.0, 30.0>, <1.0, 0.0, 0.0>);
+        }
+    }
+}
+";
+
+    /// `osLocalTeleportAgent` moves its owner within the region with a
+    /// `TeleportLocal` and no teleport sequence, and `osTeleportAgent` to a
+    /// region the grid does not have fails naming it, as OpenSim's
+    /// `RequestTeleportLocation` does.
+    #[tokio::test]
+    async fn ossl_teleports_move_the_owner_or_name_the_missing_region() -> Result<(), TestError> {
+        let region = region_of(&[ScriptedBox {
+            local_id: NPC_MAKER,
+            source: OSSL_MOVER_SOURCE.to_owned(),
+            experience: None,
+        }])?;
+        let mut scene = scene_with(
+            ImitatedGrid::OpenSim,
+            region,
+            RegionConfig {
+                heartbeat: HeartbeatConfig::stepped(Duration::from_millis(100)),
+                ossl: Some(sl_lsl_runtime::vm::ossl::Settings {
+                    threat_level: sl_lsl_runtime::library::ThreatLevel::Severe,
+                    ..sl_lsl_runtime::vm::ossl::Settings::default()
+                }),
+                ..RegionConfig::default()
+            },
+            AccountConfig {
+                agent_id: Some(box_owner()),
+                ..AccountConfig::new("Test", "User", "password")
+            },
+        )
+        .await?;
+        scene.tick(2).await?;
+        tell_npc_maker(&mut scene, "local").await?;
+        let (_flags, landed) = scene
+            .next("the local teleport", |seen| match seen {
+                Seen::TeleportLocal(flags, position) => Some((flags, position)),
+                _other => None,
+            })
+            .await?;
+        assert!(
+            (landed.x() - 140.0).abs() < 0.01 && (landed.y() - 140.0).abs() < 0.01,
+            "{landed:?}"
+        );
+        tell_npc_maker(&mut scene, "nowhere").await?;
+        let reason = scene
+            .next("the teleport's failure", |seen| match seen {
+                Seen::TeleportFailed(reason) => Some(reason),
+                _other => None,
+            })
+            .await?;
+        assert_eq!(reason, "The region 'Nowhere' could not be found.");
+        scene.stop();
+        Ok(())
     }
 }

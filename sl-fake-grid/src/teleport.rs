@@ -744,6 +744,67 @@ fn landing_point(
     })
 }
 
+/// `osLocalTeleportAgent` of an agent (OpenSim's
+/// `ScenePresence.LocalTeleport`): no teleport sequence — the avatar stood up
+/// if it sits and put at `position`, which the script's call kept in the
+/// region and above the ground, given `velocity` if one is given, and shown
+/// there to every viewer; with `announced`, its viewer is told of the move as
+/// a local teleport looking the way given (or as it looked), flying or not as
+/// given (or as it was).
+async fn move_in_place(
+    source: &SharedSim,
+    position: &sl_types::lsl::Vector,
+    velocity: Option<&sl_types::lsl::Vector>,
+    announced: Option<(Option<sl_types::lsl::Vector>, Option<bool>)>,
+) {
+    let moved = source
+        .with_state(|state| {
+            let now = source.now();
+            let agent = state.avatar.agent_id;
+            let _stood = crate::seating::stand(&mut state.world.lock(), agent);
+            let _was = state.sim.unseat_agent();
+            let landing = RegionCoordinates::new(position.x, position.y, position.z);
+            let mut look_at = state.sim.arrival_position().look_at.clone();
+            if let Some((Some(look), _fly)) = &announced {
+                look_at = look.clone();
+            }
+            state.sim.set_arrival_position(landing, look_at.clone());
+            if let Some((_look, fly)) = &announced {
+                let flying = fly
+                    .unwrap_or_else(|| state.motion.posture() == crate::movement::Posture::Flying);
+                let flags = if flying {
+                    TeleportFlags::VIA_LOCATION | TeleportFlags::IS_FLYING
+                } else {
+                    TeleportFlags::VIA_LOCATION
+                };
+                state
+                    .sim
+                    .send_teleport_local(landing, look_at, flags, now)?;
+            }
+            if let Some(velocity) = velocity {
+                state.motion.launch(velocity.clone());
+            }
+            let mut world = state.world.lock();
+            world.objects.move_wearer(agent, position);
+            let avatar =
+                crate::world::avatar_prim(world.avatar_id(agent), &state.avatar, position.clone());
+            drop(world);
+            let sent =
+                crate::world::send_objects(&mut state.sim, core::slice::from_ref(&avatar), now);
+            let mut world = state.world.lock();
+            if let Some(shown) = world.reshow_resident(agent, &avatar) {
+                state.publish(shown);
+            }
+            drop(world);
+            crate::driver::refresh_privacy(state, now);
+            sent
+        })
+        .await;
+    if let Err(error) = moved {
+        tracing::warn!("a script's local teleport failed: {error}");
+    }
+}
+
 /// Hands a teleport a script of the region at `index` asked for
 /// (`llTeleportAgent`, `llTeleportAgentGlobalCoords`, `llTeleportAgentHome`)
 /// to the teleport machinery, on a task of its own: a teleport waits on the
@@ -810,6 +871,40 @@ pub(crate) async fn scripted(
                     policy.unknown_region,
                 )),
             }
+        }
+        // OpenSim's `RequestTeleportLocation` by name: a teleport to a
+        // location, or the failure naming the region it could not find.
+        Destination::Region {
+            name,
+            position,
+            look_at,
+        } => match core.region_named(&name) {
+            Some(region) => Ok(TeleportRequest {
+                region,
+                arrival: ArrivalPlacement {
+                    position: place(&position),
+                    look_at,
+                },
+                flags: TeleportFlags::VIA_LOCATION,
+                kind_line: None,
+                client_requested: false,
+            }),
+            // Refused before any teleport starts (`SendTeleportFailed`).
+            None => Err(Refusal {
+                flags: TeleportFlags::VIA_LOCATION,
+                started: false,
+                progress: Vec::new(),
+                reason: format!("The region '{name}' could not be found."),
+                alert: None,
+            }),
+        },
+        Destination::Moved {
+            position,
+            velocity,
+            announced,
+        } => {
+            move_in_place(&source, &position, velocity.as_ref(), announced).await;
+            return;
         }
         Destination::Landmark { asset, look_at } => {
             let flags = TeleportFlags::VIA_LANDMARK | policy.kind_flags;

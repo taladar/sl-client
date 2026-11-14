@@ -26,6 +26,8 @@ pub const PASSIVE: i32 = 0x4;
 pub const SCRIPTED: i32 = 0x8;
 /// `AGENT_BY_USERNAME`.
 pub const AGENT_BY_USERNAME: i32 = 0x10;
+/// OpenSim's `NPC` sensor and detected type.
+pub const NPC: i32 = 0x20;
 
 /// The farthest a sweep looks, in metres, on both grids (`SensorMaxRange`).
 pub const SENSOR_MAX_RANGE: f32 = 96.0;
@@ -55,6 +57,10 @@ pub struct Sensed {
     pub physical: bool,
     /// Whether a script runs in it — for an avatar, in what it wears.
     pub scripted: bool,
+    /// For one of OpenSim's NPCs (an avatar too), whether it was created to
+    /// be sensed as an agent (`OS_NPC_SENSE_AS_AGENT`); [`None`] for anything
+    /// else.
+    pub npc: Option<bool>,
 }
 
 /// What a sweep looks for: `llSensor`'s arguments.
@@ -109,8 +115,16 @@ const fn cap(flavour: EngineFlavour) -> usize {
 /// scripted attachment), `AGENT` on OpenSim; an object `ACTIVE` when physical
 /// and `PASSIVE` otherwise, with `SCRIPTED` when a script runs in it — an
 /// idle scripted prim reads 12 on both grids.
+///
+/// An NPC is OpenSim's `NPC` (32), and `ACTIVE` beside while it moves
+/// (`DetectParams.Populate`).
 #[must_use]
-pub const fn detected_type(sensed: &Sensed, flavour: EngineFlavour) -> i32 {
+pub fn detected_type(sensed: &Sensed, flavour: EngineFlavour) -> i32 {
+    if sensed.npc.is_some() {
+        let moving =
+            sensed.velocity.x != 0.0 || sensed.velocity.y != 0.0 || sensed.velocity.z != 0.0;
+        return NPC | if moving { ACTIVE } else { 0 };
+    }
     if sensed.agent {
         if flavour.is_opensim() {
             return AGENT;
@@ -128,7 +142,18 @@ pub const fn detected_type(sensed: &Sensed, flavour: EngineFlavour) -> i32 {
 /// active (idle ones drift between the two on aditi, `llDetectedType` saying
 /// 12 throughout; the runtime holds them active). OpenSim's mask is a union,
 /// a scripted prim active and never passive.
+///
+/// OpenSim's NPC is admitted by `NPC` (32) unless it was created to be
+/// sensed as an agent, when `AGENT` admits it and nothing else does
+/// (`SensorRepeat.doAgentSensor`).
 const fn admits(mask: i32, sensed: &Sensed, flavour: EngineFlavour) -> bool {
+    if let Some(as_agent) = sensed.npc {
+        return if as_agent {
+            mask & AGENT != 0
+        } else {
+            mask & NPC != 0
+        };
+    }
     if sensed.agent {
         let by_name = if flavour.is_opensim() {
             AGENT

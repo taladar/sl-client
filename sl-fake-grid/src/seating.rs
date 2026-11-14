@@ -193,8 +193,26 @@ pub(crate) fn place(world: &SceneFixtures, prim: &Object) -> Placed {
 /// prim whose target is free, and on a grid with a
 /// [`plain_reach_m`](crate::imitates::SitPolicy::plain_reach_m) from within it
 /// for any other, measured along the ground to the prim's centre.
+///
+/// A prim's own sit range (OpenSim's `SitActiveRange`, `osSetSitActiveRange`)
+/// comes first: a negative one answers nobody, and a positive one nobody
+/// standing farther from the prim's centre than it.
 #[must_use]
 pub(crate) fn answers(world: &SceneFixtures, prim: &Object, at: &Vector) -> bool {
+    let range = world
+        .objects
+        .seat_settings(prim.local_id)
+        .map_or(0.0, |seat| seat.sit_active_range);
+    if range < 0.0 {
+        return false;
+    }
+    if range > 1e-5 {
+        let (centre, _turn) = frame_of(world, prim);
+        let (dx, dy, dz) = (at.x - centre.x, at.y - centre.y, at.z - centre.z);
+        if dx * dx + dy * dy + dz * dz > range * range {
+            return false;
+        }
+    }
     let Some(reach) = world.sits.plain_reach_m else {
         return true;
     };
@@ -203,6 +221,36 @@ pub(crate) fn answers(world: &SceneFixtures, prim: &Object, at: &Vector) -> bool
     }
     let (centre, _turn) = frame_of(world, prim);
     (at.x - centre.x).hypot(at.y - centre.y) <= reach
+}
+
+/// The prim a sit on `prim` lands on (OpenSim's `FindNextAvailableSitTarget`):
+/// the first of `prim` and then the rest of its linkset in link order with a
+/// sit target nobody took and a sit range that is not negative, or `prim`
+/// itself when none has.
+#[must_use]
+pub(crate) fn next_free_target(
+    world: &SceneFixtures,
+    prim: RegionLocalObjectId,
+) -> RegionLocalObjectId {
+    let root = world.root_of(prim);
+    std::iter::once(prim)
+        .chain(
+            std::iter::once(root)
+                .chain(crate::link_sets::children_in_order(world, root))
+                .filter(|part| *part != prim),
+        )
+        .find(|part| {
+            world
+                .objects
+                .seat_settings(*part)
+                .is_some_and(|seat| seat.target.is_some() && seat.sit_active_range >= 0.0)
+                && !world
+                    .objects
+                    .sitters(*part)
+                    .iter()
+                    .any(|sitter| sitter.on_target)
+        })
+        .unwrap_or(prim)
 }
 
 /// The camera a sitter on `prim` is given, and whether it is put in
@@ -274,6 +322,25 @@ pub(crate) fn stand(world: &mut SceneFixtures, agent: AgentKey) -> Option<Vector
         .seat_of(agent)
         .map(|(seat, _sitter)| seat.clone());
     let (local_id, sitter) = world.objects.stand(agent)?;
+    // A stand target (OpenSim's `StandOffset`, `osSetStandTarget`) puts the
+    // avatar there from the prim, turned with the prim about the vertical,
+    // half its height and a tenth of a metre up.
+    let target = world
+        .objects
+        .seat_settings(local_id)
+        .map(|settings| settings.stand_target.clone())
+        .filter(|target| !is_zero(target));
+    if let (Some(target), Some(seat)) = (target, seat.as_ref()) {
+        let (at, turn) = frame_of(world, seat);
+        let yaw = level(&turn);
+        let offset = rotate(&yaw, &target);
+        let stands = Vector {
+            x: at.x + offset.x,
+            y: at.y + offset.y,
+            z: at.z + offset.z + crate::world::AVATAR_CENTRE_ABOVE_GROUND_M + 0.1,
+        };
+        return Some(finish_stand(world, agent, local_id, stands));
+    }
     let (sat, facing) = match (sat, seat) {
         (Some(sat), Some(seat)) => {
             let (_at, turn) = frame_of(world, &seat);
@@ -294,6 +361,18 @@ pub(crate) fn stand(world: &mut SceneFixtures, agent: AgentKey) -> Option<Vector
         y: sat.y + ahead.y,
         z: sat.z + policy.stand_up_m,
     };
+    Some(finish_stand(world, agent, local_id, stands))
+}
+
+/// `agent` has stood up from the prim `local_id` and stands at `stands`: what
+/// it wears follows it, the object's scripts are told and lose the controls
+/// and camera it granted them. Where it stands.
+fn finish_stand(
+    world: &mut SceneFixtures,
+    agent: AgentKey,
+    local_id: RegionLocalObjectId,
+    stands: Vector,
+) -> Vector {
     world.objects.move_wearer(agent, &stands);
     let root = world.root_of(local_id);
     crate::scripts::raise_changed(world, root, CHANGED_LINK);
@@ -303,7 +382,23 @@ pub(crate) fn stand(world: &mut SceneFixtures, agent: AgentKey) -> Option<Vector
         agent,
         PERMISSION_TAKE_CONTROLS | PERMISSION_CONTROL_CAMERA,
     );
-    Some(stands)
+    stands
+}
+
+/// `turn` reduced to its turn about the vertical, normalised (OpenSim's
+/// `standRotationZ`); unturned when it has none.
+fn level(turn: &Rotation) -> Rotation {
+    let length = turn.z.hypot(turn.s);
+    if length > 0.0 {
+        Rotation {
+            x: 0.0,
+            y: 0.0,
+            z: turn.z / length,
+            s: turn.s / length,
+        }
+    } else {
+        UNTURNED
+    }
 }
 
 /// Stands up every avatar sitting on the linkset whose root is `root` — one
@@ -425,13 +520,15 @@ fn linkset_records(world: &SceneFixtures, root: RegionLocalObjectId) -> Vec<Obje
 }
 
 /// Puts the worn root `root` of `agent`'s back in the world where its wearer
-/// stands, under the same ids; its scripts are told, and lose the controls
-/// the wearer granted them. The records, the root first, and what it was
-/// worn as, or [`None`] for a root `agent` does not wear.
+/// stands — or at the place and turn `at` gives (`osDropAttachmentAt`) —
+/// under the same ids; its scripts are told, and lose the controls the wearer
+/// granted them. The records, the root first, and what it was worn as, or
+/// [`None`] for a root `agent` does not wear.
 pub(crate) fn drop_off(
     world: &mut SceneFixtures,
     agent: AgentKey,
     root: RegionLocalObjectId,
+    at: Option<(&Vector, &Rotation)>,
 ) -> Option<(Vec<Object>, crate::scene_store::WornItem)> {
     if world
         .objects
@@ -445,7 +542,13 @@ pub(crate) fn drop_off(
         let mut dropped = world.object_mut(root)?;
         dropped.parent_id = RegionLocalObjectId(0);
         dropped.state = 0;
-        dropped.motion.position = attached.at;
+        match at {
+            Some((position, rotation)) => {
+                dropped.motion.position = position.clone();
+                dropped.motion.rotation = rotation.clone();
+            }
+            None => dropped.motion.position = attached.at,
+        }
         dropped.name_value = String::new();
     }
     crate::scripts::raise_attach(world, root, None, attached.travelled);

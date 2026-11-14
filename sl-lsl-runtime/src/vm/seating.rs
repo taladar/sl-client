@@ -46,6 +46,14 @@ pub struct Seat {
     pub camera_at: Vector,
     /// Whether its sitter is put in mouselook (`llForceMouselook`).
     pub force_mouselook: bool,
+    /// Where an avatar that stands up from the prim is put, from the prim in
+    /// its own frame turned about the vertical (OpenSim's `StandOffset`,
+    /// `osSetStandTarget`); zero for where the region puts one.
+    pub stand_target: Vector,
+    /// How far from the prim an avatar may be to sit on it (OpenSim's
+    /// `SitActiveRange`, `osSetSitActiveRange`): zero for any distance, a
+    /// negative range for nobody, at most 128 m.
+    pub sit_active_range: f32,
 }
 
 impl Default for Seat {
@@ -55,6 +63,8 @@ impl Default for Seat {
             camera_eye: ZERO,
             camera_at: ZERO,
             force_mouselook: false,
+            stand_target: ZERO,
+            sit_active_range: 0.0,
         }
     }
 }

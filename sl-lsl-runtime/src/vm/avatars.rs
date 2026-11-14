@@ -331,6 +331,32 @@ pub enum Destination {
         /// The way the avatar looks on arrival.
         look_at: Vector,
     },
+    /// A place in the grid's region of that name (OpenSim's
+    /// `osTeleportAgent` with a region name other than the caller's own).
+    Region {
+        /// The region's name.
+        name: String,
+        /// The position in it.
+        position: Vector,
+        /// The way the avatar looks on arrival.
+        look_at: Vector,
+    },
+    /// A move within the caller's region with no teleport sequence
+    /// (`osLocalTeleportAgent`, OpenSim's `ScenePresence.LocalTeleport`): the
+    /// avatar stood up if it sits, its walk to a target given up, put at
+    /// `position` — which the library has kept in the region and above the
+    /// ground — and shown there to every viewer.
+    Moved {
+        /// Where it is put.
+        position: Vector,
+        /// The velocity it is given, or [`None`] to leave its own.
+        velocity: Option<Vector>,
+        /// Whether its viewer is told of the move as a local teleport
+        /// (`TeleportLocal`), and if so the way it then looks — [`None`] for
+        /// the way it looked — and whether it then flies — [`None`] for as it
+        /// was.
+        announced: Option<(Option<Vector>, Option<bool>)>,
+    },
     /// A place on the grid (`llTeleportAgentGlobalCoords`).
     Global {
         /// The region's corner, in metres.

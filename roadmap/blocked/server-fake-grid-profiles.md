@@ -42,3 +42,12 @@ owner on Second Life, its name on OpenSim) and position.
 `e2e_two_avatars`' `a_live_profile_shows_its_avatar_online_with_its_groups`
 runs on the fake grid but for this: take its `Need::LiveGrid` off once a
 profile is served.
+
+## From server-lsl-lib-ossl-avatars (2026-11-14)
+
+OpenSim's NPCs answer a profile request with what a script set
+(`osNpcSetProfileAbout`, `osNpcSetProfileImage`: the NPC module's
+`INPC.profileAbout` / `profileImage`, read by `NPCAvatar`'s
+`AvatarPropertiesRequest` handler). The fake grid's `scripts::npcs` refuses
+both today with a "does not model profiles" log line; once a profile is
+served, keep each on the NPC's record and answer an NPC's profile from it.

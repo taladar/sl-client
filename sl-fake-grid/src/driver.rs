@@ -55,6 +55,9 @@ pub(crate) struct SimState {
     /// How the region moves the agent's avatar where the live grids disagree
     /// ([`crate::ImitatedGrid::movement_policy`]).
     pub(crate) movement_policy: crate::movement::MovementPolicy,
+    /// How many times as fast as the policy says the avatar moves, as a
+    /// script set it (`osSetSpeed`); 1 until one does.
+    pub(crate) speed: f32,
     /// Whether a parcel's own environment is served only while the estate
     /// allows parcel environments
     /// ([`crate::ImitatedGrid::parcel_environments_need_estate`]).

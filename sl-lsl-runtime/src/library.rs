@@ -47,6 +47,7 @@ pub mod math;
 pub mod money_permissions;
 pub mod notecards;
 pub mod ossl;
+pub mod ossl_avatars;
 pub mod ossl_inventory;
 pub mod ossl_prim;
 pub(crate) mod prim_params;
@@ -340,7 +341,9 @@ mod tests {
             _description: &str,
             _text: &str,
             _changed: &[i32],
-        ) {
+            _replace: bool,
+        ) -> String {
+            String::new()
         }
 
         fn epoch_micros(&self) -> i64 {
@@ -557,6 +560,85 @@ mod tests {
         fn attached_list(&self, _caller: CallerId, _agent: &str) -> Option<Vec<String>> {
             None
         }
+
+        fn attachments(&self, _caller: CallerId, _agent: &str) -> Option<Vec<(i32, String)>> {
+            None
+        }
+
+        fn attach_from_inventory(
+            &mut self,
+            _caller: CallerId,
+            _agent: &str,
+            _item: &str,
+            _point: i32,
+        ) {
+        }
+
+        fn drop_attachment(&mut self, _caller: CallerId, _at: Option<&crate::vm::npcs::DropAt>) {}
+
+        fn sit(&mut self, _caller: CallerId, _agent: &str, _prim: &str, _target_free: bool) {}
+
+        fn create_npc(
+            &mut self,
+            _caller: CallerId,
+            _spec: &crate::vm::npcs::NpcSpec,
+        ) -> Result<String, crate::vm::npcs::NpcRefusal> {
+            Err(crate::vm::npcs::NpcRefusal::Full)
+        }
+
+        fn npcs(&self, _caller: CallerId) -> Vec<crate::vm::npcs::Npc> {
+            Vec::new()
+        }
+
+        fn npc_act(&mut self, _caller: CallerId, _npc: &str, _action: &crate::vm::npcs::NpcAction) {
+        }
+
+        fn npc_say(
+            &mut self,
+            _caller: CallerId,
+            _npc: &str,
+            _speech: &crate::vm::npcs::NpcSpeech,
+        ) -> Option<crate::vm::Overheard> {
+            None
+        }
+
+        fn appearance(
+            &self,
+            _caller: CallerId,
+            _agent: &str,
+        ) -> Option<crate::vm::npcs::Appearance> {
+            None
+        }
+
+        fn vitals(&self, _caller: CallerId, _agent: &str) -> Option<crate::vm::npcs::Vitals> {
+            None
+        }
+
+        fn set_vitals(
+            &mut self,
+            _caller: CallerId,
+            _agent: &str,
+            _vitals: crate::vm::npcs::Vitals,
+        ) {
+        }
+
+        fn alert(&mut self, _caller: CallerId, _agent: &str, _text: &str, _modal: bool) {}
+
+        fn set_speed(&mut self, _caller: CallerId, _agent: &str, _factor: f32) {}
+
+        fn kick(&mut self, _caller: CallerId, _agent: &str, _alert: &str) {}
+
+        fn group_powers(&self, _group: &str, _agent: &str) -> Option<u64> {
+            None
+        }
+
+        fn group_name(&self, _group: &str) -> Option<String> {
+            None
+        }
+
+        fn invite_to_group(&mut self, _caller: CallerId, _group: &str, _agent: &str) {}
+
+        fn eject_from_group(&mut self, _caller: CallerId, _group: &str, _agent: &str) {}
 
         fn sense(&self, _caller: CallerId) -> Vec<crate::vm::sensing::Sensed> {
             Vec::new()

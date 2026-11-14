@@ -1027,11 +1027,37 @@ scope of 236` as this was written):
   `osGetNotecardLine`, `osGetNumberOfNotecardLines`), `osMakeNotecard`,
   `osGetRezzingObject`, `osDie` (of the caller's own object, or one it
   rezzed), `osResetAllScripts`, `osGetLastChangedEventKey` and the loaded
-  OAR's data (`osLoadedCreation*`, empty: the fake grid loads no OAR).
-- **Later, with the tranche of the `ll*` functions they shadow** — the NPC
-  family, avatar animation, attachment, teleport and sitting functions
-  (`server-lsl-lib-avatar-control`, which has the NPC fixtures to answer
-  them); the parcel, estate, environment, wind, sun and terrain writers,
+  OAR's data (`osLoadedCreation*`, empty: the fake grid loads no OAR). With
+  the avatar tranche (`server-lsl-lib-ossl-avatars`) came its 66, in
+  `library::ossl_avatars`: the NPCs (below), and the avatar-side twins of the
+  `ll*` avatar functions — animations on any avatar
+  (`osAvatarPlayAnimation`, `osAvatarStopAnimation`), wearing without a
+  permission (`osForceAttachToAvatar*`, `osForceDetachFromAvatar`, the wear
+  of a contents item by its owner or another avatar,
+  `Host::attach_from_inventory`), drops to the ground (`osDropAttachment*`,
+  `osForceDropAttachment*`,
+  `Host::drop_attachment`), counting and messaging what an avatar wears by
+  point (`osGetNumberOfAttachments`, `osMessageAttachments`,
+  `Host::attachments`), forced sits (`osForceOtherSit`, `Host::sit`), a
+  prim's stand target and sit range (kept on its `Seat`, which a stand-up and
+  a sit request on the fake grid honour), the three teleports by position,
+  region name and grid cell and the local move without a teleport
+  (`osTeleportAgent`, `osTeleportOwner`, `osLocalTeleportAgent`,
+  `Destination::Region` and `Destination::Moved`), the names and kinds
+  (`osKey2Name`, `osAvatarName2Key`, `osAvatarType`, `osGetGender`), the
+  appearance saves (`osOwnerSaveAppearance`, `osAgentSaveAppearance`,
+  `osNpcSaveAppearance`, the notecard OpenSim's `PackForNotecard` writes,
+  `vm::npcs::Appearance`), health (`osGetHealth`, `osCauseDamage`,
+  `osCauseHealing`, `osSetHealth`, the heal rate, `Host::vitals` — the region
+  heals an avatar at its rate every tick and tells its viewer, and kills one
+  at 0 as OpenSim does), speed (`osSetSpeed`, `osSetOwnerSpeed`), group
+  invitations and ejections in the prim's group (`osInviteToGroup`,
+  `osEjectFromGroup`) and kicks (`osKickAvatar`). OpenSim gates the overload
+  of `osTeleportAgent` that takes no region by nothing at all, unlike its two
+  siblings: `ossl-checks.txt` gives that overload a line of its own
+  (`osTeleportAgent#1`).
+- **Later, with the tranche of the `ll*` functions they shadow** — the
+  parcel, estate, environment, wind, sun and terrain writers,
   the region statistics, notice and restart and LightShare
   (`server-lsl-lib-ossl-land-writers`); inertia and object teleports
   (`server-lsl-lib-physics-vehicles`); URLs (`server-lsl-lib-http-url`). A
@@ -1044,6 +1070,35 @@ scope of 236` as this was written):
   gatekeeper and login URIs, the custom grid info, an agent's country
   (`grid-services`). Each is still compiled and gated, so a script calling
   one is denied, or fails, exactly where OpenSim's would.
+
+**OpenSim's NPCs.** `osNpcCreate` asks the host for an avatar with no viewer
+behind it (`Host::create_npc`, a `vm::npcs::NpcSpec`), owned by the script's
+owner unless `OS_NPC_NOT_OWNED` — and the four-argument overload makes it
+unowned, as OpenSim's stock `[NPC] AllowNotOwned` does — dressed from an
+appearance notecard, or as another avatar in the region whose key the
+notecard argument names (`AllowCloneOtherAvatars`). Every other `osNpc*` call
+reads the region's NPCs (`Host::npcs`) and drives only one the script's owner
+may (`NPCModule.CheckPermissions`: unowned, the owner's, or the owner itself);
+a call on any other NPC does nothing and reads the zero answer. The fake grid
+shows an NPC to every viewer as a resident with no session
+(`world::Resident`), so its arrival, moves, animations, appearance and
+departure travel the changes a logged-in avatar's do and a viewer arriving
+later is shown it with the others; `sl_fake_grid`'s `scripts::npcs` keeps what
+only an NPC has. It walks, runs or flies to a target in a straight line at
+the grid's own speeds, over the ground, no physics and no prims in the way,
+flying to a target more than 2 m above the ground under it unless told not
+to and stopping within half a metre; it sits and stands as a viewer's sit
+request and stand would, speaks as an avatar (the `osNpcSay` family past the
+calling script's channel-0 throttle), touches as a viewer's click — a press,
+an update and a release, only on a prim whose scripts take touches — looks at
+something by the `LookAt` viewer effect, and is answered by `llGetAgentSize`,
+`llKey2Name`, `llGetObjectDetails` and the animation functions as an avatar
+is, as OpenSim answers of an NPC's presence. A sensor sees an NPC as
+OpenSim's does (`Sensed::npc`): by its `NPC` type (32), or by `AGENT` alone
+for one created `OS_NPC_SENSE_AS_AGENT`, detected as `NPC`, `ACTIVE` beside
+while it moves. One thing is not modelled: an NPC's profile
+(`osNpcSetProfileAbout`, `osNpcSetProfileImage` — the fake grid keeps no
+profiles, so the call says so in the grid's log and does nothing).
 
 **.NET's culture-sensitive search, ported.** OpenSim runs on Mono, and every
 `String.IndexOf(string)` with no comparison named — `llSubStringIndex`, the

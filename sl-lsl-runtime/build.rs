@@ -230,12 +230,20 @@ fn opensim_family(name: &str) -> Result<&'static str, BoxError> {
     })
 }
 
-/// The `Gate` expression for a function of `family` named `name`.
-fn gate(family: &str, name: &str, checks: &HashMap<String, Check>) -> Result<String, BoxError> {
+/// The `Gate` expression for the overload `overload` of a function of
+/// `family` named `name`: a line for `name#overload` is that overload's
+/// alone, where OpenSim checks one overload unlike the others.
+fn gate(
+    family: &str,
+    name: &str,
+    overload: usize,
+    checks: &HashMap<String, Check>,
+) -> Result<String, BoxError> {
     Ok(match family {
         "Ossl" => {
             let check = checks
-                .get(name)
+                .get(&format!("{name}#{overload}"))
+                .or_else(|| checks.get(name))
                 .ok_or_else(|| format!("{name}: no line in {OSSL_CHECKS}"))?;
             match check.kind.as_str() {
                 "none" => "Gate::Unchecked".to_owned(),
@@ -409,7 +417,7 @@ fn function(
         deprecated: flag(entry, "deprecated") || replacement.is_some(),
         god_mode: flag(entry, "god-mode"),
         family,
-        gate: gate(family, name, checks)?,
+        gate: gate(family, name, overload, checks)?,
         replacement,
     })
 }

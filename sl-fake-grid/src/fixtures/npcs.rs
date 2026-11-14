@@ -35,37 +35,7 @@ use sl_types::lsl::{Rotation, Vector};
 use super::prims::PrimFixture;
 use crate::world::{AvatarIdentity, avatar_prim};
 
-/// The **default avatar's** transmitted visual params — the body a grid hands
-/// an account that has no stored appearance yet ("Ruth").
-///
-/// Verbatim from OpenSim's `AvatarAppearance.SetDefaultParams`
-/// (`OpenSim/Framework/AvatarAppearance.cs`, BSD-licensed), which is what the
-/// local test grid actually sends, so a fixture NPC looks exactly like a
-/// default OpenSim avatar. Setting every param to the midpoint of its own range
-/// instead — the obvious-looking alternative — produces a badly distorted body,
-/// because the ranges are not centred on anything an avatar wants to be.
-///
-/// The vector is 218 bytes and a receiver reads it positionally against its own
-/// [transmitted param list], which in the standard `avatar_lad.xml` is 253
-/// params: exactly the 218 classic ones (every id below 10000), then the 33
-/// physics params (10000–10032) and two more (11000, 11001). So the classic
-/// half lands slot for slot and the rest falls back to each param's default —
-/// which is what OpenSim itself relies on.
-///
-/// [transmitted param list]: https://wiki.secondlife.com/wiki/Appearance
-pub const DEFAULT_VISUAL_PARAMS: [u8; 218] = [
-    33, 61, 85, 23, 58, 127, 63, 85, 63, 42, 0, 85, 63, 36, 85, 95, 153, 63, 34, 0, 63, 109, 88,
-    132, 63, 136, 81, 85, 103, 136, 127, 0, 150, 150, 150, 127, 0, 0, 0, 0, 0, 127, 0, 0, 255, 127,
-    114, 127, 99, 63, 127, 140, 127, 127, 0, 0, 0, 191, 0, 104, 0, 0, 0, 0, 0, 0, 0, 0, 0, 145,
-    216, 133, 0, 127, 0, 127, 170, 0, 0, 127, 127, 109, 85, 127, 127, 63, 85, 42, 150, 150, 150,
-    150, 150, 150, 150, 25, 150, 150, 150, 0, 127, 0, 0, 144, 85, 127, 132, 127, 85, 0, 127, 127,
-    127, 127, 127, 127, 59, 127, 85, 127, 127, 106, 47, 79, 127, 127, 204, 2, 141, 66, 0, 0, 127,
-    127, 0, 0, 0, 0, 127, 0, 159, 0, 0, 178, 127, 36, 85, 131, 127, 127, 127, 153, 95, 0, 140, 75,
-    27, 127, 127, 0, 150, 150, 198, 0, 0, 63, 30, 127, 165, 209, 198, 127, 127, 153, 204, 51, 51,
-    255, 255, 255, 204, 0, 255, 150, 150, 150, 150, 150, 150, 150, 150, 150, 150, 0, 150, 150, 150,
-    150, 150, 0, 127, 127, 150, 150, 150, 150, 150, 150, 150, 150, 0, 0, 150, 51, 132, 150, 150,
-    150,
-];
+pub use sl_lsl_runtime::vm::npcs::DEFAULT_VISUAL_PARAMS;
 
 /// The side, in pixels, of a fixture's baked textures: what a real grid's
 /// bakes are.

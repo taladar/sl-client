@@ -336,7 +336,7 @@ pub fn mod_send_command(
 
 /// An OSSL run-time error: `OSSL Runtime Error: <message>`, which ends the
 /// event.
-fn runtime_error(id: crate::library::BuiltinId, message: &str) -> CallError {
+pub(crate) fn runtime_error(id: crate::library::BuiltinId, message: &str) -> CallError {
     CallError::Thrown {
         id,
         thrown: crate::vm::Thrown {

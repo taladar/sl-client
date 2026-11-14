@@ -35,6 +35,7 @@ mod math;
 mod memory;
 mod money;
 mod ossl;
+mod ossl_avatars;
 mod persistence;
 mod placement;
 mod precision;
@@ -313,6 +314,39 @@ struct Recorder {
     /// The linkset every script is in, where a test states one in full;
     /// otherwise each script's prim is a lone one.
     linked: Option<Links>,
+    /// The NPCs of the region, in the order they were created.
+    npcs: Vec<crate::vm::npcs::Npc>,
+    /// What each NPC was made to do, in order.
+    npc_actions: Vec<(String, crate::vm::npcs::NpcAction)>,
+    /// What each NPC said, in order.
+    npc_lines: Vec<(String, crate::vm::npcs::NpcSpeech)>,
+    /// What `osNpcCreate` asked for, in order.
+    npc_specs: Vec<crate::vm::npcs::NpcSpec>,
+    /// The refusal every NPC creation meets, when a test rigs one.
+    npc_refusal: Option<crate::vm::npcs::NpcRefusal>,
+    /// How each avatar and NPC looks, by key.
+    appearances: std::collections::BTreeMap<String, crate::vm::npcs::Appearance>,
+    /// Each avatar's and NPC's health, by key; one in the region with none
+    /// listed has a fresh presence's.
+    vitals: std::collections::BTreeMap<String, crate::vm::npcs::Vitals>,
+    /// `(agent, text, modal)` per alert sent.
+    alerts: Vec<(String, String, bool)>,
+    /// `(agent, factor)` per speed set.
+    speeds: Vec<(String, f32)>,
+    /// `(agent, alert)` per kick.
+    kicks: Vec<(String, String)>,
+    /// The powers each `(group, agent)` member holds.
+    group_powers: std::collections::BTreeMap<(String, String), u64>,
+    /// `(group, agent, invited)` per invitation (`true`) or ejection.
+    group_changes: Vec<(String, String, bool)>,
+    /// What each avatar wears, by key: `(point, root key)`.
+    worn_points: std::collections::BTreeMap<String, Vec<(i32, String)>>,
+    /// `(agent, item, point)` per wear from the prim's contents.
+    worn_from_contents: Vec<(String, String, i32)>,
+    /// `(caller, where)` per drop of a worn object.
+    drops: Vec<(CallerId, Option<crate::vm::npcs::DropAt>)>,
+    /// `(agent, prim, target_free)` per sit a script asked for.
+    forced_sits: Vec<(String, String, bool)>,
     /// The keys `llCreateLink` may link; every other is an invalid target.
     linkable: std::collections::BTreeSet<String>,
     /// `(caller, target, parent)` per `llCreateLink` handed over.
@@ -1130,17 +1164,21 @@ impl Host for Recorder {
         description: &str,
         text: &str,
         changed: &[i32],
-    ) {
+        replace: bool,
+    ) -> String {
         let prim = self.prim_of(caller);
         let asset = format!("0e0e0e0e-0000-4000-8000-{:012}", self.notecards.len());
         let _was = self.notecards.insert(asset.clone(), text.to_owned());
         let owner = self.owner.clone().unwrap_or_else(|| OWNER.to_owned());
         let held = self.contents.entry(prim).or_default();
+        if replace {
+            held.retain(|item| item.name != name);
+        }
         let item = crate::vm::Item {
             name: free_name(held, name),
+            asset: asset.clone(),
             kind: crate::vm::contents::INVENTORY_NOTECARD,
             item: asset.replace("0e0e0e0e", "0f0f0f0f"),
-            asset,
             creator: owner,
             last_owner: crate::value::NULL_KEY.to_owned(),
             masks: crate::vm::Masks::full(),
@@ -1152,6 +1190,7 @@ impl Host for Recorder {
         for bits in changed {
             self.changes.push((key.clone(), *bits));
         }
+        asset
     }
 
     fn epoch_micros(&self) -> i64 {
@@ -1485,6 +1524,121 @@ impl Host for Recorder {
         _end: &sl_types::lsl::Vector,
     ) -> Vec<crate::vm::sensing::RayHit> {
         self.ray_hits.clone()
+    }
+
+    fn attachments(&self, _caller: CallerId, agent: &str) -> Option<Vec<(i32, String)>> {
+        self.avatars
+            .get(agent)
+            .map(|_| self.worn_points.get(agent).cloned().unwrap_or_default())
+    }
+
+    fn attach_from_inventory(&mut self, _caller: CallerId, agent: &str, item: &str, point: i32) {
+        self.worn_from_contents
+            .push((agent.to_owned(), item.to_owned(), point));
+    }
+
+    fn drop_attachment(&mut self, caller: CallerId, at: Option<&crate::vm::npcs::DropAt>) {
+        self.drops.push((caller, at.cloned()));
+    }
+
+    fn sit(&mut self, _caller: CallerId, agent: &str, prim: &str, target_free: bool) {
+        self.forced_sits
+            .push((agent.to_owned(), prim.to_owned(), target_free));
+    }
+
+    fn create_npc(
+        &mut self,
+        _caller: CallerId,
+        spec: &crate::vm::npcs::NpcSpec,
+    ) -> Result<String, crate::vm::npcs::NpcRefusal> {
+        self.npc_specs.push(spec.clone());
+        if let Some(refusal) = self.npc_refusal {
+            return Err(refusal);
+        }
+        let key = format!("0c0c0c0c-0000-4000-8000-{:012}", self.npc_specs.len());
+        self.npcs.push(crate::vm::npcs::Npc {
+            key: key.clone(),
+            name: format!("{} {}", spec.first, spec.last),
+            owner: spec.owner.clone(),
+            position: spec.position.clone(),
+            rotation: crate::value::ZERO_ROTATION,
+        });
+        if let Some(appearance) = &spec.appearance {
+            let _was = self.appearances.insert(key.clone(), appearance.clone());
+        }
+        Ok(key)
+    }
+
+    fn npcs(&self, _caller: CallerId) -> Vec<crate::vm::npcs::Npc> {
+        self.npcs.clone()
+    }
+
+    fn npc_act(&mut self, _caller: CallerId, npc: &str, action: &crate::vm::npcs::NpcAction) {
+        match action {
+            crate::vm::npcs::NpcAction::Remove => self.npcs.retain(|held| held.key != npc),
+            crate::vm::npcs::NpcAction::Turn(rotation) => {
+                for held in self.npcs.iter_mut().filter(|held| held.key == npc) {
+                    held.rotation = rotation.clone();
+                }
+            }
+            _ => {}
+        }
+        self.npc_actions.push((npc.to_owned(), action.clone()));
+    }
+
+    fn npc_say(
+        &mut self,
+        _caller: CallerId,
+        npc: &str,
+        speech: &crate::vm::npcs::NpcSpeech,
+    ) -> Option<Overheard> {
+        self.npc_lines.push((npc.to_owned(), speech.clone()));
+        None
+    }
+
+    fn appearance(&self, _caller: CallerId, agent: &str) -> Option<crate::vm::npcs::Appearance> {
+        self.appearances.get(agent).cloned()
+    }
+
+    fn vitals(&self, _caller: CallerId, agent: &str) -> Option<crate::vm::npcs::Vitals> {
+        let here = self.avatars.contains_key(agent) || self.npcs.iter().any(|npc| npc.key == agent);
+        here.then(|| self.vitals.get(agent).copied().unwrap_or_default())
+    }
+
+    fn set_vitals(&mut self, _caller: CallerId, agent: &str, vitals: crate::vm::npcs::Vitals) {
+        let _was = self.vitals.insert(agent.to_owned(), vitals);
+    }
+
+    fn alert(&mut self, _caller: CallerId, agent: &str, text: &str, modal: bool) {
+        self.alerts.push((agent.to_owned(), text.to_owned(), modal));
+    }
+
+    fn set_speed(&mut self, _caller: CallerId, agent: &str, factor: f32) {
+        self.speeds.push((agent.to_owned(), factor));
+    }
+
+    fn kick(&mut self, _caller: CallerId, agent: &str, alert: &str) {
+        self.kicks.push((agent.to_owned(), alert.to_owned()));
+    }
+
+    fn group_powers(&self, group: &str, agent: &str) -> Option<u64> {
+        self.group_powers
+            .get(&(group.to_owned(), agent.to_owned()))
+            .copied()
+    }
+
+    fn group_name(&self, group: &str) -> Option<String> {
+        Some(format!("Group {group}"))
+    }
+
+    fn invite_to_group(&mut self, _caller: CallerId, group: &str, agent: &str) {
+        self.group_changes
+            .push((group.to_owned(), agent.to_owned(), true));
+    }
+
+    fn eject_from_group(&mut self, _caller: CallerId, group: &str, agent: &str) {
+        self.group_changes
+            .push((group.to_owned(), agent.to_owned(), false));
     }
 }
 

@@ -6,13 +6,14 @@
 //! Life compiles neither probe, as aditi did not.
 //!
 //! What the probes call of a tranche not written yet is answered where they
-//! call it, with what the grid answered: the avatar's gender and health, the
-//! link number, the map texture, the wind and LightShare's water colour, the
-//! apparent time and the wallclock (each as its transcript has it, for they
-//! read the moment the probe ran), `llGetTime` (the `elapsed` the
-//! probe prints is compared as present, not as a number), what a listener
-//! reads of where the speaker is, and `llResetOtherScript`, which the test
-//! does for the leader. Keys minted on either side compare as keys.
+//! call it, with what the grid answered: the link number, the map texture, the
+//! wind and LightShare's water colour, the apparent time and the wallclock
+//! (each as its transcript has it, for they read the moment the probe ran),
+//! `llGetTime` (the `elapsed` the probe prints is compared as present, not as
+//! a number), what a listener reads of where the speaker is, and
+//! `llResetOtherScript`, which the test does for the leader. The owner stands
+//! in the region in the default shape, at full health, as on the grid. Keys
+//! minted on either side compare as keys.
 
 use pretty_assertions::assert_eq;
 
@@ -110,10 +111,7 @@ fn available_answers_as_each_engine_did() -> Result<(), String> {
     let source = include_str!("../../../probes/ossl/available.lsl");
     for (flavour, transcript) in transcripts("available") {
         let rigged = source
-            .replace("osGetGender(owner)", "\"female\"")
-            .replace("osGetHealth(owner)", "100.0")
             .replace("osGetWindParam(\"SimpleRandomWind\", \"strength\")", "1.0")
-            .replace("osIsNpc(owner)", "0")
             .replace("osGetLinkNumber(llGetObjectName())", "-1")
             .replace(
                 "osGetApparentTimeString(TRUE)",
@@ -129,6 +127,23 @@ fn available_answers_as_each_engine_did() -> Result<(), String> {
         let mut region = Region::new(flavour);
         region.host.simulator = local_opensim();
         region.host.map_texture = Some(printed(transcript, "osGetMapTexture", "map_texture"));
+        // The owner stood in the region in the default shape, at full health.
+        let _owner = region.host.avatars.insert(
+            super::OWNER.to_owned(),
+            super::TestAvatar::standing("Probe Owner"),
+        );
+        let _look = region.host.appearances.insert(
+            super::OWNER.to_owned(),
+            crate::vm::npcs::Appearance {
+                serial: 0,
+                height: 1.9,
+                hover: 0.0,
+                textures: Vec::new(),
+                extra_bakes: None,
+                visual_params: crate::vm::npcs::DEFAULT_VISUAL_PARAMS.to_vec(),
+                attachments: Vec::new(),
+            },
+        );
         let added = region.add(A, "Probe", 1, &rigged);
         // The probe's prim was rezzed by its owner, an avatar in the region:
         // `osGetRezzingObject` answers `NULL_KEY` for it.

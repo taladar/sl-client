@@ -219,6 +219,8 @@ osStringSubString enabled
 osSunGetParam None osSunGetParam osGetSunParam
 osSunSetParam None osSunSetParam osSetSunParam
 osTeleportAgent Severe
+# Written by hand: the overload (agent, position, lookat) checks nothing.
+osTeleportAgent#1 none
 osTeleportObject Severe
 osTeleportOwner None
 osTerrainFlush VeryLow

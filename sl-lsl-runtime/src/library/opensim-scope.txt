@@ -9,8 +9,15 @@
 
 in modSendCommand
 in osAdjustSoundVolume
+in osAgentSaveAppearance
 in osAngleBetween
 in osApproxEquals
+in osAvatarName2Key
+in osAvatarPlayAnimation
+in osAvatarStopAnimation
+in osAvatarType
+in osCauseDamage
+in osCauseHealing
 in osCheckODE
 in osClearObjectAnimations
 in osCollisionSound
@@ -28,9 +35,19 @@ in osDrawRotationTransform
 in osDrawScaleTransform
 in osDrawText
 in osDrawTranslationTransform
+in osDropAttachment
+in osDropAttachmentAt
+in osEjectFromGroup
+in osForceAttachToAvatar
+in osForceAttachToAvatarFromInventory
+in osForceAttachToOtherAvatarFromInventory
 in osForceBreakAllLinks
 in osForceBreakLink
 in osForceCreateLink
+in osForceDetachFromAvatar
+in osForceDropAttachment
+in osForceDropAttachmentAt
+in osForceOtherSit
 in osFormatString
 in osGetAgentIP
 in osGetAgents
@@ -40,8 +57,11 @@ in osGetApparentTime
 in osGetApparentTimeString
 in osGetAvatarList
 in osGetCurrentSunHour
+in osGetGender
 in osGetGridName
 in osGetGridNick
+in osGetHealRate
+in osGetHealth
 in osGetInventoryDesc
 in osGetInventoryItemKey
 in osGetInventoryLastOwner
@@ -49,9 +69,13 @@ in osGetInventoryName
 in osGetLastChangedEventKey
 in osGetLinkNumber
 in osGetLinkPrimitiveParams
+in osGetLinkSitActiveRange
+in osGetLinkStandTarget
 in osGetMapTexture
+in osGetNPCList
 in osGetNotecard
 in osGetNotecardLine
+in osGetNumberOfAttachments
 in osGetNumberOfNotecardLines
 in osGetPSTWallclock
 in osGetParcelDwell
@@ -63,25 +87,57 @@ in osGetRegionSize
 in osGetRezzingObject
 in osGetScriptEngineName
 in osGetSimulatorVersion
+in osGetSitActiveRange
+in osGetStandTarget
 in osGetSunParam
 in osGetTerrainHeight
+in osInviteToGroup
 in osIsNotValidNumber
+in osIsNpc
 in osIsUUID
+in osKey2Name
+in osKickAvatar
 in osLinkParticleSystem
 in osListSortInPlace
 in osListenRegex
 in osLoadedCreationDate
 in osLoadedCreationID
 in osLoadedCreationTime
+in osLocalTeleportAgent
 in osLoopSound
 in osLoopSoundMaster
 in osLoopSoundSlave
 in osMakeNotecard
 in osMatchString
 in osMax
+in osMessageAttachments
 in osMessageObject
 in osMin
 in osMovePen
+in osNpcCreate
+in osNpcGetOwner
+in osNpcGetPos
+in osNpcGetRot
+in osNpcLoadAppearance
+in osNpcLookAt
+in osNpcMoveTo
+in osNpcMoveToTarget
+in osNpcPlayAnimation
+in osNpcRemove
+in osNpcSaveAppearance
+in osNpcSay
+in osNpcSayTo
+in osNpcSetProfileAbout
+in osNpcSetProfileImage
+in osNpcSetRot
+in osNpcShout
+in osNpcSit
+in osNpcStand
+in osNpcStopAnimation
+in osNpcStopMoveToTarget
+in osNpcTouch
+in osNpcWhisper
+in osOwnerSaveAppearance
 in osParticleSystem
 in osPlaySound
 in osPlaySoundSlave
@@ -96,6 +152,11 @@ in osSHA256
 in osSetContentType
 in osSetFontName
 in osSetFontSize
+in osSetHealRate
+in osSetHealth
+in osSetLinkSitActiveRange
+in osSetLinkStandTarget
+in osSetOwnerSpeed
 in osSetParcelMediaURL
 in osSetParcelMusicURL
 in osSetPenCap
@@ -104,7 +165,10 @@ in osSetPenColour
 in osSetPenSize
 in osSetPrimitiveParams
 in osSetProjectionParams
+in osSetSitActiveRange
 in osSetSoundRadius
+in osSetSpeed
+in osSetStandTarget
 in osSlerp
 in osStopSound
 in osStringEndsWith
@@ -115,6 +179,8 @@ in osStringReplace
 in osStringStartsWith
 in osStringSubString
 in osSunGetParam
+in osTeleportAgent
+in osTeleportOwner
 in osTerrainGetHeight
 in osTriggerSound
 in osTriggerSoundLimited
@@ -122,72 +188,6 @@ in osUnixTimeToTimestamp
 in osVecDistSquare
 in osVecMagSquare
 in osWindActiveModelPluginName
-later server-lsl-lib-ossl-avatars osAgentSaveAppearance
-later server-lsl-lib-ossl-avatars osAvatarName2Key
-later server-lsl-lib-ossl-avatars osAvatarPlayAnimation
-later server-lsl-lib-ossl-avatars osAvatarStopAnimation
-later server-lsl-lib-ossl-avatars osAvatarType
-later server-lsl-lib-ossl-avatars osCauseDamage
-later server-lsl-lib-ossl-avatars osCauseHealing
-later server-lsl-lib-ossl-avatars osDropAttachment
-later server-lsl-lib-ossl-avatars osDropAttachmentAt
-later server-lsl-lib-ossl-avatars osEjectFromGroup
-later server-lsl-lib-ossl-avatars osForceAttachToAvatar
-later server-lsl-lib-ossl-avatars osForceAttachToAvatarFromInventory
-later server-lsl-lib-ossl-avatars osForceAttachToOtherAvatarFromInventory
-later server-lsl-lib-ossl-avatars osForceDetachFromAvatar
-later server-lsl-lib-ossl-avatars osForceDropAttachment
-later server-lsl-lib-ossl-avatars osForceDropAttachmentAt
-later server-lsl-lib-ossl-avatars osForceOtherSit
-later server-lsl-lib-ossl-avatars osGetGender
-later server-lsl-lib-ossl-avatars osGetHealRate
-later server-lsl-lib-ossl-avatars osGetHealth
-later server-lsl-lib-ossl-avatars osGetLinkSitActiveRange
-later server-lsl-lib-ossl-avatars osGetLinkStandTarget
-later server-lsl-lib-ossl-avatars osGetNPCList
-later server-lsl-lib-ossl-avatars osGetNumberOfAttachments
-later server-lsl-lib-ossl-avatars osGetSitActiveRange
-later server-lsl-lib-ossl-avatars osGetStandTarget
-later server-lsl-lib-ossl-avatars osInviteToGroup
-later server-lsl-lib-ossl-avatars osIsNpc
-later server-lsl-lib-ossl-avatars osKey2Name
-later server-lsl-lib-ossl-avatars osKickAvatar
-later server-lsl-lib-ossl-avatars osLocalTeleportAgent
-later server-lsl-lib-ossl-avatars osMessageAttachments
-later server-lsl-lib-ossl-avatars osNpcCreate
-later server-lsl-lib-ossl-avatars osNpcGetOwner
-later server-lsl-lib-ossl-avatars osNpcGetPos
-later server-lsl-lib-ossl-avatars osNpcGetRot
-later server-lsl-lib-ossl-avatars osNpcLoadAppearance
-later server-lsl-lib-ossl-avatars osNpcLookAt
-later server-lsl-lib-ossl-avatars osNpcMoveTo
-later server-lsl-lib-ossl-avatars osNpcMoveToTarget
-later server-lsl-lib-ossl-avatars osNpcPlayAnimation
-later server-lsl-lib-ossl-avatars osNpcRemove
-later server-lsl-lib-ossl-avatars osNpcSaveAppearance
-later server-lsl-lib-ossl-avatars osNpcSay
-later server-lsl-lib-ossl-avatars osNpcSayTo
-later server-lsl-lib-ossl-avatars osNpcSetProfileAbout
-later server-lsl-lib-ossl-avatars osNpcSetProfileImage
-later server-lsl-lib-ossl-avatars osNpcSetRot
-later server-lsl-lib-ossl-avatars osNpcShout
-later server-lsl-lib-ossl-avatars osNpcSit
-later server-lsl-lib-ossl-avatars osNpcStand
-later server-lsl-lib-ossl-avatars osNpcStopAnimation
-later server-lsl-lib-ossl-avatars osNpcStopMoveToTarget
-later server-lsl-lib-ossl-avatars osNpcTouch
-later server-lsl-lib-ossl-avatars osNpcWhisper
-later server-lsl-lib-ossl-avatars osOwnerSaveAppearance
-later server-lsl-lib-ossl-avatars osSetHealRate
-later server-lsl-lib-ossl-avatars osSetHealth
-later server-lsl-lib-ossl-avatars osSetLinkSitActiveRange
-later server-lsl-lib-ossl-avatars osSetLinkStandTarget
-later server-lsl-lib-ossl-avatars osSetOwnerSpeed
-later server-lsl-lib-ossl-avatars osSetSitActiveRange
-later server-lsl-lib-ossl-avatars osSetSpeed
-later server-lsl-lib-ossl-avatars osSetStandTarget
-later server-lsl-lib-ossl-avatars osTeleportAgent
-later server-lsl-lib-ossl-avatars osTeleportOwner
 later server-lsl-lib-ossl-land-writers lsClearWindlightScene
 later server-lsl-lib-ossl-land-writers lsGetWindlightScene
 later server-lsl-lib-ossl-land-writers lsSetWindlightScene

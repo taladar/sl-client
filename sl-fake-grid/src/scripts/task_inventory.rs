@@ -410,16 +410,19 @@ impl RegionHost<'_> {
             .map(|notecard| notecard.text)
     }
 
-    /// `osMakeNotecard`: a notecard of `text`, stored and put in `caller`'s
-    /// prim under a free name, the prim's owner its creator.
+    /// `osMakeNotecard` and the appearance saves: a notecard of `text`,
+    /// stored and put in `caller`'s prim under a free name — or in place of an
+    /// item of that name, with `replace` — the prim's owner its creator; its
+    /// asset key, nil when `caller` is in no prim.
     pub(super) fn make_notecard_in(
         &mut self,
         caller: CallerId,
         (name, description, text): (&str, &str, &str),
         changed: &[i32],
-    ) {
+        replace: bool,
+    ) -> String {
         let Some(origin) = self.origin(caller) else {
-            return;
+            return uuid::Uuid::nil().to_string();
         };
         let body = sl_notecard::Notecard {
             source_version: sl_notecard::NotecardVersion::V2,
@@ -457,10 +460,15 @@ impl RegionHost<'_> {
             creation_date: self.world.wall.unix_seconds_i32(),
         };
         let Some(contents) = self.world.objects.contents_or_empty(origin.local_id) else {
-            return;
+            return uuid::Uuid::nil().to_string();
         };
+        if replace && let Some(held) = contents.items.iter().find(|held| held.name == name) {
+            let held = held.item_id;
+            let _gone = contents.remove(held);
+        }
         item.name = contents.free_name(&item.name);
         contents.write(item);
         self.written(origin.local_id, false, changed);
+        asset.to_string()
     }
 }

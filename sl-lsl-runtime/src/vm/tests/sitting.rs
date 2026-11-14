@@ -159,6 +159,7 @@ fn a_seat_keeps_its_camera_and_its_pie_texts() -> Result<(), String> {
                 z: 0.5
             },
             force_mouselook: true,
+            ..Seat::default()
         })
     );
     assert_eq!(

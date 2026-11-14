@@ -233,6 +233,7 @@ impl RegionHost<'_> {
                 agent: false,
                 physical: object.update_flags & prim_flags::USE_PHYSICS != 0,
                 scripted: self.scripted(object.local_id),
+                npc: None,
             })
             .collect();
         for present in self.present {
@@ -261,8 +262,10 @@ impl RegionHost<'_> {
                 agent: true,
                 physical: true,
                 scripted: worn_scripted,
+                npc: None,
             });
         }
+        sensed.extend(self.npcs_sensed());
         sensed
     }
 

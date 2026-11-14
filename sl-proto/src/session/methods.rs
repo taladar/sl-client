@@ -4796,16 +4796,20 @@ impl Session {
                     if let Some(circuit) = self.circuit.as_mut() {
                         circuit.timers.teleport = None;
                     }
-                    self.events.push_back(Event::TeleportLocal {
-                        position: RegionCoordinates::new(
-                            local.info.position.x,
-                            local.info.position.y,
-                            local.info.position.z,
-                        ),
-                        look_at: local.info.look_at.clone(),
-                        flags: TeleportFlags(local.info.teleport_flags),
-                    });
                 }
+                // One with no teleport started — OpenSim's `osLocalTeleportAgent`
+                // sends it unasked — moves the avatar all the same, as the
+                // reference viewer's `process_teleport_local` applies it in any
+                // teleport state.
+                self.events.push_back(Event::TeleportLocal {
+                    position: RegionCoordinates::new(
+                        local.info.position.x,
+                        local.info.position.y,
+                        local.info.position.z,
+                    ),
+                    look_at: local.info.look_at.clone(),
+                    flags: TeleportFlags(local.info.teleport_flags),
+                });
             }
             AnyMessage::TeleportFailed(failed) => {
                 // The wire strings are NUL-terminated; strip them like every

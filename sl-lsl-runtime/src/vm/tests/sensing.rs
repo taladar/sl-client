@@ -53,6 +53,7 @@ fn object(number: u32, name: &str, position: Vector, scripted: bool) -> Sensed {
         agent: false,
         physical: false,
         scripted,
+        npc: None,
     }
 }
 
@@ -87,6 +88,7 @@ fn scene() -> Vec<Sensed> {
         agent: true,
         physical: true,
         scripted: false,
+        npc: None,
     });
     scene
 }

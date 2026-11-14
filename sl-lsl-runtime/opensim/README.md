@@ -29,7 +29,11 @@ runs, derived from `OSSL_Api.cs` by `extract_ossl_checks.py` (run it on an
 OpenSim checkout and redirect its output there): the threat level a
 `CheckThreatLevel(level, name)` names, `enabled` for a bare
 `CheckThreatLevel()`, `none` for no check, and a deprecated function's
-replacement.
+replacement. The script gives an overloaded function the check of its most
+guarded overload; a line for `name#N`, written by hand (add it back after
+regenerating the file), gives the document's `N`th overload of `name` its own
+check where OpenSim's differs (`osTeleportAgent#1`: the overload taking no
+region checks nothing).
 
 `osslDefaultEnable.ini` is OpenSim's `bin/config-include/osslDefaultEnable.ini`,
 copied verbatim from the same tree (commit `36f6d16a61`; SHA-256
