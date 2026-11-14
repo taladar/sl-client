@@ -110,7 +110,7 @@ fn current_circuit(ctx: &dyn ReplContext) -> Result<CircuitId, ReplError> {
 }
 
 /// Scopes a raw region-local object id to the current circuit.
-fn scoped_object(ctx: &dyn ReplContext, id: u32) -> Result<ScopedObjectId, ReplError> {
+pub(crate) fn scoped_object(ctx: &dyn ReplContext, id: u32) -> Result<ScopedObjectId, ReplError> {
     Ok(ScopedObjectId::new(
         current_circuit(ctx)?,
         RegionLocalObjectId(id),
@@ -179,14 +179,26 @@ impl Default for Registry {
 static DEFAULT_REGISTRY: LazyLock<Registry> = LazyLock::new(Registry::new);
 
 /// The help lines for `name` (or every command) from the
-/// [shared](Registry::shared) registry — what a binary prints for a
-/// [`MetaCommand::Help`](crate::meta::MetaCommand::Help) line.
+/// [shared](Registry::shared) registry and the `script` verbs
+/// ([`SCRIPT_USAGE`](crate::script_verbs::SCRIPT_USAGE)) — what a binary prints
+/// for a [`MetaCommand::Help`](crate::meta::MetaCommand::Help) line.
 ///
 /// # Errors
 ///
 /// Returns [`ReplError::UnknownCommand`] when `name` names no command.
 pub fn help_lines(name: Option<&str>) -> Result<Vec<String>, ReplError> {
-    Registry::shared().help(name)
+    let script = crate::script_verbs::SCRIPT_USAGE
+        .iter()
+        .map(|line| (*line).to_owned());
+    match name {
+        Some("script") => Ok(script.collect()),
+        Some(_) => Registry::shared().help(name),
+        None => Ok(Registry::shared()
+            .help(None)?
+            .into_iter()
+            .chain(script)
+            .collect()),
+    }
 }
 
 impl Registry {
@@ -755,7 +767,7 @@ fn parse_updatable_asset_type(field: &str, value: &str) -> Result<UpdatableAsset
 }
 
 /// Parse a [`ScriptTarget`] (script compile backend) from its wire token.
-fn parse_script_target(field: &str, value: &str) -> Result<ScriptTarget, ReplError> {
+pub(crate) fn parse_script_target(field: &str, value: &str) -> Result<ScriptTarget, ReplError> {
     ScriptTarget::from_wire(&norm(value))
         .ok_or_else(|| invalid(field, value, "script target (mono/lsl2/luau)"))
 }

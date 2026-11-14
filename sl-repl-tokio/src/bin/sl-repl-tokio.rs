@@ -1,11 +1,11 @@
 #![doc = include_str!("../../README.md")]
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::ffi::OsString;
 use std::io::IsTerminal as _;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use rustyline::error::ReadlineError;
 use rustyline::{DefaultEditor, ExternalPrinter};
@@ -15,8 +15,9 @@ use sl_client_tokio::{
 };
 use sl_proto::Diagnostic;
 use sl_repl::{
-    Avatar, Credentials, MetaCommand, ReplAction, ScriptRecorder, SessionContext, format_command,
-    format_diagnostic, format_event, help_lines, parse_line, smoke_battery,
+    Avatar, Credentials, MetaCommand, ReplAction, ScriptDriver, ScriptLine, ScriptOutput,
+    ScriptRecorder, SessionContext, check_script_file, format_command, format_diagnostic,
+    format_event, help_lines, parse_line, smoke_battery,
 };
 use tokio::sync::{mpsc, oneshot};
 use tracing_subscriber::{
@@ -84,6 +85,16 @@ pub enum Error {
     /// The `--http-proxy` value could not be turned into a proxy URL.
     #[error("invalid --http-proxy value: {0}")]
     HttpProxy(String),
+    /// A `check-script` file could not be read.
+    #[error("{0}")]
+    Repl(
+        #[source]
+        #[from]
+        sl_repl::ReplError,
+    ),
+    /// A `check-script` run found errors in the script.
+    #[error("the script has {0} error(s)")]
+    ScriptErrors(usize),
     /// The man page could not be generated.
     #[error("error generating man page: {0}")]
     GenerateManpage(#[source] std::io::Error),
@@ -145,9 +156,22 @@ pub struct RunArgs {
     no_group_chat_history: bool,
 }
 
-/// The packaging sub-commands (the absence of a sub-command runs a session).
+/// The sub-commands: a gridless script check and the packaging ones (the
+/// absence of a sub-command runs a session).
 #[derive(clap::Subcommand, Debug)]
 pub enum Subcommand {
+    /// Check an LSL source file with no grid — lex, parse and analyse it and
+    /// print each finding with a caret under its source line, as the REPL's
+    /// `script check` does. Exits with an error when the script has errors.
+    CheckScript {
+        /// The LSL source file.
+        file: PathBuf,
+        /// An `LSLSyntax` document (LLSD XML, e.g. OpenSim's
+        /// `bin/ScriptSyntax.xml`) to check library calls and constants
+        /// against; without one they are not checked.
+        #[clap(long)]
+        syntax: Option<PathBuf>,
+    },
     /// Generate the man page.
     GenerateManpage {
         /// The target directory for man-page generation.
@@ -550,10 +574,29 @@ fn apply_meta(meta: MetaCommand, ctx: &mut SessionContext) {
     }
 }
 
+/// Log a `script` verb's lines and send its commands.
+async fn apply_script(out: ScriptOutput, ctx: &SessionContext, command_tx: &mpsc::Sender<Command>) {
+    for line in out.lines {
+        match line {
+            ScriptLine::Info(text) => tracing::info!("{text}"),
+            ScriptLine::Warn(text) => tracing::warn!("{text}"),
+        }
+    }
+    for command in out.commands {
+        tracing::info!("{}", format_command(&command, ctx));
+        command_tx.send(command).await.ok();
+    }
+}
+
 /// Handle one input line: a meta command updates the context, a grid command is
-/// resolved against the context and dispatched, and anything malformed is
-/// logged.
-async fn handle_input(raw: &str, ctx: &mut SessionContext, command_tx: &mpsc::Sender<Command>) {
+/// resolved against the context and dispatched, a `script` verb is started on
+/// the driver, and anything malformed is logged.
+async fn handle_input(
+    raw: &str,
+    ctx: &mut SessionContext,
+    scripts: &mut ScriptDriver,
+    command_tx: &mpsc::Sender<Command>,
+) {
     match parse_line(raw) {
         Ok(None) => {}
         Ok(Some(ReplAction::Meta(meta))) => apply_meta(meta, ctx),
@@ -564,7 +607,39 @@ async fn handle_input(raw: &str, ctx: &mut SessionContext, command_tx: &mpsc::Se
             }
             Err(error) => tracing::warn!("could not build command: {error}"),
         },
+        Ok(Some(ReplAction::Script(request))) => match request.resolve(&*ctx) {
+            Ok(verb) => {
+                let out = scripts.start(verb, Instant::now());
+                apply_script(out, ctx, command_tx).await;
+            }
+            Err(error) => tracing::warn!("could not start script verb: {error}"),
+        },
         Err(error) => tracing::warn!("could not parse line: {error}"),
+    }
+}
+
+/// Run a `check-script` sub-command: print the report, and fail when the
+/// script has errors.
+///
+/// # Errors
+///
+/// Returns [`Error::Repl`] when a file cannot be read, [`Error::Io`] when the
+/// report cannot be written and [`Error::ScriptErrors`] when the script has
+/// errors.
+fn check_script(file: &Path, syntax: Option<&Path>) -> Result<(), Error> {
+    let check = check_script_file(file, syntax)?;
+    let mut stdout = std::io::stdout().lock();
+    for line in check.lines {
+        match line {
+            ScriptLine::Info(text) | ScriptLine::Warn(text) => {
+                std::io::Write::write_all(&mut stdout, format!("{text}\n").as_bytes())?;
+            }
+        }
+    }
+    if check.errors == 0 {
+        Ok(())
+    } else {
+        Err(Error::ScriptErrors(check.errors))
     }
 }
 
@@ -692,12 +767,19 @@ async fn run_repl(args: RunArgs) -> Result<(), Error> {
 
     let mut input_open = true;
     let mut smoke_fired = false;
+    // The `script` verbs, and the lines held back while one is in progress.
+    let mut scripts = ScriptDriver::new();
+    let mut held: VecDeque<String> = VecDeque::new();
+    let mut logout_sent = false;
+    let mut script_tick = tokio::time::interval(Duration::from_millis(250));
     loop {
         tokio::select! {
             maybe_event = event_rx.recv() => {
                 let Some(event) = maybe_event else { break; };
                 ctx.apply_event(&event);
                 tracing::info!("{}", format_event(&event, &ctx));
+                let out = scripts.on_event(&event, Instant::now());
+                apply_script(out, &ctx, &command_tx).await;
                 match event {
                     Event::RegionHandshakeComplete => {
                         if args.smoke && !smoke_fired {
@@ -731,15 +813,27 @@ async fn run_repl(args: RunArgs) -> Result<(), Error> {
                         {
                             tracing::warn!("could not record line: {error}");
                         }
-                        handle_input(&raw, &mut ctx, &command_tx).await;
+                        held.push_back(raw);
                     }
-                    None => {
-                        input_open = false;
-                        command_tx.send(Command::Logout).await.ok();
-                    }
+                    None => input_open = false,
                 }
             }
+            _instant = script_tick.tick() => {
+                let out = scripts.tick(Instant::now());
+                apply_script(out, &ctx, &command_tx).await;
+            }
             else => break,
+        }
+        // A line waits while a `script` verb is in progress, so the next line
+        // of a replayed script sees it finished.
+        while !scripts.is_busy()
+            && let Some(raw) = held.pop_front()
+        {
+            handle_input(&raw, &mut ctx, &mut scripts, &command_tx).await;
+        }
+        if !input_open && !logout_sent && held.is_empty() && !scripts.is_busy() {
+            logout_sent = true;
+            command_tx.send(Command::Logout).await.ok();
         }
     }
 
@@ -760,6 +854,7 @@ async fn main() -> Result<(), Error> {
     let options = <Options as clap::Parser>::parse();
     match options.command {
         None => run_repl(options.run).await?,
+        Some(Subcommand::CheckScript { file, syntax }) => check_script(&file, syntax.as_deref())?,
         Some(Subcommand::GenerateManpage { output_dir }) => {
             clap_mangen::generate_to(<Options as clap::CommandFactory>::command(), output_dir)
                 .map_err(Error::GenerateManpage)?;

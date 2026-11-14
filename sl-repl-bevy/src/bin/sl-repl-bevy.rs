@@ -1,5 +1,6 @@
 #![doc = include_str!("../../README.md")]
 
+use std::collections::VecDeque;
 use std::ffi::OsString;
 use std::io::IsTerminal as _;
 use std::path::{Path, PathBuf};
@@ -18,8 +19,9 @@ use sl_client_bevy::{
     StartLocation, Uuid,
 };
 use sl_repl::{
-    Avatar, Credentials, MetaCommand, ReplAction, ScriptRecorder, SessionContext, format_command,
-    format_diagnostic, format_event, help_lines, parse_line, smoke_battery,
+    Avatar, Credentials, MetaCommand, ReplAction, ScriptDriver, ScriptLine, ScriptOutput,
+    ScriptRecorder, SessionContext, check_script_file, format_command, format_diagnostic,
+    format_event, help_lines, parse_line, smoke_battery,
 };
 use tracing::{error, info, warn};
 use tracing_subscriber::{
@@ -73,6 +75,16 @@ pub enum Error {
     /// The interactive line editor could not be initialized.
     #[error("could not initialize the interactive line editor")]
     LineEditor,
+    /// A `check-script` file could not be read.
+    #[error("{0}")]
+    Repl(
+        #[source]
+        #[from]
+        sl_repl::ReplError,
+    ),
+    /// A `check-script` run found errors in the script.
+    #[error("the script has {0} error(s)")]
+    ScriptErrors(usize),
     /// The man page could not be generated.
     #[error("error generating man page: {0}")]
     GenerateManpage(#[source] std::io::Error),
@@ -130,9 +142,22 @@ pub struct RunArgs {
     no_group_chat_history: bool,
 }
 
-/// The packaging sub-commands (the absence of a sub-command runs a session).
+/// The sub-commands: a gridless script check and the packaging ones (the
+/// absence of a sub-command runs a session).
 #[derive(clap::Subcommand, Debug)]
 pub enum Subcommand {
+    /// Check an LSL source file with no grid — lex, parse and analyse it and
+    /// print each finding with a caret under its source line, as the REPL's
+    /// `script check` does. Exits with an error when the script has errors.
+    CheckScript {
+        /// The LSL source file.
+        file: PathBuf,
+        /// An `LSLSyntax` document (LLSD XML, e.g. OpenSim's
+        /// `bin/ScriptSyntax.xml`) to check library calls and constants
+        /// against; without one they are not checked.
+        #[clap(long)]
+        syntax: Option<PathBuf>,
+    },
     /// Generate the man page.
     GenerateManpage {
         /// The target directory for man-page generation.
@@ -267,8 +292,24 @@ struct ReplState {
     smoke_fired: bool,
     /// The logged-in avatar's agent id, once known.
     self_agent: Option<Uuid>,
-    /// Whether the input channel is still open (cleared once it disconnects).
-    input_open: bool,
+    /// Where the input is: open, or ended and the logout sent or still held
+    /// back by a `script` verb.
+    input: InputState,
+    /// The `script` verbs.
+    scripts: ScriptDriver,
+    /// The lines held back while a `script` verb is in progress.
+    held: VecDeque<String>,
+}
+
+/// Where the REPL's input is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum InputState {
+    /// Lines may still arrive.
+    Open,
+    /// The input ended; the logout waits for the held lines and verbs.
+    Ended,
+    /// The logout has been sent.
+    LoggedOut,
 }
 
 /// The line-input channel, kept as a Bevy resource.
@@ -511,10 +552,29 @@ fn apply_meta(meta: MetaCommand, ctx: &mut SessionContext) {
     }
 }
 
+/// Log a `script` verb's lines and dispatch its commands.
+fn apply_script(out: ScriptOutput, ctx: &SessionContext, commands: &mut MessageWriter<SlCommand>) {
+    for line in out.lines {
+        match line {
+            ScriptLine::Info(text) => info!("{text}"),
+            ScriptLine::Warn(text) => warn!("{text}"),
+        }
+    }
+    for command in out.commands {
+        info!("{}", format_command(&command, ctx));
+        commands.write(SlCommand(command));
+    }
+}
+
 /// Handle one input line: a meta command updates the context, a grid command is
-/// resolved against the context and dispatched as an [`SlCommand`] event, and
-/// anything malformed is logged.
-fn handle_input(raw: &str, ctx: &mut SessionContext, commands: &mut MessageWriter<SlCommand>) {
+/// resolved against the context and dispatched as an [`SlCommand`] event, a
+/// `script` verb is started on the driver, and anything malformed is logged.
+fn handle_input(
+    raw: &str,
+    ctx: &mut SessionContext,
+    scripts: &mut ScriptDriver,
+    commands: &mut MessageWriter<SlCommand>,
+) {
     match parse_line(raw) {
         Ok(None) => {}
         Ok(Some(ReplAction::Meta(meta))) => apply_meta(meta, ctx),
@@ -525,7 +585,39 @@ fn handle_input(raw: &str, ctx: &mut SessionContext, commands: &mut MessageWrite
             }
             Err(error) => warn!("could not build command: {error}"),
         },
+        Ok(Some(ReplAction::Script(request))) => match request.resolve(&*ctx) {
+            Ok(verb) => {
+                let out = scripts.start(verb, Instant::now());
+                apply_script(out, ctx, commands);
+            }
+            Err(error) => warn!("could not start script verb: {error}"),
+        },
         Err(error) => warn!("could not parse line: {error}"),
+    }
+}
+
+/// Run a `check-script` sub-command: print the report, and fail when the
+/// script has errors.
+///
+/// # Errors
+///
+/// Returns [`Error::Repl`] when a file cannot be read, [`Error::Io`] when the
+/// report cannot be written and [`Error::ScriptErrors`] when the script has
+/// errors.
+fn check_script(file: &Path, syntax: Option<&Path>) -> Result<(), Error> {
+    let check = check_script_file(file, syntax)?;
+    let mut stdout = std::io::stdout().lock();
+    for line in check.lines {
+        match line {
+            ScriptLine::Info(text) | ScriptLine::Warn(text) => {
+                std::io::Write::write_all(&mut stdout, format!("{text}\n").as_bytes())?;
+            }
+        }
+    }
+    if check.errors == 0 {
+        Ok(())
+    } else {
+        Err(Error::ScriptErrors(check.errors))
     }
 }
 /// The plugin's several report streams, bundled as one
@@ -599,9 +691,12 @@ fn repl_driver(
     for caps in capabilities.read() {
         state.ctx.set_caps(caps.0.clone().into_iter().collect());
     }
+    let state = &mut *state;
     for event in events.read() {
         state.ctx.apply_event(&event.0);
         info!("{}", format_event(&event.0, &state.ctx));
+        let out = state.scripts.on_event(&event.0, Instant::now());
+        apply_script(out, &state.ctx, &mut commands);
         match &event.0 {
             SlSessionEvent::RegionHandshakeComplete => {
                 if state.smoke && !state.smoke_fired {
@@ -638,17 +733,29 @@ fn repl_driver(
                 {
                     warn!("could not record line: {error}");
                 }
-                handle_input(&raw, &mut state.ctx, &mut commands);
+                state.held.push_back(raw);
             }
             Err(TryRecvError::Empty) => break,
             Err(TryRecvError::Disconnected) => {
-                if state.input_open {
-                    state.input_open = false;
-                    commands.write(SlCommand(Command::Logout));
+                if state.input == InputState::Open {
+                    state.input = InputState::Ended;
                 }
                 break;
             }
         }
+    }
+    let out = state.scripts.tick(Instant::now());
+    apply_script(out, &state.ctx, &mut commands);
+    // A line waits while a `script` verb is in progress, so the next line of a
+    // replayed script sees it finished.
+    while !state.scripts.is_busy()
+        && let Some(raw) = state.held.pop_front()
+    {
+        handle_input(&raw, &mut state.ctx, &mut state.scripts, &mut commands);
+    }
+    if state.input == InputState::Ended && state.held.is_empty() && !state.scripts.is_busy() {
+        state.input = InputState::LoggedOut;
+        commands.write(SlCommand(Command::Logout));
     }
 }
 
@@ -719,7 +826,9 @@ fn run_session(
             smoke,
             smoke_fired: false,
             self_agent: None,
-            input_open: true,
+            input: InputState::Open,
+            scripts: ScriptDriver::new(),
+            held: VecDeque::new(),
         })
         .insert_resource(LineInput {
             rx: line_rx.clone(),
@@ -870,6 +979,7 @@ fn main() -> Result<(), Error> {
     let options = <Options as clap::Parser>::parse();
     match options.command {
         None => run_repl(options.run)?,
+        Some(Subcommand::CheckScript { file, syntax }) => check_script(&file, syntax.as_deref())?,
         Some(Subcommand::GenerateManpage { output_dir }) => {
             clap_mangen::generate_to(<Options as clap::CommandFactory>::command(), output_dir)
                 .map_err(Error::GenerateManpage)?;

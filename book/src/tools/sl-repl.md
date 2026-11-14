@@ -31,8 +31,10 @@ The tool is split so the two runtime backends stay at feature parity:
 ## Running
 
 Both binaries take the same options. With no subcommand they open a REPL
-session; the `generate-manpage` and `generate-shell-completion` subcommands emit
-packaging artifacts and exit.
+session; `check-script <file.lsl> [--syntax <LSLSyntax.xml>]` checks a script
+with no grid at all (see [Script verbs](#script-verbs)), and the
+`generate-manpage` and `generate-shell-completion` subcommands emit packaging
+artifacts and exit.
 
 ```sh
 sl-repl-tokio --credentials creds.toml --avatar alice --grid aditi
@@ -117,6 +119,48 @@ their leading token:
   the line, surrounding quotes stripped).
 - `unset <name>` — remove a user variable.
 - `vars` — list the currently bound user variables.
+
+## Script verbs
+
+A `script` line is not one command but a short conversation with the grid, so
+the verbs run on a small state machine (`ScriptDriver`) the binaries feed every
+event and a quarter-second tick. While a verb is in progress the REPL **holds
+the next lines back**, so a replayed script's next line sees the verb finished,
+and the logout at the end of a script waits for it too. They work the same
+against the local OpenSim, `aditi` and the fake grid.
+
+An `<object>` is the prim's region-local id or its UUID; an `<item>` is the
+script item's UUID or its name in the prim.
+
+| Verb | What it does |
+| --- | --- |
+| `script put <object> <name> <file.lsl> [target=mono\|lsl2] [running=true]` | Lists the prim; makes a script of that name when it has none (`RezScript`) and waits for the listing to show it; uploads the file over it (`UploadScript`) and prints whether it compiled, each compiler error rendered with a caret under its source line |
+| `script list <object>` | The prim's scripts, by name, item and asset |
+| `script state <object> <item>` | The run state (`GetScriptRunning`) |
+| `script run\|stop <object> <item>` | Sets the run state, then reports it |
+| `script reset <object> <item>` | Resets the script (the grid does not answer) |
+| `script watch [seconds\|off]` | Prints everything a script can say to the session, one line each with its object: chat by type (`say`, `owner-say`, `debug` for `DEBUG_CHANNEL`, …), dialogs with their channel and buttons, permission questions, `LoadURL`s, map teleports and object IMs. With seconds it holds the REPL that long; bare, it stays on |
+| `script check <file.lsl> [syntax=<LSLSyntax.xml>]` | No grid: lexes, parses and runs the semantic pass, rendering each finding with its caret |
+
+A grid makes a script only in a prim the agent may edit, and says nothing when
+it refuses, so `script put` into someone else's prim ends in a timeout that
+says as much. A run-time error is printed as the grid states it: neither grid
+(nor the fake grid, which imitates them) names the line — Second Life says
+`Script run-time error` and `Math Error`, OpenSim's YEngine `Division by Zero`
+with the event and the prim's position.
+
+`script check` (and the `check-script` subcommand) checks calls and constants
+against a library table only when given one — an `LSLSyntax` document such as
+OpenSim's `bin/ScriptSyntax.xml`, whose leading id line is skipped; without one
+the semantic pass skips those checks, as it does for an empty table, and the
+summary says so. The subcommand exits with an error when the script has errors.
+
+```text
+script check probe.lsl syntax=ScriptSyntax.xml
+script put 2fe02818-c309-4407-9772-db60a19ff409 probe probe.lsl
+script watch 10
+script stop 2fe02818-c309-4407-9772-db60a19ff409 probe
+```
 
 ## Smoke mode
 
@@ -209,7 +253,8 @@ token folded in; the persistent line editor and the log survive the restart.
 >   (`ReplContext` / `SessionContext`, placeholder resolution + symbolizer),
 >   `format.rs` (`format_event` / `format_command` / `format_diagnostic` /
 >   `hexdump`), `smoke.rs` (`smoke_battery`), `record.rs` (`ScriptRecorder`),
->   and `auth.rs` (`Credentials`, the redacting `Secret` newtype,
+>   `script_verbs.rs` (`ScriptRequest`, `ScriptDriver`, `check_script`) and
+>   `auth.rs` (`Credentials`, the redacting `Secret` newtype,
 >   `acquire_mfa_token` with the window-aligned wait).
 > - The binaries are `sl-repl-tokio` and `sl-repl-bevy`. Each seeds
 >   `$self`/`$session`/`$circuit`/`$cap:*` from identity facts the `Event`

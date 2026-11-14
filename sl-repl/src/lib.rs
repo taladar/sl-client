@@ -25,6 +25,9 @@
 //! - [`smoke`] — the read-only [`smoke_battery`] fired by `--smoke` mode.
 //! - [`record`] — the [`ScriptRecorder`] that writes a replayable `.repl`
 //!   transcript of an interactive session.
+//! - [`script_verbs`] — the `script` verbs ([`ScriptRequest`]) and the
+//!   sans-I/O [`ScriptDriver`] that carries them out against a session, plus
+//!   the gridless [`check_script`].
 
 pub mod args;
 pub mod auth;
@@ -37,6 +40,7 @@ pub mod meta;
 pub mod parse;
 pub mod record;
 pub mod registry;
+pub mod script_verbs;
 pub mod smoke;
 
 pub use args::Args;
@@ -50,4 +54,8 @@ pub use meta::MetaCommand;
 pub use parse::{PendingCommand, ReplAction, parse_line};
 pub use record::ScriptRecorder;
 pub use registry::{CommandSpec, Registry, help_lines};
+pub use script_verbs::{
+    ScriptCheck, ScriptDriver, ScriptLine, ScriptOutput, ScriptRequest, ScriptVerb, check_script,
+    check_script_file,
+};
 pub use smoke::smoke_battery;

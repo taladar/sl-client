@@ -52,4 +52,7 @@ pub enum ReplError {
     /// The command is recognised but cannot be constructed from a text line.
     #[error("command `{0}` cannot be built from a REPL line: {1}")]
     NotSupported(&'static str, &'static str),
+    /// A file a `script` verb names could not be read or decoded.
+    #[error("could not read file: {0}")]
+    ReadFile(String),
 }

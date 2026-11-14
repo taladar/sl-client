@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 130 |
-| ready | 330 |
+| ready | 329 |
 | blocked | 36 |
 | in-progress | 6 |
 | bugs | 23 |
-| done | 1574 |
+| done | 1575 |
 | deferred | 30 |
 | wont-do | 24 |
 | **total** | **2153** |
@@ -316,7 +316,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-lsl-opensim-function-set`](ideas/gridspec-lsl-opensim-function-set.md)
   — Measure which library functions OpenSim's engines compile
 
-## ready (330)
+## ready (329)
 
 ### protocol
 
@@ -1046,9 +1046,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`repl-audit-binary-duplication`](ready/repl-audit-binary-duplication.md) —
   The two REPL binaries share ~400 near-verbatim lines and have already drifted
-- [`repl-lsl-script-control`](ready/repl-lsl-script-control.md) — sl-repl verbs
-  for compiling, running and watching scripts (blocked by
-  `server-fake-grid-script-engine-wiring` (done))
 
 ### server
 
@@ -1318,7 +1315,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1574)
+## done (1575)
 
 ### protocol
 
@@ -4446,6 +4443,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`repl-e2`](done/repl-e2-local-opensim-verification-both-runtimes.md) — Local
   OpenSim verification (both runtimes)
 - [`repl-e3`](done/repl-e3-live-aditi-run.md) — Live aditi run
+- [`repl-lsl-script-control`](done/repl-lsl-script-control.md) — sl-repl verbs
+  for compiling, running and watching scripts (blocked by
+  `server-fake-grid-script-engine-wiring` (done))
 - [`repl-unknown-keyword-arguments-ignored`](done/repl-unknown-keyword-arguments-ignored.md)
   — sl-repl silently ignores unknown or misspelled key=value arguments
 

@@ -13,6 +13,7 @@ use crate::context::ReplContext;
 use crate::error::ReplError;
 use crate::meta::MetaCommand;
 use crate::registry::Registry;
+use crate::script_verbs::ScriptRequest;
 
 /// A grid command named on a REPL line, with its arguments parsed but not yet
 /// resolved or type-checked. The [registry](crate::registry) turns this into a
@@ -50,13 +51,17 @@ pub enum ReplAction {
     Meta(MetaCommand),
     /// A grid command to dispatch to the session.
     Command(PendingCommand),
+    /// A `script` verb, for the runtime's
+    /// [`ScriptDriver`](crate::script_verbs::ScriptDriver).
+    Script(ScriptRequest),
 }
 
 /// Parse a single REPL input line.
 ///
 /// Returns `Ok(None)` for a blank line (after trimming). A `#`-prefixed line is
 /// a [`MetaCommand::Comment`]; a line whose first token is a meta keyword is the
-/// matching [`MetaCommand`]; anything else is a [`PendingCommand`].
+/// matching [`MetaCommand`]; a `script` line is a [`ScriptRequest`]; anything
+/// else is a [`PendingCommand`].
 ///
 /// # Errors
 ///
@@ -83,6 +88,16 @@ pub fn parse_line(line: &str) -> Result<Option<ReplAction>, ReplError> {
     };
     if let Some(meta) = MetaCommand::try_parse(head, rest)? {
         return Ok(Some(ReplAction::Meta(meta)));
+    }
+    if head == "script" {
+        let (verb, rest) = match rest.split_once(char::is_whitespace) {
+            Some((verb, rest)) => (verb, rest.trim_start()),
+            None => (rest, ""),
+        };
+        return Ok(Some(ReplAction::Script(ScriptRequest {
+            verb: verb.to_owned(),
+            args: Args::parse(rest)?,
+        })));
     }
     Ok(Some(ReplAction::Command(PendingCommand {
         name: head.to_owned(),

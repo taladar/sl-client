@@ -23,14 +23,19 @@ directories = { version = "6.0.0" }
 # — which for the credentials file is the whole diagnostic.
 fs-err = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
+# `script check` and the rendering of a compile error read the source.
+sl-llsd = { workspace = true }
+sl-lsl = { workspace = true }
 sl-proto = { workspace = true }
+# Decodes an `LSLSyntax` document for `script check syntax=`.
+sl-wire = { workspace = true }
 thiserror = { workspace = true }
 # The login-cooldown stamps are RFC 3339 times.
 time = { workspace = true, features = ["formatting", "parsing"] }
 toml = { workspace = true }
 tracing = { workspace = true }
 url = { workspace = true }
-uuid = { workspace = true }
+uuid = { workspace = true, features = ["v4"] }
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }

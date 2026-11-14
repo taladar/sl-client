@@ -20,13 +20,16 @@ only difference is the runtime underneath.
 sl-repl-bevy --credentials creds.toml --avatar alice --grid aditi
 ```
 
-With no subcommand the binary opens a REPL session. The two subcommands
-`generate-manpage` and `generate-shell-completion` emit packaging artifacts and
-exit.
+With no subcommand the binary opens a REPL session. `check-script <file.lsl>
+[--syntax <LSLSyntax.xml>]` checks a script with no grid and exits with an
+error when it has errors; `generate-manpage` and `generate-shell-completion`
+emit packaging artifacts and exit.
 
 At the prompt, `help` lists every command with its arguments and `help
 <command>` prints just one; the other meta lines are `#` comments, `sleep
-<seconds>`, and `set` / `unset` / `vars`.
+<seconds>`, and `set` / `unset` / `vars`. The `script` verbs (`help script`)
+put a source file into a prim, list, start, stop and reset its scripts, watch
+what scripts say and check a file locally — see the book's REPL chapter.
 
 Key options (identical to `sl-repl-tokio`):
 
