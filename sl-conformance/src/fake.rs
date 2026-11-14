@@ -137,6 +137,18 @@ pub const FAR_REGION: &str = "Fake Region Far";
 /// neighbour.
 const FAR_REGION_OFFSET: u32 = 10;
 
+/// The name of a region north of [`START_REGION`], far from it, holding the
+/// scripts scene ([`sl_fake_grid::fixtures::scripts_scene`]): one prim per
+/// scripted behaviour, each script running from the start.
+///
+/// It is where a script case provokes what a live grid's fixture prim raises on
+/// its own (`script-dialog` touches its dialog prim), and far enough from the
+/// others that no handover case meets it as a neighbour.
+pub const SCRIPTS_REGION: &str = "Fake Region Scripts";
+
+/// How many regions north of [`START_REGION`] [`SCRIPTS_REGION`] lies.
+const SCRIPTS_REGION_OFFSET: u32 = 10;
+
 /// The cases that run against the fake grid on every `cargo test`.
 ///
 /// Two rules decide membership. Each case's fixtures must all be **offline** —
@@ -245,6 +257,10 @@ pub const OFFLINE_CASES: &[&str] = &[
     "avatar-render-info",
     "landmarks-home",
     "script-compile",
+    "script-upload",
+    "script-running",
+    "script-dialog",
+    "script-permissions",
 ];
 
 /// The cases that run on the fake grid through the runner alone
@@ -424,6 +440,14 @@ impl FakeGridHarness {
             maturity: sl_client_tokio::Maturity::Mature,
             ..sl_fake_grid::RegionConfig::default()
         };
+        let scripts = sl_fake_grid::RegionConfig {
+            name: SCRIPTS_REGION.to_owned(),
+            heartbeat,
+            grid_y: sl_fake_grid::RegionConfig::default()
+                .grid_y
+                .saturating_add(SCRIPTS_REGION_OFFSET),
+            ..sl_fake_grid::RegionConfig::default()
+        };
         let (_primary, founder, _founder_id) = ACCOUNTS[0];
         let (_secondary, member, _member_id) = ACCOUNTS[1];
         let grid = builder
@@ -437,6 +461,7 @@ impl FakeGridHarness {
             .region(sl_fake_grid::catalogue().into_region(start))
             .region(sl_fake_grid::fixtures::border::border().into_region(east))
             .region(far)
+            .region(sl_fake_grid::fixtures::scripts_scene::region().into_region(scripts))
             .start()
             .await
             .map_err(|error| TestFailure::State(format!("the fake grid did not start: {error}")))?;

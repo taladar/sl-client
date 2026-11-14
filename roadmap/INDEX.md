@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 130 |
-| ready | 332 |
+| ready | 331 |
 | blocked | 36 |
 | in-progress | 6 |
 | bugs | 34 |
-| done | 1558 |
+| done | 1559 |
 | deferred | 30 |
 | wont-do | 24 |
 | **total** | **2150** |
@@ -316,7 +316,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-lsl-opensim-function-set`](ideas/gridspec-lsl-opensim-function-set.md)
   — Measure which library functions OpenSim's engines compile
 
-## ready (332)
+## ready (331)
 
 ### protocol
 
@@ -1038,9 +1038,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Factor the repeated session/id acquisition out of the conformance cases
 - [`test-e2e-sweep-live-grid`](ready/test-e2e-sweep-live-grid.md) — End-to-end
   tests for what only a live grid has
-- [`test-fake-grid-lsl-offline-cases`](ready/test-fake-grid-lsl-offline-cases.md)
-  — Move the script and chat conformance cases offline (blocked by
-  `server-fake-grid-scripted-scenario` (done))
 - [`test-handover-distant-and-vehicle-aditi`](ready/test-handover-distant-and-vehicle-aditi.md)
   — Live-test distant teleport (world_reset) and vehicle corner crossings, incl.
   on aditi
@@ -1349,7 +1346,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1558)
+## done (1559)
 
 ### protocol
 
@@ -4108,6 +4105,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   viewer
 - [`test-fake-grid-login-matrix-and-timeouts`](done/test-fake-grid-login-matrix-and-timeouts.md)
   — The login refusals and handover timeouts nothing tests
+- [`test-fake-grid-lsl-offline-cases`](done/test-fake-grid-lsl-offline-cases.md)
+  — Move the script and chat conformance cases offline (blocked by
+  `server-fake-grid-scripted-scenario` (done))
 - [`test-fake-grid-map-server-url-not-honoured`](done/test-fake-grid-map-server-url-not-honoured.md)
   — The reference viewer builds its first map-tile URL before it knows the map
   server

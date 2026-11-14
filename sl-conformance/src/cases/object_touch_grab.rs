@@ -2149,7 +2149,8 @@ async fn census(
 
     // --- 10. A physical prim. ---
     if grid.is_fake() {
-        // Nothing falls here, and nothing pulls.
+        // The kinematic physics applies no grab's force to a physical prim
+        // (server-lsl-lib-physics-vehicles), so there is nothing to pull.
         return Ok(());
     }
     let plain_id = plain.object.scoped_id();

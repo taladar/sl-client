@@ -159,8 +159,9 @@ impl RegionHost<'_> {
     /// both grids send it, an instant message of dialog
     /// `TaskInventoryOffered` under the object owner's id and the object's
     /// name, its bucket the asset type of what is offered (a folder for a
-    /// list). Filing the items when the offer is accepted is
-    /// `test-fake-grid-lsl-offline-cases`'s.
+    /// list), its id one of its own on Second Life and the recipient's copy's
+    /// on OpenSim; and the copy, which [`crate::gifts`] files when the grid
+    /// files it.
     pub(super) fn offer_to(&mut self, caller: CallerId, offer: &Offer) -> bool {
         let Some(origin) = self.origin(caller) else {
             return false;
@@ -172,19 +173,31 @@ impl RegionHost<'_> {
         if self.core.account_by_agent(agent).is_none() {
             return false;
         }
+        let held: Vec<TaskInventoryItem> = offer
+            .items
+            .iter()
+            .filter_map(|name| self.held(caller, name))
+            .collect();
         let bucket = match &offer.folder {
             Some(_folder) => AssetType::Folder,
-            None => offer
-                .items
+            None => held
                 .first()
-                .and_then(|name| self.held(caller, name))
                 .map_or(AssetType::Folder, |item| item.asset_type),
         };
+        let owner = AgentKey::from(origin.object.owner_id);
+        let gift =
+            crate::gifts::object_gift(self.core, &held, offer.folder.as_deref(), owner, agent);
+        let id = match self.core.gift_policy.offer_id {
+            crate::gifts::OfferId::Transaction => None,
+            crate::gifts::OfferId::Copy => gift.copy_id(),
+        }
+        .unwrap_or_else(|| self.core.minter.uuid());
         let position = self.position(caller);
         let region_id = self.core.region(self.index).map(|region| region.region_id);
-        self.deliveries.push(Delivery::Message {
+        self.deliveries.push(Delivery::Gift {
             agent,
-            message: Box::new(sl_proto::InstantMessage {
+            gift: Box::new(gift),
+            offer: Box::new(sl_proto::InstantMessage {
                 from_agent_id: AgentKey::from(origin.object.owner_id),
                 from_agent_name: origin.name,
                 to_agent_id: agent,
@@ -194,7 +207,7 @@ impl RegionHost<'_> {
                 position: RegionCoordinates::new(position.x, position.y, position.z),
                 offline: offer.offline,
                 timestamp: None,
-                id: self.core.minter.uuid(),
+                id,
                 parent_estate_id: 1,
                 message: offer.message.clone(),
                 binary_bucket: vec![u8::try_from(bucket.to_code()).unwrap_or(u8::MAX)],

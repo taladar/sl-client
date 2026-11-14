@@ -1641,6 +1641,7 @@ pub(crate) async fn run_region_watcher(
                                         ) else {
                                             return;
                                         };
+                                        let line = policy.stated(line);
                                         state.sim.send_chat_from_simulator(
                                             &line.from_name,
                                             line.source,
@@ -1770,6 +1771,7 @@ async fn say_from_the_hearers_region(
     let Some(root) = core.root_session_of(over.agent).await else {
         return;
     };
+    let line = &policy.stated(line);
     let position = sl_proto::Vector {
         x: line.position.x - over.offset.0,
         y: line.position.y - over.offset.1,

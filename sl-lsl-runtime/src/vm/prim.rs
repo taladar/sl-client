@@ -468,6 +468,9 @@ pub struct SoundSettings {
     pub radius: f32,
     /// Whether a sound waits for the one playing to end.
     pub queueing: bool,
+    /// Whether `llStopSound` stopped what it played on, and nothing has
+    /// played since: what a grid that states the stop on the prim keeps.
+    pub stopped: bool,
     /// The collision sound and its volume (`llCollisionSound`).
     pub collision: Option<(String, f32)>,
 }
@@ -478,6 +481,7 @@ impl Default for SoundSettings {
             playing: None,
             radius: 0.0,
             queueing: false,
+            stopped: false,
             collision: None,
         }
     }
@@ -730,9 +734,21 @@ impl Prim {
 }
 
 /// A sound a script plays once or preloads, which no later call changes —
-/// what a host sends the viewers in earshot and keeps nothing of.
+/// what a host sends the viewers in earshot and keeps nothing of — or a
+/// change to what the prim plays on, which the prim keeps as well
+/// ([`SoundSettings`]) and a grid may also tell the viewers of in a message.
 #[derive(Debug, Clone, PartialEq)]
 pub enum SoundCue {
+    /// `llLoopSound` and its master and slave forms: the prim now plays on
+    /// `0`.
+    Loop(AttachedSound),
+    /// `llStopSound`: the prim stopped what it played on.
+    Stop,
+    /// `llAdjustSoundVolume`: what the prim plays on is now at `volume`.
+    Adjust {
+        /// The new volume, 0 to 1.
+        volume: f32,
+    },
     /// `llPlaySound`: play `sound` once from the prim, at `volume`.
     Play {
         /// The sound's asset key.

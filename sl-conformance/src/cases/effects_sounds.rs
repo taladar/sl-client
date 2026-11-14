@@ -35,15 +35,13 @@
 //!    it is asked only of a run made as the land's owner.
 //!
 //! The script is the instrument of legs 4 to 6: it does what its owner says
-//! on a channel and says so. A grid that runs no scripts and moves no avatar
-//! answers them with nothing, so only legs 1 to 3 are asked of the fake grid.
+//! on a channel and says so.
 //!
 //! What each live grid answered is stated as a [`Measured`] and written up in
 //! `book/src/gridspec/avatars.md` § Effects and sounds; every run is held to
 //! it.
 //!
-//! `2av`, `[both]`, the first three legs offline on both fake flavours. The
-//! cube is derezzed to the Trash, also when a leg fails. On Second Life the
+//! `2av`, `[both]`, and both fake flavours. The cube is derezzed to the Trash, also when a leg fails. On Second Life the
 //! whole of it wants a parcel that lets everybody's avatar sounds play — a
 //! sandbox usually does not, and the grid then passes no viewer's sound on.
 
@@ -647,7 +645,7 @@ const MEASURED: &[(&str, Measured<Answer>)] = &[
 
 /// What each live grid was measured to answer where a script or a moving
 /// avatar is needed to ask.
-const MEASURED_LIVE: &[(&str, Measured<Answer>)] = &[
+const MEASURED_SCRIPTED: &[(&str, Measured<Answer>)] = &[
     (
         "arrival_beside_a_looping_prim_told",
         each(
@@ -658,10 +656,6 @@ const MEASURED_LIVE: &[(&str, Measured<Answer>)] = &[
                 "update[full]: the sound, owner the sender, gain 0.50, flags loop, radius 100.00",
             ),
         ),
-    ),
-    (
-        "barred_parcel_avatar_sounds",
-        each(Answer::Text("the group's only"), Answer::Text("not asked")),
     ),
     (
         "far_effect_beam_told_other",
@@ -1095,6 +1089,16 @@ const MEASURED_LIVE: &[(&str, Measured<Answer>)] = &[
                 "trigger(owner the sender, object the prim, parent the prim, gain 0.50, at the prim)",
             ),
         ),
+    ),
+];
+
+/// What only a live grid is held to: the parcel that bars avatar sounds,
+/// which the fixtures name on Second Life (`sound_location`, the sandbox) and
+/// nobody names on OpenSim or a fake grid, where the leg is not asked.
+const MEASURED_LIVE: &[(&str, Measured<Answer>)] = &[
+    (
+        "barred_parcel_avatar_sounds",
+        each(Answer::Text("the group's only"), Answer::Text("not asked")),
     ),
     (
         "sound_on_a_barred_parcel_told_other",
@@ -2177,6 +2181,7 @@ impl GridTest for EffectsSounds {
             outcome
                 .and(cleanup)
                 .and_then(|()| hold_to_measured(grid, &metrics, MEASURED, SOURCE))
+                .and_then(|()| hold_to_measured(grid, &metrics, MEASURED_SCRIPTED, SOURCE))
                 .and_then(|()| {
                     if grid.is_fake() {
                         Ok(())
@@ -2731,10 +2736,6 @@ async fn census(
     metrics.set("parcel_avatar_sounds", sounds);
 
     viewer_legs(&mut census, metrics).await?;
-    if grid.is_fake() {
-        // Nothing runs a script here, and no avatar moves.
-        return Ok(());
-    }
     live_legs(&mut census, &mut run, residue, barred, metrics).await
 }
 

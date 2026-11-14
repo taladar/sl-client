@@ -43,17 +43,32 @@
 //! object requests permissions from this avatar, so a window with no request
 //! records `partial` rather than failed. The aditi run is deferred with the rest
 //! of the Aditi batch (no aditi record this session).
+//!
+//! On both fake grids the case brings its own fixture, since no prim of the
+//! scripts scene may ask the case's avatar for `DEBIT`: a script asks only its
+//! owner for it. It rezzes a cube, saves into it a script that asks its owner
+//! for `DEBIT` as it starts and says what it was granted, and answers the
+//! question that script raises. The grant then has an observer the live grids
+//! lack — the script's own `run_time_permissions` — so the case also waits for
+//! the script to say it holds `DEBIT`.
 
 use std::time::Duration;
 
 use sl_client_tokio::{
-    Command, Event, ScriptPermissionRequest as ScriptPermissionRequestEvent, ScriptPermissions,
+    AgentKey, ChatSource, Command, DeRezDestination, Event, FolderType, InventoryFolderKey,
+    InventoryKey, InventoryType, Object, ObjectKey, PrimShape, RestoreItem, RezScriptParams,
+    ScriptPermissionRequest as ScriptPermissionRequestEvent, ScriptPermissions, ScriptTarget,
+    ScriptUploadLocation, TransactionId, Uuid,
 };
 
-use crate::context::{TestContext, TestFailure};
+use super::script_upload::{agent_root, folder_of_type, lift};
+use crate::context::{Session, TestContext, TestFailure};
 use crate::grid::Grid;
 use crate::registry::{GridTest, TestFuture};
-use crate::support::{REGION_TIMEOUT, REPLY_TIMEOUT, is_opensim, secs_metric};
+use crate::support::{
+    REGION_TIMEOUT, REPLY_TIMEOUT, check_eq, is_opensim, secs_metric, settle_scene,
+    wait_for_own_new_object,
+};
 
 /// The OpenSim start location: the "Default Region" (1000,1000), centred, which
 /// holds the `SLClientScriptTester` scripted prim that fires the permission
@@ -77,6 +92,22 @@ const REQUEST_WINDOW: Duration = Duration::from_secs(30);
 /// [`super::script_dialog`] confirms its unacknowledged reply.
 const OBSERVE_WINDOW: Duration = Duration::from_secs(15);
 
+/// How long the fake grids' run waits for each step of planting its own
+/// fixture: the cube, the new script, the saved source.
+const FAKE_STEP_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// The fixture script the fake grids' run saves into its cube: it asks its
+/// owner for `DEBIT` as it starts, as the Default Region's test prim asks on
+/// its timer, and tells its owner what it was granted — wherever the cube
+/// was rezzed, out of the range of a say.
+const FAKE_SOURCE: &str = "default\n{\n    state_entry()\n    {\n        \
+    llRequestPermissions(llGetOwner(), PERMISSION_DEBIT);\n    }\n\n    \
+    run_time_permissions(integer granted)\n    {\n        \
+    llOwnerSay(\"granted \" + (string)granted);\n    }\n}\n";
+
+/// The line [`FAKE_SOURCE`] tells its owner once it holds `DEBIT` (`0x2`) alone.
+const FAKE_GRANTED_LINE: &str = "granted 2";
+
 /// Receives a scripted-object permission request, grants it, reads the grant back
 /// from the mirror, then revokes it, confirming the circuit stays healthy.
 ///
@@ -99,7 +130,11 @@ impl GridTest for ScriptPermissionsCase {
     }
 
     fn grids(&self) -> &'static [Grid] {
-        &[Grid::Opensim, Grid::Aditi]
+        &[Grid::Opensim, Grid::Aditi, Grid::FakeSl, Grid::FakeOpensim]
+    }
+
+    fn rezzes_objects(&self) -> bool {
+        true
     }
 
     fn start_location(&self, grid: Grid) -> &'static str {
@@ -113,6 +148,9 @@ impl GridTest for ScriptPermissionsCase {
     fn run<'a>(&'a self, ctx: &'a mut TestContext) -> TestFuture<'a> {
         Box::pin(async move {
             let grid = ctx.grid();
+            if grid.is_fake() {
+                return run_fake(ctx).await;
+            }
 
             // Wait for the scripted prim's permission request. `ScriptQuestion`
             // fires each time the test prim calls `llRequestPermissions`; the
@@ -282,9 +320,9 @@ struct MirroredGrant {
 /// [`Event::ScriptPermissionState`] snapshot — no wire round-trip — so the first
 /// such event after the query is this query's answer.
 async fn query_grant(
-    session: &mut crate::context::Session,
-    task_id: sl_client_tokio::ObjectKey,
-    item_id: sl_client_tokio::InventoryKey,
+    session: &mut Session,
+    task_id: ObjectKey,
+    item_id: InventoryKey,
 ) -> Result<Option<MirroredGrant>, TestFailure> {
     session.send(Command::QueryScriptPermissions).await?;
     let state = session
@@ -301,4 +339,252 @@ async fn query_grant(
             permissions: grant.granted,
             denied: grant.denied,
         }))
+}
+
+/// The fake grids' run: rez a cube, save [`FAKE_SOURCE`] into it, answer the
+/// question it raises, hear it say it holds `DEBIT`, read the grant back from
+/// the mirror, revoke it, and derez the cube.
+#[expect(
+    clippy::too_many_lines,
+    reason = "one linear flow: plant the fixture, answer it, read back, revoke, clean up"
+)]
+async fn run_fake(ctx: &mut TestContext) -> Result<(), TestFailure> {
+    let grid = ctx.grid();
+    let build_position = ctx.build_position();
+    let session = ctx.primary();
+    let trash = trash_folder(session)
+        .await
+        .map_err(|failure| waiting_for("the inventory skeleton", failure))?;
+    session
+        .wait_for_region(REGION_TIMEOUT)
+        .await
+        .map_err(|failure| waiting_for("the region", failure))?;
+    let (seen, reference) = settle_scene(
+        session,
+        grid,
+        build_position,
+        Duration::from_secs(15),
+        Duration::from_secs(2),
+    )
+    .await
+    .map_err(|failure| waiting_for("the settled scene", failure))?;
+    let reference = reference.ok_or_else(|| {
+        TestFailure::Assertion("the fake region streamed no primitive to place against".to_owned())
+    })?;
+    session
+        .send(Command::RezObject {
+            shape: PrimShape::cube(lift(&reference, 1.0)),
+            group_id: None,
+        })
+        .await?;
+    let cube = wait_for_own_new_object(session, &seen, FAKE_STEP_TIMEOUT)
+        .await
+        .map_err(|failure| waiting_for("the rezzed cube", failure))?
+        .map_err(|reason| TestFailure::Assertion(format!("the cube was not rezzed: {reason}")))?;
+    let item = new_script(session, &cube)
+        .await
+        .map_err(|failure| waiting_for("the new script", failure))?;
+    session
+        .send(Command::UploadScript {
+            location: ScriptUploadLocation::TaskInventory {
+                task_id: cube.full_id,
+                item_id: item,
+                running: true,
+                experience: None,
+            },
+            target: ScriptTarget::Mono,
+            source: FAKE_SOURCE.as_bytes().to_vec(),
+        })
+        .await?;
+    // The script may ask before the save is answered, so one wait takes both.
+    let started = std::time::Instant::now();
+    let mut compiled: Option<bool> = None;
+    let mut asked: Option<ScriptPermissionRequestEvent> = None;
+    let waited = session
+        .wait_for(FAKE_STEP_TIMEOUT, |event| {
+            match event {
+                Event::ScriptUploaded { compiled: done, .. } => compiled = Some(*done),
+                Event::ScriptPermissionRequest(request) => asked = Some((**request).clone()),
+                _ => {}
+            }
+            (compiled == Some(false) || (compiled.is_some() && asked.is_some())).then_some(())
+        })
+        .await;
+    match waited {
+        Ok(()) => {}
+        Err(TestFailure::Timeout(_)) => {
+            return Err(TestFailure::Assertion(format!(
+                "planting the fixture script stalled: the save was {}, and {}",
+                compiled.map_or("never answered", |done| if done {
+                    "compiled"
+                } else {
+                    "refused"
+                }),
+                if asked.is_some() {
+                    "the question came"
+                } else {
+                    "no question came"
+                }
+            )));
+        }
+        Err(other) => return Err(other),
+    }
+    let request_rtt = started.elapsed();
+    check_eq("fixture script compiled", &compiled, &Some(true))?;
+    let request = asked
+        .ok_or_else(|| TestFailure::Assertion("the fixture script asked no question".to_owned()))?;
+    check_eq("question's prim", &request.task_id, &cube.full_id)?;
+    check_eq("question's script", &request.item_id, &item)?;
+    check_eq(
+        "question's permissions",
+        &request.permissions,
+        &ScriptPermissions(ScriptPermissions::DEBIT),
+    )?;
+    session
+        .send(Command::AnswerScriptPermissions {
+            task_id: request.task_id,
+            item_id: request.item_id,
+            permissions: request.permissions,
+            experience_id: request.experience_id,
+        })
+        .await?;
+    let speaker = ChatSource::Object(cube.full_id);
+    let answer = session
+        .wait_for(REPLY_TIMEOUT, |event| match event {
+            Event::ChatReceived(chat) if chat.source == speaker => Some(chat.message.clone()),
+            _ => None,
+        })
+        .await
+        .map_err(|failure| waiting_for("the script's answer", failure))?;
+    check_eq("the script's answer", &answer.as_str(), &FAKE_GRANTED_LINE)?;
+    let granted = query_grant(session, request.task_id, request.item_id)
+        .await
+        .map_err(|failure| waiting_for("the mirror after the grant", failure))?
+        .ok_or_else(|| {
+            TestFailure::Assertion(
+                "the granted script permission was not recorded in the mirror".to_owned(),
+            )
+        })?;
+    check_eq("mirrored deny", &granted.denied, &false)?;
+    check_eq(
+        "mirrored grant",
+        &granted.permissions,
+        &ScriptPermissions(ScriptPermissions::DEBIT),
+    )?;
+    session
+        .send(Command::RevokeScriptPermissions {
+            object_id: request.task_id,
+            permissions: request.permissions,
+        })
+        .await?;
+    let after_revoke = query_grant(session, request.task_id, request.item_id)
+        .await
+        .map_err(|failure| waiting_for("the mirror after the revoke", failure))?;
+    let debit_retained = after_revoke
+        .as_ref()
+        .is_some_and(|grant| grant.permissions.contains(ScriptPermissions::DEBIT));
+    check_eq(
+        "DEBIT kept in the mirror after the revoke",
+        &debit_retained,
+        &true,
+    )?;
+    let local_id = cube.scoped_id();
+    session
+        .send(Command::DerezObjects {
+            local_ids: vec![local_id],
+            destination: DeRezDestination::Trash(trash),
+            transaction_id: TransactionId::from(Uuid::new_v4()),
+            group_id: None,
+        })
+        .await?;
+    session
+        .wait_for(FAKE_STEP_TIMEOUT, |event| match event {
+            Event::ObjectRemoved { local_id: gone, .. } if *gone == local_id => Some(()),
+            _ => None,
+        })
+        .await
+        .map_err(|failure| waiting_for("the derezzed cube", failure))?;
+    let metrics = ctx.metrics();
+    metrics.set_timing(&secs_metric("request_rtt"), request_rtt.as_secs_f64());
+    metrics.set("task_id", request.task_id.to_string());
+    metrics.set("item_id", request.item_id.uuid().to_string());
+    metrics.set("object_name", request.object_name.clone());
+    metrics.set("object_owner", request.object_owner.clone());
+    metrics.set("requested_permissions", i64::from(request.permissions.0));
+    metrics.set("granted_permissions", i64::from(granted.permissions.0));
+    metrics.set("is_experience", request.experience_id.is_some());
+    metrics.set("debit_retained_after_revoke", debit_retained);
+    metrics.set("script_answer", answer);
+    Ok(())
+}
+
+/// The Trash folder of the login skeleton (the root, failing that), read
+/// before anything else waits and discards it.
+async fn trash_folder(session: &mut Session) -> Result<InventoryFolderKey, TestFailure> {
+    let folders = session
+        .wait_for(REPLY_TIMEOUT, |event| match event {
+            Event::InventorySkeleton(folders) => Some(folders.clone()),
+            _ => None,
+        })
+        .await?;
+    folder_of_type(&folders, FolderType::Trash)
+        .or_else(|| agent_root(&folders))
+        .ok_or_else(|| {
+            TestFailure::Assertion(
+                "inventory skeleton had neither a Trash nor a root folder".to_owned(),
+            )
+        })
+}
+
+/// Makes a new script in `cube` (the viewer's object-Contents "New Script")
+/// and the id it is listed under once it appears.
+async fn new_script(session: &mut Session, cube: &Object) -> Result<InventoryKey, TestFailure> {
+    let owner: AgentKey = session
+        .agent_id()
+        .ok_or_else(|| TestFailure::Assertion("login reported no agent id".to_owned()))?;
+    let target = cube.scoped_id();
+    session
+        .send(Command::RezScript {
+            target,
+            params: Box::new(RezScriptParams {
+                group_id: None,
+                enabled: false,
+                item: RestoreItem::new_script(owner, cube.full_id, "New Script", Uuid::new_v4()),
+            }),
+        })
+        .await?;
+    let started = std::time::Instant::now();
+    loop {
+        session
+            .send(Command::FetchTaskInventory {
+                target,
+                held_serial: None,
+            })
+            .await?;
+        let found = crate::support::wait_for_task_listing(session, cube.full_id, FAKE_STEP_TIMEOUT)
+            .await?
+            .iter()
+            .find(|entry| entry.inv_type == InventoryType::Script)
+            .map(|entry| entry.item_id);
+        if let Some(item) = found {
+            return Ok(item);
+        }
+        if started.elapsed() >= FAKE_STEP_TIMEOUT {
+            return Err(TestFailure::Assertion(
+                "the new script did not appear in the cube's task inventory".to_owned(),
+            ));
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+}
+
+/// `failure`, named after what the fake grids' run was waiting for when it
+/// timed out.
+fn waiting_for(what: &str, failure: TestFailure) -> TestFailure {
+    match failure {
+        TestFailure::Timeout(reason) => {
+            TestFailure::Timeout(format!("waiting for {what}: {reason}"))
+        }
+        other => other,
+    }
 }

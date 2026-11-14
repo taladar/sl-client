@@ -2672,8 +2672,10 @@ interaction tier. See the *viewer test harness* chapter.
 ## The offline conformance tier
 
 `sl-conformance` is the third consumer, and the one whose subject is the *wire*
-rather than the picture. `sl-conformance::fake` starts a grid with two regions —
-the catalogue and the border scene announced as its neighbour — registers three
+rather than the picture. `sl-conformance::fake` starts a grid with four
+regions — the catalogue, the border scene announced as its neighbour, a far
+region rated Moderate, and the scripts scene far to the north, where the script
+cases provoke what a live grid's fixture prim raises by itself — registers three
 accounts and synthesises the credentials that reach them, so the conformance
 runner's ordinary login path (XML-RPC round trip included) reaches an offline
 grid. The cases in `fake::OFFLINE_CASES` then run as plain `cargo test` tests

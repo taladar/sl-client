@@ -1686,6 +1686,7 @@ impl ImitatedGrid {
                 gaze_camera_range_m: None,
                 sound_range_m: None,
                 sound_names_a_parent: false,
+                script_sounds: crate::relays::ScriptSounds::Messages,
             },
             Self::OpenSim => crate::relays::RelayPolicy {
                 effects_echo: false,
@@ -1693,6 +1694,7 @@ impl ImitatedGrid {
                 gaze_camera_range_m: Some(crate::relays::OPENSIM_GAZE_RANGE_M),
                 sound_range_m: Some(crate::relays::OPENSIM_SOUND_RANGE_M),
                 sound_names_a_parent: true,
+                script_sounds: crate::relays::ScriptSounds::OnThePrim,
             },
         }
     }
@@ -1769,8 +1771,8 @@ impl ImitatedGrid {
     #[must_use]
     pub const fn im_policy(self) -> crate::messages::ImPolicy {
         use crate::messages::{
-            AwayAutoResponse, ImPolicy, Lures, OPENSIM_KEPT_TEXT, OPENSIM_SIGNATURE,
-            SECOND_LIFE_BURST, SECOND_LIFE_KEPT_TEXT, SECOND_LIFE_SIGNATURE,
+            AwayAutoResponse, ImPolicy, Lures, OPENSIM_KEPT_TEXT, OPENSIM_SCRIPT_ESTATE,
+            OPENSIM_SIGNATURE, SECOND_LIFE_BURST, SECOND_LIFE_KEPT_TEXT, SECOND_LIFE_SIGNATURE,
             SECOND_LIFE_SUSPENSION, Statement,
         };
         match self {
@@ -1782,6 +1784,7 @@ impl ImitatedGrid {
                 kept_text: SECOND_LIFE_KEPT_TEXT,
                 away_auto_response: AwayAutoResponse::Kept,
                 lures: Lures::Held,
+                script_estate: 1,
             },
             Self::OpenSim => ImPolicy {
                 statement: Statement::Stamped,
@@ -1791,6 +1794,7 @@ impl ImitatedGrid {
                 kept_text: OPENSIM_KEPT_TEXT,
                 away_auto_response: AwayAutoResponse::Refused,
                 lures: Lures::Places,
+                script_estate: OPENSIM_SCRIPT_ESTATE,
             },
         }
     }
@@ -1808,19 +1812,23 @@ impl ImitatedGrid {
     /// avatar that is away and keeps the offer.
     #[must_use]
     pub const fn gift_policy(self) -> crate::gifts::GiftPolicy {
-        use crate::gifts::{AwayGift, GiftAnnouncement, GiftAnswers, GiftPolicy, OfferId};
+        use crate::gifts::{
+            AwayGift, GiftAnnouncement, GiftAnswers, GiftPolicy, ObjectGiftFiling, OfferId,
+        };
         match self {
             Self::SecondLife => GiftPolicy {
                 offer_id: OfferId::Transaction,
                 announcement: GiftAnnouncement::FoldersOverEventQueue,
                 answers: GiftAnswers::Ignored,
                 away: AwayGift::Silent,
+                object_filing: ObjectGiftFiling::OnAccept,
             },
             Self::OpenSim => GiftPolicy {
                 offer_id: OfferId::Copy,
                 announcement: GiftAnnouncement::EveryCopyOverUdp,
                 answers: GiftAnswers::Relayed,
                 away: AwayGift::AlertedAndKept,
+                object_filing: ObjectGiftFiling::AtOffer,
             },
         }
     }
@@ -1941,8 +1949,8 @@ impl ImitatedGrid {
     #[must_use]
     pub const fn chat_policy(self) -> crate::chat::ChatPolicy {
         use crate::chat::{
-            ChatPolicy, OddViewerTypes, OverBorders, SAY_RANGE_M, TextLimit, TypingReach,
-            ViewerDebugChannel,
+            ChatPolicy, ObjectLines, OddViewerTypes, OverBorders, SAY_RANGE_M, TextLimit,
+            TypingReach, ViewerDebugChannel,
         };
         match self {
             Self::SecondLife => ChatPolicy {
@@ -1956,6 +1964,7 @@ impl ImitatedGrid {
                 text: TextLimit::WithTheName,
                 states_ranges: true,
                 over_borders: OverBorders::FromTheHearersRegion,
+                object_lines: ObjectLines::AsSaid,
             },
             Self::OpenSim => ChatPolicy {
                 odd_viewer_types: OddViewerTypes::PassedOn,
@@ -1966,6 +1975,7 @@ impl ImitatedGrid {
                 text: TextLimit::CharactersThenBytes,
                 states_ranges: false,
                 over_borders: OverBorders::DownTheChildCircuit,
+                object_lines: ObjectLines::Rewritten,
             },
         }
     }

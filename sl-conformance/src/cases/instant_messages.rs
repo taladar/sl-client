@@ -41,10 +41,9 @@
 //! What each live grid answered is stated as a [`Measured`] and written up in
 //! `book/src/gridspec/chat.md` § Instant messages; every run is held to it.
 //!
-//! `2av`, `[both]`, and both fake flavours, which run no script: there the
-//! cube is not rezzed, the script's legs are not asked, and the metrics in
-//! `FAKE_EXEMPT` are not held. The cube is derezzed to the Trash, also when
-//! a leg fails, and B's mute of A is taken back.
+//! `2av`, `[both]`, and both fake flavours, each held to the grid it imitates
+//! but for the metrics in `FAKE_EXEMPT`. The cube is derezzed to the Trash,
+//! also when a leg fails, and B's mute of A is taken back.
 
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -313,7 +312,7 @@ const MEASURED: &[(&str, Measured<Answer>)] = &[
         "cap_script",
         each(
             Answer::Text(
-                "{asset_id=the prim, binary_bucket=15 bytes, dialog=19, estate_id=1, from_agent_id=avatar A, from_agent_name=the prim's name, from_group=false, message=as sent, message_time=a date and time, offline=1, parent_estate_id=1, position=[3], region_id=another id, timestamp=the time it was sent, to_agent_id=avatar B, transaction-id=nobody}",
+                "{asset_id=the prim, binary_bucket=a region and a place, dialog=19, estate_id=1, from_agent_id=avatar A, from_agent_name=the prim's name, from_group=false, message=as sent, message_time=a date and time, offline=1, parent_estate_id=1, position=[3], region_id=another id, timestamp=the time it was sent, to_agent_id=avatar B, transaction-id=nobody}",
             ),
             Answer::Text("no capability"),
         ),
@@ -734,18 +733,10 @@ const MEASURED: &[(&str, Measured<Answer>)] = &[
 
 /// The metrics a fake flavour is not held to, by prefix or whole name, each
 /// with why.
-const FAKE_EXEMPT: &[(&str, &str)] = &[
-    ("script_im_", "the fake grid runs no scripts"),
-    ("muted_script_im_", "the fake grid runs no scripts"),
-    ("away_script_", "the fake grid runs no scripts"),
-    ("udp_script", "the fake grid runs no scripts"),
-    ("cap_script", "the fake grid runs no scripts"),
-    ("client_script", "the fake grid runs no scripts"),
-    (
-        "mute_list_after_the_mute",
-        "the fake grid keeps no mute list (server-fake-grid-mute-list)",
-    ),
-];
+const FAKE_EXEMPT: &[(&str, &str)] = &[(
+    "mute_list_after_the_mute",
+    "the fake grid keeps no mute list (server-fake-grid-mute-list)",
+)];
 
 /// Why `grid` is not held to the metric `key`, if it is a fake flavour and
 /// [`FAKE_EXEMPT`] names the metric.
@@ -1294,6 +1285,11 @@ impl Scene {
                     Llsd::Real(number) if *number == 0.0 => "0".to_owned(),
                     Llsd::Real(_) => "a number".to_owned(),
                     Llsd::Boolean(flag) => flag.to_string(),
+                    Llsd::Binary(bytes)
+                        if names_a_place(String::from_utf8_lossy(bytes).trim_end_matches('\0')) =>
+                    {
+                        "a region and a place".to_owned()
+                    }
                     Llsd::Binary(bytes) => format!("{} bytes", bytes.len()),
                     Llsd::Array(items) => format!("[{}]", items.len()),
                     other => shape_of(other),
@@ -2014,11 +2010,7 @@ impl Census<'_> {
     /// The legs of a mute: B mutes A, and A's message, its typing and its
     /// prim's message are asked again; so is B's message to the avatar it
     /// muted. The mute is taken back whatever became of the legs.
-    async fn mute_legs(
-        &mut self,
-        metrics: &mut Metrics,
-        scripted: bool,
-    ) -> Result<(), TestFailure> {
+    async fn mute_legs(&mut self, metrics: &mut Metrics) -> Result<(), TestFailure> {
         self.b
             .send(Command::Mute {
                 id: self.scene.a,
@@ -2027,7 +2019,7 @@ impl Census<'_> {
                 flags: MuteFlags::default(),
             })
             .await?;
-        let outcome = self.muted(metrics, scripted).await;
+        let outcome = self.muted(metrics).await;
         let unmuted = self
             .b
             .send(Command::Unmute {
@@ -2044,7 +2036,7 @@ impl Census<'_> {
     }
 
     /// What a grid passes on while B mutes A.
-    async fn muted(&mut self, metrics: &mut Metrics, scripted: bool) -> Result<(), TestFailure> {
+    async fn muted(&mut self, metrics: &mut Metrics) -> Result<(), TestFailure> {
         watch(self.b, self.windows.mute_settle).await?;
         self.b.send(Command::RequestMuteList).await?;
         let a = self.scene.a;
@@ -2093,14 +2085,12 @@ impl Census<'_> {
         // The stop is not what the next leg asks about.
         watch(self.b, self.drain).await?;
 
-        if scripted {
-            let sent = self.sent("muted-script");
-            let brought = self.order(self.scene.b, "muted", &sent).await?;
-            metrics.set(
-                "muted_script_im_told_b",
-                self.scene.told(&brought.b, &sent, None),
-            );
-        }
+        let sent = self.sent("muted-script");
+        let brought = self.order(self.scene.b, "muted", &sent).await?;
+        metrics.set(
+            "muted_script_im_told_b",
+            self.scene.told(&brought.b, &sent, None),
+        );
 
         let sent = self.sent("muter");
         let brought = self
@@ -2133,7 +2123,6 @@ impl Census<'_> {
         &mut self,
         metrics: &mut Metrics,
         fetch: Fetch,
-        scripted: bool,
         first: bool,
     ) -> Result<(), TestFailure> {
         let round = fetch.word();
@@ -2172,9 +2161,6 @@ impl Census<'_> {
                     (self.act(Who::A, vec![self.to_b(&this)]).await?, this)
                 }
                 "script" => {
-                    if !scripted {
-                        continue;
-                    }
                     let this = self.sent(word);
                     (self.order(self.scene.b, "away", &this).await?, this)
                 }
@@ -2528,21 +2514,11 @@ async fn census(
 
     census.viewer_legs(metrics).await?;
 
-    // A grid that runs no script is asked the rest without one.
-    let scripted = !grid.is_fake();
-    if scripted {
-        census_scripted(&mut census, &mut run, residue, metrics).await?;
-    }
-    census.mute_legs(metrics, scripted).await?;
-    census
-        .away_round(metrics, Fetch::Udp, scripted, true)
-        .await?;
-    census
-        .away_round(metrics, Fetch::Capability, scripted, false)
-        .await?;
-    census
-        .away_round(metrics, Fetch::Client, scripted, false)
-        .await
+    census_scripted(&mut census, &mut run, residue, metrics).await?;
+    census.mute_legs(metrics).await?;
+    census.away_round(metrics, Fetch::Udp, true).await?;
+    census.away_round(metrics, Fetch::Capability, false).await?;
+    census.away_round(metrics, Fetch::Client, false).await
 }
 
 /// Rezzes the cube beside A, puts the probe into it and asks the script's

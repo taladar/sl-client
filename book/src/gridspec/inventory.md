@@ -270,8 +270,9 @@ system folder (by its name), when the offer arrives and after the answer, and
 what each avatar was sent is recorded for a window after each step. The
 census holds both grids to these answers as `Measured` constants
 (`sl-conformance/src/cases/inventory_offers.rs`), and holds both fake
-flavours to them as well, but for an object's gift: the fake grid runs no
-scripts. Each fake flavour files a gift at the offer as its grid does, offers it
+flavours to them as well, an object's gift included: each files it on the
+accept or at the offer as its grid does (`GiftPolicy::object_filing`). Each
+fake flavour files an agent's gift at the offer as its grid does, offers it
 under the id its grid names, answers an accept and a decline as its grid does,
 and holds a gift to an avatar that is away for its next login (the fake grid
 keeps no inventory between sessions); a gift of an object it took carries the

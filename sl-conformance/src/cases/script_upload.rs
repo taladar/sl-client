@@ -105,7 +105,7 @@ impl GridTest for ScriptUpload {
     }
 
     fn grids(&self) -> &'static [Grid] {
-        &[Grid::Opensim, Grid::Aditi]
+        &[Grid::Opensim, Grid::Aditi, Grid::FakeSl, Grid::FakeOpensim]
     }
 
     fn rezzes_objects(&self) -> bool {
@@ -362,7 +362,7 @@ async fn upload_source(
 }
 
 /// A point `lift` metres above `base`.
-fn lift(base: &Vector, lift: f32) -> Vector {
+pub(super) fn lift(base: &Vector, lift: f32) -> Vector {
     Vector {
         x: base.x,
         y: base.y,
@@ -372,7 +372,7 @@ fn lift(base: &Vector, lift: f32) -> Vector {
 
 /// The agent inventory root folder id from a login skeleton (`None` if empty or
 /// rootless).
-fn agent_root(folders: &[InventoryFolder]) -> Option<InventoryFolderKey> {
+pub(super) fn agent_root(folders: &[InventoryFolder]) -> Option<InventoryFolderKey> {
     folders
         .iter()
         .find(|folder| folder.parent_id.is_none())
@@ -381,7 +381,7 @@ fn agent_root(folders: &[InventoryFolder]) -> Option<InventoryFolderKey> {
 
 /// The id of the first folder of the given well-known type in a login skeleton
 /// (`None` if absent).
-fn folder_of_type(
+pub(super) fn folder_of_type(
     folders: &[InventoryFolder],
     folder_type: FolderType,
 ) -> Option<InventoryFolderKey> {

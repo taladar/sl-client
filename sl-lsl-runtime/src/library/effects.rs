@@ -4,7 +4,10 @@
 //!
 //! A sound played once or preloaded goes to the host as a [`SoundCue`]; what
 //! the prim plays on, its particles and its texture animation are the
-//! prim's, written back with it. The grids' rules are the `prim/effects`
+//! prim's, written back with it — and a loop, a stop and a change of volume
+//! are cued to the host as well, for a grid that tells the viewers of them in
+//! a message of their own (`effects-sounds`, `gridspec/avatars.md` § A
+//! script's sounds). The grids' rules are the `prim/effects`
 //! probe's (book chapter `gridspec/lsl.md`, § Sound, particles, texture
 //! animation and media): Second Life names a sound or texture that is not
 //! there on the debug channel and OpenSim is silent; OpenSim throws on a
@@ -50,10 +53,13 @@ fn cue(ctx: &mut ScriptCtx<'_>, sound: &SoundCue) {
     }
 }
 
-/// Puts the caller's own prim on `playing` — [`None`] to stop it.
+/// Puts the prims `link` names on `playing` — [`None`] to stop them, which
+/// a prim that played on states as stopped.
 fn play_on(ctx: &mut ScriptCtx<'_>, link: i32, playing: Option<&AttachedSound>) {
     change_linked(ctx, link, |_ctx, prim, _changes| {
+        let was = prim.sound.playing.is_some();
         prim.sound.playing = playing.cloned();
+        prim.sound.stopped = playing.is_none() && (was || prim.sound.stopped);
     });
 }
 
@@ -72,6 +78,12 @@ pub fn ll_play_sound(ctx: &mut ScriptCtx<'_>, sound: String, volume: f32) -> Res
                 slave: false,
             },
         );
+        // A sound played after a stop ends the stop the prim stated.
+        if own(ctx).is_some_and(|prim| prim.sound.stopped) {
+            change_linked(ctx, LINK_THIS, |_ctx, prim, _changes| {
+                prim.sound.stopped = false;
+            });
+        }
     }
     Ok(())
 }
@@ -113,6 +125,7 @@ fn loop_sound(ctx: &mut ScriptCtx<'_>, sound: &str, volume: f32, master: bool, s
         slave,
     };
     play_on(ctx, LINK_THIS, Some(&playing));
+    cue(ctx, &SoundCue::Loop(playing));
 }
 
 /// `llLoopSound`: plays `sound` from the prim until stopped.
@@ -209,7 +222,16 @@ pub fn ll_trigger_sound_limited(
 ///
 /// None; the signature is the library's.
 pub fn ll_stop_sound(ctx: &mut ScriptCtx<'_>) -> Result<(), CallError> {
-    play_on(ctx, LINK_THIS, None);
+    let mut stopped = false;
+    change_linked(ctx, LINK_THIS, |_ctx, prim, _changes| {
+        if prim.sound.playing.take().is_some() {
+            prim.sound.stopped = true;
+            stopped = true;
+        }
+    });
+    if stopped {
+        cue(ctx, &SoundCue::Stop);
+    }
     Ok(())
 }
 
@@ -316,7 +338,22 @@ pub fn ll_link_set_sound_radius(
 ///
 /// None; the signature is the library's.
 pub fn ll_adjust_sound_volume(ctx: &mut ScriptCtx<'_>, volume: f32) -> Result<(), CallError> {
-    ll_link_adjust_sound_volume(ctx, LINK_THIS, volume)
+    let mut playing = false;
+    change_linked(ctx, LINK_THIS, |_ctx, prim, _changes| {
+        if let Some(sound) = prim.sound.playing.as_mut() {
+            sound.volume = unit(volume);
+            playing = true;
+        }
+    });
+    if playing {
+        cue(
+            ctx,
+            &SoundCue::Adjust {
+                volume: unit(volume),
+            },
+        );
+    }
+    Ok(())
 }
 
 /// `llLinkAdjustSoundVolume`: [`ll_adjust_sound_volume`] for the prims

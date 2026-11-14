@@ -226,8 +226,21 @@ controller has an avatar standing, and the camera rule from the last
 `AgentUpdate`; those two are checked by unit tests of the policy. A
 timeline can show a session effects and sounds of its own making
 (`Action::Effects`, `TriggerSound`, `AttachSound`, `AdjustAttachedSound`,
-`PreloadSounds`). No script runs, so nothing in the second half of this
-section happens there (`server-lsl-lib-comms` and its siblings).
+`PreloadSounds`).
+
+A script's sounds are told as each grid tells them
+(`RelayPolicy::script_sounds`): on the Second Life flavour a loop, a stop
+and a change of volume each come in a message of their own beside the
+prim's full update, which states every change of the prim's sound — the
+stop and the queueing switch too, and a played sound ending a stop; on the
+OpenSim flavour the prim's update alone states a loop and a stop, a change
+of volume comes as `AttachedSoundGainChange` alone, and the queueing switch,
+the radius and the volume change on the prim unannounced, as
+`SoundModule` changes them. A triggered sound and a preload reach as far,
+and name the parent and the owner, as each grid's do. `effects-sounds` runs
+every leg offline on both flavours and holds them to all of the above but
+the parcel that bars avatar sounds, which the fixtures name on Second Life
+alone.
 
 ### What our viewer does with them
 
@@ -347,11 +360,11 @@ object is gone, on both grids.
 the empty physical block on `FakeSl`. Every statement the agent is sent, the
 region's other viewers are sent too, under the same numbers, in the shape a
 statement to somebody else takes (`animations::Observed`). `animations` runs
-its first seven legs offline on both flavours and holds them to both columns
-above; `animation-play-stop` joined the offline list. It wears no overrider,
-so its idle set is `stand` alone, which cannot tell Second Life's one source
-from one per entry: that answer stays held on the live grids. It asks nothing
-of a script.
+every leg offline on both flavours, the script's included, and holds them to
+both columns above; `animation-play-stop` joined the offline list. It wears
+no overrider, so its idle set is `stand` alone, which cannot tell Second
+Life's one source from one per entry: that answer stays held on the live
+grids.
 
 ### What our viewer does with them
 
@@ -472,10 +485,10 @@ number.
 | the shape | `{attachments:[{location, objects:[{id, is_group_owned, location, name, owner_id, resources}]}], summary:{available, used}}`, `location` an array of three reals | the same | the same |
 | what is listed | the scripted attachments, by attachment point, HUDs included: the test avatar's overrider is three, on `ATTACH_CHIN`, `ATTACH_LWING` and `ATTACH_HUD_TOP_LEFT`; nothing unscripted | the scripted attachments; nothing worn is `attachments: []` | the same |
 | how a point is named | the LSL constant's name: `ATTACH_RIGHT_PEC` | the same | the same |
-| an object's `resources` | `memory`, 65,536 for one Mono script, and `urls` when it holds one | `urls` when it holds one; never `memory` | as the flavour's grid; no script holds a URL yet (`server-lsl-lib-http-url`) |
+| an object's `resources` | `memory`, 65,536 for one Mono script, and `urls` when it holds one | `urls` when it holds one; never `memory` | as the flavour's grid, `urls` the count its scripts hold (stated as 0 for none, which neither grid was asked) |
 | `summary.available` | `memory` -1 (no limit) and `urls` 38 | the same | the same |
 | `summary.used` | the sums: 327,680 bytes for the overrider, 393,216 with the cube | `memory` 0 whatever is worn; `urls` the sum | as the flavour's grid |
-| a URL asked for by a prim and the prim then attached from the world | granted, and still held worn: `urls` 1 | the same | no URLs yet |
+| a URL asked for by a prim and the prim then attached from the world | granted, and still held worn: `urls` 1 | the same | the same |
 | the attachment taken off | gone from the next report | the same | the same |
 
 Our client reads the report on both grids, whatever the label
@@ -486,10 +499,8 @@ Our client reads the report on both grids, whatever the label
 Each flavour answers `AttachmentResources` with what the agent wears that
 holds a script (`attachments::resources_report`, kept current with every
 flush), labelled as its grid labels it: by point, under its LSL constant,
-with a Mono script's memory on Second Life and none on OpenSim. No script
-holds a URL yet (`server-lsl-lib-http-url`), so `avatar-render-info` leaves
-its scripted cube's legs out offline. `tests/scripts.rs` holds the report on
-both flavours.
+with a Mono script's memory on Second Life and none on OpenSim, and the URLs
+its scripts hold. `tests/scripts.rs` holds the report on both flavours.
 
 The Second Life flavour grants `AvatarRenderInfo`; the OpenSim flavour
 refuses it. The region holds every report its viewers send
@@ -500,11 +511,10 @@ sent, to every reader, and `reportinglimit` counts the reports of the reader.
 Two rules are the fake grid's own, because Second Life's could not be worked
 out from what was measured: the latest report of an avatar is its stated
 weight, and a report is held for five minutes. `overlimit` stays `0`, as it
-did on Second Life. The census runs on both flavours. Each holds everything
-except the scripted cube's legs (no offline leg runs the cube's script yet,
-`test-fake-grid-lsl-offline-cases`) and what
-Second Life states of its own reckoning (B in the statement, and the report
-of B that nobody of ours sent).
+did on Second Life. The census runs on both flavours, the scripted cube's
+legs included. Each holds everything except what Second Life states of its
+own reckoning (B in the statement, and the report of B that nobody of ours
+sent).
 
 ### What our viewer does with it
 

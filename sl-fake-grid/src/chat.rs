@@ -122,7 +122,36 @@ pub struct ChatPolicy {
     /// Which region tells an avatar standing over a border of a line it is
     /// in earshot of.
     pub over_borders: OverBorders,
+    /// How a script's line is stated to the avatars that hear it.
+    pub object_lines: ObjectLines,
 }
+
+/// How a grid states a script's line to the avatars that hear it
+/// ([`ChatPolicy::object_lines`]; the `local-chat` conformance case,
+/// `book/src/gridspec/chat.md` § A script's lines).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ObjectLines {
+    /// As the script said it: the prim's owner as the owner, where the prim
+    /// stands as the place: Second Life.
+    AsSaid,
+    /// A shout and a region say naming nobody as the owner; an owner-say
+    /// naming the prim itself as the owner and the middle of the region as
+    /// the place (its broadcast path, `ChatModule.OnChatBroadcast`); and every
+    /// line cut at 1000 characters (`ChatModule`'s "libomv limit"): OpenSim.
+    Rewritten,
+}
+
+/// How many characters of a script's line OpenSim passes on to an avatar
+/// ([`ObjectLines::Rewritten`]).
+pub const OPENSIM_OBJECT_LINE_CHARS: usize = 1000;
+
+/// Where OpenSim says an owner-say was said ([`ObjectLines::Rewritten`]):
+/// `ChatModule.CenterOfRegion`.
+pub const OPENSIM_OWNER_SAY_AT: Vector = Vector {
+    x: 128.0,
+    y: 128.0,
+    z: 30.0,
+};
 
 /// How a grid carries a line over a region border
 /// ([`ChatPolicy::over_borders`]). Both live grids carry it, by the same
@@ -243,6 +272,35 @@ impl ChatPolicy {
         }
         line.message = self.text.kept(&line.message, &line.from_name).to_owned();
         Some(line)
+    }
+
+    /// `line` as this grid states it to an avatar that hears it: a script's
+    /// owner-say from the prim itself at the middle of the region, and a
+    /// script's line cut at [`OPENSIM_OBJECT_LINE_CHARS`], on a grid that
+    /// rewrites them ([`ObjectLines::Rewritten`]). Who hears it is decided
+    /// on the line as said ([`hears`](Self::hears)); a shout's and a region
+    /// say's missing owner is the line's own, set where it is said.
+    #[must_use]
+    pub fn stated(&self, line: &Line) -> Line {
+        let ChatSource::Object(prim) = line.source else {
+            return line.clone();
+        };
+        if self.object_lines == ObjectLines::AsSaid {
+            return line.clone();
+        }
+        let mut stated = Line {
+            message: line
+                .message
+                .chars()
+                .take(OPENSIM_OBJECT_LINE_CHARS)
+                .collect(),
+            ..line.clone()
+        };
+        if line.chat_type == ChatType::Owner {
+            stated.owner_id = prim.uuid();
+            stated.position = OPENSIM_OWNER_SAY_AT;
+        }
+        stated
     }
 
     /// Whether the avatar of `agent`, standing at `position`, is sent `line`
@@ -726,5 +784,30 @@ mod test {
         drop(tap);
         listens.hear(&line(ChatType::Normal, PUBLIC_CHANNEL), nowhere);
         assert!(listens.taps.is_empty(), "a dropped tap is let go");
+    }
+
+    /// OpenSim states a script's owner-say from the prim at the middle of the
+    /// region and cuts its lines at 1000 characters; Second Life states them
+    /// as said; an avatar's line is left alone by both.
+    #[test]
+    fn opensim_restates_a_scripts_lines_to_avatars() {
+        let long = "x".repeat(1500);
+        let owner_say = Line {
+            message: long.clone(),
+            ..of_an_object(line(ChatType::Owner, PUBLIC_CHANNEL))
+        };
+        let opensim = ImitatedGrid::OpenSim.chat_policy().stated(&owner_say);
+        assert_eq!(opensim.owner_id, sl_proto::Uuid::from_u128(0x0B));
+        assert_eq!(opensim.position, OPENSIM_OWNER_SAY_AT);
+        assert_eq!(opensim.message.len(), OPENSIM_OBJECT_LINE_CHARS);
+        assert_eq!(
+            ImitatedGrid::SecondLife.chat_policy().stated(&owner_say),
+            owner_say
+        );
+        let said = Line {
+            message: long,
+            ..line(ChatType::Normal, PUBLIC_CHANNEL)
+        };
+        assert_eq!(ImitatedGrid::OpenSim.chat_policy().stated(&said), said);
     }
 }

@@ -164,8 +164,9 @@ pub fn ll_region_say(ctx: &mut ScriptCtx<'_>, channel: i32, text: String) -> Res
 
 /// `llRegionSayTo`: say `text` on `channel` to `target` alone, at any
 /// distance in the region. A target that is no key, `NULL_KEY` and the
-/// script's own prim get nothing, and nothing is said of it; OpenSim says
-/// nothing on `DEBUG_CHANNEL` this way either.
+/// script's own prim get nothing, and nothing is said of it; neither grid
+/// says anything on `DEBUG_CHANNEL` this way either (the `local-chat`
+/// conformance case, 2026-10-13: an avatar told nothing on both).
 ///
 /// # Errors
 ///
@@ -179,7 +180,7 @@ pub fn ll_region_say_to(
     let flavour = ctx.flavour();
     let caller = ctx.caller();
     if !is_somebody(&target.0)
-        || (flavour.is_opensim() && channel == DEBUG_CHANNEL)
+        || channel == DEBUG_CHANNEL
         || ctx
             .host()
             .whereabouts(caller)

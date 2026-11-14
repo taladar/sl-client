@@ -39,10 +39,10 @@
 //! What each live grid answered is stated as a [`Measured`] and written up in
 //! `book/src/gridspec/avatars.md` § Render info; every run is held to it.
 //!
-//! `2av`, live grids and both fake flavours. The fake grid runs no scripts and
-//! is no sandbox, so there the scripted cube's legs and the move are left out,
-//! and what only a live grid states (`MEASURED_LIVE`) is not held. The cube
-//! is derezzed to the Trash and its item removed, also when a leg fails.
+//! `2av`, live grids and both fake flavours. The fake grid is no sandbox, so
+//! there the move is left out, and what only Second Life states of its own
+//! reckoning (`MEASURED_LIVE`) is not held. The cube is derezzed to the Trash
+//! and its item removed, also when a leg fails.
 
 use std::fmt::Write as _;
 use std::time::{Duration, Instant};
@@ -568,12 +568,10 @@ const MEASURED: &[(&str, Measured<Answer>)] = &[
     ),
 ];
 
-/// What only the live grids are held to: the scripted cube's legs, which the
-/// fake grid cannot take (it runs no scripts), and what Second Life states of
-/// its own reckoning — B in the statement, and a report of B nobody of ours
-/// sent — which the fake grid has no reckoning to imitate
-/// (`sl-fake-grid` `render_info`).
-const MEASURED_LIVE: &[(&str, Measured<Answer>)] = &[
+/// What each live grid was measured to answer of the scripted cube: worn,
+/// what its script says, and what the attachment resources report while it
+/// is worn and after it is detached.
+const MEASURED_SCRIPTED: &[(&str, Measured<Answer>)] = &[
     (
         "detached_resources_body",
         each(
@@ -604,19 +602,6 @@ const MEASURED_LIVE: &[(&str, Measured<Answer>)] = &[
         each(
             Answer::Any,
             Answer::Text("available memory=-1 urls=38; used memory=0 urls=0"),
-        ),
-    ),
-    (
-        "last_read_agents",
-        each(Answer::Text("A,B"), Answer::Text("absent")),
-    ),
-    (
-        "last_read_body",
-        each(
-            Answer::Text(
-                "{agents:{A:{weight:integer},B:{weight:integer}},overlimit:integer,reportinglimit:integer}",
-            ),
-            Answer::Text("no capability"),
         ),
     ),
     ("scripted_attach_said", both(Answer::Text("A|1|30"))),
@@ -668,6 +653,26 @@ const MEASURED_LIVE: &[(&str, Measured<Answer>)] = &[
         ),
     ),
     ("scripted_rez_url", both(Answer::Text("granted"))),
+];
+
+/// What only the live grids are held to: what Second Life states of its own
+/// reckoning — B in the statement, and a report of B nobody of ours sent —
+/// which the fake grid has no reckoning to imitate (`sl-fake-grid`
+/// `render_info`).
+const MEASURED_LIVE: &[(&str, Measured<Answer>)] = &[
+    (
+        "last_read_agents",
+        each(Answer::Text("A,B"), Answer::Text("absent")),
+    ),
+    (
+        "last_read_body",
+        each(
+            Answer::Text(
+                "{agents:{A:{weight:integer},B:{weight:integer}},overlimit:integer,reportinglimit:integer}",
+            ),
+            Answer::Text("no capability"),
+        ),
+    ),
     (
         "too_complex_b_read_agents",
         each(Answer::Text("A,B"), Answer::Text("absent")),
@@ -751,6 +756,7 @@ impl GridTest for AvatarRenderInfo {
             let cleanup = tidy(ctx.primary(), &left, folders).await;
             outcome
                 .and_then(|()| hold_to_measured(grid, &metrics, MEASURED, SOURCE))
+                .and_then(|()| hold_to_measured(grid, &metrics, MEASURED_SCRIPTED, SOURCE))
                 .and_then(|()| {
                     if grid.is_fake() {
                         Ok(())
@@ -1221,9 +1227,8 @@ async fn census(
     // --- 7. Attachment resources, unscripted. ---
     resources_leg(a, &http, resources.as_deref(), metrics, "worn", &cast).await?;
 
-    // --- 8. A scripted attachment, where scripts run: the fake grid runs
-    // none. ---
-    if !grid.is_fake() {
+    // --- 8. A scripted attachment. ---
+    {
         let anchor = settled
             .avatar
             .clone()

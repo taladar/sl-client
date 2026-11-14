@@ -166,6 +166,10 @@ mod test {
         avatar_render_info => "avatar-render-info" [fake_sl, fake_opensim],
         landmarks_home => "landmarks-home" [fake_sl, fake_opensim],
         script_compile => "script-compile" [fake_sl, fake_opensim],
+        script_upload => "script-upload" [fake_sl, fake_opensim],
+        script_running => "script-running" [fake_sl, fake_opensim],
+        script_dialog => "script-dialog" [fake_sl, fake_opensim],
+        script_permissions => "script-permissions" [fake_sl, fake_opensim],
         instant_messages => "instant-messages" [fake_sl, fake_opensim],
     }
 

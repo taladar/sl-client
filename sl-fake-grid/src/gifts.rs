@@ -32,10 +32,18 @@
 //! rebuilt at each login. A gift to an avatar that is away is therefore held
 //! by the grid (`Gifts`) and filed when its next session is prepared.
 //!
-//! An object's gift (`TaskInventoryOffered`, `llGiveInventory` to an avatar)
-//! is offered by the script engine (`crate::scripts`), not here; filing it
-//! when it is accepted, as Second Life does, or at the offer, as OpenSim does,
-//! is `test-fake-grid-lsl-offline-cases`'s.
+//! An object's gift (`TaskInventoryOffered`, `llGiveInventory` and
+//! `llGiveInventoryList` to an avatar) is offered by the script engine
+//! (`crate::scripts`), which hands the copy here (`object_gift`,
+//! `object_offered`); the answer (`TaskInventoryAccepted`,
+//! `TaskInventoryDeclined`) comes through the IM responder
+//! (`object_answered`):
+//!
+//! | | Second Life | OpenSim |
+//! | --- | --- | --- |
+//! | when an item is filed | on the accept, in the folder it names, announced (`UpdateCreateInventoryItem`) | at the offer, in the folder of its type, announced |
+//! | when a folder is filed | on the accept, under the root, announced over the event queue without what it holds | at the offer, under the root, unannounced; on the accept, a `BulkUpdateInventory` naming it and what it holds |
+//! | a decline | nothing filed | the copy moved to the Trash and announced |
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -68,6 +76,19 @@ pub struct GiftPolicy {
     pub answers: GiftAnswers,
     /// What a gift to an avatar that is away brings besides the copy.
     pub away: AwayGift,
+    /// When an object's gift is filed.
+    pub object_filing: ObjectGiftFiling,
+}
+
+/// When an object's gift is filed ([`GiftPolicy::object_filing`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ObjectGiftFiling {
+    /// On the accept, in the folder the accept names; nothing on a decline:
+    /// Second Life.
+    OnAccept,
+    /// When the offer is made, in the folder of its type; a decline moves it
+    /// to the Trash: OpenSim.
+    AtOffer,
 }
 
 impl Default for GiftPolicy {
@@ -136,7 +157,7 @@ pub(crate) struct Gift {
 
 impl Gift {
     /// The id of the copy the offer names.
-    fn copy_id(&self) -> Option<Uuid> {
+    pub(crate) fn copy_id(&self) -> Option<Uuid> {
         self.folders
             .first()
             .map(|folder| folder.folder_id.uuid())
@@ -144,11 +165,23 @@ impl Gift {
     }
 }
 
-/// The gifts the grid holds for avatars that were away when they were given.
+/// The gifts the grid holds for avatars that were away when they were given,
+/// and the objects' gifts waiting for an answer.
 #[derive(Debug, Default)]
 pub(crate) struct Gifts {
     /// What is held for each account, in the order given.
     held: HashMap<AgentKey, Vec<Gift>>,
+    /// The objects' gifts offered and not yet answered, by the offer's id.
+    object_offers: HashMap<Uuid, ObjectOffer>,
+}
+
+/// An object's gift waiting for its recipient's answer.
+#[derive(Debug, Clone)]
+struct ObjectOffer {
+    /// The recipient.
+    to: AgentKey,
+    /// The copy, filed already on a grid that files it at the offer.
+    gift: Gift,
 }
 
 /// Files in `sim` every gift held for `agent`, whose session it is: the
@@ -320,15 +353,25 @@ fn handed_over_linkset(
 
 /// Files `gift` in `sim`'s agent inventory: the copy in the folder of its
 /// type, or the root where there is none. The gift as filed.
-fn file(sim: &mut SimSession, mut gift: Gift) -> Gift {
+fn file(sim: &mut SimSession, gift: Gift) -> Gift {
+    file_in(sim, gift, None)
+}
+
+/// Files `gift` in `sim`'s agent inventory: the copy in `named`, where that is
+/// a folder of the agent's, else in the folder of its type, or the root where
+/// there is none. The gift as filed.
+fn file_in(sim: &mut SimSession, mut gift: Gift, named: Option<InventoryFolderKey>) -> Gift {
     let root = sim
         .agent_inventory()
         .folders()
         .find(|folder| folder.parent_id.is_none())
         .map(|folder| folder.folder_id);
-    let home = gift
-        .folder_type
-        .and_then(|folder_type| crate::social::folder_of_type(sim, folder_type))
+    let home = named
+        .filter(|folder| sim.agent_inventory().folder(*folder).is_some())
+        .or_else(|| {
+            gift.folder_type
+                .and_then(|folder_type| crate::social::folder_of_type(sim, folder_type))
+        })
         .or(root);
     let Some(home) = home else {
         return gift;
@@ -467,6 +510,154 @@ fn announce(
             );
         }
     }
+}
+
+/// The copy for `to` of what a prim owned by `from` gives: each of `held`, its
+/// next owner's masks, under a new id — in a new folder called `folder`, under
+/// the root, for `llGiveInventoryList`. An object carries the linkset the prim
+/// holds for it along, as an avatar's gift does.
+pub(crate) fn object_gift(
+    core: &GridCore,
+    held: &[sl_proto::TaskInventoryItem],
+    folder: Option<&str>,
+    from: AgentKey,
+    to: AgentKey,
+) -> Gift {
+    let mint = || core.minter.uuid();
+    let top = folder.map(|name| InventoryFolder {
+        folder_id: InventoryFolderKey::from(mint()),
+        parent_id: None,
+        name: name.to_owned(),
+        folder_type: -1,
+        version: 1,
+    });
+    let placeholder = InventoryFolderKey::from(Uuid::nil());
+    let items: Vec<InventoryItem> = held
+        .iter()
+        .map(|held| {
+            let original = crate::task_contents::agent_item_from(held, placeholder, &mint);
+            let copy = InventoryItem {
+                folder_id: top.as_ref().map_or(placeholder, |top| top.folder_id),
+                ..item_copy(&original, mint(), from, to)
+            };
+            if let Some(mut linkset) = core.assets.taken_linkset(held.item_id) {
+                let objects = handed_over_linkset(linkset.objects(), from, to);
+                for (prim, object) in linkset.prims.iter_mut().zip(objects) {
+                    prim.object = object;
+                }
+                core.assets.insert_taken_linkset(copy.item_id, linkset);
+            }
+            copy
+        })
+        .collect();
+    Gift {
+        folder_type: if top.is_some() {
+            None
+        } else {
+            items.first().map(|item| item.item_type)
+        },
+        folders: top.into_iter().collect(),
+        items,
+        originals: Vec::new(),
+    }
+}
+
+/// Hands the recipient of `offer`, whose session `sim` is, an object's
+/// `gift` after its offer: on a grid that files it at the offer, filed in the
+/// folder of its type and an item announced. Remembered for the answer either
+/// way.
+pub(crate) fn object_offered(
+    core: &GridCore,
+    sim: &mut SimSession,
+    offer: &InstantMessage,
+    gift: Gift,
+    now: Instant,
+) {
+    let gift = if core.gift_policy.object_filing == ObjectGiftFiling::AtOffer {
+        let filed = file(sim, gift);
+        if filed.folders.is_empty() {
+            warn_on(
+                sim.send_inventory_item_created(
+                    &filed.items,
+                    TransactionId::from(Uuid::nil()),
+                    true,
+                    now,
+                ),
+                "an object's gift",
+            );
+        }
+        filed
+    } else {
+        gift
+    };
+    core.gifts.lock().object_offers.insert(
+        offer.id,
+        ObjectOffer {
+            to: offer.to_agent_id,
+            gift,
+        },
+    );
+}
+
+/// An avatar answered an object's offer (`TaskInventoryAccepted`, the folder
+/// in the bucket, or `TaskInventoryDeclined`), the offer's id as `im`'s id: an
+/// accept files the copy where the grid files it on the accept and announces
+/// it; a decline moves a copy filed at the offer to the Trash.
+pub(crate) async fn object_answered(core: &Arc<GridCore>, shared: &SharedSim, im: &InstantMessage) {
+    let by = shared.state.lock().await.avatar.agent_id;
+    let pending = {
+        let mut gifts = core.gifts.lock();
+        match gifts.object_offers.get(&im.id) {
+            Some(offer) if offer.to == by => gifts.object_offers.remove(&im.id),
+            _ => None,
+        }
+    };
+    let Some(ObjectOffer { gift, .. }) = pending else {
+        return;
+    };
+    let filed_at_offer = core.gift_policy.object_filing == ObjectGiftFiling::AtOffer;
+    if im.dialog == sl_proto::ImDialog::TaskInventoryDeclined {
+        if filed_at_offer {
+            discard(shared, im).await;
+        }
+        return;
+    }
+    let named = im
+        .binary_bucket
+        .get(..16)
+        .and_then(|bytes| <[u8; 16]>::try_from(bytes).ok())
+        .map(|bytes| InventoryFolderKey::from(Uuid::from_bytes(bytes)));
+    shared
+        .with_state(|state| {
+            let now = shared.now();
+            let sim = &mut state.sim;
+            let nil = TransactionId::from(Uuid::nil());
+            if filed_at_offer {
+                if !gift.folders.is_empty() {
+                    warn_on(
+                        sim.send_bulk_update_inventory(nil, &gift.folders, &gift.items, now),
+                        "an accepted folder",
+                    );
+                }
+                return;
+            }
+            let is_folder = !gift.folders.is_empty();
+            let filed = file_in(sim, gift, named.filter(|_named| !is_folder));
+            if is_folder {
+                let top: Vec<InventoryFolder> =
+                    filed.folders.first().cloned().into_iter().collect();
+                warn_on(
+                    sim.enqueue_bulk_update_inventory(nil, &top, &[]),
+                    "an accepted folder",
+                );
+            } else {
+                warn_on(
+                    sim.send_inventory_item_created(&filed.items, nil, true, now),
+                    "an accepted gift",
+                );
+            }
+        })
+        .await;
 }
 
 /// An avatar declined the gift `im` names, on a grid that moves a declined

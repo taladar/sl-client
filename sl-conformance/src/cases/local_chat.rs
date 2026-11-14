@@ -30,14 +30,13 @@
 //!    there on every grid (a telehub would catch a teleport on a live one).
 //!
 //! The script is the instrument of legs 6 and 7 and of the script's part of
-//! leg 8: it says what it is told to on a channel and says when it has. A
-//! grid that runs no scripts is asked the rest.
+//! leg 8: it says what it is told to on a channel and says when it has.
 //!
 //! What each live grid answered is stated as a [`Measured`] and written up in
 //! `book/src/gridspec/chat.md`; every run is held to it.
 //!
-//! `2av`, `[both]`, everything but the script's legs offline on both fake
-//! flavours. The cube is derezzed to the Trash, also when a leg fails.
+//! `2av`, `[both]`, and both fake flavours. The cube is derezzed to the
+//! Trash, also when a leg fails.
 
 use std::time::{Duration, Instant};
 
@@ -885,7 +884,7 @@ const MEASURED: &[(&str, Measured<Answer>)] = &[
 
 /// What each live grid was measured to answer where a script is needed to
 /// ask.
-const MEASURED_LIVE: &[(&str, Measured<Answer>)] = &[
+const MEASURED_SCRIPTED: &[(&str, Measured<Answer>)] = &[
     (
         "far_script_debug_say_told_a",
         each(
@@ -2383,13 +2382,7 @@ impl GridTest for LocalChat {
             outcome
                 .and(cleanup)
                 .and_then(|()| hold_to_measured(grid, &metrics, MEASURED, SOURCE))
-                .and_then(|()| {
-                    if grid.is_fake() {
-                        Ok(())
-                    } else {
-                        hold_to_measured(grid, &metrics, MEASURED_LIVE, SOURCE)
-                    }
-                })
+                .and_then(|()| hold_to_measured(grid, &metrics, MEASURED_SCRIPTED, SOURCE))
         })
     }
 }
@@ -2794,10 +2787,6 @@ async fn census(
     metrics.set("region_info_chat_ranges", ranges);
 
     beside_legs(&mut census, metrics).await?;
-    if grid.is_fake() {
-        // Nothing runs a script here.
-        return distance_legs(&mut census, metrics).await;
-    }
     // Beside where A stands by now: it was still coming down from its
     // flight to the spot when the scene settled, and a cube rezzed beside
     // where it was then hangs in the air.

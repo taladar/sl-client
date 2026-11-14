@@ -169,3 +169,12 @@ collision, land collision and moving event. `llMoveToTarget`,
 `Body` holds a velocity, so the force and impulse functions add to it, and a
 look-at turns the root where the solver moves it. Rotation is not simulated
 at all yet.
+
+## From test-fake-grid-lsl-offline-cases (2026-11-14)
+
+`object-touch-grab`'s leg 10 (a physical prim, `MEASURED_PHYSICAL`) is the one
+script-case leg still live-only: an owner's drag pulls a physical prim along on
+Second Life and leaves it where it was on OpenSim, and a spin turns it some
+other way on both. That needs a grab's force applied to a `Body` and rotation
+simulated, which is this tranche's; once it is, drop the `grid.is_fake()` return
+before leg 10 and hold `MEASURED_PHYSICAL` on both fake flavours.

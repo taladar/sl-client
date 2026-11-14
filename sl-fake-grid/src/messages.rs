@@ -24,6 +24,8 @@
 //! | a teleport offer | under a lure id the grid holds, its bucket naming the place and its rating | under the place itself packed into the id, no bucket |
 //! | a declined or used lure | spent | a place, for ever |
 //! | a teleport request (dialog 26) | its id as sent, from no region, estate 0, one zero byte | stated like a message |
+//! | a script's message (dialog 19) | from the owner under the prim's name and id, place zero, no time, estate 1, a bucket `Region/x/y/z` where the prim stands | the same but where the prim stands, the time now, estate 101 |
+//! | a script's message to an avatar that is away | kept as it would have arrived, its capability record from where the prim stands; the owner told nothing | the same, with no capability |
 //!
 //! Both pass a message without text and one of a line break as they are, cut
 //! a longer text at 1023 bytes, pass typing on and keep none, drop a message
@@ -37,8 +39,11 @@
 //! An inventory offer and its answers ride the same road and are handed to
 //! [`crate::gifts`].
 //!
-//! Not modelled here: a script's message, which the region's engine sends
-//! itself ([`crate::scripts`]); how long
+//! A script's message is stated here (`ImPolicy::script_message`) and sent by
+//! the region's engine itself ([`crate::scripts`]), which hands one for an
+//! avatar that is away back to be kept (`keep_script_message`).
+//!
+//! Not modelled here: how long
 //! Second Life's suspension after a burst lasts (it is not measured; the fake
 //! grid's lasts [`SECOND_LIFE_SUSPENSION`]), messages forwarded as mail, and
 //! conferences, which start over `ChatSessionRequest` and wait for the group
@@ -60,6 +65,11 @@ use crate::social::{Whereabouts, session_of, tell, warn_on};
 
 /// The estate every region of the fake grid belongs to.
 const ESTATE: u32 = 1;
+
+/// The estate OpenSim states a script's message from: its region's own
+/// (`EstateSettings.EstateID`), 101 on the measured grid, where a viewer's
+/// message there says 1.
+pub const OPENSIM_SCRIPT_ESTATE: u32 = 101;
 
 /// How many bytes of a message's text either grid passes on.
 pub const LONGEST_TEXT_BYTES: usize = 1023;
@@ -116,6 +126,45 @@ pub struct ImPolicy {
     pub away_auto_response: AwayAutoResponse,
     /// What a teleport offer's lure id is.
     pub lures: Lures,
+    /// The estate a script's message is stated from.
+    pub script_estate: u32,
+}
+
+/// A script's `llInstantMessage`, before a grid states it
+/// ([`ImPolicy::script_message`]).
+#[derive(Debug, Clone)]
+pub(crate) struct ScriptMessage {
+    /// Who owns the prim the script is in.
+    pub owner: AgentKey,
+    /// The prim's name.
+    pub name: String,
+    /// The prim.
+    pub prim: Uuid,
+    /// The avatar it is to.
+    pub to: AgentKey,
+    /// The region the prim is in, and its name.
+    pub region: (Uuid, String),
+    /// Where the prim stands.
+    pub at: RegionCoordinates,
+    /// The text.
+    pub text: String,
+}
+
+/// The bucket both grids state a script's message with: the region's name
+/// and where the prim stands, each coordinate rounded down, zero-terminated
+/// (OpenSim's `Util.StringToBytes256`; aditi's measured 15 bytes for
+/// `Mauve/52/62/22`).
+fn place_bucket(region: &str, at: &RegionCoordinates) -> Vec<u8> {
+    let floor = |value: f32| format!("{}", value.floor());
+    let mut bucket = format!(
+        "{region}/{}/{}/{}",
+        floor(at.x()),
+        floor(at.y()),
+        floor(at.z())
+    )
+    .into_bytes();
+    bucket.push(0);
+    bucket
 }
 
 impl Default for ImPolicy {
@@ -288,6 +337,33 @@ const fn nowhere() -> RegionCoordinates {
 }
 
 impl ImPolicy {
+    /// `script`'s message as this grid states it, at `stamp` (the grid's UNIX
+    /// seconds): from the owner, under the prim's name and id, from the
+    /// prim's region, a bucket naming where the prim stands; on Second Life
+    /// from place zero with no time, on OpenSim from where the prim stands,
+    /// the time now.
+    pub(crate) fn script_message(&self, script: &ScriptMessage, stamp: u32) -> InstantMessage {
+        let (position, timestamp) = match self.statement {
+            Statement::Rewritten => (nowhere(), None),
+            Statement::Stamped => (script.at, Some(stamp)),
+        };
+        InstantMessage {
+            from_agent_id: script.owner,
+            from_agent_name: script.name.clone(),
+            to_agent_id: script.to,
+            dialog: ImDialog::FromTask,
+            from_group: false,
+            region_id: Some(script.region.0),
+            position,
+            offline: false,
+            timestamp,
+            id: script.prim,
+            parent_estate_id: self.script_estate,
+            message: cut(&script.text),
+            binary_bucket: place_bucket(&script.region.1, &script.at),
+        }
+    }
+
     /// `im` of `from`'s as this grid passes it on to the avatar it names, at
     /// `stamp` (the grid's UNIX seconds).
     pub(crate) fn passed_on(
@@ -475,6 +551,9 @@ async fn answer(core: &Arc<GridCore>, shared: &SharedSim, event: ServerEvent) {
                         crate::gifts::discard(shared, &im).await;
                     }
                 }
+                ImDialog::TaskInventoryAccepted | ImDialog::TaskInventoryDeclined => {
+                    crate::gifts::object_answered(core, shared, &im).await;
+                }
                 ImDialog::LureDeclined => {
                     // A decline goes nowhere; on a grid that holds its lures
                     // it spends the one it names.
@@ -550,6 +629,29 @@ fn keep(core: &GridCore, from: &Whereabouts, passed: InstantMessage) {
             .lock()
             .keep(to, kept(from, passed, core.wall.unix_seconds_u32()));
     }
+}
+
+/// Keeps `stated`, a script's message `script` this grid stated for an avatar
+/// that is away, for the account it names, if there is one: as it would have
+/// arrived, flagged kept, with the time it was sent; as Second Life's
+/// `ReadOfflineMsgs` record from where the prim stands, estate 1. Its owner
+/// is told nothing.
+pub(crate) fn keep_script_message(core: &GridCore, script: &ScriptMessage, stated: InstantMessage) {
+    let to = stated.to_agent_id;
+    if core.account_by_agent(to).is_none() {
+        return;
+    }
+    let message = InstantMessage {
+        offline: true,
+        timestamp: Some(core.wall.unix_seconds_u32()),
+        ..stated
+    };
+    let record = InstantMessage {
+        position: script.at,
+        parent_estate_id: ESTATE,
+        ..message.clone()
+    };
+    core.social.lock().keep(to, KeptMessage { message, record });
 }
 
 /// Tells the sender of `passed` that the grid kept it: from the recipient's
@@ -988,5 +1090,46 @@ mod tests {
         assert_eq!(opensim.burst, None);
         assert_ne!(second_life.signature, opensim.signature);
         assert_ne!(second_life.lures, opensim.lures);
+    }
+
+    /// A script's message from a prim at 52.7/62.2/22.9 in "Mauve".
+    fn from_a_prim() -> super::ScriptMessage {
+        super::ScriptMessage {
+            owner: sender(),
+            name: "Probe".to_owned(),
+            prim: Uuid::from_u128(0x0b0b),
+            to: recipient(),
+            region: (Uuid::from_u128(0xabc), "Mauve".to_owned()),
+            at: RegionCoordinates::new(52.7, 62.2, 22.9),
+            text: "hello".to_owned(),
+        }
+    }
+
+    /// Both grids state a script's message from the owner under the prim's
+    /// name and id with a zero-terminated `Region/x/y/z` bucket — aditi's 15
+    /// bytes for this place; Second Life from place zero with no time and
+    /// estate 1, OpenSim from the prim with the time and estate 101.
+    #[test]
+    fn a_scripts_message_is_stated_as_each_grid_states_it() {
+        let script = from_a_prim();
+        let second_life = ImitatedGrid::SecondLife
+            .im_policy()
+            .script_message(&script, STAMP);
+        assert_eq!(second_life.from_agent_id, sender());
+        assert_eq!(second_life.from_agent_name, "Probe");
+        assert_eq!(second_life.id, Uuid::from_u128(0x0b0b));
+        assert_eq!(second_life.dialog, ImDialog::FromTask);
+        assert_eq!(second_life.binary_bucket, b"Mauve/52/62/22\0".to_vec());
+        assert_eq!(second_life.binary_bucket.len(), 15);
+        assert_eq!(second_life.position, RegionCoordinates::new(0.0, 0.0, 0.0));
+        assert_eq!(second_life.timestamp, None);
+        assert_eq!(second_life.parent_estate_id, 1);
+        let opensim = ImitatedGrid::OpenSim
+            .im_policy()
+            .script_message(&script, STAMP);
+        assert_eq!(opensim.position, script.at);
+        assert_eq!(opensim.timestamp, Some(STAMP));
+        assert_eq!(opensim.parent_estate_id, super::OPENSIM_SCRIPT_ESTATE);
+        assert_eq!(opensim.binary_bucket, second_life.binary_bucket);
     }
 }

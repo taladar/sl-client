@@ -104,7 +104,7 @@ use sl_lsl_runtime::vm::{
     Whereabouts,
 };
 use sl_proto::{
-    AssetKey, AssetSource as _, AssetType, ChatSource, ChatType, ExperiencePermission, ImDialog,
+    AssetKey, AssetSource as _, AssetType, ChatSource, ChatType, ExperiencePermission,
     InventoryType, LoadUrlRequest, Object, RegionLocalObjectId, ScriptDialog, ScriptLanguage,
     ScriptPermissionRequest, ScriptTeleportRequest, ServerEvent, SimSession, TaskInventoryItem,
     prim_flags,
@@ -548,6 +548,12 @@ impl RegionScripts {
     #[must_use]
     pub fn instance_of(&self, prim: ObjectKey, item: InventoryKey) -> Option<CallerId> {
         self.by_item.get(&(prim, item)).copied()
+    }
+
+    /// How many URLs the instance `id` holds (`llRequestURL`).
+    #[must_use]
+    pub(crate) fn urls_held(&self, id: CallerId) -> usize {
+        self.engine.urls(id).len()
     }
 
     /// Whether the script `item` in `prim` reads as running, as the imitated
@@ -1265,12 +1271,26 @@ enum Delivery {
         /// The destination.
         destination: Box<ScriptTeleportRequest>,
     },
-    /// An instant message from the object, wherever its avatar is.
+    /// An instant message from the object, wherever its avatar is; kept for
+    /// one that is away.
     Message {
         /// The avatar.
         agent: AgentKey,
-        /// The message.
+        /// The message, as the grid states it.
         message: Box<sl_proto::InstantMessage>,
+        /// What the script sent, which a message kept for an avatar that is
+        /// away is stated from; [`None`] for one nobody keeps.
+        script: Option<Box<crate::messages::ScriptMessage>>,
+    },
+    /// An object's gift (`llGiveInventory`, `llGiveInventoryList`): its
+    /// offer, wherever its avatar is, and the copy it offers.
+    Gift {
+        /// The avatar.
+        agent: AgentKey,
+        /// The offer, a `TaskInventoryOffered` instant message.
+        offer: Box<sl_proto::InstantMessage>,
+        /// The copy, filed when the grid files it ([`crate::gifts`]).
+        gift: Box<crate::gifts::Gift>,
     },
     /// A sound a prim played once, triggered or had preloaded.
     Sound {
@@ -1353,22 +1373,54 @@ enum Delivery {
     },
 }
 
-/// A sound an avatar is sent (`llPlaySound`, `llTriggerSound`,
-/// `llPreloadSound`).
+/// A script's sound as an avatar is sent it.
 #[derive(Debug, Clone)]
 struct HeardSound {
     /// The prim it comes from.
     object: ObjectKey,
-    /// The prim's linkset root, when that is another prim.
-    parent: Option<ObjectKey>,
     /// The prim's owner.
     owner: OwnerKey,
-    /// The sound's asset.
-    asset: AssetKey,
-    /// Where the prim is in the region.
-    position: Vector,
-    /// How it is played.
-    cue: sl_lsl_runtime::vm::prim::SoundCue,
+    /// The message it is sent in.
+    message: SoundMessage,
+}
+
+/// Which of the region's avatars a script's sound reaches, by where each
+/// stands: the share of its gain each is sent, [`None`] for one out of
+/// reach.
+type Reach = Box<dyn Fn(&Vector) -> Option<f32>>;
+
+/// The message a script's sound is sent in ([`HeardSound`]).
+#[derive(Debug, Clone)]
+enum SoundMessage {
+    /// An `AttachedSound`: a sound played from the prim, a loop or a stop.
+    Attached {
+        /// The sound's asset; nil for a stop.
+        asset: AssetKey,
+        /// Its gain.
+        gain: f32,
+        /// Its flags.
+        flags: sl_proto::SoundFlags,
+    },
+    /// An `AttachedSoundGainChange`.
+    Gain(f32),
+    /// A `SoundTrigger` where the prim is.
+    Trigger {
+        /// The sound's asset.
+        asset: AssetKey,
+        /// Its gain.
+        gain: f32,
+        /// The parent it names.
+        parent: Option<ObjectKey>,
+        /// Where the prim is in the region.
+        position: Vector,
+    },
+    /// A `PreloadSound`.
+    Preload {
+        /// The sound's asset.
+        asset: AssetKey,
+        /// The owner it names.
+        owner: uuid::Uuid,
+    },
 }
 
 /// The region as a script sees it: the [`Host`] the engine runs a tick
@@ -1945,10 +1997,18 @@ impl Host for RegionHost<'_> {
     fn say(&mut self, caller: CallerId, speech: &Speech) -> Option<Overheard> {
         let origin = self.origin(caller)?;
         let channel = ChatChannel(speech.channel);
+        // OpenSim's shout and region say reach `ChatModule` with no sender
+        // object, so they name nobody as the owner (`local-chat`).
+        let ownerless = self.world.chat.object_lines == crate::chat::ObjectLines::Rewritten
+            && matches!(speech.to_avatars, ChatVolume::Shout | ChatVolume::RegionSay);
         let avatars = Line {
             source: ChatSource::Object(origin.prim),
             from_name: origin.name,
-            owner_id: origin.object.owner_id,
+            owner_id: if ownerless {
+                uuid::Uuid::nil()
+            } else {
+                origin.object.owner_id
+            },
             chat_type: if channel == DEBUG_CHANNEL {
                 ChatType::DebugChannel
             } else {
@@ -2052,24 +2112,30 @@ impl Host for RegionHost<'_> {
             return;
         };
         let position = self.position(caller);
-        let region_id = self.core.region(self.index).map(|region| region.region_id);
+        let Some(region) = self
+            .core
+            .region(self.index)
+            .map(|region| (region.region_id, region.config.name.clone()))
+        else {
+            return;
+        };
+        let script = crate::messages::ScriptMessage {
+            owner: AgentKey::from(origin.object.owner_id),
+            name: origin.name,
+            prim: origin.prim.uuid(),
+            to: AgentKey::from(agent),
+            region,
+            at: RegionCoordinates::new(position.x, position.y, position.z),
+            text: message.text.clone(),
+        };
+        let stated = self
+            .core
+            .im_policy
+            .script_message(&script, self.core.wall.unix_seconds_u32());
         self.deliveries.push(Delivery::Message {
             agent: AgentKey::from(agent),
-            message: Box::new(sl_proto::InstantMessage {
-                from_agent_id: AgentKey::from(origin.object.owner_id),
-                from_agent_name: origin.name,
-                to_agent_id: AgentKey::from(agent),
-                dialog: ImDialog::FromTask,
-                from_group: false,
-                region_id,
-                position: RegionCoordinates::new(position.x, position.y, position.z),
-                offline: false,
-                timestamp: None,
-                id: origin.prim.uuid(),
-                parent_estate_id: 1,
-                message: message.text.clone(),
-                binary_bucket: Vec::new(),
-            }),
+            message: Box::new(stated),
+            script: Some(Box::new(script)),
         });
     }
 
@@ -2847,50 +2913,181 @@ impl Host for RegionHost<'_> {
             .map(|asset| asset.uuid().to_string())
     }
 
-    fn sound(&mut self, _caller: CallerId, prim: &str, cue: &sl_lsl_runtime::vm::prim::SoundCue) {
+    fn sound(&mut self, caller: CallerId, prim: &str, cue: &sl_lsl_runtime::vm::prim::SoundCue) {
+        use crate::relays::ScriptSounds;
         use sl_lsl_runtime::vm::prim::SoundCue;
+        use sl_proto::SoundFlags;
         let Some(local_id) = self.prim_keyed(prim) else {
             return;
         };
         let Some(object) = self.world.objects.get(local_id).cloned() else {
             return;
         };
-        let asset = match cue {
-            SoundCue::Play { sound, .. }
-            | SoundCue::Trigger { sound, .. }
-            | SoundCue::Preload { sound } => sound,
-        };
-        let Ok(asset) = uuid::Uuid::parse_str(asset) else {
-            return;
-        };
-        let root = self.world.root_of(local_id);
-        let parent = (root != local_id)
-            .then(|| self.world.objects.get(root).map(|root| root.full_id))
-            .flatten();
+        let told = self.world.relays.script_sounds;
+        let messages = told == ScriptSounds::Messages;
+        let queueing = Host::prim(self, caller, prim).is_some_and(|prim| prim.sound.queueing);
+        let queue = if queueing { SoundFlags::QUEUE } else { 0 };
+        let asset_of = |sound: &str| uuid::Uuid::parse_str(sound).ok().map(AssetKey::from);
         let (position, _turn) = crate::seating::frame_of(self.world, &object);
-        let bounds = match cue {
-            SoundCue::Trigger { bounds, .. } => bounds.clone(),
-            _ => None,
+        // A prim with no radius sounds within OpenSim's default.
+        let radius = if object.sound_radius > 0.0 {
+            object.sound_radius
+        } else {
+            crate::relays::OPENSIM_SOUND_RANGE_M
+        };
+        let everybody = |_at: &Vector| Some(1.0_f32);
+        let (message, heard_by): (SoundMessage, Reach) = match cue {
+            SoundCue::Play {
+                sound,
+                volume,
+                slave,
+            } => {
+                let Some(asset) = asset_of(sound) else {
+                    return;
+                };
+                let mut flags = queue;
+                if *slave {
+                    flags |= SoundFlags::SYNC_SLAVE;
+                    if messages {
+                        flags |= SoundFlags::SYNC_PENDING;
+                    }
+                }
+                (
+                    SoundMessage::Attached {
+                        asset,
+                        gain: *volume,
+                        flags: SoundFlags(flags),
+                    },
+                    Box::new(everybody),
+                )
+            }
+            SoundCue::Loop(playing) if messages => {
+                let Some(asset) = asset_of(&playing.sound) else {
+                    return;
+                };
+                let mut flags = SoundFlags::LOOP | queue;
+                if playing.master {
+                    flags |= SoundFlags::SYNC_MASTER;
+                }
+                if playing.slave {
+                    flags |= SoundFlags::SYNC_SLAVE;
+                }
+                (
+                    SoundMessage::Attached {
+                        asset,
+                        gain: playing.volume,
+                        flags: SoundFlags(flags),
+                    },
+                    Box::new(everybody),
+                )
+            }
+            SoundCue::Stop if messages => (
+                SoundMessage::Attached {
+                    asset: AssetKey::from(uuid::Uuid::nil()),
+                    gain: 0.0,
+                    flags: SoundFlags(SoundFlags::STOP),
+                },
+                Box::new(everybody),
+            ),
+            // The prim's update alone states them there.
+            SoundCue::Loop(_) | SoundCue::Stop => return,
+            SoundCue::Adjust { volume } => (SoundMessage::Gain(*volume), Box::new(everybody)),
+            SoundCue::Trigger {
+                sound,
+                volume,
+                bounds,
+            } => {
+                let Some(asset) = asset_of(sound) else {
+                    return;
+                };
+                let root = self.world.root_of(local_id);
+                let root_key = self.world.objects.get(root).map(|root| root.full_id);
+                let parent = if messages {
+                    root_key.filter(|_root| root != local_id)
+                } else {
+                    root_key
+                };
+                let from = position.clone();
+                let (bounds, volume) = (bounds.clone(), *volume);
+                let reach = if messages {
+                    crate::relays::SECOND_LIFE_SCRIPT_TRIGGER_RANGE_M
+                } else if bounds.is_some() {
+                    crate::relays::OPENSIM_SOUND_RANGE_M
+                } else {
+                    radius
+                };
+                (
+                    SoundMessage::Trigger {
+                        asset,
+                        gain: volume,
+                        parent,
+                        position: position.clone(),
+                    },
+                    Box::new(move |at: &Vector| {
+                        let distance = crate::relays::distance(&from, at);
+                        if distance > reach {
+                            return None;
+                        }
+                        if let Some((low, high)) = &bounds {
+                            let inside = (low.x..=high.x).contains(&at.x)
+                                && (low.y..=high.y).contains(&at.y)
+                                && (low.z..=high.z).contains(&at.z);
+                            if !inside {
+                                return None;
+                            }
+                            // OpenSim scales a limited sound down by distance.
+                            if !messages {
+                                return Some((reach - distance) / reach);
+                            }
+                        }
+                        Some(1.0)
+                    }),
+                )
+            }
+            SoundCue::Preload { sound } => {
+                let Some(asset) = asset_of(sound) else {
+                    return;
+                };
+                let from = position.clone();
+                let (owner, reach) = if messages {
+                    (object.owner_id, None)
+                } else {
+                    (object.full_id.uuid(), Some(2.0 * radius))
+                };
+                (
+                    SoundMessage::Preload { asset, owner },
+                    Box::new(move |at: &Vector| {
+                        reach
+                            .is_none_or(|reach| crate::relays::distance(&from, at) < reach)
+                            .then_some(1.0)
+                    }),
+                )
+            }
         };
         for present in self.present {
-            if let Some((low, high)) = &bounds {
-                let at = &present.position;
-                let inside = (low.x..=high.x).contains(&at.x)
-                    && (low.y..=high.y).contains(&at.y)
-                    && (low.z..=high.z).contains(&at.z);
-                if !inside {
-                    continue;
-                }
-            }
+            let Some(scale) = heard_by(&present.position) else {
+                continue;
+            };
+            let message = match &message {
+                SoundMessage::Trigger {
+                    asset,
+                    gain,
+                    parent,
+                    position,
+                } => SoundMessage::Trigger {
+                    asset: *asset,
+                    gain: gain * scale,
+                    parent: *parent,
+                    position: position.clone(),
+                },
+                other => other.clone(),
+            };
             self.deliveries.push(Delivery::Sound {
                 agent: present.agent,
                 sound: Box::new(HeardSound {
                     object: object.full_id,
-                    parent,
                     owner: OwnerKey::Agent(AgentKey::from(object.owner_id)),
-                    asset: AssetKey::from(asset),
-                    position: position.clone(),
-                    cue: cue.clone(),
+                    message,
                 }),
             });
         }
@@ -3797,6 +3994,7 @@ async fn deliver(core: &Arc<GridCore>, index: usize, deliveries: Vec<Delivery>) 
             | Delivery::LoadUrl { agent, .. }
             | Delivery::MapDestination { agent, .. }
             | Delivery::Message { agent, .. }
+            | Delivery::Gift { agent, .. }
             | Delivery::Sound { agent, .. }
             | Delivery::Balance { agent, .. }
             | Delivery::Parcel { agent, .. }
@@ -3815,7 +4013,16 @@ async fn deliver(core: &Arc<GridCore>, index: usize, deliveries: Vec<Delivery>) 
             continue;
         }
         let Some(shared) = core.root_session_of(agent).await else {
-            tracing::debug!(%agent, "a script spoke to an avatar no longer in world");
+            if let Delivery::Message {
+                message,
+                script: Some(script),
+                ..
+            } = delivery
+            {
+                crate::messages::keep_script_message(core, &script, *message);
+            } else {
+                tracing::debug!(%agent, "a script spoke to an avatar no longer in world");
+            }
             continue;
         };
         let sent = shared
@@ -3824,7 +4031,7 @@ async fn deliver(core: &Arc<GridCore>, index: usize, deliveries: Vec<Delivery>) 
                 if state.region != index
                     && !matches!(
                         delivery,
-                        Delivery::Message { .. } | Delivery::Balance { .. }
+                        Delivery::Message { .. } | Delivery::Gift { .. } | Delivery::Balance { .. }
                     )
                 {
                     return Ok(());
@@ -3843,6 +4050,17 @@ async fn deliver(core: &Arc<GridCore>, index: usize, deliveries: Vec<Delivery>) 
                     }
                     Delivery::Overridden { .. } => {
                         crate::movement::state_posture(state, now);
+                        Ok(())
+                    }
+                    Delivery::Gift { offer, gift, .. } => {
+                        state.sim.send_instant_message(offer, now)?;
+                        crate::gifts::object_offered(
+                            core,
+                            &mut state.sim,
+                            offer,
+                            (**gift).clone(),
+                            now,
+                        );
                         Ok(())
                     }
                     _ => send(&mut state.sim, &delivery, now),
@@ -3925,11 +4143,12 @@ fn send(sim: &mut SimSession, delivery: &Delivery, now: Instant) -> Result<(), s
             }
             None => sim.send_clear_follow_cam_properties(*object, now),
         },
-        // Sent with the session's animation set, above; a teleport is the
-        // grid's, not the session's.
-        Delivery::Animate { .. } | Delivery::Overridden { .. } | Delivery::Teleport { .. } => {
-            Ok(())
-        }
+        // Sent with the session's animation set, above, and a gift with its
+        // copy; a teleport is the grid's, not the session's.
+        Delivery::Animate { .. }
+        | Delivery::Overridden { .. }
+        | Delivery::Teleport { .. }
+        | Delivery::Gift { .. } => Ok(()),
         Delivery::Parcel { parcel, .. } => {
             // Both grids push a changed parcel down the event queue.
             sim.enqueue_parcel_properties(parcel);
@@ -3951,38 +4170,36 @@ fn send(sim: &mut SimSession, delivery: &Delivery, now: Instant) -> Result<(), s
     }
 }
 
-/// Sends `sound` down `sim`: a sound played once is the prim's attached
-/// sound without the loop flag, a triggered one a `SoundTrigger` at the
-/// prim's position, a preload a `PreloadSound`.
+/// Sends `sound` down `sim` in the message the grid tells it in.
 fn send_sound(
     sim: &mut SimSession,
     sound: &HeardSound,
     now: Instant,
 ) -> Result<(), sl_proto::Error> {
-    use sl_lsl_runtime::vm::prim::SoundCue;
-    match &sound.cue {
-        SoundCue::Play { volume, slave, .. } => {
-            let flags = if *slave {
-                sl_proto::SoundFlags(sl_proto::SoundFlags::SYNC_SLAVE)
-            } else {
-                sl_proto::SoundFlags(0)
-            };
-            sim.send_attached_sound(sound.object, sound.owner, sound.asset, *volume, flags, now)
+    match &sound.message {
+        SoundMessage::Attached { asset, gain, flags } => {
+            sim.send_attached_sound(sound.object, sound.owner, *asset, *gain, *flags, now)
         }
-        SoundCue::Trigger { volume, .. } => sim.send_sound_trigger(
-            sound.asset,
+        SoundMessage::Gain(gain) => sim.send_attached_sound_gain_change(sound.object, *gain, now),
+        SoundMessage::Trigger {
+            asset,
+            gain,
+            parent,
+            position,
+        } => sim.send_sound_trigger(
+            *asset,
             sound.owner,
             sound.object,
-            sound.parent,
-            sound.position.clone(),
-            *volume,
+            *parent,
+            position.clone(),
+            *gain,
             now,
         ),
-        SoundCue::Preload { .. } => sim.send_preload_sound(
+        SoundMessage::Preload { asset, owner } => sim.send_preload_sound(
             &[sl_proto::SoundPreload {
                 object_id: sound.object,
-                owner_id: sound.owner.uuid(),
-                sound_id: sound.asset.uuid(),
+                owner_id: *owner,
+                sound_id: asset.uuid(),
             }],
             now,
         ),

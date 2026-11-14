@@ -26,21 +26,41 @@
 //! region deliberately menuing this avatar — so a window with no dialog is
 //! recorded `partial` rather than failed. The aditi run is deferred with the
 //! rest of the Aditi batch (no aditi record this session).
+//!
+//! On both fake grids the avatar starts in the scripts scene
+//! ([`crate::fake::SCRIPTS_REGION`]) beside its dialog prim, which menus
+//! whoever touches it. The case touches it, so the dialog it answers is one it
+//! provoked, and asserts the menu that prim's script raises: from that prim,
+//! offering Red, Green and Blue. The reply then has an observer the live grids
+//! lack — the script says who chose what — so the case waits for that line
+//! rather than for a keep-alive ping.
 
 use std::time::Duration;
 
-use sl_client_tokio::{Command, Event, ScriptDialog as ScriptDialogEvent};
+use sl_client_tokio::{
+    ChatSource, Command, Event, ScopedObjectId, ScriptDialog as ScriptDialogEvent, Vector,
+};
+use sl_fake_grid::fixtures::scripts_scene;
 
 use crate::context::{TestContext, TestFailure};
 use crate::grid::Grid;
 use crate::registry::{GridTest, TestFuture};
-use crate::support::{REGION_TIMEOUT, count_metric, is_opensim, secs_metric};
+use crate::support::{
+    REGION_TIMEOUT, REPLY_TIMEOUT, check, check_eq, count_metric, is_opensim, secs_metric,
+};
 
 /// The OpenSim start location: the "Default Region" (1000,1000), centred, which
 /// holds the `SLClientScriptTester` scripted prim that fires the dialog. On
 /// Second Life the avatar keeps `"last"` (a named OpenSim region is meaningless
 /// there), and no scripted dialog fixture is expected.
 const OPENSIM_START: &str = "uri:Default Region&128&128&30";
+
+/// The fake grids' start location: the scripts scene, a couple of metres in
+/// front of its dialog prim.
+const FAKE_START: &str = "uri:Fake Region Scripts&122&130&26";
+
+/// The buttons the scripts scene's dialog prim offers.
+const FAKE_BUTTONS: [&str; 3] = ["Red", "Green", "Blue"];
 
 /// How long to watch for a `ScriptDialog` after the region is ready.
 ///
@@ -77,12 +97,14 @@ impl GridTest for ScriptDialog {
     }
 
     fn grids(&self) -> &'static [Grid] {
-        &[Grid::Opensim, Grid::Aditi]
+        &[Grid::Opensim, Grid::Aditi, Grid::FakeSl, Grid::FakeOpensim]
     }
 
     fn start_location(&self, grid: Grid) -> &'static str {
         if is_opensim(grid) {
             OPENSIM_START
+        } else if grid.is_fake() {
+            FAKE_START
         } else {
             "last"
         }
@@ -91,6 +113,9 @@ impl GridTest for ScriptDialog {
     fn run<'a>(&'a self, ctx: &'a mut TestContext) -> TestFuture<'a> {
         Box::pin(async move {
             let grid = ctx.grid();
+            if grid.is_fake() {
+                return run_fake(ctx).await;
+            }
 
             // Wait for the scripted prim's dialog. `ScriptDialog` fires each time
             // the test prim calls `llDialog`; the first one inside the window is
@@ -194,5 +219,108 @@ impl GridTest for ScriptDialog {
             metrics.set_timing(&secs_metric("ping_rtt"), rtt.as_secs_f64());
             Ok(())
         })
+    }
+}
+
+/// The fake grids' run: touch the scripts scene's dialog prim, answer the menu
+/// it raises with its first button and hear its script say who chose it.
+async fn run_fake(ctx: &mut TestContext) -> Result<(), TestFailure> {
+    let prim = scripts_scene::key(scripts_scene::DIALOG)
+        .ok_or_else(|| TestFailure::State("the scripts scene names no dialog prim".to_owned()))?;
+    let session = ctx.primary();
+    session.wait_for_region(REGION_TIMEOUT).await?;
+    let local_id: ScopedObjectId = session
+        .wait_for(REGION_TIMEOUT, |event| match event {
+            Event::ObjectAdded(object) if object.full_id == prim => Some(object.scoped_id()),
+            _ => None,
+        })
+        .await?;
+    let started = std::time::Instant::now();
+    let origin = Vector {
+        x: 0.0,
+        y: 0.0,
+        z: 0.0,
+    };
+    session
+        .send(Command::GrabObject {
+            local_id,
+            grab_offset: origin,
+            surface: None,
+        })
+        .await?;
+    session
+        .send(Command::DegrabObject {
+            local_id,
+            surface: None,
+        })
+        .await?;
+    let dialog = session
+        .wait_for(DIALOG_WINDOW, |event| match event {
+            Event::ScriptDialog(dialog) => Some((**dialog).clone()),
+            _ => None,
+        })
+        .await?;
+    let dialog_rtt = started.elapsed();
+    check_eq("dialog object", &dialog.object_id, &prim)?;
+    check_eq(
+        "dialog object name",
+        &dialog.object_name.as_str(),
+        &scripts_scene::DIALOG,
+    )?;
+    check(!dialog.is_text_box(), "the dialog prim raised a text box")?;
+    let buttons: Vec<&str> = dialog.buttons.iter().map(String::as_str).collect();
+    check_eq(
+        "dialog buttons",
+        &buttons.as_slice(),
+        &FAKE_BUTTONS.as_slice(),
+    )?;
+    let chosen =
+        dialog.buttons.first().cloned().ok_or_else(|| {
+            TestFailure::Assertion("the script dialog carried no buttons".to_owned())
+        })?;
+    session
+        .send(Command::ReplyScriptDialog {
+            object_id: dialog.object_id,
+            chat_channel: dialog.chat_channel,
+            button_index: 0,
+            button_label: chosen.clone(),
+        })
+        .await?;
+    let said = format!(" chose {chosen}");
+    let answer = session
+        .wait_for(REPLY_TIMEOUT, |event| match event {
+            Event::ChatReceived(chat)
+                if chat.source == ChatSource::Object(prim) && chat.message.ends_with(&said) =>
+            {
+                Some(chat.message.clone())
+            }
+            _ => None,
+        })
+        .await?;
+    let metrics = ctx.metrics();
+    metrics.set_timing(&secs_metric("dialog_rtt"), dialog_rtt.as_secs_f64());
+    metrics.set("object_id", dialog.object_id.to_string());
+    metrics.set("object_name", dialog.object_name.clone());
+    metrics.set("chat_channel", i64::from(dialog.chat_channel.0));
+    metrics.set(&count_metric("buttons"), dialog.buttons.len().to_string());
+    metrics.set("is_text_box", false);
+    metrics.set("chosen_button", chosen);
+    metrics.set("script_answer", answer);
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::FAKE_START;
+
+    /// The fake start location names the region the harness holds the scripts
+    /// scene in, at the dialog prim's end of the row.
+    #[test]
+    fn the_fake_start_is_the_scripts_region() {
+        assert!(
+            FAKE_START.starts_with(&format!("uri:{}&", crate::fake::SCRIPTS_REGION)),
+            "{FAKE_START} is not in {}",
+            crate::fake::SCRIPTS_REGION
+        );
     }
 }

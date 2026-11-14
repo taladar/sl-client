@@ -908,8 +908,8 @@ const POINT_NAMES: [&str; 56] = [
 /// `world`: each worn object that holds a script, grouped by the point it is
 /// on — HUDs included — with its id, where it stands, its name, its owner and
 /// its resources: on Second Life the memory of its scripts
-/// ([`AttachmentPolicy::script_memory`]), and the URLs it holds — none, until
-/// a script can hold one (`server-lsl-lib-http-url`). The summary states
+/// ([`AttachmentPolicy::script_memory`]), and on both the URLs its scripts
+/// hold (`llRequestURL`). The summary states
 /// unlimited memory and 38 URLs available and the sums used, as both grids
 /// do (`avatar-render-info`, 2026-10-21, `book/src/gridspec/avatars.md`
 /// § Attachment resources).
@@ -921,9 +921,15 @@ pub(crate) fn resources_report(
     let memory_each = world.attachments.script_memory;
     let mut report = sl_wire::AttachmentResourcesReport::nothing_scripted();
     let mut memory_used = 0_i32;
+    let mut urls_used = 0_i32;
     let mut locations: BTreeMap<u8, Vec<sl_wire::ScriptedObjectInfo>> = BTreeMap::new();
     for root in world.objects.worn_by(agent) {
-        let scripts = crate::scripts::linkset_scripts(world, root).len();
+        let held = crate::scripts::linkset_scripts(world, root);
+        let scripts = held.len();
+        let urls = held.iter().fold(0_i32, |sum, id| {
+            let each = world.script_instances.urls_held(*id);
+            sum.saturating_add(i32::try_from(each).unwrap_or(i32::MAX))
+        });
         let (Some(attached), Some(object)) =
             (world.objects.attached_to(root), world.objects.get(root))
         else {
@@ -935,6 +941,7 @@ pub(crate) fn resources_report(
         let memory =
             memory_each.map(|each| each.saturating_mul(i32::try_from(scripts).unwrap_or(i32::MAX)));
         memory_used = memory_used.saturating_add(memory.unwrap_or(0));
+        urls_used = urls_used.saturating_add(urls);
         let name = world
             .properties_of(root)
             .map(|properties| properties.name)
@@ -951,7 +958,10 @@ pub(crate) fn resources_report(
                 ),
                 name,
                 owner: sl_types::key::OwnerKey::Agent(agent),
-                resources: sl_wire::ScriptedObjectResources { memory, urls: None },
+                resources: sl_wire::ScriptedObjectResources {
+                    memory,
+                    urls: Some(urls),
+                },
             });
     }
     report.attachments = locations
@@ -966,6 +976,8 @@ pub(crate) fn resources_report(
     for used in &mut report.summary.used {
         if used.resource_type == "memory" {
             used.amount = memory_used;
+        } else if used.resource_type == "urls" {
+            used.amount = urls_used;
         }
     }
     report

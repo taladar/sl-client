@@ -33,6 +33,7 @@ use sl_proto::{
 use sl_types::key::{ObjectKey, TextureKey};
 use sl_types::lsl::Vector;
 
+use crate::relays::ScriptSounds;
 use crate::world::SceneFixtures;
 
 /// The last prim a script wrote, and the record it was written as.
@@ -715,10 +716,82 @@ fn keep_written(prim: &mut Prim, object: &Object, scripted: &Scripted) {
     prim.damage = kept.damage;
     prim.health = kept.health;
     prim.sound.queueing = kept.sound.queueing;
+    prim.sound.stopped = kept.sound.stopped;
     prim.sound.collision.clone_from(&kept.sound.collision);
     if prim.sound.playing.is_some() {
         prim.sound.playing.clone_from(&kept.sound.playing);
     }
+}
+
+/// Writes what `prim` plays on into `object`, `before` the record as it was,
+/// as `told` states a prim's sound: the sound, its gain and its loop and sync
+/// flags while it plays on, nothing after; the queueing switch in the flags
+/// whenever it is on and a stop until something plays again on Second
+/// Life, on OpenSim the queueing switch in a loop's flags alone and a stop
+/// until anything plays (`SoundModule`). Second Life keeps the radius the
+/// script gave; OpenSim gives a prim that sounds with none its 100 m.
+fn write_sound(object: &mut Object, before: &Object, prim: &Prim, told: ScriptSounds) {
+    let messages = told == ScriptSounds::Messages;
+    let queue = if prim.sound.queueing {
+        SoundFlags::QUEUE
+    } else {
+        0
+    };
+    match &prim.sound.playing {
+        Some(playing) => {
+            object.sound = uuid::Uuid::parse_str(&playing.sound).unwrap_or_default();
+            object.gain = playing.volume;
+            let mut flags = queue;
+            if playing.looped {
+                flags |= SoundFlags::LOOP;
+            }
+            if playing.master {
+                flags |= SoundFlags::SYNC_MASTER;
+            }
+            if playing.slave {
+                flags |= SoundFlags::SYNC_SLAVE;
+            }
+            object.sound_flags = flags;
+        }
+        None => {
+            object.sound = uuid::Uuid::nil();
+            object.gain = 0.0;
+            let stop = if prim.sound.stopped {
+                SoundFlags::STOP
+            } else {
+                0
+            };
+            object.sound_flags = stop | if messages { queue } else { 0 };
+        }
+    }
+    let sounded = prim.sound.playing.is_some() || prim.sound.stopped || before.sound_radius > 0.0;
+    object.sound_radius = if messages || prim.sound.radius > 0.0 {
+        prim.sound.radius
+    } else if sounded {
+        crate::relays::OPENSIM_SOUND_RANGE_M
+    } else {
+        0.0
+    };
+}
+
+/// Whether `object` differs from `before` only in what `told` changes on a
+/// prim without an update: on OpenSim its sound's gain, radius and flags
+/// while the sound itself is the same and no loop's flags changed — a change
+/// of volume, of radius, a played sound's end of a stop.
+fn sound_changed_silently(before: &Object, object: &Object, told: ScriptSounds) -> bool {
+    if told == ScriptSounds::Messages || object.sound != before.sound {
+        return false;
+    }
+    if !object.sound.is_nil() && object.sound_flags != before.sound_flags {
+        return false;
+    }
+    let unsounded = Object {
+        gain: before.gain,
+        sound_flags: before.sound_flags,
+        sound_radius: before.sound_radius,
+        ..object.clone()
+    };
+    unsounded == *before
 }
 
 /// What writing a prim changed, for the host to apply after the tick.
@@ -831,36 +904,15 @@ pub(crate) fn write(
         .as_ref()
         .map_or_else(Vec::new, sl_proto::encode_particle_system);
     object.particles = particles;
-    match &prim.sound.playing {
-        Some(playing) => {
-            object.sound = uuid::Uuid::parse_str(&playing.sound).unwrap_or_default();
-            object.gain = playing.volume;
-            let mut flags = 0;
-            if playing.looped {
-                flags |= SoundFlags::LOOP;
-            }
-            if playing.master {
-                flags |= SoundFlags::SYNC_MASTER;
-            }
-            if playing.slave {
-                flags |= SoundFlags::SYNC_SLAVE;
-            }
-            if prim.sound.queueing {
-                flags |= SoundFlags::QUEUE;
-            }
-            object.sound_flags = flags;
-        }
-        None => {
-            object.sound = uuid::Uuid::nil();
-            object.gain = 0.0;
-            object.sound_flags = 0;
-        }
-    }
-    object.sound_radius = prim.sound.radius;
+    write_sound(&mut object, &before, prim, world.relays.script_sounds);
     if object != before {
-        written.changed = true;
+        written.changed = !sound_changed_silently(&before, &object, world.relays.script_sounds);
         if let Some(mut stored) = world.object_mut(local_id) {
-            *stored = object.clone();
+            if written.changed {
+                *stored = object.clone();
+            } else {
+                *stored.quietly() = object.clone();
+            }
         }
     }
     if let Some(mut properties) = world.properties_of(local_id)
@@ -882,4 +934,108 @@ pub(crate) fn write(
         },
     );
     written
+}
+
+#[cfg(test)]
+mod test {
+    use pretty_assertions::assert_eq;
+    use sl_lsl_runtime::vm::prim::{AttachedSound, Prim};
+    use sl_proto::{Object, RegionLocalObjectId, SoundFlags};
+    use sl_types::key::{AgentKey, ObjectKey};
+    use sl_types::lsl::Vector;
+
+    use super::{sound_changed_silently, write_sound};
+    use crate::relays::ScriptSounds;
+
+    /// The origin.
+    const ZERO: Vector = Vector {
+        x: 0.0,
+        y: 0.0,
+        z: 0.0,
+    };
+
+    /// A box nothing has sounded from.
+    fn record() -> Object {
+        crate::world::box_prim(
+            RegionLocalObjectId(1),
+            ObjectKey::from(uuid::Uuid::from_u128(0x10)),
+            AgentKey::from(uuid::Uuid::from_u128(0x1)),
+            ZERO,
+            ZERO,
+        )
+    }
+
+    /// The box's prim after `llStopSound`, its queueing switch as given.
+    fn stopped(queueing: bool) -> Prim {
+        let mut prim = Prim::new_box("box", "");
+        prim.sound.stopped = true;
+        prim.sound.queueing = queueing;
+        prim
+    }
+
+    /// `record` with `prim`'s sound written as `told` writes it.
+    fn written(record: &Object, prim: &Prim, told: ScriptSounds) -> Object {
+        let mut object = record.clone();
+        write_sound(&mut object, record, prim, told);
+        object
+    }
+
+    /// A stop stays on the prim with the queueing switch on Second Life;
+    /// OpenSim states the stop alone and gives the prim its 100 m.
+    #[test]
+    fn a_stop_is_stated_on_the_prim_as_each_grid_states_it() {
+        let second_life = written(&record(), &stopped(true), ScriptSounds::Messages);
+        assert_eq!(
+            second_life.sound_flags,
+            SoundFlags::STOP | SoundFlags::QUEUE
+        );
+        assert!(second_life.sound_radius.abs() < f32::EPSILON);
+        let opensim = written(&record(), &stopped(true), ScriptSounds::OnThePrim);
+        assert_eq!(opensim.sound_flags, SoundFlags::STOP);
+        assert!((opensim.sound_radius - crate::relays::OPENSIM_SOUND_RANGE_M).abs() < f32::EPSILON);
+    }
+
+    /// OpenSim changes a loop's volume and the prim's radius without an
+    /// update, and states a stop; Second Life states every change.
+    #[test]
+    fn opensim_changes_a_volume_and_a_radius_unannounced() {
+        let mut looping = Prim::new_box("box", "");
+        looping.sound.playing = Some(AttachedSound {
+            sound: uuid::Uuid::from_u128(0x50).to_string(),
+            volume: 0.5,
+            looped: true,
+            master: false,
+            slave: false,
+        });
+        let before = written(&record(), &looping, ScriptSounds::OnThePrim);
+        let mut quieter = looping.clone();
+        if let Some(playing) = quieter.sound.playing.as_mut() {
+            playing.volume = 0.25;
+        }
+        let after = written(&before, &quieter, ScriptSounds::OnThePrim);
+        assert!(sound_changed_silently(
+            &before,
+            &after,
+            ScriptSounds::OnThePrim
+        ));
+        assert!(!sound_changed_silently(
+            &before,
+            &after,
+            ScriptSounds::Messages
+        ));
+        let mut wider = looping.clone();
+        wider.sound.radius = 5.0;
+        let after = written(&before, &wider, ScriptSounds::OnThePrim);
+        assert!(sound_changed_silently(
+            &before,
+            &after,
+            ScriptSounds::OnThePrim
+        ));
+        let after = written(&before, &stopped(false), ScriptSounds::OnThePrim);
+        assert!(!sound_changed_silently(
+            &before,
+            &after,
+            ScriptSounds::OnThePrim
+        ));
+    }
 }

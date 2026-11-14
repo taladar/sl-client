@@ -20,7 +20,9 @@ Two uses, and the second is the more valuable one.
 The first is internal: scripted content is what makes a test grid a
 *grid*, and nine conformance cases are live-grid-only today purely
 because the fake grid cannot run a script
-([[test-fake-grid-lsl-offline-cases]]).
+([[test-fake-grid-lsl-offline-cases]]). (Since 2026-11-14 they run offline on
+both flavours, and so do the script legs of six censuses; only
+`object-touch-grab`'s physical prim waits, for a grab's force.)
 
 The second is that an offline, deterministic, in-process grid that runs
 a given set of scripts and asserts what they do is **a regression-test

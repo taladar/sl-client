@@ -46,6 +46,35 @@ pub const OPENSIM_GAZE_RANGE_M: f32 = 10.0;
 /// (`SoundModule.MaxDistance`).
 pub const OPENSIM_SOUND_RANGE_M: f32 = 100.0;
 
+/// How far from its prim Second Life sends a script's triggered sound, in
+/// metres: heard at 36 m and not at 121 m (`effects-sounds`); not measured
+/// between, and taken to be OpenSim's.
+pub const SECOND_LIFE_SCRIPT_TRIGGER_RANGE_M: f32 = 100.0;
+
+/// How a grid tells the viewers of a script's sounds
+/// ([`RelayPolicy::script_sounds`]; the `effects-sounds` conformance case,
+/// `book/src/gridspec/avatars.md` § A script's sounds).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScriptSounds {
+    /// A loop, a stop and a change of volume each in a message of its own
+    /// (`AttachedSound`, `AttachedSoundGainChange`) beside the prim's full
+    /// update, which states every change of the prim's sound — a stop and
+    /// the queueing switch too, and a played sound ending a stop; a slave's
+    /// played sound flagged pending; a triggered sound naming no parent and
+    /// sent within [`SECOND_LIFE_SCRIPT_TRIGGER_RANGE_M`]; a preload from the
+    /// owner, to everybody: Second Life.
+    Messages,
+    /// `SoundModule`'s: a loop and a stop stated by the prim's update alone,
+    /// a change of volume by an `AttachedSoundGainChange` alone; the
+    /// queueing switch, the radius, the volume and a played sound's clearing
+    /// of a stop changed on the prim without an update; a prim with no
+    /// radius given [`OPENSIM_SOUND_RANGE_M`] once it sounds; a triggered
+    /// sound naming the prim's root as its parent and sent within the prim's
+    /// radius, a limited one scaled down by distance; a preload from the prim
+    /// itself, within twice the radius: OpenSim.
+    OnThePrim,
+}
+
 /// How a grid passes a viewer's effects and sounds on
 /// ([`ImitatedGrid::relay_policy`](crate::ImitatedGrid::relay_policy)).
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -63,6 +92,8 @@ pub struct RelayPolicy {
     /// Whether a viewer's sound names the sender as its `ParentID` too,
     /// rather than nobody.
     pub sound_names_a_parent: bool,
+    /// How a script's sounds are told.
+    pub script_sounds: ScriptSounds,
 }
 
 /// What a grid does to the effects it passes on ([`RelayPolicy::effects`]).
@@ -92,6 +123,11 @@ pub struct EffectsSent {
     pub at: Vector,
     /// The effects, already as the grid passes them on.
     pub effects: Vec<ViewerEffect>,
+}
+
+/// How far apart `left` and `right` are, in metres.
+pub(crate) fn distance(left: &Vector, right: &Vector) -> f32 {
+    distance_squared(left, right).sqrt()
 }
 
 /// The square of the distance between two points.

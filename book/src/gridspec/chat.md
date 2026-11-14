@@ -82,8 +82,11 @@ instant messages become, is [LSL scripts][lsl-comms].
 
 [lsl-comms]: lsl.md#chat-listens-dialogs-and-link-messages
 
-The probe prim stands beside B; its owner A is the one that moves away. Not
-yet asked of the fake grid (`test-fake-grid-lsl-offline-cases`).
+The probe prim stands beside B; its owner A is the one that moves away. Both
+fake flavours are held to the table on every test run: OpenSim's flavour
+states a script's line as its `ChatModule` does (`ChatPolicy::object_lines`),
+the shout and the region say without an owner, the owner-say from the prim
+at the middle of the region, and every line cut at 1000 characters.
 
 | behaviour | Second Life | OpenSim |
 | --- | --- | --- |
@@ -167,9 +170,10 @@ while away. No answer changed between two runs.
 
 The fake grid passes instant messages on as each flavour's live grid does
 (`sl-fake-grid`'s `messages` module), and both fake flavours are held to the
-census on every test run — but for a script's messages, which no offline leg
-asks of it yet (`test-fake-grid-lsl-offline-cases`), and the mute list, which it
-does not keep (`server-fake-grid-mute-list`). How long Second Life's suspension
+census on every test run — a script's messages included, stated and kept for
+an avatar that is away as each grid states and keeps them
+(`ImPolicy::script_message`) — but for the mute list, which it does not keep
+(`server-fake-grid-mute-list`). How long Second Life's suspension
 after a burst lasts is not measured; the fake grid's lasts a second.
 
 ### What a message says of itself

@@ -44,9 +44,7 @@
 //! a decline the Trash. The default reference sends nothing for an agent's
 //! offer, which the unanswered leg measures. What each live grid answered is
 //! stated as a [`Measured`] and written up in `book/src/gridspec/inventory.md`
-//! § Giving; every run is held to it. The fake grid's two flavours are held to
-//! it too but for the object gives, which they skip: the fake grid runs no
-//! scripts (`FAKE_EXEMPT`).
+//! § Giving; every run is held to it, the fake grid's two flavours included.
 //!
 //! `2av`, live and fake grids.
 
@@ -77,8 +75,13 @@ use crate::measured::Measured;
 use crate::metrics::Metrics;
 use crate::registry::{GridTest, TestFuture};
 use crate::support::{
-    REGION_TIMEOUT, is_opensim, settle_scene, settle_scene_observing, wait_for_own_new_object,
+    REGION_TIMEOUT, is_opensim, settle_scene, settle_scene_observing, settle_scene_with_avatar,
+    wait_for_own_new_object,
 };
+
+/// How far east of A a fake grid's cube is rezzed, in metres: well inside the
+/// range of A's say, which the probe listens for.
+const FAKE_CUBE_AWAY_M: f32 = 2.0;
 
 /// Where the measurements below are written down.
 const SOURCE: &str = "book/src/gridspec/inventory.md § Giving (inventory-offers, 2026-10-22)";
@@ -88,6 +91,11 @@ const WINDOW: Duration = Duration::from_secs(6);
 
 /// [`WINDOW`] on a fake grid, which answers at once.
 const FAKE_WINDOW: Duration = Duration::from_secs(2);
+
+/// The least an object's give is listened to after its offer: the probe says
+/// its request back after the give's sleep, 2 s on Second Life and 3 s on
+/// OpenSim, which outlasts [`FAKE_WINDOW`].
+const OBJECT_WINDOW: Duration = Duration::from_secs(4);
 
 /// How long an offer may take to reach the recipient.
 const OFFER_TIMEOUT: Duration = Duration::from_secs(30);
@@ -846,21 +854,6 @@ const MEASURED: &[(&str, Measured<Answer>)] = &[
     ("reverse_told_b", both(Answer::Text("nothing"))),
 ];
 
-/// The metrics a fake flavour is not held to, by prefix, each with why.
-const FAKE_EXEMPT: &[(&str, &str)] = &[("object_", "the fake grid runs no scripts")];
-
-/// Why `grid` is not held to the metric `key`, if it is a fake flavour and
-/// [`FAKE_EXEMPT`] names the metric.
-fn fake_exemption(grid: Grid, key: &str) -> Option<&'static str> {
-    if !grid.is_fake() {
-        return None;
-    }
-    FAKE_EXEMPT
-        .iter()
-        .find(|(prefix, _why)| key.starts_with(prefix))
-        .map(|(_prefix, why)| *why)
-}
-
 /// The probe: gives what its owner names on [`PROBE_CHANNEL`] — `give|<key>`
 /// the notecard it holds, `list|<key>|<folder>` the notecard in a folder —
 /// and says each request back.
@@ -937,12 +930,7 @@ impl GridTest for InventoryOffers {
             let mut metrics = Metrics::new();
             let outcome = census(ctx, &mut metrics).await;
             ctx.metrics().merge(metrics.clone());
-            let held: Vec<(&str, Measured<Answer>)> = MEASURED
-                .iter()
-                .filter(|(key, _measured)| fake_exemption(grid, key).is_none())
-                .copied()
-                .collect();
-            outcome.and_then(|()| hold_to_measured(grid, &metrics, &held, SOURCE))
+            outcome.and_then(|()| hold_to_measured(grid, &metrics, MEASURED, SOURCE))
         })
     }
 }
@@ -1058,6 +1046,8 @@ impl Scene {
             }
         }
         if !self.region.is_empty() {
+            // A SLurl writes a space in the name as `%20`.
+            out = out.replace(&self.region.replace(' ', "%20"), "<region>");
             out = out.replace(&self.region, "<region>");
         }
         out = without_positions(&out);
@@ -2131,11 +2121,25 @@ async fn census(ctx: &mut TestContext, metrics: &mut Metrics) -> Result<(), Test
     }
     let (seen_b, _anchor) =
         settle_scene(b, grid, build_point.clone(), SETTLE_WINDOW, SETTLE_IDLE).await?;
-    let (seen_a, anchor) =
-        settle_scene(a, grid, build_point.clone(), SETTLE_WINDOW, SETTLE_IDLE).await?;
-    let anchor = anchor.ok_or_else(|| {
-        TestFailure::Assertion("the arrival streamed nothing to place a cube against".to_owned())
-    })?;
+    let settled_a =
+        settle_scene_with_avatar(a, grid, build_point.clone(), SETTLE_WINDOW, SETTLE_IDLE).await?;
+    let seen_a = settled_a.seen;
+    // A fake grid's anchor is a fixture of its catalogue, out of the range
+    // of A's say from where A arrives, so the probe would never hear its
+    // owner: there the cube goes beside A.
+    let anchor = settled_a
+        .avatar
+        .filter(|_avatar| grid.is_fake())
+        .map(|avatar| Vector {
+            x: avatar.x + FAKE_CUBE_AWAY_M,
+            ..avatar
+        })
+        .or(settled_a.anchor)
+        .ok_or_else(|| {
+            TestFailure::Assertion(
+                "the arrival streamed nothing to place a cube against".to_owned(),
+            )
+        })?;
     let started = Instant::now();
     while [FID2, FI2]
         .iter()
@@ -2187,9 +2191,7 @@ async fn census(ctx: &mut TestContext, metrics: &mut Metrics) -> Result<(), Test
 async fn legs(offers: &mut Offers<'_>, metrics: &mut Metrics) -> Result<(), TestFailure> {
     agent_gives(offers, metrics).await?;
     offline(offers, metrics).await?;
-    if !offers.grid.is_fake() {
-        object_gives(offers, metrics).await?;
-    }
+    object_gives(offers, metrics).await?;
     no_copy_object(offers, metrics).await
 }
 
@@ -2551,7 +2553,9 @@ async fn object_give(
             Offers::offer_in(got, &wanted).is_some()
         })
         .await?;
-    let (late_a, late_b) = offers.hear(offers.window, receiver, |_got| false).await?;
+    let (late_a, late_b) = offers
+        .hear(offers.window.max(OBJECT_WINDOW), receiver, |_got| false)
+        .await?;
     got_a.merge(late_a);
     got_b.merge(late_b);
     offers.name_copies(receiver, looked_for).await?;

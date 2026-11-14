@@ -27,7 +27,7 @@
 //!    control set and cleared.
 //! 7. **The reset** the reference sends with its *Stop animations* (a stop of
 //!    the nil id).
-//! 8. **A script's animation** (live grids): a probe in a cube asks for
+//! 8. **A script's animation**: a probe in a cube asks for
 //!    `PERMISSION_TRIGGER_ANIMATION`, starts and stops `dance2`, has it stopped
 //!    by the avatar instead, and is deleted while it plays.
 //!
@@ -39,8 +39,8 @@
 //! What each live grid answered is stated as a [`Measured`] and written up in
 //! `book/src/gridspec/avatars.md` § Animations; every run is held to it.
 //!
-//! `2av`, `[both]`, legs 1 to 7 offline on both fake flavours, A's own column
-//! and B's both held there: only the script's leg is live alone.
+//! `2av`, `[both]`, and both fake flavours, A's own column and B's both held
+//! there but for the one answer an overrider gives (`MEASURED_LIVE`).
 
 use std::collections::{BTreeMap, HashSet};
 use std::time::{Duration, Instant};
@@ -594,17 +594,18 @@ const MEASURED_SEEN: &[(&str, Measured<Answer>)] = &[
     ),
 ];
 
-/// What each grid was measured to state of a script's animation, and the one
-/// answer of B's that a set of one entry cannot give: held on the live grids
-/// only. A fake grid runs no script, and its avatar wears no overrider, so
-/// its idle set is `stand` alone — whose one source is both "one per entry"
-/// and "only the first entry's". Second Life's answer came from an
-/// overrider's set of several.
-const MEASURED_LIVE: &[(&str, Measured<Answer>)] = &[
-    (
-        "idle_seen_sources",
-        each(Answer::Text("only the first entry's"), Answer::Text("none")),
-    ),
+/// The one answer of B's that a set of one entry cannot give: held on the
+/// live grids only. A fake grid's avatar wears no overrider, so its idle set
+/// is `stand` alone — whose one source is both "one per entry" and "only the
+/// first entry's". Second Life's answer came from an overrider's set of
+/// several.
+const MEASURED_LIVE: &[(&str, Measured<Answer>)] = &[(
+    "idle_seen_sources",
+    each(Answer::Text("only the first entry's"), Answer::Text("none")),
+)];
+
+/// What each grid was measured to state of a script's animation.
+const MEASURED_SCRIPTED: &[(&str, Measured<Answer>)] = &[
     ("cube_deleted_own", both(Answer::Text("nothing"))),
     (
         "cube_deleted_own_restated",
@@ -816,6 +817,7 @@ impl GridTest for Animations {
                 .and(cleanup)
                 .and_then(|()| hold_to_measured(grid, &metrics, MEASURED, SOURCE))
                 .and_then(|()| hold_to_measured(grid, &metrics, MEASURED_SEEN, SOURCE))
+                .and_then(|()| hold_to_measured(grid, &metrics, MEASURED_SCRIPTED, SOURCE))
                 .and_then(|()| {
                     if grid.is_fake() {
                         Ok(())
@@ -1503,10 +1505,6 @@ async fn census(
     viewer_legs(&mut census, metrics, one_shot).await?;
     metrics.set("physical_events_own", describe_physical(&census.own));
     metrics.set("physical_events_seen", describe_physical(&census.seen));
-    if grid.is_fake() {
-        // Nothing runs a script here.
-        return Ok(());
-    }
     script_legs(&mut census, trash, residue, metrics, &standing).await
 }
 

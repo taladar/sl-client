@@ -2,7 +2,7 @@
 id: test-fake-grid-lsl-offline-cases
 title: Move the script and chat conformance cases offline
 topic: test
-status: ready
+status: done
 origin: LSL-on-the-fake-grid audit (2026-09-20)
 points: 3
 blocked_by: [server-fake-grid-scripted-scenario]
@@ -93,3 +93,43 @@ The `scripts` scene (`fixtures::scripts_scene`) holds a prim for most of the
 cases above — a dialog prim, a touch prim, a listener, a vendor raising
 `money` — and `scripts-avatars` a scripted avatar that answers them, so a
 case can log in to it rather than stand up a fixture of its own.
+
+## Done (2026-11-14)
+
+All nine cases run offline on both fake flavours but `money-transfer`, which
+stays Second-Life-flavoured (`SINGLE_FLAVOUR`: OpenSim's money module drops
+every transfer), and every census leg that waited for a script now runs:
+
+- `script-upload` and `script-running` needed nothing but their fake grids
+  declared.
+- `script-dialog` starts in a fourth harness region, `fake::SCRIPTS_REGION`
+  (the scripts scene, ten regions north), touches its dialog prim, answers the
+  menu and hears the script say who chose what.
+- `script-permissions` brings its own fixture on a fake grid, since a script
+  asks only its owner for `DEBIT`: a cube whose script asks for it as it
+  starts and tells its owner what it was granted.
+- `object-touch-grab`'s physical leg stays live: a grab's force is
+  [[server-lsl-lib-physics-vehicles]]'s.
+- `instant-messages`: the fake grid states a script's message as each grid
+  does (`ImPolicy::script_message`: place zero and no time on Second Life,
+  where the prim stands, the time and estate 101 on OpenSim, a
+  `Region/x/y/z` bucket on both) and keeps one for an avatar that is away
+  (`messages::keep_script_message`). The census's capability record now
+  reads a place bucket by its content, not its length (15 bytes was
+  `Mauve/52/62/22`).
+- `inventory-offers`: an object's gift is filed as each grid files it
+  (`GiftPolicy::object_filing`, `gifts::object_gift`, `object_offered`,
+  `object_answered`): on the accept in the folder it names on Second Life,
+  at the offer on OpenSim with a decline moved to the Trash. The fake cube is
+  rezzed beside A (the catalogue's first prim is 21.5 m from the arrival, past
+  a say), the object legs listen past the give's 2–3 s sleep, and a SLurl's
+  `%20` is scrubbed.
+
+Four more censuses skipped their script legs on a fake grid for the same
+reason, and now run them: `animations` (as it was), `local-chat` (OpenSim's
+`ChatModule` rules, `ChatPolicy::object_lines`; `llRegionSayTo` on the debug
+channel now says nothing on Second Life either), `avatar-render-info`
+(attachment resources count a worn script's URLs) and `effects-sounds` (a
+script's sounds told as each grid tells them, `RelayPolicy::script_sounds`;
+only the barred-parcel leg, which needs a `sound_location` fixture, stays
+live).

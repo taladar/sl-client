@@ -53,7 +53,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-use bevy_ecs::change_detection::{DetectChanges as _, Tick};
+use bevy_ecs::change_detection::{DetectChanges as _, DetectChangesMut as _, Tick};
 use bevy_ecs::component::Component;
 use bevy_ecs::entity::Entity;
 use bevy_ecs::world::{Mut, Ref, World};
@@ -1086,6 +1086,15 @@ impl<'store> ObjectMut<'store> {
             seq,
             filed,
         }
+    }
+}
+
+impl ObjectMut<'_> {
+    /// The prim, to change without the change counting as a write
+    /// ([`ObjectStore::take_written`]): what a grid changes on a prim and
+    /// tells no viewer of until something else is sent of it.
+    pub(crate) fn quietly(&mut self) -> &mut Object {
+        &mut self.body.bypass_change_detection().0
     }
 }
 
