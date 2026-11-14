@@ -32,6 +32,10 @@ use sl_viewer_kit::coords::bevy_to_sl_vec;
 use sl_viewer_settings::ViewerSettings;
 use sl_viewer_world_api::{ViewerCamera, WorldPhase};
 
+use crate::interest_cadence::{
+    InterestCadence, InterestStreamDiag, advance_interest_cadence, log_interest_cadence,
+};
+
 /// The persisted-settings section the draw-distance setting lives under.
 const RENDER_SECTION: &[&str] = &["render"];
 
@@ -157,6 +161,9 @@ impl Plugin for SessionDriverPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ViewerSession>()
             .init_resource::<OfflineDrain>()
+            // `SL_VIEWER_INTEREST_CADENCE` picks how often the interest camera
+            // is reported; unset, it is the ~45 Hz default.
+            .insert_resource(InterestCadence::from_env())
             // The process's signal flag, unless the host gave this App its own.
             .init_resource::<TerminationFlag>()
             // The viewer inserts the real one from its command line; this is
@@ -178,7 +185,10 @@ impl Plugin for SessionDriverPlugin {
                     // frame's pose: after the camera, or every report describes
                     // where the camera was a frame ago (a whole report interval
                     // at its ~45 Hz cadence).
-                    report_camera_interest.after(WorldPhase::CameraPositioned),
+                    report_camera_interest
+                        .after(WorldPhase::CameraPositioned)
+                        .after(advance_interest_cadence),
+                    advance_interest_cadence,
                     report_agent_viewport,
                     // Quit handling: request a clean logout, then force the exit
                     // once the grace period lapses. `Ctrl+Q` is not a system of
@@ -197,6 +207,10 @@ impl Plugin for SessionDriverPlugin {
             .add_systems(Last, save_settings_on_exit);
         if self.repeat_animation {
             app.add_systems(Update, repeat_debug_animation);
+        }
+        if crate::interest_cadence::log_enabled() {
+            app.init_resource::<InterestStreamDiag>()
+                .add_systems(Update, log_interest_cadence.after(report_camera_interest));
         }
     }
 }
@@ -252,33 +266,8 @@ pub fn repeat_debug_animation(
     }
 }
 
-/// The shortest interval, in seconds, between interest-camera `AgentUpdate`s while
-/// the view is moving (≈45 Hz). The simulator paces the interest-list object /
-/// avatar update stream off the agent's `AgentUpdate` cadence, so a moving vehicle
-/// (or any moving object) only renders smoothly when the camera is reported near
-/// the display rate — the reference viewer sends `AgentUpdate` at up to
-/// `MAX_AGENT_UPDATES_PER_SECOND` (125, `llviewermessage.cpp`) whenever the camera
-/// or controls change. The earlier 0.5 s (2 Hz) reporting starved the stream: the
-/// sim streamed a driven kart at ~14 Hz, so extrapolation between those sparse
-/// samples showed as visible jerk even going straight
-/// ([[viewer-physical-object-motion-not-smooth]]). Capped at ~45 Hz (the sim's own
-/// physics rate — sending faster cannot yield fresher object data). A **still**
-/// view sends nothing here and falls back to the 1 Hz keep-alive `AgentUpdate`.
-const CAMERA_INTEREST_MIN_PERIOD_SECS: f32 = 1.0 / 45.0;
-
-/// The camera must move at least this far (metres) since the last interest report
-/// before another is sent within the min period — so a static view relies on the
-/// keep-alive rather than spamming identical viewpoints, mirroring the reference
-/// viewer's send-on-significant-change behaviour.
-const CAMERA_INTEREST_MOVE_EPS_M: f32 = 0.02;
-
-/// The camera's look axis must change by at least this (one minus the dot product
-/// of successive forward vectors, ~2.6°) before another interest report is sent
-/// within the min period, the rotation counterpart of [`CAMERA_INTEREST_MOVE_EPS_M`].
-const CAMERA_INTEREST_LOOK_EPS: f32 = 1.0e-3;
-
 /// Report the fly-camera's world viewpoint to the simulator as the agent's
-/// interest camera, throttled to `CAMERA_INTEREST_INTERVAL_SECS` (R22).
+/// interest camera, at the [`InterestCadence`] in force (R22).
 ///
 /// The simulator builds the agent's interest list — which objects and avatars it
 /// streams as full updates — around this viewpoint. Left at its
@@ -295,15 +284,25 @@ const CAMERA_INTEREST_LOOK_EPS: f32 = 1.0e-3;
 /// Reads the camera's **`Transform`**, not its `GlobalTransform`: the camera is a
 /// top-level entity (spawned with no parent), so its `Transform` is its world pose,
 /// and `GlobalTransform` is only recomputed by propagation in `PostUpdate` — a
-/// frame old by the time this reads it. At the ~45 Hz cadence below that frame is a
+/// frame old by the time this reads it. At the ~45 Hz default cadence that frame is a
 /// whole report interval, so the sim's interest list would trail the viewpoint by
 /// one report the entire time the camera is moving. Scheduled
 /// `.after(WorldPhase::CameraPositioned)` so the pose it reads is this frame's.
+///
+/// How often it reports is the [`InterestCadence`]: by default up to ~45 Hz
+/// while the view moves, and nothing while it is still (the 1 Hz keep-alive
+/// `AgentUpdate` carries it then). The reference viewer sends `AgentUpdate` at up
+/// to `MAX_AGENT_UPDATES_PER_SECOND` (125, `llviewermessage.cpp`) whenever the
+/// camera or controls change. The earlier 0.5 s (2 Hz) reporting was well under
+/// that; it was raised while chasing a driven kart's jerky motion
+/// ([[viewer-physical-object-motion-not-smooth]]), and what the cadence actually
+/// changes is measured with the presets in [`crate::interest_cadence`].
 pub fn report_camera_interest(
     time: Res<Time>,
     mut since_last: Local<f32>,
     mut last_view: Local<Option<(Vec3, Vec3)>>,
     session: Res<ViewerSession>,
+    mut cadence: ResMut<InterestCadence>,
     camera: Query<&Transform, With<ViewerCamera>>,
     mut commands: MessageWriter<SlCommand>,
 ) {
@@ -315,12 +314,7 @@ pub fn report_camera_interest(
     if !session.agent_in_world {
         return;
     }
-    // Rate-limit to ~45 Hz: sending faster than the sim's physics rate cannot yield
-    // fresher object data, and it matches the reference's high-but-bounded cadence.
     *since_last += time.delta_secs();
-    if *since_last < CAMERA_INTEREST_MIN_PERIOD_SECS {
-        return;
-    }
     let Ok(transform) = camera.single() else {
         return;
     };
@@ -330,18 +324,18 @@ pub fn report_camera_interest(
     // Per-component `f32` maths keeps clear of the workspace
     // `arithmetic_side_effects` lint, which `Vec3`'s `+` operator trips.
     let forward = transform.forward().as_vec3();
-    // Only report when the view actually moved since the last send; a static view
-    // relies on the 1 Hz keep-alive `AgentUpdate` instead of re-sending an identical
-    // viewpoint every 22 ms (the reference viewer likewise sends on significant
-    // change). While driving, the camera moves every frame, so this fires at the full
-    // ~45 Hz cap — which is what keeps the sim's interest-list object stream dense.
-    let moved = last_view.is_none_or(|(last_eye, last_forward)| {
-        eye.distance(last_eye) > CAMERA_INTEREST_MOVE_EPS_M
-            || forward.dot(last_forward) < 1.0 - CAMERA_INTEREST_LOOK_EPS
-    });
-    if !moved {
+    // Only report when the rate limit allows and the view actually moved since
+    // the last send; a static view relies on the 1 Hz keep-alive `AgentUpdate`
+    // instead of re-sending an identical viewpoint (the reference viewer likewise
+    // sends on significant change). While driving, the camera moves every frame,
+    // so this fires at the full cap.
+    if !cadence
+        .policy()
+        .should_report(*since_last, *last_view, eye, forward)
+    {
         return;
     }
+    cadence.record_report();
     *since_last = 0.0;
     *last_view = Some((eye, forward));
     let target = Vec3::new(eye.x + forward.x, eye.y + forward.y, eye.z + forward.z);
@@ -922,6 +916,7 @@ mod tests {
         app.add_message::<SlCommand>()
             .init_resource::<Time>()
             .init_resource::<Reported>()
+            .init_resource::<super::InterestCadence>()
             .insert_resource(session)
             .add_systems(Update, (report_camera_interest, collect).chain());
 
