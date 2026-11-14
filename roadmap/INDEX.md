@@ -14,9 +14,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ideas | 130 |
 | ready | 330 |
 | blocked | 36 |
-| in-progress | 6 |
+| in-progress | 5 |
 | bugs | 23 |
-| done | 1574 |
+| done | 1575 |
 | deferred | 30 |
 | wont-do | 24 |
 | **total** | **2153** |
@@ -1236,15 +1236,13 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-voice`](blocked/gridspec-voice.md) — Voice provisioning and
   signalling on each grid (blocked by `viewer-voice-audio`)
 
-## in-progress (6)
+## in-progress (5)
 
 ### viewer
 
 - [`viewer-agentupdate-cadence-effects`](in-progress/viewer-agentupdate-cadence-effects.md)
   — Explore what the raised AgentUpdate/camera-interest cadence buys (and how
   the sim reacts)
-- [`viewer-perf-pbr-shadow-cluster-rez`](in-progress/viewer-perf-pbr-shadow-cluster-rez.md)
-  — Tune main-view shadow specialization + clustered lighting during rez
 - [`viewer-ui-text-caret-grapheme-motion`](in-progress/viewer-ui-text-caret-grapheme-motion.md)
   — Upstream issue — parley caret motion steps one codepoint, not one grapheme
 - [`viewer-ui-text-parley-pr-backdelete`](in-progress/viewer-ui-text-parley-pr-backdelete.md)
@@ -1318,7 +1316,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1574)
+## done (1575)
 
 ### protocol
 
@@ -2935,6 +2933,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Coalesce repeated object updates in the pending queue
 - [`viewer-perf-parcel-borders-rebuild-spread`](done/viewer-perf-parcel-borders-rebuild-spread.md)
   — Parcel borders — rebuild only the changed region, spread new regions
+- [`viewer-perf-pbr-shadow-cluster-rez`](done/viewer-perf-pbr-shadow-cluster-rez.md)
+  — Tune main-view shadow specialization + clustered lighting during rez
 - [`viewer-perf-pick-warm-set-scales-with-crowd`](done/viewer-perf-pick-warm-set-scales-with-crowd.md)
   — collect_pick_warm_set scales with the crowd (touches un-pickable copies)
 - [`viewer-perf-pipeline-specialization-stalls`](done/viewer-perf-pipeline-specialization-stalls.md)
