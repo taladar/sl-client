@@ -535,10 +535,11 @@ mod tests {
     }
 
     #[test]
-    fn the_quiescence_probe_needs_a_region() -> Result<(), TestError> {
+    fn the_quiescence_probe_needs_a_region_and_the_own_avatar() -> Result<(), TestError> {
         let mut app = probe_world();
         let before = read_quiescence(app.world_mut());
         assert!(!before.region_up);
+        assert!(!before.agent_present);
         assert!(!before.is_quiet(), "nothing is quiet before a region");
         assert_eq!(
             before.outstanding,
@@ -562,7 +563,23 @@ mod tests {
             },
             SlCurrentRegion,
         ));
-        assert!(read_quiescence(app.world_mut()).is_quiet());
+        let handshaken = read_quiescence(app.world_mut());
+        assert!(handshaken.region_up);
+        assert!(
+            !handshaken.is_quiet(),
+            "nothing is outstanding before the region's first object update, \
+             which is not settled: {handshaken:?}"
+        );
+        app.world_mut().insert_resource(AgentRegionPosition {
+            position: Some(Vector {
+                x: 128.0,
+                y: 128.0,
+                z: 25.0,
+            }),
+        });
+        let arrived = read_quiescence(app.world_mut());
+        assert!(arrived.agent_present);
+        assert!(arrived.is_quiet(), "{arrived:?}");
         Ok(())
     }
 

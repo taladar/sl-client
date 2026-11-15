@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 36 |
 | in-progress | 4 |
 | bugs | 20 |
-| done | 1580 |
+| done | 1581 |
 | deferred | 30 |
 | wont-do | 24 |
-| **total** | **2155** |
+| **total** | **2156** |
 
 ## ideas (131)
 
@@ -1287,8 +1287,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### test
 
-- [`test-automation-quiet-before-own-avatar-arrives`](bugs/test-automation-quiet-before-own-avatar-arrives.md)
-  — The automation's Quiet holds before the own avatar has arrived
+- [`test-automation-quiet-after-teleport-reads-old-position`](bugs/test-automation-quiet-after-teleport-reads-old-position.md)
+  — After a teleport or crossing, Quiet and the agent probe still hold the old
+  region's position
 - [`test-conformance-cancelled-case-leaves-its-prims`](bugs/test-conformance-cancelled-case-leaves-its-prims.md)
   — A conformance case cancelled by its timeout or a panic leaves its rezzed
   prims in the region
@@ -1307,7 +1308,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1580)
+## done (1581)
 
 ### protocol
 
@@ -3977,6 +3978,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `test-fake-grid-determinism` (done))
 - [`test-audit-fake-grid-session-teardown`](done/test-audit-fake-grid-session-teardown.md)
   — sl-fake-grid never prunes sessions, and its tasks outlive shutdown
+- [`test-automation-quiet-before-own-avatar-arrives`](done/test-automation-quiet-before-own-avatar-arrives.md)
+  — The automation's Quiet holds before the own avatar has arrived
 - [`test-avatar-notes`](done/test-avatar-notes-write-and-read-avatar-notes.md) —
   write and read avatar notes
 - [`test-avatar-picker`](done/test-avatar-picker-avatar-picker-request.md) —

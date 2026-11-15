@@ -465,8 +465,9 @@ fn snake_case(debug: &str) -> String {
     out
 }
 
-/// Whether the viewer has settled: the region is up, nothing the scene asked
-/// for is outstanding, and no render pipeline is compiling.
+/// Whether the viewer has settled: the region is up, the own avatar has
+/// arrived in it, nothing the scene asked for is outstanding, and no render
+/// pipeline is compiling.
 #[must_use]
 pub fn read_quiescence(world: &mut World) -> QuiescenceReadout {
     let region_up = world
@@ -479,6 +480,9 @@ pub fn read_quiescence(world: &mut World) -> QuiescenceReadout {
         .map(|reader| reader(world));
     QuiescenceReadout {
         region_up,
+        agent_present: world
+            .get_resource::<AgentRegionPosition>()
+            .is_some_and(|position| position.position.is_some()),
         outstanding: outstanding_by
             .as_ref()
             .map(|buckets| buckets.values().copied().fold(0_u64, u64::saturating_add)),
