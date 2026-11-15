@@ -20,13 +20,16 @@
 //!
 //! `SL_VIEWER_LOG_INTEREST_CADENCE` adds a once-a-second `interest_cadence` log
 //! line: the active preset, the interest reports sent, the object-update stream
-//! by message form, the busiest objects' terse-update rates, and the region's own
-//! `AgentUpdatesPerSecond` and frame rate from `SimStats`. That is the
+//! by message form, the full and compressed updates split into objects never
+//! held, objects re-sent after a kill and changes to held ones
+//! (`arrived=new/returning/changed`), the busiest objects' terse-update rates,
+//! and the region's own `AgentUpdatesPerSecond` and frame rate from
+//! `SimStats`. That is the
 //! measurement `viewer-agentupdate-cadence-effects` asks for. Whether the
 //! interest list resolves avatars faster is the existing
 //! `SL_VIEWER_LOG_AVATAR_INTEREST` census.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use bevy::prelude::*;
 use sl_client_bevy::{
@@ -270,6 +273,35 @@ impl FormCount {
     }
 }
 
+/// What the full and compressed updates of a window were: objects the session
+/// had never held, objects it held until a kill and is now sent again, and
+/// changes to objects it holds.
+///
+/// A camera that turns or moves makes the simulator kill what drops out of the
+/// agent's interest and send what comes into it, so a busier cadence can mean
+/// fresher content or the same objects killed and re-sent; `returning` is the
+/// second.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ArrivalCount {
+    /// Objects the session had not held at any point before.
+    pub new: u32,
+    /// Objects the session held until a kill earlier in the session.
+    pub returning: u32,
+    /// Objects the session held when the update came.
+    pub changed: u32,
+}
+
+/// The objects killed so far in the session, which outlives the windows so a
+/// re-sent object is told from a new one.
+///
+/// Keyed by region-local id, which a simulator could in principle hand to a
+/// different object after a kill; a re-used id would count as `returning`.
+#[derive(Debug, Clone, Default)]
+pub struct StreamHistory {
+    /// Every object a kill named.
+    killed: HashSet<(RegionHandle, RegionLocalObjectId)>,
+}
+
 /// What the object-update stream carried over one readout window.
 #[derive(Debug, Clone, Default)]
 pub struct StreamWindow {
@@ -283,13 +315,17 @@ pub struct StreamWindow {
     pub terse: FormCount,
     /// `KillObject`.
     pub kill: FormCount,
+    /// The objects the full and compressed updates named, by whether the
+    /// session held them before.
+    pub arrivals: ArrivalCount,
     /// Terse updates per object, the motion stream a moving object rides.
     terse_per_object: HashMap<(RegionHandle, RegionLocalObjectId), u32>,
 }
 
 impl StreamWindow {
-    /// Count one message of the stream.
-    pub fn record(&mut self, batch: &ObjectStreamBatch) {
+    /// Count one message of the stream, telling re-sent objects from new ones
+    /// by the session's `history` of kills, which it adds this message's to.
+    pub fn record(&mut self, batch: &ObjectStreamBatch, history: &mut StreamHistory) {
         let count = match batch.form {
             ObjectUpdateForm::Full => &mut self.full,
             ObjectUpdateForm::Compressed => &mut self.compressed,
@@ -298,13 +334,28 @@ impl StreamWindow {
             ObjectUpdateForm::Kill => &mut self.kill,
         };
         count.add(batch.entries.len());
-        if batch.form == ObjectUpdateForm::Terse {
-            for entry in &batch.entries {
-                let seen = self
-                    .terse_per_object
-                    .entry((batch.region_handle, entry.local_id))
-                    .or_insert(0);
-                *seen = seen.saturating_add(1);
+        for entry in &batch.entries {
+            let key = (batch.region_handle, entry.local_id);
+            match batch.form {
+                ObjectUpdateForm::Terse => {
+                    let seen = self.terse_per_object.entry(key).or_insert(0);
+                    *seen = seen.saturating_add(1);
+                }
+                ObjectUpdateForm::Kill => {
+                    history.killed.insert(key);
+                }
+                ObjectUpdateForm::Full | ObjectUpdateForm::Compressed => {
+                    let arrivals = &mut self.arrivals;
+                    let slot = if entry.known {
+                        &mut arrivals.changed
+                    } else if history.killed.contains(&key) {
+                        &mut arrivals.returning
+                    } else {
+                        &mut arrivals.new
+                    };
+                    *slot = slot.saturating_add(1);
+                }
+                ObjectUpdateForm::Cached => {}
             }
         }
     }
@@ -336,6 +387,8 @@ impl StreamWindow {
 pub struct InterestStreamDiag {
     /// The stream in the current window.
     window: StreamWindow,
+    /// The kills of the whole session.
+    history: StreamHistory,
     /// Seconds into the current window.
     elapsed: f32,
     /// The region's last `AgentUpdatesPerSecond`.
@@ -354,7 +407,12 @@ pub fn log_interest_cadence(
 ) {
     for event in events.read() {
         match &event.0 {
-            SlSessionEvent::ObjectStreamBatch(batch) => diag.window.record(batch),
+            SlSessionEvent::ObjectStreamBatch(batch) => {
+                let InterestStreamDiag {
+                    window, history, ..
+                } = &mut *diag;
+                window.record(batch, history);
+            }
             SlSessionEvent::SimStats(stats) => {
                 for &(id, value) in &stats.stats {
                     match id {
@@ -382,7 +440,7 @@ pub fn log_interest_cadence(
     info!(
         target: "interest_cadence",
         "cadence={}Hz reports={} terse={}/{} full={}/{} compressed={}/{} cached={}/{} \
-         kill={}/{} moving={} busiest=[{busiest}] sim_agent_updates={:?} sim_fps={:?}",
+         kill={}/{} arrived={}/{}/{} moving={} busiest=[{busiest}] sim_agent_updates={:?} sim_fps={:?}",
         cadence.active().label(),
         cadence.take_reports(),
         window.terse.messages,
@@ -395,6 +453,9 @@ pub fn log_interest_cadence(
         window.cached.entries,
         window.kill.messages,
         window.kill.entries,
+        window.arrivals.new,
+        window.arrivals.returning,
+        window.arrivals.changed,
         window.moving_objects(),
         diag.sim_agent_updates,
         diag.sim_fps,
@@ -536,8 +597,15 @@ mod tests {
         assert_eq!(cadence.take_reports(), 0);
     }
 
-    /// One stream message of `form` naming the objects `ids` in region `1`.
+    /// One stream message of `form` naming the objects `ids` in region `1`,
+    /// all of them held by the session.
     fn batch(form: ObjectUpdateForm, ids: &[u32]) -> ObjectStreamBatch {
+        batch_of(form, ids, true)
+    }
+
+    /// One stream message of `form` naming the objects `ids` in region `1`,
+    /// `known` saying whether the session held them.
+    fn batch_of(form: ObjectUpdateForm, ids: &[u32], known: bool) -> ObjectStreamBatch {
         ObjectStreamBatch {
             region_handle: RegionHandle::new(1),
             child: false,
@@ -546,7 +614,7 @@ mod tests {
                 .iter()
                 .map(|&id| ObjectStreamEntry {
                     local_id: RegionLocalObjectId::new(id),
-                    known: true,
+                    known,
                     crc: None,
                     cache_hit: None,
                 })
@@ -557,11 +625,12 @@ mod tests {
     #[test]
     fn the_window_counts_messages_and_objects_per_form() {
         let mut window = StreamWindow::default();
-        window.record(&batch(ObjectUpdateForm::Terse, &[7, 8]));
-        window.record(&batch(ObjectUpdateForm::Terse, &[7]));
-        window.record(&batch(ObjectUpdateForm::Terse, &[7, 9]));
-        window.record(&batch(ObjectUpdateForm::Full, &[3]));
-        window.record(&batch(ObjectUpdateForm::Kill, &[4, 5, 6]));
+        let mut history = StreamHistory::default();
+        window.record(&batch(ObjectUpdateForm::Terse, &[7, 8]), &mut history);
+        window.record(&batch(ObjectUpdateForm::Terse, &[7]), &mut history);
+        window.record(&batch(ObjectUpdateForm::Terse, &[7, 9]), &mut history);
+        window.record(&batch(ObjectUpdateForm::Full, &[3]), &mut history);
+        window.record(&batch(ObjectUpdateForm::Kill, &[4, 5, 6]), &mut history);
         assert_eq!(
             window.terse,
             FormCount {
@@ -591,6 +660,45 @@ mod tests {
                 (RegionLocalObjectId::new(7), 3),
                 (RegionLocalObjectId::new(8), 1)
             ]
+        );
+    }
+
+    #[test]
+    fn a_killed_object_sent_again_is_returning_not_new() {
+        let mut history = StreamHistory::default();
+        let mut first = StreamWindow::default();
+        first.record(
+            &batch_of(ObjectUpdateForm::Full, &[1, 2], false),
+            &mut history,
+        );
+        first.record(&batch(ObjectUpdateForm::Full, &[1]), &mut history);
+        first.record(&batch(ObjectUpdateForm::Kill, &[2]), &mut history);
+        assert_eq!(
+            first.arrivals,
+            ArrivalCount {
+                new: 2,
+                returning: 0,
+                changed: 1
+            }
+        );
+        // The kill outlives the window it came in: the next window still tells
+        // the re-sent object from a new one, in either update form.
+        let mut second = StreamWindow::default();
+        second.record(
+            &batch_of(ObjectUpdateForm::Compressed, &[2, 3], false),
+            &mut history,
+        );
+        second.record(
+            &batch_of(ObjectUpdateForm::Terse, &[4], false),
+            &mut history,
+        );
+        assert_eq!(
+            second.arrivals,
+            ArrivalCount {
+                new: 1,
+                returning: 1,
+                changed: 0
+            }
         );
     }
 }

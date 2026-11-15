@@ -14,12 +14,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ideas | 130 |
 | ready | 330 |
 | blocked | 36 |
-| in-progress | 5 |
-| bugs | 21 |
-| done | 1577 |
+| in-progress | 4 |
+| bugs | 22 |
+| done | 1578 |
 | deferred | 30 |
 | wont-do | 24 |
-| **total** | **2153** |
+| **total** | **2154** |
 
 ## ideas (130)
 
@@ -1236,13 +1236,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-voice`](blocked/gridspec-voice.md) — Voice provisioning and
   signalling on each grid (blocked by `viewer-voice-audio`)
 
-## in-progress (5)
+## in-progress (4)
 
 ### viewer
 
-- [`viewer-agentupdate-cadence-effects`](in-progress/viewer-agentupdate-cadence-effects.md)
-  — Explore what the raised AgentUpdate/camera-interest cadence buys (and how
-  the sim reacts)
 - [`viewer-ui-text-caret-grapheme-motion`](in-progress/viewer-ui-text-caret-grapheme-motion.md)
   — Upstream issue — parley caret motion steps one codepoint, not one grapheme
 - [`viewer-ui-text-parley-pr-backdelete`](in-progress/viewer-ui-text-parley-pr-backdelete.md)
@@ -1252,7 +1249,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-text-renderability-axis`](in-progress/viewer-ui-text-renderability-axis.md)
   — Upstream issue — font selection cannot see glyph-format renderability
 
-## bugs (21)
+## bugs (22)
 
 ### protocol
 
@@ -1293,6 +1290,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### test
 
+- [`test-automation-quiet-before-own-avatar-arrives`](bugs/test-automation-quiet-before-own-avatar-arrives.md)
+  — The automation's Quiet holds before the own avatar has arrived
 - [`test-conformance-cancelled-case-leaves-its-prims`](bugs/test-conformance-cancelled-case-leaves-its-prims.md)
   — A conformance case cancelled by its timeout or a panic leaves its rezzed
   prims in the region
@@ -1311,7 +1310,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1577)
+## done (1578)
 
 ### protocol
 
@@ -1645,6 +1644,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   About Landmark floater — full detail view
 - [`viewer-add-friend-offers-silently`](done/viewer-add-friend-offers-silently.md)
   — Add Friend sends the offer silently — no message dialog, no feedback
+- [`viewer-agentupdate-cadence-effects`](done/viewer-agentupdate-cadence-effects.md)
+  — Explore what the raised AgentUpdate/camera-interest cadence buys (and how
+  the sim reacts)
 - [`viewer-ais3-inventory-mutations-and-cof-reconverge`](done/viewer-ais3-inventory-mutations-and-cof-reconverge.md)
   — Route inventory mutations through AIS3 on SL + reconverge the COF on wear
 - [`viewer-animesh-intermittent-render`](done/viewer-animesh-intermittent-render.md)
