@@ -654,6 +654,49 @@ struct SimXferReceive {
 /// safely under a datagram's worth.
 const TRANSFER_CHUNK_SIZE: usize = 1000;
 
+/// The most bytes of encoded message (id and body, before zero coding) one
+/// object-update datagram carries: the reference's `MTUBYTES`. A simulator fills
+/// an `ObjectUpdate` with blocks only until the next one would not fit, and the
+/// reference viewer refuses outright a datagram that decodes past its 8 KiB
+/// `NET_BUFFER_SIZE`, so a region's worth of objects in one message is dropped
+/// whole. A single block larger than this still goes, alone.
+const OBJECT_UPDATE_DATAGRAM_BYTES: usize = 1200;
+
+/// How many bytes `message` encodes to: its id and body, before zero coding.
+fn encoded_len(message: &AnyMessage) -> Result<usize, WireError> {
+    let mut writer = sl_wire::Writer::new();
+    message.id().encode(&mut writer)?;
+    message.encode_body(&mut writer)?;
+    Ok(writer.into_bytes().len())
+}
+
+/// `blocks` split into the messages `build` makes of them, each holding as many
+/// blocks, in order, as fit [`OBJECT_UPDATE_DATAGRAM_BYTES`] — a block that
+/// does not fit even alone gets a message to itself. No blocks make no
+/// messages.
+fn object_update_datagrams<B: Clone>(
+    blocks: Vec<B>,
+    build: impl Fn(Vec<B>) -> AnyMessage,
+) -> Result<Vec<AnyMessage>, WireError> {
+    let header = encoded_len(&build(Vec::new()))?;
+    let mut messages = Vec::new();
+    let mut batch = Vec::new();
+    let mut batch_len = header;
+    for block in blocks {
+        let block_len = encoded_len(&build(vec![block.clone()]))?.saturating_sub(header);
+        if !batch.is_empty() && batch_len.saturating_add(block_len) > OBJECT_UPDATE_DATAGRAM_BYTES {
+            messages.push(build(core::mem::take(&mut batch)));
+            batch_len = header;
+        }
+        batch.push(block);
+        batch_len = batch_len.saturating_add(block_len);
+    }
+    if !batch.is_empty() {
+        messages.push(build(batch));
+    }
+    Ok(messages)
+}
+
 /// The server-side mirror status of one client-[`Session`](crate::Session)
 /// flow-level state machine, as pinned in [`SESSION_FLOW_COVERAGE`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -8520,7 +8563,9 @@ impl SimSession {
     /// compressed forms cannot carry. The inverse of the client's
     /// [`Event::ObjectAdded`](crate::Event::ObjectAdded) /
     /// [`Event::ObjectUpdated`](crate::Event::ObjectUpdated) decode. Sent
-    /// reliably.
+    /// reliably, split across as many datagrams as the MTU needs, as a
+    /// simulator fills each `ObjectUpdate` only until the next object would
+    /// not fit.
     ///
     /// `time_dilation` is the physics time dilation the client reads off the
     /// region-data block, `0xFFFF` meaning "real time".
@@ -8538,21 +8583,26 @@ impl SimSession {
         if self.client_addr.is_none() {
             return Err(Error::NoCircuit);
         }
-        let message = AnyMessage::ObjectUpdate(ObjectUpdate {
-            region_data: ObjectUpdateRegionDataBlock {
-                region_handle: self.region_handle.0,
-                time_dilation,
-            },
-            object_data: objects
-                .iter()
-                .map(|object| {
-                    let mut block = full_update_block(object);
-                    block.owner_id = self.ownership.owner.stated(object);
-                    block
-                })
-                .collect(),
-        });
-        self.send(&message, Reliability::Reliable, now)?;
+        let region_handle = self.region_handle.0;
+        let blocks = objects
+            .iter()
+            .map(|object| {
+                let mut block = full_update_block(object);
+                block.owner_id = self.ownership.owner.stated(object);
+                block
+            })
+            .collect();
+        for message in object_update_datagrams(blocks, |object_data| {
+            AnyMessage::ObjectUpdate(ObjectUpdate {
+                region_data: ObjectUpdateRegionDataBlock {
+                    region_handle,
+                    time_dilation,
+                },
+                object_data,
+            })
+        })? {
+            self.send(&message, Reliability::Reliable, now)?;
+        }
         Ok(())
     }
 
@@ -8562,7 +8612,8 @@ impl SimSession {
     /// The client decodes it into the same
     /// [`Event::ObjectAdded`](crate::Event::ObjectAdded) /
     /// [`Event::ObjectUpdated`](crate::Event::ObjectUpdated) as the full form.
-    /// Sent reliably.
+    /// Sent reliably, split across datagrams like
+    /// [`send_object_update`](Self::send_object_update).
     ///
     /// # Errors
     ///
@@ -8577,20 +8628,25 @@ impl SimSession {
         if self.client_addr.is_none() {
             return Err(Error::NoCircuit);
         }
-        let message = AnyMessage::ObjectUpdateCompressed(ObjectUpdateCompressed {
-            region_data: ObjectUpdateCompressedRegionDataBlock {
-                region_handle: self.region_handle.0,
-                time_dilation,
-            },
-            object_data: objects
-                .iter()
-                .map(|object| ObjectUpdateCompressedObjectDataBlock {
-                    update_flags: object.update_flags,
-                    data: crate::encode_compressed_object(object),
-                })
-                .collect(),
-        });
-        self.send(&message, Reliability::Reliable, now)?;
+        let region_handle = self.region_handle.0;
+        let blocks = objects
+            .iter()
+            .map(|object| ObjectUpdateCompressedObjectDataBlock {
+                update_flags: object.update_flags,
+                data: crate::encode_compressed_object(object),
+            })
+            .collect();
+        for message in object_update_datagrams(blocks, |object_data| {
+            AnyMessage::ObjectUpdateCompressed(ObjectUpdateCompressed {
+                region_data: ObjectUpdateCompressedRegionDataBlock {
+                    region_handle,
+                    time_dilation,
+                },
+                object_data,
+            })
+        })? {
+            self.send(&message, Reliability::Reliable, now)?;
+        }
         Ok(())
     }
 
@@ -9576,7 +9632,8 @@ impl SimSession {
     /// avatar's update additionally carries its collision plane
     /// ([`ObjectMotion::collision_plane`](crate::ObjectMotion::collision_plane)).
     /// Sent unreliably, as a simulator sends it: the next frame's update
-    /// supersedes a lost one.
+    /// supersedes a lost one. Split across datagrams like
+    /// [`send_object_update`](Self::send_object_update).
     ///
     /// # Errors
     ///
@@ -9591,20 +9648,25 @@ impl SimSession {
         if self.client_addr.is_none() {
             return Err(Error::NoCircuit);
         }
-        let message = AnyMessage::ImprovedTerseObjectUpdate(ImprovedTerseObjectUpdate {
-            region_data: ImprovedTerseObjectUpdateRegionDataBlock {
-                region_handle: self.region_handle.0,
-                time_dilation,
-            },
-            object_data: updates
-                .iter()
-                .map(|update| ImprovedTerseObjectUpdateObjectDataBlock {
-                    data: crate::object_update::encode_terse_object_data(update),
-                    texture_entry: Vec::new(),
-                })
-                .collect(),
-        });
-        self.send(&message, Reliability::Unreliable, now)?;
+        let region_handle = self.region_handle.0;
+        let blocks = updates
+            .iter()
+            .map(|update| ImprovedTerseObjectUpdateObjectDataBlock {
+                data: crate::object_update::encode_terse_object_data(update),
+                texture_entry: Vec::new(),
+            })
+            .collect();
+        for message in object_update_datagrams(blocks, |object_data| {
+            AnyMessage::ImprovedTerseObjectUpdate(ImprovedTerseObjectUpdate {
+                region_data: ImprovedTerseObjectUpdateRegionDataBlock {
+                    region_handle,
+                    time_dilation,
+                },
+                object_data,
+            })
+        })? {
+            self.send(&message, Reliability::Unreliable, now)?;
+        }
         Ok(())
     }
 

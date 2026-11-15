@@ -686,7 +686,12 @@ fn fragment(
         let light_dir = normalize(lights.directional_lights[0].direction_to_light);
         let shadow = sl_sun_shadow(pbr_input);
         let light = sky_surface_light(sky, n, light_dir);
-        let irradiance = sky_irradiance(sky, light, n);
+        let fragment = SkyFragment(
+            pbr_input.world_position.xyz,
+            pbr_input.frag_coord.xy,
+            pbr_input.is_orthographic,
+        );
+        let irradiance = sky_irradiance(sky, light, n, fragment);
         let emissive = pbr_input.material.emissive;
         let emissive_rgb = emissive.rgb * mix(1.0, view.exposure, emissive.a);
         var color: vec3<f32>;
@@ -700,11 +705,7 @@ fn fragment(
             color = sky_legacy_finish(sky, sky_pbr_base_light(
                 sky, light, colors, pbr_input.material.perceptual_roughness, n, pbr_input.V,
                 light_dir, shadow, irradiance, pbr_input.diffuse_occlusion, emissive_rgb,
-                SkyFragment(
-                    pbr_input.world_position.xyz,
-                    pbr_input.frag_coord.xy,
-                    pbr_input.is_orthographic,
-                ),
+                fragment,
             ));
             color += sl_local_lights(pbr_input);
         } else {

@@ -11,17 +11,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 130 |
+| ideas | 131 |
 | ready | 330 |
 | blocked | 36 |
 | in-progress | 4 |
-| bugs | 22 |
-| done | 1578 |
+| bugs | 21 |
+| done | 1579 |
 | deferred | 30 |
 | wont-do | 24 |
-| **total** | **2154** |
+| **total** | **2155** |
 
-## ideas (130)
+## ideas (131)
 
 ### protocol
 
@@ -82,6 +82,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Take the linkset prim limit from the region where the region states one
 - [`viewer-local-mesh`](ideas/viewer-local-mesh.md) — Local mesh — live-reload
   mesh from disk
+- [`viewer-local-probe-ambient-saturation`](ideas/viewer-local-probe-ambient-saturation.md)
+  — A face inside a placed probe takes a more saturated ambient than Firestorm
+  gives it
 - [`viewer-lsl-oracle-misses`](ideas/viewer-lsl-oracle-misses.md) — Grid compile
   errors the LSL semantic pass does not report (19 oracle misses)
 - [`viewer-lsl-preprocessor`](ideas/viewer-lsl-preprocessor.md) — LSL
@@ -1249,7 +1252,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-text-renderability-axis`](in-progress/viewer-ui-text-renderability-axis.md)
   — Upstream issue — font selection cannot see glyph-format renderability
 
-## bugs (22)
+## bugs (21)
 
 ### protocol
 
@@ -1282,9 +1285,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   its plywood
 - [`viewer-perf-steady-state-46fps-ceiling`](bugs/viewer-perf-steady-state-46fps-ceiling.md)
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
-- [`viewer-sky-irradiance-ignores-local-probes`](bugs/viewer-sky-irradiance-ignores-local-probes.md)
-  — Sky-lit faces take their probe ambient from the view's probe, never from a
-  placed probe
 - [`viewer-texture-filtering-in-linear-space`](bugs/viewer-texture-filtering-in-linear-space.md)
   — Colour textures are filtered after sRGB decoding, the reference before
 
@@ -1310,7 +1310,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1578)
+## done (1579)
 
 ### protocol
 
@@ -3326,6 +3326,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-skinned-bind-group-quits-on-rez`](done/viewer-skinned-bind-group-quits-on-rez.md)
   — A skinned draw takes the non-skinned bind group and the render handler quits
   the viewer
+- [`viewer-sky-irradiance-ignores-local-probes`](done/viewer-sky-irradiance-ignores-local-probes.md)
+  — Sky-lit faces take their probe ambient from the view's probe, never from a
+  placed probe
 - [`viewer-sky-sunset-preset-glow-divergence`](done/viewer-sky-sunset-preset-glow-divergence.md)
   — The legacy sunset sky is far brighter, with a much larger glow, than
 - [`viewer-sliced-art-seam-at-fractional-ui-scale`](done/viewer-sliced-art-seam-at-fractional-ui-scale.md)

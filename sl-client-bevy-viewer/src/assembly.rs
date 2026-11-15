@@ -766,8 +766,12 @@ impl ViewerAppBuilder {
         // stack (whose `SlFaceMaterialPlugin` the editor plugins' `FromWorld`
         // resources build against), the world fold, the build tools, and what
         // the viewer needs of the machine.
+        // A capture run is unattended, so like the cursor grab below it leaves
+        // the SpaceNavigator alone: the device is read straight off the machine,
+        // and a touch on it — or a button event — turned a pinned camera into a
+        // flycam mid-run and moved it off its subject.
         app.add_plugins(ViewerUiPlugins)
-            .add_plugins(if windowed {
+            .add_plugins(if windowed && capture.dir.is_none() {
                 ViewerInputPlugins::default()
             } else {
                 ViewerInputPlugins::without_devices()

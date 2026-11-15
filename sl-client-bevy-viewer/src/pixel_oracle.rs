@@ -234,6 +234,27 @@ impl Patch {
         }
         Some((subject_count, other_count))
     }
+
+    /// The mean colour of the patch's pixels that lie on the frame.
+    ///
+    /// Returns `None` if the patch's origin cannot be a pixel index, or if none of
+    /// its pixels lies on the frame.
+    pub(crate) fn mean(self, frame: &Frame) -> Option<Vec4> {
+        let mut pixels = Vec::new();
+        let mut count = 0.0_f32;
+        for dy in -PATCH_RADIUS..=PATCH_RADIUS {
+            for dx in -PATCH_RADIUS..=PATCH_RADIUS {
+                let x = u32::try_from(i32_from_f32(self.at.x).saturating_add(dx)).ok()?;
+                let y = u32::try_from(i32_from_f32(self.at.y).saturating_add(dy)).ok()?;
+                if let Some(pixel) = frame.pixel(x, y) {
+                    pixels.push(pixel);
+                    count += 1.0;
+                }
+            }
+        }
+        let sum: Vec4 = pixels.into_iter().sum();
+        (count >= 1.0).then(|| Vec4::from_array(sum.to_array().map(|channel| channel / count)))
+    }
 }
 
 /// What one sampled cell came back as, given a subject painted in one marker
