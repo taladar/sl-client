@@ -38,9 +38,12 @@ LEVELS = [
 METHOD = re.compile(
     r"\n\s+public\s+(?:virtual\s+)?[\w.<>\[\]]+\s+(os\w+)\s*\([^)]*\)\s*\n\s*\{"
 )
-CHECK = re.compile(r'CheckThreatLevel\((?:ThreatLevel\.(\w+),\s*"(\w+)")?\)')
+CHECK = re.compile(r'CheckThreatLevel\((?:ThreatLevel\.(\w+),\s*(?:"(\w+)"|(\w+)))?\)')
+# A check may name its function through a local constant
+# (`const string functionName = "osSetParcelDetails";`).
+CONSTANT = re.compile(r'const\s+string\s+(\w+)\s*=\s*"(\w+)"\s*;')
 COMMENT = re.compile(r"/\*.*?\*/|//[^\n]*", re.DOTALL)
-DEPRECATED = re.compile(r'OSSLDeprecated\("(\w+)",\s*"(\w+)"\)')
+DEPRECATED = re.compile(r'OSSLDeprecated\((?:"\w+"|\w+),\s*"(\w+)"\)')
 
 
 def rank(check: tuple[str, str]) -> int:
@@ -73,13 +76,16 @@ def main() -> None:
             check = ("none", name)
         elif found.group(1) is None:
             check = ("enabled", name)
-        else:
+        elif found.group(2) is not None:
             check = (found.group(1), found.group(2))
+        else:
+            constants = dict(CONSTANT.findall(body))
+            check = (found.group(1), constants[found.group(3)])
         if name not in checks or rank(check) > rank(checks[name]):
             checks[name] = check
         deprecated = DEPRECATED.search(body)
         if deprecated is not None:
-            replacements[name] = deprecated.group(2)
+            replacements[name] = deprecated.group(1)
     print("# Derived by extract_ossl_checks.py from OSSL_Api.cs; see README.md.")
     for name in sorted(checks):
         kind, checked = checks[name]

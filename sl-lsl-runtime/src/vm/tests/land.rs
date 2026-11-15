@@ -137,6 +137,8 @@ fn land(flavour: EngineFlavour) -> (Parcel, Option<Parcel>, Region) {
             agents: 2,
             water: 20.0,
             neighbours: [true, true, false, false],
+
+            environment_override: false,
         };
         return (here, None, region);
     }
@@ -182,6 +184,8 @@ fn land(flavour: EngineFlavour) -> (Parcel, Option<Parcel>, Region) {
         agents: 9,
         water: 20.0,
         neighbours: [false; 4],
+
+        environment_override: false,
     };
     (here, Some(edge), region)
 }

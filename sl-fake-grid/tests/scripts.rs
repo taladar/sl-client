@@ -77,6 +77,10 @@ mod test {
         TeleportLocal(u32, sl_types::map::RegionCoordinates),
         /// A teleport failed, with its reason.
         TeleportFailed(String),
+        /// A patch of the region's land.
+        Land(Box<sl_proto::TerrainPatch>),
+        /// The region's record, with its water line.
+        Water(f32),
     }
 
     /// A logged-in client in a stepped catalogue region.
@@ -215,6 +219,12 @@ mod test {
                         position, flags, ..
                     } => Seen::TeleportLocal(flags.0, position),
                     Event::TeleportFailed { reason, .. } => Seen::TeleportFailed(reason),
+                    Event::TerrainPatch(patch)
+                        if patch.layer == sl_proto::TerrainLayerType::Land =>
+                    {
+                        Seen::Land(patch)
+                    }
+                    Event::RegionLimits(limits) => Seen::Water(limits.water_height),
                     Event::ObjectStreamBatch(batch) => Seen::Stream(
                         batch.form,
                         batch.entries.iter().map(|entry| entry.local_id).collect(),
@@ -5255,6 +5265,143 @@ default
             })
             .await?;
         assert_eq!(reason, "The region 'Nowhere' could not be found.");
+        scene.stop();
+        Ok(())
+    }
+
+    /// A box whose script, owned by the estate's owner, changes the region on
+    /// channel 7 with OpenSim's land writers.
+    const LAND_WRITER_SOURCE: &str = "default
+{
+    state_entry()
+    {
+        llListen(7, \"\", NULL_KEY, \"\");
+    }
+
+    listen(integer channel, string name, key id, string message)
+    {
+        if (message == \"ground\")
+        {
+            integer set = osSetTerrainHeight(130, 130, 40.0);
+            llOwnerSay(\"ground \" + (string)set + \" \" + (string)osGetTerrainHeight(130, 130));
+        }
+        else if (message == \"water\")
+        {
+            osSetRegionWaterHeight(15.5);
+        }
+        else if (message == \"notice\")
+        {
+            osRegionNotice(\"hi\");
+        }
+        else if (message == \"share\")
+        {
+            integer set = lsSetWindlightScene([WL_WATER_COLOR, <8.0, 16.0, 32.0>]);
+            llOwnerSay(\"share \" + (string)set + \" \"
+                + llList2CSV(lsGetWindlightScene([WL_WATER_COLOR])));
+        }
+        else if (message == \"cut\")
+        {
+            osParcelSubdivide(<0.0, 0.0, 0.0>, <64.0, 64.0, 0.0>);
+            llOwnerSay(\"cut \" + llList2CSV(llGetParcelDetails(<10.0, 10.0, 0.0>,
+                [PARCEL_DETAILS_AREA])) + \" \" + llList2CSV(llGetParcelDetails(
+                <100.0, 100.0, 0.0>, [PARCEL_DETAILS_AREA])));
+        }
+        else if (message == \"join\")
+        {
+            osParcelJoin(<0.0, 0.0, 0.0>, <256.0, 256.0, 0.0>);
+            llOwnerSay(\"join \" + llList2CSV(llGetParcelDetails(<10.0, 10.0, 0.0>,
+                [PARCEL_DETAILS_AREA])));
+        }
+    }
+}
+";
+
+    /// OpenSim's land writers change the region its viewers are in: a moved
+    /// height goes out as its patch after the tick, the water line in the
+    /// region's record, a notice as an alert, a LightShare scene reads back
+    /// as it was set, and a parcel cut off and joined back is the size it
+    /// should be — under the stock `[OSSL]` settings, the script's owner the
+    /// estate's.
+    #[tokio::test]
+    async fn ossl_land_writers_move_the_ground_the_water_the_sky_and_the_parcels()
+    -> Result<(), TestError> {
+        let mut fixture = region_of(&[ScriptedBox {
+            local_id: NPC_MAKER,
+            source: LAND_WRITER_SOURCE.to_owned(),
+            experience: None,
+        }])?;
+        fixture.world.add_parcel(
+            sl_fake_grid::world::region_wide_parcel(
+                sl_fake_grid::scenario::STOCK_PARCEL_LOCAL_ID,
+                sl_types::key::OwnerKey::Agent(box_owner()),
+                "Estate",
+            ),
+            sl_fake_grid::scenario::stock_parcel_id(),
+            0.0,
+        );
+        let mut scene = scene_with(
+            ImitatedGrid::OpenSim,
+            fixture,
+            RegionConfig {
+                heartbeat: HeartbeatConfig::stepped(Duration::from_millis(100)),
+                ossl: Some(sl_lsl_runtime::vm::ossl::Settings::stock()),
+                ..RegionConfig::default()
+            },
+            AccountConfig {
+                agent_id: Some(box_owner()),
+                estate_manager: true,
+                ..AccountConfig::new("Test", "User", "password")
+            },
+        )
+        .await?;
+        scene.tick(2).await?;
+
+        tell_npc_maker(&mut scene, "ground").await?;
+        assert_eq!(scene.line("ground ").await?, "ground 1 40.000000");
+        let moved = scene
+            .next("the moved patch", |seen| match seen {
+                Seen::Land(patch)
+                    if (patch.patch_x, patch.patch_y) == (8, 8)
+                        && patch
+                            .values
+                            .get(2 + 2 * 16)
+                            .is_some_and(|height| (height - 40.0).abs() < 0.5) =>
+                {
+                    Some(patch)
+                }
+                _other => None,
+            })
+            .await?;
+        assert_eq!(moved.values.len(), 256);
+
+        tell_npc_maker(&mut scene, "water").await?;
+        let water = scene
+            .next("the new water line", |seen| match seen {
+                Seen::Water(height) if (height - 15.5).abs() < 0.01 => Some(height),
+                _other => None,
+            })
+            .await?;
+        assert!((water - 15.5).abs() < 0.01);
+
+        tell_npc_maker(&mut scene, "notice").await?;
+        let notice = scene
+            .next("the region notice", |seen| match seen {
+                Seen::Alert(text) if text.starts_with("hi") => Some(text),
+                _other => None,
+            })
+            .await?;
+        assert_eq!(notice, "hi\n");
+
+        tell_npc_maker(&mut scene, "share").await?;
+        assert_eq!(
+            scene.line("share ").await?,
+            "share 1 0, <8.000000, 16.000000, 32.000000>"
+        );
+
+        tell_npc_maker(&mut scene, "cut").await?;
+        assert_eq!(scene.line("cut ").await?, "cut 4096 61440");
+        tell_npc_maker(&mut scene, "join").await?;
+        assert_eq!(scene.line("join ").await?, "join 65536");
         scene.stop();
         Ok(())
     }

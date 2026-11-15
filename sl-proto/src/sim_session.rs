@@ -3783,6 +3783,10 @@ pub struct SimSession {
     /// construction and never removed; a parcel without its own entry falls
     /// back to the region's — SL parcels inherit the region environment).
     environments: BTreeMap<i32, EnvironmentSettings>,
+    /// The agent's own environment, which the `ExtEnvironment` capability
+    /// serves for the region and every parcel in place of theirs
+    /// ([`SimSession::set_agent_environment`]); `None` for none.
+    agent_environment: Option<EnvironmentSettings>,
     /// The per-object costs the `GetObjectCost` capability serves, keyed by
     /// object ([`SimSession::set_object_cost`]). Driver-populated.
     object_costs: BTreeMap<ObjectKey, ObjectCost>,
@@ -4063,6 +4067,7 @@ impl SimSession {
             simulator_features: SimulatorFeatures::default(),
             lsl_syntax: None,
             environments: BTreeMap::from([(-1, EnvironmentSettings::default_region())]),
+            agent_environment: None,
             object_costs: BTreeMap::new(),
             object_physics: BTreeMap::new(),
             selection_costs: BTreeMap::new(),
@@ -4852,6 +4857,32 @@ impl SimSession {
         self.environments.insert(environment.parcel_id, environment);
     }
 
+    /// Forgets the environment stored for the parcel `parcel_id`, so it is
+    /// served the region's again — a driver dropping a parcel's environment
+    /// the client did not. The region entry stays: replace it with
+    /// [`set_environment`](Self::set_environment).
+    pub fn forget_environment(&mut self, parcel_id: i32) {
+        if parcel_id != -1 {
+            drop(self.environments.remove(&parcel_id));
+        }
+    }
+
+    /// Sets the agent's own environment, which the `ExtEnvironment`
+    /// capability serves for the region and every parcel in place of theirs
+    /// (OpenSim's `ScenePresence.Environment`, an `osReplaceAgentEnvironment`),
+    /// or with `None` drops it.
+    pub fn set_agent_environment(&mut self, environment: Option<EnvironmentSettings>) {
+        self.agent_environment = environment;
+    }
+
+    /// The environment stored for `parcel_id` (`-1` = the region), or
+    /// [`None`] for a parcel with none of its own — what a driver mirrors
+    /// after the client changed one.
+    #[must_use]
+    pub fn stored_environment(&self, parcel_id: i32) -> Option<&EnvironmentSettings> {
+        self.environments.get(&parcel_id)
+    }
+
     /// Sets whether a parcel's own environment is served (default `true`).
     /// Off, a read of any parcel answers `is_default` with no day, whatever
     /// is stored for it — what OpenSim does while its estate does not allow
@@ -5024,6 +5055,11 @@ impl SimSession {
     /// own environment, or — for a parcel that has none — the `is_default`
     /// body both grids answer with, which carries no day cycle.
     pub(crate) fn environment_body(&self, parcel_id: i32) -> Llsd {
+        if let Some(own) = &self.agent_environment {
+            let mut own = own.clone();
+            own.parcel_id = parcel_id;
+            return crate::session::environment_to_llsd(&own);
+        }
         if parcel_id == -1
             || (self.parcel_environments == ParcelEnvironments::Served
                 && self.environments.contains_key(&parcel_id))

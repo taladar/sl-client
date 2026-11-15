@@ -209,7 +209,12 @@ pub(crate) async fn teleport_session(
     // `ScenePresence` lifts it to the ground), with the avatar's centre half
     // its height above. The fake grid runs no physics, so nothing else would.
     let wanted = request.arrival.position;
-    let ground = dest_region.config.terrain.height_at(wanted.x(), wanted.y());
+    let ground = dest_region
+        .world
+        .lock()
+        .edits
+        .ground(&dest_region.config.terrain)
+        .height_at(wanted.x(), wanted.y());
     if wanted.z() < ground {
         request.arrival.position = RegionCoordinates::new(
             wanted.x(),

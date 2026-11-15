@@ -159,6 +159,21 @@ pub enum Exception {
     /// `System.Exception` from `osForceAttachToAvatarFromInventory`: the item
     /// of that name is no object.
     ItemNotObject(String),
+    /// `System.Exception` from OpenSim's `WindModule`: `osGetWindParam` of a
+    /// wind model the region has not got.
+    NoWindPlugin(String),
+    /// `System.Exception` from a wind model: `osGetWindParam` of a parameter
+    /// it has not got, the model named as it names itself.
+    NoWindParam {
+        /// The model.
+        plugin: String,
+        /// The parameter.
+        param: String,
+    },
+    /// `System.Exception` from OpenSim's `LandManagementModule.GetLandObject`:
+    /// a point off the region (`osSetParcelDetails`, `osParcelJoin`,
+    /// `osParcelSubdivide`).
+    NoParcelAt(i32, i32),
 }
 
 impl Exception {
@@ -178,7 +193,12 @@ impl Exception {
             | Self::StartIndexOutOfRange
             | Self::ItemIndexOutOfRange
             | Self::SleepTimeout => "ArgumentOutOfRangeException",
-            Self::FaceOutOfRange(_) | Self::ItemNotFound(_) | Self::ItemNotObject(_) => "Exception",
+            Self::FaceOutOfRange(_)
+            | Self::ItemNotFound(_)
+            | Self::ItemNotObject(_)
+            | Self::NoWindPlugin(_)
+            | Self::NoWindParam { .. }
+            | Self::NoParcelAt(..) => "Exception",
             Self::NullReference => "NullReferenceException",
         }
     }
@@ -196,6 +216,15 @@ impl Exception {
             Self::ItemNotObject(item) => {
                 std::borrow::Cow::Owned(format!("The inventory item '{item}' is not an object"))
             }
+            Self::NoWindPlugin(plugin) => {
+                std::borrow::Cow::Owned(format!("Could not find plugin {plugin}"))
+            }
+            Self::NoWindParam { plugin, param } => {
+                std::borrow::Cow::Owned(format!("Unknown {plugin} parameter {param}"))
+            }
+            Self::NoParcelAt(x, y) => {
+                std::borrow::Cow::Owned(format!("Error: Parcel not found at point {x}, {y}"))
+            }
             other => std::borrow::Cow::Borrowed(other.fixed_message()),
         }
     }
@@ -203,7 +232,12 @@ impl Exception {
     /// The message of an exception whose message names nothing of the call.
     const fn fixed_message(&self) -> &'static str {
         match self {
-            Self::FaceOutOfRange(_) | Self::ItemNotFound(_) | Self::ItemNotObject(_) => "",
+            Self::FaceOutOfRange(_)
+            | Self::ItemNotFound(_)
+            | Self::ItemNotObject(_)
+            | Self::NoWindPlugin(_)
+            | Self::NoWindParam { .. }
+            | Self::NoParcelAt(..) => "",
             Self::InvalidUuid => "Invalid UUID",
             Self::IndexOutOfRange => "Index was outside the bounds of the array.",
             Self::Overflow => "Value was either too large or too small for an Int32.",

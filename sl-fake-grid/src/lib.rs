@@ -43,6 +43,7 @@ mod object_edits;
 mod parcel_edits;
 pub mod physics;
 pub(crate) mod prim_state;
+mod region_edits;
 pub mod relays;
 mod render_info;
 pub mod runtime;

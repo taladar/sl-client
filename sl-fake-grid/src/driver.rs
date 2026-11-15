@@ -778,6 +778,21 @@ impl SharedSim {
                 if let ServerEvent::DisplayNameChanged(update) = &event {
                     changes.push(RegionChange::DisplayNameChanged(update.clone()));
                 }
+                // A viewer's environment change is the region's: the world
+                // keeps it, so a script reads it and a later session serves
+                // it, and the region's other sessions serve it from now on.
+                // Nobody is told of it: what a grid pushes then is unmeasured.
+                if let ServerEvent::EnvironmentUpdated { parcel_id, .. }
+                | ServerEvent::EnvironmentReset { parcel_id, .. } = &event
+                {
+                    let stored = state.sim.stored_environment(*parcel_id).cloned();
+                    world.edits.keep_environment(*parcel_id, stored.clone());
+                    changes.push(RegionChange::EnvironmentChanged {
+                        parcel_id: *parcel_id,
+                        settings: stored.map(Box::new),
+                        told: None,
+                    });
+                }
                 // What is worn is what the next login puts back on; and on a
                 // grid whose own appearance lists it, a wear of one item from
                 // the inventory states the appearance again.
@@ -1704,6 +1719,61 @@ pub(crate) async fn run_region_watcher(
                                         let mut identity = state.identity.clone();
                                         identity.terrain = **composition;
                                         state.sim.send_region_handshake(&identity, now)
+                                    }
+                                    // Nearest first, as an arrival's ground
+                                    // is streamed; a region withholding its
+                                    // ground withholds this too.
+                                    RegionChange::TerrainPatched(patches) => {
+                                        if state.world.lock().withholds_ground {
+                                            return;
+                                        }
+                                        let at = state.sim.arrival_position().position;
+                                        let stream = state.terrain_policy.land_stream(at.x(), at.y());
+                                        state.sim.send_terrain(patches, &stream, now)
+                                    }
+                                    RegionChange::EnvironmentChanged {
+                                        parcel_id,
+                                        settings,
+                                        told,
+                                    } => {
+                                        match settings {
+                                            Some(settings) => {
+                                                state.sim.set_environment((**settings).clone());
+                                            }
+                                            None => state.sim.forget_environment(*parcel_id),
+                                        }
+                                        match told {
+                                            Some(limits) if state.sim.is_root_agent() => {
+                                                state.sim.send_region_info(limits, now)
+                                            }
+                                            _ => Ok(()),
+                                        }
+                                    }
+                                    RegionChange::AgentEnvironment {
+                                        agent,
+                                        settings,
+                                        told,
+                                    } => {
+                                        if *agent != state.avatar.agent_id {
+                                            return;
+                                        }
+                                        state
+                                            .sim
+                                            .set_agent_environment(settings.as_deref().cloned());
+                                        let parcel = {
+                                            let at = state.sim.arrival_position().position;
+                                            let world = state.world.lock();
+                                            world
+                                                .parcel_at(at.x(), at.y())
+                                                .filter(|parcel| {
+                                                    parcel.parcel_environment_version != -1
+                                                })
+                                                .cloned()
+                                        };
+                                        if let Some(parcel) = parcel {
+                                            state.sim.enqueue_parcel_properties(&parcel);
+                                        }
+                                        state.sim.send_region_info(told, now)
                                     }
                                     RegionChange::DisplayNameChanged(update) => {
                                         state.sim.set_display_name(update.name.clone());

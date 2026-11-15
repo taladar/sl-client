@@ -380,9 +380,12 @@ impl RegionHost<'_> {
 
     /// The ground's height at `(x, y)`.
     fn ground(&self, x: f32, y: f32) -> f32 {
-        self.core
-            .region(self.index)
-            .map_or(0.0, |region| region.config.terrain.height_at(x, y))
+        self.core.region(self.index).map_or(0.0, |region| {
+            self.world
+                .edits
+                .ground(&region.config.terrain)
+                .height_at(x, y)
+        })
     }
 
     /// Where the segment first goes into the ground, and the ground's normal

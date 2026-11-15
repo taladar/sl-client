@@ -206,28 +206,20 @@ impl TerrainFixture {
     /// mesh builder reads.
     #[must_use]
     pub fn to_patches(&self, handle: RegionHandle) -> Vec<TerrainPatch> {
-        let mut patches = Vec::new();
-        for patch_y in 0..PATCHES_PER_EDGE {
-            for patch_x in 0..PATCHES_PER_EDGE {
-                let mut values = Vec::with_capacity(256);
-                for cell_y in 0..PATCH_CELLS {
-                    for cell_x in 0..PATCH_CELLS {
-                        let x = metres(patch_x.saturating_mul(PATCH_CELLS).saturating_add(cell_x));
-                        let y = metres(patch_y.saturating_mul(PATCH_CELLS).saturating_add(cell_y));
-                        values.push(self.height_at(x, y));
-                    }
-                }
-                patches.push(TerrainPatch {
-                    region_handle: handle,
-                    layer: TerrainLayerType::Land,
-                    patch_x,
-                    patch_y,
-                    size: PATCH_CELLS,
-                    values,
-                });
-            }
+        self.live(None).to_patches(handle)
+    }
+
+    /// The ground as it stands with `edits`, the heightmap that replaced the
+    /// fixture's heights once something moved them.
+    #[must_use]
+    pub const fn live<'ground>(
+        &'ground self,
+        edits: Option<&'ground Heightmap>,
+    ) -> LiveGround<'ground> {
+        LiveGround {
+            fixture: self,
+            edits,
         }
-        patches
     }
 
     /// The wind layer's two patches — the east then the north velocity
@@ -263,7 +255,159 @@ impl TerrainFixture {
     /// step. The eleven land-data channels are zero.
     #[must_use]
     pub fn to_raw(&self) -> Vec<u8> {
-        let multiplier = raw_multiplier(self.heights.max_height());
+        self.live(None).to_raw()
+    }
+}
+
+/// A region's ground once something moved it: one height per whole metre,
+/// row-major from the south-west corner, which the fixture's closed form
+/// answered until then. A point between them is read off the four around it,
+/// as a simulator reads its heightfield.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Heightmap {
+    /// The heights, `y * side + x`.
+    heights: Vec<f32>,
+}
+
+/// The cells along each edge of a standard region's heightmap.
+const SIDE: usize = 256;
+
+impl Heightmap {
+    /// The heights `fixture` gives at every whole metre.
+    #[must_use]
+    pub fn of(fixture: &TerrainFixture) -> Self {
+        let mut heights = Vec::with_capacity(SIDE.saturating_mul(SIDE));
+        for y in 0..SIDE {
+            for x in 0..SIDE {
+                heights.push(fixture.height_at(sample_metres(x), sample_metres(y)));
+            }
+        }
+        Self { heights }
+    }
+
+    /// The height at the whole-metre point `(x, y)`, held inside the map.
+    #[must_use]
+    pub fn get(&self, x: usize, y: usize) -> f32 {
+        let (x, y) = (x.min(SIDE - 1), y.min(SIDE - 1));
+        self.heights
+            .get(y.saturating_mul(SIDE).saturating_add(x))
+            .copied()
+            .unwrap_or_default()
+    }
+
+    /// Sets the height at the whole-metre point `(x, y)`; a point off the
+    /// map sets nothing. Whether the height changed.
+    pub fn set(&mut self, x: usize, y: usize, height: f32) -> bool {
+        if x >= SIDE || y >= SIDE {
+            return false;
+        }
+        let Some(slot) = self
+            .heights
+            .get_mut(y.saturating_mul(SIDE).saturating_add(x))
+        else {
+            return false;
+        };
+        let changed = slot.total_cmp(&height).is_ne();
+        *slot = height;
+        changed
+    }
+
+    /// The height at the region-local point `(x, y)`, read off the four whole
+    /// metres around it, held inside the map.
+    #[must_use]
+    pub fn height_at(&self, x: f32, y: f32) -> f32 {
+        let edge = metres(u32::try_from(SIDE - 1).unwrap_or(u32::MAX));
+        let (x, y) = (x.clamp(0.0, edge), y.clamp(0.0, edge));
+        let cell = |value: f32| {
+            #[expect(
+                clippy::as_conversions,
+                clippy::cast_possible_truncation,
+                clippy::cast_sign_loss,
+                reason = "a metre index of the map, clamped into it above"
+            )]
+            let index = value.floor() as usize;
+            index
+        };
+        let (x0, y0) = (cell(x), cell(y));
+        let (fx, fy) = (x - x.floor(), y - y.floor());
+        let south =
+            (self.get(x0.saturating_add(1), y0) - self.get(x0, y0)).mul_add(fx, self.get(x0, y0));
+        let north = (self.get(x0.saturating_add(1), y0.saturating_add(1))
+            - self.get(x0, y0.saturating_add(1)))
+        .mul_add(fx, self.get(x0, y0.saturating_add(1)));
+        (north - south).mul_add(fy, south)
+    }
+
+    /// The highest point of the map.
+    #[must_use]
+    pub fn max_height(&self) -> f32 {
+        self.heights.iter().copied().fold(f32::MIN, f32::max)
+    }
+}
+
+/// A region's ground as it stands: its fixture, and the heightmap that
+/// replaces the fixture's heights once a script or a brush moved them.
+#[derive(Debug, Clone, Copy)]
+pub struct LiveGround<'ground> {
+    /// The fixture: the heights until an edit, the wind, clouds and textures
+    /// always.
+    pub fixture: &'ground TerrainFixture,
+    /// The heights since the first edit.
+    pub edits: Option<&'ground Heightmap>,
+}
+
+impl LiveGround<'_> {
+    /// The ground height, in metres, at the region-local point `(x, y)`.
+    #[must_use]
+    pub fn height_at(&self, x: f32, y: f32) -> f32 {
+        match self.edits {
+            Some(edits) => edits.height_at(x, y),
+            None => self.fixture.height_at(x, y),
+        }
+    }
+
+    /// The land patch at `(patch_x, patch_y)`, stamped with `handle`
+    /// ([`TerrainFixture::to_patches`]).
+    #[must_use]
+    pub fn patch(&self, handle: RegionHandle, patch_x: u32, patch_y: u32) -> TerrainPatch {
+        let mut values = Vec::with_capacity(256);
+        for cell_y in 0..PATCH_CELLS {
+            for cell_x in 0..PATCH_CELLS {
+                let x = metres(patch_x.saturating_mul(PATCH_CELLS).saturating_add(cell_x));
+                let y = metres(patch_y.saturating_mul(PATCH_CELLS).saturating_add(cell_y));
+                values.push(self.height_at(x, y));
+            }
+        }
+        TerrainPatch {
+            region_handle: handle,
+            layer: TerrainLayerType::Land,
+            patch_x,
+            patch_y,
+            size: PATCH_CELLS,
+            values,
+        }
+    }
+
+    /// The region's ground as the 256 land patches a standard region streams
+    /// ([`TerrainFixture::to_patches`]).
+    #[must_use]
+    pub fn to_patches(&self, handle: RegionHandle) -> Vec<TerrainPatch> {
+        let mut patches = Vec::new();
+        for patch_y in 0..PATCHES_PER_EDGE {
+            for patch_x in 0..PATCHES_PER_EDGE {
+                patches.push(self.patch(handle, patch_x, patch_y));
+            }
+        }
+        patches
+    }
+
+    /// The region's ground as the estate RAW file ([`TerrainFixture::to_raw`]).
+    #[must_use]
+    pub fn to_raw(&self) -> Vec<u8> {
+        let max_height = self
+            .edits
+            .map_or_else(|| self.fixture.heights.max_height(), Heightmap::max_height);
+        let multiplier = raw_multiplier(max_height);
         let scale = f32::from(RAW_MULTIPLIER_DIVISOR) / f32::from(multiplier);
         let mut raw = Vec::with_capacity(
             TERRAIN_RAW_SIDE

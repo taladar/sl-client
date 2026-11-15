@@ -759,7 +759,7 @@ fn region_info_update(limits: &sl_proto::RegionLimits) -> sl_proto::RegionInfoUp
 
 /// Writes `flags` into both of `limits`' flag fields: the legacy one takes
 /// the low half, the extended block the whole, where the region sends one.
-fn set_flags(limits: &mut sl_proto::RegionLimits, flags: sl_proto::RegionFlags) {
+pub(crate) fn set_flags(limits: &mut sl_proto::RegionLimits, flags: sl_proto::RegionFlags) {
     limits.region_flags = sl_proto::RegionFlags::from_legacy(flags.legacy_bits());
     if limits.region_flags_extended.is_some() {
         limits.region_flags_extended = Some(flags);

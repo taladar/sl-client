@@ -145,7 +145,7 @@ osNpcTouch High
 osNpcWhisper High
 osOwnerSaveAppearance High
 osParcelJoin High
-osParcelSetDetails none
+osParcelSetDetails High osParcelSetDetails osSetParcelDetails
 osParcelSubdivide High
 osParticleSystem none
 osPlaySound none
@@ -184,7 +184,7 @@ osSetInertiaAsSphere enabled
 osSetLinkSitActiveRange none
 osSetLinkStandTarget none
 osSetOwnerSpeed Moderate
-osSetParcelDetails none
+osSetParcelDetails High
 osSetParcelMediaURL VeryLow
 osSetParcelMusicURL VeryLow
 osSetParcelSIPAddress VeryLow

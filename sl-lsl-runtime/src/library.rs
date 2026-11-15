@@ -49,6 +49,7 @@ pub mod notecards;
 pub mod ossl;
 pub mod ossl_avatars;
 pub mod ossl_inventory;
+pub mod ossl_land;
 pub mod ossl_prim;
 pub(crate) mod prim_params;
 pub mod prim_state;
@@ -408,6 +409,7 @@ mod tests {
                     z: 0.0,
                     s: 1.0,
                 },
+                altitudes: [1000.0, 2000.0, 3000.0],
             }
         }
 
@@ -443,6 +445,45 @@ mod tests {
 
         fn map_texture(&self, _caller: CallerId, _region: &str) -> Option<String> {
             None
+        }
+
+        fn edit_region(&mut self, _caller: CallerId, _edit: &crate::vm::land::RegionEdit) -> bool {
+            false
+        }
+
+        fn wind_param(
+            &self,
+            _caller: CallerId,
+            _plugin: &str,
+            _param: &str,
+        ) -> Result<f32, crate::vm::land::WindParamError> {
+            Err(crate::vm::land::WindParamError::NoPlugin)
+        }
+
+        fn region_stats(&self, _caller: CallerId) -> Vec<f32> {
+            Vec::new()
+        }
+
+        fn lightshare(&self, _caller: CallerId) -> crate::vm::land::LightShare {
+            crate::vm::land::LightShare::default()
+        }
+
+        fn day_cycle(&self, _asset: &str) -> crate::vm::land::DayCycle {
+            crate::vm::land::DayCycle::Missing
+        }
+
+        fn change_environment(
+            &mut self,
+            _caller: CallerId,
+            _scope: &crate::vm::land::EnvironmentScope,
+            _change: &crate::vm::land::EnvironmentChange,
+            _transition: i32,
+        ) -> bool {
+            false
+        }
+
+        fn parcel_sip_address(&mut self, _caller: CallerId, _address: &str) -> bool {
+            false
         }
 
         fn send_http(&mut self, _caller: CallerId, _request: &crate::vm::http::Outbound) {}

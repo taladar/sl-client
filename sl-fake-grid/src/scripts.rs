@@ -184,6 +184,7 @@ pub struct StubbedCall {
 mod avatars;
 pub(crate) mod http;
 mod land;
+mod land_writers;
 mod npcs;
 mod sensing;
 mod task_inventory;
@@ -2915,10 +2916,12 @@ impl Host for RegionHost<'_> {
             if !(0.0..edge).contains(&to.x) || !(0.0..edge).contains(&to.y) {
                 return;
             }
-            let ground = self
-                .core
-                .region(self.index)
-                .map_or(0.0, |region| region.config.terrain.height_at(to.x, to.y));
+            let ground = self.core.region(self.index).map_or(0.0, |region| {
+                self.world
+                    .edits
+                    .ground(&region.config.terrain)
+                    .height_at(to.x, to.y)
+            });
             to.z = to.z.max(ground);
         }
         // OpenSim's part raises its position change whether a child goes
@@ -2957,8 +2960,12 @@ impl Host for RegionHost<'_> {
         };
         let opensim = self.opensim();
         let region = self.core.region(self.index);
-        let ground =
-            |x: f32, y: f32| region.map_or(0.0, |region| region.config.terrain.height_at(x, y));
+        let edits = self.world.edits.ground.clone();
+        let ground = |x: f32, y: f32| {
+            region.map_or(0.0, |region| {
+                region.config.terrain.live(edits.as_deref()).height_at(x, y)
+            })
+        };
         let edge = u16::try_from(REGION_EDGE_M).map_or(f32::MAX, f32::from);
         let _written = crate::prim_state::write(self.world, local_id, state, opensim, ground, edge);
     }
@@ -2973,7 +2980,10 @@ impl Host for RegionHost<'_> {
             return None;
         }
         let ground = self.core.region(self.index).map_or(0.0, |region| {
-            region.config.terrain.height_at(position.x, position.y)
+            self.world
+                .edits
+                .ground(&region.config.terrain)
+                .height_at(position.x, position.y)
         });
         let mut to = position;
         to.z = to.z.max(ground);
@@ -3311,7 +3321,10 @@ impl Host for RegionHost<'_> {
     fn terrain_height(&self, _caller: CallerId, x: u32, y: u32) -> f32 {
         let metres = |at: u32| u16::try_from(at).map_or(0.0, f32::from);
         self.core.region(self.index).map_or(0.0, |region| {
-            region.config.terrain.height_at(metres(x), metres(y))
+            self.world
+                .edits
+                .ground(&region.config.terrain)
+                .height_at(metres(x), metres(y))
         })
     }
 
@@ -3425,6 +3438,51 @@ impl Host for RegionHost<'_> {
 
     fn map_texture(&self, _caller: CallerId, region: &str) -> Option<String> {
         self.map_texture_of(region)
+    }
+
+    fn edit_region(
+        &mut self,
+        _caller: CallerId,
+        edit: &sl_lsl_runtime::vm::land::RegionEdit,
+    ) -> bool {
+        self.region_edit(edit)
+    }
+
+    fn wind_param(
+        &self,
+        _caller: CallerId,
+        plugin: &str,
+        param: &str,
+    ) -> Result<f32, sl_lsl_runtime::vm::land::WindParamError> {
+        self.wind_param_of(plugin, param)
+    }
+
+    fn region_stats(&self, _caller: CallerId) -> Vec<f32> {
+        self.opensim_stats()
+    }
+
+    fn lightshare(&self, _caller: CallerId) -> sl_lsl_runtime::vm::land::LightShare {
+        self.lightshare_of()
+    }
+
+    fn day_cycle(&self, asset: &str) -> sl_lsl_runtime::vm::land::DayCycle {
+        self.day_cycle_kind(asset)
+    }
+
+    fn change_environment(
+        &mut self,
+        _caller: CallerId,
+        scope: &sl_lsl_runtime::vm::land::EnvironmentScope,
+        change: &sl_lsl_runtime::vm::land::EnvironmentChange,
+        _transition: i32,
+    ) -> bool {
+        self.environment_change(scope, change)
+    }
+
+    // The fake grid's voice is WebRTC, which has no SIP address to hand a
+    // parcel, as the local OpenSim runs no voice module that takes one.
+    fn parcel_sip_address(&mut self, _caller: CallerId, _address: &str) -> bool {
+        false
     }
 
     fn send_http(&mut self, caller: CallerId, request: &sl_lsl_runtime::vm::http::Outbound) {
@@ -3930,8 +3988,9 @@ pub(crate) async fn run_tick(core: &Arc<GridCore>, index: usize) -> Option<TickR
             let mut world = region.world.lock();
             crate::updates::begin(&mut world);
             let step = world.script_instances.engine.config().step;
+            let edits = world.edits.ground.clone();
             crate::physics::step(&mut world, &[], step, &|x, y| {
-                region.config.terrain.height_at(x, y)
+                region.config.terrain.live(edits.as_deref()).height_at(x, y)
             });
             let (walked, healed) = region_life(core, &region.config, &mut world, step);
             let changes = crate::updates::finish(&mut world, walked);
@@ -4008,8 +4067,9 @@ fn tick_locked(
         })
         .collect();
     if let Some(region) = core.region(index) {
+        let edits = world.edits.ground.clone();
         crate::physics::step(world, &avatars, config.step, &|x, y| {
-            region.config.terrain.height_at(x, y)
+            region.config.terrain.live(edits.as_deref()).height_at(x, y)
         });
     }
     // A prim that comes into the region from here to the next tick came in
@@ -4209,6 +4269,15 @@ fn tick_locked(
     world
         .script_instances
         .time_out_experience_questions(report.tick, config.step);
+    // The ground the tick's scripts moved, told once for the tick, as
+    // OpenSim's terrain module sends the patches tainted since it last looked.
+    if let Some(region) = core.region(index) {
+        changes.extend(
+            world
+                .edits
+                .take_moved(&region.config.terrain, region.handle()),
+        );
+    }
     start_loaded(world);
     // What the tick started, saved over or moved to another state may take
     // touches now, or no longer.
@@ -4264,8 +4333,9 @@ fn region_life(
     step: Duration,
 ) -> (Vec<RegionChange>, Vec<Delivery>) {
     let policy = core.imitated.movement_policy();
+    let edits = world.edits.ground.clone();
     let walked = npcs::step(world, step, (&policy, core.animation_policy), &|x, y| {
-        config.terrain.height_at(x, y)
+        config.terrain.live(edits.as_deref()).height_at(x, y)
     });
     let healed = npcs::heal(world, step)
         .into_iter()

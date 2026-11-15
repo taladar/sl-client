@@ -266,9 +266,10 @@ pub(crate) fn pad_pay_buttons(mut buttons: Vec<Element>) -> Vec<Element> {
     buttons
 }
 
-/// OpenSim's `GetLSLIntegerItem` of a pay button: an integer as it is, a
+/// OpenSim's `GetLSLIntegerItem` of a list element, a pay button among them:
+/// an integer as it is, a
 /// string or a key as the cast reads it, and anything else a throw.
-fn opensim_button(button: &Element) -> Result<i32, Exception> {
+pub(crate) fn opensim_integer_item(button: &Element) -> Result<i32, Exception> {
     match button {
         Element::Integer(integer) => Ok(*integer),
         Element::String(text) | Element::Key(text) => Ok(parse::integer(&until_nul(text.clone()))),
@@ -307,7 +308,7 @@ pub fn ll_set_pay_price(
         let padded = pad_pay_buttons(buttons);
         ctx.write_back(1, padded.clone());
         for (amount, button) in amounts.iter_mut().zip(&padded) {
-            *amount = opensim_button(button).map_err(|exception| CallError::Exception {
+            *amount = opensim_integer_item(button).map_err(|exception| CallError::Exception {
                 id: BuiltinId::LlSetPayPrice,
                 exception,
             })?;
@@ -355,9 +356,12 @@ mod tests {
 
     #[test]
     fn opensim_reads_a_string_button_and_throws_at_a_float() {
-        assert_eq!(opensim_button(&Element::String("5".to_owned())), Ok(5));
         assert_eq!(
-            opensim_button(&Element::Float(2.5)),
+            opensim_integer_item(&Element::String("5".to_owned())),
+            Ok(5)
+        );
+        assert_eq!(
+            opensim_integer_item(&Element::Float(2.5)),
             Err(Exception::InvalidCast)
         );
     }

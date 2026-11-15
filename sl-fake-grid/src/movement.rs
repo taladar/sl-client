@@ -314,8 +314,8 @@ pub struct Block {
 
 /// The heightfield and the solid prims round an avatar.
 pub(crate) struct Surroundings<'ground> {
-    /// The heightfield.
-    pub(crate) terrain: &'ground crate::terrain::TerrainFixture,
+    /// The heightfield, as it stands.
+    pub(crate) terrain: crate::terrain::LiveGround<'ground>,
     /// The prims.
     pub(crate) blocks: Vec<Block>,
 }
@@ -1177,9 +1177,16 @@ pub(crate) fn advance(state: &mut SimState, step: Duration, now: Instant) {
         z: placement.position.z(),
     };
     let policy = state.movement_policy.scaled(state.speed);
+    let (edits, blocks) = {
+        let world = state.world.lock();
+        (
+            world.edits.ground.clone(),
+            crate::physics::avatar_blocks(&world, &from),
+        )
+    };
     let surroundings = Surroundings {
-        terrain: &state.terrain,
-        blocks: crate::physics::avatar_blocks(&state.world.lock(), &from),
+        terrain: state.terrain.live(edits.as_deref()),
+        blocks,
     };
     let stepped = state.motion.step(&policy, &surroundings, &from, step);
     let to = stepped.position;

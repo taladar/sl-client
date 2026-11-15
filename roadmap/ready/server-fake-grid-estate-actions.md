@@ -45,3 +45,14 @@ both lists after an allowed/banned change. Still to do, per flavour:
   then 15 s) and the restart itself ("The simulator is going down.");
 - then add `Grid::FakeSl` / `Grid::FakeOpensim` to the `estate` census's
   grids and hold the fake flavours to it.
+
+## From server-lsl-lib-ossl-land-writers (2026-11-15)
+
+`osRegionRestart` (and its message overload) now sends its first notice as
+OpenSim's `RestartModule` does — an `AlertMessage` to every avatar, the
+script's text or OpenSim's own with the time spelled out — and calls a
+restart off under 15 seconds with the agent alert `Region restart has been
+aborted`. The alerts still due (seconds before the restart, OpenSim's 2 min /
+1 min / 30 s / 15 s steps) are kept in `region_edits::RegionEdits::restart`;
+the countdown here should send them and restart the region, for a script's
+restart as for an estate one (which does not record itself there yet).

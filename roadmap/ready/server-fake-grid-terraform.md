@@ -33,3 +33,14 @@ flatten reaching `√2` × radius, revert reaching `√radius`), the area form i
 baked map and skipped for a god (OpenSim's region owner by default); a RAW
 load re-bakes; bake is silent. When done, drop the brush rows from
 `NOT_IMITATED_AS_OPENSIM` in `sl-conformance/src/cases/terrain_editing.rs`.
+
+## From server-lsl-lib-ossl-land-writers (2026-11-15)
+
+The region has a live heightmap now: `region_edits::RegionEdits::ground`
+(`terrain::Heightmap`, read through `terrain::LiveGround`), the fixture's
+closed form until the first edit, and every ground reader goes through it
+(session streams, the avatar controller, physics, scripts, teleports, the RAW
+download a session opens with). A script's `osSetTerrainHeight` moves it and
+the moved patches go to every viewer after the tick
+(`RegionChange::TerrainPatched`). Brushes, undo and a RAW upload should write
+there; a session's RAW download is still the snapshot it opened with.

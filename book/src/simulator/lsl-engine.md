@@ -1055,12 +1055,59 @@ scope of 236` as this was written):
   `osEjectFromGroup`) and kicks (`osKickAvatar`). OpenSim gates the overload
   of `osTeleportAgent` that takes no region by nothing at all, unlike its two
   siblings: `ossl-checks.txt` gives that overload a line of its own
-  (`osTeleportAgent#1`).
-- **Later, with the tranche of the `ll*` functions they shadow** — the
-  parcel, estate, environment, wind, sun and terrain writers,
-  the region statistics, notice and restart and LightShare
-  (`server-lsl-lib-ossl-land-writers`); inertia and object teleports
-  (`server-lsl-lib-physics-vehicles`); URLs (`server-lsl-lib-http-url`). A
+  (`osTeleportAgent#1`). With the land writers
+  (`server-lsl-lib-ossl-land-writers`) came their 28, in
+  `library::ossl_land`, each making the second check OpenSim's function makes
+  against its permissions module (an estate manager, a god, the parcel's
+  owner or its group's member with the power named) before it asks the host:
+  the ground (`osSetTerrainHeight`, `osTerrainFlush`, the textures and blend
+  heights a god sets — `Host::edit_region` with a `RegionEdit`), the water
+  line and the region's sun settings, the wind models' parameters
+  (`Host::wind_param`; an unknown model or parameter throws the model's own
+  `System.Exception` from the getter, and is caught by the setter), the
+  region's, a parcel's and an avatar's environment from a day-cycle settings
+  asset named by item or key (`Host::day_cycle`, `Host::change_environment`,
+  OpenSim's return codes), LightShare's view of the region's environment
+  (`Host::lightshare`, OpenSim's `RegionLightShareData` defaults where the
+  region keeps none), the parcel joins, cuts and details (`LandChange::Join`,
+  `Subdivide`, `Details`, sampled as OpenSim's land module samples the box,
+  and throwing its `Parcel not found at point` off the region), the region's
+  48 statistics in OpenSim's `StatsIndex` order (`Host::region_stats`), its
+  notices, and a restart's first notice or its abort. `osSetEstateSunSettings`
+  and the two sun-parameter setters do nothing, as OpenSim's do (a commented
+  body, a sun module it no longer has), and `osSetParcelSIPAddress` throws for
+  a region with no voice module taking a SIP address, which the fake grid's
+  WebRTC voice is not (`Host::parcel_sip_address`). `osSetParcelDetails` and
+  its deprecated twin check `High` through a local constant naming the
+  function, which `extract_ossl_checks.py` now reads.
+
+  On the fake grid (`scripts::land_writers`, `region_edits`), a moved height
+  turns the region's ground into a heightmap (until then the fixture's closed
+  form), which every reader of the ground then reads — a session's stream, the
+  avatar controller, physics, the RAW download a session opens with — and the
+  patches it moved go to every viewer once after the tick, every patch after a
+  flush, as OpenSim's terrain module sends what was tainted since it last
+  looked. A texture goes out in a `RegionInfo` and a handshake, a blend height
+  in a handshake, the water line in a `RegionInfo`; the sun settings are kept
+  and told to nobody. The wind models' parameters are kept, not simulated: the
+  wind blows as the fixture says. Environments are the region's to keep
+  (`RegionEdits::environments`): a script's change, and a viewer's
+  `ExtEnvironment` change mirrored into it, is served by every session of the
+  region and by one that opens later, a region's change refreshes each viewer
+  with a `RegionInfo` as OpenSim refreshes an environment-aware one, a
+  parcel's moves the parcel's environment version and sends the parcel to the
+  avatars on it, and an avatar's own environment is served by its session for
+  the region and every parcel (`SimSession::set_agent_environment`). LightShare
+  converts both ways as OpenSim's `ViewerEnvironment` does, quirks kept (the
+  water fog's exponent is read back as a square root of the density it was
+  raised to a power of). A join merges the parcels' blocks and dwell into the
+  largest; a cut takes the next local id, a new key, no dwell, no search
+  listing and no landing point; both resend every viewer the overlay. A
+  restart's countdown after its first notice, and the restart itself, are
+  `server-fake-grid-estate-actions`'.
+- **Later, with the tranche of the `ll*` functions they shadow** — inertia
+  and object teleports (`server-lsl-lib-physics-vehicles`); URLs
+  (`server-lsl-lib-http-url`). A
   task of its own takes the dynamic textures every OpenSim sign is drawn with
   (`server-fake-grid-dynamic-textures`).
 - **Out** — `osConsoleCommand` (the region console, which the fake grid has

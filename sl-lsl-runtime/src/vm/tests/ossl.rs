@@ -7,7 +7,7 @@
 //!
 //! What the probes call of a tranche not written yet is answered where they
 //! call it, with what the grid answered: the link number, the map texture, the
-//! wind and LightShare's water colour, the apparent time and the wallclock
+//! apparent time and the wallclock
 //! (each as its transcript has it, for they read the moment the probe ran),
 //! `llGetTime` (the `elapsed` the probe prints is compared as present, not as
 //! a number), what a listener reads of where the speaker is, and
@@ -111,7 +111,6 @@ fn available_answers_as_each_engine_did() -> Result<(), String> {
     let source = include_str!("../../../probes/ossl/available.lsl");
     for (flavour, transcript) in transcripts("available") {
         let rigged = source
-            .replace("osGetWindParam(\"SimpleRandomWind\", \"strength\")", "1.0")
             .replace("osGetLinkNumber(llGetObjectName())", "-1")
             .replace(
                 "osGetApparentTimeString(TRUE)",
@@ -127,6 +126,11 @@ fn available_answers_as_each_engine_did() -> Result<(), String> {
         let mut region = Region::new(flavour);
         region.host.simulator = local_opensim();
         region.host.map_texture = Some(printed(transcript, "osGetMapTexture", "map_texture"));
+        // The local OpenSim's stock wind model, at its stock strength.
+        let _wind = region.host.wind_plugins.insert(
+            "SimpleRandomWind".to_owned(),
+            std::collections::BTreeMap::from([("strength".to_owned(), 1.0)]),
+        );
         // The owner stood in the region in the default shape, at full health.
         let _owner = region.host.avatars.insert(
             super::OWNER.to_owned(),
@@ -259,10 +263,6 @@ fn errors_are_thrown_and_shouted_as_each_engine_did() -> Result<(), String> {
                 .replace(
                     "llResetOtherScript(\"Threat\");",
                     "print(\"RESET Threat\");",
-                )
-                .replace(
-                    "llList2CSV(lsGetWindlightScene([WL_WATER_COLOR]))",
-                    "llList2CSV([0, <4.0, 38.0, 64.0>])",
                 )
                 .replace(
                     "vector at = llList2Vector(llGetObjectDetails(id, [OBJECT_POS]), 0);",

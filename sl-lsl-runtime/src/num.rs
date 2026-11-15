@@ -88,6 +88,22 @@ pub(crate) fn double_to_long(value: f64) -> i64 {
     }
 }
 
+/// `(int)double` as .NET on x86-64 converts it (`cvttsd2si`): truncated
+/// toward zero, and anything outside the `i32` range — infinities and NaN
+/// included — `i32::MIN`, never saturated.
+#[expect(
+    clippy::as_conversions,
+    clippy::cast_possible_truncation,
+    reason = "the range check above the cast makes the truncation exact"
+)]
+pub(crate) fn double_to_int(value: f64) -> i32 {
+    if (-2_147_483_648.0..2_147_483_648.0).contains(&value) {
+        value as i32
+    } else {
+        i32::MIN
+    }
+}
+
 /// An integral `f32` below `2^63` in magnitude as the integer it is.
 #[expect(
     clippy::as_conversions,

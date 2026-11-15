@@ -36,6 +36,7 @@ mod memory;
 mod money;
 mod ossl;
 mod ossl_avatars;
+mod ossl_land;
 mod persistence;
 mod placement;
 mod precision;
@@ -444,6 +445,28 @@ struct Recorder {
     sensed: Vec<crate::vm::sensing::Sensed>,
     /// What every ray hits, nearest its start first.
     ray_hits: Vec<crate::vm::sensing::RayHit>,
+    /// The changes made to the region, in order.
+    region_edits: Vec<crate::vm::land::RegionEdit>,
+    /// The changes made to environments, in order, each with its transition.
+    environment_changes: Vec<(
+        crate::vm::land::EnvironmentScope,
+        crate::vm::land::EnvironmentChange,
+        i32,
+    )>,
+    /// The region's environment in LightShare's terms.
+    lightshare: crate::vm::land::LightShare,
+    /// What each settings asset is, by key; [`DayCycle::Missing`] when not
+    /// listed.
+    ///
+    /// [`DayCycle::Missing`]: crate::vm::land::DayCycle::Missing
+    day_cycles: std::collections::BTreeMap<String, crate::vm::land::DayCycle>,
+    /// The region's wind models and their parameters, by name.
+    wind_plugins: std::collections::BTreeMap<String, std::collections::BTreeMap<String, f32>>,
+    /// OpenSim's statistics of the region.
+    region_stats: Vec<f32>,
+    /// The SIP addresses handed to a voice module; `None` for a region with
+    /// none.
+    sip_addresses: Option<Vec<String>>,
 }
 
 /// The owner of every object a [`Recorder`] has, unless it says otherwise.
@@ -1270,6 +1293,7 @@ impl Host for Recorder {
                 z: 0.0,
                 s: sin,
             },
+            altitudes: [1000.0, 2000.0, 3000.0],
         }
     }
 
@@ -1313,6 +1337,86 @@ impl Host for Recorder {
                 z: 0.35,
             })]
         })
+    }
+
+    fn edit_region(&mut self, _caller: CallerId, edit: &crate::vm::land::RegionEdit) -> bool {
+        match edit {
+            crate::vm::land::RegionEdit::LightShare(scene) => self.lightshare = (**scene).clone(),
+            crate::vm::land::RegionEdit::ClearLightShare => {
+                self.lightshare = crate::vm::land::LightShare::default();
+            }
+            crate::vm::land::RegionEdit::WindParam {
+                plugin,
+                param,
+                value,
+            } => {
+                if let Some(slot) = self
+                    .wind_plugins
+                    .get_mut(plugin)
+                    .and_then(|params| params.get_mut(param))
+                {
+                    *slot = *value;
+                }
+            }
+            _ => {}
+        }
+        self.region_edits.push(edit.clone());
+        true
+    }
+
+    fn wind_param(
+        &self,
+        _caller: CallerId,
+        plugin: &str,
+        param: &str,
+    ) -> Result<f32, crate::vm::land::WindParamError> {
+        let params = self
+            .wind_plugins
+            .get(plugin)
+            .ok_or(crate::vm::land::WindParamError::NoPlugin)?;
+        params
+            .get(param)
+            .copied()
+            .ok_or_else(|| crate::vm::land::WindParamError::NoParam {
+                plugin: plugin.to_owned(),
+            })
+    }
+
+    fn region_stats(&self, _caller: CallerId) -> Vec<f32> {
+        self.region_stats.clone()
+    }
+
+    fn lightshare(&self, _caller: CallerId) -> crate::vm::land::LightShare {
+        self.lightshare.clone()
+    }
+
+    fn day_cycle(&self, asset: &str) -> crate::vm::land::DayCycle {
+        self.day_cycles
+            .get(asset)
+            .copied()
+            .unwrap_or(crate::vm::land::DayCycle::Missing)
+    }
+
+    fn change_environment(
+        &mut self,
+        _caller: CallerId,
+        scope: &crate::vm::land::EnvironmentScope,
+        change: &crate::vm::land::EnvironmentChange,
+        transition: i32,
+    ) -> bool {
+        self.environment_changes
+            .push((scope.clone(), change.clone(), transition));
+        true
+    }
+
+    fn parcel_sip_address(&mut self, _caller: CallerId, address: &str) -> bool {
+        match self.sip_addresses.as_mut() {
+            Some(addresses) => {
+                addresses.push(address.to_owned());
+                true
+            }
+            None => false,
+        }
     }
 
     fn map_texture(&self, _caller: CallerId, region: &str) -> Option<String> {

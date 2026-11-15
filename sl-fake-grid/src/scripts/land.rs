@@ -210,6 +210,7 @@ impl RegionHost<'_> {
             agents: saturate(self.present.len()),
             water: limits.water_height,
             neighbours,
+            environment_override: self.world.parcel_environments_allowed(),
         }
     }
 
@@ -243,9 +244,12 @@ impl RegionHost<'_> {
 
     /// The ground's height at `(x, y)`.
     pub(super) fn ground_at(&self, x: f32, y: f32) -> f32 {
-        self.core
-            .region(self.index)
-            .map_or(0.0, |region| region.config.terrain.height_at(x, y))
+        self.core.region(self.index).map_or(0.0, |region| {
+            self.world
+                .edits
+                .ground(&region.config.terrain)
+                .height_at(x, y)
+        })
     }
 
     /// The wind: the terrain fixture's, the same everywhere, or still air.
@@ -258,11 +262,16 @@ impl RegionHost<'_> {
             })
     }
 
-    /// The region's environment settings, if it keeps its own.
+    /// The region's environment settings, if it keeps its own: what a
+    /// script or a viewer set since it started, else its scene's.
     fn settings(&self) -> Option<&sl_proto::EnvironmentSettings> {
-        self.core
-            .region(self.index)
-            .and_then(|region| region.config.environment.as_ref())
+        match &self.world.edits.environments.region {
+            Some(edited) => edited.settings(),
+            None => self
+                .core
+                .region(self.index)
+                .and_then(|region| region.config.environment.as_ref()),
+        }
     }
 
     /// The length of the region's day and its offset, in whole seconds.
@@ -323,6 +332,10 @@ impl RegionHost<'_> {
             day_offset: offset,
             sun,
             moon,
+            altitudes: self.settings().map_or_else(
+                || sl_proto::EnvironmentSettings::default_region().track_altitudes,
+                |settings| settings.track_altitudes,
+            ),
         }
     }
 
@@ -623,6 +636,9 @@ impl RegionHost<'_> {
                 }
                 true
             }
+            LandChange::Join(points) => self.join_parcels(points),
+            LandChange::Subdivide(start, end) => self.subdivide_parcel(local_id, (*start, *end)),
+            LandChange::Details(details) => self.set_parcel_details(local_id, details),
             // The fake grid moves no avatar off a parcel yet.
             LandChange::Eject(_) => false,
         }

@@ -13,7 +13,10 @@ use crate::vm::experiences::{
     Admission, ExperienceDetails, ExperienceError, ExperienceQuestion, KeyValueStore,
     ScriptExperience, SitRefusal,
 };
-use crate::vm::land::{Environment, LandChange, Parcel, ParcelMedia, Region, SimData};
+use crate::vm::land::{
+    DayCycle, Environment, EnvironmentChange, EnvironmentScope, LandChange, LightShare, Parcel,
+    ParcelMedia, Region, RegionEdit, SimData, WindParamError,
+};
 use crate::vm::linkset_data::{LinksetData, LinksetId};
 use crate::vm::ossl::{Simulator, Standing};
 use crate::vm::permissions::Question;
@@ -562,6 +565,55 @@ pub trait Host {
         position: &Vector,
         rule: i32,
     ) -> Option<Vec<crate::value::Element>>;
+
+    /// Make `edit` to `caller`'s region — its ground, water, sun, wind, sky
+    /// or the notices its avatars are sent — which the library has checked
+    /// `caller`'s owner may make; whether it was made.
+    fn edit_region(&mut self, caller: CallerId, edit: &RegionEdit) -> bool;
+
+    /// The parameter `param` of the wind model `plugin` of `caller`'s region
+    /// (`osGetWindParam`), matched as written.
+    ///
+    /// # Errors
+    ///
+    /// [`WindParamError`] for a model the region has not got, or a parameter
+    /// the model has not got.
+    fn wind_param(
+        &self,
+        caller: CallerId,
+        plugin: &str,
+        param: &str,
+    ) -> Result<f32, WindParamError>;
+
+    /// OpenSim's statistics of `caller`'s region, its `StatsIndex` array of
+    /// 48 values in order (`osGetRegionStats`).
+    fn region_stats(&self, caller: CallerId) -> Vec<f32>;
+
+    /// The environment of `caller`'s region in LightShare's terms
+    /// (`lsGetWindlightScene`): the defaults where the region keeps none of
+    /// its own.
+    fn lightshare(&self, caller: CallerId) -> LightShare;
+
+    /// What the asset keyed `asset` is to a function that wants a day cycle
+    /// of it (`osReplaceRegionEnvironment` and its kin).
+    fn day_cycle(&self, asset: &str) -> DayCycle;
+
+    /// Make `change` to the environment `scope` names, which the library has
+    /// checked `caller`'s owner may make, and tell the avatars it shows to,
+    /// `transition` seconds the time a viewer takes to blend into it; whether
+    /// it was made.
+    fn change_environment(
+        &mut self,
+        caller: CallerId,
+        scope: &EnvironmentScope,
+        change: &EnvironmentChange,
+        transition: i32,
+    ) -> bool;
+
+    /// `osSetParcelSIPAddress`: hand the parcel under `caller`'s prim's voice
+    /// channel the SIP address `address`; whether the region has a voice
+    /// module that takes one.
+    fn parcel_sip_address(&mut self, caller: CallerId, address: &str) -> bool;
 
     /// `llHTTPRequest`: send `request`, checked and with every header it
     /// goes out with, from `caller`'s prim. The host hands the answer back

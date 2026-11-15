@@ -748,6 +748,17 @@ impl GridCore {
         }
     }
 
+    /// The grid's default day for the region keyed `region_id`, labelled as
+    /// the imitated grid labels it: what a region nobody gave an environment
+    /// serves, and what one whose environment was dropped serves again.
+    pub(crate) fn stock_environment(&self, region_id: uuid::Uuid) -> EnvironmentSettings {
+        let mut stock = EnvironmentSettings::default_region();
+        self.stock_day.name.clone_into(&mut stock.day_cycle.name);
+        stock.env_version = self.stock_day.env_version;
+        stock.region_id = region_id;
+        stock
+    }
+
     /// The region at `index` (indices come from the lookups below and from
     /// [`SimState::region`]).
     pub(crate) fn region(&self, index: usize) -> Option<&RegionEntry> {
@@ -782,7 +793,12 @@ impl GridCore {
         else {
             return (fallback, None);
         };
-        let ground = entry.config.terrain.height_at(position.x(), position.y())
+        let ground = entry
+            .world
+            .lock()
+            .edits
+            .ground(&entry.config.terrain)
+            .height_at(position.x(), position.y())
             + AVATAR_CENTRE_ABOVE_GROUND_M;
         let placement = ArrivalPlacement {
             position: RegionCoordinates::new(position.x(), position.y(), ground),
@@ -1117,7 +1133,12 @@ impl GridCore {
             // fixtures use -- an avatar's position is its centre, so half its
             // 1.9 m height above the terrain.
             let center = sl_proto::Camera::region_center().center;
-            let ground = region.config.terrain.height_at(center.x, center.y);
+            let ground = region
+                .world
+                .lock()
+                .edits
+                .ground(&region.config.terrain)
+                .height_at(center.x, center.y);
             sim.set_arrival_position(
                 sl_types::map::RegionCoordinates::new(
                     center.x,
@@ -1134,12 +1155,12 @@ impl GridCore {
         // The region's environment: the scene's own, or the stock day labelled
         // as the imitated grid labels its default. Either names its region, as
         // a live grid's always does.
-        let environment = region.config.environment.clone().unwrap_or_else(|| {
-            let mut stock = EnvironmentSettings::default_region();
-            self.stock_day.name.clone_into(&mut stock.day_cycle.name);
-            stock.env_version = self.stock_day.env_version;
-            stock
-        });
+        let stock = self.stock_environment(region.region_id);
+        let environment = region
+            .config
+            .environment
+            .clone()
+            .unwrap_or_else(|| stock.clone());
         sim.set_environment(EnvironmentSettings {
             region_id: if environment.region_id.is_nil() {
                 region.region_id
@@ -1149,6 +1170,13 @@ impl GridCore {
             ..environment
         });
         (region.scenario.setup)(&mut sim, now);
+        // What a script or a viewer set since the region started outranks
+        // what the scene installed.
+        region
+            .world
+            .lock()
+            .edits
+            .serve_environments(&mut sim, &stock, account.agent_id);
         if account.config.dressed {
             crate::scenario::dress(&mut sim);
         }
@@ -1274,7 +1302,14 @@ impl GridCore {
         // ground, so the estate download matches what the viewer stands on.
         let mut udp_assets = region.scenario.udp_assets.clone();
         if udp_assets.terrain_raw.is_none() {
-            udp_assets.terrain_raw = Some(region.config.terrain.to_raw());
+            udp_assets.terrain_raw = Some(
+                region
+                    .world
+                    .lock()
+                    .edits
+                    .ground(&region.config.terrain)
+                    .to_raw(),
+            );
         }
 
         let state = SimState {

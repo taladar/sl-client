@@ -51,3 +51,13 @@ resident on a parcel whose `SeeAVs` is off on `FakeOpensim`
 (`PresencePolicy`), but the case chops a corner off the region's parcel to
 make one, so it is OpenSim-only. Once a divide is answered, add it to the
 offline list for `FakeOpensim`.
+
+## From server-lsl-lib-ossl-land-writers (2026-11-15)
+
+`osParcelJoin` and `osParcelSubdivide` do OpenSim's land-module surgery on
+the fake grid (`scripts::land_writers::join_parcels`, `subdivide_parcel`):
+blocks and dwell merged into the largest, a cut given the next local id, a
+new listing, no landing point and no search flag, both parcels sent to the
+avatars on them and every viewer the overlay. A viewer's `DivideParcel` /
+`JoinParcels` can share them once its own rules (measured: OpenSim answers an
+ordinary resident with the overlay alone) are in.

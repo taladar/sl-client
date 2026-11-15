@@ -703,6 +703,7 @@ impl Host for CorpusHost {
                 z: 0.0,
                 s: 1.0,
             },
+            altitudes: [1000.0, 2000.0, 3000.0],
         }
     }
 
@@ -738,6 +739,49 @@ impl Host for CorpusHost {
 
     fn map_texture(&self, _caller: CallerId, _region: &str) -> Option<String> {
         None
+    }
+
+    fn edit_region(
+        &mut self,
+        _caller: CallerId,
+        _edit: &sl_lsl_runtime::vm::land::RegionEdit,
+    ) -> bool {
+        false
+    }
+
+    fn wind_param(
+        &self,
+        _caller: CallerId,
+        _plugin: &str,
+        _param: &str,
+    ) -> Result<f32, sl_lsl_runtime::vm::land::WindParamError> {
+        Err(sl_lsl_runtime::vm::land::WindParamError::NoPlugin)
+    }
+
+    fn region_stats(&self, _caller: CallerId) -> Vec<f32> {
+        Vec::new()
+    }
+
+    fn lightshare(&self, _caller: CallerId) -> sl_lsl_runtime::vm::land::LightShare {
+        sl_lsl_runtime::vm::land::LightShare::default()
+    }
+
+    fn day_cycle(&self, _asset: &str) -> sl_lsl_runtime::vm::land::DayCycle {
+        sl_lsl_runtime::vm::land::DayCycle::Missing
+    }
+
+    fn change_environment(
+        &mut self,
+        _caller: CallerId,
+        _scope: &sl_lsl_runtime::vm::land::EnvironmentScope,
+        _change: &sl_lsl_runtime::vm::land::EnvironmentChange,
+        _transition: i32,
+    ) -> bool {
+        false
+    }
+
+    fn parcel_sip_address(&mut self, _caller: CallerId, _address: &str) -> bool {
+        false
     }
 
     fn send_http(&mut self, _caller: CallerId, _request: &sl_lsl_runtime::vm::http::Outbound) {}

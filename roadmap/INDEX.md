@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 130 |
-| ready | 328 |
+| ready | 327 |
 | blocked | 36 |
 | in-progress | 6 |
 | bugs | 23 |
-| done | 1576 |
+| done | 1577 |
 | deferred | 30 |
 | wont-do | 24 |
 | **total** | **2153** |
@@ -316,7 +316,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-lsl-opensim-function-set`](ideas/gridspec-lsl-opensim-function-set.md)
   — Measure which library functions OpenSim's engines compile
 
-## ready (328)
+## ready (327)
 
 ### protocol
 
@@ -1094,9 +1094,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-fake-grid-terraform`](ready/server-fake-grid-terraform.md) — Fake
   grid — terraforming, undo and bake (blocked by `gridspec-terrain-editing`
   (done))
-- [`server-lsl-lib-ossl-land-writers`](ready/server-lsl-lib-ossl-land-writers.md)
-  — Library tranche — OpenSim's land, terrain, wind and environment writers
-  (blocked by `server-lsl-lib-land-region-env` (done))
 - [`server-world-changed-object-crossing`](ready/server-world-changed-object-crossing.md)
   — Measure and raise changed() when an unworn object crosses a region border
   (blocked by `gridspec-neighbours-crossing` (done))
@@ -1312,7 +1309,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1576)
+## done (1577)
 
 ### protocol
 
@@ -4593,6 +4590,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-lsl-lib-ossl-avatars`](done/server-lsl-lib-ossl-avatars.md) — Library
   tranche — OpenSim's NPC and avatar functions (blocked by
   `server-lsl-lib-avatar-control` (done))
+- [`server-lsl-lib-ossl-land-writers`](done/server-lsl-lib-ossl-land-writers.md)
+  — Library tranche — OpenSim's land, terrain, wind and environment writers
+  (blocked by `server-lsl-lib-land-region-env` (done))
 - [`server-lsl-lib-prim-state`](done/server-lsl-lib-prim-state.md) — Library
   tranche — reading and writing the prim (blocked by `server-lsl-vm-execution`
   (done), `server-world-ecs-store` (done), `server-world-link-sets` (done),

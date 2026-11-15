@@ -266,6 +266,10 @@ pub struct SceneFixtures {
     /// access pass's expiry). The grid hands every region its own; a world
     /// built by hand reads the machine's.
     pub wall: crate::time::WallClock,
+    /// What the region's scripts changed of it beside its prims and parcels:
+    /// the ground, the wind models, the environments, a restart
+    /// ([`crate::region_edits`]). Not a fixture.
+    pub(crate) edits: crate::region_edits::RegionEdits,
 }
 
 /// One agent's avatar standing in a region, as the region's **other** viewers
@@ -515,6 +519,36 @@ pub enum RegionChange {
     /// session's identity, so what travels here is the composition rather than
     /// a finished message.
     TerrainRetextured(Box<RegionTerrainComposition>),
+    /// Patches of the ground moved (a script's `osSetTerrainHeight`), or all
+    /// of them sent again (`osTerrainFlush`): every session streams them to
+    /// its viewer, as OpenSim's terrain module sends each client the patches
+    /// tainted since it last looked.
+    TerrainPatched(Vec<sl_proto::TerrainPatch>),
+    /// A region's or a parcel's environment was set or dropped: every session
+    /// serves it from now on, and — where the change says so — tells its
+    /// viewer with the `RegionInfo` OpenSim refreshes an environment-aware
+    /// viewer with.
+    EnvironmentChanged {
+        /// The parcel's region-local id, or `-1` for the region.
+        parcel_id: i32,
+        /// The environment, or `None` for one dropped.
+        settings: Option<Box<sl_proto::EnvironmentSettings>>,
+        /// The region's record to tell the viewer with, if it is told.
+        told: Option<Box<sl_proto::RegionLimits>>,
+    },
+    /// An avatar's own environment was set or dropped
+    /// (`osReplaceAgentEnvironment`): its session serves it in place of every
+    /// other and refreshes its viewer as OpenSim does — the parcel it stands
+    /// on, where that has an environment of its own, then the region's
+    /// record.
+    AgentEnvironment {
+        /// The avatar.
+        agent: AgentKey,
+        /// Its environment, or `None` for one dropped.
+        settings: Option<Box<sl_proto::EnvironmentSettings>>,
+        /// The region's record to tell the viewer with.
+        told: Box<sl_proto::RegionLimits>,
+    },
     /// An agent changed its display name over `SetDisplayName`. Every other
     /// session stores the new record (so its `GetDisplayNames` answers it)
     /// and pushes its viewer the `DisplayNameUpdate`, as the agent's own
@@ -961,6 +995,7 @@ impl SceneFixtures {
             touches: crate::touches::Touches::default(),
             physics: crate::physics::Physics::default(),
             wall: crate::time::WallClock::default(),
+            edits: crate::region_edits::RegionEdits::default(),
         }
     }
 
@@ -2312,7 +2347,7 @@ pub(crate) fn push_arrival_world(
         record.sequence_id = UNSOLICITED_SEQUENCE_ID;
         sim.enqueue_parcel_properties(&record);
     }
-    push_terrain(ground, !world.withholds_ground, true, sim, now);
+    push_terrain(world, ground, !world.withholds_ground, true, sim, now);
     // Every object but what another avatar wears, which follows its wearer
     // ([`push_residents`]).
     let shown: Vec<&Object> = world
@@ -2552,7 +2587,7 @@ pub(crate) fn push_child_world(
     refresh_coarse_others(world, viewer, sim);
     sim.start_child_coarse_feed(now);
     push_object_animations(&world.object_animations, sim, now);
-    push_terrain(ground, !world.withholds_ground, false, sim, now);
+    push_terrain(world, ground, !world.withholds_ground, false, sim, now);
     // The overlay is the whole region's parcel layout, which a neighbouring
     // region draws on the minimap; it needs no viewer to be standing on it.
     // `overlay_for` colours the cells by owner, and a child agent owns nothing
@@ -2835,16 +2870,25 @@ pub(crate) struct Ground<'a> {
 /// behind it where the grid sends a root agent its wind with the ground
 /// (`root`), and the CLOUD layer if the fixture carries one. The wind that
 /// follows on a timer is the session's own
-/// ([`SimSession::set_wind_feed`]). Send failures are logged.
-fn push_terrain(ground: Ground<'_>, land: bool, root: bool, sim: &mut SimSession, now: Instant) {
+/// ([`SimSession::set_wind_feed`]). The land is `world`'s as it stands, the
+/// heights a script moved among it. Send failures are logged.
+fn push_terrain(
+    world: &SceneFixtures,
+    ground: Ground<'_>,
+    land: bool,
+    root: bool,
+    sim: &mut SimSession,
+    now: Instant,
+) {
     let Ground {
         fixture: terrain,
         policy,
     } = ground;
+    let live = world.edits.ground(terrain);
     let handle = sim.region_handle();
     let placement = sim.arrival_position().position;
     let stream = policy.land_stream(placement.x(), placement.y());
-    if land && let Err(error) = sim.send_terrain(&terrain.to_patches(handle), &stream, now) {
+    if land && let Err(error) = sim.send_terrain(&live.to_patches(handle), &stream, now) {
         tracing::warn!("streaming the region's ground failed: {error}");
     }
     let wind = terrain.wind_patches(handle);

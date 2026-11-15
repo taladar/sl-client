@@ -7,6 +7,10 @@
 #   out <reason> <function>      not for this grid, the reason a word the
 #                                 book's scope section explains.
 
+in lsClearWindlightScene
+in lsGetWindlightScene
+in lsSetWindlightScene
+in lsSetWindlightSceneTargeted
 in modSendCommand
 in osAdjustSoundVolume
 in osAgentSaveAppearance
@@ -84,6 +88,7 @@ in osGetPhysicsEngineType
 in osGetPrimitiveParams
 in osGetRegionMapTexture
 in osGetRegionSize
+in osGetRegionStats
 in osGetRezzingObject
 in osGetScriptEngineName
 in osGetSimulatorVersion
@@ -91,6 +96,7 @@ in osGetSitActiveRange
 in osGetStandTarget
 in osGetSunParam
 in osGetTerrainHeight
+in osGetWindParam
 in osInviteToGroup
 in osIsNotValidNumber
 in osIsNpc
@@ -138,18 +144,28 @@ in osNpcStopMoveToTarget
 in osNpcTouch
 in osNpcWhisper
 in osOwnerSaveAppearance
+in osParcelJoin
+in osParcelSetDetails
+in osParcelSubdivide
 in osParticleSystem
 in osPlaySound
 in osPlaySoundSlave
 in osPreloadSound
 in osRegexIsMatch
+in osRegionNotice
+in osRegionRestart
+in osReplaceAgentEnvironment
+in osReplaceParcelEnvironment
+in osReplaceRegionEnvironment
 in osReplaceString
 in osRequestSecureURL
 in osRequestURL
 in osResetAllScripts
+in osResetEnvironment
 in osRound
 in osSHA256
 in osSetContentType
+in osSetEstateSunSettings
 in osSetFontName
 in osSetFontSize
 in osSetHealRate
@@ -157,18 +173,27 @@ in osSetHealth
 in osSetLinkSitActiveRange
 in osSetLinkStandTarget
 in osSetOwnerSpeed
+in osSetParcelDetails
 in osSetParcelMediaURL
 in osSetParcelMusicURL
+in osSetParcelSIPAddress
 in osSetPenCap
 in osSetPenColor
 in osSetPenColour
 in osSetPenSize
 in osSetPrimitiveParams
 in osSetProjectionParams
+in osSetRegionSunSettings
+in osSetRegionWaterHeight
 in osSetSitActiveRange
 in osSetSoundRadius
 in osSetSpeed
 in osSetStandTarget
+in osSetSunParam
+in osSetTerrainHeight
+in osSetTerrainTexture
+in osSetTerrainTextureHeight
+in osSetWindParam
 in osSlerp
 in osStopSound
 in osStringEndsWith
@@ -179,43 +204,18 @@ in osStringReplace
 in osStringStartsWith
 in osStringSubString
 in osSunGetParam
+in osSunSetParam
 in osTeleportAgent
 in osTeleportOwner
+in osTerrainFlush
 in osTerrainGetHeight
+in osTerrainSetHeight
 in osTriggerSound
 in osTriggerSoundLimited
 in osUnixTimeToTimestamp
 in osVecDistSquare
 in osVecMagSquare
 in osWindActiveModelPluginName
-later server-lsl-lib-ossl-land-writers lsClearWindlightScene
-later server-lsl-lib-ossl-land-writers lsGetWindlightScene
-later server-lsl-lib-ossl-land-writers lsSetWindlightScene
-later server-lsl-lib-ossl-land-writers lsSetWindlightSceneTargeted
-later server-lsl-lib-ossl-land-writers osGetRegionStats
-later server-lsl-lib-ossl-land-writers osGetWindParam
-later server-lsl-lib-ossl-land-writers osParcelJoin
-later server-lsl-lib-ossl-land-writers osParcelSetDetails
-later server-lsl-lib-ossl-land-writers osParcelSubdivide
-later server-lsl-lib-ossl-land-writers osRegionNotice
-later server-lsl-lib-ossl-land-writers osRegionRestart
-later server-lsl-lib-ossl-land-writers osReplaceAgentEnvironment
-later server-lsl-lib-ossl-land-writers osReplaceParcelEnvironment
-later server-lsl-lib-ossl-land-writers osReplaceRegionEnvironment
-later server-lsl-lib-ossl-land-writers osResetEnvironment
-later server-lsl-lib-ossl-land-writers osSetEstateSunSettings
-later server-lsl-lib-ossl-land-writers osSetParcelDetails
-later server-lsl-lib-ossl-land-writers osSetParcelSIPAddress
-later server-lsl-lib-ossl-land-writers osSetRegionSunSettings
-later server-lsl-lib-ossl-land-writers osSetRegionWaterHeight
-later server-lsl-lib-ossl-land-writers osSetSunParam
-later server-lsl-lib-ossl-land-writers osSetTerrainHeight
-later server-lsl-lib-ossl-land-writers osSetTerrainTexture
-later server-lsl-lib-ossl-land-writers osSetTerrainTextureHeight
-later server-lsl-lib-ossl-land-writers osSetWindParam
-later server-lsl-lib-ossl-land-writers osSunSetParam
-later server-lsl-lib-ossl-land-writers osTerrainFlush
-later server-lsl-lib-ossl-land-writers osTerrainSetHeight
 later server-lsl-lib-physics-vehicles osClearInertia
 later server-lsl-lib-physics-vehicles osGetInertiaData
 later server-lsl-lib-physics-vehicles osSetInertia

@@ -401,10 +401,20 @@ pub fn os_format_string<C: PureCtx>(
     format: String,
     strings: Vec<Element>,
 ) -> Result<String, CallError> {
-    let thrown = |exception| CallError::Exception {
+    dotnet_format(&format, &strings).map_err(|exception| CallError::Exception {
         id: crate::library::BuiltinId::OsFormatString,
         exception,
-    };
+    })
+}
+
+/// .NET's `String.Format` of `format` with `strings`, each written as
+/// OpenSim writes the element ([`os_format_string`]).
+///
+/// # Errors
+///
+/// [`Exception::FormatIndex`] for an item past the list, and
+/// [`Exception::FormatInvalid`] for a format that is not one.
+pub(crate) fn dotnet_format(format: &str, strings: &[Element]) -> Result<String, Exception> {
     let mut out = String::new();
     let mut chars = format.chars().peekable();
     while let Some(character) = chars.next() {
@@ -417,14 +427,14 @@ pub fn os_format_string<C: PureCtx>(
                 let _brace = chars.next();
                 out.push('}');
             }
-            '}' => return Err(thrown(Exception::FormatInvalid)),
+            '}' => return Err(Exception::FormatInvalid),
             '{' => {
                 let mut item = String::new();
                 loop {
                     match chars.next() {
                         Some('}') => break,
                         Some(inner) => item.push(inner),
-                        None => return Err(thrown(Exception::FormatInvalid)),
+                        None => return Err(Exception::FormatInvalid),
                     }
                 }
                 let item = item.split(':').next().unwrap_or_default();
@@ -435,19 +445,15 @@ pub fn os_format_string<C: PureCtx>(
                 let index: usize = index
                     .trim()
                     .parse()
-                    .map_err(|_error| thrown(Exception::FormatInvalid))?;
+                    .map_err(|_error| Exception::FormatInvalid)?;
                 let alignment: i32 = match alignment {
                     Some(alignment) => alignment
                         .parse()
-                        .map_err(|_error| thrown(Exception::FormatInvalid))?,
+                        .map_err(|_error| Exception::FormatInvalid)?,
                     None => 0,
                 };
-                let text = element_to_string_for(
-                    strings
-                        .get(index)
-                        .ok_or_else(|| thrown(Exception::FormatIndex))?,
-                    true,
-                );
+                let text =
+                    element_to_string_for(strings.get(index).ok_or(Exception::FormatIndex)?, true);
                 let pad = count_of(alignment.saturating_abs())
                     .saturating_sub(text.encode_utf16().count());
                 let padding = " ".repeat(pad);
