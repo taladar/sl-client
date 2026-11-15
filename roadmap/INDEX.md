@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 330 |
 | blocked | 36 |
 | in-progress | 4 |
-| bugs | 21 |
-| done | 1579 |
+| bugs | 20 |
+| done | 1580 |
 | deferred | 30 |
 | wont-do | 24 |
 | **total** | **2155** |
@@ -1252,7 +1252,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-text-renderability-axis`](in-progress/viewer-ui-text-renderability-axis.md)
   — Upstream issue — font selection cannot see glyph-format renderability
 
-## bugs (21)
+## bugs (20)
 
 ### protocol
 
@@ -1280,9 +1280,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A nearby avatar stays a coarse sphere even as the camera closes in
 - [`viewer-own-avatar-broken-after-teleport`](bugs/viewer-own-avatar-broken-after-teleport.md)
   — Own avatar looks broken after a teleport
-- [`viewer-pbr-face-shows-legacy-texture-on-aditi`](bugs/viewer-pbr-face-shows-legacy-texture-on-aditi.md)
-  — A prim given a PBR material from the Build window sometimes keeps drawing
-  its plywood
 - [`viewer-perf-steady-state-46fps-ceiling`](bugs/viewer-perf-steady-state-46fps-ceiling.md)
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
 - [`viewer-texture-filtering-in-linear-space`](bugs/viewer-texture-filtering-in-linear-space.md)
@@ -1310,7 +1307,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1579)
+## done (1580)
 
 ### protocol
 
@@ -2865,6 +2862,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-pbr-blinn-phong-build-preview`](done/viewer-pbr-blinn-phong-build-preview.md)
   — PBR supersedes Blinn-Phong on a face; build tool previews Blinn-Phong
   (FIRE-35138)
+- [`viewer-pbr-face-shows-legacy-texture-on-aditi`](done/viewer-pbr-face-shows-legacy-texture-on-aditi.md)
+  — A prim given a PBR material from the Build window sometimes keeps drawing
+  its plywood
 - [`viewer-pbr-face-sky-lighting-divergence`](done/viewer-pbr-face-sky-lighting-divergence.md)
   — PBR (glTF) faces are still lit by Bevy's model, not the reference's
 - [`viewer-pbr-face-zero-alpha-not-culled`](done/viewer-pbr-face-zero-alpha-not-culled.md)

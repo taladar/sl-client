@@ -42,7 +42,6 @@ use bevy::camera::visibility::RenderLayers;
 use bevy::prelude::*;
 
 use sl_client_bevy::{Object, PrimFaceId, Priority, TextureAnimation, TextureFace, TextureKey};
-use sl_viewer_world_api::DecodedTextures;
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
@@ -51,9 +50,7 @@ use crate::objects::{FaceTextureDebug, PrimFaceEntity};
 use crate::texture_anim::{
     ObjectTextureAnimation, anim_applies_to_face, running_texture_animation,
 };
-use crate::textures::{
-    FaceStores, FaceStoresParam, PrimTextures, TextureAlpha, TextureManager, face_material,
-};
+use crate::textures::{FaceStores, FaceStoresParam, TextureAlpha, face_material};
 use sl_viewer_kit::face_material::FaceMaterial;
 use sl_viewer_world_api::{SelectionSet, on_hud_layer};
 
@@ -270,32 +267,26 @@ impl MaterialInternContext {
 
 /// Give `face` a private (unshared) material recomposed from its
 /// [`FaceTextureDebug`] texture entry, and drop its [`SharedFaceMaterial`]
-/// marker. A full recompose (not a clone) so the [`PrimTextures`] pending /
-/// LOD bookkeeping is re-registered for the new handle; the texture was
-/// already requested at spawn priority, so the re-request rides idle.
+/// marker. A full recompose (not a clone) so the
+/// [`PrimTextures`](crate::textures::PrimTextures) pending / LOD bookkeeping
+/// is re-registered for the new handle; the texture was already requested at
+/// spawn priority, so the re-request rides idle.
+///
+/// The face's [`PrimFaceEntity`] is written again too, which is how a face
+/// announces a new handle: the registrations keyed on it — a PBR face slot
+/// above all, which composes onto the handle it registered — follow the face
+/// onto its private material instead of composing onto one it no longer draws.
 fn detach_face(
     face: Entity,
+    prim_face: PrimFaceEntity,
     texture_face: &TextureFace,
     commands: &mut Commands,
-    materials: &mut Assets<FaceMaterial>,
-    manager: &mut TextureManager,
-    store: &DecodedTextures,
-    prim_textures: &mut PrimTextures,
+    stores: &mut FaceStores,
 ) {
-    let private = face_material(
-        texture_face,
-        &mut FaceStores {
-            materials,
-            manager,
-            store,
-            prim_textures,
-        },
-        Priority::IDLE,
-        TextureAlpha::Mask,
-    );
+    let private = face_material(texture_face, stores, Priority::IDLE, TextureAlpha::Mask);
     commands
         .entity(face)
-        .insert(MeshMaterial3d(private))
+        .insert((MeshMaterial3d(private), prim_face))
         .remove::<SharedFaceMaterial>();
 }
 
@@ -357,12 +348,10 @@ pub fn detach_shared_face_materials(
             if detached.insert(face) {
                 detach_face(
                     face,
+                    *prim_face,
                     &texture.0,
                     &mut commands,
-                    &mut paint.materials,
-                    &mut paint.manager,
-                    &paint.store,
-                    &mut paint.prim_textures,
+                    &mut paint.stores(),
                 );
             }
         }
@@ -387,12 +376,10 @@ pub fn detach_shared_face_materials(
             if detached.insert(face) {
                 detach_face(
                     face,
+                    *prim_face,
                     &texture.0,
                     &mut commands,
-                    &mut paint.materials,
-                    &mut paint.manager,
-                    &paint.store,
-                    &mut paint.prim_textures,
+                    &mut paint.stores(),
                 );
             }
         }
@@ -402,18 +389,16 @@ pub fn detach_shared_face_materials(
         if !on_hud_layer(Some(layers)) {
             continue;
         }
-        let Ok((_prim_face, texture)) = sources.shared_faces.get(face) else {
+        let Ok((prim_face, texture)) = sources.shared_faces.get(face) else {
             continue;
         };
         if detached.insert(face) {
             detach_face(
                 face,
+                *prim_face,
                 &texture.0,
                 &mut commands,
-                &mut paint.materials,
-                &mut paint.manager,
-                &paint.store,
-                &mut paint.prim_textures,
+                &mut paint.stores(),
             );
         }
     }
@@ -422,18 +407,16 @@ pub fn detach_shared_face_materials(
     // selection) never touch a shared material.
     for node in sources.selection.iter() {
         for descendant in sources.children.iter_descendants(node.entity) {
-            let Ok((_prim_face, texture)) = sources.shared_faces.get(descendant) else {
+            let Ok((prim_face, texture)) = sources.shared_faces.get(descendant) else {
                 continue;
             };
             if detached.insert(descendant) {
                 detach_face(
                     descendant,
+                    *prim_face,
                     &texture.0,
                     &mut commands,
-                    &mut paint.materials,
-                    &mut paint.manager,
-                    &paint.store,
-                    &mut paint.prim_textures,
+                    &mut paint.stores(),
                 );
             }
         }

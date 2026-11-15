@@ -7484,3 +7484,215 @@ mod first_person_tests {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod pbr_face_tests {
+    use bevy::prelude::*;
+    use pretty_assertions::{assert_eq, assert_ne};
+
+    use sl_client_bevy::{
+        Object, RenderMaterialRef, ScopedObjectId, SlEvent, SlSessionEvent as SessionEvent, Uuid,
+        Vector,
+    };
+    use sl_viewer_world_objects::material_cache::SharedFaceMaterial;
+
+    use super::{entity_of, fixture_prim, install_camera, seed_object, settle, world_app};
+    use crate::face_material::{FaceMaterial, SL_FACE_MODE_DIFFUSE, SL_FACE_MODE_PBR};
+    use crate::objects::PrimFaceEntity;
+
+    /// A boxed error so tests can use `?`.
+    type TestError = Box<dyn core::error::Error>;
+
+    /// The glTF material the tests assign. Nothing serves it, so it never
+    /// decodes; a face carrying it is composed from the glTF defaults, which is
+    /// what tells a PBR face from a Blinn-Phong one here.
+    const MATERIAL: Uuid = Uuid::from_u128(0x0b8c_0000_0000_0000_0000_0000_0000_0001);
+
+    /// Where the first fixture prim stands, region-local metres.
+    const FIRST_AT: Vector = Vector {
+        x: 128.0,
+        y: 128.0,
+        z: 30.0,
+    };
+
+    /// Where the second fixture prim stands, clear of the first.
+    const SECOND_AT: Vector = Vector {
+        x: 140.0,
+        y: 128.0,
+        z: 30.0,
+    };
+
+    /// The faces the fixture prim draws: its default shape is not a box, and
+    /// a render material on a face it does not draw changes nothing.
+    const FACES: usize = 3;
+
+    /// `object` with [`MATERIAL`] on every one of a box's six faces.
+    fn with_render_material(mut object: Object) -> Object {
+        object.extra.render_material = (0..6)
+            .map(|face| RenderMaterialRef {
+                face,
+                material_id: MATERIAL,
+            })
+            .collect();
+        object
+    }
+
+    /// The prim `scoped`'s faces: each one's entity, its material handle and
+    /// whether it still carries the shared-material marker, in face order.
+    fn faces_of(
+        app: &mut App,
+        scoped: ScopedObjectId,
+    ) -> Result<Vec<(Entity, Handle<FaceMaterial>, bool)>, TestError> {
+        let object = entity_of(app, scoped).ok_or("the prim has no entity")?;
+        let mut faces = app.world_mut().query::<(
+            &PrimFaceEntity,
+            &MeshMaterial3d<FaceMaterial>,
+            Has<SharedFaceMaterial>,
+        )>();
+        let mut found: Vec<(u16, Entity, Handle<FaceMaterial>, bool)> = Vec::new();
+        let mut descendants: Vec<Entity> = Vec::new();
+        let mut stack = vec![object];
+        while let Some(entity) = stack.pop() {
+            if let Some(children) = app.world().get::<Children>(entity) {
+                stack.extend(children.iter());
+                descendants.extend(children.iter());
+            }
+        }
+        for descendant in descendants {
+            if let Ok((face, material, shared)) = faces.get(app.world(), descendant) {
+                found.push((face.face_id.get(), descendant, material.0.clone(), shared));
+            }
+        }
+        found.sort_by_key(|(index, ..)| *index);
+        Ok(found
+            .into_iter()
+            .map(|(_index, entity, handle, shared)| (entity, handle, shared))
+            .collect())
+    }
+
+    /// The render mode each of `scoped`'s faces is composed in.
+    fn modes_of(app: &mut App, scoped: ScopedObjectId) -> Result<Vec<u32>, TestError> {
+        let faces = faces_of(app, scoped)?;
+        let materials = app.world().resource::<Assets<FaceMaterial>>();
+        faces
+            .iter()
+            .map(|(_entity, handle, _shared)| {
+                materials
+                    .get(handle)
+                    .map(|material| material.extension.params.mode)
+                    .ok_or_else(|| "a face's material is not in the store".into())
+            })
+            .collect()
+    }
+
+    /// **A render material given to one of two identical prims lands on that
+    /// prim alone** ([[viewer-pbr-face-shows-legacy-texture-on-aditi]]).
+    ///
+    /// Two prims with the same texture entry share their face materials. The
+    /// render material arrives on an update that does not re-tessellate, and
+    /// the material pipeline used to register the face on the handle it held
+    /// that frame — the shared one — and compose the glTF material onto it, so
+    /// the *other* prim turned PBR; the detach net then handed the edited prim
+    /// a private Blinn-Phong copy no PBR slot knew about, and it went on
+    /// drawing its texture for good.
+    #[test]
+    fn a_render_material_on_a_shared_face_lands_on_that_prim_alone() -> Result<(), TestError> {
+        let mut app = world_app();
+        let first = seed_object(&mut app, fixture_prim(1, FIRST_AT, 0));
+        let second = seed_object(&mut app, fixture_prim(2, SECOND_AT, 0));
+        settle(&mut app, 5);
+        let before = faces_of(&mut app, first)?;
+        let other = faces_of(&mut app, second)?;
+        assert!(!before.is_empty(), "the fixture prim built no faces");
+        assert!(
+            before
+                .iter()
+                .zip(&other)
+                .all(|(mine, theirs)| mine.1 == theirs.1 && mine.2 && theirs.2),
+            "the two identical prims start out sharing their face materials"
+        );
+
+        app.world_mut()
+            .write_message(SlEvent(SessionEvent::ObjectUpdated(Box::new(
+                with_render_material(fixture_prim(1, FIRST_AT, 0)),
+            ))));
+        settle(&mut app, 5);
+
+        assert_eq!(
+            modes_of(&mut app, first)?,
+            vec![SL_FACE_MODE_PBR; FACES],
+            "the prim given the material draws it on every face"
+        );
+        assert_eq!(
+            modes_of(&mut app, second)?,
+            vec![SL_FACE_MODE_DIFFUSE; FACES],
+            "the identical prim beside it is untouched"
+        );
+        Ok(())
+    }
+
+    /// **A level-of-detail rebuild keeps a render material assigned without a
+    /// rebuild** ([[viewer-pbr-face-shows-legacy-texture-on-aditi]]).
+    ///
+    /// A render material given to a prim already in the scene does not
+    /// re-tessellate it, and the pixel-area driver's later rebuild used to run
+    /// from the inputs of the last real one — which said no face carried a
+    /// render material — so it rebuilt the faces onto shared materials. Every
+    /// frame of the run is checked: a face that is PBR must never be shared,
+    /// not even for the frame before the detach net would catch it.
+    #[test]
+    fn a_level_of_detail_rebuild_keeps_a_late_render_material() -> Result<(), TestError> {
+        let mut app = world_app();
+        let scoped = seed_object(&mut app, fixture_prim(1, FIRST_AT, 0));
+        let _beside = seed_object(&mut app, fixture_prim(2, SECOND_AT, 0));
+        settle(&mut app, 5);
+        app.world_mut()
+            .write_message(SlEvent(SessionEvent::ObjectUpdated(Box::new(
+                with_render_material(fixture_prim(1, FIRST_AT, 0)),
+            ))));
+        settle(&mut app, 5);
+        assert_eq!(modes_of(&mut app, scoped)?, vec![SL_FACE_MODE_PBR; FACES]);
+
+        // On screen and close, so the pixel-area driver wants another level for
+        // the prim and rebuilds its faces.
+        let meshes_before = meshes_of(&mut app, scoped)?;
+        let target =
+            super::scene_position_of(&mut app, scoped).ok_or("the prim has no position")?;
+        install_camera(&mut app, target + Vec3::new(0.0, 0.0, 10.0), target);
+        for frame in 0..40 {
+            settle(&mut app, 1);
+            let faces = faces_of(&mut app, scoped)?;
+            assert!(
+                faces.iter().all(|(_entity, _handle, shared)| !shared),
+                "frame {frame}: a face carrying a render material was rebuilt onto a shared \
+                 material"
+            );
+        }
+        assert_ne!(
+            meshes_of(&mut app, scoped)?,
+            meshes_before,
+            "the prim was never re-tessellated, so this test checked nothing"
+        );
+        assert_eq!(
+            modes_of(&mut app, scoped)?,
+            vec![SL_FACE_MODE_PBR; FACES],
+            "the rebuilt faces still draw the render material"
+        );
+        Ok(())
+    }
+
+    /// The mesh handle each of `scoped`'s faces draws, in face order — what a
+    /// re-tessellation changes.
+    fn meshes_of(app: &mut App, scoped: ScopedObjectId) -> Result<Vec<Handle<Mesh>>, TestError> {
+        let faces = faces_of(app, scoped)?;
+        faces
+            .iter()
+            .map(|(entity, _handle, _shared)| {
+                app.world()
+                    .get::<Mesh3d>(*entity)
+                    .map(|mesh| mesh.0.clone())
+                    .ok_or_else(|| "a face has no mesh".into())
+            })
+            .collect()
+    }
+}

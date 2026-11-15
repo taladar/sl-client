@@ -521,6 +521,36 @@ impl ObjectBuilds {
         self.pending.as_ref()
     }
 
+    /// Bring every retained build's material-intern inputs up to `intern`, the
+    /// context of the update just applied.
+    ///
+    /// An update that changes an intern input without re-tessellating — a render
+    /// material assigned to the prim, a texture animation started — leaves the
+    /// faces as they are, but the retained inputs would still describe the faces
+    /// as they were: the next level-of-detail rebuild would build a now PBR face
+    /// onto a shared material, register the PBR composition onto the shared
+    /// handle, and the detach net would then hand the face a private copy that no
+    /// PBR slot knows about, so it drew its Blinn-Phong layer for good.
+    fn refresh_intern(&mut self, intern: &MaterialInternContext) {
+        let pending = match self.pending.as_mut() {
+            Some(PendingGeometry::Mesh(mesh)) => Some(&mut mesh.intern),
+            Some(PendingGeometry::Sculpt(sculpt)) => Some(&mut sculpt.intern),
+            Some(PendingGeometry::RiggedMesh(rigged)) => Some(&mut rigged.mesh.intern),
+            None => None,
+        };
+        let retained = [
+            pending,
+            self.mesh_rebuild.as_mut().map(|mesh| &mut mesh.intern),
+            self.prim_rebuild.as_mut().map(|prim| &mut prim.intern),
+            self.sculpt_rebuild
+                .as_mut()
+                .map(|sculpt| &mut sculpt.intern),
+        ];
+        for slot in retained.into_iter().flatten() {
+            slot.clone_from(intern);
+        }
+    }
+
     /// The client-tessellated rebuild inputs this object holds, if any — what
     /// [`apply_prim_lod`] re-runs at a new level. `None` for a mesh, a tree (which
     /// has its own tier and driver), or anything not tessellated on the CPU.
@@ -3420,6 +3450,17 @@ fn apply_object(
             sync_world_root_marker(existing.entity, is_root, build.commands);
             apply_render_materials(existing.geometry, scoped, object, build.commands);
             apply_texture_animation(existing.geometry, object, build.commands);
+            // The faces stay, but a later level-of-detail rebuild must build them
+            // as this update describes them (a rebuild below replaces the whole
+            // record anyway).
+            if !rebuilt {
+                let intern = build.intern.clone();
+                build
+                    .commands
+                    .entity(existing.entity)
+                    .entry::<ObjectBuilds>()
+                    .and_modify(move |mut builds| builds.refresh_intern(&intern));
+            }
             // The light (P25.1) / particle (P30.1) / flexi (P32.1) / probe
             // (P33) blocks: each helper inserts its component when the block is
             // present and removes it when absent, so one toggled off / retuned
