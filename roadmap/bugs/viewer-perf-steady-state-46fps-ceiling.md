@@ -362,3 +362,28 @@ Steady window (1832 frames), per frame: frame p50 36.6 ms, `Main` 27.2,
   (`build_static_colliders` 1.5, `mark_3d_meshes_as_changed…` 1.5, the
   `check_entities_needing_specialization` family ~1.3 each in parallel,
   bounds / visibility ~1 each), `Update` 10.9 ms; UI layout 0.5 ms/frame.
+
+## Re-capture 2026-11-14 (aditi, closing viewer-perf-pbr-shadow-cluster-rez)
+
+Release `profile-tracy`, visible window `t ≥ 220 s` (1979 frames, ~19 fps,
+content still arriving; the first 200 s were an off-screen window at 1 fps and
+are excluded):
+
+| | mean | p50 | p90 |
+| --- | --- | --- | --- |
+| `Render` | 50.1 ms | 48.0 | 62.2 |
+| ↳ `render_system` (`RenderGraph`) | 21.9 / 21.6 | 22.3 | 24.9 |
+| ↳ `camera_driver` | 14.8 | | |
+| `Main` | 28.8 | 27.5 | 31.8 |
+| ↳ `PostUpdate` / `Update` | 13.5 / 11.4 | 13.2 / 10.4 | |
+| `ExtractSchedule` | 3.1 | 2.6 | 2.9 |
+| `vkQueuePresentKHR` | 0.14 | 0.11 | 0.15 |
+
+Still render-thread bound, with Main at ~29 ms. Render-side contributors per
+frame: `collect_visible_cpu_culled_entities` 7.2,
+`submit_pending_command_buffers` 6.3, `collect_meshes_for_gpu_building` 5.8
+(parallel), `specialize_material_meshes` 4.0 (render thread),
+`queue_material_meshes` 2.7, `prepare_generated_environment_map_bind_groups`
+2.0 (max 59). Shadows (queue + specialize + cascade pass) are now ~0.4 ms
+against ~4.8 in the table above, and clustering is ~1.4 ms on a worker. Trace:
+`tracy-captures/aditi-shadow-cluster-rez.tracy` (gitignored).

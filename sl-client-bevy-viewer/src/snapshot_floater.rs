@@ -19,7 +19,10 @@
 //!
 //! - **Include UI** off (the default) hides the whole UI ([`UiRoot`], via
 //!   `Display::None`) for the shot frame, so the photo is a clean world view;
-//!   on, the interface (this floater included) is left in the frame.
+//!   on, the interface (this floater included) is left in the frame. Hover
+//!   text, name tags and the in-world beacons go with it
+//!   ([`WorldUiVisibility`]): the world camera draws them, but the reference
+//!   draws them in its UI pass, so its snapshots without the UI hold none.
 //! - **Include HUD** off (the default) hides the worn-HUD attachment subtree
 //!   ([`crate::hud::HudScreen`], via `Visibility::Hidden`) for the shot; on, it
 //!   stays in the frame. (The HUD *camera* is deliberately left alone — the UI
@@ -92,6 +95,7 @@ use crate::ui_tab::{
 };
 
 use sl_settings::SettingValue;
+use sl_viewer_world_api::{WorldUiHider, WorldUiVisibility};
 
 /// The floater's stable id (see [`crate::floater::Floater::id`]).
 pub(crate) const SNAPSHOT_FLOATER_ID: &str = "snapshot";
@@ -201,6 +205,7 @@ impl Plugin for SnapshotFloaterPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SnapshotState>()
             .init_resource::<CapturedShot>()
+            .init_resource::<WorldUiVisibility>()
             .add_message::<RequestSnapshotCapture>()
             .add_systems(
                 Startup,
@@ -920,15 +925,74 @@ fn snapshot_hotkey(
     }
 }
 
+/// What a capture hides for its shot and restores after, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the UI root, the worn-HUD
+/// screens, the status-bar balance, and the world-anchored UI — hover text and
+/// name tags, which the world camera draws but the reference counts as UI.
+#[derive(bevy::ecs::system::SystemParam)]
+struct ShotLayers<'w, 's> {
+    /// The UI root, collapsed while the UI is out of the shot.
+    root: Res<'w, UiRoot>,
+    /// Its node.
+    nodes: Query<'w, 's, &'static mut Node>,
+    /// The worn-HUD screens.
+    hud: Query<'w, 's, &'static mut Visibility, (With<HudScreen>, Without<BalanceReadout>)>,
+    /// The status-bar balance read-out.
+    balance: Query<'w, 's, &'static mut Visibility, (With<BalanceReadout>, Without<HudScreen>)>,
+    /// Whether the main camera draws the world-anchored UI.
+    world_ui: ResMut<'w, WorldUiVisibility>,
+}
+
+impl ShotLayers<'_, '_> {
+    /// Hide what `state`'s capture leaves out of its shot.
+    fn hide(&mut self, state: &SnapshotState) {
+        if state.hid_ui {
+            if let Ok(mut node) = self.nodes.get_mut(self.root.0) {
+                node.display = Display::None;
+            }
+            // Hover text and name tags leave with the rest of the UI, as the
+            // reference's snapshot without the UI drops its `LLHUDObject`s.
+            self.world_ui.hide(WorldUiHider::Snapshot);
+        }
+        if state.hid_hud {
+            for mut visibility in &mut self.hud {
+                *visibility = Visibility::Hidden;
+            }
+        }
+        if state.hid_balance {
+            for mut visibility in &mut self.balance {
+                *visibility = Visibility::Hidden;
+            }
+        }
+    }
+
+    /// Bring back exactly what [`Self::hide`] hid for `state`'s capture.
+    fn restore(&mut self, state: &SnapshotState) {
+        if state.hid_ui {
+            if let Ok(mut node) = self.nodes.get_mut(self.root.0) {
+                node.display = Display::Flex;
+            }
+            self.world_ui.release(WorldUiHider::Snapshot);
+        }
+        if state.hid_hud {
+            for mut visibility in &mut self.hud {
+                *visibility = Visibility::Inherited;
+            }
+        }
+        if state.hid_balance {
+            for mut visibility in &mut self.balance {
+                *visibility = Visibility::Inherited;
+            }
+        }
+    }
+}
+
 /// Begin a capture on a request: hide the excluded layers (UI / HUD) and arm the
 /// shutter countdown. Ignores a request while one is already in flight.
 fn start_capture(
     mut requests: MessageReader<RequestSnapshotCapture>,
     mut state: ResMut<SnapshotState>,
-    root: Res<UiRoot>,
-    mut nodes: Query<&mut Node>,
-    mut hud: Query<&mut Visibility, (With<HudScreen>, Without<BalanceReadout>)>,
-    mut balance: Query<&mut Visibility, (With<BalanceReadout>, Without<HudScreen>)>,
+    mut layers: ShotLayers,
 ) {
     // Collapse a burst of clicks; a request while busy is dropped.
     let Some(request) = requests.read().last().copied() else {
@@ -942,21 +1006,7 @@ fn start_capture(
     state.hid_ui = !state.include_ui;
     state.hid_hud = !state.include_hud;
     state.hid_balance = should_hide_balance(state.include_ui, state.hide_balance);
-    if state.hid_ui
-        && let Ok(mut node) = nodes.get_mut(root.0)
-    {
-        node.display = Display::None;
-    }
-    if state.hid_hud {
-        for mut visibility in &mut hud {
-            *visibility = Visibility::Hidden;
-        }
-    }
-    if state.hid_balance {
-        for mut visibility in &mut balance {
-            *visibility = Visibility::Hidden;
-        }
-    }
+    layers.hide(&state);
     state.phase = CapturePhase::Waiting(HIDE_FRAMES);
     state.status = StatusKind::Working;
 }
@@ -976,10 +1026,7 @@ const fn should_hide_balance(include_ui: bool, hide_balance: bool) -> bool {
 fn drive_capture(
     mut state: ResMut<SnapshotState>,
     mut commands: Commands,
-    root: Res<UiRoot>,
-    mut nodes: Query<&mut Node>,
-    mut hud: Query<&mut Visibility, (With<HudScreen>, Without<BalanceReadout>)>,
-    mut balance: Query<&mut Visibility, (With<BalanceReadout>, Without<HudScreen>)>,
+    mut layers: ShotLayers,
     mut ui_sound: MessageWriter<crate::ui_sounds::PlayUiSound>,
 ) {
     match state.phase {
@@ -1005,21 +1052,7 @@ fn drive_capture(
             state.phase = CapturePhase::Restoring;
         }
         CapturePhase::Restoring => {
-            if state.hid_ui
-                && let Ok(mut node) = nodes.get_mut(root.0)
-            {
-                node.display = Display::Flex;
-            }
-            if state.hid_hud {
-                for mut visibility in &mut hud {
-                    *visibility = Visibility::Inherited;
-                }
-            }
-            if state.hid_balance {
-                for mut visibility in &mut balance {
-                    *visibility = Visibility::Inherited;
-                }
-            }
+            layers.restore(&state);
             state.phase = CapturePhase::Idle;
         }
     }
@@ -1286,10 +1319,62 @@ fn dimension_to_f32(value: u32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::{
-        DEFAULT_FORMAT, FORMATS, PREVIEW_MAX_HEIGHT, PREVIEW_MAX_WIDTH, SnapshotState, clamp_index,
-        fit_within, should_hide_balance,
+        DEFAULT_FORMAT, FORMATS, PREVIEW_MAX_HEIGHT, PREVIEW_MAX_WIDTH, ShotLayers, SnapshotState,
+        clamp_index, fit_within, should_hide_balance,
     };
+    use crate::ui::UiRoot;
+    use bevy::ecs::system::RunSystemOnce as _;
+    use bevy::prelude::{App, Display, Node};
     use pretty_assertions::assert_eq;
+    use sl_viewer_world_api::WorldUiVisibility;
+
+    /// The boxed error a fallible test reports through.
+    type TestError = Box<dyn core::error::Error>;
+
+    /// A shot's state with the UI left out (`hid_ui`) or kept in.
+    fn shot(hid_ui: bool) -> SnapshotState {
+        SnapshotState {
+            hid_ui,
+            ..SnapshotState::default()
+        }
+    }
+
+    /// Run [`ShotLayers::hide`] (or, with `restore`, [`ShotLayers::restore`])
+    /// for a shot, and report whether the world-anchored UI is shown after.
+    fn world_ui_shown_after(app: &mut App, hid_ui: bool, restore: bool) -> Result<bool, TestError> {
+        app.world_mut()
+            .run_system_once(move |mut layers: ShotLayers| {
+                if restore {
+                    layers.restore(&shot(hid_ui));
+                } else {
+                    layers.hide(&shot(hid_ui));
+                }
+            })
+            .map_err(|error| error.to_string())?;
+        Ok(app.world().resource::<WorldUiVisibility>().shown())
+    }
+
+    /// A shot without the UI takes hover text and name tags with it — the
+    /// reference's snapshot without the UI holds none — and its restore brings
+    /// them back with the rest of the UI. A shot that keeps the UI leaves them.
+    #[test]
+    fn a_shot_without_the_ui_takes_the_world_ui_with_it() -> Result<(), TestError> {
+        let mut app = App::new();
+        let root = app.world_mut().spawn(Node::default()).id();
+        app.insert_resource(UiRoot(root))
+            .init_resource::<WorldUiVisibility>();
+
+        assert!(!world_ui_shown_after(&mut app, true, false)?);
+        assert_eq!(
+            app.world().get::<Node>(root).map(|node| node.display),
+            Some(Display::None),
+            "the UI root stayed in the shot"
+        );
+        assert!(world_ui_shown_after(&mut app, true, true)?);
+
+        assert!(world_ui_shown_after(&mut app, false, false)?);
+        Ok(())
+    }
 
     /// The built-in default format index is in range, so the floater opens on a
     /// real format before any saved choice loads.

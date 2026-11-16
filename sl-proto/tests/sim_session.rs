@@ -10417,6 +10417,54 @@ mod test {
         Ok(())
     }
 
+    /// A region's worth of objects goes out in as many datagrams as the MTU
+    /// needs rather than one oversized message, which the reference viewer
+    /// drops whole once it decodes past 8 KiB, and every object still arrives,
+    /// in the full and the compressed form alike.
+    #[test]
+    fn many_objects_are_split_into_mtu_sized_datagrams() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+        drain_client(&mut client);
+        let at = Vector {
+            x: 1.0,
+            y: 2.0,
+            z: 3.0,
+        };
+        let full: Vec<_> = (0x100_u32..0x140)
+            .map(|id| box_prim(id, u128::from(id), at.clone()))
+            .collect();
+        let compressed: Vec<_> = (0x200_u32..0x240)
+            .map(|id| box_prim(id, u128::from(id), at.clone()))
+            .collect();
+        for send_compressed in [false, true] {
+            if send_compressed {
+                sim.send_object_update_compressed(&compressed, 0xFFFF, now)?;
+            } else {
+                sim.send_object_update(&full, 0xFFFF, now)?;
+            }
+            let mut datagrams = 0_usize;
+            while let Some(transmit) = sim.poll_transmit() {
+                assert!(
+                    transmit.payload.len() <= 1300,
+                    "a {}-byte datagram",
+                    transmit.payload.len()
+                );
+                datagrams = datagrams.saturating_add(1);
+                client.handle_datagram(sim_addr(), &transmit.payload, now)?;
+            }
+            assert!(datagrams > 1, "{datagrams} datagram(s) for 64 objects");
+            pump(&mut client, &mut sim, now)?;
+            let added = drain_client(&mut client)
+                .into_iter()
+                .filter(|event| matches!(event, Event::ObjectAdded(_)))
+                .count();
+            assert_eq!(added, 64);
+        }
+        Ok(())
+    }
+
     /// A kill that names a linkset's root alone — which is how Second Life
     /// takes a linkset out of range — takes the prims under it too, and an
     /// avatar seated on it stays. The batch says what the message itself

@@ -62,6 +62,7 @@ use bevy::shader::ShaderRef;
 use sl_client_bevy::{ObjectKey, RegionHandle, SlIdentity};
 
 use sl_viewer_kit::coords::{region_offset_bevy, sl_to_bevy_object_rotation, sl_to_bevy_vec};
+use sl_viewer_kit::probe_layers::world_ui_render_layers;
 use sl_viewer_social::{DebugBeacon, DebugBeacons};
 use sl_viewer_world_api::ObjectState;
 
@@ -472,12 +473,16 @@ fn update_debug_beacons(
             }
             continue;
         }
+        // The reference renders its debug beacons only under
+        // `RENDER_DEBUG_FEATURE_UI` (`render_ui_3d`), so they leave a frame with
+        // the UI: both passes sit on the world-anchored UI's layer.
         let through = commands
             .spawn((
                 Mesh3d(assets.through.clone()),
                 MeshMaterial3d(through_material),
                 transform,
                 Visibility::Visible,
+                world_ui_render_layers(),
                 Name::new("debug-beacon:through"),
             ))
             .id();
@@ -487,6 +492,7 @@ fn update_debug_beacons(
                 MeshMaterial3d(solid_material),
                 transform,
                 Visibility::Visible,
+                world_ui_render_layers(),
                 Name::new("debug-beacon:solid"),
             ))
             .id();

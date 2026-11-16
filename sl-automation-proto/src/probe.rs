@@ -641,6 +641,11 @@ pub struct DiagnosticsReadout {
 pub struct QuiescenceReadout {
     /// Whether a region handshake completed — quiet means nothing before it.
     pub region_up: bool,
+    /// Whether the own avatar is in the world: its first object update (or a
+    /// local teleport) has given the agent a position, the one the `Agent`
+    /// probe reports. Until then nothing of the region has arrived, so
+    /// nothing is outstanding either.
+    pub agent_present: bool,
     /// Assets in flight or queued and decoded work not yet built, across every
     /// store; absent in a viewer with no asset stores.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -657,10 +662,12 @@ pub struct QuiescenceReadout {
 }
 
 impl QuiescenceReadout {
-    /// Whether the region is up and nothing is outstanding or compiling.
+    /// Whether the region is up, the own avatar is in it, and nothing is
+    /// outstanding or compiling.
     #[must_use]
     pub fn is_quiet(&self) -> bool {
         self.region_up
+            && self.agent_present
             && self.outstanding.unwrap_or(0) == 0
             && self.waiting_pipelines.unwrap_or(0) == 0
     }
@@ -1003,6 +1010,11 @@ mod tests {
         let mut readout = QuiescenceReadout::default();
         assert!(!readout.is_quiet(), "no region is not quiet");
         readout.region_up = true;
+        assert!(
+            !readout.is_quiet(),
+            "a region whose objects, the own avatar included, have not begun to arrive"
+        );
+        readout.agent_present = true;
         assert!(readout.is_quiet(), "a viewer with nothing to wait for");
         readout.outstanding = Some(1);
         assert!(!readout.is_quiet());
@@ -1019,11 +1031,16 @@ mod tests {
     fn the_outstanding_breakdown_round_trips() -> Result<(), serde_json::Error> {
         let quiet = QuiescenceReadout {
             region_up: true,
+            agent_present: true,
             ..QuiescenceReadout::default()
         };
-        assert_eq!(serde_json::to_string(&quiet)?, r#"{"region_up":true}"#);
+        assert_eq!(
+            serde_json::to_string(&quiet)?,
+            r#"{"region_up":true,"agent_present":true}"#
+        );
         let busy = QuiescenceReadout {
             region_up: true,
+            agent_present: true,
             outstanding: Some(3),
             outstanding_by: [("textures.downloading".to_owned(), 3)].into(),
             waiting_pipelines: Some(0),

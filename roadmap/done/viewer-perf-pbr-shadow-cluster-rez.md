@@ -2,7 +2,7 @@
 id: viewer-perf-pbr-shadow-cluster-rez
 title: Tune main-view shadow specialization + clustered lighting during rez
 topic: viewer
-status: in-progress
+status: done
 origin: Tracy profiling of Aditi rezzing (2026-07-30)
 refs: [viewer-perf-probe-capture-shadows, viewer-perf-probe-scheduling]
 ---
@@ -227,3 +227,57 @@ still scene by [[viewer-perf-shadow-cull-change-driven]]), and `VisibilityRange`
 LOD is not honoured for shadow casters on the async path (rare on SL). The
 per-view multiplication that makes the *off-thread* pass ~13 ms is the probe
 views ([[viewer-perf-probe-capture-shadows]]).
+
+## Closing measurement (2026-11-14) — nothing left to tune here
+
+Fresh release `profile-tracy` whole-session capture on aditi (5:48, the user
+driving). The first ~200 s ran at exactly 1 fps with `vkQueuePresentKHR`
+blocking ~1 s (the window was off-screen), so every per-frame figure below is
+from the visible window, `t ≥ 220 s`, 1979 frames, ~19 fps, while content was
+still arriving. The five systems this task opened with:
+
+| system | 2026-07-30 (ms/frame) | 2026-11-14 mean | max | thread |
+| --- | --- | --- | --- | --- |
+| `specialize_shadows` | 1.33 | 0.18 | 9.3 | render |
+| `prepare_clusters_for_gpu_clustering` | 0.89 | 1.35 incl. / 0.93 self | 13.3 | worker |
+| `queue_shadows` | 0.87 | 0.14 | 9.4 | render |
+| `prepare_preprocess_bind_groups` | 0.66 | 0.92 | 20.9 | worker |
+| `check_dir_light_mesh_visibility` | 0.42 (8.2 steady) | replaced | | |
+
+The replacement's main-schedule parts are `mark_shadow_caster_visibility` 0.32
+(max 1.3) and `apply_shadow_cull` 0.02. Most of `dispatch_shadow_cull`'s zone
+time (3 zones per frame) is on Tracy's async-task pseudo-thread, which is the
+off-thread cull wearing the system's span, not frame time. The sun cascade
+pass itself (`{shadow_directional_light_0_cascade_0}`) encodes in 0.05 ms.
+None of the rez spikes are back: no shadow zone reached 20 ms in the whole
+session, against 165 frames over 50 ms on 2026-07-31.
+
+What closed each item:
+
+- **Shadow re-specialization spikes:** [[viewer-perf-probe-capture-shadows]]
+  (probe cameras no longer get sun cascades, so their pipeline caches are no
+  longer purged and rebuilt every capture cycle).
+- **`check_dir_light_mesh_visibility`:** the async double-buffered cull above,
+  then [[viewer-perf-shadow-cull-change-driven]].
+- **Local-light shadows:** there are none to cap. `lights.rs` builds
+  `PointLight` / `SpotLight` with Bevy's default `shadow_maps_enabled: false`,
+  and only the `MAX_LOCAL_LIGHTS` (32) nearest/brightest prims get a light at
+  all (P25.2). Projector shadows are a feature of their own,
+  [[viewer-projector-lights-spot-shadows]].
+- **Clustered-forward config:** `viewer_camera.rs` already pins
+  `ClusterConfig::FixedZ` (4096 clusters, 24 slices, 0.5 m first slice,
+  constant 512 m far plane) for the facelight fix. With 32 lights at most,
+  clustering costs ~1 ms/frame on a worker in parallel with the rest of the
+  Render schedule. That doesn't justify reshaping a config that was tuned for
+  correctness.
+- **Caster-count levers** (`NotShadowCaster` on small or distant meshes,
+  shorter shadow distance, fewer cascades): no longer worth having on cost
+  grounds. Cascades and map size are user settings already
+  (`preferences_graphics.rs`); the bias and softness knobs are
+  [[viewer-shadow-tuning-knobs]].
+
+The frame is now **render-thread bound** (`Render` mean 50 ms, p50 48, against
+`Main` 29 ms), and none of that is shadows or clustering. The breakdown is
+recorded in [[viewer-perf-steady-state-46fps-ceiling]], which owns it.
+
+Trace (gitignored): `tracy-captures/aditi-shadow-cluster-rez.tracy`.

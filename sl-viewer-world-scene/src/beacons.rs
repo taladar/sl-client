@@ -57,7 +57,7 @@ use bevy::shader::ShaderRef;
 use sl_client_bevy::{AgentKey, RegionHandle, SlIdentity, Vector};
 
 use sl_viewer_kit::coords::{metres_to_f32, sl_to_bevy_vec};
-use sl_viewer_world_objects::name_tag_billboard::tag_render_layers;
+use sl_viewer_kit::probe_layers::world_ui_render_layers;
 
 use bevy_flair::style::components::ClassList;
 use sl_viewer_social::{FriendsModel, MapTracking, TrackTarget};
@@ -626,7 +626,9 @@ fn update_beacon_beam(
             .spawn((
                 Transform::default(),
                 Visibility::Hidden,
-                Propagate(tag_render_layers()),
+                // The reference draws the tracker beacon in its UI pass
+                // (`render_hud_elements`), so it leaves a frame with the UI.
+                Propagate(world_ui_render_layers()),
                 bevy::camera::visibility::NoFrustumCulling,
                 Name::new("beacon-beam"),
             ))

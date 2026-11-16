@@ -374,6 +374,13 @@ cargo run --release -p sl-crosscheck -- --scenario catalogue \
   --capture-ui --sl-client-skin vintage --firestorm-skin vintage
 ```
 
+The interface includes what is drawn into the world as part of it: hover
+text, name tags, the tracking beacon's beam, debug beacons and parcel
+borders. Firestorm draws all of these in its UI pass, so its frames without
+the UI hold none of them, and this viewer leaves them out of a frame without
+`--capture-ui` for the same reason. A world-only pair therefore compares the
+world on its own, with no captions over it.
+
 Such a run lands in `crosscheck-runs/<scenario>-chrome-<ours>-vs-<theirs>`
 (`catalogue-chrome-vintage-vs-vintage` above) rather than in the
 scenario's own directory, so a pair is kept per pair of skins and the

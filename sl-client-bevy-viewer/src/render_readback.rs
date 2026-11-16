@@ -621,7 +621,7 @@ mod tests {
     };
     use crate::environment::EnvironmentState;
     use crate::pixel_oracle::{
-        CellVerdict, Marker, Silhouette, centroid, differing_pixels, dominant, read_cell,
+        CellVerdict, Marker, Patch, Silhouette, centroid, differing_pixels, dominant, read_cell,
     };
     use crate::render_scene::{
         RenderScene, SCENES, SceneAssets, SceneCamera, SceneCx, SceneLighting, Timeline,
@@ -1241,6 +1241,132 @@ mod tests {
             !through(opaque),
             "the plate reached the frame through the **opaque** cap — the scene is not framing \
              what this test thinks it is, so its other half proves nothing",
+        );
+        Ok(())
+    }
+
+    /// The colour the placed probe of [`capture_box_in_sky_ambient`] captured:
+    /// pure red, which nothing else in that frame is.
+    const PLACED_PROBE_COLOUR: Color = Color::srgb(1.0, 0.0, 0.0);
+
+    /// Light the readback with an EEP sky whose whole ambient comes from the
+    /// reflection probes (`probe_ambiance` 1) and which has no sun and no `amblit`,
+    /// so a face's colour is its albedo times the probe irradiance and nothing else.
+    /// The directional light is only there because a face takes the sky's lighting
+    /// path only when the view has one; the sky's `sunlit` of zero is what lights.
+    fn light_with_probe_ambient_only(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
+        sl_client_bevy::write_sky_lighting(
+            &mut images,
+            &sl_client_bevy::SkyLighting {
+                sunlit: Vec3::ZERO,
+                amblit: Vec3::ZERO,
+                probe_ambiance: 1.0,
+                mode: sl_client_bevy::SkyLightingMode::Eep,
+            },
+        );
+        commands.spawn((
+            DirectionalLight {
+                illuminance: 0.0,
+                shadow_maps_enabled: false,
+                ..default()
+            },
+            Transform::default().looking_to(Vec3::NEG_Y, Vec3::Z),
+            Name::new("test-probe-ambient/sun"),
+        ));
+    }
+
+    /// A placed reflection probe of [`PLACED_PROBE_COLOUR`] whose volume — a 4 m
+    /// cube about the origin — holds the whole of the `prim-box` scene's unit box.
+    fn spawn_placed_red_probe(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
+        commands.spawn((
+            bevy::light::LightProbe::default(),
+            bevy::light::EnvironmentMapLight::solid_color(&mut images, PLACED_PROBE_COLOUR),
+            Transform::from_scale(Vec3::splat(4.0)),
+            Name::new("test-probe-ambient/placed-probe"),
+        ));
+    }
+
+    /// Give the placed probe the gain of 1 the viewer calibrates its own probes to
+    /// (`intensity * exposure == gain`), so it lights at the colour it holds.
+    fn calibrate_placed_probe(
+        cameras: Query<&bevy::camera::Exposure, With<ViewerCamera>>,
+        mut probes: Query<&mut bevy::light::EnvironmentMapLight, With<bevy::light::LightProbe>>,
+    ) {
+        let Ok(exposure) = cameras.single() else {
+            return;
+        };
+        let intensity = 1.0 / exposure.exposure();
+        for mut probe in &mut probes {
+            if (probe.intensity - intensity).abs() > f32::EPSILON {
+                probe.intensity = intensity;
+            }
+        }
+    }
+
+    /// Render the `prim-box` scene lit only by the reflection probes' ambient
+    /// ([`light_with_probe_ambient_only`]), with or without the placed red probe
+    /// about it, and return the mean colour of a patch at the box's centre — on
+    /// the face toward the camera. `None` when no frame came back.
+    fn capture_box_in_sky_ambient(placed_probe: bool) -> Result<Option<Vec4>, TestError> {
+        let scene = SCENES
+            .iter()
+            .find(|scene| scene.id == "prim-box")
+            .ok_or("the `prim-box` scene is not registered")?;
+        let Some((frame, projected)) = capture_with(scene, SceneCx::new(), &[Vec3::ZERO], |app| {
+            app.add_systems(Startup, light_with_probe_ambient_only);
+            if placed_probe {
+                app.add_systems(Startup, spawn_placed_red_probe)
+                    .add_systems(Update, calibrate_placed_probe);
+            }
+        }) else {
+            return Ok(None);
+        };
+        let centre = projected
+            .get(0)
+            .ok_or("the box did not project onto the frame — the camera is not looking at it")?;
+        // The same patch the cell reads use, so no single pixel decides.
+        let mean = Patch { at: centre }
+            .mean(&frame)
+            .ok_or("the patch at the box's centre lies outside the frame")?;
+        Ok(Some(mean))
+    }
+
+    /// **A face inside a placed reflection probe takes its ambient from that
+    /// probe** (`viewer-sky-irradiance-ignores-local-probes`).
+    ///
+    /// The sky-lit faces' diffuse ambient — the reference's `ambenv`, which its
+    /// `sampleReflectionProbes` takes from the probes holding the fragment — used
+    /// to sample only the view's own default probe, so a room inside its own probe
+    /// stayed lit like the open sky. Here the ambient is the only light, so the box
+    /// inside a pure red probe must come out red, and the same box with no placed
+    /// probe (lit by the default probe's capture of an empty, uncoloured scene)
+    /// must not.
+    ///
+    /// Skips when no frame came back (no GPU adapter).
+    #[test]
+    fn a_face_inside_a_placed_probe_takes_its_ambient_from_it() -> Result<(), TestError> {
+        let (Some(inside), Some(outside)) = (
+            capture_box_in_sky_ambient(true)?,
+            capture_box_in_sky_ambient(false)?,
+        ) else {
+            warn!("skipping: no frame came back, so this machine has no usable GPU adapter");
+            return Ok(());
+        };
+        assert!(
+            inside.x > 0.2 && inside.x > inside.y * 3.0 && inside.x > inside.z * 3.0,
+            "the box inside the red probe came out {inside:?}: it is not lit red by the probe \
+             that holds it, so its ambient still comes from somewhere else (outside it the box \
+             is {outside:?})"
+        );
+        assert!(
+            inside.x > outside.x + 0.1,
+            "the box is no redder inside the red probe ({inside:?}) than with no placed probe \
+             ({outside:?}), so the placed probe is not what lights it"
+        );
+        assert!(
+            outside.x < outside.y * 2.0 + 0.05,
+            "with no placed probe the box still came out red ({outside:?}) — the comparison \
+             is not isolating the placed probe"
         );
         Ok(())
     }

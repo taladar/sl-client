@@ -11,17 +11,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 130 |
+| ideas | 131 |
 | ready | 327 |
 | blocked | 36 |
-| in-progress | 6 |
-| bugs | 24 |
-| done | 1578 |
+| in-progress | 4 |
+| bugs | 21 |
+| done | 1585 |
 | deferred | 30 |
 | wont-do | 24 |
-| **total** | **2155** |
+| **total** | **2158** |
 
-## ideas (130)
+## ideas (131)
 
 ### protocol
 
@@ -82,6 +82,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Take the linkset prim limit from the region where the region states one
 - [`viewer-local-mesh`](ideas/viewer-local-mesh.md) — Local mesh — live-reload
   mesh from disk
+- [`viewer-local-probe-ambient-saturation`](ideas/viewer-local-probe-ambient-saturation.md)
+  — A face inside a placed probe takes a more saturated ambient than Firestorm
+  gives it
 - [`viewer-lsl-oracle-misses`](ideas/viewer-lsl-oracle-misses.md) — Grid compile
   errors the LSL semantic pass does not report (19 oracle misses)
 - [`viewer-lsl-preprocessor`](ideas/viewer-lsl-preprocessor.md) — LSL
@@ -1225,15 +1228,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-voice`](blocked/gridspec-voice.md) — Voice provisioning and
   signalling on each grid (blocked by `viewer-voice-audio`)
 
-## in-progress (6)
+## in-progress (4)
 
 ### viewer
 
-- [`viewer-agentupdate-cadence-effects`](in-progress/viewer-agentupdate-cadence-effects.md)
-  — Explore what the raised AgentUpdate/camera-interest cadence buys (and how
-  the sim reacts)
-- [`viewer-perf-pbr-shadow-cluster-rez`](in-progress/viewer-perf-pbr-shadow-cluster-rez.md)
-  — Tune main-view shadow specialization + clustered lighting during rez
 - [`viewer-ui-text-caret-grapheme-motion`](in-progress/viewer-ui-text-caret-grapheme-motion.md)
   — Upstream issue — parley caret motion steps one codepoint, not one grapheme
 - [`viewer-ui-text-parley-pr-backdelete`](in-progress/viewer-ui-text-parley-pr-backdelete.md)
@@ -1243,7 +1241,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-text-renderability-axis`](in-progress/viewer-ui-text-renderability-axis.md)
   — Upstream issue — font selection cannot see glyph-format renderability
 
-## bugs (24)
+## bugs (21)
 
 ### protocol
 
@@ -1263,11 +1261,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### viewer
 
-- [`viewer-capture-world-only-draws-hover-text-and-tags`](bugs/viewer-capture-world-only-draws-hover-text-and-tags.md)
-  — A world-only capture holds hover text and name tags, which Firestorm draws
-  only with the UI
-- [`viewer-harness-status-counts-before-last-frame`](bugs/viewer-harness-status-counts-before-last-frame.md)
-  — The screenshot harness writes its status before the last frame is saved
 - [`viewer-live-opensim-world-renders-white`](bugs/viewer-live-opensim-world-renders-white.md)
   — The world renders all white at times on the live OpenSim grid
 - [`viewer-mesh-hair-not-rendering`](bugs/viewer-mesh-hair-not-rendering.md) —
@@ -1276,19 +1269,16 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A nearby avatar stays a coarse sphere even as the camera closes in
 - [`viewer-own-avatar-broken-after-teleport`](bugs/viewer-own-avatar-broken-after-teleport.md)
   — Own avatar looks broken after a teleport
-- [`viewer-pbr-face-shows-legacy-texture-on-aditi`](bugs/viewer-pbr-face-shows-legacy-texture-on-aditi.md)
-  — A prim given a PBR material from the Build window sometimes keeps drawing
-  its plywood
 - [`viewer-perf-steady-state-46fps-ceiling`](bugs/viewer-perf-steady-state-46fps-ceiling.md)
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
-- [`viewer-sky-irradiance-ignores-local-probes`](bugs/viewer-sky-irradiance-ignores-local-probes.md)
-  — Sky-lit faces take their probe ambient from the view's probe, never from a
-  placed probe
 - [`viewer-texture-filtering-in-linear-space`](bugs/viewer-texture-filtering-in-linear-space.md)
   — Colour textures are filtered after sRGB decoding, the reference before
 
 ### test
 
+- [`test-automation-quiet-after-teleport-reads-old-position`](bugs/test-automation-quiet-after-teleport-reads-old-position.md)
+  — After a teleport or crossing, Quiet and the agent probe still hold the old
+  region's position
 - [`test-conformance-cancelled-case-leaves-its-prims`](bugs/test-conformance-cancelled-case-leaves-its-prims.md)
   — A conformance case cancelled by its timeout or a panic leaves its rezzed
   prims in the region
@@ -1309,7 +1299,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1578)
+## done (1585)
 
 ### protocol
 
@@ -1643,6 +1633,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   About Landmark floater — full detail view
 - [`viewer-add-friend-offers-silently`](done/viewer-add-friend-offers-silently.md)
   — Add Friend sends the offer silently — no message dialog, no feedback
+- [`viewer-agentupdate-cadence-effects`](done/viewer-agentupdate-cadence-effects.md)
+  — Explore what the raised AgentUpdate/camera-interest cadence buys (and how
+  the sim reacts)
 - [`viewer-ais3-inventory-mutations-and-cof-reconverge`](done/viewer-ais3-inventory-mutations-and-cof-reconverge.md)
   — Route inventory mutations through AIS3 on SL + reconverge the COF on wear
 - [`viewer-animesh-intermittent-render`](done/viewer-animesh-intermittent-render.md)
@@ -2014,6 +2007,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   teleport spree, freezing the avatar at a crossing
 - [`viewer-capture-layers`](done/viewer-capture-layers.md) — UI, HUD and gizmos
   as independent switches in both viewers' captures
+- [`viewer-capture-world-only-draws-hover-text-and-tags`](done/viewer-capture-world-only-draws-hover-text-and-tags.md)
+  — A world-only capture holds hover text and name tags, which Firestorm draws
+  only with the UI
 - [`viewer-cef-audio-mixer-handoff`](done/viewer-cef-audio-mixer-handoff.md) —
   CEF page audio into the shared mixer (OnAudioStreamPacket) (blocked by
   `viewer-audio-backend` (done))
@@ -2250,6 +2246,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-audio-backend` (done))
 - [`viewer-hair-dome-stays-grey`](done/viewer-hair-dome-stays-grey.md) — The
   default hair dome intermittently stays grey for a whole session
+- [`viewer-harness-status-counts-before-last-frame`](done/viewer-harness-status-counts-before-last-frame.md)
+  — The screenshot harness writes its status before the last frame is saved
 - [`viewer-horizon-thin-line-flashes`](done/viewer-horizon-thin-line-flashes.md)
   — Flashes along a thin line near the horizon
 - [`viewer-hover-text`](done/viewer-hover-text.md) — Object hover text
@@ -2856,6 +2854,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-pbr-blinn-phong-build-preview`](done/viewer-pbr-blinn-phong-build-preview.md)
   — PBR supersedes Blinn-Phong on a face; build tool previews Blinn-Phong
   (FIRE-35138)
+- [`viewer-pbr-face-shows-legacy-texture-on-aditi`](done/viewer-pbr-face-shows-legacy-texture-on-aditi.md)
+  — A prim given a PBR material from the Build window sometimes keeps drawing
+  its plywood
 - [`viewer-pbr-face-sky-lighting-divergence`](done/viewer-pbr-face-sky-lighting-divergence.md)
   — PBR (glTF) faces are still lit by Bevy's model, not the reference's
 - [`viewer-pbr-face-zero-alpha-not-culled`](done/viewer-pbr-face-zero-alpha-not-culled.md)
@@ -2926,6 +2927,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Coalesce repeated object updates in the pending queue
 - [`viewer-perf-parcel-borders-rebuild-spread`](done/viewer-perf-parcel-borders-rebuild-spread.md)
   — Parcel borders — rebuild only the changed region, spread new regions
+- [`viewer-perf-pbr-shadow-cluster-rez`](done/viewer-perf-pbr-shadow-cluster-rez.md)
+  — Tune main-view shadow specialization + clustered lighting during rez
 - [`viewer-perf-pick-warm-set-scales-with-crowd`](done/viewer-perf-pick-warm-set-scales-with-crowd.md)
   — collect_pick_warm_set scales with the crowd (touches un-pickable copies)
 - [`viewer-perf-pipeline-specialization-stalls`](done/viewer-perf-pipeline-specialization-stalls.md)
@@ -3315,6 +3318,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-skinned-bind-group-quits-on-rez`](done/viewer-skinned-bind-group-quits-on-rez.md)
   — A skinned draw takes the non-skinned bind group and the render handler quits
   the viewer
+- [`viewer-sky-irradiance-ignores-local-probes`](done/viewer-sky-irradiance-ignores-local-probes.md)
+  — Sky-lit faces take their probe ambient from the view's probe, never from a
+  placed probe
 - [`viewer-sky-sunset-preset-glow-divergence`](done/viewer-sky-sunset-preset-glow-divergence.md)
   — The legacy sunset sky is far brighter, with a much larger glow, than
 - [`viewer-sliced-art-seam-at-fractional-ui-scale`](done/viewer-sliced-art-seam-at-fractional-ui-scale.md)
@@ -3963,6 +3969,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `test-fake-grid-determinism` (done))
 - [`test-audit-fake-grid-session-teardown`](done/test-audit-fake-grid-session-teardown.md)
   — sl-fake-grid never prunes sessions, and its tasks outlive shutdown
+- [`test-automation-quiet-before-own-avatar-arrives`](done/test-automation-quiet-before-own-avatar-arrives.md)
+  — The automation's Quiet holds before the own avatar has arrived
 - [`test-avatar-notes`](done/test-avatar-notes-write-and-read-avatar-notes.md) —
   write and read avatar notes
 - [`test-avatar-picker`](done/test-avatar-picker-avatar-picker-request.md) —

@@ -38,6 +38,7 @@ pub mod hud;
 pub mod hud_pick;
 pub mod input_action;
 pub mod input_context;
+pub mod interest_cadence;
 pub mod media_controls;
 pub mod media_prim;
 pub mod movement;

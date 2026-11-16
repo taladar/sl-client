@@ -351,7 +351,7 @@ fn slot_offset(local_id: RegionLocalObjectId) -> f32 {
 /// The names of the catalogue's prims, in the order they stand in the row.
 /// The index into this list is the prim's offset from the first catalogue
 /// local id, so the row order and the id order are the same thing.
-pub const NAMES: [&str; 23] = [
+pub const NAMES: [&str; 24] = [
     "plain-box",
     "checker-box",
     "sphere",
@@ -375,6 +375,7 @@ pub const NAMES: [&str; 23] = [
     "placement-rotated",
     "placement-offset-t",
     "scripted-box",
+    "probe-room",
 ];
 
 /// Every catalogue entry, in row order.
@@ -691,6 +692,7 @@ fn objects(owner: AgentKey) -> Vec<sl_proto::Object> {
                 },
             )),
             "scripted-box" => objects.push(prim.textured(CHECKER_TEXTURE).scripted().build()),
+            "probe-room" => objects.extend(probe_room(prim, entry, owner, &mut next_child_id)),
             _unknown => objects.push(prim.build()),
         }
     }
@@ -894,6 +896,123 @@ fn placement_box(prim: PrimFixture, style: &FaceStyle) -> sl_proto::Object {
         ..style.clone()
     })
     .build()
+}
+
+/// The tint of the `probe-room`'s walls and roof: a red neither the green
+/// ground nor the blue sky has any of, so whatever red reaches the box inside
+/// came from the room's own probe.
+const PROBE_ROOM_COLOR: [u8; 3] = [255, 40, 40];
+
+/// The `probe-room`'s inside, from wall to wall, in metres: its probe's box
+/// volume and its height.
+const PROBE_ROOM_SIZE: f32 = 3.0;
+
+/// The `probe-room`'s wall and roof thickness, in metres.
+const PROBE_ROOM_WALL: f32 = 0.1;
+
+/// The `probe-room`: a plain box standing inside a red room that is open to
+/// the south, with a transparent box reflection probe filling the room.
+///
+/// The probe in the `reflection-probe` slot holds nothing but its own faces,
+/// which lie on the edge of its volume where the probe's weight falls to zero,
+/// so it cannot show what a probe does to the faces inside it. Here the box
+/// stands well inside the probe's volume, and the probe captures red walls
+/// rather than the open sky the region's own probe sees. A viewer that takes a
+/// face's ambient from the probes holding it lights the box with a red cast; a
+/// viewer that only samples the region's probe lights it like the open-air
+/// boxes in the rest of the row. The open side faces the camera a landmark
+/// look places to the south.
+///
+/// The root is the box (the landmark the camera looks at); the walls, the roof
+/// and the probe are its linkset children.
+fn probe_room(
+    prim: PrimFixture,
+    entry: &CatalogueEntry,
+    owner: AgentKey,
+    next_child_id: &mut u32,
+) -> Vec<sl_proto::Object> {
+    // The room's floor is the ground the half-metre-high root box rests on,
+    // so its walls and probe are centred one metre above the box's centre.
+    let mid_height = PROBE_ROOM_SIZE / 2.0 - 0.5;
+    let half = PROBE_ROOM_SIZE / 2.0;
+    let wall_offset = half + PROBE_ROOM_WALL / 2.0;
+    // The side walls and the roof reach from the open south edge to the outer
+    // face of the north wall.
+    let depth = PROBE_ROOM_SIZE + PROBE_ROOM_WALL;
+    let width = PROBE_ROOM_SIZE + 2.0 * PROBE_ROOM_WALL;
+    let red = FaceStyle {
+        color: PROBE_ROOM_COLOR,
+        ..FaceStyle::default()
+    };
+    let invisible = FaceStyle {
+        alpha: 0.0,
+        ..FaceStyle::default()
+    };
+    // (offset from the root, scale, faces) for each child.
+    let parts = [
+        // The west, east and north walls.
+        (
+            (-wall_offset, PROBE_ROOM_WALL / 2.0, mid_height),
+            (PROBE_ROOM_WALL, depth, PROBE_ROOM_SIZE),
+            &red,
+        ),
+        (
+            (wall_offset, PROBE_ROOM_WALL / 2.0, mid_height),
+            (PROBE_ROOM_WALL, depth, PROBE_ROOM_SIZE),
+            &red,
+        ),
+        (
+            (0.0, wall_offset, mid_height),
+            (width, PROBE_ROOM_WALL, PROBE_ROOM_SIZE),
+            &red,
+        ),
+        // The roof.
+        (
+            (0.0, PROBE_ROOM_WALL / 2.0, mid_height + wall_offset),
+            (width, depth, PROBE_ROOM_WALL),
+            &red,
+        ),
+        // The probe, filling the room. Transparent, as a builder leaves one.
+        (
+            (0.0, 0.0, mid_height),
+            (PROBE_ROOM_SIZE, PROBE_ROOM_SIZE, PROBE_ROOM_SIZE),
+            &invisible,
+        ),
+    ];
+    let probe_index = parts.len().saturating_sub(1);
+    let children = parts
+        .into_iter()
+        .enumerate()
+        .map(|(index, ((x, y, z), (scale_x, scale_y, scale_z), style))| {
+            let child_id = RegionLocalObjectId(*next_child_id);
+            *next_child_id = next_child_id.saturating_add(1);
+            let child = PrimFixture::boxed(
+                child_id,
+                ObjectKey::from(uuid::Uuid::from_u128(
+                    0xCA7_2100_u128.saturating_add(u128::try_from(index).unwrap_or(0)),
+                )),
+                owner,
+                entry.position(),
+                Vector {
+                    x: scale_x,
+                    y: scale_y,
+                    z: scale_z,
+                },
+            )
+            .faces(style)
+            .child_of(entry.local_id, Vector { x, y, z }, NO_ROTATION);
+            if index == probe_index {
+                child.reflection_probe(ReflectionProbe {
+                    ambiance: 1.0,
+                    clip_distance: 0.0,
+                    flags: ReflectionProbeFlags::BOX_VOLUME,
+                })
+            } else {
+                child
+            }
+        })
+        .collect();
+    linkset(prim, children)
 }
 
 /// The four-coloured box: one marker colour per face, the fifth glowing and
@@ -1433,7 +1552,7 @@ mod test {
     /// The prims carry what their names claim, read back out of the raw wire
     /// blobs rather than the typed views beside them.
     #[test]
-    fn each_prim_carries_the_feature_it_is_named_for() {
+    fn each_prim_carries_the_feature_it_is_named_for() -> Result<(), TestError> {
         let fixture = catalogue();
         let find = |name: &str| {
             let wanted = entry(name).map(|found| found.local_id);
@@ -1477,6 +1596,23 @@ mod test {
             .and_then(|object| decode_extra_params(&object.extra_params).reflection_probe);
         assert_eq!(probe.map(|probe| probe.ambiance), Some(0.5));
 
+        // The room's probe is a child of the room's box, and the box stands
+        // inside its volume rather than on the volume's edge.
+        let room = entry("probe-room").ok_or("no probe-room entry")?;
+        let room_probe = fixture
+            .world
+            .objects
+            .iter()
+            .find(|object| {
+                decode_extra_params(&object.extra_params)
+                    .reflection_probe
+                    .is_some()
+                    && object.parent_id == room.local_id
+            })
+            .ok_or("the probe-room has no probe")?;
+        assert!(room_probe.scale.x > 2.0 && room_probe.scale.z > 2.0);
+        assert!(room_probe.motion.position.z > 0.5);
+
         let pbr =
             find("pbr-box").map(|object| decode_extra_params(&object.extra_params).render_material);
         assert_eq!(
@@ -1517,6 +1653,7 @@ mod test {
             })
             .map(sl_proto::TextureFace::media_enabled);
         assert_eq!(media, Some(true));
+        Ok(())
     }
 
     /// Both rigged prims name the rigged asset, only the animesh one carries

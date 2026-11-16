@@ -44,6 +44,7 @@ use sl_client_bevy::{
 };
 
 use crate::legacy_materials::{LegacyMaterialManager, preview_legacy_material};
+use crate::material_cache::SharedFaceMaterial;
 use crate::objects::{
     FaceTextureDebug, PrimFaceEntity, SceneObject, TransparencyCulled, is_fully_transparent,
 };
@@ -402,10 +403,12 @@ impl MaterialManager {
             return;
         }
         debug!(
-            "render material {} registered on {} face {}",
+            "render material {} registered on {} face {} (entity {}, handle {:?})",
             id.uuid(),
             key.0,
-            key.1
+            key.1,
+            face.entity,
+            handle.id()
         );
         let _prev = self.face_slots.insert(
             key,
@@ -442,10 +445,13 @@ impl MaterialManager {
             return false;
         }
         debug!(
-            "render material {} assigned to {} face {}",
+            "render material {} assigned to {} face {} (entity {}, handle {:?}, slot handle {:?})",
             id.uuid(),
             key.0,
-            key.1
+            key.1,
+            face.entity,
+            handle.id(),
+            self.face_slots.get(&key).map(|slot| slot.handle.id())
         );
         if let Some(slot) = self.face_slots.get_mut(&key) {
             if slot.material_id == id {
@@ -842,7 +848,7 @@ type NewFaces<'w, 's> = Query<
         &'static FaceTextureDebug,
         &'static ChildOf,
     ),
-    Changed<PrimFaceEntity>,
+    (Changed<PrimFaceEntity>, Without<SharedFaceMaterial>),
 >;
 
 /// Join each newly-built face entity to its object's [`ObjectRenderMaterials`]
@@ -857,6 +863,12 @@ type NewFaces<'w, 's> = Query<
 /// (`FaceReuse`), so the marker is *written* on every build but only *added* on
 /// the first. Registration keyed on `Added` would leave a re-tessellated face
 /// registered against the material handle of the geometry it no longer draws.
+///
+/// A face still marked [`SharedFaceMaterial`] is left alone: composing the glTF
+/// material onto its handle would compose it onto every identical face sharing
+/// it. The detach net gives such a face a private material at the next frame
+/// boundary and writes its [`PrimFaceEntity`] again, which brings it back here
+/// on the handle it actually draws.
 pub fn register_pbr_materials(
     mut manager: ResMut<MaterialManager>,
     mut textures: ResMut<TextureManager>,
@@ -906,16 +918,23 @@ pub fn register_pbr_materials(
 /// changed (`refresh_face_material`
 /// returns `false` for an unchanged echo), so a moving prim's per-update holder
 /// refresh costs a lookup, not a recomposition.
+///
+/// A face that gained its material while still sharing a cached one is skipped
+/// for the same reason as in [`register_pbr_materials`], which registers it
+/// once the detach net has made it private.
 pub fn register_changed_render_materials(
     mut manager: ResMut<MaterialManager>,
     mut textures: ResMut<TextureManager>,
     mut materials: ResMut<Assets<FaceMaterial>>,
     changed: Query<(&ObjectRenderMaterials, &Children), Changed<ObjectRenderMaterials>>,
-    faces: Query<(
-        &MeshMaterial3d<FaceMaterial>,
-        &PrimFaceEntity,
-        &FaceTextureDebug,
-    )>,
+    faces: Query<
+        (
+            &MeshMaterial3d<FaceMaterial>,
+            &PrimFaceEntity,
+            &FaceTextureDebug,
+        ),
+        Without<SharedFaceMaterial>,
+    >,
 ) {
     for (holder, children) in &changed {
         for child in children.iter() {

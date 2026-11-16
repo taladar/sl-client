@@ -51,6 +51,7 @@ use sl_client_bevy::{
 use crate::terrain::update_terrain;
 use crate::water::WaterState;
 use sl_viewer_kit::coords::{metres_to_f32, sl_to_bevy_rotation, sl_to_bevy_vec};
+use sl_viewer_kit::probe_layers::world_ui_render_layers;
 use sl_viewer_settings::ViewerSettings;
 use sl_viewer_world_api::TerrainState;
 
@@ -707,6 +708,9 @@ fn update_parcel_borders(
                 MeshMaterial3d(material.clone()),
                 region_transform(origin, region),
                 ParcelBorderSurface,
+                // Property lines are drawn in the reference's UI pass
+                // (`render_hud_elements`), so they leave a frame with the UI.
+                world_ui_render_layers(),
             ))
             .id();
         if let Some(old) = state.entities.insert(region, entity) {

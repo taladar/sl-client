@@ -354,6 +354,10 @@ impl Plugin for ViewerRenderPlugins {
             PostUpdate,
             PropagateSet::<RenderLayers>::default().before(VisibilitySystems::CheckVisibility),
         );
+        // Hover text, name tags and the in-world beacons are UI the world camera
+        // draws: their layer leaves the camera whenever a frame leaves the UI out
+        // (a world-only capture run, a snapshot without the UI).
+        app.add_plugins(crate::viewer_camera::WorldUiLayerPlugin);
     }
 }
 

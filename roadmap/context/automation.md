@@ -485,6 +485,13 @@ replaces that person.
   aditi run found the mesh store's skin and physics loads leaving their
   entries at `Downloading` for good (63 on a busy region), which only the
   breakdown could tell from a slow region.
+- **Quiet means the own avatar has arrived**: between the region handshake
+  and the region's first object update nothing is outstanding yet, so `Quiet`
+  also needs `agent_present`, true once the own avatar's first update (or a
+  local teleport) has given the agent the position the `Agent` probe reports.
+  A launch or stage that waits for `Quiet` can therefore read `/position` at
+  once. After a teleport or crossing the old region's position still counts
+  (see `test-automation-quiet-after-teleport-reads-old-position`).
 - **An aditi second factor in process**: the App ends on the MFA challenge
   (`LoginOutcome`), which the stage reads from the exited App, answers with
   the avatar's `mfa_command` and logs in again with a new App — the loop the

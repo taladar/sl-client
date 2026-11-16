@@ -17,6 +17,7 @@
     view_transformations::position_world_to_clip,
 }
 #import sl_client_bevy::sky_lighting::{
+    SkyFragment,
     sky_irradiance,
     sky_legacy_diffuse,
     sky_legacy_finish,
@@ -156,7 +157,13 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
         // textures are uploaded sRGB, so `base` is already the linear albedo the
         // branch converts its G-buffer colour to.
         let light = sky_surface_light(lighting, normal, sun_dir);
-        let irradiance = sky_irradiance(lighting, light, normal);
+        // Where the fragment is, for the reflection probes whose volumes hold it.
+        let fragment = SkyFragment(
+            in.world_position.xyz,
+            in.clip_position.xy,
+            view_bindings::view.clip_from_view[3].w == 1.0,
+        );
+        let irradiance = sky_irradiance(lighting, light, normal, fragment);
         let diffuse = sky_legacy_diffuse(lighting, light, irradiance, normal, sun_dir, shadow);
         color = sky_legacy_finish(lighting, diffuse.light * base.rgb);
     } else {
