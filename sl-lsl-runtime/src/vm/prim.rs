@@ -614,6 +614,8 @@ pub struct Prim {
     pub volume_detect: bool,
     /// Its physics shape (`PRIM_PHYSICS_SHAPE_*`).
     pub physics_shape: i32,
+    /// Its physics material (`llSetPhysicsMaterial`).
+    pub physics_material: crate::vm::physics::PhysicsMaterial,
     /// Its spin.
     pub omega: Omega,
     /// Its click action (`CLICK_ACTION_*`).
@@ -707,6 +709,7 @@ impl Prim {
             status: STATUS_ROTATE_XYZ,
             volume_detect: false,
             physics_shape: 0,
+            physics_material: crate::vm::physics::PhysicsMaterial::default(),
             omega: Omega {
                 axis: ZERO,
                 spin: 0.0,
@@ -841,6 +844,12 @@ pub struct ObjectDetails {
     pub masks: [i32; 5],
     /// An avatar's hover height, 0 for a prim.
     pub hover_height: f32,
+    /// The mass of its linkset (an avatar: its own), in Linden's units —
+    /// kilograms over 100 (`llGetObjectMass`).
+    pub mass: f32,
+    /// Its pathfinding type (`OBJECT_PATHFINDING_TYPE`): `OPT_CHARACTER` (2)
+    /// for a character, 0 (`OPT_LEGACY_LINKSET`) otherwise.
+    pub pathfinding_type: i32,
     /// An avatar's body shape type (0 female, 1 male), −1 for a prim.
     pub body_shape: f32,
     /// An avatar's animated attachments.

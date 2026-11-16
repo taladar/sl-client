@@ -22,7 +22,7 @@
 //! consumer treats "no engine" as "surface never appears".
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use bevy::asset::{AssetMut, RenderAssetUsages};
 use bevy::image::{ImageAddressMode, ImageSampler, ImageSamplerDescriptor};
@@ -405,9 +405,9 @@ fn initialize_media_engine(
 }
 
 /// The expected path of the CEF subprocess helper: `sl-cef-helper` next to
-/// the running executable — or, for a test binary cargo built into
-/// `<profile>/deps/`, next to the binaries in `<profile>/`, where cargo put the
-/// helper. `None` when it is in neither place.
+/// the running executable — or, for a test binary cargo built, next to the
+/// binaries in its profile directory, where cargo put the helper. `None` when
+/// it is in neither place.
 fn helper_path() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
     let dir = exe.parent()?;
@@ -415,13 +415,28 @@ fn helper_path() -> Option<PathBuf> {
     if beside.is_file() {
         return Some(beside);
     }
-    let profile = dir
-        .file_name()
-        .is_some_and(|name| name == "deps")
-        .then(|| dir.parent())
-        .flatten()?;
-    let helper = profile.join("sl-cef-helper");
+    let helper = test_binary_profile(dir)?.join("sl-cef-helper");
     helper.is_file().then_some(helper)
+}
+
+/// The profile directory (`target/debug`, …) of a cargo-built test binary in
+/// `dir`: `<profile>/deps/` in cargo's old layout, and
+/// `<profile>/build/<package>/<hash>/out/` in the build-dir layout cargo 1.100
+/// builds test binaries into. `None` for a directory in neither layout.
+fn test_binary_profile(dir: &Path) -> Option<&Path> {
+    let name = dir.file_name()?;
+    if name == "deps" {
+        return dir.parent();
+    }
+    if name != "out" {
+        return None;
+    }
+    let build = dir.parent()?.parent()?.parent()?;
+    if build.file_name()? == "build" {
+        build.parent()
+    } else {
+        None
+    }
 }
 
 /// Per-frame: pump CEF (all paint / status callbacks fire inside), then
@@ -611,5 +626,38 @@ fn shutdown_media_engine_on_exit(
     }
     if let Some(mut backend) = engine.video_backend.take() {
         backend.shutdown();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use pretty_assertions::assert_eq;
+
+    use super::test_binary_profile;
+
+    #[test]
+    fn a_test_binary_in_deps_belongs_to_the_profile_above() {
+        assert_eq!(
+            test_binary_profile(Path::new("/w/target/debug/deps")),
+            Some(Path::new("/w/target/debug"))
+        );
+    }
+
+    #[test]
+    fn a_test_binary_in_the_build_dir_layout_belongs_to_its_profile() {
+        assert_eq!(
+            test_binary_profile(Path::new(
+                "/w/target/debug/build/sl-client-bevy-viewer/0406984910e1fb47/out"
+            )),
+            Some(Path::new("/w/target/debug"))
+        );
+    }
+
+    #[test]
+    fn other_directories_belong_to_no_profile() {
+        assert_eq!(test_binary_profile(Path::new("/w/target/debug")), None);
+        assert_eq!(test_binary_profile(Path::new("/w/a/b/c/out")), None);
     }
 }

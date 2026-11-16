@@ -1416,6 +1416,14 @@ enum Delivery {
         /// The reason its viewer shows.
         reason: String,
     },
+    /// The avatar is pushed (`llPushObject`): its velocity changes by this
+    /// much.
+    Push {
+        /// The avatar.
+        agent: AgentKey,
+        /// The change of its velocity.
+        velocity: Vector,
+    },
     /// The avatar moves this many times as fast (`osSetSpeed`).
     Speed {
         /// The avatar.
@@ -1966,6 +1974,13 @@ impl RegionHost<'_> {
             hover_height: 0.0,
             body_shape: -1.0,
             animated: 0,
+            mass: crate::physics::mass_of(self.world, root),
+            pathfinding_type: self
+                .world
+                .objects
+                .get(root)
+                .filter(|root| self.world.physics.characters.contains_key(&root.full_id))
+                .map_or(0, |_root| 2),
         })
     }
 
@@ -2048,12 +2063,45 @@ impl RegionHost<'_> {
             hover_height: 0.0,
             body_shape: 0.0,
             animated: 0,
+            mass: crate::script_physics::AVATAR_MASS,
+            pathfinding_type: 0,
         }
     }
 
     /// The avatar a script names by `agent`, as the grid keys it.
     fn agent_named(agent: &str) -> Option<AgentKey> {
         uuid::Uuid::parse_str(agent).ok().map(AgentKey::from)
+    }
+
+    /// The avatar keyed `target` in the region, where it stands and whether
+    /// the object `origin` may push it: where the parcel under it allows
+    /// pushing, or the object's owner owns the parcel or is the avatar
+    /// (`LSL_Api.llPushObject`); [`None`] for a key no avatar here has.
+    fn pushable_avatar(&self, origin: &Origin, target: &str) -> Option<(AgentKey, Vector, bool)> {
+        let agent = Self::agent_named(target)?;
+        let present = self.present.iter().find(|present| present.agent == agent)?;
+        let owner = origin.object.owner_id;
+        let allowed = owner == agent.uuid()
+            || self
+                .world
+                .parcel_at(present.position.x, present.position.y)
+                .is_none_or(|parcel| {
+                    !parcel.restrict_push()
+                        || parcel.owner == OwnerKey::Agent(AgentKey::from(owner))
+                });
+        Some((agent, present.position.clone(), allowed))
+    }
+
+    /// Whether objects of `owner`'s may move a stranger's object standing at
+    /// `at` (`OSSL_Api.checkAllowObjectTPbyLandOwner`): on land it owns or
+    /// no parcel covers, or as the estate's owner or a manager.
+    fn may_move_on(&self, owner: uuid::Uuid, at: &Vector) -> bool {
+        if owner == self.core.estate_owner.uuid() || self.world.estate.managers.contains(&owner) {
+            return true;
+        }
+        self.world
+            .parcel_at(at.x, at.y)
+            .is_none_or(|parcel| parcel.owner == OwnerKey::Agent(AgentKey::from(owner)))
     }
 }
 
@@ -2624,6 +2672,79 @@ impl Host for RegionHost<'_> {
         }
     }
 
+    fn physics(&mut self, caller: CallerId, call: sl_lsl_runtime::vm::physics::PhysicsCall) {
+        let Some(origin) = self.origin(caller) else {
+            return;
+        };
+        let at = crate::script_physics::Caller {
+            root: origin.root,
+            prim: origin.local_id,
+        };
+        if let sl_lsl_runtime::vm::physics::PhysicsCall::Push {
+            target,
+            impulse,
+            angular,
+            local,
+        } = call
+        {
+            let avatar = self.pushable_avatar(&origin, &target);
+            let pushed = crate::script_physics::push_object(
+                self.world,
+                at,
+                (&target, avatar),
+                (impulse, angular, local),
+            );
+            if let crate::script_physics::Pushed::Avatar(agent, velocity) = pushed {
+                self.deliveries.push(Delivery::Push { agent, velocity });
+            }
+            return;
+        }
+        crate::script_physics::apply(self.world, at, call);
+    }
+
+    fn physics_reading(&self, caller: CallerId) -> sl_lsl_runtime::vm::physics::PhysicsReading {
+        self.origin(caller).map_or_else(
+            || sl_lsl_runtime::vm::physics::PhysicsReading::at_rest(self.position(caller)),
+            |origin| crate::script_physics::reading(self.world, origin.root),
+        )
+    }
+
+    fn teleport_object(
+        &mut self,
+        caller: CallerId,
+        object: &str,
+        position: Vector,
+        rotation: Rotation,
+        flags: i32,
+    ) -> i32 {
+        let (Some(origin), Some(target)) = (self.origin(caller), self.prim_keyed(object)) else {
+            return -1;
+        };
+        let Some(moved) = self.world.objects.get(target).cloned() else {
+            return -1;
+        };
+        let owner = origin.object.owner_id;
+        if moved.owner_id != owner && !self.may_move_on(owner, &moved.motion.position) {
+            return -1;
+        }
+        let Some(mover) = self.world.objects.get(origin.root).map(|root| root.full_id) else {
+            return -1;
+        };
+        let region = self.core.region(self.index);
+        let edits = self.world.edits.ground.clone();
+        let ground = |x: f32, y: f32| {
+            region.map_or(0.0, |region| {
+                region.config.terrain.live(edits.as_deref()).height_at(x, y)
+            })
+        };
+        crate::script_physics::teleport_object(
+            self.world,
+            (target, mover),
+            (position, rotation, flags),
+            ground,
+        )
+    }
+
     fn experience(&self, caller: CallerId) -> Option<ScriptExperience> {
         if self.world.script_instances.flavour().is_opensim() {
             return None;
@@ -2967,7 +3088,27 @@ impl Host for RegionHost<'_> {
             })
         };
         let edge = u16::try_from(REGION_EDGE_M).map_or(f32::MAX, f32::from);
+        let before = self.world.objects.get(local_id).map(|object| {
+            let shape = self
+                .world
+                .objects
+                .scripted(local_id)
+                .map_or(0, |scripted| scripted.prim.physics_shape);
+            (object.full_id, object.scale.clone(), shape)
+        });
         let _written = crate::prim_state::write(self.world, local_id, state, opensim, ground, edge);
+        if let Some((prim, scale, shape)) = before {
+            if scale != state.scale {
+                self.world.physics.rescaled(prim, &state.scale);
+            }
+            let root = self.world.root_of(local_id);
+            if shape != state.physics_shape
+                && let Some(root) = self.world.objects.get(root).map(|root| root.full_id)
+            {
+                let now = self.world.physics.clock;
+                let _previous = self.world.physics.shape_changed.insert(root, now);
+            }
+        }
     }
 
     fn set_region_position(&mut self, caller: CallerId, position: Vector) -> Option<Vector> {
@@ -3989,9 +4130,16 @@ pub(crate) async fn run_tick(core: &Arc<GridCore>, index: usize) -> Option<TickR
             crate::updates::begin(&mut world);
             let step = world.script_instances.engine.config().step;
             let edits = world.edits.ground.clone();
-            crate::physics::step(&mut world, &[], step, &|x, y| {
-                region.config.terrain.live(edits.as_deref()).height_at(x, y)
-            });
+            let water = world.limits(&region.script_identity(core)).water_height;
+            crate::physics::step(
+                &mut world,
+                &crate::physics::Region {
+                    avatars: &[],
+                    ground: &|x, y| region.config.terrain.live(edits.as_deref()).height_at(x, y),
+                    water,
+                },
+                step,
+            );
             let (walked, healed) = region_life(core, &region.config, &mut world, step);
             let changes = crate::updates::finish(&mut world, walked);
             crate::attachments::finish_leaving(&mut world, &core.assets, (core.clock)());
@@ -4068,9 +4216,16 @@ fn tick_locked(
         .collect();
     if let Some(region) = core.region(index) {
         let edits = world.edits.ground.clone();
-        crate::physics::step(world, &avatars, config.step, &|x, y| {
-            region.config.terrain.live(edits.as_deref()).height_at(x, y)
-        });
+        let water = world.limits(&region.script_identity(core)).water_height;
+        crate::physics::step(
+            world,
+            &crate::physics::Region {
+                avatars: &avatars,
+                ground: &|x, y| region.config.terrain.live(edits.as_deref()).height_at(x, y),
+                water,
+            },
+            config.step,
+        );
     }
     // A prim that comes into the region from here to the next tick came in
     // in the tick about to run.
@@ -4266,6 +4421,11 @@ fn tick_locked(
             }
         }
     }
+    // What the scripts' physics calls raised — a keyframed motion's start
+    // and stop —, now the engine is back in place.
+    for (root, event) in core::mem::take(&mut world.physics.raised) {
+        crate::physics::raise_plain(world, root, event);
+    }
     world
         .script_instances
         .time_out_experience_questions(report.tick, config.step);
@@ -4323,9 +4483,10 @@ fn force_sit(
 }
 
 /// One tick of `step` of what goes on in a region by itself once a script set
-/// it going: its NPCs walk ([`npcs::step`]), and its avatars heal
-/// ([`npcs::heal`]). What the region's sessions are to be told, and the
-/// health to send.
+/// it going: its NPCs walk ([`npcs::step`]), its avatars heal
+/// ([`npcs::heal`]) and its expired temporary objects go
+/// ([`crate::temporary::sweep`]). What the region's sessions are to be told,
+/// and the health to send.
 fn region_life(
     core: &GridCore,
     config: &crate::runtime::RegionConfig,
@@ -4334,9 +4495,10 @@ fn region_life(
 ) -> (Vec<RegionChange>, Vec<Delivery>) {
     let policy = core.imitated.movement_policy();
     let edits = world.edits.ground.clone();
-    let walked = npcs::step(world, step, (&policy, core.animation_policy), &|x, y| {
+    let mut walked = npcs::step(world, step, (&policy, core.animation_policy), &|x, y| {
         config.terrain.live(edits.as_deref()).height_at(x, y)
     });
+    walked.extend(crate::temporary::sweep(world));
     let healed = npcs::heal(world, step)
         .into_iter()
         .map(|(agent, health)| Delivery::Health { agent, health })
@@ -4540,6 +4702,7 @@ async fn deliver(core: &Arc<GridCore>, index: usize, deliveries: Vec<Delivery>) 
             | Delivery::Alert { agent, .. }
             | Delivery::Kick { agent, .. }
             | Delivery::Speed { agent, .. }
+            | Delivery::Push { agent, .. }
             | Delivery::GroupInvite { agent, .. }
             | Delivery::GroupEject { agent, .. }
             | Delivery::WearFromContents { agent, .. }
@@ -4611,6 +4774,10 @@ async fn deliver(core: &Arc<GridCore>, index: usize, deliveries: Vec<Delivery>) 
                     }
                     Delivery::Speed { factor, .. } => {
                         state.speed = *factor;
+                        Ok(())
+                    }
+                    Delivery::Push { velocity, .. } => {
+                        state.motion.push(velocity);
                         Ok(())
                     }
                     Delivery::WearFromContents { item, point, .. } => {
@@ -4816,6 +4983,7 @@ fn send(sim: &mut SimSession, delivery: &Delivery, now: Instant) -> Result<(), s
         | Delivery::Gift { .. }
         | Delivery::Kick { .. }
         | Delivery::Speed { .. }
+        | Delivery::Push { .. }
         | Delivery::GroupInvite { .. }
         | Delivery::GroupEject { .. }
         | Delivery::WearFromContents { .. }

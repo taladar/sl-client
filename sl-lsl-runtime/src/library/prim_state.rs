@@ -1209,6 +1209,7 @@ fn detail(details: &ObjectDetails, code: i32, opensim_flavour: bool, link: i32) 
         18 => key(&details.root),
         19 => integer(details.attached_point),
         20 | 24 | 34 | 35 | 37 | 39 | 40 | 55 | 56 => integer(match code {
+            20 => details.pathfinding_type,
             37 => details.selected.0,
             39 => details.animated,
             _ => 0,
@@ -1312,7 +1313,10 @@ const fn status_of(prim: &Prim) -> i32 {
 /// cannot be set on Second Life, and is set for good by either value on
 /// OpenSim; a phantom clear leaves a prim under `llVolumeDetect` phantom
 /// (`physics/status`, on every grid). A physical prim is moved by the
-/// host's physics.
+/// host's physics. Second Life will not turn an object playing a keyframed
+/// motion physical, and says so (`Can't enable physics for keyframed
+/// objects.`); OpenSim turns it physical, and it falls
+/// (`physics/keyframed`).
 ///
 /// # Errors
 ///
@@ -1320,9 +1324,17 @@ const fn status_of(prim: &Prim) -> i32 {
 pub fn ll_set_status(ctx: &mut ScriptCtx<'_>, mask: i32, value: i32) -> Result<(), CallError> {
     let opensim_flavour = ctx.flavour().is_opensim();
     let on = value != 0;
+    let caller = ctx.caller();
+    let keyframed = on
+        && mask & STATUS_PHYSICS != 0
+        && !opensim_flavour
+        && ctx.host().physics_reading(caller).keyframed != crate::vm::physics::KeyframedState::Idle;
+    if keyframed {
+        ctx.refuse("Can't enable physics for keyframed objects.".to_owned());
+    }
     change_own(ctx, |_ctx, prim, _changes| {
         let mask = mask & STATUS_ALL;
-        if mask & STATUS_PHYSICS != 0 {
+        if mask & STATUS_PHYSICS != 0 && !keyframed {
             prim.physics = on;
         }
         if mask & STATUS_PHANTOM != 0 && (on || !prim.volume_detect) {

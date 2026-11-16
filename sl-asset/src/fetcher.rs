@@ -21,10 +21,6 @@
 
 use sl_proto::{AssetKey, AssetType};
 
-#[expect(
-    clippy::module_name_repetitions,
-    reason = "re-exported at the crate root, where `AssetFetcher` reads clearly"
-)]
 pub use sl_asset_sched::{AssetFetcher, FetchChunk, FetchError};
 
 /// A reference to one generic asset: its id and its [`AssetType`] class. The

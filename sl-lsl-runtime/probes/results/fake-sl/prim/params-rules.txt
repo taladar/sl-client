@@ -1,5 +1,5 @@
 grid: fake-sl
-date: 2026-11-09
+date: 2026-11-15
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating Mono
@@ -35,15 +35,15 @@ PROBE prim/params-rules rec=try label=set-face-minus-2
 # debug-channel: from="after" text="llGetPrimitiveParams error: Param 0 error, unknown parameter"
 PROBE prim/params-rules rec=set label=set-face-minus-2 name="after" glow0=0.500000 color0="<1.000000, 1.000000, 1.000000>" glow5=0.500000
 PROBE prim/params-rules rec=try label=unknown-code
-# debug-channel: from="after" text="llGetPrimitiveParams error: Param 0 error, unknown parameter"
 PROBE prim/params-rules rec=get label=unknown-code count=0 types= got=""
+# debug-channel: from="after" text="llGetPrimitiveParams error: Param 0 error, unknown parameter"
 PROBE prim/params-rules rec=try label=unknown-negative-code
 PROBE prim/params-rules rec=get label=unknown-negative-code count=0 types= got=""
-# debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1: unknown rule."
 PROBE prim/params-rules rec=try label=set-unknown-code
-PROBE prim/params-rules rec=set label=set-unknown-code name="Object" glow0=0.000000 color0="<1.000000, 1.000000, 1.000000>" glow5=0.000000
 # debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1: unknown rule."
+PROBE prim/params-rules rec=set label=set-unknown-code name="Object" glow0=0.000000 color0="<1.000000, 1.000000, 1.000000>" glow5=0.000000
 PROBE prim/params-rules rec=try label=set-unknown-then-glow
+# debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1: unknown rule."
 PROBE prim/params-rules rec=set label=set-unknown-then-glow name="Object" glow0=0.000000 color0="<1.000000, 1.000000, 1.000000>" glow5=0.000000
 # debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1 (PRIM_GLOW): arg #2 (glow) float expected but string given."
 PROBE prim/params-rules rec=try label=glow-as-string
@@ -53,14 +53,14 @@ PROBE prim/params-rules rec=set label=glow-as-integer name="after" glow0=1.00000
 # debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1 (PRIM_GLOW): arg #2 (glow) float expected but vector given."
 PROBE prim/params-rules rec=try label=glow-as-vector
 PROBE prim/params-rules rec=set label=glow-as-vector name="Object" glow0=0.000000 color0="<1.000000, 1.000000, 1.000000>" glow5=0.000000
-# debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1 (PRIM_GLOW): arg #1 (face number) integer expected but float given."
 PROBE prim/params-rules rec=try label=face-as-float
+# debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1 (PRIM_GLOW): arg #1 (face number) integer expected but float given."
 PROBE prim/params-rules rec=set label=face-as-float name="Object" glow0=0.000000 color0="<1.000000, 1.000000, 1.000000>" glow5=0.000000
-# debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1 (PRIM_COLOR): arg #2 (color) vector expected but string given."
 PROBE prim/params-rules rec=try label=color-as-string
+# debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1 (PRIM_COLOR): arg #2 (color) vector expected but string given."
 PROBE prim/params-rules rec=set label=color-as-string name="Object" glow0=0.000000 color0="<1.000000, 1.000000, 1.000000>" glow5=0.000000
-# debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1 (PRIM_NAME): arg #1 string expected but integer given."
 PROBE prim/params-rules rec=try label=name-as-integer
+# debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1 (PRIM_NAME): arg #1 string expected but integer given."
 PROBE prim/params-rules rec=set label=name-as-integer name="Object" glow0=0.000000 color0="<1.000000, 1.000000, 1.000000>" glow5=0.000000
 PROBE prim/params-rules rec=try label=name-as-key
 PROBE prim/params-rules rec=set label=name-as-key name="Object" glow0=0.000000 color0="<1.000000, 1.000000, 1.000000>" glow5=0.000000

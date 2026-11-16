@@ -270,6 +270,9 @@ pub struct SceneFixtures {
     /// the ground, the wind models, the environments, a restart
     /// ([`crate::region_edits`]). Not a fixture.
     pub(crate) edits: crate::region_edits::RegionEdits,
+    /// When each temporary object became temporary, which it leaves the
+    /// region a minute after ([`crate::temporary`]). Not a fixture.
+    pub(crate) temporaries: crate::temporary::Temporaries,
 }
 
 /// One agent's avatar standing in a region, as the region's **other** viewers
@@ -996,6 +999,7 @@ impl SceneFixtures {
             physics: crate::physics::Physics::default(),
             wall: crate::time::WallClock::default(),
             edits: crate::region_edits::RegionEdits::default(),
+            temporaries: crate::temporary::Temporaries::default(),
         }
     }
 

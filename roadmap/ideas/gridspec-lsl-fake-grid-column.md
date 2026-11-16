@@ -25,3 +25,9 @@ rather than writing 500 cells by hand.
 
 Acceptance: no "no scripts" cell is left for behaviour a probe measures,
 and every remaining difference names its `accepted.toml` entry or task.
+
+## From server-lsl-lib-physics-vehicles (2026-11-15)
+
+§ Status flags, forces, targets and vehicles has its fake grid column filled
+from the fake flavours' runs of the seven `physics/*` probes, written by hand
+from `compare-probes`; the generator this task asks for can take it over.

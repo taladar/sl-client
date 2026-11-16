@@ -490,12 +490,25 @@ fn within_reach(from: &Vector, to: Vector) -> Vector {
 /// a root. A child's offset is not capped on Second Life and is capped 10 m
 /// from where the child was on OpenSim. The host keeps a root out of the
 /// ground. The 0.2 s the call costs is the library table's forced delay.
+/// Second Life refuses to move an object playing a keyframed motion, with
+/// a line on the debug channel; OpenSim moves it, and the motion goes on
+/// from there (`physics/keyframed`).
 ///
 /// # Errors
 ///
 /// None; the signature is the library's.
 pub fn ll_set_pos(ctx: &mut ScriptCtx<'_>, target: Vector) -> Result<(), CallError> {
     let caller = ctx.caller();
+    if !ctx.flavour().is_opensim()
+        && ctx.host().physics_reading(caller).keyframed != crate::vm::physics::KeyframedState::Idle
+    {
+        ctx.refuse(
+            "Cannot use a script to move a linkset while it is playing an animation. Stop the \
+             animation first."
+                .to_owned(),
+        );
+        return Ok(());
+    }
     let child = ctx.host().links(caller).this >= 2;
     let to = if child && !ctx.flavour().is_opensim() {
         target

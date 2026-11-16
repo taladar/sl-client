@@ -1,5 +1,5 @@
 grid: fake-sl
-date: 2026-11-12
+date: 2026-11-16
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating Mono
@@ -18,10 +18,10 @@ PROBE avatar/sit-animation rec=did step=1 call=llStopAnimation anim=sit
 # animations avatar=owner playing="sit@probe"
 PROBE avatar/sit-animation rec=playing step=2 why=sit-stopped state="Sitting" has_sit=0 has_dance=0 info_sitting=1 info_on_object=1
 PROBE avatar/sit-animation rec=did step=2 call=llStartAnimation anim=sit
-# animations avatar=owner playing=""
 PROBE avatar/sit-animation rec=playing step=3 why=sit-started state="Sitting" has_sit=1 has_dance=0 info_sitting=1 info_on_object=1
-# animations avatar=owner playing="dance1@probe"
+# animations avatar=owner playing=""
 PROBE avatar/sit-animation rec=did step=3 call=llStopAnimation anim=sit call=llStartAnimation anim=dance1
+# animations avatar=owner playing="dance1@probe"
 PROBE avatar/sit-animation rec=playing step=4 why=posed state="Sitting" has_sit=0 has_dance=1 info_sitting=1 info_on_object=1
 PROBE avatar/sit-animation rec=waiting drive=stand
 # stand

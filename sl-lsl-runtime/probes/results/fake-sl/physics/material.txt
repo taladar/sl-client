@@ -1,13 +1,55 @@
 grid: fake-sl
-date: 2026-11-11
+date: 2026-11-16
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating Mono
 settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
-complete: no
 
 PROBE physics/material rec=start region="Fake Region" channel="Second Life Server" version="sl-fake-grid 0.1.0"
-# debug-channel: from="Object" text="Object [script:Probe] Script run-time error"
-# debug-channel: from="Object" text="llGetCenterOfMass is not implemented by this grid"
-# debug-channel by=other: from="Object" text="Object [script:Probe] Script run-time error"
-# debug-channel by=other: from="Object" text="llGetCenterOfMass is not implemented by this grid"
+PROBE physics/material rec=fresh length=4 gravity=1.000000 restitution=0.500000 friction=0.600000 density=1000.000000 mass=1.250000 mass_mks=125.000000 object_mass=1.250000 scale="<0.50000, 0.50000, 0.50000>" shape_type=0 centre_offset="<0.00000, 0.00000, 0.00000>"
+PROBE physics/material rec=set term=gravity value=-2.000000 length=4 gravity=1.000000 restitution=0.500000 friction=0.600000 density=1000.000000 mass=1.250000 mass_mks=125.000000 object_mass=1.250000
+PROBE physics/material rec=set term=gravity value=-1.000000 length=4 gravity=-1.000000 restitution=0.500000 friction=0.600000 density=1000.000000 mass=1.250000 mass_mks=125.000000 object_mass=1.250000
+PROBE physics/material rec=set term=gravity value=0.000000 length=4 gravity=0.000000 restitution=0.500000 friction=0.600000 density=1000.000000 mass=1.250000 mass_mks=125.000000 object_mass=1.250000
+PROBE physics/material rec=set term=gravity value=0.500000 length=4 gravity=0.500000 restitution=0.500000 friction=0.600000 density=1000.000000 mass=1.250000 mass_mks=125.000000 object_mass=1.250000
+PROBE physics/material rec=set term=gravity value=28.000000 length=4 gravity=28.000000 restitution=0.500000 friction=0.600000 density=1000.000000 mass=1.250000 mass_mks=125.000000 object_mass=1.250000
+PROBE physics/material rec=set term=gravity value=40.000000 length=4 gravity=1.000000 restitution=0.500000 friction=0.600000 density=1000.000000 mass=1.250000 mass_mks=125.000000 object_mass=1.250000
+PROBE physics/material rec=set term=restitution value=-1.000000 length=4 gravity=1.000000 restitution=0.500000 friction=0.600000 density=1000.000000 mass=1.250000 mass_mks=125.000000 object_mass=1.250000
+PROBE physics/material rec=set term=restitution value=0.000000 length=4 gravity=1.000000 restitution=0.000000 friction=0.600000 density=1000.000000 mass=1.250000 mass_mks=125.000000 object_mass=1.250000
+PROBE physics/material rec=set term=restitution value=1.000000 length=4 gravity=1.000000 restitution=1.000000 friction=0.600000 density=1000.000000 mass=1.250000 mass_mks=125.000000 object_mass=1.250000
+PROBE physics/material rec=set term=restitution value=2.000000 length=4 gravity=1.000000 restitution=0.500000 friction=0.600000 density=1000.000000 mass=1.250000 mass_mks=125.000000 object_mass=1.250000
+PROBE physics/material rec=set term=friction value=-1.000000 length=4 gravity=1.000000 restitution=0.500000 friction=0.600000 density=1000.000000 mass=1.250000 mass_mks=125.000000 object_mass=1.250000
+PROBE physics/material rec=set term=friction value=0.000000 length=4 gravity=1.000000 restitution=0.500000 friction=0.000000 density=1000.000000 mass=1.250000 mass_mks=125.000000 object_mass=1.250000
+PROBE physics/material rec=set term=friction value=255.000000 length=4 gravity=1.000000 restitution=0.500000 friction=255.000000 density=1000.000000 mass=1.250000 mass_mks=125.000000 object_mass=1.250000
+PROBE physics/material rec=set term=friction value=300.000000 length=4 gravity=1.000000 restitution=0.500000 friction=0.600000 density=1000.000000 mass=1.250000 mass_mks=125.000000 object_mass=1.250000
+PROBE physics/material rec=set term=density value=-5.000000 length=4 gravity=1.000000 restitution=0.500000 friction=0.600000 density=1000.000000 mass=1.250000 mass_mks=125.000000 object_mass=1.250000
+PROBE physics/material rec=set term=density value=0.000000 length=4 gravity=1.000000 restitution=0.500000 friction=0.600000 density=1000.000000 mass=1.250000 mass_mks=125.000000 object_mass=1.250000
+PROBE physics/material rec=set term=density value=1.000000 length=4 gravity=1.000000 restitution=0.500000 friction=0.600000 density=1.000000 mass=0.001250 mass_mks=0.125000 object_mass=0.001250
+PROBE physics/material rec=set term=density value=22587.000000 length=4 gravity=1.000000 restitution=0.500000 friction=0.600000 density=22587.000000 mass=28.233750 mass_mks=2823.375000 object_mass=28.233750
+PROBE physics/material rec=set term=density value=30000.000000 length=4 gravity=1.000000 restitution=0.500000 friction=0.600000 density=1000.000000 mass=1.250000 mass_mks=125.000000 object_mass=1.250000
+PROBE physics/material rec=set term=none length=4 gravity=1.000000 restitution=0.500000 friction=0.600000 density=1000.000000 mass=1.250000 mass_mks=125.000000 object_mass=1.250000
+PROBE physics/material rec=set term=all length=4 gravity=0.250000 restitution=0.750000 friction=0.125000 density=500.000000 mass=0.625000 mass_mks=62.500000 object_mass=0.625000
+# debug-channel: from="Object" text="ERROR: Failed to set material properties."
+# debug-channel: from="Object" text="ERROR: Failed to set material properties."
+# debug-channel: from="Object" text="ERROR: Failed to set material properties."
+# debug-channel: from="Object" text="ERROR: Failed to set material properties."
+# debug-channel: from="Object" text="ERROR: Failed to set material properties."
+# debug-channel: from="Object" text="ERROR: Failed to set material properties."
+# debug-channel: from="Object" text="ERROR: Failed to set material properties."
+# debug-channel: from="Object" text="ERROR: Failed to set material properties."
+# debug-channel: from="Object" text="Too many errors... dropping further messages until the flood stops"
+PROBE physics/material rec=scaled scale="<1.00000, 1.00000, 1.00000>" mass=10.000000 mass_mks=1000.000000 object_mass=10.000000
+PROBE physics/material rec=scaled scale="<2.00000, 2.00000, 2.00000>" mass=10.000000 mass_mks=1000.000000 object_mass=10.000000
+PROBE physics/material rec=scaled scale="<4.00000, 0.50000, 0.50000>" mass=10.000000 mass_mks=1000.000000 object_mass=10.000000
+PROBE physics/material rec=shape asked=2 shape_type=2 mass=10.000000 mass_mks=1000.000000 object_mass=10.000000
+PROBE physics/material rec=shape asked=0 shape_type=0 mass=10.000000 mass_mks=1000.000000 object_mass=10.000000
+PROBE physics/material rec=shape asked=1 shape_type=0 mass=1.250000 mass_mks=125.000000 object_mass=1.250000
+PROBE physics/material rec=end
+# debug-channel by=other: from="Object" text="ERROR: Failed to set material properties."
+# debug-channel by=other: from="Object" text="ERROR: Failed to set material properties."
+# debug-channel by=other: from="Object" text="ERROR: Failed to set material properties."
+# debug-channel by=other: from="Object" text="ERROR: Failed to set material properties."
+# debug-channel by=other: from="Object" text="ERROR: Failed to set material properties."
+# debug-channel by=other: from="Object" text="ERROR: Failed to set material properties."
+# debug-channel by=other: from="Object" text="ERROR: Failed to set material properties."
+# debug-channel by=other: from="Object" text="ERROR: Failed to set material properties."
+# debug-channel by=other: from="Object" text="Too many errors... dropping further messages until the flood stops"

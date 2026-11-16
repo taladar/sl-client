@@ -1,11 +1,37 @@
 grid: fake-opensim
-date: 2026-11-11
+date: 2026-11-15
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating YEngine
 settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
-complete: no
 
 PROBE physics/material rec=start region="Fake Region" channel="OpenSim" version="sl-fake-grid 0.1.0"
-# debug-channel: from="Object" text="YEngine: llGetCenterOfMass is not implemented by this grid (script: Probe event: state_entry primID: d4106609-9999-90a7-c641-4a240a566a46 at: <128,124,26>) Script must be Reset to re-enable.\n"
-# debug-channel by=other: from="Object" text="YEngine: llGetCenterOfMass is not implemented by this grid (script: Probe event: state_entry primID: d4106609-9999-90a7-c641-4a240a566a46 at: <128,124,26>) Script must be Reset to re-enable.\n"
+PROBE physics/material rec=fresh length=4 gravity=1.000000 restitution=0.500000 friction=0.600000 density=1000.000000 mass=1.250000 mass_mks=125.000000 object_mass=1.250000 scale="<0.500000, 0.500000, 0.500000>" shape_type=0 centre_offset="<0.000000, 0.000000, 0.000000>"
+PROBE physics/material rec=set term=gravity value=-2.000000 length=4 gravity=1.000000 restitution=0.500000 friction=0.600000 density=1000.000000 mass=1.250000 mass_mks=125.000000 object_mass=1.250000
+PROBE physics/material rec=set term=gravity value=-1.000000 length=4 gravity=-1.000000 restitution=0.500000 friction=0.600000 density=1000.000000 mass=1.250000 mass_mks=125.000000 object_mass=1.250000
+PROBE physics/material rec=set term=gravity value=0.000000 length=4 gravity=0.000000 restitution=0.500000 friction=0.600000 density=1000.000000 mass=1.250000 mass_mks=125.000000 object_mass=1.250000
+PROBE physics/material rec=set term=gravity value=0.500000 length=4 gravity=0.500000 restitution=0.500000 friction=0.600000 density=1000.000000 mass=1.250000 mass_mks=125.000000 object_mass=1.250000
+PROBE physics/material rec=set term=gravity value=28.000000 length=4 gravity=28.000000 restitution=0.500000 friction=0.600000 density=1000.000000 mass=1.250000 mass_mks=125.000000 object_mass=1.250000
+PROBE physics/material rec=set term=gravity value=40.000000 length=4 gravity=1.000000 restitution=0.500000 friction=0.600000 density=1000.000000 mass=1.250000 mass_mks=125.000000 object_mass=1.250000
+PROBE physics/material rec=set term=restitution value=-1.000000 length=4 gravity=1.000000 restitution=0.500000 friction=0.600000 density=1000.000000 mass=1.250000 mass_mks=125.000000 object_mass=1.250000
+PROBE physics/material rec=set term=restitution value=0.000000 length=4 gravity=1.000000 restitution=0.000000 friction=0.600000 density=1000.000000 mass=1.250000 mass_mks=125.000000 object_mass=1.250000
+PROBE physics/material rec=set term=restitution value=1.000000 length=4 gravity=1.000000 restitution=1.000000 friction=0.600000 density=1000.000000 mass=1.250000 mass_mks=125.000000 object_mass=1.250000
+PROBE physics/material rec=set term=restitution value=2.000000 length=4 gravity=1.000000 restitution=0.500000 friction=0.600000 density=1000.000000 mass=1.250000 mass_mks=125.000000 object_mass=1.250000
+PROBE physics/material rec=set term=friction value=-1.000000 length=4 gravity=1.000000 restitution=0.500000 friction=0.600000 density=1000.000000 mass=1.250000 mass_mks=125.000000 object_mass=1.250000
+PROBE physics/material rec=set term=friction value=0.000000 length=4 gravity=1.000000 restitution=0.500000 friction=0.000000 density=1000.000000 mass=1.250000 mass_mks=125.000000 object_mass=1.250000
+PROBE physics/material rec=set term=friction value=255.000000 length=4 gravity=1.000000 restitution=0.500000 friction=255.000000 density=1000.000000 mass=1.250000 mass_mks=125.000000 object_mass=1.250000
+PROBE physics/material rec=set term=friction value=300.000000 length=4 gravity=1.000000 restitution=0.500000 friction=0.600000 density=1000.000000 mass=1.250000 mass_mks=125.000000 object_mass=1.250000
+PROBE physics/material rec=set term=density value=-5.000000 length=4 gravity=1.000000 restitution=0.500000 friction=0.600000 density=1000.000000 mass=1.250000 mass_mks=125.000000 object_mass=1.250000
+PROBE physics/material rec=set term=density value=0.000000 length=4 gravity=1.000000 restitution=0.500000 friction=0.600000 density=1000.000000 mass=1.250000 mass_mks=125.000000 object_mass=1.250000
+PROBE physics/material rec=set term=density value=1.000000 length=4 gravity=1.000000 restitution=0.500000 friction=0.600000 density=1.000000 mass=1.250000 mass_mks=125.000000 object_mass=1.250000
+PROBE physics/material rec=set term=density value=22587.000000 length=4 gravity=1.000000 restitution=0.500000 friction=0.600000 density=22587.000000 mass=1.250000 mass_mks=125.000000 object_mass=1.250000
+PROBE physics/material rec=set term=density value=30000.000000 length=4 gravity=1.000000 restitution=0.500000 friction=0.600000 density=1000.000000 mass=1.250000 mass_mks=125.000000 object_mass=1.250000
+PROBE physics/material rec=set term=none length=4 gravity=1.000000 restitution=0.500000 friction=0.600000 density=1000.000000 mass=1.250000 mass_mks=125.000000 object_mass=1.250000
+PROBE physics/material rec=set term=all length=4 gravity=0.250000 restitution=0.750000 friction=0.125000 density=500.000000 mass=1.250000 mass_mks=125.000000 object_mass=1.250000
+PROBE physics/material rec=scaled scale="<1.000000, 1.000000, 1.000000>" mass=1.250000 mass_mks=125.000000 object_mass=1.250000
+PROBE physics/material rec=scaled scale="<2.000000, 2.000000, 2.000000>" mass=1.250000 mass_mks=125.000000 object_mass=1.250000
+PROBE physics/material rec=scaled scale="<4.000000, 0.500000, 0.500000>" mass=1.250000 mass_mks=125.000000 object_mass=1.250000
+PROBE physics/material rec=shape asked=2 shape_type=2 mass=1.250000 mass_mks=125.000000 object_mass=1.250000
+PROBE physics/material rec=shape asked=0 shape_type=0 mass=1.250000 mass_mks=125.000000 object_mass=1.250000
+PROBE physics/material rec=shape asked=1 shape_type=0 mass=1.250000 mass_mks=125.000000 object_mass=1.250000
+PROBE physics/material rec=end

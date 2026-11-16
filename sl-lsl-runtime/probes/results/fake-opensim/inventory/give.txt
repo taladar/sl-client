@@ -1,5 +1,5 @@
 grid: fake-opensim
-date: 2026-11-10
+date: 2026-11-15
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating YEngine
@@ -20,8 +20,8 @@ PROBE inventory/give rec=receiver-changed change=1 items="Gift:7|Gift 1:7|Passed
 PROBE inventory/give rec=try label=give-none
 # debug-channel: from="Object" text="llGiveInventory: Can't find inventory object 'Nope'"
 PROBE inventory/give rec=called label=give-none delay=1.018000
-# im dialog=9 from=owner id=someone name="Object" offline=1 length=60 message="'Gift'. (Object is located at Fake Region <128, 124, 26.95>)" bucket=1
 PROBE inventory/give rec=try label=give-owner
+# im dialog=9 from=owner id=someone name="Object" offline=1 length=60 message="'Gift'. (Object is located at Fake Region <128, 124, 26.95>)" bucket=1
 # im dialog=9 from=owner id=someone name="Object" offline=0 length=14 message="'Probe folder'" bucket=1
 PROBE inventory/give rec=called label=give-owner delay=3.018001
 PROBE inventory/give rec=try label=give-list-owner

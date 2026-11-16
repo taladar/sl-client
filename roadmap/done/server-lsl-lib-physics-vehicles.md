@@ -2,7 +2,7 @@
 id: server-lsl-lib-physics-vehicles
 title: Library tranche — status flags, forces, targets and vehicles
 topic: server
-status: ideas
+status: done
 origin: LSL-on-the-fake-grid audit (2026-09-20)
 blocked_by: [server-lsl-vm-execution, server-world-collision-and-physics,
   gridspec-lsl-physics-vehicles]
@@ -178,3 +178,67 @@ Second Life and leaves it where it was on OpenSim, and a spin turns it some
 other way on both. That needs a grab's force applied to a `Body` and rotation
 simulated, which is this tranche's; once it is, drop the `grid.is_fake()` return
 before leg 10 and hold `MEASURED_PHYSICAL` on both fake flavours.
+
+## Done (2026-11-15)
+
+Every function of the tranche runs, and every `physics/*` probe agrees with
+its grid on both fake flavours (`results/fake-sl`, `results/fake-opensim`)
+but for what `probes/accepted.toml` names: aditi's weightless drift (about
+1 m/s up every time its prim turned physical and weightless, which the probe
+does not explain), a millimetre of Havok's float in a 20 m frame, and when
+the runner saved the keyframed probe's three scripts. The tranche's old
+whole-probe accepted entries are gone.
+
+- **Library** (`library::physics`, `library::characters`,
+  `library::ossl_physics`, 44 `ll*` and the 9 `os*`): forces and torques
+  (Second Life keeps a local one as given, OpenSim turns it into the region),
+  impulses (OpenSim keeps one given while not physical and caps at 20 000),
+  set velocities, `llPushObject`, hovers and `llGroundRepel` (OpenSim's
+  height plus twice the ground, as its code does), `llLookAt` /
+  `llRotLookAt` / `llStopLookAt` (a prim that is not physical turned at once,
+  a physical one with each grid's time constant), material and mass, the
+  centre of mass, `llCollisionFilter`, `llCollisionSprite` (nothing), the six
+  vehicle setters with Second Life's unknown-code lines, `llSetKeyframedMotion`
+  read and refused as each grid does (OpenSim throwing at a wrong element
+  type: `Exception::ItemNot`), Second Life's refusals of `llSetPos` and
+  physics during a motion, the character functions and `llGetStaticPath`, and
+  `PRIM_PHYSICS_SHAPE_NONE` left on a root. `Host` grew `physics`,
+  `physics_reading` and `teleport_object` (`vm::physics`); `Prim` the physics
+  material; `ObjectDetails` the mass and pathfinding type.
+- **The vehicle decision**: OpenSim's own model (`ubOde/ODEDynamics.cs`)
+  ported onto the kinematic solver (`sl_fake_grid::vehicles`) — presets,
+  clamps, motors and decay, friction, hover, buoyancy, deflection, vertical
+  attraction, banking — rather than stubbed: the probe's sled, linear and
+  angular clamps agree with both grids, which clamp alike. It has no camera
+  for a mouselook steer and turns as a unit inertia.
+- **Fake grid physics**: rotation and spin, forces, torques, pending
+  impulses, Coulomb friction for a body at rest on something, hover,
+  look-at, keyframed motion (`keyframes`), characters walking over the
+  ground (a navmesh of all the ground, a metre's reach), each flavour's mass
+  (Second Life's following density at once and scale with a 1 s rebuild,
+  OpenSim's as first seen), collision filters, `osTeleportObject`, floating,
+  a physical rezzed child leaving at its rez velocity, and the policy rows:
+  OpenSim raises `moving_start` / `moving_end` for keyframed motion alone
+  (its code, and the probe's prim made physical mid-motion), Second Life's
+  late keyframed start after a shape change (0.4 s), its play of the last
+  motion given, and its stop of a vehicle typed none. A grab drags a physical
+  prim on Second Life and a spin turns one on both, so `object-touch-grab`'s
+  leg 10 runs on both fake flavours and holds `MEASURED_PHYSICAL`.
+- Tests: `vm/tests/physics.rs`, the solver's and the vehicle model's unit
+  tests, `script_physics`'s, and `tests/scripts.rs`'
+  `a_physical_prim_moves_as_it_is_told_*` and `a_character_walks_to_its_goal`.
+  Book: `simulator/physics.md`, `gridspec/lsl.md`'s fake grid column of this
+  section, `simulator/lsl-engine.md`.
+
+The 44 `ll*` functions no tranche took are
+[[server-lsl-lib-remaining-functions]]; an `osTeleportObject` off the region
+waits for objects to cross ([[server-world-changed-object-crossing]]).
+
+A full corpus run on both fake flavours stopped `physics/targets`' and
+`physics/vehicles`' rises half a metre up, against the temporary children
+`inventory/newer` rezzes a metre above the shared anchor: the fake grid never
+deleted a temporary object. It now does, a minute after the object became
+temporary unless an avatar sits on it, as OpenSim's `CleanTempObjects` does
+(`sl_fake_grid::temporary`, with unit tests). Two other results a full run
+changes, not this tranche's, are
+[[test-lsl-probes-corpus-order-leaks-between-probes]].

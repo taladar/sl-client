@@ -1,10 +1,11 @@
 grid: fake-opensim
-date: 2026-11-11
+date: 2026-11-15
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating YEngine
 settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
 
+# chat type=say from="Object" length=14 text="Script running"
 PROBE math/rotation-bits rec=start region="Fake Region" channel="OpenSim" version="sl-fake-grid 0.1.0"
 PROBE math/rotation-bits rec=input case=0 a="<3.000000, 5.000000, 7.000000, 17.000000>" b="<0.220000, 0.260000, 0.380000, 0.860000>"
 PROBE math/rotation-bits rec=input-bits case=0 operand=a x=+12582912:0p-22 y=+10485760:0p-21 z=+14680064:0p-21 s=+8912896:0p-19
@@ -176,3 +177,4 @@ PROBE math/rotation-bits rec=library fn=PI value=+13176795:0p-22
 PROBE math/rotation-bits rec=library fn=DEG_TO_RAD value=+9370165:0p-29
 PROBE math/rotation-bits rec=library fn=SQRT2 value=+11863283:0p-23
 PROBE math/rotation-bits rec=end
+# chat by=other type=say from="Object" length=14 text="Script running"

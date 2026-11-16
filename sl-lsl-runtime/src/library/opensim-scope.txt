@@ -23,6 +23,7 @@ in osAvatarType
 in osCauseDamage
 in osCauseHealing
 in osCheckODE
+in osClearInertia
 in osClearObjectAnimations
 in osCollisionSound
 in osDie
@@ -66,6 +67,7 @@ in osGetGridName
 in osGetGridNick
 in osGetHealRate
 in osGetHealth
+in osGetInertiaData
 in osGetInventoryDesc
 in osGetInventoryItemKey
 in osGetInventoryLastOwner
@@ -170,6 +172,10 @@ in osSetFontName
 in osSetFontSize
 in osSetHealRate
 in osSetHealth
+in osSetInertia
+in osSetInertiaAsBox
+in osSetInertiaAsCylinder
+in osSetInertiaAsSphere
 in osSetLinkSitActiveRange
 in osSetLinkStandTarget
 in osSetOwnerSpeed
@@ -181,6 +187,7 @@ in osSetPenCap
 in osSetPenColor
 in osSetPenColour
 in osSetPenSize
+in osSetPrimFloatOnWater
 in osSetPrimitiveParams
 in osSetProjectionParams
 in osSetRegionSunSettings
@@ -206,6 +213,7 @@ in osStringSubString
 in osSunGetParam
 in osSunSetParam
 in osTeleportAgent
+in osTeleportObject
 in osTeleportOwner
 in osTerrainFlush
 in osTerrainGetHeight
@@ -215,16 +223,8 @@ in osTriggerSoundLimited
 in osUnixTimeToTimestamp
 in osVecDistSquare
 in osVecMagSquare
+in osVolumeDetect
 in osWindActiveModelPluginName
-later server-lsl-lib-physics-vehicles osClearInertia
-later server-lsl-lib-physics-vehicles osGetInertiaData
-later server-lsl-lib-physics-vehicles osSetInertia
-later server-lsl-lib-physics-vehicles osSetInertiaAsBox
-later server-lsl-lib-physics-vehicles osSetInertiaAsCylinder
-later server-lsl-lib-physics-vehicles osSetInertiaAsSphere
-later server-lsl-lib-physics-vehicles osSetPrimFloatOnWater
-later server-lsl-lib-physics-vehicles osTeleportObject
-later server-lsl-lib-physics-vehicles osVolumeDetect
 later server-fake-grid-dynamic-textures osGetDrawStringSize
 later server-fake-grid-dynamic-textures osSetDynamicTextureData
 later server-fake-grid-dynamic-textures osSetDynamicTextureDataBlend

@@ -1,5 +1,5 @@
 grid: fake-opensim
-date: 2026-11-10
+date: 2026-11-15
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating YEngine
@@ -13,8 +13,9 @@ settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor
 # notecard "_under" bytes=20
 # notecard "alpha" bytes=19
 # object "Box" scripts=1
+# chat type=say from="Object" length=14 text="Script running"
 PROBE inventory/listing rec=helper-entry param=0
-# owner-say: from="Object" text="[YEngine]: Exception while running 458f6e58-8995-1cb5-c63d-0b3b89cfbbcc"
+# owner-say: from="Object" text="[YEngine]: Exception while running 75f7062d-2055-347d-cadf-54cd8b7d2155"
 # owner-say: from="Object" text="ArgumentOutOfRangeException: Index was out of range. Must be non-negative and less than the size of the collection."
 # owner-say: from="Object" text="Parameter name: index"
 # owner-say: from="Object" text="Prim: <Object>, Script: <Range minus one>, Location: Fake Region <130,124,26>"
@@ -105,6 +106,7 @@ PROBE inventory/listing rec=count when=last type=4 n=0 names=""
 PROBE inventory/listing rec=count when=last type=99 n=0 names=""
 PROBE inventory/listing rec=count when=last type=-2 n=0 names=""
 PROBE inventory/listing rec=end
+# chat by=other type=say from="Object" length=14 text="Script running"
 # debug-channel by=other: from="Object" text="llGetInventoryCreator: Can't find item ''"
 # debug-channel by=other: from="Object" text="llGetInventoryCreator: Can't find item ''"
 # debug-channel by=other: from="Object" text="llGetInventoryCreator: Can't find item ''"

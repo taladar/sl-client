@@ -1,13 +1,13 @@
 grid: fake-sl
-date: 2026-11-09
+date: 2026-11-16
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating Mono
 settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
 
 PROBE events/changed-edits rec=start region="Fake Region" channel="Second Life Server" version="sl-fake-grid 0.1.0"
-# question permissions=128 object="Object" owner="<first> <last>" experience=none
 PROBE events/changed-edits rec=waiting drive=answer grant=128
+# question permissions=128 object="Object" owner="<first> <last>" experience=none
 # answer grant=128
 PROBE events/changed-edits rec=permissions got=128
 PROBE events/changed-edits rec=changed prim=B step=0 bits=LINK

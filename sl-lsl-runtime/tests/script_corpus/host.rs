@@ -365,6 +365,28 @@ impl Host for CorpusHost {
         self.line(format_args!("buoyancy {buoyancy}"));
     }
 
+    fn physics(&mut self, _caller: CallerId, call: sl_lsl_runtime::vm::physics::PhysicsCall) {
+        self.line(format_args!("physics {call:?}"));
+    }
+
+    fn physics_reading(&self, _caller: CallerId) -> sl_lsl_runtime::vm::physics::PhysicsReading {
+        sl_lsl_runtime::vm::physics::PhysicsReading::at_rest(ZERO_VECTOR)
+    }
+
+    fn teleport_object(
+        &mut self,
+        _caller: CallerId,
+        object: &str,
+        position: Vector,
+        _rotation: Rotation,
+        flags: i32,
+    ) -> i32 {
+        self.line(format_args!(
+            "teleport object {object} to {position:?} {flags}"
+        ));
+        1
+    }
+
     fn experience(&self, _caller: CallerId) -> Option<ScriptExperience> {
         None
     }
@@ -513,6 +535,8 @@ impl Host for CorpusHost {
             rezzer: OWNER.to_owned(),
             masks: [i32::MAX, i32::MAX, 0, 0, 532_480],
             hover_height: 0.0,
+            mass: 0.0,
+            pathfinding_type: 0,
             body_shape: -1.0,
             animated: 0,
         })

@@ -1,5 +1,5 @@
 grid: fake-sl
-date: 2026-11-11
+date: 2026-11-15
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating Mono
@@ -20,16 +20,16 @@ PROBE comms/dialog rec=heard step=2 from=owner name_is_key2name=1 message="OK"
 PROBE comms/dialog rec=waiting drive=dialog reply="Not a button"
 PROBE comms/dialog rec=put step=3 to=owner how=answered buttons=2 message_length=11
 # dialog-reply reply="Not a button" index=0 sent_length=12
-PROBE comms/dialog rec=heard step=3 from=owner name_is_key2name=1 message="Not a button"
 # dialog object="Object" owner="<first> <last>" channel=-731001 message_length=6 message="Twelve" buttons="B1|B2|B3|B4|B5|B6|B7|B8|B9|B10|B11|B12" count=12
+PROBE comms/dialog rec=heard step=3 from=owner name_is_key2name=1 message="Not a button"
 PROBE comms/dialog rec=waiting drive=dialog reply="B12"
 PROBE comms/dialog rec=put step=4 to=owner how=answered buttons=12 message_length=6
 # dialog-reply reply="B12" index=11 sent_length=3
 PROBE comms/dialog rec=heard step=4 from=owner name_is_key2name=1 message="B12"
 PROBE comms/dialog rec=put step=5 to=owner how=unanswered buttons=13 message_length=8
 # debug-channel: from="Object" text="llDialog: button list too long, must be 12 or fewer entries"
-PROBE comms/dialog rec=moved-on step=5
 # dialog object="Object" owner="<first> <last>" channel=-731001 message_length=10 message="Long label" buttons="xxxxxxxxxxxxxxxxxxxxxxxx" count=1
+PROBE comms/dialog rec=moved-on step=5
 PROBE comms/dialog rec=waiting drive=dialog reply="xxxxxxxxxxxxxxxxxxxxxxxx"
 # debug-channel by=other: from="Object" text="llDialog: button list too long, must be 12 or fewer entries"
 PROBE comms/dialog rec=put step=6 to=owner how=answered buttons=1 message_length=10

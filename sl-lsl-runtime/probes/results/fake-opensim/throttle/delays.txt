@@ -1,5 +1,5 @@
 grid: fake-opensim
-date: 2026-11-11
+date: 2026-11-15
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating YEngine
@@ -34,9 +34,9 @@ PROBE throttle/delays rec=delay fn=llParcelMediaQuery seconds=0.000000 least=0.0
 PROBE throttle/delays rec=delay fn=llGetPrimMediaParams seconds=1.018000 least=1.018000 most=1.019000
 PROBE throttle/delays rec=delay fn=llClearPrimMedia seconds=1.018000 least=1.018000 most=1.018000
 PROBE throttle/delays rec=delay fn=llMapDestination seconds=0.000000 least=0.000000 most=0.000000
-# im dialog=19 from=owner id=probe name="Object" offline=0 length=15 message="throttle/delays" bucket=0
-# im dialog=19 from=owner id=probe name="Object" offline=0 length=15 message="throttle/delays" bucket=0
-# im dialog=19 from=owner id=probe name="Object" offline=0 length=15 message="throttle/delays" bucket=0
+# im dialog=19 from=owner id=probe name="Object" offline=0 length=15 message="throttle/delays" bucket=23
+# im dialog=19 from=owner id=probe name="Object" offline=0 length=15 message="throttle/delays" bucket=23
+# im dialog=19 from=owner id=probe name="Object" offline=0 length=15 message="throttle/delays" bucket=23
 PROBE throttle/delays rec=delay fn=llInstantMessage seconds=2.018000 least=2.018000 most=2.019000
 # dialog object="Object" owner="<first> <last>" channel=-7401 message_length=15 message="throttle/delays" buttons="OK" count=1
 # dialog object="Object" owner="<first> <last>" channel=-7401 message_length=15 message="throttle/delays" buttons="OK" count=1

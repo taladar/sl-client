@@ -317,6 +317,16 @@ impl RegionHost<'_> {
             .first()
             .map(|object| (object.full_id, object.local_id))
             .ok_or(RezRefusal::Missing)?;
+        // A physical object leaves at the velocity it was given; one that is
+        // not physical keeps none (`inventory/rez`: 0 on every grid).
+        let physical = self
+            .world
+            .objects
+            .get(root_local)
+            .is_some_and(|object| object.update_flags & sl_proto::prim_flags::USE_PHYSICS != 0);
+        if physical {
+            self.world.physics.settings_mut(root).velocity = Some(rez.velocity.clone());
+        }
         if rez.die_at_edge {
             // OpenSim marks every object a script rezzes `STATUS_DIE_AT_EDGE`
             // (`inventory/rez`); the flag is no record's, so the script's

@@ -4793,8 +4793,10 @@ default
     /// bounces once and keeps touching until it is no longer physical, which
     /// only the struck box hears end. Under `llVolumeDetect` the box falls
     /// through, the struck one hearing a start and an end and no
-    /// `collision`, the falling one nothing of it and the ground instead —
-    /// on a grid imitating `imitated`.
+    /// `collision`, the falling one nothing of it and the ground instead.
+    /// The faller hears `moving_start` and `moving_end` on Second Life;
+    /// OpenSim raises those for keyframed motion alone — on a grid imitating
+    /// `imitated`.
     async fn a_falling_box_collides(imitated: ImitatedGrid) -> Result<(), TestError> {
         let second_life = imitated == ImitatedGrid::SecondLife;
         for detect in [false, true] {
@@ -4819,9 +4821,9 @@ default
                 .collect();
             let expected = match (second_life, detect) {
                 (true, false) => ["falling 1 1 1 0 0 1 1", "struck 1 1 1 10"],
-                (false, false) => ["falling 2 1 1 0 0 1 1", "struck 2 2 1 10"],
+                (false, false) => ["falling 2 1 1 0 0 0 0", "struck 2 2 1 10"],
                 (true, true) => ["falling 0 0 0 1 1 1 1", "struck 1 1 0 10"],
-                (false, true) => ["falling 0 0 0 1 0 1 1", "struck 1 1 0 10"],
+                (false, true) => ["falling 0 0 0 1 0 0 0", "struck 1 1 0 10"],
             };
             assert_eq!(heard, expected, "volume detect {detect}");
         }
@@ -5403,6 +5405,210 @@ default
         tell_npc_maker(&mut scene, "join").await?;
         assert_eq!(scene.line("join ").await?, "join 65536");
         scene.stop();
+        Ok(())
+    }
+
+    /// The box of [`a_physical_prim_moves_as_it_is_told`]: on channel 7 it
+    /// is kicked, pushed, played a keyframed motion or driven as a sled, and
+    /// says how far it went, in centimetres, and how many `moving_start` and
+    /// `moving_end` it heard.
+    const PHYSICAL_MOVER_SOURCE: &str = "vector home;
+integer starts;
+integer ends;
+
+default
+{
+    state_entry()
+    {
+        home = llGetPos();
+        llListen(7, \"\", NULL_KEY, \"\");
+    }
+
+    listen(integer channel, string name, key id, string message)
+    {
+        if (message == \"impulse\")
+        {
+            llSetBuoyancy(1.0);
+            llSetStatus(STATUS_PHYSICS, TRUE);
+            llApplyImpulse(<0.0, 0.0, llGetMass()>, FALSE);
+        }
+        else if (message == \"force\")
+        {
+            llSetBuoyancy(1.0);
+            llSetStatus(STATUS_PHYSICS, TRUE);
+            llSetForce(<llGetMass(), 0.0, 0.0>, FALSE);
+        }
+        else if (message == \"keyframed\")
+        {
+            llSetPrimitiveParams([PRIM_PHYSICS_SHAPE_TYPE, PRIM_PHYSICS_SHAPE_CONVEX]);
+            llSetKeyframedMotion([<0.0, 0.0, 0.5>, ZERO_ROTATION, 1.0], []);
+        }
+        else if (message == \"sled\")
+        {
+            llSetVehicleType(VEHICLE_TYPE_SLED);
+            llSetVehicleVectorParam(VEHICLE_LINEAR_MOTOR_DIRECTION, <1.0, 0.0, 0.0>);
+            llSetVehicleFloatParam(VEHICLE_LINEAR_MOTOR_TIMESCALE, 0.2);
+            llSetStatus(STATUS_PHYSICS, TRUE);
+        }
+        else if (message == \"report\")
+        {
+            vector moved = llGetPos() - home;
+            llShout(0, \"moved \" + (string)llRound(moved.x * 100.0) + \" \"
+                + (string)llRound(moved.y * 100.0) + \" \"
+                + (string)llRound(moved.z * 100.0) + \" \"
+                + (string)starts + \" \" + (string)ends);
+        }
+    }
+
+    moving_start()
+    {
+        ++starts;
+    }
+
+    moving_end()
+    {
+        ++ends;
+    }
+}
+";
+
+    /// The mover's region-local id.
+    const PHYSICAL_MOVER: sl_proto::RegionLocalObjectId = sl_proto::RegionLocalObjectId(0xD00);
+
+    /// What the mover says after `command` and `ticks` ticks of 100 ms, on a
+    /// grid imitating `imitated`: east, north and up in centimetres, its
+    /// `moving_start`s and its `moving_end`s.
+    async fn moved_by(
+        imitated: ImitatedGrid,
+        command: &str,
+        ticks: u32,
+    ) -> Result<[i32; 5], TestError> {
+        let fixture = region_of(&[ScriptedBox {
+            local_id: PHYSICAL_MOVER,
+            source: PHYSICAL_MOVER_SOURCE.to_owned(),
+            experience: None,
+        }])?;
+        let mut scene = scene_of(imitated, fixture).await?;
+        scene.tick(2).await?;
+        scene.shout(command).await?;
+        scene.tick(ticks).await?;
+        scene.shout("report").await?;
+        scene.tick(3).await?;
+        let heard = shouted(&mut scene).await;
+        scene.stop();
+        let line = heard
+            .iter()
+            .find_map(|line| line.strip_prefix("moved "))
+            .ok_or_else(|| format!("the mover said nothing of its move: {heard:?}"))?;
+        let numbers: Vec<i32> = line
+            .split(' ')
+            .map(str::parse)
+            .collect::<Result<_, _>>()
+            .map_err(|error| format!("{line}: {error}"))?;
+        numbers
+            .try_into()
+            .map_err(|numbers| format!("not five numbers: {numbers:?}").into())
+    }
+
+    /// A weightless physical prim kicked up by its mass in newton-seconds
+    /// rises at a metre a second; one pushed east by a steady force of its
+    /// mass in newtons speeds up a metre a second every second; a keyframed
+    /// motion half a metre up in a second plays out, raising its
+    /// `moving_start` and `moving_end` on both grids; and a sled whose motor
+    /// pushes east goes east. Second Life raises `moving_start` for the
+    /// physical moves too; OpenSim for keyframed motion alone — on a grid
+    /// imitating `imitated`.
+    async fn a_physical_prim_moves_as_it_is_told(imitated: ImitatedGrid) -> Result<(), TestError> {
+        let moving = i32::from(imitated == ImitatedGrid::SecondLife);
+        // A second of rising at 1 m/s, the impulse given at the next step.
+        let impulse = moved_by(imitated, "impulse", 10).await?;
+        let [east, north, up, starts, _ends] = impulse;
+        assert_eq!((east, north, starts), (0, 0, moving), "impulse {impulse:?}");
+        assert!((90..=100).contains(&up), "impulse {impulse:?}");
+        // Half of 1 m/s² times a second squared, give or take a step.
+        let force = moved_by(imitated, "force", 10).await?;
+        let [east, north, up, starts, _ends] = force;
+        assert_eq!((north, up, starts), (0, 0, moving), "force {force:?}");
+        assert!((40..=60).contains(&east), "force {force:?}");
+        // Done in the second, whatever Second Life's start waits for.
+        let motion = moved_by(imitated, "keyframed", 20).await?;
+        assert_eq!(motion, [0, 0, 50, 1, 1], "keyframed");
+        let sled = moved_by(imitated, "sled", 15).await?;
+        let [east, north, _up, _starts, _ends] = sled;
+        assert_eq!(north, 0, "sled {sled:?}");
+        assert!(east > 30, "sled {sled:?}");
+        Ok(())
+    }
+
+    /// On a grid imitating Second Life.
+    #[tokio::test]
+    async fn a_physical_prim_moves_as_it_is_told_on_second_life() -> Result<(), TestError> {
+        a_physical_prim_moves_as_it_is_told(ImitatedGrid::SecondLife).await
+    }
+
+    /// On a grid imitating OpenSim.
+    #[tokio::test]
+    async fn a_physical_prim_moves_as_it_is_told_on_opensim() -> Result<(), TestError> {
+        a_physical_prim_moves_as_it_is_told(ImitatedGrid::OpenSim).await
+    }
+
+    /// The box of [`a_character_walks_to_its_goal`]: told to walk, it
+    /// becomes a character and goes to the navmesh's point three metres
+    /// east; it says each `path_update` and, told to, how far it went.
+    const WALKER_SOURCE: &str = "vector home;
+
+default
+{
+    state_entry()
+    {
+        home = llGetPos();
+        llListen(7, \"\", NULL_KEY, \"\");
+    }
+
+    listen(integer channel, string name, key id, string message)
+    {
+        if (message == \"walk\")
+        {
+            llCreateCharacter([CHARACTER_DESIRED_SPEED, 2.0]);
+            llNavigateTo(llList2Vector(llGetClosestNavPoint(home + <3.0, 0.0, 0.0>, []), 0), []);
+        }
+        else if (message == \"report\")
+        {
+            vector moved = llGetPos() - home;
+            llShout(0, \"walked \" + (string)llRound(moved.x) + \" \"
+                + (string)llList2Integer(llGetObjectDetails(llGetKey(),
+                    [OBJECT_PATHFINDING_TYPE]), 0));
+        }
+    }
+
+    path_update(integer type, list reserved)
+    {
+        llShout(0, \"path \" + (string)type);
+    }
+}
+";
+
+    /// A character told to go to a point three metres east turns physical,
+    /// walks there at its speed, raising `path_update`
+    /// `PU_SLOWDOWN_DISTANCE_REACHED` and then `PU_GOAL_REACHED`
+    /// (`physics/character` on aditi), and stops; its pathfinding type is
+    /// `OPT_CHARACTER`. Second Life's: OpenSim compiles none of it.
+    #[tokio::test]
+    async fn a_character_walks_to_its_goal() -> Result<(), TestError> {
+        let fixture = region_of(&[ScriptedBox {
+            local_id: PHYSICAL_MOVER,
+            source: WALKER_SOURCE.to_owned(),
+            experience: None,
+        }])?;
+        let mut scene = scene_of(ImitatedGrid::SecondLife, fixture).await?;
+        scene.tick(2).await?;
+        scene.shout("walk").await?;
+        scene.tick(40).await?;
+        scene.shout("report").await?;
+        scene.tick(3).await?;
+        let heard = shouted(&mut scene).await;
+        scene.stop();
+        assert_eq!(heard, vec!["path 0", "path 1", "walked 3 2"]);
         Ok(())
     }
 }

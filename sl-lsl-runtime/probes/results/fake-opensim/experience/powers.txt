@@ -1,5 +1,5 @@
 grid: fake-opensim
-date: 2026-11-11
+date: 2026-11-15
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating YEngine
@@ -17,9 +17,9 @@ PROBE experience/powers rec=teleport step=3 call=llTeleportAgent of=owner back=0
 # teleport-started flags=0x10
 # teleport-local flags=0x10
 PROBE experience/powers rec=after step=3 of=owner landed=1 moved=1 off=0.0 dz=0.0
-PROBE experience/powers rec=teleport step=4 call=llTeleportAgent of=owner back=1 perms=4096 granter=owner
 # teleport-started flags=0x10
 # teleport-local flags=0x10
+PROBE experience/powers rec=teleport step=4 call=llTeleportAgent of=owner back=1 perms=4096 granter=owner
 PROBE experience/powers rec=after step=4 of=owner landed=1 moved=0 off=0.0 dz=0.0
 PROBE experience/powers rec=waiting drive=touch by=other
 # touch by=other active_group=none surface=none
@@ -32,8 +32,8 @@ PROBE experience/powers rec=asked step=7 of=other mask=4096
 # answer by=other grant=4096
 PROBE experience/powers rec=held step=7 answer=4096 perms=4096 granter=other
 PROBE experience/powers rec=teleport step=8 call=llTeleportAgent of=other back=0 perms=4096 granter=other
-# question permissions=4128 object="Object" owner="<first> <last>" experience=none
 PROBE experience/powers rec=after step=8 of=other landed=1 moved=1 off=0.0 dz=0.0
+# question permissions=4128 object="Object" owner="<first> <last>" experience=none
 PROBE experience/powers rec=waiting drive=answer grant=4128
 # teleport-started by=other flags=0x10
 # teleport-local by=other flags=0x10

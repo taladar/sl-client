@@ -44,6 +44,10 @@
 //! - [`ossl`] — OpenSim's own library families as its engines gate them:
 //!   the region's `[OSSL]` configuration, what the script's owner is in the
 //!   region, and the check a call passes before it runs.
+//! - [`physics`] — what a script asks of its object's physics: forces,
+//!   impulses, hovers, look-ats, vehicles, keyframed motion and characters,
+//!   handed to the host's physics with each grid's rules applied, and what
+//!   the physics says back.
 //! - [`persistence`] — a script's running state saved as plain data
 //!   ([`SavedScript`]) when its object is taken or its region goes down, and
 //!   brought back when it is rezzed or the region is up again.
@@ -80,6 +84,7 @@ pub(crate) mod objects;
 pub mod ossl;
 pub mod permissions;
 pub mod persistence;
+pub mod physics;
 pub mod prim;
 mod report;
 pub mod seating;

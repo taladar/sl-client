@@ -1,13 +1,47 @@
 grid: fake-opensim
-date: 2026-11-11
+date: 2026-11-16
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating YEngine
 settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
-complete: no
 
 PROBE physics/vehicles rec=start region="Fake Region" channel="OpenSim" version="sl-fake-grid 0.1.0"
 PROBE physics/vehicles rec=fresh physics=0 rotate_x=1 rotate_y=1 rotate_z=1 phantom=0
 PROBE physics/vehicles rec=try label=param-before-type
-# debug-channel: from="Object" text="YEngine: llSetVehicleFloatParam is not implemented by this grid (script: Probe event: state_entry primID: a6d159b9-e30c-a45a-ceda-27c2104ceb92 at: <128,124,26>) Script must be Reset to re-enable.\n"
-# debug-channel by=other: from="Object" text="YEngine: llSetVehicleFloatParam is not implemented by this grid (script: Probe event: state_entry primID: a6d159b9-e30c-a45a-ceda-27c2104ceb92 at: <128,124,26>) Script must be Reset to re-enable.\n"
+PROBE physics/vehicles rec=after label=param-before-type physics=0 rotate_x=1 rotate_y=1 rotate_z=1 phantom=0
+PROBE physics/vehicles rec=try label=type-1
+PROBE physics/vehicles rec=after label=type-1 physics=0 rotate_x=1 rotate_y=1 rotate_z=1 phantom=0
+PROBE physics/vehicles rec=try label=type-2
+PROBE physics/vehicles rec=after label=type-2 physics=0 rotate_x=1 rotate_y=1 rotate_z=1 phantom=0
+PROBE physics/vehicles rec=try label=type-3
+PROBE physics/vehicles rec=after label=type-3 physics=0 rotate_x=1 rotate_y=1 rotate_z=1 phantom=0
+PROBE physics/vehicles rec=try label=type-4
+PROBE physics/vehicles rec=after label=type-4 physics=0 rotate_x=1 rotate_y=1 rotate_z=1 phantom=0
+PROBE physics/vehicles rec=try label=type-5
+PROBE physics/vehicles rec=after label=type-5 physics=0 rotate_x=1 rotate_y=1 rotate_z=1 phantom=0
+PROBE physics/vehicles rec=try label=type-0
+PROBE physics/vehicles rec=after label=type-0 physics=0 rotate_x=1 rotate_y=1 rotate_z=1 phantom=0
+PROBE physics/vehicles rec=try label=type-99
+PROBE physics/vehicles rec=after label=type-99 physics=0 rotate_x=1 rotate_y=1 rotate_z=1 phantom=0
+PROBE physics/vehicles rec=try label=type--1
+PROBE physics/vehicles rec=after label=type--1 physics=0 rotate_x=1 rotate_y=1 rotate_z=1 phantom=0
+PROBE physics/vehicles rec=try label=unknown-float-param
+PROBE physics/vehicles rec=try label=unknown-vector-param
+PROBE physics/vehicles rec=try label=unknown-rotation-param
+PROBE physics/vehicles rec=try label=float-param-as-vector
+PROBE physics/vehicles rec=try label=negative-timescale
+PROBE physics/vehicles rec=try label=huge-timescale
+PROBE physics/vehicles rec=try label=efficiency-above-one
+PROBE physics/vehicles rec=try label=efficiency-below-zero
+PROBE physics/vehicles rec=try label=unknown-flags
+PROBE physics/vehicles rec=after label=params physics=0 rotate_x=1 rotate_y=1 rotate_z=1 phantom=0
+PROBE physics/vehicles rec=try label=sled-motor
+PROBE physics/vehicles rec=after label=sled-motor physics=1 rotate_x=1 rotate_y=1 rotate_z=1 phantom=0
+PROBE physics/vehicles rec=sled-motor dx=1.334885 east=1
+PROBE physics/vehicles rec=type-none speed=0.681686 physics=1
+PROBE physics/vehicles rec=try label=linear-clamp
+PROBE physics/vehicles rec=linear-clamp speed=97.703830 dz=42.092220 up=1 above_30=1
+PROBE physics/vehicles rec=try label=angular-clamp
+PROBE physics/vehicles rec=angular-clamp spin=12.429770 turning=1 above_4pi=0
+PROBE physics/vehicles rec=after label=restored physics=0 rotate_x=1 rotate_y=1 rotate_z=1 phantom=0
+PROBE physics/vehicles rec=end

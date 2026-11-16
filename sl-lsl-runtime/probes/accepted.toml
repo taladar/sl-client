@@ -466,73 +466,53 @@ probe = "errors/bounds-newer"
 between = ["opensim-yengine", "fake-opensim"]
 reason = "OpenSim compiles none of the newer list and string functions, so the probe stops at its first script's compile error on both, never printing its end"
 
-# --- physics: the fake grid runs none (server-lsl-lib-physics-vehicles) ---
+# --- physics (server-lsl-lib-physics-vehicles) ---
 
 [[difference]]
 probe = "physics/forces"
 between = ["aditi", "fake-sl"]
-reason = "Forces, impulses, hover and the velocity setters are not implemented on the fake grid, whose kinematic physics moves a physical prim by gravity, buoyancy and llMoveToTarget alone: its prims never move under a force"
-task = "server-lsl-lib-physics-vehicles"
-
-[[difference]]
-probe = "physics/keyframed"
-between = ["aditi", "fake-sl"]
-reason = "The fake grid does not play keyframed motion yet, nor refuse its calls as Second Life does"
-task = "server-lsl-lib-physics-vehicles"
-
-[[difference]]
-probe = "physics/material"
-between = ["aditi", "fake-sl"]
-reason = "Physics material, mass and density are not modelled by the fake grid's kinematic physics"
-task = "server-lsl-lib-physics-vehicles"
-
-[[difference]]
-probe = "physics/vehicles"
-between = ["aditi", "fake-sl"]
-reason = "Vehicles are not modelled by the fake grid's kinematic physics, and the vehicle decision is still open"
-task = "server-lsl-lib-physics-vehicles"
-
-[[difference]]
-probe = "physics/targets"
-between = ["aditi", "fake-sl"]
-reason = "llLookAt, llRotLookAt and llStopLookAt are not implemented on the fake grid, so the probe stops at its first look-at call after llMoveToTarget; its target phases agree"
-task = "server-lsl-lib-physics-vehicles"
+record = "physical"
+fields = { step = "weightless" }
+field = "rising"
+reason = "aditi's prim drifted up at about 1 m/s every time it turned physical and weightless, after the impulses as before them and again later: the probe does not separate why, so the fake grid's weightless prim stays where it is"
 
 [[difference]]
 probe = "physics/forces"
-between = ["opensim-yengine", "fake-opensim"]
-reason = "Forces, impulses, hover and the velocity setters are not implemented on the fake grid, whose kinematic physics moves a physical prim by gravity, buoyancy and llMoveToTarget alone: its prims never move under a force"
-task = "server-lsl-lib-physics-vehicles"
+between = ["aditi", "fake-sl"]
+record = "physical"
+fields = { step = "weightless-again" }
+field = "rising"
+reason = "aditi's weightless drift, as at the first weightless step"
 
 [[difference]]
 probe = "physics/keyframed"
-between = ["opensim-yengine", "fake-opensim"]
-reason = "The fake grid does not play keyframed motion yet, nor refuse its calls as Second Life does"
-task = "server-lsl-lib-physics-vehicles"
-
-[[difference]]
-probe = "physics/material"
-between = ["opensim-yengine", "fake-opensim"]
-reason = "Physics material, mass and density are not modelled by the fake grid's kinematic physics"
-task = "server-lsl-lib-physics-vehicles"
-
-[[difference]]
-probe = "physics/vehicles"
-between = ["opensim-yengine", "fake-opensim"]
-reason = "Vehicles are not modelled by the fake grid's kinematic physics, and the vehicle decision is still open"
-task = "server-lsl-lib-physics-vehicles"
-
-[[difference]]
-probe = "physics/targets"
-between = ["opensim-yengine", "fake-opensim"]
-reason = "llLookAt, llRotLookAt and llStopLookAt are not implemented on the fake grid, so the probe stops at its first look-at call after llMoveToTarget; its target phases agree"
-task = "server-lsl-lib-physics-vehicles"
-
-[[difference]]
-probe = "physics/character"
 between = ["aditi", "fake-sl"]
-reason = "The character and pathfinding functions are not implemented on the fake grid yet, so the probe stops at its first call"
-task = "server-lsl-lib-physics-vehicles"
+record = "outcome"
+fields = { label = "on-physical" }
+field = "dz"
+reason = "aditi's weightless drift (physics/forces): the physical, weightless prim the motion is refused to rose 11 mm on its own"
+
+[[difference]]
+probe = "physics/keyframed"
+between = ["aditi", "fake-sl"]
+record = "outcome"
+fields = { label = "fast" }
+field = "dz"
+reason = "Havok left the 20 m frame a millimetre short in its last float; the fake grid's frames add up to the translation"
+
+[[difference]]
+probe = "physics/keyframed"
+between = ["aditi", "fake-sl"]
+record = "outcome"
+fields = { label = "types-swapped" }
+reason = "Prim B's script prints its outcome 1.5 s after it starts: on aditi, whose runner saved the three scripts seconds apart, before prim A's script started; on the fake grid, which saves them within a tick, after. The record agrees"
+
+[[difference]]
+probe = "physics/keyframed"
+between = ["aditi", "fake-sl"]
+record = "outcome"
+fields = { label = "translation-only-three" }
+reason = "Prim C's outcome, printed before or after prim A's script started by when the runner saved it, as prim B's. The record agrees"
 
 # --- the rest of the corpus, second pass (test-lsl-differential-corpus-triage) ---
 
@@ -1569,20 +1549,6 @@ between = ["opensim-yengine", "fake-opensim"]
 record = "returned"
 fields = { script = "Listed" }
 reason = "Each OSSL script returns from its call in the same frame as the others, and in which order their lines print is scheduling"
-
-[[difference]]
-probe = "ossl/errors"
-between = ["opensim-yengine", "fake-opensim"]
-record = "returned"
-fields = { script = "LightShare" }
-reason = "Each OSSL script returns from its call in the same frame as the others, and in which order their lines print is scheduling"
-
-[[difference]]
-probe = "ossl/errors"
-between = ["opensim-yengine", "fake-opensim"]
-record = "answer"
-field = "script"
-reason = "The scripts answer the leader in the same frame, and in which order their lines print is scheduling"
 
 [[difference]]
 probe = "prim/link-refusals"

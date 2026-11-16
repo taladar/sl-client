@@ -19,8 +19,11 @@
 //!   button is the script's, and the prim stays.
 //! - **And only for somebody who may move it**: its owner, or anybody where
 //!   its record lets everyone move it.
-//! - **A physical prim is pulled, not placed** — by a force, which this
-//!   grid's kinematic physics ([`crate::physics`]) does not apply. It stays.
+//! - **A physical prim is pulled, not placed**: on Second Life a drag draws
+//!   it towards the grab, on OpenSim it stays where it is; a spin turns it
+//!   towards the rotation asked on both, and leaves it turned some other way
+//!   (`object-touch-grab`, leg 10). The pull and the turn are the physics'
+//!   ([`crate::physics`]), held for half a second after each update.
 //!
 //! The grids differ in one thing: OpenSim sends its terse update for every
 //! `ObjectGrabUpdate` whether the prim moved or not, and Second Life only
@@ -69,6 +72,22 @@ pub(crate) fn answer_grab(
         return Some(Vec::new());
     };
     let root = world.root_of(local_id);
+    if pulled(world, agent, local_id, root) {
+        let until = world
+            .physics
+            .clock
+            .saturating_add(crate::physics::GRAB_HOLD);
+        let pulls = world.physics.policy.grab_pulls_physical;
+        if let Some(key) = world.objects.get(root).map(|root| root.full_id) {
+            let settings = world.physics.settings_mut(key);
+            match pull {
+                Pull::To(position) if pulls => settings.grab = Some((position.clone(), until)),
+                Pull::To(_position) => {}
+                Pull::Turned(rotation) => settings.spin = Some((rotation.clone(), until)),
+            }
+        }
+        return Some(Vec::new());
+    }
     if follows(world, agent, local_id, root)
         && let Some(mut object) = world.object_mut(root)
     {
@@ -89,6 +108,33 @@ pub(crate) fn answer_grab(
     Some(Vec::new())
 }
 
+/// Whether the linkset `root`, held by its prim `local_id`, is physical and
+/// `agent` may move it: its held button pulls it rather than placing it.
+fn pulled(
+    world: &SceneFixtures,
+    agent: AgentKey,
+    local_id: RegionLocalObjectId,
+    root: RegionLocalObjectId,
+) -> bool {
+    let flags_of = |id| {
+        world
+            .object_by_local_id(id)
+            .map_or(0, |object: Object| object.update_flags)
+    };
+    flags_of(root) & prim_flags::USE_PHYSICS != 0
+        && (flags_of(local_id) | flags_of(root)) & prim_flags::HANDLE_TOUCH == 0
+        && may_move(world, agent, root)
+}
+
+/// Whether `agent` may move the linkset `root`: its owner, or anybody where
+/// its record lets everyone move it.
+fn may_move(world: &SceneFixtures, agent: AgentKey, root: RegionLocalObjectId) -> bool {
+    world.record_of(root).is_some_and(|record| {
+        record.owner == OwnerKey::Agent(agent)
+            || record.permissions.everyone.contains(Permissions::MOVE)
+    })
+}
+
 /// Whether the linkset `root`, held by its prim `local_id`, goes where
 /// `agent`'s held button asks it to.
 fn follows(
@@ -106,8 +152,5 @@ fn follows(
     if flags & (prim_flags::HANDLE_TOUCH | prim_flags::USE_PHYSICS) != 0 {
         return false;
     }
-    world.record_of(root).is_some_and(|record| {
-        record.owner == OwnerKey::Agent(agent)
-            || record.permissions.everyone.contains(Permissions::MOVE)
-    })
+    may_move(world, agent, root)
 }

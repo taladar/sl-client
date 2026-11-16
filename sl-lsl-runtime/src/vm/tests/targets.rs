@@ -5,8 +5,10 @@
 //! (`vary: at, not_at`), so a count is held only to whether it is zero. On
 //! OpenSim a handle is the region's next local id, which anything else in
 //! the region may have drawn from between two targets, so the steps between
-//! handles are not held there. The probe goes on to `llMoveToTarget` and the look-at functions, which are the
-//! physics tranche's, and stops there.
+//! handles are not held there. The probe goes on to `llMoveToTarget` and the
+//! look-at functions on a physical prim, which the host's physics moves and
+//! turns: those phases are held by the fake grid's runs of the probe
+//! (`results/fake-*/physics/targets.txt`), not here.
 
 use pretty_assertions::assert_eq;
 

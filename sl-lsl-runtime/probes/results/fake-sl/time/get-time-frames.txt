@@ -1,5 +1,5 @@
 grid: fake-sl
-date: 2026-11-11
+date: 2026-11-15
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating Mono
@@ -7,5 +7,5 @@ settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor
 
 PROBE time/get-time-frames rec=start region="Fake Region" channel="Second Life Server" version="sl-fake-grid 0.1.0"
 PROBE time/get-time-frames rec=steps samples=223585 distinct=45 smallest=0.022222 largest=0.022222 first="0.022222, 0.022222, 0.022222, 0.022222, 0.022222, 0.022222, 0.022222, 0.022222, 0.022222, 0.022222"
-PROBE time/get-time-frames rec=clocks timestamp="2026-11-11T04:48:15.258609Z" unix=1794372495 gmt=17295.000000 wall=74895.000000 time_of_day=2895.259000
+PROBE time/get-time-frames rec=clocks timestamp="2026-11-15T21:08:18.957558Z" unix=1794776898 gmt=76098.000000 wall=47298.000000 time_of_day=4098.958000
 PROBE time/get-time-frames rec=end

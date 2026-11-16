@@ -1,5 +1,5 @@
 grid: fake-opensim
-date: 2026-11-10
+date: 2026-11-15
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating YEngine
@@ -18,7 +18,7 @@ PROBE events/latency rec=latency kind=link-echo trial=2 t=0.000000
 PROBE events/latency rec=latency kind=link-echo trial=3 t=0.000000
 PROBE events/latency rec=latency kind=link-echo trial=4 t=0.000000
 PROBE events/latency rec=latency kind=link-echo trial=5 t=0.000000
-PROBE events/latency rec=latency kind=chat-echo trial=0 t=0.164000
+PROBE events/latency rec=latency kind=chat-echo trial=0 t=0.163000
 PROBE events/latency rec=latency kind=chat-echo trial=1 t=0.182000
 PROBE events/latency rec=latency kind=chat-echo trial=2 t=0.182000
 PROBE events/latency rec=latency kind=chat-echo trial=3 t=0.182000
@@ -36,12 +36,12 @@ PROBE events/latency rec=latency kind=changed trial=2 t=0.000000
 PROBE events/latency rec=latency kind=changed trial=3 t=0.000000
 PROBE events/latency rec=latency kind=changed trial=4 t=0.000000
 PROBE events/latency rec=latency kind=changed trial=5 t=0.000000
-PROBE events/latency rec=latency kind=link-busy trial=0 t=0.019000
+PROBE events/latency rec=latency kind=link-busy trial=0 t=0.018000
 PROBE events/latency rec=latency kind=link-busy trial=1 t=0.018000
-PROBE events/latency rec=latency kind=link-busy trial=2 t=0.018002
-PROBE events/latency rec=latency kind=link-busy trial=3 t=0.018999
+PROBE events/latency rec=latency kind=link-busy trial=2 t=0.018000
+PROBE events/latency rec=latency kind=link-busy trial=3 t=0.018002
 PROBE events/latency rec=latency kind=link-busy trial=4 t=0.018000
-PROBE events/latency rec=latency kind=link-busy trial=5 t=0.018002
+PROBE events/latency rec=latency kind=link-busy trial=5 t=0.018999
 PROBE events/latency rec=latency kind=chat-busy trial=0 t=0.054001
 PROBE events/latency rec=latency kind=chat-busy trial=1 t=0.073000
 PROBE events/latency rec=latency kind=chat-busy trial=2 t=0.091000

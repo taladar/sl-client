@@ -1,5 +1,5 @@
 grid: fake-opensim
-date: 2026-11-10
+date: 2026-11-15
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating YEngine
@@ -8,16 +8,15 @@ settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor
 # chat type=say from="Object" length=14 text="Script running"
 PROBE errors/math rec=listening channel=2147483647 dist=19
 PROBE errors/math rec=listening channel=2147483647 dist=21
-# chat type=say from="Object" length=14 text="Script running"
 PROBE errors/math rec=start region="Fake Region" channel="OpenSim" version="sl-fake-grid 0.1.0"
 PROBE errors/math rec=case script="Math 1" case=int-div step=before
-# debug-channel: from="Faulty prim" text="YEngine: Division by Zero (script: Math 1 event: link_message primID: 12376e6b-3f05-5183-c534-f9a635df5be0 at: <128,124,26>) Script must be Reset to re-enable.\n"
+# debug-channel: from="Faulty prim" text="YEngine: Division by Zero (script: Math 1 event: link_message primID: 95b118d5-abf8-1ded-c225-00db90393696 at: <128,124,26>) Script must be Reset to re-enable.\n"
 PROBE errors/math rec=case script="Math 2" case=int-mod step=before
-# debug-channel: from="Faulty prim" text="YEngine: Division by Zero (script: Math 2 event: link_message primID: 12376e6b-3f05-5183-c534-f9a635df5be0 at: <128,124,26>) Script must be Reset to re-enable.\n"
+# debug-channel: from="Faulty prim" text="YEngine: Division by Zero (script: Math 2 event: link_message primID: 95b118d5-abf8-1ded-c225-00db90393696 at: <128,124,26>) Script must be Reset to re-enable.\n"
 PROBE errors/math rec=case script="Math 3" case=float-div step=before
-# debug-channel: from="Faulty prim" text="YEngine: Division by Zero (script: Math 3 event: link_message primID: 12376e6b-3f05-5183-c534-f9a635df5be0 at: <128,124,26>) Script must be Reset to re-enable.\n"
+# debug-channel: from="Faulty prim" text="YEngine: Division by Zero (script: Math 3 event: link_message primID: 95b118d5-abf8-1ded-c225-00db90393696 at: <128,124,26>) Script must be Reset to re-enable.\n"
 PROBE errors/math rec=case script="Math 4" case=vector-div step=before
-# debug-channel: from="Faulty prim" text="YEngine: Vector division by zero (script: Math 4 event: link_message primID: 12376e6b-3f05-5183-c534-f9a635df5be0 at: <128,124,26>) Script must be Reset to re-enable.\n"
+# debug-channel: from="Faulty prim" text="YEngine: Vector division by zero (script: Math 4 event: link_message primID: 95b118d5-abf8-1ded-c225-00db90393696 at: <128,124,26>) Script must be Reset to re-enable.\n"
 PROBE errors/math rec=case script="Math 5" case=rotation-div step=before
 PROBE errors/math rec=case script="Math 5" case=rotation-div step=after result="<0.000000, 0.000000, 0.000000, 1.000000>"
 PROBE errors/math rec=case script="Math 6" case=int-min-div step=before
@@ -29,7 +28,7 @@ PROBE errors/math rec=case script="Math 8" case=sqrt-negative step=after result=
 PROBE errors/math rec=case script="Math 9" case=float-overflow step=before
 PROBE errors/math rec=case script="Math 9" case=float-overflow step=after result="Infinity"
 PROBE errors/math rec=case script="Math 10" case=modpow-zero step=before
-# owner-say: from="Faulty prim" text="[YEngine]: Exception while running aa2de44a-4ec2-d322-cf1b-85d68c87de04"
+# owner-say: from="Faulty prim" text="[YEngine]: Exception while running 2a5bc7c0-404d-7b4b-c2aa-71a2da00537d"
 # owner-say: from="Faulty prim" text="DivideByZeroException: Attempted to divide by zero."
 # owner-say: from="Faulty prim" text="Prim: <Faulty prim>, Script: <Math 10>, Location: Fake Region <128,124,26>"
 # owner-say: from="Faulty prim" text="Script must be Reset to re-enable."
@@ -90,8 +89,7 @@ PROBE errors/math rec=script-state when=after-revive script="Math 14" running=1
 PROBE errors/math rec=script-state when=after-revive script="Math 15" running=1
 PROBE errors/math rec=end
 # chat by=other type=say from="Object" length=14 text="Script running"
-# chat by=other type=say from="Object" length=14 text="Script running"
-# debug-channel by=other: from="Faulty prim" text="YEngine: Division by Zero (script: Math 1 event: link_message primID: 12376e6b-3f05-5183-c534-f9a635df5be0 at: <128,124,26>) Script must be Reset to re-enable.\n"
-# debug-channel by=other: from="Faulty prim" text="YEngine: Division by Zero (script: Math 2 event: link_message primID: 12376e6b-3f05-5183-c534-f9a635df5be0 at: <128,124,26>) Script must be Reset to re-enable.\n"
-# debug-channel by=other: from="Faulty prim" text="YEngine: Division by Zero (script: Math 3 event: link_message primID: 12376e6b-3f05-5183-c534-f9a635df5be0 at: <128,124,26>) Script must be Reset to re-enable.\n"
-# debug-channel by=other: from="Faulty prim" text="YEngine: Vector division by zero (script: Math 4 event: link_message primID: 12376e6b-3f05-5183-c534-f9a635df5be0 at: <128,124,26>) Script must be Reset to re-enable.\n"
+# debug-channel by=other: from="Faulty prim" text="YEngine: Division by Zero (script: Math 1 event: link_message primID: 95b118d5-abf8-1ded-c225-00db90393696 at: <128,124,26>) Script must be Reset to re-enable.\n"
+# debug-channel by=other: from="Faulty prim" text="YEngine: Division by Zero (script: Math 2 event: link_message primID: 95b118d5-abf8-1ded-c225-00db90393696 at: <128,124,26>) Script must be Reset to re-enable.\n"
+# debug-channel by=other: from="Faulty prim" text="YEngine: Division by Zero (script: Math 3 event: link_message primID: 95b118d5-abf8-1ded-c225-00db90393696 at: <128,124,26>) Script must be Reset to re-enable.\n"
+# debug-channel by=other: from="Faulty prim" text="YEngine: Vector division by zero (script: Math 4 event: link_message primID: 95b118d5-abf8-1ded-c225-00db90393696 at: <128,124,26>) Script must be Reset to re-enable.\n"

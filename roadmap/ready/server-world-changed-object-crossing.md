@@ -45,3 +45,12 @@ object ever moves from one region to the next.
   it with a `tests/scripts.rs` case on both flavours. Physical motion over the
   edge waits for [[server-physics-integration]]; a script's or a viewer's
   move does not.
+
+## From server-lsl-lib-physics-vehicles (2026-11-15)
+
+`osTeleportObject` to a point off the region is OpenSim's crossing
+(`SceneObjectGroup.TeleportObject`'s cross-region half, with a 20 s cooldown
+per mover and the `OSTPOBJ_STOPONFAIL` flag); the fake grid answers it −1
+(`script_physics::teleport_object`) until objects cross. The fake grid's
+physics now moves a physical object by forces, impulses, vehicles and
+characters as well, all clamped at the region's edge.

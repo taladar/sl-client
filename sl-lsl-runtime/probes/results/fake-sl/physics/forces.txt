@@ -1,13 +1,33 @@
 grid: fake-sl
-date: 2026-11-11
+date: 2026-11-16
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating Mono
 settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
-complete: no
 
 PROBE physics/forces rec=start region="Fake Region" channel="Second Life Server" version="sl-fake-grid 0.1.0"
-# debug-channel: from="Object" text="Object [script:Probe] Script run-time error"
-# debug-channel: from="Object" text="llGetAccel is not implemented by this grid"
-# debug-channel by=other: from="Object" text="Object [script:Probe] Script run-time error"
-# debug-channel by=other: from="Object" text="llGetAccel is not implemented by this grid"
+PROBE physics/forces rec=fresh force="<0.00000, 0.00000, 0.00000>" torque="<0.00000, 0.00000, 0.00000>" vel="<0.00000, 0.00000, 0.00000>" omega="<0.00000, 0.00000, 0.00000>" accel="<0.00000, 0.00000, 0.00000>"
+PROBE physics/forces rec=force set=global read="<1.00000, 2.00000, 3.00000>"
+PROBE physics/forces rec=force set=local-turned read="<1.00000, 0.00000, 0.00000>"
+PROBE physics/forces rec=force set=huge read="<1000000.00000, 0.00000, 0.00000>"
+PROBE physics/forces rec=force set=zero read="<0.00000, 0.00000, 0.00000>"
+PROBE physics/forces rec=torque set=global read="<1.00000, 2.00000, 3.00000>"
+PROBE physics/forces rec=torque set=local-turned read="<1.00000, 0.00000, 0.00000>"
+PROBE physics/forces rec=torque set=huge read="<1000000.00000, 0.00000, 0.00000>"
+PROBE physics/forces rec=force-and-torque force="<4.00000, 5.00000, 6.00000>" torque="<7.00000, 8.00000, 9.00000>"
+PROBE physics/forces rec=velocity set=velocity read="<0.00000, 0.00000, 0.00000>"
+PROBE physics/forces rec=velocity set=angular read="<0.00000, 0.00000, 0.00000>"
+PROBE physics/forces rec=velocity set=impulse read="<0.00000, 0.00000, 0.00000>"
+PROBE physics/forces rec=velocity set=rotational-impulse read="<0.00000, 0.00000, 0.00000>" accel="<0.00000, 0.00000, 0.00000>"
+PROBE physics/forces rec=non-physical-movers moved=0 turned=0 vel="<0.00000, 0.00000, 0.00000>"
+PROBE physics/forces rec=physical step=weightless vel="<0.00000, 0.00000, 0.00000>" rising=0 falling=0
+PROBE physics/forces rec=physical step=weightless-again vel="<0.00000, 0.00000, 0.00000>" rising=0 falling=0
+PROBE physics/forces rec=physical step=on force="<0.00000, 0.00000, 0.25000>"
+PROBE physics/forces rec=physical step=pushed vel="<0.00000, 0.00000, 0.10222>"
+PROBE physics/forces rec=physical step=set-velocity vel_z=0.102222 read_at_once=0
+PROBE physics/forces rec=physical step=velocity-later vel_z=0.500000 rising=1
+PROBE physics/forces rec=physical step=huge-velocity vel_z=0.500000 read_above_100=0
+PROBE physics/forces rec=physical step=impulse mass=1.250000 vel_z=0.000000
+PROBE physics/forces rec=physical step=impulse-later vel_z=1.000000 rising=1
+PROBE physics/forces rec=after physics=0 force="<0.00000, 0.00000, 0.00000>" torque="<0.00000, 0.00000, 0.00000>" moved=0 turned=0
+PROBE physics/forces rec=end

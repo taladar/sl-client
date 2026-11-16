@@ -1,5 +1,5 @@
 grid: fake-sl
-date: 2026-11-11
+date: 2026-11-16
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating Mono
@@ -18,8 +18,8 @@ PROBE detection/sensor rec=swept step=ours event=sensor num=1
 PROBE detection/sensor rec=found step=ours i=0 dist=69.066000 type=12 owned=0 name=ours self=0
 PROBE detection/sensor rec=sweep step=agents name="" key="" type=1 range=96.000000 arc=3.142000
 PROBE detection/sensor rec=swept step=agents event=sensor num=2
-PROBE detection/sensor rec=agent step=agents key_is_owner=0 type=3 owner_is_self=1 name_is_key2name=1 agent_dist=1.056000
 PROBE detection/sensor rec=agent step=agents key_is_owner=1 type=3 owner_is_self=1 name_is_key2name=1 agent_dist=4.123000
+PROBE detection/sensor rec=agent step=agents key_is_owner=0 type=3 owner_is_self=1 name_is_key2name=1 agent_dist=4.123000
 PROBE detection/sensor rec=sweep step=owner-legacy name="@owner" key="" type=1 range=96.000000 arc=3.142000
 PROBE detection/sensor rec=swept step=owner-legacy event=sensor num=1
 PROBE detection/sensor rec=agent step=owner-legacy key_is_owner=1 type=3 owner_is_self=1 name_is_key2name=1 agent_dist=4.123000

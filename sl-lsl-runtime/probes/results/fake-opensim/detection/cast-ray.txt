@@ -1,5 +1,5 @@
 grid: fake-opensim
-date: 2026-11-11
+date: 2026-11-15
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating YEngine
@@ -116,7 +116,7 @@ PROBE detection/cast-ray rec=ray step=owner-reject-agents from=<0.000000,0.00000
 PROBE detection/cast-ray rec=item step=owner-reject-agents i=0 type=integer value=0
 PROBE detection/cast-ray rec=throttle calls=500 ok=500 failed=0 first_fail=-1 unknown=0 sim_perf_low=0 cast_time_exceeded=0 elapsed=0.001000 per_second=500000
 PROBE detection/cast-ray rec=after after_status=1
-# owner-say: from="Object" text="[YEngine]: Exception while running 14a7c6c7-f84c-4f80-c2dc-1d038361371f"
+# owner-say: from="Object" text="[YEngine]: Exception while running e38c1a2d-48aa-2d77-c0b4-da63f4c4c4ed"
 # owner-say: from="Object" text="IndexOutOfRangeException: Index was outside the bounds of the array."
 # owner-say: from="Object" text="Prim: <Object>, Script: <Odd>, Location: Fake Region <128,124,26>"
 # owner-say: from="Object" text="Script must be Reset to re-enable."

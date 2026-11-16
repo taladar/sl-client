@@ -1,5 +1,5 @@
 grid: fake-opensim
-date: 2026-11-11
+date: 2026-11-15
 runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
 region: Fake Region
 engine: sl-lsl-runtime imitating YEngine
@@ -27,7 +27,7 @@ PROBE memory/collision rec=grown script=doubling step=15 length=32768 used=65584
 PROBE memory/collision rec=grown script=doubling step=16 length=65536 used=131120 free=917456 limit=65536
 PROBE memory/collision rec=grown script=doubling step=17 length=131072 used=262192 free=786384 limit=65536
 PROBE memory/collision rec=grown script=doubling step=18 length=262144 used=524336 free=524240 limit=65536
-# owner-say: from="Object" text="[YEngine]: Exception while running c9753f23-569f-880c-c0fa-faf92ee9341c"
+# owner-say: from="Object" text="[YEngine]: Exception while running 6fb7e32d-6191-ffd0-c5f7-2a2f3089282f"
 # owner-say: from="Object" text="OutOfHeapException: oldtotal=0, newtotal=524288, limit=1048576"
 # owner-say: from="Object" text="Prim: <Object>, Script: <Doubling>, Location: Fake Region <128,124,26>"
 # owner-say: from="Object" text="Script must be Reset to re-enable."
@@ -52,7 +52,7 @@ PROBE memory/collision rec=grown script=doubling-lso step=15 length=32768 used=6
 PROBE memory/collision rec=grown script=doubling-lso step=16 length=65536 used=131128 free=917448 limit=65536
 PROBE memory/collision rec=grown script=doubling-lso step=17 length=131072 used=262200 free=786376 limit=65536
 PROBE memory/collision rec=grown script=doubling-lso step=18 length=262144 used=524344 free=524232 limit=65536
-# owner-say: from="Object" text="[YEngine]: Exception while running 4909b167-953f-ee07-cd54-d91a0818f01b"
+# owner-say: from="Object" text="[YEngine]: Exception while running d0f15fe1-a064-7507-c88e-9808ccc31c2d"
 # owner-say: from="Object" text="OutOfHeapException: oldtotal=0, newtotal=524288, limit=1048576"
 # owner-say: from="Object" text="Prim: <Object>, Script: <Doubling LSO>, Location: Fake Region <128,124,26>"
 # owner-say: from="Object" text="Script must be Reset to re-enable."

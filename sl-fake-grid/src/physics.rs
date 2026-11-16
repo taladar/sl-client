@@ -42,16 +42,29 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
 use sl_lsl_runtime::Value;
+use sl_lsl_runtime::vm::physics::{
+    Character, CollisionFilter, Goal, Hover, Inertia, Keyframes, LookAt, MASS_UNIT_KG,
+    PhysicsMaterial,
+};
 use sl_lsl_runtime::vm::prim::MoveTarget;
 use sl_lsl_runtime::vm::{CallerId, Detected};
 use sl_proto::{Object, RegionLocalObjectId, prim_flags};
 use sl_types::key::{AgentKey, ObjectKey};
 use sl_types::lsl::{Rotation, Vector};
 
+use crate::keyframes::Player;
+use crate::vehicles::Vehicle;
 use crate::world::SceneFixtures;
 
 /// The pull of gravity, in metres a second squared.
-const GRAVITY: f32 = 9.806_65;
+pub(crate) const GRAVITY: f32 = 9.806_65;
+
+/// How fast a drag pulls a physical prim to the grab, and a spin turns it:
+/// the time constant, seconds.
+const GRAB_TAU: f32 = 0.25;
+
+/// How long a drag's pull or a spin's turn holds after its last update.
+pub(crate) const GRAB_HOLD: Duration = Duration::from_millis(500);
 
 /// How close two surfaces stand to count as touching, in metres.
 const CONTACT: f32 = 0.01;
@@ -147,6 +160,10 @@ pub enum LandPoint {
     reason = "read at its use sites as `ImitatedGrid::physics_policy() -> PhysicsPolicy`, \
               beside the other per-flavour policies"
 )]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "each bool is one measured difference between the grids' physics"
+)]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PhysicsPolicy {
     /// Whether a landing object bounces.
@@ -157,6 +174,64 @@ pub struct PhysicsPolicy {
     pub busy: BusyCollisions,
     /// What `land_collision_*` is handed.
     pub land_point: LandPoint,
+    /// Whether a physical object raises `moving_start` and `moving_end` as
+    /// it starts and stops. OpenSim raises them for keyframed motion alone
+    /// (`KeyframeMotion` is the only caller of `TriggerMovingStartEvent`,
+    /// and `physics/keyframed`'s prim, made physical mid-motion, fell without
+    /// a second `moving_start`); Second Life's, unmeasured, is taken as its
+    /// documentation states it.
+    pub moving_events: bool,
+    /// Whether an impulse or a push given to a prim that is not physical is
+    /// kept and applied when it turns physical (OpenSim, `physics/forces`:
+    /// (1 + 5) / 1.25 m/s up the moment it did) or lost (Second Life).
+    pub impulses_wait: bool,
+    /// Whether a force set while the object is not physical still pushes it
+    /// once it turns physical (Second Life's, unmeasured) or is kept for
+    /// `llGetForce` alone (OpenSim, `physics/forces`: 0.25 N on a weightless
+    /// 1.25 kg prim left it still).
+    pub force_survives_physics: bool,
+    /// How the object's mass is reckoned.
+    pub mass: MassRule,
+    /// Whether `VEHICLE_TYPE_NONE` stops a moving vehicle at once (Second
+    /// Life, `physics/vehicles`) or lets it coast (OpenSim: 6 m/s half a
+    /// second later).
+    pub vehicle_none_stops: bool,
+    /// How long after a change of its root's physics shape a keyframed
+    /// motion waits to start ([`None`]: it starts at once). Second Life's
+    /// first motion after the shape was made convex started late
+    /// (`physics/keyframed`: 0.43–0.46 m of a 0.5 m frame done 1.3 s after
+    /// the call — 0.38 to 0.44 s late); the runtime changes the shape after
+    /// `llSetPrimitiveParams`'s forced delay, at the call's moment, so the
+    /// wait is counted from there.
+    pub keyframed_wait_after_shape: Option<Duration>,
+    /// Whether a drag pulls a physical prim towards the grab (Second Life:
+    /// pulled along) or leaves it (OpenSim) — `object-touch-grab`, leg 10.
+    pub grab_pulls_physical: bool,
+    /// Whether `KFM_CMD_PLAY` with no motion on the object plays the last
+    /// one given it (Second Life, `physics/keyframed`: the one given while
+    /// it was physical) or does nothing (OpenSim, whose motion is gone).
+    pub play_resumes_last: bool,
+}
+
+/// How an object's mass follows its prims.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MassRule {
+    /// Each prim's density times its box's volume, the scale taken from the
+    /// prim's physics shape, which is rebuilt at once after a change of
+    /// scale unless one was rebuilt within `rebuild` before, and then
+    /// `rebuild` after that one (Second Life, `physics/material`: a cube
+    /// scaled to 1 m read 10 at once, then 10 still at 2 m, at 4 × 0.5 × 0.5
+    /// m and in the two reads after it was scaled back, the third 1.25 —
+    /// each read a `llSetPrimitiveParams` later, which at the measured
+    /// forced delays puts them 0.47, 0.91 and 1.36 s after the first change:
+    /// a window between 0.91 and 1.36 s, of which the fake grid takes 1 s).
+    FollowsDensity {
+        /// The least time between two rebuilds.
+        rebuild: Duration,
+    },
+    /// What the prims weighed when the region first saw them, density and
+    /// scale changes notwithstanding (OpenSim under ubODE, `physics/material`).
+    AsRezzed,
 }
 
 impl PhysicsPolicy {
@@ -169,6 +244,16 @@ impl PhysicsPolicy {
         rest: Rest::SleepsAfter(Duration::from_millis(250)),
         busy: BusyCollisions::Lost,
         land_point: LandPoint::Ground,
+        moving_events: true,
+        impulses_wait: false,
+        force_survives_physics: true,
+        mass: MassRule::FollowsDensity {
+            rebuild: Duration::from_secs(1),
+        },
+        vehicle_none_stops: true,
+        keyframed_wait_after_shape: Some(Duration::from_millis(400)),
+        play_resumes_last: true,
+        grab_pulls_physical: true,
     };
 
     /// OpenSim's under ubODE, measured on the local grid under both engines
@@ -182,6 +267,14 @@ impl PhysicsPolicy {
         rest: Rest::KeepsTouching,
         busy: BusyCollisions::Queued,
         land_point: LandPoint::Root,
+        moving_events: false,
+        impulses_wait: true,
+        force_survives_physics: false,
+        mass: MassRule::AsRezzed,
+        vehicle_none_stops: false,
+        keyframed_wait_after_shape: None,
+        play_resumes_last: false,
+        grab_pulls_physical: false,
     };
 }
 
@@ -192,30 +285,87 @@ impl Default for PhysicsPolicy {
     }
 }
 
-/// What a script set on an object that its physics reads.
+/// What scripts set on an object that its physics reads.
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "each bool is one script setting of its own"
+)]
 #[derive(Debug, Clone, PartialEq)]
-struct Settings {
+pub(crate) struct Settings {
     /// `llSetBuoyancy`: the share of gravity it does not feel.
-    buoyancy: f32,
+    pub(crate) buoyancy: f32,
     /// `llMoveToTarget`: where it is drawn while physical.
-    target: Option<MoveTarget>,
+    pub(crate) target: Option<MoveTarget>,
+    /// `llSetForce`: the steady force, as set.
+    pub(crate) force: Vector,
+    /// Whether the force is in the object's frame.
+    pub(crate) force_local: bool,
+    /// Whether the force pushes the object ([`PhysicsPolicy::force_survives_physics`]).
+    pub(crate) force_applies: bool,
+    /// `llSetTorque`: the steady torque, as set.
+    pub(crate) torque: Vector,
+    /// Whether the torque is in the object's frame.
+    pub(crate) torque_local: bool,
+    /// `llSetHoverHeight` or `llGroundRepel`.
+    pub(crate) hover: Option<Hover>,
+    /// `llLookAt` or `llRotLookAt` on a physical object.
+    pub(crate) look_at: Option<LookAt>,
+    /// The vehicle, once a vehicle function was called.
+    pub(crate) vehicle: Option<Vehicle>,
+    /// Impulses waiting for the next step (or, on OpenSim, for physics),
+    /// region axes.
+    pub(crate) impulse: Vector,
+    /// Rotational impulses waiting likewise.
+    pub(crate) angular_impulse: Vector,
+    /// `llSetVelocity` for the next step, region axes.
+    pub(crate) velocity: Option<Vector>,
+    /// `llSetAngularVelocity` for the next step, region axes.
+    pub(crate) omega: Option<Vector>,
+    /// `osSetInertia*`.
+    pub(crate) inertia: Option<Inertia>,
+    /// `osSetPrimFloatOnWater`: the water holds it up.
+    pub(crate) float_on_water: bool,
+    /// A drag's pull: where to and until when, physics time.
+    pub(crate) grab: Option<(Vector, Duration)>,
+    /// A spin's turn: to what and until when, physics time.
+    pub(crate) spin: Option<(Rotation, Duration)>,
 }
 
 impl Default for Settings {
-    /// Gravity in full, no target.
+    /// Gravity in full, nothing else.
     fn default() -> Self {
         Self {
             buoyancy: 0.0,
             target: None,
+            force: ZERO,
+            force_local: false,
+            force_applies: false,
+            torque: ZERO,
+            torque_local: false,
+            hover: None,
+            look_at: None,
+            vehicle: None,
+            impulse: ZERO,
+            angular_impulse: ZERO,
+            velocity: None,
+            omega: None,
+            inertia: None,
+            float_on_water: false,
+            grab: None,
+            spin: None,
         }
     }
 }
 
 /// A physical object's motion.
 #[derive(Debug, Clone, PartialEq)]
-struct Body {
+pub(crate) struct Body {
     /// Its velocity, in metres a second.
     velocity: Vector,
+    /// Its spin, radians a second about each region axis.
+    pub(crate) omega: Vector,
+    /// Its acceleration over the last step.
+    pub(crate) acceleration: Vector,
     /// How long it has been at rest.
     rest: Duration,
     /// Whether it sleeps ([`Rest::SleepsAfter`]).
@@ -229,6 +379,8 @@ impl Default for Body {
     fn default() -> Self {
         Self {
             velocity: ZERO,
+            omega: ZERO,
+            acceleration: ZERO,
             rest: Duration::ZERO,
             asleep: false,
             moving: false,
@@ -284,6 +436,57 @@ pub struct Physics {
     passes: BTreeMap<ObjectKey, i32>,
     /// What each prim touched at the end of the last tick.
     contacts: BTreeMap<Contact, Touching>,
+    /// Each prim's `llCollisionFilter`.
+    filters: BTreeMap<ObjectKey, CollisionFilter>,
+    /// Each object's keyframed motion, by its root's key.
+    pub(crate) players: BTreeMap<ObjectKey, Player>,
+    /// Second Life's last motion given to each object, which
+    /// `KFM_CMD_PLAY` plays when nothing is.
+    pub(crate) last_motion: BTreeMap<ObjectKey, Keyframes>,
+    /// When each root's physics shape last changed, physics time.
+    pub(crate) shape_changed: BTreeMap<ObjectKey, Duration>,
+    /// Each prim's physics shape as it was last rebuilt
+    /// ([`MassRule::FollowsDensity`]).
+    rebuilt: BTreeMap<ObjectKey, Rebuilt>,
+    /// What each object weighed when first seen ([`MassRule::AsRezzed`]).
+    rezzed_mass: BTreeMap<ObjectKey, f32>,
+    /// Each pathfinding character, by its root's key.
+    pub(crate) characters: BTreeMap<ObjectKey, Walker>,
+    /// When an object last moved another by `osTeleportObject`, physics
+    /// time, by the moved object and the mover.
+    pub(crate) teleports: BTreeMap<(ObjectKey, ObjectKey), Duration>,
+    /// How much physics time has passed.
+    pub(crate) clock: Duration,
+    /// The events a script's physics call raised in the linkset of a root,
+    /// raised once the engine the tick lends out is back.
+    pub(crate) raised: Vec<(RegionLocalObjectId, &'static str)>,
+}
+
+/// A prim's physics shape as last rebuilt, and the scale waiting for the
+/// next rebuild.
+#[derive(Debug, Clone, PartialEq)]
+struct Rebuilt {
+    /// The scale it was built at.
+    scale: Vector,
+    /// When, physics time.
+    at: Duration,
+    /// The scale the prim has had since, waiting for a rebuild.
+    pending: Option<Vector>,
+}
+
+/// A pathfinding character: its settings and where it goes.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Walker {
+    /// Its settings.
+    pub(crate) settings: Character,
+    /// Where it goes, [`None`] for standing.
+    pub(crate) goal: Option<Goal>,
+    /// The point of a patrol or a wander it goes to now.
+    pub(crate) leg: usize,
+    /// Whether this leg's `PU_SLOWDOWN_DISTANCE_REACHED` was raised.
+    pub(crate) slowing: bool,
+    /// A jump's upward speed for the next step.
+    pub(crate) jump: Option<f32>,
 }
 
 impl Physics {
@@ -311,6 +514,153 @@ impl Physics {
     pub(crate) fn set_buoyancy(&mut self, object: ObjectKey, buoyancy: f32) {
         self.settings.entry(object).or_default().buoyancy = buoyancy;
     }
+
+    /// What scripts set on the object whose root is `object`, to change.
+    pub(crate) fn settings_mut(&mut self, object: ObjectKey) -> &mut Settings {
+        self.settings.entry(object).or_default()
+    }
+
+    /// What scripts set on the object whose root is `object`.
+    pub(crate) fn settings_of(&self, object: ObjectKey) -> Option<&Settings> {
+        self.settings.get(&object)
+    }
+
+    /// The motion of the physical object whose root is `object`.
+    pub(crate) fn body_of(&self, object: ObjectKey) -> Option<&Body> {
+        self.bodies.get(&object)
+    }
+
+    /// `llCollisionFilter` in the prim `prim`.
+    pub(crate) fn set_filter(&mut self, prim: ObjectKey, filter: Option<CollisionFilter>) {
+        match filter {
+            Some(filter) => {
+                let _previous = self.filters.insert(prim, filter);
+            }
+            None => {
+                let _previous = self.filters.remove(&prim);
+            }
+        }
+    }
+
+    /// The prim `prim`'s scale changed to `scale` ([`MassRule::FollowsDensity`]):
+    /// its physics shape is rebuilt now, or once the last rebuild is
+    /// `rebuild` old.
+    pub(crate) fn rescaled(&mut self, prim: ObjectKey, scale: &Vector) {
+        let MassRule::FollowsDensity { rebuild } = self.policy.mass else {
+            return;
+        };
+        let now = self.clock;
+        match self.rebuilt.get_mut(&prim) {
+            Some(built) if now.saturating_sub(built.at) < rebuild => {
+                built.pending = Some(scale.clone());
+            }
+            _ => {
+                let _previous = self.rebuilt.insert(
+                    prim,
+                    Rebuilt {
+                        scale: scale.clone(),
+                        at: now,
+                        pending: None,
+                    },
+                );
+            }
+        }
+    }
+
+    /// The scale the prim `prim`'s mass is reckoned from, its scale now
+    /// `scale`.
+    fn mass_scale(&self, prim: ObjectKey, scale: &Vector) -> Vector {
+        let MassRule::FollowsDensity { rebuild } = self.policy.mass else {
+            return scale.clone();
+        };
+        match self.rebuilt.get(&prim) {
+            Some(built) => match &built.pending {
+                Some(pending) if self.clock.saturating_sub(built.at) >= rebuild => pending.clone(),
+                _ => built.scale.clone(),
+            },
+            None => scale.clone(),
+        }
+    }
+
+    /// Folds each pending rebuild whose time has come into its prim's shape.
+    fn rebuild_due(&mut self) {
+        let MassRule::FollowsDensity { rebuild } = self.policy.mass else {
+            return;
+        };
+        let now = self.clock;
+        for built in self.rebuilt.values_mut() {
+            if now.saturating_sub(built.at) >= rebuild
+                && let Some(pending) = built.pending.take()
+            {
+                built.scale = pending;
+                built.at = now;
+            }
+        }
+    }
+}
+
+/// The mass of the object whose root is `root`, in Linden's units, as the
+/// imitated grid reckons it ([`MassRule`]); OpenSim's inertia data, once set,
+/// gives it instead.
+pub(crate) fn mass_of(world: &SceneFixtures, root: RegionLocalObjectId) -> f32 {
+    let Some(key) = world.objects.get(root).map(|object| object.full_id) else {
+        return 0.0;
+    };
+    let physics = &world.physics;
+    if let Some(inertia) = physics
+        .settings
+        .get(&key)
+        .and_then(|settings| settings.inertia.as_ref())
+        && physics.policy.mass == MassRule::AsRezzed
+    {
+        return inertia.mass;
+    }
+    if physics.policy.mass == MassRule::AsRezzed
+        && let Some(mass) = physics.rezzed_mass.get(&key)
+    {
+        return *mass;
+    }
+    density_mass(world, root)
+}
+
+/// The mass the prims of the linkset `root` have now: each one's density
+/// times the volume of its box, its scale the one its physics shape was
+/// last built at.
+fn density_mass(world: &SceneFixtures, root: RegionLocalObjectId) -> f32 {
+    std::iter::once(root)
+        .chain(crate::link_sets::children_in_order(world, root))
+        .filter_map(|local_id| world.objects.get(local_id))
+        .map(|prim| {
+            let density = world.objects.scripted(prim.local_id).map_or_else(
+                || PhysicsMaterial::default().density,
+                |scripted| scripted.prim.physics_material.density,
+            );
+            let scale = world.physics.mass_scale(prim.full_id, &prim.scale);
+            density * scale.x * scale.y * scale.z / MASS_UNIT_KG
+        })
+        .sum()
+}
+
+/// The material of the prim `local_id`.
+fn material_of(world: &SceneFixtures, local_id: RegionLocalObjectId) -> PhysicsMaterial {
+    world
+        .objects
+        .scripted(local_id)
+        .map_or_else(PhysicsMaterial::default, |scripted| {
+            scripted.prim.physics_material
+        })
+}
+
+/// The `STATUS_ROTATE_*` flags of the prim `local_id`: which axes it may
+/// turn about while physical.
+fn rotate_flags(world: &SceneFixtures, local_id: RegionLocalObjectId) -> (bool, bool, bool) {
+    let status = world
+        .objects
+        .scripted(local_id)
+        .map_or(sl_lsl_runtime::vm::prim::STATUS_ROTATE_XYZ, |scripted| {
+            scripted.prim.status
+        });
+    (status & 2 != 0, status & 4 != 0, status & 8 != 0)
 }
 
 /// An avatar standing in the region, as physics sees it.
@@ -626,22 +976,31 @@ fn anybody_listens(world: &SceneFixtures) -> bool {
     })
 }
 
-/// One tick of the region's physics, `step` long: every physical object
-/// moves, and every prim's scripts hear what it began, went on and stopped
-/// touching. `ground` is the height of the ground at a point. Runs inside the
-/// tick's update burst ([`crate::updates`]), so what moved goes out with it.
-pub(crate) fn step(
-    world: &mut SceneFixtures,
-    avatars: &[Avatar],
-    step: Duration,
-    ground: &dyn Fn(f32, f32) -> f32,
-) {
+/// What a tick of physics reads of its region.
+pub(crate) struct Region<'a> {
+    /// The avatars standing in it.
+    pub(crate) avatars: &'a [Avatar],
+    /// The height of the ground at a point.
+    pub(crate) ground: &'a dyn Fn(f32, f32) -> f32,
+    /// The height of the water.
+    pub(crate) water: f32,
+}
+
+/// One tick of the region's physics, `step` long: every keyframed motion
+/// plays its share, every physical object moves, and every prim's scripts
+/// hear what it began, went on and stopped touching. Runs inside the tick's
+/// update burst ([`crate::updates`]), so what moved goes out with it.
+pub(crate) fn step(world: &mut SceneFixtures, region: &Region<'_>, step: Duration) {
+    let dt = step.as_secs_f32();
+    world.physics.clock = world.physics.clock.saturating_add(step);
+    world.physics.rebuild_due();
+    remember_rezzed_masses(world);
+    play_keyframes(world, dt);
     let roots = physical_roots(world);
     if roots.is_empty() && world.physics.contacts.is_empty() && !anybody_listens(world) {
         world.physics.bodies.clear();
         return;
     }
-    let dt = step.as_secs_f32();
     let policy = world.physics.policy;
     let keys: BTreeMap<RegionLocalObjectId, ObjectKey> = roots
         .iter()
@@ -658,31 +1017,357 @@ pub(crate) fn step(
         let prims: BTreeSet<RegionLocalObjectId> = std::iter::once(*root)
             .chain(crate::link_sets::children_in_order(world, *root))
             .collect();
-        let moved = advance(world, (*root, *key), &prims, &solids, (dt, ground, policy));
-        if let Some(by) = moved {
+        let moved = advance(world, (*root, *key), &prims, &solids, (dt, region, policy));
+        if moved.is_some() {
             for solid in &mut solids {
-                if prims.contains(&solid.local_id) {
-                    solid.aabb = solid.aabb.shifted(&by);
+                if prims.contains(&solid.local_id)
+                    && let Some(object) = world.objects.get(solid.local_id)
+                {
+                    solid.aabb = box_of(world, &object.clone());
                 }
             }
         }
     }
-    let now = touching(world, &keys, &solids, avatars, ground);
+    let now = touching(world, &keys, &solids, region.avatars, region.ground);
     raise(world, now, &was_bodies);
+}
+
+/// Notes what each object of the region weighs the first time the physics
+/// sees it ([`MassRule::AsRezzed`]), and forgets the objects gone.
+fn remember_rezzed_masses(world: &mut SceneFixtures) {
+    if world.physics.policy.mass != MassRule::AsRezzed {
+        return;
+    }
+    let roots: Vec<(RegionLocalObjectId, ObjectKey)> = world
+        .objects
+        .iter()
+        .filter(|object| object.parent_id.0 == 0 && object.pcode == sl_proto::pcode::PRIMITIVE)
+        .map(|object| (object.local_id, object.full_id))
+        .collect();
+    let fresh: Vec<(ObjectKey, f32)> = roots
+        .iter()
+        .filter(|(_root, key)| !world.physics.rezzed_mass.contains_key(key))
+        .map(|(root, key)| (*key, density_mass(world, *root)))
+        .collect();
+    world.physics.rezzed_mass.extend(fresh);
+    let present: BTreeSet<ObjectKey> = roots.iter().map(|(_root, key)| *key).collect();
+    world
+        .physics
+        .rezzed_mass
+        .retain(|key, _mass| present.contains(key));
+}
+
+/// One tick of every keyframed motion: each object playing one moves and
+/// turns by its share, raising `moving_end` when it ends. A motion whose
+/// object turned physical is gone, as OpenSim deletes it then (it raised a
+/// `moving_end`, `physics/keyframed`); Second Life refuses the physics.
+fn play_keyframes(world: &mut SceneFixtures, dt: f32) {
+    let keys: Vec<ObjectKey> = world.physics.players.keys().copied().collect();
+    for key in keys {
+        let Some(root) = world.local_id_of(key) else {
+            let _gone = world.physics.players.remove(&key);
+            continue;
+        };
+        let physical = world
+            .objects
+            .get(root)
+            .is_some_and(|object| object.update_flags & prim_flags::USE_PHYSICS != 0);
+        if physical {
+            if let Some(player) = world.physics.players.remove(&key)
+                && player.run == crate::keyframes::Run::Playing
+            {
+                raise_plain(world, root, "moving_end");
+            }
+            continue;
+        }
+        let Some(moved) = world
+            .physics
+            .players
+            .get_mut(&key)
+            .and_then(|player| player.tick(dt))
+        else {
+            continue;
+        };
+        if let Some(mut object) = world.object_mut(root) {
+            object.motion.position = plus(&object.motion.position, &moved.by);
+            object.motion.rotation = normalised(&crate::object_edits::multiply(
+                &moved.turn,
+                &object.motion.rotation,
+            ));
+            if moved.ended {
+                object.motion.velocity = ZERO;
+                object.motion.angular_velocity = ZERO;
+            } else {
+                object.motion.velocity = scaled(&moved.by, 1.0 / dt);
+                object.motion.angular_velocity = scaled(&rotation_vector(&moved.turn), 1.0 / dt);
+            }
+        }
+        if moved.ended {
+            raise_plain(world, root, "moving_end");
+        }
+    }
+}
+
+/// The axis of `turn` scaled by its angle, radians.
+fn rotation_vector(turn: &Rotation) -> Vector {
+    let turn = if turn.s < 0.0 {
+        Rotation {
+            x: -turn.x,
+            y: -turn.y,
+            z: -turn.z,
+            s: -turn.s,
+        }
+    } else {
+        turn.clone()
+    };
+    let angle = 2.0 * turn.s.clamp(-1.0, 1.0).acos();
+    let sine = (angle / 2.0).sin();
+    if sine.abs() < 1e-6 {
+        return ZERO;
+    }
+    scaled(
+        &Vector {
+            x: turn.x,
+            y: turn.y,
+            z: turn.z,
+        },
+        angle / sine,
+    )
+}
+
+/// `rotation` turned by the spin `omega`, region axes, for `dt` seconds.
+fn spun(rotation: &Rotation, omega: &Vector, dt: f32) -> Rotation {
+    let rate = length(omega);
+    let angle = rate * dt;
+    if angle < 1e-7 {
+        return rotation.clone();
+    }
+    let axis = scaled(omega, 1.0 / rate);
+    let (sine, cosine) = (angle / 2.0).sin_cos();
+    let turn = Rotation {
+        x: axis.x * sine,
+        y: axis.y * sine,
+        z: axis.z * sine,
+        s: cosine,
+    };
+    normalised(&crate::object_edits::multiply(&turn, rotation))
+}
+
+/// `r` at unit length.
+fn normalised(r: &Rotation) -> Rotation {
+    let size =
+        r.s.mul_add(r.s, r.z.mul_add(r.z, r.x.mul_add(r.x, r.y * r.y)))
+            .sqrt();
+    if size == 0.0 {
+        return IDENTITY;
+    }
+    Rotation {
+        x: r.x / size,
+        y: r.y / size,
+        z: r.z / size,
+        s: r.s / size,
+    }
+}
+
+/// The conjugate of `r`.
+const fn conjugate(r: &Rotation) -> Rotation {
+    Rotation {
+        x: -r.x,
+        y: -r.y,
+        z: -r.z,
+        s: r.s,
+    }
+}
+
+/// The spin that turns `rotation` to `target`, the angle left shrinking by
+/// `e` every `tau` seconds (a look-at).
+fn towards(rotation: &Rotation, target: &Rotation, tau: f32) -> Vector {
+    let delta = crate::object_edits::multiply(target, &conjugate(rotation));
+    scaled(&rotation_vector(&delta), 1.0 / tau.max(f32::EPSILON))
+}
+
+/// `omega` with its spin about each axis of the object's frame that its
+/// `STATUS_ROTATE_*` flag locks taken out.
+fn locked(omega: &Vector, rotation: &Rotation, (x, y, z): (bool, bool, bool)) -> Vector {
+    if x && y && z {
+        return omega.clone();
+    }
+    let local = crate::object_edits::rotate(&conjugate(rotation), omega);
+    let kept = Vector {
+        x: if x { local.x } else { 0.0 },
+        y: if y { local.y } else { 0.0 },
+        z: if z { local.z } else { 0.0 },
+    };
+    crate::object_edits::rotate(rotation, &kept)
+}
+
+/// `PU_SLOWDOWN_DISTANCE_REACHED`.
+const PU_SLOWDOWN_DISTANCE_REACHED: i32 = 0;
+
+/// `PU_GOAL_REACHED`.
+const PU_GOAL_REACHED: i32 = 1;
+
+/// Where the character whose root is `root` (keyed `key`), standing at
+/// `position`, goes now, [`None`] for nowhere: a goal's point, a patrol's or
+/// a wander's next one, what it pursues, or a point away from what it flees.
+fn walk_target(
+    world: &SceneFixtures,
+    key: ObjectKey,
+    position: &Vector,
+    avatars: &[Avatar],
+) -> Option<Vector> {
+    let walker = world.physics.characters.get(&key)?;
+    match walker.goal.as_ref()? {
+        Goal::Point(point) => Some(point.clone()),
+        Goal::Patrol(points) => points
+            .get(walker.leg.checked_rem(points.len()).unwrap_or(0))
+            .cloned(),
+        Goal::Wander { origin, range } => {
+            // A point within the range, the same for the same leg of the
+            // same object in every run.
+            let seed = key.uuid().as_u128() ^ u128::try_from(walker.leg).unwrap_or(0);
+            let share = |shift: u32| {
+                let bits = u32::try_from((seed >> shift) & 0xffff).unwrap_or(0);
+                f32::from(u16::try_from(bits).unwrap_or(0)) / f32::from(u16::MAX) * 2.0 - 1.0
+            };
+            Some(Vector {
+                x: share(0).mul_add(range.x, origin.x),
+                y: share(16).mul_add(range.y, origin.y),
+                z: origin.z,
+            })
+        }
+        Goal::Pursue { target, offset } => {
+            let at = uuid::Uuid::parse_str(target).ok().and_then(|id| {
+                world
+                    .local_id_of(ObjectKey::from(id))
+                    .and_then(|local_id| world.objects.get(local_id))
+                    .map(|object| crate::seating::frame_of(world, object).0)
+                    .or_else(|| {
+                        avatars
+                            .iter()
+                            .find(|avatar| avatar.agent.uuid() == id)
+                            .map(|avatar| avatar.position.clone())
+                    })
+            })?;
+            Some(plus(&at, offset))
+        }
+        Goal::Flee { from, distance } => {
+            let away = minus(position, from);
+            let flat = Vector { z: 0.0, ..away };
+            let gone = length(&flat);
+            if gone >= *distance {
+                return Some(position.clone());
+            }
+            let direction = if gone > 0.0 {
+                scaled(&flat, 1.0 / gone)
+            } else {
+                Vector {
+                    x: 1.0,
+                    y: 0.0,
+                    z: 0.0,
+                }
+            };
+            Some(plus(from, &scaled(&direction, *distance)))
+        }
+    }
+}
+
+/// Steers the character whose root is `root` (keyed `key`) at `position`:
+/// its level velocity towards where it goes, at its speed, and the
+/// `path_update` events of the leg — `PU_SLOWDOWN_DISTANCE_REACHED` within
+/// twice its radius, `PU_GOAL_REACHED` within its radius, a patrol or a
+/// wander going on to its next point.
+fn steer(
+    world: &mut SceneFixtures,
+    (root, key): (RegionLocalObjectId, ObjectKey),
+    position: &Vector,
+    velocity: &mut Vector,
+    avatars: &[Avatar],
+) {
+    let Some(walker) = world.physics.characters.get(&key).cloned() else {
+        return;
+    };
+    if let Some(jump) = walker.jump
+        && let Some(walker) = world.physics.characters.get_mut(&key)
+    {
+        velocity.z = jump;
+        walker.jump = None;
+    }
+    let Some(target) = walk_target(world, key, position, avatars) else {
+        velocity.x = 0.0;
+        velocity.y = 0.0;
+        return;
+    };
+    let left = Vector {
+        z: 0.0,
+        ..minus(&target, position)
+    };
+    let distance = length(&left);
+    let radius = walker.settings.radius.max(0.1);
+    let mut events = Vec::new();
+    if distance <= radius.mul_add(2.0, 0.0) && !walker.slowing {
+        events.push(PU_SLOWDOWN_DISTANCE_REACHED);
+    }
+    let reached = distance <= radius;
+    if reached {
+        velocity.x = 0.0;
+        velocity.y = 0.0;
+        let pursuing = matches!(walker.goal, Some(Goal::Pursue { .. }));
+        if !pursuing {
+            events.push(PU_GOAL_REACHED);
+        }
+    } else {
+        let speed = walker.settings.speed;
+        velocity.x = left.x / distance * speed;
+        velocity.y = left.y / distance * speed;
+    }
+    if let Some(walker) = world.physics.characters.get_mut(&key) {
+        walker.slowing |= events.contains(&PU_SLOWDOWN_DISTANCE_REACHED);
+        if reached {
+            match walker.goal {
+                Some(Goal::Patrol(_) | Goal::Wander { .. }) => {
+                    walker.leg = walker.leg.saturating_add(1);
+                    walker.slowing = false;
+                }
+                Some(Goal::Pursue { .. }) => {}
+                _ => walker.goal = None,
+            }
+        }
+    }
+    for event in events {
+        raise_with(
+            world,
+            root,
+            "path_update",
+            vec![Value::Integer(event), Value::List(Vec::new())],
+        );
+    }
 }
 
 /// Moves the physical object whose root is `root` (keyed `key`), made of
 /// `prims`, one tick of `dt` against `solids` and the ground, raising its
 /// `moving_start` or `moving_end`; returns how far it moved, [`None`] for
 /// not at all.
+///
+/// Its velocity this tick is last tick's with the impulses since added, or
+/// what `llSetVelocity` set, then the tick's accelerations — gravity (or a
+/// vehicle's whole model), the steady force over the mass — and a hover's
+/// pull, a character's steering, or `llMoveToTarget`'s draw in place of the
+/// parts they hold. Its spin likewise, with a look-at's turn, the axes its
+/// rotation flags lock taken out; it turns by its spin.
 fn advance(
     world: &mut SceneFixtures,
     (root, key): (RegionLocalObjectId, ObjectKey),
     prims: &BTreeSet<RegionLocalObjectId>,
     solids: &[Solid],
-    (dt, ground, policy): (f32, &dyn Fn(f32, f32) -> f32, PhysicsPolicy),
+    (dt, region, policy): (f32, &Region<'_>, PhysicsPolicy),
 ) -> Option<Vector> {
-    let position = world.objects.get(root)?.motion.position.clone();
+    let (position, rotation) = world.objects.get(root).map(|object| {
+        (
+            object.motion.position.clone(),
+            object.motion.rotation.clone(),
+        )
+    })?;
     let material = world.objects.get(root).map_or(3, |object| object.material);
     let settings = world
         .physics
@@ -690,7 +1375,21 @@ fn advance(
         .get(&key)
         .cloned()
         .unwrap_or_default();
+    if let Some(waiting) = world.physics.settings.get_mut(&key) {
+        waiting.impulse = ZERO;
+        waiting.angular_impulse = ZERO;
+        waiting.velocity = None;
+        waiting.omega = None;
+    }
     let mut body = world.physics.bodies.get(&key).cloned().unwrap_or_default();
+    let mass = mass_of(world, root).max(1e-6);
+    let gravity_multiplier = material_of(world, root).gravity;
+    let water = region.water;
+    let floats = settings.float_on_water;
+    let ground = |x: f32, y: f32| {
+        let land = (region.ground)(x, y);
+        if floats { land.max(water) } else { land }
+    };
     let mut bounds = solids
         .iter()
         .filter(|solid| prims.contains(&solid.local_id))
@@ -700,22 +1399,160 @@ fn advance(
         .iter()
         .filter(|solid| solid.kind == Kind::Solid && solid.root != root)
         .collect();
-    let target = settings.target.as_ref().filter(|target| target.tau > 0.0);
-    let mut velocity = if let Some(target) = target {
-        let factor = 1.0 - (-dt / target.tau).exp();
-        scaled(&minus(&target.target, &position), factor / dt)
+
+    let before = body.velocity.clone();
+    // What `llSetVelocity` set, then the impulses given since on top of it.
+    let base = settings
+        .velocity
+        .clone()
+        .unwrap_or_else(|| body.velocity.clone());
+    let mut velocity = plus(&base, &scaled(&settings.impulse, 1.0 / mass));
+    let spin = settings.omega.clone().unwrap_or_else(|| body.omega.clone());
+    let mut omega = plus(&spin, &scaled(&settings.angular_impulse, 1.0 / mass));
+    let kicked = settings.impulse != ZERO
+        || settings.angular_impulse != ZERO
+        || settings.velocity.is_some()
+        || settings.omega.is_some();
+
+    let mut vehicle = settings.vehicle.clone().filter(Vehicle::active);
+    let (mut accel, mut alpha) = if let Some(vehicle) = vehicle.as_mut() {
+        let out = vehicle.step(
+            &crate::vehicles::Input {
+                rotation: &rotation,
+                position: &position,
+                velocity: &velocity,
+                omega: &omega,
+                ground: &ground,
+                water,
+                gravity_multiplier,
+            },
+            dt,
+        );
+        (out.linear, out.angular)
     } else {
-        let fall = GRAVITY * (1.0 - settings.buoyancy) * dt;
-        Vector {
-            z: body.velocity.z - fall,
-            ..body.velocity.clone()
-        }
+        (
+            Vector {
+                x: 0.0,
+                y: 0.0,
+                z: -GRAVITY * gravity_multiplier * (1.0 - settings.buoyancy),
+            },
+            ZERO,
+        )
     };
+    if let Some(vehicle) = vehicle {
+        world.physics.settings_mut(key).vehicle = Some(vehicle);
+    }
+    if settings.force_applies && settings.force != ZERO {
+        let force = if settings.force_local {
+            crate::object_edits::rotate(&rotation, &settings.force)
+        } else {
+            settings.force.clone()
+        };
+        accel = plus(&accel, &scaled(&force, 1.0 / mass));
+    }
+    if settings.torque != ZERO {
+        let torque = if settings.torque_local {
+            crate::object_edits::rotate(&rotation, &settings.torque)
+        } else {
+            settings.torque.clone()
+        };
+        alpha = plus(&alpha, &scaled(&torque, 1.0 / mass));
+    }
+    velocity = plus(&velocity, &scaled(&accel, dt));
+    omega = plus(&omega, &scaled(&alpha, dt));
+    let driven = settings.force_applies && settings.force != ZERO
+        || settings.torque != ZERO
+        || settings
+            .grab
+            .as_ref()
+            .is_some_and(|(_to, until)| *until >= world.physics.clock)
+        || settings
+            .spin
+            .as_ref()
+            .is_some_and(|(_to, until)| *until >= world.physics.clock)
+        || settings.vehicle.as_ref().is_some_and(Vehicle::active)
+        || settings.hover.is_some()
+        || settings.look_at.is_some()
+        || world.physics.characters.contains_key(&key);
+
+    if let Some(hover) = &settings.hover {
+        let surface = if hover.water {
+            ground(position.x, position.y).max(water)
+        } else {
+            ground(position.x, position.y)
+        };
+        let left = surface + hover.height - position.z;
+        if !hover.repel || left > 0.0 {
+            let factor = if hover.tau > 0.0 {
+                1.0 - (-dt / hover.tau).exp()
+            } else {
+                1.0
+            };
+            velocity.z = left * factor / dt;
+        }
+    }
+    steer(world, (root, key), &position, &mut velocity, region.avatars);
+    let target = settings.target.as_ref().filter(|target| target.tau > 0.0);
+    if let Some(target) = target {
+        let factor = 1.0 - (-dt / target.tau).exp();
+        velocity = scaled(&minus(&target.target, &position), factor / dt);
+    }
+    if let Some(look) = &settings.look_at {
+        omega = towards(&rotation, &look.rotation, look.tau);
+    }
+    let now = world.physics.clock;
+    let grab = settings.grab.as_ref().filter(|(_to, until)| *until >= now);
+    if let Some((to, _until)) = grab {
+        let factor = 1.0 - (-dt / GRAB_TAU).exp();
+        velocity = scaled(&minus(to, &position), factor / dt);
+    }
+    let spin = settings.spin.as_ref().filter(|(_to, until)| *until >= now);
+    if let Some((to, _until)) = spin {
+        omega = towards(&rotation, to, GRAB_TAU);
+    }
+    // Resting on something, it is held back by friction: Coulomb's, the
+    // material's coefficient times the gravity it feels (none for a
+    // weightless one), against its sliding and its spin. A vehicle's model
+    // has its own; a character, a target, a drag and a spin set their own
+    // motion.
+    let steered = target.is_some()
+        || grab.is_some()
+        || spin.is_some()
+        || settings.look_at.is_some()
+        || world.physics.characters.contains_key(&key)
+        || settings.vehicle.as_ref().is_some_and(Vehicle::active);
+    if !steered && supported(&bounds, &obstacles, &ground) {
+        let weight = (GRAVITY * gravity_multiplier * (1.0 - settings.buoyancy)).max(0.0);
+        let slowing = material_of(world, root).friction.min(1.0) * weight * dt;
+        let level = Vector {
+            z: 0.0,
+            ..velocity.clone()
+        };
+        let speed = length(&level);
+        let kept = if speed > slowing {
+            (speed - slowing) / speed
+        } else {
+            0.0
+        };
+        velocity.x *= kept;
+        velocity.y *= kept;
+        let rate = length(&omega);
+        let spun_down = if rate > slowing {
+            (rate - slowing) / rate
+        } else {
+            0.0
+        };
+        omega = scaled(&omega, spun_down);
+    }
+    omega = locked(&omega, &rotation, rotate_flags(world, root));
+
     if body.asleep {
-        let wakes = target.is_some_and(|_target| length(&velocity) * dt > MOVING)
+        let wakes = kicked
+            || driven
+            || target.is_some_and(|_target| length(&velocity) * dt > MOVING)
             || (target.is_none()
                 && settings.buoyancy < 1.0
-                && !supported(&bounds, &obstacles, ground));
+                && !supported(&bounds, &obstacles, &ground));
         if !wakes {
             return None;
         }
@@ -727,7 +1564,7 @@ fn advance(
         if wanted == 0.0 {
             continue;
         }
-        let (allowed, hit) = reach(&bounds, axis, wanted, &obstacles, ground);
+        let (allowed, hit) = reach(&bounds, axis, wanted, &obstacles, &ground);
         let by = with(&ZERO, axis, allowed);
         bounds = bounds.shifted(&by);
         moved = plus(&moved, &by);
@@ -747,35 +1584,47 @@ fn advance(
     placed.x = placed.x.clamp(0.0, REGION_EDGE - CONTACT);
     placed.y = placed.y.clamp(0.0, REGION_EDGE - CONTACT);
     let moved = minus(&placed, &position);
+    let turned = spun(&rotation, &omega, dt);
+    let turning = length(&omega) * dt > 1e-6;
     let moving = length(&moved) > MOVING;
-    if length(&velocity) < REST_SPEED && !moving {
+    if length(&velocity) < REST_SPEED && length(&omega) < REST_SPEED && !moving {
         body.rest = body.rest.saturating_add(Duration::from_secs_f32(dt));
     } else {
         body.rest = Duration::ZERO;
     }
     if let Rest::SleepsAfter(after) = policy.rest
         && body.rest >= after
+        && !driven
     {
         body.asleep = true;
         velocity = ZERO;
+        omega = ZERO;
     }
+    body.acceleration = scaled(&minus(&velocity, &before), 1.0 / dt);
     if let Some(mut object) = world.object_mut(root) {
         if moving {
             object.motion.position = placed;
         }
+        if turning {
+            object.motion.rotation = turned;
+        }
         object.motion.velocity = velocity.clone();
+        object.motion.angular_velocity = omega.clone();
     }
     body.velocity = velocity;
+    body.omega = omega;
     let started = moving && !body.moving;
     let stopped = !moving && body.moving;
     body.moving = moving;
     let _previous = world.physics.bodies.insert(key, body);
-    if started {
-        raise_plain(world, root, "moving_start");
-    } else if stopped {
-        raise_plain(world, root, "moving_end");
+    if policy.moving_events {
+        if started {
+            raise_plain(world, root, "moving_start");
+        } else if stopped {
+            raise_plain(world, root, "moving_end");
+        }
     }
-    moving.then_some(moved)
+    (moving || turning).then_some(moved)
 }
 
 /// How far `bounds` may move along `axis`, of the `wanted` distance, before it
@@ -1142,6 +1991,15 @@ fn tell(world: &mut SceneFixtures, contact: &Contact, event: &str, touching: &To
         tracing::error!(event, "a collision event the runtime does not know");
         return;
     };
+    if contact.with != Collider::Land
+        && let Some(filter) = world
+            .objects
+            .get(contact.prim)
+            .and_then(|prim| world.physics.filters.get(&prim.full_id))
+        && !lets_through(filter, &touching.detected)
+    {
+        return;
+    }
     let told: Vec<CallerId> = routed(world, contact.prim, event.name)
         .into_iter()
         .filter(|id| !touching.missed.contains(id))
@@ -1163,9 +2021,19 @@ fn tell(world: &mut SceneFixtures, contact: &Contact, event: &str, touching: &To
     }
 }
 
+/// Whether `filter` (`llCollisionFilter`) lets a collision with what
+/// `detected` describes through: an empty name or key matches anything, and
+/// what matches both is let through when the filter accepts, kept out when
+/// it does not.
+fn lets_through(filter: &CollisionFilter, detected: &Detected) -> bool {
+    let name = filter.name.is_empty() || filter.name == detected.name;
+    let key = filter.key.is_empty() || filter.key.eq_ignore_ascii_case(&detected.key);
+    filter.accept == (name && key)
+}
+
 /// Raises the argument-less `event` in every script of the linkset whose root
 /// is `root`.
-fn raise_plain(world: &mut SceneFixtures, root: RegionLocalObjectId, event: &str) {
+pub(crate) fn raise_plain(world: &mut SceneFixtures, root: RegionLocalObjectId, event: &str) {
     let Some(event) = sl_lsl_runtime::library::event(event) else {
         tracing::error!(event, "a movement event the runtime does not know");
         return;
@@ -1177,6 +2045,24 @@ fn raise_plain(world: &mut SceneFixtures, root: RegionLocalObjectId, event: &str
             .post(id, event, Vec::new())
         {
             tracing::warn!(?id, %error, "a movement event could not be posted");
+        }
+    }
+}
+
+/// Raises `event` with `args` in every script of the linkset whose root is
+/// `root`.
+fn raise_with(world: &mut SceneFixtures, root: RegionLocalObjectId, event: &str, args: Vec<Value>) {
+    let Some(event) = sl_lsl_runtime::library::event(event) else {
+        tracing::error!(event, "a physics event the runtime does not know");
+        return;
+    };
+    for id in crate::scripts::linkset_scripts(world, root) {
+        if let Err(error) = world
+            .script_instances
+            .engine_mut()
+            .post(id, event, args.clone())
+        {
+            tracing::warn!(?id, %error, "a physics event could not be posted");
         }
     }
 }

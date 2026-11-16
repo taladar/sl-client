@@ -24,6 +24,7 @@
 
 pub mod avatars;
 pub mod calendar;
+pub mod characters;
 pub mod clocks;
 pub(crate) mod collation;
 pub mod comms;
@@ -50,7 +51,9 @@ pub mod ossl;
 pub mod ossl_avatars;
 pub mod ossl_inventory;
 pub mod ossl_land;
+pub mod ossl_physics;
 pub mod ossl_prim;
+pub mod physics;
 pub(crate) mod prim_params;
 pub mod prim_state;
 mod range;
@@ -794,6 +797,23 @@ mod tests {
 
         fn set_buoyancy(&mut self, _caller: CallerId, _buoyancy: f32) {}
 
+        fn physics(&mut self, _caller: CallerId, _call: crate::vm::physics::PhysicsCall) {}
+
+        fn physics_reading(&self, _caller: CallerId) -> crate::vm::physics::PhysicsReading {
+            crate::vm::physics::PhysicsReading::at_rest(crate::value::ZERO_VECTOR)
+        }
+
+        fn teleport_object(
+            &mut self,
+            _caller: CallerId,
+            _object: &str,
+            _position: Vector,
+            _rotation: sl_types::lsl::Rotation,
+            _flags: i32,
+        ) -> i32 {
+            -1
+        }
+
         fn placement(&self, _caller: CallerId) -> crate::vm::seating::Placement {
             crate::vm::seating::Placement {
                 position: crate::value::ZERO_VECTOR,
@@ -1235,8 +1255,8 @@ mod tests {
             })
         );
         assert_eq!(
-            call(BuiltinId::LlStopHover, &mut ctx, vec![]),
-            Err(CallError::Missing(BuiltinId::LlStopHover))
+            call(BuiltinId::LlRefreshPrimURL, &mut ctx, vec![]),
+            Err(CallError::Missing(BuiltinId::LlRefreshPrimURL))
         );
     }
 

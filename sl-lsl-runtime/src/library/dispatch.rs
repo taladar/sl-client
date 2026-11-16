@@ -174,6 +174,16 @@ pub enum Exception {
     /// a point off the region (`osSetParcelDetails`, `osParcelJoin`,
     /// `osParcelSubdivide`).
     NoParcelAt(i32, i32),
+    /// `System.InvalidCastException` from `LSL_Types.list`'s typed getters
+    /// (`GetVector3Item`, `GetQuaternionItem`): an element of another type
+    /// (`llSetKeyframedMotion`'s frames, `physics/keyframed`: `Vector3
+    /// expected but Quaternion given`).
+    ItemNot {
+        /// The .NET type wanted.
+        expected: &'static str,
+        /// The .NET type the element is.
+        given: &'static str,
+    },
 }
 
 impl Exception {
@@ -184,9 +194,10 @@ impl Exception {
             Self::IndexOutOfRange => "IndexOutOfRangeException",
             Self::Overflow | Self::ArithmeticOverflow => "OverflowException",
             Self::DivideByZero => "DivideByZeroException",
-            Self::InvalidCast | Self::VectorNotInteger | Self::RotationNotInteger => {
-                "InvalidCastException"
-            }
+            Self::InvalidCast
+            | Self::VectorNotInteger
+            | Self::RotationNotInteger
+            | Self::ItemNot { .. } => "InvalidCastException",
             Self::FormatIndex | Self::FormatInvalid | Self::InvalidUuid => "FormatException",
             Self::InvalidPattern => "ArgumentException",
             Self::CountOutOfRange
@@ -225,6 +236,9 @@ impl Exception {
             Self::NoParcelAt(x, y) => {
                 std::borrow::Cow::Owned(format!("Error: Parcel not found at point {x}, {y}"))
             }
+            Self::ItemNot { expected, given } => {
+                std::borrow::Cow::Owned(format!("{expected} expected but {given} given"))
+            }
             other => std::borrow::Cow::Borrowed(other.fixed_message()),
         }
     }
@@ -237,7 +251,8 @@ impl Exception {
             | Self::ItemNotObject(_)
             | Self::NoWindPlugin(_)
             | Self::NoWindParam { .. }
-            | Self::NoParcelAt(..) => "",
+            | Self::NoParcelAt(..)
+            | Self::ItemNot { .. } => "",
             Self::InvalidUuid => "Invalid UUID",
             Self::IndexOutOfRange => "Index was outside the bounds of the array.",
             Self::Overflow => "Value was either too large or too small for an Int32.",

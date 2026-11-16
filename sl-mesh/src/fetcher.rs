@@ -15,10 +15,6 @@
 
 use sl_proto::MeshKey;
 
-#[expect(
-    clippy::module_name_repetitions,
-    reason = "re-exported at the crate root, where `AssetFetcher` reads clearly"
-)]
 pub use sl_asset_sched::{AssetFetcher, FetchChunk, FetchError};
 
 /// Fetches ranges of a mesh's `GetMesh2` / `GetMesh` asset: an [`AssetFetcher`]

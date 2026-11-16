@@ -84,6 +84,9 @@ impl Changes {
     }
 }
 
+/// `PRIM_PHYSICS_SHAPE_NONE`.
+const PHYSICS_SHAPE_NONE: i32 = 1;
+
 /// A prim a run of rules is applied to.
 #[derive(Debug, Clone)]
 struct Target {
@@ -974,7 +977,12 @@ fn rule(
         }
         PHYSICS_SHAPE_TYPE => {
             reader.need(1)?;
-            prim.physics_shape = reader.integer(ctx, Some("physics shape type"))?;
+            let shape = reader.integer(ctx, Some("physics shape type"))?;
+            // A root keeps a shape: `PRIM_PHYSICS_SHAPE_NONE` (1) leaves it
+            // as it was, on every grid (`physics/material`).
+            if target.child || shape != PHYSICS_SHAPE_NONE {
+                prim.physics_shape = shape;
+            }
         }
         MATERIAL => {
             reader.need(1)?;

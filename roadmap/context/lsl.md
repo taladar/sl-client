@@ -126,7 +126,10 @@ below.
    ([[server-lsl-runtime-errors]]).
 3. **The library** — ~425 `ll*` functions and 35 events, split into
    tranches by what they touch, tracked by a coverage harness
-   ([[server-lsl-library-surface-table]]).
+   ([[server-lsl-library-surface-table]]). (Since 2026-11-15 every planned
+   tranche is done or deferred, the last
+   [[server-lsl-lib-physics-vehicles]]; 44 functions no tranche took are
+   [[server-lsl-lib-remaining-functions]].)
 4. **The simulator facilities** the library reads and writes — an ECS
    scene store ([[server-world-ecs-store]]), a heartbeat
    ([[server-world-heartbeat]]), agent movement

@@ -1105,8 +1105,18 @@ scope of 236` as this was written):
   listing and no landing point; both resend every viewer the overlay. A
   restart's countdown after its first notice, and the restart itself, are
   `server-fake-grid-estate-actions`'.
-- **Later, with the tranche of the `ll*` functions they shadow** — inertia
-  and object teleports (`server-lsl-lib-physics-vehicles`); URLs
+- **Inertia, floating and object teleports** — the inertia functions keep
+  what they set on the object (`osGetInertiaData` reads it back of a
+  physical one, the mass and centre of one that is not; `osSetInertia` reads
+  the rotation's y for its z, as OpenSim does), `osSetPrimFloatOnWater` makes
+  the water hold a physical object up, `osVolumeDetect` is `llVolumeDetect`
+  for a root and a child's own for a child, and `osTeleportObject` moves an
+  object within the region with OpenSim's answers (−2 within a second of the
+  last move by the same object; −1 for a worn object, one with a keyframed
+  motion, a stranger's on land the owner has no say over, or a destination
+  off the region, which would be a crossing the fake grid's objects do not
+  make).
+- **Later, with the tranche of the `ll*` functions they shadow** — URLs
   (`server-lsl-lib-http-url`). A
   task of its own takes the dynamic textures every OpenSim sign is drawn with
   (`server-fake-grid-dynamic-textures`).
@@ -1259,6 +1269,18 @@ The avatar tranche (`server-lsl-lib-avatar-control`) added `agent` (a
 `release` shaped, and the controls to route through `Engine::controls`),
 `set_camera`, `clear_camera` and `camera`, `teleport_agent` and
 `attached_list`.
+The physics tranche (`server-lsl-lib-physics-vehicles`) added `physics`, which
+hands the host's physics a `vm::physics::PhysicsCall` — a force or torque in
+the frame the grid keeps it in, an impulse, a set velocity, a push, a hover,
+a look-at with the time constant its grid turns by, a vehicle setting, a
+keyframed motion already read and refused as the grid reads and refuses it, a
+pathfinding character's settings or goal, a collision filter, OpenSim's
+inertia and floating —, `physics_reading` (the force and torque as set, a
+physical object's spin and acceleration, the mass as the grid reckons it, the
+centre of mass, whether a keyframed motion plays, whether the object is a
+character, the inertia set), and `teleport_object`; `ObjectDetails` grew the
+mass `llGetObjectMass` reads and the pathfinding type. What the fake grid's
+physics does with them is `simulator/physics.md`.
 The methods the first tranches need — chat and listens, identity, position,
 hover text, and the seeded randomness and clock the determinism rule requires —
 are enough to fix its shape:
@@ -1543,7 +1565,12 @@ is.
   its taken linkset with it — its scripts arriving at the next reconcile as
   they were saved, with the start parameter and string, and the rezzer is told
   (`Engine::object_rezzed`) after the tick in which they ran `on_rez`, before
-  what they said is heard. A script loaded with `llRemoteLoadScriptPin` starts
+  what they said is heard. An object rezzed temporary (`REZ_FLAG_TEMP`, or
+  any root carrying `TEMPORARY_ON_REZ`) leaves the region on the first tick a
+  minute after it became temporary, unless an avatar sits on it — OpenSim's
+  `CleanTempObjects` rule, without its sweep every 180 frames; Second Life's
+  "about a minute" is not measured (`sl_fake_grid::temporary`). A script
+  loaded with `llRemoteLoadScriptPin` starts
   stopped and runs once the tick after the one it landed in is over, so the
   prim's scripts read it stopped when they hear of it. Notecards are read out
   of the asset store with `sl-notecard`, and the region remembers which it

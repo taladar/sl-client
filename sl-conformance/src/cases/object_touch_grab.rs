@@ -33,14 +33,13 @@
 //!     the other avatar.
 //!
 //! The script is the probe: it says each event it is handed, with the
-//! detected values, to its owner. The fake grid runs it, so legs 1 to 9 are
-//! asked of both fake flavours; its kinematic physics applies no grab's
-//! force or spin, so leg 10 is not.
+//! detected values, to its owner. The fake grid runs it, so every leg is
+//! asked of both fake flavours.
 //!
 //! What each live grid answered is stated as a [`Measured`] and written up in
 //! `book/src/gridspec/building.md` § Touch and grab; every run is held to it.
 //!
-//! `2av`, `[both]`, legs 1 to 9 offline on both fake flavours. The cubes
+//! `2av`, `[both]`, offline on both fake flavours. The cubes
 //! are derezzed to the Trash, also when a leg fails.
 
 use std::time::{Duration, Instant};
@@ -757,8 +756,7 @@ const MEASURED_SCRIPTED: &[(&str, Measured<Answer>)] = &[
     ),
 ];
 
-/// What each live grid was measured to answer of a physical prim: a fake
-/// grid's kinematic physics applies no grab's force to ask.
+/// What each live grid was measured to answer of a physical prim.
 const MEASURED_PHYSICAL: &[(&str, Measured<Answer>)] = &[
     (
         "physical_owner_drag_leaves_the_prim",
@@ -1320,13 +1318,7 @@ impl GridTest for ObjectTouchGrab {
                 .and(cleanup)
                 .and_then(|()| hold_to_measured(grid, &metrics, MEASURED, SOURCE))
                 .and_then(|()| hold_to_measured(grid, &metrics, MEASURED_SCRIPTED, SOURCE))
-                .and_then(|()| {
-                    if grid.is_fake() {
-                        Ok(())
-                    } else {
-                        hold_to_measured(grid, &metrics, MEASURED_PHYSICAL, SOURCE)
-                    }
-                })
+                .and_then(|()| hold_to_measured(grid, &metrics, MEASURED_PHYSICAL, SOURCE))
         })
     }
 }
@@ -2148,11 +2140,6 @@ async fn census(
     }
 
     // --- 10. A physical prim. ---
-    if grid.is_fake() {
-        // The kinematic physics applies no grab's force to a physical prim
-        // (server-lsl-lib-physics-vehicles), so there is nothing to pull.
-        return Ok(());
-    }
     let plain_id = plain.object.scoped_id();
     let physical = |use_physics| Command::SetObjectFlags {
         local_id: plain_id,

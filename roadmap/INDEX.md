@@ -15,11 +15,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 327 |
 | blocked | 36 |
 | in-progress | 6 |
-| bugs | 23 |
-| done | 1577 |
+| bugs | 24 |
+| done | 1578 |
 | deferred | 30 |
 | wont-do | 24 |
-| **total** | **2153** |
+| **total** | **2155** |
 
 ## ideas (130)
 
@@ -281,10 +281,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   server
 - [`server-lsl-cast-ray-cost`](ideas/server-lsl-cast-ray-cost.md) — Charge
   llCastRay what each grid charges
-- [`server-lsl-lib-physics-vehicles`](ideas/server-lsl-lib-physics-vehicles.md)
-  — Library tranche — status flags, forces, targets and vehicles (blocked by
-  `server-lsl-vm-execution` (done), `server-world-collision-and-physics` (done),
-  `gridspec-lsl-physics-vehicles` (done))
+- [`server-lsl-lib-remaining-functions`](ideas/server-lsl-lib-remaining-functions.md)
+  — Library — the 44 ll functions no tranche took
 - [`server-lsl-mono-garbage-room`](ideas/server-lsl-mono-garbage-room.md) —
   Under a lowered limit, Mono has the room its reading's garbage gave it
 - [`server-lsl-opensim-teleport-by-region-name`](ideas/server-lsl-opensim-teleport-by-region-name.md)
@@ -1245,7 +1243,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-text-renderability-axis`](in-progress/viewer-ui-text-renderability-axis.md)
   — Upstream issue — font selection cannot see glyph-format renderability
 
-## bugs (23)
+## bugs (24)
 
 ### protocol
 
@@ -1306,10 +1304,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-tests-stop-reading-client-events`](bugs/test-fake-grid-tests-stop-reading-client-events.md)
   — Fake-grid integration tests stop reading the client's events and can stall
   it
+- [`test-lsl-probes-corpus-order-leaks-between-probes`](bugs/test-lsl-probes-corpus-order-leaks-between-probes.md)
+  — A full fake-grid probe corpus run changes two probes' results
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1577)
+## done (1578)
 
 ### protocol
 
@@ -4593,6 +4593,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-lsl-lib-ossl-land-writers`](done/server-lsl-lib-ossl-land-writers.md)
   — Library tranche — OpenSim's land, terrain, wind and environment writers
   (blocked by `server-lsl-lib-land-region-env` (done))
+- [`server-lsl-lib-physics-vehicles`](done/server-lsl-lib-physics-vehicles.md) —
+  Library tranche — status flags, forces, targets and vehicles (blocked by
+  `server-lsl-vm-execution` (done), `server-world-collision-and-physics` (done),
+  `gridspec-lsl-physics-vehicles` (done))
 - [`server-lsl-lib-prim-state`](done/server-lsl-lib-prim-state.md) — Library
   tranche — reading and writing the prim (blocked by `server-lsl-vm-execution`
   (done), `server-world-ecs-store` (done), `server-world-link-sets` (done),

@@ -38,6 +38,7 @@ mod ossl;
 mod ossl_avatars;
 mod ossl_land;
 mod persistence;
+mod physics;
 mod placement;
 mod precision;
 mod prim_state;
@@ -244,6 +245,14 @@ struct Recorder {
     move_targets: Vec<(CallerId, Option<crate::vm::prim::MoveTarget>)>,
     /// Each `llSetBuoyancy` handed on, in order.
     buoyancies: Vec<(CallerId, f32)>,
+    /// Each physics call handed on, in order.
+    physics_calls: Vec<(CallerId, crate::vm::physics::PhysicsCall)>,
+    /// What the physics says of each script's object; at rest at its
+    /// position when not listed.
+    physics_readings: std::collections::BTreeMap<CallerId, crate::vm::physics::PhysicsReading>,
+    /// Each `osTeleportObject` handed on, in order: the object, where to,
+    /// the rotation and the flags.
+    object_teleports: Vec<(String, sl_types::lsl::Vector, sl_types::lsl::Rotation, i32)>,
     /// The experience each script was compiled into; none when not listed.
     experiences: std::collections::BTreeMap<CallerId, ScriptExperience>,
     /// The experiences the grid knows, by key; an id not listed is no
@@ -764,6 +773,32 @@ impl Host for Recorder {
         self.buoyancies.push((caller, buoyancy));
     }
 
+    fn physics(&mut self, caller: CallerId, call: crate::vm::physics::PhysicsCall) {
+        self.physics_calls.push((caller, call));
+    }
+
+    fn physics_reading(&self, caller: CallerId) -> crate::vm::physics::PhysicsReading {
+        self.physics_readings
+            .get(&caller)
+            .cloned()
+            .unwrap_or_else(|| {
+                crate::vm::physics::PhysicsReading::at_rest(self.whereabouts(caller).position)
+            })
+    }
+
+    fn teleport_object(
+        &mut self,
+        _caller: CallerId,
+        object: &str,
+        position: sl_types::lsl::Vector,
+        rotation: sl_types::lsl::Rotation,
+        flags: i32,
+    ) -> i32 {
+        self.object_teleports
+            .push((object.to_owned(), position, rotation, flags));
+        1
+    }
+
     fn experience(&self, caller: CallerId) -> Option<ScriptExperience> {
         self.experiences.get(&caller).cloned()
     }
@@ -1042,6 +1077,8 @@ impl Host for Recorder {
                 .unwrap_or_else(|| OWNER.to_owned()),
             masks: [i32::MAX, i32::MAX, 0, 0, 532_480],
             hover_height: 0.0,
+            mass: 0.0,
+            pathfinding_type: 0,
             body_shape: -1.0,
             animated: 0,
         })
@@ -2471,14 +2508,17 @@ fn every_value_type_survives_a_round_trip_through_the_machine() -> Result<(), St
 fn a_call_to_a_function_nobody_wrote_stops_the_script() -> Result<(), String> {
     let mut engine = engine();
     let mut host = Recorder::default();
-    let _none = engine.add(A, program("default { state_entry() { llStopHover(); } }")?);
+    let _none = engine.add(
+        A,
+        program("default { state_entry() { llRefreshPrimURL(); } }")?,
+    );
     let reports = run(&mut engine, &mut host, 1);
     assert!(matches!(
         reports.first().map(|report| outcomes(report, A)).as_deref(),
         Some([
             Outcome::Finished,
             Outcome::Faulted(Fault {
-                error: RuntimeError::Unimplemented(BuiltinId::LlStopHover),
+                error: RuntimeError::Unimplemented(BuiltinId::LlRefreshPrimURL),
                 ..
             })
         ])

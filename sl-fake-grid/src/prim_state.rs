@@ -708,6 +708,7 @@ fn keep_written(prim: &mut Prim, object: &Object, scripted: &Scripted) {
     }
     prim.has_media_list = kept.has_media_list;
     prim.physics_shape = kept.physics_shape;
+    prim.physics_material = kept.physics_material;
     prim.allow_unsit = kept.allow_unsit;
     prim.scripted_sit_only = kept.scripted_sit_only;
     prim.sit_flags = kept.sit_flags;

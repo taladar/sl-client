@@ -24,10 +24,6 @@ use async_trait::async_trait;
 use sl_proto::TextureKey;
 use thiserror::Error;
 
-#[expect(
-    clippy::module_name_repetitions,
-    reason = "re-exported at the crate root, where `AssetFetcher` reads clearly"
-)]
 pub use sl_asset_sched::{AssetFetcher, FetchChunk, FetchError};
 
 /// Where a texture is sourced from, mirroring the reference viewer's `FTType`.

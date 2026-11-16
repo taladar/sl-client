@@ -45,8 +45,7 @@ pub enum Token {
     /// A `"…"` double-quoted string literal, honouring `\"` (and `\\`) escapes,
     /// optionally with the legacy `L` prefix the grid's compiler still accepts
     /// (`L"…"`). Error-tolerant: an unterminated string runs to end-of-input.
-    #[token("\"", string_literal)]
-    #[token("L\"", string_literal)]
+    #[regex(r#"L?""#, string_literal)]
     StringLiteral,
     /// An integer literal: a decimal `[0-9]+` run or a `0x` hexadecimal run.
     #[regex(r"[0-9]+")]

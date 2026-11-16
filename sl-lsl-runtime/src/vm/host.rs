@@ -1,6 +1,6 @@
 //! The boundary between a running script and the world it runs in.
 
-use sl_types::lsl::Vector;
+use sl_types::lsl::{Rotation, Vector};
 
 use crate::library::BuiltinId;
 use crate::vm::Fault;
@@ -20,6 +20,7 @@ use crate::vm::land::{
 use crate::vm::linkset_data::{LinksetData, LinksetId};
 use crate::vm::ossl::{Simulator, Standing};
 use crate::vm::permissions::Question;
+use crate::vm::physics::{PhysicsCall, PhysicsReading};
 use crate::vm::prim::{MoveTarget, ObjectDetails, Prim, SoundCue};
 use crate::vm::report::{Speech, Whereabouts};
 use crate::vm::seating::{Placement, Seat};
@@ -257,6 +258,30 @@ pub trait Host {
     /// `llSetBuoyancy`: the share of gravity the object `caller` is in no
     /// longer feels while physical — 1 floats, above 1 rises. The object's.
     fn set_buoyancy(&mut self, caller: CallerId, buoyancy: f32);
+
+    /// A physics function's call on the object `caller` is in (or, for a
+    /// push, on what it pushes), each grid's refusals, clamps and frames
+    /// already applied by the library: the host's physics runs it. The
+    /// object's, so a reset leaves it.
+    fn physics(&mut self, caller: CallerId, call: PhysicsCall);
+
+    /// What the host's physics says of the object `caller` is in.
+    fn physics_reading(&self, caller: CallerId) -> PhysicsReading;
+
+    /// `osTeleportObject`: moves the object keyed `object` to `position` in
+    /// the region, turned by `rotation` (or to it, with `OSTPOBJ_SETROT`),
+    /// keeping its velocity unless `OSTPOBJ_STOPATTARGET`. OpenSim's answer:
+    /// 1 when it moved, −1 for an object that cannot be moved (none, worn,
+    /// playing a keyframed motion, or a stranger's on land the script's owner
+    /// has no say over), −2 for one moved by the same object within a second.
+    fn teleport_object(
+        &mut self,
+        caller: CallerId,
+        object: &str,
+        position: Vector,
+        rotation: Rotation,
+        flags: i32,
+    ) -> i32;
 
     /// The experience the script `caller` was compiled into (the upload's
     /// experience, kept on its inventory item), and whether it may run where

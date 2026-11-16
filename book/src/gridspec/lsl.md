@@ -1854,6 +1854,13 @@ and distances are measurements and differ from run to run; the tables give
 what a grid does with them. Where the two engines agree, OpenSim is one
 column: the physics is the region's, not the engine's.
 
+The fake grid column is each fake flavour's run of the same probes
+(2026-11-15, `results/fake-sl` and `results/fake-opensim`), read against its
+grid: every one agrees but for what `probes/accepted.toml` names — aditi's
+weightless drift, which the probe does not explain, a float of Havok's, and
+when the runner saved the keyframed probe's three scripts. How the fake
+grid's physics does it is `simulator/physics.md`.
+
 ### Status flags
 
 `physics/status`: every flag of a fresh prim, masks that are not one flag,
@@ -1861,16 +1868,16 @@ each flag set and cleared on its own, and physics last.
 
 | what | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
-| a fresh prim | `STATUS_ROTATE_X`, `_Y` and `_Z` 1, every other flag 0 | the same | no scripts |
-| `llGetStatus` of several flags at once | TRUE if **any** of them is set: `ROTATE_X \| ROTATE_Y \| ROTATE_Z`, `PHYSICS \| ROTATE_X` and `PHANTOM \| ROTATE_X` all read 1 | **0** for any mask that is not exactly one flag | no scripts |
-| `llGetStatus` of 0, 2048 (no flag) and −1 | 0 | 0 | no scripts |
-| each of the rotation flags, `PHANTOM`, `SANDBOX`, `BLOCK_GRAB`, `DIE_AT_EDGE`, `RETURN_AT_EDGE` and `BLOCK_GRAB_OBJECT`, set and cleared | reads back as set; no other flag moves | the same | no scripts |
-| `STATUS_CAST_SHADOWS` | cannot be set: reads 0 after TRUE | **set by either value**, TRUE or FALSE, and never cleared again | no scripts |
-| a value of 2 or −1 | TRUE | TRUE | no scripts |
-| two flags in one call | both set | both set | no scripts |
-| `PRIM_PHYSICS`, `PRIM_PHANTOM` | follow the flags; `PRIM_TEMP_ON_REZ` stays 0 | the same | no scripts |
-| `llVolumeDetect(TRUE)` | reads as phantom (`STATUS_PHANTOM` and `PRIM_PHANTOM` 1), which `llSetStatus(STATUS_PHANTOM, FALSE)` does not clear; `llVolumeDetect(FALSE)` clears it, also on a prim that was phantom before | the same | no scripts |
-| physics on; a rotation flag cleared while physical; physics with phantom; physics under volume detect | each reads as set, the last as physical and phantom | the same | no scripts |
+| a fresh prim | `STATUS_ROTATE_X`, `_Y` and `_Z` 1, every other flag 0 | the same | each flavour as its grid |
+| `llGetStatus` of several flags at once | TRUE if **any** of them is set: `ROTATE_X \| ROTATE_Y \| ROTATE_Z`, `PHYSICS \| ROTATE_X` and `PHANTOM \| ROTATE_X` all read 1 | **0** for any mask that is not exactly one flag | each flavour as its grid |
+| `llGetStatus` of 0, 2048 (no flag) and −1 | 0 | 0 | each flavour as its grid |
+| each of the rotation flags, `PHANTOM`, `SANDBOX`, `BLOCK_GRAB`, `DIE_AT_EDGE`, `RETURN_AT_EDGE` and `BLOCK_GRAB_OBJECT`, set and cleared | reads back as set; no other flag moves | the same | each flavour as its grid |
+| `STATUS_CAST_SHADOWS` | cannot be set: reads 0 after TRUE | **set by either value**, TRUE or FALSE, and never cleared again | each flavour as its grid |
+| a value of 2 or −1 | TRUE | TRUE | each flavour as its grid |
+| two flags in one call | both set | both set | each flavour as its grid |
+| `PRIM_PHYSICS`, `PRIM_PHANTOM` | follow the flags; `PRIM_TEMP_ON_REZ` stays 0 | the same | each flavour as its grid |
+| `llVolumeDetect(TRUE)` | reads as phantom (`STATUS_PHANTOM` and `PRIM_PHANTOM` 1), which `llSetStatus(STATUS_PHANTOM, FALSE)` does not clear; `llVolumeDetect(FALSE)` clears it, also on a prim that was phantom before | the same | each flavour as its grid |
+| physics on; a rotation flag cleared while physical; physics with phantom; physics under volume detect | each reads as set, the last as physical and phantom | the same | each flavour as its grid |
 
 ### Physics material and mass
 
@@ -1880,15 +1887,15 @@ scales and physics shapes.
 
 | what | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
-| a fresh prim's `llGetPhysicsMaterial` | `[1.0, 0.5, 0.6, 1000.0]`: gravity multiplier, restitution, friction, density | the same | no scripts |
-| values in range: gravity −1 to 28, restitution 0 to 1, friction 0 to 255, density 1 to 22587 | set as given | the same | no scripts |
-| a value out of range: gravity −2 or 40, restitution −1 or 2, friction −1 or 300, density −5, 0 or 30000 | refused, nothing changes: `ERROR: Failed to set material properties.` | refused **silently**, nothing changes | no scripts |
-| no bits, all four bits | nothing changes; all four set | the same | no scripts |
-| a fresh 0.5 m cube's `llGetMass`, `llGetMassMKS`, `llGetObjectMass` | 1.25, 125, 1.25: `llGetMass` is the kilograms over 100 | the same | no scripts |
-| the mass after a change of density | follows it: 0.00125 at 1, 28.23 at 22587, 0.625 at 500 | **stays 1.25** | no scripts |
-| the mass after `llSetScale`, read in the same event | 10 at 1 m, and still 10 at 2 m and at 4 × 0.5 × 0.5 m, and for two calls after the prim is scaled back to 0.5 m: it follows a scale late | stays 1.25 | no scripts |
-| `llGetCenterOfMass` | the prim's position | the same | no scripts |
-| `PRIM_PHYSICS_SHAPE_TYPE` on the root | convex and prim are set; none is refused (the type stays prim) | the same | no scripts |
+| a fresh prim's `llGetPhysicsMaterial` | `[1.0, 0.5, 0.6, 1000.0]`: gravity multiplier, restitution, friction, density | the same | each flavour as its grid |
+| values in range: gravity −1 to 28, restitution 0 to 1, friction 0 to 255, density 1 to 22587 | set as given | the same | each flavour as its grid |
+| a value out of range: gravity −2 or 40, restitution −1 or 2, friction −1 or 300, density −5, 0 or 30000 | refused, nothing changes: `ERROR: Failed to set material properties.` | refused **silently**, nothing changes | each flavour as its grid |
+| no bits, all four bits | nothing changes; all four set | the same | each flavour as its grid |
+| a fresh 0.5 m cube's `llGetMass`, `llGetMassMKS`, `llGetObjectMass` | 1.25, 125, 1.25: `llGetMass` is the kilograms over 100 | the same | 1.25, 125, 1.25 on both flavours |
+| the mass after a change of density | follows it: 0.00125 at 1, 28.23 at 22587, 0.625 at 500 | **stays 1.25** | each flavour as its grid |
+| the mass after `llSetScale`, read in the same event | 10 at 1 m, and still 10 at 2 m and at 4 × 0.5 × 0.5 m, and for two calls after the prim is scaled back to 0.5 m: it follows a scale late | stays 1.25 | Second Life's follows a rebuild of the physics shape at most every second, so the reads after the scale goes back hold the 1 m mass; OpenSim's stays |
+| `llGetCenterOfMass` | the prim's position | the same | the mass-weighted middle of the prims' boxes: the prim's position |
+| `PRIM_PHYSICS_SHAPE_TYPE` on the root | convex and prim are set; none is refused (the type stays prim) | the same | each flavour as its grid: none leaves a root's shape |
 
 ### Forces, velocities and impulses
 
@@ -1897,15 +1904,15 @@ physical and weightless (`llSetBuoyancy(1.0)`).
 
 | what | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
-| `llSetForce` and `llSetTorque` on a prim that is not physical | read back by `llGetForce` and `llGetTorque` as set, a million newtons too: no clamp | the same | no scripts |
-| a local force or torque, `<1,0,0>`, on a prim turned a quarter round Z | read back **as given**, in the prim's frame | read back **rotated into the region's**, `<0,1,0>` | no scripts |
-| `llSetVelocity`, `llSetAngularVelocity`, `llApplyImpulse`, `llApplyRotationalImpulse` on a prim that is not physical | nothing: `llGetVel`, `llGetOmega`, `llGetAccel` read 0 | the same | no scripts |
-| `llSetBuoyancy`, `llSetHoverHeight`, `llGroundRepel`, `llPushObject` of itself, not physical | it does not move | the same | no scripts |
-| turning physical, weightless, after those impulses and the push | drifts up at about 1 m/s, as it does every time it turns physical weightless here: the probe does not separate why | **shoots up at 4.6 m/s**: the impulse (1) and the push (5) it was given while not physical are applied now, (1 + 5) / 1.25 kg | no scripts |
-| turning physical weightless again | drifts up as before | stays still | no scripts |
-| a force set before physics | kept in `llGetForce` | kept in `llGetForce`, but the prim does not move | no scripts |
-| `llSetVelocity`, read back in the same event | not yet: `llGetVel` still has the old velocity | the same | no scripts |
-| `llSetVelocity(<0,0,200>)` stopped in the same event | not seen, and the prim does not fly off | the same | no scripts |
+| `llSetForce` and `llSetTorque` on a prim that is not physical | read back by `llGetForce` and `llGetTorque` as set, a million newtons too: no clamp | the same | each flavour as its grid |
+| a local force or torque, `<1,0,0>`, on a prim turned a quarter round Z | read back **as given**, in the prim's frame | read back **rotated into the region's**, `<0,1,0>` | each flavour as its grid |
+| `llSetVelocity`, `llSetAngularVelocity`, `llApplyImpulse`, `llApplyRotationalImpulse` on a prim that is not physical | nothing: `llGetVel`, `llGetOmega`, `llGetAccel` read 0 | the same | each flavour as its grid |
+| `llSetBuoyancy`, `llSetHoverHeight`, `llGroundRepel`, `llPushObject` of itself, not physical | it does not move | the same | each flavour as its grid |
+| turning physical, weightless, after those impulses and the push | drifts up at about 1 m/s, as it does every time it turns physical weightless here: the probe does not separate why | **shoots up at 4.6 m/s**: the impulse (1) and the push (5) it was given while not physical are applied now, (1 + 5) / 1.25 kg | OpenSim's (1 + 5) / 1.25 m/s; Second Life's stays still: its drift is not imitated (`accepted.toml`) |
+| turning physical weightless again | drifts up as before | stays still | stays still, as OpenSim; Second Life's drift is not imitated |
+| a force set before physics | kept in `llGetForce` | kept in `llGetForce`, but the prim does not move | each flavour as its grid: OpenSim's force applies only when set while physical |
+| `llSetVelocity`, read back in the same event | not yet: `llGetVel` still has the old velocity | the same | each flavour as its grid |
+| `llSetVelocity(<0,0,200>)` stopped in the same event | not seen, and the prim does not fly off | the same | each flavour as its grid |
 
 ### Targets, moving to them and looking at them
 
@@ -1916,19 +1923,19 @@ physical and weightless.
 
 | what | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
-| a script's first position targets | positive handles, one apart | positive handles from one counter of the whole scene, which other ids share: one apart, in either direction | no scripts |
-| a target in range on a prim that is not physical | `at_target` every other frame or so (21 a second), with the handle, the target as given and the prim's position | the same arguments, 11 a second | no scripts |
-| a second target out of range | raises nothing, and `not_at_target` does not run while another target is reached | YEngine the same; **XEngine runs `not_at_target` too**, as often as `at_target` | no scripts |
-| ten targets | only the newest eight raise events: a script keeps eight | the same | no scripts |
-| a range of 0, at the target | **never reached** | reached: the distance squared is compared with the range squared, `<=` | no scripts |
-| a range of −1 | reached: the range is squared | reached | no scripts |
-| rotation targets | handles from the same counter as position targets (the next one); eight kept, the same arguments | handles from the scene's counter (one or two on); eight kept | no scripts |
+| a script's first position targets | positive handles, one apart | positive handles from one counter of the whole scene, which other ids share: one apart, in either direction | each flavour as its grid |
+| a target in range on a prim that is not physical | `at_target` every other frame or so (21 a second), with the handle, the target as given and the prim's position | the same arguments, 11 a second | each flavour as its grid |
+| a second target out of range | raises nothing, and `not_at_target` does not run while another target is reached | YEngine the same; **XEngine runs `not_at_target` too**, as often as `at_target` | each flavour as its grid |
+| ten targets | only the newest eight raise events: a script keeps eight | the same | each flavour as its grid |
+| a range of 0, at the target | **never reached** | reached: the distance squared is compared with the range squared, `<=` | each flavour as its grid |
+| a range of −1 | reached: the range is squared | reached | each flavour as its grid |
+| rotation targets | handles from the same counter as position targets (the next one); eight kept, the same arguments | handles from the scene's counter (one or two on); eight kept | each flavour as its grid |
 | `llMoveToTarget` on a prim that is not physical | it does not move | the same | the same |
-| `llLookAt`, `llRotLookAt` on a prim that is not physical | **turn it** | the same | no scripts |
+| `llLookAt`, `llRotLookAt` on a prim that is not physical | **turn it** | the same | turn it, on both flavours |
 | `llMoveToTarget` a metre up with a tau of 0.3, physical | reaches a 0.1 m target in 0.69 s | 0.71 s | the distance left shrinks by `e` every tau: 0.7 s at ten ticks a second |
 | a target 70 m up (the documented limit is 65 m) | it does not move | **it moves**: 27 m in half a second | each flavour as its grid |
 | a tau of 0 | it does not move | the same | the same |
-| `llRotLookAt` a quarter round, physical | reaches a 0.1 rad rotation target in 1.36 s | 0.87 s | no scripts |
+| `llRotLookAt` a quarter round, physical | reaches a 0.1 rad rotation target in 1.36 s | 0.87 s | the angle left shrinks by `e` every damping (1.36 s); OpenSim's turns at the angle left times π × min(1, 1/strength) (0.87 s) |
 
 ### Keyframed motion
 
@@ -1939,25 +1946,25 @@ own in prims B and C. A valid frame here is half a metre up in a second.
 
 | what | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
-| a prim of the default physics shape (prim) | refused: `Error, failed to play animation. Does your linkset exceed the complexity limit for keyframing?` | plays | no scripts |
-| a valid frame, once the shape is convex | plays, `moving_start` then `moving_end`; the first motion after the shape changed started late (0.44–0.46 m of the 0.5 at 1.5 s, no `moving_end` yet) | plays, exactly 0.5 m | no scripts |
-| a frame time under 0.1 s (0.05), or negative | refused: `Delta times must be >0.1s` | plays it as given | no scripts |
-| an integer time | accepted | accepted | no scripts |
-| a list one element short | refused: `Expected delta time in keyframe list.` | nothing, silently: the incomplete frame is dropped | no scripts |
-| rotation and translation in each other's places | refused: `Error, expected translation vector in keyframe list.` | **throws**: YEngine stops the script (`InvalidCastException: Vector3 expected but Quaternion given`, to the owner), XEngine ends the event with the exception on the debug channel | no scripts |
-| three-element frames under `KFM_DATA, KFM_TRANSLATION` | refused: `Expected delta time in keyframe list.` | throws: `Specified cast is not valid.` | no scripts |
-| two frames | relative to each other: they add up to 0.5 m | the same | no scripts |
-| translation only, rotation only, both in one frame | play | the same | no scripts |
-| an unknown `KFM_MODE` (7) | refused: `Unknown playback mode.` | plays forward | no scripts |
-| an unknown option (99) | refused: `Unknown parameter type.` | ignored; plays | no scripts |
-| `KFM_REVERSE` | plays the frame backwards: ends 0.5 m below | the same | no scripts |
-| 20 m in 0.2 s | plays: no speed limit | the same | no scripts |
-| a loop paused, played, stopped | the pause holds it, play goes on, stop leaves it where it is (not back at the start) | the same | no scripts |
-| `llSetPos` during a motion | refused: `Cannot use a script to move a linkset while it is playing an animation. Stop the animation first.` | **moves it**, and the motion goes on from there | no keyframed motion yet |
-| physics on during a motion | refused: `Can't enable physics for keyframed objects.` | **turns physical** and falls | no scripts |
-| a motion on a physical prim | nothing, silently (a `moving_end`) | nothing, silently | no scripts |
-| `KFM_CMD_PLAY` with nothing playing | plays the last motion given, here the one given while physical | nothing | no scripts |
-| an empty call with nothing playing | a `moving_start` and a `moving_end`, no motion | nothing | no scripts |
+| a prim of the default physics shape (prim) | refused: `Error, failed to play animation. Does your linkset exceed the complexity limit for keyframing?` | plays | each flavour as its grid |
+| a valid frame, once the shape is convex | plays, `moving_start` then `moving_end`; the first motion after the shape changed started late (0.44–0.46 m of the 0.5 at 1.5 s, no `moving_end` yet) | plays, exactly 0.5 m | each flavour as its grid; Second Life's waits 0.4 s after the change of the shape |
+| a frame time under 0.1 s (0.05), or negative | refused: `Delta times must be >0.1s` | plays it as given | each flavour as its grid |
+| an integer time | accepted | accepted | each flavour as its grid |
+| a list one element short | refused: `Expected delta time in keyframe list.` | nothing, silently: the incomplete frame is dropped | each flavour as its grid |
+| rotation and translation in each other's places | refused: `Error, expected translation vector in keyframe list.` | **throws**: YEngine stops the script (`InvalidCastException: Vector3 expected but Quaternion given`, to the owner), XEngine ends the event with the exception on the debug channel | each flavour as its grid |
+| three-element frames under `KFM_DATA, KFM_TRANSLATION` | refused: `Expected delta time in keyframe list.` | throws: `Specified cast is not valid.` | each flavour as its grid |
+| two frames | relative to each other: they add up to 0.5 m | the same | each flavour as its grid |
+| translation only, rotation only, both in one frame | play | the same | each flavour as its grid |
+| an unknown `KFM_MODE` (7) | refused: `Unknown playback mode.` | plays forward | each flavour as its grid |
+| an unknown option (99) | refused: `Unknown parameter type.` | ignored; plays | each flavour as its grid |
+| `KFM_REVERSE` | plays the frame backwards: ends 0.5 m below | the same | each flavour as its grid |
+| 20 m in 0.2 s | plays: no speed limit | the same | plays, the frames adding up to 20 m exactly |
+| a loop paused, played, stopped | the pause holds it, play goes on, stop leaves it where it is (not back at the start) | the same | each flavour as its grid |
+| `llSetPos` during a motion | refused: `Cannot use a script to move a linkset while it is playing an animation. Stop the animation first.` | **moves it**, and the motion goes on from there | each flavour as its grid |
+| physics on during a motion | refused: `Can't enable physics for keyframed objects.` | **turns physical** and falls | each flavour as its grid |
+| a motion on a physical prim | nothing, silently (a `moving_end`) | nothing, silently | each flavour as its grid |
+| `KFM_CMD_PLAY` with nothing playing | plays the last motion given, here the one given while physical | nothing | each flavour as its grid |
+| an empty call with nothing playing | a `moving_start` and a `moving_end`, no motion | nothing | each flavour as its grid |
 
 ### Vehicles
 
@@ -1966,15 +1973,15 @@ answers with its debug-channel chat and with what the prim does.
 
 | what | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
-| a parameter or flag set before any vehicle type | silent | silent | no scripts |
-| each type, 0, 99 and −1 on a prim that is not physical | silent; no status flag moves | the same | no scripts |
-| an unknown parameter code (999) | `Unknown vehicle float parameter 999`, and `vector`, `rotation` for the other setters | silent | no scripts |
-| a float parameter through the vector setter | `Unknown vehicle vector parameter 24` | silent | no scripts |
-| timescales and efficiencies out of range, unknown flag bits | silent | silent | no scripts |
-| a sled whose linear motor pushes it east at 1 m/s | goes east, 1.7 m in 1.5 s | goes east, 0.9 m | no scripts |
-| `VEHICLE_TYPE_NONE` then | stops at once | still moving at 6 m/s half a second later | no scripts |
-| a linear motor of 100 m/s up for half a second | 98 m/s: no clamp at the documented 30 | 97 m/s | no scripts |
-| an angular motor of 100 rad/s about Z | 12.4 rad/s after a second, under the documented 4π clamp | 12.3 rad/s | no scripts |
+| a parameter or flag set before any vehicle type | silent | silent | each flavour as its grid |
+| each type, 0, 99 and −1 on a prim that is not physical | silent; no status flag moves | the same | each flavour as its grid |
+| an unknown parameter code (999) | `Unknown vehicle float parameter 999`, and `vector`, `rotation` for the other setters | silent | each flavour as its grid |
+| a float parameter through the vector setter | `Unknown vehicle vector parameter 24` | silent | each flavour as its grid |
+| timescales and efficiencies out of range, unknown flag bits | silent | silent | each flavour as its grid |
+| a sled whose linear motor pushes it east at 1 m/s | goes east, 1.7 m in 1.5 s | goes east, 0.9 m | goes east on both: OpenSim's vehicle model (`ODEDynamics`) on the kinematic solver |
+| `VEHICLE_TYPE_NONE` then | stops at once | still moving at 6 m/s half a second later | each flavour as its grid |
+| a linear motor of 100 m/s up for half a second | 98 m/s: no clamp at the documented 30 | 97 m/s | clamped at 100 m/s on both |
+| an angular motor of 100 rad/s about Z | 12.4 rad/s after a second, under the documented 4π clamp | 12.3 rad/s | clamped at 4π rad/s on both |
 
 ### Pathfinding characters
 
@@ -1986,14 +1993,14 @@ the ones before it.
 
 | what | Second Life | fake grid |
 | --- | --- | --- |
-| `llGetClosestNavPoint` of the prim, a metre above the reference prim | one point, 2.2 m away | no scripts |
-| `llGetStaticPath` two metres east from there | `[3]`: a status alone, `PU_FAILURE_INVALID_GOAL` | no scripts |
-| `llNavigateTo` with no character | `You must call llCreateCharacter before llNavigateTo.` | no scripts |
-| `llCreateCharacter` | the prim turns physical, `OBJECT_PATHFINDING_TYPE` 2 (`OPT_CHARACTER`); the rotation flags stay set | no scripts |
-| `CHARACTER_DESIRED_SPEED` 100 | `Error: CHARACTER_DESIRED_SPEED 100 larger than max 40` | no scripts |
-| `llNavigateTo` the nearest navmesh point two metres east | `path_update` 0 (`PU_SLOWDOWN_DISTANCE_REACHED`), then 1 (`PU_GOAL_REACHED`), each with an empty list; the prim moved east | no scripts |
-| `llExecCharacterCmd` with a command no grid has (999) | `Unrecognized character command.` | no scripts |
-| `llDeleteCharacter`, twice | not physical, pathfinding type 0; the second is silent | no scripts |
+| `llGetClosestNavPoint` of the prim, a metre above the reference prim | one point, 2.2 m away | the ground under it: the fake grid reads all its ground as navmesh |
+| `llGetStaticPath` two metres east from there | `[3]`: a status alone, `PU_FAILURE_INVALID_GOAL` | `[3]`: a point more than a metre off the ground is off the navmesh |
+| `llNavigateTo` with no character | `You must call llCreateCharacter before llNavigateTo.` | the same |
+| `llCreateCharacter` | the prim turns physical, `OBJECT_PATHFINDING_TYPE` 2 (`OPT_CHARACTER`); the rotation flags stay set | the same |
+| `CHARACTER_DESIRED_SPEED` 100 | `Error: CHARACTER_DESIRED_SPEED 100 larger than max 40` | the same |
+| `llNavigateTo` the nearest navmesh point two metres east | `path_update` 0 (`PU_SLOWDOWN_DISTANCE_REACHED`), then 1 (`PU_GOAL_REACHED`), each with an empty list; the prim moved east | the same: it walks over the ground at its speed |
+| `llExecCharacterCmd` with a command no grid has (999) | `Unrecognized character command.` | the same |
+| `llDeleteCharacter`, twice | not physical, pathfinding type 0; the second is silent | the same |
 
 ### What the viewer does with it
 
@@ -2816,8 +2823,8 @@ box with its script, a removal sent to the viewer).
 | start parameter, `llGetStartParameter`, `OBJECT_REZZER_KEY` | as passed, both; the rezzer | the same | each flavour as its grid |
 | `llRezAtRoot` of one prim | as `llRezObject` | the same | each flavour as its grid |
 | a rotation that is not unit length | normalised | normalised | each flavour as its grid |
-| a velocity, the child not physical | 0 | 0 | 0: the fake grid keeps no rez velocity |
-| `STATUS_DIE_AT_EDGE` of the child | 0 | **1** | each flavour hands the rez its grid's flag; the fake grid keeps no status flags yet (`server-lsl-lib-physics-vehicles`) |
+| a velocity, the child not physical | 0 | 0 | 0; a physical child leaves at it |
+| `STATUS_DIE_AT_EDGE` of the child | 0 | **1** | each flavour as its grid |
 | 11 m from the rezzer | nothing, silently | nothing, silently, and no forced delay | each flavour as its grid |
 | a name that is not there | `Could not find object 'Nope'.`, 1.1 s | `llRez(AtRoot/Object): Can't find object 'Nope'`, 1 s | each flavour as its grid |
 | a notecard's name | nothing, silently | `Can't create requested object; object is missing from database`, 1 s | each flavour as its grid |

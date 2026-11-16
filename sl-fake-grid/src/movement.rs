@@ -700,6 +700,18 @@ impl Motion {
         flat(wanted.0, wanted.1)
     }
 
+    /// A push (`llPushObject`): `by` is added to the avatar's velocity. One
+    /// with a lift takes it off the ground, as a fall; a level one slides it
+    /// until the ground's braking stops it.
+    pub fn push(&mut self, by: &Vector) {
+        self.velocity.x += by.x;
+        self.velocity.y += by.y;
+        self.velocity.z += by.z;
+        if by.z > 0.0 && !self.posture.airborne() && !self.controls.contains(ControlFlags::FLY) {
+            let _changed = self.set_posture(Posture::Falling);
+        }
+    }
+
     /// Advances the avatar standing at `position` by one tick of `step` over
     /// `ground`.
     pub fn step(
