@@ -805,7 +805,7 @@ fn run_session(
     let mut app = App::new();
     app.add_plugins(MinimalPlugins.set(ScheduleRunnerPlugin::run_loop(TICK_INTERVAL)))
         .add_plugins(SlClientPlugin {
-            params: params.clone(),
+            params: Some(params.clone()),
             diagnostics: true,
             circuit_probe: sl_client_bevy::CircuitProbe::Off,
             region_handshake_reply_flags: sl_client_bevy::RegionHandshakeReplyFlags::CLIENT_DEFAULT,

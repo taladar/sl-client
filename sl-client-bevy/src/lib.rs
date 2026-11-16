@@ -543,8 +543,10 @@ pub struct AccountDirsConfig {
 )]
 #[derive(Debug, Clone)]
 pub struct SlClientPlugin {
-    /// The login parameters used to start the session.
-    pub params: LoginParams,
+    /// The login parameters the session starts with at startup, or `None` to
+    /// start none until an [`SlLogin`] asks for one — an app that first asks
+    /// its user who to log in as.
+    pub params: Option<LoginParams>,
     /// Whether to collect protocol diagnostics. Off by default; while enabled,
     /// the session records [`Diagnostic`]s for anomalies it would otherwise
     /// silently drop, surfaced as [`SlDiagnostic`] events.
@@ -639,6 +641,7 @@ impl Plugin for SlClientPlugin {
             .add_message::<SlCapabilities>()
             .add_message::<SlMfaChallenge>()
             .add_message::<SlLoginRejected>()
+            .add_message::<SlLogin>()
             .add_message::<SlCommand>()
             .insert_resource(SlConfig {
                 params: self.params.clone(),
@@ -660,15 +663,17 @@ impl Plugin for SlClientPlugin {
                 }),
             })
             .init_resource::<SlIdentity>()
+            .init_resource::<SlSessionStatus>()
             .init_resource::<SlGrantedCapabilities>()
             .init_resource::<SlAgentParcel>()
             .init_resource::<SlParcelOverlay>()
             .init_resource::<SlRegionIndex>()
             .add_systems(Startup, start_login)
-            // `maintain_world` reads the events `drive` writes, so chain it after.
+            // `maintain_world` reads the events `drive` writes, so chain it after;
+            // a login asked for this frame starts before the pump runs.
             .add_systems(
                 Update,
-                (drive, maintain_world)
+                (start_requested_login, drive, maintain_world)
                     .chain()
                     .in_set(SlClientSystems::SessionDrained),
             );
@@ -773,10 +778,50 @@ impl SlGrantedCapabilities {
 }
 
 /// Emitted when the grid requires a multi-factor one-time code. To answer it,
-/// re-add the plugin with login parameters prepared via
-/// `LoginRequest::with_mfa`.
+/// send an [`SlLogin`] whose request is prepared via `LoginRequest::with_mfa`.
 #[derive(Message, Debug, Clone)]
 pub struct SlMfaChallenge(pub MfaChallenge);
+
+/// Where the app's session stands: what a login screen shows, and what a quit
+/// decides by (with no session live there is nothing to log out of).
+#[derive(Resource, Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum SlSessionStatus {
+    /// No login has started: the plugin had no parameters and no [`SlLogin`]
+    /// has come yet.
+    #[default]
+    Idle,
+    /// A login is with the grid: the request is in flight and no session
+    /// exists yet.
+    LoggingIn,
+    /// The grid let the agent in and the session runs (an offline session
+    /// counts, fed by whatever writes its events).
+    Running,
+    /// The last session or login attempt ended: logged out, disconnected,
+    /// failed, or stopped for an answer.
+    Ended,
+}
+
+impl SlSessionStatus {
+    /// Whether a login or a session is live, which a quit has to log out of.
+    #[must_use]
+    pub const fn is_live(self) -> bool {
+        matches!(self, Self::LoggingIn | Self::Running)
+    }
+}
+
+/// Start a login, sent as a Bevy message: the first of an app whose plugin
+/// had no [`SlClientPlugin::params`], or the next after an attempt that ended
+/// without a session — an MFA challenge to answer, a retryable rejection, a
+/// failed login. A request while a session is still live is refused with a
+/// warning: log that one out first.
+#[derive(Message, Debug, Clone)]
+pub struct SlLogin {
+    /// Who logs in, where, and as which viewer.
+    pub params: LoginParams,
+    /// The per-avatar directory derivation for this login, in place of
+    /// [`SlClientPlugin::account_dirs`]: the avatar is only known now.
+    pub account_dirs: Option<AccountDirsConfig>,
+}
 
 /// Emitted when the grid rejected the login with a *retryable* "already logged
 /// in" presence ([`LoginRejectKind::AlreadyLoggedIn`]) — typically a prior
@@ -805,8 +850,8 @@ pub struct SlCommand(pub Command);
 )]
 #[derive(Resource, Debug)]
 struct SlConfig {
-    /// The login parameters.
-    params: LoginParams,
+    /// The login parameters of the startup login, if there is one.
+    params: Option<LoginParams>,
     /// Whether to collect protocol diagnostics.
     diagnostics: bool,
     /// What the session does to its circuits from the start.
@@ -850,6 +895,10 @@ struct NetLink {
     command_tx: Sender<Command>,
     /// Everything the network thread reports back.
     outbound_rx: Receiver<NetOutbound>,
+    /// Whether this link's session has ended — logged out, disconnected, or
+    /// stopped for an answer — so that its thread's exit is expected
+    /// teardown, and a new [`SlLogin`] may replace it.
+    ended: bool,
 }
 
 /// One message from the network thread to the Bevy side, drained by
@@ -988,15 +1037,77 @@ const NET_TICK: Duration = Duration::from_millis(15);
 /// socket / CAPS / timers / commands continuously — LLUDP parse, ACKs and
 /// retransmits no longer wait for a render frame, and the chat-log /
 /// inventory-cache disk writes stay off the frame thread.
-fn start_login(mut commands: Commands, config: Res<SlConfig>) {
+fn start_login(mut commands: Commands, config: Res<SlConfig>, mut status: ResMut<SlSessionStatus>) {
     // Offline (replay) mode: register nothing on the wire — no thread, so
     // `drive` is a no-op and the session is fed only by synthetic `SlEvent`s
-    // injected by the replay loader.
-    if config.offline {
-        commands.insert_resource(SlState { link: None });
-        return;
+    // injected by the replay loader. Without parameters there is nobody to log
+    // in as until an `SlLogin` names somebody.
+    let link = match (&config.params, config.offline) {
+        (Some(params), false) => {
+            let link = spawn_session(&config, params.clone(), config.account_dirs.clone());
+            *status = if link.is_some() {
+                SlSessionStatus::LoggingIn
+            } else {
+                SlSessionStatus::Ended
+            };
+            link
+        }
+        (_, true) => {
+            *status = SlSessionStatus::Running;
+            None
+        }
+        (None, false) => None,
+    };
+    commands.insert_resource(SlState { link });
+}
+
+/// Update system: start the login an [`SlLogin`] asks for, in place of a link
+/// whose session has ended, with the identity and the region mirrors cleared
+/// of what an earlier session left in them.
+fn start_requested_login(
+    mut requests: MessageReader<SlLogin>,
+    config: Res<SlConfig>,
+    mut state: ResMut<SlState>,
+    mut identity: ResMut<SlIdentity>,
+    mut agent_parcel: ResMut<SlAgentParcel>,
+    mut granted: ResMut<SlGrantedCapabilities>,
+    mut status: ResMut<SlSessionStatus>,
+) {
+    for request in requests.read() {
+        if config.offline {
+            tracing::warn!("a login was asked for in an offline session; not started");
+            continue;
+        }
+        if state.link.as_ref().is_some_and(|link| !link.ended) {
+            tracing::warn!("a login was asked for while a session is live; not started");
+            continue;
+        }
+        *identity = SlIdentity::default();
+        *agent_parcel = SlAgentParcel::default();
+        *granted = SlGrantedCapabilities::default();
+        // Dropping the old link closes its command channel, which an ended
+        // session's thread has already left anyway.
+        state.link = spawn_session(
+            &config,
+            request.params.clone(),
+            request.account_dirs.clone(),
+        );
+        *status = if state.link.is_some() {
+            SlSessionStatus::LoggingIn
+        } else {
+            SlSessionStatus::Ended
+        };
     }
-    let mut session = Session::new(config.params.clone());
+}
+
+/// Build the session for `params` and spawn its network thread, returning the
+/// link to it — or `None`, logged, when the thread cannot be spawned.
+fn spawn_session(
+    config: &SlConfig,
+    params: LoginParams,
+    account_dirs: Option<AccountDirsConfig>,
+) -> Option<NetLink> {
+    let mut session = Session::new(params);
     session.set_diagnostics(config.diagnostics);
     session.probe_circuits(config.circuit_probe);
     session.set_region_handshake_reply_flags(config.region_handshake_reply_flags);
@@ -1007,7 +1118,7 @@ fn start_login(mut commands: Commands, config: Res<SlConfig>) {
     let net_config = NetThreadConfig {
         chat_log_config: config.chat_log_config.clone(),
         directories: config.directories.clone(),
-        account_dirs: config.account_dirs.clone(),
+        account_dirs,
         inventory_cache_config: config.inventory_cache_config,
         requested_capabilities: Arc::clone(&config.requested_capabilities),
     };
@@ -1018,15 +1129,13 @@ fn start_login(mut commands: Commands, config: Res<SlConfig>) {
     });
     if let Err(error) = spawned {
         tracing::error!("could not spawn the session network thread: {error}");
-        commands.insert_resource(SlState { link: None });
-        return;
+        return None;
     }
-    commands.insert_resource(SlState {
-        link: Some(NetLink {
-            command_tx,
-            outbound_rx,
-        }),
-    });
+    Some(NetLink {
+        command_tx,
+        outbound_rx,
+        ended: false,
+    })
 }
 
 /// The dedicated session network thread: the blocking XML-RPC login, then the
@@ -1107,13 +1216,13 @@ struct SlSinks<'w> {
 /// work (LLUDP parse, CAPS ingestion, timers, disk caches) happens on the
 /// thread; see [`run_network_thread`].
 fn drive(
-    state: Res<SlState>,
+    mut state: ResMut<SlState>,
     hold: Option<Res<SlEventHold>>,
     sinks: SlSinks,
     mut identity: ResMut<SlIdentity>,
     mut agent_parcel: ResMut<SlAgentParcel>,
     mut commands: MessageReader<SlCommand>,
-    mut session_ended: Local<bool>,
+    mut status: ResMut<SlSessionStatus>,
 ) {
     let SlSinks {
         mut events,
@@ -1124,9 +1233,10 @@ fn drive(
         mut mfa,
         mut rejected,
     } = sinks;
-    let Some(link) = &state.link else {
+    let Some(link) = &mut state.link else {
         return;
     };
+    let session_ended = &mut link.ended;
     for command in commands.read() {
         // A send failure means the thread is gone; the drain below surfaces it.
         if link.command_tx.send(command.0.clone()).is_err() {
@@ -1187,6 +1297,14 @@ fn drive(
             }
         }
     }
+    let now = if *session_ended {
+        SlSessionStatus::Ended
+    } else if identity.agent_id.is_some() {
+        SlSessionStatus::Running
+    } else {
+        SlSessionStatus::LoggingIn
+    };
+    status.set_if_neq(now);
 }
 
 /// Hand one report to the Bevy side.

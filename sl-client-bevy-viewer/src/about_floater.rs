@@ -86,9 +86,10 @@ const MONO_FONT: f32 = 12.0;
 // Data model.
 // ---------------------------------------------------------------------------
 
-/// Login-derived session facts for the support block, inserted by
-/// `run_session` before the app starts (absent in the gallery binary).
-#[derive(Resource, Clone)]
+/// Login-derived session facts for the support block, inserted when a login
+/// starts (`crate::login_flow::LoginScope`; absent before one, and in the
+/// gallery binary).
+#[derive(Resource, Clone, Debug)]
 pub(crate) struct AboutSessionInfo {
     /// The grid directory name derived from the login URI (`localhost`,
     /// `agni`, …).

@@ -12,9 +12,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 131 |
-| ready | 327 |
+| ready | 326 |
 | blocked | 36 |
-| in-progress | 4 |
+| in-progress | 5 |
 | bugs | 21 |
 | done | 1585 |
 | deferred | 30 |
@@ -317,7 +317,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-lsl-opensim-function-set`](ideas/gridspec-lsl-opensim-function-set.md)
   — Measure which library functions OpenSim's engines compile
 
-## ready (327)
+## ready (326)
 
 ### protocol
 
@@ -647,8 +647,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-local-textures`](ready/viewer-local-textures.md) — Local textures —
   file-backed textures with live reload (blocked by `viewer-ui-texture-picker`
   (done))
-- [`viewer-login-screen`](ready/viewer-login-screen.md) — Login screen — grid
-  select, saved credentials, MFA (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-lookat-faithful`](ready/viewer-lookat-faithful.md) — Faithful look-at
   (LLHUDEffectLookAt) (blocked by `viewer-camera-third-person-orbit` (done))
 - [`viewer-lsl-editor-save-compile`](ready/viewer-lsl-editor-save-compile.md) —
@@ -1228,10 +1226,13 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-voice`](blocked/gridspec-voice.md) — Voice provisioning and
   signalling on each grid (blocked by `viewer-voice-audio`)
 
-## in-progress (4)
+## in-progress (5)
 
 ### viewer
 
+- [`viewer-login-screen`](in-progress/viewer-login-screen.md) — Login screen —
+  grid select, saved credentials, MFA (blocked by `viewer-ui-widget-scaffold`
+  (done))
 - [`viewer-ui-text-caret-grapheme-motion`](in-progress/viewer-ui-text-caret-grapheme-motion.md)
   — Upstream issue — parley caret motion steps one codepoint, not one grapheme
 - [`viewer-ui-text-parley-pr-backdelete`](in-progress/viewer-ui-text-parley-pr-backdelete.md)

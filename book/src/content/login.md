@@ -88,6 +88,16 @@ a TOML file (with an optional `mfa_command` per avatar) and, when too little of
 the current window remains, waiting out its tail before generating the token so
 the re-submitted login survives the round-trip.
 
+The Bevy runtime answers a challenge without leaving the app: its
+`SlClientPlugin` reports `SlMfaChallenge`, and the app sends an `SlLogin`
+whose request carries the token, which starts the next attempt in place of the
+ended one (`SlSessionStatus` says which stage the app is at). A plugin built
+with no `params` starts no login until a first `SlLogin`, which is how the
+viewer's login screen logs in. The viewer answers a challenge this way on both
+roads in, the credentials file's `mfa_command` and the screen's prompt: a
+windowed viewer cannot build a second app, because winit allows one event
+loop per process.
+
 ## The server side
 
 The same codec works in the grid direction, so a login *server* (a fake grid,

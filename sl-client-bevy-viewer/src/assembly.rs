@@ -74,9 +74,8 @@ use bevy::render::pipelined_rendering::PipelinedRenderingPlugin;
 use bevy::window::{CursorGrabMode, CursorOptions, ExitCondition};
 use bevy::winit::WinitPlugin;
 use sl_client_bevy::{
-    AccountDirsConfig, AnimationKey, ChatLogConfig, ClientDirectories, InventoryCacheConfig,
-    LoggedChatType, LoginFailure, LoginParams, MfaChallenge, SlClientPlugin, SlLoginRejected,
-    SlMfaChallenge, Uuid,
+    AnimationKey, ChatLogConfig, ClientDirectories, InventoryCacheConfig, LoggedChatType,
+    LoginFailure, LoginParams, SlClientPlugin, SlLoginRejected, Uuid,
 };
 use tracing::warn;
 
@@ -90,9 +89,10 @@ use crate::avatar_assets::AvatarAssetLibrary;
 use crate::avatar_overrides::AvatarOverrides;
 use crate::camera::{CameraSpin, CameraStart};
 use crate::input_context::CursorGrabAllowed;
+pub use crate::login_flow::{SecondFactor, ViewerLogin};
 use crate::render_overrides::RenderOverrides;
 use crate::session::PlayOnLogin;
-use crate::settings::{AccountContext, SettingsAgent, ViewerSettings, load_account_settings};
+use crate::settings::{SettingsAgent, ViewerSettings, load_account_settings};
 use crate::viewer_camera::viewer_camera_bundle;
 use crate::viewer_plugins::{
     ViewerEditPlugins, ViewerInputPlugins, ViewerRenderPlugins, ViewerShellPlugins,
@@ -319,9 +319,10 @@ impl Default for MediaRuntime {
 /// interactive viewer; a harness changes the fields it has a reason to.
 #[derive(Debug)]
 pub struct ViewerAppOptions {
-    /// Who logs in, where, and as which viewer. A replay run carries a
-    /// placeholder the offline plugin never uses.
-    pub params: LoginParams,
+    /// Who logs in, where, and as which viewer — at startup, or from the
+    /// login screen. A replay run carries a placeholder the offline plugin
+    /// never uses.
+    pub login: ViewerLogin,
     /// What the session is fed beside the login.
     pub content: SessionContent,
     /// The unattended capture harness, if this is a capture run.
@@ -366,13 +367,22 @@ pub struct ViewerAppOptions {
 }
 
 impl ViewerAppOptions {
-    /// The interactive viewer logging in with `params`: a window, the user's
-    /// directories, sound, every media engine, the vendored avatar bodies and
-    /// the render knobs from the environment.
+    /// The interactive viewer logging in with `params` at startup: a window,
+    /// the user's directories, sound, every media engine, the vendored avatar
+    /// bodies and the render knobs from the environment.
     #[must_use]
     pub fn new(params: LoginParams) -> Self {
+        Self::with_login(ViewerLogin::Now {
+            params: Box::new(params),
+            second_factor: None,
+        })
+    }
+
+    /// The interactive viewer, logging in as `login` says.
+    #[must_use]
+    pub fn with_login(login: ViewerLogin) -> Self {
         Self {
-            params,
+            login,
             content: SessionContent {
                 viewer_assets: default_viewer_assets(),
                 fetch_server_chat_history: true,
@@ -402,12 +412,13 @@ pub struct ViewerAppBuilder {
     options: ViewerAppOptions,
 }
 
-/// The recoverable outcome of one session: an MFA challenge to answer or a
-/// retryable login rejection, either of which stops the app.
+/// The recoverable outcome of a viewer started with credentials: a retryable
+/// login rejection, which stops the app — nobody is there to decide whether
+/// to try again. (A second-factor challenge is answered inside the app,
+/// [`crate::login_flow`]; a viewer on its login screen reports a rejection
+/// there.)
 #[derive(Resource, Debug, Default, Clone)]
 pub struct LoginOutcome {
-    /// The MFA challenge the session stopped on, if any.
-    pub challenge: Option<MfaChallenge>,
     /// The retryable "already logged in" rejection, if any.
     pub rejected: Option<LoginFailure>,
 }
@@ -456,7 +467,7 @@ impl ViewerAppBuilder {
     /// The whole of [`build`](Self::build) but the span.
     fn assemble(options: ViewerAppOptions) -> Result<App, Error> {
         let ViewerAppOptions {
-            params,
+            login,
             content,
             capture,
             camera,
@@ -510,16 +521,26 @@ impl ViewerAppBuilder {
         // request) and resolved to the avatar's directory at login, once the UUID is
         // known — by the plugin (`account_dirs`, for chat / inventory) and the
         // settings account-scope loader (`AccountContext` + `load_account_settings`).
-        let grid = sl_account_dirs::grid_dir_name(&params.login_uri);
-        let avatar =
-            sl_account_dirs::avatar_dir_name(&params.request.first_name, &params.request.last_name);
-        let account_dirs = stores_anything.then(|| AccountDirsConfig {
-            grid: grid.clone(),
-            avatar: avatar.clone(),
-            chat_log_base: paths.state_accounts_base(),
-            inventory_cache_base: paths.cache_accounts_base(),
-        });
-        let config_accounts_base = paths.config_accounts_base();
+        // A viewer on its login screen derives all of this when its user logs in
+        // (`crate::login_screen`); one started with credentials, now.
+        let (params, second_factor) = match login {
+            ViewerLogin::Now {
+                params,
+                second_factor,
+            } => (Some(*params), second_factor),
+            ViewerLogin::Screen => (None, None),
+        };
+        let scope = params
+            .as_ref()
+            .map(|params| crate::login_flow::LoginScope::of(params, &paths));
+        let account_dirs = scope.as_ref().and_then(|scope| scope.account_dirs.clone());
+        let scene_identity = params
+            .as_ref()
+            .map(|params| crate::scene_dump::DumpIdentity {
+                channel: params.request.channel.clone(),
+                version: params.request.version.clone(),
+                grid: sl_account_dirs::grid_dir_name(&params.login_uri),
+            });
 
         // Resolve the system time zone now, while the process is still single-threaded:
         // it reads the `TZ` environment variable, and reading the environment is only
@@ -547,27 +568,31 @@ impl ViewerAppBuilder {
         app.insert_resource(render_overrides);
         // Likewise the avatar debug knobs.
         app.insert_resource(avatar_overrides.unwrap_or_else(AvatarOverrides::from_env));
-        // The About floater's login-derived facts (grid, login URI, reported
-        // channel/version) — captured here where they are all still at hand.
-        if automation != Automation::Off {
-            // Who a hello names: this viewer, the grid, and the avatar it logs
-            // in as.
-            app.insert_resource(sl_viewer_automation::AutomationIdentity {
-                viewer: crate::build_info::VIEWER_NAME.to_owned(),
-                version: crate::build_info::full_version(),
-                grid: Some(grid.clone()),
-                agent_name: Some(format!(
-                    "{} {}",
-                    params.request.first_name, params.request.last_name
-                )),
+        // What the login decides beside the session — the per-avatar settings'
+        // identity, the land cache, the About floater's facts and who an
+        // automation hello names — inserted before any plugin initialises its
+        // own default of them. A viewer on its login screen holds placeholders
+        // until its user logs in.
+        let automated = automation != Automation::Off;
+        if let Some(scope) = scope {
+            scope.insert(app.world_mut(), automated);
+        } else {
+            let (account_context, identity) = crate::login_flow::LoginScope::before_login();
+            app.insert_resource(account_context);
+            if automated {
+                app.insert_resource(identity);
+            }
+            app.insert_resource(sl_viewer_world_view::session::LoginScreen);
+        }
+        if let Some(params) = &params {
+            app.insert_resource(crate::login_flow::PendingLogin {
+                params: params.clone(),
+                account_dirs: account_dirs.clone(),
             });
         }
-        app.insert_resource(crate::about_floater::AboutSessionInfo {
-            grid: grid.clone(),
-            login_uri: params.login_uri.to_string(),
-            channel: params.request.channel.clone(),
-            version: params.request.version.clone(),
-        });
+        if let Some(second_factor) = second_factor {
+            app.insert_resource(crate::login_flow::SecondFactorSource(second_factor));
+        }
         let default_plugins = DefaultPlugins
             // Resolve the viewer's own `assets/` (icons, locales, skins) rather
             // than inheriting Bevy's executable-relative default, which a binary
@@ -789,21 +814,6 @@ impl ViewerAppBuilder {
             // (`sl_viewer_automation::ProbeSources`). Plain function pointers,
             // run only when a probe asks, so every viewer carries them.
             .insert_resource(crate::automation_sources::probe_sources())
-            // The per-avatar account identity (grid + name + accounts root), used by
-            // `load_account_settings` to locate the account-scope settings once the
-            // agent UUID is known at login. No accounts root, no account scope.
-            // The land-height cache on disk, for this grid: region handles are
-            // grid coordinates, so another grid's file would be another region.
-            .insert_resource(
-                sl_viewer_world_scene::terrain_disk_cache::TerrainDiskCache::new(
-                    paths.terrain_cache_dir(&grid),
-                ),
-            )
-            .insert_resource(AccountContext {
-                accounts_base: config_accounts_base,
-                grid,
-                avatar,
-            })
             // The viewer settings store (viewer-ui-settings-store), the reference's
             // `gSavedSettings`: registers each feature's settings and loads any persisted
             // global overrides (e.g. SpaceNavigator sensitivities). `REGISTRARS` is the
@@ -847,7 +857,15 @@ impl ViewerAppBuilder {
                 repeat: repeat_animation,
             })
             .add_systems(Startup, setup_scene)
-            .add_systems(Update, capture_login_outcome)
+            // A challenge is answered in place; a rejection ends a run that has
+            // nobody to decide on a retry, and is the login screen's to report.
+            .add_systems(Update, crate::login_flow::answer_second_factor)
+            .add_systems(
+                Update,
+                capture_login_outcome.run_if(not(resource_exists::<
+                    sl_viewer_world_view::session::LoginScreen,
+                >)),
+            )
             // What the login brings waits for the strings: an offline offer's
             // card composed before the locale bundles load would show its keys
             // for good.
@@ -862,7 +880,6 @@ impl ViewerAppBuilder {
         // queue are carried out through the same synthetic input a headless
         // viewer installs, and answered with responses — to the caller, or
         // over the socket.
-        let automated = automation != Automation::Off;
         match automation {
             Automation::Off => {}
             Automation::InProcess => {
@@ -943,11 +960,13 @@ impl ViewerAppBuilder {
                     .scene_dump
                     .clone()
                     .unwrap_or_else(|| dir.join("scene.json")),
-                identity: crate::scene_dump::DumpIdentity {
-                    channel: params.request.channel.clone(),
-                    version: params.request.version.clone(),
-                    grid: sl_account_dirs::grid_dir_name(&params.login_uri),
-                },
+                // A capture logs in with credentials; one started on the login
+                // screen names whatever grid it is on as nothing.
+                identity: scene_identity.unwrap_or_else(|| crate::scene_dump::DumpIdentity {
+                    channel: String::new(),
+                    version: String::new(),
+                    grid: String::new(),
+                }),
             });
         } else if capture.scene_dump.is_some() {
             // A dump describes the scene a capture's last frame was taken from, so
@@ -1195,19 +1214,13 @@ fn release_session_hold(
     commands.remove_resource::<sl_client_bevy::SlEventHold>();
 }
 
-/// Capture a login-stopping outcome (MFA challenge or retryable rejection) into
-/// the [`LoginOutcome`] resource and exit the app so the caller can restart the
-/// login with the answer folded in.
+/// Capture a retryable rejection into the [`LoginOutcome`] resource and exit the
+/// app, for its caller to report.
 fn capture_login_outcome(
-    mut mfa: MessageReader<SlMfaChallenge>,
     mut rejected: MessageReader<SlLoginRejected>,
     mut outcome: ResMut<LoginOutcome>,
     mut exit: MessageWriter<AppExit>,
 ) {
-    for challenge in mfa.read() {
-        outcome.challenge = Some(challenge.0.clone());
-        exit.write(AppExit::Success);
-    }
     for rejection in rejected.read() {
         outcome.rejected = Some(rejection.0.clone());
         exit.write(AppExit::Success);

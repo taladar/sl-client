@@ -130,7 +130,7 @@ mod test {
             let mut app = App::new();
             app.add_plugins(MinimalPlugins)
                 .add_plugins(SlClientPlugin {
-                    params,
+                    params: Some(params),
                     diagnostics: false,
                     circuit_probe: sl_client_bevy::CircuitProbe::Off,
                     region_handshake_reply_flags:

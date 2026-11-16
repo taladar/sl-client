@@ -2,7 +2,7 @@
 id: viewer-login-screen
 title: Login screen — grid select, saved credentials, MFA
 topic: viewer
-status: ready
+status: in-progress
 origin: user request (2026-07)
 blocked_by: [viewer-ui-widget-scaffold]
 ---
@@ -105,3 +105,19 @@ binary never answered a challenge (it read the login outcome after `App::run`
 had emptied the App), and the bevy client raced the challenge against a
 spurious `Disconnected(ProtocolError)`. When the prompt lands, that test is
 the one to extend to drive it.
+
+## Progress (2026-11-16)
+
+The login now happens inside the one App, which the panel needs: winit allows
+one event loop per process and `bevy_winit` builds it when its plugin is
+added, so the old answer to an MFA challenge — a new App with the token folded
+in — would have panicked in a windowed viewer (`RecreationAttempt`); only the
+headless and in-process runs the e2e tests use had ever answered one.
+`SlClientPlugin::params` is optional and an `SlLogin` starts a login (again
+after a challenge, a rejection or a failure); `SlSessionStatus` says where the
+session stands. The viewer's `ViewerLogin::Now` keeps the credentials path —
+no panel — and answers a challenge in place from a `SecondFactor` source (the
+avatar's `mfa_command`, or a stage's token); `ViewerLogin::Screen` starts with
+no login and the `LoginScreen` marker, under which a login failing before
+arrival leaves the window open and a quit with nothing live exits at once. The
+panel itself is still to build.

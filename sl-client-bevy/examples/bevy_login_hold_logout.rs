@@ -52,7 +52,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _exit = App::new()
         .add_plugins(MinimalPlugins.set(ScheduleRunnerPlugin::run_loop(Duration::from_millis(10))))
         .add_plugins(SlClientPlugin {
-            params,
+            params: Some(params),
             diagnostics: false,
             circuit_probe: sl_client_bevy::CircuitProbe::Off,
             region_handshake_reply_flags: sl_client_bevy::RegionHandshakeReplyFlags::CLIENT_DEFAULT,

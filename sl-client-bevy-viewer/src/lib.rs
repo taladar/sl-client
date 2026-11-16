@@ -45,6 +45,7 @@ pub(crate) use sl_viewer_places::top_objects;
 pub(crate) use sl_viewer_world_avatar::animations;
 pub(crate) use sl_viewer_world_avatar::avatar_overrides;
 pub mod assembly;
+pub mod login_flow;
 /// Every module that declares settings, in registration order.
 ///
 /// This list lives here rather than in `settings` because a store that
@@ -429,8 +430,8 @@ use tracing::{info, warn};
 use tracing_subscriber::{EnvFilter, layer::SubscriberExt as _, util::SubscriberInitExt as _};
 
 use crate::assembly::{
-    Automation, CaptureStartup, MediaRuntime, Storage, ViewerAppBuilder, ViewerAppOptions,
-    ViewerPaths, WindowMode,
+    Automation, CaptureStartup, MediaRuntime, SecondFactor, Storage, ViewerAppBuilder,
+    ViewerAppOptions, ViewerLogin, ViewerPaths, WindowMode,
 };
 use crate::camera::{CameraSpin, CameraStart, SpinAxis};
 
@@ -458,9 +459,6 @@ pub enum Error {
         #[from]
         url::ParseError,
     ),
-    /// The grid issued an MFA challenge but the avatar has no `mfa_command`.
-    #[error("the grid requires multi-factor authentication but no mfa_command is configured")]
-    MfaRequired,
     /// A `--replay` bundle could not be loaded (missing directory, no manifests,
     /// or an unreadable / unsupported manifest).
     #[error("replay bundle error: {0}")]
@@ -935,8 +933,8 @@ fn capture_content(options: &Options) -> crate::screenshot::CaptureContent {
 /// The builder options every command-line run shares: the interactive
 /// viewer's, with what the command line says about the capture, the camera's
 /// spin and lens, the avatar art and animations, and the skin watch.
-fn cli_app_options(options: &Options, params: LoginParams) -> ViewerAppOptions {
-    let mut app_options = ViewerAppOptions::new(params);
+fn cli_app_options(options: &Options, login: ViewerLogin) -> ViewerAppOptions {
+    let mut app_options = ViewerAppOptions::with_login(login);
     app_options
         .content
         .viewer_assets
@@ -1048,7 +1046,7 @@ fn run_viewer(options: &Options) -> Result<(), Error> {
             crate::preferences_colors_skins::stored_skin_choice(&settings);
         (start, stored_skin, stored_theme, paths)
     };
-    let mut request = LoginRequest::new(
+    let request = LoginRequest::new(
         avatar.first().to_owned(),
         avatar.last().to_owned(),
         avatar.password().expose().to_owned(),
@@ -1056,57 +1054,63 @@ fn run_viewer(options: &Options) -> Result<(), Error> {
         options.channel.clone(),
         options.version.clone(),
     );
-    loop {
-        info!(
-            "logging in as {} {} to {login_uri}",
-            avatar.first(),
-            avatar.last()
+    info!(
+        "logging in as {} {} to {login_uri}",
+        avatar.first(),
+        avatar.last()
+    );
+    let params = LoginParams {
+        login_uri: login_uri.parse()?,
+        request,
+    };
+    // A challenge is answered inside the one App (`login_flow`): a windowed
+    // viewer cannot build a second, since winit allows one event loop per
+    // process.
+    let second_factor = {
+        let avatar = avatar.clone();
+        SecondFactor::new(move || {
+            avatar
+                .acquire_mfa()
+                .map(|token| token.map(|token| token.expose().to_owned()))
+                .map_err(|error| error.to_string())
+        })
+    };
+    let mut app_options = cli_app_options(
+        options,
+        ViewerLogin::Now {
+            params: Box::new(params),
+            second_factor: Some(second_factor),
+        },
+    );
+    app_options.storage = Storage::Directories(paths);
+    app_options.automation = automation;
+    app_options.content.fetch_server_chat_history = !options.no_group_chat_history;
+    app_options.camera.start = fixed_camera_start(options).unwrap_or_default();
+    // The debug framing knobs (`SL_VIEWER_CAMERA_ORBIT_DEG` and friends).
+    app_options.camera.start.orbit = sl_viewer_world_api::OrbitSeed::from_env();
+    app_options.skin.selection = crate::skin::SkinSelection::resolve(
+        options.skin.clone(),
+        options.theme.clone(),
+        stored_skin,
+        stored_theme,
+    );
+    app_options.media = MediaRuntime {
+        web: !options.disable_web_media,
+        video: !options.disable_video_media,
+        web_auth: !options.no_web_auth,
+    };
+    let outcome = ViewerAppBuilder::from_options(app_options).build()?.run()?;
+    if let Some(rejection) = outcome.rejected {
+        // Nobody is there to decide on a retry, so a retryable rejection is
+        // reported and the run ends rather than looping (a rapid re-login may
+        // be flagged by the grid). Logged at `error!` so a launch that fails
+        // login — e.g. an OpenSim stale-presence block on a too-quick re-login
+        // — is unmistakable in the log even at `RUST_LOG=error`, rather than
+        // looking like a silent early exit.
+        error!(
+            "login rejected: {} ({}); the viewer will exit without connecting",
+            rejection.reason, rejection.message
         );
-        let params = LoginParams {
-            login_uri: login_uri.parse()?,
-            request: request.clone(),
-        };
-        let mut app_options = cli_app_options(options, params);
-        app_options.storage = Storage::Directories(paths.clone());
-        app_options.automation = automation.clone();
-        app_options.content.fetch_server_chat_history = !options.no_group_chat_history;
-        app_options.camera.start = fixed_camera_start(options).unwrap_or_default();
-        // The debug framing knobs (`SL_VIEWER_CAMERA_ORBIT_DEG` and friends).
-        app_options.camera.start.orbit = sl_viewer_world_api::OrbitSeed::from_env();
-        app_options.skin.selection = crate::skin::SkinSelection::resolve(
-            options.skin.clone(),
-            options.theme.clone(),
-            stored_skin.clone(),
-            stored_theme.clone(),
-        );
-        app_options.media = MediaRuntime {
-            web: !options.disable_web_media,
-            video: !options.disable_video_media,
-            web_auth: !options.no_web_auth,
-        };
-        let outcome = ViewerAppBuilder::from_options(app_options).build()?.run()?;
-        if let Some(challenge) = outcome.challenge {
-            info!(
-                "multi-factor authentication required: {}",
-                challenge.message
-            );
-            let token = avatar.acquire_mfa()?.ok_or(Error::MfaRequired)?;
-            request = request.with_mfa(token.expose(), challenge.mfa_hash);
-            continue;
-        }
-        if let Some(rejection) = outcome.rejected {
-            // The viewer has no interactive prompt, so a retryable rejection is
-            // reported and the run ends rather than looping (a rapid re-login
-            // may be flagged by the grid). Logged at `error!` so a launch that
-            // fails login — e.g. an OpenSim stale-presence block on a too-quick
-            // re-login — is unmistakable in the log even at `RUST_LOG=error`,
-            // rather than looking like a silent early exit.
-            error!(
-                "login rejected: {} ({}); the viewer will exit without connecting",
-                rejection.reason, rejection.message
-            );
-        }
-        break;
     }
     info!("session ended");
     Ok(())
@@ -1166,7 +1170,13 @@ fn run_replay(options: &Options, bundle_dir: &Path) -> Result<(), Error> {
             options.version.clone(),
         ),
     };
-    let mut app_options = cli_app_options(options, params);
+    let mut app_options = cli_app_options(
+        options,
+        ViewerLogin::Now {
+            params: Box::new(params),
+            second_factor: None,
+        },
+    );
     app_options.automation = cli_automation(options)?;
     // Offline there is no session thread, so the flag is inert; false keeps the
     // no-network intent explicit.

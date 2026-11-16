@@ -14,7 +14,11 @@
 //!   on the grid's `LogoutReply`, or on the session's own timeout where a grid
 //!   sends none (or after a grace beyond that, so a session that has stopped
 //!   reporting can never wedge the window open);
-//! - exit on any `LoggedOut` / `Disconnected`.
+//! - exit on any `LoggedOut` / `Disconnected` — except a login that fails
+//!   before the agent arrives in a viewer showing the login screen
+//!   ([`LoginScreen`]), which goes back to the screen to say why;
+//! - exit at once on a quit with no session live, which has nothing to log
+//!   out of.
 //!
 //! Rendering the scene (terrain, prims, meshes, sculpts, avatars, chat) lands
 //! in later phases.
@@ -23,7 +27,7 @@ use bevy::prelude::*;
 use bevy::window::{PrimaryWindow, WindowCloseRequested};
 use sl_client_bevy::{
     AnimationKey, Camera, Command, Distance, LOGOUT_TIMEOUT, SlCapabilities, SlCommand, SlEvent,
-    SlIdentity, SlSessionEvent,
+    SlIdentity, SlSessionEvent, SlSessionStatus,
 };
 use sl_settings::SettingValue;
 use sl_viewer_social::MuteModel;
@@ -92,6 +96,13 @@ pub struct ViewerSession {
     /// requested.
     quit_deadline: Option<f32>,
 }
+
+/// Present while the viewer was started on its login screen rather than with
+/// credentials: a login that ends before the agent arrives — a refused
+/// password, an unreachable grid — is the screen's to report, so the session
+/// driver leaves the window open instead of exiting.
+#[derive(Debug, Resource, Default, Clone, Copy)]
+pub struct LoginScreen;
 
 /// Where the login-time read of the kept messages stands
 /// ([`request_offline_messages`]).
@@ -588,15 +599,22 @@ pub fn save_settings_on_exit(mut exit: MessageReader<AppExit>, settings: Res<Vie
 }
 
 /// Force the app to exit once the post-quit grace period has elapsed, in case a
-/// `LoggedOut` never arrives.
+/// `LoggedOut` never arrives — or at once, when no session is live and there
+/// is no logout to wait for (a quit from the login screen, or after a login
+/// that failed). Without the runtime's status every quit waits as a live one.
 pub fn enforce_quit_deadline(
     time: Res<Time>,
     session: Res<ViewerSession>,
+    status: Option<Res<SlSessionStatus>>,
     mut exit: MessageWriter<AppExit>,
 ) {
-    if let Some(deadline) = session.quit_deadline
-        && time.elapsed_secs() >= deadline
-    {
+    let Some(deadline) = session.quit_deadline else {
+        return;
+    };
+    if status.is_some_and(|status| !status.is_live()) {
+        info!("quit with no session live; exiting");
+        exit.write(AppExit::Success);
+    } else if time.elapsed_secs() >= deadline {
         warn!("logout not acknowledged within grace period; exiting anyway");
         exit.write(AppExit::Success);
     }
@@ -657,6 +675,7 @@ pub fn drive_session(
     identity: Res<SlIdentity>,
     mut session: ResMut<ViewerSession>,
     play_on_login: Res<PlayOnLogin>,
+    login_screen: Option<Res<LoginScreen>>,
     mut commands: MessageWriter<SlCommand>,
     mut exit: MessageWriter<AppExit>,
 ) {
@@ -695,6 +714,11 @@ pub fn drive_session(
             SlSessionEvent::LoggedOut => {
                 info!("logged out cleanly; exiting");
                 exit.write(AppExit::Success);
+            }
+            SlSessionEvent::Disconnected(reason)
+                if login_screen.is_some() && !session.agent_in_world =>
+            {
+                warn!("the login ended before arrival ({reason:?}); back to the login screen");
             }
             SlSessionEvent::Disconnected(reason) => {
                 warn!("disconnected ({reason:?}); exiting");
