@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 131 |
-| ready | 326 |
-| blocked | 36 |
-| in-progress | 5 |
+| ready | 328 |
+| blocked | 34 |
+| in-progress | 4 |
 | bugs | 21 |
-| done | 1587 |
+| done | 1588 |
 | deferred | 30 |
 | wont-do | 24 |
 | **total** | **2160** |
@@ -317,7 +317,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-lsl-opensim-function-set`](ideas/gridspec-lsl-opensim-function-set.md)
   — Measure which library functions OpenSim's engines compile
 
-## ready (326)
+## ready (328)
 
 ### protocol
 
@@ -647,6 +647,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-local-textures`](ready/viewer-local-textures.md) — Local textures —
   file-backed textures with live reload (blocked by `viewer-ui-texture-picker`
   (done))
+- [`viewer-login-refusal-localised-text`](ready/viewer-login-refusal-localised-text.md)
+  — Show a login refusal in the user's language from its message_id (blocked by
+  `viewer-login-screen` (done))
+- [`viewer-login-tos`](ready/viewer-login-tos.md) — Login TOS / critical-message
+  acceptance (blocked by `viewer-login-screen` (done))
 - [`viewer-lookat-faithful`](ready/viewer-lookat-faithful.md) — Faithful look-at
   (LLHUDEffectLookAt) (blocked by `viewer-camera-third-person-orbit` (done))
 - [`viewer-lsl-editor-save-compile`](ready/viewer-lsl-editor-save-compile.md) —
@@ -1108,7 +1113,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-sl-mfa-challenge`](ready/gridspec-sl-mfa-challenge.md) — Record
   Second Life's MFA challenge and whether a remembered mfa_hash gets past it
 
-## blocked (36)
+## blocked (34)
 
 ### viewer
 
@@ -1128,11 +1133,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Key-binding configuration UI (blocked by `viewer-input-rebinding-persistence`,
   `viewer-input-conflict-detection`, `viewer-ui-text-input-widget` (done),
   `viewer-ui-settings-binding` (done))
-- [`viewer-login-refusal-localised-text`](blocked/viewer-login-refusal-localised-text.md)
-  — Show a login refusal in the user's language from its message_id (blocked by
-  `viewer-login-screen`)
-- [`viewer-login-tos`](blocked/viewer-login-tos.md) — Login TOS /
-  critical-message acceptance (blocked by `viewer-login-screen`)
 - [`viewer-mesh-lod-decimation`](blocked/viewer-mesh-lod-decimation.md) — LOD
   decimation via meshoptimizer (blocked by `viewer-mesh-gltf-import`)
 - [`viewer-mesh-physics-vhacd`](blocked/viewer-mesh-physics-vhacd.md) — Physics
@@ -1226,13 +1226,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-voice`](blocked/gridspec-voice.md) — Voice provisioning and
   signalling on each grid (blocked by `viewer-voice-audio`)
 
-## in-progress (5)
+## in-progress (4)
 
 ### viewer
 
-- [`viewer-login-screen`](in-progress/viewer-login-screen.md) — Login screen —
-  grid select, saved credentials, MFA (blocked by `viewer-ui-widget-scaffold`
-  (done))
 - [`viewer-ui-text-caret-grapheme-motion`](in-progress/viewer-ui-text-caret-grapheme-motion.md)
   — Upstream issue — parley caret motion steps one codepoint, not one grapheme
 - [`viewer-ui-text-parley-pr-backdelete`](in-progress/viewer-ui-text-parley-pr-backdelete.md)
@@ -1300,7 +1297,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1587)
+## done (1588)
 
 ### protocol
 
@@ -2392,6 +2389,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-url-linkification` (done))
 - [`viewer-login-saved-passwords`](done/viewer-login-saved-passwords.md) — Login
   screen — remember the password (blocked by `viewer-secret-store` (done))
+- [`viewer-login-screen`](done/viewer-login-screen.md) — Login screen — grid
+  select, saved credentials, MFA (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-login-voice-config-unread`](done/viewer-login-voice-config-unread.md)
   — The login response's voice-config is decoded and read by nobody
 - [`viewer-lsl-diagnostics`](done/viewer-lsl-diagnostics.md) — LSL diagnostics —

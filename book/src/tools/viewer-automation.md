@@ -78,6 +78,10 @@ object[name=Door][near=own_avatar][radius=5]
 ```
 
 `~=` is "contains"; a value is bare when it is plain and quoted otherwise.
+The state filters are `enabled`, `checked`, `selected`, `expanded`, `focused`
+and `drawn`. The last is any visibility but hidden, which picks the shown
+screen's menu bar (`menubar[drawn=true]`) while another screen's bar is kept
+hidden; a menu path scopes its first step that way.
 
 **Locators are strict**: an action on a locator that matches two nodes is an
 error listing both, never "the first one". Name a row (`[name~=…]`) or pick
@@ -115,7 +119,8 @@ nothing runs while none are queued.
   landed, in that region's metres.
 - **Waits** run in the viewer, a predicate over the model each frame with a
   frame and a wall deadline: a node attached, detached, visible, hidden,
-  enabled, disabled, checked, holding a text; a world thing present or gone;
+  enabled, disabled, checked, focused, holding a text; a world thing present
+  or gone;
   a probe's readout holding a value at a JSON pointer. A test never sleeps.
 - **Probes** read the viewer's models, not its widgets: `agent` (region,
   position, seat, teleport, camera mode and eye, heading), `status`,

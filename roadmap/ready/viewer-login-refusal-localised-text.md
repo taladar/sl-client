@@ -2,7 +2,7 @@
 id: viewer-login-refusal-localised-text
 title: Show a login refusal in the user's language from its message_id
 topic: viewer
-status: blocked
+status: ready
 origin: gridspec-login-refusals (2026-10-06)
 refs: [gridspec-login-refusals, viewer-notification-catalogue-login-session]
 blocked_by: [viewer-login-screen]

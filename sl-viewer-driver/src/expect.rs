@@ -183,6 +183,20 @@ impl UiExpect {
         .await
     }
 
+    /// A matching node has the keyboard focus.
+    ///
+    /// # Errors
+    ///
+    /// As [`to_be_attached`](Self::to_be_attached).
+    pub async fn to_be_focused(self) -> Result<Vec<UiNode>, DriverError> {
+        self.hold(
+            self.query().focused(true),
+            WaitCondition::Attached,
+            "be focused",
+        )
+        .await
+    }
+
     /// A matching node is not checked.
     ///
     /// # Errors

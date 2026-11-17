@@ -2,7 +2,7 @@
 id: viewer-login-tos
 title: Login TOS / critical-message acceptance
 topic: viewer
-status: blocked
+status: ready
 origin: Vintage-parity coverage audit (2026-07-22)
 blocked_by: [viewer-login-screen]
 ---

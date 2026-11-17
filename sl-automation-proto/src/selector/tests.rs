@@ -39,6 +39,7 @@ fn ui_shapes() -> Vec<Locator> {
         shapes.push(Locator::default().selected(wanted));
         shapes.push(Locator::default().expanded(wanted));
         shapes.push(Locator::default().focused(wanted));
+        shapes.push(Locator::default().drawn(wanted));
     }
     shapes.push(Locator::default().nth(0));
     shapes.push(Locator::default().nth(u32::MAX));
@@ -50,6 +51,7 @@ fn ui_shapes() -> Vec<Locator> {
         .selected(true)
         .expanded(false)
         .focused(true)
+        .drawn(true)
         .nth(2);
     let everything = Locator {
         test_id: Some("prefs.yes".to_owned()),
@@ -285,7 +287,7 @@ fn an_error_names_the_selector_and_the_column() {
         error.map(|error| error.to_string()),
         Some(
             "selector \"button[label=OK]\", column 8: unknown attribute `label` (known: name, \
-             name_key, test_id, enabled, checked, selected, expanded, focused, nth)"
+             name_key, test_id, enabled, checked, selected, expanded, focused, drawn, nth)"
                 .to_owned()
         )
     );

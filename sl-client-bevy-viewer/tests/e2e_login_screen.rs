@@ -6,10 +6,16 @@
 //!
 //! - **A login.** The page covers the world and hides the permanent chrome
 //!   until the agent arrives; then the page is gone and the menu bar is back.
+//!   Before it, the pre-login menu opens Preferences over the page and its
+//!   Close Window closes it again.
 //! - **A wrong password.** The grid's refusal is said on the panel, the
 //!   window stays open, and the next try with the right password gets in.
 //! - **A second factor.** A challenge shows the token row; the token typed
 //!   there is the same login again, and it gets in.
+//! - **The keyboard alone.** The name field has the keyboard when the page
+//!   opens and Log In is greyed until there is a name and a password; `Enter`
+//!   logs in, a refused password comes back selected, so one `Backspace`
+//!   clears it, and the next `Enter` gets in.
 //! - **A remembered password.** With Remember password ticked, the login that
 //!   arrives keeps its password in the stage's in-memory secret store; the
 //!   next session fills the field from it, and Log In alone gets in.
@@ -114,6 +120,17 @@ mod test {
                 .expect(&alpha.ui().test_id("menu-button:menu-bar-avatar"))
                 .to_be_hidden()
                 .await?;
+            // The pre-login menu: Preferences over the page, and Close Window
+            // closing it.
+            let preferences = alpha.ui().test_id("floater:preferences");
+            let _opened = alpha
+                .menu_path(&["login-menu-viewer", "menu-bar-preferences"])
+                .await?;
+            let _shown = alpha.expect(&preferences).to_be_visible().await?;
+            let _closed = alpha
+                .menu_path(&["login-menu-viewer", "login-menu-close-window"])
+                .await?;
+            let _gone = alpha.expect(&preferences).to_be_hidden().await?;
             log_in(stage, alpha, &stage.login_details("Alpha")?.password).await?;
             arrives(stage, alpha).await
         })?;
@@ -142,8 +159,54 @@ mod test {
         Ok(())
     }
 
-    /// **A second factor on the screen**: the token row asks, the token gets
-    /// in.
+    /// **The keyboard alone**: the panel opens with the keyboard in the name
+    /// field and Log In greyed, `Enter` logs in, and a refused password comes
+    /// back selected for the next try.
+    #[test]
+    fn the_panel_is_worked_from_the_keyboard() -> Result<(), TestError> {
+        stage("login_screen_keyboard").run(async |stage: &Stage| {
+            let alpha = &stage.viewer("Alpha")?;
+            let details = stage.login_details("Alpha")?;
+            let name = alpha.ui().test_id("login-avatar:field");
+            let password = alpha.ui().test_id("login-password:field");
+            let connect = alpha.ui().test_id("login-connect");
+            let _page = alpha
+                .expect(&alpha.ui().test_id("login-page"))
+                .timeout(WAIT)
+                .to_be_visible()
+                .await?;
+            let _keyboard = alpha.expect(&name).to_be_focused().await?;
+            let _greyed = alpha.expect(&connect).to_be_disabled().await?;
+            add_the_grid(stage, alpha).await?;
+            let _named = name.fill(&details.name).await?;
+            let _still_greyed = alpha.expect(&connect).to_be_disabled().await?;
+            let _typed = password.fill("not the password").await?;
+            let _ready = alpha.expect(&connect).to_be_enabled().await?;
+            alpha.press("Enter").await?;
+            let _refused = alpha
+                .expect(&alpha.ui().test_id("login-notice"))
+                .timeout(WAIT)
+                .to_contain_text("The grid refused the login")
+                .await?;
+            // The refused password has the keyboard, selected: one Backspace
+            // empties it, which greys Log In again.
+            let _back = alpha
+                .expect(&password)
+                .timeout(WAIT)
+                .to_be_focused()
+                .await?;
+            alpha.press("Backspace").await?;
+            let _cleared = alpha.expect(&password).to_have_text("").await?;
+            let _greyed_again = alpha.expect(&connect).to_be_disabled().await?;
+            let _right = password.fill(&details.password).await?;
+            alpha.press("Enter").await?;
+            arrives(stage, alpha).await
+        })?;
+        Ok(())
+    }
+
+    /// **A second factor on the screen**: the token row asks, with the
+    /// keyboard in it, and the token gets in.
     #[test]
     fn a_second_factor_is_asked_for_on_the_panel() -> Result<(), TestError> {
         stage("login_screen_mfa")
@@ -154,6 +217,7 @@ mod test {
                 log_in(stage, alpha, &stage.login_details("Alpha")?.password).await?;
                 let token = alpha.ui().test_id("login-token:field");
                 let _asked = alpha.expect(&token).timeout(WAIT).to_be_visible().await?;
+                let _keyboard = alpha.expect(&token).to_be_focused().await?;
                 let _typed = token.fill("314159").await?;
                 let _sent = alpha.ui().test_id("login-submit-token").click().await?;
                 arrives(stage, alpha).await

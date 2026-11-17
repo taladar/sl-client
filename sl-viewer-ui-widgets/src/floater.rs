@@ -493,6 +493,13 @@ impl Floater {
         self.key = Some(key);
     }
 
+    /// Whether this floater offers a close — what `Ctrl+W` and a Close Window
+    /// entry ask before closing it.
+    #[must_use]
+    pub const fn closable(&self) -> bool {
+        self.caps.closable
+    }
+
     /// Whether this floater is the instance of `id` showing `key`.
     #[must_use]
     pub fn is_instance(&self, id: &str, key: &FloaterKey) -> bool {

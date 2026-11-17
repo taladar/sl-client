@@ -5748,8 +5748,10 @@ script-errors-all = All
 script-errors-clear = Clear
 
 ## The login screen (viewer-login-screen)
-# The pre-login menu bar's Viewer menu and its Exit entry.
+# The pre-login menu bar's Viewer menu, its Close Window entry (which
+# closes the front window) and its Exit entry.
 login-menu-viewer = Viewer
+login-menu-close-window = Close Window
 login-menu-exit = Exit
 # The captions beside the panel's fields.
 login-grid-label = Grid:

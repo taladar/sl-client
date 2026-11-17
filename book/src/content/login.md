@@ -98,6 +98,19 @@ roads in, the credentials file's `mfa_command` and the screen's prompt: a
 windowed viewer cannot build a second app, because winit allows one event
 loop per process.
 
+## Typing to log in
+
+The viewer's login screen can be worked from the keyboard alone, as the
+reference's can (`llpanellogin.cpp`'s `giveFocus`). The keyboard starts in the
+first blank field: the avatar name, or the password when the last avatar's name
+is already filled in. It comes back there when a login fails. A password the
+grid refused comes back selected, so typing replaces it, and a second-factor
+challenge puts the keyboard in the token field. `Enter` in a field does what its
+row's button does. **Log In** stays greyed until there is a name and a password
+to send. The pre-login menu carries the reference's chords: `Ctrl+P` for
+Preferences and `Ctrl+Q` to exit. Like every menu chord they yield to a focused
+text field, and `Ctrl+W` closes the front window as it does everywhere.
+
 ## A remembered password
 
 The password never goes into the viewer's settings. When the login screen's

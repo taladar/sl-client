@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::snapshot::{NodeState, Role, UiNode};
+use crate::snapshot::{NodeState, NodeVisibility, Role, UiNode};
 
 /// How a locator's name is compared with a node's resolved accessible name.
 ///
@@ -74,6 +74,10 @@ pub struct Locator {
     /// Focused or not.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub focused: Option<bool>,
+    /// Drawn (`true`: any visibility but [`NodeVisibility::Hidden`]) or not
+    /// drawn at all (`false`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub drawn: Option<bool>,
 }
 
 impl Locator {
@@ -166,6 +170,14 @@ impl Locator {
         self
     }
 
+    /// Also require the node to be drawn (`true`) or hidden (`false`) — what
+    /// tells a screen's own menu bar from another screen's, kept but hidden.
+    #[must_use]
+    pub const fn drawn(mut self, drawn: bool) -> Self {
+        self.drawn = Some(drawn);
+        self
+    }
+
     /// Whether `node` itself satisfies the criteria that concern a single
     /// node: role, name, name key, test id and the state filters.
     ///
@@ -195,6 +207,9 @@ impl Locator {
             && state_filter_holds(self.selected, node, NodeState::Selected)
             && state_filter_holds(self.expanded, node, NodeState::Expanded)
             && state_filter_holds(self.focused, node, NodeState::Focused)
+            && self
+                .drawn
+                .is_none_or(|drawn| drawn == (node.visibility != NodeVisibility::Hidden))
     }
 }
 
@@ -299,6 +314,32 @@ mod tests {
             !Locator::default().enabled(true).matches_node(&all),
             "a disabled node is not enabled"
         );
+    }
+
+    /// `drawn` tells a hidden node from every other visibility, a covered or
+    /// clipped one being drawn all the same.
+    #[test]
+    fn the_drawn_filter_reads_the_visibility() {
+        let mut node = ok_button(&[]);
+        for (visibility, drawn) in [
+            (NodeVisibility::Visible, true),
+            (NodeVisibility::Covered, true),
+            (NodeVisibility::Clipped, true),
+            (NodeVisibility::OffScreen, true),
+            (NodeVisibility::Hidden, false),
+        ] {
+            node.visibility = visibility;
+            assert_eq!(
+                Locator::default().drawn(true).matches_node(&node),
+                drawn,
+                "{visibility:?}"
+            );
+            assert_eq!(
+                Locator::default().drawn(false).matches_node(&node),
+                !drawn,
+                "{visibility:?}"
+            );
+        }
     }
 
     #[test]

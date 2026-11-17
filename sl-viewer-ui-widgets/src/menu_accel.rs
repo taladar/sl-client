@@ -36,6 +36,12 @@
 //!   accelerator needs the world: it is one keystroke from being typed.
 //! - **An open menu.** While a drop-down is up, an unmodified accelerator is a
 //!   jump key, not a shortcut (`LLMenuBarGL::handleAcceleratorKey`).
+//! - **A bar that is not drawn.** A host under a `Display::None` or
+//!   `Visibility::Hidden` node — the in-world bar hidden under the login
+//!   screen, the login screen's own bar once the world has the window — has
+//!   no shortcuts, as its lines have no clicks: otherwise a hidden bar's
+//!   chords run commands its screen never offered, and two bars drawing one
+//!   chord for one toggle (Preferences on both) run it twice, which is none.
 //!
 //! Reference (Firestorm, read-only): `indra/llui/llmenugl.cpp`
 //! (`LLMenuItemCallGL::handleAcceleratorKey`, `LLMenuBarGL::handleAcceleratorKey`),
@@ -296,6 +302,22 @@ fn live_commands(
 // The dispatcher.
 // ---------------------------------------------------------------------------
 
+/// Whether the menu host `entity` is not drawn: it, or a node above it, is
+/// `Display::None` or `Visibility::Hidden`.
+fn host_hidden(
+    entity: Entity,
+    child_of: &Query<&ChildOf>,
+    drawn: &Query<(&Node, Option<&Visibility>)>,
+) -> bool {
+    core::iter::once(entity)
+        .chain(child_of.iter_ancestors(entity))
+        .any(|node| {
+            drawn.get(node).is_ok_and(|(node, visibility)| {
+                node.display == Display::None || visibility == Some(&Visibility::Hidden)
+            })
+        })
+}
+
 /// Where the keyboard is this frame, as far as an accelerator is concerned.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum AcceleratorGate {
@@ -324,12 +346,13 @@ impl AcceleratorGate {
 /// drop-down, the inventory `+` menu — so a bar gets its shortcuts by being
 /// spawned, not by anyone remembering to bind them. The conditions are the
 /// host's own ([`conditions_at`], the same ancestor walk that greys a line), so
-/// an entry the user would find greyed is one the keyboard finds greyed too.
+/// an entry the user would find greyed is one the keyboard finds greyed too. A
+/// host that is not drawn is skipped ([`host_hidden`]).
 pub(crate) fn dispatch_menu_accelerators(
     keys: Res<ButtonInput<KeyCode>>,
     hosts: Query<(Entity, &MenuHost)>,
     conditions: Query<&MenuConditions>,
-    child_of: Query<&ChildOf>,
+    (child_of, drawn): (Query<&ChildOf>, Query<(&Node, Option<&Visibility>)>),
     focus: Res<InputFocus>,
     ui_nodes: Query<Has<EditableText>, With<Node>>,
     mut actions: MessageWriter<UiAction>,
@@ -350,6 +373,9 @@ pub(crate) fn dispatch_menu_accelerators(
     let empty = MenuConditions::default();
     let mut fired: Vec<(&'static str, &'static str)> = Vec::new();
     for (entity, host) in &hosts {
+        if host_hidden(entity, &child_of, &drawn) {
+            continue;
+        }
         let held = conditions_at(entity, &child_of, &conditions).unwrap_or(&empty);
         let mut commands = Vec::new();
         live_commands(host.def, held, &mut commands);
@@ -729,6 +755,38 @@ mod tests {
                 action: "open",
             }],
             "a Ctrl chord could not have been meant for it"
+        );
+        Ok(())
+    }
+
+    /// A bar that is not drawn has no shortcuts, and gets them back when it is
+    /// drawn again.
+    #[test]
+    fn a_hidden_bar_ignores_its_chords() -> Result<(), TestError> {
+        let mut app = bar_app(&[])?;
+        let root = app.world().resource::<UiRoot>().0;
+        let set_display = |app: &mut App, display: Display| -> Result<(), TestError> {
+            app.world_mut()
+                .get_mut::<Node>(root)
+                .ok_or("the UI root has no Node")?
+                .display = display;
+            settle(app);
+            drain_actions(app);
+            Ok(())
+        };
+        set_display(&mut app, Display::None)?;
+        assert!(
+            ran(&mut app, "Ctrl+I")?.is_empty(),
+            "a bar under a Display::None node runs nothing"
+        );
+        set_display(&mut app, Display::Flex)?;
+        assert_eq!(
+            ran(&mut app, "Ctrl+I")?,
+            vec![UiAction {
+                element: TEST_ELEMENT,
+                action: "open",
+            }],
+            "and runs again once it is drawn"
         );
         Ok(())
     }

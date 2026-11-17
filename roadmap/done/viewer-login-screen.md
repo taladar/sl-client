@@ -2,7 +2,7 @@
 id: viewer-login-screen
 title: Login screen — grid select, saved credentials, MFA
 topic: viewer
-status: in-progress
+status: done
 origin: user request (2026-07)
 blocked_by: [viewer-ui-widget-scaffold]
 ---
@@ -145,5 +145,30 @@ a wrong password and answers a second factor, on both backends.
 
 Saved passwords were split out as [[viewer-login-saved-passwords]] and landed
 with the secret store they needed, [[viewer-secret-store]]: Remember password
-keeps a login's password in the OS keychain. Still to do here: the
-reference's typing-to-login conveniences.
+keeps a login's password in the OS keychain.
+
+## Typing to log in (2026-11-17) — done
+
+The reference's keyboard conveniences (Firestorm's `FSPanelLogin`): the
+keyboard starts in the first blank field (the name, or the password after a
+remembered name) and returns there when a login fails; a refused password
+comes back selected, so one keystroke replaces it; a second-factor challenge
+focuses the token field; **Log In** is greyed until a name and a password are
+there (`Enter` still asks and is told what is missing); the pre-login menu
+draws `Ctrl+P` and `Ctrl+Q`, and gains Close Window, which closes the front
+floater and is greyed while there is none. It draws no `Ctrl+W`: every floater
+already answers that chord, and drawing it on the entry would close two
+windows. Firestorm's clearing of a password when the name changes was already
+ours, since only a stored password is dropped then.
+
+Doing it surfaced two hidden-bar bugs. `menu_accel` ran the chords of menu bars
+that were not drawn, so on the login screen the hidden in-world bar's `Ctrl+I`
+and friends fired, and two bars drawing one toggle ran it twice. A host under
+`Display::None` or `Visibility::Hidden` now has no shortcuts. And the
+automation's menu path scoped its first step to "the" menu bar, which is
+ambiguous wherever a login screen's bar sits hidden beside the world's. Locators
+gain a `drawn` filter (`[drawn=true]`, any visibility but hidden), and the path
+uses it. `sl-viewer-driver` gains `to_be_focused`. In `e2e_login_screen`,
+`the_panel_is_worked_from_the_keyboard` drives the panel by keyboard alone on
+both backends, and the first test opens Preferences from the pre-login menu
+and closes it with Close Window.

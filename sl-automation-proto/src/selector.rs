@@ -405,6 +405,10 @@ fn ui_step(scanner: &Scanner<'_>, step: Step) -> Result<Locator, SelectorError> 
                 let wanted = parsed(scanner, attr, "true or false")?;
                 set(scanner, &mut locator.focused, attr, wanted)?;
             }
+            "drawn" => {
+                let wanted = parsed(scanner, attr, "true or false")?;
+                set(scanner, &mut locator.drawn, attr, wanted)?;
+            }
             "nth" => {
                 let index = parsed(scanner, attr, "a zero-based index")?;
                 set(scanner, &mut locator.nth, attr, index)?;
@@ -414,7 +418,7 @@ fn ui_step(scanner: &Scanner<'_>, step: Step) -> Result<Locator, SelectorError> 
                     attr.at,
                     format!(
                         "unknown attribute `{other}` (known: name, name_key, test_id, enabled, \
-                         checked, selected, expanded, focused, nth)"
+                         checked, selected, expanded, focused, drawn, nth)"
                     ),
                 ));
             }
@@ -614,6 +618,7 @@ impl fmt::Display for Locator {
             ("selected", self.selected),
             ("expanded", self.expanded),
             ("focused", self.focused),
+            ("drawn", self.drawn),
         ] {
             if let Some(wanted) = filter {
                 write_plain(f, key, wanted)?;

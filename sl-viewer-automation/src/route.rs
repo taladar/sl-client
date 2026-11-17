@@ -101,10 +101,12 @@ impl Route {
             let entry = Locator::role(Role::MenuItem).name_key(*key);
             let opens_more = index < last;
             Step {
-                // The first entry is a bar button; the rest are in the open
+                // The first entry is a bar button, on the bar that is drawn
+                // (a screen's bar may be kept, hidden, under another's: the
+                // login screen's and the world's); the rest are in the open
                 // menus.
                 locator: if index == 0 {
-                    entry.within(Locator::role(Role::MenuBar))
+                    entry.within(Locator::role(Role::MenuBar).drawn(true))
                 } else {
                     entry
                 },

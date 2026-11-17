@@ -32,6 +32,18 @@
 //!
 //! The last grid and avatar name are remembered in the global settings.
 //!
+//! # Typing to log in
+//!
+//! The panel can be worked from the keyboard alone, as the reference's can.
+//! The keyboard starts in the first blank field — the name, or the password
+//! when the last avatar's name is already there — and comes back to it when
+//! a login fails; a refused password is selected, so typing replaces it, and
+//! a second-factor challenge puts the keyboard in the token field. `Enter` in
+//! a field does what its row's button does, and **Log In** is greyed until
+//! there is a name and a password to send. The pre-login menu's entries carry
+//! the reference's chords (`Ctrl+P`, `Ctrl+Q`), and its Close Window closes
+//! the front floater, as `Ctrl+W` does.
+//!
 //! # A remembered password
 //!
 //! With **Remember password** ticked (`LoginRememberPassword`), a login that
@@ -47,7 +59,7 @@
 
 use std::sync::mpsc::{Receiver, TryRecvError};
 
-use bevy::input_focus::InputFocus;
+use bevy::input_focus::{FocusCause, InputFocus};
 use bevy::prelude::*;
 use bevy::text::{EditableText, FontCx, LayoutCx};
 use bevy::ui::InteractionDisabled;
@@ -62,7 +74,7 @@ use sl_secret_store::{Secret, SecretKey};
 use sl_settings::{Scope, SettingValue};
 use url::Url;
 
-use crate::floater::{Floater, toggle_floater};
+use crate::floater::{ActiveFloater, Floater, FloaterCommand, FloaterOp, toggle_floater};
 use crate::i18n::{TransArgs, Translator};
 use crate::login_flow::{LoginScope, PendingLogin, SecondFactorSource};
 use crate::login_grids::GridList;
@@ -116,17 +128,27 @@ const START_OPTIONS: [&str; 3] = ["login-start-last", "login-start-home", "login
 /// The start combo's index for a named region.
 const START_REGION: usize = 2;
 
-/// The Viewer menu before login: Preferences and Exit. (The reference's Show
-/// Grid Picker is moot here, where the grid combo is always shown; its Close
-/// Window is Exit, for a viewer with one window.)
+/// The login menu's condition that holds while the front floater is shown and
+/// can be closed: Close Window's.
+const FRONT_FLOATER_CLOSABLE: &str = "login-front-floater-closable";
+
+/// The Viewer menu before login: Preferences, Close Window and Exit, on the
+/// reference's chords. Close Window draws none: the `Ctrl+W` it would draw is
+/// the one every floater already answers (`close_active_floater_shortcut`),
+/// and drawing it here would make the chord close the window twice over. (The
+/// reference's Show Grid Picker is moot here, where the grid combo is always
+/// shown.)
 static LOGIN_VIEWER_MENU: MenuDef = MenuDef {
     label_key: "login-menu-viewer",
     items: &[
-        MenuItemDef::Command(MenuCommand::new(
-            "menu-bar-preferences",
-            "toggle-preferences",
-        )),
-        MenuItemDef::Command(MenuCommand::new("login-menu-exit", "quit")),
+        MenuItemDef::Command(
+            MenuCommand::new("menu-bar-preferences", "toggle-preferences").accel("Ctrl+P"),
+        ),
+        MenuItemDef::Command(
+            MenuCommand::new("login-menu-close-window", "close-window")
+                .enabled_when(FRONT_FLOATER_CLOSABLE),
+        ),
+        MenuItemDef::Command(MenuCommand::new("login-menu-exit", "quit").accel("Ctrl+Q")),
     ],
 };
 
@@ -172,6 +194,8 @@ enum LoginPanelRequest {
 struct LoginPanelUi {
     /// The page across the window.
     page: Entity,
+    /// The pre-login menu bar.
+    bar: Entity,
     /// The grid combo.
     grid: Entity,
     /// The button that removes the chosen grid.
@@ -211,17 +235,51 @@ enum Notice {
     Message(&'static str, String),
 }
 
+/// Where the panel wants the keyboard next.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FocusWanted {
+    /// The first blank field: the name, else the password, else the name.
+    FirstBlank,
+    /// The password, its text selected so typing replaces it.
+    Password,
+    /// The second-factor token.
+    Token,
+}
+
+/// Whether [`FocusWanted::FirstBlank`] means the password rather than the
+/// name, given whether the name and the password fields hold anything
+/// (`llpanellogin.cpp`'s `giveFocus`): only when the name is there and the
+/// password is not.
+const fn password_first(have_name: bool, have_password: bool) -> bool {
+    have_name && !have_password
+}
+
 /// What the panel knows beyond its widgets.
-#[derive(Resource, Debug, Default)]
+#[derive(Resource, Debug)]
 struct LoginPanelState {
     /// The last thing that went wrong, or what the user must do next.
     notice: Notice,
+    /// Where the keyboard goes next, once the panel can put it there.
+    focus: Option<FocusWanted>,
     /// The second-factor challenge a token is waiting for, if one is.
     challenge: Option<WaitingChallenge>,
     /// What the notice line shows, so it is rewritten only on a change.
     shown: Option<Notice>,
     /// The remembered password's part.
     saved: SavedPassword,
+}
+
+impl Default for LoginPanelState {
+    fn default() -> Self {
+        Self {
+            notice: Notice::default(),
+            // The panel opens with the keyboard in it.
+            focus: Some(FocusWanted::FirstBlank),
+            challenge: None,
+            shown: None,
+            saved: SavedPassword::default(),
+        }
+    }
 }
 
 /// Where the remembered password stands.
@@ -293,8 +351,10 @@ impl Plugin for LoginScreenPlugin {
                     keep_the_password,
                     show_the_page,
                     reflect_the_panel,
+                    give_focus,
                     write_the_notice,
                     write_the_remember_note,
+                    reflect_the_menu,
                     handle_login_menu,
                 )
                     .chain()
@@ -631,6 +691,7 @@ fn spawn_login_page(
     commands.insert_resource(grids);
     commands.insert_resource(LoginPanelUi {
         page,
+        bar,
         grid,
         remove_grid,
         grid_uri,
@@ -1116,10 +1177,17 @@ fn follow_the_login(
             continue;
         }
         state.notice = ended_notice(reason);
-        if let SessionDisconnectReason::LoginFailed { reason, .. } = reason
-            && reason == LoginServer::BAD_CREDENTIALS_REASON
-            && let Some((key, _refused)) = state.saved.attempt.take()
-        {
+        let bad_password = matches!(
+            reason,
+            SessionDisconnectReason::LoginFailed { reason, .. }
+                if reason == LoginServer::BAD_CREDENTIALS_REASON
+        );
+        state.focus = Some(if bad_password {
+            FocusWanted::Password
+        } else {
+            FocusWanted::FirstBlank
+        });
+        if bad_password && let Some((key, _refused)) = state.saved.attempt.take() {
             state.saved.filled = false;
             secrets.write(SecretRequest {
                 key,
@@ -1129,6 +1197,7 @@ fn follow_the_login(
     }
     for rejection in rejected.read() {
         state.notice = Notice::Message("login-notice-refused", rejection.0.message.clone());
+        state.focus.get_or_insert(FocusWanted::FirstBlank);
     }
     for challenge in challenges.read() {
         if second_factor.is_some() {
@@ -1138,6 +1207,7 @@ fn follow_the_login(
             mfa_hash: challenge.0.mfa_hash.clone(),
         });
         state.notice = Notice::Message("login-notice-token", challenge.0.message.clone());
+        state.focus = Some(FocusWanted::Token);
     }
 }
 
@@ -1316,8 +1386,9 @@ fn show_the_page(
 }
 
 /// Keep the panel's controls in step with where the login stands: Log In
-/// refused while a login is live, the token row shown while a challenge
-/// waits, and Remove refused for a built-in grid.
+/// refused while a login is live or while the name or the password is empty
+/// (`Enter` in a field still asks, and is told what is missing), the token
+/// row shown while a challenge waits, and Remove refused for a built-in grid.
 fn reflect_the_panel(
     (ui, status, state): (
         Res<LoginPanelUi>,
@@ -1325,6 +1396,7 @@ fn reflect_the_panel(
         Res<LoginPanelState>,
     ),
     (grids, combos): (Res<GridList>, Query<&ComboSelection>),
+    (fields, passwords): (Query<&EditableText>, Query<&PasswordField>),
     mut rows: Query<&mut UiPanelShown>,
     disabled: Query<Has<InteractionDisabled>>,
     mut commands: Commands,
@@ -1340,13 +1412,78 @@ fn reflect_the_panel(
         .ok()
         .and_then(|choice| grids.grids().get(choice.active))
         .is_none_or(|grid| grid.builtin);
-    for (entity, refuse) in [(ui.connect, status.is_live()), (ui.remove_grid, builtin)] {
+    let incomplete = field_text(&fields, ui.avatar).is_empty()
+        || passwords
+            .get(ui.password)
+            .is_ok_and(|field| field.secret().is_empty());
+    for (entity, refuse) in [
+        (ui.connect, status.is_live() || incomplete),
+        (ui.remove_grid, builtin),
+    ] {
         if disabled.get(entity).is_ok_and(|held| held != refuse) {
             if refuse {
                 commands.entity(entity).insert(InteractionDisabled);
             } else {
                 commands.entity(entity).remove::<InteractionDisabled>();
             }
+        }
+    }
+}
+
+/// Put the keyboard where the panel wants it ([`FocusWanted`]): the first
+/// blank field when it opens and when a login fails, the password selected
+/// after a refused one, the token field when a challenge asks for it. A
+/// request waits while a login is live, and for the token row to be shown.
+fn give_focus(
+    (ui, status): (Res<LoginPanelUi>, Res<SlSessionStatus>),
+    rows: Query<&UiPanelShown>,
+    mut text: FieldEdit,
+    passwords: Query<&PasswordField>,
+    mut focus: ResMut<InputFocus>,
+    mut state: ResMut<LoginPanelState>,
+) {
+    let Some(wanted) = state.focus else {
+        return;
+    };
+    if status.is_live() {
+        return;
+    }
+    let wanted = match wanted {
+        FocusWanted::FirstBlank
+            if !password_first(
+                text.fields
+                    .get(ui.avatar)
+                    .is_ok_and(|field| !field.value().to_string().trim().is_empty()),
+                passwords
+                    .get(ui.password)
+                    .is_ok_and(|field| !field.secret().is_empty()),
+            ) =>
+        {
+            FocusWanted::FirstBlank
+        }
+        FocusWanted::FirstBlank | FocusWanted::Password => FocusWanted::Password,
+        FocusWanted::Token => FocusWanted::Token,
+    };
+    let target = match wanted {
+        FocusWanted::FirstBlank => ui.avatar,
+        FocusWanted::Password => ui.password,
+        FocusWanted::Token => {
+            if !rows.get(ui.token_row).is_ok_and(|shown| shown.0) {
+                return;
+            }
+            ui.token
+        }
+    };
+    state.focus = None;
+    focus.set(target, FocusCause::Navigated);
+    if wanted == FocusWanted::Password {
+        let FieldEdit {
+            fields,
+            font_cx,
+            layout_cx,
+        } = &mut text;
+        if let Ok(mut field) = fields.get_mut(ui.password) {
+            field.editor.driver(font_cx, layout_cx).select_all();
         }
     }
 }
@@ -1413,12 +1550,47 @@ fn write_the_remember_note(
     state.saved.shown = Some(problem);
 }
 
-/// Route the pre-login menu's picks: Preferences, About, and Exit (a quit,
-/// which with nothing live exits at once).
+/// The floater Close Window would close: the front one, while it is shown
+/// and offers a close.
+fn closable_front_floater(
+    active: &ActiveFloater,
+    floaters: &Query<(Entity, &Floater)>,
+    panels: &Query<&mut UiPanelShown>,
+) -> Option<Entity> {
+    let front = active.front()?;
+    let (_entity, floater) = floaters.get(front).ok()?;
+    let shown = panels.get(front).is_ok_and(|shown| shown.0);
+    (shown && floater.closable()).then_some(front)
+}
+
+/// Grey Close Window unless there is a front floater it can close.
+fn reflect_the_menu(
+    ui: Res<LoginPanelUi>,
+    active: Res<ActiveFloater>,
+    floaters: Query<(Entity, &Floater)>,
+    panels: Query<&mut UiPanelShown>,
+    mut conditions: Query<&mut MenuConditions>,
+) {
+    let closable = closable_front_floater(&active, &floaters, &panels).is_some();
+    let Ok(mut held) = conditions.get_mut(ui.bar) else {
+        return;
+    };
+    if held.holds(Some(FRONT_FLOATER_CLOSABLE)) != closable {
+        held.0 = if closable {
+            vec![FRONT_FLOATER_CLOSABLE]
+        } else {
+            Vec::new()
+        };
+    }
+}
+
+/// Route the pre-login menu's picks: Preferences, About, Close Window (the
+/// front floater) and Exit (a quit, which with nothing live exits at once).
 fn handle_login_menu(
     mut actions: MessageReader<UiAction>,
-    floaters: Query<(Entity, &Floater)>,
+    (active, floaters): (Res<ActiveFloater>, Query<(Entity, &Floater)>),
     mut panels: Query<&mut UiPanelShown>,
+    mut floater_commands: MessageWriter<FloaterCommand>,
     mut quit: MessageWriter<crate::session::QuitRequested>,
 ) {
     for action in actions.read() {
@@ -1436,6 +1608,14 @@ fn handle_login_menu(
                 &mut panels,
                 crate::about_floater::ABOUT_FLOATER_ID,
             ),
+            "close-window" => {
+                if let Some(floater) = closable_front_floater(&active, &floaters, &panels) {
+                    floater_commands.write(FloaterCommand {
+                        floater,
+                        op: FloaterOp::Close,
+                    });
+                }
+            }
             "quit" => {
                 quit.write(crate::session::QuitRequested);
             }
@@ -1446,7 +1626,9 @@ fn handle_login_menu(
 
 #[cfg(test)]
 mod tests {
-    use super::{Notice, START_REGION, chosen_start, split_avatar_name, start_choice};
+    use super::{
+        Notice, START_REGION, chosen_start, password_first, split_avatar_name, start_choice,
+    };
     use pretty_assertions::assert_eq;
     use sl_client_bevy::StartLocation;
 
@@ -1462,6 +1644,16 @@ mod tests {
         assert_eq!(split(""), None);
         assert_eq!(split("one two three"), None);
         assert_eq!(split(".tester"), None);
+    }
+
+    /// The keyboard goes to the password only when the name is there and the
+    /// password is not, as the reference's `giveFocus` decides.
+    #[test]
+    fn the_first_blank_field_is_the_password_only_after_a_name() {
+        assert!(!password_first(false, false), "nothing typed: the name");
+        assert!(password_first(true, false), "a name alone: the password");
+        assert!(!password_first(true, true), "both there: the name");
+        assert!(!password_first(false, true), "a password alone: the name");
     }
 
     /// The start combo reads back as the location it names, and a region
