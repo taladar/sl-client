@@ -9032,6 +9032,7 @@ name = "sl-cef"
 version = "0.1.0"
 dependencies = [
  "cef",
+ "cef-dll-sys",
  "fs-err",
  "libc",
  "pretty_assertions",

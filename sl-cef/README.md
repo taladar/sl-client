@@ -26,5 +26,10 @@ every build of the viewer puts both in the same target directory.
 
 Build note: the `cef-dll-sys` build script downloads the CEF binary
 distribution on first build (respects `CEF_PATH`; this workspace pins it to
-`.cef/` via `.cargo/config.toml`) and copies the runtime files
-(`libcef.so`, `*.pak`, `locales/`, …) into the cargo target directory.
+`.cef/` via `.cargo/config.toml`). This crate's own build script then copies
+the runtime files (`libcef.so`, `*.pak`, `locales/`, …) into
+`target/<profile>/`, beside the binaries, tests and examples that load them.
+`cef-dll-sys` copies them too, but under cargo 1.100's build-dir layout its
+copy lands one level too deep, in `target/<profile>/build/`. A copy that is
+already there and unchanged is skipped, and a deleted one comes back on the
+next build.
