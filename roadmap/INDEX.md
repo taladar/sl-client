@@ -13,13 +13,13 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | --- | --- |
 | ideas | 131 |
 | ready | 326 |
-| blocked | 36 |
+| blocked | 38 |
 | in-progress | 5 |
 | bugs | 21 |
 | done | 1585 |
 | deferred | 30 |
 | wont-do | 24 |
-| **total** | **2158** |
+| **total** | **2160** |
 
 ## ideas (131)
 
@@ -798,9 +798,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-permission-active-grants`](ready/viewer-permission-active-grants.md)
   — Active permission grants (review / revoke) (blocked by
   `viewer-permission-request-dialog` (done))
-- [`viewer-photo-hosting-upload`](ready/viewer-photo-hosting-upload.md) — Share
-  snapshots to external photo/hosting services (blocked by
-  `viewer-snapshot-floater` (done))
 - [`viewer-pie-wire-ready-placeholders`](ready/viewer-pie-wire-ready-placeholders.md)
   — Wire the pie placeholder slices whose features already exist
 - [`viewer-places-landmarks`](ready/viewer-places-landmarks.md) — Places floater
@@ -911,6 +908,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Search asks for every rating whatever the account is allowed to see
 - [`viewer-seated-region-crossing`](ready/viewer-seated-region-crossing.md) —
   Seamless seated region crossing (keep sit-implied permissions)
+- [`viewer-secret-store`](ready/viewer-secret-store.md) — Secret store for the
+  viewer (OS keychain, keyed secrets)
 - [`viewer-settings-backup`](ready/viewer-settings-backup.md) — Settings backup
   — export / import (blocked by `viewer-preferences-floater` (done))
 - [`viewer-simulator-features-unread-keys`](ready/viewer-simulator-features-unread-keys.md)
@@ -1108,7 +1107,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-sl-mfa-challenge`](ready/gridspec-sl-mfa-challenge.md) — Record
   Second Life's MFA challenge and whether a remembered mfa_hash gets past it
 
-## blocked (36)
+## blocked (38)
 
 ### viewer
 
@@ -1131,6 +1130,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-login-refusal-localised-text`](blocked/viewer-login-refusal-localised-text.md)
   — Show a login refusal in the user's language from its message_id (blocked by
   `viewer-login-screen`)
+- [`viewer-login-saved-passwords`](blocked/viewer-login-saved-passwords.md) —
+  Login screen — remember the password (blocked by `viewer-secret-store`)
 - [`viewer-login-tos`](blocked/viewer-login-tos.md) — Login TOS /
   critical-message acceptance (blocked by `viewer-login-screen`)
 - [`viewer-mesh-lod-decimation`](blocked/viewer-mesh-lod-decimation.md) — LOD
@@ -1159,6 +1160,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-pathfinding-navmesh-view`](blocked/viewer-pathfinding-navmesh-view.md)
   — Render and test the region's navmesh (blocked by
   `viewer-pathfinding-floaters`)
+- [`viewer-photo-hosting-upload`](blocked/viewer-photo-hosting-upload.md) —
+  Share snapshots to external photo/hosting services (blocked by
+  `viewer-snapshot-floater` (done), `viewer-secret-store`)
 - [`viewer-projector-lights-spot-shadows`](blocked/viewer-projector-lights-spot-shadows.md)
   — Projector spot-shadow tier (blocked by `viewer-projector-lights-textured`)
 - [`viewer-render-matrix-glow-over-water`](blocked/viewer-render-matrix-glow-over-water.md)

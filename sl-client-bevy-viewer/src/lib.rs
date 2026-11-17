@@ -46,6 +46,8 @@ pub(crate) use sl_viewer_world_avatar::animations;
 pub(crate) use sl_viewer_world_avatar::avatar_overrides;
 pub mod assembly;
 pub mod login_flow;
+pub mod login_grids;
+mod login_screen;
 /// Every module that declares settings, in registration order.
 ///
 /// This list lives here rather than in `settings` because a store that
@@ -97,6 +99,7 @@ pub(crate) const REGISTRARS: &[fn(&mut crate::settings::ViewerSettings)] = &[
     crate::experiences_floater::register_settings,
     crate::web_floater::register_settings,
     crate::region_terrain_actions::register_settings,
+    crate::login_screen::register_settings,
 ];
 
 // The leaf toolkit (geometry math, render leaves, small models) is its own
@@ -435,8 +438,7 @@ use crate::assembly::{
 };
 use crate::camera::{CameraSpin, CameraStart, SpinAxis};
 
-/// The local OpenSim grid login URI used when none is otherwise resolved.
-const DEFAULT_LOGIN_URI: &str = "http://127.0.0.1:9000/";
+use crate::login_grids::DEFAULT_LOGIN_URI;
 
 /// An error from the viewer binary.
 #[derive(thiserror::Error, Debug)]
@@ -495,13 +497,11 @@ pub enum Error {
     reason = "CLI switches are independent flags by nature; clap derives the parser from them"
 )]
 struct Options {
-    /// The TOML credentials file.
-    #[clap(
-        long,
-        default_value = "credentials.toml",
-        env = "SL_VIEWER_CREDENTIALS"
-    )]
-    credentials: PathBuf,
+    /// The TOML credentials file to log in from, skipping the login screen —
+    /// the road every test, harness and headless run takes. Without it the
+    /// viewer starts on its login screen.
+    #[clap(long, env = "SL_VIEWER_CREDENTIALS")]
+    credentials: Option<PathBuf>,
     /// Which avatar in the credentials file to log in as (defaults to the file's
     /// `default_avatar`, or its sole avatar).
     #[clap(long)]
@@ -839,12 +839,7 @@ fn parse_sl_vec3(value: &str) -> Result<Vec3, String> {
 /// end-to-end stage resolves a live grid's avatars through.
 #[must_use]
 pub fn grid_login_uri(grid: &str) -> Option<&'static str> {
-    match grid.to_ascii_lowercase().as_str() {
-        "agni" | "secondlife" | "sl" => Some("https://login.agni.lindenlab.com/cgi-bin/login.cgi"),
-        "aditi" | "beta" => Some("https://login.aditi.lindenlab.com/cgi-bin/login.cgi"),
-        "localhost" | "local" | "opensim" => Some(DEFAULT_LOGIN_URI),
-        _other => None,
-    }
+    crate::login_grids::builtin_login_uri(grid)
 }
 
 /// Resolve the login URI from (in priority order) the explicit `--login-uri`,
@@ -990,15 +985,14 @@ fn fixed_camera_start(options: &Options) -> Option<CameraStart> {
     })
 }
 
-/// Run the viewer end-to-end, restarting the windowed app once per MFA
-/// challenge with the acquired token folded in.
+/// Run the viewer end-to-end: logged straight in from `--credentials`, or on
+/// its login screen without them.
 ///
 /// # Errors
 ///
 /// Returns an [`enum@Error`] if credentials cannot be loaded, the login URI
-/// cannot be resolved, an MFA challenge cannot be answered, or a session fails
-/// ([`Error::AppFailed`] / [`Error::ScreenshotDir`]) — a failing session ends
-/// the retry loop rather than being retried.
+/// cannot be resolved, or a session fails ([`Error::AppFailed`] /
+/// [`Error::ScreenshotDir`]).
 fn run_viewer(options: &Options) -> Result<(), Error> {
     // Before anything else, so a signal that arrives during login is still a
     // graceful logout: the flag is only read once the app is running, but the
@@ -1008,10 +1002,6 @@ fn run_viewer(options: &Options) -> Result<(), Error> {
     if let Err(error) = crate::session::install_termination_handler() {
         warn!("could not install the SIGTERM/SIGINT handler: {error}");
     }
-    let credentials = Credentials::load(&options.credentials)?;
-    let avatar = credentials.select(options.avatar.as_deref())?;
-    let login_uri = resolve_login_uri(options, avatar)?;
-    // Resolved once: an MFA restart reopens the socket at the same path.
     let automation = cli_automation(options)?;
 
     // The persisted start-location preference (the preferences General tab) is
@@ -1046,42 +1036,19 @@ fn run_viewer(options: &Options) -> Result<(), Error> {
             crate::preferences_colors_skins::stored_skin_choice(&settings);
         (start, stored_skin, stored_theme, paths)
     };
-    let request = LoginRequest::new(
-        avatar.first().to_owned(),
-        avatar.last().to_owned(),
-        avatar.password().expose().to_owned(),
-        start,
-        options.channel.clone(),
-        options.version.clone(),
-    );
-    info!(
-        "logging in as {} {} to {login_uri}",
-        avatar.first(),
-        avatar.last()
-    );
-    let params = LoginParams {
-        login_uri: login_uri.parse()?,
-        request,
+    let login = match &options.credentials {
+        Some(file) => credentials_login(options, file, start)?,
+        // No credentials: the login screen takes the start location (whose
+        // default is the same stored preference) from its user.
+        None => {
+            info!("no credentials given; starting on the login screen");
+            ViewerLogin::Screen {
+                channel: options.channel.clone(),
+                version: options.version.clone(),
+            }
+        }
     };
-    // A challenge is answered inside the one App (`login_flow`): a windowed
-    // viewer cannot build a second, since winit allows one event loop per
-    // process.
-    let second_factor = {
-        let avatar = avatar.clone();
-        SecondFactor::new(move || {
-            avatar
-                .acquire_mfa()
-                .map(|token| token.map(|token| token.expose().to_owned()))
-                .map_err(|error| error.to_string())
-        })
-    };
-    let mut app_options = cli_app_options(
-        options,
-        ViewerLogin::Now {
-            params: Box::new(params),
-            second_factor: Some(second_factor),
-        },
-    );
+    let mut app_options = cli_app_options(options, login);
     app_options.storage = Storage::Directories(paths);
     app_options.automation = automation;
     app_options.content.fetch_server_chat_history = !options.no_group_chat_history;
@@ -1114,6 +1081,58 @@ fn run_viewer(options: &Options) -> Result<(), Error> {
     }
     info!("session ended");
     Ok(())
+}
+
+/// The login a run started with the credentials file `file` makes at once,
+/// with no login screen: the avatar `--avatar` selects, on the grid the
+/// command line or the avatar names, starting at `start`, answering a
+/// second-factor challenge from the avatar's own `mfa_command`.
+///
+/// # Errors
+///
+/// Returns an [`enum@Error`] if the credentials cannot be loaded or the login
+/// URI cannot be resolved.
+fn credentials_login(
+    options: &Options,
+    file: &Path,
+    start: StartLocation,
+) -> Result<ViewerLogin, Error> {
+    let credentials = Credentials::load(file)?;
+    let avatar = credentials.select(options.avatar.as_deref())?;
+    let login_uri = resolve_login_uri(options, avatar)?;
+    let request = LoginRequest::new(
+        avatar.first().to_owned(),
+        avatar.last().to_owned(),
+        avatar.password().expose().to_owned(),
+        start,
+        options.channel.clone(),
+        options.version.clone(),
+    );
+    info!(
+        "logging in as {} {} to {login_uri}",
+        avatar.first(),
+        avatar.last()
+    );
+    let params = LoginParams {
+        login_uri: login_uri.parse()?,
+        request,
+    };
+    // A challenge is answered inside the one App (`login_flow`): a windowed
+    // viewer cannot build a second, since winit allows one event loop per
+    // process.
+    let second_factor = {
+        let avatar = avatar.clone();
+        SecondFactor::new(move || {
+            avatar
+                .acquire_mfa()
+                .map(|token| token.map(|token| token.expose().to_owned()))
+                .map_err(|error| error.to_string())
+        })
+    };
+    Ok(ViewerLogin::Now {
+        params: Box::new(params),
+        second_factor: Some(second_factor),
+    })
 }
 
 /// Render a captured avatar-state bundle offline (`--replay <dir>`): point the

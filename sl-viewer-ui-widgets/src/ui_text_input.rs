@@ -98,6 +98,23 @@
 //! selection it queues never reaches the buffer, so nothing is ever painted and
 //! then taken back.
 //!
+//! # Passwords
+//!
+//! [`EditableText`] has no masking, and whatever its editor holds is drawn,
+//! read by the automation model and handed to a screen reader. So a
+//! [`TextInputKind::Password`] field's editor never holds the password: it
+//! holds one [`PASSWORD_BULLET`] per character, and the typed text lives in
+//! the field's [`PasswordField`].
+//!
+//! `apply_password_edits` applies such a field's queued edits itself, one at a
+//! time, before `bevy_text` drains the queue. A typed edit (a key, an IME
+//! commit, a paste) goes into the editor as bullets and into the secret as
+//! text; any other edit is the editor's own, and because every bullet is the
+//! same, what it removed is told by the buffer's length and the caret it left.
+//! A copy and a cut are dropped, as every platform's password field drops
+//! them, and so is an IME preedit, which would draw the composing text in the
+//! clear.
+//!
 //! # Constructible without wiring
 //!
 //! Per the registry rule (`ui_element`): a field holds and edits its own
@@ -202,6 +219,10 @@ pub enum TextInputKind {
     /// (`0`, `128`). The `-` key is rejected outright, the way a count or a
     /// dimension field wants.
     NonNegativeInteger,
+    /// A password: one line that shows a bullet per character and keeps what
+    /// was typed in its [`PasswordField`], never in the editor (see the
+    /// [module documentation](self#passwords)).
+    Password,
 }
 
 impl TextInputKind {
@@ -226,7 +247,7 @@ impl TextInputKind {
     /// point, a sign only at the front) — that is `Self::accepts`'s job.
     fn char_filter(self) -> Option<fn(char) -> bool> {
         match self {
-            Self::Line | Self::Multiline => None,
+            Self::Line | Self::Multiline | Self::Password => None,
             Self::Float => Some(is_float_char),
             Self::Integer => Some(is_integer_char),
             Self::NonNegativeInteger => Some(is_digit_char),
@@ -243,7 +264,7 @@ impl TextInputKind {
     /// reverting anything it rejects.
     fn accepts(self, value: &str) -> bool {
         match self {
-            Self::Line | Self::Multiline => true,
+            Self::Line | Self::Multiline | Self::Password => true,
             Self::Float => accepts_float_intermediate(value),
             Self::Integer => accepts_integer_intermediate(value),
             Self::NonNegativeInteger => accepts_unsigned_integer(value),
@@ -260,7 +281,7 @@ impl TextInputKind {
     /// have no numeric value and always return `None`.
     pub fn parse(self, value: &str) -> Option<TextInputValue> {
         match self {
-            Self::Line | Self::Multiline => None,
+            Self::Line | Self::Multiline | Self::Password => None,
             Self::Float => value.parse::<f64>().ok().map(TextInputValue::Float),
             Self::Integer => value.parse::<i64>().ok().map(TextInputValue::Integer),
             Self::NonNegativeInteger => value.parse::<u64>().ok().map(TextInputValue::Unsigned),
@@ -523,8 +544,13 @@ pub struct NumericField {
 pub fn spawn_text_input(commands: &mut Commands, parent: Entity, spec: &TextInputSpec) -> Entity {
     let multiline = spec.kind.is_multiline();
     let initial = spec.sanitised_initial();
+    let password = spec.kind == TextInputKind::Password;
 
-    let mut editor = EditableText::new(&initial);
+    let mut editor = EditableText::new(if password {
+        masked(&initial)
+    } else {
+        initial.clone()
+    });
     editor.allow_newlines = multiline;
     editor.max_characters = spec.max_characters;
     if multiline {
@@ -643,7 +669,9 @@ pub fn spawn_text_input(commands: &mut Commands, parent: Entity, spec: &TextInpu
     if let Some(filter) = spec.kind.char_filter() {
         field.insert(EditableTextFilter::new(filter));
     }
-    if spec.kind.is_numeric() {
+    if password {
+        field.insert(PasswordField { secret: initial });
+    } else if spec.kind.is_numeric() {
         field.insert(NumericField {
             kind: spec.kind,
             last_valid: initial,
@@ -1085,6 +1113,12 @@ impl Plugin for TextInputPlugin {
                 // Before `bevy_text` drains the queued edits, so an overwrite
                 // rewrite still reaches this frame's `apply_text_edits`.
                 apply_overwrite_edits.before(EditableTextSystems),
+                // Last before the drain, on the queue the overwrite rewrite and
+                // the refusal have already settled: a password field's edits
+                // are applied here, and `bevy_text` finds its queue empty.
+                apply_password_edits
+                    .after(refuse_edits_an_uneditable_field_must_not_take)
+                    .before(EditableTextSystems),
                 enforce_numeric_intermediate
                     // After `bevy_text` applies the frame's edits, but before the
                     // editable-text glyph layout (`UiSystems::PostLayout`), so a
@@ -1296,6 +1330,147 @@ fn reconcile_numeric_field(
     driver.move_to_text_end();
 }
 
+/// What a [`TextInputKind::Password`] field shows for each character it holds.
+pub const PASSWORD_BULLET: char = '•';
+
+/// `text` as a password field shows it: one [`PASSWORD_BULLET`] per character.
+fn masked(text: &str) -> String {
+    text.chars().map(|_| PASSWORD_BULLET).collect()
+}
+
+/// What a [`TextInputKind::Password`] field holds: the text typed into it,
+/// which its editor shows only as bullets. Read it with
+/// [`secret`](Self::secret).
+///
+/// Its `Debug` prints neither the text nor its length.
+#[derive(Component, Clone, Default)]
+pub struct PasswordField {
+    /// The typed text.
+    secret: String,
+}
+
+impl PasswordField {
+    /// The text typed into the field.
+    #[must_use]
+    pub fn secret(&self) -> &str {
+        &self.secret
+    }
+
+    /// Bring the secret in step with one edit its editor has just applied:
+    /// `before` and `after` bullets either side of it, the selection it was
+    /// made over (`selected`, in characters), the caret after it, and the text
+    /// it typed, if it typed any.
+    ///
+    /// Every bullet is the same, so the editor's change says where the secret
+    /// changed: a typed edit replaced the selection with its text, unless the
+    /// editor refused it (a length cap); any other edit that shrank the buffer
+    /// deleted at the caret it left behind, whether it was a backspace, a
+    /// delete, a word deletion or a selection's.
+    fn mirror(
+        &mut self,
+        before: usize,
+        after: usize,
+        selected: core::ops::Range<usize>,
+        caret: usize,
+        typed: Option<&str>,
+    ) {
+        if let Some(typed) = typed {
+            let replaced = selected.end.saturating_sub(selected.start);
+            let expected = before
+                .saturating_sub(replaced)
+                .saturating_add(typed.chars().count());
+            if after == expected {
+                let range =
+                    char_byte(&self.secret, selected.start)..char_byte(&self.secret, selected.end);
+                self.secret.replace_range(range, typed);
+            }
+        } else if after < before {
+            let end = caret.saturating_add(before.saturating_sub(after));
+            let range = char_byte(&self.secret, caret)..char_byte(&self.secret, end);
+            self.secret.replace_range(range, "");
+        }
+    }
+}
+
+impl core::fmt::Debug for PasswordField {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str("PasswordField(..)")
+    }
+}
+
+/// The byte offset of the character `index` characters into `text`, or its
+/// length past the end.
+fn char_byte(text: &str, index: usize) -> usize {
+    text.char_indices()
+        .nth(index)
+        .map_or(text.len(), |(byte, _)| byte)
+}
+
+/// The character offset of `byte` in a password field's buffer of bullets.
+fn bullet_index(byte: usize) -> usize {
+    byte.checked_div(PASSWORD_BULLET.len_utf8()).unwrap_or(0)
+}
+
+/// Apply every password field's queued edits itself, before `bevy_text`
+/// drains the queue, so that what is typed reaches the field's
+/// [`PasswordField`] and only bullets reach its editor.
+///
+/// Each edit is applied alone so the change it made can be read off the
+/// editor: a typed edit (a key, an IME commit, a paste) goes in as bullets and
+/// its text into the secret; every other edit is the editor's own, mirrored
+/// onto the secret by [`PasswordField::mirror`]. A copy or a cut is dropped,
+/// because a password never leaves its field, and so is an IME preedit, which
+/// would draw the composing text in the clear.
+fn apply_password_edits(
+    mut fields: Query<(&mut EditableText, &mut PasswordField)>,
+    mut font_cx: ResMut<FontCx>,
+    mut layout_cx: ResMut<LayoutCx>,
+    mut clipboard: ResMut<bevy::clipboard::Clipboard>,
+) {
+    for (mut editable, mut password) in &mut fields {
+        // Read through `as_ref`, so an idle field is not marked changed.
+        if editable.as_ref().pending_edits.is_empty() {
+            continue;
+        }
+        for edit in core::mem::take(&mut editable.pending_edits) {
+            let typed = match edit {
+                TextEdit::Copy | TextEdit::Cut => continue,
+                TextEdit::ImeSetCompose { ref value, .. } if !value.is_empty() => continue,
+                TextEdit::Paste => match clipboard.fetch_text().poll_result() {
+                    Some(Ok(text)) => Some(text),
+                    Some(Err(error)) => {
+                        warn!(
+                            "could not read the clipboard to paste into a password field: {error:?}"
+                        );
+                        continue;
+                    }
+                    None => {
+                        warn!(
+                            "the clipboard did not answer at once, so the paste into a password field is dropped"
+                        );
+                        continue;
+                    }
+                },
+                TextEdit::Insert(ref text) | TextEdit::ImeCommit { value: ref text } => {
+                    Some(text.to_string())
+                }
+                _ => None,
+            };
+            let before = editable.editor.raw_text().chars().count();
+            let selected = editable.editor.raw_selection().text_range();
+            let selected = bullet_index(selected.start)..bullet_index(selected.end);
+            let shown = typed
+                .as_deref()
+                .map_or(edit, |text| TextEdit::Insert(masked(text).into()));
+            editable.pending_edits.push(shown);
+            editable.apply_pending_edits(&mut font_cx, &mut layout_cx.0, &mut clipboard, |_| true);
+            let after = editable.editor.raw_text().chars().count();
+            let caret = bullet_index(editable.editor.raw_selection().focus().index());
+            password.mirror(before, after, selected, caret, typed.as_deref());
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Gallery specimens — one registered element per variant, so every field is
 // swept by `ui_test` across every script, direction, scale and font size.
@@ -1396,6 +1571,21 @@ pub fn spawn_read_only_specimen(commands: &mut Commands, parent: Entity, cx: Ele
             read_only: true,
             name_key: Some("text-input-read-only-name"),
             ..TextInputSpec::new("text-input-read-only", TextInputKind::Line)
+        },
+    )
+}
+
+/// Spawn the password field specimen: the sample text as the bullets a
+/// password field shows instead.
+pub fn spawn_password_specimen(commands: &mut Commands, parent: Entity, cx: ElementCx) -> Entity {
+    spawn_text_input(
+        commands,
+        parent,
+        &TextInputSpec {
+            initial: cx.text(SAMPLE_TEXT),
+            font_size: cx.font_size,
+            name_key: Some("text-input-password-name"),
+            ..TextInputSpec::new("text-input-password", TextInputKind::Password)
         },
     )
 }
@@ -2136,7 +2326,10 @@ mod tests {
 /// typing path then honours. A validator can be perfect and unreachable.
 #[cfg(test)]
 mod typed_tests {
-    use super::{TextInputKind, TextInputPlugin, TextInputSpec, TextInputValue, spawn_text_input};
+    use super::{
+        PasswordField, TextInputKind, TextInputPlugin, TextInputSpec, TextInputValue,
+        spawn_text_input,
+    };
     use bevy::input::keyboard::Key;
     use bevy::prelude::*;
     use pretty_assertions::assert_eq;
@@ -2450,6 +2643,110 @@ mod typed_tests {
             .poll_result()
             .ok_or("the clipboard read never resolved")??;
         assert_eq!(copied, "alpha", "`Ctrl+C` copies a read-only field's text");
+        Ok(())
+    }
+
+    /// The secret the password field `field` holds.
+    fn secret(app: &App, field: Entity) -> Result<String, TestError> {
+        Ok(app
+            .world()
+            .get::<PasswordField>(field)
+            .ok_or("the field holds no password")?
+            .secret()
+            .to_owned())
+    }
+
+    /// **A password field shows bullets and keeps the text.** Typing,
+    /// deleting either side of the caret, a word deletion and a replaced
+    /// selection all reach the secret, while the editor (what is drawn, what
+    /// the automation model and a screen reader read) only ever holds as many
+    /// bullets.
+    #[test]
+    fn a_password_field_shows_bullets_and_keeps_the_text() -> Result<(), TestError> {
+        let mut app = typed_field_app(spec(TextInputKind::Password, "ca"))?;
+        let field =
+            crate::ui_test::find_by_name(&mut app, FIELD).ok_or("the field did not spawn")?;
+        assert_eq!(secret(&app, field)?, "ca", "the initial text is the secret");
+        assert_eq!(value(&mut app), "••", "and the field shows it as bullets");
+
+        interact::tap(&mut app, KeyCode::End, Key::End);
+        interact::type_str(&mut app, "rné");
+        settle(&mut app);
+        assert_eq!(secret(&app, field)?, "carné");
+        assert_eq!(value(&mut app), "•••••");
+
+        // A backspace at the end, then a delete in the middle.
+        interact::tap(&mut app, KeyCode::Backspace, Key::Backspace);
+        interact::tap(&mut app, KeyCode::ArrowLeft, Key::ArrowLeft);
+        interact::tap(&mut app, KeyCode::ArrowLeft, Key::ArrowLeft);
+        interact::tap(&mut app, KeyCode::Delete, Key::Delete);
+        settle(&mut app);
+        assert_eq!(
+            secret(&app, field)?,
+            "can",
+            "each deletion takes its own character"
+        );
+        assert_eq!(value(&mut app), "•••");
+
+        // Typing over a selection replaces it.
+        interact::with_modifier(&mut app, KeyCode::ControlLeft, Key::Control, |app| {
+            interact::type_str(app, "a");
+        });
+        interact::type_str(&mut app, "x");
+        settle(&mut app);
+        assert_eq!(
+            secret(&app, field)?,
+            "x",
+            "a select-all and a key replace the lot"
+        );
+        assert_eq!(value(&mut app), "•");
+        Ok(())
+    }
+
+    /// **A password never leaves its field, and a paste goes in.** `Ctrl+C`
+    /// and `Ctrl+X` leave the clipboard and the field as they were, while
+    /// `Ctrl+V` types the clipboard's text into the secret.
+    #[test]
+    fn a_password_field_refuses_copy_and_cut_and_takes_a_paste() -> Result<(), TestError> {
+        let mut app = typed_field_app(spec(TextInputKind::Password, "hunter"))?;
+        let field =
+            crate::ui_test::find_by_name(&mut app, FIELD).ok_or("the field did not spawn")?;
+        app.world_mut()
+            .resource_mut::<bevy::clipboard::Clipboard>()
+            .set_text("before")?;
+        interact::with_modifier(&mut app, KeyCode::ControlLeft, Key::Control, |app| {
+            interact::type_str(app, "a");
+            interact::type_str(app, "c");
+            interact::type_str(app, "x");
+        });
+        settle(&mut app);
+        let held = app
+            .world_mut()
+            .resource_mut::<bevy::clipboard::Clipboard>()
+            .fetch_text()
+            .poll_result()
+            .ok_or("the clipboard read never resolved")??;
+        assert_eq!(
+            held, "before",
+            "neither a copy nor a cut reaches the clipboard"
+        );
+        assert_eq!(
+            secret(&app, field)?,
+            "hunter",
+            "and a cut takes nothing away"
+        );
+
+        // The selection a select-all made is still standing: the paste
+        // replaces it.
+        app.world_mut()
+            .resource_mut::<bevy::clipboard::Clipboard>()
+            .set_text("pasted")?;
+        interact::with_modifier(&mut app, KeyCode::ControlLeft, Key::Control, |app| {
+            interact::type_str(app, "v");
+        });
+        settle(&mut app);
+        assert_eq!(secret(&app, field)?, "pasted");
+        assert_eq!(value(&mut app), "••••••");
         Ok(())
     }
 

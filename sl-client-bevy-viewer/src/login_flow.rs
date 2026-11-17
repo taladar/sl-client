@@ -38,7 +38,12 @@ pub enum ViewerLogin {
         second_factor: Option<SecondFactor>,
     },
     /// When the login screen's user asks, with what they entered there.
-    Screen,
+    Screen {
+        /// The viewer channel reported to the grid.
+        channel: String,
+        /// The viewer version reported to the grid.
+        version: String,
+    },
 }
 
 /// Where a viewer started with credentials gets a second-factor token: a

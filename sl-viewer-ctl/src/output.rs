@@ -419,6 +419,7 @@ fn node_line(node: &UiNode) -> String {
         Some(NodeValue::Text(text)) => parts.push(format!("= {text:?}")),
         Some(NodeValue::Number(number)) => parts.push(format!("= {number}")),
         Some(NodeValue::Color(color)) => parts.push(format!("= {color}")),
+        Some(NodeValue::Masked(length)) => parts.push(format!("= ({length} hidden characters)")),
         None => {}
     }
     if let Some(accelerator) = &node.accelerator {

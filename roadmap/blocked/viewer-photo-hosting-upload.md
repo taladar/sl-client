@@ -2,9 +2,9 @@
 id: viewer-photo-hosting-upload
 title: Share snapshots to external photo/hosting services
 topic: viewer
-status: ready
+status: blocked
 origin: user request (2026-07)
-blocked_by: [viewer-snapshot-floater]
+blocked_by: [viewer-snapshot-floater, viewer-secret-store]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
@@ -78,11 +78,9 @@ is a leaf change.
   **default to the system browser + loopback**, offer CEF only as a fallback,
   and let paste-a-token (Gyazo) and webhook-URL (Discord) skip the browser
   entirely.
-- **Token storage** — refresh tokens and webhook URLs are secrets; use the OS
-  keychain via `keyring` (Secret Service / macOS Keychain / Windows Credential
-  Manager), **not** a plaintext config. Caveat worth planning for: on a headless
-  or locked-keyring Linux box (exactly our test machines) `keyring` fails, so
-  ship an encrypted-file fallback.
+- **Token storage** — refresh tokens and webhook URLs are secrets; keep them
+  in the viewer's secret store ([[viewer-secret-store]]), **not** a plaintext
+  config. That task owns the keychain and what happens without one.
 
 All the recommended crates are dual MIT/Apache (verify before relying).
 

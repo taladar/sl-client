@@ -73,6 +73,12 @@ pub const ELEMENTS: &[UiElement] = &[
         spawn: crate::ui_text_input::spawn_read_only_specimen,
     },
     UiElement {
+        id: "text-input-password",
+        summary: "The password field: one line that shows a bullet per character and keeps the \
+                  typed text out of its editor, refusing copy and cut.",
+        spawn: crate::ui_text_input::spawn_password_specimen,
+    },
+    UiElement {
         id: "text-input-float",
         summary: "The signed-decimal numeric field: accepts an optional `-`, digits and one `.`; \
                   a bad character is rejected as typed and a bad arrangement reverted.",

@@ -196,6 +196,14 @@ pub fn accesskit_node(node: &UiNode, scale: f64) -> Node {
     match &node.value {
         Some(NodeValue::Text(text)) => ak.set_value(text.as_str()),
         Some(NodeValue::Number(number)) => ak.set_numeric_value(f64::from(*number)),
+        // A password field, which a screen reader announces as such; its
+        // value is the bullets it shows, as a platform password field's is.
+        Some(value @ NodeValue::Masked(_)) => {
+            ak.set_role(AkRole::PasswordInput);
+            if let Some(shown) = value.shown_text() {
+                ak.set_value(shown);
+            }
+        }
         Some(NodeValue::Color(color)) => {
             if let Some(color) = accesskit_color(color) {
                 ak.set_color_value(color);

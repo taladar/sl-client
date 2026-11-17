@@ -157,6 +157,7 @@ pub fn text(app: &mut App, locator: &Locator) -> Result<Option<String>, DriverEr
     let node = locate(app, locator)?;
     Ok(match node.value {
         Some(NodeValue::Text(text) | NodeValue::Color(text)) => Some(text),
+        Some(value @ NodeValue::Masked(_)) => value.shown_text(),
         // A spin button's text is the number it holds.
         Some(NodeValue::Number(number)) if node.role == Role::SpinButton => {
             Some(number.to_string())

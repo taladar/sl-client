@@ -172,8 +172,9 @@ wire crate's own text for a scenario that asks for it.
   requirement is recorded on `viewer-image-upload`.
 - The e2e test `e2e_login` logs in on both fake flavours, through a second
   factor, and past a terms-of-service and a critical-message gate.
-- A refused login ends the run with the grid's reason and text, word for
-  word; there is no login screen to show it on yet (`viewer-login-screen`).
+- A refused login started from a credentials file ends the run with the
+  grid's reason and text, word for word; on the login screen the same text
+  is said on the panel and the next try may follow (`e2e_login_screen`).
   It does not read `message_id`, so Second Life's text is shown in English
   whatever the locale (`viewer-login-refusal-localised-text`).
 - A viewer kicked by a second login exits cleanly, with the grid's reason in

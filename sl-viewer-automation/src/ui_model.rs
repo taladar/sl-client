@@ -21,7 +21,7 @@ use sl_viewer_ui_core::semantic::{
     role_from_classes, selected_by_class,
 };
 use sl_viewer_ui_core::virtual_list::VirtualRow;
-use sl_viewer_ui_widgets::ui_text_input::ReadOnlyField;
+use sl_viewer_ui_widgets::ui_text_input::{PasswordField, ReadOnlyField};
 
 /// The handle a snapshot reports for `entity`: its bits, stable for the
 /// entity's lifetime and meaningless to any other viewer.
@@ -146,6 +146,8 @@ struct NodeMarkers {
     expanded: Has<Expanded>,
     /// A read-only text field.
     read_only: Has<ReadOnlyField>,
+    /// A password field, whose value is only its length.
+    password: Has<PasswordField>,
 }
 
 /// What a node inherits from its ancestors.
@@ -425,7 +427,13 @@ impl UiModel<'_, '_> {
             }
         }
         let semantic = facts.semantic;
-        let value = if let Some(editable) = facts.editable {
+        let value = if let Some(editable) = facts.editable
+            && facts.markers.password
+        {
+            // Its editor holds bullets; counting them says how much was typed
+            // without saying what.
+            Some(NodeValue::Masked(editable.editor.text().chars().count()))
+        } else if let Some(editable) = facts.editable {
             let text = editable.editor.text().to_string();
             // A spin button is valued by its number; while it holds none (an
             // empty field, a lone `-` mid-typing) the text is what it shows.

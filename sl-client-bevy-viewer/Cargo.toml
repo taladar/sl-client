@@ -180,6 +180,8 @@ image = { version = "0.25.10", default-features = false, features = [
   "tga",
 ] }
 jiff = { version = "0.2.35" }
+# The login screen's own grids file (`grids.toml`).
+serde = { workspace = true, features = ["derive"] }
 sl-account-dirs = { workspace = true }
 # The static-asset library the viewer ships (built-in animations, library
 # wearables and gestures) is installed process-wide before any asset store.
@@ -235,6 +237,7 @@ sl-viewer-world-objects = { workspace = true }
 sl-viewer-world-scene = { workspace = true }
 sl-viewer-world-view = { workspace = true }
 thiserror = { workspace = true }
+toml = { workspace = true }
 tracing = { workspace = true }
 tracing-chrome = { version = "0.7.0", optional = true }
 tracing-subscriber = { workspace = true, features = ["env-filter", "tracing-log"] }

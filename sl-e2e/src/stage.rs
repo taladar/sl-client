@@ -115,6 +115,8 @@ pub struct StageBuilder {
     /// The labels whose accounts must pass a second factor on the fake grid,
     /// each with the one-time token that satisfies it.
     mfa_tokens: Vec<(String, String)>,
+    /// The labels whose viewers start on their login screen.
+    login_screens: Vec<String>,
     /// How every viewer is set up beyond its login.
     setup: ViewerSetup,
 }
@@ -158,6 +160,7 @@ impl core::fmt::Debug for StageBuilder {
             .field("needs", &self.needs)
             .field("on", &self.on)
             .field("estate_managers", &self.estate_managers)
+            .field("login_screens", &self.login_screens)
             .field("setup", &self.setup)
             .finish_non_exhaustive()
     }
@@ -186,6 +189,7 @@ impl StageBuilder {
             on: None,
             estate_managers: Vec::new(),
             mfa_tokens: Vec::new(),
+            login_screens: Vec::new(),
             setup: ViewerSetup::default(),
         }
     }
@@ -254,6 +258,17 @@ impl StageBuilder {
     pub fn mfa(mut self, label: impl Into<String>, token: impl Into<String>) -> Self {
         self.mfa_tokens.push((label.into(), token.into()));
         self.dictates("it makes an account pass a second factor")
+    }
+
+    /// Viewer `label` starts on its login screen, as a viewer started without
+    /// credentials does, rather than logging in: the stage connects the
+    /// driver and waits for nothing more. The body logs it in through the
+    /// panel, with what [`Stage::login_details`] answers, and waits for it
+    /// with [`Stage::arrive`]; a relog starts it on the screen again.
+    #[must_use]
+    pub fn login_screen(mut self, label: impl Into<String>) -> Self {
+        self.login_screens.push(label.into());
+        self
     }
 
     /// Let every viewer start the web (CEF) engine, which a stage viewer
@@ -850,6 +865,22 @@ pub struct Stage {
     /// The fake-grid accounts that pass a second factor, and their tokens
     /// ([`StageBuilder::mfa`]).
     mfa_tokens: Vec<(String, String)>,
+    /// The labels whose viewers start on their login screen
+    /// ([`StageBuilder::login_screen`]).
+    login_screens: Vec<String>,
+}
+
+/// What a resident types into the login screen to log a stage viewer in
+/// ([`Stage::login_details`]).
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub struct LoginDetails {
+    /// The avatar's `First Last` name.
+    pub name: String,
+    /// Its password.
+    pub password: String,
+    /// The grid's login URI.
+    pub login_uri: String,
 }
 
 impl Stage {
@@ -893,6 +924,7 @@ impl Stage {
             host: None,
             sockets: OnceLock::new(),
             mfa_tokens: builder.mfa_tokens.clone(),
+            login_screens: builder.login_screens.clone(),
         };
         match stage.launch(builder).await {
             Ok(()) => Ok(stage),
@@ -934,6 +966,9 @@ impl Stage {
         }
         let mut arrivals = tokio::task::JoinSet::new();
         for viewer in &self.viewers {
+            if self.on_login_screen(&viewer.label) {
+                continue;
+            }
             let _task = arrivals.spawn(arrive(viewer.driver()?, self.arrival(), self.settle()));
         }
         while let Some(joined) = arrivals.join_next().await {
@@ -944,7 +979,8 @@ impl Stage {
         }
         // A live grid's agents and region are known only now.
         for viewer in &mut self.viewers {
-            if viewer.agent.is_some() && !self.home.is_empty() {
+            let on_screen = self.login_screens.contains(&viewer.label);
+            if on_screen || (viewer.agent.is_some() && !self.home.is_empty()) {
                 continue;
             }
             let driver = viewer.driver()?;
@@ -962,6 +998,47 @@ impl Stage {
             }
         }
         Ok(())
+    }
+
+    /// Whether viewer `label` starts on its login screen.
+    fn on_login_screen(&self, label: &str) -> bool {
+        self.login_screens.iter().any(|screen| screen == label)
+    }
+
+    /// What a resident types into viewer `label`'s login screen to log it in
+    /// as its account: on the fake grid the account `Stage <label>`, on a live
+    /// grid the account it takes.
+    ///
+    /// # Errors
+    ///
+    /// [`StageError::UnknownViewer`], and on a live grid
+    /// [`StageError::NoAccount`] when there are fewer accounts than viewers.
+    pub fn login_details(&self, label: &str) -> Result<LoginDetails, StageError> {
+        let viewer = self.stage_viewer(label)?;
+        Ok(match self.login_of(viewer.index, label)? {
+            Login::Stage { login_uri, .. } => LoginDetails {
+                name: format!("{FIRST_NAME} {label}"),
+                password: PASSWORD.to_owned(),
+                login_uri,
+            },
+            Login::Live(account) => LoginDetails {
+                name: account.name(),
+                password: account.avatar.password().expose().to_owned(),
+                login_uri: account.login_uri,
+            },
+        })
+    }
+
+    /// Wait until viewer `label`, logged in from its login screen, has
+    /// arrived and settled, as the stage's start waits for every other
+    /// viewer.
+    ///
+    /// # Errors
+    ///
+    /// [`StageError::UnknownViewer`], and [`StageError::Driver`] when it does
+    /// not arrive.
+    pub async fn arrive(&self, label: &str) -> Result<(), StageError> {
+        arrive(self.viewer(label)?, self.arrival(), self.settle()).await
     }
 
     /// The region a viewer that logs in waits to arrive in: the fake grid's
@@ -1103,6 +1180,18 @@ impl Stage {
                 mfa_token: None, ..
             } => None,
         };
+        let on_screen = self.on_login_screen(label);
+        let viewer_login = if on_screen {
+            ViewerLogin::Screen {
+                channel: "sl-e2e".to_owned(),
+                version: "0.0".to_owned(),
+            }
+        } else {
+            ViewerLogin::Now {
+                params: Box::new(params),
+                second_factor,
+            }
+        };
         let log_label = self.log_label(label);
         let state = dir.join("state");
         let assets = self.setup.watch_skins.then(|| asset_base(dir));
@@ -1113,7 +1202,7 @@ impl Stage {
             .ok_or(sl_viewer_automation::HostError::Stopped)?;
         let (handle, link) = host
             .host(label.clone(), move || {
-                in_process_viewer(params, second_factor, log_label, &state, assets, &setup)
+                in_process_viewer(viewer_login, log_label, &state, assets, &setup)
             })
             .await?;
         viewer.running(ViewerRun::InProcess(Some(handle)));
@@ -1124,6 +1213,9 @@ impl Stage {
                 source,
             })?;
         viewer.connected(driver.clone());
+        if on_screen {
+            return Ok(());
+        }
         let logged_in = driver
             .expect_state(Probe::Agent)
             .at("/agent_id")
@@ -1209,21 +1301,32 @@ impl Stage {
         };
         self.take_login_turn(login).await?;
         let socket = sockets.join(format!("{}.{session}.sock", viewer.index));
-        let mut launch = Launch::in_dir(label.clone(), &binary, &dir).args([
-            "--credentials".to_owned(),
-            credentials.display().to_string(),
-            "--avatar".to_owned(),
-            avatar_key,
-            "--login-uri".to_owned(),
-            login_uri,
-            "--start".to_owned(),
-            self.start.to_wire_string(),
-            "--headless".to_owned(),
-            "--capture-size".to_owned(),
-            format!("{}x{}", WINDOW.x, WINDOW.y),
-            "--automation-socket".to_owned(),
-            socket.display().to_string(),
-        ]);
+        let on_screen = self.on_login_screen(label);
+        // A viewer on its login screen is started without credentials, as a
+        // resident starts one.
+        let credentials_args = if on_screen {
+            Vec::new()
+        } else {
+            vec![
+                "--credentials".to_owned(),
+                credentials.display().to_string(),
+                "--avatar".to_owned(),
+                avatar_key,
+                "--login-uri".to_owned(),
+                login_uri,
+                "--start".to_owned(),
+                self.start.to_wire_string(),
+            ]
+        };
+        let mut launch = Launch::in_dir(label.clone(), &binary, &dir)
+            .args(credentials_args)
+            .args([
+                "--headless".to_owned(),
+                "--capture-size".to_owned(),
+                format!("{}x{}", WINDOW.x, WINDOW.y),
+                "--automation-socket".to_owned(),
+                socket.display().to_string(),
+            ]);
         if !self.setup.media.web {
             launch = launch.args(["--disable-web-media".to_owned()]);
         }
@@ -1252,7 +1355,11 @@ impl Stage {
             source,
         })?;
         viewer.running(ViewerRun::Process(Some(running)));
-        let driver = logged_in(viewer, &socket, &launch.log).await?;
+        let driver = if on_screen {
+            connect(viewer, &socket, &launch.log).await?
+        } else {
+            logged_in(viewer, &socket, &launch.log).await?
+        };
         viewer.connected(driver);
         Ok(())
     }
@@ -1866,22 +1973,19 @@ fn driver_options(label: &str, dir: &Path) -> ViewerOptions {
     ViewerOptions::new(label).with_artifacts(dir.join("failures"))
 }
 
-/// An in-process stage viewer: the viewer's own builder's App, headless,
+/// An in-process stage viewer logging in as `login` says: the viewer's own
+/// builder's App, headless,
 /// storing under `state`, reading the asset tree in `assets` when given, set
 /// up as `setup` says, reached through the in-process transport and logging
 /// inside a span named `log_label`.
 fn in_process_viewer(
-    params: LoginParams,
-    second_factor: Option<SecondFactor>,
+    login: ViewerLogin,
     log_label: String,
     state: &Path,
     assets: Option<PathBuf>,
     setup: &ViewerSetup,
 ) -> Result<ViewerApp, BuildError> {
-    let mut options = ViewerAppOptions::with_login(ViewerLogin::Now {
-        params: Box::new(params),
-        second_factor,
-    });
+    let mut options = ViewerAppOptions::with_login(login);
     options.window = WindowMode::Headless {
         size: WINDOW,
         watch: false,

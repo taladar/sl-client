@@ -5419,6 +5419,8 @@ setting-desc-LogTimestamp = Prefix each logged line with a timestamp
 setting-desc-LogTimestampDate = Include the date in logged timestamps
 setting-desc-LogTimestampSeconds = Include seconds in logged timestamps
 setting-desc-LoginStartLocation = The default login start location: last, home, or uri:Region&x&y&z
+setting-desc-LoginLastGrid = The login URI of the grid the login screen last logged in to
+setting-desc-LoginLastAvatar = The avatar name the login screen last logged in with
 setting-desc-MediaAutoPlayEnabled = Start media-on-a-prim faces marked auto-play without a click
 setting-desc-ParcelMediaAutoPlayEnable = Start the parcel's media by itself a few seconds after arriving, while its screen is in view
 setting-desc-PermAllowScriptedMedia = Let a script start the parcel's media (stopping and pausing it are always allowed)
@@ -5636,6 +5638,7 @@ text-input-float-name = Decimal number
 text-input-integer-name = Whole number
 text-input-unsigned-name = Non-negative number
 text-input-read-only-name = Read-only text
+text-input-password-name = Password
 spinner-specimen-name = Stepped number
 # What the gallery's multi-line text editor specimen is called.
 text-editor-name = Text editor
@@ -5742,3 +5745,50 @@ script-errors-title = Script Errors
 # The tab that shows every object's lines together.
 script-errors-all = All
 script-errors-clear = Clear
+
+## The login screen (viewer-login-screen)
+# The pre-login menu bar's Viewer menu and its Exit entry.
+login-menu-viewer = Viewer
+login-menu-exit = Exit
+# The captions beside the panel's fields.
+login-grid-label = Grid:
+login-add-grid-label = Add a grid:
+login-avatar-label = Username:
+login-password-label = Password:
+login-start-label = Start at:
+login-token-label = Authenticator code:
+# What the region field beside the start combo is called.
+login-start-region-name = Start region
+# The start combo's choices.
+login-start-last = My last location
+login-start-home = My home
+login-start-region = A region
+# The panel's buttons.
+login-remove-grid = Remove
+login-add-grid = Add
+login-connect = Log In
+login-submit-token = Continue
+# The line under the panel: progress, and what went wrong. A $message is the
+# grid's own words, or the system's.
+login-notice-logging-in = Logging in…
+login-notice-connecting = Connecting to the region…
+login-notice-no-grid = Choose a grid to log in to.
+login-notice-no-avatar = Enter your username, as "First Last" or a single name.
+login-notice-no-password = Enter your password.
+login-notice-no-region = Enter the region to start in.
+login-notice-bad-region = That start region cannot be used: { $message }
+login-notice-no-token = Enter the code from your authenticator.
+login-notice-token = { $message }
+login-notice-refused = The grid refused the login: { $message }
+login-notice-timeout = The region stopped answering before you arrived.
+login-notice-handshake = The region never let you in. Try again in a moment.
+login-notice-unreachable = The grid could not be reached.
+login-notice-kicked = The region sent you away: { $message }
+login-notice-ended = The login ended: { $message }
+login-notice-fetching-grid = Asking the grid for its name…
+login-notice-bad-grid-uri = That is not a login URI: { $message }
+login-notice-grid-failed = The grid could not be added: { $message }
+login-notice-grid-added = Added { $message }.
+login-notice-grid-unsaved = The grid is listed, but could not be kept for next time: { $message }
+login-notice-grid-removed = Removed { $message }.
+login-notice-grid-not-removed = { $message }

@@ -121,7 +121,7 @@ a test harness) can serve an unmodified viewer:
 ## The login host's siblings: grid info, map tiles, helper URIs
 
 A login URI is more than the login method. A viewer's grid manager
-(Firestorm's, or this workspace's future login screen) first fetches
+(Firestorm's, or this workspace's login screen) first fetches
 `<login-uri>/get_grid_info`, a flat `<gridinfo><key>value</key>…</gridinfo>`
 document, to learn the grid's `gridname`, `gridnick`, `platform`, welcome /
 help / register pages, and the `economy` helper URI (`helperuri` is an
@@ -152,7 +152,9 @@ hands out:
 > - `sl-wire/src/xmlrpc.rs` is the generic XML-RPC codec (calls,
 >   responses, faults over `Llsd` values) the login codec shares.
 > - `sl-wire/src/grid_info.rs`: `GridInfo`, `build_grid_info_xml` /
->   `parse_grid_info_xml`, and the XML-RPC pair.
+>   `parse_grid_info_xml`, and the XML-RPC pair;
+>   `sl-client-bevy/src/grids.rs` fetches it, which is how the viewer's
+>   login screen names a grid added by its login URI.
 > - `sl-wire/src/map_tile.rs`: `MapTileRef` (file-name build/parse).
 > - `sl-wire/src/economy_helper.rs`: typed request/response builders and
 >   parsers for all four helper methods, both directions.

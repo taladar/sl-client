@@ -123,13 +123,15 @@ mod tests {
             // The seams the host owns, and the price of scheduling the real
             // widget plugins rather than a stub: the reading direction the tab
             // strip mirrors under, the wheel accumulator and hover map the
-            // virtualized lists scroll from, the font context and key stream the
-            // text fields need, and the toast channel the event log raises on.
+            // virtualized lists scroll from, the font context, key stream and
+            // clipboard the text fields need, and the toast channel the event
+            // log raises on.
             .init_resource::<UiDirection>()
             .init_resource::<AccumulatedMouseScroll>()
             .init_resource::<HoverMap>()
             .init_resource::<bevy::text::FontCx>()
             .init_resource::<bevy::text::LayoutCx>()
+            .insert_resource(bevy::clipboard::Clipboard::in_process())
             .add_message::<KeyboardInput>()
             .add_message::<ShowNotification>()
             .init_resource::<sl_viewer_world_api::AvatarState>()
@@ -184,13 +186,15 @@ mod tests {
             // The seams the host owns, and the price of scheduling the real
             // widget plugins rather than a stub: the reading direction the tab
             // strip mirrors under, the wheel accumulator and hover map the
-            // virtualized lists scroll from, the font context and key stream the
-            // text fields need, and the toast channel the event log raises on.
+            // virtualized lists scroll from, the font context, key stream and
+            // clipboard the text fields need, and the toast channel the event
+            // log raises on.
             .init_resource::<UiDirection>()
             .init_resource::<AccumulatedMouseScroll>()
             .init_resource::<HoverMap>()
             .init_resource::<bevy::text::FontCx>()
             .init_resource::<bevy::text::LayoutCx>()
+            .insert_resource(bevy::clipboard::Clipboard::in_process())
             .add_message::<KeyboardInput>()
             .add_message::<ShowNotification>()
             .init_resource::<sl_viewer_world_api::AvatarState>()

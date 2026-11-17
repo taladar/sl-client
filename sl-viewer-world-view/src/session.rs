@@ -97,6 +97,15 @@ pub struct ViewerSession {
     quit_deadline: Option<f32>,
 }
 
+impl ViewerSession {
+    /// Whether the agent's own avatar has arrived in-world: what the login
+    /// screen waits for before it gives the window to the world.
+    #[must_use]
+    pub const fn agent_in_world(&self) -> bool {
+        self.agent_in_world
+    }
+}
+
 /// Present while the viewer was started on its login screen rather than with
 /// credentials: a login that ends before the agent arrives — a refused
 /// password, an unreachable grid — is the screen's to report, so the session

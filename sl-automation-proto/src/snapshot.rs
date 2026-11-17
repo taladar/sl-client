@@ -172,14 +172,31 @@ pub enum NodeValue {
     /// The colour a colour well holds, as `#rrggbb` in sRGB — `#rrggbbaa`
     /// when it is not opaque.
     Color(String),
+    /// A password field, which reports how many characters it holds and
+    /// never what they are.
+    Masked(usize),
 }
 
 impl NodeValue {
+    /// The text a field shows for this value: a text or a colour as it is,
+    /// a password as one bullet per character, and a number as nothing, for
+    /// its caller to spell.
+    #[must_use]
+    pub fn shown_text(&self) -> Option<String> {
+        match self {
+            Self::Text(text) | Self::Color(text) => Some(text.clone()),
+            Self::Masked(length) => Some(core::iter::repeat_n('•', *length).collect()),
+            Self::Number(_) => None,
+        }
+    }
+
     /// Whether a field filled with `text` now holds it: the same text, or — a
-    /// spin button being valued by its number — the number `text` spells.
+    /// spin button being valued by its number — the number `text` spells, or
+    /// — a password field, which says no more — as many characters.
     #[must_use]
     pub fn holds(&self, text: &str) -> bool {
         match self {
+            Self::Masked(length) => text.chars().count() == *length,
             Self::Text(held) | Self::Color(held) => held == text,
             Self::Number(number) => text
                 .trim()

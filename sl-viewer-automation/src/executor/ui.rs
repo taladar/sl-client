@@ -527,6 +527,9 @@ fn holds(condition: &WaitCondition, matches: &[UiNode]) -> bool {
                 }
             }
             Some(NodeValue::Text(text) | NodeValue::Color(text)) => matcher.matches(text),
+            Some(value @ NodeValue::Masked(_)) => value
+                .shown_text()
+                .is_some_and(|shown| matcher.matches(&shown)),
             Some(NodeValue::Number(_)) | None => node
                 .name
                 .as_deref()

@@ -121,3 +121,29 @@ avatar's `mfa_command`, or a stage's token); `ViewerLogin::Screen` starts with
 no login and the `LoginScreen` marker, under which a login failing before
 arrival leaves the window open and a quit with nothing live exits at once. The
 panel itself is still to build.
+
+## The panel (2026-11-16)
+
+A viewer started without `--credentials` (or `SL_VIEWER_CREDENTIALS`) now
+starts on the login screen (`crate::login_screen`): an opaque page under the
+floaters, with the permanent chrome hidden until the avatar arrives. It has
+a grid combo over `GridList` (the built-in local OpenSim, Second Life and
+Second Life Beta, plus the user's own in `grids.toml` beside the global
+settings), an add-a-grid row that names the grid from its `get_grid_info`
+(`sl_client_bevy::grids::fetch_grid_info`) and a Remove refused for a
+built-in, the avatar name (`First Last`, a username alone, or `first.last`),
+a masked password field (`TextInputKind::Password`: the editor holds bullets,
+the typed text lives in `PasswordField`, copy and cut are refused, and the
+automation model reports `NodeValue::Masked(length)`), the start location,
+Log In with live progress, the grid's refusal and lost-login notices, and a
+token row for a second factor. The last grid and avatar name are remembered
+(`LoginLastGrid`, `LoginLastAvatar`). The pre-login menu has Viewer ▸
+Preferences / Exit and Help ▸ About. `sl-e2e` gains
+`StageBuilder::login_screen(label)`, `Stage::login_details` and
+`Stage::arrive`; `e2e_login_screen` logs in through the panel, recovers from
+a wrong password and answers a second factor, on both backends.
+
+Saved passwords are split out as [[viewer-login-saved-passwords]], blocked on
+the secret store they need, [[viewer-secret-store]] (which
+[[viewer-photo-hosting-upload]] now waits on too). Still to do here: the
+reference's typing-to-login conveniences.

@@ -70,6 +70,9 @@ const TERRAIN_CACHE_KIND: &str = "terraincache";
 /// The filename of the global settings file within the config root.
 const GLOBAL_SETTINGS_FILE: &str = "viewer-settings.toml";
 
+/// The filename of the user's own grids within the config root.
+const GRIDS_FILE: &str = "grids.toml";
+
 /// The subdirectory of the data root holding the per-avatar account directories.
 const ACCOUNTS_SUBDIR: &str = "accounts";
 
@@ -335,6 +338,15 @@ impl ViewerPaths {
     #[must_use]
     pub fn global_settings_file(&self) -> Option<PathBuf> {
         Some(self.roots.as_ref()?.config.join(GLOBAL_SETTINGS_FILE))
+    }
+
+    /// The file the login screen's grid manager keeps the user's own grids
+    /// in, under the config root beside the global settings, or `None` when
+    /// this viewer keeps nothing on disk (only the built-in grids are then
+    /// offered, and an added grid lasts the run).
+    #[must_use]
+    pub fn grids_file(&self) -> Option<PathBuf> {
+        Some(self.roots.as_ref()?.config.join(GRIDS_FILE))
     }
 
     /// The web-media (CEF) engine's directory under the **cache** root: the

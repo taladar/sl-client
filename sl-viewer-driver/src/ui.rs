@@ -484,6 +484,7 @@ impl UiLocator {
         let node = self.node().await?;
         Ok(match node.value {
             Some(NodeValue::Text(text) | NodeValue::Color(text)) => Some(text),
+            Some(value @ NodeValue::Masked(_)) => value.shown_text(),
             Some(NodeValue::Number(_)) | None => node.name,
         })
     }

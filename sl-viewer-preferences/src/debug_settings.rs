@@ -883,7 +883,7 @@ fn spawn_editor_field(
 /// string field, which is no spinner.
 fn debug_spin_step(element: &str, kind: TextInputKind) -> Option<SpinStep> {
     match kind {
-        TextInputKind::Line | TextInputKind::Multiline => None,
+        TextInputKind::Line | TextInputKind::Multiline | TextInputKind::Password => None,
         TextInputKind::Integer => Some(SpinStep::new(
             1.0,
             f64::from(i32::MIN),

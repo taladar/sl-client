@@ -211,6 +211,9 @@ What a test may say about its stage:
   `simulator_version`, a `Scenario` seeding the account's inventory through
   `setup_for_agent`); `start_position`; `configure_grid` for the rest;
 - `estate_manager(label)`, `skin(id)` (as `--skin`) and `web_media()`;
+- `login_screen(label)` — that viewer starts on its login screen, as one
+  started without credentials does: the body types in what
+  `stage.login_details(label)` answers and waits with `stage.arrive(label)`;
 - `needs(Need::…)` — grid control, content, a dictated grid — so a test
   that cannot run on a grid skips there instead of failing.
 

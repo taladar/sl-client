@@ -1532,6 +1532,10 @@ pub(crate) const CONTRACTS: &[ElementContract] = &[
         nodes: &[NodeContract::inert("text-input-multiline:field")],
     },
     ElementContract {
+        element: "text-input-password",
+        nodes: &[NodeContract::inert("text-input-password:field")],
+    },
+    ElementContract {
         element: "text-input-read-only",
         nodes: &[NodeContract::new(
             "text-input-read-only:field",

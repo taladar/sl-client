@@ -523,12 +523,16 @@ impl ViewerAppBuilder {
         // settings account-scope loader (`AccountContext` + `load_account_settings`).
         // A viewer on its login screen derives all of this when its user logs in
         // (`crate::login_screen`); one started with credentials, now.
-        let (params, second_factor) = match login {
+        let (params, second_factor, form) = match login {
             ViewerLogin::Now {
                 params,
                 second_factor,
-            } => (Some(*params), second_factor),
-            ViewerLogin::Screen => (None, None),
+            } => (Some(*params), second_factor, None),
+            ViewerLogin::Screen { channel, version } => (
+                None,
+                None,
+                Some(crate::login_screen::LoginForm { channel, version }),
+            ),
         };
         let scope = params
             .as_ref()
@@ -583,6 +587,9 @@ impl ViewerAppBuilder {
                 app.insert_resource(identity);
             }
             app.insert_resource(sl_viewer_world_view::session::LoginScreen);
+        }
+        if let Some(form) = form {
+            app.insert_resource(form);
         }
         if let Some(params) = &params {
             app.insert_resource(crate::login_flow::PendingLogin {
@@ -860,6 +867,8 @@ impl ViewerAppBuilder {
             // A challenge is answered in place; a rejection ends a run that has
             // nobody to decide on a retry, and is the login screen's to report.
             .add_systems(Update, crate::login_flow::answer_second_factor)
+            // The login screen, for a viewer started on it.
+            .add_plugins(crate::login_screen::LoginScreenPlugin)
             .add_systems(
                 Update,
                 capture_login_outcome.run_if(not(resource_exists::<
