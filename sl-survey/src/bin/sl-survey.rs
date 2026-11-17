@@ -128,9 +128,10 @@ pub struct SurveyParameters {
     /// The maximum number of regions to survey before stopping.
     #[clap(long, default_value_t = 64)]
     max_regions: u32,
-    /// How long to spend collecting data in each region.
-    #[clap(long, default_value = "12s")]
-    collection_time: humantime::Duration,
+    /// How long to spend collecting data in each region (`12s`, `1m 30s`,
+    /// or ISO 8601's `PT12S`).
+    #[clap(long, default_value = "12s", value_parser = parse_collection_time)]
+    collection_time: std::time::Duration,
     /// The draw distance (metres) advertised so neighbours are enabled.
     #[clap(long, default_value_t = 256.0)]
     draw_distance: f32,
@@ -1054,6 +1055,13 @@ impl Survey {
     }
 }
 
+/// Parse `--collection-time`: a duration in jiff's friendly form (`12s`,
+/// `1m 30s`) or ISO 8601's (`PT12S`), refusing a negative one.
+fn parse_collection_time(text: &str) -> Result<std::time::Duration, String> {
+    let signed: jiff::SignedDuration = text.parse().map_err(|error| format!("{error}"))?;
+    std::time::Duration::try_from(signed).map_err(|error| format!("{error}"))
+}
+
 /// Implementation of the survey subcommand.
 ///
 /// # Errors
@@ -1083,7 +1091,7 @@ async fn survey_command(parameters: SurveyParameters) -> Result<(), Error> {
         bounds,
         start_handle,
         parameters.max_regions,
-        parameters.collection_time.into(),
+        parameters.collection_time,
         parameters.draw_distance,
         writer,
     );
@@ -1214,4 +1222,21 @@ async fn main() -> Result<(), Error> {
     }
     tracing::debug!("Exiting");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_collection_time;
+    use core::time::Duration;
+    use pretty_assertions::assert_eq;
+
+    /// The friendly and ISO forms parse; a negative time and nonsense do not.
+    #[test]
+    fn a_collection_time_parses_as_a_duration() {
+        assert_eq!(parse_collection_time("12s"), Ok(Duration::from_secs(12)));
+        assert_eq!(parse_collection_time("1m 30s"), Ok(Duration::from_secs(90)));
+        assert_eq!(parse_collection_time("PT12S"), Ok(Duration::from_secs(12)));
+        assert!(parse_collection_time("-5s").is_err(), "negative");
+        assert!(parse_collection_time("soon").is_err(), "nonsense");
+    }
 }
