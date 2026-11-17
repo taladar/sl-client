@@ -20119,6 +20119,141 @@ mod test {
         Ok(())
     }
 
+    /// A selection longer than one message states — a box-selected build — is
+    /// sent in messages of the reference's 254 objects (`MAX_OBJECTS_PER_PACKET`)
+    /// rather than failing to encode: select, delete and every other
+    /// selection-list request alike, in order, nothing lost.
+    #[test]
+    fn a_selection_of_more_than_one_message_is_split() -> Result<(), TestError> {
+        use sl_proto::RegionLocalObjectId;
+
+        let now = Instant::now();
+        let mut session = established(now)?;
+        let root = session.root_circuit_id().ok_or("no circuit")?;
+        drain(&mut session)?;
+        let selection: Vec<ScopedObjectId> = (1..=600)
+            .map(|id| ScopedObjectId::new(root, RegionLocalObjectId(id)))
+            .collect();
+
+        session.request_object_properties(&selection, now)?;
+        let selects: Vec<Vec<u32>> = drain(&mut session)?
+            .into_iter()
+            .filter_map(|message| match message {
+                AnyMessage::ObjectSelect(select) => Some(
+                    select
+                        .object_data
+                        .iter()
+                        .map(|block| block.object_local_id)
+                        .collect(),
+                ),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            selects.iter().map(Vec::len).collect::<Vec<_>>(),
+            vec![254, 254, 92]
+        );
+        assert_eq!(selects.concat(), (1..=600).collect::<Vec<u32>>());
+
+        session.delete_objects(&selection, now)?;
+        let deleted: usize = drain(&mut session)?
+            .into_iter()
+            .filter_map(|message| match message {
+                AnyMessage::ObjectDelete(delete) => Some(delete.object_data.len()),
+                _ => None,
+            })
+            .sum();
+        assert_eq!(deleted, 600);
+        Ok(())
+    }
+
+    /// A linkset larger than one message is linked in several, and each opens
+    /// with the root, so the simulator links every part to the same root rather
+    /// than making a second linkset of the later parts.
+    #[test]
+    fn a_large_link_repeats_the_root_in_every_message() -> Result<(), TestError> {
+        use sl_proto::RegionLocalObjectId;
+
+        let now = Instant::now();
+        let mut session = established(now)?;
+        let root = session.root_circuit_id().ok_or("no circuit")?;
+        drain(&mut session)?;
+        let prims: Vec<ScopedObjectId> = (1..=300)
+            .map(|id| ScopedObjectId::new(root, RegionLocalObjectId(id)))
+            .collect();
+        session.link_objects(&prims, now)?;
+        let links: Vec<Vec<u32>> = drain(&mut session)?
+            .into_iter()
+            .filter_map(|message| match message {
+                AnyMessage::ObjectLink(link) => Some(
+                    link.object_data
+                        .iter()
+                        .map(|block| block.object_local_id)
+                        .collect(),
+                ),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(links.len(), 2, "{links:?}");
+        for link in &links {
+            assert_eq!(link.first(), Some(&1));
+            assert!(link.len() <= 254);
+        }
+        let children: Vec<u32> = links
+            .iter()
+            .flat_map(|link| link.iter().skip(1).copied())
+            .collect();
+        assert_eq!(children, (2..=300).collect::<Vec<u32>>());
+        Ok(())
+    }
+
+    /// A take of more roots than one `DeRezObject` carries is sent as the
+    /// reference sends it: 250 roots to a packet, every packet naming the same
+    /// transaction, the packet count and its own number.
+    #[test]
+    fn a_large_take_is_numbered_across_packets() -> Result<(), TestError> {
+        use sl_proto::RegionLocalObjectId;
+
+        let now = Instant::now();
+        let mut session = established(now)?;
+        let root = session.root_circuit_id().ok_or("no circuit")?;
+        drain(&mut session)?;
+        let objects: Vec<ScopedObjectId> = (1..=600)
+            .map(|id| ScopedObjectId::new(root, RegionLocalObjectId(id)))
+            .collect();
+        let transaction = uuid::Uuid::from_u128(0x7A);
+        session.derez_objects(
+            &objects,
+            DeRezDestination::TakeIntoAgentInventory(InventoryFolderKey::from(
+                uuid::Uuid::from_u128(0xF0_1DE2),
+            )),
+            TransactionId::from(transaction),
+            None,
+            now,
+        )?;
+        let packets: Vec<(u8, u8, uuid::Uuid, usize)> = drain(&mut session)?
+            .into_iter()
+            .filter_map(|message| match message {
+                AnyMessage::DeRezObject(derez) => Some((
+                    derez.agent_block.packet_count,
+                    derez.agent_block.packet_number,
+                    derez.agent_block.transaction_id,
+                    derez.object_data.len(),
+                )),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            packets,
+            vec![
+                (3, 0, transaction, 250),
+                (3, 1, transaction, 250),
+                (3, 2, transaction, 100),
+            ]
+        );
+        Ok(())
+    }
+
     /// An object-addressed **capability** request (`GetObjectCost` here) is
     /// split by region like the UDP requests above: the root region's objects
     /// go to the root map, a neighbour's to the neighbour's own map — which is

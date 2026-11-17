@@ -232,6 +232,7 @@ fn on_events(
             | SlSessionEvent::InventoryThumbnailUploadFailed { .. }
             | SlSessionEvent::PostcardSent
             | SlSessionEvent::PostcardFailed { .. }
+            | SlSessionEvent::CommandFailed { .. }
             | SlSessionEvent::AvatarAppearance(_)
             | SlSessionEvent::AgentWearables { .. }
             | SlSessionEvent::AvatarAnimation { .. }

@@ -292,7 +292,8 @@ fn push_block_encode(out: &mut String, block: &BlockDef) {
             emit(
                 out,
                 format_args!(
-                    "        writer.put_u8(u8::try_from(self.{field}.len()).map_err(|_e| WireError::VariableTooLong {{ len: self.{field}.len(), max: 255 }})?);\n"
+                    "        writer.put_u8(u8::try_from(self.{field}.len()).map_err(|_e| WireError::TooManyBlocks {{ block: \"{}\", found: self.{field}.len(), max: 255 }})?);\n",
+                    block.name
                 ),
             );
             emit(out, format_args!("        for item in &self.{field} {{\n"));

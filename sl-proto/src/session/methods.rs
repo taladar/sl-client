@@ -14229,12 +14229,18 @@ impl Session {
     /// caller-chosen id correlating any resulting inventory update; `group_id` is
     /// the active group (use [`Uuid::nil`] for none).
     ///
+    /// A take of more than 250 objects goes out in several packets, each naming
+    /// the transaction, the packet count and its own number, as the reference
+    /// sends it.
+    ///
     /// # Errors
     ///
     /// Returns [`Error::MixedCircuits`] if `local_ids` are in more than one
     /// region (the simulator acts only on its own objects, and the reference
     /// refuses the same way), [`Error::NoCircuit`] if no circuit is established
-    /// yet, or [`Error::Wire`] if the request fails to encode.
+    /// yet, or [`Error::Wire`] if the request fails to encode — including a take
+    /// of more objects than the 254 packets one take may span carry
+    /// ([`WireError::TooManyBlocks`](sl_wire::WireError::TooManyBlocks)).
     pub fn derez_objects(
         &mut self,
         local_ids: &[ScopedObjectId],
@@ -14659,7 +14665,9 @@ impl Session {
     }
 
     /// Links the objects `local_ids` into one linkset (an `ObjectLink`). The
-    /// first id becomes the root prim; the rest become its children.
+    /// first id becomes the root prim; the rest become its children. A linkset
+    /// larger than one message carries is linked in several, each opening with
+    /// the root.
     ///
     /// # Errors
     ///

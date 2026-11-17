@@ -9,6 +9,7 @@ use crate::encode_texture_entry;
 use crate::extra_params::extra_param_message_blocks;
 use crate::link::{ExhaustedPacket, ReliableLink, ReliableSeverity};
 use crate::scoped_id::CircuitId;
+use crate::split::{MAX_VARIABLE_BLOCKS, fill_messages, fill_messages_or_one_empty};
 use crate::types::EventId;
 use crate::types::directory::category_to_wire;
 use crate::types::{
@@ -176,9 +177,7 @@ use sl_wire::messages::{
     RegionHandshakeReply, RegionHandshakeReplyAgentDataBlock, RegionHandshakeReplyRegionInfoBlock,
     RemoveInventoryFolder, RemoveInventoryFolderAgentDataBlock,
     RemoveInventoryFolderFolderDataBlock, RemoveInventoryItem, RemoveInventoryItemAgentDataBlock,
-    RemoveInventoryItemInventoryDataBlock, RemoveInventoryObjects,
-    RemoveInventoryObjectsAgentDataBlock, RemoveInventoryObjectsFolderDataBlock,
-    RemoveInventoryObjectsItemDataBlock, RemoveMuteListEntry, RemoveMuteListEntryAgentDataBlock,
+    RemoveInventoryItemInventoryDataBlock, RemoveMuteListEntry, RemoveMuteListEntryAgentDataBlock,
     RemoveMuteListEntryMuteDataBlock, RequestImage, RequestImageAgentDataBlock,
     RequestImageRequestImageBlock, RequestMultipleObjects, RequestMultipleObjectsAgentDataBlock,
     RequestMultipleObjectsObjectDataBlock, RequestRegionInfo, RequestRegionInfoAgentDataBlock,
@@ -342,10 +341,23 @@ const fn severity_of(message: &AnyMessage) -> ReliableSeverity {
     }
 }
 
-/// The most entries one message's variable block list can carry: its count is
-/// a single byte on the wire. A request naming more than this is split across
-/// messages; one that is not fails to encode.
-const MAX_VARIABLE_BLOCKS: usize = 255;
+/// How many objects one message of a selection-list request carries — select,
+/// deselect, duplicate, delete, owner, group, permissions, link, delink, undo,
+/// redo, detach and drop: the reference's `MAX_OBJECTS_PER_PACKET`
+/// (`llselectmgr.cpp`). A longer selection is split across messages
+/// ([`fill_messages`]), as `LLSelectMgr::sendListToRegions`
+/// splits it, the MTU permitting.
+const SELECTION_OBJECTS_PER_MESSAGE: usize = 254;
+
+/// How many root objects one `DeRezObject` carries, and how many packets one
+/// take may span: the reference's `MAX_ROOTS_PER_PACKET` and
+/// `MAX_PACKET_COUNT` (`derez_objects` in `llviewermenu.cpp`). Every packet of
+/// one take names the same transaction and states the count and its own
+/// number, so the simulator can tell when the take is complete.
+const DEREZ_ROOTS_PER_PACKET: usize = 250;
+
+/// See [`DEREZ_ROOTS_PER_PACKET`].
+const DEREZ_MAX_PACKETS: usize = 254;
 
 /// How many objects one `RezMultipleAttachmentsFromInv` packet carries: the
 /// reference's `OBJECTS_PER_PACKET` (`llattachmentsmgr.cpp`).
@@ -1464,23 +1476,28 @@ impl Circuit {
         invitees: &[(AgentKey, GroupRoleKey)],
         now: Instant,
     ) -> Result<(), WireError> {
-        let message = AnyMessage::InviteGroupRequest(InviteGroupRequest {
-            agent_data: InviteGroupRequestAgentDataBlock {
-                agent_id: self.agent_id.uuid(),
-                session_id: self.session_id,
-            },
-            group_data: InviteGroupRequestGroupDataBlock {
-                group_id: group_id.uuid(),
-            },
-            invite_data: invitees
-                .iter()
-                .map(|(invitee_id, role_id)| InviteGroupRequestInviteDataBlock {
-                    invitee_id: invitee_id.uuid(),
-                    role_id: role_id.uuid(),
-                })
-                .collect(),
-        });
-        self.send(&message, Reliability::Reliable, now)
+        let blocks: Vec<_> = invitees
+            .iter()
+            .map(|(invitee_id, role_id)| InviteGroupRequestInviteDataBlock {
+                invitee_id: invitee_id.uuid(),
+                role_id: role_id.uuid(),
+            })
+            .collect();
+        for message in fill_messages(blocks, MAX_VARIABLE_BLOCKS, |invite_data| {
+            AnyMessage::InviteGroupRequest(InviteGroupRequest {
+                agent_data: InviteGroupRequestAgentDataBlock {
+                    agent_id: self.agent_id.uuid(),
+                    session_id: self.session_id,
+                },
+                group_data: InviteGroupRequestGroupDataBlock {
+                    group_id: group_id.uuid(),
+                },
+                invite_data,
+            })
+        })? {
+            self.send(&message, Reliability::Reliable, now)?;
+        }
+        Ok(())
     }
 
     /// Queues a `SetGroupAcceptNotices` reliably for `group_id`.
@@ -1533,25 +1550,30 @@ impl Circuit {
         roles: &[GroupRoleEdit],
         now: Instant,
     ) -> Result<(), WireError> {
-        let message = AnyMessage::GroupRoleUpdate(GroupRoleUpdate {
-            agent_data: GroupRoleUpdateAgentDataBlock {
-                agent_id: self.agent_id.uuid(),
-                session_id: self.session_id,
-                group_id: group_id.uuid(),
-            },
-            role_data: roles
-                .iter()
-                .map(|role| GroupRoleUpdateRoleDataBlock {
-                    role_id: role.role_id.map_or_else(Uuid::nil, |r| r.uuid()),
-                    name: with_nul(&role.name),
-                    description: with_nul(&role.description),
-                    title: with_nul(&role.title),
-                    powers: role.powers,
-                    update_type: role.update_type.to_u8(),
-                })
-                .collect(),
-        });
-        self.send(&message, Reliability::Reliable, now)
+        let blocks: Vec<_> = roles
+            .iter()
+            .map(|role| GroupRoleUpdateRoleDataBlock {
+                role_id: role.role_id.map_or_else(Uuid::nil, |r| r.uuid()),
+                name: with_nul(&role.name),
+                description: with_nul(&role.description),
+                title: with_nul(&role.title),
+                powers: role.powers,
+                update_type: role.update_type.to_u8(),
+            })
+            .collect();
+        for message in fill_messages(blocks, MAX_VARIABLE_BLOCKS, |role_data| {
+            AnyMessage::GroupRoleUpdate(GroupRoleUpdate {
+                agent_data: GroupRoleUpdateAgentDataBlock {
+                    agent_id: self.agent_id.uuid(),
+                    session_id: self.session_id,
+                    group_id: group_id.uuid(),
+                },
+                role_data,
+            })
+        })? {
+            self.send(&message, Reliability::Reliable, now)?;
+        }
+        Ok(())
     }
 
     /// Queues a `GroupRoleChanges` reliably, carrying one `RoleChange` block per
@@ -1562,22 +1584,27 @@ impl Circuit {
         changes: &[GroupRoleMemberChange],
         now: Instant,
     ) -> Result<(), WireError> {
-        let message = AnyMessage::GroupRoleChanges(GroupRoleChanges {
-            agent_data: GroupRoleChangesAgentDataBlock {
-                agent_id: self.agent_id.uuid(),
-                session_id: self.session_id,
-                group_id: group_id.uuid(),
-            },
-            role_change: changes
-                .iter()
-                .map(|change| GroupRoleChangesRoleChangeBlock {
-                    role_id: change.role_id.map_or_else(Uuid::nil, |r| r.uuid()),
-                    member_id: change.member_id.uuid(),
-                    change: change.change.to_u32(),
-                })
-                .collect(),
-        });
-        self.send(&message, Reliability::Reliable, now)
+        let blocks: Vec<_> = changes
+            .iter()
+            .map(|change| GroupRoleChangesRoleChangeBlock {
+                role_id: change.role_id.map_or_else(Uuid::nil, |r| r.uuid()),
+                member_id: change.member_id.uuid(),
+                change: change.change.to_u32(),
+            })
+            .collect();
+        for message in fill_messages(blocks, MAX_VARIABLE_BLOCKS, |role_change| {
+            AnyMessage::GroupRoleChanges(GroupRoleChanges {
+                agent_data: GroupRoleChangesAgentDataBlock {
+                    agent_id: self.agent_id.uuid(),
+                    session_id: self.session_id,
+                    group_id: group_id.uuid(),
+                },
+                role_change,
+            })
+        })? {
+            self.send(&message, Reliability::Reliable, now)?;
+        }
+        Ok(())
     }
 
     /// Queues an `EjectGroupMemberRequest` reliably, ejecting each agent in
@@ -1588,22 +1615,27 @@ impl Circuit {
         member_ids: &[AgentKey],
         now: Instant,
     ) -> Result<(), WireError> {
-        let message = AnyMessage::EjectGroupMemberRequest(EjectGroupMemberRequest {
-            agent_data: EjectGroupMemberRequestAgentDataBlock {
-                agent_id: self.agent_id.uuid(),
-                session_id: self.session_id,
-            },
-            group_data: EjectGroupMemberRequestGroupDataBlock {
-                group_id: group_id.uuid(),
-            },
-            eject_data: member_ids
-                .iter()
-                .map(|ejectee_id| EjectGroupMemberRequestEjectDataBlock {
-                    ejectee_id: ejectee_id.uuid(),
-                })
-                .collect(),
-        });
-        self.send(&message, Reliability::Reliable, now)
+        let blocks: Vec<_> = member_ids
+            .iter()
+            .map(|ejectee_id| EjectGroupMemberRequestEjectDataBlock {
+                ejectee_id: ejectee_id.uuid(),
+            })
+            .collect();
+        for message in fill_messages(blocks, MAX_VARIABLE_BLOCKS, |eject_data| {
+            AnyMessage::EjectGroupMemberRequest(EjectGroupMemberRequest {
+                agent_data: EjectGroupMemberRequestAgentDataBlock {
+                    agent_id: self.agent_id.uuid(),
+                    session_id: self.session_id,
+                },
+                group_data: EjectGroupMemberRequestGroupDataBlock {
+                    group_id: group_id.uuid(),
+                },
+                eject_data,
+            })
+        })? {
+            self.send(&message, Reliability::Reliable, now)?;
+        }
+        Ok(())
     }
 
     /// Queues an `ActivateGestures` reliably, marking each gesture in `gestures`
@@ -1613,22 +1645,27 @@ impl Circuit {
         gestures: &[GestureActivation],
         now: Instant,
     ) -> Result<(), WireError> {
-        let message = AnyMessage::ActivateGestures(ActivateGestures {
-            agent_data: ActivateGesturesAgentDataBlock {
-                agent_id: self.agent_id.uuid(),
-                session_id: self.session_id,
-                flags: 0,
-            },
-            data: gestures
-                .iter()
-                .map(|gesture| ActivateGesturesDataBlock {
-                    item_id: gesture.item_id.uuid(),
-                    asset_id: gesture.asset_id,
-                    gesture_flags: 0,
-                })
-                .collect(),
-        });
-        self.send(&message, Reliability::Reliable, now)
+        let blocks: Vec<_> = gestures
+            .iter()
+            .map(|gesture| ActivateGesturesDataBlock {
+                item_id: gesture.item_id.uuid(),
+                asset_id: gesture.asset_id,
+                gesture_flags: 0,
+            })
+            .collect();
+        for message in fill_messages(blocks, MAX_VARIABLE_BLOCKS, |data| {
+            AnyMessage::ActivateGestures(ActivateGestures {
+                agent_data: ActivateGesturesAgentDataBlock {
+                    agent_id: self.agent_id.uuid(),
+                    session_id: self.session_id,
+                    flags: 0,
+                },
+                data,
+            })
+        })? {
+            self.send(&message, Reliability::Reliable, now)?;
+        }
+        Ok(())
     }
 
     /// Queues a `DeactivateGestures` reliably, marking each gesture named in
@@ -1638,21 +1675,26 @@ impl Circuit {
         item_ids: &[Uuid],
         now: Instant,
     ) -> Result<(), WireError> {
-        let message = AnyMessage::DeactivateGestures(DeactivateGestures {
-            agent_data: DeactivateGesturesAgentDataBlock {
-                agent_id: self.agent_id.uuid(),
-                session_id: self.session_id,
-                flags: 0,
-            },
-            data: item_ids
-                .iter()
-                .map(|item_id| DeactivateGesturesDataBlock {
-                    item_id: *item_id,
-                    gesture_flags: 0,
-                })
-                .collect(),
-        });
-        self.send(&message, Reliability::Reliable, now)
+        let blocks: Vec<_> = item_ids
+            .iter()
+            .map(|item_id| DeactivateGesturesDataBlock {
+                item_id: *item_id,
+                gesture_flags: 0,
+            })
+            .collect();
+        for message in fill_messages(blocks, MAX_VARIABLE_BLOCKS, |data| {
+            AnyMessage::DeactivateGestures(DeactivateGestures {
+                agent_data: DeactivateGesturesAgentDataBlock {
+                    agent_id: self.agent_id.uuid(),
+                    session_id: self.session_id,
+                    flags: 0,
+                },
+                data,
+            })
+        })? {
+            self.send(&message, Reliability::Reliable, now)?;
+        }
+        Ok(())
     }
 
     /// Allocates the next `AgentPause`/`AgentResume` serial number (a single
@@ -2326,19 +2368,24 @@ impl Circuit {
         local_ids: &[RegionLocalObjectId],
         now: Instant,
     ) -> Result<(), WireError> {
-        let message = AnyMessage::ObjectDetach(ObjectDetach {
-            agent_data: ObjectDetachAgentDataBlock {
-                agent_id: self.agent_id.uuid(),
-                session_id: self.session_id,
-            },
-            object_data: local_ids
-                .iter()
-                .map(|&object_local_id| ObjectDetachObjectDataBlock {
-                    object_local_id: object_local_id.0,
-                })
-                .collect(),
-        });
-        self.send(&message, Reliability::Reliable, now)
+        let blocks: Vec<_> = local_ids
+            .iter()
+            .map(|&object_local_id| ObjectDetachObjectDataBlock {
+                object_local_id: object_local_id.0,
+            })
+            .collect();
+        for message in fill_messages(blocks, SELECTION_OBJECTS_PER_MESSAGE, |object_data| {
+            AnyMessage::ObjectDetach(ObjectDetach {
+                agent_data: ObjectDetachAgentDataBlock {
+                    agent_id: self.agent_id.uuid(),
+                    session_id: self.session_id,
+                },
+                object_data,
+            })
+        })? {
+            self.send(&message, Reliability::Reliable, now)?;
+        }
+        Ok(())
     }
 
     /// Queues an `ObjectDrop` reliably, dropping the attachments `local_ids` from
@@ -2348,19 +2395,24 @@ impl Circuit {
         local_ids: &[RegionLocalObjectId],
         now: Instant,
     ) -> Result<(), WireError> {
-        let message = AnyMessage::ObjectDrop(ObjectDrop {
-            agent_data: ObjectDropAgentDataBlock {
-                agent_id: self.agent_id.uuid(),
-                session_id: self.session_id,
-            },
-            object_data: local_ids
-                .iter()
-                .map(|&object_local_id| ObjectDropObjectDataBlock {
-                    object_local_id: object_local_id.0,
-                })
-                .collect(),
-        });
-        self.send(&message, Reliability::Reliable, now)
+        let blocks: Vec<_> = local_ids
+            .iter()
+            .map(|&object_local_id| ObjectDropObjectDataBlock {
+                object_local_id: object_local_id.0,
+            })
+            .collect();
+        for message in fill_messages(blocks, SELECTION_OBJECTS_PER_MESSAGE, |object_data| {
+            AnyMessage::ObjectDrop(ObjectDrop {
+                agent_data: ObjectDropAgentDataBlock {
+                    agent_id: self.agent_id.uuid(),
+                    session_id: self.session_id,
+                },
+                object_data,
+            })
+        })? {
+            self.send(&message, Reliability::Reliable, now)?;
+        }
+        Ok(())
     }
 
     /// Queues a `RezSingleAttachmentFromInv` reliably, wearing the inventory item
@@ -2405,9 +2457,10 @@ impl Circuit {
         now: Instant,
     ) -> Result<(), WireError> {
         let total_objects =
-            u8::try_from(attachments.len()).map_err(|_e| WireError::VariableTooLong {
-                len: attachments.len(),
-                max: 255,
+            u8::try_from(attachments.len()).map_err(|_e| WireError::TooManyBlocks {
+                block: "ObjectData",
+                found: attachments.len(),
+                max: usize::from(u8::MAX),
             })?;
         // The reference packs four objects to a packet and starts a new one
         // for the next four, every packet naming the same compound message and
@@ -2454,24 +2507,29 @@ impl Circuit {
         effects: &[ViewerEffect],
         now: Instant,
     ) -> Result<(), WireError> {
-        let message = AnyMessage::ViewerEffect(ViewerEffectMessage {
-            agent_data: ViewerEffectAgentDataBlock {
-                agent_id: self.agent_id.uuid(),
-                session_id: self.session_id,
-            },
-            effect: effects
-                .iter()
-                .map(|effect| ViewerEffectEffectBlock {
-                    id: effect.id,
-                    agent_id: effect.agent_id.uuid(),
-                    r#type: effect.effect_type.to_code(),
-                    duration: effect.duration,
-                    color: effect.color,
-                    type_data: effect.data.to_wire(),
-                })
-                .collect(),
-        });
-        self.send(&message, Reliability::Reliable, now)
+        let blocks: Vec<_> = effects
+            .iter()
+            .map(|effect| ViewerEffectEffectBlock {
+                id: effect.id,
+                agent_id: effect.agent_id.uuid(),
+                r#type: effect.effect_type.to_code(),
+                duration: effect.duration,
+                color: effect.color,
+                type_data: effect.data.to_wire(),
+            })
+            .collect();
+        for message in fill_messages(blocks, MAX_VARIABLE_BLOCKS, |effect| {
+            AnyMessage::ViewerEffect(ViewerEffectMessage {
+                agent_data: ViewerEffectAgentDataBlock {
+                    agent_id: self.agent_id.uuid(),
+                    session_id: self.session_id,
+                },
+                effect,
+            })
+        })? {
+            self.send(&message, Reliability::Reliable, now)?;
+        }
+        Ok(())
     }
 
     /// Queues a `TrackAgent` reliably, asking the simulator to track `prey_id`'s
@@ -2779,23 +2837,28 @@ impl Circuit {
         animations: &[(Uuid, bool)],
         now: Instant,
     ) -> Result<(), WireError> {
-        let message = AnyMessage::AgentAnimation(AgentAnimation {
-            agent_data: AgentAnimationAgentDataBlock {
-                agent_id: self.agent_id.uuid(),
-                session_id: self.session_id,
-            },
-            animation_list: animations
-                .iter()
-                .map(|&(anim_id, start_anim)| AgentAnimationAnimationListBlock {
-                    anim_id,
-                    start_anim,
-                })
-                .collect(),
-            physical_avatar_event_list: vec![AgentAnimationPhysicalAvatarEventListBlock {
-                type_data: Vec::new(),
-            }],
-        });
-        self.send(&message, Reliability::Reliable, now)
+        let blocks: Vec<_> = animations
+            .iter()
+            .map(|&(anim_id, start_anim)| AgentAnimationAnimationListBlock {
+                anim_id,
+                start_anim,
+            })
+            .collect();
+        for message in fill_messages(blocks, MAX_VARIABLE_BLOCKS, |animation_list| {
+            AnyMessage::AgentAnimation(AgentAnimation {
+                agent_data: AgentAnimationAgentDataBlock {
+                    agent_id: self.agent_id.uuid(),
+                    session_id: self.session_id,
+                },
+                animation_list,
+                physical_avatar_event_list: vec![AgentAnimationPhysicalAvatarEventListBlock {
+                    type_data: Vec::new(),
+                }],
+            })
+        })? {
+            self.send(&message, Reliability::Reliable, now)?;
+        }
+        Ok(())
     }
 
     /// Queues an `AgentCachedTexture` reliably, asking the simulator which of the
@@ -2908,23 +2971,28 @@ impl Circuit {
         stamp: bool,
         now: Instant,
     ) -> Result<(), WireError> {
-        let message = AnyMessage::MoveInventoryFolder(MoveInventoryFolder {
-            agent_data: MoveInventoryFolderAgentDataBlock {
-                agent_id: self.agent_id.uuid(),
-                session_id: self.session_id,
-                stamp,
-            },
-            inventory_data: moves
-                .iter()
-                .map(
-                    |&(folder_id, parent_id)| MoveInventoryFolderInventoryDataBlock {
-                        folder_id,
-                        parent_id,
-                    },
-                )
-                .collect(),
-        });
-        self.send(&message, Reliability::Reliable, now)
+        let blocks: Vec<_> = moves
+            .iter()
+            .map(
+                |&(folder_id, parent_id)| MoveInventoryFolderInventoryDataBlock {
+                    folder_id,
+                    parent_id,
+                },
+            )
+            .collect();
+        for message in fill_messages(blocks, MAX_VARIABLE_BLOCKS, |inventory_data| {
+            AnyMessage::MoveInventoryFolder(MoveInventoryFolder {
+                agent_data: MoveInventoryFolderAgentDataBlock {
+                    agent_id: self.agent_id.uuid(),
+                    session_id: self.session_id,
+                    stamp,
+                },
+                inventory_data,
+            })
+        })? {
+            self.send(&message, Reliability::Reliable, now)?;
+        }
+        Ok(())
     }
 
     /// Queues a `RemoveInventoryFolder` reliably (delete each folder, moving it to
@@ -2934,17 +3002,22 @@ impl Circuit {
         folder_ids: &[Uuid],
         now: Instant,
     ) -> Result<(), WireError> {
-        let message = AnyMessage::RemoveInventoryFolder(RemoveInventoryFolder {
-            agent_data: RemoveInventoryFolderAgentDataBlock {
-                agent_id: self.agent_id.uuid(),
-                session_id: self.session_id,
-            },
-            folder_data: folder_ids
-                .iter()
-                .map(|&folder_id| RemoveInventoryFolderFolderDataBlock { folder_id })
-                .collect(),
-        });
-        self.send(&message, Reliability::Reliable, now)
+        let blocks: Vec<_> = folder_ids
+            .iter()
+            .map(|&folder_id| RemoveInventoryFolderFolderDataBlock { folder_id })
+            .collect();
+        for message in fill_messages(blocks, MAX_VARIABLE_BLOCKS, |folder_data| {
+            AnyMessage::RemoveInventoryFolder(RemoveInventoryFolder {
+                agent_data: RemoveInventoryFolderAgentDataBlock {
+                    agent_id: self.agent_id.uuid(),
+                    session_id: self.session_id,
+                },
+                folder_data,
+            })
+        })? {
+            self.send(&message, Reliability::Reliable, now)?;
+        }
+        Ok(())
     }
 
     /// Queues a `CreateInventoryItem` reliably. The simulator answers with an
@@ -3074,24 +3147,29 @@ impl Circuit {
         stamp: bool,
         now: Instant,
     ) -> Result<(), WireError> {
-        let message = AnyMessage::MoveInventoryItem(MoveInventoryItem {
-            agent_data: MoveInventoryItemAgentDataBlock {
-                agent_id: self.agent_id.uuid(),
-                session_id: self.session_id,
-                stamp,
-            },
-            inventory_data: moves
-                .iter()
-                .map(
-                    |(item_id, folder_id, new_name)| MoveInventoryItemInventoryDataBlock {
-                        item_id: *item_id,
-                        folder_id: *folder_id,
-                        new_name: with_nul(new_name),
-                    },
-                )
-                .collect(),
-        });
-        self.send(&message, Reliability::Reliable, now)
+        let blocks: Vec<_> = moves
+            .iter()
+            .map(
+                |(item_id, folder_id, new_name)| MoveInventoryItemInventoryDataBlock {
+                    item_id: *item_id,
+                    folder_id: *folder_id,
+                    new_name: with_nul(new_name),
+                },
+            )
+            .collect();
+        for message in fill_messages(blocks, MAX_VARIABLE_BLOCKS, |inventory_data| {
+            AnyMessage::MoveInventoryItem(MoveInventoryItem {
+                agent_data: MoveInventoryItemAgentDataBlock {
+                    agent_id: self.agent_id.uuid(),
+                    session_id: self.session_id,
+                    stamp,
+                },
+                inventory_data,
+            })
+        })? {
+            self.send(&message, Reliability::Reliable, now)?;
+        }
+        Ok(())
     }
 
     /// Queues a `CopyInventoryItem` reliably (copy `old_item_id` owned by
@@ -3128,17 +3206,22 @@ impl Circuit {
         item_ids: &[Uuid],
         now: Instant,
     ) -> Result<(), WireError> {
-        let message = AnyMessage::RemoveInventoryItem(RemoveInventoryItem {
-            agent_data: RemoveInventoryItemAgentDataBlock {
-                agent_id: self.agent_id.uuid(),
-                session_id: self.session_id,
-            },
-            inventory_data: item_ids
-                .iter()
-                .map(|&item_id| RemoveInventoryItemInventoryDataBlock { item_id })
-                .collect(),
-        });
-        self.send(&message, Reliability::Reliable, now)
+        let blocks: Vec<_> = item_ids
+            .iter()
+            .map(|&item_id| RemoveInventoryItemInventoryDataBlock { item_id })
+            .collect();
+        for message in fill_messages(blocks, MAX_VARIABLE_BLOCKS, |inventory_data| {
+            AnyMessage::RemoveInventoryItem(RemoveInventoryItem {
+                agent_data: RemoveInventoryItemAgentDataBlock {
+                    agent_id: self.agent_id.uuid(),
+                    session_id: self.session_id,
+                },
+                inventory_data,
+            })
+        })? {
+            self.send(&message, Reliability::Reliable, now)?;
+        }
+        Ok(())
     }
 
     /// Queues a `ChangeInventoryItemFlags` reliably (rewrite an item's flags).
@@ -3183,21 +3266,15 @@ impl Circuit {
         item_ids: &[Uuid],
         now: Instant,
     ) -> Result<(), WireError> {
-        let message = AnyMessage::RemoveInventoryObjects(RemoveInventoryObjects {
-            agent_data: RemoveInventoryObjectsAgentDataBlock {
-                agent_id: self.agent_id.uuid(),
-                session_id: self.session_id,
-            },
-            folder_data: folder_ids
-                .iter()
-                .map(|&folder_id| RemoveInventoryObjectsFolderDataBlock { folder_id })
-                .collect(),
-            item_data: item_ids
-                .iter()
-                .map(|&item_id| RemoveInventoryObjectsItemDataBlock { item_id })
-                .collect(),
-        });
-        self.send(&message, Reliability::Reliable, now)
+        for message in crate::split::remove_inventory_objects(
+            self.agent_id.uuid(),
+            self.session_id,
+            folder_ids.iter().copied(),
+            item_ids.iter().copied(),
+        )? {
+            self.send(&message, Reliability::Reliable, now)?;
+        }
+        Ok(())
     }
 
     /// Queues a `TeleportLocationRequest` reliably.
@@ -3940,23 +4017,28 @@ impl Circuit {
         object_ids: &[ObjectKey],
         now: Instant,
     ) -> Result<(), WireError> {
-        let message = AnyMessage::ParcelSelectObjects(ParcelSelectObjects {
-            agent_data: ParcelSelectObjectsAgentDataBlock {
-                agent_id: self.agent_id.uuid(),
-                session_id: self.session_id,
-            },
-            parcel_data: ParcelSelectObjectsParcelDataBlock {
-                local_id: local_id.0,
-                return_type,
-            },
-            return_i_ds: object_ids
-                .iter()
-                .map(|id| ParcelSelectObjectsReturnIDsBlock {
-                    return_id: id.uuid(),
-                })
-                .collect(),
-        });
-        self.send(&message, Reliability::Reliable, now)
+        let blocks: Vec<_> = object_ids
+            .iter()
+            .map(|id| ParcelSelectObjectsReturnIDsBlock {
+                return_id: id.uuid(),
+            })
+            .collect();
+        for message in fill_messages_or_one_empty(blocks, MAX_VARIABLE_BLOCKS, |return_i_ds| {
+            AnyMessage::ParcelSelectObjects(ParcelSelectObjects {
+                agent_data: ParcelSelectObjectsAgentDataBlock {
+                    agent_id: self.agent_id.uuid(),
+                    session_id: self.session_id,
+                },
+                parcel_data: ParcelSelectObjectsParcelDataBlock {
+                    local_id: local_id.0,
+                    return_type,
+                },
+                return_i_ds,
+            })
+        })? {
+            self.send(&message, Reliability::Reliable, now)?;
+        }
+        Ok(())
     }
 
     /// Queues a `ParcelDeedToGroup` reliably (deed the parcel to `group_id`).
@@ -4440,7 +4522,10 @@ impl Circuit {
     /// the full `ObjectUpdate` for each local id (cache-miss type "full" = 0).
     ///
     /// A message's block count is one byte, so the ids go out
-    /// [`MAX_VARIABLE_BLOCKS`] to a message — as many messages as it takes.
+    /// [`MAX_VARIABLE_BLOCKS`] to a message — as many messages as it takes. That
+    /// is the reference's own count (`LLViewerRegion::requestCacheMisses` sends
+    /// at 255 blocks and checks nothing else), so unlike the selection lists this
+    /// is not also held to the MTU.
     pub(crate) fn send_request_multiple_objects(
         &mut self,
         local_ids: &[RegionLocalObjectId],
@@ -4472,19 +4557,24 @@ impl Circuit {
         local_ids: &[RegionLocalObjectId],
         now: Instant,
     ) -> Result<(), WireError> {
-        let message = AnyMessage::ObjectSelect(ObjectSelect {
-            agent_data: ObjectSelectAgentDataBlock {
-                agent_id: self.agent_id.uuid(),
-                session_id: self.session_id,
-            },
-            object_data: local_ids
-                .iter()
-                .map(|id| ObjectSelectObjectDataBlock {
-                    object_local_id: id.0,
-                })
-                .collect(),
-        });
-        self.send(&message, Reliability::Reliable, now)
+        let blocks: Vec<_> = local_ids
+            .iter()
+            .map(|id| ObjectSelectObjectDataBlock {
+                object_local_id: id.0,
+            })
+            .collect();
+        for message in fill_messages(blocks, SELECTION_OBJECTS_PER_MESSAGE, |object_data| {
+            AnyMessage::ObjectSelect(ObjectSelect {
+                agent_data: ObjectSelectAgentDataBlock {
+                    agent_id: self.agent_id.uuid(),
+                    session_id: self.session_id,
+                },
+                object_data,
+            })
+        })? {
+            self.send(&message, Reliability::Reliable, now)?;
+        }
+        Ok(())
     }
 
     /// Queues an `ObjectDeselect` reliably for the given local ids.
@@ -4493,19 +4583,24 @@ impl Circuit {
         local_ids: &[RegionLocalObjectId],
         now: Instant,
     ) -> Result<(), WireError> {
-        let message = AnyMessage::ObjectDeselect(ObjectDeselect {
-            agent_data: ObjectDeselectAgentDataBlock {
-                agent_id: self.agent_id.uuid(),
-                session_id: self.session_id,
-            },
-            object_data: local_ids
-                .iter()
-                .map(|id| ObjectDeselectObjectDataBlock {
-                    object_local_id: id.0,
-                })
-                .collect(),
-        });
-        self.send(&message, Reliability::Reliable, now)
+        let blocks: Vec<_> = local_ids
+            .iter()
+            .map(|id| ObjectDeselectObjectDataBlock {
+                object_local_id: id.0,
+            })
+            .collect();
+        for message in fill_messages(blocks, SELECTION_OBJECTS_PER_MESSAGE, |object_data| {
+            AnyMessage::ObjectDeselect(ObjectDeselect {
+                agent_data: ObjectDeselectAgentDataBlock {
+                    agent_id: self.agent_id.uuid(),
+                    session_id: self.session_id,
+                },
+                object_data,
+            })
+        })? {
+            self.send(&message, Reliability::Reliable, now)?;
+        }
+        Ok(())
     }
 
     // Object interaction & editing (#17) -----------------------------------
@@ -4672,24 +4767,29 @@ impl Circuit {
         group_id: Option<GroupKey>,
         now: Instant,
     ) -> Result<(), WireError> {
-        let message = AnyMessage::ObjectDuplicate(ObjectDuplicate {
-            agent_data: ObjectDuplicateAgentDataBlock {
-                agent_id: self.agent_id.uuid(),
-                session_id: self.session_id,
-                group_id: group_id.map_or_else(Uuid::nil, |g| g.uuid()),
-            },
-            shared_data: ObjectDuplicateSharedDataBlock {
-                offset,
-                duplicate_flags: 0,
-            },
-            object_data: local_ids
-                .iter()
-                .map(|id| ObjectDuplicateObjectDataBlock {
-                    object_local_id: id.0,
-                })
-                .collect(),
-        });
-        self.send(&message, Reliability::Reliable, now)
+        let blocks: Vec<_> = local_ids
+            .iter()
+            .map(|id| ObjectDuplicateObjectDataBlock {
+                object_local_id: id.0,
+            })
+            .collect();
+        for message in fill_messages(blocks, SELECTION_OBJECTS_PER_MESSAGE, |object_data| {
+            AnyMessage::ObjectDuplicate(ObjectDuplicate {
+                agent_data: ObjectDuplicateAgentDataBlock {
+                    agent_id: self.agent_id.uuid(),
+                    session_id: self.session_id,
+                    group_id: group_id.map_or_else(Uuid::nil, |g| g.uuid()),
+                },
+                shared_data: ObjectDuplicateSharedDataBlock {
+                    offset: offset.clone(),
+                    duplicate_flags: 0,
+                },
+                object_data,
+            })
+        })? {
+            self.send(&message, Reliability::Reliable, now)?;
+        }
+        Ok(())
     }
 
     /// Queues an `ObjectDelete` reliably for `local_ids` (non-god, non-forced).
@@ -4698,23 +4798,39 @@ impl Circuit {
         local_ids: &[RegionLocalObjectId],
         now: Instant,
     ) -> Result<(), WireError> {
-        let message = AnyMessage::ObjectDelete(ObjectDelete {
-            agent_data: ObjectDeleteAgentDataBlock {
-                agent_id: self.agent_id.uuid(),
-                session_id: self.session_id,
-                force: false,
-            },
-            object_data: local_ids
-                .iter()
-                .map(|id| ObjectDeleteObjectDataBlock {
-                    object_local_id: id.0,
-                })
-                .collect(),
-        });
-        self.send(&message, Reliability::Reliable, now)
+        let blocks: Vec<_> = local_ids
+            .iter()
+            .map(|id| ObjectDeleteObjectDataBlock {
+                object_local_id: id.0,
+            })
+            .collect();
+        for message in fill_messages(blocks, SELECTION_OBJECTS_PER_MESSAGE, |object_data| {
+            AnyMessage::ObjectDelete(ObjectDelete {
+                agent_data: ObjectDeleteAgentDataBlock {
+                    agent_id: self.agent_id.uuid(),
+                    session_id: self.session_id,
+                    force: false,
+                },
+                object_data,
+            })
+        })? {
+            self.send(&message, Reliability::Reliable, now)?;
+        }
+        Ok(())
     }
 
     /// Queues a `DeRezObject` reliably (take/return/trash `local_ids`).
+    ///
+    /// The roots go out [`DEREZ_ROOTS_PER_PACKET`] to a packet, every packet
+    /// naming the same transaction, the packet count and its own number, as the
+    /// reference's `derez_objects` sends them; a take that would need more than
+    /// [`DEREZ_MAX_PACKETS`] packets is refused whole, as the reference refuses
+    /// it ("AcquireErrorTooManyObjects"), rather than sent in part.
+    ///
+    /// # Errors
+    ///
+    /// [`WireError::TooManyBlocks`] for a take of more objects than
+    /// [`DEREZ_MAX_PACKETS`] packets carry; otherwise a failure to encode.
     pub(crate) fn send_derez_object(
         &mut self,
         local_ids: &[RegionLocalObjectId],
@@ -4723,28 +4839,40 @@ impl Circuit {
         group_id: Option<GroupKey>,
         now: Instant,
     ) -> Result<(), WireError> {
-        let message = AnyMessage::DeRezObject(DeRezObject {
-            agent_data: DeRezObjectAgentDataBlock {
-                agent_id: self.agent_id.uuid(),
-                session_id: self.session_id,
-            },
-            agent_block: DeRezObjectAgentBlockBlock {
-                group_id: group_id.map_or_else(Uuid::nil, |g| g.uuid()),
-                destination: destination.to_code(),
-                destination_id: destination.destination_id(),
-                transaction_id,
-                // The whole selection fits in one packet.
-                packet_count: 1,
-                packet_number: 0,
-            },
-            object_data: local_ids
-                .iter()
-                .map(|id| DeRezObjectObjectDataBlock {
-                    object_local_id: id.0,
-                })
-                .collect(),
-        });
-        self.send(&message, Reliability::Reliable, now)
+        let too_many = || WireError::TooManyBlocks {
+            block: "ObjectData",
+            found: local_ids.len(),
+            max: DEREZ_ROOTS_PER_PACKET.saturating_mul(DEREZ_MAX_PACKETS),
+        };
+        let packets = local_ids.chunks(DEREZ_ROOTS_PER_PACKET);
+        let packet_count = u8::try_from(packets.len())
+            .ok()
+            .filter(|&count| usize::from(count) <= DEREZ_MAX_PACKETS)
+            .ok_or_else(too_many)?;
+        for (packet_number, roots) in (0..packet_count).zip(packets) {
+            let message = AnyMessage::DeRezObject(DeRezObject {
+                agent_data: DeRezObjectAgentDataBlock {
+                    agent_id: self.agent_id.uuid(),
+                    session_id: self.session_id,
+                },
+                agent_block: DeRezObjectAgentBlockBlock {
+                    group_id: group_id.map_or_else(Uuid::nil, |g| g.uuid()),
+                    destination: destination.to_code(),
+                    destination_id: destination.destination_id(),
+                    transaction_id,
+                    packet_count,
+                    packet_number,
+                },
+                object_data: roots
+                    .iter()
+                    .map(|id| DeRezObjectObjectDataBlock {
+                        object_local_id: id.0,
+                    })
+                    .collect(),
+            });
+            self.send(&message, Reliability::Reliable, now)?;
+        }
+        Ok(())
     }
 
     /// Queues an `ObjectName` reliably (rename `local_id`).
@@ -4958,24 +5086,29 @@ impl Circuit {
         group_id: Option<GroupKey>,
         now: Instant,
     ) -> Result<(), WireError> {
-        let message = AnyMessage::ObjectOwner(ObjectOwner {
-            agent_data: ObjectOwnerAgentDataBlock {
-                agent_id: self.agent_id.uuid(),
-                session_id: self.session_id,
-            },
-            header_data: ObjectOwnerHeaderDataBlock {
-                r#override: owner.is_some(),
-                owner_id: owner.map_or_else(Uuid::nil, |agent| agent.uuid()),
-                group_id: group_id.map_or_else(Uuid::nil, |group| group.uuid()),
-            },
-            object_data: local_ids
-                .iter()
-                .map(|id| ObjectOwnerObjectDataBlock {
-                    object_local_id: id.0,
-                })
-                .collect(),
-        });
-        self.send(&message, Reliability::Reliable, now)
+        let blocks: Vec<_> = local_ids
+            .iter()
+            .map(|id| ObjectOwnerObjectDataBlock {
+                object_local_id: id.0,
+            })
+            .collect();
+        for message in fill_messages(blocks, SELECTION_OBJECTS_PER_MESSAGE, |object_data| {
+            AnyMessage::ObjectOwner(ObjectOwner {
+                agent_data: ObjectOwnerAgentDataBlock {
+                    agent_id: self.agent_id.uuid(),
+                    session_id: self.session_id,
+                },
+                header_data: ObjectOwnerHeaderDataBlock {
+                    r#override: owner.is_some(),
+                    owner_id: owner.map_or_else(Uuid::nil, |agent| agent.uuid()),
+                    group_id: group_id.map_or_else(Uuid::nil, |group| group.uuid()),
+                },
+                object_data,
+            })
+        })? {
+            self.send(&message, Reliability::Reliable, now)?;
+        }
+        Ok(())
     }
 
     /// Queues an `ObjectGroup` reliably (set the group `local_ids` are set to).
@@ -4985,20 +5118,25 @@ impl Circuit {
         group_id: GroupKey,
         now: Instant,
     ) -> Result<(), WireError> {
-        let message = AnyMessage::ObjectGroup(ObjectGroup {
-            agent_data: ObjectGroupAgentDataBlock {
-                agent_id: self.agent_id.uuid(),
-                session_id: self.session_id,
-                group_id: group_id.uuid(),
-            },
-            object_data: local_ids
-                .iter()
-                .map(|id| ObjectGroupObjectDataBlock {
-                    object_local_id: id.0,
-                })
-                .collect(),
-        });
-        self.send(&message, Reliability::Reliable, now)
+        let blocks: Vec<_> = local_ids
+            .iter()
+            .map(|id| ObjectGroupObjectDataBlock {
+                object_local_id: id.0,
+            })
+            .collect();
+        for message in fill_messages(blocks, SELECTION_OBJECTS_PER_MESSAGE, |object_data| {
+            AnyMessage::ObjectGroup(ObjectGroup {
+                agent_data: ObjectGroupAgentDataBlock {
+                    agent_id: self.agent_id.uuid(),
+                    session_id: self.session_id,
+                    group_id: group_id.uuid(),
+                },
+                object_data,
+            })
+        })? {
+            self.send(&message, Reliability::Reliable, now)?;
+        }
+        Ok(())
     }
 
     /// Queues an `ObjectPermissions` reliably (set/clear the `mask` bits of
@@ -5011,23 +5149,28 @@ impl Circuit {
         mask: Permissions,
         now: Instant,
     ) -> Result<(), WireError> {
-        let message = AnyMessage::ObjectPermissions(ObjectPermissions {
-            agent_data: ObjectPermissionsAgentDataBlock {
-                agent_id: self.agent_id.uuid(),
-                session_id: self.session_id,
-            },
-            header_data: ObjectPermissionsHeaderDataBlock { r#override: false },
-            object_data: local_ids
-                .iter()
-                .map(|id| ObjectPermissionsObjectDataBlock {
-                    object_local_id: id.0,
-                    field: field.to_code(),
-                    set: u8::from(set),
-                    mask: mask.bits(),
-                })
-                .collect(),
-        });
-        self.send(&message, Reliability::Reliable, now)
+        let blocks: Vec<_> = local_ids
+            .iter()
+            .map(|id| ObjectPermissionsObjectDataBlock {
+                object_local_id: id.0,
+                field: field.to_code(),
+                set: u8::from(set),
+                mask: mask.bits(),
+            })
+            .collect();
+        for message in fill_messages(blocks, SELECTION_OBJECTS_PER_MESSAGE, |object_data| {
+            AnyMessage::ObjectPermissions(ObjectPermissions {
+                agent_data: ObjectPermissionsAgentDataBlock {
+                    agent_id: self.agent_id.uuid(),
+                    session_id: self.session_id,
+                },
+                header_data: ObjectPermissionsHeaderDataBlock { r#override: false },
+                object_data,
+            })
+        })? {
+            self.send(&message, Reliability::Reliable, now)?;
+        }
+        Ok(())
     }
 
     /// Queues an `ObjectSaleInfo` reliably (set the sale type and price).
@@ -5094,24 +5237,47 @@ impl Circuit {
 
     /// Queues an `ObjectLink` reliably linking `local_ids` (the first id becomes
     /// the linkset root).
+    ///
+    /// A linkset larger than one message carries goes out in several, and every
+    /// one of them starts with the root: the simulator links each message's
+    /// objects to its first, so a later message without the root would make a
+    /// second linkset (`LLSelectMgr::sendListToRegions`, whose `linkset_root`
+    /// opens each new message for exactly this).
     pub(crate) fn send_object_link(
         &mut self,
         local_ids: &[RegionLocalObjectId],
         now: Instant,
     ) -> Result<(), WireError> {
-        let message = AnyMessage::ObjectLink(ObjectLink {
-            agent_data: ObjectLinkAgentDataBlock {
-                agent_id: self.agent_id.uuid(),
-                session_id: self.session_id,
-            },
-            object_data: local_ids
-                .iter()
-                .map(|id| ObjectLinkObjectDataBlock {
-                    object_local_id: id.0,
-                })
-                .collect(),
-        });
-        self.send(&message, Reliability::Reliable, now)
+        let Some((root, children)) = local_ids.split_first() else {
+            return Ok(());
+        };
+        let block = |id: &RegionLocalObjectId| ObjectLinkObjectDataBlock {
+            object_local_id: id.0,
+        };
+        let children: Vec<_> = children.iter().map(block).collect();
+        let link = |mut object_data: Vec<ObjectLinkObjectDataBlock>| {
+            object_data.insert(0, block(root));
+            AnyMessage::ObjectLink(ObjectLink {
+                agent_data: ObjectLinkAgentDataBlock {
+                    agent_id: self.agent_id.uuid(),
+                    session_id: self.session_id,
+                },
+                object_data,
+            })
+        };
+        let messages = if children.is_empty() {
+            vec![link(Vec::new())]
+        } else {
+            fill_messages(
+                children,
+                SELECTION_OBJECTS_PER_MESSAGE.saturating_sub(1),
+                link,
+            )?
+        };
+        for message in messages {
+            self.send(&message, Reliability::Reliable, now)?;
+        }
+        Ok(())
     }
 
     /// Queues an `ObjectDelink` reliably unlinking `local_ids`.
@@ -5120,19 +5286,24 @@ impl Circuit {
         local_ids: &[RegionLocalObjectId],
         now: Instant,
     ) -> Result<(), WireError> {
-        let message = AnyMessage::ObjectDelink(ObjectDelink {
-            agent_data: ObjectDelinkAgentDataBlock {
-                agent_id: self.agent_id.uuid(),
-                session_id: self.session_id,
-            },
-            object_data: local_ids
-                .iter()
-                .map(|id| ObjectDelinkObjectDataBlock {
-                    object_local_id: id.0,
-                })
-                .collect(),
-        });
-        self.send(&message, Reliability::Reliable, now)
+        let blocks: Vec<_> = local_ids
+            .iter()
+            .map(|id| ObjectDelinkObjectDataBlock {
+                object_local_id: id.0,
+            })
+            .collect();
+        for message in fill_messages(blocks, SELECTION_OBJECTS_PER_MESSAGE, |object_data| {
+            AnyMessage::ObjectDelink(ObjectDelink {
+                agent_data: ObjectDelinkAgentDataBlock {
+                    agent_id: self.agent_id.uuid(),
+                    session_id: self.session_id,
+                },
+                object_data,
+            })
+        })? {
+            self.send(&message, Reliability::Reliable, now)?;
+        }
+        Ok(())
     }
 
     /// Queues an `ObjectBuy` reliably (purchase `objects` into `category_id`).
@@ -5359,28 +5530,33 @@ impl Circuit {
         duplicate_flags: u32,
         now: Instant,
     ) -> Result<(), WireError> {
-        let message = AnyMessage::ObjectDuplicateOnRay(ObjectDuplicateOnRay {
-            agent_data: ObjectDuplicateOnRayAgentDataBlock {
-                agent_id: self.agent_id.uuid(),
-                session_id: self.session_id,
-                group_id: group_id.map_or_else(Uuid::nil, |g| g.uuid()),
-                ray_start,
-                ray_end,
-                bypass_raycast,
-                ray_end_is_intersection,
-                copy_centers,
-                copy_rotates,
-                ray_target_id: ray_target_id.map_or_else(Uuid::nil, |t| t.uuid()),
-                duplicate_flags,
-            },
-            object_data: local_ids
-                .iter()
-                .map(|id| ObjectDuplicateOnRayObjectDataBlock {
-                    object_local_id: id.0,
-                })
-                .collect(),
-        });
-        self.send(&message, Reliability::Reliable, now)
+        let blocks: Vec<_> = local_ids
+            .iter()
+            .map(|id| ObjectDuplicateOnRayObjectDataBlock {
+                object_local_id: id.0,
+            })
+            .collect();
+        for message in fill_messages(blocks, SELECTION_OBJECTS_PER_MESSAGE, |object_data| {
+            AnyMessage::ObjectDuplicateOnRay(ObjectDuplicateOnRay {
+                agent_data: ObjectDuplicateOnRayAgentDataBlock {
+                    agent_id: self.agent_id.uuid(),
+                    session_id: self.session_id,
+                    group_id: group_id.map_or_else(Uuid::nil, |g| g.uuid()),
+                    ray_start: ray_start.clone(),
+                    ray_end: ray_end.clone(),
+                    bypass_raycast,
+                    ray_end_is_intersection,
+                    copy_centers,
+                    copy_rotates,
+                    ray_target_id: ray_target_id.map_or_else(Uuid::nil, |t| t.uuid()),
+                    duplicate_flags,
+                },
+                object_data,
+            })
+        })? {
+            self.send(&message, Reliability::Reliable, now)?;
+        }
+        Ok(())
     }
 
     /// Queues a `RezRestoreToWorld` reliably (restore `item` to its last place).
@@ -5786,20 +5962,25 @@ impl Circuit {
         object_ids: &[ObjectKey],
         now: Instant,
     ) -> Result<(), WireError> {
-        let message = AnyMessage::Undo(Undo {
-            agent_data: UndoAgentDataBlock {
-                agent_id: self.agent_id.uuid(),
-                session_id: self.session_id,
-                group_id: uuid::Uuid::nil(),
-            },
-            object_data: object_ids
-                .iter()
-                .map(|id| UndoObjectDataBlock {
-                    object_id: id.uuid(),
-                })
-                .collect(),
-        });
-        self.send(&message, Reliability::Reliable, now)
+        let blocks: Vec<_> = object_ids
+            .iter()
+            .map(|id| UndoObjectDataBlock {
+                object_id: id.uuid(),
+            })
+            .collect();
+        for message in fill_messages(blocks, SELECTION_OBJECTS_PER_MESSAGE, |object_data| {
+            AnyMessage::Undo(Undo {
+                agent_data: UndoAgentDataBlock {
+                    agent_id: self.agent_id.uuid(),
+                    session_id: self.session_id,
+                    group_id: uuid::Uuid::nil(),
+                },
+                object_data,
+            })
+        })? {
+            self.send(&message, Reliability::Reliable, now)?;
+        }
+        Ok(())
     }
 
     /// Queues a `Redo` reliably (the inverse of [`Circuit::send_undo`]): asks the
@@ -5810,20 +5991,25 @@ impl Circuit {
         object_ids: &[ObjectKey],
         now: Instant,
     ) -> Result<(), WireError> {
-        let message = AnyMessage::Redo(Redo {
-            agent_data: RedoAgentDataBlock {
-                agent_id: self.agent_id.uuid(),
-                session_id: self.session_id,
-                group_id: uuid::Uuid::nil(),
-            },
-            object_data: object_ids
-                .iter()
-                .map(|id| RedoObjectDataBlock {
-                    object_id: id.uuid(),
-                })
-                .collect(),
-        });
-        self.send(&message, Reliability::Reliable, now)
+        let blocks: Vec<_> = object_ids
+            .iter()
+            .map(|id| RedoObjectDataBlock {
+                object_id: id.uuid(),
+            })
+            .collect();
+        for message in fill_messages(blocks, SELECTION_OBJECTS_PER_MESSAGE, |object_data| {
+            AnyMessage::Redo(Redo {
+                agent_data: RedoAgentDataBlock {
+                    agent_id: self.agent_id.uuid(),
+                    session_id: self.session_id,
+                    group_id: uuid::Uuid::nil(),
+                },
+                object_data,
+            })
+        })? {
+            self.send(&message, Reliability::Reliable, now)?;
+        }
+        Ok(())
     }
 
     /// Queues a `ParcelPropertiesRequestByID` reliably (fetch the parcel

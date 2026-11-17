@@ -630,6 +630,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             | Event::InventoryThumbnailUploadFailed { .. }
             | Event::PostcardSent
             | Event::PostcardFailed { .. }
+            | Event::CommandFailed { .. }
             | Event::VoiceAccountProvisioned(_)
             | Event::ParcelVoiceInfo(_)
             | Event::RegionChanged { .. }

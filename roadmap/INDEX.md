@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 328 |
 | blocked | 34 |
 | in-progress | 4 |
-| bugs | 21 |
-| done | 1588 |
+| bugs | 20 |
+| done | 1589 |
 | deferred | 30 |
 | wont-do | 24 |
 | **total** | **2160** |
@@ -1239,7 +1239,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-text-renderability-axis`](in-progress/viewer-ui-text-renderability-axis.md)
   — Upstream issue — font selection cannot see glyph-format renderability
 
-## bugs (21)
+## bugs (20)
 
 ### protocol
 
@@ -1252,8 +1252,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`protocol-teleport-start-after-failure-rearms`](bugs/protocol-teleport-start-after-failure-rearms.md)
   — A TeleportStart that arrives after its own failure starts a teleport that
   never ends
-- [`protocol-variable-block-lists-over-255`](bugs/protocol-variable-block-lists-over-255.md)
-  — A request listing more than 255 objects fails to encode and ends the session
 - [`protocol-voice-accept-on-direct-session-becomes-conference`](bugs/protocol-voice-accept-on-direct-session-becomes-conference.md)
   — A voice accept on a 1:1 session is folded into a phantom conference
 
@@ -1297,7 +1295,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1588)
+## done (1589)
 
 ### protocol
 
@@ -1596,6 +1594,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Defer handover teardown until the destination confirms (+ overlap safety)
 - [`protocol-teleport-timeout-strands-child-circuits`](done/protocol-teleport-timeout-strands-child-circuits.md)
   — A timed-out teleport strands the session and loses its child circuits
+- [`protocol-variable-block-lists-over-255`](done/protocol-variable-block-lists-over-255.md)
+  — A request listing more than 255 objects fails to encode and ends the session
 - [`protocol-xfer-listing-parse-error-ends-session`](done/protocol-xfer-listing-parse-error-ends-session.md)
   — A malformed Xfer listing ends the whole session
 

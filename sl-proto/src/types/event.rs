@@ -2071,6 +2071,21 @@ pub enum Event {
         /// A description of the failure.
         reason: String,
     },
+    /// A queued [`Command`](crate::Command) could not be sent — typically
+    /// because there is no circuit yet, its scoped id names a region the session
+    /// has left, or the request failed to encode. The action did not happen;
+    /// the session carries on, since one bad request is not the end of a login.
+    ///
+    /// Emitted by the tokio driver. The Bevy driver reports the same failure as
+    /// its `SlCommandFailed` message, which carries the typed error.
+    CommandFailed {
+        /// The failing command's variant name, from
+        /// [`Command::name`](crate::Command::name) (`"DeleteObjects"` for
+        /// [`Command::DeleteObjects`](crate::Command::DeleteObjects)).
+        command: &'static str,
+        /// Why the send failed.
+        reason: String,
+    },
     /// A script upload ([`Command::UploadScript`](crate::Command::UploadScript))
     /// completed and the **simulator compiled** the source. Distinct from
     /// [`AssetUploaded`](Self::AssetUploaded)/[`AssetUploadFailed`](Self::AssetUploadFailed):

@@ -2,7 +2,7 @@
 id: protocol-variable-block-lists-over-255
 title: A request listing more than 255 objects fails to encode and ends the session
 topic: protocol
-status: bugs
+status: done
 origin: gridspec-circuit (2026-10-06)
 refs: [gridspec-circuit]
 ---
@@ -57,3 +57,39 @@ reference viewer's `LLMessageSystem::addString` cuts it (its text box also
 caps the input at 250 characters). The general question above — what a
 command that fails to encode should cost each driver — is still open, and
 every other caller-sized string field reaches it the same way.
+
+## Resolution (2026-11-17)
+
+- `sl-proto`'s new `split` module fills messages the way the reference's
+  `isSendFull` does: at most 255 of the block (or a caller's smaller limit)
+  and no more than the 1200-byte `MTUBYTES`, header blocks repeated in each.
+  The simulator's object-update packing now uses it too.
+- Client senders: the selection lists (select, deselect, duplicate,
+  duplicate-on-ray, delete, owner, group, permissions, delink, undo, redo,
+  detach, drop) at the reference's `MAX_OBJECTS_PER_PACKET` of 254; a link
+  repeats its root at the head of every message, as `sendListToRegions` does
+  with `linkset_root`; a `DeRezObject` take goes 250 roots to a packet with
+  the packet count and number filled in, and a take past 254 packets is
+  refused whole (the reference's "AcquireErrorTooManyObjects"). Inventory
+  moves and removals (`RemoveInventoryObjects`' two lists counted together),
+  gestures, group invites, ejections, role edits, animations, viewer effects
+  and parcel selections split at 255 / the MTU. `RequestMultipleObjects` keeps
+  its flat 255, which is the reference's own count for it.
+- Simulator senders: kills, online/offline notifications, sound preloads,
+  object-owner tallies, directory and picker replies, rights changes,
+  inventory removals, mean-collision alerts and the map block / item / layer
+  replies. `ForceObjectSelect` resets only in its first message. The fake
+  grid's own kill chunking is gone.
+- An empty list sends nothing where it would say nothing, and still one
+  message where it means something (a parcel selection of "every object", an
+  empty directory reply, a forced selection that only clears).
+- Messages whose blocks are not independent are left unsplit and fail to
+  encode past the limit: the parameter lists of `GenericMessage`,
+  `EstateOwnerMessage` and `GodlikeMessage`, `AgentSetAppearance`'s visual
+  parameters, `CoarseLocationUpdate` (its `You`/`Prey` indices point into the
+  list) and `AgentWearablesUpdate`.
+- A failed command now costs only itself in both drivers: the tokio run loop
+  reports it as the new `Event::CommandFailed { command, reason }` and keeps
+  going, as the Bevy driver already did with `SlCommandFailed`.
+- The encoder's block-count error is the new `WireError::TooManyBlocks`,
+  naming the block; `VariableTooLong` is left for byte-length fields.

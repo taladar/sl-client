@@ -1274,2126 +1274,2140 @@ impl Client {
                     }
                 }
                 command = commands.recv() => {
-                    match command {
-                        Some(Command::Send { message, reliability }) => {
-                            self.session.enqueue(*message, reliability, Instant::now())?;
-                        }
-                        Some(Command::Chat { message, chat_type, channel }) => {
-                            self.session.say(&message, chat_type, channel, Instant::now())?;
-                        }
-                        Some(Command::Typing(typing)) => {
-                            self.session.set_typing(typing, Instant::now())?;
-                        }
-                        Some(Command::InstantMessage { to_agent_id, message }) => {
-                            self.session.send_instant_message(to_agent_id, &message, Instant::now())?;
-                            chat_log.log_outbound_im(to_agent_id, &message);
-                        }
-                        Some(Command::AutoResponse { to_agent_id, message }) => {
-                            self.session.send_auto_response(to_agent_id, &message, Instant::now())?;
-                        }
-                        Some(Command::ImTyping { to_agent_id, typing }) => {
-                            self.session.send_im_typing(to_agent_id, typing, Instant::now())?;
-                        }
-                        Some(Command::SetControls(controls)) => {
-                            self.session.set_controls(controls, Instant::now())?;
-                        }
-                        Some(Command::SetThrottle(throttle)) => {
-                            self.session.set_throttle(throttle, Instant::now())?;
-                        }
-                        Some(Command::SetRotation { body, head }) => {
-                            self.session.set_rotation(body, head, Instant::now())?;
-                        }
-                        Some(Command::SetCamera(camera)) => {
-                            self.session.set_camera(camera, Instant::now())?;
-                        }
-                        Some(Command::Stand) => {
-                            self.session.stand(Instant::now())?;
-                        }
-                        Some(Command::FinishAnimation) => {
-                            self.session.finish_animation(Instant::now())?;
-                        }
-                        Some(Command::SitOnGround) => {
-                            self.session.sit_on_ground(Instant::now())?;
-                        }
-                        Some(Command::Sit { target, offset }) => {
-                            self.session.sit_on(target, offset, Instant::now())?;
-                        }
-                        Some(Command::Autopilot { global_x, global_y, z }) => {
-                            self.session.autopilot_to(global_x, global_y, z, Instant::now())?;
-                        }
-                        // The three reads are one `AgentProfile` GET where the
-                        // region grants it, as the reference makes them.
-                        Some(Command::RequestAvatarProperties(target)) => {
-                            if !profile_over_the_capability(&caps, &mut self.session, target, &http, &caps_tx) {
-                                self.session.request_avatar_properties(target, Instant::now())?;
+                    // A command that fails to send is one action that did not
+                    // happen, not the end of the login: it is reported and the
+                    // loop carries on, as the Bevy driver does. Only the socket
+                    // and the session's own input end the session.
+                    let name = command.as_ref().map(Command::name);
+                    let outcome: Result<(), Error> = async {
+                        match command {
+                            Some(Command::Send { message, reliability }) => {
+                                self.session.enqueue(*message, reliability, Instant::now())?;
                             }
-                        }
-                        Some(Command::RequestAvatarPicks(target)) => {
-                            if !profile_over_the_capability(&caps, &mut self.session, target, &http, &caps_tx) {
-                                self.session.request_avatar_picks(target, Instant::now())?;
+                            Some(Command::Chat { message, chat_type, channel }) => {
+                                self.session.say(&message, chat_type, channel, Instant::now())?;
                             }
-                        }
-                        Some(Command::RequestAvatarNotes(target)) => {
-                            if !profile_over_the_capability(&caps, &mut self.session, target, &http, &caps_tx) {
-                                self.session.request_avatar_notes(target, Instant::now())?;
+                            Some(Command::Typing(typing)) => {
+                                self.session.set_typing(typing, Instant::now())?;
                             }
-                        }
-                        Some(Command::RequestAvatarClassifieds(target)) => {
-                            self.session
-                                .request_avatar_classifieds(target, Instant::now())?;
-                        }
-                        Some(Command::RequestPickInfo {
-                            creator_id,
-                            pick_id,
-                        }) => {
-                            self.session
-                                .request_pick_info(creator_id, pick_id, Instant::now())?;
-                        }
-                        Some(Command::RequestClassifiedInfo(classified_id)) => {
-                            self.session
-                                .request_classified_info(classified_id, Instant::now())?;
-                        }
-                        Some(Command::UpdateProfile(update)) => {
-                            match (caps.get(CAP_AGENT_PROFILE), self.session.agent_id()) {
-                                (Some(url), Some(agent)) => {
-                                    tokio::spawn(put_agent_profile(
-                                        agent_profile_url(url, agent),
-                                        agent_profile_put_body(&update),
-                                        http.clone(),
-                                    ));
+                            Some(Command::InstantMessage { to_agent_id, message }) => {
+                                self.session.send_instant_message(to_agent_id, &message, Instant::now())?;
+                                chat_log.log_outbound_im(to_agent_id, &message);
+                            }
+                            Some(Command::AutoResponse { to_agent_id, message }) => {
+                                self.session.send_auto_response(to_agent_id, &message, Instant::now())?;
+                            }
+                            Some(Command::ImTyping { to_agent_id, typing }) => {
+                                self.session.send_im_typing(to_agent_id, typing, Instant::now())?;
+                            }
+                            Some(Command::SetControls(controls)) => {
+                                self.session.set_controls(controls, Instant::now())?;
+                            }
+                            Some(Command::SetThrottle(throttle)) => {
+                                self.session.set_throttle(throttle, Instant::now())?;
+                            }
+                            Some(Command::SetRotation { body, head }) => {
+                                self.session.set_rotation(body, head, Instant::now())?;
+                            }
+                            Some(Command::SetCamera(camera)) => {
+                                self.session.set_camera(camera, Instant::now())?;
+                            }
+                            Some(Command::Stand) => {
+                                self.session.stand(Instant::now())?;
+                            }
+                            Some(Command::FinishAnimation) => {
+                                self.session.finish_animation(Instant::now())?;
+                            }
+                            Some(Command::SitOnGround) => {
+                                self.session.sit_on_ground(Instant::now())?;
+                            }
+                            Some(Command::Sit { target, offset }) => {
+                                self.session.sit_on(target, offset, Instant::now())?;
+                            }
+                            Some(Command::Autopilot { global_x, global_y, z }) => {
+                                self.session.autopilot_to(global_x, global_y, z, Instant::now())?;
+                            }
+                            // The three reads are one `AgentProfile` GET where the
+                            // region grants it, as the reference makes them.
+                            Some(Command::RequestAvatarProperties(target)) => {
+                                if !profile_over_the_capability(&caps, &mut self.session, target, &http, &caps_tx) {
+                                    self.session.request_avatar_properties(target, Instant::now())?;
                                 }
-                                _ => self.session.update_profile(&update, Instant::now())?,
                             }
-                        }
-                        Some(Command::UpdateInterests(update)) => {
-                            self.session.update_interests(&update, Instant::now())?;
-                        }
-                        Some(Command::UpdateAvatarNotes { target_id, notes }) => {
-                            match caps.get(CAP_AGENT_PROFILE) {
-                                Some(url) => {
-                                    tokio::spawn(put_agent_profile(
-                                        agent_profile_url(url, target_id),
-                                        agent_profile_notes_body(&notes),
-                                        http.clone(),
-                                    ));
+                            Some(Command::RequestAvatarPicks(target)) => {
+                                if !profile_over_the_capability(&caps, &mut self.session, target, &http, &caps_tx) {
+                                    self.session.request_avatar_picks(target, Instant::now())?;
                                 }
-                                None => self.session.update_avatar_notes(
-                                    target_id,
-                                    &notes,
-                                    Instant::now(),
-                                )?,
                             }
-                        }
-                        Some(Command::UpdatePick(update)) => {
-                            self.session.update_pick(&update, Instant::now())?;
-                        }
-                        Some(Command::DeletePick(pick_id)) => {
-                            self.session.delete_pick(pick_id, Instant::now())?;
-                        }
-                        Some(Command::GodDeletePick { pick_id, query_id }) => {
-                            self.session
-                                .god_delete_pick(pick_id, query_id, Instant::now())?;
-                        }
-                        Some(Command::UpdateClassified(update)) => {
-                            self.session.update_classified(&update, Instant::now())?;
-                        }
-                        Some(Command::DeleteClassified(classified_id)) => {
-                            self.session
-                                .delete_classified(classified_id, Instant::now())?;
-                        }
-                        Some(Command::RequestClassifiedClickStats(classified_id)) => {
-                            match caps.get(CAP_SEARCH_STAT_REQUEST) {
-                                Some(url) => {
-                                    tokio::spawn(search_stat(
-                                        url.clone(),
-                                        classified_id,
-                                        http.clone(),
-                                        caps_tx.clone(),
-                                    ));
+                            Some(Command::RequestAvatarNotes(target)) => {
+                                if !profile_over_the_capability(&caps, &mut self.session, target, &http, &caps_tx) {
+                                    self.session.request_avatar_notes(target, Instant::now())?;
                                 }
-                                None => tracing::warn!(
-                                    "the region has no SearchStatRequest capability: no click counts"
-                                ),
                             }
-                        }
-                        Some(Command::RequestLandProducts) => {
-                            match caps.get(CAP_PRODUCT_INFO_REQUEST).cloned() {
-                                Some(url) => {
-                                    tokio::spawn(get_caps_llsd(
-                                        url,
-                                        CAP_PRODUCT_INFO_REQUEST,
-                                        http.clone(),
-                                        caps_tx.clone(),
-                                    ));
+                            Some(Command::RequestAvatarClassifieds(target)) => {
+                                self.session
+                                    .request_avatar_classifieds(target, Instant::now())?;
+                            }
+                            Some(Command::RequestPickInfo {
+                                creator_id,
+                                pick_id,
+                            }) => {
+                                self.session
+                                    .request_pick_info(creator_id, pick_id, Instant::now())?;
+                            }
+                            Some(Command::RequestClassifiedInfo(classified_id)) => {
+                                self.session
+                                    .request_classified_info(classified_id, Instant::now())?;
+                            }
+                            Some(Command::UpdateProfile(update)) => {
+                                match (caps.get(CAP_AGENT_PROFILE), self.session.agent_id()) {
+                                    (Some(url), Some(agent)) => {
+                                        tokio::spawn(put_agent_profile(
+                                            agent_profile_url(url, agent),
+                                            agent_profile_put_body(&update),
+                                            http.clone(),
+                                        ));
+                                    }
+                                    _ => self.session.update_profile(&update, Instant::now())?,
                                 }
-                                None => tracing::warn!(
-                                    "the region has no ProductInfoRequest capability: no land types"
-                                ),
                             }
-                        }
-                        Some(Command::UploadProfileImage { image, j2c }) => {
-                            tokio::spawn(upload_profile_image(
-                                caps.get(CAP_UPLOAD_AGENT_PROFILE_IMAGE).cloned(),
-                                image,
-                                j2c,
-                                http.clone(),
-                                caps_tx.clone(),
-                            ));
-                        }
-                        Some(Command::SetDisplayName { old, new }) => {
-                            match caps.get(CAP_SET_DISPLAY_NAME) {
-                                Some(url) => {
-                                    tokio::spawn(set_display_name(
-                                        url.clone(),
-                                        set_display_name_body(&old, &new),
-                                        http.clone(),
-                                    ));
+                            Some(Command::UpdateInterests(update)) => {
+                                self.session.update_interests(&update, Instant::now())?;
+                            }
+                            Some(Command::UpdateAvatarNotes { target_id, notes }) => {
+                                match caps.get(CAP_AGENT_PROFILE) {
+                                    Some(url) => {
+                                        tokio::spawn(put_agent_profile(
+                                            agent_profile_url(url, target_id),
+                                            agent_profile_notes_body(&notes),
+                                            http.clone(),
+                                        ));
+                                    }
+                                    None => self.session.update_avatar_notes(
+                                        target_id,
+                                        &notes,
+                                        Instant::now(),
+                                    )?,
                                 }
-                                None => tracing::warn!(
-                                    "the region has no SetDisplayName capability: the display name is not changed"
-                                ),
                             }
-                        }
-                        Some(Command::GodDeleteClassified {
-                            classified_id,
-                            query_id,
-                        }) => {
-                            self.session.god_delete_classified(
+                            Some(Command::UpdatePick(update)) => {
+                                self.session.update_pick(&update, Instant::now())?;
+                            }
+                            Some(Command::DeletePick(pick_id)) => {
+                                self.session.delete_pick(pick_id, Instant::now())?;
+                            }
+                            Some(Command::GodDeletePick { pick_id, query_id }) => {
+                                self.session
+                                    .god_delete_pick(pick_id, query_id, Instant::now())?;
+                            }
+                            Some(Command::UpdateClassified(update)) => {
+                                self.session.update_classified(&update, Instant::now())?;
+                            }
+                            Some(Command::DeleteClassified(classified_id)) => {
+                                self.session
+                                    .delete_classified(classified_id, Instant::now())?;
+                            }
+                            Some(Command::RequestClassifiedClickStats(classified_id)) => {
+                                match caps.get(CAP_SEARCH_STAT_REQUEST) {
+                                    Some(url) => {
+                                        tokio::spawn(search_stat(
+                                            url.clone(),
+                                            classified_id,
+                                            http.clone(),
+                                            caps_tx.clone(),
+                                        ));
+                                    }
+                                    None => tracing::warn!(
+                                        "the region has no SearchStatRequest capability: no click counts"
+                                    ),
+                                }
+                            }
+                            Some(Command::RequestLandProducts) => {
+                                match caps.get(CAP_PRODUCT_INFO_REQUEST).cloned() {
+                                    Some(url) => {
+                                        tokio::spawn(get_caps_llsd(
+                                            url,
+                                            CAP_PRODUCT_INFO_REQUEST,
+                                            http.clone(),
+                                            caps_tx.clone(),
+                                        ));
+                                    }
+                                    None => tracing::warn!(
+                                        "the region has no ProductInfoRequest capability: no land types"
+                                    ),
+                                }
+                            }
+                            Some(Command::UploadProfileImage { image, j2c }) => {
+                                tokio::spawn(upload_profile_image(
+                                    caps.get(CAP_UPLOAD_AGENT_PROFILE_IMAGE).cloned(),
+                                    image,
+                                    j2c,
+                                    http.clone(),
+                                    caps_tx.clone(),
+                                ));
+                            }
+                            Some(Command::SetDisplayName { old, new }) => {
+                                match caps.get(CAP_SET_DISPLAY_NAME) {
+                                    Some(url) => {
+                                        tokio::spawn(set_display_name(
+                                            url.clone(),
+                                            set_display_name_body(&old, &new),
+                                            http.clone(),
+                                        ));
+                                    }
+                                    None => tracing::warn!(
+                                        "the region has no SetDisplayName capability: the display name is not changed"
+                                    ),
+                                }
+                            }
+                            Some(Command::GodDeleteClassified {
                                 classified_id,
                                 query_id,
-                                Instant::now(),
-                            )?;
-                        }
-                        Some(Command::RequestFolderContents(folder_id)) => {
-                            fetch_folder_contents(
-                                &mut self.session,
-                                folder_id,
-                                &caps,
-                                &http,
-                                &caps_tx,
-                                Instant::now(),
-                            )?;
-                        }
-                        Some(Command::FetchInventoryFolders(folder_ids)) => {
-                            if let (Some(url), Some(owner)) =
-                                (caps.get(CAP_FETCH_INVENTORY).cloned(), self.session.agent_id())
-                            {
-                                tokio::spawn(fetch_inventory(
-                                    url,
-                                    owner.uuid(),
-                                    folder_ids,
-                                    CAP_FETCH_INVENTORY,
-                                    http.clone(),
-                                    caps_tx.clone(),
-                                ));
-                            }
-                        }
-                        Some(Command::CreateInventoryFolder { folder_id, parent_id, folder_type, name }) => {
-                            // Second Life creates a folder through AIS3, as the reference's
-                            // `createNewCategory` does. It mints the id itself, so the
-                            // session matches the answer to this request and names both
-                            // ids (`Event::InventoryFolderCreated`). OpenSim keeps the UDP
-                            // create, which keeps `folder_id`.
-                            if has_ais3(&caps) {
-                                self.session.note_folder_create(folder_id, parent_id, &name);
-                                route_ais3(&caps, &http, &caps_tx, &ais_create_category_url(parent_id, Uuid::new_v4()), Ais3Verb::Post, Some(build_ais_create_category_body(parent_id, i32::from(folder_type.to_code()), &name)));
-                            } else {
-                                self.session.create_inventory_folder(folder_id, parent_id, folder_type, &name, Instant::now())?;
-                            }
-                        }
-                        Some(Command::UpdateInventoryFolder { folder_id, parent_id, folder_type, name }) => {
-                            // Second Life renames through AIS3, as the reference's
-                            // `update_inventory_category` does; a change of parent is a
-                            // move, which goes UDP on every grid. OpenSim keeps the UDP
-                            // update.
-                            if has_ais3(&caps) {
-                                let parent = self.session.inventory_folder(folder_id).and_then(|folder| folder.parent_id);
-                                if parent != Some(parent_id) {
-                                    self.session.move_inventory_folder(folder_id, parent_id, Instant::now())?;
-                                }
-                                self.session.update_inventory_folder_local(folder_id, parent_id, folder_type, &name);
-                                route_ais3(&caps, &http, &caps_tx, &ais_category_url(folder_id), Ais3Verb::Patch, Some(build_ais_rename_category_body(&name)));
-                            } else {
-                                self.session.update_inventory_folder(folder_id, parent_id, folder_type, &name, Instant::now())?;
-                            }
-                        }
-                        Some(Command::MoveInventoryFolder { folder_id, parent_id }) => {
-                            // UDP on every grid, as the reference moves a folder
-                            // (`updateParentOnServer`): Second Life's AIS3 refuses a
-                            // `PATCH` of `parent_id` ("Use MOVE method") and takes the
-                            // UDP message (`book/src/gridspec/inventory.md` § Fetching).
-                            self.session.move_inventory_folder(folder_id, parent_id, Instant::now())?;
-                        }
-                        Some(Command::RemoveInventoryFolders(folder_ids)) => {
-                            // Second Life deletes each folder via AIS3 (`DELETE /category/<id>`); OpenSim keeps the UDP batch.
-                            if has_ais3(&caps) {
-                                // Drop them from the cache optimistically (the AIS3 DELETE does not).
-                                self.session.remove_inventory_folders_local(&folder_ids);
-                                for folder_id in &folder_ids {
-                                    route_ais3(&caps, &http, &caps_tx, &ais_category_url(*folder_id), Ais3Verb::Delete, None);
-                                }
-                            } else {
-                                self.session.remove_inventory_folders(&folder_ids, Instant::now())?;
-                            }
-                        }
-                        Some(Command::CreateInventoryItem(new)) => {
-                            self.session.create_inventory_item(&new, Instant::now())?;
-                        }
-                        Some(Command::CreateScript { folder_id, name, description, next_owner_mask, language }) => {
-                            self.session.create_script(folder_id, &name, &description, next_owner_mask, language, Instant::now())?;
-                        }
-                        Some(Command::LinkInventoryItem(new)) => {
-                            // Second Life: create the link via AIS3 (`POST /category/<folder>` with a
-                            // `links` array) — the UDP `LinkInventoryItem` is rejected against the
-                            // AIS-managed Current Outfit Folder. OpenSim (no cap) keeps the UDP path.
-                            let suffix = ais_create_category_url(new.folder_id, Uuid::new_v4());
-                            let body = build_ais_create_link_body(
-                                new.linked_id.uuid(),
-                                new.link_type.to_code(),
-                                new.inv_type.to_code(),
-                                &new.name,
-                                &new.description,
-                            );
-                            if !route_ais3(&caps, &http, &caps_tx, &suffix, Ais3Verb::Post, Some(body)) {
-                                self.session.link_inventory_item(&new, Instant::now())?;
-                            }
-                        }
-                        Some(Command::UpdateInventoryItem { item, transaction_id }) => {
-                            // Second Life updates an item through AIS3 (`PATCH /item/<id>`
-                            // with the whole item), as the reference's
-                            // `update_inventory_item` does; OpenSim keeps the UDP message.
-                            if has_ais3(&caps) {
-                                let body = ais_item_update_body(&item, transaction_id).map_err(sl_proto::Error::from)?;
-                                self.session.update_inventory_item_local(&item);
-                                route_ais3(&caps, &http, &caps_tx, &ais_item_url(item.item_id), Ais3Verb::Patch, Some(body));
-                            } else {
-                                self.session.update_inventory_item(&item, transaction_id, Instant::now())?;
-                            }
-                        }
-                        Some(Command::SaveInventoryAsset { item, asset_type, transaction_id, data }) => {
-                            self.session.save_inventory_asset(&item, asset_type, data, transaction_id, Instant::now())?;
-                        }
-                        Some(Command::CreateInventoryItemWithAsset { item, data }) => {
-                            self.session.create_inventory_item_with_asset(&item, data, Instant::now())?;
-                        }
-                        Some(Command::MoveInventoryItem { item_id, folder_id, new_name }) => {
-                            // UDP on every grid, as the reference moves an item: Second
-                            // Life's AIS3 refuses a `PATCH` of `parent_id` ("Use MOVE
-                            // method") and takes the UDP message
-                            // (`book/src/gridspec/inventory.md` § Fetching).
-                            self.session.move_inventory_item(item_id, folder_id, &new_name, Instant::now())?;
-                        }
-                        Some(Command::CopyInventoryItem { old_agent_id, old_item_id, new_folder_id, new_name }) => {
-                            self.session.copy_inventory_item(old_agent_id, old_item_id, new_folder_id, &new_name, Instant::now())?;
-                        }
-                        Some(Command::RemoveInventoryItems(item_ids)) => {
-                            // Second Life deletes each item via AIS3 (`DELETE /item/<id>`); OpenSim keeps the UDP batch.
-                            if has_ais3(&caps) {
-                                // Drop the items from the cache optimistically (the AIS3 DELETE does
-                                // not), so a taken-off / detached item leaves the model at once.
-                                self.session.remove_inventory_items_local(&item_ids);
-                                for item_id in &item_ids {
-                                    route_ais3(&caps, &http, &caps_tx, &ais_item_url(*item_id), Ais3Verb::Delete, None);
-                                }
-                            } else {
-                                self.session.remove_inventory_items(&item_ids, Instant::now())?;
-                            }
-                        }
-                        Some(Command::ChangeInventoryItemFlags { item_id, flags }) => {
-                            self.session.change_inventory_item_flags(item_id, flags, Instant::now())?;
-                        }
-                        Some(Command::PurgeInventoryDescendents(folder_id)) => {
-                            // Second Life empties via AIS3 (`DELETE /category/<id>/children`); OpenSim keeps UDP.
-                            // The cache empties first either way, as the UDP path's does.
-                            if has_ais3(&caps) {
-                                self.session.purge_inventory_descendents_local(folder_id);
-                                route_ais3(&caps, &http, &caps_tx, &ais_category_children_url(folder_id), Ais3Verb::Delete, None);
-                            } else {
-                                self.session.purge_inventory_descendents(folder_id, Instant::now())?;
-                            }
-                        }
-                        Some(Command::RemoveInventoryObjects { folder_ids, item_ids }) => {
-                            // Second Life deletes each folder and item through AIS3, as
-                            // the reference's `remove_inventory_object` does (it never
-                            // sends `RemoveInventoryObjects`); OpenSim keeps the UDP batch.
-                            if has_ais3(&caps) {
-                                self.session.remove_inventory_folders_local(&folder_ids);
-                                self.session.remove_inventory_items_local(&item_ids);
-                                for folder_id in &folder_ids {
-                                    route_ais3(&caps, &http, &caps_tx, &ais_category_url(*folder_id), Ais3Verb::Delete, None);
-                                }
-                                for item_id in &item_ids {
-                                    route_ais3(&caps, &http, &caps_tx, &ais_item_url(*item_id), Ais3Verb::Delete, None);
-                                }
-                            } else {
-                                self.session.remove_inventory_objects(&folder_ids, &item_ids, Instant::now())?;
-                            }
-                        }
-                        Some(Command::CreateInventoryCategory { parent_id, folder_type, name }) => {
-                            // Second Life creates a folder through AIS3, as the reference's
-                            // `createNewCategory` does; elsewhere the capability.
-                            if has_ais3(&caps) {
-                                route_ais3(&caps, &http, &caps_tx, &ais_create_category_url(parent_id, Uuid::new_v4()), Ais3Verb::Post, Some(build_ais_create_category_body(parent_id, folder_type, &name)));
-                            } else if let Some(url) = caps.get(CAP_CREATE_INVENTORY_CATEGORY).cloned() {
-                                let body = build_create_inventory_category_request(InventoryFolderKey::from(Uuid::new_v4()), parent_id, folder_type, &name);
-                                tokio::spawn(post_voice_cap(url, body, CAP_CREATE_INVENTORY_CATEGORY, http.clone(), caps_tx.clone()));
-                            }
-                        }
-                        Some(Command::Ais3CreateFolder { parent_id, folder_type, name }) => {
-                            if let Some(base) = caps.get(CAP_INVENTORY_API_V3).cloned() {
-                                let url = format!("{base}{}", ais_create_category_url(parent_id, Uuid::new_v4()));
-                                let body = build_ais_create_category_body(parent_id, folder_type, &name);
-                                tokio::spawn(post_voice_cap(url, body, CAP_INVENTORY_API_V3, http.clone(), caps_tx.clone()));
-                            } else {
-                                report_capability_not_granted(&self.session, &diagnostics, CAP_INVENTORY_API_V3).await;
-                            }
-                        }
-                        Some(Command::Ais3RenameFolder { folder_id, name }) => {
-                            if let Some(base) = caps.get(CAP_INVENTORY_API_V3).cloned() {
-                                let url = format!("{base}{}", ais_category_url(folder_id));
-                                tokio::spawn(patch_caps_llsd(url, build_ais_rename_category_body(&name), CAP_INVENTORY_API_V3, http.clone(), caps_tx.clone()));
-                            } else {
-                                report_capability_not_granted(&self.session, &diagnostics, CAP_INVENTORY_API_V3).await;
-                            }
-                        }
-                        // No AIS3 move commands: Second Life refuses AIS3's `PATCH` of a
-                        // `parent_id` and its `MOVE`; moves go UDP (see the note on
-                        // `Command::Ais3RemoveFolder` in `sl-proto`'s `command.rs`).
-                        Some(Command::Ais3RemoveFolder(folder_id)) => {
-                            if let Some(base) = caps.get(CAP_INVENTORY_API_V3).cloned() {
-                                let url = format!("{base}{}", ais_category_url(folder_id));
-                                tokio::spawn(delete_caps_llsd(url, CAP_INVENTORY_API_V3, http.clone(), caps_tx.clone()));
-                            } else {
-                                report_capability_not_granted(&self.session, &diagnostics, CAP_INVENTORY_API_V3).await;
-                            }
-                        }
-                        Some(Command::Ais3PurgeFolder(folder_id)) => {
-                            if let Some(base) = caps.get(CAP_INVENTORY_API_V3).cloned() {
-                                let url = format!("{base}{}", ais_category_children_url(folder_id));
-                                tokio::spawn(delete_caps_llsd(url, CAP_INVENTORY_API_V3, http.clone(), caps_tx.clone()));
-                            } else {
-                                report_capability_not_granted(&self.session, &diagnostics, CAP_INVENTORY_API_V3).await;
-                            }
-                        }
-                        Some(Command::Ais3FetchFolderChildren { folder_id, depth }) => {
-                            // A Library folder lives behind `LibraryAPIv3`; sending it to
-                            // the agent's `InventoryAPIv3` is a 404 on Second Life.
-                            let cap = if self.session.inventory_owner(folder_id) == Some(InventoryOwner::Library) {
-                                CAP_LIBRARY_API_V3
-                            } else {
-                                CAP_INVENTORY_API_V3
-                            };
-                            if let Some(base) = caps.get(cap).cloned() {
-                                let url = format!("{base}{}", ais_category_children_fetch_url(folder_id, depth));
-                                tokio::spawn(get_caps_llsd(url, cap, http.clone(), caps_tx.clone()));
-                            } else {
-                                report_capability_not_granted(&self.session, &diagnostics, cap).await;
-                            }
-                        }
-                        Some(Command::Ais3UpdateItem { item_id, name, description }) => {
-                            if let Some(base) = caps.get(CAP_INVENTORY_API_V3).cloned() {
-                                let url = format!("{base}{}", ais_item_url(item_id));
-                                tokio::spawn(patch_caps_llsd(url, build_ais_update_item_body(&name, &description), CAP_INVENTORY_API_V3, http.clone(), caps_tx.clone()));
-                            } else {
-                                report_capability_not_granted(&self.session, &diagnostics, CAP_INVENTORY_API_V3).await;
-                            }
-                        }
-                        Some(Command::Ais3RemoveItem(item_id)) => {
-                            if let Some(base) = caps.get(CAP_INVENTORY_API_V3).cloned() {
-                                let url = format!("{base}{}", ais_item_url(item_id));
-                                tokio::spawn(delete_caps_llsd(url, CAP_INVENTORY_API_V3, http.clone(), caps_tx.clone()));
-                            } else {
-                                report_capability_not_granted(&self.session, &diagnostics, CAP_INVENTORY_API_V3).await;
-                            }
-                        }
-                        Some(Command::Ais3FetchItem(item_id)) => {
-                            if let Some(base) = caps.get(CAP_INVENTORY_API_V3).cloned() {
-                                let url = format!("{base}{}", ais_item_url(item_id));
-                                tokio::spawn(get_caps_llsd(url, CAP_INVENTORY_API_V3, http.clone(), caps_tx.clone()));
-                            } else {
-                                report_capability_not_granted(&self.session, &diagnostics, CAP_INVENTORY_API_V3).await;
-                            }
-                        }
-                        Some(Command::FetchGroupMembers(group_id)) => {
-                            if let Some(url) = caps.get(CAP_GROUP_MEMBER_DATA).cloned() {
-                                tokio::spawn(fetch_group_members(url, group_id, http.clone(), caps_tx.clone()));
-                            }
-                        }
-                        Some(Command::OfferFriendship { to_agent_id, message }) => {
-                            self.session.send_friendship_offer(to_agent_id, &message, Instant::now())?;
-                        }
-                        Some(Command::GrantUserRights { target, rights }) => {
-                            self.session.grant_user_rights(target, rights, Instant::now())?;
-                        }
-                        Some(Command::TerminateFriendship(other)) => {
-                            self.session.terminate_friendship(other, Instant::now())?;
-                        }
-                        Some(Command::AcceptFriendship { transaction_id, friend_id, calling_card_folder, use_offline_cap }) => {
-                            // A kept offer is answered over the capability where the
-                            // region grants it, as the reference does; a live offer,
-                            // or a region without it, over UDP.
-                            match caps.get(CAP_ACCEPT_FRIENDSHIP).filter(|_url| use_offline_cap) {
-                                Some(url) => {
-                                    let url = friendship_answer_url(url, friend_id, Some(&self.session.agent_legacy_name()));
-                                    tokio::spawn(answer_friendship(url, true, http.clone()));
-                                    self.session.note_friendship_accepted(friend_id);
-                                }
-                                None => {
-                                    if transaction_id.get().is_nil() {
-                                        tracing::warn!("accepting a friendship offer over UDP without its transaction id");
-                                    }
-                                    self.session.accept_friendship(transaction_id, friend_id, calling_card_folder, Instant::now())?;
-                                }
-                            }
-                        }
-                        Some(Command::DeclineFriendship { transaction_id, friend_id, use_offline_cap }) => {
-                            match caps.get(CAP_DECLINE_FRIENDSHIP).filter(|_url| use_offline_cap) {
-                                Some(url) => {
-                                    let url = friendship_answer_url(url, friend_id, None);
-                                    tokio::spawn(answer_friendship(url, false, http.clone()));
-                                }
-                                None => {
-                                    if transaction_id.get().is_nil() {
-                                        tracing::warn!("declining a friendship offer over UDP without its transaction id");
-                                    }
-                                    self.session.decline_friendship(transaction_id, Instant::now())?;
-                                }
-                            }
-                        }
-                        Some(Command::OfferCallingCard { to_agent_id, transaction_id }) => {
-                            self.session.offer_calling_card(to_agent_id, transaction_id, Instant::now())?;
-                        }
-                        Some(Command::AcceptCallingCard { transaction_id, calling_card_folder }) => {
-                            self.session.accept_calling_card(transaction_id, calling_card_folder, Instant::now())?;
-                        }
-                        Some(Command::DeclineCallingCard(transaction_id)) => {
-                            self.session.decline_calling_card(transaction_id, Instant::now())?;
-                        }
-                        Some(Command::ActivateGroup(group_id)) => {
-                            self.session.activate_group(group_id, Instant::now())?;
-                        }
-                        Some(Command::RequestGroupMembers(group_id)) => {
-                            self.session.request_group_members(group_id, Instant::now())?;
-                        }
-                        Some(Command::RequestGroupRoles(group_id)) => {
-                            self.session.request_group_roles(group_id, Instant::now())?;
-                        }
-                        Some(Command::RequestGroupRoleMembers(group_id)) => {
-                            self.session.request_group_role_members(group_id, Instant::now())?;
-                        }
-                        Some(Command::RequestGroupTitles(group_id)) => {
-                            self.session.request_group_titles(group_id, Instant::now())?;
-                        }
-                        Some(Command::RequestGroupProfile(group_id)) => {
-                            self.session.request_group_profile(group_id, Instant::now())?;
-                        }
-                        Some(Command::RequestGroupNotices(group_id)) => {
-                            self.session.request_group_notices(group_id, Instant::now())?;
-                        }
-                        Some(Command::RequestGroupNotice(notice_id)) => {
-                            self.session.request_group_notice(notice_id, Instant::now())?;
-                        }
-                        Some(Command::CreateGroup(params)) => {
-                            self.session.create_group(&params, Instant::now())?;
-                        }
-                        Some(Command::UpdateGroupInfo(params)) => {
-                            self.session.update_group_info(&params, Instant::now())?;
-                        }
-                        Some(Command::UpdateGroupTitle { group_id, title_role_id }) => {
-                            self.session.update_group_title(group_id, title_role_id, Instant::now())?;
-                        }
-                        Some(Command::JoinGroup(group_id)) => {
-                            self.session.join_group(group_id, Instant::now())?;
-                        }
-                        Some(Command::LeaveGroup(group_id)) => {
-                            self.session.leave_group(group_id, Instant::now())?;
-                        }
-                        Some(Command::InviteToGroup { group_id, invitees }) => {
-                            self.session.invite_to_group(group_id, &invitees, Instant::now())?;
-                        }
-                        Some(Command::AcceptGroupInvitation { group_id, transaction_id, use_offline_cap }) => {
-                            // A kept invitation is answered over the capability where
-                            // the region grants it, as the reference does; a live
-                            // invitation, or a region without it, over UDP.
-                            match caps.get(CAP_ACCEPT_GROUP_INVITE).filter(|_url| use_offline_cap) {
-                                Some(url) => {
-                                    let body = group_invite_response_body(group_id);
-                                    tokio::spawn(answer_group_invitation(url.clone(), body, true, http.clone()));
-                                }
-                                None => {
-                                    if transaction_id.get().is_nil() {
-                                        tracing::warn!("accepting a group invitation over UDP without its transaction id");
-                                    }
-                                    self.session.accept_group_invitation(group_id, transaction_id, Instant::now())?;
-                                }
-                            }
-                        }
-                        Some(Command::DeclineGroupInvitation { group_id, transaction_id, use_offline_cap }) => {
-                            match caps.get(CAP_DECLINE_GROUP_INVITE).filter(|_url| use_offline_cap) {
-                                Some(url) => {
-                                    let body = group_invite_response_body(group_id);
-                                    tokio::spawn(answer_group_invitation(url.clone(), body, false, http.clone()));
-                                }
-                                None => {
-                                    if transaction_id.get().is_nil() {
-                                        tracing::warn!("declining a group invitation over UDP without its transaction id");
-                                    }
-                                    self.session.decline_group_invitation(group_id, transaction_id, Instant::now())?;
-                                }
-                            }
-                        }
-                        Some(Command::RequestGroupBans(group_id)) => {
-                            bans_over_the_capability(&caps, group_id, None, &http, &caps_tx);
-                        }
-                        Some(Command::BanGroupMembers { group_id, agent_ids }) => {
-                            let body = group_ban_request_body(GroupBanAction::Ban, &agent_ids);
-                            bans_over_the_capability(&caps, group_id, Some(body), &http, &caps_tx);
-                        }
-                        Some(Command::UnbanGroupMembers { group_id, agent_ids }) => {
-                            let body = group_ban_request_body(GroupBanAction::Unban, &agent_ids);
-                            bans_over_the_capability(&caps, group_id, Some(body), &http, &caps_tx);
-                        }
-                        Some(Command::SetGroupAcceptNotices { group_id, accept_notices, list_in_profile }) => {
-                            self.session.set_group_accept_notices(group_id, accept_notices, list_in_profile, Instant::now())?;
-                        }
-                        Some(Command::SetGroupContribution { group_id, contribution }) => {
-                            self.session.set_group_contribution(group_id, contribution, Instant::now())?;
-                        }
-                        Some(Command::StartGroupSession(group_id)) => {
-                            self.session.start_group_session(group_id, Instant::now())?;
-                        }
-                        Some(Command::SendGroupMessage { group_id, message }) => {
-                            self.session.send_group_message(group_id, &message, Instant::now())?;
-                            if let Some(own) = self.session.agent_id() {
-                                let name = self.session.agent_legacy_name();
-                                chat_log.log_group(group_id, own, &name, &message);
-                            }
-                        }
-                        Some(Command::LeaveGroupSession(group_id)) => {
-                            self.session.leave_group_session(group_id, Instant::now())?;
-                        }
-                        Some(Command::UpdateGroupRoles { group_id, roles }) => {
-                            self.session.update_group_roles(group_id, &roles, Instant::now())?;
-                        }
-                        Some(Command::ChangeGroupRoleMembers { group_id, changes }) => {
-                            self.session.change_group_role_members(group_id, &changes, Instant::now())?;
-                        }
-                        Some(Command::EjectGroupMembers { group_id, member_ids }) => {
-                            self.session.eject_group_members(group_id, &member_ids, Instant::now())?;
-                        }
-                        Some(Command::ActivateGestures { gestures }) => {
-                            self.session.activate_gestures(&gestures, Instant::now())?;
-                        }
-                        Some(Command::DeactivateGestures { item_ids }) => {
-                            self.session.deactivate_gestures(&item_ids, Instant::now())?;
-                        }
-                        Some(Command::SetAlwaysRun { mode }) => {
-                            self.session.set_always_run(mode, Instant::now())?;
-                        }
-                        Some(Command::PauseAgent) => {
-                            self.session.pause_agent(Instant::now())?;
-                        }
-                        Some(Command::ResumeAgent) => {
-                            self.session.resume_agent(Instant::now())?;
-                        }
-                        Some(Command::SetAgentFov { vertical_angle }) => {
-                            self.session.set_agent_fov(vertical_angle, Instant::now())?;
-                        }
-                        Some(Command::SetAgentSize { height, width }) => {
-                            self.session.set_agent_size(height, width, Instant::now())?;
-                        }
-                        Some(Command::ReleaseScriptControls) => {
-                            self.session.release_script_controls(Instant::now())?;
-                        }
-                        Some(Command::SendGroupNotice { group_id, subject, message, attachment }) => {
-                            self.session.send_group_notice(group_id, &subject, &message, attachment, Instant::now())?;
-                        }
-                        Some(Command::RequestGroupAccountSummary { group_id, request_id, interval_days, current_interval }) => {
-                            self.session.request_group_account_summary(group_id, request_id, interval_days, current_interval, Instant::now())?;
-                        }
-                        Some(Command::RequestGroupAccountDetails { group_id, request_id, interval_days, current_interval }) => {
-                            self.session.request_group_account_details(group_id, request_id, interval_days, current_interval, Instant::now())?;
-                        }
-                        Some(Command::RequestGroupAccountTransactions { group_id, request_id, interval_days, current_interval }) => {
-                            self.session.request_group_account_transactions(group_id, request_id, interval_days, current_interval, Instant::now())?;
-                        }
-                        Some(Command::RequestGroupActiveProposals { group_id, transaction_id }) => {
-                            self.session.request_group_active_proposals(group_id, transaction_id, Instant::now())?;
-                        }
-                        Some(Command::RequestGroupVoteHistory { group_id, transaction_id }) => {
-                            self.session.request_group_vote_history(group_id, transaction_id, Instant::now())?;
-                        }
-                        Some(Command::StartGroupProposal { group_id, quorum, majority, duration, proposal_text }) => {
-                            self.session.start_group_proposal(group_id, quorum, majority, duration, &proposal_text, Instant::now())?;
-                        }
-                        Some(Command::GroupProposalBallot { proposal_id, group_id, vote_cast }) => {
-                            self.session.cast_group_proposal_ballot(proposal_id, group_id, &vote_cast, Instant::now())?;
-                        }
-                        Some(Command::ReplyScriptDialog { object_id, chat_channel, button_index, button_label }) => {
-                            self.session.reply_script_dialog(object_id, chat_channel, button_index, &button_label, Instant::now())?;
-                        }
-                        Some(Command::AnswerScriptPermissions { task_id, item_id, permissions, experience_id }) => {
-                            self.session.answer_script_permissions(task_id, item_id, permissions, experience_id, Instant::now())?;
-                        }
-                        Some(Command::RequestMuteList) => {
-                            self.session.request_mute_list(Instant::now())?;
-                        }
-                        Some(Command::Mute { id, name, mute_type, flags }) => {
-                            self.session.mute(id, &name, mute_type, flags, Instant::now())?;
-                        }
-                        Some(Command::Unmute { id, name }) => {
-                            self.session.unmute(id, &name, Instant::now())?;
-                        }
-                        Some(Command::Teleport { region_handle, position, look_at }) => {
-                            self.session.teleport_to(region_handle, position, look_at, Instant::now())?;
-                        }
-                        Some(Command::RequestRegionInfo) => {
-                            self.session.request_region_info(Instant::now())?;
-                        }
-                        Some(Command::RequestAvatarNames(ids)) => {
-                            self.session.request_avatar_names(&ids, Instant::now())?;
-                        }
-                        Some(Command::RequestGroupNames(ids)) => {
-                            self.session.request_group_names(&ids, Instant::now())?;
-                        }
-                        Some(Command::RequestEnvironment { parcel_id }) => {
-                            if let Some(base) = caps.get(CAP_EXT_ENVIRONMENT).cloned() {
-                                let url = environment_cap_url(&base, parcel_id, None);
-                                tokio::spawn(get_caps_llsd(
-                                    url,
-                                    CAP_EXT_ENVIRONMENT,
-                                    http.clone(),
-                                    caps_tx.clone(),
-                                ));
-                            }
-                        }
-                        Some(Command::SetEnvironment { parcel_id, track_no, update }) => {
-                            if let Some(base) = caps.get(CAP_EXT_ENVIRONMENT).cloned() {
-                                let url = environment_cap_url(&base, parcel_id, track_no);
-                                let refetch = environment_cap_url(&base, parcel_id, None);
-                                let body = build_environment_update_request(&update);
-                                let (reply_tx, reply_rx) = mpsc::channel(1);
-                                let (http, caps_tx) = (http.clone(), caps_tx.clone());
-                                tokio::spawn(async move {
-                                    put_caps_llsd(url, body, CAP_EXT_ENVIRONMENT, http.clone(), reply_tx).await;
-                                    settle_environment_change(reply_rx, refetch, http, caps_tx).await;
-                                });
-                            }
-                        }
-                        Some(Command::ResetEnvironment { parcel_id, track_no }) => {
-                            if let Some(base) = caps.get(CAP_EXT_ENVIRONMENT).cloned() {
-                                let url = environment_cap_url(&base, parcel_id, track_no);
-                                let refetch = environment_cap_url(&base, parcel_id, None);
-                                let (reply_tx, reply_rx) = mpsc::channel(1);
-                                let (http, caps_tx) = (http.clone(), caps_tx.clone());
-                                tokio::spawn(async move {
-                                    delete_caps_llsd(url, CAP_EXT_ENVIRONMENT, http.clone(), reply_tx).await;
-                                    settle_environment_change(reply_rx, refetch, http, caps_tx).await;
-                                });
-                            }
-                        }
-                        Some(Command::RequestMoneyBalance) => {
-                            self.session.request_money_balance(Instant::now())?;
-                        }
-                        Some(Command::RequestEconomyData) => {
-                            self.session.request_economy_data(Instant::now())?;
-                        }
-                        Some(Command::SendMoneyTransfer { dest, amount, kind, description }) => {
-                            self.session.send_money_transfer(
-                                dest, amount, kind, &description, Instant::now(),
-                            )?;
-                        }
-                        Some(Command::RequestParcelProperties { west, south, east, north, sequence_id, snap_selection }) => {
-                            self.session.request_parcel_properties(
-                                ParcelRect::new(west, south, east, north),
-                                sequence_id,
-                                snap_selection,
-                                Instant::now(),
-                            )?;
-                        }
-                        Some(Command::RequestParcelPropertiesById { local_id, sequence_id }) => {
-                            self.session.request_parcel_properties_by_id(local_id, sequence_id, Instant::now())?;
-                        }
-                        Some(Command::SetParcelOtherCleanTime { local_id, clean_time }) => {
-                            self.session.set_parcel_other_clean_time(local_id, clean_time, Instant::now())?;
-                        }
-                        Some(Command::ModifyLand(edit)) => {
-                            self.session.modify_land(&edit, Instant::now())?;
-                        }
-                        Some(Command::UndoLand) => {
-                            self.session.undo_land(Instant::now())?;
-                        }
-                        Some(Command::SetDrawDistance(far)) => {
-                            self.session.set_draw_distance(far);
-                        }
-                        Some(Command::RequestMapBlocks { min_x, max_x, min_y, max_y, flags }) => {
-                            self.session.request_map_blocks((min_x, max_x), (min_y, max_y), flags, Instant::now())?;
-                        }
-                        Some(Command::RequestMapByName { name }) => {
-                            self.session.request_map_by_name(&name, Instant::now())?;
-                        }
-                        Some(Command::RequestMapItems { item_type, region_handle }) => {
-                            self.session.request_map_items(item_type, region_handle, Instant::now())?;
-                        }
-                        Some(Command::RequestMapLayer) => {
-                            self.session.request_map_layer(Instant::now())?;
-                        }
-                        Some(Command::SendAbuseReport(report)) => {
-                            self.session.send_abuse_report(&report, Instant::now())?;
-                        }
-                        Some(Command::SendAbuseReportViaCaps { mut report, screenshot }) => {
-                            // With a snapshot and the screenshot cap available, upload
-                            // the snapshot over the two-step uploader (filling
-                            // `screenshot_id` with a fresh texture asset id) and POST
-                            // the report referencing it; otherwise the plain path.
-                            let has_screenshot = screenshot.as_ref().is_some_and(|bytes| !bytes.is_empty());
-                            match caps
-                                .get(CAP_SEND_USER_REPORT_WITH_SCREENSHOT)
-                                .cloned()
-                                .zip(screenshot.filter(|bytes| !bytes.is_empty()))
-                            {
-                                Some((url, bytes)) => {
-                                    if report.screenshot_id.is_nil() {
-                                        report.screenshot_id = Uuid::new_v4();
-                                    }
-                                    let body = build_send_user_report(&report);
-                                    tokio::spawn(run_report_screenshot_upload(
-                                        url,
-                                        body,
-                                        bytes,
-                                        http.clone(),
-                                    ));
-                                }
-                                None => {
-                                    if let Some(url) = caps.get(CAP_SEND_USER_REPORT).cloned() {
-                                        let body = build_send_user_report(&report);
-                                        tokio::spawn(post_caps_oneway(url, body, http.clone()));
-                                    } else {
-                                        // A grid with neither report capability (a stock
-                                        // OpenSim) takes the report over the UDP
-                                        // `UserReport`, as the reference viewer does.
-                                        // The snapshot cannot ride along: attaching one
-                                        // there needs the legacy asset upload.
-                                        if has_screenshot {
-                                            tracing::warn!("the grid offers no report capability; filing the report over UDP without its screenshot");
-                                        }
-                                        self.session.send_abuse_report(&report, Instant::now())?;
-                                    }
-                                }
-                            }
-                        }
-                        Some(Command::SendPostcard(postcard)) => {
-                            self.session.send_postcard(&postcard, Instant::now())?;
-                        }
-                        Some(Command::SendPostcardViaCaps { postcard, image }) => {
-                            if let Some(url) = caps.get(CAP_SEND_POSTCARD).cloned() {
-                                let card = build_postcard_request(&postcard);
-                                tokio::spawn(run_postcard_upload(url, card, image, http.clone(), events.clone()));
-                            } else {
-                                deliver(&events, Event::PostcardFailed { reason: "SendPostcard capability not available".to_owned() }).await;
-                            }
-                        }
-                        Some(Command::RequestMeshUploadFlag) => {
-                            if let Some(url) = caps.get(CAP_MESH_UPLOAD_FLAG).cloned() {
-                                tokio::spawn(get_caps_llsd(url, CAP_MESH_UPLOAD_FLAG, http.clone(), caps_tx.clone()));
-                            }
-                        }
-                        Some(Command::UploadInventoryThumbnail { target, data }) => {
-                            if let Some(url) = caps.get(CAP_INVENTORY_THUMBNAIL_UPLOAD).cloned() {
-                                tokio::spawn(run_thumbnail_upload(url, target, data, http.clone(), events.clone()));
-                            } else {
-                                deliver(&events, Event::InventoryThumbnailUploadFailed { target, reason: "InventoryThumbnailUpload capability not available".to_owned() }).await;
-                            }
-                        }
-                        Some(Command::RequestObjects { local_ids }) => {
-                            self.session.request_objects(&local_ids, Instant::now())?;
-                        }
-                        Some(Command::ResendCachedObjects { local_ids }) => {
-                            self.session.resend_cached_objects(&local_ids);
-                        }
-                        Some(Command::RequestObjectProperties { local_ids }) => {
-                            self.session.request_object_properties(&local_ids, Instant::now())?;
-                        }
-                        Some(Command::DeselectObjects { local_ids }) => {
-                            self.session.deselect_objects(&local_ids, Instant::now())?;
-                        }
-                        Some(Command::TouchObject { local_id, surface }) => {
-                            self.session.touch_object(local_id, surface.as_ref(), Instant::now())?;
-                        }
-                        Some(Command::GrabObject { local_id, grab_offset, surface }) => {
-                            self.session.grab_object(local_id, grab_offset, surface.as_ref(), Instant::now())?;
-                        }
-                        Some(Command::GrabObjectUpdate { object_id, grab_offset_initial, grab_position, time_since_last, surface }) => {
-                            self.session.grab_object_update(object_id, grab_offset_initial, grab_position, time_since_last, surface.as_ref(), Instant::now())?;
-                        }
-                        Some(Command::DegrabObject { local_id, surface }) => {
-                            self.session.degrab_object(local_id, surface.as_ref(), Instant::now())?;
-                        }
-                        Some(Command::RezObject { shape, group_id }) => {
-                            self.session.rez_object(&shape, group_id, Instant::now())?;
-                        }
-                        Some(Command::DuplicateObjects { local_ids, offset, group_id }) => {
-                            self.session.duplicate_objects(&local_ids, offset, group_id, Instant::now())?;
-                        }
-                        Some(Command::DeleteObjects { local_ids }) => {
-                            self.session.delete_objects(&local_ids, Instant::now())?;
-                        }
-                        Some(Command::DerezObjects { local_ids, destination, transaction_id, group_id }) => {
-                            self.session.derez_objects(&local_ids, destination, transaction_id, group_id, Instant::now())?;
-                        }
-                        Some(Command::UpdateObject { local_id, transform }) => {
-                            self.session.update_object(local_id, &transform, Instant::now())?;
-                        }
-                        Some(Command::SetObjectName { local_id, name }) => {
-                            self.session.set_object_name(local_id, &name, Instant::now())?;
-                        }
-                        Some(Command::SetObjectDescription { local_id, description }) => {
-                            self.session.set_object_description(local_id, &description, Instant::now())?;
-                        }
-                        Some(Command::SetObjectClickAction { local_id, action }) => {
-                            self.session.set_object_click_action(local_id, action, Instant::now())?;
-                        }
-                        Some(Command::SetObjectMaterial { local_id, material }) => {
-                            self.session.set_object_material(local_id, material, Instant::now())?;
-                        }
-                        Some(Command::SetObjectFlags { local_id, flags }) => {
-                            self.session.set_object_flags(local_id, &flags, Instant::now())?;
-                        }
-                        Some(Command::SetObjectShape { local_id, shape }) => {
-                            self.session.set_object_shape(local_id, &shape, Instant::now())?;
-                        }
-                        Some(Command::SetObjectImage { local_id, media_url, texture_entry }) => {
-                            self.session.set_object_image(local_id, media_url.as_deref(), &texture_entry, Instant::now())?;
-                        }
-                        Some(Command::SetObjectExtraParams { local_id, params }) => {
-                            self.session.set_object_extra_params(local_id, &params, Instant::now())?;
-                        }
-                        Some(Command::SetObjectGroup { local_ids, group_id }) => {
-                            self.session.set_object_group(&local_ids, group_id, Instant::now())?;
-                        }
-                        Some(Command::DeedObjectsToGroup { local_ids, group_id }) => {
-                            self.session.deed_objects_to_group(&local_ids, group_id, Instant::now())?;
-                        }
-                        Some(Command::SetObjectPermissions { local_ids, field, set, mask }) => {
-                            self.session.set_object_permissions(&local_ids, field, set, mask, Instant::now())?;
-                        }
-                        Some(Command::SetObjectForSale { local_id, sale_type, sale_price }) => {
-                            self.session.set_object_for_sale(local_id, sale_type, sale_price, Instant::now())?;
-                        }
-                        Some(Command::SetObjectCategory { local_id, category }) => {
-                            self.session.set_object_category(local_id, category, Instant::now())?;
-                        }
-                        Some(Command::SetObjectIncludeInSearch { local_id, include }) => {
-                            self.session.set_object_include_in_search(local_id, include, Instant::now())?;
-                        }
-                        Some(Command::LinkObjects { local_ids }) => {
-                            self.session.link_objects(&local_ids, Instant::now())?;
-                        }
-                        Some(Command::DelinkObjects { local_ids }) => {
-                            self.session.delink_objects(&local_ids, Instant::now())?;
-                        }
-                        Some(Command::UndoObjects { local_ids }) => {
-                            self.session.undo_objects(&local_ids, Instant::now())?;
-                        }
-                        Some(Command::RedoObjects { local_ids }) => {
-                            self.session.redo_objects(&local_ids, Instant::now())?;
-                        }
-                        Some(Command::UpdateParcel(update)) => {
-                            // The capability where the region grants it, as the
-                            // reference viewer does: it carries the whole parcel,
-                            // and on OpenSim the UDP form nulls the media type.
-                            if let Some(url) = caps.get(CAP_PARCEL_PROPERTIES_UPDATE).cloned() {
-                                let body = build_parcel_properties_update_request(&update);
-                                tokio::spawn(http::post_caps_reporting(url, body, CAP_PARCEL_PROPERTIES_UPDATE, http.clone(), caps_tx.clone()));
-                            } else {
-                                self.session.update_parcel(&update, Instant::now())?;
-                            }
-                        }
-                        Some(Command::RequestParcelAccessList { local_id, scope }) => {
-                            self.session.request_parcel_access_list(local_id, scope, Instant::now())?;
-                        }
-                        Some(Command::UpdateParcelAccessList { local_id, scope, entries }) => {
-                            // A fresh transaction id per update, so the simulator
-                            // clears the old entries before applying ours rather
-                            // than appending (see `update_parcel_access_list`).
-                            self.session.update_parcel_access_list(local_id, scope, &entries, Uuid::new_v4(), Instant::now())?;
-                        }
-                        Some(Command::RequestParcelDwell { local_id }) => {
-                            self.session.request_parcel_dwell(local_id, Instant::now())?;
-                        }
-                        Some(Command::BuyParcel { local_id, price, area, group_id, is_group_owned }) => {
-                            self.session.buy_parcel(local_id, price, area, group_id, is_group_owned, Instant::now())?;
-                        }
-                        Some(Command::ReturnParcelObjects { local_id, return_type, owner_ids, task_ids }) => {
-                            self.session.return_parcel_objects(local_id, return_type, &owner_ids, &task_ids, Instant::now())?;
-                        }
-                        Some(Command::SelectParcelObjects { local_id, return_type, object_ids }) => {
-                            self.session.select_parcel_objects(local_id, return_type, &object_ids, Instant::now())?;
-                        }
-                        Some(Command::DeedParcelToGroup { local_id, group_id }) => {
-                            self.session.deed_parcel_to_group(local_id, group_id, Instant::now())?;
-                        }
-                        Some(Command::ReclaimParcel { local_id }) => {
-                            self.session.reclaim_parcel(local_id, Instant::now())?;
-                        }
-                        Some(Command::ReleaseParcel { local_id }) => {
-                            self.session.release_parcel(local_id, Instant::now())?;
-                        }
-                        Some(Command::JoinParcels { west, south, east, north }) => {
-                            self.session.join_parcels(west, south, east, north, Instant::now())?;
-                        }
-                        Some(Command::DivideParcel { west, south, east, north }) => {
-                            self.session.divide_parcel(west, south, east, north, Instant::now())?;
-                        }
-                        Some(Command::RequestParcelObjectOwners { local_id }) => {
-                            self.session.request_parcel_object_owners(local_id, Instant::now())?;
-                        }
-                        Some(Command::BuyParcelPass { local_id }) => {
-                            self.session.buy_parcel_pass(local_id, Instant::now())?;
-                        }
-                        Some(Command::DisableParcelObjects { local_id, return_type, owner_ids, task_ids }) => {
-                            self.session.disable_parcel_objects(local_id, return_type, &owner_ids, &task_ids, Instant::now())?;
-                        }
-                        Some(Command::RequestParcelInfo { parcel_id }) => {
-                            self.session.request_parcel_info(parcel_id, Instant::now())?;
-                        }
-                        Some(Command::RequestEstateInfo) => {
-                            self.session.request_estate_info(Instant::now())?;
-                        }
-                        Some(Command::RequestRegionTerrainDownload { viewer_filename }) => {
-                            self.session.request_region_terrain_download(&viewer_filename, Instant::now())?;
-                        }
-                        Some(Command::RequestRegionTerrainUpload { viewer_filename, data }) => {
-                            self.session.request_region_terrain_upload(&viewer_filename, data, Instant::now())?;
-                        }
-                        Some(Command::UpdateEstateAccess { delta, target }) => {
-                            self.session.update_estate_access(delta, target, Instant::now())?;
-                        }
-                        Some(Command::KickEstateUser { target }) => {
-                            self.session.kick_estate_user(target, Instant::now())?;
-                        }
-                        Some(Command::TeleportHomeUser { target }) => {
-                            self.session.teleport_home_user(target, Instant::now())?;
-                        }
-                        Some(Command::TeleportHomeAllUsers) => {
-                            self.session.teleport_home_all_users(Instant::now())?;
-                        }
-                        Some(Command::RestartRegion { seconds }) => {
-                            self.session.restart_region(seconds, Instant::now())?;
-                        }
-                        Some(Command::SendRegionMessage { message }) => {
-                            self.session.send_region_message(&message, Instant::now())?;
-                        }
-                        Some(Command::SendEstateMessage { message }) => {
-                            self.session.send_estate_message(&message, Instant::now())?;
-                        }
-                        Some(Command::SetEstateCovenant { covenant }) => {
-                            self.session.set_estate_covenant(covenant, Instant::now())?;
-                        }
-                        Some(Command::SetRegionInfo(update)) => {
-                            // The capability where the region grants it (it
-                            // carries every field), the UDP `setregioninfo`
-                            // otherwise — as the reference.
-                            if let Some(url) = caps.get(CAP_DISPATCH_REGION_INFO).cloned() {
-                                let body = build_dispatch_region_info_request(&update.to_dispatch());
-                                tokio::spawn(post_voice_cap(url, body, CAP_DISPATCH_REGION_INFO, http.clone(), caps_tx.clone()));
-                            } else {
-                                self.session.set_region_info(&update, Instant::now())?;
-                            }
-                        }
-                        Some(Command::RequestRegionSchedule) => {
-                            if let Some(url) = caps.get(CAP_REGION_SCHEDULE).cloned() {
-                                tokio::spawn(get_caps_llsd(url, CAP_REGION_SCHEDULE, http.clone(), caps_tx.clone()));
-                            }
-                        }
-                        Some(Command::SetRegionSchedule { schedule }) => {
-                            if let Some(url) = caps.get(CAP_REGION_SCHEDULE).cloned() {
-                                let body = build_region_schedule(schedule.as_ref(), true);
-                                tokio::spawn(set_region_schedule(url, body, http.clone(), caps_tx.clone()));
-                            }
-                        }
-                        Some(Command::RequestTerrainMaterialOverrides) => {
-                            if let Some(url) = caps.get(CAP_MODIFY_REGION).cloned() {
-                                tokio::spawn(get_caps_llsd(url, CAP_MODIFY_REGION, http.clone(), caps_tx.clone()));
-                            } else {
-                                report_capability_not_granted(&self.session, &diagnostics, CAP_MODIFY_REGION).await;
-                            }
-                        }
-                        Some(Command::SetTerrainMaterialOverrides(overrides)) => {
-                            if let Some(url) = caps.get(CAP_MODIFY_REGION).cloned() {
-                                let body = build_modify_region_request(&overrides);
-                                tokio::spawn(set_terrain_material_overrides(url, body, http.clone(), caps_tx.clone()));
-                            } else {
-                                report_capability_not_granted(&self.session, &diagnostics, CAP_MODIFY_REGION).await;
-                            }
-                        }
-                        Some(Command::SetRegionDebug(update)) => {
-                            self.session.set_region_debug(&update, Instant::now())?;
-                        }
-                        Some(Command::SetRegionTerrain(update)) => {
-                            self.session.set_region_terrain(&update, Instant::now())?;
-                        }
-                        Some(Command::BakeRegionTerrain) => {
-                            self.session.bake_region_terrain(Instant::now())?;
-                        }
-                        Some(Command::SetEstateInfo(update)) => {
-                            self.session.set_estate_info(&update, Instant::now())?;
-                        }
-                        Some(Command::RequestEstateCovenant) => {
-                            self.session.request_estate_covenant(Instant::now())?;
-                        }
-                        Some(Command::RequestTelehubInfo) => {
-                            self.session.request_telehub_info(Instant::now())?;
-                        }
-                        Some(Command::ConnectTelehub { object_local_id }) => {
-                            self.session.connect_telehub(object_local_id, Instant::now())?;
-                        }
-                        Some(Command::DisconnectTelehub) => {
-                            self.session.disconnect_telehub(Instant::now())?;
-                        }
-                        Some(Command::AddTelehubSpawnPoint { object_local_id }) => {
-                            self.session.add_telehub_spawn_point(object_local_id, Instant::now())?;
-                        }
-                        Some(Command::RemoveTelehubSpawnPoint { spawn_index }) => {
-                            self.session.remove_telehub_spawn_point(spawn_index, Instant::now())?;
-                        }
-                        Some(Command::GodKickUser { target, action, reason }) => {
-                            // The capability where the region grants it, as the
-                            // reference's `message.xml` flavours the message
-                            // `llsd`; the UDP message otherwise.
-                            if let Some(url) = caps.get(CAP_UNTRUSTED_SIMULATOR_MESSAGE).cloned() {
-                                let body = build_god_kick_user_untrusted(&self.session.god_kick_user_request(target, action, &reason)?);
-                                tokio::spawn(post_caps_oneway(url, body, http.clone()));
-                            } else {
-                                self.session.god_kick_user(target, action, &reason, Instant::now())?;
-                            }
-                        }
-                        Some(Command::ForceObjectOwner { local_ids, owner, group_id }) => {
-                            self.session.force_object_owner(&local_ids, owner, group_id, Instant::now())?;
-                        }
-                        Some(Command::SendGodlikeMessage { method, params }) => {
-                            let refs: Vec<&str> = params.iter().map(String::as_str).collect();
-                            self.session.send_godlike_message(&method, &refs, Instant::now())?;
-                        }
-                        Some(Command::RequestTexture { texture_id, discard_level, priority }) => {
-                            self.session.request_texture(texture_id, discard_level, priority, Instant::now())?;
-                        }
-                        Some(Command::FetchTexture { texture_id, discard_level }) => {
-                            if let Some(url) = caps.get(CAP_GET_TEXTURE).cloned() {
-                                tokio::spawn(fetch_texture_http(
-                                    url, texture_id, discard_level, http.clone(), events.clone(),
-                                ));
-                            }
-                        }
-                        Some(Command::FetchMesh { mesh_id, byte_range }) => {
-                            // GetMesh2 is preferred when offered; fall back to GetMesh.
-                            if let Some(url) = caps.get(CAP_GET_MESH2).or_else(|| caps.get(CAP_GET_MESH)).cloned() {
-                                tokio::spawn(fetch_mesh_http(url, mesh_id.uuid(), byte_range, http.clone(), events.clone()));
-                            }
-                        }
-                        Some(Command::FetchAsset { asset_id, asset_type, byte_range }) => {
-                            if let Some(url) = caps.get(CAP_VIEWER_ASSET).cloned() {
-                                tokio::spawn(fetch_asset_http(
-                                    url, asset_id.uuid(), asset_type, byte_range, http.clone(), events.clone(),
-                                ));
-                            }
-                        }
-                        Some(Command::RequestWearables) => {
-                            self.session.request_wearables(Instant::now())?;
-                        }
-                        Some(Command::SetWearing(wearables)) => {
-                            self.session.set_wearing(&wearables, Instant::now())?;
-                        }
-                        Some(Command::SetAppearance { serial, size, texture_entry, visual_params, wearable_cache }) => {
-                            self.session.set_appearance(serial, size, &texture_entry, &visual_params, &wearable_cache, Instant::now())?;
-                        }
-                        Some(Command::RequestCachedTextures { serial, slots }) => {
-                            self.session.request_cached_textures(serial, &slots, Instant::now())?;
-                        }
-                        Some(Command::RequestServerAppearanceUpdate { cof_version }) => {
-                            if let Some(url) = caps.get(CAP_UPDATE_AVATAR_APPEARANCE).cloned() {
-                                tokio::spawn(request_server_appearance_update(
-                                    url, cof_version, http.clone(), caps_tx.clone(),
-                                ));
-                            }
-                        }
-                        Some(Command::IncrementCofVersion) => {
-                            if let Some(url) = caps.get(CAP_INCREMENT_COF_VERSION).cloned() {
-                                tokio::spawn(increment_cof_version(url, http.clone(), caps_tx.clone()));
-                            }
-                        }
-                        Some(Command::SetAnimations(animations)) => {
-                            self.session.set_animations(&animations, Instant::now())?;
-                        }
-                        Some(Command::PlayAnimation(anim_id)) => {
-                            self.session.play_animation(anim_id, Instant::now())?;
-                        }
-                        Some(Command::StopAnimation(anim_id)) => {
-                            self.session.stop_animation(anim_id, Instant::now())?;
-                        }
-                        Some(Command::AttachObject { local_id, attachment_point, mode, rotation }) => {
-                            self.session.attach_object(local_id, attachment_point, mode, &rotation, Instant::now())?;
-                        }
-                        Some(Command::DetachObjects { local_ids }) => {
-                            self.session.detach_objects(&local_ids, Instant::now())?;
-                        }
-                        Some(Command::DropAttachments { local_ids }) => {
-                            self.session.drop_attachments(&local_ids, Instant::now())?;
-                        }
-                        Some(Command::RezAttachment(rez)) => {
-                            self.session.rez_attachment(&rez, Instant::now())?;
-                        }
-                        Some(Command::RezAttachments { compound_id, detach, attachments }) => {
-                            self.session.rez_attachments(compound_id, detach, &attachments, Instant::now())?;
-                        }
-                        Some(Command::ViewerEffect(effects)) => {
-                            self.session.send_viewer_effect(&effects, Instant::now())?;
-                        }
-                        Some(Command::TrackAgent { prey_id }) => {
-                            self.session.track_agent(prey_id, Instant::now())?;
-                        }
-                        Some(Command::FindAgent { hunter, prey }) => {
-                            self.session.find_agent(hunter, prey, Instant::now())?;
-                        }
-                        Some(Command::DirFindQuery { query_id, query_text, flags, query_start }) => {
-                            self.session.dir_find_query(query_id, &query_text, flags, query_start, Instant::now())?;
-                        }
-                        Some(Command::DirPlacesQuery { query_id, query_text, flags, category, sim_name, query_start }) => {
-                            self.session.dir_places_query(query_id, &query_text, flags, category, &sim_name, query_start, Instant::now())?;
-                        }
-                        Some(Command::DirLandQuery { query_id, flags, search_type, price, area, query_start }) => {
-                            self.session.dir_land_query(query_id, flags, search_type, price, area, query_start, Instant::now())?;
-                        }
-                        Some(Command::DirClassifiedQuery { query_id, query_text, flags, category, query_start }) => {
-                            self.session.dir_classified_query(query_id, &query_text, flags, category, query_start, Instant::now())?;
-                        }
-                        Some(Command::AvatarPickerRequest { query_id, name }) => {
-                            // The modern search is the `AvatarPickerSearch` GET,
-                            // which matches username *and* display name; the
-                            // legacy UDP message is the fallback for a grid
-                            // without the cap (on Second Life it answers "no
-                            // matches" to everything).
-                            if let Some(base) = caps.get(CAP_AVATAR_PICKER_SEARCH).cloned() {
-                                let url = format!("{base}{}", avatar_picker_search_query(&name, AVATAR_PICKER_PAGE_SIZE));
-                                tokio::spawn(get_avatar_picker_search(url, query_id.get(), http.clone(), caps_tx.clone()));
-                            } else {
-                                self.session.avatar_picker_request(query_id, &name, Instant::now())?;
-                            }
-                        }
-                        Some(Command::PlacesQuery { query_id, transaction_id, query_text, flags, category, sim_name }) => {
-                            self.session.places_query(query_id, transaction_id, &query_text, flags, category, &sim_name, Instant::now())?;
-                        }
-                        Some(Command::EventInfoRequest { event_id }) => {
-                            self.session.event_info_request(event_id, Instant::now())?;
-                        }
-                        Some(Command::EventNotificationAddRequest { event_id }) => {
-                            self.session.event_notification_add_request(event_id, Instant::now())?;
-                        }
-                        Some(Command::EventNotificationRemoveRequest { event_id }) => {
-                            self.session.event_notification_remove_request(event_id, Instant::now())?;
-                        }
-                        Some(Command::BuyObject { group_id, category_id, objects }) => {
-                            self.session.buy_object(group_id, category_id, &objects, Instant::now())?;
-                        }
-                        Some(Command::BuyObjectInventory { object_id, item_id, folder_id }) => {
-                            self.session.buy_object_inventory(object_id, item_id, folder_id, Instant::now())?;
-                        }
-                        Some(Command::RequestPayPrice { object_id }) => {
-                            self.session.request_pay_price(object_id, Instant::now())?;
-                        }
-                        Some(Command::RequestObjectPropertiesFamily { request_flags, object_id }) => {
-                            self.session.request_object_properties_family(request_flags, object_id, Instant::now())?;
-                        }
-                        Some(Command::SpinObjectStart { object_id }) => {
-                            self.session.spin_object_start(object_id, Instant::now())?;
-                        }
-                        Some(Command::SpinObjectUpdate { object_id, rotation }) => {
-                            self.session.spin_object_update(object_id, rotation, Instant::now())?;
-                        }
-                        Some(Command::SpinObjectStop { object_id }) => {
-                            self.session.spin_object_stop(object_id, Instant::now())?;
-                        }
-                        Some(Command::DuplicateObjectsOnRay {
-                            local_ids, group_id, ray_start, ray_end, bypass_raycast,
-                            ray_end_is_intersection, copy_centers, copy_rotates, ray_target_id,
-                            duplicate_flags,
-                        }) => {
-                            self.session.duplicate_objects_on_ray(
-                                &local_ids, group_id, ray_start, ray_end, bypass_raycast,
-                                ray_end_is_intersection, copy_centers, copy_rotates, ray_target_id,
-                                duplicate_flags, Instant::now(),
-                            )?;
-                        }
-                        Some(Command::RezRestoreToWorld { item }) => {
-                            self.session.rez_restore_to_world(&item, Instant::now())?;
-                        }
-                        Some(Command::RezObjectFromNotecard { rez }) => {
-                            self.session.rez_object_from_notecard(&rez, Instant::now())?;
-                        }
-                        Some(Command::CopyInventoryFromNotecard { notecard_id, object_id, item_id, folder_id }) => {
-                            // Copy an item embedded in a notecard into inventory:
-                            // a one-way LLSD POST to the cap. The copied item
-                            // arrives over the normal inventory-update stream, so
-                            // there is nothing to await here.
-                            if let Some(url) = caps.get(CAP_COPY_INVENTORY_FROM_NOTECARD).cloned() {
-                                let body = copy_inventory_from_notecard_body(notecard_id, object_id, item_id, folder_id);
-                                tokio::spawn(post_caps_oneway(url, body, http.clone()));
-                            } else {
-                                tracing::warn!("no CopyInventoryFromNotecard capability; cannot copy embedded item");
-                            }
-                        }
-                        Some(Command::RezObjectFromInventory { params }) => {
-                            self.session.rez_object_from_inventory(&params, Instant::now())?;
-                        }
-                        Some(Command::RezScript { target, params }) => {
-                            self.session.rez_script(target, &params, Instant::now())?;
-                        }
-                        Some(Command::RevokeScriptPermissions { object_id, permissions }) => {
-                            self.session.revoke_script_permissions(object_id, permissions, Instant::now())?;
-                        }
-                        Some(Command::QueryScriptPermissions) => {
-                            // Local query: synthesize the snapshot from the session
-                            // and surface it on the event stream (no wire send).
-                            deliver(&events, Event::ScriptPermissionState( self.session.script_permission_state(), )).await;
-                        }
-                        Some(Command::DetachAttachmentIntoInventory { item_id }) => {
-                            self.session.detach_attachment_into_inventory(item_id, Instant::now())?;
-                        }
-                        Some(Command::RequestTaskInventory { target }) => {
-                            self.session.request_task_inventory(target, Instant::now())?;
-                        }
-                        Some(Command::FetchTaskInventory { target, held_serial }) => {
-                            // Over the capability where this region grants
-                            // it, as current viewers read a prim's contents;
-                            // over UDP and `Xfer` otherwise. The capability
-                            // is the root region's and names a prim by its
-                            // full id, so a neighbour's prim, and one the
-                            // cache does not hold, go over UDP.
-                            let by_cap = caps
-                                .get(CAP_REQUEST_TASK_INVENTORY)
-                                .cloned()
-                                .filter(|_url| Some(target.circuit) == self.session.root_circuit_id())
-                                .zip(self.session.resolve_object_key(target));
-                            match by_cap {
-                                Some((base, task)) => {
-                                    tokio::spawn(get_task_inventory(base, task, held_serial, http.clone(), caps_tx.clone()));
-                                }
-                                None => {
-                                    self.session.fetch_task_inventory(target, held_serial, Instant::now())?;
-                                }
-                            }
-                        }
-                        Some(Command::RequestScriptExperience { task, item_id }) => {
-                            if let Some(url) = caps.get(CAP_GET_METADATA).cloned() {
-                                tokio::spawn(post_script_metadata(url, task, item_id, http.clone(), caps_tx.clone()));
-                            }
-                        }
-                        Some(Command::FetchTaskItemAsset {
-                            task,
-                            item_id,
-                            asset_id,
-                            asset_type,
-                        }) => {
-                            self.session.fetch_task_item_asset(
-                                task,
-                                item_id,
-                                asset_id,
-                                asset_type,
-                                Instant::now(),
-                            )?;
-                        }
-                        Some(Command::FetchInventoryItemAsset {
-                            item_id,
-                            asset_id,
-                            asset_type,
-                        }) => {
-                            self.session.fetch_inventory_item_asset(
-                                item_id,
-                                asset_id,
-                                asset_type,
-                                Instant::now(),
-                            )?;
-                        }
-                        Some(Command::FetchEstateCovenantAsset) => {
-                            self.session.fetch_estate_covenant_asset(Instant::now())?;
-                        }
-                        Some(Command::RequestXfer { filename }) => {
-                            self.session.request_xfer(&filename, Instant::now())?;
-                        }
-                        Some(Command::UpdateTaskInventory { target, key, item }) => {
-                            self.session.update_task_inventory(target, key, &item, Instant::now())?;
-                        }
-                        Some(Command::MoveTaskInventory { target, folder_id, item_id }) => {
-                            self.session.move_task_inventory(target, folder_id, item_id, Instant::now())?;
-                        }
-                        Some(Command::RemoveTaskInventory { target, item_id }) => {
-                            self.session.remove_task_inventory(target, item_id, Instant::now())?;
-                        }
-                        Some(Command::RequestScriptRunning { object_id, item_id }) => {
-                            self.session.request_script_running(object_id, item_id, Instant::now())?;
-                        }
-                        Some(Command::SetScriptRunning { object_id, item_id, running }) => {
-                            self.session.set_script_running(object_id, item_id, running, Instant::now())?;
-                        }
-                        Some(Command::ResetScript { object_id, item_id }) => {
-                            self.session.reset_script(object_id, item_id, Instant::now())?;
-                        }
-                        Some(Command::UploadAsset { asset_type, .. }) if asset_type.is_script() => {
-                            // Scripts must go through `UploadScript` so the
-                            // simulator's compile result is surfaced; the generic
-                            // create-with-body path would discard it.
-                            deliver(&events, Event::AssetUploadFailed {
-                                reason: "scripts must be uploaded with UploadScript (create the \
-                                         item with create_inventory_item first)"
-                                    .to_owned(),
-                            }).await;
-                        }
-                        Some(Command::UploadAsset {
-                            folder_id, asset_type, inventory_type, name, description,
-                            next_owner_mask, group_mask, everyone_mask, expected_upload_cost, data,
-                        }) => {
-                            // The modern CAPS uploader (the only upload path — the
-                            // legacy UDP asset-upload fallback was dropped): needs
-                            // both the region capability and a CAPS name for the
-                            // asset and inventory classes.
-                            let caps_upload = match (asset_type.caps_asset_name(), inventory_type.caps_name()) {
-                                (Some(asset_name), Some(inv_name)) => caps
-                                    .get(CAP_NEW_FILE_AGENT_INVENTORY)
-                                    .cloned()
-                                    .map(|url| (url, asset_name, inv_name)),
-                                _ => None,
-                            };
-                            if let Some((url, asset_name, inv_name)) = caps_upload {
-                                let request = NewFileAgentInventoryRequest {
-                                    folder_id,
-                                    asset_type: asset_name.to_owned(),
-                                    inventory_type: inv_name.to_owned(),
-                                    name, description,
-                                    next_owner_mask: next_owner_mask.bits(), group_mask: group_mask.bits(),
-                                    everyone_mask: everyone_mask.bits(), expected_upload_cost,
-                                };
-                                let body = build_new_file_agent_inventory_request(&request);
-                                // The request is kept for the completion: this is
-                                // the one upload that *creates* an item, and no
-                                // grid announces the item it created, so the
-                                // completion has to be turned into one here.
-                                let creating = self.session.agent_id().map(|owner| (request, owner));
-                                tokio::spawn(run_caps_upload(url, body, data, creating, None, http.clone(), upload_events.clone()));
-                            } else {
-                                deliver(&events, Event::AssetUploadFailed { reason: "NewFileAgentInventory capability not available".to_owned(), }).await;
-                            }
-                        }
-                        Some(Command::UploadBakedTexture { data }) => {
-                            if let Some(url) = caps.get(CAP_UPLOAD_BAKED_TEXTURE).cloned() {
-                                let body = build_upload_baked_texture_request();
-                                tokio::spawn(run_caps_upload(url, body, data, None, None, http.clone(), events.clone()));
-                            } else {
-                                deliver(&events, Event::AssetUploadFailed { reason: "UploadBakedTexture capability not available".to_owned(), }).await;
-                            }
-                        }
-                        Some(Command::UpdateInventoryAsset { location, asset_type, data }) => {
-                            // `UpdatableAssetType::cap` / `task_cap` are total —
-                            // scripts (which need the compile-aware `UploadScript`)
-                            // are excluded from this type by construction. The
-                            // location picks the agent vs task cap and body shape.
-                            let (cap, body) = match location {
-                                AssetUpdateLocation::AgentInventory { item_id } => {
-                                    (asset_type.cap(), build_update_item_asset_request(item_id))
-                                }
-                                AssetUpdateLocation::TaskInventory { task_id, item_id } => (
-                                    asset_type.task_cap(),
-                                    build_update_task_item_asset_request(task_id, item_id),
-                                ),
-                            };
-                            // The item this save is *about*. A task item is not
-                            // an agent-inventory item, so it stays `None`.
-                            let asked_about = match location {
-                                AssetUpdateLocation::AgentInventory { item_id } => Some(item_id.uuid()),
-                                AssetUpdateLocation::TaskInventory { .. } => None,
-                            };
-                            if let Some(url) = caps.get(cap).cloned() {
-                                tokio::spawn(run_caps_upload(url, body, data, None, asked_about, http.clone(), upload_events.clone()));
-                            } else {
-                                deliver(&events, Event::AssetUploadFailed { reason: format!("{cap} capability not available"), }).await;
-                            }
-                        }
-                        Some(Command::UploadScript { location, target, source }) => {
-                            // Choose the capability + request body by location; the
-                            // completion carries the simulator's compile result.
-                            let target_wire = target.to_wire();
-                            let (cap, body, running) = match location {
-                                ScriptUploadLocation::AgentInventory { item_id } => (
-                                    CAP_UPDATE_SCRIPT_AGENT,
-                                    build_update_script_agent_request(item_id, target_wire),
-                                    None,
-                                ),
-                                ScriptUploadLocation::TaskInventory {
-                                    task_id, item_id, running, experience,
-                                } => (
-                                    CAP_UPDATE_SCRIPT_TASK,
-                                    build_update_script_task_request(
-                                        task_id, item_id, running, target_wire, experience,
-                                    ),
-                                    Some(running),
-                                ),
-                            };
-                            let asked_about = match location {
-                                ScriptUploadLocation::AgentInventory { item_id } => Some(item_id.uuid()),
-                                ScriptUploadLocation::TaskInventory { .. } => None,
-                            };
-                            if let Some(url) = caps.get(cap).cloned() {
-                                tokio::spawn(run_script_upload(
-                                    url, body, source, running, asked_about, http.clone(),
-                                    upload_events.clone(),
-                                ));
-                            } else {
-                                deliver(&events, Event::AssetUploadFailed { reason: format!("{cap} capability not available"), }).await;
-                            }
-                        }
-                        Some(Command::RequestObjectMedia { object_id }) => {
-                            if let Some(url) = caps.get(CAP_OBJECT_MEDIA).cloned() {
-                                tokio::spawn(fetch_object_media(url, object_id, http.clone(), caps_tx.clone()));
-                            }
-                        }
-                        Some(Command::SetObjectMedia { object_id, faces }) => {
-                            if let Some(url) = caps.get(CAP_OBJECT_MEDIA).cloned() {
-                                let body = build_object_media_update_request(object_id, &faces);
-                                tokio::spawn(post_object_media(url, body, http.clone()));
-                            }
-                        }
-                        Some(Command::NavigateObjectMedia { object_id, face, url: media_url }) => {
-                            if let Some(url) = caps.get(CAP_OBJECT_MEDIA_NAVIGATE).cloned() {
-                                let body = build_object_media_navigate_request(object_id, face, &media_url);
-                                tokio::spawn(post_object_media(url, body, http.clone()));
-                            }
-                        }
-                        Some(Command::RequestRenderMaterials { material_ids }) => {
-                            if let Some(url) = caps.get(CAP_RENDER_MATERIALS).cloned() {
-                                tokio::spawn(fetch_render_materials(url, material_ids, http.clone(), events.clone()));
-                            }
-                        }
-                        Some(Command::SetRenderMaterials { updates }) => {
-                            if let Some(url) = caps.get(CAP_RENDER_MATERIALS).cloned() {
-                                tokio::spawn(set_render_materials(url, updates, http.clone()));
-                            }
-                        }
-                        Some(Command::ModifyMaterialParams { updates }) => {
-                            if let Some(url) = caps.get(CAP_MODIFY_MATERIAL_PARAMS).cloned() {
-                                let body = build_modify_material_params_request(&updates);
-                                tokio::spawn(post_modify_material_params(url, body, http.clone(), caps_tx.clone()));
-                            } else {
-                                // No PBR material overrides on this grid (a stock
-                                // OpenSim grants none): say so rather than drop the edit.
-                                report_capability_not_granted(&self.session, &diagnostics, CAP_MODIFY_MATERIAL_PARAMS).await;
-                            }
-                        }
-                        Some(Command::RequestVoiceAccount { request }) => {
-                            if let Some(url) = caps.get(CAP_PROVISION_VOICE_ACCOUNT).cloned() {
-                                let body = build_provision_voice_account_request(&request);
-                                tokio::spawn(post_voice_cap(url, body, CAP_PROVISION_VOICE_ACCOUNT, http.clone(), caps_tx.clone()));
-                            } else {
-                                report_capability_not_granted(&self.session, &diagnostics, CAP_PROVISION_VOICE_ACCOUNT).await;
-                            }
-                        }
-                        Some(Command::RequestParcelVoiceInfo) => {
-                            if let Some(url) = caps.get(CAP_PARCEL_VOICE_INFO).cloned() {
-                                let body = build_parcel_voice_info_request();
-                                tokio::spawn(post_voice_cap(url, body, CAP_PARCEL_VOICE_INFO, http.clone(), caps_tx.clone()));
-                            } else {
-                                report_capability_not_granted(&self.session, &diagnostics, CAP_PARCEL_VOICE_INFO).await;
-                            }
-                        }
-                        Some(Command::SendVoiceSignaling { viewer_session, candidates, completed }) => {
-                            if let Some(url) = caps.get(CAP_VOICE_SIGNALING).cloned() {
-                                let body = build_voice_signaling_request(&viewer_session, &candidates, completed);
-                                tokio::spawn(post_voice_signaling(url, body, http.clone()));
-                            } else {
-                                report_capability_not_granted(&self.session, &diagnostics, CAP_VOICE_SIGNALING).await;
-                            }
-                        }
-                        Some(Command::RequestDisplayNames(agent_ids)) => {
-                            if let Some(base) = caps.get(CAP_GET_DISPLAY_NAMES).cloned() {
-                                let agent_uuids: Vec<Uuid> =
-                                    agent_ids.iter().map(AgentKey::uuid).collect();
-                                let url = format!("{base}{}", display_names_query(&agent_uuids));
-                                tokio::spawn(get_caps_llsd(url, CAP_GET_DISPLAY_NAMES, http.clone(), caps_tx.clone()));
-                            }
-                        }
-                        Some(Command::RequestRemoteParcelId { location, region_id, region_handle }) => {
-                            if let Some(url) = caps.get(CAP_REMOTE_PARCEL_REQUEST).cloned() {
-                                // Not `post_voice_cap`: the reply names no
-                                // question, so the request rides along to be
-                                // stamped into the answer.
-                                let request = RemoteParcelRequest { location, region_id, region_handle };
-                                tokio::spawn(post_remote_parcel_request(url, request, http.clone(), caps_tx.clone()));
-                            }
-                        }
-                        Some(Command::RequestSimulatorFeatures) => {
-                            if let Some(url) = caps.get(CAP_SIMULATOR_FEATURES).cloned() {
-                                tokio::spawn(get_caps_llsd(url, CAP_SIMULATOR_FEATURES, http.clone(), caps_tx.clone()));
-                            }
-                        }
-                        Some(Command::RequestAgentPreferences) => {
-                            if let Some(url) = caps.get(CAP_AGENT_PREFERENCES).cloned() {
-                                let body = build_agent_preferences_request(&AgentPreferences::default());
-                                tokio::spawn(post_voice_cap(url, body, CAP_AGENT_PREFERENCES, http.clone(), caps_tx.clone()));
-                            }
-                        }
-                        Some(Command::SetInterestListMode(mode)) => {
-                            // Remembered whether or not this region has the
-                            // capability: the next one may.
-                            self.session.set_interest_list_mode(mode);
-                            if let Some(url) = caps.get(CAP_INTEREST_LIST).cloned() {
-                                let body = build_interest_list_request(mode);
-                                tokio::spawn(post_voice_cap(url, body, CAP_INTEREST_LIST, http.clone(), caps_tx.clone()));
-                            }
-                        }
-                        Some(Command::SetAgentPreferences(prefs)) => {
-                            if let Some(url) = caps.get(CAP_AGENT_PREFERENCES).cloned() {
-                                let body = build_agent_preferences_request(&prefs);
-                                tokio::spawn(post_voice_cap(url, body, CAP_AGENT_PREFERENCES, http.clone(), caps_tx.clone()));
-                            }
-                        }
-                        // Split by the region each object is in: a neighbour's
-                        // objects are asked of the neighbour's own capability.
-                        Some(
-                            command @ (Command::RequestObjectCost { .. }
-                            | Command::RequestSelectedCost { .. }
-                            | Command::RequestObjectPhysicsData { .. }),
-                        ) => {
-                            object_caps::dispatch(command, Instant::now(), &self.session, &caps, &mut neighbours, &http, &caps_tx).await;
-                        }
-                        Some(Command::SetAvatarRenderReports(reports)) => {
-                            self.session.set_avatar_render_reports(reports);
-                        }
-                        Some(Command::RequestAttachmentResources) => {
-                            if let Some(url) = caps.get(CAP_ATTACHMENT_RESOURCES).cloned() {
-                                tokio::spawn(get_caps_llsd(url, CAP_ATTACHMENT_RESOURCES, http.clone(), caps_tx.clone()));
-                            }
-                        }
-                        Some(Command::RequestLandResources { parcel_id }) => {
-                            if let Some(url) = caps.get(CAP_LAND_RESOURCES).cloned() {
-                                tokio::spawn(fetch_land_resources(url, parcel_id, http.clone(), caps_tx.clone()));
-                            }
-                        }
-                        Some(Command::RequestLandStat { report_type, request_flags, filter, parcel_local_id }) => {
-                            self.session.request_land_stat(report_type, request_flags, &filter, parcel_local_id, Instant::now())?;
-                        }
-                        Some(Command::RequestExperienceInfo { experience_ids }) => {
-                            if let Some(base) = caps.get(CAP_GET_EXPERIENCE_INFO).cloned() {
-                                let url = format!("{base}{}", experience_info_query(&experience_ids));
-                                tokio::spawn(get_caps_llsd(url, CAP_GET_EXPERIENCE_INFO, http.clone(), caps_tx.clone()));
-                            } else {
-                                report_capability_not_granted(&self.session, &diagnostics, CAP_GET_EXPERIENCE_INFO).await;
-                            }
-                        }
-                        Some(Command::FindExperiences { query, page }) => {
-                            if let Some(base) = caps.get(CAP_FIND_EXPERIENCE_BY_NAME).cloned() {
-                                let url = format!("{base}{}", find_experience_query(&query, page));
-                                tokio::spawn(get_caps_llsd(url, CAP_FIND_EXPERIENCE_BY_NAME, http.clone(), caps_tx.clone()));
-                            } else {
-                                report_capability_not_granted(&self.session, &diagnostics, CAP_FIND_EXPERIENCE_BY_NAME).await;
-                            }
-                        }
-                        Some(Command::RequestExperiencePermissions) => {
-                            if let Some(url) = caps.get(CAP_GET_EXPERIENCES).cloned() {
-                                tokio::spawn(get_caps_llsd(url, CAP_GET_EXPERIENCES, http.clone(), caps_tx.clone()));
-                            } else {
-                                report_capability_not_granted(&self.session, &diagnostics, CAP_GET_EXPERIENCES).await;
-                            }
-                        }
-                        Some(Command::SetExperiencePermission { experience_id, permission }) => {
-                            if let Some(base) = caps.get(CAP_EXPERIENCE_PREFERENCES).cloned() {
-                                if permission.is_forget() {
-                                    let url = format!("{base}{}", forget_experience_query(experience_id));
-                                    tokio::spawn(delete_caps_llsd(url, CAP_EXPERIENCE_PREFERENCES, http.clone(), caps_tx.clone()));
-                                } else {
-                                    let body = build_set_experience_permission_request(experience_id, permission);
-                                    tokio::spawn(put_caps_llsd(base, body, CAP_EXPERIENCE_PREFERENCES, http.clone(), caps_tx.clone()));
-                                }
-                            } else {
-                                report_capability_not_granted(&self.session, &diagnostics, CAP_EXPERIENCE_PREFERENCES).await;
-                            }
-                        }
-                        Some(Command::RequestOwnedExperiences) => {
-                            if let Some(url) = caps.get(CAP_AGENT_EXPERIENCES).cloned() {
-                                tokio::spawn(get_caps_llsd(url, CAP_AGENT_EXPERIENCES, http.clone(), caps_tx.clone()));
-                            } else {
-                                report_capability_not_granted(&self.session, &diagnostics, CAP_AGENT_EXPERIENCES).await;
-                            }
-                        }
-                        Some(Command::RequestAdminExperiences) => {
-                            if let Some(url) = caps.get(CAP_GET_ADMIN_EXPERIENCES).cloned() {
-                                tokio::spawn(get_caps_llsd(url, CAP_GET_ADMIN_EXPERIENCES, http.clone(), caps_tx.clone()));
-                            } else {
-                                report_capability_not_granted(&self.session, &diagnostics, CAP_GET_ADMIN_EXPERIENCES).await;
-                            }
-                        }
-                        Some(Command::RequestCreatorExperiences) => {
-                            if let Some(url) = caps.get(CAP_GET_CREATOR_EXPERIENCES).cloned() {
-                                tokio::spawn(get_caps_llsd(url, CAP_GET_CREATOR_EXPERIENCES, http.clone(), caps_tx.clone()));
-                            } else {
-                                report_capability_not_granted(&self.session, &diagnostics, CAP_GET_CREATOR_EXPERIENCES).await;
-                            }
-                        }
-                        Some(Command::RequestGroupExperiences { group_id }) => {
-                            if let Some(base) = caps.get(CAP_GROUP_EXPERIENCES).cloned() {
-                                let url = format!("{base}{}", group_experiences_query(group_id.uuid()));
-                                tokio::spawn(fetch_group_experiences(url, group_id, http.clone(), events.clone()));
-                            } else {
-                                report_capability_not_granted(&self.session, &diagnostics, CAP_GROUP_EXPERIENCES).await;
-                            }
-                        }
-                        Some(Command::RequestExperienceAdmin { experience_id }) => {
-                            if let Some(base) = caps.get(CAP_IS_EXPERIENCE_ADMIN).cloned() {
-                                let url = format!("{base}{}", experience_id_query(experience_id));
-                                tokio::spawn(fetch_experience_admin(url, experience_id, http.clone(), events.clone()));
-                            } else {
-                                report_capability_not_granted(&self.session, &diagnostics, CAP_IS_EXPERIENCE_ADMIN).await;
-                            }
-                        }
-                        Some(Command::RequestExperienceContributor { experience_id }) => {
-                            if let Some(base) = caps.get(CAP_IS_EXPERIENCE_CONTRIBUTOR).cloned() {
-                                let url = format!("{base}{}", experience_id_query(experience_id));
-                                tokio::spawn(fetch_experience_contributor(url, experience_id, http.clone(), events.clone()));
-                            } else {
-                                report_capability_not_granted(&self.session, &diagnostics, CAP_IS_EXPERIENCE_CONTRIBUTOR).await;
-                            }
-                        }
-                        Some(Command::UpdateExperience { update }) => {
-                            if let Some(url) = caps.get(CAP_UPDATE_EXPERIENCE).cloned() {
-                                let body = build_update_experience_request(&update);
-                                tokio::spawn(post_voice_cap(url, body, CAP_UPDATE_EXPERIENCE, http.clone(), caps_tx.clone()));
-                            } else {
-                                report_capability_not_granted(&self.session, &diagnostics, CAP_UPDATE_EXPERIENCE).await;
-                            }
-                        }
-                        Some(Command::RequestEstateAccessLists) => {
-                            if let Some(url) = caps.get(CAP_ESTATE_ACCESS).cloned() {
-                                tokio::spawn(get_caps_llsd(url, CAP_ESTATE_ACCESS, http.clone(), caps_tx.clone()));
-                            }
-                        }
-                        Some(Command::RequestRegionExperiences) => {
-                            if let Some(url) = caps.get(CAP_REGION_EXPERIENCES).cloned() {
-                                tokio::spawn(get_caps_llsd(url, CAP_REGION_EXPERIENCES, http.clone(), caps_tx.clone()));
-                            } else {
-                                report_capability_not_granted(&self.session, &diagnostics, CAP_REGION_EXPERIENCES).await;
-                            }
-                        }
-                        Some(Command::SetRegionExperiences { allowed, blocked, trusted }) => {
-                            if let Some(url) = caps.get(CAP_REGION_EXPERIENCES).cloned() {
-                                let body = build_region_experiences_request(&allowed, &blocked, &trusted);
-                                tokio::spawn(post_voice_cap(url, body, CAP_REGION_EXPERIENCES, http.clone(), caps_tx.clone()));
-                            } else {
-                                report_capability_not_granted(&self.session, &diagnostics, CAP_REGION_EXPERIENCES).await;
-                            }
-                        }
-                        Some(Command::QueryParcelExperiences { parcel_id, experiences }) => {
-                            if let Some(base) = caps.get(CAP_EXPERIENCE_QUERY).cloned() {
-                                let url = format!("{base}{}", experience_query(parcel_id, &experiences));
-                                tokio::spawn(get_experience_query(url, parcel_id, http.clone(), caps_tx.clone()));
-                            } else {
-                                report_capability_not_granted(&self.session, &diagnostics, CAP_EXPERIENCE_QUERY).await;
-                            }
-                        }
-                        Some(Command::OfferTeleport { targets, message }) => {
-                            self.session.offer_teleport(&targets, &message, Instant::now())?;
-                        }
-                        Some(Command::AcceptTeleportLure { lure_id }) => {
-                            self.session.accept_teleport_lure(lure_id, Instant::now())?;
-                        }
-                        Some(Command::DeclineTeleportLure { from_agent_id, lure_id }) => {
-                            self.session.decline_teleport_lure(from_agent_id, lure_id, Instant::now())?;
-                        }
-                        Some(Command::RequestTeleport { to_agent_id, message }) => {
-                            self.session.request_teleport(to_agent_id, &message, Instant::now())?;
-                        }
-                        Some(Command::GiveInventory { to_agent_id, item_id, asset_type, item_name, transaction_id }) => {
-                            self.session.give_inventory(to_agent_id, item_id, asset_type, &item_name, transaction_id, Instant::now())?;
-                        }
-                        Some(Command::GiveInventoryFolder { to_agent_id, folder_id, folder_name, transaction_id }) => {
-                            self.session.give_inventory_folder(to_agent_id, folder_id, &folder_name, transaction_id, Instant::now())?;
-                        }
-                        Some(Command::AcceptInventoryOffer { offer, folder_id }) => {
-                            self.session.accept_inventory_offer(&offer, folder_id, Instant::now())?;
-                        }
-                        Some(Command::DeclineInventoryOffer { offer, trash_folder_id }) => {
-                            self.session.decline_inventory_offer(&offer, trash_folder_id, Instant::now())?;
-                        }
-                        Some(Command::StartConference { session_id, invitees, message }) => {
-                            // Prefer the modern `ChatSessionRequest` POST; the
-                            // deprecated `IM_SESSION_CONFERENCE_START` instant
-                            // message is the fallback for a grid without the cap.
-                            // Either way the session opens under the id we minted,
-                            // until the grid's `ChatterBoxSessionStartReply` moves
-                            // it onto the id the session really has.
-                            if let Some(url) = caps.get(CAP_CHAT_SESSION_REQUEST).cloned() {
-                                let body = chat_session_agents_body(CHAT_SESSION_START_CONFERENCE, session_id.get(), &invitees);
-                                self.session.open_conference(session_id, &invitees, Instant::now());
-                                tokio::spawn(post_caps_oneway(url, body, http.clone()));
-                            } else {
-                                self.session.start_conference(session_id, &invitees, &message, Instant::now())?;
-                            }
-                        }
-                        Some(Command::InviteToChatSession { session_id, invitees }) => {
-                            // Adding to a session that already exists is the cap's
-                            // own `invite`; the legacy path has only the
-                            // conference-start IM, which a simulator without the
-                            // cap treats as an add.
-                            if let Some(url) = caps.get(CAP_CHAT_SESSION_REQUEST).cloned() {
-                                let body = chat_session_agents_body(CHAT_SESSION_INVITE, session_id.get(), &invitees);
-                                self.session.open_conference(session_id, &invitees, Instant::now());
-                                tokio::spawn(post_caps_oneway(url, body, http.clone()));
-                            } else {
-                                self.session.start_conference(session_id, &invitees, "", Instant::now())?;
-                            }
-                        }
-                        Some(Command::SendConferenceMessage { session_id, message }) => {
-                            self.session.send_conference_message(session_id, &message, Instant::now())?;
-                            if let Some(own) = self.session.agent_id() {
-                                let name = self.session.agent_legacy_name();
-                                let roster: std::collections::BTreeSet<_> = self
-                                    .session
-                                    .participants(ChatSessionKind::Conference { id: session_id })
-                                    .collect();
-                                chat_log.log_conference(session_id, &roster, own, &name, &message);
-                            }
-                        }
-                        Some(Command::LeaveConference { session_id }) => {
-                            self.session.leave_conference(session_id, Instant::now())?;
-                        }
-                        Some(Command::MarkSessionRead { session }) => {
-                            self.session.mark_session_read(session);
-                        }
-                        Some(Command::AcceptChatInvite { session_id, from_group }) => {
-                            // Promote the registry entry to joined, then drive the
-                            // modern accept over the cap when present (its reply
-                            // roster seeds the participants); on a grid without the
-                            // cap the optimistic local join is the whole accept.
-                            self.session.accept_chat_invite(session_id, from_group, Instant::now());
-                            if let Some(url) = caps.get(CAP_CHAT_SESSION_REQUEST).cloned() {
-                                let body = chat_session_request_body(CHAT_SESSION_ACCEPT, session_id.get());
-                                tokio::spawn(post_chat_session_request(url, body, session_id.get(), from_group, http.clone(), caps_tx.clone()));
-                            }
-                        }
-                        Some(Command::DeclineChatInvite { session_id, from_group }) => {
-                            // Remove the registry entry, then refuse on the wire:
-                            // the cap `decline invitation` POST when present, else
-                            // a UDP `SessionLeave` as the OpenSim fallback.
-                            self.session.decline_chat_invite(session_id, from_group, Instant::now());
-                            if let Some(url) = caps.get(CAP_CHAT_SESSION_REQUEST).cloned() {
-                                let body = chat_session_request_body(CHAT_SESSION_DECLINE, session_id.get());
-                                tokio::spawn(post_chat_session_request(url, body, session_id.get(), from_group, http.clone(), caps_tx.clone()));
-                            } else if from_group {
-                                self.session.leave_group_session(GroupKey::from(session_id.get()), Instant::now())?;
-                            } else {
-                                self.session.leave_conference(session_id, Instant::now())?;
-                            }
-                        }
-                        Some(Command::JoinSessionVoice { session }) => {
-                            // Optimistic local join, then drive the signalling: ensure
-                            // a voice account, then signal into the session's channel
-                            // over `ChatSessionRequest` (accept invitation). Signalling
-                            // only — the audio session is the caller's concern.
-                            self.session.join_session_voice(session, Instant::now());
-                            if let Some(own) = self.session.agent_id() {
-                                let session_uuid = session.canonical_session_id(own);
-                                let from_group = matches!(session, ChatSessionKind::Group { .. });
-                                if let Some(url) = caps.get(CAP_PROVISION_VOICE_ACCOUNT).cloned() {
-                                    let body = build_provision_voice_account_request(&VoiceProvisionRequest::vivox());
-                                    tokio::spawn(post_voice_cap(url, body, CAP_PROVISION_VOICE_ACCOUNT, http.clone(), caps_tx.clone()));
-                                }
-                                if let Some(url) = caps.get(CAP_CHAT_SESSION_REQUEST).cloned() {
-                                    let body = chat_session_request_body(CHAT_SESSION_ACCEPT, session_uuid);
-                                    tokio::spawn(post_chat_session_request(url, body, session_uuid, from_group, http.clone(), caps_tx.clone()));
-                                }
-                            }
-                        }
-                        Some(Command::LeaveSessionVoice { session }) => {
-                            // Optimistic local leave (keeps the text conversation),
-                            // then signal the voice decline on the wire: a 1:1 P2P
-                            // call uses `decline p2p voice`, a group / conference the
-                            // multi-agent `decline invitation`.
-                            self.session.leave_session_voice(session);
-                            if let Some(own) = self.session.agent_id() {
-                                let session_uuid = session.canonical_session_id(own);
-                                let from_group = matches!(session, ChatSessionKind::Group { .. });
-                                let method = if matches!(session, ChatSessionKind::Direct { .. }) {
-                                    CHAT_SESSION_DECLINE_P2P_VOICE
-                                } else {
-                                    CHAT_SESSION_DECLINE
-                                };
-                                if let Some(url) = caps.get(CAP_CHAT_SESSION_REQUEST).cloned() {
-                                    let body = chat_session_request_body(method, session_uuid);
-                                    tokio::spawn(post_chat_session_request(url, body, session_uuid, from_group, http.clone(), caps_tx.clone()));
-                                }
-                            }
-                        }
-                        Some(Command::FetchSessionHistory { kind }) => {
-                            // Explicit server-backlog fetch, bypassing the
-                            // auto-fetch gate. Only group / conference sessions
-                            // have a server backlog; on a grid without the cap
-                            // (stock OpenSim) there is nothing to POST to, so the
-                            // command silently degrades.
-                            if !matches!(kind, ChatSessionKind::Direct { .. })
-                                && let (Some(url), Some(own)) = (
-                                    caps.get(CAP_CHAT_SESSION_REQUEST).cloned(),
-                                    self.session.agent_id(),
-                                )
-                            {
-                                // Suppress a later duplicate auto-fetch of the
-                                // same session.
-                                self.session.note_server_history_requested(kind);
-                                let session_uuid = kind.canonical_session_id(own);
-                                let body = chat_session_request_body(CHAT_SESSION_FETCH_HISTORY, session_uuid);
-                                tokio::spawn(post_chat_session_fetch_history(
-                                    url,
-                                    body,
-                                    session_uuid,
-                                    matches!(kind, ChatSessionKind::Group { .. }),
-                                    http.clone(),
-                                    caps_tx.clone(),
-                                ));
-                            }
-                        }
-                        Some(Command::QueryChatSessions) => {
-                            // Local query: build the light session list and surface
-                            // it on the event stream (no wire send).
-                            deliver(&events, Event::ChatSessions( self.session.chat_sessions_info().collect(), )).await;
-                        }
-                        Some(Command::QueryChatHistoryPage { session, before, limit }) => {
-                            // Newest-first paging across the unified memory→archive
-                            // view: serve the in-memory ring first, then continue
-                            // older pages from the on-disk transcript (B9).
-                            let consumed = before.map_or(0, MessageCursor::consumed_count);
-                            let mem_len = self.session.history_len(session);
-                            let (messages, prev): (std::sync::Arc<[SessionMessage]>, _) =
-                                if consumed < mem_len {
-                                    let (page, mem_prev) =
-                                        self.session.history_page(session, before, limit);
-                                    let collected: std::sync::Arc<[_]> = page.cloned().collect();
-                                    let next = consumed.saturating_add(collected.len());
-                                    // When the ring is exhausted, hand a file cursor
-                                    // if the transcript holds anything older.
-                                    let prev = mem_prev.or_else(|| {
-                                        chat_log
-                                            .read_older_page(session, mem_len, next, 1)
-                                            .filter(|(probe, _)| !probe.is_empty())
-                                            .map(|_more| MessageCursor::from_consumed(next))
-                                    });
-                                    (collected, prev)
-                                } else {
-                                    match chat_log.read_older_page(session, mem_len, consumed, limit) {
-                                        Some((msgs, prev)) => (msgs.into(), prev),
-                                        None => (Vec::new().into(), None),
-                                    }
-                                };
-                            deliver(&events, Event::ChatHistoryPage { session, messages, prev }).await;
-                        }
-                        Some(Command::QueryNearbyChatHistoryPage { already_shown, before, limit }) => {
-                            // Nearby chat has no in-memory ring: the whole page
-                            // comes from the on-disk transcript, skipping the newest
-                            // `already_shown` lines the caller already shows live
-                            // (B9 paging discipline).
-                            let consumed = before.map_or(0, MessageCursor::consumed_count);
-                            let (lines, prev): (std::sync::Arc<[NearbyHistoryLine]>, _) =
-                                match chat_log.read_nearby_older_page(already_shown, consumed, limit) {
-                                    Some((page, cursor)) => (page.into(), cursor),
-                                    None => (Vec::new().into(), None),
-                                };
-                            deliver(&events, Event::NearbyChatHistoryPage { lines, prev }).await;
-                        }
-                        Some(Command::QueryInventoryFolder { folder, before, limit }) => {
-                            // Local query: page the held model into owning view
-                            // types (one bounded borrow→owned transform, the
-                            // payload `Arc<[…]>` so re-handoff is a refcount
-                            // bump). A bevy reader may instead borrow the Session
-                            // and call `inventory_folder_page` directly.
-                            let (folders, items, prev) =
-                                self.session.inventory_folder_page(folder, before, limit);
-                            // On-demand: a query for an unfetched folder schedules
-                            // its fetch so a later query sees the contents (works
-                            // regardless of the background-crawl flag). A folder the
-                            // crawl gave up on (`Failed`) is retried here too — this
-                            // is a fresh, caller-driven decision to fetch it, and the
-                            // stall deadline keeps a repeated query from hammering.
-                            if matches!(
-                                self.session.folder_fetch_state(folder),
-                                Some(FolderState::Unknown | FolderState::Failed)
-                            ) {
+                            }) => {
+                                self.session.god_delete_classified(
+                                    classified_id,
+                                    query_id,
+                                    Instant::now(),
+                                )?;
+                            }
+                            Some(Command::RequestFolderContents(folder_id)) => {
                                 fetch_folder_contents(
                                     &mut self.session,
-                                    folder,
+                                    folder_id,
                                     &caps,
                                     &http,
                                     &caps_tx,
                                     Instant::now(),
                                 )?;
                             }
-                            // Read after the fetch above, so a folder it just
-                            // scheduled reports `Fetching`, not `Unknown`.
-                            let state = self.session.folder_fetch_state(folder);
-                            deliver(&events, Event::InventoryFolderPage { folder, state, folders: folders.into(), items: items.into(), prev, }).await;
-                        }
-                        Some(Command::QueryInventoryRoots) => {
-                            // Local query: surface the agent + library roots (both
-                            // `Copy` keys, no `Arc` needed).
-                            deliver(&events, Event::InventoryRoots { agent_root: self.session.inventory_root(), library_root: self.session.library_root(), }).await;
-                        }
-                        Some(Command::QueryInventoryFolders) => {
-                            // Local query: snapshot the agent tree's known folders
-                            // (seeded from the login skeleton, so present before any
-                            // contents fetch). `Arc` so the clone across the channel
-                            // is cheap regardless of tree size.
-                            let folders: std::sync::Arc<[FolderInfo]> =
-                                self.session.inventory_folder_infos().into();
-                            deliver(&events, Event::InventoryFolders(folders)).await;
-                        }
-                        Some(Command::QueryFriends) => {
-                            // Local query: build the buddy snapshot with online flags.
-                            deliver(&events, Event::FriendsSnapshot( self.session.friends_presence().collect(), )).await;
-                        }
-                        Some(Command::RetrieveInstantMessages) => {
-                            self.session.retrieve_instant_messages(Instant::now())?;
-                        }
-                        Some(Command::RequestOfflineMessages) => {
-                            match caps.get(CAP_READ_OFFLINE_MSGS).cloned().filter(|_url| {
-                                OFFLINE_DRAIN_CAPABILITIES.iter().all(|cap| caps.contains_key(*cap))
-                            }) {
-                                Some(url) => {
-                                    tokio::spawn(get_caps_llsd(url, CAP_READ_OFFLINE_MSGS, http.clone(), caps_tx.clone()));
+                            Some(Command::FetchInventoryFolders(folder_ids)) => {
+                                if let (Some(url), Some(owner)) =
+                                    (caps.get(CAP_FETCH_INVENTORY).cloned(), self.session.agent_id())
+                                {
+                                    tokio::spawn(fetch_inventory(
+                                        url,
+                                        owner.uuid(),
+                                        folder_ids,
+                                        CAP_FETCH_INVENTORY,
+                                        http.clone(),
+                                        caps_tx.clone(),
+                                    ));
                                 }
-                                // A region without the capability, or without the
-                                // two that answer what it hands over (a stock
-                                // OpenSim), is read over the UDP
-                                // `RetrieveInstantMessages`, as the reference does.
-                                None => self.session.retrieve_instant_messages(Instant::now())?,
                             }
-                        }
-                        Some(Command::TeleportViaLandmark { landmark }) => {
-                            self.session.teleport_via_landmark(landmark, Instant::now())?;
-                        }
-                        Some(Command::CancelTeleport) => {
-                            self.session.cancel_teleport(Instant::now())?;
-                        }
-                        Some(Command::SetStartLocation { slot, position, look_at }) => {
-                            match caps.get(CAP_HOME_LOCATION).cloned() {
-                                // The reference's "Set Home to Here" takes the
-                                // capability where the region grants it, and
-                                // falls back to UDP only where it does not.
-                                Some(url) => {
-                                    let body = build_home_location_request(&HomeLocationRequest {
-                                        location_id: slot.to_code(),
-                                        position,
-                                        look_at,
+                            Some(Command::CreateInventoryFolder { folder_id, parent_id, folder_type, name }) => {
+                                // Second Life creates a folder through AIS3, as the reference's
+                                // `createNewCategory` does. It mints the id itself, so the
+                                // session matches the answer to this request and names both
+                                // ids (`Event::InventoryFolderCreated`). OpenSim keeps the UDP
+                                // create, which keeps `folder_id`.
+                                if has_ais3(&caps) {
+                                    self.session.note_folder_create(folder_id, parent_id, &name);
+                                    route_ais3(&caps, &http, &caps_tx, &ais_create_category_url(parent_id, Uuid::new_v4()), Ais3Verb::Post, Some(build_ais_create_category_body(parent_id, i32::from(folder_type.to_code()), &name)));
+                                } else {
+                                    self.session.create_inventory_folder(folder_id, parent_id, folder_type, &name, Instant::now())?;
+                                }
+                            }
+                            Some(Command::UpdateInventoryFolder { folder_id, parent_id, folder_type, name }) => {
+                                // Second Life renames through AIS3, as the reference's
+                                // `update_inventory_category` does; a change of parent is a
+                                // move, which goes UDP on every grid. OpenSim keeps the UDP
+                                // update.
+                                if has_ais3(&caps) {
+                                    let parent = self.session.inventory_folder(folder_id).and_then(|folder| folder.parent_id);
+                                    if parent != Some(parent_id) {
+                                        self.session.move_inventory_folder(folder_id, parent_id, Instant::now())?;
+                                    }
+                                    self.session.update_inventory_folder_local(folder_id, parent_id, folder_type, &name);
+                                    route_ais3(&caps, &http, &caps_tx, &ais_category_url(folder_id), Ais3Verb::Patch, Some(build_ais_rename_category_body(&name)));
+                                } else {
+                                    self.session.update_inventory_folder(folder_id, parent_id, folder_type, &name, Instant::now())?;
+                                }
+                            }
+                            Some(Command::MoveInventoryFolder { folder_id, parent_id }) => {
+                                // UDP on every grid, as the reference moves a folder
+                                // (`updateParentOnServer`): Second Life's AIS3 refuses a
+                                // `PATCH` of `parent_id` ("Use MOVE method") and takes the
+                                // UDP message (`book/src/gridspec/inventory.md` § Fetching).
+                                self.session.move_inventory_folder(folder_id, parent_id, Instant::now())?;
+                            }
+                            Some(Command::RemoveInventoryFolders(folder_ids)) => {
+                                // Second Life deletes each folder via AIS3 (`DELETE /category/<id>`); OpenSim keeps the UDP batch.
+                                if has_ais3(&caps) {
+                                    // Drop them from the cache optimistically (the AIS3 DELETE does not).
+                                    self.session.remove_inventory_folders_local(&folder_ids);
+                                    for folder_id in &folder_ids {
+                                        route_ais3(&caps, &http, &caps_tx, &ais_category_url(*folder_id), Ais3Verb::Delete, None);
+                                    }
+                                } else {
+                                    self.session.remove_inventory_folders(&folder_ids, Instant::now())?;
+                                }
+                            }
+                            Some(Command::CreateInventoryItem(new)) => {
+                                self.session.create_inventory_item(&new, Instant::now())?;
+                            }
+                            Some(Command::CreateScript { folder_id, name, description, next_owner_mask, language }) => {
+                                self.session.create_script(folder_id, &name, &description, next_owner_mask, language, Instant::now())?;
+                            }
+                            Some(Command::LinkInventoryItem(new)) => {
+                                // Second Life: create the link via AIS3 (`POST /category/<folder>` with a
+                                // `links` array) — the UDP `LinkInventoryItem` is rejected against the
+                                // AIS-managed Current Outfit Folder. OpenSim (no cap) keeps the UDP path.
+                                let suffix = ais_create_category_url(new.folder_id, Uuid::new_v4());
+                                let body = build_ais_create_link_body(
+                                    new.linked_id.uuid(),
+                                    new.link_type.to_code(),
+                                    new.inv_type.to_code(),
+                                    &new.name,
+                                    &new.description,
+                                );
+                                if !route_ais3(&caps, &http, &caps_tx, &suffix, Ais3Verb::Post, Some(body)) {
+                                    self.session.link_inventory_item(&new, Instant::now())?;
+                                }
+                            }
+                            Some(Command::UpdateInventoryItem { item, transaction_id }) => {
+                                // Second Life updates an item through AIS3 (`PATCH /item/<id>`
+                                // with the whole item), as the reference's
+                                // `update_inventory_item` does; OpenSim keeps the UDP message.
+                                if has_ais3(&caps) {
+                                    let body = ais_item_update_body(&item, transaction_id).map_err(sl_proto::Error::from)?;
+                                    self.session.update_inventory_item_local(&item);
+                                    route_ais3(&caps, &http, &caps_tx, &ais_item_url(item.item_id), Ais3Verb::Patch, Some(body));
+                                } else {
+                                    self.session.update_inventory_item(&item, transaction_id, Instant::now())?;
+                                }
+                            }
+                            Some(Command::SaveInventoryAsset { item, asset_type, transaction_id, data }) => {
+                                self.session.save_inventory_asset(&item, asset_type, data, transaction_id, Instant::now())?;
+                            }
+                            Some(Command::CreateInventoryItemWithAsset { item, data }) => {
+                                self.session.create_inventory_item_with_asset(&item, data, Instant::now())?;
+                            }
+                            Some(Command::MoveInventoryItem { item_id, folder_id, new_name }) => {
+                                // UDP on every grid, as the reference moves an item: Second
+                                // Life's AIS3 refuses a `PATCH` of `parent_id` ("Use MOVE
+                                // method") and takes the UDP message
+                                // (`book/src/gridspec/inventory.md` § Fetching).
+                                self.session.move_inventory_item(item_id, folder_id, &new_name, Instant::now())?;
+                            }
+                            Some(Command::CopyInventoryItem { old_agent_id, old_item_id, new_folder_id, new_name }) => {
+                                self.session.copy_inventory_item(old_agent_id, old_item_id, new_folder_id, &new_name, Instant::now())?;
+                            }
+                            Some(Command::RemoveInventoryItems(item_ids)) => {
+                                // Second Life deletes each item via AIS3 (`DELETE /item/<id>`); OpenSim keeps the UDP batch.
+                                if has_ais3(&caps) {
+                                    // Drop the items from the cache optimistically (the AIS3 DELETE does
+                                    // not), so a taken-off / detached item leaves the model at once.
+                                    self.session.remove_inventory_items_local(&item_ids);
+                                    for item_id in &item_ids {
+                                        route_ais3(&caps, &http, &caps_tx, &ais_item_url(*item_id), Ais3Verb::Delete, None);
+                                    }
+                                } else {
+                                    self.session.remove_inventory_items(&item_ids, Instant::now())?;
+                                }
+                            }
+                            Some(Command::ChangeInventoryItemFlags { item_id, flags }) => {
+                                self.session.change_inventory_item_flags(item_id, flags, Instant::now())?;
+                            }
+                            Some(Command::PurgeInventoryDescendents(folder_id)) => {
+                                // Second Life empties via AIS3 (`DELETE /category/<id>/children`); OpenSim keeps UDP.
+                                // The cache empties first either way, as the UDP path's does.
+                                if has_ais3(&caps) {
+                                    self.session.purge_inventory_descendents_local(folder_id);
+                                    route_ais3(&caps, &http, &caps_tx, &ais_category_children_url(folder_id), Ais3Verb::Delete, None);
+                                } else {
+                                    self.session.purge_inventory_descendents(folder_id, Instant::now())?;
+                                }
+                            }
+                            Some(Command::RemoveInventoryObjects { folder_ids, item_ids }) => {
+                                // Second Life deletes each folder and item through AIS3, as
+                                // the reference's `remove_inventory_object` does (it never
+                                // sends `RemoveInventoryObjects`); OpenSim keeps the UDP batch.
+                                if has_ais3(&caps) {
+                                    self.session.remove_inventory_folders_local(&folder_ids);
+                                    self.session.remove_inventory_items_local(&item_ids);
+                                    for folder_id in &folder_ids {
+                                        route_ais3(&caps, &http, &caps_tx, &ais_category_url(*folder_id), Ais3Verb::Delete, None);
+                                    }
+                                    for item_id in &item_ids {
+                                        route_ais3(&caps, &http, &caps_tx, &ais_item_url(*item_id), Ais3Verb::Delete, None);
+                                    }
+                                } else {
+                                    self.session.remove_inventory_objects(&folder_ids, &item_ids, Instant::now())?;
+                                }
+                            }
+                            Some(Command::CreateInventoryCategory { parent_id, folder_type, name }) => {
+                                // Second Life creates a folder through AIS3, as the reference's
+                                // `createNewCategory` does; elsewhere the capability.
+                                if has_ais3(&caps) {
+                                    route_ais3(&caps, &http, &caps_tx, &ais_create_category_url(parent_id, Uuid::new_v4()), Ais3Verb::Post, Some(build_ais_create_category_body(parent_id, folder_type, &name)));
+                                } else if let Some(url) = caps.get(CAP_CREATE_INVENTORY_CATEGORY).cloned() {
+                                    let body = build_create_inventory_category_request(InventoryFolderKey::from(Uuid::new_v4()), parent_id, folder_type, &name);
+                                    tokio::spawn(post_voice_cap(url, body, CAP_CREATE_INVENTORY_CATEGORY, http.clone(), caps_tx.clone()));
+                                }
+                            }
+                            Some(Command::Ais3CreateFolder { parent_id, folder_type, name }) => {
+                                if let Some(base) = caps.get(CAP_INVENTORY_API_V3).cloned() {
+                                    let url = format!("{base}{}", ais_create_category_url(parent_id, Uuid::new_v4()));
+                                    let body = build_ais_create_category_body(parent_id, folder_type, &name);
+                                    tokio::spawn(post_voice_cap(url, body, CAP_INVENTORY_API_V3, http.clone(), caps_tx.clone()));
+                                } else {
+                                    report_capability_not_granted(&self.session, &diagnostics, CAP_INVENTORY_API_V3).await;
+                                }
+                            }
+                            Some(Command::Ais3RenameFolder { folder_id, name }) => {
+                                if let Some(base) = caps.get(CAP_INVENTORY_API_V3).cloned() {
+                                    let url = format!("{base}{}", ais_category_url(folder_id));
+                                    tokio::spawn(patch_caps_llsd(url, build_ais_rename_category_body(&name), CAP_INVENTORY_API_V3, http.clone(), caps_tx.clone()));
+                                } else {
+                                    report_capability_not_granted(&self.session, &diagnostics, CAP_INVENTORY_API_V3).await;
+                                }
+                            }
+                            // No AIS3 move commands: Second Life refuses AIS3's `PATCH` of a
+                            // `parent_id` and its `MOVE`; moves go UDP (see the note on
+                            // `Command::Ais3RemoveFolder` in `sl-proto`'s `command.rs`).
+                            Some(Command::Ais3RemoveFolder(folder_id)) => {
+                                if let Some(base) = caps.get(CAP_INVENTORY_API_V3).cloned() {
+                                    let url = format!("{base}{}", ais_category_url(folder_id));
+                                    tokio::spawn(delete_caps_llsd(url, CAP_INVENTORY_API_V3, http.clone(), caps_tx.clone()));
+                                } else {
+                                    report_capability_not_granted(&self.session, &diagnostics, CAP_INVENTORY_API_V3).await;
+                                }
+                            }
+                            Some(Command::Ais3PurgeFolder(folder_id)) => {
+                                if let Some(base) = caps.get(CAP_INVENTORY_API_V3).cloned() {
+                                    let url = format!("{base}{}", ais_category_children_url(folder_id));
+                                    tokio::spawn(delete_caps_llsd(url, CAP_INVENTORY_API_V3, http.clone(), caps_tx.clone()));
+                                } else {
+                                    report_capability_not_granted(&self.session, &diagnostics, CAP_INVENTORY_API_V3).await;
+                                }
+                            }
+                            Some(Command::Ais3FetchFolderChildren { folder_id, depth }) => {
+                                // A Library folder lives behind `LibraryAPIv3`; sending it to
+                                // the agent's `InventoryAPIv3` is a 404 on Second Life.
+                                let cap = if self.session.inventory_owner(folder_id) == Some(InventoryOwner::Library) {
+                                    CAP_LIBRARY_API_V3
+                                } else {
+                                    CAP_INVENTORY_API_V3
+                                };
+                                if let Some(base) = caps.get(cap).cloned() {
+                                    let url = format!("{base}{}", ais_category_children_fetch_url(folder_id, depth));
+                                    tokio::spawn(get_caps_llsd(url, cap, http.clone(), caps_tx.clone()));
+                                } else {
+                                    report_capability_not_granted(&self.session, &diagnostics, cap).await;
+                                }
+                            }
+                            Some(Command::Ais3UpdateItem { item_id, name, description }) => {
+                                if let Some(base) = caps.get(CAP_INVENTORY_API_V3).cloned() {
+                                    let url = format!("{base}{}", ais_item_url(item_id));
+                                    tokio::spawn(patch_caps_llsd(url, build_ais_update_item_body(&name, &description), CAP_INVENTORY_API_V3, http.clone(), caps_tx.clone()));
+                                } else {
+                                    report_capability_not_granted(&self.session, &diagnostics, CAP_INVENTORY_API_V3).await;
+                                }
+                            }
+                            Some(Command::Ais3RemoveItem(item_id)) => {
+                                if let Some(base) = caps.get(CAP_INVENTORY_API_V3).cloned() {
+                                    let url = format!("{base}{}", ais_item_url(item_id));
+                                    tokio::spawn(delete_caps_llsd(url, CAP_INVENTORY_API_V3, http.clone(), caps_tx.clone()));
+                                } else {
+                                    report_capability_not_granted(&self.session, &diagnostics, CAP_INVENTORY_API_V3).await;
+                                }
+                            }
+                            Some(Command::Ais3FetchItem(item_id)) => {
+                                if let Some(base) = caps.get(CAP_INVENTORY_API_V3).cloned() {
+                                    let url = format!("{base}{}", ais_item_url(item_id));
+                                    tokio::spawn(get_caps_llsd(url, CAP_INVENTORY_API_V3, http.clone(), caps_tx.clone()));
+                                } else {
+                                    report_capability_not_granted(&self.session, &diagnostics, CAP_INVENTORY_API_V3).await;
+                                }
+                            }
+                            Some(Command::FetchGroupMembers(group_id)) => {
+                                if let Some(url) = caps.get(CAP_GROUP_MEMBER_DATA).cloned() {
+                                    tokio::spawn(fetch_group_members(url, group_id, http.clone(), caps_tx.clone()));
+                                }
+                            }
+                            Some(Command::OfferFriendship { to_agent_id, message }) => {
+                                self.session.send_friendship_offer(to_agent_id, &message, Instant::now())?;
+                            }
+                            Some(Command::GrantUserRights { target, rights }) => {
+                                self.session.grant_user_rights(target, rights, Instant::now())?;
+                            }
+                            Some(Command::TerminateFriendship(other)) => {
+                                self.session.terminate_friendship(other, Instant::now())?;
+                            }
+                            Some(Command::AcceptFriendship { transaction_id, friend_id, calling_card_folder, use_offline_cap }) => {
+                                // A kept offer is answered over the capability where the
+                                // region grants it, as the reference does; a live offer,
+                                // or a region without it, over UDP.
+                                match caps.get(CAP_ACCEPT_FRIENDSHIP).filter(|_url| use_offline_cap) {
+                                    Some(url) => {
+                                        let url = friendship_answer_url(url, friend_id, Some(&self.session.agent_legacy_name()));
+                                        tokio::spawn(answer_friendship(url, true, http.clone()));
+                                        self.session.note_friendship_accepted(friend_id);
+                                    }
+                                    None => {
+                                        if transaction_id.get().is_nil() {
+                                            tracing::warn!("accepting a friendship offer over UDP without its transaction id");
+                                        }
+                                        self.session.accept_friendship(transaction_id, friend_id, calling_card_folder, Instant::now())?;
+                                    }
+                                }
+                            }
+                            Some(Command::DeclineFriendship { transaction_id, friend_id, use_offline_cap }) => {
+                                match caps.get(CAP_DECLINE_FRIENDSHIP).filter(|_url| use_offline_cap) {
+                                    Some(url) => {
+                                        let url = friendship_answer_url(url, friend_id, None);
+                                        tokio::spawn(answer_friendship(url, false, http.clone()));
+                                    }
+                                    None => {
+                                        if transaction_id.get().is_nil() {
+                                            tracing::warn!("declining a friendship offer over UDP without its transaction id");
+                                        }
+                                        self.session.decline_friendship(transaction_id, Instant::now())?;
+                                    }
+                                }
+                            }
+                            Some(Command::OfferCallingCard { to_agent_id, transaction_id }) => {
+                                self.session.offer_calling_card(to_agent_id, transaction_id, Instant::now())?;
+                            }
+                            Some(Command::AcceptCallingCard { transaction_id, calling_card_folder }) => {
+                                self.session.accept_calling_card(transaction_id, calling_card_folder, Instant::now())?;
+                            }
+                            Some(Command::DeclineCallingCard(transaction_id)) => {
+                                self.session.decline_calling_card(transaction_id, Instant::now())?;
+                            }
+                            Some(Command::ActivateGroup(group_id)) => {
+                                self.session.activate_group(group_id, Instant::now())?;
+                            }
+                            Some(Command::RequestGroupMembers(group_id)) => {
+                                self.session.request_group_members(group_id, Instant::now())?;
+                            }
+                            Some(Command::RequestGroupRoles(group_id)) => {
+                                self.session.request_group_roles(group_id, Instant::now())?;
+                            }
+                            Some(Command::RequestGroupRoleMembers(group_id)) => {
+                                self.session.request_group_role_members(group_id, Instant::now())?;
+                            }
+                            Some(Command::RequestGroupTitles(group_id)) => {
+                                self.session.request_group_titles(group_id, Instant::now())?;
+                            }
+                            Some(Command::RequestGroupProfile(group_id)) => {
+                                self.session.request_group_profile(group_id, Instant::now())?;
+                            }
+                            Some(Command::RequestGroupNotices(group_id)) => {
+                                self.session.request_group_notices(group_id, Instant::now())?;
+                            }
+                            Some(Command::RequestGroupNotice(notice_id)) => {
+                                self.session.request_group_notice(notice_id, Instant::now())?;
+                            }
+                            Some(Command::CreateGroup(params)) => {
+                                self.session.create_group(&params, Instant::now())?;
+                            }
+                            Some(Command::UpdateGroupInfo(params)) => {
+                                self.session.update_group_info(&params, Instant::now())?;
+                            }
+                            Some(Command::UpdateGroupTitle { group_id, title_role_id }) => {
+                                self.session.update_group_title(group_id, title_role_id, Instant::now())?;
+                            }
+                            Some(Command::JoinGroup(group_id)) => {
+                                self.session.join_group(group_id, Instant::now())?;
+                            }
+                            Some(Command::LeaveGroup(group_id)) => {
+                                self.session.leave_group(group_id, Instant::now())?;
+                            }
+                            Some(Command::InviteToGroup { group_id, invitees }) => {
+                                self.session.invite_to_group(group_id, &invitees, Instant::now())?;
+                            }
+                            Some(Command::AcceptGroupInvitation { group_id, transaction_id, use_offline_cap }) => {
+                                // A kept invitation is answered over the capability where
+                                // the region grants it, as the reference does; a live
+                                // invitation, or a region without it, over UDP.
+                                match caps.get(CAP_ACCEPT_GROUP_INVITE).filter(|_url| use_offline_cap) {
+                                    Some(url) => {
+                                        let body = group_invite_response_body(group_id);
+                                        tokio::spawn(answer_group_invitation(url.clone(), body, true, http.clone()));
+                                    }
+                                    None => {
+                                        if transaction_id.get().is_nil() {
+                                            tracing::warn!("accepting a group invitation over UDP without its transaction id");
+                                        }
+                                        self.session.accept_group_invitation(group_id, transaction_id, Instant::now())?;
+                                    }
+                                }
+                            }
+                            Some(Command::DeclineGroupInvitation { group_id, transaction_id, use_offline_cap }) => {
+                                match caps.get(CAP_DECLINE_GROUP_INVITE).filter(|_url| use_offline_cap) {
+                                    Some(url) => {
+                                        let body = group_invite_response_body(group_id);
+                                        tokio::spawn(answer_group_invitation(url.clone(), body, false, http.clone()));
+                                    }
+                                    None => {
+                                        if transaction_id.get().is_nil() {
+                                            tracing::warn!("declining a group invitation over UDP without its transaction id");
+                                        }
+                                        self.session.decline_group_invitation(group_id, transaction_id, Instant::now())?;
+                                    }
+                                }
+                            }
+                            Some(Command::RequestGroupBans(group_id)) => {
+                                bans_over_the_capability(&caps, group_id, None, &http, &caps_tx);
+                            }
+                            Some(Command::BanGroupMembers { group_id, agent_ids }) => {
+                                let body = group_ban_request_body(GroupBanAction::Ban, &agent_ids);
+                                bans_over_the_capability(&caps, group_id, Some(body), &http, &caps_tx);
+                            }
+                            Some(Command::UnbanGroupMembers { group_id, agent_ids }) => {
+                                let body = group_ban_request_body(GroupBanAction::Unban, &agent_ids);
+                                bans_over_the_capability(&caps, group_id, Some(body), &http, &caps_tx);
+                            }
+                            Some(Command::SetGroupAcceptNotices { group_id, accept_notices, list_in_profile }) => {
+                                self.session.set_group_accept_notices(group_id, accept_notices, list_in_profile, Instant::now())?;
+                            }
+                            Some(Command::SetGroupContribution { group_id, contribution }) => {
+                                self.session.set_group_contribution(group_id, contribution, Instant::now())?;
+                            }
+                            Some(Command::StartGroupSession(group_id)) => {
+                                self.session.start_group_session(group_id, Instant::now())?;
+                            }
+                            Some(Command::SendGroupMessage { group_id, message }) => {
+                                self.session.send_group_message(group_id, &message, Instant::now())?;
+                                if let Some(own) = self.session.agent_id() {
+                                    let name = self.session.agent_legacy_name();
+                                    chat_log.log_group(group_id, own, &name, &message);
+                                }
+                            }
+                            Some(Command::LeaveGroupSession(group_id)) => {
+                                self.session.leave_group_session(group_id, Instant::now())?;
+                            }
+                            Some(Command::UpdateGroupRoles { group_id, roles }) => {
+                                self.session.update_group_roles(group_id, &roles, Instant::now())?;
+                            }
+                            Some(Command::ChangeGroupRoleMembers { group_id, changes }) => {
+                                self.session.change_group_role_members(group_id, &changes, Instant::now())?;
+                            }
+                            Some(Command::EjectGroupMembers { group_id, member_ids }) => {
+                                self.session.eject_group_members(group_id, &member_ids, Instant::now())?;
+                            }
+                            Some(Command::ActivateGestures { gestures }) => {
+                                self.session.activate_gestures(&gestures, Instant::now())?;
+                            }
+                            Some(Command::DeactivateGestures { item_ids }) => {
+                                self.session.deactivate_gestures(&item_ids, Instant::now())?;
+                            }
+                            Some(Command::SetAlwaysRun { mode }) => {
+                                self.session.set_always_run(mode, Instant::now())?;
+                            }
+                            Some(Command::PauseAgent) => {
+                                self.session.pause_agent(Instant::now())?;
+                            }
+                            Some(Command::ResumeAgent) => {
+                                self.session.resume_agent(Instant::now())?;
+                            }
+                            Some(Command::SetAgentFov { vertical_angle }) => {
+                                self.session.set_agent_fov(vertical_angle, Instant::now())?;
+                            }
+                            Some(Command::SetAgentSize { height, width }) => {
+                                self.session.set_agent_size(height, width, Instant::now())?;
+                            }
+                            Some(Command::ReleaseScriptControls) => {
+                                self.session.release_script_controls(Instant::now())?;
+                            }
+                            Some(Command::SendGroupNotice { group_id, subject, message, attachment }) => {
+                                self.session.send_group_notice(group_id, &subject, &message, attachment, Instant::now())?;
+                            }
+                            Some(Command::RequestGroupAccountSummary { group_id, request_id, interval_days, current_interval }) => {
+                                self.session.request_group_account_summary(group_id, request_id, interval_days, current_interval, Instant::now())?;
+                            }
+                            Some(Command::RequestGroupAccountDetails { group_id, request_id, interval_days, current_interval }) => {
+                                self.session.request_group_account_details(group_id, request_id, interval_days, current_interval, Instant::now())?;
+                            }
+                            Some(Command::RequestGroupAccountTransactions { group_id, request_id, interval_days, current_interval }) => {
+                                self.session.request_group_account_transactions(group_id, request_id, interval_days, current_interval, Instant::now())?;
+                            }
+                            Some(Command::RequestGroupActiveProposals { group_id, transaction_id }) => {
+                                self.session.request_group_active_proposals(group_id, transaction_id, Instant::now())?;
+                            }
+                            Some(Command::RequestGroupVoteHistory { group_id, transaction_id }) => {
+                                self.session.request_group_vote_history(group_id, transaction_id, Instant::now())?;
+                            }
+                            Some(Command::StartGroupProposal { group_id, quorum, majority, duration, proposal_text }) => {
+                                self.session.start_group_proposal(group_id, quorum, majority, duration, &proposal_text, Instant::now())?;
+                            }
+                            Some(Command::GroupProposalBallot { proposal_id, group_id, vote_cast }) => {
+                                self.session.cast_group_proposal_ballot(proposal_id, group_id, &vote_cast, Instant::now())?;
+                            }
+                            Some(Command::ReplyScriptDialog { object_id, chat_channel, button_index, button_label }) => {
+                                self.session.reply_script_dialog(object_id, chat_channel, button_index, &button_label, Instant::now())?;
+                            }
+                            Some(Command::AnswerScriptPermissions { task_id, item_id, permissions, experience_id }) => {
+                                self.session.answer_script_permissions(task_id, item_id, permissions, experience_id, Instant::now())?;
+                            }
+                            Some(Command::RequestMuteList) => {
+                                self.session.request_mute_list(Instant::now())?;
+                            }
+                            Some(Command::Mute { id, name, mute_type, flags }) => {
+                                self.session.mute(id, &name, mute_type, flags, Instant::now())?;
+                            }
+                            Some(Command::Unmute { id, name }) => {
+                                self.session.unmute(id, &name, Instant::now())?;
+                            }
+                            Some(Command::Teleport { region_handle, position, look_at }) => {
+                                self.session.teleport_to(region_handle, position, look_at, Instant::now())?;
+                            }
+                            Some(Command::RequestRegionInfo) => {
+                                self.session.request_region_info(Instant::now())?;
+                            }
+                            Some(Command::RequestAvatarNames(ids)) => {
+                                self.session.request_avatar_names(&ids, Instant::now())?;
+                            }
+                            Some(Command::RequestGroupNames(ids)) => {
+                                self.session.request_group_names(&ids, Instant::now())?;
+                            }
+                            Some(Command::RequestEnvironment { parcel_id }) => {
+                                if let Some(base) = caps.get(CAP_EXT_ENVIRONMENT).cloned() {
+                                    let url = environment_cap_url(&base, parcel_id, None);
+                                    tokio::spawn(get_caps_llsd(
+                                        url,
+                                        CAP_EXT_ENVIRONMENT,
+                                        http.clone(),
+                                        caps_tx.clone(),
+                                    ));
+                                }
+                            }
+                            Some(Command::SetEnvironment { parcel_id, track_no, update }) => {
+                                if let Some(base) = caps.get(CAP_EXT_ENVIRONMENT).cloned() {
+                                    let url = environment_cap_url(&base, parcel_id, track_no);
+                                    let refetch = environment_cap_url(&base, parcel_id, None);
+                                    let body = build_environment_update_request(&update);
+                                    let (reply_tx, reply_rx) = mpsc::channel(1);
+                                    let (http, caps_tx) = (http.clone(), caps_tx.clone());
+                                    tokio::spawn(async move {
+                                        put_caps_llsd(url, body, CAP_EXT_ENVIRONMENT, http.clone(), reply_tx).await;
+                                        settle_environment_change(reply_rx, refetch, http, caps_tx).await;
                                     });
-                                    tokio::spawn(post_home_location(url, body, http.clone(), caps_tx.clone()));
                                 }
-                                None => self.session.set_start_location(slot, position, look_at, Instant::now())?,
+                            }
+                            Some(Command::ResetEnvironment { parcel_id, track_no }) => {
+                                if let Some(base) = caps.get(CAP_EXT_ENVIRONMENT).cloned() {
+                                    let url = environment_cap_url(&base, parcel_id, track_no);
+                                    let refetch = environment_cap_url(&base, parcel_id, None);
+                                    let (reply_tx, reply_rx) = mpsc::channel(1);
+                                    let (http, caps_tx) = (http.clone(), caps_tx.clone());
+                                    tokio::spawn(async move {
+                                        delete_caps_llsd(url, CAP_EXT_ENVIRONMENT, http.clone(), reply_tx).await;
+                                        settle_environment_change(reply_rx, refetch, http, caps_tx).await;
+                                    });
+                                }
+                            }
+                            Some(Command::RequestMoneyBalance) => {
+                                self.session.request_money_balance(Instant::now())?;
+                            }
+                            Some(Command::RequestEconomyData) => {
+                                self.session.request_economy_data(Instant::now())?;
+                            }
+                            Some(Command::SendMoneyTransfer { dest, amount, kind, description }) => {
+                                self.session.send_money_transfer(
+                                    dest, amount, kind, &description, Instant::now(),
+                                )?;
+                            }
+                            Some(Command::RequestParcelProperties { west, south, east, north, sequence_id, snap_selection }) => {
+                                self.session.request_parcel_properties(
+                                    ParcelRect::new(west, south, east, north),
+                                    sequence_id,
+                                    snap_selection,
+                                    Instant::now(),
+                                )?;
+                            }
+                            Some(Command::RequestParcelPropertiesById { local_id, sequence_id }) => {
+                                self.session.request_parcel_properties_by_id(local_id, sequence_id, Instant::now())?;
+                            }
+                            Some(Command::SetParcelOtherCleanTime { local_id, clean_time }) => {
+                                self.session.set_parcel_other_clean_time(local_id, clean_time, Instant::now())?;
+                            }
+                            Some(Command::ModifyLand(edit)) => {
+                                self.session.modify_land(&edit, Instant::now())?;
+                            }
+                            Some(Command::UndoLand) => {
+                                self.session.undo_land(Instant::now())?;
+                            }
+                            Some(Command::SetDrawDistance(far)) => {
+                                self.session.set_draw_distance(far);
+                            }
+                            Some(Command::RequestMapBlocks { min_x, max_x, min_y, max_y, flags }) => {
+                                self.session.request_map_blocks((min_x, max_x), (min_y, max_y), flags, Instant::now())?;
+                            }
+                            Some(Command::RequestMapByName { name }) => {
+                                self.session.request_map_by_name(&name, Instant::now())?;
+                            }
+                            Some(Command::RequestMapItems { item_type, region_handle }) => {
+                                self.session.request_map_items(item_type, region_handle, Instant::now())?;
+                            }
+                            Some(Command::RequestMapLayer) => {
+                                self.session.request_map_layer(Instant::now())?;
+                            }
+                            Some(Command::SendAbuseReport(report)) => {
+                                self.session.send_abuse_report(&report, Instant::now())?;
+                            }
+                            Some(Command::SendAbuseReportViaCaps { mut report, screenshot }) => {
+                                // With a snapshot and the screenshot cap available, upload
+                                // the snapshot over the two-step uploader (filling
+                                // `screenshot_id` with a fresh texture asset id) and POST
+                                // the report referencing it; otherwise the plain path.
+                                let has_screenshot = screenshot.as_ref().is_some_and(|bytes| !bytes.is_empty());
+                                match caps
+                                    .get(CAP_SEND_USER_REPORT_WITH_SCREENSHOT)
+                                    .cloned()
+                                    .zip(screenshot.filter(|bytes| !bytes.is_empty()))
+                                {
+                                    Some((url, bytes)) => {
+                                        if report.screenshot_id.is_nil() {
+                                            report.screenshot_id = Uuid::new_v4();
+                                        }
+                                        let body = build_send_user_report(&report);
+                                        tokio::spawn(run_report_screenshot_upload(
+                                            url,
+                                            body,
+                                            bytes,
+                                            http.clone(),
+                                        ));
+                                    }
+                                    None => {
+                                        if let Some(url) = caps.get(CAP_SEND_USER_REPORT).cloned() {
+                                            let body = build_send_user_report(&report);
+                                            tokio::spawn(post_caps_oneway(url, body, http.clone()));
+                                        } else {
+                                            // A grid with neither report capability (a stock
+                                            // OpenSim) takes the report over the UDP
+                                            // `UserReport`, as the reference viewer does.
+                                            // The snapshot cannot ride along: attaching one
+                                            // there needs the legacy asset upload.
+                                            if has_screenshot {
+                                                tracing::warn!("the grid offers no report capability; filing the report over UDP without its screenshot");
+                                            }
+                                            self.session.send_abuse_report(&report, Instant::now())?;
+                                        }
+                                    }
+                                }
+                            }
+                            Some(Command::SendPostcard(postcard)) => {
+                                self.session.send_postcard(&postcard, Instant::now())?;
+                            }
+                            Some(Command::SendPostcardViaCaps { postcard, image }) => {
+                                if let Some(url) = caps.get(CAP_SEND_POSTCARD).cloned() {
+                                    let card = build_postcard_request(&postcard);
+                                    tokio::spawn(run_postcard_upload(url, card, image, http.clone(), events.clone()));
+                                } else {
+                                    deliver(&events, Event::PostcardFailed { reason: "SendPostcard capability not available".to_owned() }).await;
+                                }
+                            }
+                            Some(Command::RequestMeshUploadFlag) => {
+                                if let Some(url) = caps.get(CAP_MESH_UPLOAD_FLAG).cloned() {
+                                    tokio::spawn(get_caps_llsd(url, CAP_MESH_UPLOAD_FLAG, http.clone(), caps_tx.clone()));
+                                }
+                            }
+                            Some(Command::UploadInventoryThumbnail { target, data }) => {
+                                if let Some(url) = caps.get(CAP_INVENTORY_THUMBNAIL_UPLOAD).cloned() {
+                                    tokio::spawn(run_thumbnail_upload(url, target, data, http.clone(), events.clone()));
+                                } else {
+                                    deliver(&events, Event::InventoryThumbnailUploadFailed { target, reason: "InventoryThumbnailUpload capability not available".to_owned() }).await;
+                                }
+                            }
+                            Some(Command::RequestObjects { local_ids }) => {
+                                self.session.request_objects(&local_ids, Instant::now())?;
+                            }
+                            Some(Command::ResendCachedObjects { local_ids }) => {
+                                self.session.resend_cached_objects(&local_ids);
+                            }
+                            Some(Command::RequestObjectProperties { local_ids }) => {
+                                self.session.request_object_properties(&local_ids, Instant::now())?;
+                            }
+                            Some(Command::DeselectObjects { local_ids }) => {
+                                self.session.deselect_objects(&local_ids, Instant::now())?;
+                            }
+                            Some(Command::TouchObject { local_id, surface }) => {
+                                self.session.touch_object(local_id, surface.as_ref(), Instant::now())?;
+                            }
+                            Some(Command::GrabObject { local_id, grab_offset, surface }) => {
+                                self.session.grab_object(local_id, grab_offset, surface.as_ref(), Instant::now())?;
+                            }
+                            Some(Command::GrabObjectUpdate { object_id, grab_offset_initial, grab_position, time_since_last, surface }) => {
+                                self.session.grab_object_update(object_id, grab_offset_initial, grab_position, time_since_last, surface.as_ref(), Instant::now())?;
+                            }
+                            Some(Command::DegrabObject { local_id, surface }) => {
+                                self.session.degrab_object(local_id, surface.as_ref(), Instant::now())?;
+                            }
+                            Some(Command::RezObject { shape, group_id }) => {
+                                self.session.rez_object(&shape, group_id, Instant::now())?;
+                            }
+                            Some(Command::DuplicateObjects { local_ids, offset, group_id }) => {
+                                self.session.duplicate_objects(&local_ids, offset, group_id, Instant::now())?;
+                            }
+                            Some(Command::DeleteObjects { local_ids }) => {
+                                self.session.delete_objects(&local_ids, Instant::now())?;
+                            }
+                            Some(Command::DerezObjects { local_ids, destination, transaction_id, group_id }) => {
+                                self.session.derez_objects(&local_ids, destination, transaction_id, group_id, Instant::now())?;
+                            }
+                            Some(Command::UpdateObject { local_id, transform }) => {
+                                self.session.update_object(local_id, &transform, Instant::now())?;
+                            }
+                            Some(Command::SetObjectName { local_id, name }) => {
+                                self.session.set_object_name(local_id, &name, Instant::now())?;
+                            }
+                            Some(Command::SetObjectDescription { local_id, description }) => {
+                                self.session.set_object_description(local_id, &description, Instant::now())?;
+                            }
+                            Some(Command::SetObjectClickAction { local_id, action }) => {
+                                self.session.set_object_click_action(local_id, action, Instant::now())?;
+                            }
+                            Some(Command::SetObjectMaterial { local_id, material }) => {
+                                self.session.set_object_material(local_id, material, Instant::now())?;
+                            }
+                            Some(Command::SetObjectFlags { local_id, flags }) => {
+                                self.session.set_object_flags(local_id, &flags, Instant::now())?;
+                            }
+                            Some(Command::SetObjectShape { local_id, shape }) => {
+                                self.session.set_object_shape(local_id, &shape, Instant::now())?;
+                            }
+                            Some(Command::SetObjectImage { local_id, media_url, texture_entry }) => {
+                                self.session.set_object_image(local_id, media_url.as_deref(), &texture_entry, Instant::now())?;
+                            }
+                            Some(Command::SetObjectExtraParams { local_id, params }) => {
+                                self.session.set_object_extra_params(local_id, &params, Instant::now())?;
+                            }
+                            Some(Command::SetObjectGroup { local_ids, group_id }) => {
+                                self.session.set_object_group(&local_ids, group_id, Instant::now())?;
+                            }
+                            Some(Command::DeedObjectsToGroup { local_ids, group_id }) => {
+                                self.session.deed_objects_to_group(&local_ids, group_id, Instant::now())?;
+                            }
+                            Some(Command::SetObjectPermissions { local_ids, field, set, mask }) => {
+                                self.session.set_object_permissions(&local_ids, field, set, mask, Instant::now())?;
+                            }
+                            Some(Command::SetObjectForSale { local_id, sale_type, sale_price }) => {
+                                self.session.set_object_for_sale(local_id, sale_type, sale_price, Instant::now())?;
+                            }
+                            Some(Command::SetObjectCategory { local_id, category }) => {
+                                self.session.set_object_category(local_id, category, Instant::now())?;
+                            }
+                            Some(Command::SetObjectIncludeInSearch { local_id, include }) => {
+                                self.session.set_object_include_in_search(local_id, include, Instant::now())?;
+                            }
+                            Some(Command::LinkObjects { local_ids }) => {
+                                self.session.link_objects(&local_ids, Instant::now())?;
+                            }
+                            Some(Command::DelinkObjects { local_ids }) => {
+                                self.session.delink_objects(&local_ids, Instant::now())?;
+                            }
+                            Some(Command::UndoObjects { local_ids }) => {
+                                self.session.undo_objects(&local_ids, Instant::now())?;
+                            }
+                            Some(Command::RedoObjects { local_ids }) => {
+                                self.session.redo_objects(&local_ids, Instant::now())?;
+                            }
+                            Some(Command::UpdateParcel(update)) => {
+                                // The capability where the region grants it, as the
+                                // reference viewer does: it carries the whole parcel,
+                                // and on OpenSim the UDP form nulls the media type.
+                                if let Some(url) = caps.get(CAP_PARCEL_PROPERTIES_UPDATE).cloned() {
+                                    let body = build_parcel_properties_update_request(&update);
+                                    tokio::spawn(http::post_caps_reporting(url, body, CAP_PARCEL_PROPERTIES_UPDATE, http.clone(), caps_tx.clone()));
+                                } else {
+                                    self.session.update_parcel(&update, Instant::now())?;
+                                }
+                            }
+                            Some(Command::RequestParcelAccessList { local_id, scope }) => {
+                                self.session.request_parcel_access_list(local_id, scope, Instant::now())?;
+                            }
+                            Some(Command::UpdateParcelAccessList { local_id, scope, entries }) => {
+                                // A fresh transaction id per update, so the simulator
+                                // clears the old entries before applying ours rather
+                                // than appending (see `update_parcel_access_list`).
+                                self.session.update_parcel_access_list(local_id, scope, &entries, Uuid::new_v4(), Instant::now())?;
+                            }
+                            Some(Command::RequestParcelDwell { local_id }) => {
+                                self.session.request_parcel_dwell(local_id, Instant::now())?;
+                            }
+                            Some(Command::BuyParcel { local_id, price, area, group_id, is_group_owned }) => {
+                                self.session.buy_parcel(local_id, price, area, group_id, is_group_owned, Instant::now())?;
+                            }
+                            Some(Command::ReturnParcelObjects { local_id, return_type, owner_ids, task_ids }) => {
+                                self.session.return_parcel_objects(local_id, return_type, &owner_ids, &task_ids, Instant::now())?;
+                            }
+                            Some(Command::SelectParcelObjects { local_id, return_type, object_ids }) => {
+                                self.session.select_parcel_objects(local_id, return_type, &object_ids, Instant::now())?;
+                            }
+                            Some(Command::DeedParcelToGroup { local_id, group_id }) => {
+                                self.session.deed_parcel_to_group(local_id, group_id, Instant::now())?;
+                            }
+                            Some(Command::ReclaimParcel { local_id }) => {
+                                self.session.reclaim_parcel(local_id, Instant::now())?;
+                            }
+                            Some(Command::ReleaseParcel { local_id }) => {
+                                self.session.release_parcel(local_id, Instant::now())?;
+                            }
+                            Some(Command::JoinParcels { west, south, east, north }) => {
+                                self.session.join_parcels(west, south, east, north, Instant::now())?;
+                            }
+                            Some(Command::DivideParcel { west, south, east, north }) => {
+                                self.session.divide_parcel(west, south, east, north, Instant::now())?;
+                            }
+                            Some(Command::RequestParcelObjectOwners { local_id }) => {
+                                self.session.request_parcel_object_owners(local_id, Instant::now())?;
+                            }
+                            Some(Command::BuyParcelPass { local_id }) => {
+                                self.session.buy_parcel_pass(local_id, Instant::now())?;
+                            }
+                            Some(Command::DisableParcelObjects { local_id, return_type, owner_ids, task_ids }) => {
+                                self.session.disable_parcel_objects(local_id, return_type, &owner_ids, &task_ids, Instant::now())?;
+                            }
+                            Some(Command::RequestParcelInfo { parcel_id }) => {
+                                self.session.request_parcel_info(parcel_id, Instant::now())?;
+                            }
+                            Some(Command::RequestEstateInfo) => {
+                                self.session.request_estate_info(Instant::now())?;
+                            }
+                            Some(Command::RequestRegionTerrainDownload { viewer_filename }) => {
+                                self.session.request_region_terrain_download(&viewer_filename, Instant::now())?;
+                            }
+                            Some(Command::RequestRegionTerrainUpload { viewer_filename, data }) => {
+                                self.session.request_region_terrain_upload(&viewer_filename, data, Instant::now())?;
+                            }
+                            Some(Command::UpdateEstateAccess { delta, target }) => {
+                                self.session.update_estate_access(delta, target, Instant::now())?;
+                            }
+                            Some(Command::KickEstateUser { target }) => {
+                                self.session.kick_estate_user(target, Instant::now())?;
+                            }
+                            Some(Command::TeleportHomeUser { target }) => {
+                                self.session.teleport_home_user(target, Instant::now())?;
+                            }
+                            Some(Command::TeleportHomeAllUsers) => {
+                                self.session.teleport_home_all_users(Instant::now())?;
+                            }
+                            Some(Command::RestartRegion { seconds }) => {
+                                self.session.restart_region(seconds, Instant::now())?;
+                            }
+                            Some(Command::SendRegionMessage { message }) => {
+                                self.session.send_region_message(&message, Instant::now())?;
+                            }
+                            Some(Command::SendEstateMessage { message }) => {
+                                self.session.send_estate_message(&message, Instant::now())?;
+                            }
+                            Some(Command::SetEstateCovenant { covenant }) => {
+                                self.session.set_estate_covenant(covenant, Instant::now())?;
+                            }
+                            Some(Command::SetRegionInfo(update)) => {
+                                // The capability where the region grants it (it
+                                // carries every field), the UDP `setregioninfo`
+                                // otherwise — as the reference.
+                                if let Some(url) = caps.get(CAP_DISPATCH_REGION_INFO).cloned() {
+                                    let body = build_dispatch_region_info_request(&update.to_dispatch());
+                                    tokio::spawn(post_voice_cap(url, body, CAP_DISPATCH_REGION_INFO, http.clone(), caps_tx.clone()));
+                                } else {
+                                    self.session.set_region_info(&update, Instant::now())?;
+                                }
+                            }
+                            Some(Command::RequestRegionSchedule) => {
+                                if let Some(url) = caps.get(CAP_REGION_SCHEDULE).cloned() {
+                                    tokio::spawn(get_caps_llsd(url, CAP_REGION_SCHEDULE, http.clone(), caps_tx.clone()));
+                                }
+                            }
+                            Some(Command::SetRegionSchedule { schedule }) => {
+                                if let Some(url) = caps.get(CAP_REGION_SCHEDULE).cloned() {
+                                    let body = build_region_schedule(schedule.as_ref(), true);
+                                    tokio::spawn(set_region_schedule(url, body, http.clone(), caps_tx.clone()));
+                                }
+                            }
+                            Some(Command::RequestTerrainMaterialOverrides) => {
+                                if let Some(url) = caps.get(CAP_MODIFY_REGION).cloned() {
+                                    tokio::spawn(get_caps_llsd(url, CAP_MODIFY_REGION, http.clone(), caps_tx.clone()));
+                                } else {
+                                    report_capability_not_granted(&self.session, &diagnostics, CAP_MODIFY_REGION).await;
+                                }
+                            }
+                            Some(Command::SetTerrainMaterialOverrides(overrides)) => {
+                                if let Some(url) = caps.get(CAP_MODIFY_REGION).cloned() {
+                                    let body = build_modify_region_request(&overrides);
+                                    tokio::spawn(set_terrain_material_overrides(url, body, http.clone(), caps_tx.clone()));
+                                } else {
+                                    report_capability_not_granted(&self.session, &diagnostics, CAP_MODIFY_REGION).await;
+                                }
+                            }
+                            Some(Command::SetRegionDebug(update)) => {
+                                self.session.set_region_debug(&update, Instant::now())?;
+                            }
+                            Some(Command::SetRegionTerrain(update)) => {
+                                self.session.set_region_terrain(&update, Instant::now())?;
+                            }
+                            Some(Command::BakeRegionTerrain) => {
+                                self.session.bake_region_terrain(Instant::now())?;
+                            }
+                            Some(Command::SetEstateInfo(update)) => {
+                                self.session.set_estate_info(&update, Instant::now())?;
+                            }
+                            Some(Command::RequestEstateCovenant) => {
+                                self.session.request_estate_covenant(Instant::now())?;
+                            }
+                            Some(Command::RequestTelehubInfo) => {
+                                self.session.request_telehub_info(Instant::now())?;
+                            }
+                            Some(Command::ConnectTelehub { object_local_id }) => {
+                                self.session.connect_telehub(object_local_id, Instant::now())?;
+                            }
+                            Some(Command::DisconnectTelehub) => {
+                                self.session.disconnect_telehub(Instant::now())?;
+                            }
+                            Some(Command::AddTelehubSpawnPoint { object_local_id }) => {
+                                self.session.add_telehub_spawn_point(object_local_id, Instant::now())?;
+                            }
+                            Some(Command::RemoveTelehubSpawnPoint { spawn_index }) => {
+                                self.session.remove_telehub_spawn_point(spawn_index, Instant::now())?;
+                            }
+                            Some(Command::GodKickUser { target, action, reason }) => {
+                                // The capability where the region grants it, as the
+                                // reference's `message.xml` flavours the message
+                                // `llsd`; the UDP message otherwise.
+                                if let Some(url) = caps.get(CAP_UNTRUSTED_SIMULATOR_MESSAGE).cloned() {
+                                    let body = build_god_kick_user_untrusted(&self.session.god_kick_user_request(target, action, &reason)?);
+                                    tokio::spawn(post_caps_oneway(url, body, http.clone()));
+                                } else {
+                                    self.session.god_kick_user(target, action, &reason, Instant::now())?;
+                                }
+                            }
+                            Some(Command::ForceObjectOwner { local_ids, owner, group_id }) => {
+                                self.session.force_object_owner(&local_ids, owner, group_id, Instant::now())?;
+                            }
+                            Some(Command::SendGodlikeMessage { method, params }) => {
+                                let refs: Vec<&str> = params.iter().map(String::as_str).collect();
+                                self.session.send_godlike_message(&method, &refs, Instant::now())?;
+                            }
+                            Some(Command::RequestTexture { texture_id, discard_level, priority }) => {
+                                self.session.request_texture(texture_id, discard_level, priority, Instant::now())?;
+                            }
+                            Some(Command::FetchTexture { texture_id, discard_level }) => {
+                                if let Some(url) = caps.get(CAP_GET_TEXTURE).cloned() {
+                                    tokio::spawn(fetch_texture_http(
+                                        url, texture_id, discard_level, http.clone(), events.clone(),
+                                    ));
+                                }
+                            }
+                            Some(Command::FetchMesh { mesh_id, byte_range }) => {
+                                // GetMesh2 is preferred when offered; fall back to GetMesh.
+                                if let Some(url) = caps.get(CAP_GET_MESH2).or_else(|| caps.get(CAP_GET_MESH)).cloned() {
+                                    tokio::spawn(fetch_mesh_http(url, mesh_id.uuid(), byte_range, http.clone(), events.clone()));
+                                }
+                            }
+                            Some(Command::FetchAsset { asset_id, asset_type, byte_range }) => {
+                                if let Some(url) = caps.get(CAP_VIEWER_ASSET).cloned() {
+                                    tokio::spawn(fetch_asset_http(
+                                        url, asset_id.uuid(), asset_type, byte_range, http.clone(), events.clone(),
+                                    ));
+                                }
+                            }
+                            Some(Command::RequestWearables) => {
+                                self.session.request_wearables(Instant::now())?;
+                            }
+                            Some(Command::SetWearing(wearables)) => {
+                                self.session.set_wearing(&wearables, Instant::now())?;
+                            }
+                            Some(Command::SetAppearance { serial, size, texture_entry, visual_params, wearable_cache }) => {
+                                self.session.set_appearance(serial, size, &texture_entry, &visual_params, &wearable_cache, Instant::now())?;
+                            }
+                            Some(Command::RequestCachedTextures { serial, slots }) => {
+                                self.session.request_cached_textures(serial, &slots, Instant::now())?;
+                            }
+                            Some(Command::RequestServerAppearanceUpdate { cof_version }) => {
+                                if let Some(url) = caps.get(CAP_UPDATE_AVATAR_APPEARANCE).cloned() {
+                                    tokio::spawn(request_server_appearance_update(
+                                        url, cof_version, http.clone(), caps_tx.clone(),
+                                    ));
+                                }
+                            }
+                            Some(Command::IncrementCofVersion) => {
+                                if let Some(url) = caps.get(CAP_INCREMENT_COF_VERSION).cloned() {
+                                    tokio::spawn(increment_cof_version(url, http.clone(), caps_tx.clone()));
+                                }
+                            }
+                            Some(Command::SetAnimations(animations)) => {
+                                self.session.set_animations(&animations, Instant::now())?;
+                            }
+                            Some(Command::PlayAnimation(anim_id)) => {
+                                self.session.play_animation(anim_id, Instant::now())?;
+                            }
+                            Some(Command::StopAnimation(anim_id)) => {
+                                self.session.stop_animation(anim_id, Instant::now())?;
+                            }
+                            Some(Command::AttachObject { local_id, attachment_point, mode, rotation }) => {
+                                self.session.attach_object(local_id, attachment_point, mode, &rotation, Instant::now())?;
+                            }
+                            Some(Command::DetachObjects { local_ids }) => {
+                                self.session.detach_objects(&local_ids, Instant::now())?;
+                            }
+                            Some(Command::DropAttachments { local_ids }) => {
+                                self.session.drop_attachments(&local_ids, Instant::now())?;
+                            }
+                            Some(Command::RezAttachment(rez)) => {
+                                self.session.rez_attachment(&rez, Instant::now())?;
+                            }
+                            Some(Command::RezAttachments { compound_id, detach, attachments }) => {
+                                self.session.rez_attachments(compound_id, detach, &attachments, Instant::now())?;
+                            }
+                            Some(Command::ViewerEffect(effects)) => {
+                                self.session.send_viewer_effect(&effects, Instant::now())?;
+                            }
+                            Some(Command::TrackAgent { prey_id }) => {
+                                self.session.track_agent(prey_id, Instant::now())?;
+                            }
+                            Some(Command::FindAgent { hunter, prey }) => {
+                                self.session.find_agent(hunter, prey, Instant::now())?;
+                            }
+                            Some(Command::DirFindQuery { query_id, query_text, flags, query_start }) => {
+                                self.session.dir_find_query(query_id, &query_text, flags, query_start, Instant::now())?;
+                            }
+                            Some(Command::DirPlacesQuery { query_id, query_text, flags, category, sim_name, query_start }) => {
+                                self.session.dir_places_query(query_id, &query_text, flags, category, &sim_name, query_start, Instant::now())?;
+                            }
+                            Some(Command::DirLandQuery { query_id, flags, search_type, price, area, query_start }) => {
+                                self.session.dir_land_query(query_id, flags, search_type, price, area, query_start, Instant::now())?;
+                            }
+                            Some(Command::DirClassifiedQuery { query_id, query_text, flags, category, query_start }) => {
+                                self.session.dir_classified_query(query_id, &query_text, flags, category, query_start, Instant::now())?;
+                            }
+                            Some(Command::AvatarPickerRequest { query_id, name }) => {
+                                // The modern search is the `AvatarPickerSearch` GET,
+                                // which matches username *and* display name; the
+                                // legacy UDP message is the fallback for a grid
+                                // without the cap (on Second Life it answers "no
+                                // matches" to everything).
+                                if let Some(base) = caps.get(CAP_AVATAR_PICKER_SEARCH).cloned() {
+                                    let url = format!("{base}{}", avatar_picker_search_query(&name, AVATAR_PICKER_PAGE_SIZE));
+                                    tokio::spawn(get_avatar_picker_search(url, query_id.get(), http.clone(), caps_tx.clone()));
+                                } else {
+                                    self.session.avatar_picker_request(query_id, &name, Instant::now())?;
+                                }
+                            }
+                            Some(Command::PlacesQuery { query_id, transaction_id, query_text, flags, category, sim_name }) => {
+                                self.session.places_query(query_id, transaction_id, &query_text, flags, category, &sim_name, Instant::now())?;
+                            }
+                            Some(Command::EventInfoRequest { event_id }) => {
+                                self.session.event_info_request(event_id, Instant::now())?;
+                            }
+                            Some(Command::EventNotificationAddRequest { event_id }) => {
+                                self.session.event_notification_add_request(event_id, Instant::now())?;
+                            }
+                            Some(Command::EventNotificationRemoveRequest { event_id }) => {
+                                self.session.event_notification_remove_request(event_id, Instant::now())?;
+                            }
+                            Some(Command::BuyObject { group_id, category_id, objects }) => {
+                                self.session.buy_object(group_id, category_id, &objects, Instant::now())?;
+                            }
+                            Some(Command::BuyObjectInventory { object_id, item_id, folder_id }) => {
+                                self.session.buy_object_inventory(object_id, item_id, folder_id, Instant::now())?;
+                            }
+                            Some(Command::RequestPayPrice { object_id }) => {
+                                self.session.request_pay_price(object_id, Instant::now())?;
+                            }
+                            Some(Command::RequestObjectPropertiesFamily { request_flags, object_id }) => {
+                                self.session.request_object_properties_family(request_flags, object_id, Instant::now())?;
+                            }
+                            Some(Command::SpinObjectStart { object_id }) => {
+                                self.session.spin_object_start(object_id, Instant::now())?;
+                            }
+                            Some(Command::SpinObjectUpdate { object_id, rotation }) => {
+                                self.session.spin_object_update(object_id, rotation, Instant::now())?;
+                            }
+                            Some(Command::SpinObjectStop { object_id }) => {
+                                self.session.spin_object_stop(object_id, Instant::now())?;
+                            }
+                            Some(Command::DuplicateObjectsOnRay {
+                                local_ids, group_id, ray_start, ray_end, bypass_raycast,
+                                ray_end_is_intersection, copy_centers, copy_rotates, ray_target_id,
+                                duplicate_flags,
+                            }) => {
+                                self.session.duplicate_objects_on_ray(
+                                    &local_ids, group_id, ray_start, ray_end, bypass_raycast,
+                                    ray_end_is_intersection, copy_centers, copy_rotates, ray_target_id,
+                                    duplicate_flags, Instant::now(),
+                                )?;
+                            }
+                            Some(Command::RezRestoreToWorld { item }) => {
+                                self.session.rez_restore_to_world(&item, Instant::now())?;
+                            }
+                            Some(Command::RezObjectFromNotecard { rez }) => {
+                                self.session.rez_object_from_notecard(&rez, Instant::now())?;
+                            }
+                            Some(Command::CopyInventoryFromNotecard { notecard_id, object_id, item_id, folder_id }) => {
+                                // Copy an item embedded in a notecard into inventory:
+                                // a one-way LLSD POST to the cap. The copied item
+                                // arrives over the normal inventory-update stream, so
+                                // there is nothing to await here.
+                                if let Some(url) = caps.get(CAP_COPY_INVENTORY_FROM_NOTECARD).cloned() {
+                                    let body = copy_inventory_from_notecard_body(notecard_id, object_id, item_id, folder_id);
+                                    tokio::spawn(post_caps_oneway(url, body, http.clone()));
+                                } else {
+                                    tracing::warn!("no CopyInventoryFromNotecard capability; cannot copy embedded item");
+                                }
+                            }
+                            Some(Command::RezObjectFromInventory { params }) => {
+                                self.session.rez_object_from_inventory(&params, Instant::now())?;
+                            }
+                            Some(Command::RezScript { target, params }) => {
+                                self.session.rez_script(target, &params, Instant::now())?;
+                            }
+                            Some(Command::RevokeScriptPermissions { object_id, permissions }) => {
+                                self.session.revoke_script_permissions(object_id, permissions, Instant::now())?;
+                            }
+                            Some(Command::QueryScriptPermissions) => {
+                                // Local query: synthesize the snapshot from the session
+                                // and surface it on the event stream (no wire send).
+                                deliver(&events, Event::ScriptPermissionState( self.session.script_permission_state(), )).await;
+                            }
+                            Some(Command::DetachAttachmentIntoInventory { item_id }) => {
+                                self.session.detach_attachment_into_inventory(item_id, Instant::now())?;
+                            }
+                            Some(Command::RequestTaskInventory { target }) => {
+                                self.session.request_task_inventory(target, Instant::now())?;
+                            }
+                            Some(Command::FetchTaskInventory { target, held_serial }) => {
+                                // Over the capability where this region grants
+                                // it, as current viewers read a prim's contents;
+                                // over UDP and `Xfer` otherwise. The capability
+                                // is the root region's and names a prim by its
+                                // full id, so a neighbour's prim, and one the
+                                // cache does not hold, go over UDP.
+                                let by_cap = caps
+                                    .get(CAP_REQUEST_TASK_INVENTORY)
+                                    .cloned()
+                                    .filter(|_url| Some(target.circuit) == self.session.root_circuit_id())
+                                    .zip(self.session.resolve_object_key(target));
+                                match by_cap {
+                                    Some((base, task)) => {
+                                        tokio::spawn(get_task_inventory(base, task, held_serial, http.clone(), caps_tx.clone()));
+                                    }
+                                    None => {
+                                        self.session.fetch_task_inventory(target, held_serial, Instant::now())?;
+                                    }
+                                }
+                            }
+                            Some(Command::RequestScriptExperience { task, item_id }) => {
+                                if let Some(url) = caps.get(CAP_GET_METADATA).cloned() {
+                                    tokio::spawn(post_script_metadata(url, task, item_id, http.clone(), caps_tx.clone()));
+                                }
+                            }
+                            Some(Command::FetchTaskItemAsset {
+                                task,
+                                item_id,
+                                asset_id,
+                                asset_type,
+                            }) => {
+                                self.session.fetch_task_item_asset(
+                                    task,
+                                    item_id,
+                                    asset_id,
+                                    asset_type,
+                                    Instant::now(),
+                                )?;
+                            }
+                            Some(Command::FetchInventoryItemAsset {
+                                item_id,
+                                asset_id,
+                                asset_type,
+                            }) => {
+                                self.session.fetch_inventory_item_asset(
+                                    item_id,
+                                    asset_id,
+                                    asset_type,
+                                    Instant::now(),
+                                )?;
+                            }
+                            Some(Command::FetchEstateCovenantAsset) => {
+                                self.session.fetch_estate_covenant_asset(Instant::now())?;
+                            }
+                            Some(Command::RequestXfer { filename }) => {
+                                self.session.request_xfer(&filename, Instant::now())?;
+                            }
+                            Some(Command::UpdateTaskInventory { target, key, item }) => {
+                                self.session.update_task_inventory(target, key, &item, Instant::now())?;
+                            }
+                            Some(Command::MoveTaskInventory { target, folder_id, item_id }) => {
+                                self.session.move_task_inventory(target, folder_id, item_id, Instant::now())?;
+                            }
+                            Some(Command::RemoveTaskInventory { target, item_id }) => {
+                                self.session.remove_task_inventory(target, item_id, Instant::now())?;
+                            }
+                            Some(Command::RequestScriptRunning { object_id, item_id }) => {
+                                self.session.request_script_running(object_id, item_id, Instant::now())?;
+                            }
+                            Some(Command::SetScriptRunning { object_id, item_id, running }) => {
+                                self.session.set_script_running(object_id, item_id, running, Instant::now())?;
+                            }
+                            Some(Command::ResetScript { object_id, item_id }) => {
+                                self.session.reset_script(object_id, item_id, Instant::now())?;
+                            }
+                            Some(Command::UploadAsset { asset_type, .. }) if asset_type.is_script() => {
+                                // Scripts must go through `UploadScript` so the
+                                // simulator's compile result is surfaced; the generic
+                                // create-with-body path would discard it.
+                                deliver(&events, Event::AssetUploadFailed {
+                                    reason: "scripts must be uploaded with UploadScript (create the \
+                                             item with create_inventory_item first)"
+                                        .to_owned(),
+                                }).await;
+                            }
+                            Some(Command::UploadAsset {
+                                folder_id, asset_type, inventory_type, name, description,
+                                next_owner_mask, group_mask, everyone_mask, expected_upload_cost, data,
+                            }) => {
+                                // The modern CAPS uploader (the only upload path — the
+                                // legacy UDP asset-upload fallback was dropped): needs
+                                // both the region capability and a CAPS name for the
+                                // asset and inventory classes.
+                                let caps_upload = match (asset_type.caps_asset_name(), inventory_type.caps_name()) {
+                                    (Some(asset_name), Some(inv_name)) => caps
+                                        .get(CAP_NEW_FILE_AGENT_INVENTORY)
+                                        .cloned()
+                                        .map(|url| (url, asset_name, inv_name)),
+                                    _ => None,
+                                };
+                                if let Some((url, asset_name, inv_name)) = caps_upload {
+                                    let request = NewFileAgentInventoryRequest {
+                                        folder_id,
+                                        asset_type: asset_name.to_owned(),
+                                        inventory_type: inv_name.to_owned(),
+                                        name, description,
+                                        next_owner_mask: next_owner_mask.bits(), group_mask: group_mask.bits(),
+                                        everyone_mask: everyone_mask.bits(), expected_upload_cost,
+                                    };
+                                    let body = build_new_file_agent_inventory_request(&request);
+                                    // The request is kept for the completion: this is
+                                    // the one upload that *creates* an item, and no
+                                    // grid announces the item it created, so the
+                                    // completion has to be turned into one here.
+                                    let creating = self.session.agent_id().map(|owner| (request, owner));
+                                    tokio::spawn(run_caps_upload(url, body, data, creating, None, http.clone(), upload_events.clone()));
+                                } else {
+                                    deliver(&events, Event::AssetUploadFailed { reason: "NewFileAgentInventory capability not available".to_owned(), }).await;
+                                }
+                            }
+                            Some(Command::UploadBakedTexture { data }) => {
+                                if let Some(url) = caps.get(CAP_UPLOAD_BAKED_TEXTURE).cloned() {
+                                    let body = build_upload_baked_texture_request();
+                                    tokio::spawn(run_caps_upload(url, body, data, None, None, http.clone(), events.clone()));
+                                } else {
+                                    deliver(&events, Event::AssetUploadFailed { reason: "UploadBakedTexture capability not available".to_owned(), }).await;
+                                }
+                            }
+                            Some(Command::UpdateInventoryAsset { location, asset_type, data }) => {
+                                // `UpdatableAssetType::cap` / `task_cap` are total —
+                                // scripts (which need the compile-aware `UploadScript`)
+                                // are excluded from this type by construction. The
+                                // location picks the agent vs task cap and body shape.
+                                let (cap, body) = match location {
+                                    AssetUpdateLocation::AgentInventory { item_id } => {
+                                        (asset_type.cap(), build_update_item_asset_request(item_id))
+                                    }
+                                    AssetUpdateLocation::TaskInventory { task_id, item_id } => (
+                                        asset_type.task_cap(),
+                                        build_update_task_item_asset_request(task_id, item_id),
+                                    ),
+                                };
+                                // The item this save is *about*. A task item is not
+                                // an agent-inventory item, so it stays `None`.
+                                let asked_about = match location {
+                                    AssetUpdateLocation::AgentInventory { item_id } => Some(item_id.uuid()),
+                                    AssetUpdateLocation::TaskInventory { .. } => None,
+                                };
+                                if let Some(url) = caps.get(cap).cloned() {
+                                    tokio::spawn(run_caps_upload(url, body, data, None, asked_about, http.clone(), upload_events.clone()));
+                                } else {
+                                    deliver(&events, Event::AssetUploadFailed { reason: format!("{cap} capability not available"), }).await;
+                                }
+                            }
+                            Some(Command::UploadScript { location, target, source }) => {
+                                // Choose the capability + request body by location; the
+                                // completion carries the simulator's compile result.
+                                let target_wire = target.to_wire();
+                                let (cap, body, running) = match location {
+                                    ScriptUploadLocation::AgentInventory { item_id } => (
+                                        CAP_UPDATE_SCRIPT_AGENT,
+                                        build_update_script_agent_request(item_id, target_wire),
+                                        None,
+                                    ),
+                                    ScriptUploadLocation::TaskInventory {
+                                        task_id, item_id, running, experience,
+                                    } => (
+                                        CAP_UPDATE_SCRIPT_TASK,
+                                        build_update_script_task_request(
+                                            task_id, item_id, running, target_wire, experience,
+                                        ),
+                                        Some(running),
+                                    ),
+                                };
+                                let asked_about = match location {
+                                    ScriptUploadLocation::AgentInventory { item_id } => Some(item_id.uuid()),
+                                    ScriptUploadLocation::TaskInventory { .. } => None,
+                                };
+                                if let Some(url) = caps.get(cap).cloned() {
+                                    tokio::spawn(run_script_upload(
+                                        url, body, source, running, asked_about, http.clone(),
+                                        upload_events.clone(),
+                                    ));
+                                } else {
+                                    deliver(&events, Event::AssetUploadFailed { reason: format!("{cap} capability not available"), }).await;
+                                }
+                            }
+                            Some(Command::RequestObjectMedia { object_id }) => {
+                                if let Some(url) = caps.get(CAP_OBJECT_MEDIA).cloned() {
+                                    tokio::spawn(fetch_object_media(url, object_id, http.clone(), caps_tx.clone()));
+                                }
+                            }
+                            Some(Command::SetObjectMedia { object_id, faces }) => {
+                                if let Some(url) = caps.get(CAP_OBJECT_MEDIA).cloned() {
+                                    let body = build_object_media_update_request(object_id, &faces);
+                                    tokio::spawn(post_object_media(url, body, http.clone()));
+                                }
+                            }
+                            Some(Command::NavigateObjectMedia { object_id, face, url: media_url }) => {
+                                if let Some(url) = caps.get(CAP_OBJECT_MEDIA_NAVIGATE).cloned() {
+                                    let body = build_object_media_navigate_request(object_id, face, &media_url);
+                                    tokio::spawn(post_object_media(url, body, http.clone()));
+                                }
+                            }
+                            Some(Command::RequestRenderMaterials { material_ids }) => {
+                                if let Some(url) = caps.get(CAP_RENDER_MATERIALS).cloned() {
+                                    tokio::spawn(fetch_render_materials(url, material_ids, http.clone(), events.clone()));
+                                }
+                            }
+                            Some(Command::SetRenderMaterials { updates }) => {
+                                if let Some(url) = caps.get(CAP_RENDER_MATERIALS).cloned() {
+                                    tokio::spawn(set_render_materials(url, updates, http.clone()));
+                                }
+                            }
+                            Some(Command::ModifyMaterialParams { updates }) => {
+                                if let Some(url) = caps.get(CAP_MODIFY_MATERIAL_PARAMS).cloned() {
+                                    let body = build_modify_material_params_request(&updates);
+                                    tokio::spawn(post_modify_material_params(url, body, http.clone(), caps_tx.clone()));
+                                } else {
+                                    // No PBR material overrides on this grid (a stock
+                                    // OpenSim grants none): say so rather than drop the edit.
+                                    report_capability_not_granted(&self.session, &diagnostics, CAP_MODIFY_MATERIAL_PARAMS).await;
+                                }
+                            }
+                            Some(Command::RequestVoiceAccount { request }) => {
+                                if let Some(url) = caps.get(CAP_PROVISION_VOICE_ACCOUNT).cloned() {
+                                    let body = build_provision_voice_account_request(&request);
+                                    tokio::spawn(post_voice_cap(url, body, CAP_PROVISION_VOICE_ACCOUNT, http.clone(), caps_tx.clone()));
+                                } else {
+                                    report_capability_not_granted(&self.session, &diagnostics, CAP_PROVISION_VOICE_ACCOUNT).await;
+                                }
+                            }
+                            Some(Command::RequestParcelVoiceInfo) => {
+                                if let Some(url) = caps.get(CAP_PARCEL_VOICE_INFO).cloned() {
+                                    let body = build_parcel_voice_info_request();
+                                    tokio::spawn(post_voice_cap(url, body, CAP_PARCEL_VOICE_INFO, http.clone(), caps_tx.clone()));
+                                } else {
+                                    report_capability_not_granted(&self.session, &diagnostics, CAP_PARCEL_VOICE_INFO).await;
+                                }
+                            }
+                            Some(Command::SendVoiceSignaling { viewer_session, candidates, completed }) => {
+                                if let Some(url) = caps.get(CAP_VOICE_SIGNALING).cloned() {
+                                    let body = build_voice_signaling_request(&viewer_session, &candidates, completed);
+                                    tokio::spawn(post_voice_signaling(url, body, http.clone()));
+                                } else {
+                                    report_capability_not_granted(&self.session, &diagnostics, CAP_VOICE_SIGNALING).await;
+                                }
+                            }
+                            Some(Command::RequestDisplayNames(agent_ids)) => {
+                                if let Some(base) = caps.get(CAP_GET_DISPLAY_NAMES).cloned() {
+                                    let agent_uuids: Vec<Uuid> =
+                                        agent_ids.iter().map(AgentKey::uuid).collect();
+                                    let url = format!("{base}{}", display_names_query(&agent_uuids));
+                                    tokio::spawn(get_caps_llsd(url, CAP_GET_DISPLAY_NAMES, http.clone(), caps_tx.clone()));
+                                }
+                            }
+                            Some(Command::RequestRemoteParcelId { location, region_id, region_handle }) => {
+                                if let Some(url) = caps.get(CAP_REMOTE_PARCEL_REQUEST).cloned() {
+                                    // Not `post_voice_cap`: the reply names no
+                                    // question, so the request rides along to be
+                                    // stamped into the answer.
+                                    let request = RemoteParcelRequest { location, region_id, region_handle };
+                                    tokio::spawn(post_remote_parcel_request(url, request, http.clone(), caps_tx.clone()));
+                                }
+                            }
+                            Some(Command::RequestSimulatorFeatures) => {
+                                if let Some(url) = caps.get(CAP_SIMULATOR_FEATURES).cloned() {
+                                    tokio::spawn(get_caps_llsd(url, CAP_SIMULATOR_FEATURES, http.clone(), caps_tx.clone()));
+                                }
+                            }
+                            Some(Command::RequestAgentPreferences) => {
+                                if let Some(url) = caps.get(CAP_AGENT_PREFERENCES).cloned() {
+                                    let body = build_agent_preferences_request(&AgentPreferences::default());
+                                    tokio::spawn(post_voice_cap(url, body, CAP_AGENT_PREFERENCES, http.clone(), caps_tx.clone()));
+                                }
+                            }
+                            Some(Command::SetInterestListMode(mode)) => {
+                                // Remembered whether or not this region has the
+                                // capability: the next one may.
+                                self.session.set_interest_list_mode(mode);
+                                if let Some(url) = caps.get(CAP_INTEREST_LIST).cloned() {
+                                    let body = build_interest_list_request(mode);
+                                    tokio::spawn(post_voice_cap(url, body, CAP_INTEREST_LIST, http.clone(), caps_tx.clone()));
+                                }
+                            }
+                            Some(Command::SetAgentPreferences(prefs)) => {
+                                if let Some(url) = caps.get(CAP_AGENT_PREFERENCES).cloned() {
+                                    let body = build_agent_preferences_request(&prefs);
+                                    tokio::spawn(post_voice_cap(url, body, CAP_AGENT_PREFERENCES, http.clone(), caps_tx.clone()));
+                                }
+                            }
+                            // Split by the region each object is in: a neighbour's
+                            // objects are asked of the neighbour's own capability.
+                            Some(
+                                command @ (Command::RequestObjectCost { .. }
+                                | Command::RequestSelectedCost { .. }
+                                | Command::RequestObjectPhysicsData { .. }),
+                            ) => {
+                                object_caps::dispatch(command, Instant::now(), &self.session, &caps, &mut neighbours, &http, &caps_tx).await;
+                            }
+                            Some(Command::SetAvatarRenderReports(reports)) => {
+                                self.session.set_avatar_render_reports(reports);
+                            }
+                            Some(Command::RequestAttachmentResources) => {
+                                if let Some(url) = caps.get(CAP_ATTACHMENT_RESOURCES).cloned() {
+                                    tokio::spawn(get_caps_llsd(url, CAP_ATTACHMENT_RESOURCES, http.clone(), caps_tx.clone()));
+                                }
+                            }
+                            Some(Command::RequestLandResources { parcel_id }) => {
+                                if let Some(url) = caps.get(CAP_LAND_RESOURCES).cloned() {
+                                    tokio::spawn(fetch_land_resources(url, parcel_id, http.clone(), caps_tx.clone()));
+                                }
+                            }
+                            Some(Command::RequestLandStat { report_type, request_flags, filter, parcel_local_id }) => {
+                                self.session.request_land_stat(report_type, request_flags, &filter, parcel_local_id, Instant::now())?;
+                            }
+                            Some(Command::RequestExperienceInfo { experience_ids }) => {
+                                if let Some(base) = caps.get(CAP_GET_EXPERIENCE_INFO).cloned() {
+                                    let url = format!("{base}{}", experience_info_query(&experience_ids));
+                                    tokio::spawn(get_caps_llsd(url, CAP_GET_EXPERIENCE_INFO, http.clone(), caps_tx.clone()));
+                                } else {
+                                    report_capability_not_granted(&self.session, &diagnostics, CAP_GET_EXPERIENCE_INFO).await;
+                                }
+                            }
+                            Some(Command::FindExperiences { query, page }) => {
+                                if let Some(base) = caps.get(CAP_FIND_EXPERIENCE_BY_NAME).cloned() {
+                                    let url = format!("{base}{}", find_experience_query(&query, page));
+                                    tokio::spawn(get_caps_llsd(url, CAP_FIND_EXPERIENCE_BY_NAME, http.clone(), caps_tx.clone()));
+                                } else {
+                                    report_capability_not_granted(&self.session, &diagnostics, CAP_FIND_EXPERIENCE_BY_NAME).await;
+                                }
+                            }
+                            Some(Command::RequestExperiencePermissions) => {
+                                if let Some(url) = caps.get(CAP_GET_EXPERIENCES).cloned() {
+                                    tokio::spawn(get_caps_llsd(url, CAP_GET_EXPERIENCES, http.clone(), caps_tx.clone()));
+                                } else {
+                                    report_capability_not_granted(&self.session, &diagnostics, CAP_GET_EXPERIENCES).await;
+                                }
+                            }
+                            Some(Command::SetExperiencePermission { experience_id, permission }) => {
+                                if let Some(base) = caps.get(CAP_EXPERIENCE_PREFERENCES).cloned() {
+                                    if permission.is_forget() {
+                                        let url = format!("{base}{}", forget_experience_query(experience_id));
+                                        tokio::spawn(delete_caps_llsd(url, CAP_EXPERIENCE_PREFERENCES, http.clone(), caps_tx.clone()));
+                                    } else {
+                                        let body = build_set_experience_permission_request(experience_id, permission);
+                                        tokio::spawn(put_caps_llsd(base, body, CAP_EXPERIENCE_PREFERENCES, http.clone(), caps_tx.clone()));
+                                    }
+                                } else {
+                                    report_capability_not_granted(&self.session, &diagnostics, CAP_EXPERIENCE_PREFERENCES).await;
+                                }
+                            }
+                            Some(Command::RequestOwnedExperiences) => {
+                                if let Some(url) = caps.get(CAP_AGENT_EXPERIENCES).cloned() {
+                                    tokio::spawn(get_caps_llsd(url, CAP_AGENT_EXPERIENCES, http.clone(), caps_tx.clone()));
+                                } else {
+                                    report_capability_not_granted(&self.session, &diagnostics, CAP_AGENT_EXPERIENCES).await;
+                                }
+                            }
+                            Some(Command::RequestAdminExperiences) => {
+                                if let Some(url) = caps.get(CAP_GET_ADMIN_EXPERIENCES).cloned() {
+                                    tokio::spawn(get_caps_llsd(url, CAP_GET_ADMIN_EXPERIENCES, http.clone(), caps_tx.clone()));
+                                } else {
+                                    report_capability_not_granted(&self.session, &diagnostics, CAP_GET_ADMIN_EXPERIENCES).await;
+                                }
+                            }
+                            Some(Command::RequestCreatorExperiences) => {
+                                if let Some(url) = caps.get(CAP_GET_CREATOR_EXPERIENCES).cloned() {
+                                    tokio::spawn(get_caps_llsd(url, CAP_GET_CREATOR_EXPERIENCES, http.clone(), caps_tx.clone()));
+                                } else {
+                                    report_capability_not_granted(&self.session, &diagnostics, CAP_GET_CREATOR_EXPERIENCES).await;
+                                }
+                            }
+                            Some(Command::RequestGroupExperiences { group_id }) => {
+                                if let Some(base) = caps.get(CAP_GROUP_EXPERIENCES).cloned() {
+                                    let url = format!("{base}{}", group_experiences_query(group_id.uuid()));
+                                    tokio::spawn(fetch_group_experiences(url, group_id, http.clone(), events.clone()));
+                                } else {
+                                    report_capability_not_granted(&self.session, &diagnostics, CAP_GROUP_EXPERIENCES).await;
+                                }
+                            }
+                            Some(Command::RequestExperienceAdmin { experience_id }) => {
+                                if let Some(base) = caps.get(CAP_IS_EXPERIENCE_ADMIN).cloned() {
+                                    let url = format!("{base}{}", experience_id_query(experience_id));
+                                    tokio::spawn(fetch_experience_admin(url, experience_id, http.clone(), events.clone()));
+                                } else {
+                                    report_capability_not_granted(&self.session, &diagnostics, CAP_IS_EXPERIENCE_ADMIN).await;
+                                }
+                            }
+                            Some(Command::RequestExperienceContributor { experience_id }) => {
+                                if let Some(base) = caps.get(CAP_IS_EXPERIENCE_CONTRIBUTOR).cloned() {
+                                    let url = format!("{base}{}", experience_id_query(experience_id));
+                                    tokio::spawn(fetch_experience_contributor(url, experience_id, http.clone(), events.clone()));
+                                } else {
+                                    report_capability_not_granted(&self.session, &diagnostics, CAP_IS_EXPERIENCE_CONTRIBUTOR).await;
+                                }
+                            }
+                            Some(Command::UpdateExperience { update }) => {
+                                if let Some(url) = caps.get(CAP_UPDATE_EXPERIENCE).cloned() {
+                                    let body = build_update_experience_request(&update);
+                                    tokio::spawn(post_voice_cap(url, body, CAP_UPDATE_EXPERIENCE, http.clone(), caps_tx.clone()));
+                                } else {
+                                    report_capability_not_granted(&self.session, &diagnostics, CAP_UPDATE_EXPERIENCE).await;
+                                }
+                            }
+                            Some(Command::RequestEstateAccessLists) => {
+                                if let Some(url) = caps.get(CAP_ESTATE_ACCESS).cloned() {
+                                    tokio::spawn(get_caps_llsd(url, CAP_ESTATE_ACCESS, http.clone(), caps_tx.clone()));
+                                }
+                            }
+                            Some(Command::RequestRegionExperiences) => {
+                                if let Some(url) = caps.get(CAP_REGION_EXPERIENCES).cloned() {
+                                    tokio::spawn(get_caps_llsd(url, CAP_REGION_EXPERIENCES, http.clone(), caps_tx.clone()));
+                                } else {
+                                    report_capability_not_granted(&self.session, &diagnostics, CAP_REGION_EXPERIENCES).await;
+                                }
+                            }
+                            Some(Command::SetRegionExperiences { allowed, blocked, trusted }) => {
+                                if let Some(url) = caps.get(CAP_REGION_EXPERIENCES).cloned() {
+                                    let body = build_region_experiences_request(&allowed, &blocked, &trusted);
+                                    tokio::spawn(post_voice_cap(url, body, CAP_REGION_EXPERIENCES, http.clone(), caps_tx.clone()));
+                                } else {
+                                    report_capability_not_granted(&self.session, &diagnostics, CAP_REGION_EXPERIENCES).await;
+                                }
+                            }
+                            Some(Command::QueryParcelExperiences { parcel_id, experiences }) => {
+                                if let Some(base) = caps.get(CAP_EXPERIENCE_QUERY).cloned() {
+                                    let url = format!("{base}{}", experience_query(parcel_id, &experiences));
+                                    tokio::spawn(get_experience_query(url, parcel_id, http.clone(), caps_tx.clone()));
+                                } else {
+                                    report_capability_not_granted(&self.session, &diagnostics, CAP_EXPERIENCE_QUERY).await;
+                                }
+                            }
+                            Some(Command::OfferTeleport { targets, message }) => {
+                                self.session.offer_teleport(&targets, &message, Instant::now())?;
+                            }
+                            Some(Command::AcceptTeleportLure { lure_id }) => {
+                                self.session.accept_teleport_lure(lure_id, Instant::now())?;
+                            }
+                            Some(Command::DeclineTeleportLure { from_agent_id, lure_id }) => {
+                                self.session.decline_teleport_lure(from_agent_id, lure_id, Instant::now())?;
+                            }
+                            Some(Command::RequestTeleport { to_agent_id, message }) => {
+                                self.session.request_teleport(to_agent_id, &message, Instant::now())?;
+                            }
+                            Some(Command::GiveInventory { to_agent_id, item_id, asset_type, item_name, transaction_id }) => {
+                                self.session.give_inventory(to_agent_id, item_id, asset_type, &item_name, transaction_id, Instant::now())?;
+                            }
+                            Some(Command::GiveInventoryFolder { to_agent_id, folder_id, folder_name, transaction_id }) => {
+                                self.session.give_inventory_folder(to_agent_id, folder_id, &folder_name, transaction_id, Instant::now())?;
+                            }
+                            Some(Command::AcceptInventoryOffer { offer, folder_id }) => {
+                                self.session.accept_inventory_offer(&offer, folder_id, Instant::now())?;
+                            }
+                            Some(Command::DeclineInventoryOffer { offer, trash_folder_id }) => {
+                                self.session.decline_inventory_offer(&offer, trash_folder_id, Instant::now())?;
+                            }
+                            Some(Command::StartConference { session_id, invitees, message }) => {
+                                // Prefer the modern `ChatSessionRequest` POST; the
+                                // deprecated `IM_SESSION_CONFERENCE_START` instant
+                                // message is the fallback for a grid without the cap.
+                                // Either way the session opens under the id we minted,
+                                // until the grid's `ChatterBoxSessionStartReply` moves
+                                // it onto the id the session really has.
+                                if let Some(url) = caps.get(CAP_CHAT_SESSION_REQUEST).cloned() {
+                                    let body = chat_session_agents_body(CHAT_SESSION_START_CONFERENCE, session_id.get(), &invitees);
+                                    self.session.open_conference(session_id, &invitees, Instant::now());
+                                    tokio::spawn(post_caps_oneway(url, body, http.clone()));
+                                } else {
+                                    self.session.start_conference(session_id, &invitees, &message, Instant::now())?;
+                                }
+                            }
+                            Some(Command::InviteToChatSession { session_id, invitees }) => {
+                                // Adding to a session that already exists is the cap's
+                                // own `invite`; the legacy path has only the
+                                // conference-start IM, which a simulator without the
+                                // cap treats as an add.
+                                if let Some(url) = caps.get(CAP_CHAT_SESSION_REQUEST).cloned() {
+                                    let body = chat_session_agents_body(CHAT_SESSION_INVITE, session_id.get(), &invitees);
+                                    self.session.open_conference(session_id, &invitees, Instant::now());
+                                    tokio::spawn(post_caps_oneway(url, body, http.clone()));
+                                } else {
+                                    self.session.start_conference(session_id, &invitees, "", Instant::now())?;
+                                }
+                            }
+                            Some(Command::SendConferenceMessage { session_id, message }) => {
+                                self.session.send_conference_message(session_id, &message, Instant::now())?;
+                                if let Some(own) = self.session.agent_id() {
+                                    let name = self.session.agent_legacy_name();
+                                    let roster: std::collections::BTreeSet<_> = self
+                                        .session
+                                        .participants(ChatSessionKind::Conference { id: session_id })
+                                        .collect();
+                                    chat_log.log_conference(session_id, &roster, own, &name, &message);
+                                }
+                            }
+                            Some(Command::LeaveConference { session_id }) => {
+                                self.session.leave_conference(session_id, Instant::now())?;
+                            }
+                            Some(Command::MarkSessionRead { session }) => {
+                                self.session.mark_session_read(session);
+                            }
+                            Some(Command::AcceptChatInvite { session_id, from_group }) => {
+                                // Promote the registry entry to joined, then drive the
+                                // modern accept over the cap when present (its reply
+                                // roster seeds the participants); on a grid without the
+                                // cap the optimistic local join is the whole accept.
+                                self.session.accept_chat_invite(session_id, from_group, Instant::now());
+                                if let Some(url) = caps.get(CAP_CHAT_SESSION_REQUEST).cloned() {
+                                    let body = chat_session_request_body(CHAT_SESSION_ACCEPT, session_id.get());
+                                    tokio::spawn(post_chat_session_request(url, body, session_id.get(), from_group, http.clone(), caps_tx.clone()));
+                                }
+                            }
+                            Some(Command::DeclineChatInvite { session_id, from_group }) => {
+                                // Remove the registry entry, then refuse on the wire:
+                                // the cap `decline invitation` POST when present, else
+                                // a UDP `SessionLeave` as the OpenSim fallback.
+                                self.session.decline_chat_invite(session_id, from_group, Instant::now());
+                                if let Some(url) = caps.get(CAP_CHAT_SESSION_REQUEST).cloned() {
+                                    let body = chat_session_request_body(CHAT_SESSION_DECLINE, session_id.get());
+                                    tokio::spawn(post_chat_session_request(url, body, session_id.get(), from_group, http.clone(), caps_tx.clone()));
+                                } else if from_group {
+                                    self.session.leave_group_session(GroupKey::from(session_id.get()), Instant::now())?;
+                                } else {
+                                    self.session.leave_conference(session_id, Instant::now())?;
+                                }
+                            }
+                            Some(Command::JoinSessionVoice { session }) => {
+                                // Optimistic local join, then drive the signalling: ensure
+                                // a voice account, then signal into the session's channel
+                                // over `ChatSessionRequest` (accept invitation). Signalling
+                                // only — the audio session is the caller's concern.
+                                self.session.join_session_voice(session, Instant::now());
+                                if let Some(own) = self.session.agent_id() {
+                                    let session_uuid = session.canonical_session_id(own);
+                                    let from_group = matches!(session, ChatSessionKind::Group { .. });
+                                    if let Some(url) = caps.get(CAP_PROVISION_VOICE_ACCOUNT).cloned() {
+                                        let body = build_provision_voice_account_request(&VoiceProvisionRequest::vivox());
+                                        tokio::spawn(post_voice_cap(url, body, CAP_PROVISION_VOICE_ACCOUNT, http.clone(), caps_tx.clone()));
+                                    }
+                                    if let Some(url) = caps.get(CAP_CHAT_SESSION_REQUEST).cloned() {
+                                        let body = chat_session_request_body(CHAT_SESSION_ACCEPT, session_uuid);
+                                        tokio::spawn(post_chat_session_request(url, body, session_uuid, from_group, http.clone(), caps_tx.clone()));
+                                    }
+                                }
+                            }
+                            Some(Command::LeaveSessionVoice { session }) => {
+                                // Optimistic local leave (keeps the text conversation),
+                                // then signal the voice decline on the wire: a 1:1 P2P
+                                // call uses `decline p2p voice`, a group / conference the
+                                // multi-agent `decline invitation`.
+                                self.session.leave_session_voice(session);
+                                if let Some(own) = self.session.agent_id() {
+                                    let session_uuid = session.canonical_session_id(own);
+                                    let from_group = matches!(session, ChatSessionKind::Group { .. });
+                                    let method = if matches!(session, ChatSessionKind::Direct { .. }) {
+                                        CHAT_SESSION_DECLINE_P2P_VOICE
+                                    } else {
+                                        CHAT_SESSION_DECLINE
+                                    };
+                                    if let Some(url) = caps.get(CAP_CHAT_SESSION_REQUEST).cloned() {
+                                        let body = chat_session_request_body(method, session_uuid);
+                                        tokio::spawn(post_chat_session_request(url, body, session_uuid, from_group, http.clone(), caps_tx.clone()));
+                                    }
+                                }
+                            }
+                            Some(Command::FetchSessionHistory { kind }) => {
+                                // Explicit server-backlog fetch, bypassing the
+                                // auto-fetch gate. Only group / conference sessions
+                                // have a server backlog; on a grid without the cap
+                                // (stock OpenSim) there is nothing to POST to, so the
+                                // command silently degrades.
+                                if !matches!(kind, ChatSessionKind::Direct { .. })
+                                    && let (Some(url), Some(own)) = (
+                                        caps.get(CAP_CHAT_SESSION_REQUEST).cloned(),
+                                        self.session.agent_id(),
+                                    )
+                                {
+                                    // Suppress a later duplicate auto-fetch of the
+                                    // same session.
+                                    self.session.note_server_history_requested(kind);
+                                    let session_uuid = kind.canonical_session_id(own);
+                                    let body = chat_session_request_body(CHAT_SESSION_FETCH_HISTORY, session_uuid);
+                                    tokio::spawn(post_chat_session_fetch_history(
+                                        url,
+                                        body,
+                                        session_uuid,
+                                        matches!(kind, ChatSessionKind::Group { .. }),
+                                        http.clone(),
+                                        caps_tx.clone(),
+                                    ));
+                                }
+                            }
+                            Some(Command::QueryChatSessions) => {
+                                // Local query: build the light session list and surface
+                                // it on the event stream (no wire send).
+                                deliver(&events, Event::ChatSessions( self.session.chat_sessions_info().collect(), )).await;
+                            }
+                            Some(Command::QueryChatHistoryPage { session, before, limit }) => {
+                                // Newest-first paging across the unified memory→archive
+                                // view: serve the in-memory ring first, then continue
+                                // older pages from the on-disk transcript (B9).
+                                let consumed = before.map_or(0, MessageCursor::consumed_count);
+                                let mem_len = self.session.history_len(session);
+                                let (messages, prev): (std::sync::Arc<[SessionMessage]>, _) =
+                                    if consumed < mem_len {
+                                        let (page, mem_prev) =
+                                            self.session.history_page(session, before, limit);
+                                        let collected: std::sync::Arc<[_]> = page.cloned().collect();
+                                        let next = consumed.saturating_add(collected.len());
+                                        // When the ring is exhausted, hand a file cursor
+                                        // if the transcript holds anything older.
+                                        let prev = mem_prev.or_else(|| {
+                                            chat_log
+                                                .read_older_page(session, mem_len, next, 1)
+                                                .filter(|(probe, _)| !probe.is_empty())
+                                                .map(|_more| MessageCursor::from_consumed(next))
+                                        });
+                                        (collected, prev)
+                                    } else {
+                                        match chat_log.read_older_page(session, mem_len, consumed, limit) {
+                                            Some((msgs, prev)) => (msgs.into(), prev),
+                                            None => (Vec::new().into(), None),
+                                        }
+                                    };
+                                deliver(&events, Event::ChatHistoryPage { session, messages, prev }).await;
+                            }
+                            Some(Command::QueryNearbyChatHistoryPage { already_shown, before, limit }) => {
+                                // Nearby chat has no in-memory ring: the whole page
+                                // comes from the on-disk transcript, skipping the newest
+                                // `already_shown` lines the caller already shows live
+                                // (B9 paging discipline).
+                                let consumed = before.map_or(0, MessageCursor::consumed_count);
+                                let (lines, prev): (std::sync::Arc<[NearbyHistoryLine]>, _) =
+                                    match chat_log.read_nearby_older_page(already_shown, consumed, limit) {
+                                        Some((page, cursor)) => (page.into(), cursor),
+                                        None => (Vec::new().into(), None),
+                                    };
+                                deliver(&events, Event::NearbyChatHistoryPage { lines, prev }).await;
+                            }
+                            Some(Command::QueryInventoryFolder { folder, before, limit }) => {
+                                // Local query: page the held model into owning view
+                                // types (one bounded borrow→owned transform, the
+                                // payload `Arc<[…]>` so re-handoff is a refcount
+                                // bump). A bevy reader may instead borrow the Session
+                                // and call `inventory_folder_page` directly.
+                                let (folders, items, prev) =
+                                    self.session.inventory_folder_page(folder, before, limit);
+                                // On-demand: a query for an unfetched folder schedules
+                                // its fetch so a later query sees the contents (works
+                                // regardless of the background-crawl flag). A folder the
+                                // crawl gave up on (`Failed`) is retried here too — this
+                                // is a fresh, caller-driven decision to fetch it, and the
+                                // stall deadline keeps a repeated query from hammering.
+                                if matches!(
+                                    self.session.folder_fetch_state(folder),
+                                    Some(FolderState::Unknown | FolderState::Failed)
+                                ) {
+                                    fetch_folder_contents(
+                                        &mut self.session,
+                                        folder,
+                                        &caps,
+                                        &http,
+                                        &caps_tx,
+                                        Instant::now(),
+                                    )?;
+                                }
+                                // Read after the fetch above, so a folder it just
+                                // scheduled reports `Fetching`, not `Unknown`.
+                                let state = self.session.folder_fetch_state(folder);
+                                deliver(&events, Event::InventoryFolderPage { folder, state, folders: folders.into(), items: items.into(), prev, }).await;
+                            }
+                            Some(Command::QueryInventoryRoots) => {
+                                // Local query: surface the agent + library roots (both
+                                // `Copy` keys, no `Arc` needed).
+                                deliver(&events, Event::InventoryRoots { agent_root: self.session.inventory_root(), library_root: self.session.library_root(), }).await;
+                            }
+                            Some(Command::QueryInventoryFolders) => {
+                                // Local query: snapshot the agent tree's known folders
+                                // (seeded from the login skeleton, so present before any
+                                // contents fetch). `Arc` so the clone across the channel
+                                // is cheap regardless of tree size.
+                                let folders: std::sync::Arc<[FolderInfo]> =
+                                    self.session.inventory_folder_infos().into();
+                                deliver(&events, Event::InventoryFolders(folders)).await;
+                            }
+                            Some(Command::QueryFriends) => {
+                                // Local query: build the buddy snapshot with online flags.
+                                deliver(&events, Event::FriendsSnapshot( self.session.friends_presence().collect(), )).await;
+                            }
+                            Some(Command::RetrieveInstantMessages) => {
+                                self.session.retrieve_instant_messages(Instant::now())?;
+                            }
+                            Some(Command::RequestOfflineMessages) => {
+                                match caps.get(CAP_READ_OFFLINE_MSGS).cloned().filter(|_url| {
+                                    OFFLINE_DRAIN_CAPABILITIES.iter().all(|cap| caps.contains_key(*cap))
+                                }) {
+                                    Some(url) => {
+                                        tokio::spawn(get_caps_llsd(url, CAP_READ_OFFLINE_MSGS, http.clone(), caps_tx.clone()));
+                                    }
+                                    // A region without the capability, or without the
+                                    // two that answer what it hands over (a stock
+                                    // OpenSim), is read over the UDP
+                                    // `RetrieveInstantMessages`, as the reference does.
+                                    None => self.session.retrieve_instant_messages(Instant::now())?,
+                                }
+                            }
+                            Some(Command::TeleportViaLandmark { landmark }) => {
+                                self.session.teleport_via_landmark(landmark, Instant::now())?;
+                            }
+                            Some(Command::CancelTeleport) => {
+                                self.session.cancel_teleport(Instant::now())?;
+                            }
+                            Some(Command::SetStartLocation { slot, position, look_at }) => {
+                                match caps.get(CAP_HOME_LOCATION).cloned() {
+                                    // The reference's "Set Home to Here" takes the
+                                    // capability where the region grants it, and
+                                    // falls back to UDP only where it does not.
+                                    Some(url) => {
+                                        let body = build_home_location_request(&HomeLocationRequest {
+                                            location_id: slot.to_code(),
+                                            position,
+                                            look_at,
+                                        });
+                                        tokio::spawn(post_home_location(url, body, http.clone(), caps_tx.clone()));
+                                    }
+                                    None => self.session.set_start_location(slot, position, look_at, Instant::now())?,
+                                }
+                            }
+                            Some(Command::RequestAgentDataUpdate) => {
+                                self.session.request_agent_data_update(Instant::now())?;
+                            }
+                            Some(Command::QuitCopy) => {
+                                self.session.quit_copy(Instant::now())?;
+                            }
+                            Some(Command::SetVelocityInterpolation { enabled }) => {
+                                self.session.set_velocity_interpolation(enabled, Instant::now())?;
+                            }
+                            // Cap-preferred (the modern `UserInfo` GET/POST), falling back to the
+                            // legacy `UserInfoRequest`/`UpdateUserInfo` UDP messages where the
+                            // region does not serve the capability (OpenSim).
+                            Some(Command::RequestUserInfo) => {
+                                if let Some(url) = caps.get(CAP_USER_INFO).cloned() {
+                                    tokio::spawn(get_caps_llsd(url, CAP_USER_INFO, http.clone(), caps_tx.clone()));
+                                } else {
+                                    self.session.request_user_info(Instant::now())?;
+                                }
+                            }
+                            Some(Command::UpdateUserInfo { im_via_email, directory_visibility }) => {
+                                if let Some(url) = caps.get(CAP_USER_INFO).cloned() {
+                                    // `im_via_email` is always included: OpenSim needs it and
+                                    // Second Life ignores unknown keys (it manages the forwarding
+                                    // preference on the account website).
+                                    let body = build_user_info_update(&UserInfoUpdate {
+                                        im_via_email: Some(im_via_email),
+                                        dir_visibility: directory_visibility.to_wire().to_owned(),
+                                    });
+                                    tokio::spawn(post_voice_cap(url, body, CAP_USER_INFO, http.clone(), caps_tx.clone()));
+                                } else {
+                                    self.session.update_user_info(im_via_email, directory_visibility, Instant::now())?;
+                                }
+                            }
+                            Some(Command::SetChatLogConfig(config)) => {
+                                chat_log.set_config(*config);
+                            }
+                            Some(Command::TranscribeInvitationLine { session, from_agent_id, from_name, message }) => {
+                                chat_log.log_invitation_line(&self.session, session, from_agent_id, &from_name, &message);
+                            }
+                            Some(Command::SetDiagnostics(enabled)) => {
+                                self.session.set_diagnostics(enabled);
+                            }
+                            Some(Command::ProbeCircuits(probe)) => {
+                                self.session.probe_circuits(probe);
+                            }
+                            Some(Command::TriggerSound { sound, gain, region_handle, position }) => {
+                                self.session.trigger_sound(sound, gain, region_handle, position, Instant::now())?;
+                            }
+                            Some(Command::RequestGodlikePowers { godlike }) => {
+                                self.session.request_godlike_powers(godlike, Instant::now())?;
+                            }
+                            Some(Command::EjectUser { target, action }) => {
+                                self.session.eject_user(target, action, Instant::now())?;
+                            }
+                            Some(Command::FreezeUser { target, action }) => {
+                                self.session.freeze_user(target, action, Instant::now())?;
+                            }
+                            Some(Command::SimWideDeletes { owner, flags }) => {
+                                self.session.sim_wide_deletes(owner, flags, Instant::now())?;
+                            }
+                            Some(Command::GodUpdateRegionInfo { update }) => {
+                                self.session.god_update_region_info(&update, Instant::now())?;
+                            }
+                            Some(Command::ParcelGodForceOwner { parcel, owner }) => {
+                                self.session.parcel_god_force_owner(parcel, owner, Instant::now())?;
+                            }
+                            Some(Command::ParcelGodMarkAsContent { parcel }) => {
+                                self.session.parcel_god_mark_as_content(parcel, Instant::now())?;
+                            }
+                            Some(Command::EventGodDelete { event, query_id, query_text, flags, query_start }) => {
+                                self.session.event_god_delete(event, query_id, &query_text, flags, query_start, Instant::now())?;
+                            }
+                            Some(Command::StateSave { filename }) => {
+                                self.session.state_save(&filename, Instant::now())?;
+                            }
+                            Some(Command::ViewerStartAuction { parcel, snapshot }) => {
+                                self.session.viewer_start_auction(parcel, snapshot, Instant::now())?;
+                            }
+                            Some(Command::MarketplaceMerchantStatus) => {
+                                dispatch_marketplace_request(caps.get(CAP_DIRECT_DELIVERY).cloned(), MarketplaceOperation::MerchantStatus, Ok(merchant_status_request()), &http, &events);
+                            }
+                            Some(Command::MarketplaceListings) => {
+                                dispatch_marketplace_request(caps.get(CAP_DIRECT_DELIVERY).cloned(), MarketplaceOperation::GetListings, Ok(listings_request()), &http, &events);
+                            }
+                            Some(Command::MarketplaceListing(id)) => {
+                                dispatch_marketplace_request(caps.get(CAP_DIRECT_DELIVERY).cloned(), MarketplaceOperation::GetListing(id), Ok(listing_request(id)), &http, &events);
+                            }
+                            Some(Command::MarketplaceCreateListing(payload)) => {
+                                dispatch_marketplace_request(caps.get(CAP_DIRECT_DELIVERY).cloned(), MarketplaceOperation::CreateListing, create_listing_request(&payload), &http, &events);
+                            }
+                            Some(Command::MarketplaceUpdateListing(payload)) => {
+                                dispatch_marketplace_request(caps.get(CAP_DIRECT_DELIVERY).cloned(), MarketplaceOperation::UpdateListing(payload.id), update_listing_request(&payload), &http, &events);
+                            }
+                            Some(Command::MarketplaceAssociateListing(payload)) => {
+                                dispatch_marketplace_request(caps.get(CAP_DIRECT_DELIVERY).cloned(), MarketplaceOperation::AssociateInventory(payload.id), associate_inventory_request(&payload), &http, &events);
+                            }
+                            Some(Command::MarketplaceDeleteListing(id)) => {
+                                dispatch_marketplace_request(caps.get(CAP_DIRECT_DELIVERY).cloned(), MarketplaceOperation::DeleteListing(id), Ok(delete_listing_request(id)), &http, &events);
+                            }
+                            Some(Command::Logout) | None => {
+                                self.session.initiate_logout(Instant::now());
                             }
                         }
-                        Some(Command::RequestAgentDataUpdate) => {
-                            self.session.request_agent_data_update(Instant::now())?;
-                        }
-                        Some(Command::QuitCopy) => {
-                            self.session.quit_copy(Instant::now())?;
-                        }
-                        Some(Command::SetVelocityInterpolation { enabled }) => {
-                            self.session.set_velocity_interpolation(enabled, Instant::now())?;
-                        }
-                        // Cap-preferred (the modern `UserInfo` GET/POST), falling back to the
-                        // legacy `UserInfoRequest`/`UpdateUserInfo` UDP messages where the
-                        // region does not serve the capability (OpenSim).
-                        Some(Command::RequestUserInfo) => {
-                            if let Some(url) = caps.get(CAP_USER_INFO).cloned() {
-                                tokio::spawn(get_caps_llsd(url, CAP_USER_INFO, http.clone(), caps_tx.clone()));
-                            } else {
-                                self.session.request_user_info(Instant::now())?;
-                            }
-                        }
-                        Some(Command::UpdateUserInfo { im_via_email, directory_visibility }) => {
-                            if let Some(url) = caps.get(CAP_USER_INFO).cloned() {
-                                // `im_via_email` is always included: OpenSim needs it and
-                                // Second Life ignores unknown keys (it manages the forwarding
-                                // preference on the account website).
-                                let body = build_user_info_update(&UserInfoUpdate {
-                                    im_via_email: Some(im_via_email),
-                                    dir_visibility: directory_visibility.to_wire().to_owned(),
-                                });
-                                tokio::spawn(post_voice_cap(url, body, CAP_USER_INFO, http.clone(), caps_tx.clone()));
-                            } else {
-                                self.session.update_user_info(im_via_email, directory_visibility, Instant::now())?;
-                            }
-                        }
-                        Some(Command::SetChatLogConfig(config)) => {
-                            chat_log.set_config(*config);
-                        }
-                        Some(Command::TranscribeInvitationLine { session, from_agent_id, from_name, message }) => {
-                            chat_log.log_invitation_line(&self.session, session, from_agent_id, &from_name, &message);
-                        }
-                        Some(Command::SetDiagnostics(enabled)) => {
-                            self.session.set_diagnostics(enabled);
-                        }
-                        Some(Command::ProbeCircuits(probe)) => {
-                            self.session.probe_circuits(probe);
-                        }
-                        Some(Command::TriggerSound { sound, gain, region_handle, position }) => {
-                            self.session.trigger_sound(sound, gain, region_handle, position, Instant::now())?;
-                        }
-                        Some(Command::RequestGodlikePowers { godlike }) => {
-                            self.session.request_godlike_powers(godlike, Instant::now())?;
-                        }
-                        Some(Command::EjectUser { target, action }) => {
-                            self.session.eject_user(target, action, Instant::now())?;
-                        }
-                        Some(Command::FreezeUser { target, action }) => {
-                            self.session.freeze_user(target, action, Instant::now())?;
-                        }
-                        Some(Command::SimWideDeletes { owner, flags }) => {
-                            self.session.sim_wide_deletes(owner, flags, Instant::now())?;
-                        }
-                        Some(Command::GodUpdateRegionInfo { update }) => {
-                            self.session.god_update_region_info(&update, Instant::now())?;
-                        }
-                        Some(Command::ParcelGodForceOwner { parcel, owner }) => {
-                            self.session.parcel_god_force_owner(parcel, owner, Instant::now())?;
-                        }
-                        Some(Command::ParcelGodMarkAsContent { parcel }) => {
-                            self.session.parcel_god_mark_as_content(parcel, Instant::now())?;
-                        }
-                        Some(Command::EventGodDelete { event, query_id, query_text, flags, query_start }) => {
-                            self.session.event_god_delete(event, query_id, &query_text, flags, query_start, Instant::now())?;
-                        }
-                        Some(Command::StateSave { filename }) => {
-                            self.session.state_save(&filename, Instant::now())?;
-                        }
-                        Some(Command::ViewerStartAuction { parcel, snapshot }) => {
-                            self.session.viewer_start_auction(parcel, snapshot, Instant::now())?;
-                        }
-                        Some(Command::MarketplaceMerchantStatus) => {
-                            dispatch_marketplace_request(caps.get(CAP_DIRECT_DELIVERY).cloned(), MarketplaceOperation::MerchantStatus, Ok(merchant_status_request()), &http, &events);
-                        }
-                        Some(Command::MarketplaceListings) => {
-                            dispatch_marketplace_request(caps.get(CAP_DIRECT_DELIVERY).cloned(), MarketplaceOperation::GetListings, Ok(listings_request()), &http, &events);
-                        }
-                        Some(Command::MarketplaceListing(id)) => {
-                            dispatch_marketplace_request(caps.get(CAP_DIRECT_DELIVERY).cloned(), MarketplaceOperation::GetListing(id), Ok(listing_request(id)), &http, &events);
-                        }
-                        Some(Command::MarketplaceCreateListing(payload)) => {
-                            dispatch_marketplace_request(caps.get(CAP_DIRECT_DELIVERY).cloned(), MarketplaceOperation::CreateListing, create_listing_request(&payload), &http, &events);
-                        }
-                        Some(Command::MarketplaceUpdateListing(payload)) => {
-                            dispatch_marketplace_request(caps.get(CAP_DIRECT_DELIVERY).cloned(), MarketplaceOperation::UpdateListing(payload.id), update_listing_request(&payload), &http, &events);
-                        }
-                        Some(Command::MarketplaceAssociateListing(payload)) => {
-                            dispatch_marketplace_request(caps.get(CAP_DIRECT_DELIVERY).cloned(), MarketplaceOperation::AssociateInventory(payload.id), associate_inventory_request(&payload), &http, &events);
-                        }
-                        Some(Command::MarketplaceDeleteListing(id)) => {
-                            dispatch_marketplace_request(caps.get(CAP_DIRECT_DELIVERY).cloned(), MarketplaceOperation::DeleteListing(id), Ok(delete_listing_request(id)), &http, &events);
-                        }
-                        Some(Command::Logout) | None => {
-                            self.session.initiate_logout(Instant::now());
-                        }
+                        Ok(())
+                    }
+                    .await;
+                    if let Err(error) = outcome {
+                        let command = name.unwrap_or("Logout");
+                        tracing::warn!("command {command} failed to send: {error}");
+                        deliver(&events, Event::CommandFailed { command, reason: error.to_string() }).await;
                     }
                 }
                 () = &mut sleep => {

@@ -6544,6 +6544,42 @@ mod test {
         Ok(())
     }
 
+    /// A map reply of more items than one message holds — a busy grid's green
+    /// dots — goes out as several replies, each inside the MTU, and every item
+    /// reaches the client in order.
+    #[test]
+    fn a_long_map_item_reply_is_split() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_client(&mut client);
+        let items: Vec<MapItem> = (0..600_u32)
+            .map(|index| MapItem {
+                position: GlobalCoordinates::new(256_000.0 + f64::from(index), 256_128.0, 0.0),
+                id: None,
+                extra: 1,
+                extra2: 0,
+                name: String::new(),
+            })
+            .collect();
+        sim.send_map_item_reply(
+            MapRequestFlags(MapRequestFlags::LAYER),
+            MapItemType::AgentLocations,
+            &items,
+            now,
+        )?;
+        pump(&mut client, &mut sim, now)?;
+        let replies: Vec<Vec<MapItem>> = drain_client(&mut client)
+            .into_iter()
+            .filter_map(|event| match event {
+                Event::MapItems { items, .. } => Some(items),
+                _ => None,
+            })
+            .collect();
+        assert!(replies.len() > 2, "{} replies", replies.len());
+        assert_eq!(replies.concat(), items);
+        Ok(())
+    }
+
     #[test]
     fn simulator_map_layer_reply_reaches_client() -> Result<(), TestError> {
         let now = Instant::now();
@@ -10414,6 +10450,70 @@ mod test {
             removed,
             vec![RegionLocalObjectId(0x10), RegionLocalObjectId(0x11)]
         );
+        Ok(())
+    }
+
+    /// A forced selection longer than one message states arrives whole, in
+    /// several messages of which only the first clears the selection — a later
+    /// one that also reset it would drop what the one before it selected.
+    #[test]
+    fn a_long_forced_selection_resets_only_once() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_client(&mut client);
+        let selected: Vec<RegionLocalObjectId> = (1..=600).map(RegionLocalObjectId).collect();
+        sim.send_force_object_select(true, &selected, now)?;
+        pump(&mut client, &mut sim, now)?;
+        let parts: Vec<(bool, Vec<RegionLocalObjectId>)> = drain_client(&mut client)
+            .into_iter()
+            .filter_map(|e| match e {
+                Event::ForceObjectSelect {
+                    reset_list,
+                    objects,
+                } => Some((reset_list, objects.iter().map(|o| o.id()).collect())),
+                _ => None,
+            })
+            .collect();
+        assert!(parts.len() > 1, "{} part(s)", parts.len());
+        assert_eq!(
+            parts.iter().map(|(reset, _)| *reset).collect::<Vec<_>>(),
+            std::iter::once(true)
+                .chain(std::iter::repeat_n(false, parts.len() - 1))
+                .collect::<Vec<_>>()
+        );
+        let all: Vec<RegionLocalObjectId> =
+            parts.into_iter().flat_map(|(_, objects)| objects).collect();
+        assert_eq!(all, selected);
+
+        // An empty list is still a message: "clear the selection".
+        sim.send_force_object_select(true, &[], now)?;
+        pump(&mut client, &mut sim, now)?;
+        let cleared = drain_client(&mut client).into_iter().any(|e| {
+            matches!(e, Event::ForceObjectSelect { reset_list: true, ref objects } if objects.is_empty())
+        });
+        assert!(cleared, "expected an empty resetting ForceObjectSelect");
+        Ok(())
+    }
+
+    /// A derez of more than 255 objects is killed in as many `KillObject`s as it
+    /// takes rather than failing to encode — the fake grid's linkset derez that
+    /// left 256 prims on the client.
+    #[test]
+    fn a_long_kill_list_is_split() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_client(&mut client);
+        let objects: Vec<RegionLocalObjectId> = (1..=600).map(RegionLocalObjectId).collect();
+        sim.send_kill_object(&objects, now)?;
+        let mut kills = Vec::new();
+        while let Some(transmit) = sim.poll_transmit() {
+            if let AnyMessage::KillObject(kill) = decode(&transmit)? {
+                kills.push(kill.object_data.iter().map(|b| b.id).collect::<Vec<u32>>());
+            }
+        }
+        assert!(kills.len() > 2, "{} message(s)", kills.len());
+        assert!(kills.iter().all(|kill| kill.len() <= 255));
+        assert_eq!(kills.concat(), (1..=600).collect::<Vec<u32>>());
         Ok(())
     }
 

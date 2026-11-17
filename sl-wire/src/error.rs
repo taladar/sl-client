@@ -69,6 +69,22 @@ pub enum WireError {
         /// The number of items the encoder was handed.
         found: usize,
     },
+    /// A `Variable` block was handed more items than its one-byte count can
+    /// state.
+    ///
+    /// The count is a single byte on the wire, so a message carries at most 255
+    /// of one block. A sender with a longer list splits it across messages (the
+    /// reference viewer starts a new message when the current one is full); one
+    /// that does not is refused here rather than written with a wrapped count.
+    #[error("block {block} holds {found} item(s) where its one-byte count allows at most {max}")]
+    TooManyBlocks {
+        /// The template's name for the offending block.
+        block: &'static str,
+        /// The number of items the encoder was handed.
+        found: usize,
+        /// The most items the block can carry.
+        max: usize,
+    },
     /// A decoded field held a value outside the range its typed representation
     /// permits — for example a negative L$ amount in a field a conforming peer
     /// only ever sends non-negative, or an amount too large for its signed

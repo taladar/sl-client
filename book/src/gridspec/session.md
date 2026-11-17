@@ -141,8 +141,13 @@ each test which sees an object on that flavour is sure to read one;
   85 ms each way — the round trip measured to aditi.
 - `Command::RequestObjects` for more than 255 objects used to fail to encode
   — a message's block count is one byte — and the driver ended the session
-  over it. It is split across messages now. The same limit applies to every
-  other request that lists objects (`protocol-variable-block-lists-over-255`).
+  over it. Every request that lists objects is now split across messages as
+  the reference splits it (`protocol-variable-block-lists-over-255`): the
+  selection lists at 254 objects or the 1200-byte MTU, whichever comes first,
+  a link with its root opening every message, a take at 250 roots to a
+  numbered packet. The simulator side splits its kills, notifications and
+  replies the same way. A command that still fails to send is reported and
+  costs only itself, in both drivers.
 
 ### Not measured
 

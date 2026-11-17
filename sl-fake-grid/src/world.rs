@@ -62,9 +62,6 @@ pub(crate) const REAL_TIME_DILATION: u16 = 0xFFFF;
 /// `SendLandUpdateToClient` sends).
 pub(crate) const UNSOLICITED_SEQUENCE_ID: i32 = 0;
 
-/// The most objects one `KillObject` names: its block count is a byte.
-const MOST_KILLS_A_MESSAGE: usize = 255;
-
 /// The parcels and objects of one region, pushed at every arriving agent
 /// and replayed on request.
 #[derive(Debug, Clone)]
@@ -4649,12 +4646,10 @@ fn derez(
     };
     if !killed.is_empty() {
         for _message in 0..kill_messages {
-            // A message's block count is one byte: a linkset of 256 prims
-            // and a root beside it are more than one `KillObject` holds.
-            for named in killed.chunks(MOST_KILLS_A_MESSAGE) {
-                if let Err(error) = sim.send_kill_object(named, now) {
-                    tracing::warn!("killing a derezzed object failed: {error}");
-                }
+            // A linkset of 256 prims and a root beside it are more than one
+            // `KillObject` holds; the session splits the list itself.
+            if let Err(error) = sim.send_kill_object(&killed, now) {
+                tracing::warn!("killing a derezzed object failed: {error}");
             }
         }
     }

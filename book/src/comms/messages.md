@@ -109,6 +109,23 @@ Because the structs are generated from the canonical template, the wire format
 stays in lock-step with Linden Lab's definition — adding support for a new
 message is often just a matter of the template already containing it.
 
+## Lists longer than one message
+
+A `Variable` block's count is a single byte, so one message carries at most
+255 of it, and a datagram is filled only to the reference's 1200-byte MTU. A
+list longer than either — a box-selected build, a large linkset, a region's
+worth of kills — is several messages, each repeating the header blocks, the
+way the reference viewer starts a new message once `isSendFull` says the
+current one is full. `sl-proto`'s `split` module does this for both the client
+and the simulator senders. A list handed to the encoder unsplit is refused
+with `WireError::TooManyBlocks`, which names the block, rather than written
+with a wrapped count.
+
+A command that fails to send anyway — no circuit yet, a scoped id naming a
+region the session has left, a request that does not encode — is reported and
+the session carries on: the tokio driver sends `Event::CommandFailed`, the Bevy
+driver its `SlCommandFailed` message.
+
 ## When decoding goes wrong
 
 Three things can happen on the receive path that are worth surfacing rather

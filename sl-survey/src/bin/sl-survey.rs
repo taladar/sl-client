@@ -704,6 +704,7 @@ impl Survey {
             | Event::InventoryThumbnailUploadFailed { .. }
             | Event::PostcardSent
             | Event::PostcardFailed { .. }
+            | Event::CommandFailed { .. }
             | Event::AvatarAppearance(_)
             | Event::AgentWearables { .. }
             | Event::AvatarAnimation { .. }

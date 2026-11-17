@@ -234,6 +234,28 @@ mod test {
         Ok(())
     }
 
+    /// A `Variable` block's count is one byte, so 255 items encode and 256 are
+    /// refused with an error that counts blocks — not a wrapped count byte,
+    /// and not the byte-capacity error a long string field gets.
+    #[test]
+    fn a_variable_block_refuses_more_items_than_its_count_byte_states()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let acks = |count: u32| PacketAck {
+            packets: (0..count).map(|id| PacketAckPacketsBlock { id }).collect(),
+        };
+        assert_eq!(encode(&acks(255))?.len(), 1 + 255 * 4);
+        let mut writer = Writer::new();
+        assert_eq!(
+            acks(256).encode_body(&mut writer),
+            Err(sl_wire::WireError::TooManyBlocks {
+                block: "Packets",
+                found: 256,
+                max: 255,
+            })
+        );
+        Ok(())
+    }
+
     /// A `Variable` block's repeat-count byte is only optional where the block
     /// may be omitted altogether — the message's *trailing* run of `Variable`
     /// blocks, which is what OpenSim's shorter `RegionInfo` drops. Elsewhere

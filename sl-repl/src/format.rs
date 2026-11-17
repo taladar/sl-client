@@ -437,6 +437,7 @@ const fn event_name(event: &Event) -> &'static str {
         Event::InventoryThumbnailUploadFailed { .. } => "inventory_thumbnail_upload_failed",
         Event::PostcardSent => "postcard_sent",
         Event::PostcardFailed { .. } => "postcard_failed",
+        Event::CommandFailed { .. } => "command_failed",
         Event::AvatarAppearance(..) => "avatar_appearance",
         Event::AgentWearables { .. } => "agent_wearables",
         Event::ServerAppearanceUpdate { .. } => "server_appearance_update",

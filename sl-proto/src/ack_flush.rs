@@ -14,7 +14,7 @@ use sl_wire::messages::{AnyMessage, PacketAck, PacketAckPacketsBlock};
 /// The maximum number of acknowledgements packed into a single `PacketAck`.
 ///
 /// The message's block count is a `u8`, so a longer batch would fail to encode
-/// with [`WireError::VariableTooLong`](sl_wire::WireError::VariableTooLong).
+/// with [`WireError::TooManyBlocks`](sl_wire::WireError::TooManyBlocks).
 pub(crate) const MAX_ACKS_PER_PACKET: usize = 255;
 
 /// Packs `acks` into `PacketAck` messages of at most [`MAX_ACKS_PER_PACKET`]

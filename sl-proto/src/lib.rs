@@ -31,6 +31,7 @@ mod sim_new_file;
 mod sim_notecard;
 mod sim_session;
 mod sim_voice;
+mod split;
 mod task_caps;
 mod terrain;
 mod types;

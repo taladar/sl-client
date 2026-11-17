@@ -632,6 +632,56 @@ mod test {
         Ok(())
     }
 
+    /// **A command that fails to send costs that command, not the login.**
+    ///
+    /// A request naming a region the session has no circuit to cannot be sent;
+    /// the run loop used to return that error and end the whole session. Now
+    /// it reports the failure, naming the command, and keeps going — as the
+    /// Bevy driver does — so the chat sent after it still reaches the grid.
+    #[tokio::test]
+    async fn a_command_that_fails_to_send_is_reported_and_the_session_carries_on()
+    -> Result<(), TestError> {
+        let mut running = start().await?;
+        let mut server_events = running.agent.events();
+        running
+            .commands
+            .send(Command::RequestObjects {
+                local_ids: vec![sl_client_tokio::ScopedObjectId::new(
+                    sl_client_tokio::CircuitId::new(9_999),
+                    sl_client_tokio::RegionLocalObjectId(1),
+                )],
+            })
+            .await?;
+        let failed = running
+            .wait_for(|event| match event {
+                Event::CommandFailed { command, reason } => Some((*command, reason.clone())),
+                _ => None,
+            })
+            .await?;
+        assert_eq!(failed.0, "RequestObjects");
+        assert!(!failed.1.is_empty());
+
+        running
+            .commands
+            .send(Command::Chat {
+                message: "still here".to_owned(),
+                chat_type: ChatType::Normal,
+                channel: ChatChannel(0),
+            })
+            .await?;
+        let deadline = whole_wait();
+        loop {
+            let event = tokio::time::timeout_at(deadline, server_events.recv()).await??;
+            if let ServerEvent::Chat { message, .. } = &event
+                && message == "still here"
+            {
+                break;
+            }
+        }
+        assert!(!running.run.is_finished(), "the run loop ended");
+        Ok(())
+    }
+
     /// **A parcel's object-owner tally comes back whole, from the scene.**
     ///
     /// Over the event queue, as a region with one answers it: the event says it

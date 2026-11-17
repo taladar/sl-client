@@ -105,9 +105,7 @@ use sl_wire::messages::{
     InventoryDescendentsFolderDataBlock, InventoryDescendentsItemDataBlock, MoveInventoryItem,
     MoveInventoryItemAgentDataBlock, MoveInventoryItemInventoryDataBlock, RemoveInventoryFolder,
     RemoveInventoryFolderAgentDataBlock, RemoveInventoryFolderFolderDataBlock, RemoveInventoryItem,
-    RemoveInventoryItemAgentDataBlock, RemoveInventoryItemInventoryDataBlock,
-    RemoveInventoryObjects, RemoveInventoryObjectsAgentDataBlock,
-    RemoveInventoryObjectsFolderDataBlock, RemoveInventoryObjectsItemDataBlock, ReplyTaskInventory,
+    RemoveInventoryItemAgentDataBlock, RemoveInventoryItemInventoryDataBlock, ReplyTaskInventory,
     ReplyTaskInventoryInventoryDataBlock, UpdateCreateInventoryItem,
     UpdateCreateInventoryItemAgentDataBlock, UpdateCreateInventoryItemInventoryDataBlock,
     UserInfoReply, UserInfoReplyAgentDataBlock, UserInfoReplyUserDataBlock,
@@ -206,6 +204,7 @@ use crate::session::{
 use crate::sim_experiences::SimExperiences;
 use crate::sim_inventory::{SimInventoryError, SimInventoryTree};
 use crate::sim_voice::{SimVoice, VoiceProvisionOutcome, VoiceProvisionRefusal};
+use crate::split::{MAX_VARIABLE_BLOCKS, fill_messages, fill_messages_or_one_empty};
 use crate::types::directory::category_from_wire;
 use crate::types::{
     AddPrimParams, AlertInfo, AssetType, AttachmentMode, AttachmentPoint, AvatarAppearance,
@@ -653,49 +652,6 @@ struct SimXferReceive {
 /// (`MAX_PACKET_DATA_SIZE`); like OpenSim's `SendAsset`, packets are kept
 /// safely under a datagram's worth.
 const TRANSFER_CHUNK_SIZE: usize = 1000;
-
-/// The most bytes of encoded message (id and body, before zero coding) one
-/// object-update datagram carries: the reference's `MTUBYTES`. A simulator fills
-/// an `ObjectUpdate` with blocks only until the next one would not fit, and the
-/// reference viewer refuses outright a datagram that decodes past its 8 KiB
-/// `NET_BUFFER_SIZE`, so a region's worth of objects in one message is dropped
-/// whole. A single block larger than this still goes, alone.
-const OBJECT_UPDATE_DATAGRAM_BYTES: usize = 1200;
-
-/// How many bytes `message` encodes to: its id and body, before zero coding.
-fn encoded_len(message: &AnyMessage) -> Result<usize, WireError> {
-    let mut writer = sl_wire::Writer::new();
-    message.id().encode(&mut writer)?;
-    message.encode_body(&mut writer)?;
-    Ok(writer.into_bytes().len())
-}
-
-/// `blocks` split into the messages `build` makes of them, each holding as many
-/// blocks, in order, as fit [`OBJECT_UPDATE_DATAGRAM_BYTES`] — a block that
-/// does not fit even alone gets a message to itself. No blocks make no
-/// messages.
-fn object_update_datagrams<B: Clone>(
-    blocks: Vec<B>,
-    build: impl Fn(Vec<B>) -> AnyMessage,
-) -> Result<Vec<AnyMessage>, WireError> {
-    let header = encoded_len(&build(Vec::new()))?;
-    let mut messages = Vec::new();
-    let mut batch = Vec::new();
-    let mut batch_len = header;
-    for block in blocks {
-        let block_len = encoded_len(&build(vec![block.clone()]))?.saturating_sub(header);
-        if !batch.is_empty() && batch_len.saturating_add(block_len) > OBJECT_UPDATE_DATAGRAM_BYTES {
-            messages.push(build(core::mem::take(&mut batch)));
-            batch_len = header;
-        }
-        batch.push(block);
-        batch_len = batch_len.saturating_add(block_len);
-    }
-    if !batch.is_empty() {
-        messages.push(build(batch));
-    }
-    Ok(messages)
-}
 
 /// The server-side mirror status of one client-[`Session`](crate::Session)
 /// flow-level state machine, as pinned in [`SESSION_FLOW_COVERAGE`].
@@ -6190,12 +6146,14 @@ impl SimSession {
     /// the client's `MapBlockRequest`/`MapNameRequest`). `flags` is the request's
     /// map-layer flag, echoed in the agent block. The reply is sent reliably, as
     /// a map server sends it. See [`build_map_block_reply`] for how
-    /// variable-sized regions are reported; the batch is capped at 255 regions.
+    /// variable-sized regions are reported; more regions than one message
+    /// carries (255, or fewer once the MTU is full) go out in several replies,
+    /// and none is still one reply saying so.
     ///
     /// # Errors
     ///
     /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
-    /// if the message fails to encode (e.g. more than 255 regions).
+    /// if the message fails to encode.
     pub fn send_map_block_reply(
         &mut self,
         flags: MapRequestFlags,
@@ -6206,19 +6164,26 @@ impl SimSession {
             return Err(Error::NoCircuit);
         }
         let agent_id = self.agent_id.unwrap_or_else(|| AgentKey::from(Uuid::nil()));
-        let message = AnyMessage::MapBlockReply(build_map_block_reply(agent_id, flags, regions));
-        self.send(&message, Reliability::Reliable, now)?;
+        for message in
+            fill_messages_or_one_empty(regions.to_vec(), MAX_VARIABLE_BLOCKS, |regions| {
+                AnyMessage::MapBlockReply(build_map_block_reply(agent_id, flags, &regions))
+            })?
+        {
+            self.send(&message, Reliability::Reliable, now)?;
+        }
         Ok(())
     }
 
     /// Sends a `MapBlockReply` carrying `batch` entry for entry: its flags, its
     /// regions, and the entries that are not regions — a cell reported empty,
-    /// the entry that ends a name search. Sent reliably.
+    /// the entry that ends a name search. Sent reliably, in as many replies as
+    /// the entries take, in order, so an entry that ends a search still ends
+    /// the last of them.
     ///
     /// # Errors
     ///
     /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
-    /// if the message fails to encode (e.g. more than 255 entries).
+    /// if the message fails to encode.
     pub fn send_map_block_batch(
         &mut self,
         batch: &MapBlockBatch,
@@ -6228,20 +6193,31 @@ impl SimSession {
             return Err(Error::NoCircuit);
         }
         let agent_id = self.agent_id.unwrap_or_else(|| AgentKey::from(Uuid::nil()));
-        let message = AnyMessage::MapBlockReply(build_map_block_batch_reply(agent_id, batch));
-        self.send(&message, Reliability::Reliable, now)?;
+        for message in
+            fill_messages_or_one_empty(batch.blocks.clone(), MAX_VARIABLE_BLOCKS, |blocks| {
+                AnyMessage::MapBlockReply(build_map_block_batch_reply(
+                    agent_id,
+                    &MapBlockBatch {
+                        flags: batch.flags,
+                        blocks,
+                    },
+                ))
+            })?
+        {
+            self.send(&message, Reliability::Reliable, now)?;
+        }
         Ok(())
     }
 
     /// Sends a `MapItemReply` of the given [`MapItemType`] reporting `items` to
     /// the client (the inverse of the client's `MapItemRequest`). `flags` is the
     /// request's map-layer flag, echoed in the agent block. The reply is sent
-    /// reliably; the batch is capped at 255 items.
+    /// reliably, in as many replies as the items take.
     ///
     /// # Errors
     ///
     /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
-    /// if the message fails to encode (e.g. more than 255 items).
+    /// if the message fails to encode.
     pub fn send_map_item_reply(
         &mut self,
         flags: MapRequestFlags,
@@ -6253,21 +6229,23 @@ impl SimSession {
             return Err(Error::NoCircuit);
         }
         let agent_id = self.agent_id.unwrap_or_else(|| AgentKey::from(Uuid::nil()));
-        let message =
-            AnyMessage::MapItemReply(build_map_item_reply(agent_id, flags, item_type, items));
-        self.send(&message, Reliability::Reliable, now)?;
+        for message in fill_messages_or_one_empty(items.to_vec(), MAX_VARIABLE_BLOCKS, |items| {
+            AnyMessage::MapItemReply(build_map_item_reply(agent_id, flags, item_type, &items))
+        })? {
+            self.send(&message, Reliability::Reliable, now)?;
+        }
         Ok(())
     }
 
     /// Sends a `MapLayerReply` reporting `layers` to the client (the inverse of
     /// the client's `MapLayerRequest`). `flags` is the request's map-layer flag,
-    /// echoed in the agent block. The reply is sent reliably; the batch is
-    /// capped at 255 layers.
+    /// echoed in the agent block. The reply is sent reliably, in as many replies
+    /// as the layers take.
     ///
     /// # Errors
     ///
     /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
-    /// if the message fails to encode (e.g. more than 255 layers).
+    /// if the message fails to encode.
     pub fn send_map_layer_reply(
         &mut self,
         flags: MapRequestFlags,
@@ -6278,8 +6256,11 @@ impl SimSession {
             return Err(Error::NoCircuit);
         }
         let agent_id = self.agent_id.unwrap_or_else(|| AgentKey::from(Uuid::nil()));
-        let message = AnyMessage::MapLayerReply(build_map_layer_reply(agent_id, flags, layers));
-        self.send(&message, Reliability::Reliable, now)?;
+        for message in fill_messages_or_one_empty(layers.to_vec(), MAX_VARIABLE_BLOCKS, |layers| {
+            AnyMessage::MapLayerReply(build_map_layer_reply(agent_id, flags, &layers))
+        })? {
+            self.send(&message, Reliability::Reliable, now)?;
+        }
         Ok(())
     }
 
@@ -6889,19 +6870,21 @@ impl SimSession {
         if self.client_addr.is_none() {
             return Err(Error::NoCircuit);
         }
-        let message = AnyMessage::MeanCollisionAlert(MeanCollisionAlert {
-            mean_collision: collisions
-                .iter()
-                .map(|collision| MeanCollisionAlertMeanCollisionBlock {
-                    victim: collision.victim,
-                    perp: collision.perp,
-                    time: collision.time,
-                    mag: collision.magnitude,
-                    r#type: collision.collision_type.to_u8(),
-                })
-                .collect(),
-        });
-        self.send(&message, Reliability::Reliable, now)?;
+        let blocks: Vec<_> = collisions
+            .iter()
+            .map(|collision| MeanCollisionAlertMeanCollisionBlock {
+                victim: collision.victim,
+                perp: collision.perp,
+                time: collision.time,
+                mag: collision.magnitude,
+                r#type: collision.collision_type.to_u8(),
+            })
+            .collect();
+        for message in fill_messages(blocks, MAX_VARIABLE_BLOCKS, |mean_collision| {
+            AnyMessage::MeanCollisionAlert(MeanCollisionAlert { mean_collision })
+        })? {
+            self.send(&message, Reliability::Reliable, now)?;
+        }
         Ok(())
     }
 
@@ -7100,24 +7083,28 @@ impl SimSession {
         if self.client_addr.is_none() {
             return Err(Error::NoCircuit);
         }
-        let message = AnyMessage::DirPeopleReply(DirPeopleReply {
-            agent_data: DirPeopleReplyAgentDataBlock {
-                agent_id: self.agent_id.map_or_else(Uuid::nil, |a| a.uuid()),
-            },
-            query_data: DirPeopleReplyQueryDataBlock { query_id },
-            query_replies: results
-                .iter()
-                .map(|result| DirPeopleReplyQueryRepliesBlock {
-                    agent_id: result.agent_id.uuid(),
-                    first_name: with_nul(&result.first_name),
-                    last_name: with_nul(&result.last_name),
-                    group: with_nul(&result.group),
-                    online: result.online,
-                    reputation: result.reputation,
-                })
-                .collect(),
-        });
-        self.send(&message, Reliability::Reliable, now)?;
+        let blocks: Vec<_> = results
+            .iter()
+            .map(|result| DirPeopleReplyQueryRepliesBlock {
+                agent_id: result.agent_id.uuid(),
+                first_name: with_nul(&result.first_name),
+                last_name: with_nul(&result.last_name),
+                group: with_nul(&result.group),
+                online: result.online,
+                reputation: result.reputation,
+            })
+            .collect();
+        for message in fill_messages_or_one_empty(blocks, MAX_VARIABLE_BLOCKS, |query_replies| {
+            AnyMessage::DirPeopleReply(DirPeopleReply {
+                agent_data: DirPeopleReplyAgentDataBlock {
+                    agent_id: self.agent_id.map_or_else(Uuid::nil, |a| a.uuid()),
+                },
+                query_data: DirPeopleReplyQueryDataBlock { query_id },
+                query_replies,
+            })
+        })? {
+            self.send(&message, Reliability::Reliable, now)?;
+        }
         Ok(())
     }
 
@@ -7343,21 +7330,25 @@ impl SimSession {
         if self.client_addr.is_none() {
             return Err(Error::NoCircuit);
         }
-        let message = AnyMessage::AvatarPickerReply(AvatarPickerReply {
-            agent_data: AvatarPickerReplyAgentDataBlock {
-                agent_id: self.agent_id.map_or_else(Uuid::nil, |a| a.uuid()),
-                query_id,
-            },
-            data: results
-                .iter()
-                .map(|result| AvatarPickerReplyDataBlock {
-                    avatar_id: result.avatar_id.uuid(),
-                    first_name: with_nul(&result.first_name),
-                    last_name: with_nul(&result.last_name),
-                })
-                .collect(),
-        });
-        self.send(&message, Reliability::Reliable, now)?;
+        let blocks: Vec<_> = results
+            .iter()
+            .map(|result| AvatarPickerReplyDataBlock {
+                avatar_id: result.avatar_id.uuid(),
+                first_name: with_nul(&result.first_name),
+                last_name: with_nul(&result.last_name),
+            })
+            .collect();
+        for message in fill_messages_or_one_empty(blocks, MAX_VARIABLE_BLOCKS, |data| {
+            AnyMessage::AvatarPickerReply(AvatarPickerReply {
+                agent_data: AvatarPickerReplyAgentDataBlock {
+                    agent_id: self.agent_id.map_or_else(Uuid::nil, |a| a.uuid()),
+                    query_id,
+                },
+                data,
+            })
+        })? {
+            self.send(&message, Reliability::Reliable, now)?;
+        }
         Ok(())
     }
 
@@ -8249,18 +8240,20 @@ impl SimSession {
         if self.client_addr.is_none() {
             return Err(Error::NoCircuit);
         }
-        let message = AnyMessage::ParcelObjectOwnersReply(ParcelObjectOwnersReply {
-            data: owners
-                .iter()
-                .map(|owner| ParcelObjectOwnersReplyDataBlock {
-                    owner_id: owner.owner.uuid(),
-                    is_group_owned: owner.owner.is_group(),
-                    count: owner.count,
-                    online_status: owner.online_status,
-                })
-                .collect(),
-        });
-        self.send(&message, Reliability::Reliable, now)?;
+        let blocks: Vec<_> = owners
+            .iter()
+            .map(|owner| ParcelObjectOwnersReplyDataBlock {
+                owner_id: owner.owner.uuid(),
+                is_group_owned: owner.owner.is_group(),
+                count: owner.count,
+                online_status: owner.online_status,
+            })
+            .collect();
+        for message in fill_messages_or_one_empty(blocks, MAX_VARIABLE_BLOCKS, |data| {
+            AnyMessage::ParcelObjectOwnersReply(ParcelObjectOwnersReply { data })
+        })? {
+            self.send(&message, Reliability::Reliable, now)?;
+        }
         Ok(())
     }
 
@@ -8628,7 +8621,7 @@ impl SimSession {
                 block
             })
             .collect();
-        for message in object_update_datagrams(blocks, |object_data| {
+        for message in fill_messages(blocks, MAX_VARIABLE_BLOCKS, |object_data| {
             AnyMessage::ObjectUpdate(ObjectUpdate {
                 region_data: ObjectUpdateRegionDataBlock {
                     region_handle,
@@ -8672,7 +8665,7 @@ impl SimSession {
                 data: crate::encode_compressed_object(object),
             })
             .collect();
-        for message in object_update_datagrams(blocks, |object_data| {
+        for message in fill_messages(blocks, MAX_VARIABLE_BLOCKS, |object_data| {
             AnyMessage::ObjectUpdateCompressed(ObjectUpdateCompressed {
                 region_data: ObjectUpdateCompressedRegionDataBlock {
                     region_handle,
@@ -8704,13 +8697,15 @@ impl SimSession {
         if self.client_addr.is_none() {
             return Err(Error::NoCircuit);
         }
-        let message = AnyMessage::KillObject(KillObject {
-            object_data: objects
-                .iter()
-                .map(|id| KillObjectObjectDataBlock { id: id.0 })
-                .collect(),
-        });
-        self.send(&message, Reliability::Reliable, now)?;
+        let blocks: Vec<_> = objects
+            .iter()
+            .map(|id| KillObjectObjectDataBlock { id: id.0 })
+            .collect();
+        for message in fill_messages(blocks, MAX_VARIABLE_BLOCKS, |object_data| {
+            AnyMessage::KillObject(KillObject { object_data })
+        })? {
+            self.send(&message, Reliability::Reliable, now)?;
+        }
         Ok(())
     }
 
@@ -9408,17 +9403,19 @@ impl SimSession {
         if self.client_addr.is_none() {
             return Err(Error::NoCircuit);
         }
-        let message = AnyMessage::PreloadSound(PreloadSound {
-            data_block: sounds
-                .iter()
-                .map(|preload| PreloadSoundDataBlockBlock {
-                    object_id: preload.object_id.uuid(),
-                    owner_id: preload.owner_id,
-                    sound_id: preload.sound_id,
-                })
-                .collect(),
-        });
-        self.send(&message, Reliability::Reliable, now)?;
+        let blocks: Vec<_> = sounds
+            .iter()
+            .map(|preload| PreloadSoundDataBlockBlock {
+                object_id: preload.object_id.uuid(),
+                owner_id: preload.owner_id,
+                sound_id: preload.sound_id,
+            })
+            .collect();
+        for message in fill_messages(blocks, MAX_VARIABLE_BLOCKS, |data_block| {
+            AnyMessage::PreloadSound(PreloadSound { data_block })
+        })? {
+            self.send(&message, Reliability::Reliable, now)?;
+        }
         Ok(())
     }
 
@@ -9692,7 +9689,7 @@ impl SimSession {
                 texture_entry: Vec::new(),
             })
             .collect();
-        for message in object_update_datagrams(blocks, |object_data| {
+        for message in fill_messages(blocks, MAX_VARIABLE_BLOCKS, |object_data| {
             AnyMessage::ImprovedTerseObjectUpdate(ImprovedTerseObjectUpdate {
                 region_data: ImprovedTerseObjectUpdateRegionDataBlock {
                     region_handle,
@@ -9836,15 +9833,17 @@ impl SimSession {
         if self.client_addr.is_none() {
             return Err(Error::NoCircuit);
         }
-        let message = AnyMessage::OnlineNotification(OnlineNotification {
-            agent_block: friends
-                .iter()
-                .map(|friend| OnlineNotificationAgentBlockBlock {
-                    agent_id: friend.uuid(),
-                })
-                .collect(),
-        });
-        self.send(&message, Reliability::Reliable, now)?;
+        let blocks: Vec<_> = friends
+            .iter()
+            .map(|friend| OnlineNotificationAgentBlockBlock {
+                agent_id: friend.uuid(),
+            })
+            .collect();
+        for message in fill_messages(blocks, MAX_VARIABLE_BLOCKS, |agent_block| {
+            AnyMessage::OnlineNotification(OnlineNotification { agent_block })
+        })? {
+            self.send(&message, Reliability::Reliable, now)?;
+        }
         Ok(())
     }
 
@@ -9865,15 +9864,17 @@ impl SimSession {
         if self.client_addr.is_none() {
             return Err(Error::NoCircuit);
         }
-        let message = AnyMessage::OfflineNotification(OfflineNotification {
-            agent_block: friends
-                .iter()
-                .map(|friend| OfflineNotificationAgentBlockBlock {
-                    agent_id: friend.uuid(),
-                })
-                .collect(),
-        });
-        self.send(&message, Reliability::Reliable, now)?;
+        let blocks: Vec<_> = friends
+            .iter()
+            .map(|friend| OfflineNotificationAgentBlockBlock {
+                agent_id: friend.uuid(),
+            })
+            .collect();
+        for message in fill_messages(blocks, MAX_VARIABLE_BLOCKS, |agent_block| {
+            AnyMessage::OfflineNotification(OfflineNotification { agent_block })
+        })? {
+            self.send(&message, Reliability::Reliable, now)?;
+        }
         Ok(())
     }
 
@@ -9900,19 +9901,23 @@ impl SimSession {
         if self.client_addr.is_none() {
             return Err(Error::NoCircuit);
         }
-        let message = AnyMessage::ChangeUserRights(ChangeUserRights {
-            agent_data: ChangeUserRightsAgentDataBlock {
-                agent_id: changer.uuid(),
-            },
-            rights: rights
-                .iter()
-                .map(|entry| ChangeUserRightsRightsBlock {
-                    agent_related: entry.agent.uuid(),
-                    related_rights: entry.rights.0,
-                })
-                .collect(),
-        });
-        self.send(&message, Reliability::Reliable, now)?;
+        let blocks: Vec<_> = rights
+            .iter()
+            .map(|entry| ChangeUserRightsRightsBlock {
+                agent_related: entry.agent.uuid(),
+                related_rights: entry.rights.0,
+            })
+            .collect();
+        for message in fill_messages(blocks, MAX_VARIABLE_BLOCKS, |rights| {
+            AnyMessage::ChangeUserRights(ChangeUserRights {
+                agent_data: ChangeUserRightsAgentDataBlock {
+                    agent_id: changer.uuid(),
+                },
+                rights,
+            })
+        })? {
+            self.send(&message, Reliability::Reliable, now)?;
+        }
         Ok(())
     }
 
@@ -10601,19 +10606,23 @@ impl SimSession {
         if self.client_addr.is_none() {
             return Err(Error::NoCircuit);
         }
-        let message = AnyMessage::RemoveInventoryItem(RemoveInventoryItem {
-            agent_data: RemoveInventoryItemAgentDataBlock {
-                agent_id: self.agent_id.map_or_else(Uuid::nil, |a| a.uuid()),
-                session_id: self.session_id.unwrap_or_else(Uuid::nil),
-            },
-            inventory_data: items
-                .iter()
-                .map(|item| RemoveInventoryItemInventoryDataBlock {
-                    item_id: item.uuid(),
-                })
-                .collect(),
-        });
-        self.send(&message, Reliability::Reliable, now)?;
+        let blocks: Vec<_> = items
+            .iter()
+            .map(|item| RemoveInventoryItemInventoryDataBlock {
+                item_id: item.uuid(),
+            })
+            .collect();
+        for message in fill_messages(blocks, MAX_VARIABLE_BLOCKS, |inventory_data| {
+            AnyMessage::RemoveInventoryItem(RemoveInventoryItem {
+                agent_data: RemoveInventoryItemAgentDataBlock {
+                    agent_id: self.agent_id.map_or_else(Uuid::nil, |a| a.uuid()),
+                    session_id: self.session_id.unwrap_or_else(Uuid::nil),
+                },
+                inventory_data,
+            })
+        })? {
+            self.send(&message, Reliability::Reliable, now)?;
+        }
         Ok(())
     }
 
@@ -10635,19 +10644,23 @@ impl SimSession {
         if self.client_addr.is_none() {
             return Err(Error::NoCircuit);
         }
-        let message = AnyMessage::RemoveInventoryFolder(RemoveInventoryFolder {
-            agent_data: RemoveInventoryFolderAgentDataBlock {
-                agent_id: self.agent_id.map_or_else(Uuid::nil, |a| a.uuid()),
-                session_id: self.session_id.unwrap_or_else(Uuid::nil),
-            },
-            folder_data: folders
-                .iter()
-                .map(|folder| RemoveInventoryFolderFolderDataBlock {
-                    folder_id: folder.uuid(),
-                })
-                .collect(),
-        });
-        self.send(&message, Reliability::Reliable, now)?;
+        let blocks: Vec<_> = folders
+            .iter()
+            .map(|folder| RemoveInventoryFolderFolderDataBlock {
+                folder_id: folder.uuid(),
+            })
+            .collect();
+        for message in fill_messages(blocks, MAX_VARIABLE_BLOCKS, |folder_data| {
+            AnyMessage::RemoveInventoryFolder(RemoveInventoryFolder {
+                agent_data: RemoveInventoryFolderAgentDataBlock {
+                    agent_id: self.agent_id.map_or_else(Uuid::nil, |a| a.uuid()),
+                    session_id: self.session_id.unwrap_or_else(Uuid::nil),
+                },
+                folder_data,
+            })
+        })? {
+            self.send(&message, Reliability::Reliable, now)?;
+        }
         Ok(())
     }
 
@@ -10670,25 +10683,14 @@ impl SimSession {
         if self.client_addr.is_none() {
             return Err(Error::NoCircuit);
         }
-        let message = AnyMessage::RemoveInventoryObjects(RemoveInventoryObjects {
-            agent_data: RemoveInventoryObjectsAgentDataBlock {
-                agent_id: self.agent_id.map_or_else(Uuid::nil, |a| a.uuid()),
-                session_id: self.session_id.unwrap_or_else(Uuid::nil),
-            },
-            folder_data: folders
-                .iter()
-                .map(|folder| RemoveInventoryObjectsFolderDataBlock {
-                    folder_id: folder.uuid(),
-                })
-                .collect(),
-            item_data: items
-                .iter()
-                .map(|item| RemoveInventoryObjectsItemDataBlock {
-                    item_id: item.uuid(),
-                })
-                .collect(),
-        });
-        self.send(&message, Reliability::Reliable, now)?;
+        for message in crate::split::remove_inventory_objects(
+            self.agent_id.map_or_else(Uuid::nil, |a| a.uuid()),
+            self.session_id.unwrap_or_else(Uuid::nil),
+            folders.iter().map(InventoryFolderKey::uuid),
+            items.iter().map(InventoryKey::uuid),
+        )? {
+            self.send(&message, Reliability::Reliable, now)?;
+        }
         Ok(())
     }
 
@@ -11667,7 +11669,8 @@ impl SimSession {
     /// clears the client's current selection before applying these; the ids are
     /// region-local [`RegionLocalObjectId`]s, the bare counterpart of the
     /// [`ScopedObjectId`](crate::ScopedObjectId) the client scopes them to. Sent
-    /// reliably.
+    /// reliably, in as many messages as the list takes, of which only the first
+    /// carries `reset_list`.
     ///
     /// # Errors
     ///
@@ -11682,14 +11685,28 @@ impl SimSession {
         if self.client_addr.is_none() {
             return Err(Error::NoCircuit);
         }
-        let message = AnyMessage::ForceObjectSelect(ForceObjectSelect {
-            header: ForceObjectSelectHeaderBlock { reset_list },
-            data: objects
-                .iter()
-                .map(|object| ForceObjectSelectDataBlock { local_id: object.0 })
-                .collect(),
-        });
-        self.send(&message, Reliability::Reliable, now)?;
+        let select = |reset_list, data| {
+            AnyMessage::ForceObjectSelect(ForceObjectSelect {
+                header: ForceObjectSelectHeaderBlock { reset_list },
+                data,
+            })
+        };
+        let blocks: Vec<_> = objects
+            .iter()
+            .map(|object| ForceObjectSelectDataBlock { local_id: object.0 })
+            .collect();
+        // A longer list goes out in several messages; only the first may clear
+        // the selection, or each would drop what the one before it selected.
+        // An empty list still sends its one message: "clear the selection".
+        let mut messages = fill_messages(blocks, MAX_VARIABLE_BLOCKS, |data| select(false, data))?;
+        match messages.first_mut() {
+            Some(AnyMessage::ForceObjectSelect(first)) => first.header.reset_list = reset_list,
+            Some(_) => {}
+            None => messages.push(select(reset_list, Vec::new())),
+        }
+        for message in messages {
+            self.send(&message, Reliability::Reliable, now)?;
+        }
         Ok(())
     }
 

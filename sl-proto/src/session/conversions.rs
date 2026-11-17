@@ -3088,7 +3088,9 @@ pub(crate) fn map_region_info_to_data_block(info: &MapRegionInfo) -> MapBlockRep
 /// not the standard 256 m, and omitted entirely when every region is 256 m (the
 /// size the client assumes for a missing block). The `data` array is capped at
 /// the 255 entries the wire count byte allows; longer runs must be split across
-/// several replies by the caller.
+/// several replies by the caller, as
+/// [`SimSession::send_map_block_reply`](crate::SimSession::send_map_block_reply)
+/// splits them.
 #[must_use]
 pub fn build_map_block_reply(
     agent_id: AgentKey,
@@ -3183,7 +3185,9 @@ pub(crate) fn map_item_to_data_block(item: &MapItem) -> MapItemReplyDataBlock {
 /// simulator-side inverse of the client's `MapItemRequest` (decoded into an
 /// [`Event::MapItems`]). `agent_id` and `flags` fill the agent block (the client
 /// ignores them). The `data` array is capped at the 255 entries the wire count
-/// byte allows; longer runs must be split across several replies by the caller.
+/// byte allows; longer runs must be split across several replies by the caller,
+/// as [`SimSession::send_map_item_reply`](crate::SimSession::send_map_item_reply)
+/// splits them.
 #[must_use]
 pub fn build_map_item_reply(
     agent_id: AgentKey,
