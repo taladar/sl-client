@@ -21,6 +21,7 @@ use sl_fake_grid::fixtures::scenarios;
 use sl_fake_grid::{AccountConfig, FakeAgent, FakeGrid, FakeGridBuilder, RegionConfig};
 use sl_proto::{AgentKey, RegionCoordinates};
 use sl_repl::LoginCooldown;
+use sl_secret_store::{MemoryStore, SecretStore};
 use sl_viewer_automation::{BuildError, InProcessHost, ViewerHandle};
 use sl_viewer_driver::{Viewer, ViewerOptions};
 use sl_viewer_launch::{Ending, LOGOUT_GRACE, Launch, RunningViewer, ViewerDir};
@@ -806,6 +807,11 @@ struct StageViewer {
     /// the teardown takes its own exit as its logout rather than asking for
     /// one.
     quits: AtomicBool,
+    /// Where an in-process viewer keeps its secrets (a remembered password),
+    /// the same store every session of it reads back, and never the
+    /// developer's own keychain. A process viewer keeps them in its own
+    /// memory, for one session (`--secret-store memory`).
+    secrets: Arc<MemoryStore>,
 }
 
 impl StageViewer {
@@ -956,6 +962,7 @@ impl Stage {
                 run: Mutex::new(ViewerRun::idle(self.backend)),
                 sessions: AtomicU32::new(0),
                 quits: AtomicBool::new(false),
+                secrets: Arc::default(),
             });
             if let Some(viewer) = self.viewers.last() {
                 if self.setup.watch_skins {
@@ -1196,13 +1203,14 @@ impl Stage {
         let state = dir.join("state");
         let assets = self.setup.watch_skins.then(|| asset_base(dir));
         let setup = self.setup.clone();
+        let secrets: Arc<dyn SecretStore> = Arc::<MemoryStore>::clone(&viewer.secrets);
         let host = self
             .host
             .as_ref()
             .ok_or(sl_viewer_automation::HostError::Stopped)?;
         let (handle, link) = host
             .host(label.clone(), move || {
-                in_process_viewer(viewer_login, log_label, &state, assets, &setup)
+                in_process_viewer(viewer_login, log_label, &state, assets, secrets, &setup)
             })
             .await?;
         viewer.running(ViewerRun::InProcess(Some(handle)));
@@ -1326,6 +1334,9 @@ impl Stage {
                 format!("{}x{}", WINDOW.x, WINDOW.y),
                 "--automation-socket".to_owned(),
                 socket.display().to_string(),
+                // Nothing a stage does reaches the developer's own keychain.
+                "--secret-store".to_owned(),
+                "memory".to_owned(),
             ]);
         if !self.setup.media.web {
             launch = launch.args(["--disable-web-media".to_owned()]);
@@ -1423,7 +1434,10 @@ impl Stage {
 
     /// The second half of [`relog`](Self::relog): log viewer `label`, which
     /// [`log_out_viewer`](Self::log_out_viewer) logged out, back in where the
-    /// stage's viewers start, and wait for it as the stage's start waits.
+    /// stage's viewers start, and wait for it as the stage's start waits. A
+    /// viewer on its login screen ([`StageBuilder::login_screen`]) comes back
+    /// to it, and is not waited for: the body logs it in there, and
+    /// [`arrive`](Self::arrive) waits for that.
     ///
     /// # Errors
     ///
@@ -1433,6 +1447,13 @@ impl Stage {
         let viewer = self.stage_viewer(label)?;
         self.start_session(viewer).await?;
         let driver = viewer.driver()?;
+        if self.on_login_screen(label) {
+            tracing::info!(
+                "stage {}: viewer {label} is back on its login screen",
+                self.name
+            );
+            return Ok(driver);
+        }
         arrive(driver.clone(), self.arrival(), self.settle()).await?;
         tracing::info!("stage {}: viewer {label} is back", self.name);
         Ok(driver)
@@ -1975,14 +1996,15 @@ fn driver_options(label: &str, dir: &Path) -> ViewerOptions {
 
 /// An in-process stage viewer logging in as `login` says: the viewer's own
 /// builder's App, headless,
-/// storing under `state`, reading the asset tree in `assets` when given, set
-/// up as `setup` says, reached through the in-process transport and logging
-/// inside a span named `log_label`.
+/// storing under `state` and keeping its secrets in `secrets`, reading the
+/// asset tree in `assets` when given, set up as `setup` says, reached through
+/// the in-process transport and logging inside a span named `log_label`.
 fn in_process_viewer(
     login: ViewerLogin,
     log_label: String,
     state: &Path,
     assets: Option<PathBuf>,
+    secrets: Arc<dyn SecretStore>,
     setup: &ViewerSetup,
 ) -> Result<ViewerApp, BuildError> {
     let mut options = ViewerAppOptions::with_login(login);
@@ -1991,6 +2013,7 @@ fn in_process_viewer(
         watch: false,
     };
     options.storage = Storage::Directories(ViewerPaths::under(state));
+    options.secrets = secrets;
     options.audio_device = false;
     options.media = MediaRuntime {
         web: setup.media.web,

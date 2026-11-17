@@ -5421,6 +5421,7 @@ setting-desc-LogTimestampSeconds = Include seconds in logged timestamps
 setting-desc-LoginStartLocation = The default login start location: last, home, or uri:Region&x&y&z
 setting-desc-LoginLastGrid = The login URI of the grid the login screen last logged in to
 setting-desc-LoginLastAvatar = The avatar name the login screen last logged in with
+setting-desc-LoginRememberPassword = Whether a login from the login screen keeps its password in the OS keychain
 setting-desc-MediaAutoPlayEnabled = Start media-on-a-prim faces marked auto-play without a click
 setting-desc-ParcelMediaAutoPlayEnable = Start the parcel's media by itself a few seconds after arriving, while its screen is in view
 setting-desc-PermAllowScriptedMedia = Let a script start the parcel's media (stopping and pausing it are always allowed)
@@ -5768,6 +5769,10 @@ login-remove-grid = Remove
 login-add-grid = Add
 login-connect = Log In
 login-submit-token = Continue
+# Remember password, under the password field, and the line beside it when
+# no keychain can keep one. $message is the keychain's own words.
+login-remember-password = Remember password
+login-remember-unavailable = Cannot remember it here: { $message }
 # The line under the panel: progress, and what went wrong. A $message is the
 # grid's own words, or the system's.
 login-notice-logging-in = Logging in…

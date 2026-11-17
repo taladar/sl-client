@@ -10,6 +10,9 @@
 //!   window stays open, and the next try with the right password gets in.
 //! - **A second factor.** A challenge shows the token row; the token typed
 //!   there is the same login again, and it gets in.
+//! - **A remembered password.** With Remember password ticked, the login that
+//!   arrives keeps its password in the stage's in-memory secret store; the
+//!   next session fills the field from it, and Log In alone gets in.
 //!
 //! The credentials-file road that skips the screen is `e2e_login`'s.
 
@@ -17,7 +20,7 @@
 mod test {
     use core::time::Duration;
 
-    use sl_e2e::{BodyError, Stage, StageBuilder};
+    use sl_e2e::{Backend, BodyError, Stage, StageBuilder};
     use sl_fake_grid::{ImitatedGrid, RegionConfig};
     use sl_viewer_driver::Viewer;
 
@@ -153,6 +156,38 @@ mod test {
                 let _asked = alpha.expect(&token).timeout(WAIT).to_be_visible().await?;
                 let _typed = token.fill("314159").await?;
                 let _sent = alpha.ui().test_id("login-submit-token").click().await?;
+                arrives(stage, alpha).await
+            })?;
+        Ok(())
+    }
+
+    /// **A remembered password**: ticked, the login that arrives keeps it,
+    /// and the next session fills it in, so Log In alone gets in. In process
+    /// only: a process viewer's in-memory store ends with its process, while
+    /// the in-process stage's outlives each session, as a keychain does.
+    #[test]
+    fn a_remembered_password_logs_in_without_typing_it() -> Result<(), TestError> {
+        stage("login_screen_remember")
+            .backends([Backend::InProcess])
+            .run(async |stage: &Stage| {
+                let alpha = &stage.viewer("Alpha")?;
+                let details = stage.login_details("Alpha")?;
+                add_the_grid(stage, alpha).await?;
+                let remember = alpha.ui().test_id("login-remember:checkbox");
+                let _ticked = remember.click().await?;
+                let _checked = alpha.expect(&remember).to_be_checked().await?;
+                log_in(stage, alpha, &details.password).await?;
+                arrives(stage, alpha).await?;
+
+                stage.log_out_viewer("Alpha").await?;
+                let alpha = &stage.log_in_again("Alpha").await?;
+                let bullets: String = details.password.chars().map(|_| '•').collect();
+                let _filled = alpha
+                    .expect(&alpha.ui().test_id("login-password:field"))
+                    .timeout(WAIT)
+                    .to_have_text(&bullets)
+                    .await?;
+                let _pressed = alpha.ui().test_id("login-connect").click().await?;
                 arrives(stage, alpha).await
             })?;
         Ok(())

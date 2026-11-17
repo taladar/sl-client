@@ -98,6 +98,26 @@ roads in, the credentials file's `mfa_command` and the screen's prompt: a
 windowed viewer cannot build a second app, because winit allows one event
 loop per process.
 
+## A remembered password
+
+The password never goes into the viewer's settings. When the login screen's
+**Remember password** is ticked, a login that arrives keeps its password in the
+OS keychain (`sl-secret-store`: the Secret Service, Keychain or the Credential
+Manager, through the `keyring` crate). The keychain keys it by grid and avatar,
+named as the per-avatar directories are (`Avatar Tester @ 127.0.0.1:9000`), so
+each avatar on each grid remembers its own. Choosing that grid and avatar again
+fills the password field, and the text never enters the editor. Unticking the
+box, or a refusal for a bad password (`reason` `key`), forgets it.
+
+A keychain call can block on D-Bus or an unlock prompt, so the viewer makes
+its calls on a worker thread and gets the answers back as messages. Where no
+keychain answers (a headless box, a locked or absent Secret Service), nothing
+is remembered and the line beside the box says why. There is no file fallback:
+a file encrypted with a key on the same machine is obfuscation, not protection.
+A test stage hands its viewers an in-memory store (`--secret-store memory`)
+instead, so tests never touch the developer's keychain. The reference keeps its
+credentials in a protected store of its own (`llsechandler_basic`).
+
 ## The server side
 
 The same codec works in the grid direction, so a login *server* (a fake grid,

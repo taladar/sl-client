@@ -31,6 +31,8 @@ sl-proto = { workspace = true }
 # A live grid's accounts (its credentials file), their second factor, and the
 # login cooldown every unattended harness shares.
 sl-repl = { workspace = true }
+# The in-memory store each stage viewer keeps its secrets in.
+sl-secret-store = { workspace = true }
 # The in-process host the in-process backend steps its viewers on.
 sl-viewer-automation = { workspace = true }
 sl-viewer-driver = { workspace = true }

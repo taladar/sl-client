@@ -195,6 +195,8 @@ sl-client-bevy = { workspace = true, features = [
 ] }
 sl-l10n = { path = "../sl-l10n", version = "0.1.0" }
 sl-repl = { workspace = true }
+# The OS keychain a saved login password is kept in (`src/secrets.rs`).
+sl-secret-store = { workspace = true }
 sl-settings = { path = "../sl-settings", version = "0.1.0" }
 sl-texture = { path = "../sl-texture", version = "0.1.0", features = [
   "encode",

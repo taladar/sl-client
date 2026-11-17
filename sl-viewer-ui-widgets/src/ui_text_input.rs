@@ -1356,6 +1356,25 @@ impl PasswordField {
         &self.secret
     }
 
+    /// Fill the field with `secret` from somewhere other than the keyboard (a
+    /// saved password), or empty it with `""`: `editable`, the field's editor,
+    /// shows its bullets with the caret at their end, and the text itself
+    /// never enters the editor. Laid out again with `font_cx` and `layout_cx`,
+    /// as a programmatic edit must be.
+    pub fn fill(
+        &mut self,
+        secret: &str,
+        editable: &mut EditableText,
+        font_cx: &mut FontCx,
+        layout_cx: &mut LayoutCx,
+    ) {
+        secret.clone_into(&mut self.secret);
+        editable.editor.set_text(&masked(secret));
+        let mut driver = editable.editor.driver(font_cx, layout_cx);
+        driver.refresh_layout();
+        driver.move_to_text_end();
+    }
+
     /// Bring the secret in step with one edit its editor has just applied:
     /// `before` and `after` bullets either side of it, the selection it was
     /// made over (`selected`, in characters), the caret after it, and the text
@@ -2747,6 +2766,39 @@ mod typed_tests {
         settle(&mut app);
         assert_eq!(secret(&app, field)?, "pasted");
         assert_eq!(value(&mut app), "••••••");
+        Ok(())
+    }
+
+    /// A field filled from outside the keyboard (a saved password) shows its
+    /// bullets, with the caret at their end so typing goes on after them, and
+    /// an empty fill clears it.
+    #[test]
+    fn a_password_field_filled_from_outside_shows_bullets() -> Result<(), TestError> {
+        let mut app = typed_field_app(spec(TextInputKind::Password, ""))?;
+        let field =
+            crate::ui_test::find_by_name(&mut app, FIELD).ok_or("the field did not spawn")?;
+        let fill = |app: &mut App, text: &str| {
+            let world = app.world_mut();
+            let mut contexts = world.query::<(&mut bevy::text::EditableText, &mut PasswordField)>();
+            world.resource_scope(|world, mut font_cx: Mut<bevy::text::FontCx>| {
+                world.resource_scope(|world, mut layout_cx: Mut<bevy::text::LayoutCx>| {
+                    if let Ok((mut editable, mut password)) = contexts.get_mut(world, field) {
+                        password.fill(text, &mut editable, &mut font_cx, &mut layout_cx);
+                    }
+                });
+            });
+        };
+        fill(&mut app, "sesame");
+        settle(&mut app);
+        assert_eq!(secret(&app, field)?, "sesame");
+        assert_eq!(value(&mut app), "••••••");
+        interact::type_str(&mut app, "!");
+        settle(&mut app);
+        assert_eq!(secret(&app, field)?, "sesame!");
+        fill(&mut app, "");
+        settle(&mut app);
+        assert_eq!(secret(&app, field)?, "");
+        assert_eq!(value(&mut app), "");
         Ok(())
     }
 

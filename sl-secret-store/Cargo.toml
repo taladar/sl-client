@@ -1,0 +1,26 @@
+[package]
+name = "sl-secret-store"
+version = { workspace = true }
+authors = { workspace = true }
+edition = { workspace = true }
+rust-version = { workspace = true }
+description = "Keyed secrets for a Second Life / OpenSim viewer: the OS keychain (Secret Service, Keychain, Credential Manager) or an in-memory store for tests, never a plaintext file"
+readme = { workspace = true }
+license = { workspace = true }
+
+repository = { workspace = true }
+keywords = ["keychain", "opensim", "password", "secondlife", "viewer"]
+categories = ["authentication", "game-development"]
+publish = { workspace = true }
+
+exclude = { workspace = true }
+
+[dependencies]
+keyring = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }
+
+[lints]
+workspace = true

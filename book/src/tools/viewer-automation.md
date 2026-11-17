@@ -213,7 +213,12 @@ What a test may say about its stage:
 - `estate_manager(label)`, `skin(id)` (as `--skin`) and `web_media()`;
 - `login_screen(label)` — that viewer starts on its login screen, as one
   started without credentials does: the body types in what
-  `stage.login_details(label)` answers and waits with `stage.arrive(label)`;
+  `stage.login_details(label)` answers and waits with `stage.arrive(label)`.
+  `log_in_again(label)` brings such a viewer back to its screen without
+  waiting for it. Every stage viewer keeps its secrets (a remembered
+  password) in an in-memory store, never the keychain. In process the store
+  outlives each session; a process viewer's (`--secret-store memory`) ends
+  with its process;
 - `needs(Need::…)` — grid control, content, a dictated grid — so a test
   that cannot run on a grid skips there instead of failing.
 

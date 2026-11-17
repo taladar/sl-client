@@ -77,6 +77,7 @@ use sl_client_bevy::{
     AnimationKey, ChatLogConfig, ClientDirectories, InventoryCacheConfig, LoggedChatType,
     LoginFailure, LoginParams, SlClientPlugin, SlLoginRejected, Uuid,
 };
+use sl_secret_store::{KeychainStore, SecretStore};
 use tracing::warn;
 
 pub use sl_viewer_platform::paths::{StartupOverrides, ViewerPaths};
@@ -344,6 +345,11 @@ pub struct ViewerAppOptions {
     pub storage: Storage,
     /// Whether the audio device is opened.
     pub audio_device: bool,
+    /// Where secrets (a saved login password) are kept: the OS keychain for a
+    /// resident, an in-memory store a test stage hands each of its viewers so
+    /// nothing it does reaches the developer's own keychain
+    /// (`crate::secrets`).
+    pub secrets: Arc<dyn SecretStore>,
     /// The render debug knobs, or `None` to read them from the environment
     /// (`SL_VIEWER_DISABLE_GLOW`, `SL_VIEWER_SKY_DAY_POSITION`, …) — which is
     /// how the interactive viewer and a capture run take them.
@@ -396,6 +402,7 @@ impl ViewerAppOptions {
             window: WindowMode::Windowed,
             storage: Storage::default(),
             audio_device: true,
+            secrets: Arc::new(KeychainStore),
             render_overrides: None,
             avatar_overrides: None,
             automation: Automation::Off,
@@ -477,6 +484,7 @@ impl ViewerAppBuilder {
             window,
             storage,
             audio_device,
+            secrets,
             render_overrides,
             avatar_overrides,
             automation,
@@ -558,6 +566,7 @@ impl ViewerAppBuilder {
         // (`ViewerPaths::of`), and a store built without it keeps nothing on
         // disk.
         app.insert_resource(paths.clone());
+        app.insert_resource(crate::secrets::ViewerSecrets(secrets));
         if private_clipboard {
             crate::clipboard::use_private_clipboard(&mut app);
         }
@@ -869,6 +878,7 @@ impl ViewerAppBuilder {
             .add_systems(Update, crate::login_flow::answer_second_factor)
             // The login screen, for a viewer started on it.
             .add_plugins(crate::login_screen::LoginScreenPlugin)
+            .add_plugins(crate::secrets::SecretsPlugin)
             .add_systems(
                 Update,
                 capture_login_outcome.run_if(not(resource_exists::<

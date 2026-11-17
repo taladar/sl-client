@@ -143,7 +143,7 @@ Preferences / Exit and Help ▸ About. `sl-e2e` gains
 `Stage::arrive`; `e2e_login_screen` logs in through the panel, recovers from
 a wrong password and answers a second factor, on both backends.
 
-Saved passwords are split out as [[viewer-login-saved-passwords]], blocked on
-the secret store they need, [[viewer-secret-store]] (which
-[[viewer-photo-hosting-upload]] now waits on too). Still to do here: the
+Saved passwords were split out as [[viewer-login-saved-passwords]] and landed
+with the secret store they needed, [[viewer-secret-store]]: Remember password
+keeps a login's password in the OS keychain. Still to do here: the
 reference's typing-to-login conveniences.

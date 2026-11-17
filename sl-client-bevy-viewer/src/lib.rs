@@ -48,6 +48,7 @@ pub mod assembly;
 pub mod login_flow;
 pub mod login_grids;
 mod login_screen;
+mod secrets;
 /// Every module that declares settings, in registration order.
 ///
 /// This list lives here rather than in `settings` because a store that
@@ -424,6 +425,7 @@ pub(crate) use sl_viewer_world_scene::water_scene_depth;
 
 use std::num::NonZero;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use bevy::prelude::*;
 use clap::Parser as _;
@@ -481,6 +483,15 @@ pub enum Error {
     /// run asked to be driven that cannot be has already failed.
     #[error("could not open the automation socket")]
     AutomationSocket(#[source] sl_viewer_automation::SocketError),
+}
+
+/// Where a run keeps its secrets (`--secret-store`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
+enum SecretStoreChoice {
+    /// The OS keychain.
+    Keychain,
+    /// This run alone, in memory.
+    Memory,
 }
 
 /// The command-line options for the viewer.
@@ -734,6 +745,13 @@ struct Options {
     /// way).
     #[clap(long)]
     no_group_chat_history: bool,
+    /// Where secrets (a password the login screen remembers) are kept:
+    /// `keychain`, the OS keychain (the Secret Service, Keychain, the
+    /// Credential Manager), or `memory`, this run alone, forgotten at exit and
+    /// never touching the keychain — what a test stage starts its viewers
+    /// with. Never a file.
+    #[clap(long, value_enum, default_value_t = SecretStoreChoice::Keychain)]
+    secret_store: SecretStoreChoice,
     /// Render a captured avatar-state bundle **offline** (no login, no grid):
     /// `--replay <dir>` where `<dir>` is a bundle written by the capture
     /// (**Ctrl+Alt+D** with `SL_VIEWER_DUMP_DIR` set). The viewer rebuilds the
@@ -952,6 +970,10 @@ fn cli_app_options(options: &Options, login: ViewerLogin) -> ViewerAppOptions {
     };
     app_options.camera.field_of_view = options.camera_fov.map(f32::to_radians);
     app_options.skin.watch = options.watch_skins;
+    app_options.secrets = match options.secret_store {
+        SecretStoreChoice::Keychain => Arc::new(sl_secret_store::KeychainStore),
+        SecretStoreChoice::Memory => Arc::new(sl_secret_store::MemoryStore::default()),
+    };
     if options.headless {
         // The off-screen window is the capture size, so a headless capture's
         // frames are the window itself.

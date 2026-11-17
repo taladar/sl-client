@@ -30,9 +30,17 @@
 //! `get_grid_info` (fetched off the frame thread, as Firestorm's grid manager
 //! does), and removes a user grid; a built-in one cannot be removed.
 //!
-//! The last grid and avatar name are remembered in the global settings. A
-//! password is not: keeping one belongs in the OS keychain, which is its own
-//! step of `viewer-login-screen`.
+//! The last grid and avatar name are remembered in the global settings.
+//!
+//! # A remembered password
+//!
+//! With **Remember password** ticked (`LoginRememberPassword`), a login that
+//! arrives keeps its password in the secret store ([`crate::secrets`]: the OS
+//! keychain), keyed by the grid and the avatar as `sl-account-dirs` names
+//! their directories; choosing that grid and avatar again fills the password
+//! field from it, the text never entering the editor. Unticking the box, or a
+//! refusal for a bad password, forgets it. Where no keychain can keep it, the
+//! line under the box says why, rather than pretending to remember.
 //!
 //! Reference (Firestorm, read-only): `llpanellogin.cpp`, `panel_login.xml`,
 //! `menu_login.xml`, `llstartup.cpp`, `fsgridhandler.cpp`.
@@ -44,11 +52,13 @@ use bevy::prelude::*;
 use bevy::text::{EditableText, FontCx, LayoutCx};
 use bevy::ui::InteractionDisabled;
 use bevy::ui_widgets::Activate;
+use sl_account_dirs::{avatar_dir_name, grid_dir_name};
 use sl_client_bevy::grids::{GridInfo, fetch_grid_info};
 use sl_client_bevy::{
-    LoginParams, LoginRequest, SessionDisconnectReason, SlEvent, SlLogin, SlLoginRejected,
-    SlMfaChallenge, SlSessionEvent, SlSessionStatus, StartLocation,
+    LoginParams, LoginRequest, LoginServer, SessionDisconnectReason, SlEvent, SlLogin,
+    SlLoginRejected, SlMfaChallenge, SlSessionEvent, SlSessionStatus, StartLocation,
 };
+use sl_secret_store::{Secret, SecretKey};
 use sl_settings::{Scope, SettingValue};
 use url::Url;
 
@@ -57,9 +67,12 @@ use crate::i18n::{TransArgs, Translator};
 use crate::login_flow::{LoginScope, PendingLogin, SecondFactorSource};
 use crate::login_grids::GridList;
 use crate::menu::{MenuBarDef, MenuCommand, MenuConditions, MenuDef, MenuItemDef, spawn_menu_bar};
+use crate::secrets::{SecretAnswer, SecretOp, SecretOutcome, SecretRequest};
 use crate::settings::ViewerSettings;
+use crate::settings_binding::SettingBinding;
 use crate::skin_palette::SkinPalette;
 use crate::ui::{ScreenChrome, UiPanelShown, UiRoot, UiScaffoldSystems, column};
+use crate::ui_checkbox::{CheckboxSpec, spawn_checkbox};
 use crate::ui_combo::{ComboSelection, ComboSpec, SetComboOptions, spawn_combo};
 use crate::ui_element::{ElementCx, UiAction};
 use crate::ui_spawn::{
@@ -72,6 +85,10 @@ pub(crate) const SETTING_LOGIN_LAST_GRID: &str = "LoginLastGrid";
 
 /// The global setting holding the avatar name last logged in with.
 pub(crate) const SETTING_LOGIN_LAST_AVATAR: &str = "LoginLastAvatar";
+
+/// The global setting saying whether a login keeps its password in the
+/// secret store.
+pub(crate) const SETTING_LOGIN_REMEMBER_PASSWORD: &str = "LoginRememberPassword";
 
 /// The section the login settings are kept under.
 const LOGIN_SECTION: &[&str] = &["login"];
@@ -165,6 +182,8 @@ struct LoginPanelUi {
     avatar: Entity,
     /// The password field.
     password: Entity,
+    /// The line under Remember password saying why no password can be kept.
+    remember_note: Entity,
     /// The start-location combo.
     start: Entity,
     /// The region field, for a start in a named region.
@@ -201,7 +220,32 @@ struct LoginPanelState {
     challenge: Option<WaitingChallenge>,
     /// What the notice line shows, so it is rewritten only on a change.
     shown: Option<Notice>,
+    /// The remembered password's part.
+    saved: SavedPassword,
 }
+
+/// Where the remembered password stands.
+#[derive(Debug, Default)]
+struct SavedPassword {
+    /// The grid and avatar the panel shows, whose saved password was asked
+    /// for.
+    asked: Option<SecretKey>,
+    /// Whether the password field holds what the store gave for `asked`.
+    filled: bool,
+    /// The login under way: the grid and avatar, and the password it was sent
+    /// with, kept once it arrives if the box is ticked.
+    attempt: Option<(SecretKey, Secret)>,
+    /// Why the store could not keep a password, said under the box.
+    problem: Option<String>,
+    /// What the line under the box shows, so it is rewritten only on a
+    /// change; `None` before it is first written.
+    shown: Option<ShownProblem>,
+}
+
+/// The problem the line under Remember password was last written with, or
+/// none.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ShownProblem(Option<String>);
 
 /// A second-factor challenge waiting for the token the user types.
 #[derive(Debug, Clone)]
@@ -244,9 +288,13 @@ impl Plugin for LoginScreenPlugin {
                     add_grid,
                     remove_grid,
                     follow_the_login,
+                    ask_for_the_saved_password,
+                    take_the_saved_password,
+                    keep_the_password,
                     show_the_page,
                     reflect_the_panel,
                     write_the_notice,
+                    write_the_remember_note,
                     handle_login_menu,
                 )
                     .chain()
@@ -255,7 +303,8 @@ impl Plugin for LoginScreenPlugin {
     }
 }
 
-/// Register the login screen's settings: the last grid and avatar name.
+/// Register the login screen's settings: the last grid and avatar name, and
+/// whether a password is remembered.
 pub(crate) fn register_settings(settings: &mut ViewerSettings) {
     settings.register_in(
         LOGIN_SECTION,
@@ -269,6 +318,26 @@ pub(crate) fn register_settings(settings: &mut ViewerSettings) {
         SettingValue::String(String::new()),
         "setting-desc-LoginLastAvatar",
     );
+    settings.register_in(
+        LOGIN_SECTION,
+        SETTING_LOGIN_REMEMBER_PASSWORD,
+        SettingValue::Bool(false),
+        "setting-desc-LoginRememberPassword",
+    );
+}
+
+/// Whether Remember password is ticked.
+fn remembering(settings: &ViewerSettings) -> bool {
+    settings
+        .store()
+        .get_bool(SETTING_LOGIN_REMEMBER_PASSWORD)
+        .unwrap_or(false)
+}
+
+/// The secret-store key of `first last`'s password on the grid at
+/// `login_uri`.
+fn password_key(login_uri: &Url, first: &str, last: &str) -> SecretKey {
+    SecretKey::login_password(&grid_dir_name(login_uri), &avatar_dir_name(first, last))
 }
 
 /// A string setting's value, or empty when it is not set.
@@ -442,6 +511,41 @@ fn spawn_login_page(
             ..TextInputSpec::new("login-password", TextInputKind::Password)
         },
     );
+    // Remember password, under the fields it belongs to, and the line that
+    // says why no password can be kept, when none can.
+    let remember_row = spawn_labeled_row(
+        &mut commands,
+        panel,
+        LabeledRowSpec::new(UiLabel::literal(String::new()))
+            .font_size(PANEL_FONT)
+            .label_min_width(Val::Px(LABEL_MIN_WIDTH)),
+    )
+    .row;
+    let remember = spawn_checkbox(
+        &mut commands,
+        remember_row,
+        &CheckboxSpec {
+            element: "login-remember",
+            label: "login-remember-password".to_owned(),
+            tab_index: 7,
+            font_size: PANEL_FONT,
+            translate_label: true,
+        },
+    )
+    .checkbox;
+    commands
+        .entity(remember)
+        .insert(SettingBinding::global(SETTING_LOGIN_REMEMBER_PASSWORD));
+    let remember_note = spawn_label(
+        &mut commands,
+        remember_row,
+        UiLabel::literal(String::new()),
+        palette.text_muted,
+        PANEL_FONT,
+    );
+    commands
+        .entity(remember_note)
+        .insert(Name::new("login-remember-note"));
 
     let start_row = labeled(&mut commands, "login-start-label");
     let start_labels: Vec<String> = START_OPTIONS.iter().map(|&key| key.to_owned()).collect();
@@ -452,7 +556,7 @@ fn spawn_login_page(
             element: "login-start",
             labels: &start_labels,
             active: start_index,
-            tab_index: 7,
+            tab_index: 8,
             font_size: PANEL_FONT,
             translate_labels: true,
         },
@@ -464,7 +568,7 @@ fn spawn_login_page(
             initial: start_region,
             font_size: PANEL_FONT,
             width_glyphs: 14.0,
-            tab_index: 8,
+            tab_index: 9,
             name_key: Some("login-start-region-name"),
             ..TextInputSpec::new("login-start-region", TextInputKind::Line)
         },
@@ -475,7 +579,7 @@ fn spawn_login_page(
         panel,
         ButtonSpec::bordered(UiLabel::key("login-connect"), "login-connect")
             .kind(ButtonKind::Headless)
-            .tab_index(9)
+            .tab_index(10)
             .font_size(PANEL_FONT)
             .primary(),
     )
@@ -503,7 +607,7 @@ fn spawn_login_page(
         &TextInputSpec {
             font_size: PANEL_FONT,
             width_glyphs: 10.0,
-            tab_index: 10,
+            tab_index: 11,
             ..TextInputSpec::new("login-token", TextInputKind::Line)
         },
     );
@@ -512,7 +616,7 @@ fn spawn_login_page(
         token_row,
         "login-submit-token",
         LoginPanelRequest::SubmitToken,
-        11,
+        12,
     );
 
     let notice = spawn_label(
@@ -532,6 +636,7 @@ fn spawn_login_page(
         grid_uri,
         avatar,
         password,
+        remember_note,
         start,
         start_region,
         connect,
@@ -719,6 +824,10 @@ fn connect(
             return;
         }
     };
+    state.saved.attempt = Some((
+        password_key(&grid.login_uri, &first, &last),
+        Secret::new(password.clone()),
+    ));
     let params = LoginParams {
         login_uri: grid.login_uri.clone(),
         request: LoginRequest::new(
@@ -986,20 +1095,36 @@ fn ended_notice(reason: &SessionDisconnectReason) -> Notice {
 
 /// Fold what the login brings into the panel's notice: a refusal, a lost
 /// login, or a second-factor challenge to answer here (a viewer with a
-/// second-factor source of its own answers that itself).
+/// second-factor source of its own answers that itself). A refusal for a bad
+/// password forgets the password kept for that account.
 fn follow_the_login(
-    mut events: MessageReader<SlEvent>,
-    mut rejected: MessageReader<SlLoginRejected>,
-    mut challenges: MessageReader<SlMfaChallenge>,
+    (mut events, mut rejected, mut challenges): (
+        MessageReader<SlEvent>,
+        MessageReader<SlLoginRejected>,
+        MessageReader<SlMfaChallenge>,
+    ),
     second_factor: Option<Res<SecondFactorSource>>,
     session: Res<crate::session::ViewerSession>,
     mut state: ResMut<LoginPanelState>,
+    mut secrets: MessageWriter<SecretRequest>,
 ) {
     for event in events.read() {
-        if let SlSessionEvent::Disconnected(reason) = &event.0
-            && !session.agent_in_world()
+        let SlSessionEvent::Disconnected(reason) = &event.0 else {
+            continue;
+        };
+        if session.agent_in_world() {
+            continue;
+        }
+        state.notice = ended_notice(reason);
+        if let SessionDisconnectReason::LoginFailed { reason, .. } = reason
+            && reason == LoginServer::BAD_CREDENTIALS_REASON
+            && let Some((key, _refused)) = state.saved.attempt.take()
         {
-            state.notice = ended_notice(reason);
+            state.saved.filled = false;
+            secrets.write(SecretRequest {
+                key,
+                op: SecretOp::Forget,
+            });
         }
     }
     for rejection in rejected.read() {
@@ -1013,6 +1138,154 @@ fn follow_the_login(
             mfa_hash: challenge.0.mfa_hash.clone(),
         });
         state.notice = Notice::Message("login-notice-token", challenge.0.message.clone());
+    }
+}
+
+/// The password field, and the text contexts filling it lays it out again
+/// with.
+#[derive(bevy::ecs::system::SystemParam)]
+struct PasswordFill<'w, 's> {
+    /// The text fields' editors.
+    fields: Query<'w, 's, &'static mut EditableText>,
+    /// The password fields' secrets.
+    passwords: Query<'w, 's, &'static mut PasswordField>,
+    /// The font context.
+    font_cx: ResMut<'w, FontCx>,
+    /// The layout context.
+    layout_cx: ResMut<'w, LayoutCx>,
+}
+
+impl PasswordFill<'_, '_> {
+    /// Fill the password field `field` with `secret`, or empty it with `""`.
+    fn fill(&mut self, field: Entity, secret: &str) {
+        if let (Ok(mut editable), Ok(mut password)) =
+            (self.fields.get_mut(field), self.passwords.get_mut(field))
+        {
+            password.fill(
+                secret,
+                &mut editable,
+                &mut self.font_cx,
+                &mut self.layout_cx,
+            );
+        }
+    }
+
+    /// The text of the field `field`, trimmed, or empty.
+    fn text(&self, field: Entity) -> String {
+        self.fields
+            .get(field)
+            .map(|editable| editable.value().to_string().trim().to_owned())
+            .unwrap_or_default()
+    }
+}
+
+/// The secret-store key of the grid chosen at `grid_choice` and the avatar
+/// named `avatar`, or `None` while either is missing.
+fn panel_key(grids: &GridList, grid_choice: usize, avatar: &str) -> Option<SecretKey> {
+    let grid = grids.grids().get(grid_choice)?;
+    let (first, last) = split_avatar_name(avatar)?;
+    Some(password_key(&grid.login_uri, &first, &last))
+}
+
+/// While Remember password is ticked, ask the store for the password of the
+/// grid and avatar the panel shows, whenever they change (the name once its
+/// field is left, not at every key). Unticking it forgets that password.
+fn ask_for_the_saved_password(
+    (ui, settings, focus): (Res<LoginPanelUi>, Res<ViewerSettings>, Res<InputFocus>),
+    (grids, combos): (Res<GridList>, Query<&ComboSelection>),
+    mut fill: PasswordFill,
+    mut state: ResMut<LoginPanelState>,
+    mut secrets: MessageWriter<SecretRequest>,
+    mut was_ticked: Local<Option<bool>>,
+) {
+    let ticked = remembering(&settings);
+    let untoggled = was_ticked.replace(ticked) == Some(true) && !ticked;
+    let grid_choice = combos.get(ui.grid).map_or(0, |choice| choice.active);
+    let key = panel_key(&grids, grid_choice, &fill.text(ui.avatar));
+    if untoggled && let Some(key) = key.clone() {
+        secrets.write(SecretRequest {
+            key,
+            op: SecretOp::Forget,
+        });
+    }
+    if !ticked {
+        state.saved.asked = None;
+        return;
+    }
+    if focus.get() == Some(ui.avatar) || key == state.saved.asked {
+        return;
+    }
+    // A password filled for the account shown before is not this one's.
+    if state.saved.filled {
+        fill.fill(ui.password, "");
+        state.saved.filled = false;
+    }
+    state.saved.asked.clone_from(&key);
+    if let Some(key) = key {
+        secrets.write(SecretRequest {
+            key,
+            op: SecretOp::Load,
+        });
+    }
+}
+
+/// Fill the password field with the password the store found for the
+/// account the panel shows (unless its user has typed one of their own), and
+/// note why, when the store could not keep or read one.
+fn take_the_saved_password(
+    mut answers: MessageReader<SecretAnswer>,
+    ui: Res<LoginPanelUi>,
+    mut fill: PasswordFill,
+    mut state: ResMut<LoginPanelState>,
+) {
+    for answer in answers.read() {
+        match &answer.outcome {
+            SecretOutcome::Loaded(found) => {
+                state.saved.problem = None;
+                let Some(secret) = found else {
+                    continue;
+                };
+                if state.saved.asked.as_ref() != Some(&answer.key) {
+                    continue;
+                }
+                let typed = fill
+                    .passwords
+                    .get(ui.password)
+                    .is_ok_and(|field| !field.secret().is_empty());
+                if typed && !state.saved.filled {
+                    continue;
+                }
+                fill.fill(ui.password, secret.expose());
+                state.saved.filled = true;
+            }
+            SecretOutcome::Saved | SecretOutcome::Forgotten => state.saved.problem = None,
+            SecretOutcome::Failed(error) => {
+                warn!("the login screen's password could not be kept or read: {error}");
+                state.saved.problem = Some(error.to_string());
+            }
+        }
+    }
+}
+
+/// Once the login arrives, keep the password it was sent with, if Remember
+/// password is ticked.
+fn keep_the_password(
+    session: Res<crate::session::ViewerSession>,
+    settings: Res<ViewerSettings>,
+    mut state: ResMut<LoginPanelState>,
+    mut secrets: MessageWriter<SecretRequest>,
+) {
+    if !session.agent_in_world() {
+        return;
+    }
+    let Some((key, password)) = state.saved.attempt.take() else {
+        return;
+    };
+    if remembering(&settings) {
+        secrets.write(SecretRequest {
+            key,
+            op: SecretOp::Save(password),
+        });
     }
 }
 
@@ -1114,6 +1387,30 @@ fn write_the_notice(
         shown.0 = text;
     }
     state.shown = Some(notice);
+}
+
+/// Write the line under Remember password when what it says changes, or the
+/// locale does: why no password can be kept, or nothing.
+fn write_the_remember_note(
+    ui: Res<LoginPanelUi>,
+    mut state: ResMut<LoginPanelState>,
+    translator: Translator,
+    mut texts: Query<&mut Text>,
+) {
+    let problem = ShownProblem(state.saved.problem.clone());
+    if state.saved.shown.as_ref() == Some(&problem) && !translator.changed() {
+        return;
+    }
+    let text = problem.0.as_ref().map_or_else(String::new, |reason| {
+        translator.format(
+            "login-remember-unavailable",
+            &TransArgs::new().text("message", reason),
+        )
+    });
+    if let Ok(mut shown) = texts.get_mut(ui.remember_note) {
+        shown.0 = text;
+    }
+    state.saved.shown = Some(problem);
 }
 
 /// Route the pre-login menu's picks: Preferences, About, and Exit (a quit,
