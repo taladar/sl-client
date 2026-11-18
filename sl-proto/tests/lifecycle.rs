@@ -40,12 +40,12 @@ mod test {
         RegionLocalParcelId, RegionName, Reliability, RequiredVoiceVersion, RestoreItem,
         RezAttachment, RezObjectParams, RezScriptParams, SaleInfo, SaleType, Scale, ScopedObjectId,
         ScopedParcelId, ScriptControlAction, ScriptPermissionStatus, ScriptPermissions,
-        SculptOrMeshKey, Session, SessionMessage, SetDisplayNameReply, SimStatId,
-        SimWideDeleteFlags, SimulatorTime, SkySettings, SoundFlags, StartLocationSlot,
-        TEXTURE_DOWNLOAD_MAX_ATTEMPTS, TaskInventoryKey, TaskInventoryReply, TeleportFlags,
-        TerraformArea, TerrainLayerType, TextureEntry, TextureFace, TextureKey, Throttle,
-        TransactionId, TransferStatus, Transmit, UpdateGroupInfoParams, UserInfo, ViewerEffect,
-        ViewerEffectData, ViewerEffectType, WaterSettings, WearableType, XferListing,
+        SculptOrMeshKey, Session, SessionMessage, SessionVoiceFailure, SessionVoiceRequest,
+        SetDisplayNameReply, SimStatId, SimWideDeleteFlags, SimulatorTime, SkySettings, SoundFlags,
+        StartLocationSlot, TEXTURE_DOWNLOAD_MAX_ATTEMPTS, TaskInventoryKey, TaskInventoryReply,
+        TeleportFlags, TerraformArea, TerrainLayerType, TextureEntry, TextureFace, TextureKey,
+        Throttle, TransactionId, TransferStatus, Transmit, UpdateGroupInfoParams, UserInfo,
+        ViewerEffect, ViewerEffectData, ViewerEffectType, WaterSettings, WearableType, XferListing,
         avatar_texture, chat_session_agent_params_from_llsd, chat_session_agents_body,
         chat_session_request_body, decode_texture_entry, group_powers, pcode,
     };
@@ -23014,6 +23014,7 @@ mod test {
         Ok(ChatSessionReply {
             session,
             purpose: ChatSessionRequestPurpose::Answer,
+            status: 200,
             body: parse_llsd_xml(xml)?,
         })
     }
@@ -23024,6 +23025,7 @@ mod test {
         Ok(ChatSessionReply {
             session,
             purpose: ChatSessionRequestPurpose::FetchHistory,
+            status: 200,
             body: parse_llsd_xml(xml)?,
         })
     }
@@ -24464,6 +24466,405 @@ mod test {
         );
         // Leaving voice does not leave the conversation.
         assert_eq!(chat_sessions(&session), vec![kind]);
+        Ok(())
+    }
+
+    /// The reply to a voice join's request, handed back with its purpose and
+    /// status as the runtime hands it back.
+    fn voice_reply(
+        session: ChatSessionKind,
+        purpose: ChatSessionRequestPurpose,
+        status: u16,
+        xml: &str,
+    ) -> Result<ChatSessionReply, TestError> {
+        Ok(ChatSessionReply {
+            session,
+            purpose,
+            status,
+            body: parse_llsd_xml(xml)?,
+        })
+    }
+
+    /// A `call` reply carrying a WebRTC channel whose id is `channel`.
+    fn call_reply(
+        session: ChatSessionKind,
+        channel: uuid::Uuid,
+    ) -> Result<ChatSessionReply, TestError> {
+        voice_reply(
+            session,
+            ChatSessionRequestPurpose::VoiceCall,
+            200,
+            &format!(
+                "<llsd><map><key>voice_credentials</key><map>\
+                   <key>channel_uri</key><string>{channel}</string>\
+                   <key>channel_credentials</key><string>pass</string>\
+                   <key>voice_server_type</key><string>webrtc</string>\
+                 </map></map></llsd>"
+            ),
+        )
+    }
+
+    /// The `ChatterBoxSessionStartReply` Second Life answers a 1:1 call's
+    /// `start p2p voice` with, under the 1:1 session's own id.
+    fn p2p_start_reply(session_id: uuid::Uuid, success: bool) -> Result<Llsd, TestError> {
+        Ok(parse_llsd_xml(&format!(
+            "<llsd><map>\
+               <key>temp_session_id</key><uuid>{session_id}</uuid>\
+               <key>session_id</key><uuid>{session_id}</uuid>\
+               <key>success</key><boolean>{}</boolean>\
+               <key>error</key><string>{}</string>\
+             </map></llsd>",
+            u8::from(success),
+            if success { "" } else { "unverified" },
+        ))?)
+    }
+
+    /// Joining a group's voice asks for its channel with one `call` naming
+    /// WebRTC, returned once; the reply's `voice_credentials` become the
+    /// session's channel and the join stays joined.
+    #[test]
+    fn joining_a_group_voice_calls_for_its_channel() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        let kind = ChatSessionKind::Group {
+            group_id: GroupKey::from(uuid::Uuid::from_u128(0x6A_31)),
+        };
+        session.join_session_voice(kind, now);
+        let requests = session.next_session_voice_requests();
+        assert_eq!(requests, vec![(kind, SessionVoiceRequest::Call)]);
+        assert!(
+            session.next_session_voice_requests().is_empty(),
+            "a request is returned once"
+        );
+        let body = parse_llsd_xml(&SessionVoiceRequest::Call.body(uuid::Uuid::from_u128(0x6A_31)))?;
+        assert_eq!(body.get("method").and_then(Llsd::as_str), Some("call"));
+        assert_eq!(
+            body.get("alt_params")
+                .and_then(|alt| alt.get("preferred_voice_server_type"))
+                .and_then(Llsd::as_str),
+            Some("webrtc")
+        );
+        assert_eq!(
+            SessionVoiceRequest::Call.purpose(),
+            ChatSessionRequestPurpose::VoiceCall
+        );
+
+        let channel = uuid::Uuid::from_u128(0x6A_3A);
+        session.handle_chat_session_reply(&call_reply(kind, channel)?, now);
+        let info = session
+            .session_voice_channel(kind)
+            .ok_or("the call's channel is recorded")?;
+        assert_eq!(
+            info.channel_uri,
+            Some(sl_wire::VoiceChannelUri::Id(channel))
+        );
+        assert_eq!(info.channel_credentials.as_deref(), Some("pass"));
+        assert!(session.session_voice_joined(kind));
+        assert!(drain_events(&mut session).is_empty());
+        Ok(())
+    }
+
+    /// Joining a 1:1 call starts it with `start p2p voice` naming the other
+    /// agent, then waits: the `call` for its channel is due only once the
+    /// grid answers the 1:1 session's start over the event queue, and that
+    /// answer opens no conference under the 1:1 session's id.
+    #[test]
+    fn joining_a_direct_call_starts_it_then_calls() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+        let own = session.agent_id().ok_or("logged in")?;
+
+        let peer = AgentKey::from(uuid::Uuid::from_u128(0x6A_41));
+        let direct = ChatSessionKind::Direct { peer };
+        let session_id = direct.canonical_session_id(own);
+        session.join_session_voice(direct, now);
+        let start = SessionVoiceRequest::StartP2pVoice { peer };
+        assert_eq!(session.next_session_voice_requests(), vec![(direct, start)]);
+        let body = parse_llsd_xml(&start.body(session_id))?;
+        assert_eq!(
+            body.get("method").and_then(Llsd::as_str),
+            Some("start p2p voice")
+        );
+        assert_eq!(
+            body.get("session-id").and_then(Llsd::as_uuid),
+            Some(session_id)
+        );
+        assert_eq!(
+            body.get("params").and_then(Llsd::as_uuid),
+            Some(peer.uuid())
+        );
+        assert_eq!(
+            body.get("alt_params")
+                .and_then(|alt| alt.get("voice_server_type"))
+                .and_then(Llsd::as_str),
+            Some("webrtc")
+        );
+
+        session.handle_chat_session_reply(
+            &voice_reply(
+                direct,
+                ChatSessionRequestPurpose::StartP2pVoice,
+                200,
+                "<llsd><undef /></llsd>",
+            )?,
+            now,
+        );
+        assert!(
+            session.next_session_voice_requests().is_empty(),
+            "the call waits for the session's start"
+        );
+
+        session.handle_caps_event(
+            "ChatterBoxSessionStartReply",
+            &p2p_start_reply(session_id, true)?,
+            now,
+        )?;
+        assert_eq!(
+            session.next_session_voice_requests(),
+            vec![(direct, SessionVoiceRequest::Call)]
+        );
+        let kinds: Vec<ChatSessionKind> =
+            session.chat_sessions_info().map(|info| info.kind).collect();
+        assert_eq!(kinds, vec![direct], "no phantom conference beside it");
+
+        let channel = uuid::Uuid::from_u128(0x6A_42);
+        session.handle_chat_session_reply(&call_reply(direct, channel)?, now);
+        assert_eq!(
+            session
+                .session_voice_channel(direct)
+                .and_then(|info| info.channel_uri.clone()),
+            Some(sl_wire::VoiceChannelUri::Id(channel))
+        );
+        assert!(session.session_voice_joined(direct));
+        Ok(())
+    }
+
+    /// A session whose invitation carried its channel needs no request: the
+    /// reference asks for a channel only when it has none.
+    #[test]
+    fn joining_voice_with_a_known_channel_asks_nothing() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let conf = uuid::Uuid::from_u128(0x6A_51);
+        let xml = format!(
+            "<llsd><map>\
+               <key>session_id</key><uuid>{conf}</uuid>\
+               <key>from_id</key><uuid>{}</uuid>\
+               <key>voice</key><map>\
+                 <key>channel_uri</key><string>{}</string>\
+               </map></map></llsd>",
+            uuid::Uuid::from_u128(0x6A_52),
+            uuid::Uuid::from_u128(0x6A_53),
+        );
+        session.handle_caps_event("ChatterBoxInvitation", &parse_llsd_xml(&xml)?, now)?;
+        let kind = ChatSessionKind::Conference {
+            id: ImSessionId::from(conf),
+        };
+        session.join_session_voice(kind, now);
+        assert!(session.session_voice_joined(kind));
+        assert!(session.next_session_voice_requests().is_empty());
+        Ok(())
+    }
+
+    /// Each way a voice join can fail ends it with `SessionVoiceFailed`
+    /// naming why, clears the optimistic join and keeps the conversation: a
+    /// `call` answered 403, a `call` with no channel in it, a `start p2p
+    /// voice` answered 400 and a 1:1 session's start refused.
+    #[test]
+    fn a_refused_voice_join_fails_and_clears_joined() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+        let own = session.agent_id().ok_or("logged in")?;
+
+        let failed = |session: &mut Session| -> Vec<(ChatSessionKind, SessionVoiceFailure)> {
+            drain_events(session)
+                .into_iter()
+                .filter_map(|event| match event {
+                    Event::SessionVoiceFailed { session, reason } => Some((session, reason)),
+                    _ => None,
+                })
+                .collect()
+        };
+
+        let group = ChatSessionKind::Group {
+            group_id: GroupKey::from(uuid::Uuid::from_u128(0x6A_61)),
+        };
+        session.join_session_voice(group, now);
+        let _posted = session.next_session_voice_requests();
+        session.handle_chat_session_reply(
+            &voice_reply(
+                group,
+                ChatSessionRequestPurpose::VoiceCall,
+                403,
+                "<llsd><undef /></llsd>",
+            )?,
+            now,
+        );
+        assert_eq!(
+            failed(&mut session),
+            vec![(group, SessionVoiceFailure::NotAllowed)]
+        );
+        assert!(!session.session_voice_joined(group));
+        assert!(session.chat_sessions_info().any(|info| info.kind == group));
+
+        session.join_session_voice(group, now);
+        let _posted = session.next_session_voice_requests();
+        session.handle_chat_session_reply(
+            &voice_reply(
+                group,
+                ChatSessionRequestPurpose::VoiceCall,
+                200,
+                "<llsd><map /></llsd>",
+            )?,
+            now,
+        );
+        assert_eq!(
+            failed(&mut session),
+            vec![(group, SessionVoiceFailure::NoChannel)]
+        );
+
+        let peer = AgentKey::from(uuid::Uuid::from_u128(0x6A_62));
+        let direct = ChatSessionKind::Direct { peer };
+        session.join_session_voice(direct, now);
+        let _posted = session.next_session_voice_requests();
+        session.handle_chat_session_reply(
+            &voice_reply(
+                direct,
+                ChatSessionRequestPurpose::StartP2pVoice,
+                400,
+                "<llsd><undef /></llsd>",
+            )?,
+            now,
+        );
+        assert_eq!(
+            failed(&mut session),
+            vec![(
+                direct,
+                SessionVoiceFailure::Refused {
+                    request: SessionVoiceRequest::StartP2pVoice { peer },
+                    status: 400,
+                }
+            )]
+        );
+        assert!(!session.session_voice_joined(direct));
+
+        session.join_session_voice(direct, now);
+        let _posted = session.next_session_voice_requests();
+        session.handle_caps_event(
+            "ChatterBoxSessionStartReply",
+            &p2p_start_reply(direct.canonical_session_id(own), false)?,
+            now,
+        )?;
+        assert_eq!(
+            failed(&mut session),
+            vec![(
+                direct,
+                SessionVoiceFailure::StartFailed {
+                    error: "unverified".to_owned(),
+                }
+            )]
+        );
+        assert!(!session.session_voice_joined(direct));
+        assert!(
+            session.chat_sessions_info().any(|info| info.kind == direct),
+            "a refused call keeps the conversation"
+        );
+        Ok(())
+    }
+
+    /// Leaving voice abandons a request still in flight: its reply, when it
+    /// comes, records no channel and joins nothing. Leaving a 1:1 call also
+    /// forgets its channel, so calling again starts it again, while a group
+    /// keeps its channel and is rejoined with no request.
+    #[test]
+    fn leaving_voice_abandons_the_request_and_a_calls_channel() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        let group = ChatSessionKind::Group {
+            group_id: GroupKey::from(uuid::Uuid::from_u128(0x6A_71)),
+        };
+        session.join_session_voice(group, now);
+        let _posted = session.next_session_voice_requests();
+        session.leave_session_voice(group);
+        session.handle_chat_session_reply(&call_reply(group, uuid::Uuid::from_u128(0x6A_72))?, now);
+        assert_eq!(session.session_voice_channel(group), None);
+        assert!(!session.session_voice_joined(group));
+
+        session.join_session_voice(group, now);
+        let _posted = session.next_session_voice_requests();
+        session.handle_chat_session_reply(&call_reply(group, uuid::Uuid::from_u128(0x6A_72))?, now);
+        session.leave_session_voice(group);
+        session.join_session_voice(group, now);
+        assert!(
+            session.next_session_voice_requests().is_empty(),
+            "a group keeps its channel"
+        );
+
+        let peer = AgentKey::from(uuid::Uuid::from_u128(0x6A_73));
+        let direct = ChatSessionKind::Direct { peer };
+        session.join_session_voice(direct, now);
+        let _posted = session.next_session_voice_requests();
+        session
+            .handle_chat_session_reply(&call_reply(direct, uuid::Uuid::from_u128(0x6A_74))?, now);
+        // The call above was never asked for (the start is still awaited).
+        assert_eq!(session.session_voice_channel(direct), None);
+        session.leave_session_voice(direct);
+        session.join_session_voice(direct, now);
+        assert_eq!(
+            session.next_session_voice_requests(),
+            vec![(direct, SessionVoiceRequest::StartP2pVoice { peer })]
+        );
+        assert!(drain_events(&mut session).is_empty());
+        Ok(())
+    }
+
+    /// A refused `fetch history` stores nothing and is not asked again; a
+    /// refused accept folds no roster.
+    #[test]
+    fn a_refused_answer_or_fetch_changes_nothing() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        let conference = ChatSessionKind::Conference {
+            id: ImSessionId::from(uuid::Uuid::from_u128(0x6A_81)),
+        };
+        session.handle_chat_session_reply(
+            &voice_reply(
+                conference,
+                ChatSessionRequestPurpose::FetchHistory,
+                403,
+                "<llsd><string>You cannot join chat</string></llsd>",
+            )?,
+            now,
+        );
+        session.handle_chat_session_reply(
+            &voice_reply(
+                conference,
+                ChatSessionRequestPurpose::Answer,
+                403,
+                &format!(
+                    "<llsd><map><key>agents</key><array><uuid>{}</uuid></array></map></llsd>",
+                    uuid::Uuid::from_u128(0x6A_82)
+                ),
+            )?,
+            now,
+        );
+        assert_eq!(session.chat_sessions_info().count(), 0);
+        assert!(drain_events(&mut session).is_empty());
         Ok(())
     }
 

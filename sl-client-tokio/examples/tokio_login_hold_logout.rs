@@ -321,6 +321,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Event::ChatSessionForceClosed { session_id, reason } => {
                 info!("chat session {session_id} closed by the grid: {reason:?}");
             }
+            Event::SessionVoiceFailed { session, reason } => {
+                info!("voice of chat session {session:?} not joined: {reason:?}");
+            }
             Event::ScriptDialog(dialog) => info!(
                 "script dialog from {:?}: {:?} [{}]",
                 dialog.object_name,

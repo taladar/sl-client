@@ -38,3 +38,12 @@ verified. The log does not say which avatar sent them.
   session is initialised); if it is the declined group, do not fetch for it.
 - Name the avatar in the runtimes' log line, which would have answered the
   first question here.
+
+## Seen answered (2026-11-18)
+
+A `sl-repl-tokio` probe of the secondary avatar joining the voice of one of
+its groups (protocol-join-session-voice-posts-accept-invitation) logged that
+group's automatic `fetch history` answered `200` with an empty array, so a
+group member's fetch is not refused as such. Since that change a refused
+fetch is handed back with its status and stores nothing (the session stays
+`Requested`); what asked the second time in the original run is still open.

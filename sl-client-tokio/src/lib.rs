@@ -1110,6 +1110,21 @@ impl Client {
                         chat_replies_tx.clone(),
                     ));
                 }
+                // The requests the sessions' voice joins wait on: a `call`
+                // for a channel, or a 1:1 call's `start p2p voice`. A 1:1
+                // call's `call` becomes due once its start is answered over
+                // the event queue, and is posted by a later pass.
+                for (kind, request) in self.session.next_session_voice_requests() {
+                    tokio::spawn(post_chat_session_request(
+                        url.clone(),
+                        request.body(kind.canonical_session_id(own_agent)),
+                        kind,
+                        request.purpose(),
+                        http.clone(),
+                        caps_tx.clone(),
+                        chat_replies_tx.clone(),
+                    ));
+                }
             }
 
             // The region's `AvatarRenderInfo`, on the reference cadence the
@@ -3134,21 +3149,16 @@ impl Client {
                                 }
                             }
                             Some(Command::JoinSessionVoice { session }) => {
-                                // Optimistic local join, then drive the signalling: ensure
-                                // a voice account, then signal into the session's channel
-                                // over `ChatSessionRequest` (accept invitation). Signalling
-                                // only — the audio session is the caller's concern.
+                                // Optimistic local join, which also records what the
+                                // grid must be asked for the session's channel (`call`,
+                                // or `start p2p voice` first for a 1:1 call); the sweep
+                                // below POSTs it. Then ensure a voice account.
                                 self.session.join_session_voice(session, Instant::now());
-                                if let Some(own) = self.session.agent_id() {
-                                    let session_uuid = session.canonical_session_id(own);
-                                    if let Some(url) = caps.get(CAP_PROVISION_VOICE_ACCOUNT).cloned() {
-                                        let body = build_provision_voice_account_request(&VoiceProvisionRequest::vivox());
-                                        tokio::spawn(post_voice_cap(url, body, CAP_PROVISION_VOICE_ACCOUNT, http.clone(), caps_tx.clone()));
-                                    }
-                                    if let Some(url) = caps.get(CAP_CHAT_SESSION_REQUEST).cloned() {
-                                        let body = chat_session_request_body(CHAT_SESSION_ACCEPT, session_uuid);
-                                        tokio::spawn(post_chat_session_request(url, body, session, ChatSessionRequestPurpose::Answer, http.clone(), caps_tx.clone(), chat_replies_tx.clone()));
-                                    }
+                                if self.session.agent_id().is_some()
+                                    && let Some(url) = caps.get(CAP_PROVISION_VOICE_ACCOUNT).cloned()
+                                {
+                                    let body = build_provision_voice_account_request(&VoiceProvisionRequest::vivox());
+                                    tokio::spawn(post_voice_cap(url, body, CAP_PROVISION_VOICE_ACCOUNT, http.clone(), caps_tx.clone()));
                                 }
                             }
                             Some(Command::LeaveSessionVoice { session }) => {

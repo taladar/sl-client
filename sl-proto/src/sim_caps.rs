@@ -77,6 +77,7 @@ use crate::bookkeeping_ids::ImSessionId;
 use crate::session::{
     ais_category_children_reply_to_llsd, ais_category_links_reply_to_llsd,
     ais_inventory_update_to_llsd, ais_item_reply_to_llsd, chat_session_agent_params_from_llsd,
+    chat_session_call_reply_to_llsd, chat_session_p2p_peer_from_llsd,
     chat_session_request_from_llsd, chat_session_roster_to_llsd, cof_version_increment_to_llsd,
     environment_to_llsd, environment_update_from_llsd, fetch_inventory_items_to_llsd,
     inventory_descendents_to_llsd, llsd_map, parse_copy_inventory_from_notecard,
@@ -118,9 +119,10 @@ use crate::{
     CAP_UPDATE_NOTECARD_TASK_INVENTORY, CAP_UPDATE_SCRIPT_AGENT, CAP_UPDATE_SCRIPT_TASK,
     CAP_UPDATE_SETTINGS_AGENT_INVENTORY, CAP_UPDATE_SETTINGS_TASK_INVENTORY,
     CAP_UPLOAD_AGENT_PROFILE_IMAGE, CAP_UPLOAD_BAKED_TEXTURE, CAP_VOICE_SIGNALING,
-    CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE, CHAT_SESSION_DECLINE_P2P_VOICE,
-    CHAT_SESSION_FETCH_HISTORY, CHAT_SESSION_INVITE, CHAT_SESSION_START_CONFERENCE, Event,
-    InventoryItem, InventoryListing, ServerEvent, VoiceProvisionRefusal, offline_messages_to_llsd,
+    CHAT_SESSION_ACCEPT, CHAT_SESSION_CALL, CHAT_SESSION_DECLINE, CHAT_SESSION_DECLINE_P2P_VOICE,
+    CHAT_SESSION_FETCH_HISTORY, CHAT_SESSION_INVITE, CHAT_SESSION_START_CONFERENCE,
+    CHAT_SESSION_START_P2P_VOICE, ChatSessionKind, Event, InventoryItem, InventoryListing,
+    ServerEvent, VoiceChannelInfo, VoiceProvisionRefusal, offline_messages_to_llsd,
 };
 use sl_wire::{
     AvatarRenderInfo, AvatarRenderReport, EstateAccessLists, EstateAccessStyle,
@@ -139,6 +141,12 @@ const EVENT_QUEUE_GET: &str = "EventQueueGet";
 
 /// The LLSD-XML body of a data-less `200` ack (`<llsd><undef /></llsd>`).
 const UNDEF_LLSD_BODY: &str = "<llsd><undef /></llsd>";
+
+/// The session `type` Second Life states for a 1:1 call's session, in a
+/// `start p2p voice` reply's `session_info` and a `call` reply's
+/// `voice_credentials.invitation_type` (measured on aditi, 2026-11-18) — the
+/// reference's `P2P_CHAT_SESSION`.
+const P2P_SESSION_TYPE: i32 = 2;
 
 /// The sub-path under the `SendUserReportWithScreenshot` cap URL that step 1
 /// mints as its uploader URL and step 2 POSTs the screenshot bytes to.
@@ -628,6 +636,12 @@ impl CapsResponse {
     /// not match (the viewer reports it as "channel locked").
     const fn unauthorized() -> Self {
         Self::empty(401)
+    }
+
+    /// `403 Forbidden` — a voice `call` in a region without voice (the viewer
+    /// reports it as "voice not allowed").
+    const fn forbidden() -> Self {
+        Self::empty(403)
     }
 
     /// `502 Bad Gateway` — the "nothing yet, re-poll" answer to a held
@@ -1615,7 +1629,9 @@ impl SimCaps {
     /// `agent_info` map for an unknown session — tolerant, mirroring
     /// OpenSim's stubbed cap); `"decline invitation"` drops this agent from
     /// the roster and acks with an undefined body; `"decline p2p voice"` is a
-    /// pure ack; `"fetch history"` answers the session's server-side backlog
+    /// pure ack; `"start p2p voice"` starts a 1:1 call
+    /// ([`Self::start_p2p_voice`]); `"call"` answers the session's voice
+    /// channel ([`Self::voice_call`]); `"fetch history"` answers the session's server-side backlog
     /// (an empty array for an unknown session). Any other method — or a
     /// method-less / malformed body — answers `400`.
     fn dispatch_chat_session(sim: &mut SimSession, request: &CapsRequest<'_>) -> CapsResponse {
@@ -1670,6 +1686,8 @@ impl SimCaps {
                 CapsResponse::llsd_xml(chat_session_roster_to_llsd(&roster).to_llsd_xml())
             }
             CHAT_SESSION_DECLINE_P2P_VOICE => CapsResponse::llsd_xml(UNDEF_LLSD_BODY.to_owned()),
+            CHAT_SESSION_START_P2P_VOICE => Self::start_p2p_voice(sim, &body, session_id),
+            CHAT_SESSION_CALL => Self::voice_call(sim, session_id),
             CHAT_SESSION_FETCH_HISTORY => {
                 let history = sim.chat_session(session_id).map_or_else(
                     || Llsd::Array(Vec::new()),
@@ -1679,6 +1697,98 @@ impl SimCaps {
             }
             _ => CapsResponse::bad_request(),
         }
+    }
+
+    /// Serves a `"start p2p voice"`: the start of a 1:1 call with the agent
+    /// the body's `params` names. A body naming no agent, or a `session-id`
+    /// that is not the 1:1 session of this agent and that one, answers `400`
+    /// (the reference's "session does not exist"). Otherwise the session's
+    /// start is answered both in the reply and over the event queue, under
+    /// the session's own id — no session is minted, since a 1:1 session's id
+    /// is fixed by its two agents — as Second Life answers it (measured on
+    /// aditi, 2026-11-18: the reply is the start reply's map without its
+    /// `success`, its `session_info` a `type` of 2 and the other agent's name,
+    /// which the fake grid leaves empty). Whether Second Life rings the other
+    /// agent at this point is not measured; the fake grid rings nobody.
+    fn start_p2p_voice(sim: &mut SimSession, body: &Llsd, session_id: ImSessionId) -> CapsResponse {
+        let Some(peer) = chat_session_p2p_peer_from_llsd(body) else {
+            return CapsResponse::bad_request();
+        };
+        // The agent is known once its circuit is open, which a real client's
+        // capability request always follows; a sim driven by its caps alone
+        // (a unit test) has none to check the id against.
+        if let Some(own) = sim.agent_id()
+            && (ChatSessionKind::Direct { peer }).canonical_session_id(own) != session_id.get()
+        {
+            return CapsResponse::bad_request();
+        }
+        sim.enqueue_chatterbox_session_start_reply(&Event::ChatSessionStarted {
+            temp_session_id: session_id,
+            session_id,
+            success: true,
+            session_name: String::new(),
+            voice_enabled: true,
+            error: String::new(),
+        });
+        let reply = llsd_map(vec![
+            ("session_id", Llsd::Uuid(session_id.get())),
+            ("temp_session_id", Llsd::Uuid(session_id.get())),
+            (
+                "session_info",
+                llsd_map(vec![
+                    ("session_name", Llsd::String(String::new())),
+                    ("voice_enabled", Llsd::Boolean(true)),
+                    ("type", Llsd::Integer(P2P_SESSION_TYPE)),
+                    (
+                        "moderated_mode",
+                        llsd_map(vec![("voice", Llsd::Boolean(false))]),
+                    ),
+                ]),
+            ),
+        ]);
+        CapsResponse::llsd_xml(reply.to_llsd_xml())
+    }
+
+    /// Serves a `"call"`: the session's voice channel as `voice_credentials`,
+    /// a WebRTC channel whose id is the session's, with the credentials
+    /// registered for it ([`SimVoice::set_channel_credentials`](crate::SimVoice::set_channel_credentials)),
+    /// so that the multi-agent provision the client then makes for it is one
+    /// the stub accepts. As Second Life answers it (measured on aditi,
+    /// 2026-11-18, for a group and a 1:1 call), the reply also names the
+    /// session as a string `session-id`, and the channel an
+    /// `invitation_type`: 0 for a session the simulator holds (a group or a
+    /// conference), 2 for one it does not, which is a 1:1 call. Second
+    /// Life's credentials are `<uuid>:<token>`; the fake grid's are whatever
+    /// was registered. A region without the WebRTC backend answers `403`,
+    /// the reference's "voice not allowed".
+    fn voice_call(sim: &SimSession, session_id: ImSessionId) -> CapsResponse {
+        if sim.voice().webrtc().is_none() {
+            return CapsResponse::forbidden();
+        }
+        let channel = session_id.get().to_string();
+        let info = VoiceChannelInfo {
+            channel_credentials: sim.voice().channel_credentials(&channel).map(str::to_owned),
+            channel_uri: Some(sl_wire::VoiceChannelUri::Id(session_id.get())),
+            voice_server_type: Some(sl_wire::VOICE_SERVER_TYPE_WEBRTC.to_owned()),
+            session_handle: None,
+        };
+        let invitation_type = if sim.chat_session(session_id).is_some() {
+            0
+        } else {
+            P2P_SESSION_TYPE
+        };
+        let mut reply = chat_session_call_reply_to_llsd(&info);
+        if let Llsd::Map(members) = &mut reply {
+            if let Some(Llsd::Map(credentials)) = members.get_mut("voice_credentials") {
+                let _previous = credentials
+                    .insert("invitation_type".to_owned(), Llsd::Integer(invitation_type));
+            }
+            let _previous = members.insert(
+                "session-id".to_owned(),
+                Llsd::String(session_id.get().to_string()),
+            );
+        }
+        CapsResponse::llsd_xml(reply.to_llsd_xml())
     }
 
     /// Serves one `ReadOfflineMsgs` GET: the messages stored while the agent

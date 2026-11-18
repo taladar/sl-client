@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 34 |
 | in-progress | 4 |
 | bugs | 17 |
-| done | 1594 |
+| done | 1595 |
 | deferred | 30 |
 | wont-do | 24 |
-| **total** | **2162** |
+| **total** | **2163** |
 
 ## ideas (131)
 
@@ -1245,9 +1245,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`protocol-group-fetch-history-403-on-aditi`](bugs/protocol-group-fetch-history-403-on-aditi.md)
   — A group session's automatic fetch history is answered 403 on aditi
-- [`protocol-join-session-voice-posts-accept-invitation`](bugs/protocol-join-session-voice-posts-accept-invitation.md)
-  — Joining a session's voice posts accept invitation, where the reference posts
-  call or start p2p voice
+- [`protocol-join-session-voice-provisions-vivox`](bugs/protocol-join-session-voice-provisions-vivox.md)
+  — Joining a session's voice posts a Vivox account provision
 
 ### viewer
 
@@ -1289,7 +1288,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1594)
+## done (1595)
 
 ### protocol
 
@@ -1527,6 +1526,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Carry the experience search's paging URLs through to the viewer
 - [`protocol-im-states-no-position`](done/protocol-im-states-no-position.md) —
   Every instant message the session sends states position zero
+- [`protocol-join-session-voice-posts-accept-invitation`](done/protocol-join-session-voice-posts-accept-invitation.md)
+  — Joining a session's voice posts accept invitation, where the reference posts
+  call or start p2p voice
 - [`protocol-login-options-max-agent-groups-unrequested`](done/protocol-login-options-max-agent-groups-unrequested.md)
   — max-agent-groups is never requested at login but is gated on the option
 - [`protocol-logout-reply-sometimes-missing-on-opensim`](done/protocol-logout-reply-sometimes-missing-on-opensim.md)

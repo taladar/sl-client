@@ -311,6 +311,7 @@ fn on_events(
             | SlSessionEvent::ChatSessionAgentsUpdated { .. }
             | SlSessionEvent::ChatSessionEventReply { .. }
             | SlSessionEvent::ChatSessionForceClosed { .. }
+            | SlSessionEvent::SessionVoiceFailed { .. }
             | SlSessionEvent::AvatarNames(_)
             | SlSessionEvent::GroupNames(_)
             | SlSessionEvent::DisplayNames(_)

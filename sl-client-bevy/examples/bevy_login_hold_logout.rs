@@ -420,6 +420,7 @@ fn on_events(
             | SlSessionEvent::ChatSessionAgentsUpdated { .. }
             | SlSessionEvent::ChatSessionEventReply { .. }
             | SlSessionEvent::ChatSessionForceClosed { .. }
+            | SlSessionEvent::SessionVoiceFailed { .. }
             | SlSessionEvent::EstateAccessLists(_)
             | SlSessionEvent::RegionSchedule(_)
             | SlSessionEvent::TerrainMaterialOverrides(_)

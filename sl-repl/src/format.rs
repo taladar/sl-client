@@ -372,6 +372,7 @@ const fn event_name(event: &Event) -> &'static str {
         Event::ChatSessionAgentsUpdated { .. } => "chat_session_agents_updated",
         Event::ChatSessionEventReply { .. } => "chat_session_event_reply",
         Event::ChatSessionForceClosed { .. } => "chat_session_force_closed",
+        Event::SessionVoiceFailed { .. } => "session_voice_failed",
         Event::CreateGroupResult { .. } => "create_group_result",
         Event::JoinGroupResult { .. } => "join_group_result",
         Event::LeaveGroupResult { .. } => "leave_group_result",

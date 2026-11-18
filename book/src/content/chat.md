@@ -152,12 +152,32 @@ a 1:1 call is accepted with **no POST**, as the reference accepts one, and
 declined with `decline p2p voice`. Declining a call leaves a conversation
 already open with the caller in place.
 
+Joining a session's voice (`Command::JoinSessionVoice`) asks the cap for the
+session's **channel** only when the session does not have one, as the
+reference does: an invitation that carried a channel needs no request. A group
+or a conference asks with `call`, naming the backend in
+`alt_params.preferred_voice_server_type`, and the reply's `voice_credentials`
+become the session's channel. A 1:1 call is run the way the reference runs one
+under WebRTC, which relays no call itself: as a two-person ad-hoc channel,
+started with `start p2p voice` (the other agent as a single uuid in `params`,
+the backend in `alt_params.voice_server_type`), whose
+`ChatterBoxSessionStartReply` comes under the 1:1 session's own id and makes
+the `call` due. `Session` records what is due and the runtimes POST it from
+`Session::next_session_voice_requests`; a `call` answered `403`, any other
+refusal, a `call` with no channel in it or a refused start ends the join with
+`Event::SessionVoiceFailed`, clearing the optimistic `voice.joined`. Leaving a
+1:1 call forgets its channel, so calling again rings again; a group keeps its
+channel. On OpenSim there is no cap, and nothing is asked.
+
 The cap's replies — an accept's roster and `voice_channel_info`, a
-`fetch history`'s backlog — name no session of their own: the reference keeps
-the session id in the coroutine that posted. So the runtimes carry the kind
-from the request to its reply as a typed `ChatSessionReply { session, purpose,
-body }` on a channel of its own, handed to `Session::handle_chat_session_reply`,
-rather than writing it into the reply body.
+`fetch history`'s backlog, a `call`'s channel — name no session of their own:
+the reference keeps the session id in the coroutine that posted. So the
+runtimes carry the kind from the request to its reply as a typed
+`ChatSessionReply { session, purpose, status, body }` on a channel of its own,
+handed to `Session::handle_chat_session_reply`, rather than writing it into
+the reply body. A refusal is handed back too, with its status (and an
+undefined body when it was not LLSD); a refused accept folds no roster and a
+refused `fetch history` stores nothing and is not asked again.
 
 ## The server side
 

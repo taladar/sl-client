@@ -1,6 +1,7 @@
 //! The driver-facing `Session` API: login, UDP/CAPS dispatch, and command methods.
 
 use super::caps_event::CapsEvent;
+use super::chat_session::VoiceRequestState;
 use super::circuit::EMPTY_BINARY_BUCKET;
 use super::conversions::{
     EnvironmentReply, OutgoingIm, ZERO_VECTOR, active_group, agent_drop_group_from_llsd,
@@ -45,12 +46,12 @@ use super::{
     MAX_XFER_DOWNLOAD_BYTES, MessageCursor, OfferedUpload, PARENT_REQUEST_WARN_ATTEMPTS,
     PendingHandover, PendingInventorySave, PendingInvite, SIT_REFUSAL_ALERTS, SIT_REFUSAL_TEXTS,
     SIT_TIMEOUT, ScriptGrant, ScriptHolder, ServerHistoryFetch, ServerHistoryMessage,
-    ServerHistoryState, Session, SessionMessage, SessionState, SessionTransition, SitState,
-    TELEPORT_TIMEOUT, TEXTURE_DOWNLOAD_MAX_ATTEMPTS, TEXTURE_DOWNLOAD_STALL_TIMEOUT,
-    TYPING_TIMEOUT, TakenControls, TeleportPhase, TextureDownload, TransferDownload,
-    TransferProgress, TransferPurpose, VoiceChannelInfo, XFER_OFFER_TIMEOUT, XFER_REFUSED_RESULT,
-    XFER_STALL_TIMEOUT, XFER_TIMEOUT_RESULT, XferDownload, XferPurpose, XferUpload, deadline,
-    merge_deadline,
+    ServerHistoryState, Session, SessionMessage, SessionState, SessionTransition,
+    SessionVoiceFailure, SessionVoiceRequest, SitState, TELEPORT_TIMEOUT,
+    TEXTURE_DOWNLOAD_MAX_ATTEMPTS, TEXTURE_DOWNLOAD_STALL_TIMEOUT, TYPING_TIMEOUT, TakenControls,
+    TeleportPhase, TextureDownload, TransferDownload, TransferProgress, TransferPurpose,
+    VoiceChannelInfo, XFER_OFFER_TIMEOUT, XFER_REFUSED_RESULT, XFER_STALL_TIMEOUT,
+    XFER_TIMEOUT_RESULT, XferDownload, XferPurpose, XferUpload, deadline, merge_deadline,
 };
 use crate::GroupRoleKey;
 use crate::asset_keys::{AnimationKey, AssetKey};
@@ -1575,10 +1576,17 @@ impl Session {
                         temp_session_id,
                         session_id,
                         success,
+                        error,
                         ..
                     } = &event
                     {
-                        self.rekey_started_session(*temp_session_id, *session_id, *success, now);
+                        self.rekey_started_session(
+                            *temp_session_id,
+                            *session_id,
+                            *success,
+                            error.clone(),
+                            now,
+                        );
                     }
                     self.events.push_back(event);
                 } else {
@@ -7934,8 +7942,33 @@ impl Session {
         temp_session_id: ImSessionId,
         session_id: ImSessionId,
         success: bool,
+        error: String,
         now: Instant,
     ) {
+        // A 1:1 call's start (`start p2p voice`) is answered under the 1:1
+        // session's id: that reply is the conversation's, and must not open a
+        // conference of the same id beside it. A call waiting on it now asks
+        // for its channel, as the reference starts the call once the session
+        // is initialised; a refused start ends the join.
+        if let Some(own) = self.agent_id()
+            && let Some((&kind, direct)) = self.chat_sessions.iter_mut().find(|(kind, _)| {
+                matches!(kind, ChatSessionKind::Direct { .. })
+                    && kind.canonical_session_id(own) == temp_session_id.get()
+            })
+        {
+            if direct.voice_request == VoiceRequestState::AwaitingStart {
+                if success {
+                    direct.voice_request = VoiceRequestState::Due(SessionVoiceRequest::Call);
+                } else {
+                    direct.note_voice_left();
+                    self.events.push_back(Event::SessionVoiceFailed {
+                        session: kind,
+                        reason: SessionVoiceFailure::StartFailed { error },
+                    });
+                }
+            }
+            return;
+        }
         // A group session's start is answered too, under the group's id: that
         // reply is the group session's, and must not open a conference of the
         // same id beside it.
@@ -8248,13 +8281,28 @@ impl Session {
     /// store (the message that triggered a lazy-open fetch arrives both ways)
     /// and surfaced as [`Event::SessionServerHistory`] when non-empty; it is
     /// never written to the on-disk transcript.
+    ///
+    /// A refused answer or fetch changes nothing (a refused fetch is not asked
+    /// again). A [`VoiceCall`](ChatSessionRequestPurpose::VoiceCall) or
+    /// [`StartP2pVoice`](ChatSessionRequestPurpose::StartP2pVoice) reply
+    /// advances the voice join that asked for it (see
+    /// [`Self::join_session_voice`]).
     pub fn handle_chat_session_reply(&mut self, reply: &ChatSessionReply, now: Instant) {
         let ChatSessionReply {
             session: kind,
             purpose,
             body,
+            ..
         } = reply;
         match purpose {
+            // An answer's and a backlog's refusal carry no roster and no
+            // backlog: the session keeps what it had, and a refused fetch
+            // stays `Requested`, so it is not asked again.
+            ChatSessionRequestPurpose::Answer | ChatSessionRequestPurpose::FetchHistory
+                if !reply.succeeded() => {}
+            ChatSessionRequestPurpose::VoiceCall | ChatSessionRequestPurpose::StartP2pVoice => {
+                self.handle_session_voice_reply(reply);
+            }
             ChatSessionRequestPurpose::Answer => {
                 let roster = chat_session_roster_from_llsd(body);
                 let voice = body.get("voice_channel_info");
@@ -8289,8 +8337,103 @@ impl Session {
     /// conversation — a 1:1 P2P call may have no text traffic yet) and sets both
     /// `voice.joined` and `voice.has_voice`. The runtime additionally provisions a
     /// voice account and signals into the channel via `ChatSessionRequest`.
+    ///
+    /// It also records what the grid must be asked for the session's voice
+    /// channel, which the runtime takes from
+    /// [`Self::next_session_voice_requests`]: nothing when the session already
+    /// knows its channel (an invitation carried it), a
+    /// [`call`](crate::CHAT_SESSION_CALL) for a group or a conference, and for
+    /// a 1:1 call a [`start p2p voice`](crate::CHAT_SESSION_START_P2P_VOICE)
+    /// whose `ChatterBoxSessionStartReply` is then followed by the `call` —
+    /// the reference's path under WebRTC, which relays no 1:1 call itself
+    /// and runs one as a two-person ad-hoc channel.
     pub fn join_session_voice(&mut self, session: ChatSessionKind, now: Instant) {
-        self.chat_session_mut(session, now).note_voice_joined();
+        let chat_session = self.chat_session_mut(session, now);
+        chat_session.note_voice_joined();
+        chat_session.request_voice_channel(session);
+    }
+
+    /// The `ChatSessionRequest` POSTs the sessions' voice joins are waiting
+    /// on, each with the session it is for, marked as posted so each is
+    /// returned once. The runtime POSTs each one's
+    /// [`body`](SessionVoiceRequest::body) under its
+    /// [`purpose`](SessionVoiceRequest::purpose) and hands the reply to
+    /// [`Self::handle_chat_session_reply`]. Called only where the region
+    /// grants `ChatSessionRequest`: on a grid without it (OpenSim) the
+    /// requests stay due and nothing is posted.
+    pub fn next_session_voice_requests(&mut self) -> Vec<(ChatSessionKind, SessionVoiceRequest)> {
+        self.chat_sessions
+            .iter_mut()
+            .filter_map(|(kind, chat_session)| {
+                let VoiceRequestState::Due(request) = chat_session.voice_request else {
+                    return None;
+                };
+                chat_session.voice_request = match request {
+                    SessionVoiceRequest::Call => VoiceRequestState::AwaitingChannel,
+                    SessionVoiceRequest::StartP2pVoice { .. } => VoiceRequestState::AwaitingStart,
+                };
+                Some((*kind, request))
+            })
+            .collect()
+    }
+
+    /// Folds the reply to a voice join's `call` or `start p2p voice`. A
+    /// `call`'s `voice_credentials` become the session's channel; a `start
+    /// p2p voice` that succeeded waits on for the session's start reply. A
+    /// refusal, or a `call` with no channel in it, ends the join with
+    /// [`Event::SessionVoiceFailed`], as the reference deactivates the
+    /// channel. A reply for a join since left is dropped.
+    fn handle_session_voice_reply(&mut self, reply: &ChatSessionReply) {
+        let ChatSessionReply {
+            session: kind,
+            purpose,
+            status,
+            body,
+        } = reply;
+        let Some(chat_session) = self.chat_session_get_mut(*kind) else {
+            return;
+        };
+        let (awaited, request) = match (purpose, kind) {
+            (ChatSessionRequestPurpose::StartP2pVoice, ChatSessionKind::Direct { peer }) => (
+                VoiceRequestState::AwaitingStart,
+                SessionVoiceRequest::StartP2pVoice { peer: *peer },
+            ),
+            _ => (
+                VoiceRequestState::AwaitingChannel,
+                SessionVoiceRequest::Call,
+            ),
+        };
+        if chat_session.voice_request != awaited {
+            return;
+        }
+        let failure = if !reply.succeeded() {
+            Some(if *status == 403 && request == SessionVoiceRequest::Call {
+                SessionVoiceFailure::NotAllowed
+            } else {
+                SessionVoiceFailure::Refused {
+                    request,
+                    status: *status,
+                }
+            })
+        } else if request == SessionVoiceRequest::Call {
+            match body.get("voice_credentials") {
+                Some(credentials @ Llsd::Map(_)) => {
+                    chat_session.note_voice_offered(voice_channel_info_from_llsd(credentials));
+                    chat_session.voice_request = VoiceRequestState::Idle;
+                    None
+                }
+                _ => Some(SessionVoiceFailure::NoChannel),
+            }
+        } else {
+            None
+        };
+        if let Some(reason) = failure {
+            chat_session.note_voice_left();
+            self.events.push_back(Event::SessionVoiceFailed {
+                session: *kind,
+                reason,
+            });
+        }
     }
 
     /// Records that we have left `session`'s voice channel — the pure-state half of
@@ -8299,9 +8442,17 @@ impl Session {
     /// channel, history, and roster — intact: leaving voice is not leaving the
     /// conversation. A no-op if no session is open for `session`. The runtime
     /// additionally signals the voice decline / logout on the wire.
+    ///
+    /// A 1:1 call's channel is forgotten with it, as the reference voids a
+    /// two-person ad-hoc channel when it is left, so that calling again asks
+    /// for a new one and rings the other side again; a group's or a
+    /// conference's channel is kept.
     pub fn leave_session_voice(&mut self, session: ChatSessionKind) {
         if let Some(chat_session) = self.chat_session_get_mut(session) {
             chat_session.note_voice_left();
+            if matches!(session, ChatSessionKind::Direct { .. }) {
+                chat_session.voice.channel = None;
+            }
         }
     }
 

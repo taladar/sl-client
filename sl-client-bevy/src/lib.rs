@@ -2030,6 +2030,26 @@ fn advance_running(
                     );
                 });
             }
+            // The requests the sessions' voice joins wait on: a `call` for a
+            // channel, or a 1:1 call's `start p2p voice`. A 1:1 call's `call`
+            // becomes due once its start is answered over the event queue, and
+            // is posted by a later pass. Mirrors the tokio run loop's sweep.
+            for (kind, request) in session.next_session_voice_requests() {
+                let body = request.body(kind.canonical_session_id(own_agent));
+                let (events_tx, replies_tx) =
+                    (caps.events_tx.clone(), caps.chat_replies_tx.clone());
+                let call_url = url.clone();
+                crate::log_context::spawn_thread(move || {
+                    run_chat_session_request(
+                        &call_url,
+                        body,
+                        kind,
+                        request.purpose(),
+                        &events_tx,
+                        &replies_tx,
+                    );
+                });
+            }
         }
     }
 
@@ -5233,36 +5253,20 @@ fn apply_command(
         Command::JoinSessionVoice {
             session: chat_session,
         } => {
-            // Optimistic local join, then drive the signalling: ensure a voice
-            // account, then signal into the channel over `ChatSessionRequest`
-            // (accept invitation). Signalling only — no audio.
+            // Optimistic local join, which also records what the grid must be
+            // asked for the session's channel (`call`, or `start p2p voice`
+            // first for a 1:1 call); the per-frame sweep POSTs it. Then ensure
+            // a voice account.
             session.join_session_voice(*chat_session, now);
-            if let (Some(own), Some(caps)) = (session.agent_id(), caps) {
-                let session_uuid = chat_session.canonical_session_id(own);
-                if let Some(url) = caps.map.get(CAP_PROVISION_VOICE_ACCOUNT).cloned() {
-                    let body =
-                        build_provision_voice_account_request(&VoiceProvisionRequest::vivox());
-                    let events_tx = caps.events_tx.clone();
-                    crate::log_context::spawn_thread(move || {
-                        run_voice_cap(&url, body, CAP_PROVISION_VOICE_ACCOUNT, &events_tx);
-                    });
-                }
-                if let Some(url) = caps.map.get(CAP_CHAT_SESSION_REQUEST).cloned() {
-                    let body = chat_session_request_body(CHAT_SESSION_ACCEPT, session_uuid);
-                    let (events_tx, replies_tx) =
-                        (caps.events_tx.clone(), caps.chat_replies_tx.clone());
-                    let kind = *chat_session;
-                    crate::log_context::spawn_thread(move || {
-                        run_chat_session_request(
-                            &url,
-                            body,
-                            kind,
-                            ChatSessionRequestPurpose::Answer,
-                            &events_tx,
-                            &replies_tx,
-                        );
-                    });
-                }
+            if session.agent_id().is_some()
+                && let Some(caps) = caps
+                && let Some(url) = caps.map.get(CAP_PROVISION_VOICE_ACCOUNT).cloned()
+            {
+                let body = build_provision_voice_account_request(&VoiceProvisionRequest::vivox());
+                let events_tx = caps.events_tx.clone();
+                crate::log_context::spawn_thread(move || {
+                    run_voice_cap(&url, body, CAP_PROVISION_VOICE_ACCOUNT, &events_tx);
+                });
             }
         }
         Command::LeaveSessionVoice {

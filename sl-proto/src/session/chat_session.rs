@@ -105,6 +105,107 @@ pub enum ChatSessionRequestPurpose {
     /// A `fetch history` POST, whose reply is the session's server-side
     /// backlog.
     FetchHistory,
+    /// A [`call`](crate::CHAT_SESSION_CALL) POST, whose reply's
+    /// `voice_credentials` is the session's voice channel.
+    VoiceCall,
+    /// A [`start p2p voice`](crate::CHAT_SESSION_START_P2P_VOICE) POST. Its
+    /// reply carries nothing the session reads: the 1:1 session's start is
+    /// answered over the event queue.
+    StartP2pVoice,
+}
+
+/// A `ChatSessionRequest` POST that joining a session's voice needs, handed to
+/// the runtime by
+/// [`Session::next_session_voice_requests`](crate::Session::next_session_voice_requests).
+/// The reference asks for a channel only when it has none
+/// (`LLVoiceChannel::activate`): a session whose invitation already carried
+/// one needs no request at all.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum SessionVoiceRequest {
+    /// [`call`](crate::CHAT_SESSION_CALL): ask for the session's voice channel.
+    Call,
+    /// [`start p2p voice`](crate::CHAT_SESSION_START_P2P_VOICE): set up a 1:1
+    /// call with `peer`, after which the channel is asked for with
+    /// [`Call`](Self::Call).
+    StartP2pVoice {
+        /// The other agent of the call.
+        peer: AgentKey,
+    },
+}
+
+impl SessionVoiceRequest {
+    /// The POST body of this request for the session whose wire id is
+    /// `session_id`, naming WebRTC — the only voice backend this client
+    /// speaks — as the reference names its own.
+    #[must_use]
+    pub fn body(self, session_id: Uuid) -> String {
+        match self {
+            Self::Call => super::conversions::chat_session_call_body(
+                session_id,
+                sl_wire::VOICE_SERVER_TYPE_WEBRTC,
+            ),
+            Self::StartP2pVoice { peer } => super::conversions::chat_session_start_p2p_voice_body(
+                session_id,
+                peer,
+                sl_wire::VOICE_SERVER_TYPE_WEBRTC,
+            ),
+        }
+    }
+
+    /// Which [`ChatSessionRequestPurpose`] the reply to this request is
+    /// handed back under.
+    #[must_use]
+    pub const fn purpose(self) -> ChatSessionRequestPurpose {
+        match self {
+            Self::Call => ChatSessionRequestPurpose::VoiceCall,
+            Self::StartP2pVoice { .. } => ChatSessionRequestPurpose::StartP2pVoice,
+        }
+    }
+}
+
+/// Why joining a session's voice came to nothing, carried by
+/// [`Event::SessionVoiceFailed`](crate::Event::SessionVoiceFailed). The
+/// variants are the reference's distinct notices.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum SessionVoiceFailure {
+    /// The [`call`](crate::CHAT_SESSION_CALL) was answered `403`: the agent may
+    /// not use voice in this session (the reference's `VoiceNotAllowed`).
+    NotAllowed,
+    /// A request was answered with another failure status (a `call`'s is the
+    /// reference's `VoiceCallGenericError`; a `start p2p voice` answered `400`
+    /// is its `session_does_not_exist_error`).
+    Refused {
+        /// The request that was refused.
+        request: SessionVoiceRequest,
+        /// The HTTP status it was answered with.
+        status: u16,
+    },
+    /// The `call` succeeded but its reply carried no `voice_credentials`, so
+    /// there is no channel to connect to.
+    NoChannel,
+    /// The grid answered a 1:1 call's start with a failed
+    /// `ChatterBoxSessionStartReply`.
+    StartFailed {
+        /// The grid's reason.
+        error: String,
+    },
+}
+
+/// Where a session's voice-channel request stands: what
+/// [`Session::join_session_voice`](crate::Session::join_session_voice) asked
+/// for and how far the grid has answered it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum VoiceRequestState {
+    /// Nothing asked for, or everything answered.
+    #[default]
+    Idle,
+    /// A request the runtime has yet to POST.
+    Due(SessionVoiceRequest),
+    /// A `start p2p voice` was posted; the 1:1 session's start reply has not
+    /// arrived.
+    AwaitingStart,
+    /// A `call` was posted; its reply has not arrived.
+    AwaitingChannel,
 }
 
 /// The reply to a `ChatSessionRequest` POST, with the session the runtime
@@ -120,8 +221,20 @@ pub struct ChatSessionReply {
     pub session: ChatSessionKind,
     /// Which request this answers.
     pub purpose: ChatSessionRequestPurpose,
-    /// The reply body as the grid sent it.
+    /// The HTTP status the grid answered with. A refusal is handed back too,
+    /// so a request whose failure matters (a voice join) can say so.
+    pub status: u16,
+    /// The reply body as the grid sent it ([`Llsd::Undef`] for a refusal
+    /// whose body was not LLSD).
     pub body: Llsd,
+}
+
+impl ChatSessionReply {
+    /// Whether the grid answered the request with a success status (`2xx`).
+    #[must_use]
+    pub const fn succeeded(&self) -> bool {
+        matches!(self.status, 200..=299)
+    }
 }
 
 /// Which channel(s) a chat-session invitation offers. A group or conference can
@@ -407,6 +520,9 @@ pub(crate) struct ChatSession {
     /// Where this session stands in the once-per-login server-history fetch
     /// cycle (see [`ServerHistoryState`]).
     pub(crate) server_history_state: ServerHistoryState,
+    /// Where the request for this session's voice channel stands (see
+    /// [`VoiceRequestState`]).
+    pub(crate) voice_request: VoiceRequestState,
 }
 
 impl ChatSession {
@@ -432,6 +548,7 @@ impl ChatSession {
             },
             server_history: Vec::new(),
             server_history_state: ServerHistoryState::Unfetched,
+            voice_request: VoiceRequestState::Idle,
         }
     }
 
@@ -542,12 +659,38 @@ impl ChatSession {
         self.voice.has_voice = false;
         self.voice.channel = None;
         self.voice.joined = false;
+        self.voice_request = VoiceRequestState::Idle;
     }
 
     /// Records that we have left the voice channel, leaving the text side of
-    /// the conversation — history, roster, lifecycle — untouched.
+    /// the conversation — history, roster, lifecycle — untouched. A request
+    /// for the channel still outstanding is abandoned: its answer, should it
+    /// come, joins nothing.
     pub(crate) const fn note_voice_left(&mut self) {
         self.voice.joined = false;
+        self.voice_request = VoiceRequestState::Idle;
+    }
+
+    /// Records a voice join's request for this session: the channel the
+    /// session already knows needs none (the reference asks only from
+    /// `STATE_NO_CHANNEL_INFO`); otherwise a group or a conference asks with
+    /// a `call`, and a 1:1 call is first started with `start p2p voice`.
+    pub(crate) fn request_voice_channel(&mut self, kind: ChatSessionKind) {
+        let has_channel = self
+            .voice
+            .channel
+            .as_ref()
+            .is_some_and(|channel| channel.channel_uri.is_some());
+        self.voice_request = if has_channel {
+            VoiceRequestState::Idle
+        } else {
+            VoiceRequestState::Due(match kind {
+                ChatSessionKind::Direct { peer } => SessionVoiceRequest::StartP2pVoice { peer },
+                ChatSessionKind::Group { .. } | ChatSessionKind::Conference { .. } => {
+                    SessionVoiceRequest::Call
+                }
+            })
+        };
     }
 
     /// Moves the server-history fetch cycle to `state`. The [`Fetched`](ServerHistoryState::Fetched)

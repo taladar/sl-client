@@ -519,6 +519,29 @@ pub const CHAT_SESSION_INVITE: &str = "invite";
 /// [`CHAT_SESSION_DECLINE`] (Firestorm `llimview.cpp` voice-call teardown).
 pub const CHAT_SESSION_DECLINE_P2P_VOICE: &str = "decline p2p voice";
 
+/// The `ChatSessionRequest` method that asks for a session's **voice
+/// channel**: the reply's `voice_credentials` map is the channel to connect to
+/// (`channel_uri`, `channel_credentials`, `voice_server_type`). The reference
+/// posts it when it joins the voice of a session whose channel it does not
+/// have yet (`LLVoiceChannelGroup::voiceCallCapCoro`, `llvoicechannel.cpp`) —
+/// a group's, a conference's, and under WebRTC a 1:1 call's too, once
+/// [`CHAT_SESSION_START_P2P_VOICE`] has set that up. The body names the
+/// backend the client speaks in `alt_params.preferred_voice_server_type`
+/// ([`chat_session_call_body`](crate::chat_session_call_body)). A `403` means
+/// the agent may not use voice there.
+pub const CHAT_SESSION_CALL: &str = "call";
+
+/// The `ChatSessionRequest` method that **starts a 1:1 voice call** on a
+/// backend without the Vivox peer-to-peer relay — under WebRTC every 1:1 call
+/// is a two-person ad-hoc channel (`startP2PVoiceCoro`, `llimview.cpp`). The
+/// body names the other agent as a single uuid in `params` and the backend in
+/// `alt_params.voice_server_type`
+/// ([`chat_session_start_p2p_voice_body`](crate::chat_session_start_p2p_voice_body));
+/// the grid answers with a `ChatterBoxSessionStartReply` for the 1:1 session,
+/// after which the channel is asked for with [`CHAT_SESSION_CALL`]. A `400`
+/// means the session does not exist.
+pub const CHAT_SESSION_START_P2P_VOICE: &str = "start p2p voice";
+
 /// The `ChatSessionRequest` method that fetches the **server-side recent-message
 /// backlog** of a group / conference session (Firestorm `chatterBoxHistoryCoro`,
 /// `llimview.cpp:784`). The reply body is a bare LLSD *array* (oldest→newest,
@@ -2186,7 +2209,8 @@ pub use chat_session::{
     ChatLifecycleView, ChatSessionAgentUpdate, ChatSessionInfo, ChatSessionKind,
     ChatSessionLifecycle, ChatSessionReply, ChatSessionRequestPurpose, FriendPresence,
     InviteChannel, MessageCursor, NearbyHistoryLine, PendingInvite, ServerHistoryMessage,
-    SessionMessage, SessionTransition, VoiceChannelInfo, VoiceChannelState,
+    SessionMessage, SessionTransition, SessionVoiceFailure, SessionVoiceRequest, VoiceChannelInfo,
+    VoiceChannelState,
 };
 pub use inventory::{FolderState, InventoryOwner};
 pub use inventory_cache::INVENTORY_CACHE_VERSION;
@@ -2205,8 +2229,10 @@ pub use conversions::{
     ais_item_update_body, ais_mutation_reply_to_llsd, build_environment_update_request,
     build_map_block_batch_reply, build_map_block_reply, build_map_item_reply,
     build_map_layer_reply, bulk_update_inventory_to_llsd, chat_session_agent_params_from_llsd,
-    chat_session_agents_body, chat_session_request_body, chat_session_request_from_llsd,
-    chat_session_roster_to_llsd, chatterbox_invitation_to_llsd,
+    chat_session_agents_body, chat_session_call_body, chat_session_call_reply_to_llsd,
+    chat_session_p2p_peer_from_llsd, chat_session_request_body, chat_session_request_from_llsd,
+    chat_session_roster_to_llsd, chat_session_start_p2p_voice_body,
+    chat_session_voice_server_type_from_llsd, chatterbox_invitation_to_llsd,
     chatterbox_session_start_reply_to_llsd, cof_version_increment_to_llsd,
     copy_inventory_from_notecard_body, created_category_to_llsd, crossed_region_to_caps_llsd,
     day_cycle_from_asset, display_name_update_to_llsd, enable_simulator_to_caps_llsd,
@@ -2220,8 +2246,8 @@ pub use conversions::{
     server_appearance_update_to_llsd, session_history_to_llsd, set_display_name_reply_to_llsd,
     sim_console_response_to_llsd, sky_settings_from_asset, sky_with_blended_values,
     sky_with_pushed_values, teleport_failed_to_caps_llsd, teleport_finish_to_llsd,
-    update_inventory_item_message, water_settings_from_asset, water_with_blended_values,
-    water_with_pushed_values, windlight_refresh_to_llsd,
+    update_inventory_item_message, voice_channel_info_to_llsd, water_settings_from_asset,
+    water_with_blended_values, water_with_pushed_values, windlight_refresh_to_llsd,
 };
 pub(crate) use conversions::{
     ZERO_VECTOR, build_task_inventory, environment_update_from_llsd, full_update_block,

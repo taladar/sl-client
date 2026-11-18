@@ -369,6 +369,13 @@ impl SimVoice {
             .insert(channel.into(), credentials.into());
     }
 
+    /// The credentials a multi-agent provision for `channel` must present,
+    /// when any were registered for it.
+    #[must_use]
+    pub fn channel_credentials(&self, channel: &str) -> Option<&str> {
+        self.channel_credentials.get(channel).map(String::as_str)
+    }
+
     /// The live connection for `viewer_session`, if provisioned.
     #[must_use]
     pub fn connection(&self, viewer_session: &str) -> Option<&VoiceConnection> {

@@ -4580,6 +4580,114 @@ pub fn chat_session_agent_params_from_llsd(body: &Llsd) -> Vec<AgentKey> {
         .collect()
 }
 
+/// Builds a `ChatSessionRequest` [`call`](crate::CHAT_SESSION_CALL) body, the
+/// request for a session's voice channel: `{ "method": "call", "session-id":
+/// <id>, "alt_params": { "preferred_voice_server_type": <backend> } }`, as
+/// `LLVoiceChannelGroup::voiceCallCapCoro` (`llvoicechannel.cpp`) builds it.
+#[must_use]
+pub fn chat_session_call_body(session_id: Uuid, voice_server_type: &str) -> String {
+    llsd_map(vec![
+        ("method", Llsd::String(crate::CHAT_SESSION_CALL.to_owned())),
+        ("session-id", Llsd::Uuid(session_id)),
+        (
+            "alt_params",
+            llsd_map(vec![(
+                "preferred_voice_server_type",
+                Llsd::String(voice_server_type.to_owned()),
+            )]),
+        ),
+    ])
+    .to_llsd_xml()
+}
+
+/// Builds a `ChatSessionRequest`
+/// [`start p2p voice`](crate::CHAT_SESSION_START_P2P_VOICE) body, the start of
+/// a 1:1 call on a backend without a peer-to-peer relay: `{ "method": "start
+/// p2p voice", "session-id": <1:1 session id>, "params": <other agent>,
+/// "alt_params": { "voice_server_type": <backend> } }`, as `startP2PVoiceCoro`
+/// (`llimview.cpp`) builds it. Unlike a conference start, `params` is a
+/// single uuid, not an array, and the alternative parameter is
+/// `voice_server_type`, not `preferred_voice_server_type`.
+#[must_use]
+pub fn chat_session_start_p2p_voice_body(
+    session_id: Uuid,
+    peer: AgentKey,
+    voice_server_type: &str,
+) -> String {
+    llsd_map(vec![
+        (
+            "method",
+            Llsd::String(crate::CHAT_SESSION_START_P2P_VOICE.to_owned()),
+        ),
+        ("session-id", Llsd::Uuid(session_id)),
+        ("params", Llsd::Uuid(peer.uuid())),
+        (
+            "alt_params",
+            llsd_map(vec![(
+                "voice_server_type",
+                Llsd::String(voice_server_type.to_owned()),
+            )]),
+        ),
+    ])
+    .to_llsd_xml()
+}
+
+/// Reads the other agent of a
+/// [`start p2p voice`](crate::CHAT_SESSION_START_P2P_VOICE) body's `params` —
+/// the inverse of [`chat_session_start_p2p_voice_body`], for the server side
+/// of the cap. `None` when `params` is absent or not a uuid.
+#[must_use]
+pub fn chat_session_p2p_peer_from_llsd(body: &Llsd) -> Option<AgentKey> {
+    body.get("params")
+        .and_then(Llsd::as_uuid)
+        .map(AgentKey::from)
+}
+
+/// Reads the backend a `ChatSessionRequest` body names in its `alt_params`:
+/// `preferred_voice_server_type` (a [`call`](crate::CHAT_SESSION_CALL)) or
+/// `voice_server_type` (a [`start p2p
+/// voice`](crate::CHAT_SESSION_START_P2P_VOICE)), whichever is present — for
+/// the server side of the cap. `None` when the body names neither.
+#[must_use]
+pub fn chat_session_voice_server_type_from_llsd(body: &Llsd) -> Option<String> {
+    let alt_params = body.get("alt_params")?;
+    optional_string_member(alt_params, "preferred_voice_server_type")
+        .or_else(|| optional_string_member(alt_params, "voice_server_type"))
+}
+
+/// Serializes a [`VoiceChannelInfo`] as the session-voice LLSD map an
+/// invitation's `voice` body, an accept's `voice_channel_info` and a `call`
+/// reply's `voice_credentials` carry — the inverse of
+/// `voice_channel_info_from_llsd`. Only the fields that are set are written.
+#[must_use]
+pub fn voice_channel_info_to_llsd(info: &VoiceChannelInfo) -> Llsd {
+    let mut entries = Vec::new();
+    if let Some(uri) = &info.channel_uri {
+        entries.push(("channel_uri", Llsd::String(uri.to_wire())));
+    }
+    if let Some(credentials) = &info.channel_credentials {
+        entries.push(("channel_credentials", Llsd::String(credentials.clone())));
+    }
+    if let Some(server_type) = &info.voice_server_type {
+        entries.push(("voice_server_type", Llsd::String(server_type.clone())));
+    }
+    if let Some(handle) = &info.session_handle {
+        entries.push(("session_handle", Llsd::String(handle.clone())));
+    }
+    llsd_map(entries)
+}
+
+/// Serializes the reply to a [`call`](crate::CHAT_SESSION_CALL) request: `{
+/// "voice_credentials": <channel> }`, the member
+/// `LLVoiceChannelGroup::voiceCallCapCoro` hands to `setChannelInfo`.
+#[must_use]
+pub fn chat_session_call_reply_to_llsd(channel: &VoiceChannelInfo) -> Llsd {
+    llsd_map(vec![(
+        "voice_credentials",
+        voice_channel_info_to_llsd(channel),
+    )])
+}
+
 /// Projects a display-name record onto an [`AvatarPickerResult`] — how an
 /// `AvatarPickerSearch` match reaches the picker. The legacy pair comes straight
 /// across, and the two fields the UDP path cannot fill (username, display name)

@@ -243,23 +243,31 @@ pub(crate) async fn post_chat_session_request(
             "ChatSessionRequest refused the request"
         );
     }
-    let Ok(reply) = parse_llsd_xml(&text) else {
-        tracing::warn!(
-            capability = CAP_CHAT_SESSION_REQUEST,
-            ?session,
-            ?purpose,
-            %status,
-            body = text.chars().take(200).collect::<String>(),
-            "ChatSessionRequest answered with something that is not LLSD"
-        );
-        report_caps_failure(&caps_tx, CAP_CHAT_SESSION_REQUEST).await;
-        return;
+    // A refusal is handed back whatever its body, so that a request whose
+    // failure matters (a voice join) learns of it; its body, already logged
+    // above, is often plain text rather than LLSD.
+    let reply = match parse_llsd_xml(&text) {
+        Ok(reply) => reply,
+        Err(_not_llsd) if !status.is_success() => Llsd::Undef,
+        Err(_not_llsd) => {
+            tracing::warn!(
+                capability = CAP_CHAT_SESSION_REQUEST,
+                ?session,
+                ?purpose,
+                %status,
+                body = text.chars().take(200).collect::<String>(),
+                "ChatSessionRequest answered with something that is not LLSD"
+            );
+            report_caps_failure(&caps_tx, CAP_CHAT_SESSION_REQUEST).await;
+            return;
+        }
     };
     deliver(
         &replies_tx,
         ChatSessionReply {
             session,
             purpose,
+            status: status.as_u16(),
             body: reply,
         },
     )

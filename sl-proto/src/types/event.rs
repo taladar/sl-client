@@ -70,7 +70,7 @@ use crate::bookkeeping_ids::{InventoryCallbackId, TransactionId, TransferId, Xfe
 use crate::scoped_id::{CircuitId, ScopedObjectId, ScopedParcelId};
 use crate::{
     ChatSessionAgentUpdate, ChatSessionInfo, ChatSessionKind, FriendPresence, InviteChannel,
-    MessageCursor, NearbyHistoryLine, ServerHistoryMessage, SessionMessage,
+    MessageCursor, NearbyHistoryLine, ServerHistoryMessage, SessionMessage, SessionVoiceFailure,
 };
 
 /// How the agent came to be in the region an [`Event::AgentArrived`] reports —
@@ -1445,6 +1445,18 @@ pub enum Event {
         event: String,
         /// Why it was refused (empty when taken).
         error: String,
+    },
+    /// Joining a session's voice
+    /// ([`Command::JoinSessionVoice`](crate::Command::JoinSessionVoice)) came to
+    /// nothing: the grid refused the request for the session's channel, or
+    /// refused to start the 1:1 call it needed. The session's optimistic
+    /// `voice.joined` has been cleared; the text conversation is untouched.
+    /// The reference deactivates the channel and shows a notice.
+    SessionVoiceFailed {
+        /// The session whose voice was being joined.
+        session: ChatSessionKind,
+        /// Why it failed.
+        reason: SessionVoiceFailure,
     },
     /// The grid closed a group or conference session on the agent — the CAPS
     /// event-queue `ForceCloseChatterBoxSession`.

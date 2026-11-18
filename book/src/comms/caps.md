@@ -216,7 +216,20 @@ non-LLSD or unroutable body → `400`):
   unknown session answers an *empty* map rather than an error, mirroring
   OpenSim's stubbed cap. A `decline invitation` removes the agent
   (dropping an emptied session) and acks with an undefined body, as does
-  `decline p2p voice`. A `fetch history` answers the session's
+  `decline p2p voice`. A `start p2p voice` naming the other agent in
+  `params` answers the 1:1 session's start, in the reply (the start
+  reply's map without `success`) and over the event queue, under the
+  session's own id (no id is minted; a body naming no agent, or a
+  `session-id` that is not that pair's 1:1 session, is a `400`), and a
+  `call` answers the session's WebRTC channel as `voice_credentials` —
+  the session's id, with any credentials registered by
+  `SimVoice::set_channel_credentials`, and an `invitation_type` of 0 for
+  a session it holds or 2 for a 1:1 call — beside a string `session-id`,
+  or `403` where the region has no WebRTC backend. Those shapes are
+  Second Life's, measured on aditi; not imitated are the voice
+  `ChatterBoxInvitation` Second Life sends the caller itself after a
+  group's `call`, and whether it rings the other agent on a `start p2p
+  voice`. A `fetch history` answers the session's
   server-side backlog (`SimChatSession::history`, fed by
   `send_session_message` or the `record_session_history` driver API) as
   the bare array the wire carries. Relaying joins and rosters to *other*

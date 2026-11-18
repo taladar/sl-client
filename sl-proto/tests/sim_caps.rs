@@ -557,6 +557,7 @@ mod test {
             &ChatSessionReply {
                 session: kind,
                 purpose: ChatSessionRequestPurpose::Answer,
+                status: 200,
                 body: parse_llsd_xml(&reply)?,
             },
             now,
@@ -628,6 +629,156 @@ mod test {
                 .any(|agent| agent == invitee),
             "the client's conference moved onto the simulator's id"
         );
+        Ok(())
+    }
+
+    /// Drives one of the client's due voice requests through the cap and
+    /// hands the reply back as the runtime does, returning the status.
+    fn post_voice_request(
+        caps: &mut SimCaps,
+        sim: &mut SimSession,
+        client: &mut Session,
+        now: Instant,
+    ) -> Result<u16, TestError> {
+        let own = client.agent_id().ok_or("logged in")?;
+        let [(kind, request)] = client.next_session_voice_requests()[..] else {
+            return Err("expected exactly one voice request".into());
+        };
+        let path = granted_cap_path(caps, "ChatSessionRequest")?;
+        let body = request.body(kind.canonical_session_id(own));
+        let (status, reply) = respond(caps, sim, &post(&path, &body))?;
+        client.handle_chat_session_reply(
+            &ChatSessionReply {
+                session: kind,
+                purpose: request.purpose(),
+                status,
+                body: parse_llsd_xml(&reply).unwrap_or(sl_wire::Llsd::Undef),
+            },
+            now,
+        );
+        Ok(status)
+    }
+
+    /// Feeds whatever the simulator queued on the event queue to the client.
+    fn deliver_event_queue(
+        caps: &mut SimCaps,
+        sim: &mut SimSession,
+        client: &mut Session,
+        now: Instant,
+    ) -> Result<(), TestError> {
+        let eq_path = granted_event_queue_path(caps)?;
+        let poll = build_event_queue_request(None, false);
+        let (status, body) = respond(caps, sim, &post(&eq_path, &poll))?;
+        assert_eq!(status, 200);
+        for event in &parse_event_queue_response(&body)?.events {
+            client.handle_caps_event(&event.message, &event.body, now)?;
+        }
+        Ok(())
+    }
+
+    /// A 1:1 call through the fake grid: the client's `start p2p voice` is
+    /// answered with the 1:1 session's start over the event queue, after which
+    /// its `call` is answered with a WebRTC channel carrying the credentials
+    /// registered for it — and no conference is opened on the way.
+    #[test]
+    fn a_direct_call_starts_and_gets_its_channel() -> Result<(), TestError> {
+        let mut caps = new_caps()?;
+        let mut sim = webrtc_sim();
+        let now = Instant::now();
+        let mut client = logged_in_client(now)?;
+        let own = client.agent_id().ok_or("logged in")?;
+
+        let peer = AgentKey::from(uuid::Uuid::from_u128(0x7401));
+        let direct = ChatSessionKind::Direct { peer };
+        let session_id = direct.canonical_session_id(own);
+        sim.voice_mut()
+            .set_channel_credentials(session_id.to_string(), "secret");
+        client.join_session_voice(direct, now);
+
+        assert_eq!(
+            post_voice_request(&mut caps, &mut sim, &mut client, now)?,
+            200
+        );
+        deliver_event_queue(&mut caps, &mut sim, &mut client, now)?;
+        assert_eq!(
+            post_voice_request(&mut caps, &mut sim, &mut client, now)?,
+            200
+        );
+
+        let channel = client
+            .session_voice_channel(direct)
+            .ok_or("the call's channel is recorded")?;
+        assert_eq!(
+            channel.channel_uri,
+            Some(sl_wire::VoiceChannelUri::Id(session_id))
+        );
+        assert_eq!(channel.channel_credentials.as_deref(), Some("secret"));
+        assert_eq!(channel.voice_server_type.as_deref(), Some("webrtc"));
+        assert!(client.session_voice_joined(direct));
+        let kinds: Vec<ChatSessionKind> =
+            client.chat_sessions_info().map(|info| info.kind).collect();
+        assert_eq!(kinds, vec![direct]);
+        assert!(
+            !drain_client(&mut client)
+                .iter()
+                .any(|event| matches!(event, Event::SessionVoiceFailed { .. }))
+        );
+        Ok(())
+    }
+
+    /// A group's voice `call` is answered with its channel where the region
+    /// speaks WebRTC, and refused `403` where it has no voice, which the
+    /// client reports as voice not allowed.
+    #[test]
+    fn a_group_call_is_answered_or_refused_by_the_backend() -> Result<(), TestError> {
+        let now = Instant::now();
+        let group = ChatSessionKind::Group {
+            group_id: GroupKey::from(uuid::Uuid::from_u128(0x7411)),
+        };
+
+        let mut caps = new_caps()?;
+        let mut sim = webrtc_sim();
+        let mut client = logged_in_client(now)?;
+        client.join_session_voice(group, now);
+        assert_eq!(
+            post_voice_request(&mut caps, &mut sim, &mut client, now)?,
+            200
+        );
+        assert_eq!(
+            client
+                .session_voice_channel(group)
+                .and_then(|channel| channel.channel_uri.clone()),
+            Some(sl_wire::VoiceChannelUri::Id(uuid::Uuid::from_u128(0x7411)))
+        );
+
+        let mut caps = new_caps()?;
+        let mut sim = new_sim();
+        let mut client = logged_in_client(now)?;
+        client.join_session_voice(group, now);
+        assert_eq!(
+            post_voice_request(&mut caps, &mut sim, &mut client, now)?,
+            403
+        );
+        assert!(!client.session_voice_joined(group));
+        assert!(drain_client(&mut client).iter().any(|event| matches!(
+            event,
+            Event::SessionVoiceFailed {
+                reason: sl_proto::SessionVoiceFailure::NotAllowed,
+                ..
+            }
+        )));
+        Ok(())
+    }
+
+    /// A `start p2p voice` naming no agent is refused `400`.
+    #[test]
+    fn a_p2p_start_naming_nobody_is_refused() -> Result<(), TestError> {
+        let mut caps = new_caps()?;
+        let mut sim = webrtc_sim();
+        let path = granted_cap_path(&caps, "ChatSessionRequest")?;
+        let body = chat_session_request_body("start p2p voice", uuid::Uuid::from_u128(0x7421));
+        let (status, _reply) = respond(&mut caps, &mut sim, &post(&path, &body))?;
+        assert_eq!(status, 400);
         Ok(())
     }
 
@@ -727,6 +878,7 @@ mod test {
             &ChatSessionReply {
                 session: kind,
                 purpose: ChatSessionRequestPurpose::FetchHistory,
+                status: 200,
                 body: parse_llsd_xml(&reply)?,
             },
             now,
