@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 328 |
 | blocked | 34 |
 | in-progress | 4 |
-| bugs | 18 |
-| done | 1591 |
+| bugs | 17 |
+| done | 1592 |
 | deferred | 30 |
 | wont-do | 24 |
 | **total** | **2160** |
@@ -1239,14 +1239,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-text-renderability-axis`](in-progress/viewer-ui-text-renderability-axis.md)
   — Upstream issue — font selection cannot see glyph-format renderability
 
-## bugs (18)
+## bugs (17)
 
 ### protocol
 
 - [`protocol-im-states-no-position`](bugs/protocol-im-states-no-position.md) —
   Every instant message the session sends states position zero
-- [`protocol-remove-inventory-objects-over-event-queue-unread`](bugs/protocol-remove-inventory-objects-over-event-queue-unread.md)
-  — The client does not read RemoveInventoryObjects over the event queue
 - [`protocol-voice-accept-on-direct-session-becomes-conference`](bugs/protocol-voice-accept-on-direct-session-becomes-conference.md)
   — A voice accept on a 1:1 session is folded into a phantom conference
 
@@ -1290,7 +1288,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1591)
+## done (1592)
 
 ### protocol
 
@@ -1543,6 +1541,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`protocol-region-flag-deny-ageunverified-value`](done/protocol-region-flag-deny-ageunverified-value.md)
   — RegionFlags::DENY_AGEUNVERIFIED has the wrong bit; region and estate flags
   are split
+- [`protocol-remove-inventory-objects-over-event-queue-unread`](done/protocol-remove-inventory-objects-over-event-queue-unread.md)
+  — The client does not read RemoveInventoryObjects over the event queue
 - [`protocol-request-task-inventory-cap`](done/protocol-request-task-inventory-cap.md)
   — Fetch task inventory over the RequestTaskInventory capability
 - [`protocol-sim-caps-agent-comms`](done/protocol-sim-caps-agent-comms.md) —

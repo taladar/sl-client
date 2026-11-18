@@ -492,7 +492,7 @@ const MEASURED: &[(&str, Measured<Answer>)] = &[
     (
         "nocopy_object_restore_told_a",
         each(
-            Answer::Text("unread event RemoveInventoryObjects"),
+            Answer::Text("items removed: [A's object item, taken back]"),
             Answer::Text("nothing"),
         ),
     ),
@@ -1207,6 +1207,28 @@ fn line(scene: &Scene, event: &Event) -> Option<String> {
                 .collect::<Vec<_>>()
                 .join(", ")
         ),
+        // One message removing both kinds; a census that only ever sees items
+        // here reads the same as the item-only message.
+        Event::InventoryObjectsRemoved { folders, items } => {
+            let named = |ids: Vec<Uuid>| {
+                ids.into_iter()
+                    .map(|id| scene.whose(id))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            };
+            let items = format!(
+                "items removed: [{}]",
+                named(items.iter().map(InventoryKey::uuid).collect())
+            );
+            if folders.is_empty() {
+                items
+            } else {
+                format!(
+                    "{items}, folders removed: [{}]",
+                    named(folders.iter().map(InventoryFolderKey::uuid).collect())
+                )
+            }
+        }
         _ => return None,
     })
 }

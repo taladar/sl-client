@@ -79,6 +79,9 @@ pub(crate) enum CapsEvent {
     FetchLibraryItem,
     /// A bulk inventory update delivered over the event queue.
     BulkUpdateInventory,
+    /// Folders and items the simulator removed, over the event queue (Second
+    /// Life's word that a restore took a no-copy item away).
+    RemoveInventoryObjects,
     /// The reply to an AIS3 operation on the agent's tree.
     InventoryApiV3,
     /// The reply to an AIS3 operation on the Library tree.
@@ -250,6 +253,7 @@ impl CapsEvent {
             CAP_FETCH_INVENTORY_ITEM => Self::FetchInventoryItem,
             CAP_FETCH_LIBRARY_ITEM => Self::FetchLibraryItem,
             "BulkUpdateInventory" => Self::BulkUpdateInventory,
+            "RemoveInventoryObjects" => Self::RemoveInventoryObjects,
             CAP_INVENTORY_API_V3 => Self::InventoryApiV3,
             CAP_LIBRARY_API_V3 => Self::LibraryApiV3,
             AIS3_FETCH_INVENTORY_TAG => Self::Ais3FetchInventory,

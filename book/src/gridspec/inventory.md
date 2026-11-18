@@ -348,7 +348,10 @@ restores it to its last position (`RezRestoreToWorld`).
 Second Life restored the object here, where it may build. The reference
 refuses a no-copy item's restore on Second Life (`CantRestoreToWorldNoCopy`),
 because the item goes whether or not the object comes back; our viewer's
-guard (`restore_refused`) keeps that refusal.
+guard (`restore_refused`) keeps that refusal. The event-queue
+`RemoveInventoryObjects` went unread by our client until 2026-11-18, so its
+inventory model held the item until the folder was fetched again; it now reads
+it as it reads the UDP message, and drops the item.
 
 ## Notecards and gestures
 

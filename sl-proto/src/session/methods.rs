@@ -27,11 +27,11 @@ use super::conversions::{
     object_properties, offline_messages_from_llsd, open_region_info_from_llsd, pack_uuids,
     packages_of, parcel_info, parcel_info_from_llsd, parcel_object_owners_from_caps_llsd,
     parse_lure_region_handle, parse_mute_list, parse_task_inventory, parse_uuid_string, pick_info,
-    places_reply_from_caps_llsd, region_identity, region_limits, required_voice_version_from_llsd,
-    script_dialog, script_permission_request, script_running_from_caps_llsd,
-    server_appearance_update_from_llsd, session_history_from_llsd,
-    set_display_name_reply_from_llsd, sim_console_response_from_llsd, skeleton_folder,
-    teleport_failed_from_caps_llsd, teleport_finish_from_llsd, trimmed_string,
+    places_reply_from_caps_llsd, region_identity, region_limits,
+    remove_inventory_objects_from_llsd, required_voice_version_from_llsd, script_dialog,
+    script_permission_request, script_running_from_caps_llsd, server_appearance_update_from_llsd,
+    session_history_from_llsd, set_display_name_reply_from_llsd, sim_console_response_from_llsd,
+    skeleton_folder, teleport_failed_from_caps_llsd, teleport_finish_from_llsd, trimmed_string,
     voice_channel_info_from_llsd, windlight_refresh_from_llsd,
 };
 use super::transfers::Transfers;
@@ -924,6 +924,19 @@ impl Session {
                         items,
                         item_callbacks: Vec::new(),
                     });
+                } else {
+                    self.caps_decode_failed(message);
+                }
+            }
+            // The event-queue form of `RemoveInventoryObjects`: Second Life
+            // takes a no-copy item away this way when it is restored to its
+            // last position. The same lists as the UDP message, so the same
+            // event and the same pruning.
+            CapsEvent::RemoveInventoryObjects => {
+                if let Some((folders, items)) = remove_inventory_objects_from_llsd(body) {
+                    self.grid_removed_inventory(&folders, &items);
+                    self.events
+                        .push_back(Event::InventoryObjectsRemoved { folders, items });
                 } else {
                     self.caps_decode_failed(message);
                 }
@@ -5381,39 +5394,40 @@ impl Session {
             // made from another session). The echoed `AgentData.AgentID` is
             // dropped; a client mirroring inventory drops these items.
             AnyMessage::RemoveInventoryItem(remove) => {
-                self.events.push_back(Event::InventoryItemsRemoved {
-                    items: remove
-                        .inventory_data
-                        .iter()
-                        .map(|block| InventoryKey::from(block.item_id))
-                        .collect(),
-                });
+                let items: Vec<InventoryKey> = remove
+                    .inventory_data
+                    .iter()
+                    .map(|block| InventoryKey::from(block.item_id))
+                    .collect();
+                self.grid_removed_inventory(&[], &items);
+                self.events.push_back(Event::InventoryItemsRemoved { items });
             }
             // The simulator removed inventory folders server-side.
             AnyMessage::RemoveInventoryFolder(remove) => {
-                self.events.push_back(Event::InventoryFoldersRemoved {
-                    folders: remove
-                        .folder_data
-                        .iter()
-                        .map(|block| InventoryFolderKey::from(block.folder_id))
-                        .collect(),
-                });
+                let folders: Vec<InventoryFolderKey> = remove
+                    .folder_data
+                    .iter()
+                    .map(|block| InventoryFolderKey::from(block.folder_id))
+                    .collect();
+                self.grid_removed_inventory(&folders, &[]);
+                self.events.push_back(Event::InventoryFoldersRemoved { folders });
             }
             // The simulator removed a mixed set of folders and items server-side
             // in one message.
             AnyMessage::RemoveInventoryObjects(remove) => {
-                self.events.push_back(Event::InventoryObjectsRemoved {
-                    folders: remove
-                        .folder_data
-                        .iter()
-                        .map(|block| InventoryFolderKey::from(block.folder_id))
-                        .collect(),
-                    items: remove
-                        .item_data
-                        .iter()
-                        .map(|block| InventoryKey::from(block.item_id))
-                        .collect(),
-                });
+                let folders: Vec<InventoryFolderKey> = remove
+                    .folder_data
+                    .iter()
+                    .map(|block| InventoryFolderKey::from(block.folder_id))
+                    .collect();
+                let items: Vec<InventoryKey> = remove
+                    .item_data
+                    .iter()
+                    .map(|block| InventoryKey::from(block.item_id))
+                    .collect();
+                self.grid_removed_inventory(&folders, &items);
+                self.events
+                    .push_back(Event::InventoryObjectsRemoved { folders, items });
             }
             // The simulator re-parented (and optionally renamed) inventory items
             // server-side. An empty `NewName` means the move does not rename.
@@ -11812,6 +11826,21 @@ impl Session {
         self.inventory
             .folder_owner(folder_id)
             .unwrap_or(InventoryOwner::Agent)
+    }
+
+    /// Drops what the grid says it removed from the held model, as the
+    /// reference's `process_remove_inventory_*` handlers delete it from
+    /// `gInventory`: without this an item the grid took away (a no-copy object
+    /// restored to its last position, a delete made from another session)
+    /// stays in every local view of inventory until its folder is fetched
+    /// again. A key the model does not hold is ignored.
+    fn grid_removed_inventory(&mut self, folders: &[InventoryFolderKey], items: &[InventoryKey]) {
+        for item in items {
+            self.inventory.remove_item(*item);
+        }
+        for folder in folders {
+            self.inventory.remove_folder(*folder);
+        }
     }
 
     /// Inserts/updates an item in the held model (agent tree), maintaining the

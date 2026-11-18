@@ -2646,6 +2646,20 @@ fn ingest_inventory(
                     }
                 }
             }
+            // The grid removed items or folders (a no-copy object restored to
+            // its last position, a delete from another session). The session
+            // has already dropped them from its model; re-read the folders
+            // that held them, and a removed folder's parent, whose complete
+            // page then prunes it.
+            SlSessionEvent::InventoryItemsRemoved { items } => {
+                refresh_after_removal(&model, &[], items, &mut commands);
+            }
+            SlSessionEvent::InventoryFoldersRemoved { folders } => {
+                refresh_after_removal(&model, folders, &[], &mut commands);
+            }
+            SlSessionEvent::InventoryObjectsRemoved { folders, items } => {
+                refresh_after_removal(&model, folders, items, &mut commands);
+            }
             SlSessionEvent::InventoryItemCreated { item, .. } => {
                 model.push_recent(
                     item.item_id,
@@ -2743,6 +2757,42 @@ pub(crate) fn request_all_agent_folders(
         .collect();
     for folder in wanted {
         request_folder(model, folder, commands);
+    }
+}
+
+/// The folders whose pages change when the grid removes `folders` and
+/// `items`: the folder each loaded item sat in and each removed folder's
+/// parent, limited to the folders this window has asked for, each once.
+fn folders_touched_by_removal(
+    model: &InventoryModel,
+    folders: &[InventoryFolderKey],
+    items: &[InventoryKey],
+) -> Vec<InventoryFolderKey> {
+    let mut touched: Vec<InventoryFolderKey> = items
+        .iter()
+        .filter_map(|item| model.find_item(*item).map(|info| info.folder_id))
+        .chain(
+            folders
+                .iter()
+                .filter_map(|folder| model.folder_info(*folder).and_then(|info| info.parent_id)),
+        )
+        .filter(|folder| model.requested.contains(folder))
+        .collect();
+    touched.sort_unstable();
+    touched.dedup();
+    touched
+}
+
+/// Re-query the pages a grid removal changed (see
+/// [`folders_touched_by_removal`]).
+fn refresh_after_removal(
+    model: &InventoryModel,
+    folders: &[InventoryFolderKey],
+    items: &[InventoryKey],
+    commands: &mut MessageWriter<SlCommand>,
+) {
+    for folder in folders_touched_by_removal(model, folders, items) {
+        query_folder_page(folder, commands);
     }
 }
 
@@ -4490,6 +4540,39 @@ mod tests {
             &[item(10, 2, "Blue shirt", InventoryType::Wearable)],
         );
         model
+    }
+
+    /// **A grid removal re-reads the pages it changed**: the folder a removed
+    /// item sat in and a removed folder's parent, each once, and only among
+    /// the folders the window has asked for. An item or folder the model never
+    /// loaded touches nothing.
+    #[test]
+    fn a_grid_removal_touches_the_holding_folders() {
+        let key = |id: u128| {
+            sl_client_bevy::InventoryFolderKey::from(sl_client_bevy::Uuid::from_u128(id))
+        };
+        let item_key =
+            |id: u128| sl_client_bevy::InventoryKey::from(sl_client_bevy::Uuid::from_u128(id));
+        let mut model = sample_model();
+        model.set_items(
+            key(2),
+            &[
+                item(10, 2, "Blue shirt", InventoryType::Wearable),
+                item(11, 2, "Red shirt", InventoryType::Wearable),
+            ],
+        );
+        let removed_items = [item_key(10), item_key(11), item_key(99)];
+        let removed_folders = [key(3), key(98)];
+        assert_eq!(
+            super::folders_touched_by_removal(&model, &removed_folders, &removed_items),
+            Vec::new(),
+            "nothing requested yet"
+        );
+        model.requested.extend([key(1), key(2)]);
+        assert_eq!(
+            super::folders_touched_by_removal(&model, &removed_folders, &removed_items),
+            vec![key(1), key(2)]
+        );
     }
 
     /// **The gallery specimen's sample shows every row state the tree draws**:

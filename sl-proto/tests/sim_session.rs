@@ -11077,25 +11077,94 @@ mod test {
     }
 
     /// Second Life's word that a restore took a no-copy item away: a
-    /// `RemoveInventoryObjects` over the event queue. It reaches the client,
-    /// which does not read it yet
-    /// (`roadmap/bugs/protocol-remove-inventory-objects-over-event-queue-unread.md`):
-    /// when it does, this test is where that shows.
+    /// `RemoveInventoryObjects` over the event queue. The client reads it into
+    /// the same event as the UDP message and drops the item from its model.
     #[test]
     fn remove_inventory_objects_over_the_event_queue_reaches_the_client() -> Result<(), TestError> {
         let now = Instant::now();
         let (mut client, mut sim) = setup(now)?;
         client.set_diagnostics(true);
-        let item = InventoryKey::from(uuid::Uuid::from_u128(0x2_2000));
-        sim.enqueue_remove_inventory_objects(&[], &[item]);
-        let _events = deliver_caps(&mut client, &mut sim, now)?;
+        let folder = InventoryFolderKey::from(uuid::Uuid::from_u128(0x2_2001));
+        let item = InventoryItem {
+            item_id: InventoryKey::from(uuid::Uuid::from_u128(0x2_2000)),
+            folder_id: folder,
+            name: "A No-Copy Object".to_owned(),
+            item_type: 6,
+            inv_type: 6,
+            ..wearable_item()
+        };
+        sim.send_bulk_update_inventory(
+            TransactionId::from(uuid::Uuid::nil()),
+            &[],
+            std::slice::from_ref(&item),
+            now,
+        )?;
+        pump(&mut client, &mut sim, now)?;
+        let _gift = drain_client(&mut client);
+        assert!(client.inventory_item(item.item_id).is_some());
+
+        sim.enqueue_remove_inventory_objects(&[], &[item.item_id]);
+        let events = deliver_caps(&mut client, &mut sim, now)?;
+        let removed = events
+            .into_iter()
+            .find_map(|event| match event {
+                Event::InventoryObjectsRemoved { folders, items } => Some((folders, items)),
+                _ => None,
+            })
+            .ok_or("expected an InventoryObjectsRemoved client event")?;
+        assert_eq!(removed, (Vec::new(), vec![item.item_id]));
+        assert!(client.inventory_item(item.item_id).is_none());
         let unread: Vec<String> = std::iter::from_fn(|| client.poll_diagnostic())
             .filter_map(|diagnostic| match diagnostic {
                 sl_proto::Diagnostic::UnknownCapsEvent { message } => Some(message),
                 _ => None,
             })
             .collect();
-        assert_eq!(unread, vec!["RemoveInventoryObjects".to_owned()]);
+        assert!(unread.is_empty(), "unread event-queue messages: {unread:?}");
+        Ok(())
+    }
+
+    /// The UDP removals prune the client's model too: an item the grid
+    /// removed with `RemoveInventoryItem`, a folder with
+    /// `RemoveInventoryFolder`, and an item of `RemoveInventoryObjects` are all
+    /// gone from it once their events arrive.
+    #[test]
+    fn udp_inventory_removals_prune_the_client_model() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        let root = InventoryFolderKey::from(uuid::Uuid::from_u128(0x2_3000));
+        let item = |n: u128| InventoryItem {
+            item_id: InventoryKey::from(uuid::Uuid::from_u128(n)),
+            folder_id: root,
+            name: format!("Item {n:x}"),
+            ..wearable_item()
+        };
+        let (first, second) = (item(0x2_3001), item(0x2_3002));
+        let doomed = InventoryFolder {
+            folder_id: InventoryFolderKey::from(uuid::Uuid::from_u128(0x2_3003)),
+            parent_id: Some(root),
+            name: "Doomed".to_owned(),
+            folder_type: -1,
+            version: 0,
+        };
+        sim.send_bulk_update_inventory(
+            TransactionId::from(uuid::Uuid::nil()),
+            std::slice::from_ref(&doomed),
+            &[first.clone(), second.clone()],
+            now,
+        )?;
+        pump(&mut client, &mut sim, now)?;
+        let _gift = drain_client(&mut client);
+        assert!(client.inventory_folder(doomed.folder_id).is_some());
+
+        sim.send_remove_inventory_item(&[first.item_id], now)?;
+        sim.send_remove_inventory_folder(&[doomed.folder_id], now)?;
+        sim.send_remove_inventory_objects(&[], &[second.item_id], now)?;
+        pump(&mut client, &mut sim, now)?;
+        let _removals = drain_client(&mut client);
+        assert!(client.inventory_item(first.item_id).is_none());
+        assert!(client.inventory_item(second.item_id).is_none());
+        assert!(client.inventory_folder(doomed.folder_id).is_none());
         Ok(())
     }
 

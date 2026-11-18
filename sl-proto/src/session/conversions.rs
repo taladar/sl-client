@@ -7315,6 +7315,39 @@ pub(crate) fn remove_inventory_objects_to_llsd(
     ])
 }
 
+/// Parses an event-queue `RemoveInventoryObjects` body (inverse of
+/// [`remove_inventory_objects_to_llsd`]) into the folders and items it names,
+/// the same two lists the UDP message carries. Second Life sends it this way
+/// when a restore to last position takes a no-copy item away.
+///
+/// Returns `None` for a body that is not a map, so a malformed event is a
+/// decode failure rather than an empty removal. A list that is absent reads as
+/// empty, as a block with no entries does on the wire; nil ids are dropped,
+/// since they name nothing a model could hold.
+pub(crate) fn remove_inventory_objects_from_llsd(
+    body: &Llsd,
+) -> Option<(Vec<InventoryFolderKey>, Vec<InventoryKey>)> {
+    body.as_map()?;
+    let ids = |block: &str, field: &str| -> Vec<Uuid> {
+        body.get(block)
+            .and_then(Llsd::as_array)
+            .unwrap_or(&[])
+            .iter()
+            .map(|entry| uuid_member_lenient(entry, field))
+            .filter(|id| !id.is_nil())
+            .collect()
+    };
+    let folders = ids("FolderData", "FolderID")
+        .into_iter()
+        .map(InventoryFolderKey::from)
+        .collect();
+    let items = ids("ItemData", "ItemID")
+        .into_iter()
+        .map(InventoryKey::from)
+        .collect();
+    Some((folders, items))
+}
+
 /// Serializes an [`InventoryItem`] as a flat `BulkUpdateInventory` `ItemData`
 /// entry (inverse of [`bulk_update_item_from_llsd`]). `last_owner_id` has no
 /// place in this wire form (the parser leaves it nil), so it is not emitted.
@@ -8503,6 +8536,7 @@ mod caps_serializer_tests {
         group_memberships_to_caps_llsd, inventory_descendents_from_llsd,
         inventory_descendents_to_llsd, offline_messages_from_llsd, offline_messages_to_llsd,
         parcel_info_from_llsd, parcel_info_to_llsd, parcel_properties_to_llsd,
+        remove_inventory_objects_from_llsd, remove_inventory_objects_to_llsd,
         server_appearance_update_from_llsd, server_appearance_update_to_llsd,
         session_history_from_llsd, session_history_to_llsd, teleport_finish_from_llsd,
         teleport_finish_to_llsd,
@@ -10355,6 +10389,48 @@ mod caps_serializer_tests {
             Some((transaction_id, folders, items))
         );
         Ok(())
+    }
+
+    #[test]
+    fn remove_inventory_objects_round_trip() {
+        let folders = vec![InventoryFolderKey::from(Uuid::from_u128(0xe1))];
+        let items = vec![
+            InventoryKey::from(Uuid::from_u128(0xe2)),
+            InventoryKey::from(Uuid::from_u128(0xe3)),
+        ];
+        let body = remove_inventory_objects_to_llsd(
+            Uuid::from_u128(0xe4),
+            Uuid::from_u128(0xe5),
+            &folders,
+            &items,
+        );
+        assert_eq!(
+            remove_inventory_objects_from_llsd(&body),
+            Some((folders, items))
+        );
+    }
+
+    /// An event-queue `RemoveInventoryObjects` with a list left out, a nil id
+    /// in the other and its ids as strings — the shapes an LLSD encoder may
+    /// choose — still names the one item; a body that is not a map is refused.
+    #[test]
+    fn remove_inventory_objects_reads_lenient_shapes() {
+        let item = Uuid::from_u128(0xe6);
+        let body = llsd_map(vec![(
+            "ItemData",
+            Llsd::Array(vec![
+                llsd_map(vec![("ItemID", Llsd::String(item.to_string()))]),
+                llsd_map(vec![("ItemID", Llsd::Uuid(Uuid::nil()))]),
+            ]),
+        )]);
+        assert_eq!(
+            remove_inventory_objects_from_llsd(&body),
+            Some((Vec::new(), vec![InventoryKey::from(item)]))
+        );
+        assert_eq!(
+            remove_inventory_objects_from_llsd(&Llsd::Array(Vec::new())),
+            None
+        );
     }
 
     /// A `BulkUpdateInventory` whose `U32` fields are the big-endian binary a

@@ -308,13 +308,18 @@ separate command, and [dropping a script](scripts.md) into an existing object is
 
 The simulator can change inventory on its own — an item deleted from another
 session, moved to trash, or re-parented — and pushes the change so a client
-mirroring inventory stays in sync. None has a reply; a mirror simply applies it:
+mirroring inventory stays in sync. None has a reply; a mirror simply applies it.
+The session applies the removals to its own inventory model before it reports
+them, as the reference deletes them from `gInventory`, so a folder read after
+the event no longer lists what the grid took away:
 
 - `Event::InventoryItemsRemoved { items }` — these items no longer exist.
 - `Event::InventoryFoldersRemoved { folders }` — these folders (and their
   descendants) no longer exist.
 - `Event::InventoryObjectsRemoved { folders, items }` — a mixed removal of both
-  in a single message.
+  in a single message. It comes over UDP, or over the event queue as an LLSD
+  body of the same blocks: Second Life sends it that way when a no-copy object
+  restored to its last position takes its item away.
 - `Event::InventoryItemsMoved { stamp, moves }` — each `InventoryItemMove`
   re-parents an item into a folder, optionally renaming it; `stamp` says whether
   the simulator re-timestamped the moved items.
