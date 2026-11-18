@@ -41,9 +41,9 @@ use super::{
     ChatSessionInfo, ChatSessionKind, ChatSessionLifecycle, Circuit, CircuitRole,
     DEFAULT_DRAW_DISTANCE, FolderState, FriendPresence, GrantStatus, HolderKind, IDENTITY_ROTATION,
     INVENTORY_FETCH_MAX_ATTEMPTS, INVENTORY_SAVE_TIMEOUT, Inventory, InventoryOwner,
-    LOGOUT_TIMEOUT, MAX_XFER_DOWNLOAD_BYTES, MessageCursor, OfferedUpload,
-    PARENT_REQUEST_WARN_ATTEMPTS, PendingHandover, PendingInventorySave, PendingInvite,
-    SIT_REFUSAL_ALERTS, SIT_REFUSAL_TEXTS, SIT_TIMEOUT, ScriptGrant, ScriptHolder,
+    LATE_TELEPORT_START_WINDOW, LOGOUT_TIMEOUT, MAX_XFER_DOWNLOAD_BYTES, MessageCursor,
+    OfferedUpload, PARENT_REQUEST_WARN_ATTEMPTS, PendingHandover, PendingInventorySave,
+    PendingInvite, SIT_REFUSAL_ALERTS, SIT_REFUSAL_TEXTS, SIT_TIMEOUT, ScriptGrant, ScriptHolder,
     ServerHistoryFetch, ServerHistoryMessage, ServerHistoryState, Session, SessionMessage,
     SessionState, SessionTransition, SitState, TELEPORT_TIMEOUT, TEXTURE_DOWNLOAD_MAX_ATTEMPTS,
     TEXTURE_DOWNLOAD_STALL_TIMEOUT, TYPING_TIMEOUT, TakenControls, TeleportPhase, TextureDownload,
@@ -282,6 +282,7 @@ impl Session {
             camera: Camera::region_center(),
             sit: SitState::NotSitting,
             teleport: TeleportPhase::Idle,
+            late_teleport_start_until: None,
             pending_handover: None,
             script_grants: BTreeMap::new(),
             taken_controls: TakenControls {
@@ -719,6 +720,25 @@ impl Session {
             // OpenSim sends the UDP message. Either way the teleport is over.
             CapsEvent::TeleportFailed => {
                 if let Some((reason, alert_info)) = teleport_failed_from_caps_llsd(body) {
+                    // Second Life starts a teleport over UDP before it fails
+                    // it here, so a failure ahead of the start means the start
+                    // is still on its way: watch for it, so that it does not
+                    // begin a teleport of the grid's own that nothing ends. A
+                    // failure with no teleport in flight, or after its start,
+                    // has no straggler to wait for, and the next start is a
+                    // real one.
+                    if matches!(self.state, SessionState::Teleporting)
+                        && matches!(
+                            self.teleport,
+                            TeleportPhase::Requested {
+                                start_seen: false,
+                                ..
+                            }
+                        )
+                    {
+                        self.late_teleport_start_until =
+                            Some(deadline(now, LATE_TELEPORT_START_WINDOW));
+                    }
                     self.teleport_refused(reason, alert_info);
                 } else {
                     self.caps_decode_failed(message);
@@ -741,7 +761,7 @@ impl Session {
                     let region_handle = finish
                         .region_handle
                         .or(match self.teleport {
-                            TeleportPhase::Requested { target } => target,
+                            TeleportPhase::Requested { target, .. } => target,
                             TeleportPhase::Idle | TeleportPhase::Handover { .. } => None,
                         })
                         // Neither side named a destination: report the
@@ -4804,8 +4824,27 @@ impl Session {
                 // (A physical crossing never sends `TeleportStart` — OpenSim's
                 // `EntityTransferModule` sends it on its two teleport paths
                 // only — so nothing here misfires for a crossing.)
-                if matches!(self.state, SessionState::Teleporting) || self.enter_remote_teleport(now)
-                {
+                //
+                // A start shortly after a teleport failed ahead of its own
+                // start belongs to the failed one: Second Life sends the start
+                // over UDP and the failure over the event queue, so the start
+                // can come second, and taking it as the grid's own would begin
+                // a teleport that nothing ends (see the `TeleportFailed` arm of
+                // `handle_caps_event`). The reference viewer has the same exposure
+                // (`process_teleport_start` enters `TELEPORT_START` from
+                // `TELEPORT_NONE` unconditionally).
+                if matches!(self.state, SessionState::Teleporting) {
+                    self.teleport_start_arrived();
+                    self.events.push_back(Event::TeleportStarted {
+                        flags: TeleportFlags(start.info.teleport_flags),
+                    });
+                } else if self.late_teleport_start_until.is_some_and(|until| now < until) {
+                    tracing::debug!(
+                        flags = start.info.teleport_flags,
+                        "ignoring a TeleportStart that arrived after its teleport failed"
+                    );
+                } else if self.enter_remote_teleport(now) {
+                    self.teleport_start_arrived();
                     self.events.push_back(Event::TeleportStarted {
                         flags: TeleportFlags(start.info.teleport_flags),
                     });
@@ -9226,6 +9265,7 @@ impl Session {
         // TeleportFinish carries the authoritative handle.
         self.teleport = TeleportPhase::Requested {
             target: parse_lure_region_handle(lure_id.get()),
+            start_seen: false,
         };
         self.state = SessionState::Teleporting;
         Ok(())
@@ -14828,9 +14868,20 @@ impl Session {
             return false;
         };
         circuit.timers.teleport = Some(deadline(now, TELEPORT_TIMEOUT));
-        self.teleport = TeleportPhase::Requested { target: None };
+        self.teleport = TeleportPhase::Requested {
+            target: None,
+            start_seen: false,
+        };
         self.state = SessionState::Teleporting;
         true
+    }
+
+    /// Records that the teleport in flight has had its `TeleportStart`, so
+    /// that a failure after it opens no window for a straggler.
+    const fn teleport_start_arrived(&mut self) {
+        if let TeleportPhase::Requested { start_seen, .. } = &mut self.teleport {
+            *start_seen = true;
+        }
     }
 
     /// The simulator refused or gave up on a teleport (`TeleportFailed`, over
@@ -14903,6 +14954,7 @@ impl Session {
         circuit.timers.teleport = Some(deadline(now, TELEPORT_TIMEOUT));
         self.teleport = TeleportPhase::Requested {
             target: Some(region_handle),
+            start_seen: false,
         };
         self.state = SessionState::Teleporting;
         Ok(())
@@ -14934,7 +14986,10 @@ impl Session {
         circuit.timers.teleport = Some(deadline(now, TELEPORT_TIMEOUT));
         // A landmark teleport's destination is resolved sim-side; the
         // authoritative handle arrives with the TeleportFinish.
-        self.teleport = TeleportPhase::Requested { target: None };
+        self.teleport = TeleportPhase::Requested {
+            target: None,
+            start_seen: false,
+        };
         self.state = SessionState::Teleporting;
         Ok(())
     }

@@ -105,6 +105,16 @@ TeleportStarted { flags }
   grid attached. It arrives as a UDP message on OpenSim and as an event-queue
   event on Second Life, where the reason is usually a key (`no_host`) repeated
   in the alert; the session handles both the same way.
+- **A start after its failure** is not a new teleport. Since Second Life's
+  failure and the start before it travel by different transports, the start
+  can arrive second. When an event-queue `TeleportFailed` ends a teleport
+  whose start has not arrived, a `TeleportStart` outside a teleport in the
+  next ten seconds is taken as the failed one's straggler and ignored, where
+  otherwise it would begin a teleport of the grid's own that nothing
+  finishes. A failure with no teleport in flight, or after its start, leaves
+  the next start alone. A teleport the grid really does start in the window
+  is not lost: it ends in a `TeleportFinish` (or a `TeleportLocal`), which
+  the session honours without a start; only its `TeleportStarted` is missed.
 
 ## Cross-region handover and child circuits
 

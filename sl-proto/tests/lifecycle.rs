@@ -157,7 +157,8 @@ mod test {
         SoundTriggerSoundDataBlock, TelehubInfo as TelehubInfoMessage,
         TelehubInfoSpawnPointBlockBlock, TelehubInfoTelehubBlockBlock, TeleportFailed,
         TeleportFailedAlertInfoBlock, TeleportFailedInfoBlock, TeleportFinish,
-        TeleportFinishInfoBlock, TeleportStart, TeleportStartInfoBlock, TerminateFriendship,
+        TeleportFinishInfoBlock, TeleportProgress, TeleportProgressAgentDataBlock,
+        TeleportProgressInfoBlock, TeleportStart, TeleportStartInfoBlock, TerminateFriendship,
         TerminateFriendshipAgentDataBlock, TerminateFriendshipExBlockBlock, TransferInfo,
         TransferInfoTransferInfoBlock, TransferPacket, TransferPacketTransferDataBlock,
         UUIDNameReply, UUIDNameReplyUUIDNameBlockBlock, UpdateCreateInventoryItem,
@@ -17453,6 +17454,196 @@ mod test {
             vec!["finished", "started", "region-changed"],
             "a finish handled ahead of the start reorders the phases without \
              losing either of them, and still arrives"
+        );
+        Ok(())
+    }
+
+    /// The teleport phases among `events`, in order, by name.
+    fn teleport_phases(events: &[Event]) -> Vec<&'static str> {
+        events
+            .iter()
+            .filter_map(|event| match event {
+                Event::TeleportStarted { .. } => Some("started"),
+                Event::TeleportProgress { .. } => Some("progress"),
+                Event::TeleportFinished { .. } => Some("finished"),
+                Event::RegionChanged { .. } => Some("region-changed"),
+                Event::TeleportFailed { .. } => Some("failed"),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// A CAPS `TeleportFailed` body as Second Life sends a refusal.
+    fn caps_teleport_failed_xml() -> &'static str {
+        "<llsd><map><key>Info</key><array><map>\
+            <key>AgentID</key><uuid>00000000-0000-0000-0000-000000000000</uuid>\
+            <key>Reason</key><string>Could not teleport closer to destination</string>\
+            </map></array></map></llsd>"
+    }
+
+    /// Requests a teleport, then has the grid refuse it over the event queue
+    /// before the source region's UDP `TeleportStart` and progress line are
+    /// read — the order Second Life's two transports can deliver them in.
+    fn refused_teleport_with_late_start(
+        session: &mut Session,
+        now: Instant,
+    ) -> Result<Vec<Event>, TestError> {
+        drain(session)?;
+        drain_events(session);
+        session.teleport_to(
+            RegionHandle(0x0003_E800_0003_E900),
+            region_coords(128.0, 128.0, 30.0),
+            vec3(1.0, 0.0, 0.0),
+            now,
+        )?;
+        drain(session)?;
+        drain_events(session);
+
+        let body = sl_proto::parse_llsd_xml(caps_teleport_failed_xml())?;
+        session.handle_caps_event("TeleportFailed", &body, now)?;
+        let start = AnyMessage::TeleportStart(TeleportStart {
+            info: TeleportStartInfoBlock { teleport_flags: 16 },
+        });
+        session.handle_datagram(sim_addr(), &server_message(&start, 900, true)?, now)?;
+        let progress = AnyMessage::TeleportProgress(TeleportProgress {
+            agent_data: TeleportProgressAgentDataBlock {
+                agent_id: uuid::Uuid::nil(),
+            },
+            info: TeleportProgressInfoBlock {
+                teleport_flags: 16,
+                message: b"sending_dest\0".to_vec(),
+            },
+        });
+        session.handle_datagram(sim_addr(), &server_message(&progress, 901, true)?, now)?;
+        Ok(drain_events(session))
+    }
+
+    /// A refused teleport's `TeleportStart` that arrives after its
+    /// `TeleportFailed` belongs to the failed teleport: it must not start a
+    /// teleport of the grid's own, which nothing would finish and which would
+    /// end thirty seconds later in a second, spurious failure.
+    #[test]
+    fn a_start_after_its_teleport_failed_starts_nothing() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        let events = refused_teleport_with_late_start(&mut session, now)?;
+        assert_eq!(
+            teleport_phases(&events),
+            vec!["failed"],
+            "the late start and its progress line should be ignored"
+        );
+
+        session.handle_timeout(after(now, 31_000)?);
+        assert_eq!(
+            teleport_phases(&drain_events(&mut session)),
+            Vec::<&str>::new(),
+            "no teleport should be left running to time out"
+        );
+        // And the session takes a new request as an active one, not as a
+        // supersession of a phantom teleport.
+        session.teleport_to(
+            RegionHandle(0x0003_E800_0003_E900),
+            region_coords(128.0, 128.0, 30.0),
+            vec3(1.0, 0.0, 0.0),
+            after(now, 31_000)?,
+        )?;
+        let sent = drain(&mut session)?;
+        assert!(
+            !sent
+                .iter()
+                .any(|m| matches!(m, AnyMessage::TeleportCancel(_))),
+            "nothing should be left to cancel, got {sent:?}"
+        );
+        Ok(())
+    }
+
+    /// Ignoring a start in the window loses no teleport the grid really does
+    /// start then: that one still ends in a `TeleportFinish`, which is
+    /// honoured without a start.
+    #[test]
+    fn a_grid_teleport_finishing_after_a_failure_is_still_honoured() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        refused_teleport_with_late_start(&mut session, now)?;
+
+        let body = sl_proto::parse_llsd_xml(caps_teleport_finish_xml())?;
+        session.handle_caps_event("TeleportFinish", &body, after(now, 1_000)?)?;
+        assert_eq!(
+            teleport_phases(&drain_events(&mut session)),
+            vec!["started", "finished"],
+            "a finish in the window is a teleport the grid decided on"
+        );
+        Ok(())
+    }
+
+    /// A failure that has no start still to come opens no window: one with
+    /// no teleport in flight (a scripted teleport refused before it started,
+    /// as Second Life refuses an `llTeleportAgent` routed no closer), and one
+    /// after its own start. The next start is a teleport the grid began, and
+    /// must surface.
+    #[test]
+    fn a_failure_with_no_start_to_come_leaves_the_next_start_alone() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+        let body = sl_proto::parse_llsd_xml(caps_teleport_failed_xml())?;
+        let start = AnyMessage::TeleportStart(TeleportStart {
+            info: TeleportStartInfoBlock { teleport_flags: 16 },
+        });
+
+        // No teleport in flight.
+        session.handle_caps_event("TeleportFailed", &body, now)?;
+        session.handle_datagram(sim_addr(), &server_message(&start, 900, true)?, now)?;
+        assert_eq!(
+            teleport_phases(&drain_events(&mut session)),
+            vec!["failed", "started"],
+            "a start after a failure with no teleport in flight is the grid's own"
+        );
+        // The grid's teleport ends (failed after its start) before the next.
+        session.handle_caps_event("TeleportFailed", &body, now)?;
+        drain_events(&mut session);
+
+        // A requested teleport whose start came before its failure.
+        session.teleport_to(
+            RegionHandle(0x0003_E800_0003_E900),
+            region_coords(128.0, 128.0, 30.0),
+            vec3(1.0, 0.0, 0.0),
+            now,
+        )?;
+        drain(&mut session)?;
+        session.handle_datagram(sim_addr(), &server_message(&start, 901, true)?, now)?;
+        session.handle_caps_event("TeleportFailed", &body, now)?;
+        session.handle_datagram(sim_addr(), &server_message(&start, 902, true)?, now)?;
+        assert_eq!(
+            teleport_phases(&drain_events(&mut session)),
+            vec!["started", "failed", "started"],
+            "a failure after its start leaves no straggler to ignore"
+        );
+        Ok(())
+    }
+
+    /// The window closes: an unexpected `TeleportStart` well after a failure
+    /// is again a teleport the grid started (`llTeleportAgent`, a forced
+    /// teleport home).
+    #[test]
+    fn a_start_long_after_a_failure_is_the_grids_own_teleport() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        refused_teleport_with_late_start(&mut session, now)?;
+
+        let start = AnyMessage::TeleportStart(TeleportStart {
+            info: TeleportStartInfoBlock { teleport_flags: 16 },
+        });
+        session.handle_datagram(
+            sim_addr(),
+            &server_message(&start, 902, true)?,
+            after(now, 11_000)?,
+        )?;
+        assert_eq!(
+            teleport_phases(&drain_events(&mut session)),
+            vec!["started"],
+            "a start after the window should enter a remote teleport"
         );
         Ok(())
     }

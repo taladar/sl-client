@@ -94,8 +94,10 @@ with a `TeleportFailed` **event on the event queue** —
 The fake grid holds an event-queue failure behind the client's
 acknowledgement of the last UDP line it sent. The live grid's tenth of a
 second is what orders the two transports there; without it a failure can
-overtake its own `TeleportStart`, which a client reads as a second teleport
-beginning.
+overtake its own `TeleportStart`. The reference viewer reads such a start as
+a second teleport beginning; the session ignores a `TeleportStart` that
+arrives outside a teleport within ten seconds of an event-queue failure that
+overtook it, and still honours a `TeleportFinish` then.
 
 When OpenSim's region was set Moderate, its handshake said so (`SimAccess`
 21) while the world map and the `TeleportFinish` went on saying General (13)

@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 328 |
 | blocked | 34 |
 | in-progress | 4 |
-| bugs | 19 |
-| done | 1590 |
+| bugs | 18 |
+| done | 1591 |
 | deferred | 30 |
 | wont-do | 24 |
 | **total** | **2160** |
@@ -1239,7 +1239,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-text-renderability-axis`](in-progress/viewer-ui-text-renderability-axis.md)
   — Upstream issue — font selection cannot see glyph-format renderability
 
-## bugs (19)
+## bugs (18)
 
 ### protocol
 
@@ -1247,9 +1247,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Every instant message the session sends states position zero
 - [`protocol-remove-inventory-objects-over-event-queue-unread`](bugs/protocol-remove-inventory-objects-over-event-queue-unread.md)
   — The client does not read RemoveInventoryObjects over the event queue
-- [`protocol-teleport-start-after-failure-rearms`](bugs/protocol-teleport-start-after-failure-rearms.md)
-  — A TeleportStart that arrives after its own failure starts a teleport that
-  never ends
 - [`protocol-voice-accept-on-direct-session-becomes-conference`](bugs/protocol-voice-accept-on-direct-session-becomes-conference.md)
   — A voice accept on a 1:1 session is folded into a phantom conference
 
@@ -1293,7 +1290,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1590)
+## done (1591)
 
 ### protocol
 
@@ -1592,6 +1589,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   sl-marketplace crate — SLM DirectDelivery JSON transport
 - [`protocol-teleport-deferred-teardown-handover`](done/protocol-teleport-deferred-teardown-handover.md)
   — Defer handover teardown until the destination confirms (+ overlap safety)
+- [`protocol-teleport-start-after-failure-rearms`](done/protocol-teleport-start-after-failure-rearms.md)
+  — A TeleportStart that arrives after its own failure starts a teleport that
+  never ends
 - [`protocol-teleport-timeout-strands-child-circuits`](done/protocol-teleport-timeout-strands-child-circuits.md)
   — A timed-out teleport strands the session and loses its child circuits
 - [`protocol-variable-block-lists-over-255`](done/protocol-variable-block-lists-over-255.md)
