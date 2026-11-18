@@ -553,13 +553,15 @@ impl Circuit {
     /// session id is the canonical `agent_id XOR to_agent_id` the viewer uses for
     /// 1:1 sessions; `from_group` is false and the binary bucket is empty (the
     /// shape of an ordinary direct IM or a typing notification). The wire strings
-    /// carry trailing NULs, as a real viewer sends.
+    /// carry trailing NULs, as a real viewer sends. `sender_position` is the
+    /// `Position` it states, which the session chooses by dialog.
     pub(crate) fn send_instant_message_raw(
         &mut self,
         to_agent_id: AgentKey,
         dialog: ImDialog,
         message: &str,
         from_name: &str,
+        sender_position: Vector,
         now: Instant,
     ) -> Result<(), WireError> {
         let mut name_bytes = from_name.as_bytes().to_vec();
@@ -576,11 +578,7 @@ impl Circuit {
                 to_agent_id: to_agent_id.uuid(),
                 parent_estate_id: 0,
                 region_id: Uuid::nil(),
-                position: Vector {
-                    x: 0.0,
-                    y: 0.0,
-                    z: 0.0,
-                },
+                position: sender_position,
                 offline: 0, // IM_ONLINE
                 dialog: dialog.to_u8(),
                 id: compute_im_session_id(self.agent_id, to_agent_id),
@@ -600,9 +598,11 @@ impl Circuit {
     /// controls every dialog-dependent field (`id`, `from_group`, the binary
     /// bucket), so this backs the offer-reply, give-inventory and conference
     /// flows (#28). The wire strings carry trailing NULs, as a viewer sends.
+    /// `sender_position` is the `Position` it states, chosen by the session.
     pub(crate) fn send_im(
         &mut self,
         params: &OutgoingIm<'_>,
+        sender_position: Vector,
         now: Instant,
     ) -> Result<(), WireError> {
         let im = AnyMessage::ImprovedInstantMessage(ImprovedInstantMessage {
@@ -615,11 +615,7 @@ impl Circuit {
                 to_agent_id: params.to_agent_id,
                 parent_estate_id: 0,
                 region_id: Uuid::nil(),
-                position: Vector {
-                    x: 0.0,
-                    y: 0.0,
-                    z: 0.0,
-                },
+                position: sender_position,
                 offline: 0, // IM_ONLINE
                 dialog: params.dialog.to_u8(),
                 id: params.id,
@@ -1975,13 +1971,15 @@ impl Circuit {
 
     /// Queues a group IM (`ImprovedInstantMessage`) reliably: the session id and
     /// recipient are both `group_id`, as group chat requires. `dialog` selects
-    /// start/send/leave.
+    /// start/send/leave. `sender_position` is the `Position` it states, chosen
+    /// by the session.
     pub(crate) fn send_group_session_im(
         &mut self,
         group_id: GroupKey,
         dialog: ImDialog,
         message: &str,
         from_name: &str,
+        sender_position: Vector,
         now: Instant,
     ) -> Result<(), WireError> {
         let im = AnyMessage::ImprovedInstantMessage(ImprovedInstantMessage {
@@ -1994,11 +1992,7 @@ impl Circuit {
                 to_agent_id: group_id.uuid(),
                 parent_estate_id: 0,
                 region_id: Uuid::nil(),
-                position: Vector {
-                    x: 0.0,
-                    y: 0.0,
-                    z: 0.0,
-                },
+                position: sender_position,
                 offline: 0,
                 dialog: dialog.to_u8(),
                 id: group_id.uuid(),

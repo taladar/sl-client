@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 328 |
 | blocked | 34 |
 | in-progress | 4 |
-| bugs | 17 |
-| done | 1592 |
+| bugs | 16 |
+| done | 1593 |
 | deferred | 30 |
 | wont-do | 24 |
 | **total** | **2160** |
@@ -1239,12 +1239,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-text-renderability-axis`](in-progress/viewer-ui-text-renderability-axis.md)
   — Upstream issue — font selection cannot see glyph-format renderability
 
-## bugs (17)
+## bugs (16)
 
 ### protocol
 
-- [`protocol-im-states-no-position`](bugs/protocol-im-states-no-position.md) —
-  Every instant message the session sends states position zero
 - [`protocol-voice-accept-on-direct-session-becomes-conference`](bugs/protocol-voice-accept-on-direct-session-becomes-conference.md)
   — A voice accept on a 1:1 session is folded into a phantom conference
 
@@ -1288,7 +1286,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1592)
+## done (1593)
 
 ### protocol
 
@@ -1524,6 +1522,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — An experience's sky follows you off its land, and nothing takes it back
 - [`protocol-experience-search-paging`](done/protocol-experience-search-paging.md)
   — Carry the experience search's paging URLs through to the viewer
+- [`protocol-im-states-no-position`](done/protocol-im-states-no-position.md) —
+  Every instant message the session sends states position zero
 - [`protocol-login-options-max-agent-groups-unrequested`](done/protocol-login-options-max-agent-groups-unrequested.md)
   — max-agent-groups is never requested at login but is gated on the option
 - [`protocol-logout-reply-sometimes-missing-on-opensim`](done/protocol-logout-reply-sometimes-missing-on-opensim.md)

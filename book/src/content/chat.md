@@ -59,6 +59,16 @@ dialog type. Inventory offers carried in an IM are accepted or declined with
 `Command::AcceptInventoryOffer` / `DeclineInventoryOffer` (see
 [Inventory](inventory.md)).
 
+Every IM states a `Position` for its sender, and the session fills it as the
+reference viewer does: the agent's own region-local position (its avatar
+object, composed with the seat it sits on, or where the last
+`AgentMovementComplete` placed it before that object arrives) for offers and
+their answers, a teleport request, a friendship offer, a group notice or
+invitation answer and a session start, and zero for the conversational
+dialogs — an ordinary message, a session's messages, typing, leaving a session
+and the automatic reply. OpenSim passes a request's position on as sent;
+Second Life states none.
+
 Messages sent while the avatar was away are kept by the grid until asked
 for: `Command::RetrieveInstantMessages` on both grids, or
 `Command::RequestOfflineMessages`, which reads Second Life's

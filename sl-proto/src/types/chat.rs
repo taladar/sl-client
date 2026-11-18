@@ -454,6 +454,26 @@ impl ImDialog {
             Self::Unknown(other) => other,
         }
     }
+
+    /// Whether an instant message with this dialog states its sender's
+    /// position, as the reference viewer sends it. Its conversational messages
+    /// — an ordinary IM and a session's messages, typing indicators, leaving a
+    /// session and the do-not-disturb reply — go through `pack_instant_message`'s
+    /// default arguments and state the origin; everything else (offers and
+    /// their answers, a teleport request, a friendship offer, a group notice or
+    /// invitation answer, a session start) is sent with
+    /// `gAgent.getPositionAgent()`.
+    pub(crate) const fn states_sender_position(self) -> bool {
+        !matches!(
+            self,
+            Self::Message
+                | Self::SessionSend
+                | Self::SessionLeave
+                | Self::TypingStart
+                | Self::TypingStop
+                | Self::DoNotDisturbAutoResponse
+        )
+    }
 }
 
 /// An instant message received from the simulator, parsed from

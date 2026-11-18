@@ -424,7 +424,8 @@ impl ImPolicy {
                 dialog: ImDialog::TeleportRequest,
                 from_group: false,
                 region_id: None,
-                position: im.position,
+                // Second Life states none, whatever the requester sent.
+                position: nowhere(),
                 offline: false,
                 timestamp: im.timestamp,
                 id: im.id,
@@ -963,6 +964,23 @@ mod tests {
         assert_eq!(reply.region_id, None);
         assert_eq!(reply.position, RegionCoordinates::new(0.0, 0.0, 0.0));
         assert_eq!(reply.parent_estate_id, 0);
+    }
+
+    /// A teleport request's position is the requester's claim on OpenSim and
+    /// none on Second Life, which states zero for a request sent with the
+    /// requester's own (`teleport-request`, 2026-11-18).
+    #[test]
+    fn a_requests_position_is_passed_on_by_opensim_alone() {
+        let from = where_the_sender_is();
+        let claimed = claiming(ImDialog::TeleportRequest);
+        let second_life = ImitatedGrid::SecondLife
+            .im_policy()
+            .request_passed_on(&from, &claimed, STAMP);
+        assert_eq!(second_life.position, RegionCoordinates::new(0.0, 0.0, 0.0));
+        let opensim = ImitatedGrid::OpenSim
+            .im_policy()
+            .request_passed_on(&from, &claimed, STAMP);
+        assert_eq!(opensim.position, claimed.position);
     }
 
     #[test]

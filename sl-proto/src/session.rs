@@ -2144,6 +2144,11 @@ pub struct Session {
     /// `AgentPreferences` reply or Second Life's `AgentStateUpdate` push
     /// ([`Session::answer_agent_preferences_request`]).
     agent_preferences: Option<sl_wire::AgentPreferences>,
+    /// Where the simulator last said it placed the agent (the latest
+    /// `AgentMovementComplete`, at login, a crossing or a teleport's arrival):
+    /// the agent's position until its own avatar object arrives on the new root
+    /// circuit ([`Session::own_region_position`]).
+    arrival_position: Option<Vector>,
     /// Whether protocol diagnostics are collected. Off by default so the
     /// silent-drop sites cost nothing (no raw-byte capture, no queueing) on the
     /// normal path. Toggled by [`Session::set_diagnostics`].

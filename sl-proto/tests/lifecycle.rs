@@ -1728,6 +1728,154 @@ mod test {
         Ok(())
     }
 
+    /// The `Position` of the one `ImprovedInstantMessage` among `sent`.
+    fn sent_im_position(sent: &[AnyMessage]) -> Result<Vector, TestError> {
+        sent.iter()
+            .find_map(|m| match m {
+                AnyMessage::ImprovedInstantMessage(im) => Some(im.message_block.position.clone()),
+                _ => None,
+            })
+            .ok_or_else(|| "expected an ImprovedInstantMessage".into())
+    }
+
+    /// The reference fills an instant message's `Position` with the agent's own
+    /// for an offer-like dialog (`send_improved_im`, a teleport request, a
+    /// friendship offer) and leaves the default zero on a conversational one
+    /// (an ordinary IM, typing, the do-not-disturb reply); the session states
+    /// its own avatar's position the same way.
+    #[test]
+    fn instant_messages_state_the_own_position_as_the_reference_does() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        let avatar = own_avatar_update(55, vec3(10.0, 20.0, 30.0));
+        session.handle_datagram(sim_addr(), &server_message(&avatar, 5, true)?, now)?;
+        drain_events(&mut session);
+        let peer = AgentKey::from(uuid::Uuid::from_u128(0x99));
+
+        session.request_teleport(peer, "come", now)?;
+        assert_eq!(
+            sent_im_position(&drain(&mut session)?)?,
+            vec3(10.0, 20.0, 30.0)
+        );
+        session.send_friendship_offer(peer, "friends?", now)?;
+        assert_eq!(
+            sent_im_position(&drain(&mut session)?)?,
+            vec3(10.0, 20.0, 30.0)
+        );
+
+        session.send_instant_message(peer, "hi", now)?;
+        assert_eq!(sent_im_position(&drain(&mut session)?)?, zero_vec());
+        session.send_im_typing(peer, true, now)?;
+        assert_eq!(sent_im_position(&drain(&mut session)?)?, zero_vec());
+        session.send_auto_response(peer, "busy", now)?;
+        assert_eq!(sent_im_position(&drain(&mut session)?)?, zero_vec());
+        Ok(())
+    }
+
+    /// A seated agent's position is its seat's plus its own offset turned by
+    /// the seat's rotation, as the reference's `getPositionAgent` reads it.
+    #[test]
+    fn a_seated_agent_states_its_position_through_its_seat() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        // The seat stands at (100, 100, 20), turned a quarter about Z.
+        let AnyMessage::ObjectUpdate(mut seat) = object_update(700, 0x5EA7, zero_vec()) else {
+            return Err("object_update builds an ObjectUpdate".into());
+        };
+        let half = std::f32::consts::FRAC_PI_4;
+        let mut writer = Writer::new();
+        writer.put_vector3(&vec3(100.0, 100.0, 20.0));
+        writer.put_vector3(&zero_vec());
+        writer.put_vector3(&zero_vec());
+        writer.put_quaternion(&Rotation {
+            x: 0.0,
+            y: 0.0,
+            z: half.sin(),
+            s: half.cos(),
+        });
+        writer.put_vector3(&zero_vec());
+        if let Some(block) = seat.object_data.first_mut() {
+            block.object_data = writer.into_bytes();
+        }
+        let seat = AnyMessage::ObjectUpdate(seat);
+        session.handle_datagram(sim_addr(), &server_message(&seat, 5, true)?, now)?;
+        // The avatar sits one metre along the seat's X and half a metre up.
+        let AnyMessage::ObjectUpdate(mut avatar) = own_avatar_update(55, vec3(1.0, 0.0, 0.5))
+        else {
+            return Err("own_avatar_update builds an ObjectUpdate".into());
+        };
+        if let Some(block) = avatar.object_data.first_mut() {
+            block.parent_id = 700;
+        }
+        let avatar = AnyMessage::ObjectUpdate(avatar);
+        session.handle_datagram(sim_addr(), &server_message(&avatar, 6, true)?, now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        session.request_teleport(AgentKey::from(uuid::Uuid::from_u128(0x99)), "", now)?;
+        let position = sent_im_position(&drain(&mut session)?)?;
+        // The seat's X is the region's Y: the avatar is north of the seat.
+        assert!(
+            (position.x - 100.0).abs() < 1e-4
+                && (position.y - 101.0).abs() < 1e-4
+                && (position.z - 20.5).abs() < 1e-4,
+            "seated position {position:?}"
+        );
+        Ok(())
+    }
+
+    /// Before its own avatar object arrives the agent is where the simulator
+    /// last placed it (`AgentMovementComplete`), and before that it states the
+    /// origin, as every instant message once did.
+    #[test]
+    fn the_arrival_position_stands_in_until_the_own_avatar_arrives() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+        let peer = AgentKey::from(uuid::Uuid::from_u128(0x99));
+        session.request_teleport(peer, "", now)?;
+        assert_eq!(sent_im_position(&drain(&mut session)?)?, zero_vec());
+
+        let amc = AnyMessage::AgentMovementComplete(AgentMovementComplete {
+            agent_data: AgentMovementCompleteAgentDataBlock {
+                agent_id: uuid::Uuid::from_u128(1),
+                session_id: uuid::Uuid::from_u128(2),
+            },
+            data: AgentMovementCompleteDataBlock {
+                position: vec3(10.0, 128.0, 30.0),
+                look_at: vec3(1.0, 0.0, 0.0),
+                region_handle: OBJ_REGION,
+                timestamp: 0,
+            },
+            sim_data: AgentMovementCompleteSimDataBlock {
+                channel_version: b"x\0".to_vec(),
+            },
+        });
+        session.handle_datagram(sim_addr(), &server_message(&amc, 5, true)?, now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+        session.request_teleport(peer, "", now)?;
+        assert_eq!(
+            sent_im_position(&drain(&mut session)?)?,
+            vec3(10.0, 128.0, 30.0)
+        );
+
+        // Its own avatar, once seen, is what it states from then on.
+        let avatar = own_avatar_update(55, vec3(12.0, 130.0, 30.0));
+        session.handle_datagram(sim_addr(), &server_message(&avatar, 6, true)?, now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+        session.request_teleport(peer, "", now)?;
+        assert_eq!(
+            sent_im_position(&drain(&mut session)?)?,
+            vec3(12.0, 130.0, 30.0)
+        );
+        Ok(())
+    }
+
     /// Builds an inbound `ImprovedInstantMessage` from a sender with the given
     /// dialog, name, and message.
     fn inbound_im(dialog: u8, from_name: &[u8], message: &[u8]) -> AnyMessage {

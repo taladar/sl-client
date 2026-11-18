@@ -242,7 +242,7 @@ can see — it could not read a plain stored instant message back there either
 | `RegionID` | none | the requester's region |
 | `ParentEstateID` | 0 | 1 |
 | `Timestamp` | none | set |
-| `Position` | as sent | as sent |
+| `Position` | **zero**, though the requester sent its own position, as the reference sends it | as sent: the requester's position |
 | anything sent to the requester while unanswered | nothing | nothing |
 
 There is no accept or decline for a request, on either grid. A viewer says

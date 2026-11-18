@@ -133,6 +133,38 @@ use uuid::Uuid;
 /// header and block count) comfortably within a typical UDP MTU.
 const UUID_NAMES_PER_REQUEST: usize = 80;
 
+/// How many parents [`Session::own_region_position`] follows from the agent's
+/// own avatar before giving up: a seated avatar's chain is one link deep, so
+/// the bound only stops a malformed cycle in the object cache.
+const MAX_PARENT_CHAIN: usize = 8;
+
+/// The component-wise sum `a + b`.
+fn add_vectors(a: &Vector, b: &Vector) -> Vector {
+    Vector {
+        x: a.x + b.x,
+        y: a.y + b.y,
+        z: a.z + b.z,
+    }
+}
+
+/// `vector` rotated by the unit quaternion `rotation`, as the reference's
+/// `LLVector3 * LLQuaternion` rotates a child's offset into its parent's frame:
+/// `v + 2s(q × v) + 2q × (q × v)`, `q` the rotation's vector part.
+fn rotate_vector(vector: &Vector, rotation: &Rotation) -> Vector {
+    let cross = |[ax, ay, az]: [f32; 3], [bx, by, bz]: [f32; 3]| {
+        [ay * bz - az * by, az * bx - ax * bz, ax * by - ay * bx]
+    };
+    let axis = [rotation.x, rotation.y, rotation.z];
+    let v = [vector.x, vector.y, vector.z];
+    let [tx, ty, tz] = cross(axis, v).map(|c| 2.0 * c);
+    let [ux, uy, uz] = cross(axis, [tx, ty, tz]);
+    Vector {
+        x: vector.x + rotation.s * tx + ux,
+        y: vector.y + rotation.s * ty + uy,
+        z: vector.z + rotation.s * tz + uz,
+    }
+}
+
 /// The maximum number of object ids packed into a single `ParcelReturnObjects` /
 /// `ParcelDisableObjects`. Each id is 16 bytes, and the two messages carry a
 /// second id list (the owners) besides, so this is half the name-request batch —
@@ -312,6 +344,7 @@ impl Session {
             handshake_reply_flags: RegionHandshakeReplyFlags::CLIENT_DEFAULT,
             interest_list_mode: sl_wire::InterestListMode::Default,
             agent_preferences: None,
+            arrival_position: None,
             diagnostics_enabled: false,
             diagnostics: VecDeque::new(),
             circuit_probe: CircuitProbe::Off,
@@ -2006,6 +2039,7 @@ impl Session {
         // region change so a consumer has already switched regions when it reads
         // the arrival pose. A teleport re-places the agent (the simulator turns it
         // to the requested facing), so this is the facing to apply at once.
+        self.arrival_position = Some(Vector::from(pose.position));
         self.events.push_back(Event::AgentArrived {
             region_handle,
             position: pose.position,
@@ -4087,6 +4121,49 @@ impl Session {
             .map(|local_id| ScopedObjectId::new(circuit.id, local_id))
     }
 
+    /// The agent's own position in its current region, in region-local
+    /// metres, as the reference's `gAgent.getPositionAgent()` reads it: its
+    /// own avatar object on the root circuit, composed with the object it sits
+    /// on, or — before that object has arrived in the region — where the last
+    /// `AgentMovementComplete` placed it. `None` before either is known, or
+    /// while the seat it sits on is not cached.
+    pub(crate) fn own_region_position(&self) -> Option<Vector> {
+        let Some(own) = self.own_avatar_id() else {
+            return self.arrival_position.clone();
+        };
+        let mut object = self.world.object(own)?;
+        let mut position = object.motion.position.clone();
+        // A seated avatar's position is relative to its parent: walk the chain
+        // to the root, rotating each offset into its parent's frame. The bound
+        // only guards a malformed cycle; a real chain is one link deep.
+        for _ in 0..MAX_PARENT_CHAIN {
+            if object.parent_id == RegionLocalObjectId(0) {
+                return Some(position);
+            }
+            object = self
+                .world
+                .object(ScopedObjectId::new(own.circuit(), object.parent_id))?;
+            position = add_vectors(
+                &object.motion.position,
+                &rotate_vector(&position, &object.motion.rotation),
+            );
+        }
+        None
+    }
+
+    /// The position an outgoing instant message with `dialog` states as its
+    /// sender's: the agent's own ([`Session::own_region_position`]) for the
+    /// dialogs the reference sends it with, zero for the conversational ones it
+    /// sends without ([`ImDialog::states_sender_position`]), and zero while the
+    /// agent's position is not known.
+    pub(crate) fn im_sender_position(&self, dialog: ImDialog) -> Vector {
+        dialog
+            .states_sender_position()
+            .then(|| self.own_region_position())
+            .flatten()
+            .unwrap_or(ZERO_VECTOR)
+    }
+
     /// Records the flags the region on `circuit` last stated — in its
     /// `RegionHandshake`, a `RegionInfo` or a `SimStats` — so
     /// [`Session::region_blocks_fly`] reads the current region's fly setting
@@ -4209,6 +4286,7 @@ impl Session {
                 // is not a re-placement: the agent carried its facing over the
                 // border, and `teleport` says so.
                 let pose = ArrivalPose::from_movement_complete(&complete.data);
+                self.arrival_position = Some(Vector::from(pose.position));
                 self.events.push_back(Event::AgentArrived {
                     region_handle: pose.region_handle,
                     position: pose.position,
@@ -7003,12 +7081,14 @@ impl Session {
     ) -> Result<(), Error> {
         let from_name = self.agent_name();
         let own_agent = self.agent_id();
+        let sender_position = self.im_sender_position(ImDialog::Message);
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_instant_message_raw(
             to_agent_id,
             ImDialog::Message,
             message,
             &from_name,
+            sender_position,
             now,
         )?;
         // Sending a 1:1 IM opens/tracks the direct session keyed by the peer and
@@ -7047,12 +7127,14 @@ impl Session {
         now: Instant,
     ) -> Result<(), Error> {
         let from_name = self.agent_name();
+        let sender_position = self.im_sender_position(ImDialog::DoNotDisturbAutoResponse);
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_instant_message_raw(
             to_agent_id,
             ImDialog::DoNotDisturbAutoResponse,
             message,
             &from_name,
+            sender_position,
             now,
         )?;
         Ok(())
@@ -7078,9 +7160,17 @@ impl Session {
             ImDialog::TypingStop
         };
         let from_name = self.agent_name();
+        let sender_position = self.im_sender_position(dialog);
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         // The viewer sends the literal text "typing" with a typing IM.
-        circuit.send_instant_message_raw(to_agent_id, dialog, "typing", &from_name, now)?;
+        circuit.send_instant_message_raw(
+            to_agent_id,
+            dialog,
+            "typing",
+            &from_name,
+            sender_position,
+            now,
+        )?;
         Ok(())
     }
 
@@ -7102,12 +7192,14 @@ impl Session {
         now: Instant,
     ) -> Result<(), Error> {
         let from_name = self.agent_name();
+        let sender_position = self.im_sender_position(ImDialog::FriendshipOffered);
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_instant_message_raw(
             to_agent_id,
             ImDialog::FriendshipOffered,
             message,
             &from_name,
+            sender_position,
             now,
         )?;
         Ok(())
@@ -8688,6 +8780,7 @@ impl Session {
         now: Instant,
     ) -> Result<(), Error> {
         let from_name = self.agent_name();
+        let sender_position = self.im_sender_position(dialog);
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_im(
             &OutgoingIm {
@@ -8699,6 +8792,7 @@ impl Session {
                 from_name: &from_name,
                 binary_bucket: Vec::new(),
             },
+            sender_position,
             now,
         )?;
         Ok(())
@@ -8751,12 +8845,14 @@ impl Session {
     /// [`Error::Wire`] if the message fails to encode.
     pub fn start_group_session(&mut self, group_id: GroupKey, now: Instant) -> Result<(), Error> {
         let from_name = self.agent_name();
+        let sender_position = self.im_sender_position(ImDialog::SessionGroupStart);
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_group_session_im(
             group_id,
             ImDialog::SessionGroupStart,
             "",
             &from_name,
+            sender_position,
             now,
         )?;
         // Starting a group session opens/tracks it (keyed by the group id).
@@ -8780,8 +8876,16 @@ impl Session {
     ) -> Result<(), Error> {
         let from_name = self.agent_name();
         let own_agent = self.agent_id();
+        let sender_position = self.im_sender_position(ImDialog::SessionSend);
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
-        circuit.send_group_session_im(group_id, ImDialog::SessionSend, message, &from_name, now)?;
+        circuit.send_group_session_im(
+            group_id,
+            ImDialog::SessionSend,
+            message,
+            &from_name,
+            sender_position,
+            now,
+        )?;
         // Sending into a group session opens/tracks it (keyed by the group id) and
         // logs our own message.
         if let Some(sender) = own_agent {
@@ -8809,8 +8913,16 @@ impl Session {
     /// [`Error::Wire`] if the message fails to encode.
     pub fn leave_group_session(&mut self, group_id: GroupKey, now: Instant) -> Result<(), Error> {
         let from_name = self.agent_name();
+        let sender_position = self.im_sender_position(ImDialog::SessionLeave);
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
-        circuit.send_group_session_im(group_id, ImDialog::SessionLeave, "", &from_name, now)?;
+        circuit.send_group_session_im(
+            group_id,
+            ImDialog::SessionLeave,
+            "",
+            &from_name,
+            sender_position,
+            now,
+        )?;
         // Leaving removes the entry — the registry tracks only live sessions.
         self.chat_sessions
             .remove(&ChatSessionKind::Group { group_id });
@@ -9210,6 +9322,7 @@ impl Session {
             || vec![0_u8],
             |attachment| build_group_notice_bucket(attachment.item_id, attachment.owner_id),
         );
+        let sender_position = self.im_sender_position(ImDialog::GroupNotice);
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_im(
             &OutgoingIm {
@@ -9221,6 +9334,7 @@ impl Session {
                 from_name: &from_name,
                 binary_bucket,
             },
+            sender_position,
             now,
         )?;
         Ok(())
@@ -9300,6 +9414,7 @@ impl Session {
         now: Instant,
     ) -> Result<(), Error> {
         let from_name = self.agent_name();
+        let sender_position = self.im_sender_position(ImDialog::LureDeclined);
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_im(
             &OutgoingIm {
@@ -9311,6 +9426,7 @@ impl Session {
                 from_name: &from_name,
                 binary_bucket: Vec::new(),
             },
+            sender_position,
             now,
         )?;
         Ok(())
@@ -9330,6 +9446,7 @@ impl Session {
         now: Instant,
     ) -> Result<(), Error> {
         let from_name = self.agent_name();
+        let sender_position = self.im_sender_position(ImDialog::TeleportRequest);
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_im(
             &OutgoingIm {
@@ -9341,6 +9458,7 @@ impl Session {
                 from_name: &from_name,
                 binary_bucket: Vec::new(),
             },
+            sender_position,
             now,
         )?;
         Ok(())
@@ -9367,6 +9485,7 @@ impl Session {
     ) -> Result<(), Error> {
         let from_name = self.agent_name();
         let bucket = inventory_offer_bucket(asset_type, item_id.uuid())?;
+        let sender_position = self.im_sender_position(ImDialog::InventoryOffered);
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_im(
             &OutgoingIm {
@@ -9378,6 +9497,7 @@ impl Session {
                 from_name: &from_name,
                 binary_bucket: bucket,
             },
+            sender_position,
             now,
         )?;
         Ok(())
@@ -9401,6 +9521,7 @@ impl Session {
     ) -> Result<(), Error> {
         let from_name = self.agent_name();
         let bucket = inventory_offer_bucket(AssetType::Folder, folder_id.uuid())?;
+        let sender_position = self.im_sender_position(ImDialog::InventoryOffered);
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_im(
             &OutgoingIm {
@@ -9412,6 +9533,7 @@ impl Session {
                 from_name: &from_name,
                 binary_bucket: bucket,
             },
+            sender_position,
             now,
         )?;
         Ok(())
@@ -9434,6 +9556,7 @@ impl Session {
         now: Instant,
     ) -> Result<(), Error> {
         let from_name = self.agent_name();
+        let sender_position = self.im_sender_position(offer.accept_dialog());
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_im(
             &OutgoingIm {
@@ -9445,6 +9568,7 @@ impl Session {
                 from_name: &from_name,
                 binary_bucket: folder_id.uuid().as_bytes().to_vec(),
             },
+            sender_position,
             now,
         )?;
         Ok(())
@@ -9464,6 +9588,7 @@ impl Session {
         now: Instant,
     ) -> Result<(), Error> {
         let from_name = self.agent_name();
+        let sender_position = self.im_sender_position(offer.decline_dialog());
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_im(
             &OutgoingIm {
@@ -9475,6 +9600,7 @@ impl Session {
                 from_name: &from_name,
                 binary_bucket: trash_folder_id.uuid().as_bytes().to_vec(),
             },
+            sender_position,
             now,
         )?;
         Ok(())
@@ -9506,6 +9632,7 @@ impl Session {
             .first()
             .copied()
             .unwrap_or_else(|| session_id.get());
+        let sender_position = self.im_sender_position(ImDialog::SessionConferenceStart);
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_im(
             &OutgoingIm {
@@ -9517,6 +9644,7 @@ impl Session {
                 from_name: &from_name,
                 binary_bucket: bucket,
             },
+            sender_position,
             now,
         )?;
         // Starting a conference opens/tracks it (keyed by the minted session id)
@@ -9570,6 +9698,7 @@ impl Session {
     ) -> Result<(), Error> {
         let from_name = self.agent_name();
         let own_agent = self.agent_id();
+        let sender_position = self.im_sender_position(ImDialog::SessionSend);
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_im(
             &OutgoingIm {
@@ -9581,6 +9710,7 @@ impl Session {
                 from_name: &from_name,
                 binary_bucket: EMPTY_BINARY_BUCKET.to_vec(),
             },
+            sender_position,
             now,
         )?;
         // Sending into a conference opens/tracks it (keyed by the session id) and
@@ -9609,6 +9739,7 @@ impl Session {
     /// [`Error::Wire`] if the message fails to encode.
     pub fn leave_conference(&mut self, session_id: ImSessionId, now: Instant) -> Result<(), Error> {
         let from_name = self.agent_name();
+        let sender_position = self.im_sender_position(ImDialog::SessionLeave);
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_im(
             &OutgoingIm {
@@ -9620,6 +9751,7 @@ impl Session {
                 from_name: &from_name,
                 binary_bucket: EMPTY_BINARY_BUCKET.to_vec(),
             },
+            sender_position,
             now,
         )?;
         // Leaving removes the entry — the registry tracks only live sessions.
