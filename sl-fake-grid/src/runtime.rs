@@ -575,6 +575,9 @@ pub(crate) struct GridCore {
     pub(crate) display_name_style: sl_proto::DisplayNameStyle,
     /// The land products `ProductInfoRequest` lists.
     pub(crate) land_products: Vec<sl_proto::LandProduct>,
+    /// How an `AgentPreferences` POST that sets nothing is answered
+    /// ([`ImitatedGrid::empty_preferences_post`]).
+    pub(crate) empty_preferences_post: sl_proto::EmptyPreferencesPost,
     /// Every account's balance, where the grid keeps them, starting at
     /// [`ImitatedGrid::upload_funds`] ([`crate::money`]).
     pub(crate) ledger: parking_lot::Mutex<crate::money::Ledger>,
@@ -1265,7 +1268,8 @@ impl GridCore {
                     .with_asset_http_policy(self.asset_http)
                     .with_new_file_policy(self.new_file)
                     .with_display_name_style(self.display_name_style)
-                    .with_land_products(self.land_products.clone());
+                    .with_land_products(self.land_products.clone())
+                    .with_empty_preferences_post(self.empty_preferences_post);
             if let Some(surface) = &self.asset_host {
                 caps = caps.with_asset_surface(surface.clone());
             }
@@ -2720,6 +2724,7 @@ impl FakeGridBuilder {
             new_file: self.imitates.new_file_policy(),
             display_name_style: self.imitates.display_name_style(),
             land_products: self.imitates.land_products(),
+            empty_preferences_post: self.imitates.empty_preferences_post(),
             ledger: parking_lot::Mutex::new(crate::money::Ledger::new(
                 self.imitates.upload_funds(),
             )),

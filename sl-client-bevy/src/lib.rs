@@ -4726,7 +4726,10 @@ fn apply_command(
             }
         }
         Command::RequestAgentPreferences => {
-            if let Some(caps) = caps
+            // Answered from what the grid last stated where the session holds
+            // it: Second Life refuses the empty POST.
+            if !session.answer_agent_preferences_request()
+                && let Some(caps) = caps
                 && let Some(url) = caps.map.get(CAP_AGENT_PREFERENCES).cloned()
             {
                 let body = build_agent_preferences_request(&AgentPreferences::default());

@@ -4,22 +4,23 @@ use super::caps_event::CapsEvent;
 use super::circuit::EMPTY_BINARY_BUCKET;
 use super::conversions::{
     EnvironmentReply, OutgoingIm, ZERO_VECTOR, active_group, agent_drop_group_from_llsd,
-    agent_list_updates_from_llsd, agent_state_update_from_llsd, ais_folder_listing_from_llsd,
-    ais_inventory_update_from_llsd, ais_updated_category_versions, avatar_animations,
-    avatar_appearance, avatar_group, avatar_interests, avatar_names, avatar_picker_result,
-    avatar_properties, benefits_of, bulk_update_folder, bulk_update_inventory_from_llsd,
-    bulk_update_item, chat_message, chat_session_roster_from_llsd, chatterbox_invitation_from_llsd,
-    chatterbox_session_event_reply_from_llsd, chatterbox_session_start_reply_from_llsd,
-    classified_info, cof_version_increment_from_llsd, created_category_from_llsd,
-    crossed_region_from_caps_llsd, dir_land_reply_from_caps_llsd, display_name_update_from_llsd,
-    economy_data, enable_simulator_from_caps_llsd, environment_reply_from_llsd,
-    establish_agent_communication_from_llsd, estate_access_from_params, estate_info_from_params,
-    fetch_inventory_items_from_llsd, force_close_chatterbox_session_from_llsd, friend,
-    grid_coordinates_from_handle, group_account_details, group_account_summary,
-    group_account_transactions, group_active_proposal_item, group_bans_from_caps_llsd,
-    group_member, group_members_from_caps_llsd, group_membership, group_memberships_from_caps_llsd,
-    group_names, group_notice, group_profile, group_role, group_title, group_vote_history_item,
-    index_into, instant_message, inventory_descendents_from_llsd, inventory_folder, inventory_item,
+    agent_list_updates_from_llsd, agent_state_preferences_from_llsd, agent_state_update_from_llsd,
+    ais_folder_listing_from_llsd, ais_inventory_update_from_llsd, ais_updated_category_versions,
+    avatar_animations, avatar_appearance, avatar_group, avatar_interests, avatar_names,
+    avatar_picker_result, avatar_properties, benefits_of, bulk_update_folder,
+    bulk_update_inventory_from_llsd, bulk_update_item, chat_message, chat_session_roster_from_llsd,
+    chatterbox_invitation_from_llsd, chatterbox_session_event_reply_from_llsd,
+    chatterbox_session_start_reply_from_llsd, classified_info, cof_version_increment_from_llsd,
+    created_category_from_llsd, crossed_region_from_caps_llsd, dir_land_reply_from_caps_llsd,
+    display_name_update_from_llsd, economy_data, enable_simulator_from_caps_llsd,
+    environment_reply_from_llsd, establish_agent_communication_from_llsd,
+    estate_access_from_params, estate_info_from_params, fetch_inventory_items_from_llsd,
+    force_close_chatterbox_session_from_llsd, friend, grid_coordinates_from_handle,
+    group_account_details, group_account_summary, group_account_transactions,
+    group_active_proposal_item, group_bans_from_caps_llsd, group_member,
+    group_members_from_caps_llsd, group_membership, group_memberships_from_caps_llsd, group_names,
+    group_notice, group_profile, group_role, group_title, group_vote_history_item, index_into,
+    instant_message, inventory_descendents_from_llsd, inventory_folder, inventory_item,
     inventory_item_from_create, inventory_offer_bucket, land_products_from_llsd,
     land_stat_reply_from_caps_llsd, map_block_batch, map_item, map_layer, map_region_info,
     money_balance, nav_mesh_status_from_llsd, neighbor_info, object_from_full_update,
@@ -309,6 +310,7 @@ impl Session {
             events: VecDeque::new(),
             handshake_reply_flags: RegionHandshakeReplyFlags::CLIENT_DEFAULT,
             interest_list_mode: sl_wire::InterestListMode::Default,
+            agent_preferences: None,
             diagnostics_enabled: false,
             diagnostics: VecDeque::new(),
             circuit_probe: CircuitProbe::Off,
@@ -366,6 +368,28 @@ impl Session {
         self.interest_list_mode = mode;
     }
 
+    /// Answers a [`Command::RequestAgentPreferences`](crate::Command::RequestAgentPreferences)
+    /// from what the grid last stated, queueing an
+    /// [`Event::AgentPreferences`] and returning `true` when the session holds
+    /// a stated set; `false` leaves the asking to the driver, which POSTs to
+    /// the `AgentPreferences` capability.
+    ///
+    /// Second Life refuses a POST that sets nothing (`400`, "Bad Request:
+    /// InvalidArguments", aditi 2026-11-17) and the reference viewer never
+    /// asks: it is told the stored set by the `AgentStateUpdate` every arrival
+    /// brings, and by the echo of each change it makes. The session keeps the
+    /// last of those, so a read on Second Life is answered with no request at
+    /// all, while OpenSim, which pushes nothing and echoes an empty POST, is
+    /// still asked.
+    pub fn answer_agent_preferences_request(&mut self) -> bool {
+        let Some(preferences) = self.agent_preferences.clone() else {
+            return false;
+        };
+        self.events
+            .push_back(Event::AgentPreferences(Box::new(preferences)));
+        true
+    }
+
     /// The `Flags` this session's `RegionHandshakeReply`s carry.
     #[must_use]
     pub const fn region_handshake_reply_flags(&self) -> RegionHandshakeReplyFlags {
@@ -402,6 +426,15 @@ impl Session {
             message: message.to_owned(),
             reason: None,
         });
+    }
+
+    /// Keeps `preferences`, the stored set as the grid just stated it, for
+    /// [`Session::answer_agent_preferences_request`], and surfaces it as an
+    /// [`Event::AgentPreferences`].
+    fn stated_agent_preferences(&mut self, preferences: sl_wire::AgentPreferences) {
+        self.agent_preferences = Some(preferences.clone());
+        self.events
+            .push_back(Event::AgentPreferences(Box::new(preferences)));
     }
 
     /// Like [`caps_decode_failed`](Self::caps_decode_failed) but records the
@@ -1176,9 +1209,7 @@ impl Session {
             // The reply to an `AgentPreferences` POST: the agent's full stored
             // preferences after the (possibly empty) update.
             CapsEvent::AgentPreferences => match parse_agent_preferences(body) {
-                Ok(preferences) => self
-                    .events
-                    .push_back(Event::AgentPreferences(Box::new(preferences))),
+                Ok(preferences) => self.stated_agent_preferences(preferences),
                 Err(error) => self.caps_decode_error(message, &error),
             },
             // The reply to a `UserInfo` GET or POST: a GET carries the
@@ -1652,12 +1683,19 @@ impl Session {
             // A pathfinding agent-state push: whether the agent may currently
             // rebake this region's navmesh (`{ "can_modify_navmesh": bool }`).
             // SL-only.
+            // Second Life's carries the agent's stored preferences too, the
+            // whole set an `AgentPreferences` reply would echo.
             CapsEvent::AgentStateUpdate => {
                 if let Some(can_modify_navmesh) = agent_state_update_from_llsd(body) {
                     self.events
                         .push_back(Event::AgentStateUpdate { can_modify_navmesh });
                 } else {
                     self.caps_decode_failed(message);
+                }
+                match agent_state_preferences_from_llsd(body) {
+                    None => {}
+                    Some(Ok(preferences)) => self.stated_agent_preferences(preferences),
+                    Some(Err(error)) => self.caps_decode_error(message, &error),
                 }
             }
             // A pathfinding navmesh-status push: the region's navmesh build

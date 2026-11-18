@@ -3,7 +3,7 @@
 use sl_client_tokio::{Command, RegionHandle};
 
 use super::teleport_access_refused::{
-    ADITI_RATED_REGION, REFUSAL_ALERT, set_preference, stated_preference,
+    ADITI_RATED_REGION, REFUSAL_ALERT, set_preference, stored_preference,
 };
 use crate::context::{Session, TestContext, TestFailure};
 use crate::grid::Grid;
@@ -100,7 +100,7 @@ impl GridTest for TeleportLureRated {
             let general = region_named(secondary, general_region).await?;
             let general_handle = RegionHandle::from(general.grid_coordinates);
             go_to(secondary, general_handle, GENERAL_SPOT, "the accepter").await?;
-            let before = stated_preference(secondary);
+            let before = stored_preference(secondary).await?;
             let lowered = set_preference(secondary, "PG").await?;
             check_eq("lowered_preference", &lowered.as_deref(), &Some("PG"))?;
 

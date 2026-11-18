@@ -3549,6 +3549,24 @@ pub(crate) fn agent_state_update_from_llsd(body: &Llsd) -> Option<bool> {
     body.get("can_modify_navmesh").and_then(Llsd::as_bool)
 }
 
+/// Decodes the agent's stored preferences out of a CAPS `AgentStateUpdate`
+/// body: Second Life pushes the whole set the `AgentPreferences` capability
+/// would echo, under `preferences`, with every arrival (`region-arrival`,
+/// 2026-11-17). `None` when the body carries no preferences, as an
+/// OpenSim-style push of the navmesh flag alone does.
+///
+/// # Errors
+/// The [`sl_wire::WireError`] of a `preferences` member that is not a
+/// preferences map.
+pub(crate) fn agent_state_preferences_from_llsd(
+    body: &Llsd,
+) -> Option<Result<sl_wire::AgentPreferences, sl_wire::WireError>> {
+    match body.get("preferences") {
+        None | Some(Llsd::Undef) => None,
+        Some(preferences) => Some(sl_wire::parse_agent_preferences(preferences)),
+    }
+}
+
 /// Decodes a CAPS `NavMeshStatusUpdate` event body into a [`NavMeshStatus`].
 /// The body is `{ region_id: uuid, version: int, status: string }`; the
 /// `region_id` is required (the version and status default as the reference
@@ -6284,14 +6302,22 @@ pub fn establish_agent_communication_to_llsd(
     ])
 }
 
-/// Serializes the pathfinding `can_modify_navmesh` flag as a CAPS
-/// `AgentStateUpdate` event body (inverse of `agent_state_update_from_llsd`).
+/// Serializes a CAPS `AgentStateUpdate` event body as Second Life pushes it:
+/// the pathfinding `can_modify_navmesh` flag and the agent's stored
+/// `preferences` (inverse of `agent_state_update_from_llsd` and
+/// `agent_state_preferences_from_llsd`).
 #[must_use]
-pub fn agent_state_update_to_llsd(can_modify_navmesh: bool) -> Llsd {
-    llsd_map(vec![(
-        "can_modify_navmesh",
-        Llsd::Boolean(can_modify_navmesh),
-    )])
+pub fn agent_state_update_to_llsd(
+    can_modify_navmesh: bool,
+    preferences: &sl_wire::AgentPreferences,
+) -> Llsd {
+    llsd_map(vec![
+        ("can_modify_navmesh", Llsd::Boolean(can_modify_navmesh)),
+        (
+            "preferences",
+            sl_wire::agent_preferences_to_llsd(preferences),
+        ),
+    ])
 }
 
 /// Serializes a [`NavMeshStatus`] as a CAPS `NavMeshStatusUpdate` event body

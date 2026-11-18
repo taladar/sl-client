@@ -60,7 +60,7 @@ Both grids open the root circuit the same way (**held**):
 | --- | --- | --- | --- |
 | the channel in `AgentMovementComplete` | "Luau 2026-07-24.30110090421" (sandbox), "Riders Test Channel 2026-10-05.37349263929" (mainland) | "OpenSim 0.9.2.1 Yeti Dev   36f6d16 (Unix/Mono)" | `sl-fake-grid` and its version, on both |
 | `HealthMessage` (**held**) | sent with the movement completion, health 100 | not sent | `FakeSl` only |
-| `AgentStateUpdate` on the event queue (**held**) | pushed 0.2 s after the handshake: the navmesh rights and the agent's preferences | not sent | `FakeSl` only |
+| `AgentStateUpdate` on the event queue (**held**) | pushed 0.2 s after the handshake: the navmesh rights and the agent's stored preferences, the whole set an `AgentPreferences` reply echoes | not sent | `FakeSl` only |
 | `ScriptControlChange` | seen on the account that wears a scripted attachment | not seen | not sent |
 | the neighbours' announcement (`EnableSimulator`, `EstablishAgentCommunication`) | 1.5 s and 2.6 s after the handshake, and **again** about every five seconds: six of each per neighbour in 32 s | once each, 0.9 s after the handshake | once each |
 | `AgentGroupDataUpdate` | not seen in 35 s | on the event queue, with the handshake | not sent on arrival |

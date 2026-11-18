@@ -5995,6 +5995,73 @@ mod test {
         Ok(())
     }
 
+    /// Second Life's `AgentStateUpdate` carries the agent's stored
+    /// preferences: they surface as an `Event::AgentPreferences`, and a later
+    /// read is answered from them without asking the grid.
+    #[test]
+    fn agent_state_update_preferences_answer_a_later_read() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        // Nothing stated yet: the read is the driver's to send.
+        assert!(!session.answer_agent_preferences_request());
+
+        // The body aditi pushed on arrival (2026-11-17).
+        let body = parse_llsd_xml(concat!(
+            "<llsd><map>",
+            "<key>has_modified_navmesh</key><boolean>0</boolean>",
+            "<key>can_modify_navmesh</key><boolean>1</boolean>",
+            "<key>preferences</key><map>",
+            "<key>language</key><string></string>",
+            "<key>language_is_public</key><boolean>0</boolean>",
+            "<key>god_level</key><integer>0</integer>",
+            "<key>hover_height</key><real>0</real>",
+            "<key>access_prefs</key><map><key>max</key><string>PG</string></map>",
+            "<key>default_object_perm_masks</key><map>",
+            "<key>Group</key><integer>0</integer>",
+            "<key>NextOwner</key><integer>532480</integer>",
+            "<key>Everyone</key><integer>0</integer>",
+            "</map></map>",
+            "</map></llsd>",
+        ))?;
+        session.handle_caps_event("AgentStateUpdate", &body, now)?;
+        let preferences_of = |events: Vec<Event>| {
+            events.into_iter().find_map(|event| match event {
+                Event::AgentPreferences(preferences) => Some(preferences),
+                _ => None,
+            })
+        };
+        let pushed = preferences_of(drain_events(&mut session))
+            .ok_or("the pushed preferences did not surface")?;
+        assert_eq!(pushed.max_access_pref.as_deref(), Some("PG"));
+        assert_eq!(
+            pushed
+                .default_object_perm_masks
+                .map(|masks| masks.next_owner),
+            Some(532_480)
+        );
+
+        assert!(session.answer_agent_preferences_request());
+        let answered =
+            preferences_of(drain_events(&mut session)).ok_or("the read was not answered")?;
+        assert_eq!(answered, pushed);
+
+        // A later echo of a change replaces what the read answers with.
+        let echo = parse_llsd_xml(concat!(
+            "<llsd><map>",
+            "<key>access_prefs</key><map><key>max</key><string>A</string></map>",
+            "</map></llsd>",
+        ))?;
+        session.handle_caps_event("AgentPreferences", &echo, now)?;
+        let _echoed = drain_events(&mut session);
+        assert!(session.answer_agent_preferences_request());
+        let answered =
+            preferences_of(drain_events(&mut session)).ok_or("the read was not answered")?;
+        assert_eq!(answered.max_access_pref.as_deref(), Some("A"));
+        Ok(())
+    }
+
     #[test]
     fn nav_mesh_status_update_caps_surfaces_status() -> Result<(), TestError> {
         let now = Instant::now();

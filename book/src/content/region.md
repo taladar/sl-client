@@ -338,9 +338,20 @@ through the `AgentPreferences` capability, a single HTTP `POST` whose body
 carries the fields to change and whose reply echoes the full stored set.
 
 `Command::SetAgentPreferences(Box<AgentPreferences>)` changes only the present
-(`Some`) fields; `Command::RequestAgentPreferences` performs a pure "get" (a
-`POST` with an empty body). Either way the reply is
-`Event::AgentPreferences(Box<AgentPreferences>)`, with every field filled in.
+(`Some`) fields; `Command::RequestAgentPreferences` reads the stored set. Either
+way the answer is `Event::AgentPreferences(Box<AgentPreferences>)`, with every
+field filled in.
+
+The read is where the grids part. OpenSim echoes a `POST` with an empty body,
+the pure "get". Second Life refuses one (`400`, `Bad Request:
+InvalidArguments`, aditi 2026-11-17), and the reference viewer never asks:
+the event-queue `AgentStateUpdate` every arrival brings carries the whole
+stored set under `preferences`, beside the navmesh flag. The session surfaces
+that push as an `Event::AgentPreferences` too, and keeps the last set the grid
+stated, pushed or echoed after a change; a read is answered from it with no
+request at all (`Session::answer_agent_preferences_request`), and only a
+session that holds none, which on OpenSim is every session before its first
+change, `POST`s the empty body.
 
 > **Testing note.** OpenSim advertises a subset of `SimulatorFeatures` (with the
 > `OpenSimExtras` subtree) and serves `AgentPreferences` through its agent-prefs

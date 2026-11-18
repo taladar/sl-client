@@ -11769,11 +11769,13 @@ impl SimSession {
     // the client decodes from its `EventQueueGet` long-poll.
 
     /// Enqueues a CAPS `AgentStateUpdate` push: whether the agent may currently
-    /// rebake this region's navmesh. SL-only (OpenSim never pushes this).
+    /// rebake this region's navmesh, and the agent's stored preferences
+    /// ([`agent_preferences`](Self::agent_preferences)), which Second Life
+    /// pushes with every arrival. SL-only (OpenSim never pushes this).
     pub fn enqueue_agent_state_update(&mut self, can_modify_navmesh: bool) {
         self.enqueue_caps_event(
             "AgentStateUpdate",
-            agent_state_update_to_llsd(can_modify_navmesh),
+            agent_state_update_to_llsd(can_modify_navmesh, &self.agent_preferences),
         );
     }
 

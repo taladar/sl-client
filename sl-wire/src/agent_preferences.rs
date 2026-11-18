@@ -8,8 +8,10 @@
 //! the UI language (with a flag controlling whether it is public in the agent's
 //! profile). The viewer reads and writes them through the `AgentPreferences`
 //! capability — a single POST whose body carries the fields to change and whose
-//! reply echoes the full, updated set. A POST with no recognised fields acts as
-//! a pure "get".
+//! reply echoes the full, updated set. On OpenSim a POST with no recognised
+//! fields acts as a pure "get"; Second Life refuses one (`400`, "Bad Request:
+//! InvalidArguments") and states the stored set in the `preferences` member of
+//! the `AgentStateUpdate` it pushes with every arrival instead.
 //!
 //! This module builds the request body and decodes the reply (client side), and
 //! parses the request and builds the reply (server side). The body keys
@@ -71,9 +73,11 @@ pub struct AgentPreferences {
 }
 
 /// Serialises an [`AgentPreferences`] to an LLSD map, emitting only the present
-/// (`Some`) fields. Shared by the client request builder and the server reply
-/// builder, which carry the identical key shape.
-fn agent_preferences_to_llsd(prefs: &AgentPreferences) -> Llsd {
+/// (`Some`) fields. Shared by the client request builder, the server reply
+/// builder and the `preferences` member of Second Life's `AgentStateUpdate`
+/// push, which all carry the identical key shape.
+#[must_use]
+pub fn agent_preferences_to_llsd(prefs: &AgentPreferences) -> Llsd {
     let mut map: HashMap<String, Llsd> = HashMap::new();
     if let Some(hover_height) = prefs.hover_height {
         let _previous = map.insert("hover_height".to_owned(), Llsd::Real(hover_height));

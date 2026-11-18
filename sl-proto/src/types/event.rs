@@ -371,11 +371,13 @@ pub enum Event {
     /// semantic pass.
     LslSyntax(Box<LslSyntax>),
     /// The agent's server-stored preferences (hover height, default object
-    /// permission masks, maturity-access ceiling, UI language), from an
-    /// `AgentPreferences` capability POST — the reply to
-    /// [`Command::SetAgentPreferences`](crate::Command::SetAgentPreferences) or
-    /// [`Command::RequestAgentPreferences`](crate::Command::RequestAgentPreferences).
-    /// The grid echoes the full stored set, so every field is `Some`.
+    /// permission masks, maturity-access ceiling, UI language): the reply to an
+    /// `AgentPreferences` capability POST
+    /// ([`Command::SetAgentPreferences`](crate::Command::SetAgentPreferences) or
+    /// [`Command::RequestAgentPreferences`](crate::Command::RequestAgentPreferences)),
+    /// the set Second Life pushes in the `AgentStateUpdate` of every arrival,
+    /// or the session's answer to a request from the last of those. The grid
+    /// states the full stored set, so every field is `Some`.
     AgentPreferences(Box<AgentPreferences>),
     /// The simulator's answer to
     /// [`Command::SetInterestListMode`](crate::Command::SetInterestListMode):

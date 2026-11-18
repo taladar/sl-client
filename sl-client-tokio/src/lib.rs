@@ -2840,7 +2840,12 @@ impl Client {
                                 }
                             }
                             Some(Command::RequestAgentPreferences) => {
-                                if let Some(url) = caps.get(CAP_AGENT_PREFERENCES).cloned() {
+                                // Answered from what the grid last stated where
+                                // the session holds it: Second Life refuses the
+                                // empty POST.
+                                if !self.session.answer_agent_preferences_request()
+                                    && let Some(url) = caps.get(CAP_AGENT_PREFERENCES).cloned()
+                                {
                                     let body = build_agent_preferences_request(&AgentPreferences::default());
                                     tokio::spawn(post_voice_cap(url, body, CAP_AGENT_PREFERENCES, http.clone(), caps_tx.clone()));
                                 }

@@ -122,7 +122,7 @@ unfamiliar `message` name is easy to place:
 
 | `message` | LLSD body | Decodes to | Grid |
 |-----------|-----------|------------|------|
-| `AgentStateUpdate` | `{ can_modify_navmesh: bool }` | `Event::AgentStateUpdate` | SL |
+| `AgentStateUpdate` | `{ can_modify_navmesh: bool, has_modified_navmesh: bool, preferences: <AgentPreferences set> }` | `Event::AgentStateUpdate`, and `Event::AgentPreferences` from `preferences` | SL |
 | `NavMeshStatusUpdate` | `{ region_id: uuid, version: int, status: string }` | `Event::NavMeshStatus` | SL |
 | `AgentDropGroup` | `{ AgentData: [ { AgentID, GroupID } ] }` | `Event::AgentDroppedFromGroup` | both |
 | `DisplayNameUpdate` | `{ agent_id: uuid, old_display_name: string, agent: <name record> }` | `Event::DisplayNameUpdate` | SL |
@@ -240,11 +240,13 @@ non-LLSD or unroutable body → `400`):
   known agents as full `agents` records, unknown ids as `bad_ids` — the
   grid's "could not resolve" form the client folds into placeholder
   records.
-- **`AgentPreferences`** merges the POSTed `Some` fields into the
-  session's stored preference set and echoes the **full** stored set, so
-  the client's empty-body POST is the pure "get". The store starts at
-  OpenSim's defaults (access ceiling `M`, language `en-us` and public,
-  hover height 0, zero permission masks, god level 0); `god_level` in a
+- **`AgentPreferences`** merges the POSTed `Some` fields into the session's
+  stored preference set and echoes the **full** stored set, so the client's
+  empty-body POST is the pure "get" — unless the surface is built
+  `with_empty_preferences_post(EmptyPreferencesPost::Refused)`, as the fake
+  grid's Second Life flavour is, which answers it `400` as Second Life does. The
+  store starts at OpenSim's defaults (access ceiling `M`, language `en-us` and
+  public, hover height 0, zero permission masks, god level 0); `god_level` in a
   request is ignored (reply-only).
 - **`SendUserReport`** parses the abuse report and surfaces it as the
   same `ServerEvent::AbuseReportReceived` the legacy UDP `UserReport`

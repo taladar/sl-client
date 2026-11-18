@@ -2913,7 +2913,13 @@ mod test {
                 )))
                 .await?;
             running
-                .wait_for(|event| matches!(event, Event::AgentPreferences(_)).then_some(()))
+                // Not the set Second Life states with the arrival, which
+                // still names the preference from before.
+                .wait_for(|event| {
+                    matches!(event, Event::AgentPreferences(preferences)
+                        if preferences.max_access_pref.as_deref() == Some("PG"))
+                    .then_some(())
+                })
                 .await?;
             teleport_to(&running, east, RegionCoordinates::new(64.0, 32.0, 25.0)).await?;
             let trace = teleport_trace(&mut running).await?;
@@ -2938,6 +2944,53 @@ mod test {
                     assert_eq!(trace.progress, Vec::<String>::new());
                 }
             }
+        }
+        Ok(())
+    }
+
+    /// The agent's stored preferences can be read on both flavours, though
+    /// only OpenSim answers the capability's empty POST: Second Life refuses
+    /// it, and states the set in the `AgentStateUpdate` of the arrival
+    /// instead, which the session answers the read from.
+    #[tokio::test]
+    async fn the_stored_preferences_are_read_on_both_flavours() -> Result<(), TestError> {
+        for imitates in [ImitatedGrid::SecondLife, ImitatedGrid::OpenSim] {
+            let mut running =
+                start_configured(vec![RegionConfig::default()], None, imitates).await?;
+            if imitates == ImitatedGrid::SecondLife {
+                running
+                    .wait_until("the preferences stated with the arrival", |event| {
+                        matches!(event, Event::AgentPreferences(_))
+                    })
+                    .await?;
+            }
+            running
+                .commands
+                .send(Command::RequestAgentPreferences)
+                .await?;
+            let mut read = None;
+            running
+                .wait_until("the preferences read", |event| match event {
+                    Event::AgentPreferences(preferences) => {
+                        read = Some(preferences.clone());
+                        true
+                    }
+                    _ => false,
+                })
+                .await?;
+            let read = read.ok_or("no preferences were read")?;
+            // Second Life starts the store from the account's entitlement, the
+            // default account's Adult; OpenSim from its Moderate default.
+            let stored = match imitates {
+                ImitatedGrid::SecondLife => "A",
+                ImitatedGrid::OpenSim => "M",
+            };
+            assert_eq!(
+                read.max_access_pref.as_deref(),
+                Some(stored),
+                "{imitates:?}"
+            );
+            assert_eq!(read.language.as_deref(), Some("en-us"), "{imitates:?}");
         }
         Ok(())
     }
@@ -5201,7 +5254,13 @@ default
                 )))
                 .await?;
             running
-                .wait_for(|event| matches!(event, Event::AgentPreferences(_)).then_some(()))
+                // Not the set Second Life states with the arrival, which
+                // still names the preference from before.
+                .wait_for(|event| {
+                    matches!(event, Event::AgentPreferences(preferences)
+                        if preferences.max_access_pref.as_deref() == Some("PG"))
+                    .then_some(())
+                })
                 .await?;
             running.commands.send(lure_to(east, 40, 50, 60)).await?;
             let trace = teleport_trace(&mut running).await?;

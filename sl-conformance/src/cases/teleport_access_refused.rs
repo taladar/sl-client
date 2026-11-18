@@ -37,53 +37,73 @@ pub(crate) const REFUSAL_ALERT: &str = "RegionTPAccessBlocked";
 /// rating.
 const REFUSAL_PARAMETER: &str = "_region_access";
 
-/// How long one attempt at setting the preference waits for its echo.
+/// How long one attempt at setting or reading the preference waits for its
+/// answer.
 const PREFERENCE_ATTEMPT: Duration = Duration::from_secs(5);
 
-/// How many times the preference is set before the case gives up on an echo.
+/// How many times the preference is set or read before the case gives up on an
+/// answer.
 const PREFERENCE_ATTEMPTS: u8 = 6;
 
-/// Sets the agent's maturity preference and waits for the grid's echo of the
-/// stored set, returning the preference it now reports.
+/// Sends `command` until the grid states preferences `accept` takes, returning
+/// the maturity preference of that set.
 ///
 /// The request is repeated until it is answered: straight after an arrival the
-/// new region's capabilities are still being fetched, and a preference set in
+/// new region's capabilities are still being fetched, and a request made in
 /// that gap has no capability to go to.
-pub(crate) async fn set_preference(
+async fn ask_preferences(
     session: &mut Session,
-    max_access: &str,
+    command: impl Fn() -> Command + Send + Sync,
+    accept: impl Fn(&AgentPreferences) -> bool + Send + Sync,
 ) -> Result<Option<String>, TestFailure> {
     let mut attempts_left = PREFERENCE_ATTEMPTS;
     loop {
-        session
-            .send(Command::SetAgentPreferences(Box::new(AgentPreferences {
-                max_access_pref: Some(max_access.to_owned()),
-                ..AgentPreferences::default()
-            })))
-            .await?;
-        let echoed = session
+        session.send(command()).await?;
+        let answered = session
             .wait_for(PREFERENCE_ATTEMPT, |event| match event {
-                Event::AgentPreferences(preferences) => Some(preferences.max_access_pref.clone()),
+                Event::AgentPreferences(preferences) if accept(preferences) => {
+                    Some(preferences.max_access_pref.clone())
+                }
                 _ => None,
             })
             .await;
         attempts_left = attempts_left.saturating_sub(1);
-        match echoed {
+        match answered {
             Err(TestFailure::Timeout(_)) if attempts_left > 0 => {}
             answered => return answered,
         }
     }
 }
 
-/// The maturity preference the login response stated, or the ceiling the agent
-/// is entitled to on a grid that states no preference.
-pub(crate) fn stated_preference(session: &Session) -> Option<String> {
-    session.login_success().and_then(|login| {
-        login
-            .agent_region_access
-            .clone()
-            .or_else(|| login.agent_access_max.clone())
-    })
+/// Sets the agent's maturity preference and waits for the grid to state the
+/// stored set with it, returning the preference it now reports.
+///
+/// Only a set naming `max_access` is the answer: Second Life also states the
+/// stored set unasked with every arrival, and one of those still names the
+/// preference from before.
+pub(crate) async fn set_preference(
+    session: &mut Session,
+    max_access: &str,
+) -> Result<Option<String>, TestFailure> {
+    ask_preferences(
+        session,
+        || {
+            Command::SetAgentPreferences(Box::new(AgentPreferences {
+                max_access_pref: Some(max_access.to_owned()),
+                ..AgentPreferences::default()
+            }))
+        },
+        |preferences| preferences.max_access_pref.as_deref() == Some(max_access),
+    )
+    .await
+}
+
+/// The maturity preference the grid has stored for the agent, as
+/// [`Command::RequestAgentPreferences`] reads it.
+pub(crate) async fn stored_preference(
+    session: &mut Session,
+) -> Result<Option<String>, TestFailure> {
+    ask_preferences(session, || Command::RequestAgentPreferences, |_| true).await
 }
 
 /// Lowers the agent's maturity preference to General and teleports into a
@@ -97,7 +117,7 @@ pub(crate) fn stated_preference(session: &Session) -> Option<String> {
 /// viewer builds its "change your preference and try again?" dialog from.
 /// **OpenSim** does not consult the preference at all, and the agent arrives.
 ///
-/// The case restores the preference the login stated. It runs on aditi and both fake
+/// The case restores the preference the grid had stored. It runs on aditi and both fake
 /// flavours; the local OpenSim has no region rated above General to try, so
 /// its answer was measured by hand (a region set Mature for one probe) and is
 /// held here on the OpenSim-flavoured fake grid.
@@ -146,12 +166,8 @@ impl GridTest for TeleportAccessRefused {
             )?;
             let target_handle = RegionHandle::from(target.grid_coordinates);
 
-            // What the agent had asked for before, to put back afterwards: the
-            // preference the login response stated, or the ceiling it is
-            // entitled to on a grid that states no preference. (Asking the
-            // capability would be the direct way, and Second Life does not
-            // answer a request that sets nothing.)
-            let before = stated_preference(session);
+            // What the agent had stored before, to put back afterwards.
+            let before = stored_preference(session).await?;
             let lowered = set_preference(session, "PG").await?;
             check_eq("lowered_preference", &lowered.as_deref(), &Some("PG"))?;
 
@@ -159,8 +175,8 @@ impl GridTest for TeleportAccessRefused {
             let trace = watch_teleport(session, REGION_TIMEOUT).await;
 
             // Put the preference back whatever happened, on whichever region
-            // the agent is in now — or at Moderate, the stored default of a
-            // grid whose login says nothing of it.
+            // the agent is in now — or at Moderate, the stored default, where
+            // the grid stated none.
             let restore_to = before.as_deref().unwrap_or("M");
             let _restored = set_preference(session, restore_to).await?;
             let trace = trace?;

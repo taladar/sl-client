@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 328 |
 | blocked | 34 |
 | in-progress | 4 |
-| bugs | 20 |
-| done | 1589 |
+| bugs | 19 |
+| done | 1590 |
 | deferred | 30 |
 | wont-do | 24 |
 | **total** | **2160** |
@@ -1239,12 +1239,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-text-renderability-axis`](in-progress/viewer-ui-text-renderability-axis.md)
   — Upstream issue — font selection cannot see glyph-format renderability
 
-## bugs (20)
+## bugs (19)
 
 ### protocol
 
-- [`protocol-agent-preferences-read-unanswered-on-sl`](bugs/protocol-agent-preferences-read-unanswered-on-sl.md)
-  — Reading the agent preferences gets no answer on Second Life
 - [`protocol-im-states-no-position`](bugs/protocol-im-states-no-position.md) —
   Every instant message the session sends states position zero
 - [`protocol-remove-inventory-objects-over-event-queue-unread`](bugs/protocol-remove-inventory-objects-over-event-queue-unread.md)
@@ -1295,7 +1293,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1589)
+## done (1590)
 
 ### protocol
 
@@ -1424,6 +1422,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — What an account is entitled to arrives at login, and nothing decodes it
 - [`protocol-agent-list-voice-transition-lossy`](done/protocol-agent-list-voice-transition-lossy.md)
   — Agent-list voice updates collapse ENTER/LEAVE and can-voice into one bool
+- [`protocol-agent-preferences-read-unanswered-on-sl`](done/protocol-agent-preferences-read-unanswered-on-sl.md)
+  — Reading the agent preferences gets no answer on Second Life
 - [`protocol-ais3-library-cap`](done/protocol-ais3-library-cap.md) — Read both
   inventory trees over AIS3 on Second Life, the library over LibraryAPIv3
 - [`protocol-ais3-nested-embedded`](done/protocol-ais3-nested-embedded.md) — An

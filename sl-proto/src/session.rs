@@ -2119,6 +2119,10 @@ pub struct Session {
     /// The interest-list mode last asked for or answered
     /// ([`Session::interest_list_mode`]).
     interest_list_mode: sl_wire::InterestListMode,
+    /// The agent's stored preferences as the grid last stated them, by an
+    /// `AgentPreferences` reply or Second Life's `AgentStateUpdate` push
+    /// ([`Session::answer_agent_preferences_request`]).
+    agent_preferences: Option<sl_wire::AgentPreferences>,
     /// Whether protocol diagnostics are collected. Off by default so the
     /// silent-drop sites cost nothing (no raw-byte capture, no queueing) on the
     /// normal path. Toggled by [`Session::set_diagnostics`].

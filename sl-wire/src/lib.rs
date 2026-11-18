@@ -58,7 +58,7 @@ pub use abuse_report::{
     AbuseReport, AbuseReportType, build_send_user_report, parse_send_user_report,
 };
 pub use agent_preferences::{
-    AgentPreferences, ObjectPermMasks, build_agent_preferences_request,
+    AgentPreferences, ObjectPermMasks, agent_preferences_to_llsd, build_agent_preferences_request,
     build_agent_preferences_response, parse_agent_preferences,
 };
 pub use avatar_render_info::{

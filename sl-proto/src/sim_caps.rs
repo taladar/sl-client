@@ -1012,6 +1012,21 @@ pub struct SimCaps {
     display_name_style: DisplayNameStyle,
     /// The land products `ProductInfoRequest` lists.
     land_products: Vec<crate::LandProduct>,
+    /// How an `AgentPreferences` POST that sets nothing is answered.
+    empty_preferences_post: EmptyPreferencesPost,
+}
+
+/// How an `AgentPreferences` POST that sets nothing is answered — which live
+/// grid's capability it imitates.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum EmptyPreferencesPost {
+    /// The stored set echoed, the pure "get" OpenSim answers.
+    #[default]
+    Echoed,
+    /// Refused `400`, "Bad Request: InvalidArguments", as Second Life refuses
+    /// it (aditi, 2026-11-17); the grid states the stored set in the
+    /// `AgentStateUpdate` of every arrival instead.
+    Refused,
 }
 
 /// Which grid's people service a `GetDisplayNames` answer imitates, for a
@@ -1091,6 +1106,7 @@ impl SimCaps {
             new_file_policy: NewFilePolicy::Plain,
             display_name_style: DisplayNameStyle::Plain,
             land_products: Vec::new(),
+            empty_preferences_post: EmptyPreferencesPost::Echoed,
         }
     }
 
@@ -1116,6 +1132,14 @@ impl SimCaps {
     #[must_use]
     pub const fn with_display_name_style(mut self, style: DisplayNameStyle) -> Self {
         self.display_name_style = style;
+        self
+    }
+
+    /// The same surface with its `AgentPreferences` answering a POST that sets
+    /// nothing as `answer` says — echoed by default, as OpenSim does.
+    #[must_use]
+    pub const fn with_empty_preferences_post(mut self, answer: EmptyPreferencesPost) -> Self {
+        self.empty_preferences_post = answer;
         self
     }
 
@@ -1164,6 +1188,7 @@ impl SimCaps {
             new_file_policy: NewFilePolicy::Plain,
             display_name_style: DisplayNameStyle::Plain,
             land_products: Vec::new(),
+            empty_preferences_post: EmptyPreferencesPost::Echoed,
         }
     }
 
@@ -1381,7 +1406,7 @@ impl SimCaps {
                         CapsDispatch::Response(Self::dispatch_avatar_picker_search(sim, request))
                     }
                     Some(CapHandler::AgentPreferences) => {
-                        CapsDispatch::Response(Self::dispatch_agent_preferences(sim, request))
+                        CapsDispatch::Response(self.dispatch_agent_preferences(sim, request))
                     }
                     Some(CapHandler::InterestList) => {
                         CapsDispatch::Response(Self::dispatch_interest_list(sim, request))
@@ -2214,9 +2239,15 @@ impl SimCaps {
 
     /// Serves one `AgentPreferences` POST: merges the request's `Some` fields
     /// into the session's stored preferences and echoes the full stored set —
-    /// so an empty-body POST is the pure "get". A malformed body answers
-    /// `400`; `god_level` in a request is ignored (reply-only).
-    fn dispatch_agent_preferences(sim: &mut SimSession, request: &CapsRequest<'_>) -> CapsResponse {
+    /// so an empty-body POST is the pure "get", unless the surface
+    /// [refuses it](Self::with_empty_preferences_post) as Second Life does.
+    /// A malformed body answers `400`; `god_level` in a request is ignored
+    /// (reply-only).
+    fn dispatch_agent_preferences(
+        &self,
+        sim: &mut SimSession,
+        request: &CapsRequest<'_>,
+    ) -> CapsResponse {
         if request.method != "POST" {
             return CapsResponse::method_not_allowed();
         }
@@ -2226,6 +2257,11 @@ impl SimCaps {
         let Ok(update) = parse_agent_preferences(&body) else {
             return CapsResponse::bad_request();
         };
+        if self.empty_preferences_post == EmptyPreferencesPost::Refused
+            && update == sl_wire::AgentPreferences::default()
+        {
+            return CapsResponse::words(400, "Bad Request: InvalidArguments");
+        }
         sim.merge_agent_preferences(&update);
         CapsResponse::llsd_xml(build_agent_preferences_response(sim.agent_preferences()))
     }

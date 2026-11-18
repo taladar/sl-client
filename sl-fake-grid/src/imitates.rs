@@ -60,7 +60,7 @@
 //! | whether a logout is answered ([`logout_reply`](ImitatedGrid::logout_reply)) | a `LogoutReply`, always | none: the session closes with the request unanswered and unacknowledged, which is what the live grid does six times in seven |
 //! | a circuit the client stops answering ([`circuit_policy`](ImitatedGrid::circuit_policy)) | an unacknowledged packet is sent four times, a second apart, and given up; a silent client is dropped after 100 s without a word | an unacknowledged packet is resent for as long as the circuit lasts; a silent client is kicked after 60 s |
 //! | how an `ObjectUpdate` is put on the wire ([`CircuitPolicy::short_zero_tails`]) | zero-coded, its final run of zeros one short | as encoded |
-//! | what a region says of itself on arrival ([`arrival_policy`](ImitatedGrid::arrival_policy)) | a product name, SKU and data centre; a `HealthMessage` and an `AgentStateUpdate`; two handshakes down each child circuit; `SimStats` every 2 s and the time every 10 s, with a sun direction | none of the three names; neither message; one handshake; `SimStats` every 3 s with six more statistics and the time every 2.55 s, with no sun direction |
+//! | what a region says of itself on arrival ([`arrival_policy`](ImitatedGrid::arrival_policy)) | a product name, SKU and data centre; a `HealthMessage` and an `AgentStateUpdate` carrying the agent's stored preferences; two handshakes down each child circuit; `SimStats` every 2 s and the time every 10 s, with a sun direction | none of the three names; neither message; one handshake; `SimStats` every 3 s with six more statistics and the time every 2.55 s, with no sun direction |
 //! | the account's entitlements ([`describes_account_entitlements`](ImitatedGrid::describes_account_entitlements)) | a benefits package, its subscription name, every package's numbers, and the maturity preference | none of the four; a viewer prices uploads from the legacy `EconomyData` instead |
 //! | how a teleport runs and how it is refused ([`teleport_policy`](ImitatedGrid::teleport_policy)) | `resolving` and `Sending to destination.` between the start and the finish; a refusal after the start, over the event queue, as a key with an `AlertInfo`; a cancel answered `TPCancelled`; a region above the maturity preference refused; a local teleport flagged `WITHIN_REGION` | no progress lines; a refusal before any start, over UDP, as a sentence with no alert; a cancel unanswered; no maturity check; the request's flags alone |
 //! | a parcel listing's flags for an adult region ([`ParcelPolicy::adult_listing_bits`]) | the adult and the mature bit, `0x03` | the adult bit alone, `0x02` |
@@ -68,6 +68,7 @@
 //! | how a region's ground and wind are sent ([`terrain_policy`](ImitatedGrid::terrain_policy)) | the ground outwards from where the agent stands, a message kept within 1,200 bytes, every patch transformed; the wind with the ground and then every second, unreliably, under a stride of 18 with six bits of prequantization | the ground outwards from the patch the agent is in, a message closed once past 890 bytes, a flat patch as a header alone; the wind every 13.6 s on the region's own clock, reliably, in the ground's encoding |
 //! | an arriving agent's own appearance ([`BakePolicy::sends_own_appearance`](crate::BakePolicy::sends_own_appearance)) | sent only to a viewer whose handshake reply set `SUPPORTS_SELF_APPEARANCE` | sent whatever the reply's flags |
 //! | the interest-list switch (`InterestList`, in [`withheld_capabilities`](ImitatedGrid::withheld_capabilities)) | granted, and answered with the mode and the one it replaced | not granted |
+//! | an `AgentPreferences` POST that sets nothing ([`empty_preferences_post`](ImitatedGrid::empty_preferences_post)) | refused, `400` "Bad Request: InvalidArguments" | the stored set echoed |
 //! | a sit on an object the region does not have ([`SitPolicy::unknown_target`]) | refused at once with the named alert `SitFailNotSameRegion` | not answered: the client's own sit timeout ends it |
 //! | where standing up puts the avatar ([`SitPolicy::stand_forward_m`], [`SitPolicy::stand_up_m`]) | 0.34 m in front of where it sat, at the same height | 0.65 m in front and 0.57 m above |
 //! | the seat position in an `AvatarSitResponse` for a seat with a sit target ([`SitPolicy::response_states_seated_position`]) | where the avatar is put: the target raised by 0.35 m | the target as the script set it, 0.35 m below where the avatar is put |
@@ -308,6 +309,18 @@ impl ImitatedGrid {
         match self {
             Self::SecondLife => sl_proto::DisplayNameStyle::SecondLife,
             Self::OpenSim => sl_proto::DisplayNameStyle::OpenSim,
+        }
+    }
+
+    /// How this grid's `AgentPreferences` answers a POST that sets nothing:
+    /// Second Life refuses it `400`, "Bad Request: InvalidArguments" (aditi,
+    /// 2026-11-17), and states the stored set instead in the
+    /// `AgentStateUpdate` of every arrival; OpenSim echoes the stored set.
+    #[must_use]
+    pub const fn empty_preferences_post(self) -> sl_proto::EmptyPreferencesPost {
+        match self {
+            Self::SecondLife => sl_proto::EmptyPreferencesPost::Refused,
+            Self::OpenSim => sl_proto::EmptyPreferencesPost::Echoed,
         }
     }
 

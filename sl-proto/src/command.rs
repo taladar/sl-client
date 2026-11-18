@@ -909,11 +909,15 @@ pub enum Command {
     /// and on each region change), so this is for an explicit re-fetch. A no-op
     /// when the region seed omits the capability.
     RequestSimulatorFeatures,
-    /// Request the agent's **server-stored preferences** via the
-    /// `AgentPreferences` capability without changing them (a POST with an empty
-    /// body); the reply arrives as
+    /// Request the agent's **server-stored preferences**; the answer arrives as
     /// [`Event::AgentPreferences`](crate::Event::AgentPreferences) carrying the
-    /// full stored set. A no-op when the region seed omits the capability.
+    /// full stored set. Where the grid has already stated the set — Second
+    /// Life's `AgentStateUpdate` on every arrival, or the echo of an earlier
+    /// change — the session answers with that and asks nothing
+    /// ([`Session::answer_agent_preferences_request`](crate::Session::answer_agent_preferences_request)),
+    /// since Second Life refuses a POST that sets nothing. Otherwise the
+    /// `AgentPreferences` capability is POSTed an empty body, which OpenSim
+    /// echoes; a no-op when the region seed omits the capability.
     RequestAgentPreferences,
     /// Update the agent's **server-stored preferences** via the `AgentPreferences`
     /// capability. Only the present ([`Some`]) fields are changed (hover height,

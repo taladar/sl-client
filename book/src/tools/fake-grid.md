@@ -2772,12 +2772,15 @@ against that flavour takes that much longer to log out. Both flavours send
 [Region arrival](../gridspec/region-arrival.md)) is what a region says of
 itself. A Second-Life-flavoured stock region names its product, SKU and data
 centre in the handshake, greets a child circuit twice, tells an arriving agent
-its health and pushes an `AgentStateUpdate`, and then sends `SimStats` every
-two seconds and the time every ten. An OpenSim-flavoured one names nothing,
-sends neither message and one handshake, and sends the statistics — six more
-of them — every three seconds and the time every 2.55. Both open the arrival
-with an `AgentDataUpdate`, and both regions carry the flags the live grids'
-stock regions do (`STOCK_REGION_FLAGS`) where they used to carry none.
+its health and pushes an `AgentStateUpdate` carrying the agent's stored
+preferences, and then sends `SimStats` every two seconds and the time every ten.
+Its `AgentPreferences` capability refuses a POST that sets nothing, `400` as
+Second Life does (`ImitatedGrid::empty_preferences_post`). An
+OpenSim-flavoured one names nothing, sends neither message and one handshake,
+echoes the stored preferences to that empty POST, and sends the statistics — six
+more of them — every three seconds and the time every 2.55. Both open the
+arrival with an `AgentDataUpdate`, and both regions carry the flags the live
+grids' stock regions do (`STOCK_REGION_FLAGS`) where they used to carry none.
 
 The telemetry is `SimSession::set_region_telemetry`; a scenario that wants
 other numbers sets its own.
