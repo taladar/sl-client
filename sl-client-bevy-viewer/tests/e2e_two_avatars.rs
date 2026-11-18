@@ -870,7 +870,7 @@ mod test {
                             from_agent_id: host,
                             from_name: account(HOST),
                             dialog: ImDialog::SessionConferenceStart,
-                            from_group: false,
+                            session: sl_proto::ChatSessionKind::Conference { id: session },
                             session_name: "Planning".to_owned(),
                             message: "Join us?".to_owned(),
                             channel: sl_proto::InviteChannel::Text,

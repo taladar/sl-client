@@ -291,10 +291,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 message,
                 session_name,
                 dialog,
-                from_group,
+                session,
                 ..
             } => info!(
-                "conference invitation to {session_name:?} ({dialog:?}, from_group={from_group}) from {from_name}: {message}"
+                "conference invitation to {session_name:?} ({dialog:?}, {session:?}) from {from_name}: {message}"
             ),
             Event::ChatSessionStarted {
                 temp_session_id,

@@ -81,6 +81,7 @@ pub(crate) fn start_caps(session: &Session, requested: &Arc<[String]>) -> Option
     };
     let (events_tx, events_rx) = unbounded();
     let (asset_tx, asset_rx) = unbounded();
+    let (chat_replies_tx, chat_replies_rx) = unbounded();
     let (map_tx, map_rx) = unbounded();
     let (command_tx, command_rx) = unbounded();
     let (neighbour_map_tx, neighbour_map_rx) = unbounded();
@@ -102,6 +103,8 @@ pub(crate) fn start_caps(session: &Session, requested: &Arc<[String]>) -> Option
         events_tx,
         asset_rx,
         asset_tx,
+        chat_replies_rx,
+        chat_replies_tx,
         map_rx,
         map: HashMap::new(),
         neighbour_map_rx,

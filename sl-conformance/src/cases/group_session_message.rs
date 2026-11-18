@@ -3,7 +3,7 @@
 
 use std::time::{Duration, Instant, SystemTime};
 
-use sl_client_tokio::{Command, Event, GroupKey};
+use sl_client_tokio::{ChatSessionKind, Command, Event};
 
 use crate::context::{TestContext, TestFailure};
 use crate::grid::Grid;
@@ -220,13 +220,12 @@ impl GridTest for GroupSessionMessage {
                             Some((*group, Delivery::SessionMessage))
                         }
                         Event::ConferenceInvited {
-                            session_id,
                             from_agent_id,
-                            from_group,
+                            session: ChatSessionKind::Group { group_id: invited },
                             message,
                             ..
-                        } if *from_group && *from_agent_id == primary_id && *message == marker => {
-                            Some((GroupKey::from(*session_id), Delivery::Invitation))
+                        } if *from_agent_id == primary_id && *message == marker => {
+                            Some((*invited, Delivery::Invitation))
                         }
                         _ => None,
                     })

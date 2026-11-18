@@ -401,8 +401,10 @@ pub const CAP_READ_OFFLINE_MSGS: &str = "ReadOfflineMsgs";
 /// `"accept invitation"` reply body is the session's current agent roster (the
 /// modern equivalent of replaying the UDP `SessionAdd` stream). OpenSim stubs this
 /// cap (returns `<llsd>true</llsd>`), so the UDP `SessionLeave` fallback is what
-/// the local grid exercises for a decline. Decoded by the runtimes' chat-invite
-/// commands; the roster reply seeds the session participants.
+/// the local grid exercises for a decline. The reply names no session, so the
+/// runtimes hand it back as a [`ChatSessionReply`] carrying the session they
+/// posted for, to [`Session::handle_chat_session_reply`]; the roster seeds the
+/// session participants.
 pub const CAP_CHAT_SESSION_REQUEST: &str = "ChatSessionRequest";
 
 /// The modern capability for **accepting** a group-membership invitation that
@@ -525,16 +527,6 @@ pub const CHAT_SESSION_DECLINE_P2P_VOICE: &str = "decline p2p voice";
 /// on the local grid the fetch is simply never issued (the cap is absent).
 pub const CHAT_SESSION_FETCH_HISTORY: &str = "fetch history";
 
-/// The tag the runtimes attach when forwarding a
-/// [`CHAT_SESSION_FETCH_HISTORY`] reply to [`Session::handle_caps_event`].
-/// A synthetic routing key (never a real capability name): the reply is a bare
-/// LLSD array with no session identity of its own, so the runtime wraps it as
-/// `{ "history": <array>, "session-id": <uuid>, "from_group": <bool> }` under
-/// this tag — the fetch-history analogue of the roster-reply stamping the plain
-/// [`CAP_CHAT_SESSION_REQUEST`] tag carries (and of the transient
-/// [`LAND_RESOURCE_SUMMARY_TAG`] convention).
-pub const CHAT_SESSION_FETCH_HISTORY_TAG: &str = "ChatSessionRequest/fetch history";
-
 /// Inventory mutation (#30): the modern Second Life **AIS3** REST inventory
 /// capability (`InventoryAPIv3`). Folder/item create/update/move/remove are HTTP
 /// verbs against path suffixes under this base URL (see `sl_wire::inventory`).
@@ -600,8 +592,7 @@ pub const CAP_AVATAR_PICKER_SEARCH: &str = "AvatarPickerSearch";
 /// reply to [`Session::handle_caps_event`]. A synthetic routing key (never a
 /// real capability name): the reply carries no query id of its own — the
 /// legacy message's `QueryID` has no HTTP counterpart — so the runtime wraps it
-/// as `{ "agents": <array>, "query-id": <uuid> }` under this tag, the same
-/// stamping convention [`CHAT_SESSION_FETCH_HISTORY_TAG`] uses.
+/// as `{ "agents": <array>, "query-id": <uuid> }` under this tag.
 pub const AVATAR_PICKER_SEARCH_TAG: &str = "AvatarPickerSearch/reply";
 
 /// The tag the runtimes attach when forwarding a [`CAP_EXPERIENCE_QUERY`] reply
@@ -2193,9 +2184,9 @@ use self::transfers::Transfers;
 use self::world_cache::WorldCache;
 pub use chat_session::{
     ChatLifecycleView, ChatSessionAgentUpdate, ChatSessionInfo, ChatSessionKind,
-    ChatSessionLifecycle, FriendPresence, InviteChannel, MessageCursor, NearbyHistoryLine,
-    PendingInvite, ServerHistoryMessage, SessionMessage, SessionTransition, VoiceChannelInfo,
-    VoiceChannelState,
+    ChatSessionLifecycle, ChatSessionReply, ChatSessionRequestPurpose, FriendPresence,
+    InviteChannel, MessageCursor, NearbyHistoryLine, PendingInvite, ServerHistoryMessage,
+    SessionMessage, SessionTransition, VoiceChannelInfo, VoiceChannelState,
 };
 pub use inventory::{FolderState, InventoryOwner};
 pub use inventory_cache::INVENTORY_CACHE_VERSION;

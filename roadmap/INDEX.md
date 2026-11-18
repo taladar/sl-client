@@ -15,11 +15,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 328 |
 | blocked | 34 |
 | in-progress | 4 |
-| bugs | 16 |
-| done | 1593 |
+| bugs | 17 |
+| done | 1594 |
 | deferred | 30 |
 | wont-do | 24 |
-| **total** | **2160** |
+| **total** | **2162** |
 
 ## ideas (131)
 
@@ -1239,12 +1239,15 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-text-renderability-axis`](in-progress/viewer-ui-text-renderability-axis.md)
   — Upstream issue — font selection cannot see glyph-format renderability
 
-## bugs (16)
+## bugs (17)
 
 ### protocol
 
-- [`protocol-voice-accept-on-direct-session-becomes-conference`](bugs/protocol-voice-accept-on-direct-session-becomes-conference.md)
-  — A voice accept on a 1:1 session is folded into a phantom conference
+- [`protocol-group-fetch-history-403-on-aditi`](bugs/protocol-group-fetch-history-403-on-aditi.md)
+  — A group session's automatic fetch history is answered 403 on aditi
+- [`protocol-join-session-voice-posts-accept-invitation`](bugs/protocol-join-session-voice-posts-accept-invitation.md)
+  — Joining a session's voice posts accept invitation, where the reference posts
+  call or start p2p voice
 
 ### viewer
 
@@ -1286,7 +1289,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1593)
+## done (1594)
 
 ### protocol
 
@@ -1596,6 +1599,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A timed-out teleport strands the session and loses its child circuits
 - [`protocol-variable-block-lists-over-255`](done/protocol-variable-block-lists-over-255.md)
   — A request listing more than 255 objects fails to encode and ends the session
+- [`protocol-voice-accept-on-direct-session-becomes-conference`](done/protocol-voice-accept-on-direct-session-becomes-conference.md)
+  — A voice accept on a 1:1 session is folded into a phantom conference
 - [`protocol-xfer-listing-parse-error-ends-session`](done/protocol-xfer-listing-parse-error-ends-session.md)
   — A malformed Xfer listing ends the whole session
 

@@ -38,18 +38,19 @@ use super::transfers::Transfers;
 use super::world_cache::WorldCache;
 use super::{
     AGENT_UPDATE_INTERVAL, ASSET_TRANSFER_TIMEOUT, ArrivalPose, ChatLifecycleView, ChatSession,
-    ChatSessionInfo, ChatSessionKind, ChatSessionLifecycle, Circuit, CircuitRole,
-    DEFAULT_DRAW_DISTANCE, FolderState, FriendPresence, GrantStatus, HolderKind, IDENTITY_ROTATION,
-    INVENTORY_FETCH_MAX_ATTEMPTS, INVENTORY_SAVE_TIMEOUT, Inventory, InventoryOwner,
-    LATE_TELEPORT_START_WINDOW, LOGOUT_TIMEOUT, MAX_XFER_DOWNLOAD_BYTES, MessageCursor,
-    OfferedUpload, PARENT_REQUEST_WARN_ATTEMPTS, PendingHandover, PendingInventorySave,
-    PendingInvite, SIT_REFUSAL_ALERTS, SIT_REFUSAL_TEXTS, SIT_TIMEOUT, ScriptGrant, ScriptHolder,
-    ServerHistoryFetch, ServerHistoryMessage, ServerHistoryState, Session, SessionMessage,
-    SessionState, SessionTransition, SitState, TELEPORT_TIMEOUT, TEXTURE_DOWNLOAD_MAX_ATTEMPTS,
-    TEXTURE_DOWNLOAD_STALL_TIMEOUT, TYPING_TIMEOUT, TakenControls, TeleportPhase, TextureDownload,
-    TransferDownload, TransferProgress, TransferPurpose, VoiceChannelInfo, XFER_OFFER_TIMEOUT,
-    XFER_REFUSED_RESULT, XFER_STALL_TIMEOUT, XFER_TIMEOUT_RESULT, XferDownload, XferPurpose,
-    XferUpload, deadline, merge_deadline,
+    ChatSessionInfo, ChatSessionKind, ChatSessionLifecycle, ChatSessionReply,
+    ChatSessionRequestPurpose, Circuit, CircuitRole, DEFAULT_DRAW_DISTANCE, FolderState,
+    FriendPresence, GrantStatus, HolderKind, IDENTITY_ROTATION, INVENTORY_FETCH_MAX_ATTEMPTS,
+    INVENTORY_SAVE_TIMEOUT, Inventory, InventoryOwner, LATE_TELEPORT_START_WINDOW, LOGOUT_TIMEOUT,
+    MAX_XFER_DOWNLOAD_BYTES, MessageCursor, OfferedUpload, PARENT_REQUEST_WARN_ATTEMPTS,
+    PendingHandover, PendingInventorySave, PendingInvite, SIT_REFUSAL_ALERTS, SIT_REFUSAL_TEXTS,
+    SIT_TIMEOUT, ScriptGrant, ScriptHolder, ServerHistoryFetch, ServerHistoryMessage,
+    ServerHistoryState, Session, SessionMessage, SessionState, SessionTransition, SitState,
+    TELEPORT_TIMEOUT, TEXTURE_DOWNLOAD_MAX_ATTEMPTS, TEXTURE_DOWNLOAD_STALL_TIMEOUT,
+    TYPING_TIMEOUT, TakenControls, TeleportPhase, TextureDownload, TransferDownload,
+    TransferProgress, TransferPurpose, VoiceChannelInfo, XFER_OFFER_TIMEOUT, XFER_REFUSED_RESULT,
+    XFER_STALL_TIMEOUT, XFER_TIMEOUT_RESULT, XferDownload, XferPurpose, XferUpload, deadline,
+    merge_deadline,
 };
 use crate::GroupRoleKey;
 use crate::asset_keys::{AnimationKey, AssetKey};
@@ -230,21 +231,6 @@ fn iter_bits(controls: ControlFlags) -> impl Iterator<Item = u32> {
         remaining &= !bit;
         Some(bit)
     })
-}
-
-/// Maps an IM session id + `from_group` flag (the two fields of a
-/// [`ConferenceInvited`](Event::ConferenceInvited) the driver is answering) to the
-/// typed [`ChatSessionKind`] key: a group IM session reinterprets the id as a
-/// group id, an ad-hoc conference keeps it as the conference id. Shared by the
-/// accept / decline invite methods.
-fn invite_session_kind(session_id: ImSessionId, from_group: bool) -> ChatSessionKind {
-    if from_group {
-        ChatSessionKind::Group {
-            group_id: GroupKey::from(session_id.get()),
-        }
-    } else {
-        ChatSessionKind::Conference { id: session_id }
-    }
 }
 
 /// An [`ObjectStreamBatch`] being put together while its message is
@@ -1530,38 +1516,28 @@ impl Session {
                     // Second Life invites to a group session with `from_group`
                     // clear: an invitation to a group the agent is in is the
                     // group's, as the reference reads it.
-                    if let Event::ConferenceInvited {
-                        session_id,
-                        from_group,
-                        ..
-                    } = &mut event
+                    if let Event::ConferenceInvited { session, .. } = &mut event
+                        && let ChatSessionKind::Conference { id } = *session
+                        && self.reads_as_group(id.get(), false)
                     {
-                        *from_group = self.reads_as_group(*session_id, *from_group);
+                        *session = ChatSessionKind::Group {
+                            group_id: GroupKey::from(id.get()),
+                        };
                     }
                     // Record the invitation as a pending `Invited` chat-session
                     // entry (the registry is the pending-invitation read model)
                     // before surfacing the event unchanged for the driver to act
-                    // on. The session is keyed by the group id for a group IM or
-                    // the conference id otherwise; the channel(s) are classified
-                    // from the body's `instantmessage` / `voice` sub-maps.
+                    // on. The channel(s) are classified from the body's
+                    // `instantmessage` / `voice` sub-maps.
                     if let Event::ConferenceInvited {
-                        session_id,
+                        session: kind,
                         from_agent_id,
-                        from_group,
                         session_name,
                         channel,
                         ..
                     } = &event
                     {
-                        let kind = if *from_group {
-                            ChatSessionKind::Group {
-                                group_id: GroupKey::from(*session_id),
-                            }
-                        } else {
-                            ChatSessionKind::Conference {
-                                id: ImSessionId::from(*session_id),
-                            }
-                        };
+                        let kind = *kind;
                         self.mark_chat_session_invited(
                             kind,
                             PendingInvite {
@@ -1585,82 +1561,6 @@ impl Session {
                     self.events.push_back(event);
                 } else {
                     self.caps_decode_failed(message);
-                }
-            }
-            // The reply to a `ChatSessionRequest` accept/decline POST (#28). The
-            // accept reply carries the session's current agent roster, which the
-            // runtime tags with the session id + `from_group`; fold it into that
-            // session's participants (the modern equivalent of replaying the
-            // `SessionAdd` stream). A voice accept reply also carries a
-            // `voice_channel_info` block — record the channel coordinates and that
-            // the session offers voice (B8). The decline reply and OpenSim's
-            // stubbed `<llsd>true</llsd>` carry neither, so this is then a no-op.
-            CapsEvent::ChatSessionRequest => {
-                let roster = chat_session_roster_from_llsd(body);
-                let voice = body.get("voice_channel_info");
-                if !roster.is_empty() || voice.is_some() {
-                    let session_uuid = body
-                        .get("session-id")
-                        .and_then(Llsd::as_uuid)
-                        .unwrap_or_default();
-                    let from_group = body
-                        .get("from_group")
-                        .and_then(Llsd::as_bool)
-                        .unwrap_or(false);
-                    let kind = if from_group {
-                        ChatSessionKind::Group {
-                            group_id: GroupKey::from(session_uuid),
-                        }
-                    } else {
-                        ChatSessionKind::Conference {
-                            id: ImSessionId::from(session_uuid),
-                        }
-                    };
-                    let session = self.chat_session_mut(kind, now);
-                    session.extend_participants(roster);
-                    if let Some(voice) = voice {
-                        session.note_voice_offered(voice_channel_info_from_llsd(voice));
-                    }
-                }
-            }
-            // The reply to a `ChatSessionRequest` "fetch history" POST: the
-            // session's server-side recent-message backlog. The wire reply is a
-            // bare LLSD array with no session identity, so the runtime wraps it
-            // as `{ history, session-id, from_group }` under this synthetic tag
-            // (see `CHAT_SESSION_FETCH_HISTORY_TAG`); the kind is rebuilt from
-            // the stamp exactly as the accept-roster arm above does — always
-            // group or conference, the only kinds a fetch is issued for. The
-            // backlog is de-duplicated against the live ring on store (the
-            // message that triggered a lazy-open fetch arrives both ways) and
-            // surfaced as `Event::SessionServerHistory` when non-empty; it is
-            // never written to the on-disk transcript.
-            CapsEvent::ChatSessionFetchHistory => {
-                let session_uuid = body
-                    .get("session-id")
-                    .and_then(Llsd::as_uuid)
-                    .unwrap_or_default();
-                let from_group = body
-                    .get("from_group")
-                    .and_then(Llsd::as_bool)
-                    .unwrap_or(false);
-                let kind = if from_group {
-                    ChatSessionKind::Group {
-                        group_id: GroupKey::from(session_uuid),
-                    }
-                } else {
-                    ChatSessionKind::Conference {
-                        id: ImSessionId::from(session_uuid),
-                    }
-                };
-                let messages = session_history_from_llsd(body);
-                let session = self.chat_session_mut(kind, now);
-                session.store_server_history(messages);
-                let stored = session.server_history.clone();
-                if !stored.is_empty() {
-                    self.events.push_back(Event::SessionServerHistory {
-                        kind,
-                        messages: stored,
-                    });
                 }
             }
             // The grid's answer to a session start we requested: the session's
@@ -8296,35 +8196,89 @@ impl Session {
 
     /// Accepts a pending chat-session invitation, promoting its registry entry to
     /// [`Joined`](ChatSessionLifecycle::Joined) (get-or-creating it as joined if
-    /// it is somehow absent). This is the pure-state half of the accept; the
-    /// runtime additionally POSTs `{ "method": "accept invitation", "session-id" }`
-    /// to the `ChatSessionRequest` capability when present (whose reply roster
-    /// seeds the participants), and on a grid without the cap relies on the
-    /// optimistic local join (the simulator added us when it routed the invite).
-    /// `from_group` selects whether `session_id` keys a [`Group`](ChatSessionKind::Group)
-    /// or a [`Conference`](ChatSessionKind::Conference) session, mirroring the
-    /// [`Event::ConferenceInvited`](crate::Event::ConferenceInvited) being answered.
-    pub fn accept_chat_invite(&mut self, session_id: ImSessionId, from_group: bool, now: Instant) {
-        let kind = invite_session_kind(session_id, from_group);
+    /// it is somehow absent). This is the pure-state half of the accept; for a
+    /// group or a conference the runtime additionally POSTs `{ "method": "accept
+    /// invitation", "session-id" }` to the `ChatSessionRequest` capability when
+    /// present (whose reply roster seeds the participants), and on a grid
+    /// without the cap relies on the optimistic local join (the simulator added
+    /// us when it routed the invite). A 1:1 voice call is accepted with no POST,
+    /// as the reference accepts one (`LLIncomingCallDialog::processCallResponse`
+    /// opens the P2P session and starts the call). `session` is the
+    /// [`Event::ConferenceInvited`](crate::Event::ConferenceInvited)'s.
+    pub fn accept_chat_invite(&mut self, session: ChatSessionKind, now: Instant) {
         // `chat_session_mut` stamps activity and promotes `Invited` → `Joined`.
-        let _session = self.chat_session_mut(kind, now);
+        let _session = self.chat_session_mut(session, now);
     }
 
     /// Declines a pending chat-session invitation, **removing** its registry
     /// entry (the registry tracks only live sessions). This is the pure-state
-    /// half of the decline; the runtime additionally POSTs `{ "method": "decline
-    /// invitation", "session-id" }` to the `ChatSessionRequest` capability when
-    /// present, or sends a UDP `SessionLeave` as the fallback on a grid without
-    /// the cap. `from_group` selects [`Group`](ChatSessionKind::Group) vs
-    /// [`Conference`](ChatSessionKind::Conference), as for [`Self::accept_chat_invite`].
-    pub fn decline_chat_invite(
-        &mut self,
-        session_id: ImSessionId,
-        from_group: bool,
-        _now: Instant,
-    ) {
-        let kind = invite_session_kind(session_id, from_group);
-        let _removed = self.chat_sessions.remove(&kind);
+    /// half of the decline; the runtime additionally POSTs `decline invitation`
+    /// (a group or a conference) or `decline p2p voice` (a 1:1 call) to the
+    /// `ChatSessionRequest` capability when present, or sends a UDP
+    /// `SessionLeave` for a group or a conference on a grid without the cap.
+    /// `session` is the [`Event::ConferenceInvited`](crate::Event::ConferenceInvited)'s.
+    ///
+    /// A declined 1:1 call leaves a conversation already open with that
+    /// avatar in place: only the call was refused, and its offer is cleared.
+    pub fn decline_chat_invite(&mut self, session: ChatSessionKind, _now: Instant) {
+        if let ChatSessionKind::Direct { .. } = session
+            && let Some(chat_session) = self.chat_sessions.get_mut(&session)
+            && chat_session.lifecycle == ChatSessionLifecycle::Joined
+        {
+            chat_session.note_voice_declined();
+            return;
+        }
+        let _removed = self.chat_sessions.remove(&session);
+    }
+
+    /// Folds the reply to a `ChatSessionRequest` POST into the session it was
+    /// posted for, which the runtime carries in [`ChatSessionReply::session`]
+    /// (the reply names no session of its own).
+    ///
+    /// An [`Answer`](ChatSessionRequestPurpose::Answer)'s reply carries the
+    /// session's current roster when it accepted, which is folded into the
+    /// participants (the modern equivalent of replaying the `SessionAdd`
+    /// stream), and a voice accept's also a `voice_channel_info` block, which
+    /// records the channel coordinates and that the session offers voice. A
+    /// decline's reply and OpenSim's stubbed `<llsd>true</llsd>` carry neither,
+    /// and then nothing changes — nor is a session opened for them.
+    ///
+    /// A [`FetchHistory`](ChatSessionRequestPurpose::FetchHistory) reply is the
+    /// session's server-side backlog, de-duplicated against the live ring on
+    /// store (the message that triggered a lazy-open fetch arrives both ways)
+    /// and surfaced as [`Event::SessionServerHistory`] when non-empty; it is
+    /// never written to the on-disk transcript.
+    pub fn handle_chat_session_reply(&mut self, reply: &ChatSessionReply, now: Instant) {
+        let ChatSessionReply {
+            session: kind,
+            purpose,
+            body,
+        } = reply;
+        match purpose {
+            ChatSessionRequestPurpose::Answer => {
+                let roster = chat_session_roster_from_llsd(body);
+                let voice = body.get("voice_channel_info");
+                if !roster.is_empty() || voice.is_some() {
+                    let session = self.chat_session_mut(*kind, now);
+                    session.extend_participants(roster);
+                    if let Some(voice) = voice {
+                        session.note_voice_offered(voice_channel_info_from_llsd(voice));
+                    }
+                }
+            }
+            ChatSessionRequestPurpose::FetchHistory => {
+                let messages = session_history_from_llsd(body);
+                let session = self.chat_session_mut(*kind, now);
+                session.store_server_history(messages);
+                let stored = session.server_history.clone();
+                if !stored.is_empty() {
+                    self.events.push_back(Event::SessionServerHistory {
+                        kind: *kind,
+                        messages: stored,
+                    });
+                }
+            }
+        }
     }
 
     /// Records that we have joined `session`'s voice channel — the pure-state half

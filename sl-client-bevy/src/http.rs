@@ -9,15 +9,16 @@ use sl_client_common::retry::{MAX_TRANSIENT_RETRIES, is_transient_status, transi
 use sl_proto::{
     AVATAR_PICKER_SEARCH_TAG, CAP_CHAT_SESSION_REQUEST, CAP_GET_METADATA, CAP_GROUP_API_V1,
     CAP_LAND_RESOURCES, CAP_LSL_SYNTAX, CAP_REMOTE_PARCEL_REQUEST, CAP_REQUEST_TASK_INVENTORY,
-    CAP_SEARCH_STAT_REQUEST, CAP_UPLOAD_AGENT_PROFILE_IMAGE, CHAT_SESSION_FETCH_HISTORY_TAG,
-    ClassifiedKey, EXPERIENCE_QUERY_TAG, InventoryKey, LAND_RESOURCE_DETAIL_TAG,
-    LAND_RESOURCE_SUMMARY_TAG, LSL_SYNTAX_VERSION, Llsd, ObjectKey, ParcelKey, ProfileImage,
-    RemoteParcelRequest, TASK_INVENTORY_FAILED_TAG, TASK_INVENTORY_UNCHANGED_TAG, Uuid,
-    build_get_metadata_request, build_land_resources_request, build_remote_parcel_request,
-    parse_land_resources_reply, parse_llsd_xml, profile_image_upload_body,
-    profile_image_upload_outcome, search_stat_request_body, stamp_get_metadata_reply,
-    stamp_remote_parcel_request, stamp_search_stat_answer, stamp_task_inventory_cap_reply,
-    task_inventory_cap_url, task_inventory_failed_body, task_inventory_unchanged_body,
+    CAP_SEARCH_STAT_REQUEST, CAP_UPLOAD_AGENT_PROFILE_IMAGE, ChatSessionKind, ChatSessionReply,
+    ChatSessionRequestPurpose, ClassifiedKey, EXPERIENCE_QUERY_TAG, InventoryKey,
+    LAND_RESOURCE_DETAIL_TAG, LAND_RESOURCE_SUMMARY_TAG, LSL_SYNTAX_VERSION, Llsd, ObjectKey,
+    ParcelKey, ProfileImage, RemoteParcelRequest, TASK_INVENTORY_FAILED_TAG,
+    TASK_INVENTORY_UNCHANGED_TAG, Uuid, build_get_metadata_request, build_land_resources_request,
+    build_remote_parcel_request, parse_land_resources_reply, parse_llsd_xml,
+    profile_image_upload_body, profile_image_upload_outcome, search_stat_request_body,
+    stamp_get_metadata_reply, stamp_remote_parcel_request, stamp_search_stat_answer,
+    stamp_task_inventory_cap_reply, task_inventory_cap_url, task_inventory_failed_body,
+    task_inventory_unchanged_body,
 };
 use std::collections::HashMap;
 
@@ -305,19 +306,21 @@ pub(crate) fn run_caps_oneway(cap_url: &str, body: String) {
     post_llsd_oneway(cap_url, body, "a fire-and-forget capability POST");
 }
 
-/// POSTs a `ChatSessionRequest` accept / decline `body` (blocking) and forwards
-/// the LLSD reply to `caps_tx` tagged [`CAP_CHAT_SESSION_REQUEST`], stamping the
-/// answered invitation's `session-id` + `from_group` into the reply map so the
-/// session can route the accept roster to the right participants (the reply
-/// carries no session id of its own). A non-map reply (decline ack / OpenSim's
-/// stubbed `true`) carries no roster, so the fold is then a no-op. Mirrors the
-/// tokio `post_chat_session_request`.
+/// POSTs a `ChatSessionRequest` `body` (blocking) and hands the LLSD reply back
+/// over `replies_tx` as a [`ChatSessionReply`] carrying `session`, the session
+/// it was posted for, and `purpose`, which request it was. The reply names no
+/// session of its own — the reference keeps the id in the coroutine that
+/// posted — so the session travels with the request, typed, never in the body.
+/// A failed POST or a reply that is not LLSD is reported over `caps_tx` as a
+/// failure of [`CAP_CHAT_SESSION_REQUEST`]. Mirrors the tokio
+/// `post_chat_session_request`.
 pub(crate) fn run_chat_session_request(
     cap_url: &str,
     body: String,
-    session_id: Uuid,
-    from_group: bool,
+    session: ChatSessionKind,
+    purpose: ChatSessionRequestPurpose,
     caps_tx: &Sender<(String, Llsd)>,
+    replies_tx: &Sender<ChatSessionReply>,
 ) {
     let Ok(http) = crate::http_proxy::blocking_client_builder()
         .timeout(EVENT_QUEUE_TIMEOUT)
@@ -343,6 +346,8 @@ pub(crate) fn run_chat_session_request(
     if !status.is_success() {
         tracing::warn!(
             capability = CAP_CHAT_SESSION_REQUEST,
+            ?session,
+            ?purpose,
             %status,
             body = text.chars().take(200).collect::<String>(),
             "ChatSessionRequest refused the request"
@@ -351,6 +356,8 @@ pub(crate) fn run_chat_session_request(
     let Ok(reply) = parse_llsd_xml(&text) else {
         tracing::warn!(
             capability = CAP_CHAT_SESSION_REQUEST,
+            ?session,
+            ?purpose,
             %status,
             body = text.chars().take(200).collect::<String>(),
             "ChatSessionRequest answered with something that is not LLSD"
@@ -358,92 +365,13 @@ pub(crate) fn run_chat_session_request(
         report_caps_failure(caps_tx, CAP_CHAT_SESSION_REQUEST);
         return;
     };
-    let mut map = match reply {
-        Llsd::Map(map) => map,
-        _ => HashMap::new(),
-    };
-    let _previous = map.insert("session-id".to_owned(), Llsd::Uuid(session_id));
-    let _previous = map.insert("from_group".to_owned(), Llsd::Boolean(from_group));
     deliver(
-        caps_tx,
-        (CAP_CHAT_SESSION_REQUEST.to_owned(), Llsd::Map(map)),
-    );
-}
-
-/// POSTs a `ChatSessionRequest` `fetch history` `body` (blocking) and forwards
-/// the reply to `caps_tx` tagged [`CHAT_SESSION_FETCH_HISTORY_TAG`] — the
-/// synthetic routing tag, because the reply is a **bare LLSD array** (the
-/// session's server-side backlog, oldest-first) that a plain
-/// [`CAP_CHAT_SESSION_REQUEST`] tag would misroute into the roster decoder.
-/// Like the roster path above, the reply carries no session identity of its
-/// own, so it is wrapped as
-/// `{ "history": <array>, "session-id": <uuid>, "from_group": <bool> }` for
-/// [`Session::handle_caps_event`](sl_proto::Session::handle_caps_event) to
-/// rebuild the session kind. Mirrors the tokio
-/// `post_chat_session_fetch_history`.
-pub(crate) fn run_chat_session_fetch_history(
-    cap_url: &str,
-    body: String,
-    session_id: Uuid,
-    from_group: bool,
-    caps_tx: &Sender<(String, Llsd)>,
-) {
-    let Ok(http) = crate::http_proxy::blocking_client_builder()
-        .timeout(EVENT_QUEUE_TIMEOUT)
-        .build()
-    else {
-        report_caps_failure(caps_tx, CHAT_SESSION_FETCH_HISTORY_TAG);
-        return;
-    };
-    let Ok(response) = http
-        .post(cap_url)
-        .header("Content-Type", "application/llsd+xml")
-        .body(body)
-        .send()
-    else {
-        report_caps_failure(caps_tx, CHAT_SESSION_FETCH_HISTORY_TAG);
-        return;
-    };
-    let status = response.status();
-    let Ok(text) = response.text() else {
-        report_caps_failure(caps_tx, CHAT_SESSION_FETCH_HISTORY_TAG);
-        return;
-    };
-    if !status.is_success() {
-        tracing::warn!(
-            capability = CHAT_SESSION_FETCH_HISTORY_TAG,
-            %status,
-            body = text.chars().take(200).collect::<String>(),
-            "ChatSessionRequest refused the request"
-        );
-    }
-    let Ok(reply) = parse_llsd_xml(&text) else {
-        tracing::warn!(
-            capability = CHAT_SESSION_FETCH_HISTORY_TAG,
-            %status,
-            body = text.chars().take(200).collect::<String>(),
-            "ChatSessionRequest answered with something that is not LLSD"
-        );
-        report_caps_failure(caps_tx, CHAT_SESSION_FETCH_HISTORY_TAG);
-        return;
-    };
-    tracing::debug!(
-        capability = CHAT_SESSION_FETCH_HISTORY_TAG,
-        %session_id,
-        %status,
-        records = match &reply {
-            Llsd::Array(records) => records.len(),
-            _other => 0,
+        replies_tx,
+        ChatSessionReply {
+            session,
+            purpose,
+            body: reply,
         },
-        "ChatSessionRequest answered fetch history"
-    );
-    let mut map = HashMap::new();
-    let _previous = map.insert("history".to_owned(), reply);
-    let _previous = map.insert("session-id".to_owned(), Llsd::Uuid(session_id));
-    let _previous = map.insert("from_group".to_owned(), Llsd::Boolean(from_group));
-    deliver(
-        caps_tx,
-        (CHAT_SESSION_FETCH_HISTORY_TAG.to_owned(), Llsd::Map(map)),
     );
 }
 

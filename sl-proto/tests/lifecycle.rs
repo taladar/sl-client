@@ -12,25 +12,26 @@ mod test {
     use sl_proto::{
         AbuseReport, AbuseReportType, AgentKey, AnimationKey, AssetKey, AssetType, AttachmentMode,
         AttachmentPoint, Camera, ChatAudible, ChatChannel, ChatLifecycleView, ChatSessionInfo,
-        ChatSessionKind, ChatSessionLifecycle, ChatSource, ChatType, Child, ClassifiedCategory,
-        ClassifiedKey, ClassifiedUpdate, ClickAction, CloudPosDensity, CoarseLocation, Color,
-        ColorAlpha, ControlFlags, CreateGroupParams, DayCycle, DayCycleFrame, DeRezDestination,
-        DensityLayer, DetachOrder, Diagnostic, DirFindFlags, Direction, DirectoryVisibility,
-        DisconnectReason, DisplayName, DisplayNameUpdate, Distance, EjectAction,
-        EnvironmentSettings, EstateAccessDelta, EstateAccessKind, Event, EventId, FolderInfo,
-        FolderState, FolderType, FollowCamProperty, FreezeAction, FriendKey, FriendPresence,
-        FriendRights, GestureActivation, GlobalCoordinates, Glow, GodRegionUpdate, GridCoordinates,
-        GroupKey, GroupNoticeAttachment, GroupRequestId, GroupRoleChange, GroupRoleEdit,
-        GroupRoleKey, GroupRoleMemberChange, GroupRoleUpdateType, INVENTORY_FETCH_MAX_IN_FLIGHT,
-        INVENTORY_FETCH_TIMEOUT, ImDialog, ImSessionId, ImageCodec, InterestsUpdate,
-        InventoryCallbackId, InventoryFolder, InventoryFolderKey, InventoryItem, InventoryItemMove,
-        InventoryItemOrFolderKey, InventoryKey, InventoryOwner, InventoryType, InviteChannel,
-        ItemInfo, LandArea, LandBrushAction, LandBrushRadius, LandBrushSize, LandEdit, LandImpact,
-        LandingType, LightData, LindenAmount, LindenBalance, LoginAccount, LoginParams,
-        LoginRedirect, LookAtType, LureId, MapItemType, MapRequestFlags, Material, Maturity,
-        MeanCollisionType, MeshKey, MoneyTransactionType, MovementMode, MuteFlags, MuteType,
-        NavMeshBuildStatus, NavMeshStatus, NewInventoryItem, NewInventoryLink, NotecardRez,
-        ObjectBuyItem, ObjectExtraParams, ObjectFlagSettings, ObjectKey, ObjectTransform, OwnerKey,
+        ChatSessionKind, ChatSessionLifecycle, ChatSessionReply, ChatSessionRequestPurpose,
+        ChatSource, ChatType, Child, ClassifiedCategory, ClassifiedKey, ClassifiedUpdate,
+        ClickAction, CloudPosDensity, CoarseLocation, Color, ColorAlpha, ControlFlags,
+        CreateGroupParams, DayCycle, DayCycleFrame, DeRezDestination, DensityLayer, DetachOrder,
+        Diagnostic, DirFindFlags, Direction, DirectoryVisibility, DisconnectReason, DisplayName,
+        DisplayNameUpdate, Distance, EjectAction, EnvironmentSettings, EstateAccessDelta,
+        EstateAccessKind, Event, EventId, FolderInfo, FolderState, FolderType, FollowCamProperty,
+        FreezeAction, FriendKey, FriendPresence, FriendRights, GestureActivation,
+        GlobalCoordinates, Glow, GodRegionUpdate, GridCoordinates, GroupKey, GroupNoticeAttachment,
+        GroupRequestId, GroupRoleChange, GroupRoleEdit, GroupRoleKey, GroupRoleMemberChange,
+        GroupRoleUpdateType, INVENTORY_FETCH_MAX_IN_FLIGHT, INVENTORY_FETCH_TIMEOUT, ImDialog,
+        ImSessionId, ImageCodec, InterestsUpdate, InventoryCallbackId, InventoryFolder,
+        InventoryFolderKey, InventoryItem, InventoryItemMove, InventoryItemOrFolderKey,
+        InventoryKey, InventoryOwner, InventoryType, InviteChannel, ItemInfo, LandArea,
+        LandBrushAction, LandBrushRadius, LandBrushSize, LandEdit, LandImpact, LandingType,
+        LightData, LindenAmount, LindenBalance, LoginAccount, LoginParams, LoginRedirect,
+        LookAtType, LureId, MapItemType, MapRequestFlags, Material, Maturity, MeanCollisionType,
+        MeshKey, MoneyTransactionType, MovementMode, MuteFlags, MuteType, NavMeshBuildStatus,
+        NavMeshStatus, NewInventoryItem, NewInventoryLink, NotecardRez, ObjectBuyItem,
+        ObjectExtraParams, ObjectFlagSettings, ObjectKey, ObjectTransform, OwnerKey,
         ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelFlags,
         ParcelKey, ParcelMediaCommand, ParcelRect, ParcelRequestResult, ParcelReturnType,
         ParcelStatus, ParcelUpdate, PendingInvite, PermissionField, Permissions, Permissions5,
@@ -22587,7 +22588,7 @@ mod test {
             from_agent_id,
             from_name,
             dialog,
-            from_group,
+            session: invited,
             session_name,
             message,
             channel,
@@ -22604,7 +22605,12 @@ mod test {
         assert_eq!(from_agent_id, AgentKey::from(from));
         assert_eq!(from_name, "Inviter");
         assert_eq!(dialog, ImDialog::SessionGroupStart);
-        assert!(from_group);
+        assert_eq!(
+            invited,
+            ChatSessionKind::Group {
+                group_id: GroupKey::from(session_id)
+            }
+        );
         assert_eq!(session_name, "My Group");
         assert_eq!(message, "join us");
         assert_eq!(channel, InviteChannel::Text);
@@ -22831,7 +22837,7 @@ mod test {
 
         // Accept → Joined.
         session.handle_caps_event("ChatterBoxInvitation", &body, now)?;
-        session.accept_chat_invite(ImSessionId::from(group), true, now);
+        session.accept_chat_invite(kind, now);
         assert_eq!(
             session.chat_session_lifecycle(kind),
             Some(&ChatSessionLifecycle::Joined)
@@ -22839,8 +22845,101 @@ mod test {
 
         // Re-invite then decline → entry removed.
         session.handle_caps_event("ChatterBoxInvitation", &body, now)?;
-        session.decline_chat_invite(ImSessionId::from(group), true, now);
+        session.decline_chat_invite(kind, now);
         assert_eq!(session.chat_session_lifecycle(kind), None);
+        Ok(())
+    }
+
+    /// A voice invitation whose `invitation_type` is the reference's
+    /// `P2P_CHAT_SESSION` is a 1:1 call with the caller: it is pending on the
+    /// direct session with that avatar, and no conference is opened under the
+    /// call's session id.
+    #[test]
+    fn a_p2p_voice_invitation_is_pending_on_the_direct_session() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        let call = uuid::Uuid::from_u128(0x62_11);
+        let caller = uuid::Uuid::from_u128(0x62_12);
+        let xml = format!(
+            "<llsd><map>\
+               <key>session_id</key><uuid>{call}</uuid>\
+               <key>from_id</key><uuid>{caller}</uuid>\
+               <key>from_name</key><string>Caller</string>\
+               <key>session_name</key><string>Caller</string>\
+               <key>voice</key><map><key>invitation_type</key><integer>2</integer></map>\
+             </map></llsd>"
+        );
+        session.handle_caps_event("ChatterBoxInvitation", &parse_llsd_xml(&xml)?, now)?;
+        let direct = ChatSessionKind::Direct {
+            peer: AgentKey::from(caller),
+        };
+        let invited = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::ConferenceInvited { session, .. } => Some(session),
+                _ => None,
+            })
+            .ok_or("expected a ConferenceInvited event")?;
+        assert_eq!(invited, direct);
+        assert!(matches!(
+            session.chat_session_lifecycle(direct),
+            Some(ChatSessionLifecycle::Invited(PendingInvite {
+                channel: InviteChannel::Voice,
+                ..
+            }))
+        ));
+        assert!(session.session_has_voice(direct));
+        let conference = ChatSessionKind::Conference {
+            id: ImSessionId::from(call),
+        };
+        assert_eq!(session.chat_session_lifecycle(conference), None);
+        Ok(())
+    }
+
+    /// Declining a 1:1 call on a conversation already open with the caller
+    /// refuses the call only: the conversation stays, without the offer. A
+    /// declined call with no conversation behind it leaves nothing.
+    #[test]
+    fn declining_a_call_keeps_the_open_conversation() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let peer = AgentKey::from(uuid::Uuid::from_u128(0x62_21));
+        let direct = ChatSessionKind::Direct { peer };
+        session.send_instant_message(peer, "hello", now)?;
+        drain(&mut session)?;
+        session.handle_chat_session_reply(
+            &answer(
+                direct,
+                "<llsd><map><key>voice_channel_info</key><map>\
+                   <key>channel_uri</key><string>sip:call@example.com</string>\
+                 </map></map></llsd>",
+            )?,
+            now,
+        );
+        assert!(session.session_has_voice(direct));
+
+        session.decline_chat_invite(direct, now);
+        assert_eq!(
+            session.chat_session_lifecycle(direct),
+            Some(&ChatSessionLifecycle::Joined)
+        );
+        assert!(!session.session_has_voice(direct));
+        assert_eq!(history(&session, direct).len(), 1, "the line is kept");
+
+        let stranger = ChatSessionKind::Direct {
+            peer: AgentKey::from(uuid::Uuid::from_u128(0x62_22)),
+        };
+        session.accept_chat_invite(stranger, now);
+        session.decline_chat_invite(stranger, now);
+        assert!(
+            session.chat_session_lifecycle(stranger).is_some(),
+            "an accepted call is a conversation, kept like any other"
+        );
         Ok(())
     }
 
@@ -22909,9 +23008,29 @@ mod test {
         Ok(())
     }
 
+    /// The reply to a `ChatSessionRequest` accept or decline the runtime posted
+    /// for `session`, as the runtime hands it back.
+    fn answer(session: ChatSessionKind, xml: &str) -> Result<ChatSessionReply, TestError> {
+        Ok(ChatSessionReply {
+            session,
+            purpose: ChatSessionRequestPurpose::Answer,
+            body: parse_llsd_xml(xml)?,
+        })
+    }
+
+    /// The reply to a `ChatSessionRequest` `fetch history` the runtime posted
+    /// for `session`, as the runtime hands it back.
+    fn history_reply(session: ChatSessionKind, xml: &str) -> Result<ChatSessionReply, TestError> {
+        Ok(ChatSessionReply {
+            session,
+            purpose: ChatSessionRequestPurpose::FetchHistory,
+            body: parse_llsd_xml(xml)?,
+        })
+    }
+
     /// A `ChatSessionRequest` accept reply carrying the session's agent roster
-    /// (tagged with the answered session id + `from_group`, as the runtime does)
-    /// seeds that session's participants. Both the modern `agent_info` map and the
+    /// (handed back with the session the runtime posted for) seeds that
+    /// session's participants. Both the modern `agent_info` map and the
     /// deprecated `agents` array are decoded.
     #[test]
     fn chat_session_request_roster_seeds_participants() -> Result<(), TestError> {
@@ -22924,17 +23043,15 @@ mod test {
         let agent_b = uuid::Uuid::from_u128(0x64_0B);
         let xml = format!(
             "<llsd><map>\
-               <key>session-id</key><uuid>{conf}</uuid>\
-               <key>from_group</key><boolean>0</boolean>\
                <key>agent_info</key><map>\
                  <key>{agent_a}</key><map><key>is_moderator</key><boolean>0</boolean></map>\
                  <key>{agent_b}</key><map><key>is_moderator</key><boolean>1</boolean></map>\
                </map></map></llsd>"
         );
-        session.handle_caps_event("ChatSessionRequest", &parse_llsd_xml(&xml)?, now)?;
         let kind = ChatSessionKind::Conference {
             id: ImSessionId::from(conf),
         };
+        session.handle_chat_session_reply(&answer(kind, &xml)?, now);
         let mut participants: Vec<AgentKey> = session.participants(kind).collect();
         participants.sort();
         let mut expected = vec![AgentKey::from(agent_a), AgentKey::from(agent_b)];
@@ -24236,19 +24353,15 @@ mod test {
         drain(&mut session)?;
 
         let conf = uuid::Uuid::from_u128(0x69_01);
-        let xml = format!(
-            "<llsd><map>\
-               <key>session-id</key><uuid>{conf}</uuid>\
-               <key>from_group</key><boolean>0</boolean>\
+        let xml = "<llsd><map>\
                <key>voice_channel_info</key><map>\
                  <key>channel_uri</key><string>sip:room@example.com</string>\
                  <key>voice_server_type</key><string>webrtc</string>\
-               </map></map></llsd>"
-        );
-        session.handle_caps_event("ChatSessionRequest", &parse_llsd_xml(&xml)?, now)?;
+               </map></map></llsd>";
         let kind = ChatSessionKind::Conference {
             id: ImSessionId::from(conf),
         };
+        session.handle_chat_session_reply(&answer(kind, xml)?, now);
         assert!(session.session_has_voice(kind));
         let channel = session
             .session_voice_channel(kind)
@@ -24261,6 +24374,62 @@ mod test {
         );
         assert_eq!(channel.voice_server_type.as_deref(), Some("webrtc"));
         assert_eq!(channel.channel_credentials, None);
+        Ok(())
+    }
+
+    /// The reply to a voice accept on a 1:1 session lands on that session: it
+    /// records the call's channel there, and opens no conference under the
+    /// 1:1 session id (the runtimes used to stamp the reply `from_group`
+    /// clear, which rebuilt every non-group reply as a conference).
+    #[test]
+    fn a_direct_voice_accept_reply_lands_on_the_direct_session() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        let peer = AgentKey::from(uuid::Uuid::from_u128(0x69_11));
+        let direct = ChatSessionKind::Direct { peer };
+        session.join_session_voice(direct, now);
+        let xml = "<llsd><map>\
+               <key>voice_channel_info</key><map>\
+                 <key>channel_uri</key><string>sip:call@example.com</string>\
+               </map></map></llsd>";
+        session.handle_chat_session_reply(&answer(direct, xml)?, now);
+
+        let channel = session
+            .session_voice_channel(direct)
+            .ok_or("the call's channel is on the direct session")?;
+        assert_eq!(
+            channel.channel_uri,
+            url::Url::parse("sip:call@example.com")
+                .ok()
+                .map(sl_wire::VoiceChannelUri::Uri)
+        );
+        let kinds: Vec<ChatSessionKind> =
+            session.chat_sessions_info().map(|info| info.kind).collect();
+        assert_eq!(kinds, vec![direct], "no phantom conference beside it");
+        Ok(())
+    }
+
+    /// A decline's reply carries neither a roster nor a channel and opens no
+    /// session: the declined one stays gone.
+    #[test]
+    fn a_decline_reply_opens_nothing() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        let conference = ChatSessionKind::Conference {
+            id: ImSessionId::from(uuid::Uuid::from_u128(0x69_21)),
+        };
+        session.handle_chat_session_reply(
+            &answer(conference, "<llsd><boolean>1</boolean></llsd>")?,
+            now,
+        );
+        assert_eq!(session.chat_sessions_info().count(), 0);
+        assert!(drain_events(&mut session).is_empty());
         Ok(())
     }
 
@@ -24447,15 +24616,11 @@ mod test {
             id: ImSessionId::from(conf),
         };
         // Seed a voice channel (accept reply) and a joined state.
-        let xml = format!(
-            "<llsd><map>\
-               <key>session-id</key><uuid>{conf}</uuid>\
-               <key>from_group</key><boolean>0</boolean>\
+        let xml = "<llsd><map>\
                <key>voice_channel_info</key><map>\
                  <key>channel_uri</key><string>sip:room@example.com</string>\
-               </map></map></llsd>"
-        );
-        session.handle_caps_event("ChatSessionRequest", &parse_llsd_xml(&xml)?, now)?;
+               </map></map></llsd>";
+        session.handle_chat_session_reply(&answer(kind, xml)?, now);
         session.join_session_voice(kind, now);
         assert!(session.session_voice_joined(kind));
         drain(&mut session)?;
@@ -24746,7 +24911,12 @@ mod test {
         assert_eq!(session.next_server_history_fetches(), Vec::new());
 
         session.set_fetch_server_chat_history(false);
-        session.accept_chat_invite(ImSessionId::from(group), true, now);
+        session.accept_chat_invite(
+            ChatSessionKind::Group {
+                group_id: GroupKey::from(group),
+            },
+            now,
+        );
         // Joined now, but the auto-fetch is disabled.
         assert_eq!(session.next_server_history_fetches(), Vec::new());
 
@@ -24762,15 +24932,14 @@ mod test {
         let conf_kind = ChatSessionKind::Conference {
             id: ImSessionId::from(conf),
         };
-        session.accept_chat_invite(ImSessionId::from(conf), false, now);
+        session.accept_chat_invite(conf_kind, now);
         session.note_server_history_requested(conf_kind);
         assert_eq!(session.next_server_history_fetches(), Vec::new());
         Ok(())
     }
 
-    /// A `fetch history` reply (the runtime's wrapped array under the synthetic
-    /// routing tag) folds into the right session by the stamped `session-id` +
-    /// `from_group`, drops the entry duplicating the live trigger message
+    /// A `fetch history` reply (a bare array, handed back with the session the
+    /// runtime posted for) folds into that session, drops the entry duplicating the live trigger message
     /// (which arrived both live and inside the fetch), stores the rest
     /// oldest-first, and surfaces them as `Event::SessionServerHistory`.
     #[test]
@@ -24787,8 +24956,7 @@ mod test {
         drain_events(&mut session);
 
         let reply_xml = format!(
-            "<llsd><map>\
-               <key>history</key><array>\
+            "<llsd><array>\
                  <map>\
                    <key>from</key><string>Backlog Speaker</string>\
                    <key>from_id</key><uuid>{sender}</uuid>\
@@ -24803,20 +24971,13 @@ mod test {
                    <key>num</key><integer>1</integer>\
                    <key>time</key><integer>1665010060</integer>\
                  </map>\
-               </array>\
-               <key>session-id</key><uuid>{group}</uuid>\
-               <key>from_group</key><boolean>1</boolean>\
-             </map></llsd>"
+             </array></llsd>"
         );
-        session.handle_caps_event(
-            sl_proto::CHAT_SESSION_FETCH_HISTORY_TAG,
-            &parse_llsd_xml(&reply_xml)?,
-            now,
-        )?;
-
         let kind = ChatSessionKind::Group {
             group_id: GroupKey::from(group),
         };
+        session.handle_chat_session_reply(&history_reply(kind, &reply_xml)?, now);
+
         // The stored backlog dropped the live-trigger duplicate ("hello group",
         // the `inbound_group_im` text) and kept the genuinely older line.
         let stored: Vec<&sl_proto::ServerHistoryMessage> = session.server_history(kind).collect();
@@ -24847,7 +25008,7 @@ mod test {
         Ok(())
     }
 
-    /// A `from_group`-clear reply routes to the conference kind, and an empty
+    /// A conference's reply routes to the conference, and an empty
     /// backlog (OpenSim never answers, but a hypothetical empty array reply)
     /// stores nothing and emits no event.
     #[test]
@@ -24859,27 +25020,19 @@ mod test {
         let conf = uuid::Uuid::from_u128(0x7D01);
         let speaker = uuid::Uuid::from_u128(0x7D02);
         let reply_xml = format!(
-            "<llsd><map>\
-               <key>history</key><array>\
+            "<llsd><array>\
                  <map>\
                    <key>from</key><string>Conference Speaker</string>\
                    <key>from_id</key><uuid>{speaker}</uuid>\
                    <key>message</key><string>conference backlog</string>\
                    <key>time</key><integer>1665010000</integer>\
                  </map>\
-               </array>\
-               <key>session-id</key><uuid>{conf}</uuid>\
-               <key>from_group</key><boolean>0</boolean>\
-             </map></llsd>"
+             </array></llsd>"
         );
-        session.handle_caps_event(
-            sl_proto::CHAT_SESSION_FETCH_HISTORY_TAG,
-            &parse_llsd_xml(&reply_xml)?,
-            now,
-        )?;
         let kind = ChatSessionKind::Conference {
             id: ImSessionId::from(conf),
         };
+        session.handle_chat_session_reply(&history_reply(kind, &reply_xml)?, now);
         assert_eq!(session.server_history(kind).count(), 1);
         assert!(matches!(
             drain_events(&mut session).as_slice(),
@@ -24887,18 +25040,8 @@ mod test {
         ));
 
         // An empty backlog reply: stored empty, no event.
-        let empty_xml = format!(
-            "<llsd><map>\
-               <key>history</key><array></array>\
-               <key>session-id</key><uuid>{conf}</uuid>\
-               <key>from_group</key><boolean>0</boolean>\
-             </map></llsd>"
-        );
-        session.handle_caps_event(
-            sl_proto::CHAT_SESSION_FETCH_HISTORY_TAG,
-            &parse_llsd_xml(&empty_xml)?,
-            now,
-        )?;
+        session
+            .handle_chat_session_reply(&history_reply(kind, "<llsd><array></array></llsd>")?, now);
         assert_eq!(session.server_history(kind).count(), 0);
         assert!(drain_events(&mut session).is_empty());
         Ok(())

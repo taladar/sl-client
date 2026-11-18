@@ -138,6 +138,27 @@ session line goes out with the reference's one zero byte. What each grid does
 with a session is measured in [Grid Behaviour: Group and conference
 sessions](../gridspec/chat.md#group-and-conference-sessions).
 
+An invitation names the session it is to as a `ChatSessionKind` — the
+`session` of `Event::ConferenceInvited` — and is answered with that kind
+(`Command::AcceptChatInvite` / `DeclineChatInvite { session }`). A voice
+invitation whose `voice.invitation_type` is 2, the reference's
+`P2P_CHAT_SESSION`, is a **1:1 call** with the inviter, so its kind is the
+`Direct` session with that avatar rather than a conference under the call's
+id; otherwise a `from_group` invitation is a group's and anything else a
+conference (still read as a group's by its id, as above). A group or a
+conference is accepted with the cap's `accept invitation` and declined with
+`decline invitation`, or left with a UDP `SessionLeave` where there is no cap;
+a 1:1 call is accepted with **no POST**, as the reference accepts one, and
+declined with `decline p2p voice`. Declining a call leaves a conversation
+already open with the caller in place.
+
+The cap's replies — an accept's roster and `voice_channel_info`, a
+`fetch history`'s backlog — name no session of their own: the reference keeps
+the session id in the coroutine that posted. So the runtimes carry the kind
+from the request to its reply as a typed `ChatSessionReply { session, purpose,
+body }` on a channel of its own, handed to `Session::handle_chat_session_reply`,
+rather than writing it into the reply body.
+
 ## The server side
 
 `SimSession` keeps a real **chat-session registry** — the mirror of the
@@ -187,7 +208,8 @@ that mints its own session id for a conference tells the starter so with
 > - Commands (`Chat`, `Typing`, `InstantMessage`, `AutoResponse`, `ImTyping`,
 >   `StartGroupSession`, `SendGroupMessage`, `LeaveGroupSession`,
 >   `StartConference`, `SendConferenceMessage`, `LeaveConference`,
->   `AcceptInventoryOffer`, `DeclineInventoryOffer`) are in
+>   `AcceptChatInvite`, `DeclineChatInvite`, `AcceptInventoryOffer`,
+>   `DeclineInventoryOffer`) are in
 >   `sl-proto/src/command.rs`.
 > - Events (`ChatReceived`, `ChatTyping`, `InstantMessageReceived`, `ImTyping`,
 >   `GroupSessionMessage`, `GroupSessionParticipant`,

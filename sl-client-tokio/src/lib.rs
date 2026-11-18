@@ -72,54 +72,55 @@ pub use sl_proto::{
     AvatarAttachment, AvatarClassified, AvatarGroupMembership, AvatarInterests, AvatarPick,
     AvatarPickerResult, AvatarProperties, AvatarRenderInfo, AvatarRenderReport, BUILTIN_UI_SOUNDS,
     Camera, CameraError, ChatAudible, ChatChannel, ChatLifecycleView, ChatLogConfig, ChatMessage,
-    ChatSessionAgentUpdate, ChatSessionInfo, ChatSessionKind, ChatSource, ChatSourceType, ChatType,
-    ChatTypeNotAVolume, Child, CircuitCode, CircuitId, CircuitProbe, ClassifiedCategory,
-    ClassifiedClickStats, ClassifiedInfo, ClassifiedKey, ClassifiedQueryFlags,
-    ClassifiedSearchClicks, ClassifiedUpdate, ClickAction, ClientDirectories, ClockStyle,
-    CoarseLocation, Color, ColorAlpha, ColumnUnit, Command, ControlFlags, ConversationKind,
-    CreateGroupParams, CreateListing, DEFAULT_PRIM_TEXTURE, DayCycle, DayCycleFrame,
-    DeRezDestination, DetachOrder, Diagnostic, DirClassifiedResult, DirEventResult, DirFindFlags,
-    DirGroupResult, DirLandResult, DirPeopleResult, DirPlaceResult, Direction, DirectoryVisibility,
-    DiscardLevel, DisconnectReason, DisplayName, DisplayNameUpdate, Distance, DynamicMenus,
-    EconomyData, EjectAction, EnvironmentPushAction, EnvironmentSettings, EnvironmentUpdate,
-    EstateAccessDelta, EstateAccessKind, EstateAccessLists, EstateBan, EstateCovenant, EstateInfo,
-    EstateInfoUpdate, Event, ExperienceEnvironmentPush, ExperienceEvent, ExperienceEventPermission,
-    ExperienceInfo, ExperienceKey, ExperienceLocation, ExperiencePermission, ExperienceProperties,
-    ExperienceSearchPage, ExperienceUpdate, ExtendedMesh, FaceMaterialPut, FlexibleData,
-    FolderInfo, FolderState, FolderType, FreezeAction, Friend, FriendKey, FriendPresence,
-    FriendRights, GestureActivation, GlobalCoordinates, Glow, GltfMaterialOverride, GodKickAction,
-    GodKickTarget, GodRegionUpdate, GridCoordinates, GroupBan, GroupBanAction, GroupKey,
-    GroupMember, GroupMembership, GroupNotice, GroupNoticeAttachment, GroupNoticeKey, GroupProfile,
-    GroupRequestId, GroupRole, GroupRoleChange, GroupRoleEdit, GroupRoleKey, GroupRoleMember,
-    GroupRoleMemberChange, GroupRoleUpdateType, GroupTitle, HomeLocation, HomeLocationAnswer,
-    IceCandidate, ImDialog, ImSessionId, ImageCodec, InstantMessage, InterestListMode,
-    InterestListReply, InterestsUpdate, InventoryCacheConfig, InventoryCallbackId, InventoryCursor,
-    InventoryFolder, InventoryFolderKey, InventoryItem, InventoryItemOrFolderKey, InventoryKey,
-    InventoryOffer, InventoryOwner, InventoryType, InviteChannel, ItemInfo, Key, Kilobits,
-    LOGOUT_TIMEOUT, LandArea, LandBrushAction, LandBrushRadius, LandBrushSize, LandEdit,
-    LandImpact, LandProduct, LandSearchType, LandStatExtended, LandStatItem, LandStatReportType,
-    LandStatScore, LandingType, LegacyMaterial, LightData, LightImage, LindenAmount, LindenBalance,
-    Listing, ListingId, Llsd, LoadUrlRequest, LoggedChatType, LoginAccount, LoginFailure,
-    LoginParams, LoginRejectKind, LoginRequest, LoginResponse, LoginSuccess, LookAtType,
-    LureDestination, LureId, MAX_FACES, MEDIA_PERM_ALL, MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP,
-    MEDIA_PERM_NONE, MEDIA_PERM_OWNER, MapBlockBatch, MapBlockKind, MapBlockRecord, MapItem,
-    MapItemType, MapLayer, MapRegionInfo, MapRequestFlags, MarketplaceApiError,
-    MarketplaceApiErrorKind, MarketplaceAssociateInventoryInfo, MarketplaceInventoryInfo,
-    MarketplaceOperation, Material, MaterialOverrideUpdate, Maturity, MediaEntry, MerchantStatus,
-    MeshKey, MeshUploadStatus, MessageCursor, MfaChallenge, ModifyRegionAnswer, MoneyBalance,
-    MoneyTransaction, MoneyTransactionType, MovementMode, MuteEntry, MuteFlags, MuteType,
-    NearbyHistoryLine, NegativeBalanceError, NeighborInfo, NeighborRetirement, NewInventoryItem,
-    NewInventoryLink, Object, ObjectBuyItem, ObjectExtraParams, ObjectFlagSettings, ObjectKey,
-    ObjectMediaResponse, ObjectMotion, ObjectPermMasks, ObjectPhysicsData, ObjectProperties,
-    ObjectPropertiesFamily, ObjectStreamBatch, ObjectStreamEntry, ObjectTransform,
-    ObjectUpdateForm, OpenRegionInfo, OpenSimExtras, OwnerKey, PacketFlags, ParcelAccessEntry,
-    ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelCollision, ParcelDetails,
-    ParcelFlags, ParcelInfo, ParcelKey, ParcelListingFlags, ParcelMediaCommand, ParcelMediaData,
-    ParcelMediaUpdateInfo, ParcelObjectOwner, ParcelObjectOwnersPart, ParcelOverlayCell,
-    ParcelOverlayGrid, ParcelOverlayInfo, ParcelOwnership, ParcelRect, ParcelRequestResult,
-    ParcelReturnType, ParcelStatus, ParcelUpdate, ParcelVoiceInfo, ParticleSystem, PermissionField,
-    Permissions, Permissions5, PhysicsShapeType, PhysicsShapeTypes, PickInfo, PickKey, PickUpdate,
-    PingId, PlacesResult, PlayingAnimation, PointAtType, PrimShape, PrimShapeParams, ProductType,
+    ChatSessionAgentUpdate, ChatSessionInfo, ChatSessionKind, ChatSessionReply,
+    ChatSessionRequestPurpose, ChatSource, ChatSourceType, ChatType, ChatTypeNotAVolume, Child,
+    CircuitCode, CircuitId, CircuitProbe, ClassifiedCategory, ClassifiedClickStats, ClassifiedInfo,
+    ClassifiedKey, ClassifiedQueryFlags, ClassifiedSearchClicks, ClassifiedUpdate, ClickAction,
+    ClientDirectories, ClockStyle, CoarseLocation, Color, ColorAlpha, ColumnUnit, Command,
+    ControlFlags, ConversationKind, CreateGroupParams, CreateListing, DEFAULT_PRIM_TEXTURE,
+    DayCycle, DayCycleFrame, DeRezDestination, DetachOrder, Diagnostic, DirClassifiedResult,
+    DirEventResult, DirFindFlags, DirGroupResult, DirLandResult, DirPeopleResult, DirPlaceResult,
+    Direction, DirectoryVisibility, DiscardLevel, DisconnectReason, DisplayName, DisplayNameUpdate,
+    Distance, DynamicMenus, EconomyData, EjectAction, EnvironmentPushAction, EnvironmentSettings,
+    EnvironmentUpdate, EstateAccessDelta, EstateAccessKind, EstateAccessLists, EstateBan,
+    EstateCovenant, EstateInfo, EstateInfoUpdate, Event, ExperienceEnvironmentPush,
+    ExperienceEvent, ExperienceEventPermission, ExperienceInfo, ExperienceKey, ExperienceLocation,
+    ExperiencePermission, ExperienceProperties, ExperienceSearchPage, ExperienceUpdate,
+    ExtendedMesh, FaceMaterialPut, FlexibleData, FolderInfo, FolderState, FolderType, FreezeAction,
+    Friend, FriendKey, FriendPresence, FriendRights, GestureActivation, GlobalCoordinates, Glow,
+    GltfMaterialOverride, GodKickAction, GodKickTarget, GodRegionUpdate, GridCoordinates, GroupBan,
+    GroupBanAction, GroupKey, GroupMember, GroupMembership, GroupNotice, GroupNoticeAttachment,
+    GroupNoticeKey, GroupProfile, GroupRequestId, GroupRole, GroupRoleChange, GroupRoleEdit,
+    GroupRoleKey, GroupRoleMember, GroupRoleMemberChange, GroupRoleUpdateType, GroupTitle,
+    HomeLocation, HomeLocationAnswer, IceCandidate, ImDialog, ImSessionId, ImageCodec,
+    InstantMessage, InterestListMode, InterestListReply, InterestsUpdate, InventoryCacheConfig,
+    InventoryCallbackId, InventoryCursor, InventoryFolder, InventoryFolderKey, InventoryItem,
+    InventoryItemOrFolderKey, InventoryKey, InventoryOffer, InventoryOwner, InventoryType,
+    InviteChannel, ItemInfo, Key, Kilobits, LOGOUT_TIMEOUT, LandArea, LandBrushAction,
+    LandBrushRadius, LandBrushSize, LandEdit, LandImpact, LandProduct, LandSearchType,
+    LandStatExtended, LandStatItem, LandStatReportType, LandStatScore, LandingType, LegacyMaterial,
+    LightData, LightImage, LindenAmount, LindenBalance, Listing, ListingId, Llsd, LoadUrlRequest,
+    LoggedChatType, LoginAccount, LoginFailure, LoginParams, LoginRejectKind, LoginRequest,
+    LoginResponse, LoginSuccess, LookAtType, LureDestination, LureId, MAX_FACES, MEDIA_PERM_ALL,
+    MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP, MEDIA_PERM_NONE, MEDIA_PERM_OWNER, MapBlockBatch,
+    MapBlockKind, MapBlockRecord, MapItem, MapItemType, MapLayer, MapRegionInfo, MapRequestFlags,
+    MarketplaceApiError, MarketplaceApiErrorKind, MarketplaceAssociateInventoryInfo,
+    MarketplaceInventoryInfo, MarketplaceOperation, Material, MaterialOverrideUpdate, Maturity,
+    MediaEntry, MerchantStatus, MeshKey, MeshUploadStatus, MessageCursor, MfaChallenge,
+    ModifyRegionAnswer, MoneyBalance, MoneyTransaction, MoneyTransactionType, MovementMode,
+    MuteEntry, MuteFlags, MuteType, NearbyHistoryLine, NegativeBalanceError, NeighborInfo,
+    NeighborRetirement, NewInventoryItem, NewInventoryLink, Object, ObjectBuyItem,
+    ObjectExtraParams, ObjectFlagSettings, ObjectKey, ObjectMediaResponse, ObjectMotion,
+    ObjectPermMasks, ObjectPhysicsData, ObjectProperties, ObjectPropertiesFamily,
+    ObjectStreamBatch, ObjectStreamEntry, ObjectTransform, ObjectUpdateForm, OpenRegionInfo,
+    OpenSimExtras, OwnerKey, PacketFlags, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope,
+    ParcelCategory, ParcelCollision, ParcelDetails, ParcelFlags, ParcelInfo, ParcelKey,
+    ParcelListingFlags, ParcelMediaCommand, ParcelMediaData, ParcelMediaUpdateInfo,
+    ParcelObjectOwner, ParcelObjectOwnersPart, ParcelOverlayCell, ParcelOverlayGrid,
+    ParcelOverlayInfo, ParcelOwnership, ParcelRect, ParcelRequestResult, ParcelReturnType,
+    ParcelStatus, ParcelUpdate, ParcelVoiceInfo, ParticleSystem, PermissionField, Permissions,
+    Permissions5, PhysicsShapeType, PhysicsShapeTypes, PickInfo, PickKey, PickUpdate, PingId,
+    PlacesResult, PlayingAnimation, PointAtType, PrimShape, PrimShapeParams, ProductType,
     ProfileImage, ProfileUpdate, ProposalCandidateId, ProposalVoteId, QueryId,
     REQUESTED_CAPABILITIES, ReflectionProbe, ReflectionProbeFlags, RegionChatSettings,
     RegionCombatSettings, RegionCoordinates, RegionDebugUpdate, RegionFlags, RegionHandle,
@@ -229,11 +230,10 @@ use crate::fetch::{fetch_asset_http, fetch_mesh_http, fetch_texture_http};
 use crate::http::{
     answer_friendship, answer_group_invitation, delete_caps_llsd, fetch_land_resources,
     fetch_lsl_syntax, get_avatar_picker_search, get_caps_llsd, get_experience_query,
-    get_task_inventory, group_bans, patch_caps_llsd, post_caps_oneway,
-    post_chat_session_fetch_history, post_chat_session_request, post_home_location,
-    post_remote_parcel_request, post_script_metadata, put_agent_profile, put_caps_llsd,
-    search_stat, set_display_name, set_region_schedule, set_terrain_material_overrides,
-    settle_environment_change, upload_profile_image,
+    get_task_inventory, group_bans, patch_caps_llsd, post_caps_oneway, post_chat_session_request,
+    post_home_location, post_remote_parcel_request, post_script_metadata, put_agent_profile,
+    put_caps_llsd, search_stat, set_display_name, set_region_schedule,
+    set_terrain_material_overrides, settle_environment_change, upload_profile_image,
 };
 use crate::inventory::{
     fetch_ais3_folders, fetch_folder_contents, fetch_group_members, fetch_inventory,
@@ -796,6 +796,9 @@ impl Client {
             .timeout(Duration::from_secs(60))
             .build()?;
         let (caps_tx, mut caps_rx) = mpsc::channel::<(String, Llsd)>(64);
+        // The replies to `ChatSessionRequest` POSTs, each carrying the session
+        // it was posted for: the reply names none of its own.
+        let (chat_replies_tx, mut chat_replies_rx) = mpsc::channel::<ChatSessionReply>(16);
         // A region change re-fetches the map in a detached task
         // ([`refetch_capabilities`]) rather than inline, so the round-trip never
         // stalls the UDP pump; the new map arrives over this channel. Each map is
@@ -1097,13 +1100,14 @@ impl Client {
             ) {
                 for kind in self.session.next_server_history_fetches() {
                     let session_id = kind.canonical_session_id(own_agent);
-                    tokio::spawn(post_chat_session_fetch_history(
+                    tokio::spawn(post_chat_session_request(
                         url.clone(),
                         chat_session_request_body(CHAT_SESSION_FETCH_HISTORY, session_id),
-                        session_id,
-                        matches!(kind, ChatSessionKind::Group { .. }),
+                        kind,
+                        ChatSessionRequestPurpose::FetchHistory,
                         http.clone(),
                         caps_tx.clone(),
+                        chat_replies_tx.clone(),
                     ));
                 }
             }
@@ -1271,6 +1275,18 @@ impl Client {
                             );
                             self.session.handle_caps_event(&message, &body, Instant::now())?;
                         }
+                    }
+                }
+                chat_reply = chat_replies_rx.recv() => {
+                    if let Some(reply) = chat_reply {
+                        tracing::trace!(
+                            target: "sl_client_tokio::wire",
+                            session = ?reply.session,
+                            purpose = ?reply.purpose,
+                            body = ?reply.body,
+                            "ChatSessionRequest reply body"
+                        );
+                        self.session.handle_chat_session_reply(&reply, Instant::now());
                     }
                 }
                 command = commands.recv() => {
@@ -3076,29 +3092,45 @@ impl Client {
                             Some(Command::MarkSessionRead { session }) => {
                                 self.session.mark_session_read(session);
                             }
-                            Some(Command::AcceptChatInvite { session_id, from_group }) => {
+                            Some(Command::AcceptChatInvite { session }) => {
                                 // Promote the registry entry to joined, then drive the
-                                // modern accept over the cap when present (its reply
-                                // roster seeds the participants); on a grid without the
-                                // cap the optimistic local join is the whole accept.
-                                self.session.accept_chat_invite(session_id, from_group, Instant::now());
-                                if let Some(url) = caps.get(CAP_CHAT_SESSION_REQUEST).cloned() {
-                                    let body = chat_session_request_body(CHAT_SESSION_ACCEPT, session_id.get());
-                                    tokio::spawn(post_chat_session_request(url, body, session_id.get(), from_group, http.clone(), caps_tx.clone()));
+                                // modern accept of a group or a conference over the cap
+                                // when present (its reply roster seeds the
+                                // participants); on a grid without the cap the
+                                // optimistic local join is the whole accept. A 1:1 call
+                                // is accepted with no POST, as the reference accepts one.
+                                self.session.accept_chat_invite(session, Instant::now());
+                                if !matches!(session, ChatSessionKind::Direct { .. })
+                                    && let (Some(url), Some(own)) = (caps.get(CAP_CHAT_SESSION_REQUEST).cloned(), self.session.agent_id())
+                                {
+                                    let body = chat_session_request_body(CHAT_SESSION_ACCEPT, session.canonical_session_id(own));
+                                    tokio::spawn(post_chat_session_request(url, body, session, ChatSessionRequestPurpose::Answer, http.clone(), caps_tx.clone(), chat_replies_tx.clone()));
                                 }
                             }
-                            Some(Command::DeclineChatInvite { session_id, from_group }) => {
+                            Some(Command::DeclineChatInvite { session }) => {
                                 // Remove the registry entry, then refuse on the wire:
-                                // the cap `decline invitation` POST when present, else
-                                // a UDP `SessionLeave` as the OpenSim fallback.
-                                self.session.decline_chat_invite(session_id, from_group, Instant::now());
-                                if let Some(url) = caps.get(CAP_CHAT_SESSION_REQUEST).cloned() {
-                                    let body = chat_session_request_body(CHAT_SESSION_DECLINE, session_id.get());
-                                    tokio::spawn(post_chat_session_request(url, body, session_id.get(), from_group, http.clone(), caps_tx.clone()));
-                                } else if from_group {
-                                    self.session.leave_group_session(GroupKey::from(session_id.get()), Instant::now())?;
-                                } else {
-                                    self.session.leave_conference(session_id, Instant::now())?;
+                                // the cap's `decline invitation` (a group or a
+                                // conference) or `decline p2p voice` (a 1:1 call) when
+                                // present, else a UDP `SessionLeave` as the OpenSim
+                                // fallback for a group or a conference.
+                                self.session.decline_chat_invite(session, Instant::now());
+                                match (caps.get(CAP_CHAT_SESSION_REQUEST).cloned(), self.session.agent_id(), session) {
+                                    (Some(url), Some(own), _) => {
+                                        let method = if matches!(session, ChatSessionKind::Direct { .. }) {
+                                            CHAT_SESSION_DECLINE_P2P_VOICE
+                                        } else {
+                                            CHAT_SESSION_DECLINE
+                                        };
+                                        let body = chat_session_request_body(method, session.canonical_session_id(own));
+                                        tokio::spawn(post_chat_session_request(url, body, session, ChatSessionRequestPurpose::Answer, http.clone(), caps_tx.clone(), chat_replies_tx.clone()));
+                                    }
+                                    (_, _, ChatSessionKind::Group { group_id }) => {
+                                        self.session.leave_group_session(group_id, Instant::now())?;
+                                    }
+                                    (_, _, ChatSessionKind::Conference { id }) => {
+                                        self.session.leave_conference(id, Instant::now())?;
+                                    }
+                                    (_, _, ChatSessionKind::Direct { .. }) => {}
                                 }
                             }
                             Some(Command::JoinSessionVoice { session }) => {
@@ -3109,14 +3141,13 @@ impl Client {
                                 self.session.join_session_voice(session, Instant::now());
                                 if let Some(own) = self.session.agent_id() {
                                     let session_uuid = session.canonical_session_id(own);
-                                    let from_group = matches!(session, ChatSessionKind::Group { .. });
                                     if let Some(url) = caps.get(CAP_PROVISION_VOICE_ACCOUNT).cloned() {
                                         let body = build_provision_voice_account_request(&VoiceProvisionRequest::vivox());
                                         tokio::spawn(post_voice_cap(url, body, CAP_PROVISION_VOICE_ACCOUNT, http.clone(), caps_tx.clone()));
                                     }
                                     if let Some(url) = caps.get(CAP_CHAT_SESSION_REQUEST).cloned() {
                                         let body = chat_session_request_body(CHAT_SESSION_ACCEPT, session_uuid);
-                                        tokio::spawn(post_chat_session_request(url, body, session_uuid, from_group, http.clone(), caps_tx.clone()));
+                                        tokio::spawn(post_chat_session_request(url, body, session, ChatSessionRequestPurpose::Answer, http.clone(), caps_tx.clone(), chat_replies_tx.clone()));
                                     }
                                 }
                             }
@@ -3128,7 +3159,6 @@ impl Client {
                                 self.session.leave_session_voice(session);
                                 if let Some(own) = self.session.agent_id() {
                                     let session_uuid = session.canonical_session_id(own);
-                                    let from_group = matches!(session, ChatSessionKind::Group { .. });
                                     let method = if matches!(session, ChatSessionKind::Direct { .. }) {
                                         CHAT_SESSION_DECLINE_P2P_VOICE
                                     } else {
@@ -3136,7 +3166,7 @@ impl Client {
                                     };
                                     if let Some(url) = caps.get(CAP_CHAT_SESSION_REQUEST).cloned() {
                                         let body = chat_session_request_body(method, session_uuid);
-                                        tokio::spawn(post_chat_session_request(url, body, session_uuid, from_group, http.clone(), caps_tx.clone()));
+                                        tokio::spawn(post_chat_session_request(url, body, session, ChatSessionRequestPurpose::Answer, http.clone(), caps_tx.clone(), chat_replies_tx.clone()));
                                     }
                                 }
                             }
@@ -3157,13 +3187,14 @@ impl Client {
                                     self.session.note_server_history_requested(kind);
                                     let session_uuid = kind.canonical_session_id(own);
                                     let body = chat_session_request_body(CHAT_SESSION_FETCH_HISTORY, session_uuid);
-                                    tokio::spawn(post_chat_session_fetch_history(
+                                    tokio::spawn(post_chat_session_request(
                                         url,
                                         body,
-                                        session_uuid,
-                                        matches!(kind, ChatSessionKind::Group { .. }),
+                                        kind,
+                                        ChatSessionRequestPurpose::FetchHistory,
                                         http.clone(),
                                         caps_tx.clone(),
+                                        chat_replies_tx.clone(),
                                     ));
                                 }
                             }

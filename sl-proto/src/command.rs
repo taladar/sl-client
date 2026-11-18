@@ -2876,22 +2876,24 @@ pub enum Command {
     /// Accept a pending chat-session invitation
     /// ([`Event::ConferenceInvited`](crate::Event::ConferenceInvited)), promoting
     /// its registry entry to joined. Where the `ChatSessionRequest` capability is
-    /// present (Second Life) this POSTs `accept invitation` and the reply roster
-    /// seeds the participants; on OpenSim the local optimistic join suffices.
+    /// present (Second Life) a group or a conference is accepted with an `accept
+    /// invitation` POST whose reply roster seeds the participants; on OpenSim the
+    /// local optimistic join suffices. A 1:1 call is accepted with no POST, as
+    /// the reference accepts one.
     AcceptChatInvite {
-        /// The invited session id (the group id for a group IM).
-        session_id: ImSessionId,
-        /// Whether the invitation is to a group IM (vs. an ad-hoc conference).
-        from_group: bool,
+        /// The invited session (the event's
+        /// [`session`](crate::Event::ConferenceInvited::session)).
+        session: ChatSessionKind,
     },
     /// Decline a pending chat-session invitation, removing its registry entry.
     /// Where the `ChatSessionRequest` capability is present this POSTs `decline
-    /// invitation`; otherwise it sends a UDP `SessionLeave` as the fallback.
+    /// invitation` (a group or a conference) or `decline p2p voice` (a 1:1
+    /// call); otherwise a group or a conference is left with a UDP
+    /// `SessionLeave`, and a 1:1 call has nothing to send.
     DeclineChatInvite {
-        /// The invited session id (the group id for a group IM).
-        session_id: ImSessionId,
-        /// Whether the invitation is to a group IM (vs. an ad-hoc conference).
-        from_group: bool,
+        /// The invited session (the event's
+        /// [`session`](crate::Event::ConferenceInvited::session)).
+        session: ChatSessionKind,
     },
     /// Join a chat session's voice channel (signalling only). Sets the session's
     /// optimistic `voice.joined` via

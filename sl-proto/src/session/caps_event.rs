@@ -8,7 +8,7 @@
 //! that request" (`GetObjectCost`, `InventoryAPIv3`, …). A handful of
 //! capabilities answer more than one kind of request, so those carry a stamped
 //! sub-tag instead ([`AVATAR_PICKER_SEARCH_TAG`],
-//! [`CHAT_SESSION_FETCH_HISTORY_TAG`], …).
+//! [`EXPERIENCE_QUERY_TAG`], …).
 //!
 //! Matching that space as raw `&str` made every tag a spelling the compiler
 //! never checked: a mistyped arm silently fell through to "unknown CAPS event"
@@ -19,9 +19,9 @@
 use super::{
     AIS3_FETCH_INVENTORY_TAG, AIS3_FETCH_LIBRARY_TAG, AVATAR_PICKER_SEARCH_TAG,
     CAP_AGENT_EXPERIENCES, CAP_AGENT_PREFERENCES, CAP_AGENT_PROFILE, CAP_ATTACHMENT_RESOURCES,
-    CAP_AVATAR_RENDER_INFO, CAP_CHAT_SESSION_REQUEST, CAP_CREATE_INVENTORY_CATEGORY,
-    CAP_DISPATCH_REGION_INFO, CAP_ESTATE_ACCESS, CAP_EXPERIENCE_PREFERENCES, CAP_EXT_ENVIRONMENT,
-    CAP_FETCH_INVENTORY, CAP_FETCH_INVENTORY_ITEM, CAP_FETCH_LIBRARY, CAP_FETCH_LIBRARY_ITEM,
+    CAP_AVATAR_RENDER_INFO, CAP_CREATE_INVENTORY_CATEGORY, CAP_DISPATCH_REGION_INFO,
+    CAP_ESTATE_ACCESS, CAP_EXPERIENCE_PREFERENCES, CAP_EXT_ENVIRONMENT, CAP_FETCH_INVENTORY,
+    CAP_FETCH_INVENTORY_ITEM, CAP_FETCH_LIBRARY, CAP_FETCH_LIBRARY_ITEM,
     CAP_FIND_EXPERIENCE_BY_NAME, CAP_GET_ADMIN_EXPERIENCES, CAP_GET_CREATOR_EXPERIENCES,
     CAP_GET_DISPLAY_NAMES, CAP_GET_EXPERIENCE_INFO, CAP_GET_EXPERIENCES, CAP_GET_METADATA,
     CAP_GET_OBJECT_COST, CAP_GET_OBJECT_PHYSICS_DATA, CAP_GROUP_API_V1, CAP_GROUP_MEMBER_DATA,
@@ -32,8 +32,8 @@ use super::{
     CAP_REGION_SCHEDULE, CAP_REMOTE_PARCEL_REQUEST, CAP_REQUEST_TASK_INVENTORY,
     CAP_RESOURCE_COST_SELECTED, CAP_SEARCH_STAT_REQUEST, CAP_SIMULATOR_FEATURES,
     CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE, CAP_UPLOAD_AGENT_PROFILE_IMAGE,
-    CAP_USER_INFO, CHAT_SESSION_FETCH_HISTORY_TAG, EXPERIENCE_QUERY_TAG, LAND_RESOURCE_DETAIL_TAG,
-    LAND_RESOURCE_SUMMARY_TAG, MODIFY_REGION_WRITE_TAG,
+    CAP_USER_INFO, EXPERIENCE_QUERY_TAG, LAND_RESOURCE_DETAIL_TAG, LAND_RESOURCE_SUMMARY_TAG,
+    MODIFY_REGION_WRITE_TAG,
 };
 
 /// One recognised CAPS event tag.
@@ -197,10 +197,6 @@ pub(crate) enum CapsEvent {
     ReadOfflineMsgs,
     /// An invitation into a group or conference IM session.
     ChatterBoxInvitation,
-    /// The reply to a chat-session request (join, leave, moderate…).
-    ChatSessionRequest,
-    /// A page of a chat session's server-side history.
-    ChatSessionFetchHistory,
     /// The confirmation that a chat session has started.
     ChatterBoxSessionStartReply,
     /// The grid's answer to something said or done in a chat session.
@@ -311,8 +307,6 @@ impl CapsEvent {
             EXPERIENCE_QUERY_TAG => Self::ExperienceQueryReply,
             CAP_READ_OFFLINE_MSGS => Self::ReadOfflineMsgs,
             "ChatterBoxInvitation" => Self::ChatterBoxInvitation,
-            CAP_CHAT_SESSION_REQUEST => Self::ChatSessionRequest,
-            CHAT_SESSION_FETCH_HISTORY_TAG => Self::ChatSessionFetchHistory,
             "ChatterBoxSessionStartReply" => Self::ChatterBoxSessionStartReply,
             "ChatterBoxSessionEventReply" => Self::ChatterBoxSessionEventReply,
             "ForceCloseChatterBoxSession" => Self::ForceCloseChatterBoxSession,
@@ -338,7 +332,7 @@ mod test {
 
     use crate::session::{
         AIS3_FETCH_INVENTORY_TAG, AIS3_FETCH_LIBRARY_TAG, AVATAR_PICKER_SEARCH_TAG,
-        CAP_FETCH_LIBRARY, CAP_LIBRARY_API_V3, CHAT_SESSION_FETCH_HISTORY_TAG,
+        CAP_FETCH_LIBRARY, CAP_LIBRARY_API_V3, EXPERIENCE_QUERY_TAG,
     };
 
     /// The three tag shapes the space is made of all resolve: a bare
@@ -355,8 +349,8 @@ mod test {
             Some(CapsEvent::LibraryApiV3)
         );
         assert_eq!(
-            CapsEvent::from_tag(CHAT_SESSION_FETCH_HISTORY_TAG),
-            Some(CapsEvent::ChatSessionFetchHistory)
+            CapsEvent::from_tag(EXPERIENCE_QUERY_TAG),
+            Some(CapsEvent::ExperienceQueryReply)
         );
         assert_eq!(
             CapsEvent::from_tag(AVATAR_PICKER_SEARCH_TAG),

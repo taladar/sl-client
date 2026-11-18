@@ -622,12 +622,11 @@ impl ChatLog {
             // is shown turns on Do Not Disturb and the ignore-ad-hoc policy,
             // which only the application knows.
             sl_proto::Event::ConferenceInvited {
-                session_id,
-                from_group,
+                session: ChatSessionKind::Group { group_id },
                 session_name,
                 ..
-            } if *from_group => {
-                self.note_group_name(GroupKey::from(*session_id), session_name);
+            } => {
+                self.note_group_name(*group_id, session_name);
             }
             _other => {}
         }
@@ -1171,7 +1170,7 @@ mod tests {
             from_agent_id: from,
             from_name: "Alice Resident".to_owned(),
             dialog: ImDialog::SessionGroupStart,
-            from_group: true,
+            session: ChatSessionKind::Group { group_id: group },
             session_name: "My Group".to_owned(),
             message: message.to_owned(),
             channel,

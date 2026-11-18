@@ -12,6 +12,7 @@ use super::conversions::compute_im_session_id;
 use crate::bookkeeping_ids::ImSessionId;
 use crate::types::{Friend, ImDialog};
 use sl_types::key::{AgentKey, GroupKey};
+use sl_wire::Llsd;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::time::{Duration, Instant};
 use uuid::Uuid;
@@ -90,6 +91,37 @@ impl ChatSessionKind {
             Self::Conference { id } => id.get(),
         }
     }
+}
+
+/// Which `ChatSessionRequest` POST a [`ChatSessionReply`] answers. The reply
+/// bodies of the two have nothing in common — an answer's is a map, a history
+/// fetch's a bare array — so the runtime says which it asked.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChatSessionRequestPurpose {
+    /// An `accept invitation`, `decline invitation` or `decline p2p voice`
+    /// POST. An accept's reply carries the session's roster, a voice accept's
+    /// also its `voice_channel_info`; a decline's carries neither.
+    Answer,
+    /// A `fetch history` POST, whose reply is the session's server-side
+    /// backlog.
+    FetchHistory,
+}
+
+/// The reply to a `ChatSessionRequest` POST, with the session the runtime
+/// posted it for. The reply names no session of its own — the reference keeps
+/// the session id in the coroutine that posted (`chatterBoxInvitationCoro`,
+/// `chatterBoxHistoryCoro`) — so the runtime, which owns the request, carries
+/// the typed [`ChatSessionKind`] to the reply rather than writing it into the
+/// body. Handed to
+/// [`Session::handle_chat_session_reply`](crate::Session::handle_chat_session_reply).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ChatSessionReply {
+    /// The session the request was for.
+    pub session: ChatSessionKind,
+    /// Which request this answers.
+    pub purpose: ChatSessionRequestPurpose,
+    /// The reply body as the grid sent it.
+    pub body: Llsd,
 }
 
 /// Which channel(s) a chat-session invitation offers. A group or conference can
@@ -502,6 +534,14 @@ impl ChatSession {
     pub(crate) const fn note_voice_joined(&mut self) {
         self.voice.joined = true;
         self.voice.has_voice = true;
+    }
+
+    /// Records that a 1:1 call offered on this conversation was declined: the
+    /// offer and its channel are gone, and we are not in it.
+    pub(crate) fn note_voice_declined(&mut self) {
+        self.voice.has_voice = false;
+        self.voice.channel = None;
+        self.voice.joined = false;
     }
 
     /// Records that we have left the voice channel, leaving the text side of

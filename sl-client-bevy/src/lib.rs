@@ -70,12 +70,12 @@ pub use sl_proto::{
     AvatarAppearance, AvatarClassified, AvatarGroupMembership, AvatarInterests, AvatarName,
     AvatarPick, AvatarPickerResult, AvatarProperties, AvatarRenderInfo, AvatarRenderReport,
     BUILTIN_UI_SOUNDS, Camera, CameraError, ChatAudible, ChatChannel, ChatLogConfig, ChatMessage,
-    ChatSessionAgentUpdate, ChatSessionKind, ChatSource, ChatSourceType, ChatType,
-    ChatTypeNotAVolume, Child, CircuitCode, CircuitId, CircuitProbe, ClassifiedCategory,
-    ClassifiedClickStats, ClassifiedInfo, ClassifiedKey, ClassifiedQueryFlags,
-    ClassifiedSearchClicks, ClassifiedUpdate, ClickAction, ClientDirectories, ClockStyle,
-    CloudPosDensity, CoarseLocation, Color, ColorAlpha, ColumnUnit, Command, ControlFlags,
-    ConversationKind, CreateGroupParams, CreateListing, DEFAULT_BLOOM_TEXTURE,
+    ChatSessionAgentUpdate, ChatSessionKind, ChatSessionReply, ChatSessionRequestPurpose,
+    ChatSource, ChatSourceType, ChatType, ChatTypeNotAVolume, Child, CircuitCode, CircuitId,
+    CircuitProbe, ClassifiedCategory, ClassifiedClickStats, ClassifiedInfo, ClassifiedKey,
+    ClassifiedQueryFlags, ClassifiedSearchClicks, ClassifiedUpdate, ClickAction, ClientDirectories,
+    ClockStyle, CloudPosDensity, CoarseLocation, Color, ColorAlpha, ColumnUnit, Command,
+    ControlFlags, ConversationKind, CreateGroupParams, CreateListing, DEFAULT_BLOOM_TEXTURE,
     DEFAULT_CLOUD_TEXTURE, DEFAULT_HALO_TEXTURE, DEFAULT_MOON_TEXTURE, DEFAULT_PRIM_TEXTURE,
     DEFAULT_RAINBOW_TEXTURE, DEFAULT_SUN_TEXTURE, DEFAULT_WATER_NORMAL_TEXTURE, DayCycle,
     DayCycleFrame, DayNames, DayTrack, DeRezDestination, DensityLayer, DetachOrder, Diagnostic,
@@ -471,11 +471,10 @@ use crate::experiences::{run_experience_status, run_group_experiences};
 use crate::fetch::{run_asset_fetch, run_generic_asset_fetch, run_texture_fetch};
 use crate::http::{
     answer_friendship, answer_group_invitation, group_bans, put_agent_profile,
-    run_avatar_picker_search, run_caps_oneway, run_chat_session_fetch_history,
-    run_chat_session_request, run_delete_caps_llsd, run_environment_change, run_experience_query,
-    run_fetch_lsl_syntax, run_get_caps_llsd, run_land_resources, run_patch_caps_llsd,
-    run_put_caps_llsd, run_remote_parcel_request, run_script_metadata, run_task_inventory,
-    search_stat, set_display_name, upload_profile_image,
+    run_avatar_picker_search, run_caps_oneway, run_chat_session_request, run_delete_caps_llsd,
+    run_environment_change, run_experience_query, run_fetch_lsl_syntax, run_get_caps_llsd,
+    run_land_resources, run_patch_caps_llsd, run_put_caps_llsd, run_remote_parcel_request,
+    run_script_metadata, run_task_inventory, search_stat, set_display_name, upload_profile_image,
 };
 use crate::inventory::{
     fetch_folder_contents, run_ais3_folder_fetches, run_group_members_fetch,
@@ -1004,6 +1003,11 @@ pub(crate) struct Caps {
     pub(crate) asset_rx: Receiver<SessionEvent>,
     /// A sender clone for spawning one-shot binary asset fetches.
     pub(crate) asset_tx: Sender<SessionEvent>,
+    /// Receives the replies to `ChatSessionRequest` POSTs, each carrying the
+    /// session it was posted for (the reply names none of its own).
+    pub(crate) chat_replies_rx: Receiver<ChatSessionReply>,
+    /// A sender clone for spawning `ChatSessionRequest` POSTs.
+    pub(crate) chat_replies_tx: Sender<ChatSessionReply>,
     /// Receives the region's capability map once the poller has fetched it, or a
     /// readable error if the seed-capabilities fetch failed (which fails the login
     /// while still awaiting initial caps, and merely degrades a region change).
@@ -1846,6 +1850,11 @@ fn advance_running(
                 tracing::warn!(capability = %message, "CAPS payload rejected: {error}");
             }
         }
+        // The replies to `ChatSessionRequest` POSTs, with the session each was
+        // posted for.
+        while let Ok(reply) = caps.chat_replies_rx.try_recv() {
+            session.handle_chat_session_reply(&reply, now);
+        }
         // A neighbour's capability map arriving releases the object-addressed
         // requests that were waiting for it.
         object_caps::drain_neighbour_maps(&session, caps, &mut neighbours, now);
@@ -2007,12 +2016,17 @@ fn advance_running(
             for kind in session.next_server_history_fetches() {
                 let session_id = kind.canonical_session_id(own_agent);
                 let body = chat_session_request_body(CHAT_SESSION_FETCH_HISTORY, session_id);
-                let from_group = matches!(kind, ChatSessionKind::Group { .. });
-                let events_tx = caps.events_tx.clone();
+                let (events_tx, replies_tx) =
+                    (caps.events_tx.clone(), caps.chat_replies_tx.clone());
                 let fetch_url = url.clone();
                 crate::log_context::spawn_thread(move || {
-                    run_chat_session_fetch_history(
-                        &fetch_url, body, session_id, from_group, &events_tx,
+                    run_chat_session_request(
+                        &fetch_url,
+                        body,
+                        kind,
+                        ChatSessionRequestPurpose::FetchHistory,
+                        &events_tx,
+                        &replies_tx,
                     );
                 });
             }
@@ -5146,44 +5160,74 @@ fn apply_command(
             session.mark_session_read(*chat_session);
         }
         Command::AcceptChatInvite {
-            session_id,
-            from_group,
+            session: chat_session,
         } => {
             // Promote the entry to joined locally, then drive the modern
-            // accept over the cap when present (its reply roster seeds the
-            // participants); without the cap the optimistic join suffices.
-            session.accept_chat_invite(*session_id, *from_group, now);
-            if let Some(caps) = caps
+            // accept of a group or a conference over the cap when present (its
+            // reply roster seeds the participants); without the cap the
+            // optimistic join suffices. A 1:1 call is accepted with no POST,
+            // as the reference accepts one.
+            session.accept_chat_invite(*chat_session, now);
+            if !matches!(chat_session, ChatSessionKind::Direct { .. })
+                && let (Some(caps), Some(own)) = (caps, session.agent_id())
                 && let Some(url) = caps.map.get(CAP_CHAT_SESSION_REQUEST).cloned()
             {
-                let body = chat_session_request_body(CHAT_SESSION_ACCEPT, session_id.get());
-                let events_tx = caps.events_tx.clone();
-                let (session_uuid, from_group) = (session_id.get(), *from_group);
+                let body = chat_session_request_body(
+                    CHAT_SESSION_ACCEPT,
+                    chat_session.canonical_session_id(own),
+                );
+                let (events_tx, replies_tx) =
+                    (caps.events_tx.clone(), caps.chat_replies_tx.clone());
+                let kind = *chat_session;
                 crate::log_context::spawn_thread(move || {
-                    run_chat_session_request(&url, body, session_uuid, from_group, &events_tx);
+                    run_chat_session_request(
+                        &url,
+                        body,
+                        kind,
+                        ChatSessionRequestPurpose::Answer,
+                        &events_tx,
+                        &replies_tx,
+                    );
                 });
             }
         }
         Command::DeclineChatInvite {
-            session_id,
-            from_group,
+            session: chat_session,
         } => {
-            // Remove the entry, then refuse on the wire: the cap `decline
-            // invitation` POST when present, else a UDP `SessionLeave`.
-            session.decline_chat_invite(*session_id, *from_group, now);
-            if let Some(caps) = caps
-                && let Some(url) = caps.map.get(CAP_CHAT_SESSION_REQUEST).cloned()
-            {
-                let body = chat_session_request_body(CHAT_SESSION_DECLINE, session_id.get());
-                let events_tx = caps.events_tx.clone();
-                let (session_uuid, from_group) = (session_id.get(), *from_group);
-                crate::log_context::spawn_thread(move || {
-                    run_chat_session_request(&url, body, session_uuid, from_group, &events_tx);
-                });
-            } else if *from_group {
-                session.leave_group_session(GroupKey::from(session_id.get()), now)?;
-            } else {
-                session.leave_conference(*session_id, now)?;
+            // Remove the entry, then refuse on the wire: the cap's `decline
+            // invitation` (a group or a conference) or `decline p2p voice` (a
+            // 1:1 call) when present, else a UDP `SessionLeave` for a group or
+            // a conference.
+            session.decline_chat_invite(*chat_session, now);
+            let url = caps.and_then(|caps| caps.map.get(CAP_CHAT_SESSION_REQUEST).cloned());
+            match (caps, url, session.agent_id(), *chat_session) {
+                (Some(caps), Some(url), Some(own), kind) => {
+                    let method = if matches!(kind, ChatSessionKind::Direct { .. }) {
+                        CHAT_SESSION_DECLINE_P2P_VOICE
+                    } else {
+                        CHAT_SESSION_DECLINE
+                    };
+                    let body = chat_session_request_body(method, kind.canonical_session_id(own));
+                    let (events_tx, replies_tx) =
+                        (caps.events_tx.clone(), caps.chat_replies_tx.clone());
+                    crate::log_context::spawn_thread(move || {
+                        run_chat_session_request(
+                            &url,
+                            body,
+                            kind,
+                            ChatSessionRequestPurpose::Answer,
+                            &events_tx,
+                            &replies_tx,
+                        );
+                    });
+                }
+                (_, _, _, ChatSessionKind::Group { group_id }) => {
+                    session.leave_group_session(group_id, now)?;
+                }
+                (_, _, _, ChatSessionKind::Conference { id }) => {
+                    session.leave_conference(id, now)?;
+                }
+                (_, _, _, ChatSessionKind::Direct { .. }) => {}
             }
         }
         Command::JoinSessionVoice {
@@ -5195,7 +5239,6 @@ fn apply_command(
             session.join_session_voice(*chat_session, now);
             if let (Some(own), Some(caps)) = (session.agent_id(), caps) {
                 let session_uuid = chat_session.canonical_session_id(own);
-                let from_group = matches!(chat_session, ChatSessionKind::Group { .. });
                 if let Some(url) = caps.map.get(CAP_PROVISION_VOICE_ACCOUNT).cloned() {
                     let body =
                         build_provision_voice_account_request(&VoiceProvisionRequest::vivox());
@@ -5206,9 +5249,18 @@ fn apply_command(
                 }
                 if let Some(url) = caps.map.get(CAP_CHAT_SESSION_REQUEST).cloned() {
                     let body = chat_session_request_body(CHAT_SESSION_ACCEPT, session_uuid);
-                    let events_tx = caps.events_tx.clone();
+                    let (events_tx, replies_tx) =
+                        (caps.events_tx.clone(), caps.chat_replies_tx.clone());
+                    let kind = *chat_session;
                     crate::log_context::spawn_thread(move || {
-                        run_chat_session_request(&url, body, session_uuid, from_group, &events_tx);
+                        run_chat_session_request(
+                            &url,
+                            body,
+                            kind,
+                            ChatSessionRequestPurpose::Answer,
+                            &events_tx,
+                            &replies_tx,
+                        );
                     });
                 }
             }
@@ -5222,7 +5274,6 @@ fn apply_command(
             session.leave_session_voice(*chat_session);
             if let (Some(own), Some(caps)) = (session.agent_id(), caps) {
                 let session_uuid = chat_session.canonical_session_id(own);
-                let from_group = matches!(chat_session, ChatSessionKind::Group { .. });
                 let method = if matches!(chat_session, ChatSessionKind::Direct { .. }) {
                     CHAT_SESSION_DECLINE_P2P_VOICE
                 } else {
@@ -5230,9 +5281,18 @@ fn apply_command(
                 };
                 if let Some(url) = caps.map.get(CAP_CHAT_SESSION_REQUEST).cloned() {
                     let body = chat_session_request_body(method, session_uuid);
-                    let events_tx = caps.events_tx.clone();
+                    let (events_tx, replies_tx) =
+                        (caps.events_tx.clone(), caps.chat_replies_tx.clone());
+                    let kind = *chat_session;
                     crate::log_context::spawn_thread(move || {
-                        run_chat_session_request(&url, body, session_uuid, from_group, &events_tx);
+                        run_chat_session_request(
+                            &url,
+                            body,
+                            kind,
+                            ChatSessionRequestPurpose::Answer,
+                            &events_tx,
+                            &replies_tx,
+                        );
                     });
                 }
             }
@@ -5250,15 +5310,17 @@ fn apply_command(
                 session.note_server_history_requested(*kind);
                 let session_uuid = kind.canonical_session_id(own);
                 let body = chat_session_request_body(CHAT_SESSION_FETCH_HISTORY, session_uuid);
-                let from_group = matches!(kind, ChatSessionKind::Group { .. });
-                let events_tx = caps.events_tx.clone();
+                let (events_tx, replies_tx) =
+                    (caps.events_tx.clone(), caps.chat_replies_tx.clone());
+                let kind = *kind;
                 crate::log_context::spawn_thread(move || {
-                    run_chat_session_fetch_history(
+                    run_chat_session_request(
                         &url,
                         body,
-                        session_uuid,
-                        from_group,
+                        kind,
+                        ChatSessionRequestPurpose::FetchHistory,
                         &events_tx,
+                        &replies_tx,
                     );
                 });
             }

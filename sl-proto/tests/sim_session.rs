@@ -5213,7 +5213,9 @@ mod test {
             from_agent_id: inviter,
             from_name: "Inviter".to_owned(),
             dialog: ImDialog::SessionConferenceStart,
-            from_group: false,
+            session: ChatSessionKind::Conference {
+                id: ImSessionId::from(conference),
+            },
             session_name: "Chat".to_owned(),
             message: "join us".to_owned(),
             channel: sl_proto::InviteChannel::Text,
@@ -9023,7 +9025,7 @@ mod test {
                 from_agent_id: a_agent,
                 from_name: "Test User".to_owned(),
                 dialog: ImDialog::SessionConferenceStart,
-                from_group: false,
+                session: ChatSessionKind::Conference { id: session_id },
                 session_name: "join us".to_owned(),
                 message: "join us".to_owned(),
                 channel: sl_proto::InviteChannel::Text,
@@ -9043,7 +9045,7 @@ mod test {
         assert!(matches!(info.lifecycle, ChatLifecycleView::Invited { .. }));
 
         // B accepts and speaks; the message reaches B's sim (and history).
-        b.client.accept_chat_invite(session_id, false, now);
+        b.client.accept_chat_invite(kind, now);
         b.client.send_conference_message(session_id, "here", now)?;
         pump_end(&mut b, now)?;
         let server_events = drain_server(&mut b.sim);

@@ -31,7 +31,7 @@ mod test {
     use sl_proto::{
         AVATAR_PICKER_PAGE_SIZE, AVATAR_PICKER_SEARCH_TAG, AbuseReport, AbuseReportType, AgentKey,
         AgentPreferences, AssetKey, CAP_AGENT_EXPERIENCES, CAP_ATTACHMENT_RESOURCES,
-        CAP_CHAT_SESSION_REQUEST, CAP_COPY_INVENTORY_FROM_NOTECARD, CAP_CREATE_INVENTORY_CATEGORY,
+        CAP_COPY_INVENTORY_FROM_NOTECARD, CAP_CREATE_INVENTORY_CATEGORY,
         CAP_EXPERIENCE_PREFERENCES, CAP_EXT_ENVIRONMENT, CAP_FETCH_INVENTORY,
         CAP_FETCH_INVENTORY_ITEM, CAP_FETCH_LIBRARY, CAP_FETCH_LIBRARY_ITEM,
         CAP_FIND_EXPERIENCE_BY_NAME, CAP_GET_ADMIN_EXPERIENCES, CAP_GET_CREATOR_EXPERIENCES,
@@ -47,13 +47,13 @@ mod test {
         CAP_UPDATE_NOTECARD_TASK_INVENTORY, CAP_UPDATE_SCRIPT_AGENT,
         CAP_UPDATE_SETTINGS_TASK_INVENTORY, CAP_UPLOAD_BAKED_TEXTURE, CAP_VIEWER_ASSET,
         CAP_VOICE_SIGNALING, CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE,
-        CHAT_SESSION_DECLINE_P2P_VOICE, CHAT_SESSION_FETCH_HISTORY, CHAT_SESSION_FETCH_HISTORY_TAG,
-        CHAT_SESSION_INVITE, CHAT_SESSION_START_CONFERENCE, CapsDispatch, CapsRequest,
-        CapsUploadMetadata, ChatSessionKind, CopyFromNotecardAnswer, DayCycle, DisplayName,
-        EnvironmentSettings, EnvironmentUpdate, Event, ExperienceInfo, ExperienceKey,
-        ExperiencePermission, ExperienceProperties, ExperienceUpdate, FaceMaterialPut, GroupKey,
-        ImDialog, ImSessionId, InMemoryAssetSource, InstantMessage, InventoryFolder,
-        InventoryFolderKey, InventoryItem, InventoryKey, LAND_RESOURCE_DETAIL_TAG,
+        CHAT_SESSION_DECLINE_P2P_VOICE, CHAT_SESSION_FETCH_HISTORY, CHAT_SESSION_INVITE,
+        CHAT_SESSION_START_CONFERENCE, CapsDispatch, CapsRequest, CapsUploadMetadata,
+        ChatSessionKind, ChatSessionReply, ChatSessionRequestPurpose, CopyFromNotecardAnswer,
+        DayCycle, DisplayName, EnvironmentSettings, EnvironmentUpdate, Event, ExperienceInfo,
+        ExperienceKey, ExperiencePermission, ExperienceProperties, ExperienceUpdate,
+        FaceMaterialPut, GroupKey, ImDialog, ImSessionId, InMemoryAssetSource, InstantMessage,
+        InventoryFolder, InventoryFolderKey, InventoryItem, InventoryKey, LAND_RESOURCE_DETAIL_TAG,
         LAND_RESOURCE_SUMMARY_TAG, LLSD_XML_CONTENT_TYPE, LegacyMaterial, LoginParams, LslKeyword,
         LslSyntax, MaterialOverrideUpdate, MediaEntry, ObjectCost, ObjectKey, ObjectMediaState,
         ObjectPhysicsData, OwnerKey, ParcelKey, ParcelScriptResources, Permissions5,
@@ -548,18 +548,19 @@ mod test {
         let (status, reply) = respond(&mut caps, &mut sim, &post(&path, &body))?;
         assert_eq!(status, 200);
 
-        // The client runtime stamps the answered invitation's identity into
-        // the reply map before forwarding (`post_chat_session_request`).
-        let Llsd::Map(mut map) = parse_llsd_xml(&reply)? else {
-            return Err("expected a roster map".into());
-        };
-        let _previous = map.insert("session-id".to_owned(), Llsd::Uuid(session_uuid));
-        let _previous = map.insert("from_group".to_owned(), Llsd::Boolean(false));
-        client.handle_caps_event(CAP_CHAT_SESSION_REQUEST, &Llsd::Map(map), now)?;
-
+        // The client runtime hands the reply back with the session it posted
+        // for (`post_chat_session_request`).
         let kind = ChatSessionKind::Conference {
             id: ImSessionId::from(session_uuid),
         };
+        client.handle_chat_session_reply(
+            &ChatSessionReply {
+                session: kind,
+                purpose: ChatSessionRequestPurpose::Answer,
+                body: parse_llsd_xml(&reply)?,
+            },
+            now,
+        );
         let info = client
             .chat_sessions_info()
             .find(|info| info.kind == kind)
@@ -719,21 +720,18 @@ mod test {
         let (status, reply) = respond(&mut caps, &mut sim, &post(&path, &body))?;
         assert_eq!(status, 200);
 
-        // The client runtime wraps the bare-array reply with the session
-        // identity (`post_chat_session_fetch_history`).
-        let history = parse_llsd_xml(&reply)?;
-        let wrapped = Llsd::Map(
-            [
-                ("history".to_owned(), history),
-                ("session-id".to_owned(), Llsd::Uuid(session_uuid)),
-                ("from_group".to_owned(), Llsd::Boolean(false)),
-            ]
-            .into_iter()
-            .collect(),
-        );
-        client.handle_caps_event(CHAT_SESSION_FETCH_HISTORY_TAG, &wrapped, now)?;
-
+        // The client runtime hands the bare-array reply back with the session
+        // it posted for (`post_chat_session_request`).
         let kind = ChatSessionKind::Conference { id: session_id };
+        client.handle_chat_session_reply(
+            &ChatSessionReply {
+                session: kind,
+                purpose: ChatSessionRequestPurpose::FetchHistory,
+                body: parse_llsd_xml(&reply)?,
+            },
+            now,
+        );
+
         let history_event = drain_client(&mut client)
             .into_iter()
             .find_map(|event| match event {
@@ -765,7 +763,9 @@ mod test {
             from_agent_id: inviter,
             from_name: "Inviter".to_owned(),
             dialog: ImDialog::SessionConferenceStart,
-            from_group: false,
+            session: ChatSessionKind::Conference {
+                id: ImSessionId::from(conference),
+            },
             session_name: "Chat".to_owned(),
             message: "join us".to_owned(),
             channel: sl_proto::InviteChannel::Text,

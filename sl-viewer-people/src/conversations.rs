@@ -2089,7 +2089,7 @@ pub(crate) fn ingest_conversation_events(
                 session_id,
                 from_agent_id,
                 from_name,
-                from_group,
+                session,
                 session_name,
                 message,
                 channel,
@@ -2100,7 +2100,9 @@ pub(crate) fn ingest_conversation_events(
                 // voice calls yet (`viewer-voice-call-dialogs`), so it is left
                 // unanswered, as there. An invitation to both channels is a text
                 // one first, as the reference reads it.
-                if *channel == InviteChannel::Voice {
+                if *channel == InviteChannel::Voice
+                    || matches!(session, ChatSessionKind::Direct { .. })
+                {
                     info!(
                         "conversations: voice invitation to {session_id} from {from_agent_id} \
                          not shown: no voice calls in this viewer yet"
@@ -2129,15 +2131,12 @@ pub(crate) fn ingest_conversation_events(
                     from_name.as_str(),
                     message.as_str(),
                 ));
-                let accept = (!own).then_some(Command::AcceptChatInvite {
-                    session_id: ImSessionId::from(*session_id),
-                    from_group: *from_group,
-                });
+                let accept = (!own).then_some(Command::AcceptChatInvite { session: *session });
                 // The inviter's name counts too, as in the reference
                 // (`isMuted(id, name, flagTextChat)`): a by-name entry blocks
                 // an inviter whose id it does not know.
                 let invited_by_blocked = text_muted(mutes, from_agent_id.uuid(), from_name);
-                if *from_group {
+                if let ChatSessionKind::Group { group_id: group } = *session {
                     // A group session a blocked resident started opens no tab
                     // — but the invitation is *not* declined, because the group
                     // is one the user chose to be in and everyone else in it is
@@ -2145,7 +2144,6 @@ pub(crate) fn ingest_conversation_events(
                     if invited_by_blocked {
                         continue;
                     }
-                    let group = GroupKey::from(*session_id);
                     model.note_group_name(group, session_name);
                     if let Some((from, name, line)) = carried {
                         avatars.note_legacy_name(from, name);
@@ -2158,8 +2156,7 @@ pub(crate) fn ingest_conversation_events(
                         )));
                     }
                     let _index = model.ensure(ConversationKey::Group(group));
-                } else {
-                    let id = ImSessionId::from(*session_id);
+                } else if let ChatSessionKind::Conference { id } = *session {
                     // The ignore-conferences mode: decline the invitation and
                     // open no tab. Only ad-hoc conferences are refused — a
                     // group IM invitation is a group the user chose to be in.
@@ -2178,10 +2175,7 @@ pub(crate) fn ingest_conversation_events(
                         info!(
                             "conversations: ignoring ad-hoc conference invite from {from_agent_id}"
                         );
-                        sl.write(SlCommand(Command::DeclineChatInvite {
-                            session_id: id,
-                            from_group: false,
-                        }));
+                        sl.write(SlCommand(Command::DeclineChatInvite { session: *session }));
                         continue;
                     }
                     model.note_conference_name(id, session_name);
@@ -4407,7 +4401,15 @@ mod tests {
             } else {
                 ImDialog::SessionConferenceStart
             },
-            from_group,
+            session: if from_group {
+                ChatSessionKind::Group {
+                    group_id: GroupKey::from(session),
+                }
+            } else {
+                ChatSessionKind::Conference {
+                    id: ImSessionId::from(session),
+                }
+            },
             session_name: "A Session".to_owned(),
             message: message.to_owned(),
             channel,
@@ -4419,21 +4421,24 @@ mod tests {
         }
     }
 
+    /// How an invitation was answered.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum InviteAnswer {
+        /// It was accepted.
+        Accept,
+        /// It was declined.
+        Decline,
+    }
+
     /// The accept / decline answers the last update sent, as `(session,
-    /// from_group, accepted)`.
-    fn invitation_answers(app: &App) -> Vec<(ImSessionId, bool, bool)> {
+    /// answer)`.
+    fn invitation_answers(app: &App) -> Vec<(ChatSessionKind, InviteAnswer)> {
         app.world()
             .resource::<Messages<SlCommand>>()
             .iter_current_update_messages()
             .filter_map(|command| match &command.0 {
-                Command::AcceptChatInvite {
-                    session_id,
-                    from_group,
-                } => Some((*session_id, *from_group, true)),
-                Command::DeclineChatInvite {
-                    session_id,
-                    from_group,
-                } => Some((*session_id, *from_group, false)),
+                Command::AcceptChatInvite { session } => Some((*session, InviteAnswer::Accept)),
+                Command::DeclineChatInvite { session } => Some((*session, InviteAnswer::Decline)),
                 _ => None,
             })
             .collect()
@@ -4475,7 +4480,10 @@ mod tests {
         );
         assert_eq!(
             invitation_answers(&app),
-            vec![(ImSessionId::from(group.uuid()), true, true)]
+            vec![(
+                ChatSessionKind::Group { group_id: group },
+                InviteAnswer::Accept
+            )]
         );
         let model = app.world().resource::<ConversationModel>();
         let entry = get(model, ConversationKey::Group(group));
@@ -4506,7 +4514,12 @@ mod tests {
         );
         assert_eq!(
             invitation_answers(&app),
-            vec![(ImSessionId::from(conference), false, true)]
+            vec![(
+                ChatSessionKind::Conference {
+                    id: ImSessionId::from(conference)
+                },
+                InviteAnswer::Accept
+            )]
         );
         assert_eq!(
             transcribed(&app),
@@ -4606,7 +4619,10 @@ mod tests {
         );
         assert_eq!(
             invitation_answers(&app),
-            vec![(ImSessionId::from(group.uuid()), true, true)]
+            vec![(
+                ChatSessionKind::Group { group_id: group },
+                InviteAnswer::Accept
+            )]
         );
         let model = app.world().resource::<ConversationModel>();
         let lines: Vec<&str> = get(model, ConversationKey::Group(group))
@@ -4663,7 +4679,12 @@ mod tests {
         );
         assert_eq!(
             invitation_answers(&app),
-            vec![(ImSessionId::from(conference), false, false)]
+            vec![(
+                ChatSessionKind::Conference {
+                    id: ImSessionId::from(conference)
+                },
+                InviteAnswer::Decline
+            )]
         );
         // The ignore-ad-hoc policy takes this same exit.
         assert_eq!(transcribed(&app), Vec::new());

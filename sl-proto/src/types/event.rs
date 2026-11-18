@@ -1366,13 +1366,15 @@ pub enum Event {
         /// ([`ImDialog::SessionConferenceStart`]), or a plain session add — so a
         /// client can tell a group IM from an ad-hoc conference before joining.
         dialog: ImDialog,
-        /// Whether the invitation is to a group session (a group IM) rather than
-        /// an ad-hoc conference of individual agents: as it says, or as the
-        /// session reads it — Second Life invites to a group session with
-        /// `from_group` clear, so an invitation under the id of a group the
-        /// agent is in is the group's (the reference's `gAgent.isInGroup`). For a group IM the
-        /// [`session_id`](Self::ConferenceInvited::session_id) is the group id.
-        from_group: bool,
+        /// The session the invitation is to: a group IM (whose id is
+        /// [`session_id`](Self::ConferenceInvited::session_id)), an ad-hoc
+        /// conference, or a 1:1 voice call with the inviter. Read from the
+        /// invitation — a voice invitation's `invitation_type` names a 1:1 call,
+        /// a text one's `from_group` a group — or as the session reads it:
+        /// Second Life invites to a group session with `from_group` clear, so an
+        /// invitation under the id of a group the agent is in is the group's
+        /// (the reference's `gAgent.isInGroup`).
+        session: ChatSessionKind,
         /// The session's human-readable name (the group or conference name),
         /// supplied directly in the event body; for a group IM the same label is
         /// also carried inside

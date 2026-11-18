@@ -891,7 +891,7 @@ struct Invitation {
     from_name: String,
     /// The dialog it states.
     dialog: ImDialog,
-    /// Whether it says it is a group's.
+    /// Whether it is a group's, as it says or as the client reads it.
     from_group: bool,
     /// The session's name.
     session_name: String,
@@ -978,7 +978,7 @@ fn fold(got: &mut Got, event: &Event) -> Option<()> {
             from_agent_id,
             from_name,
             dialog,
-            from_group,
+            session,
             session_name,
             message,
             channel,
@@ -992,7 +992,7 @@ fn fold(got: &mut Got, event: &Event) -> Option<()> {
             from: *from_agent_id,
             from_name: from_name.clone(),
             dialog: *dialog,
-            from_group: *from_group,
+            from_group: matches!(session, ChatSessionKind::Group { .. }),
             session_name: session_name.clone(),
             message: message.clone(),
             channel: *channel,
@@ -1839,21 +1839,26 @@ impl Census<'_> {
         metrics: &mut Metrics,
         key: &str,
         who: Who,
-        session: Uuid,
-        from_group: bool,
+        session: ChatSessionKind,
     ) -> Result<(), TestFailure> {
+        let session_id = match session {
+            ChatSessionKind::Group { group_id } => group_id.uuid(),
+            ChatSessionKind::Conference { id } => id.get(),
+            ChatSessionKind::Direct { .. } => {
+                return Err(TestFailure::Assertion(
+                    "the census accepts no 1:1 call".to_owned(),
+                ));
+            }
+        };
         let raw = self
-            .chat_request(who, request_body("accept invitation", session, None))
+            .chat_request(who, request_body("accept invitation", session_id, None))
             .await?;
         metrics.set(&format!("{key}_raw"), self.scene.answer_text(raw.as_ref()));
         self.leg(
             metrics,
             key,
             who,
-            vec![Command::AcceptChatInvite {
-                session_id: ImSessionId::from(session),
-                from_group,
-            }],
+            vec![Command::AcceptChatInvite { session }],
         )
         .await?;
         self.sessions(metrics, &format!("{key}_sessions"), who)
@@ -2088,8 +2093,13 @@ impl Census<'_> {
         )
         .await?;
         self.group_says(metrics, "g_first", Who::A).await?;
-        self.accept(metrics, "g_accept", Who::B, group.uuid(), true)
-            .await?;
+        self.accept(
+            metrics,
+            "g_accept",
+            Who::B,
+            ChatSessionKind::Group { group_id: group },
+        )
+        .await?;
         self.group_says(metrics, "g_b_says", Who::B).await?;
         self.group_says(metrics, "g_a_says", Who::A).await?;
         self.group_says_raw(metrics, "g_empty_bucket", Who::A, Vec::new())
@@ -2147,8 +2157,7 @@ impl Census<'_> {
             "g_decline",
             Who::B,
             vec![Command::DeclineChatInvite {
-                session_id: ImSessionId::from(group.uuid()),
-                from_group: true,
+                session: ChatSessionKind::Group { group_id: group },
             }],
         )
         .await?;
@@ -2160,8 +2169,7 @@ impl Census<'_> {
             vec![
                 Command::StartGroupSession(group),
                 Command::AcceptChatInvite {
-                    session_id: ImSessionId::from(group.uuid()),
-                    from_group: true,
+                    session: ChatSessionKind::Group { group_id: group },
                 },
             ],
         )
@@ -2278,8 +2286,9 @@ impl Census<'_> {
             vec![
                 Command::StartGroupSession(self.group()),
                 Command::AcceptChatInvite {
-                    session_id: ImSessionId::from(group),
-                    from_group: true,
+                    session: ChatSessionKind::Group {
+                        group_id: GroupKey::from(group),
+                    },
                 },
             ],
         )
@@ -2333,8 +2342,15 @@ impl Census<'_> {
                 .unwrap_or_else(|| "no reply".to_owned()),
         );
         self.conference_says(metrics, "c_first", Who::A).await?;
-        self.accept(metrics, "c_b_accept", Who::B, real, false)
-            .await?;
+        self.accept(
+            metrics,
+            "c_b_accept",
+            Who::B,
+            ChatSessionKind::Conference {
+                id: ImSessionId::from(real),
+            },
+        )
+        .await?;
         self.conference_says(metrics, "c_b_says", Who::B).await?;
         let session_id = self.conference()?;
         self.leg(
@@ -2342,8 +2358,7 @@ impl Census<'_> {
             "c_c_decline",
             Who::C,
             vec![Command::DeclineChatInvite {
-                session_id,
-                from_group: false,
+                session: ChatSessionKind::Conference { id: session_id },
             }],
         )
         .await?;
@@ -2359,8 +2374,15 @@ impl Census<'_> {
             }],
         )
         .await?;
-        self.accept(metrics, "c_c_accept", Who::C, real, false)
-            .await?;
+        self.accept(
+            metrics,
+            "c_c_accept",
+            Who::C,
+            ChatSessionKind::Conference {
+                id: ImSessionId::from(real),
+            },
+        )
+        .await?;
         self.conference_says(metrics, "c_c_says", Who::C).await?;
         self.history(metrics, "c_history", Who::B, real).await?;
         self.leg(

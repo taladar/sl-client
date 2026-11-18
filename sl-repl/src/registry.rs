@@ -6452,21 +6452,19 @@ fn all_specs() -> Vec<CommandSpec> {
         },
         CommandSpec {
             name: "accept_chat_invite",
-            usage: "<session_id> <from_group>",
+            usage: "<direct|group|conference> <id>",
             build: |args, ctx| {
                 Ok(Command::AcceptChatInvite {
-                    session_id: ImSessionId::from(args.req_uuid(ctx, "session_id", 0)?),
-                    from_group: args.req_bool(ctx, "from_group", 1)?,
+                    session: build_chat_session_kind(args, ctx, 0)?,
                 })
             },
         },
         CommandSpec {
             name: "decline_chat_invite",
-            usage: "<session_id> <from_group>",
+            usage: "<direct|group|conference> <id>",
             build: |args, ctx| {
                 Ok(Command::DeclineChatInvite {
-                    session_id: ImSessionId::from(args.req_uuid(ctx, "session_id", 0)?),
-                    from_group: args.req_bool(ctx, "from_group", 1)?,
+                    session: build_chat_session_kind(args, ctx, 0)?,
                 })
             },
         },

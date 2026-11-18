@@ -2,8 +2,8 @@
 //! server-side CAPS serializers and their round-trip tests.
 
 use super::chat_session::{
-    ChatSessionAgentUpdate, InviteChannel, ServerHistoryMessage, SessionTransition,
-    VoiceChannelInfo,
+    ChatSessionAgentUpdate, ChatSessionKind, InviteChannel, ServerHistoryMessage,
+    SessionTransition, VoiceChannelInfo,
 };
 use crate::GroupRoleKey;
 use crate::appearance;
@@ -4409,15 +4409,14 @@ pub(crate) fn chatterbox_invitation_from_llsd(body: &Llsd) -> Option<Event> {
             .or_else(|| params.get("binary_bucket"))
             .and_then(Llsd::as_binary)
             .map_or_else(Vec::new, <[u8]>::to_vec);
+        let session_id = uuid_member_lenient(params, "id");
+        let from_agent_id = AgentKey::from(uuid_member_lenient(params, "from_id"));
         return Some(Event::ConferenceInvited {
-            session_id: uuid_member_lenient(params, "id"),
-            from_agent_id: AgentKey::from(uuid_member_lenient(params, "from_id")),
+            session_id,
+            from_agent_id,
             from_name: string_member(params, "from_name"),
             dialog: ImDialog::from_u8(u8::try_from(i32_member(params, "type")).unwrap_or(0)),
-            from_group: params
-                .get("from_group")
-                .and_then(Llsd::as_bool)
-                .unwrap_or(false),
+            session: invited_session_kind(body, params, session_id, from_agent_id),
             session_name: string_member(body, "session_name"),
             message: string_member(params, "message"),
             channel: invite_channel_from_llsd(body),
@@ -4431,16 +4430,14 @@ pub(crate) fn chatterbox_invitation_from_llsd(body: &Llsd) -> Option<Event> {
     // Voice / immediate path: require at least a top-level session id; the
     // text-only fields (message, region, estate, bucket) are absent here and
     // default. The dialog defaults to the ad-hoc conference start.
-    let session_id = body.get("session_id")?;
+    let session_id = body.get("session_id")?.as_uuid().unwrap_or_default();
+    let from_agent_id = AgentKey::from(uuid_member_lenient(body, "from_id"));
     Some(Event::ConferenceInvited {
-        session_id: session_id.as_uuid().unwrap_or_default(),
-        from_agent_id: AgentKey::from(uuid_member_lenient(body, "from_id")),
+        session_id,
+        from_agent_id,
         from_name: string_member(body, "from_name"),
         dialog: ImDialog::SessionConferenceStart,
-        from_group: body
-            .get("from_group")
-            .and_then(Llsd::as_bool)
-            .unwrap_or(false),
+        session: invited_session_kind(body, body, session_id, from_agent_id),
         session_name: string_member(body, "session_name"),
         message: String::new(),
         channel: invite_channel_from_llsd(body),
@@ -4450,6 +4447,51 @@ pub(crate) fn chatterbox_invitation_from_llsd(body: &Llsd) -> Option<Event> {
         timestamp: None,
         binary_bucket: Vec::new(),
     })
+}
+
+/// The `voice.invitation_type` of a `ChatterBoxInvitation` that invites to a
+/// 1:1 call: the simulator's multi-agent session types, to which the reference
+/// adds `P2P_CHAT_SESSION` because WebRTC carries a 1:1 call over the
+/// multi-agent mechanism (`EMultiAgentChatSessionType`, `llimview.cpp`).
+const P2P_CHAT_SESSION: i32 = 2;
+
+/// Which session a `ChatterBoxInvitation` invites to, as the invitation states
+/// it. A voice invitation whose `voice.invitation_type` is
+/// [`P2P_CHAT_SESSION`] is a 1:1 call with the inviter, which the reference
+/// opens as a P2P session (`LLViewerChatterBoxInvitation::post`,
+/// `inviteToSession` with `IM_SESSION_P2P_INVITE`); otherwise `from_group`
+/// (in `params`, the text invitation's `message_params` or the voice
+/// invitation's top level) names a group session, and anything else is an
+/// ad-hoc conference — which the session may still read as a group's, since
+/// Second Life invites to one with `from_group` clear.
+fn invited_session_kind(
+    body: &Llsd,
+    params: &Llsd,
+    session_id: Uuid,
+    from_agent_id: AgentKey,
+) -> ChatSessionKind {
+    let p2p = body
+        .get("voice")
+        .and_then(|voice| voice.get("invitation_type"))
+        .and_then(Llsd::as_i32)
+        == Some(P2P_CHAT_SESSION);
+    if p2p {
+        ChatSessionKind::Direct {
+            peer: from_agent_id,
+        }
+    } else if params
+        .get("from_group")
+        .and_then(Llsd::as_bool)
+        .unwrap_or(false)
+    {
+        ChatSessionKind::Group {
+            group_id: GroupKey::from(session_id),
+        }
+    } else {
+        ChatSessionKind::Conference {
+            id: ImSessionId::from(session_id),
+        }
+    }
 }
 
 /// Classifies which channel(s) a `ChatterBoxInvitation` body invites us to: a
@@ -4830,9 +4872,9 @@ pub(crate) fn chat_session_roster_from_llsd(body: &Llsd) -> Vec<AgentKey> {
 /// invitation"` reply body — the inverse of `chat_session_roster_from_llsd`,
 /// for the server side of the cap. Emits the modern `agent_info` map keyed by
 /// agent uuid; the per-agent info maps are empty (the client reads only the
-/// keys — voice/moderator flags are out of scope for this serializer). The
-/// `session-id` / `from_group` routing members are **not** emitted: the
-/// client's HTTP glue stamps those onto the reply itself.
+/// keys — voice/moderator flags are out of scope for this serializer). Like
+/// the grid's, the reply names no session: the client's runtime carries the
+/// session it posted for to the reply.
 #[must_use]
 pub fn chat_session_roster_to_llsd(participants: &[AgentKey]) -> Llsd {
     let agent_info = participants
@@ -4844,9 +4886,7 @@ pub fn chat_session_roster_to_llsd(participants: &[AgentKey]) -> Llsd {
 
 /// Decodes a `ChatSessionRequest` `"fetch history"` reply into the session's
 /// server-side backlog, oldest-first as the server sends it. Accepts either the
-/// bare LLSD array the wire carries or the runtime's routing wrapper (the array
-/// under a `history` member — see
-/// [`CHAT_SESSION_FETCH_HISTORY_TAG`](crate::CHAT_SESSION_FETCH_HISTORY_TAG)).
+/// bare LLSD array the wire carries or the array under a `history` member.
 /// Each record is a map `{ from, from_id, message, num, time }` (Firestorm
 /// `chatterBoxHistoryCoro`, `llimview.cpp:835`); the `num` index is ignored
 /// (order is positional) and `time` may arrive as an integer **or a real** —
@@ -7056,7 +7096,8 @@ pub(crate) fn offline_message_to_record(im: &InstantMessage) -> Llsd {
 /// body (inverse of `chatterbox_invitation_from_llsd`). `session_name` sits at
 /// the top level and the bucket nests under `message_params.data`, matching the
 /// shape the parser reads. A text invitation carries the `instantmessage`
-/// sub-map, a voice one an (empty) `voice` sub-map; a voice-only invitation
+/// sub-map, a voice one a `voice` sub-map stating the session's
+/// `invitation_type` (group, conference or 1:1 call); a voice-only invitation
 /// names its session and inviter at the top level, where the reference reads
 /// them for a voice call (`llimview.cpp`, `LLViewerChatterBoxInvitation`).
 #[must_use]
@@ -7066,7 +7107,7 @@ pub fn chatterbox_invitation_to_llsd(event: &Event) -> Llsd {
         from_agent_id,
         from_name,
         dialog,
-        from_group,
+        session,
         session_name,
         message,
         channel,
@@ -7079,12 +7120,20 @@ pub fn chatterbox_invitation_to_llsd(event: &Event) -> Llsd {
     else {
         return Llsd::Undef;
     };
+    let from_group = matches!(session, ChatSessionKind::Group { .. });
+    // The simulator's multi-agent session type, with the reference's 1:1 call.
+    let invitation_type = match session {
+        ChatSessionKind::Group { .. } => 0,
+        ChatSessionKind::Conference { .. } => 1,
+        ChatSessionKind::Direct { .. } => P2P_CHAT_SESSION,
+    };
+    let voice = || llsd_map(vec![("invitation_type", Llsd::Integer(invitation_type))]);
     let params = llsd_map(vec![
         ("id", Llsd::Uuid(*session_id)),
         ("from_id", Llsd::Uuid(from_agent_id.uuid())),
         ("from_name", Llsd::String(from_name.clone())),
         ("type", Llsd::Integer(i32::from(dialog.to_u8()))),
-        ("from_group", Llsd::Boolean(*from_group)),
+        ("from_group", Llsd::Boolean(from_group)),
         ("message", Llsd::String(message.clone())),
         ("region_id", Llsd::Uuid(*region_id)),
         ("position", region_coords_to_llsd(*position)),
@@ -7105,15 +7154,15 @@ pub fn chatterbox_invitation_to_llsd(event: &Event) -> Llsd {
         }
         InviteChannel::Both => {
             body.push(("instantmessage", llsd_map(vec![("message_params", params)])));
-            body.push(("voice", llsd_map(Vec::new())));
+            body.push(("voice", voice()));
         }
         InviteChannel::Voice => {
             body.extend([
                 ("session_id", Llsd::Uuid(*session_id)),
                 ("from_id", Llsd::Uuid(from_agent_id.uuid())),
                 ("from_name", Llsd::String(from_name.clone())),
-                ("from_group", Llsd::Boolean(*from_group)),
-                ("voice", llsd_map(Vec::new())),
+                ("from_group", Llsd::Boolean(from_group)),
+                ("voice", voice()),
             ]);
         }
     }
@@ -8502,9 +8551,11 @@ pub(crate) fn full_update_block(object: &Object) -> ObjectUpdateObjectDataBlock 
 
 #[cfg(test)]
 mod caps_serializer_tests {
+    use std::collections::HashMap;
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
-    use super::InviteChannel;
+    use super::{ChatSessionKind, InviteChannel};
+    use crate::bookkeeping_ids::ImSessionId;
 
     use crate::types::{AssetType, InventoryListing, InventoryListingChildren, Maturity, MuteType};
     use pretty_assertions::{assert_eq, assert_ne};
@@ -9890,7 +9941,9 @@ mod caps_serializer_tests {
             from_agent_id: AgentKey::from(Uuid::from_u128(0xb2)),
             from_name: "Inviter Resident".to_owned(),
             dialog: ImDialog::SessionGroupStart,
-            from_group: true,
+            session: ChatSessionKind::Group {
+                group_id: GroupKey::from(Uuid::from_u128(0xb1)),
+            },
             session_name: "The Group".to_owned(),
             message: "join us".to_owned(),
             channel: InviteChannel::Text,
@@ -9916,7 +9969,9 @@ mod caps_serializer_tests {
             from_agent_id: AgentKey::from(Uuid::from_u128(0xc2)),
             from_name: "Inviter Resident".to_owned(),
             dialog: ImDialog::SessionConferenceStart,
-            from_group: false,
+            session: ChatSessionKind::Conference {
+                id: ImSessionId::from(Uuid::from_u128(0xc1)),
+            },
             session_name: "A Chat".to_owned(),
             message: "talk?".to_owned(),
             channel: InviteChannel::Both,
@@ -9935,7 +9990,9 @@ mod caps_serializer_tests {
             from_agent_id: AgentKey::from(Uuid::from_u128(0xd2)),
             from_name: "Caller Resident".to_owned(),
             dialog: ImDialog::SessionConferenceStart,
-            from_group: true,
+            session: ChatSessionKind::Group {
+                group_id: GroupKey::from(Uuid::from_u128(0xd1)),
+            },
             session_name: "The Group".to_owned(),
             message: String::new(),
             channel: InviteChannel::Voice,
@@ -9948,6 +10005,55 @@ mod caps_serializer_tests {
         let body = chatterbox_invitation_to_llsd(&voice);
         assert!(body.get("instantmessage").is_none());
         assert_eq!(chatterbox_invitation_from_llsd(&body), Some(voice));
+    }
+
+    /// A voice invitation whose `invitation_type` is the reference's
+    /// `P2P_CHAT_SESSION` is a 1:1 call with the caller, not a conference
+    /// under the call's session id.
+    #[test]
+    fn a_p2p_voice_invitation_is_a_call_with_the_caller() -> Result<(), String> {
+        let caller = AgentKey::from(Uuid::from_u128(0xd4));
+        let call = Event::ConferenceInvited {
+            session_id: Uuid::from_u128(0xd3),
+            from_agent_id: caller,
+            from_name: "Caller Resident".to_owned(),
+            dialog: ImDialog::SessionConferenceStart,
+            session: ChatSessionKind::Direct { peer: caller },
+            session_name: String::new(),
+            message: String::new(),
+            channel: InviteChannel::Voice,
+            region_id: Uuid::nil(),
+            position: RegionCoordinates::new(0.0, 0.0, 0.0),
+            parent_estate_id: 0,
+            timestamp: None,
+            binary_bucket: Vec::new(),
+        };
+        let body = chatterbox_invitation_to_llsd(&call);
+        assert_eq!(
+            body.get("voice")
+                .and_then(|voice| voice.get("invitation_type"))
+                .and_then(Llsd::as_i32),
+            Some(2)
+        );
+        assert_eq!(chatterbox_invitation_from_llsd(&body), Some(call));
+        // The same body without the type is a conference, as the reference
+        // reads every voice invitation that is not a 1:1 call.
+        let Llsd::Map(mut map) = body else {
+            return Err("an invitation body is a map".to_owned());
+        };
+        let _voice = map.insert("voice".to_owned(), Llsd::Map(HashMap::new()));
+        let Some(Event::ConferenceInvited { session, .. }) =
+            chatterbox_invitation_from_llsd(&Llsd::Map(map))
+        else {
+            return Err("the untyped body still decodes".to_owned());
+        };
+        assert_eq!(
+            session,
+            ChatSessionKind::Conference {
+                id: ImSessionId::from(Uuid::from_u128(0xd3))
+            }
+        );
+        Ok(())
     }
 
     #[test]

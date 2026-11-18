@@ -6,7 +6,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 use sl_client_tokio::{
     AgentKey, ChatLifecycleView, ChatSessionInfo, ChatSessionKind, Command, Event, GroupKey,
-    ImSessionId, InviteChannel,
+    InviteChannel,
 };
 
 use crate::context::{TestContext, TestFailure};
@@ -147,8 +147,7 @@ impl GridTest for ChatInviteAcceptDecline {
                     TestFailure::Assertion("two-account test ran without a secondary".to_owned())
                 })?
                 .send(Command::AcceptChatInvite {
-                    session_id: ImSessionId::from(accept_group.uuid()),
-                    from_group: true,
+                    session: accept_session,
                 })
                 .await?;
             let accepted = require_session(ctx, accept_session, "after accept").await?;
@@ -179,8 +178,7 @@ impl GridTest for ChatInviteAcceptDecline {
                     TestFailure::Assertion("two-account test ran without a secondary".to_owned())
                 })?
                 .send(Command::DeclineChatInvite {
-                    session_id: ImSessionId::from(decline_group.uuid()),
-                    from_group: true,
+                    session: decline_session,
                 })
                 .await?;
             let after_decline = query_session(ctx, decline_session).await?;
@@ -315,14 +313,10 @@ async fn provoke_group_invitation(
                 Event::ConferenceInvited {
                     session_id,
                     from_agent_id,
-                    from_group,
+                    session: ChatSessionKind::Group { group_id: invited },
                     message,
                     ..
-                } if *from_group
-                    && *from_agent_id == primary_id
-                    && *session_id == group_id.uuid()
-                    && *message == marker =>
-                {
+                } if *from_agent_id == primary_id && *invited == group_id && *message == marker => {
                     Some(*session_id)
                 }
                 _ => None,
