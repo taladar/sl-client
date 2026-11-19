@@ -71,6 +71,7 @@ use crate::scoped_id::{CircuitId, ScopedObjectId, ScopedParcelId};
 use crate::{
     ChatSessionAgentUpdate, ChatSessionInfo, ChatSessionKind, FriendPresence, InviteChannel,
     MessageCursor, NearbyHistoryLine, ServerHistoryMessage, SessionMessage, SessionVoiceFailure,
+    VoiceChannelInfo,
 };
 
 /// How the agent came to be in the region an [`Event::AgentArrived`] reports —
@@ -1457,6 +1458,24 @@ pub enum Event {
         session: ChatSessionKind,
         /// Why it failed.
         reason: SessionVoiceFailure,
+    },
+    /// A session whose voice we joined
+    /// ([`Command::JoinSessionVoice`](crate::Command::JoinSessionVoice)) now
+    /// knows its channel: an invitation or an answer carried it, or the grid
+    /// answered the join's `call` with it. Under WebRTC this is where the
+    /// reference connects: it provisions the channel with a `multiagent`
+    /// `ProvisionVoiceAccountRequest` carrying its JSEP offer and the channel's
+    /// id and credentials (`LLVoiceWebRTCAdHocConnection`). The caller's
+    /// WebRTC engine, which owns the offer, sends that as
+    /// [`Command::RequestVoiceAccount`](crate::Command::RequestVoiceAccount)
+    /// with a [`VoiceProvisionRequest::webrtc_channel`](sl_wire::VoiceProvisionRequest::webrtc_channel);
+    /// the runtime provisions nothing itself on a join. Surfaced once per
+    /// join, and only for a channel with an id.
+    SessionVoiceChannelReady {
+        /// The session whose voice was joined.
+        session: ChatSessionKind,
+        /// The channel to connect to.
+        channel: VoiceChannelInfo,
     },
     /// The grid closed a group or conference session on the agent — the CAPS
     /// event-queue `ForceCloseChatterBoxSession`.

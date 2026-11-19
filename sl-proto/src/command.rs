@@ -2898,16 +2898,20 @@ pub enum Command {
     /// Join a chat session's voice channel (signalling only). Sets the session's
     /// optimistic `voice.joined` via
     /// [`Session::join_session_voice`](crate::Session::join_session_voice); the
-    /// runtime then ensures a voice account
-    /// ([`Command::RequestVoiceAccount`](crate::Command::RequestVoiceAccount)) and,
-    /// where the region grants `ChatSessionRequest`, asks for the session's
-    /// channel when it does not have one: a [`call`](crate::CHAT_SESSION_CALL)
-    /// for a group or a conference, and for a 1:1 call a
-    /// [`start p2p voice`](crate::CHAT_SESSION_START_P2P_VOICE) followed by the
-    /// `call` once the grid has answered the session's start. A refusal is
-    /// reported as [`Event::SessionVoiceFailed`](crate::Event::SessionVoiceFailed).
-    /// Models the grid *signalling* only — the audio session is the caller's
-    /// concern.
+    /// runtime then, where the region grants `ChatSessionRequest`, asks for the
+    /// session's channel when it does not have one: a
+    /// [`call`](crate::CHAT_SESSION_CALL) for a group or a conference, and for
+    /// a 1:1 call a [`start p2p voice`](crate::CHAT_SESSION_START_P2P_VOICE)
+    /// followed by the `call` once the grid has answered the session's start.
+    /// A refusal is reported as
+    /// [`Event::SessionVoiceFailed`](crate::Event::SessionVoiceFailed), the
+    /// channel once known as
+    /// [`Event::SessionVoiceChannelReady`](crate::Event::SessionVoiceChannelReady).
+    /// No voice account is provisioned: as in the reference under WebRTC, the
+    /// channel is provisioned with the caller's JSEP offer
+    /// ([`Command::RequestVoiceAccount`](crate::Command::RequestVoiceAccount)
+    /// with a [`VoiceProvisionRequest::webrtc_channel`]). Models the grid
+    /// *signalling* only — the audio session is the caller's concern.
     JoinSessionVoice {
         /// Which chat session (1:1 direct, group, or conference) to join voice on.
         session: ChatSessionKind,

@@ -75,5 +75,14 @@ Reference (Firestorm, read-only): `llwebrtc/`, `llvoicewebrtc`, `llvoicevivox`,
 
 Builds on: `protocol-26` voice signalling + `sl-client-bevy/src/voice.rs`.
 
+A chat session's voice (group, conference, 1:1 call) is connected here too:
+`Command::JoinSessionVoice` provisions nothing, and the session reports its
+channel as `Event::SessionVoiceChannelReady` once known. The engine then sends
+`Command::RequestVoiceAccount` with
+`VoiceProvisionRequest::webrtc_channel(offer, channel, credentials)` — the
+reference's `multiagent` provision (`LLVoiceWebRTCAdHocConnection`) — and
+tears it down with a `webrtc_logout` when voice is left (from
+[[protocol-join-session-voice-provisions-vivox]]).
+
 Deps: [[viewer-ui-widget-scaffold]], [[viewer-audio-backend]] (the shared device
 and mixer — and the mic capture that AEC depends on).

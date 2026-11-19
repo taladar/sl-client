@@ -3152,14 +3152,11 @@ impl Client {
                                 // Optimistic local join, which also records what the
                                 // grid must be asked for the session's channel (`call`,
                                 // or `start p2p voice` first for a 1:1 call); the sweep
-                                // below POSTs it. Then ensure a voice account.
+                                // below POSTs it. No voice account is provisioned here:
+                                // under WebRTC the caller's engine provisions the
+                                // channel with its offer once `SessionVoiceChannelReady`
+                                // reports it.
                                 self.session.join_session_voice(session, Instant::now());
-                                if self.session.agent_id().is_some()
-                                    && let Some(url) = caps.get(CAP_PROVISION_VOICE_ACCOUNT).cloned()
-                                {
-                                    let body = build_provision_voice_account_request(&VoiceProvisionRequest::vivox());
-                                    tokio::spawn(post_voice_cap(url, body, CAP_PROVISION_VOICE_ACCOUNT, http.clone(), caps_tx.clone()));
-                                }
                             }
                             Some(Command::LeaveSessionVoice { session }) => {
                                 // Optimistic local leave (keeps the text conversation),

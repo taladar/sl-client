@@ -24563,7 +24563,15 @@ mod test {
         );
         assert_eq!(info.channel_credentials.as_deref(), Some("pass"));
         assert!(session.session_voice_joined(kind));
-        assert!(drain_events(&mut session).is_empty());
+        let channel = info.clone();
+        assert_eq!(
+            drain_events(&mut session),
+            vec![Event::SessionVoiceChannelReady {
+                session: kind,
+                channel
+            }],
+            "the call's channel is reported for the WebRTC engine to provision"
+        );
         Ok(())
     }
 
@@ -24641,6 +24649,21 @@ mod test {
             Some(sl_wire::VoiceChannelUri::Id(channel))
         );
         assert!(session.session_voice_joined(direct));
+        // The start reply's own `ChatSessionStarted` is surfaced beside it.
+        let ready: Vec<(ChatSessionKind, Option<sl_wire::VoiceChannelUri>)> =
+            drain_events(&mut session)
+                .into_iter()
+                .filter_map(|event| match event {
+                    Event::SessionVoiceChannelReady { session, channel } => {
+                        Some((session, channel.channel_uri))
+                    }
+                    _ => None,
+                })
+                .collect();
+        assert_eq!(
+            ready,
+            vec![(direct, Some(sl_wire::VoiceChannelUri::Id(channel)))]
+        );
         Ok(())
     }
 
@@ -24667,9 +24690,87 @@ mod test {
         let kind = ChatSessionKind::Conference {
             id: ImSessionId::from(conf),
         };
+        drain_events(&mut session);
         session.join_session_voice(kind, now);
         assert!(session.session_voice_joined(kind));
         assert!(session.next_session_voice_requests().is_empty());
+        assert!(
+            matches!(
+                drain_events(&mut session).as_slice(),
+                [Event::SessionVoiceChannelReady { session: ready, channel }]
+                    if *ready == kind
+                        && channel.channel_uri
+                            == Some(sl_wire::VoiceChannelUri::Id(uuid::Uuid::from_u128(0x6A_53)))
+            ),
+            "the known channel is reported at the join"
+        );
+        session.join_session_voice(kind, now);
+        assert!(
+            drain_events(&mut session).is_empty(),
+            "a join reports its channel once"
+        );
+        Ok(())
+    }
+
+    /// An answer that carries a channel reports it only for a session whose
+    /// voice we joined, and only when the channel has an id; a different
+    /// channel arriving later in the same join is reported again, the same
+    /// one is not.
+    #[test]
+    fn an_answers_channel_is_reported_only_for_a_joined_session() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+        let channel_xml = |uri: &str| {
+            format!(
+                "<llsd><map><key>voice_channel_info</key><map>\
+                   <key>channel_uri</key><string>{uri}</string>\
+                 </map></map></llsd>"
+            )
+        };
+        let first = uuid::Uuid::from_u128(0x6A_91);
+        let second = uuid::Uuid::from_u128(0x6A_92);
+
+        let conference = ChatSessionKind::Conference {
+            id: ImSessionId::from(uuid::Uuid::from_u128(0x6A_93)),
+        };
+        session
+            .handle_chat_session_reply(&answer(conference, &channel_xml(&first.to_string()))?, now);
+        assert!(
+            drain_events(&mut session).is_empty(),
+            "not joined: nothing to provision"
+        );
+
+        let group = ChatSessionKind::Group {
+            group_id: GroupKey::from(uuid::Uuid::from_u128(0x6A_94)),
+        };
+        session.join_session_voice(group, now);
+        let _posted = session.next_session_voice_requests();
+        session.handle_chat_session_reply(&answer(group, &channel_xml(""))?, now);
+        assert!(
+            drain_events(&mut session).is_empty(),
+            "a channel with no id is not reported"
+        );
+        session.handle_chat_session_reply(&answer(group, &channel_xml(&first.to_string()))?, now);
+        session.handle_chat_session_reply(&answer(group, &channel_xml(&first.to_string()))?, now);
+        session.handle_chat_session_reply(&answer(group, &channel_xml(&second.to_string()))?, now);
+        let reported: Vec<Option<sl_wire::VoiceChannelUri>> = drain_events(&mut session)
+            .into_iter()
+            .map(|event| match event {
+                Event::SessionVoiceChannelReady { session, channel } if session == group => {
+                    Ok(channel.channel_uri)
+                }
+                other => Err(format!("unexpected {other:?}")),
+            })
+            .collect::<Result<_, _>>()?;
+        assert_eq!(
+            reported,
+            vec![
+                Some(sl_wire::VoiceChannelUri::Id(first)),
+                Some(sl_wire::VoiceChannelUri::Id(second)),
+            ]
+        );
         Ok(())
     }
 
@@ -24826,7 +24927,19 @@ mod test {
             session.next_session_voice_requests(),
             vec![(direct, SessionVoiceRequest::StartP2pVoice { peer })]
         );
-        assert!(drain_events(&mut session).is_empty());
+        let ready: Vec<ChatSessionKind> = drain_events(&mut session)
+            .into_iter()
+            .map(|event| match event {
+                Event::SessionVoiceChannelReady { session, .. } => Ok(session),
+                other => Err(format!("unexpected {other:?}")),
+            })
+            .collect::<Result<_, _>>()?;
+        assert_eq!(
+            ready,
+            vec![group, group],
+            "the group's channel is reported by the join it answered and \
+             again by the rejoin, never by the abandoned request or the 1:1"
+        );
         Ok(())
     }
 

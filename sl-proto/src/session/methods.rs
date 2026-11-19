@@ -1557,6 +1557,7 @@ impl Session {
                             && let Some(chat_session) = self.chat_session_get_mut(kind)
                         {
                             chat_session.note_voice_offered(voice_channel_info_from_llsd(voice));
+                            self.announce_voice_channel(kind);
                         }
                     }
                     self.events.push_back(event);
@@ -8311,6 +8312,7 @@ impl Session {
                     session.extend_participants(roster);
                     if let Some(voice) = voice {
                         session.note_voice_offered(voice_channel_info_from_llsd(voice));
+                        self.announce_voice_channel(*kind);
                     }
                 }
             }
@@ -8335,8 +8337,12 @@ impl Session {
     /// as the text [`Joined`](ChatSessionLifecycle::Joined) lifecycle is
     /// optimistic). Get-or-creates the session (joining voice implies an active
     /// conversation — a 1:1 P2P call may have no text traffic yet) and sets both
-    /// `voice.joined` and `voice.has_voice`. The runtime additionally provisions a
-    /// voice account and signals into the channel via `ChatSessionRequest`.
+    /// `voice.joined` and `voice.has_voice`. The runtime then asks for the
+    /// channel via `ChatSessionRequest` where it is not known; it provisions
+    /// no voice account, since under WebRTC the channel is provisioned with
+    /// the caller's JSEP offer once it is known, which
+    /// [`Event::SessionVoiceChannelReady`] reports — here already, when the
+    /// session knows its channel.
     ///
     /// It also records what the grid must be asked for the session's voice
     /// channel, which the runtime takes from
@@ -8351,6 +8357,20 @@ impl Session {
         let chat_session = self.chat_session_mut(session, now);
         chat_session.note_voice_joined();
         chat_session.request_voice_channel(session);
+        self.announce_voice_channel(session);
+    }
+
+    /// Surfaces [`Event::SessionVoiceChannelReady`] for `session` when its
+    /// voice join has a channel it has not reported yet — the point at which
+    /// the caller's WebRTC engine provisions the channel.
+    fn announce_voice_channel(&mut self, session: ChatSessionKind) {
+        if let Some(channel) = self
+            .chat_session_get_mut(session)
+            .and_then(ChatSession::take_voice_channel_to_announce)
+        {
+            self.events
+                .push_back(Event::SessionVoiceChannelReady { session, channel });
+        }
     }
 
     /// The `ChatSessionRequest` POSTs the sessions' voice joins are waiting
@@ -8379,7 +8399,9 @@ impl Session {
 
     /// Folds the reply to a voice join's `call` or `start p2p voice`. A
     /// `call`'s `voice_credentials` become the session's channel; a `start
-    /// p2p voice` that succeeded waits on for the session's start reply. A
+    /// p2p voice` that succeeded waits on for the session's start reply. The
+    /// channel a `call` gets is reported as
+    /// [`Event::SessionVoiceChannelReady`]. A
     /// refusal, or a `call` with no channel in it, ends the join with
     /// [`Event::SessionVoiceFailed`], as the reference deactivates the
     /// channel. A reply for a join since left is dropped.
@@ -8420,7 +8442,8 @@ impl Session {
                 Some(credentials @ Llsd::Map(_)) => {
                     chat_session.note_voice_offered(voice_channel_info_from_llsd(credentials));
                     chat_session.voice_request = VoiceRequestState::Idle;
-                    None
+                    self.announce_voice_channel(*kind);
+                    return;
                 }
                 _ => Some(SessionVoiceFailure::NoChannel),
             }

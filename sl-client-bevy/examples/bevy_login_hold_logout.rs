@@ -421,6 +421,7 @@ fn on_events(
             | SlSessionEvent::ChatSessionEventReply { .. }
             | SlSessionEvent::ChatSessionForceClosed { .. }
             | SlSessionEvent::SessionVoiceFailed { .. }
+            | SlSessionEvent::SessionVoiceChannelReady { .. }
             | SlSessionEvent::EstateAccessLists(_)
             | SlSessionEvent::RegionSchedule(_)
             | SlSessionEvent::TerrainMaterialOverrides(_)

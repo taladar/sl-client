@@ -169,6 +169,17 @@ refusal, a `call` with no channel in it or a refused start ends the join with
 1:1 call forgets its channel, so calling again rings again; a group keeps its
 channel. On OpenSim there is no cap, and nothing is asked.
 
+A join provisions **no voice account**: the reference, under WebRTC, connects
+to a session's channel only once it has one, with a `multiagent`
+`ProvisionVoiceAccountRequest` carrying its JSEP offer and the channel's id
+(`channel`) and `credentials` (`LLVoiceWebRTCAdHocConnection`). The offer is
+the WebRTC engine's, so `Session` reports the channel as
+`Event::SessionVoiceChannelReady { session, channel }` — at the join when the
+session already knows it, else when a `call` or an accept brings it — once per
+join and again only when the channel changes, and never for a channel with no
+id or a session whose voice is not joined. The engine answers with
+`Command::RequestVoiceAccount` and a `VoiceProvisionRequest::webrtc_channel`.
+
 The cap's replies — an accept's roster and `voice_channel_info`, a
 `fetch history`'s backlog, a `call`'s channel — name no session of their own:
 the reference keeps the session id in the coroutine that posted. So the

@@ -523,6 +523,11 @@ pub(crate) struct ChatSession {
     /// Where the request for this session's voice channel stands (see
     /// [`VoiceRequestState`]).
     pub(crate) voice_request: VoiceRequestState,
+    /// Whether the channel of the current voice join has been reported as
+    /// [`Event::SessionVoiceChannelReady`](crate::Event::SessionVoiceChannelReady),
+    /// so each join reports its channel once. Cleared when voice is left or
+    /// declined, and when the channel changes.
+    pub(crate) voice_channel_announced: bool,
 }
 
 impl ChatSession {
@@ -549,6 +554,7 @@ impl ChatSession {
             server_history: Vec::new(),
             server_history_state: ServerHistoryState::Unfetched,
             voice_request: VoiceRequestState::Idle,
+            voice_channel_announced: false,
         }
     }
 
@@ -629,9 +635,32 @@ impl ChatSession {
     /// Records that this session offers voice, with whatever channel
     /// coordinates came with the offer (an invitation's `voice` body, or an
     /// accept reply's `voice_channel_info`).
+    /// A channel that differs from the one already reported for the current
+    /// join is reported again.
     pub(crate) fn note_voice_offered(&mut self, channel: VoiceChannelInfo) {
         self.voice.has_voice = true;
+        if self.voice.channel.as_ref() != Some(&channel) {
+            self.voice_channel_announced = false;
+        }
         self.voice.channel = Some(channel);
+    }
+
+    /// The channel of the current voice join, once, when it is to be reported
+    /// as [`Event::SessionVoiceChannelReady`](crate::Event::SessionVoiceChannelReady):
+    /// we have joined, the channel has an id, and it has not been reported
+    /// for this join yet.
+    pub(crate) fn take_voice_channel_to_announce(&mut self) -> Option<VoiceChannelInfo> {
+        if !self.voice.joined || self.voice_channel_announced {
+            return None;
+        }
+        let channel = self
+            .voice
+            .channel
+            .as_ref()
+            .filter(|channel| channel.channel_uri.is_some())?
+            .clone();
+        self.voice_channel_announced = true;
+        Some(channel)
     }
 
     /// Folds one agent-list voice flag into the voice roster. Someone being in
@@ -660,6 +689,7 @@ impl ChatSession {
         self.voice.channel = None;
         self.voice.joined = false;
         self.voice_request = VoiceRequestState::Idle;
+        self.voice_channel_announced = false;
     }
 
     /// Records that we have left the voice channel, leaving the text side of
@@ -669,6 +699,7 @@ impl ChatSession {
     pub(crate) const fn note_voice_left(&mut self) {
         self.voice.joined = false;
         self.voice_request = VoiceRequestState::Idle;
+        self.voice_channel_announced = false;
     }
 
     /// Records a voice join's request for this session: the channel the

@@ -324,6 +324,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Event::SessionVoiceFailed { session, reason } => {
                 info!("voice of chat session {session:?} not joined: {reason:?}");
             }
+            Event::SessionVoiceChannelReady { session, channel } => {
+                info!("voice of chat session {session:?} has its channel: {channel:?}");
+            }
             Event::ScriptDialog(dialog) => info!(
                 "script dialog from {:?}: {:?} [{}]",
                 dialog.object_name,

@@ -312,6 +312,7 @@ fn on_events(
             | SlSessionEvent::ChatSessionEventReply { .. }
             | SlSessionEvent::ChatSessionForceClosed { .. }
             | SlSessionEvent::SessionVoiceFailed { .. }
+            | SlSessionEvent::SessionVoiceChannelReady { .. }
             | SlSessionEvent::AvatarNames(_)
             | SlSessionEvent::GroupNames(_)
             | SlSessionEvent::DisplayNames(_)

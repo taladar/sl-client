@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 328 |
 | blocked | 34 |
 | in-progress | 4 |
-| bugs | 17 |
-| done | 1595 |
+| bugs | 16 |
+| done | 1596 |
 | deferred | 30 |
 | wont-do | 24 |
 | **total** | **2163** |
@@ -1239,14 +1239,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-text-renderability-axis`](in-progress/viewer-ui-text-renderability-axis.md)
   — Upstream issue — font selection cannot see glyph-format renderability
 
-## bugs (17)
+## bugs (16)
 
 ### protocol
 
 - [`protocol-group-fetch-history-403-on-aditi`](bugs/protocol-group-fetch-history-403-on-aditi.md)
   — A group session's automatic fetch history is answered 403 on aditi
-- [`protocol-join-session-voice-provisions-vivox`](bugs/protocol-join-session-voice-provisions-vivox.md)
-  — Joining a session's voice posts a Vivox account provision
 
 ### viewer
 
@@ -1288,7 +1286,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1595)
+## done (1596)
 
 ### protocol
 
@@ -1529,6 +1527,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`protocol-join-session-voice-posts-accept-invitation`](done/protocol-join-session-voice-posts-accept-invitation.md)
   — Joining a session's voice posts accept invitation, where the reference posts
   call or start p2p voice
+- [`protocol-join-session-voice-provisions-vivox`](done/protocol-join-session-voice-provisions-vivox.md)
+  — Joining a session's voice posts a Vivox account provision
 - [`protocol-login-options-max-agent-groups-unrequested`](done/protocol-login-options-max-agent-groups-unrequested.md)
   — max-agent-groups is never requested at login but is gated on the option
 - [`protocol-logout-reply-sometimes-missing-on-opensim`](done/protocol-logout-reply-sometimes-missing-on-opensim.md)

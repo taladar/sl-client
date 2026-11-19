@@ -782,6 +782,7 @@ impl Survey {
             | Event::ChatSessionEventReply { .. }
             | Event::ChatSessionForceClosed { .. }
             | Event::SessionVoiceFailed { .. }
+            | Event::SessionVoiceChannelReady { .. }
             | Event::AvatarNames(_)
             | Event::GroupNames(_)
             | Event::DisplayNames(_)

@@ -679,7 +679,9 @@ mod test {
     /// A 1:1 call through the fake grid: the client's `start p2p voice` is
     /// answered with the 1:1 session's start over the event queue, after which
     /// its `call` is answered with a WebRTC channel carrying the credentials
-    /// registered for it — and no conference is opened on the way.
+    /// registered for it — and no conference is opened on the way. The
+    /// channel is reported, and a WebRTC engine's `multiagent` provision of
+    /// it is accepted.
     #[test]
     fn a_direct_call_starts_and_gets_its_channel() -> Result<(), TestError> {
         let mut caps = new_caps()?;
@@ -718,10 +720,39 @@ mod test {
         let kinds: Vec<ChatSessionKind> =
             client.chat_sessions_info().map(|info| info.kind).collect();
         assert_eq!(kinds, vec![direct]);
+        let events = drain_client(&mut client);
         assert!(
-            !drain_client(&mut client)
+            !events
                 .iter()
                 .any(|event| matches!(event, Event::SessionVoiceFailed { .. }))
+        );
+        // The channel is handed on for the WebRTC engine's `multiagent`
+        // provision, which the simulator accepts with the registered
+        // credentials.
+        let ready = events
+            .iter()
+            .find_map(|event| match event {
+                Event::SessionVoiceChannelReady { session, channel } if *session == direct => {
+                    Some(channel.clone())
+                }
+                _ => None,
+            })
+            .ok_or("the call's channel is reported")?;
+        let uri = ready.channel_uri.ok_or("the channel has an id")?;
+        let request = sl_wire::VoiceProvisionRequest::webrtc_channel(
+            VOICE_OFFER,
+            uri.to_string(),
+            ready.channel_credentials,
+        );
+        let info = provision_through_client(&mut caps, &mut sim, &mut client, &request, now)?;
+        let viewer_session = info.viewer_session.ok_or("the channel is connected")?;
+        assert_eq!(
+            sim.voice()
+                .connection(&viewer_session)
+                .map(|connection| connection.channel.clone()),
+            Some(VoiceChannel::MultiAgent {
+                channel: session_id.to_string(),
+            })
         );
         Ok(())
     }

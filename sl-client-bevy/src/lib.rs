@@ -5255,19 +5255,11 @@ fn apply_command(
         } => {
             // Optimistic local join, which also records what the grid must be
             // asked for the session's channel (`call`, or `start p2p voice`
-            // first for a 1:1 call); the per-frame sweep POSTs it. Then ensure
-            // a voice account.
+            // first for a 1:1 call); the per-frame sweep POSTs it. No voice
+            // account is provisioned here: under WebRTC the caller's engine
+            // provisions the channel with its offer once
+            // `SessionVoiceChannelReady` reports it. Mirrors the tokio arm.
             session.join_session_voice(*chat_session, now);
-            if session.agent_id().is_some()
-                && let Some(caps) = caps
-                && let Some(url) = caps.map.get(CAP_PROVISION_VOICE_ACCOUNT).cloned()
-            {
-                let body = build_provision_voice_account_request(&VoiceProvisionRequest::vivox());
-                let events_tx = caps.events_tx.clone();
-                crate::log_context::spawn_thread(move || {
-                    run_voice_cap(&url, body, CAP_PROVISION_VOICE_ACCOUNT, &events_tx);
-                });
-            }
         }
         Command::LeaveSessionVoice {
             session: chat_session,
