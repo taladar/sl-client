@@ -7,18 +7,18 @@ use crossbeam_channel::Sender;
 use sl_client_common::lsl_syntax_cache::LslSyntaxCache;
 use sl_client_common::retry::{MAX_TRANSIENT_RETRIES, is_transient_status, transient_backoff};
 use sl_proto::{
-    AVATAR_PICKER_SEARCH_TAG, CAP_CHAT_SESSION_REQUEST, CAP_GET_METADATA, CAP_GROUP_API_V1,
-    CAP_LAND_RESOURCES, CAP_LSL_SYNTAX, CAP_REMOTE_PARCEL_REQUEST, CAP_REQUEST_TASK_INVENTORY,
-    CAP_SEARCH_STAT_REQUEST, CAP_UPLOAD_AGENT_PROFILE_IMAGE, ChatSessionKind, ChatSessionReply,
-    ChatSessionRequestPurpose, ClassifiedKey, EXPERIENCE_QUERY_TAG, InventoryKey,
-    LAND_RESOURCE_DETAIL_TAG, LAND_RESOURCE_SUMMARY_TAG, LSL_SYNTAX_VERSION, Llsd, ObjectKey,
-    ParcelKey, ProfileImage, RemoteParcelRequest, TASK_INVENTORY_FAILED_TAG,
-    TASK_INVENTORY_UNCHANGED_TAG, Uuid, build_get_metadata_request, build_land_resources_request,
-    build_remote_parcel_request, parse_land_resources_reply, parse_llsd_xml,
-    profile_image_upload_body, profile_image_upload_outcome, search_stat_request_body,
-    stamp_get_metadata_reply, stamp_remote_parcel_request, stamp_search_stat_answer,
-    stamp_task_inventory_cap_reply, task_inventory_cap_url, task_inventory_failed_body,
-    task_inventory_unchanged_body,
+    AVATAR_PICKER_SEARCH_TAG, AgentKey, CAP_CHAT_SESSION_REQUEST, CAP_GET_METADATA,
+    CAP_GROUP_API_V1, CAP_LAND_RESOURCES, CAP_LSL_SYNTAX, CAP_REMOTE_PARCEL_REQUEST,
+    CAP_REQUEST_TASK_INVENTORY, CAP_SEARCH_STAT_REQUEST, CAP_UPLOAD_AGENT_PROFILE_IMAGE,
+    ChatSessionKind, ChatSessionReply, ChatSessionRequestPurpose, ClassifiedKey,
+    EXPERIENCE_QUERY_TAG, InventoryKey, LAND_RESOURCE_DETAIL_TAG, LAND_RESOURCE_SUMMARY_TAG,
+    LSL_SYNTAX_VERSION, Llsd, ObjectKey, ParcelKey, ProfileImage, RemoteParcelRequest,
+    TASK_INVENTORY_FAILED_TAG, TASK_INVENTORY_UNCHANGED_TAG, Uuid, build_get_metadata_request,
+    build_land_resources_request, build_remote_parcel_request, parse_land_resources_reply,
+    parse_llsd_xml, profile_image_upload_body, profile_image_upload_outcome,
+    search_stat_request_body, stamp_get_metadata_reply, stamp_remote_parcel_request,
+    stamp_search_stat_answer, stamp_task_inventory_cap_reply, task_inventory_cap_url,
+    task_inventory_failed_body, task_inventory_unchanged_body,
 };
 use std::collections::HashMap;
 
@@ -321,6 +321,7 @@ pub(crate) fn run_chat_session_request(
     purpose: ChatSessionRequestPurpose,
     caps_tx: &Sender<(String, Llsd)>,
     replies_tx: &Sender<ChatSessionReply>,
+    agent: AgentKey,
 ) {
     let Ok(http) = crate::http_proxy::blocking_client_builder()
         .timeout(EVENT_QUEUE_TIMEOUT)
@@ -346,6 +347,7 @@ pub(crate) fn run_chat_session_request(
     if !status.is_success() {
         tracing::warn!(
             capability = CAP_CHAT_SESSION_REQUEST,
+            %agent,
             ?session,
             ?purpose,
             %status,
@@ -362,6 +364,7 @@ pub(crate) fn run_chat_session_request(
         Err(_not_llsd) => {
             tracing::warn!(
                 capability = CAP_CHAT_SESSION_REQUEST,
+                %agent,
                 ?session,
                 ?purpose,
                 %status,

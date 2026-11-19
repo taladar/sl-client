@@ -440,6 +440,7 @@ integer), oldest first. OpenSim has no capability.
 | an earlier run's lines (**held**) | never there |
 | read after A says ten lines in 2.5 s, then after twenty and thirty more (**held**) | `200` and an **empty array**, every time — and still empty after B logs out, comes back and joins again |
 | a conference's history (**held**) | **`403`** "You cannot join chat", to a participant |
+| a group's history, asked by the agent that started the session before its start reply | **`403`** "You cannot join chat" (seen 2026-11-19, the start then refused `unverified`) |
 
 So the history is the live session's, and something empties it: not its
 size (ten lines did), and not a second read. What does is not measured.
@@ -498,6 +499,8 @@ viewer minted.
   after Do Not Disturb ends arrives as a fresh invitation and joins it.
 - **The history fetch degrades on OpenSim** without a request: the
   capability is absent, so nothing is asked.
+- **A group session the agent starts is fetched after its start reply**, as
+  the reference does, and not at all when the start is refused.
 
 ### Not measured
 

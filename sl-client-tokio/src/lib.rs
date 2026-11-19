@@ -228,12 +228,13 @@ use crate::experiences::{
 };
 use crate::fetch::{fetch_asset_http, fetch_mesh_http, fetch_texture_http};
 use crate::http::{
-    answer_friendship, answer_group_invitation, delete_caps_llsd, fetch_land_resources,
-    fetch_lsl_syntax, get_avatar_picker_search, get_caps_llsd, get_experience_query,
-    get_task_inventory, group_bans, patch_caps_llsd, post_caps_oneway, post_chat_session_request,
-    post_home_location, post_remote_parcel_request, post_script_metadata, put_agent_profile,
-    put_caps_llsd, search_stat, set_display_name, set_region_schedule,
-    set_terrain_material_overrides, settle_environment_change, upload_profile_image,
+    ChatSessionPost, answer_friendship, answer_group_invitation, delete_caps_llsd,
+    fetch_land_resources, fetch_lsl_syntax, get_avatar_picker_search, get_caps_llsd,
+    get_experience_query, get_task_inventory, group_bans, patch_caps_llsd, post_caps_oneway,
+    post_chat_session_request, post_home_location, post_remote_parcel_request,
+    post_script_metadata, put_agent_profile, put_caps_llsd, search_stat, set_display_name,
+    set_region_schedule, set_terrain_material_overrides, settle_environment_change,
+    upload_profile_image,
 };
 use crate::inventory::{
     fetch_ais3_folders, fetch_folder_contents, fetch_group_members, fetch_inventory,
@@ -1103,8 +1104,11 @@ impl Client {
                     tokio::spawn(post_chat_session_request(
                         url.clone(),
                         chat_session_request_body(CHAT_SESSION_FETCH_HISTORY, session_id),
-                        kind,
-                        ChatSessionRequestPurpose::FetchHistory,
+                        ChatSessionPost {
+                            agent: own_agent,
+                            session: kind,
+                            purpose: ChatSessionRequestPurpose::FetchHistory,
+                        },
                         http.clone(),
                         caps_tx.clone(),
                         chat_replies_tx.clone(),
@@ -1118,8 +1122,11 @@ impl Client {
                     tokio::spawn(post_chat_session_request(
                         url.clone(),
                         request.body(kind.canonical_session_id(own_agent)),
-                        kind,
-                        request.purpose(),
+                        ChatSessionPost {
+                            agent: own_agent,
+                            session: kind,
+                            purpose: request.purpose(),
+                        },
                         http.clone(),
                         caps_tx.clone(),
                         chat_replies_tx.clone(),
@@ -3119,7 +3126,7 @@ impl Client {
                                     && let (Some(url), Some(own)) = (caps.get(CAP_CHAT_SESSION_REQUEST).cloned(), self.session.agent_id())
                                 {
                                     let body = chat_session_request_body(CHAT_SESSION_ACCEPT, session.canonical_session_id(own));
-                                    tokio::spawn(post_chat_session_request(url, body, session, ChatSessionRequestPurpose::Answer, http.clone(), caps_tx.clone(), chat_replies_tx.clone()));
+                                    tokio::spawn(post_chat_session_request(url, body, ChatSessionPost { agent: own, session, purpose: ChatSessionRequestPurpose::Answer }, http.clone(), caps_tx.clone(), chat_replies_tx.clone()));
                                 }
                             }
                             Some(Command::DeclineChatInvite { session }) => {
@@ -3137,7 +3144,7 @@ impl Client {
                                             CHAT_SESSION_DECLINE
                                         };
                                         let body = chat_session_request_body(method, session.canonical_session_id(own));
-                                        tokio::spawn(post_chat_session_request(url, body, session, ChatSessionRequestPurpose::Answer, http.clone(), caps_tx.clone(), chat_replies_tx.clone()));
+                                        tokio::spawn(post_chat_session_request(url, body, ChatSessionPost { agent: own, session, purpose: ChatSessionRequestPurpose::Answer }, http.clone(), caps_tx.clone(), chat_replies_tx.clone()));
                                     }
                                     (_, _, ChatSessionKind::Group { group_id }) => {
                                         self.session.leave_group_session(group_id, Instant::now())?;
@@ -3173,7 +3180,7 @@ impl Client {
                                     };
                                     if let Some(url) = caps.get(CAP_CHAT_SESSION_REQUEST).cloned() {
                                         let body = chat_session_request_body(method, session_uuid);
-                                        tokio::spawn(post_chat_session_request(url, body, session, ChatSessionRequestPurpose::Answer, http.clone(), caps_tx.clone(), chat_replies_tx.clone()));
+                                        tokio::spawn(post_chat_session_request(url, body, ChatSessionPost { agent: own, session, purpose: ChatSessionRequestPurpose::Answer }, http.clone(), caps_tx.clone(), chat_replies_tx.clone()));
                                     }
                                 }
                             }
@@ -3197,8 +3204,11 @@ impl Client {
                                     tokio::spawn(post_chat_session_request(
                                         url,
                                         body,
-                                        kind,
-                                        ChatSessionRequestPurpose::FetchHistory,
+                                        ChatSessionPost {
+                                            agent: own,
+                                            session: kind,
+                                            purpose: ChatSessionRequestPurpose::FetchHistory,
+                                        },
                                         http.clone(),
                                         caps_tx.clone(),
                                         chat_replies_tx.clone(),

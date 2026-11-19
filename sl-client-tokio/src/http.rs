@@ -2,18 +2,18 @@
 
 use reqwest::Client as ReqwestClient;
 use sl_proto::{
-    AVATAR_PICKER_SEARCH_TAG, CAP_CHAT_SESSION_REQUEST, CAP_GET_METADATA, CAP_GROUP_API_V1,
-    CAP_HOME_LOCATION, CAP_LAND_RESOURCES, CAP_LSL_SYNTAX, CAP_MODIFY_REGION, CAP_REGION_SCHEDULE,
-    CAP_REMOTE_PARCEL_REQUEST, CAP_REQUEST_TASK_INVENTORY, CAP_SEARCH_STAT_REQUEST,
-    CAP_UPLOAD_AGENT_PROFILE_IMAGE, ChatSessionKind, ChatSessionReply, ChatSessionRequestPurpose,
-    ClassifiedKey, EXPERIENCE_QUERY_TAG, InventoryKey, LAND_RESOURCE_DETAIL_TAG,
-    LAND_RESOURCE_SUMMARY_TAG, Llsd, MODIFY_REGION_WRITE_TAG, ObjectKey, ParcelKey, ProfileImage,
-    RemoteParcelRequest, TASK_INVENTORY_FAILED_TAG, TASK_INVENTORY_UNCHANGED_TAG,
-    build_get_metadata_request, build_land_resources_request, build_remote_parcel_request,
-    parse_land_resources_reply, parse_llsd_xml, profile_image_upload_body,
-    profile_image_upload_outcome, stamp_get_metadata_reply, stamp_remote_parcel_request,
-    stamp_search_stat_answer, stamp_task_inventory_cap_reply, task_inventory_cap_url,
-    task_inventory_failed_body, task_inventory_unchanged_body,
+    AVATAR_PICKER_SEARCH_TAG, AgentKey, CAP_CHAT_SESSION_REQUEST, CAP_GET_METADATA,
+    CAP_GROUP_API_V1, CAP_HOME_LOCATION, CAP_LAND_RESOURCES, CAP_LSL_SYNTAX, CAP_MODIFY_REGION,
+    CAP_REGION_SCHEDULE, CAP_REMOTE_PARCEL_REQUEST, CAP_REQUEST_TASK_INVENTORY,
+    CAP_SEARCH_STAT_REQUEST, CAP_UPLOAD_AGENT_PROFILE_IMAGE, ChatSessionKind, ChatSessionReply,
+    ChatSessionRequestPurpose, ClassifiedKey, EXPERIENCE_QUERY_TAG, InventoryKey,
+    LAND_RESOURCE_DETAIL_TAG, LAND_RESOURCE_SUMMARY_TAG, Llsd, MODIFY_REGION_WRITE_TAG, ObjectKey,
+    ParcelKey, ProfileImage, RemoteParcelRequest, TASK_INVENTORY_FAILED_TAG,
+    TASK_INVENTORY_UNCHANGED_TAG, build_get_metadata_request, build_land_resources_request,
+    build_remote_parcel_request, parse_land_resources_reply, parse_llsd_xml,
+    profile_image_upload_body, profile_image_upload_outcome, stamp_get_metadata_reply,
+    stamp_remote_parcel_request, stamp_search_stat_answer, stamp_task_inventory_cap_reply,
+    task_inventory_cap_url, task_inventory_failed_body, task_inventory_unchanged_body,
 };
 use std::collections::HashMap;
 use tokio::sync::mpsc;
@@ -202,22 +202,39 @@ pub(crate) async fn post_caps_oneway(cap_url: String, body: String, http: Reqwes
     post_llsd_oneway(&cap_url, body, &http, "a fire-and-forget capability POST").await;
 }
 
+/// Who posts a `ChatSessionRequest`, for which session, and which request it
+/// is — what travels with the POST to its reply and into its log lines.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ChatSessionPost {
+    /// The agent posting, named in a refusal's log line: a process can run
+    /// several clients, and the line is otherwise anonymous.
+    pub(crate) agent: AgentKey,
+    /// The session the request is for; the reply names none of its own.
+    pub(crate) session: ChatSessionKind,
+    /// Which request it is.
+    pub(crate) purpose: ChatSessionRequestPurpose,
+}
+
 /// POSTs a `ChatSessionRequest` `body` to the cap URL and hands the LLSD reply
-/// back over `replies_tx` as a [`ChatSessionReply`] carrying `session`, the
-/// session it was posted for, and `purpose`, which request it was. The reply
-/// names no session of its own — the reference keeps the id in the coroutine
-/// that posted — so the session travels with the request, typed, never in the
-/// body. A failed POST or a reply that is not LLSD is reported over `caps_tx`
-/// as a failure of [`CAP_CHAT_SESSION_REQUEST`].
+/// back over `replies_tx` as a [`ChatSessionReply`] carrying the request's
+/// `session`, the session it was posted for, and `purpose`, which request it
+/// was. The reply names no session of its own — the reference keeps the id in
+/// the coroutine that posted — so the session travels with the request, typed,
+/// never in the body. A failed POST or a reply that is not LLSD is reported
+/// over `caps_tx` as a failure of [`CAP_CHAT_SESSION_REQUEST`].
 pub(crate) async fn post_chat_session_request(
     cap_url: String,
     body: String,
-    session: ChatSessionKind,
-    purpose: ChatSessionRequestPurpose,
+    request: ChatSessionPost,
     http: ReqwestClient,
     caps_tx: mpsc::Sender<(String, Llsd)>,
     replies_tx: mpsc::Sender<ChatSessionReply>,
 ) {
+    let ChatSessionPost {
+        agent,
+        session,
+        purpose,
+    } = request;
     let Ok(response) = http
         .post(&cap_url)
         .header("Content-Type", "application/llsd+xml")
@@ -236,6 +253,7 @@ pub(crate) async fn post_chat_session_request(
     if !status.is_success() {
         tracing::warn!(
             capability = CAP_CHAT_SESSION_REQUEST,
+            %agent,
             ?session,
             ?purpose,
             %status,
@@ -252,6 +270,7 @@ pub(crate) async fn post_chat_session_request(
         Err(_not_llsd) => {
             tracing::warn!(
                 capability = CAP_CHAT_SESSION_REQUEST,
+                %agent,
                 ?session,
                 ?purpose,
                 %status,

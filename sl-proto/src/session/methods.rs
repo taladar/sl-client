@@ -7874,7 +7874,15 @@ impl Session {
         message: SessionMessage,
         now: Instant,
     ) {
-        self.chat_session_mut(kind, now).log_outbound(message);
+        // A session our own message opens is one the grid has not yet said we
+        // are in: its backlog waits for a start reply (see
+        // [`ServerHistoryState::AwaitingStart`]).
+        let fresh = !self.chat_sessions.contains_key(&kind);
+        let session = self.chat_session_mut(kind, now);
+        if fresh {
+            session.note_server_history(ServerHistoryState::AwaitingStart);
+        }
+        session.log_outbound(message);
     }
 
     /// Mutable access to an *already-open* chat session, **without** creating one
@@ -7972,13 +7980,18 @@ impl Session {
         }
         // A group session's start is answered too, under the group's id: that
         // reply is the group session's, and must not open a conference of the
-        // same id beside it.
+        // same id beside it. A successful one puts the agent in the session,
+        // so a backlog waiting on it is now due; a failed one (Second Life's
+        // `unverified`, its refusal of an agent it does not count a member)
+        // drops it.
         let group = ChatSessionKind::Group {
             group_id: GroupKey::from(temp_session_id.get()),
         };
-        if self.chat_sessions.contains_key(&group) {
+        if let Some(started) = self.chat_sessions.get_mut(&group) {
             if !success {
                 let _dropped = self.chat_sessions.remove(&group);
+            } else if started.server_history_state == ServerHistoryState::AwaitingStart {
+                started.note_server_history(ServerHistoryState::Unfetched);
             }
             return;
         }
@@ -8966,6 +8979,9 @@ impl Session {
     /// `IM_SESSION_GROUP_START`), so the agent receives the group's chat. Group
     /// messages arrive as [`Event::GroupSessionMessage`]. Sending a message with
     /// [`Session::send_group_message`] also joins the session implicitly.
+    /// A session the start opens fetches its server-side backlog only once the
+    /// grid's `ChatterBoxSessionStartReply` succeeds
+    /// ([`Session::next_server_history_fetches`]).
     ///
     /// # Errors
     ///
@@ -8983,8 +8999,16 @@ impl Session {
             sender_position,
             now,
         )?;
-        // Starting a group session opens/tracks it (keyed by the group id).
-        self.chat_session_mut(ChatSessionKind::Group { group_id }, now);
+        // Starting a group session opens/tracks it (keyed by the group id). A
+        // session the start opens fetches its backlog only once the grid's
+        // `ChatterBoxSessionStartReply` says the agent is in it, as the
+        // reference does; one already open keeps the state it has.
+        let kind = ChatSessionKind::Group { group_id };
+        let fresh = !self.chat_sessions.contains_key(&kind);
+        let session = self.chat_session_mut(kind, now);
+        if fresh {
+            session.note_server_history(ServerHistoryState::AwaitingStart);
+        }
         Ok(())
     }
 
@@ -11726,7 +11750,11 @@ impl Session {
     /// ever marked `Requested` there. `Direct` sessions never schedule (the
     /// reference fetches no 1:1 backlog), nor do still-`Invited` sessions, nor
     /// a conference **this client started** — it has no backlog by
-    /// construction ([`Session::open_conference`]).
+    /// construction ([`Session::open_conference`]) — nor a session this client
+    /// opened by starting it or sending into it until the grid's
+    /// `ChatterBoxSessionStartReply` to its own start succeeds, as the reference
+    /// fetches only then or for a session an inbound message opens (asked
+    /// earlier, Second Life answers `403` "You cannot join chat").
     pub fn next_server_history_fetches(&mut self) -> Vec<ChatSessionKind> {
         if !self.fetch_server_chat_history.is_enabled() {
             return Vec::new();

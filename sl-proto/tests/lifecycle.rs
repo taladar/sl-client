@@ -23227,12 +23227,127 @@ mod test {
         // A conference someone else opened — reached by an inbound message —
         // is still swept.
         let theirs = ImSessionId::from(uuid::Uuid::from_u128(0x69_02));
-        session.send_conference_message(theirs, "hi", now)?;
+        let im = inbound_offer_im(17, uuid::Uuid::from_u128(0x690B), theirs.get(), Vec::new());
+        session.handle_datagram(sim_addr(), &server_message(&im, 9, false)?, now)?;
         drain(&mut session)?;
         let swept = session.next_server_history_fetches();
         assert!(
             swept.contains(&ChatSessionKind::Conference { id: theirs }),
             "a session we did not create is still swept, got {swept:?}"
+        );
+        Ok(())
+    }
+
+    /// A `ChatterBoxSessionStartReply` for a group session we started, under
+    /// the group's id, with `success` and `error` as given.
+    fn group_start_reply(group: uuid::Uuid, success: bool, error: &str) -> Result<Llsd, TestError> {
+        let success = u8::from(success);
+        Ok(parse_llsd_xml(&format!(
+            "<llsd><map>\
+               <key>session_id</key><uuid>{group}</uuid>\
+               <key>temp_session_id</key><uuid>{group}</uuid>\
+               <key>success</key><boolean>{success}</boolean>\
+               <key>error</key><string>{error}</string>\
+               <key>session_info</key><map>\
+                 <key>session_name</key><string>A Group</string>\
+               </map></map></llsd>"
+        ))?)
+    }
+
+    /// A group session we start fetches its backlog only once the grid's start
+    /// reply says we are in it, as the reference does: asked before, Second
+    /// Life answers `403` "You cannot join chat" (measured on aditi).
+    #[test]
+    fn a_started_group_session_fetches_its_backlog_after_the_start_reply() -> Result<(), TestError>
+    {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let group = uuid::Uuid::from_u128(0x6911);
+        let kind = ChatSessionKind::Group {
+            group_id: GroupKey::from(group),
+        };
+        session.start_group_session(GroupKey::from(group), now)?;
+        session.send_group_message(GroupKey::from(group), "hello", now)?;
+        drain(&mut session)?;
+        assert_eq!(
+            session.next_server_history_fetches(),
+            Vec::new(),
+            "nothing is fetched before the start is answered"
+        );
+
+        session.handle_caps_event(
+            "ChatterBoxSessionStartReply",
+            &group_start_reply(group, true, "")?,
+            now,
+        )?;
+        assert_eq!(session.next_server_history_fetches(), vec![kind]);
+        assert_eq!(session.next_server_history_fetches(), Vec::new());
+
+        // A second, redundant success does not ask again.
+        session.handle_caps_event(
+            "ChatterBoxSessionStartReply",
+            &group_start_reply(group, true, "")?,
+            now,
+        )?;
+        assert_eq!(session.next_server_history_fetches(), Vec::new());
+        Ok(())
+    }
+
+    /// A refused group start (Second Life's `unverified`, its refusal of an
+    /// agent it does not count a member, seen on aditi) drops the session, and a message sent into the group afterwards re-opens it
+    /// without a fetch: the grid has not put the agent in that session, and
+    /// the reference fetches only on a start reply or an inbound opening.
+    #[test]
+    fn a_refused_group_start_and_a_later_send_fetch_nothing() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let group = uuid::Uuid::from_u128(0x6921);
+        let kind = ChatSessionKind::Group {
+            group_id: GroupKey::from(group),
+        };
+        session.start_group_session(GroupKey::from(group), now)?;
+        drain(&mut session)?;
+        session.handle_caps_event(
+            "ChatterBoxSessionStartReply",
+            &group_start_reply(group, false, "unverified")?,
+            now,
+        )?;
+        assert_eq!(session.chat_session_lifecycle(kind), None);
+
+        session.send_group_message(GroupKey::from(group), "anyone?", now)?;
+        drain(&mut session)?;
+        assert!(session.chat_session_lifecycle(kind).is_some());
+        assert_eq!(session.next_server_history_fetches(), Vec::new());
+
+        // Inbound traffic into the session we opened does not ask either.
+        let send = inbound_group_im(17, uuid::Uuid::from_u128(0x6922), group);
+        session.handle_datagram(sim_addr(), &server_message(&send, 9, true)?, now)?;
+        assert_eq!(session.next_server_history_fetches(), Vec::new());
+        Ok(())
+    }
+
+    /// Starting a group session that inbound traffic already opened keeps its
+    /// fetch: the grid had us in it before we asked.
+    #[test]
+    fn starting_an_open_group_session_keeps_its_fetch() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let group = uuid::Uuid::from_u128(0x6931);
+        let send = inbound_group_im(17, uuid::Uuid::from_u128(0x6932), group);
+        session.handle_datagram(sim_addr(), &server_message(&send, 9, true)?, now)?;
+        session.start_group_session(GroupKey::from(group), now)?;
+        drain(&mut session)?;
+        assert_eq!(
+            session.next_server_history_fetches(),
+            vec![ChatSessionKind::Group {
+                group_id: GroupKey::from(group)
+            }]
         );
         Ok(())
     }
@@ -24390,7 +24505,7 @@ mod test {
         drain(&mut session)?;
         drain_events(&mut session);
 
-        let peer = AgentKey::from(uuid::Uuid::from_u128(0x69_11));
+        let peer = AgentKey::from(uuid::Uuid::from_u128(0x6911));
         let direct = ChatSessionKind::Direct { peer };
         session.join_session_voice(direct, now);
         let xml = "<llsd><map>\
@@ -24424,7 +24539,7 @@ mod test {
         drain_events(&mut session);
 
         let conference = ChatSessionKind::Conference {
-            id: ImSessionId::from(uuid::Uuid::from_u128(0x69_21)),
+            id: ImSessionId::from(uuid::Uuid::from_u128(0x6921)),
         };
         session.handle_chat_session_reply(
             &answer(conference, "<llsd><boolean>1</boolean></llsd>")?,

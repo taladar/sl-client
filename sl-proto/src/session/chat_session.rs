@@ -337,6 +337,16 @@ pub(crate) enum ServerHistoryState {
     /// No fetch has been issued for this session yet; the scheduler will
     /// return it once the session is joined (and the cap is known).
     Unfetched,
+    /// **This client opened the session** — a group session it started, or a
+    /// group or conference it sent into before any traffic opened it — and the
+    /// grid has not yet said the agent is in it. The reference fetches a
+    /// session's backlog only when an inbound message opens the session or when
+    /// the `ChatterBoxSessionStartReply` to its own start succeeds
+    /// (`LLViewerChatterBoxSessionStartReply`); asked before that, Second Life
+    /// answers `403` "You cannot join chat". A successful start reply moves the
+    /// session to [`Unfetched`](Self::Unfetched); a session opened by a send
+    /// alone, with no start, stays here, as the reference never fetches one.
+    AwaitingStart,
     /// A fetch was handed to the runtime. A reply flips this to
     /// [`Fetched`](Self::Fetched); a failed POST deliberately leaves it here —
     /// the backlog is a convenience, so there is no retry storm.

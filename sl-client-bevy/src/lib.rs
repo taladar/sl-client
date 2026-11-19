@@ -2027,6 +2027,7 @@ fn advance_running(
                         ChatSessionRequestPurpose::FetchHistory,
                         &events_tx,
                         &replies_tx,
+                        own_agent,
                     );
                 });
             }
@@ -2047,6 +2048,7 @@ fn advance_running(
                         request.purpose(),
                         &events_tx,
                         &replies_tx,
+                        own_agent,
                     );
                 });
             }
@@ -5207,6 +5209,7 @@ fn apply_command(
                         ChatSessionRequestPurpose::Answer,
                         &events_tx,
                         &replies_tx,
+                        own,
                     );
                 });
             }
@@ -5238,6 +5241,7 @@ fn apply_command(
                             ChatSessionRequestPurpose::Answer,
                             &events_tx,
                             &replies_tx,
+                            own,
                         );
                     });
                 }
@@ -5288,6 +5292,7 @@ fn apply_command(
                             ChatSessionRequestPurpose::Answer,
                             &events_tx,
                             &replies_tx,
+                            own,
                         );
                     });
                 }
@@ -5317,6 +5322,7 @@ fn apply_command(
                         ChatSessionRequestPurpose::FetchHistory,
                         &events_tx,
                         &replies_tx,
+                        own,
                     );
                 });
             }

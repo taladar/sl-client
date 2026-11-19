@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 34 |
 | in-progress | 4 |
 | bugs | 16 |
-| done | 1596 |
+| done | 1597 |
 | deferred | 30 |
 | wont-do | 24 |
-| **total** | **2163** |
+| **total** | **2164** |
 
 ## ideas (131)
 
@@ -1241,11 +1241,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ## bugs (16)
 
-### protocol
-
-- [`protocol-group-fetch-history-403-on-aditi`](bugs/protocol-group-fetch-history-403-on-aditi.md)
-  — A group session's automatic fetch history is answered 403 on aditi
-
 ### viewer
 
 - [`viewer-live-opensim-world-renders-white`](bugs/viewer-live-opensim-world-renders-white.md)
@@ -1266,6 +1261,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-automation-quiet-after-teleport-reads-old-position`](bugs/test-automation-quiet-after-teleport-reads-old-position.md)
   — After a teleport or crossing, Quiet and the agent probe still hold the old
   region's position
+- [`test-chat-invite-accept-decline-aditi-primary-not-a-member`](bugs/test-chat-invite-accept-decline-aditi-primary-not-a-member.md)
+  — chat-invite-accept-decline is always partial on aditi — the primary's group
+  start is refused "unverified"
 - [`test-conformance-cancelled-case-leaves-its-prims`](bugs/test-conformance-cancelled-case-leaves-its-prims.md)
   — A conformance case cancelled by its timeout or a panic leaves its rezzed
   prims in the region
@@ -1286,7 +1284,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1596)
+## done (1597)
 
 ### protocol
 
@@ -1522,6 +1520,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — An experience's sky follows you off its land, and nothing takes it back
 - [`protocol-experience-search-paging`](done/protocol-experience-search-paging.md)
   — Carry the experience search's paging URLs through to the viewer
+- [`protocol-group-fetch-history-403-on-aditi`](done/protocol-group-fetch-history-403-on-aditi.md)
+  — A group session's automatic fetch history is answered 403 on aditi
 - [`protocol-im-states-no-position`](done/protocol-im-states-no-position.md) —
   Every instant message the session sends states position zero
 - [`protocol-join-session-voice-posts-accept-invitation`](done/protocol-join-session-voice-posts-accept-invitation.md)

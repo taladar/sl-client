@@ -190,6 +190,16 @@ the reply body. A refusal is handed back too, with its status (and an
 undefined body when it was not LLSD); a refused accept folds no roster and a
 refused `fetch history` stores nothing and is not asked again.
 
+The automatic `fetch history` (`Session::next_server_history_fetches`) asks
+only for a session the grid has put the agent in, at the two points the
+reference does: a group or a conference that an inbound message or an
+accepted invitation opens, and a group session the agent started once its
+`ChatterBoxSessionStartReply` succeeds. Asked any earlier, Second Life
+answers `403` "You cannot join chat". A session the agent opened by sending
+into it with no start is never fetched, nor is a conference it started
+(nothing was said in it before), and a refused start (`unverified` for a
+non-member) drops the session, so a later send re-opens it without a fetch.
+
 ## The server side
 
 `SimSession` keeps a real **chat-session registry** — the mirror of the
