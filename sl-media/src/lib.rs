@@ -460,6 +460,12 @@ pub struct SurfaceStatus {
     pub title: String,
     /// Whether a load is in progress.
     pub loading: bool,
+    /// Whether the document the surface is at has presented: its first
+    /// contentful paint, or for a page with nothing to paint, its network
+    /// falling idle. Until then a web engine keeps the previous page on screen
+    /// and drops input aimed at the new one, so a click waits for it. Always
+    /// `false` on surfaces that never paint a document (video, audio).
+    pub presented: bool,
     /// Whether history back-navigation is possible.
     pub can_go_back: bool,
     /// Whether history forward-navigation is possible.

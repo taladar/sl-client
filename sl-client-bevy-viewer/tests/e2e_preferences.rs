@@ -31,11 +31,13 @@ mod test {
     use std::sync::Arc;
 
     use pretty_assertions::assert_eq;
+    use serde_json::json;
     use sl_automation_proto::{Locator, NodeValue, NodeVisibility, Role, UiNode};
     use sl_e2e::{BodyError, Stage, StageBuilder};
     use sl_fake_grid::RegionConfig;
     use sl_fake_grid::scenario::Scenario;
     use sl_viewer_driver::{UiLocator, Viewer};
+    use sl_viewer_media::web_floater::SETTING_WEB_HOME_PAGE;
 
     /// A failed stage, or a test that could not set one up.
     type TestError = Box<dyn core::error::Error>;
@@ -595,6 +597,12 @@ mod test {
     /// The title of the page the test's server answers with.
     const PAGE_TITLE: &str = "Stage Page";
 
+    /// The page on the stage server a browser window opened without an
+    /// address shows, so no window loads the default home page off the
+    /// network: the tests stay offline, and no page of its own can navigate a
+    /// window after the address typed into it.
+    const HOME_PATH: &str = "home";
+
     /// The page on the stage server that is one link to [`POPPED_PATH`] in
     /// the window named [`POPUP_TARGET`].
     const OPENER_PATH: &str = "opener";
@@ -690,6 +698,9 @@ mod test {
             .web_media()
             .run(async |stage: &Stage| {
                 let alpha = &stage.viewer("Alpha")?;
+                let _home = alpha
+                    .set_setting(SETTING_WEB_HOME_PAGE, json!(format!("{base}{HOME_PATH}")))
+                    .await?;
                 let browse = async |key: &str, path: &str| -> Result<UiLocator, BodyError> {
                     let _opened = alpha
                         .menu_path(&["menu-bar-content", "menu-bar-web-browser"])
@@ -719,6 +730,9 @@ mod test {
                     .timeout(WAIT)
                     .to_have_text(&format!("{base}{POPPED_PATH}"))
                     .await?;
+                // A fresh window's first page comes ready for a click too,
+                // though its arrival preceded everything the window reports.
+                let _ready = page(&popup).click().await?;
                 let _first_kept = alpha
                     .expect(&page(&first))
                     .to_have_text(&format!("{base}first"))
@@ -750,6 +764,9 @@ mod test {
             .region(searching_region(&format!("{base}search"))?)
             .run(async |stage: &Stage| {
                 let alpha = &stage.viewer("Alpha")?;
+                let _home = alpha
+                    .set_setting(SETTING_WEB_HOME_PAGE, json!(format!("{base}{HOME_PATH}")))
+                    .await?;
                 // One window per page: the menu opens the first, keyed `new-0`.
                 let _opened = alpha
                     .menu_path(&["menu-bar-content", "menu-bar-web-browser"])

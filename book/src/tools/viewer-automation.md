@@ -49,7 +49,8 @@ for screen readers. Each node has:
 - a **test id**: the entity's `Name` (`floater:build`,
   `build-pos-x:field`);
 - **states** (`disabled` — inherited from any ancestor, `checked`, `selected`,
-  `expanded`, `focused`, `hovered`, `read_only`), a **value** (a field's text, a
+  `expanded`, `focused`, `hovered`, `read_only`, `busy` — a browser view whose
+  newly arrived document has not presented yet), a **value** (a field's text, a
   combo's choice, a slider's or a spin button's number, a colour well's
   `#rrggbb`), a text node's **colour**, its **bounds** in logical pixels and its
   **visibility** (`visible`, `hidden`, `clipped`, `off_screen`, `covered`).
@@ -96,8 +97,11 @@ nothing runs while none are queued.
   (a key or chord; `hold_frames` keeps it down), `drag_to`, `drag_by`,
   `select_option`, `menu_path`, `open_floater`. Before every action the
   target must be attached, visible, *stable* (unchanged for a few frames),
-  enabled and the one a hit test at its aim point lands on; a scroll area or
-  a virtual list is scrolled to bring it into view. Input goes through the
+  enabled, for a click not `busy` (Chromium keeps the old page on screen and
+  drops input to a newly arrived document until its first contentful paint,
+  so a click on a page whose address just changed would be lost), and the one
+  a hit test at its aim point lands on; a scroll area or a virtual list is
+  scrolled to bring it into view. Input goes through the
   real input path (`sl_viewer_ui_core::synthetic_input`), so a test that
   says "a disabled button does nothing" can fail.
 - **World actions** — `touch`, `double_click`, `open_pie`, `hover`,

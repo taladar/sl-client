@@ -19,24 +19,26 @@ use std::cell::RefCell;
 use std::os::raw::{c_int, c_ulong};
 use std::path::Path;
 use std::rc::{Rc as StdRc, Weak};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use cef::args::Args;
 use cef::rc::Rc as _;
 use cef::{
     App, AudioHandler, AudioParameters, Browser, BrowserHost, BrowserSettings, CefString, Client,
-    CommandLine, Cookie, CursorInfo, CursorType, DisplayHandler, Errorcode, Frame, ImplApp,
-    ImplAudioHandler, ImplBrowser, ImplBrowserHost, ImplClient, ImplCommandLine, ImplCookieManager,
-    ImplDisplayHandler, ImplFrame, ImplLifeSpanHandler, ImplLoadHandler, ImplRenderHandler,
+    CommandLine, Cookie, CursorInfo, CursorType, DevToolsMessageObserver, DisplayHandler,
+    Errorcode, Frame, ImplApp, ImplAudioHandler, ImplBrowser, ImplBrowserHost, ImplClient,
+    ImplCommandLine, ImplCookieManager, ImplDevToolsMessageObserver, ImplDisplayHandler, ImplFrame,
+    ImplLifeSpanHandler, ImplLoadHandler, ImplRenderHandler, ImplRequest, ImplRequestHandler,
     KeyEvent, KeyEventType, LifeSpanHandler, LoadHandler, LogSeverity, MouseButtonType, MouseEvent,
-    PaintElementType, PopupFeatures, Range, Rect, RenderHandler, RequestContext,
-    RequestContextSettings, ScreenInfo, Settings, State, WindowInfo, WindowOpenDisposition,
-    WrapApp, WrapAudioHandler, WrapClient, WrapDisplayHandler, WrapLifeSpanHandler,
-    WrapLoadHandler, WrapRenderHandler, browser_host_create_browser_sync,
+    PaintElementType, PopupFeatures, Range, Rect, Registration, RenderHandler, Request,
+    RequestContext, RequestContextSettings, RequestHandler, ScreenInfo, Settings, State,
+    TransitionType, WindowInfo, WindowOpenDisposition, WrapApp, WrapAudioHandler, WrapClient,
+    WrapDevToolsMessageObserver, WrapDisplayHandler, WrapLifeSpanHandler, WrapLoadHandler,
+    WrapRenderHandler, WrapRequestHandler, browser_host_create_browser_sync,
     cookie_manager_get_global_manager, request_context_create_context, wrap_app,
-    wrap_audio_handler, wrap_client, wrap_display_handler, wrap_life_span_handler,
-    wrap_load_handler, wrap_render_handler,
+    wrap_audio_handler, wrap_client, wrap_dev_tools_message_observer, wrap_display_handler,
+    wrap_life_span_handler, wrap_load_handler, wrap_render_handler, wrap_request_handler,
 };
 
 use crate::{
@@ -49,6 +51,9 @@ use crate::{
 /// only ever be initialised once per process (and cannot be re-initialised
 /// after shutdown).
 static CEF_INITIALIZED: AtomicBool = AtomicBool::new(false);
+
+/// The next surface's [`SurfaceShared::serial`].
+static SURFACE_SERIAL: AtomicU64 = AtomicU64::new(0);
 
 /// The newest paint of one surface, copied out of CEF's `on_paint` buffer.
 #[derive(Default)]
@@ -85,6 +90,19 @@ struct SurfaceShared {
     /// A URL [`MediaSurface::navigate`] was asked for before the first load
     /// started, loaded as soon as it does.
     pending_url: Option<String>,
+    /// The address the embedder last sent the surface to, until a page
+    /// commits or the load stops: while it is set, a navigation the page on
+    /// screen starts by itself is [superseded](superseded_navigation).
+    requested_url: Option<String>,
+    /// This surface's number in creation order, naming it in the debug log.
+    serial: u64,
+    /// The DevTools loader of the main frame's current document, from its
+    /// `Page.frameNavigated`: its own lifecycle events say when it presents
+    /// ([`SurfaceStatus::presented`]), and an older document's are ignored.
+    document_loader: Option<String>,
+    /// The page-event observer's registration, kept so it stays attached;
+    /// dropped when the browser closes.
+    devtools: Option<Registration>,
 }
 
 impl SurfaceShared {
@@ -102,6 +120,10 @@ impl SurfaceShared {
             browser: None,
             first_load_started: false,
             pending_url: None,
+            requested_url: None,
+            serial: SURFACE_SERIAL.fetch_add(1, Ordering::Relaxed),
+            document_loader: None,
+            devtools: None,
         }
     }
 
@@ -210,13 +232,46 @@ wrap_load_handler! {
                 }
                 shared.touch_status();
                 shared.first_load_started = true;
-                shared.pending_url.take()
+                if is_loading == 0 {
+                    // Whatever became of the asked-for page, it is over.
+                    shared.requested_url = None;
+                }
+                let pending = shared.pending_url.take();
+                if pending.is_some() {
+                    shared.requested_url.clone_from(&pending);
+                }
+                (shared.serial, pending)
             };
+            let (surface, pending) = pending;
+            tracing::debug!(
+                surface,
+                loading = is_loading != 0,
+                pending = pending.as_deref(),
+                "CEF surface loading state changed"
+            );
             // Outside the borrow: `load_url` may call back into a handler.
             if let Some(url) = pending
                 && let Some(frame) = browser.and_then(|browser| browser.main_frame())
             {
                 frame.load_url(Some(&CefString::from(url.as_str())));
+            }
+        }
+        fn on_load_start(
+            &self,
+            _browser: Option<&mut Browser>,
+            frame: Option<&mut Frame>,
+            transition_type: TransitionType,
+        ) {
+            if let Some(frame) = frame.filter(|frame| frame.is_main() != 0) {
+                let url = CefString::from(&frame.url()).to_string();
+                let surface = {
+                    let mut shared = self.shared.borrow_mut();
+                    // Only the asked-for page (or a link the user followed)
+                    // got this far: the page on screen is no longer the old one.
+                    shared.requested_url = None;
+                    shared.serial
+                };
+                tracing::debug!(surface, url, ?transition_type, "CEF surface committed a page");
             }
         }
         fn on_load_error(
@@ -229,6 +284,11 @@ wrap_load_handler! {
         ) {
             let raw_code: cef::sys::cef_errorcode_t = error_code.into();
             if raw_code == cef::sys::cef_errorcode_t::ERR_ABORTED {
+                tracing::debug!(
+                    surface = self.shared.borrow().serial,
+                    url = failed_url.map(CefString::to_string),
+                    "CEF surface navigation aborted"
+                );
                 return;
             }
             if frame.map(|f| f.is_main() != 0) != Some(true) {
@@ -309,11 +369,30 @@ wrap_life_span_handler! {
     }
     impl LifeSpanHandler {
         fn on_after_created(&self, browser: Option<&mut Browser>) {
+            let host = browser.as_deref().and_then(ImplBrowser::host);
+            let registration = host.as_ref().and_then(|host| {
+                let mut observer = OsrPageEvents::new(StdRc::clone(&self.shared));
+                let registration = host.add_dev_tools_message_observer(Some(&mut observer));
+                for message in PAGE_EVENT_REQUESTS {
+                    if host.send_dev_tools_message(Some(message.as_bytes())) == 0 {
+                        tracing::warn!(message, "CEF refused a DevTools request");
+                    }
+                }
+                registration
+            });
             let mut shared = self.shared.borrow_mut();
+            if registration.is_none() {
+                tracing::warn!(
+                    surface = shared.serial,
+                    "CEF surface has no page events: it will read busy throughout"
+                );
+            }
+            shared.devtools = registration;
             shared.browser = browser.map(|b| b.clone());
         }
         fn on_before_close(&self, _browser: Option<&mut Browser>) {
             let mut shared = self.shared.borrow_mut();
+            shared.devtools = None;
             shared.browser = None;
             shared.status.closed = true;
             shared.touch_status();
@@ -337,10 +416,232 @@ wrap_life_span_handler! {
             if let Some(url) = target_url {
                 let mut shared = self.shared.borrow_mut();
                 let target = target_frame_name.map(ToString::to_string).unwrap_or_default();
+                tracing::debug!(
+                    surface = shared.serial,
+                    url = %url,
+                    target,
+                    "CEF surface asked for a popup"
+                );
                 shared.status.popup_request = Some(PopupRequest::new(url.to_string(), &target));
                 shared.touch_status();
             }
             1
+        }
+    }
+}
+
+/// The DevTools requests that make a surface report its page's lifecycle:
+/// the page domain's events, the frame tree (naming the document already
+/// there, whose arrival the observer attached too late for), then the
+/// lifecycle events, which start by replaying the steps that document has
+/// already taken.
+const PAGE_EVENT_REQUESTS: [&str; 3] = [
+    r#"{"id":1,"method":"Page.enable"}"#,
+    r#"{"id":2,"method":"Page.getFrameTree"}"#,
+    r#"{"id":3,"method":"Page.setLifecycleEventsEnabled","params":{"enabled":true}}"#,
+];
+
+/// The id of the `Page.getFrameTree` request in [`PAGE_EVENT_REQUESTS`].
+const FRAME_TREE_REQUEST: c_int = 2;
+
+/// What one DevTools page event says about the main frame's document.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum DocumentEvent {
+    /// The main frame's document when the observer attached, loaded by
+    /// `loader`: the current one unless an arrival was already seen.
+    Current {
+        /// The document's DevTools loader id.
+        loader: String,
+    },
+    /// A new document arrived in the main frame, loaded by `loader`.
+    Arrived {
+        /// The document's DevTools loader id.
+        loader: String,
+    },
+    /// The document `loader` loaded has presented: its first contentful
+    /// paint, or for a page with nothing to paint, its network falling idle.
+    Presented {
+        /// The document's DevTools loader id.
+        loader: String,
+    },
+}
+
+/// `Page.frameNavigated`'s parameters, as far as they are read.
+#[derive(serde::Deserialize)]
+struct FrameNavigated {
+    /// The frame that navigated.
+    frame: NavigatedFrame,
+}
+
+/// The frame of a [`FrameNavigated`].
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct NavigatedFrame {
+    /// The parent frame's id; none for the main frame.
+    parent_id: Option<String>,
+    /// The loader of the frame's new document.
+    loader_id: String,
+}
+
+/// `Page.getFrameTree`'s result, as far as it is read.
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FrameTreeResult {
+    /// The tree, rooted at the main frame.
+    frame_tree: FrameTree,
+}
+
+/// One node of a [`FrameTreeResult`].
+#[derive(serde::Deserialize)]
+struct FrameTree {
+    /// The node's frame.
+    frame: NavigatedFrame,
+}
+
+/// Read a `Page.getFrameTree` result as the main frame's
+/// [`DocumentEvent::Current`].
+fn frame_tree_document(result: &[u8]) -> Option<DocumentEvent> {
+    let tree: FrameTreeResult = serde_json::from_slice(result).ok()?;
+    Some(DocumentEvent::Current {
+        loader: tree.frame_tree.frame.loader_id,
+    })
+}
+
+/// `Page.lifecycleEvent`'s parameters, as far as they are read.
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LifecycleEvent {
+    /// The loader of the document the event is about.
+    loader_id: String,
+    /// The lifecycle step (`init`, `load`, `firstContentfulPaint`, ...).
+    name: String,
+}
+
+/// Read a DevTools event as a [`DocumentEvent`], or `None` for one that says
+/// nothing about a document's arrival or presentation.
+///
+/// Chromium keeps showing the old page and drops input to the new one until
+/// the new document's first contentful paint (paint holding), so that paint is
+/// when the page can take a click. A page that never paints anything
+/// contentful is let go once its network falls idle.
+fn document_event(method: &str, params: &[u8]) -> Option<DocumentEvent> {
+    match method {
+        "Page.frameNavigated" => {
+            let navigated: FrameNavigated = serde_json::from_slice(params).ok()?;
+            navigated
+                .frame
+                .parent_id
+                .is_none()
+                .then_some(DocumentEvent::Arrived {
+                    loader: navigated.frame.loader_id,
+                })
+        }
+        "Page.lifecycleEvent" => {
+            let event: LifecycleEvent = serde_json::from_slice(params).ok()?;
+            matches!(event.name.as_str(), "firstContentfulPaint" | "networkIdle").then_some(
+                DocumentEvent::Presented {
+                    loader: event.loader_id,
+                },
+            )
+        }
+        _ => None,
+    }
+}
+
+/// Apply `event` to a surface's current document `loader` and its
+/// `presented` flag; whether `presented` changed. A presentation counts only
+/// for the current document.
+fn apply_document_event(
+    loader: &mut Option<String>,
+    presented: &mut bool,
+    event: DocumentEvent,
+) -> bool {
+    match event {
+        DocumentEvent::Current { loader: current } => {
+            if loader.is_none() {
+                *loader = Some(current);
+            }
+            false
+        }
+        DocumentEvent::Arrived { loader: arrived } => {
+            *loader = Some(arrived);
+            core::mem::replace(presented, false)
+        }
+        DocumentEvent::Presented { loader: shown } => {
+            let current = loader.as_deref() == Some(shown.as_str());
+            let changed = current && !*presented;
+            if changed {
+                *presented = true;
+            }
+            changed
+        }
+    }
+}
+
+wrap_dev_tools_message_observer! {
+    // Page-event observer: follows the main frame's document from its arrival
+    // to its first contentful paint, for `SurfaceStatus::presented`.
+    struct OsrPageEvents {
+        shared: StdRc<RefCell<SurfaceShared>>,
+    }
+    impl DevToolsMessageObserver {
+        fn on_dev_tools_method_result(
+            &self,
+            _browser: Option<&mut Browser>,
+            message_id: c_int,
+            success: c_int,
+            result: Option<&[u8]>,
+        ) {
+            if success == 0 {
+                tracing::warn!(
+                    surface = self.shared.borrow().serial,
+                    message_id,
+                    result = %String::from_utf8_lossy(result.unwrap_or_default()),
+                    "CEF surface's DevTools request failed"
+                );
+                return;
+            }
+            if message_id != FRAME_TREE_REQUEST {
+                return;
+            }
+            if let Some(event) = frame_tree_document(result.unwrap_or_default()) {
+                self.apply(event);
+            }
+        }
+        fn on_dev_tools_event(
+            &self,
+            _browser: Option<&mut Browser>,
+            method: Option<&CefString>,
+            params: Option<&[u8]>,
+        ) {
+            let Some(method) = method.map(CefString::to_string) else {
+                return;
+            };
+            if let Some(event) = document_event(&method, params.unwrap_or_default()) {
+                self.apply(event);
+            }
+        }
+    }
+}
+
+impl OsrPageEvents {
+    /// Apply one [`DocumentEvent`] to the surface's status.
+    fn apply(&self, event: DocumentEvent) {
+        let mut shared = self.shared.borrow_mut();
+        let shared = &mut *shared;
+        let arrived = matches!(event, DocumentEvent::Arrived { .. });
+        if apply_document_event(
+            &mut shared.document_loader,
+            &mut shared.status.presented,
+            event,
+        ) || arrived
+        {
+            shared.touch_status();
+            tracing::debug!(
+                surface = shared.serial,
+                presented = shared.status.presented,
+                "CEF surface document"
+            );
         }
     }
 }
@@ -452,6 +753,85 @@ wrap_audio_handler! {
     }
 }
 
+wrap_request_handler! {
+    // Request handler: keeps an address the embedder asked for from being
+    // overtaken by a navigation the page still on screen starts by itself.
+    struct OsrRequestHandler {
+        shared: StdRc<RefCell<SurfaceShared>>,
+    }
+    impl RequestHandler {
+        fn on_before_browse(
+            &self,
+            _browser: Option<&mut Browser>,
+            frame: Option<&mut Frame>,
+            request: Option<&mut Request>,
+            user_gesture: c_int,
+            is_redirect: c_int,
+        ) -> c_int {
+            if frame.map(|frame| frame.is_main() != 0) != Some(true) {
+                return 0;
+            }
+            let Some(request) = request else {
+                return 0;
+            };
+            let url = CefString::from(&request.url()).to_string();
+            let mut shared = self.shared.borrow_mut();
+            let surface = shared.serial;
+            let Some(requested) = shared.requested_url.as_deref() else {
+                return 0;
+            };
+            if superseded_navigation(requested, &url, user_gesture != 0, is_redirect != 0) {
+                tracing::debug!(
+                    surface,
+                    url,
+                    requested,
+                    "CEF surface cancelled a navigation the asked-for address supersedes"
+                );
+                return 1;
+            }
+            if user_gesture != 0 {
+                // A link the user followed is newer than the asked-for address.
+                shared.requested_url = None;
+            }
+            0
+        }
+    }
+}
+
+/// Whether a main-frame navigation to `url` is one the address the embedder
+/// last asked for, `requested`, supersedes and is to be cancelled.
+///
+/// Between the embedder's `load_url` and the commit of that page, the page
+/// still on screen keeps running, and a client redirect of its own — a script
+/// or a meta refresh, as `https://secondlife.com/` does on its way to its
+/// OpenID check — would otherwise replace the asked-for page as soon as it
+/// started, leaving the old site where the user asked for another.
+///
+/// Kept: the asked-for page itself, a server redirect (one navigation's next
+/// hop — the asked-for page's own, since its `load_url` cancelled every
+/// older one), and anything the user's gesture started.
+fn superseded_navigation(
+    requested: &str,
+    url: &str,
+    user_gesture: bool,
+    is_redirect: bool,
+) -> bool {
+    if user_gesture || is_redirect {
+        return false;
+    }
+    !same_address(requested, url)
+}
+
+/// Whether two addresses name the same page, compared as Chromium and the
+/// media allowlist both normalise them (`https://example.com` is
+/// `https://example.com/`); one that does not parse is compared as written.
+fn same_address(a: &str, b: &str) -> bool {
+    match (ValidatedMediaUrl::parse(a), ValidatedMediaUrl::parse(b)) {
+        (Ok(a), Ok(b)) => a.as_str() == b.as_str(),
+        _ => a == b,
+    }
+}
+
 wrap_client! {
     // The per-surface CEF client wiring the handlers above together.
     struct OsrClient {
@@ -460,6 +840,7 @@ wrap_client! {
         display: DisplayHandler,
         life_span: LifeSpanHandler,
         audio: AudioHandler,
+        request: RequestHandler,
     }
     impl Client {
         fn render_handler(&self) -> Option<RenderHandler> {
@@ -476,6 +857,9 @@ wrap_client! {
         }
         fn audio_handler(&self) -> Option<AudioHandler> {
             Some(self.audio.clone())
+        }
+        fn request_handler(&self) -> Option<RequestHandler> {
+            Some(self.request.clone())
         }
     }
 }
@@ -697,10 +1081,21 @@ impl MediaSurface for CefMediaSurface {
         {
             let mut shared = self.shared.borrow_mut();
             if !shared.first_load_started {
+                tracing::debug!(
+                    surface = shared.serial,
+                    url = url.as_str(),
+                    "CEF surface navigation held until the first load starts"
+                );
                 shared.pending_url = Some(url.as_str().to_owned());
                 return;
             }
         }
+        let surface = {
+            let mut shared = self.shared.borrow_mut();
+            shared.requested_url = Some(url.as_str().to_owned());
+            shared.serial
+        };
+        tracing::debug!(surface, url = url.as_str(), "CEF surface navigating");
         if let Some(frame) = self.browser().and_then(|browser| browser.main_frame()) {
             frame.load_url(Some(&CefString::from(url.as_str())));
         }
@@ -783,7 +1178,12 @@ impl MediaSurface for CefMediaSurface {
         click_count: u8,
         modifiers: Modifiers,
     ) {
-        self.shared.borrow_mut().last_mouse = (x, y);
+        let surface = {
+            let mut shared = self.shared.borrow_mut();
+            shared.last_mouse = (x, y);
+            shared.serial
+        };
+        tracing::debug!(surface, x, y, down, "CEF surface mouse button");
         if let Some(host) = self.host() {
             let event = MouseEvent {
                 x,
@@ -1144,6 +1544,11 @@ impl MediaBackend for CefMediaBackend {
             height,
             config.initial_url.as_str(),
         )));
+        tracing::debug!(
+            surface = shared.borrow().serial,
+            url = config.initial_url.as_str(),
+            "CEF surface created"
+        );
 
         let audio = Arc::new(Mutex::new(CefAudioState::default()));
         let render = OsrRenderHandler::new(StdRc::clone(&shared));
@@ -1151,7 +1556,8 @@ impl MediaBackend for CefMediaBackend {
         let display = OsrDisplayHandler::new(StdRc::clone(&shared));
         let life_span = OsrLifeSpanHandler::new(StdRc::clone(&shared));
         let audio_handler = OsrAudioHandler::new(Arc::clone(&audio));
-        let mut client = OsrClient::new(render, load, display, life_span, audio_handler);
+        let request = OsrRequestHandler::new(StdRc::clone(&shared));
+        let mut client = OsrClient::new(render, load, display, life_span, audio_handler, request);
 
         let window_info = WindowInfo {
             windowless_rendering_enabled: 1,
@@ -1292,8 +1698,181 @@ mod tests {
     use cef::State;
     use pretty_assertions::assert_eq;
 
-    use super::{browser_settings, utf16_offset};
+    use super::{
+        DocumentEvent, apply_document_event, browser_settings, document_event, frame_tree_document,
+        superseded_navigation, utf16_offset,
+    };
     use crate::SurfaceTrust;
+
+    /// The main frame's navigation is a document's arrival, a subframe's is
+    /// not; its first contentful paint and its network falling idle are its
+    /// presentation, and the other lifecycle steps and events are nothing.
+    #[test]
+    fn page_events_are_read_as_the_main_frames_document() {
+        let arrived =
+            br#"{"frame":{"id":"F","loaderId":"L1","url":"http://a/"},"type":"Navigation"}"#;
+        assert_eq!(
+            document_event("Page.frameNavigated", arrived),
+            Some(DocumentEvent::Arrived {
+                loader: "L1".to_owned()
+            })
+        );
+        let subframe = br#"{"frame":{"id":"S","parentId":"F","loaderId":"L2","url":"http://b/"}}"#;
+        assert_eq!(document_event("Page.frameNavigated", subframe), None);
+        for name in ["firstContentfulPaint", "networkIdle"] {
+            let params =
+                format!(r#"{{"frameId":"F","loaderId":"L1","name":"{name}","timestamp":1.5}}"#);
+            assert_eq!(
+                document_event("Page.lifecycleEvent", params.as_bytes()),
+                Some(DocumentEvent::Presented {
+                    loader: "L1".to_owned()
+                }),
+                "{name}"
+            );
+        }
+        for name in ["init", "DOMContentLoaded", "load", "firstPaint"] {
+            let params =
+                format!(r#"{{"frameId":"F","loaderId":"L1","name":"{name}","timestamp":1.5}}"#);
+            assert_eq!(
+                document_event("Page.lifecycleEvent", params.as_bytes()),
+                None,
+                "{name}"
+            );
+        }
+        assert_eq!(
+            document_event("Page.loadEventFired", br#"{"timestamp":1.5}"#),
+            None
+        );
+        assert_eq!(document_event("Page.frameNavigated", b"not json"), None);
+    }
+
+    /// A document is presented only by its own presentation: a new arrival
+    /// clears it, and the previous document's late paint does not set it.
+    #[test]
+    fn only_the_current_document_presents() {
+        let arrived = |loader: &str| DocumentEvent::Arrived {
+            loader: loader.to_owned(),
+        };
+        let shown = |loader: &str| DocumentEvent::Presented {
+            loader: loader.to_owned(),
+        };
+        let mut loader = None;
+        let mut presented = false;
+        assert!(!apply_document_event(
+            &mut loader,
+            &mut presented,
+            shown("L1")
+        ));
+        assert!(!presented);
+        assert!(!apply_document_event(
+            &mut loader,
+            &mut presented,
+            arrived("L1")
+        ));
+        assert!(apply_document_event(
+            &mut loader,
+            &mut presented,
+            shown("L1")
+        ));
+        assert!(presented);
+        assert!(!apply_document_event(
+            &mut loader,
+            &mut presented,
+            shown("L1")
+        ));
+        assert!(apply_document_event(
+            &mut loader,
+            &mut presented,
+            arrived("L2")
+        ));
+        assert!(!presented);
+        assert!(!apply_document_event(
+            &mut loader,
+            &mut presented,
+            shown("L1")
+        ));
+        assert!(!presented);
+        assert!(apply_document_event(
+            &mut loader,
+            &mut presented,
+            shown("L2")
+        ));
+        assert!(presented);
+    }
+
+    /// The frame tree names the document already there when the observer
+    /// attached, whose replayed paint then presents it; it does not undo an
+    /// arrival seen before its answer came.
+    #[test]
+    fn the_document_already_there_is_followed_from_the_frame_tree() {
+        let tree = br#"{"frameTree":{"frame":{"id":"F","loaderId":"L0","url":"http://a/"},"childFrames":[{"frame":{"id":"S","parentId":"F","loaderId":"LS","url":"http://b/"}}]}}"#;
+        let current = frame_tree_document(tree);
+        assert_eq!(
+            current,
+            Some(DocumentEvent::Current {
+                loader: "L0".to_owned()
+            })
+        );
+        assert_eq!(frame_tree_document(b"{}"), None);
+        let shown = |loader: &str| DocumentEvent::Presented {
+            loader: loader.to_owned(),
+        };
+        let mut loader = None;
+        let mut presented = false;
+        let current = DocumentEvent::Current {
+            loader: "L0".to_owned(),
+        };
+        assert!(!apply_document_event(
+            &mut loader,
+            &mut presented,
+            current.clone()
+        ));
+        assert!(apply_document_event(
+            &mut loader,
+            &mut presented,
+            shown("L0")
+        ));
+        let mut loader = Some("L1".to_owned());
+        let mut presented = false;
+        assert!(!apply_document_event(&mut loader, &mut presented, current));
+        assert_eq!(loader.as_deref(), Some("L1"));
+        assert!(!apply_document_event(
+            &mut loader,
+            &mut presented,
+            shown("L0")
+        ));
+    }
+
+    /// The address typed into a window wins over the old page's own client
+    /// redirect (the home page's OpenID hop), while the asked-for page, a
+    /// server redirect and a link the user clicks all go ahead.
+    #[test]
+    fn an_asked_for_address_supersedes_the_old_pages_own_navigations() {
+        let typed = "http://127.0.0.1:4000/browser";
+        let hop = "https://secondlife.com/?openid_identifier=anonymous";
+        assert!(superseded_navigation(typed, hop, false, false));
+        assert!(!superseded_navigation(typed, typed, false, false));
+        assert!(!superseded_navigation(typed, hop, false, true));
+        assert!(!superseded_navigation(typed, hop, true, false));
+    }
+
+    /// The asked-for page is recognised however Chromium spells it back: a
+    /// bare origin gains its root path, a host its lower case.
+    #[test]
+    fn the_asked_for_address_is_matched_normalised() {
+        assert!(!superseded_navigation(
+            "https://Example.com",
+            "https://example.com/",
+            false,
+            false
+        ));
+        assert!(superseded_navigation(
+            "https://example.com/a",
+            "https://example.com/b",
+            false,
+            false
+        ));
+    }
 
     /// winit's byte offsets become CEF's UTF-16 ones: a CJK character is three
     /// bytes and one unit, an astral emoji four bytes and two units, and an

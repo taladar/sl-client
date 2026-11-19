@@ -1377,8 +1377,19 @@ fn spawn_search_floater(mut commands: Commands, root: Res<UiRoot>) {
 /// category tabs, the filter panels and the details pane, ending with the
 /// [`SearchUi`] insert whose appearance wakes the `Option<Res<SearchUi>>`
 /// consumers.
-fn build_search_content(In(handle): In<FloaterHandle>, mut commands: Commands) {
-    let parts = spawn_search_content(&mut commands, handle.content, FONT, 0);
+///
+/// The Web tab opens on the grid's own search site when the grid has named
+/// one, so a window opened on OpenSim never loads Second Life's.
+fn build_search_content(
+    In(handle): In<FloaterHandle>,
+    state: Option<Res<SearchState>>,
+    mut commands: Commands,
+) {
+    let site = state
+        .as_deref()
+        .and_then(|state| state.web_search_base.as_deref())
+        .unwrap_or(SL_SEARCH_URL);
+    let parts = spawn_search_content(&mut commands, handle.content, FONT, 0, site);
     commands.insert_resource(parts.ui);
 }
 
@@ -1396,8 +1407,8 @@ struct SearchParts {
 
 /// Build the floater's content into `content` at `font_size`, with the tab at
 /// `active_tab` shown: the split, the category tabs, the filter panels and the
-/// details pane. Shared by the live window (on the Web tab) and its gallery
-/// specimen. The result tables keep their static specs' size: [`spawn_table`]
+/// details pane, the Web tab on the search site `site`. Shared by the live
+/// window (on the Web tab) and its gallery specimen. The result tables keep their static specs' size: [`spawn_table`]
 /// takes a `'static` [`TableSpec`].
 #[expect(
     clippy::too_many_lines,
@@ -1409,6 +1420,7 @@ fn spawn_search_content(
     content: Entity,
     font_size: f32,
     active_tab: usize,
+    site: &str,
 ) -> SearchParts {
     // The content splits into the left column and the details pane.
     let split = commands
@@ -1507,7 +1519,7 @@ fn spawn_search_content(
         commands,
         web_panel,
         &BrowserViewSpec {
-            initial_url: search_site_url(SL_SEARCH_URL),
+            initial_url: search_site_url(site),
             trust: SurfaceTrust::Viewer,
             tab_index: 0,
             fixed_height: None,
@@ -1578,7 +1590,7 @@ pub fn spawn_search_specimen(
         .iter()
         .position(|tab| tab.category() == Some(category))
         .unwrap_or(0);
-    let parts = spawn_search_content(commands, parent, cx.font_size, tab);
+    let parts = spawn_search_content(commands, parent, cx.font_size, tab, SL_SEARCH_URL);
     let mut state = SearchState::default();
     state.groups.results = [
         ("Example Group", 1520),

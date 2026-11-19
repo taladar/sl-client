@@ -9036,6 +9036,8 @@ dependencies = [
  "fs-err",
  "libc",
  "pretty_assertions",
+ "serde",
+ "serde_json",
  "sl-media",
  "tracing",
 ]

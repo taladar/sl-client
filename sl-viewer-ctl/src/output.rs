@@ -454,6 +454,7 @@ const fn state_name(state: NodeState) -> &'static str {
         NodeState::Expanded => "expanded",
         NodeState::Focused => "focused",
         NodeState::Hovered => "hovered",
+        NodeState::Busy => "busy",
     }
 }
 

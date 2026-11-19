@@ -34,6 +34,10 @@ pub enum ActionabilityCheck {
     /// nothing covers it. For a thing in the world: the viewer's own pick
     /// resolver says a click there lands on it.
     ReceivesEvents,
+    /// The node is not [busy](crate::NodeState::Busy): a web page has drawn
+    /// the document it is at, so a click reaches that document. Checked by a
+    /// click.
+    Ready,
     /// The build tool is active on a tool that selects. Checked by a world
     /// select or sweep, which select only in build mode (outside it a click
     /// touches) and not with the Create or Land tool (a click there rezzes or
@@ -57,6 +61,7 @@ impl ActionabilityCheck {
             Self::Enabled => "enabled",
             Self::Editable => "editable",
             Self::ReceivesEvents => "receives_events",
+            Self::Ready => "ready",
             Self::BuildMode => "build_mode",
             Self::CreateTool => "create_tool",
         }

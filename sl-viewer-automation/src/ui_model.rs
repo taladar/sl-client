@@ -17,7 +17,7 @@ use bevy_flair::style::components::PseudoElementsSupport;
 use sl_automation_proto::{Bounds, NodeId, NodeState, NodeValue, NodeVisibility, Role, UiNode};
 use sl_viewer_ui_core::i18n::{TransArgs, Translated, Translator};
 use sl_viewer_ui_core::semantic::{
-    Expanded, LabelledBy, NamePart, Semantic, SemanticName, SemanticValue, SpokenLabel,
+    Busy, Expanded, LabelledBy, NamePart, Semantic, SemanticName, SemanticValue, SpokenLabel,
     role_from_classes, selected_by_class,
 };
 use sl_viewer_ui_core::virtual_list::VirtualRow;
@@ -148,6 +148,8 @@ struct NodeMarkers {
     read_only: Has<ReadOnlyField>,
     /// A password field, whose value is only its length.
     password: Has<PasswordField>,
+    /// Not ready for input yet.
+    busy: Has<Busy>,
 }
 
 /// What a node inherits from its ancestors.
@@ -421,6 +423,7 @@ impl UiModel<'_, '_> {
             (NodeState::Expanded, facts.markers.expanded),
             (NodeState::Focused, frame.focused == Some(facts.entity)),
             (NodeState::Hovered, frame.hovered.contains(&facts.entity)),
+            (NodeState::Busy, facts.markers.busy),
         ] {
             if holds {
                 states.insert(state);

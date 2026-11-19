@@ -34,7 +34,7 @@ use bevy::input::keyboard::KeyboardInput;
 use bevy::input_focus::{FocusCause, FocusedInput, InputFocus};
 use bevy::prelude::*;
 use bevy::ui::RelativeCursorPosition;
-use sl_viewer_ui_core::semantic::{Role, Semantic, SemanticValue};
+use sl_viewer_ui_core::semantic::{Busy, Role, Semantic, SemanticValue};
 
 use crate::media_engine::{MediaEngine, MediaEngineSystems, MediaSurfaceId, MediaSurfaces};
 use crate::media_ime::{MediaIme, MediaImePlugin, MediaImeSystems};
@@ -187,22 +187,43 @@ pub fn spawn_browser_view(
         .id()
 }
 
+/// What [`describe_browser_views`] reads and writes of one view: its entity,
+/// the view, its reported value, its label and whether it is [`Busy`].
+type DescribedView = (
+    Entity,
+    &'static BrowserView,
+    &'static mut SemanticValue,
+    Option<&'static AccessibleLabel>,
+    Has<Busy>,
+);
+
 /// Keep what each view reports to the automation and screen-reader model in
-/// step with its page: the title as its name (none until the page states one)
-/// and the address as its value. Written only on a change, so an idle page
-/// marks nothing changed.
+/// step with its page: the title as its name (none until the page states one),
+/// the address as its value, and [`Busy`] until the document it is at has
+/// presented. Written only on a change, so an idle page marks nothing
+/// changed.
 fn describe_browser_views(
     mut commands: Commands,
-    mut views: Query<(
-        Entity,
-        &BrowserView,
-        &mut SemanticValue,
-        Option<&AccessibleLabel>,
-    )>,
+    mut views: Query<DescribedView>,
     surfaces: NonSend<MediaSurfaces>,
 ) {
-    for (entity, view, mut value, label) in &mut views {
-        let Some(slot) = view.surface.and_then(|id| surfaces.get(id)) else {
+    for (entity, view, mut value, label, busy) in &mut views {
+        let slot = view.surface.and_then(|id| surfaces.get(id));
+        // No surface yet is a page still to come; the placeholder of a viewer
+        // without the engine never draws one, and is nothing to wait for.
+        let wants_busy = match (view.surface, slot) {
+            (None, _) => true,
+            (Some(_), Some(slot)) => !slot.status.presented,
+            (Some(_), None) => false,
+        };
+        if wants_busy != busy {
+            if wants_busy {
+                commands.entity(entity).insert(Busy);
+            } else {
+                commands.entity(entity).remove::<Busy>();
+            }
+        }
+        let Some(slot) = slot else {
             continue;
         };
         let status = &slot.status;

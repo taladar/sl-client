@@ -32,7 +32,7 @@ const STABLE_FRAMES: u32 = 2;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Intent {
     /// Press and release on it: attached, visible, in the viewport, stable,
-    /// enabled and receiving events.
+    /// enabled, not busy and receiving events.
     Click,
     /// Put the pointer over it: as a click, but a disabled node may be
     /// hovered.
@@ -46,6 +46,12 @@ impl Intent {
     /// Whether the node must be enabled.
     const fn needs_enabled(self) -> bool {
         matches!(self, Self::Click | Self::Fill)
+    }
+
+    /// Whether the node must not be busy: a click on a page that has not
+    /// drawn its document yet would be dropped by the page's engine.
+    const fn needs_ready(self) -> bool {
+        matches!(self, Self::Click)
     }
 
     /// Whether the node must accept text.
@@ -282,6 +288,9 @@ impl Pursuit {
         }
         if self.intent.needs_enabled() && node.has_state(NodeState::Disabled) {
             return Ok(Decision::Wait(ActionabilityCheck::Enabled));
+        }
+        if self.intent.needs_ready() && node.has_state(NodeState::Busy) {
+            return Ok(Decision::Wait(ActionabilityCheck::Ready));
         }
         if self.intent.needs_editable() {
             // A spin button is a number field: it is typed into like a text box.

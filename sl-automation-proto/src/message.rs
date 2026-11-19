@@ -1365,6 +1365,7 @@ mod tests {
             ActionabilityCheck::Enabled,
             ActionabilityCheck::Editable,
             ActionabilityCheck::ReceivesEvents,
+            ActionabilityCheck::Ready,
             ActionabilityCheck::BuildMode,
             ActionabilityCheck::CreateTool,
         ] {
@@ -1393,6 +1394,7 @@ mod tests {
             NodeState::Expanded,
             NodeState::Focused,
             NodeState::Hovered,
+            NodeState::Busy,
         ] {
             round_trip(&state)?;
         }

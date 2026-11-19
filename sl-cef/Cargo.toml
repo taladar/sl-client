@@ -30,6 +30,9 @@ fs-err = { workspace = true }
 # The embedder's quit signals, saved before CEF starts and restored after
 # (`EmbedderSignals`): Chromium installs handlers of its own.
 libc = { version = "0.2.186" }
+serde = { workspace = true, features = ["derive"] }
+# The DevTools page events a surface follows its document's lifecycle by.
+serde_json = { workspace = true }
 sl-media = { workspace = true }
 tracing = { workspace = true }
 

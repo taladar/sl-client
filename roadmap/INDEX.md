@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 328 |
 | blocked | 34 |
 | in-progress | 4 |
-| bugs | 13 |
-| done | 1600 |
+| bugs | 12 |
+| done | 1601 |
 | deferred | 30 |
 | wont-do | 24 |
 | **total** | **2164** |
@@ -1239,7 +1239,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-text-renderability-axis`](in-progress/viewer-ui-text-renderability-axis.md)
   — Upstream issue — font selection cannot see glyph-format renderability
 
-## bugs (13)
+## bugs (12)
 
 ### viewer
 
@@ -1265,8 +1265,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   fail as "operation timed out"
 - [`test-e2e-relog-gesture-wait-margin`](bugs/test-e2e-relog-gesture-wait-margin.md)
   — e2e_relog's active-gesture test runs at the edge of its 60 s wait
-- [`test-e2e-web-browser-typed-address-lost-under-load`](bugs/test-e2e-web-browser-typed-address-lost-under-load.md)
-  — e2e_preferences' web browser test sees the home page, not the typed address
 - [`test-fake-grid-tests-stop-reading-client-events`](bugs/test-fake-grid-tests-stop-reading-client-events.md)
   — Fake-grid integration tests stop reading the client's events and can stall
   it
@@ -1275,7 +1273,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1600)
+## done (1601)
 
 ### protocol
 
@@ -4064,6 +4062,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   End-to-end tests for what two avatars see of each other
 - [`test-e2e-viewer-process-launch`](done/test-e2e-viewer-process-launch.md) —
   Extract viewer process launch and graceful stop from sl-crosscheck
+- [`test-e2e-web-browser-typed-address-lost-under-load`](done/test-e2e-web-browser-typed-address-lost-under-load.md)
+  — e2e_preferences' web browser test sees the home page, not the typed address
 - [`test-economy-data`](done/test-economy-data-request-economy-data.md) —
   request economy data
 - [`test-environment`](done/test-environment-request-environment-settings.md) —

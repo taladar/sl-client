@@ -5393,6 +5393,7 @@ setting-desc-ExperienceLogDays = How many days of experience events to keep in t
 setting-desc-ExperienceSearchMaturity = The highest content rating experience search results may carry (13 General, 21 Moderate, 42 Adult)
 setting-desc-FSAllowDoubleClickOnScriptedObjects = Let a double-click teleport land on an object that takes a click itself (a touch script, or a click action other than sit)
 setting-desc-FSBlockClickSit = Keep a left click on an object set to sit from seating the avatar; the click touches it instead, where a script listens for touches
+setting-desc-FSBrowserHomePage = The page a web browser window opened without an address shows
 setting-desc-FSDisableMouseWheelCameraZoom = Keep the mouse wheel from zooming the camera (drag zoom still works)
 setting-desc-FSLimitFramerate = Cap the frame rate at FramePerSecondLimit (thermals / battery)
 setting-desc-FadeRange = Metres past the fade start at which name tags are fully hidden

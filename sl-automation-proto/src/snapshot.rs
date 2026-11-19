@@ -159,6 +159,10 @@ pub enum NodeState {
     Focused,
     /// Under the pointer.
     Hovered,
+    /// Not ready for input yet: a web page whose newly arrived document has
+    /// not presented (its first contentful paint), whose engine drops a click
+    /// until it has.
+    Busy,
 }
 
 /// The value a node shows, for the roles that have one.

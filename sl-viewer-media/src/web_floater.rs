@@ -16,7 +16,8 @@
 //! entry, a chat link and a script's `llLoadURL` each open a window of their
 //! own, and `matchesKey` reuses a window only when a page *names* one (a
 //! `target="name"` link). `WebContentWindowLimit` (5) caps how many are open,
-//! closing the least recently opened. This module does the same: an
+//! closing the least recently opened, and `FSBrowserHomePage` is the page a
+//! window opened without an address shows. This module does the same: an
 //! [`OpenWebBrowser`] carries a [`WebTarget`], a window is keyed by it
 //! ([`web_window_key`]), a page's popup opens through the same message with
 //! the target the page named (routed for every embedded view by
@@ -71,7 +72,12 @@ pub const SETTING_WEB_WINDOW_LIMIT: &str = "WebContentWindowLimit";
 /// [`SETTING_WEB_WINDOW_LIMIT`]'s default — the reference's.
 const DEFAULT_WEB_WINDOW_LIMIT: u32 = 5;
 
-/// The page a fresh floater opens on.
+/// The page a window opened without an address shows. The reference's
+/// `FSBrowserHomePage`, under its name; an address the browser refuses falls
+/// back to the default, `https://secondlife.com/`.
+pub const SETTING_WEB_HOME_PAGE: &str = "FSBrowserHomePage";
+
+/// [`SETTING_WEB_HOME_PAGE`]'s default.
 const DEFAULT_HOME_URL: &str = "https://secondlife.com/";
 
 /// The toolbar / status font size.
@@ -151,13 +157,19 @@ impl Plugin for WebFloaterPlugin {
     }
 }
 
-/// Register the browser's settings — the window limit.
+/// Register the browser's settings — the window limit and the home page.
 pub fn register_settings(settings: &mut ViewerSettings) {
     settings.register_in(
         WEB_SETTINGS_SECTION,
         SETTING_WEB_WINDOW_LIMIT,
         SettingValue::U32(DEFAULT_WEB_WINDOW_LIMIT),
         "setting-desc-WebContentWindowLimit",
+    );
+    settings.register_in(
+        WEB_SETTINGS_SECTION,
+        SETTING_WEB_HOME_PAGE,
+        SettingValue::String(DEFAULT_HOME_URL.to_owned()),
+        "setting-desc-FSBrowserHomePage",
     );
 }
 
@@ -241,6 +253,7 @@ fn open_web_browser(
     let mut fresh: Vec<FreshWindow> = Vec::new();
     let mut closing: Vec<Entity> = Vec::new();
     let limit = window_limit(settings.as_deref());
+    let home = home_url(settings.as_deref());
     for request in requests.read() {
         let url = match &request.url {
             Some(text) => match validated_web_url(text) {
@@ -267,7 +280,7 @@ fn open_web_browser(
                 fresh.push(FreshWindow {
                     key,
                     handle,
-                    url: url.unwrap_or_else(home_url),
+                    url: url.unwrap_or_else(|| home.clone()),
                     opened: seq.0,
                 });
                 seq.0 = seq.0.wrapping_add(1);
@@ -331,9 +344,14 @@ fn navigate(view: &mut BrowserView, surfaces: Option<&MediaSurfaces>, url: Valid
     }
 }
 
-/// The home page a window opened without a URL shows.
-fn home_url() -> ValidatedMediaUrl {
-    validated_web_url(DEFAULT_HOME_URL).unwrap_or_else(|_refused| ValidatedMediaUrl::blank())
+/// The home page a window opened without a URL shows: the configured one, or
+/// the default when it is unset or refused.
+fn home_url(settings: Option<&ViewerSettings>) -> ValidatedMediaUrl {
+    settings
+        .and_then(|settings| settings.store().get_str(SETTING_WEB_HOME_PAGE).ok())
+        .and_then(|text| validated_web_url(text).ok())
+        .or_else(|| validated_web_url(DEFAULT_HOME_URL).ok())
+        .unwrap_or_else(ValidatedMediaUrl::blank)
 }
 
 /// Build a just-opened window's content and give it its [`WebWindow`].

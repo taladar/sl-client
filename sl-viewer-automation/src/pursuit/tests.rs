@@ -18,6 +18,7 @@ use sl_automation_proto::{
 };
 use sl_viewer_testkit::interact::{self, InteractionTest};
 use sl_viewer_testkit::{settle, spawn_under_root};
+use sl_viewer_ui_core::semantic::Busy;
 use sl_viewer_ui_core::skin::LIST_ROW_CLASS;
 use sl_viewer_ui_core::virtual_list::{VirtualList, VirtualListPlugin, VirtualRow};
 use sl_viewer_ui_widgets::ui_text_input::ReadOnlyField;
@@ -233,6 +234,45 @@ fn a_disabled_button_waits_until_it_is_enabled() -> Result<(), String> {
         clicked(&app),
         vec!["apply".to_owned()],
         "enabled, it is clicked"
+    );
+    Ok(())
+}
+
+/// A busy node — a page that has not drawn its document yet — holds a click
+/// until it is ready, but may still be hovered.
+#[test]
+fn a_busy_node_waits_until_it_is_ready() -> Result<(), String> {
+    let mut app = app();
+    let page = button_in(
+        &mut app,
+        None,
+        "page",
+        "Page",
+        placed(100.0, 100.0, 120.0, 30.0),
+    );
+    app.world_mut().entity_mut(page).insert(Busy);
+    settle(&mut app);
+    let mut pursuit = Pursuit::new(Locator::test_id("page"), Intent::Click);
+    assert_eq!(
+        still_waiting(&mut app, &mut pursuit, 5)?,
+        ActionabilityCheck::Ready,
+        "a busy page drops the click, so it is not clicked yet"
+    );
+    assert!(
+        pursue(
+            &mut app,
+            &mut Pursuit::new(Locator::test_id("page"), Intent::Hover)
+        )
+        .is_ok(),
+        "but it may be hovered"
+    );
+    app.world_mut().entity_mut(page).remove::<Busy>();
+    let target = pursue(&mut app, &mut pursuit).map_err(|error| error.to_string())?;
+    interact::click(&mut app, target.aim, MouseButton::Left);
+    assert_eq!(
+        clicked(&app),
+        vec!["page".to_owned()],
+        "ready, it is clicked"
     );
     Ok(())
 }

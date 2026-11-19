@@ -220,6 +220,9 @@ pub fn accesskit_node(node: &UiNode, scale: f64) -> Node {
     if node.has_state(NodeState::ReadOnly) {
         ak.set_read_only();
     }
+    if node.has_state(NodeState::Busy) {
+        ak.set_busy();
+    }
     if matches!(node.role, Role::Checkbox | Role::Radio) {
         ak.set_toggled(Toggled::from(node.has_state(NodeState::Checked)));
     }

@@ -155,6 +155,13 @@ impl Semantic {
 #[derive(Component, Debug, Clone, PartialEq, Eq, Default)]
 pub struct SemanticValue(pub String);
 
+/// The node is not ready for input yet — a browser view whose newly arrived
+/// document has not presented, so its engine would drop a click. The widget
+/// keeps it current; the automation model reports it as the busy state and
+/// a click waits for it to clear.
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Busy;
+
 /// A label naming this node, or the controls inside it — the `<label>` of a
 /// form row, for a field, a slider or a swatch that draws no text of its own.
 ///
