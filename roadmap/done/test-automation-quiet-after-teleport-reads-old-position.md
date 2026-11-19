@@ -2,7 +2,7 @@
 id: test-automation-quiet-after-teleport-reads-old-position
 title: After a teleport or crossing, Quiet and the agent probe still hold the old region's position
 topic: test
-status: bugs
+status: done
 origin: found while fixing test-automation-quiet-before-own-avatar-arrives (2026-11-15)
 refs: [test-automation-quiet-before-own-avatar-arrives]
 ---
@@ -44,3 +44,31 @@ never hold.
   the status bar showing the old coordinates.
 - A unit test for each order, and the `e2e_arrival` teleport and crossing
   legs as the end-to-end check.
+
+## Done (2026-11-19)
+
+`AgentRegionPosition` now keeps the own avatar's latest position per region
+whose update reported it (`Object::region_handle`), with the current region
+beside it, and `position()` / `current()` read only the current region's.
+`enter_region` drops every position but the new region's own, so a
+destination's update that came before the region change counts from it,
+and a region the agent returns to does not revive the position it held
+before it left. The status bar's `track_agent_position` follows
+`SlIdentity::region_handle` into it before folding the frame's updates, and
+records a `TeleportLocal` against the current region. The `Agent` probe's
+`position`, `Quiet`'s `agent_present`, the ground height under the agent
+(now from the position's own region), the status bar's coordinates, the
+About Land landing point and the experience profile's location all read it.
+
+Order on the fake grid, from probe logging in `track_agent_position` over
+`e2e_arrival`'s distant teleport and crossing: the region change lands
+first and the destination's first own-avatar update in the **same frame**.
+So the e2e legs (which now also assert that once quiet the agent stands at
+the landing point, moved off the region centre, and just over the border)
+pass with the fix and also with the old carried-over position, measured by
+running them against a deliberately reverted `enter_region`; the two
+orders are told apart by the unit tests: `world_state`'s four (a change
+drops the old position, an early update counts after it, a return does not
+revive one, the same region keeps and no region forgets), the status bar's
+two system tests for each order, and the quiescence probe test now
+entering a new region and reporting the agent absent until it reports.

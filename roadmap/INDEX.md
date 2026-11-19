@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 328 |
 | blocked | 34 |
 | in-progress | 4 |
-| bugs | 15 |
-| done | 1598 |
+| bugs | 14 |
+| done | 1599 |
 | deferred | 30 |
 | wont-do | 24 |
 | **total** | **2164** |
@@ -1239,7 +1239,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-text-renderability-axis`](in-progress/viewer-ui-text-renderability-axis.md)
   — Upstream issue — font selection cannot see glyph-format renderability
 
-## bugs (15)
+## bugs (14)
 
 ### viewer
 
@@ -1258,9 +1258,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### test
 
-- [`test-automation-quiet-after-teleport-reads-old-position`](bugs/test-automation-quiet-after-teleport-reads-old-position.md)
-  — After a teleport or crossing, Quiet and the agent probe still hold the old
-  region's position
 - [`test-conformance-cancelled-case-leaves-its-prims`](bugs/test-conformance-cancelled-case-leaves-its-prims.md)
   — A conformance case cancelled by its timeout or a panic leaves its rezzed
   prims in the region
@@ -1281,7 +1278,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1598)
+## done (1599)
 
 ### protocol
 
@@ -3977,6 +3974,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `test-fake-grid-determinism` (done))
 - [`test-audit-fake-grid-session-teardown`](done/test-audit-fake-grid-session-teardown.md)
   — sl-fake-grid never prunes sessions, and its tasks outlive shutdown
+- [`test-automation-quiet-after-teleport-reads-old-position`](done/test-automation-quiet-after-teleport-reads-old-position.md)
+  — After a teleport or crossing, Quiet and the agent probe still hold the old
+  region's position
 - [`test-automation-quiet-before-own-avatar-arrives`](done/test-automation-quiet-before-own-avatar-arrives.md)
   — The automation's Quiet holds before the own avatar has arrived
 - [`test-avatar-notes`](done/test-avatar-notes-write-and-read-avatar-notes.md) —

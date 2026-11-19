@@ -988,23 +988,155 @@ impl DerenderList {
 
 /// The agent's own region-local position, folded from its own-avatar object
 /// updates (`SlSessionEvent::ObjectAdded` / `SlSessionEvent::ObjectUpdated`
-/// whose `full_id` is the agent id). `None` before the own avatar arrives. This
-/// is the region-local `⟨x, y, z⟩` the location read-out shows, the same source
-/// the reference viewer's `LLAgentUI::buildLocationString` reads
-/// (`gAgent.getPositionAgent`).
+/// whose `full_id` is the agent id). This is the region-local `⟨x, y, z⟩` the
+/// location read-out shows, the same source the reference viewer's
+/// `LLAgentUI::buildLocationString` reads (`gAgent.getPositionAgent`).
+///
+/// Each position is kept with the region whose update reported it, and only
+/// the current region's counts: after a teleport or a crossing the old
+/// region's coordinates are not the agent's position under the new region's
+/// name. The destination of a crossing or a neighbour teleport is already a
+/// child circuit, so its update of the own avatar can arrive **before** the
+/// region change, and a standing avatar sends nothing more; that early update
+/// is kept, so it counts once the region change makes its region current.
 #[derive(Resource, Debug, Clone, Default)]
 pub struct AgentRegionPosition {
-    /// The region-local position in metres, or `None` before the own avatar
-    /// object arrives.
-    pub position: Option<Vector>,
+    /// The latest own-avatar position each region reported, region-local
+    /// metres. Holds the current region's and any reported since the last
+    /// region change.
+    by_region: HashMap<RegionHandle, Vector>,
+    /// The region the agent's root circuit occupies, as last
+    /// [`enter_region`](Self::enter_region)ed.
+    current: Option<RegionHandle>,
 }
 
 impl AgentRegionPosition {
-    /// The agent's region-local position in metres, or `None` before the own
-    /// avatar object arrives. Read by the About Land Options tab to set a
-    /// parcel's landing point to where the agent stands.
+    /// A position the agent already holds in `region`, which is current: for
+    /// seeding a world in a test.
     #[must_use]
-    pub const fn position(&self) -> Option<&Vector> {
-        self.position.as_ref()
+    pub fn at(region: RegionHandle, position: Vector) -> Self {
+        let mut this = Self::default();
+        this.enter_region(Some(region));
+        this.record(region, position);
+        this
+    }
+
+    /// The agent's region-local position in metres in the current region, or
+    /// `None` before the current region has reported the own avatar. Read by
+    /// the About Land Options tab to set a parcel's landing point to where the
+    /// agent stands.
+    #[must_use]
+    pub fn position(&self) -> Option<&Vector> {
+        self.current().map(|(_region, position)| position)
+    }
+
+    /// The current region and the agent's region-local position in it, or
+    /// `None` before the current region has reported the own avatar.
+    #[must_use]
+    pub fn current(&self) -> Option<(RegionHandle, &Vector)> {
+        let region = self.current?;
+        self.by_region
+            .get(&region)
+            .map(|position| (region, position))
+    }
+
+    /// The region last [`enter_region`](Self::enter_region)ed, whether or not
+    /// it has reported the own avatar yet.
+    #[must_use]
+    pub const fn current_region(&self) -> Option<RegionHandle> {
+        self.current
+    }
+
+    /// Record the own avatar's position as `region` reported it, whether or
+    /// not that region is current yet.
+    pub fn record(&mut self, region: RegionHandle, position: Vector) {
+        self.by_region.insert(region, position);
+    }
+
+    /// Make `region` the current one (`None` once there is no region). A
+    /// change drops every position but the new region's own, which it may
+    /// have reported before the change; the same region again changes
+    /// nothing.
+    pub fn enter_region(&mut self, region: Option<RegionHandle>) {
+        if self.current == region {
+            return;
+        }
+        self.current = region;
+        self.by_region
+            .retain(|reported, _position| Some(*reported) == region);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AgentRegionPosition;
+    use pretty_assertions::assert_eq;
+    use sl_client_bevy::{RegionHandle, Vector};
+
+    /// The region the agent leaves.
+    const OLD: RegionHandle = RegionHandle::new((256_000_u64 << 32) | 256_000);
+    /// The region it arrives in.
+    const NEW: RegionHandle = RegionHandle::new((256_256_u64 << 32) | 256_000);
+
+    /// A position at `x`, the rest fixed.
+    const fn at(x: f32) -> Vector {
+        Vector {
+            x,
+            y: 128.0,
+            z: 25.0,
+        }
+    }
+
+    /// After a region change the old region's position is not the agent's,
+    /// until the new region reports the own avatar.
+    #[test]
+    fn a_region_change_drops_the_old_position() {
+        let mut position = AgentRegionPosition::at(OLD, at(250.0));
+        assert_eq!(position.position(), Some(&at(250.0)));
+        position.enter_region(Some(NEW));
+        assert_eq!(position.position(), None);
+        assert_eq!(position.current_region(), Some(NEW));
+        position.record(NEW, at(4.0));
+        assert_eq!(position.current(), Some((NEW, &at(4.0))));
+    }
+
+    /// The destination's update can arrive before the region change (it is a
+    /// child circuit already), and a standing avatar sends nothing more: that
+    /// update counts once its region is current.
+    #[test]
+    fn an_update_before_the_region_change_counts_after_it() {
+        let mut position = AgentRegionPosition::at(OLD, at(250.0));
+        position.record(NEW, at(4.0));
+        assert_eq!(
+            position.position(),
+            Some(&at(250.0)),
+            "the destination's update does not move the agent before the change"
+        );
+        position.enter_region(Some(NEW));
+        assert_eq!(position.current(), Some((NEW, &at(4.0))));
+    }
+
+    /// Coming back to a region does not bring back the position it reported
+    /// before the agent left it.
+    #[test]
+    fn a_return_does_not_revive_a_stale_position() {
+        let mut position = AgentRegionPosition::at(OLD, at(250.0));
+        position.enter_region(Some(NEW));
+        position.record(NEW, at(4.0));
+        position.enter_region(Some(OLD));
+        assert_eq!(position.position(), None);
+    }
+
+    /// Entering the region already current keeps its position, and leaving
+    /// every region (a logout) forgets it.
+    #[test]
+    fn the_same_region_keeps_and_no_region_forgets() {
+        let mut position = AgentRegionPosition::at(OLD, at(250.0));
+        position.enter_region(Some(OLD));
+        assert_eq!(position.position(), Some(&at(250.0)));
+        position.enter_region(None);
+        assert_eq!(position.position(), None);
+        position.enter_region(Some(OLD));
+        assert_eq!(position.position(), None);
     }
 }

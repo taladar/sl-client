@@ -123,7 +123,10 @@ nothing runs while none are queued.
   or gone;
   a probe's readout holding a value at a JSON pointer. A test never sleeps.
 - **Probes** read the viewer's models, not its widgets: `agent` (region,
-  position, seat, teleport, camera mode and eye, heading), `status`,
+  position, seat, teleport, camera mode and eye, heading; the position is
+  the one the current region reported, absent after a teleport or crossing
+  until the destination has reported the own avatar, which `quiescence`
+  waits for too), `status`,
   `conversations`, `notifications`, `selection`, `inventory` (one folder by
   name path), `inventory_tree` (every folder of a tree by id — what
   `sl-viewer-ctl inventory [--library] [--wait-loaded SECS]` prints; the

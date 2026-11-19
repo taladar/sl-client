@@ -490,8 +490,12 @@ replaces that person.
   also needs `agent_present`, true once the own avatar's first update (or a
   local teleport) has given the agent the position the `Agent` probe reports.
   A launch or stage that waits for `Quiet` can therefore read `/position` at
-  once. After a teleport or crossing the old region's position still counts
-  (see `test-automation-quiet-after-teleport-reads-old-position`).
+  once. The position is kept per region it came from and only the current
+  region's counts, so after a teleport or crossing `agent_present` is false
+  until the destination has reported the own avatar, and an update it sent
+  before the region change (it is a child circuit already) counts from it. On
+  the fake grid the region change and the destination's update land in the
+  same frame, so only the unit tests tell the two orders apart.
 - **An aditi second factor in process**: the App ends on the MFA challenge
   (`LoginOutcome`), which the stage reads from the exited App, answers with
   the avatar's `mfa_command` and logs in again with a new App — the loop the

@@ -644,6 +644,11 @@ pub(crate) fn track_balance(
 /// [`AgentRegionPosition`] as its updates arrive. The own avatar is the object
 /// whose `full_id` equals the agent id ([`SlIdentity::agent_id`]).
 ///
+/// Each update is recorded against the region it came from, and the current
+/// region follows [`SlIdentity::region_handle`], so after a teleport or a
+/// crossing the old region's coordinates stop counting at once, and an update
+/// the destination sent before the region change counts from it.
+///
 /// An intra-region teleport moves the agent too, and the reference takes the
 /// `TeleportLocal`'s position at once (`process_teleport_local`'s
 /// `setPositionAgent`) rather than waiting for the avatar's next update.
@@ -652,6 +657,9 @@ fn track_agent_position(
     identity: Res<SlIdentity>,
     mut position: ResMut<AgentRegionPosition>,
 ) {
+    if position.current_region() != identity.region_handle {
+        position.enter_region(identity.region_handle);
+    }
     let Some(agent) = identity.agent_id else {
         return;
     };
@@ -660,14 +668,19 @@ fn track_agent_position(
             SlSessionEvent::ObjectAdded(object) | SlSessionEvent::ObjectUpdated(object)
                 if object.full_id.uuid() == agent.uuid() =>
             {
-                position.position = Some(object.motion.position.clone());
+                position.record(object.region_handle, object.motion.position.clone());
             }
             SlSessionEvent::TeleportLocal { position: at, .. } => {
-                position.position = Some(Vector {
-                    x: at.x(),
-                    y: at.y(),
-                    z: at.z(),
-                });
+                if let Some(region) = identity.region_handle {
+                    position.record(
+                        region,
+                        Vector {
+                            x: at.x(),
+                            y: at.y(),
+                            z: at.z(),
+                        },
+                    );
+                }
             }
             _other => {}
         }
@@ -732,9 +745,7 @@ fn update_status_readouts(
                 // Nothing to show before the region handshake.
                 translator.get("status-bar-connecting")
             }),
-            StatusReadout::Coords => {
-                coords_text(&translator, position.position.as_ref(), show_coords)
-            }
+            StatusReadout::Coords => coords_text(&translator, position.position(), show_coords),
             StatusReadout::ParcelName => parcel_name.clone().unwrap_or_default(),
             StatusReadout::Balance => {
                 balance_text(&translator, currency.symbol(), balance.balance.as_ref())
@@ -885,6 +896,7 @@ mod tests {
                 agent_id: Some(sl_client_bevy::AgentKey::from(
                     sl_client_bevy::Uuid::from_u128(1),
                 )),
+                region_handle: Some(OLD_REGION),
                 ..Default::default()
             })
             .add_systems(bevy::app::Update, super::track_agent_position);
@@ -903,8 +915,8 @@ mod tests {
         let at = app
             .world()
             .resource::<crate::world_api::AgentRegionPosition>()
-            .position
-            .clone();
+            .position()
+            .cloned();
         pretty_assertions::assert_eq!(
             at,
             Some(sl_client_bevy::Vector {
@@ -913,6 +925,144 @@ mod tests {
                 z: 26.0
             })
         );
+    }
+
+    /// The region the agent leaves in the region-change tests.
+    const OLD_REGION: sl_client_bevy::RegionHandle =
+        sl_client_bevy::RegionHandle::new((256_000_u64 << 32) | 256_000);
+    /// The region it arrives in.
+    const NEW_REGION: sl_client_bevy::RegionHandle =
+        sl_client_bevy::RegionHandle::new((256_256_u64 << 32) | 256_000);
+
+    /// A world tracking agent 1's position, standing in [`OLD_REGION`] at
+    /// x 250.
+    fn agent_in_old_region() -> bevy::app::App {
+        let mut app = bevy::app::App::new();
+        app.add_message::<sl_client_bevy::SlEvent>()
+            .init_resource::<crate::world_api::AgentRegionPosition>()
+            .insert_resource(sl_client_bevy::SlIdentity {
+                agent_id: Some(sl_client_bevy::AgentKey::from(
+                    sl_client_bevy::Uuid::from_u128(1),
+                )),
+                region_handle: Some(OLD_REGION),
+                ..Default::default()
+            })
+            .add_systems(bevy::app::Update, super::track_agent_position);
+        app.world_mut()
+            .write_message(own_avatar_update(OLD_REGION, 250.0));
+        app.update();
+        app
+    }
+
+    /// An update of agent 1's avatar as `region` reports it, at `x`.
+    fn own_avatar_update(region: sl_client_bevy::RegionHandle, x: f32) -> sl_client_bevy::SlEvent {
+        let zero = sl_client_bevy::Vector {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        };
+        sl_client_bevy::SlEvent(sl_client_bevy::SlSessionEvent::ObjectUpdated(Box::new(
+            sl_client_bevy::Object {
+                region_handle: region,
+                local_id: sl_client_bevy::RegionLocalObjectId(1),
+                circuit: sl_client_bevy::CircuitId::new(1),
+                full_id: sl_client_bevy::Uuid::from_u128(1).into(),
+                parent_id: sl_client_bevy::RegionLocalObjectId(0),
+                pcode: sl_client_bevy::pcode::AVATAR,
+                state: 0,
+                crc: 0,
+                material: 0,
+                click_action: 0,
+                update_flags: 0,
+                scale: zero.clone(),
+                motion: sl_client_bevy::ObjectMotion {
+                    position: sl_client_bevy::Vector {
+                        x,
+                        y: 128.0,
+                        z: 25.0,
+                    },
+                    velocity: zero.clone(),
+                    acceleration: zero.clone(),
+                    rotation: sl_client_bevy::Rotation {
+                        x: 0.0,
+                        y: 0.0,
+                        z: 0.0,
+                        s: 1.0,
+                    },
+                    angular_velocity: zero.clone(),
+                    collision_plane: None,
+                },
+                owner_id: sl_client_bevy::Uuid::nil(),
+                sound: sl_client_bevy::Uuid::nil(),
+                gain: 0.0,
+                sound_flags: 0,
+                sound_radius: 0.0,
+                text: String::new(),
+                text_color: [0; 4],
+                name_value: String::new(),
+                media_url: None,
+                texture_entry: Vec::new(),
+                texture_anim: Vec::new(),
+                texture_animation: None,
+                shape: sl_client_bevy::PrimShapeParams::default(),
+                particle_system: Vec::new(),
+                particles: None,
+                data: Vec::new(),
+                extra_params: Vec::new(),
+                extra: sl_client_bevy::ObjectExtraParams::default(),
+                properties: None,
+                joint_type: 0,
+                joint_pivot: zero.clone(),
+                joint_axis_or_anchor: zero,
+            },
+        )))
+    }
+
+    /// The agent's position as the read-out has it: the current region's x.
+    fn position_x(app: &bevy::app::App) -> Option<f32> {
+        app.world()
+            .resource::<crate::world_api::AgentRegionPosition>()
+            .position()
+            .map(|at| at.x)
+    }
+
+    /// The region changes first and the destination's update follows: the
+    /// old region's coordinates are gone in between, not shown under the new
+    /// region's name.
+    #[test]
+    fn a_region_change_before_the_destination_update_shows_nothing_between() {
+        let mut app = agent_in_old_region();
+        pretty_assertions::assert_eq!(position_x(&app), Some(250.0));
+        app.world_mut()
+            .resource_mut::<sl_client_bevy::SlIdentity>()
+            .region_handle = Some(NEW_REGION);
+        app.update();
+        pretty_assertions::assert_eq!(position_x(&app), None, "the old region's position is gone");
+        app.world_mut()
+            .write_message(own_avatar_update(NEW_REGION, 4.0));
+        app.update();
+        pretty_assertions::assert_eq!(position_x(&app), Some(4.0));
+    }
+
+    /// The destination (a child circuit already) reports the own avatar
+    /// before the region change: that update is the position once the change
+    /// lands, though nothing more arrives.
+    #[test]
+    fn a_destination_update_before_the_region_change_counts_after_it() {
+        let mut app = agent_in_old_region();
+        app.world_mut()
+            .write_message(own_avatar_update(NEW_REGION, 4.0));
+        app.update();
+        pretty_assertions::assert_eq!(
+            position_x(&app),
+            Some(250.0),
+            "still in the old region until the change"
+        );
+        app.world_mut()
+            .resource_mut::<sl_client_bevy::SlIdentity>()
+            .region_handle = Some(NEW_REGION);
+        app.update();
+        pretty_assertions::assert_eq!(position_x(&app), Some(4.0));
     }
 
     /// A wide-open parcel on an unrestricted region shows no icons.

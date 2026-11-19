@@ -54,6 +54,10 @@ mod test {
     /// How far a heading may be from the one stated, in radians.
     const HEADING_SLOP: f32 = 0.05;
 
+    /// Where the facing test's teleport lands: off the region's centre, so a
+    /// position still read from home cannot pass for it.
+    const LANDING: [f32; 3] = [64.0, 192.0, 25.0];
+
     /// A stage for `name` with the one viewer `Alpha`, on the home region and
     /// `others`.
     fn stage(name: &str, others: impl IntoIterator<Item = RegionConfig>) -> StageBuilder {
@@ -258,6 +262,8 @@ mod test {
     /// north, and once the destination has said everything it has to say it
     /// still does. Walked over the border into the region next door facing
     /// north, with the crossing's motion pointing east, it still faces north.
+    /// Once quiet after each, the agent's position is the destination's, not
+    /// the region-local coordinates it held where it came from.
     #[test]
     fn a_teleport_arrival_faces_the_stated_way_and_a_crossing_turns_nothing()
     -> Result<(), TestError> {
@@ -286,7 +292,7 @@ mod test {
                     stage.grid()?.teleport_agent(
                         &agent,
                         FAR,
-                        RegionCoordinates::new(128.0, 128.0, 25.0),
+                        RegionCoordinates::new(LANDING[0], LANDING[1], LANDING[2]),
                         north,
                     )
                 );
@@ -303,7 +309,16 @@ mod test {
                     "on its first frame there the avatar faces north, not {heading}"
                 );
                 alpha.wait_until_quiet(WAIT).await?;
-                let settled = alpha.agent().await?.heading.unwrap_or_default();
+                let settled_agent = alpha.agent().await?;
+                assert!(
+                    settled_agent
+                        .position
+                        .is_some_and(|at| distance(at, LANDING) < 2.0),
+                    "once quiet the agent stands where it landed, not where it \
+                     stood at home: {:?}",
+                    settled_agent.position
+                );
+                let settled = settled_agent.heading.unwrap_or_default();
                 assert!(
                     turned(settled, FRAC_PI_2).abs() <= HEADING_SLOP,
                     "nothing turned the avatar back: it faces {settled}"
@@ -331,7 +346,14 @@ mod test {
                     .to_equal(json!(NEXT_DOOR))
                     .await?;
                 alpha.wait_until_quiet(WAIT).await?;
-                let crossed = alpha.agent().await?.heading.unwrap_or_default();
+                let crossed_agent = alpha.agent().await?;
+                assert!(
+                    crossed_agent.position.is_some_and(|[x, _y, _z]| x < 16.0),
+                    "once quiet the agent stands just over the border, not at its \
+                     old region's coordinates: {:?}",
+                    crossed_agent.position
+                );
+                let crossed = crossed_agent.heading.unwrap_or_default();
                 assert!(
                     turned(crossed, FRAC_PI_2).abs() <= HEADING_SLOP,
                     "a crossing turned the avatar to {crossed}"

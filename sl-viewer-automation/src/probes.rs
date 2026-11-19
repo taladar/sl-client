@@ -181,7 +181,7 @@ pub fn read_agent(world: &mut World) -> AgentReadout {
         region: current_region(world),
         position: world
             .get_resource::<AgentRegionPosition>()
-            .and_then(|position| position.position.as_ref())
+            .and_then(AgentRegionPosition::position)
             .map(|at| [at.x, at.y, at.z]),
         seated_on: world
             .get_resource::<SlAgentParcel>()
@@ -214,12 +214,9 @@ pub fn read_agent(world: &mut World) -> AgentReadout {
 /// cache, which a relog fills from disk). `None` before the region or the
 /// agent's position is known, or while no ground there is.
 fn ground_height(world: &World) -> Option<f32> {
-    let region = world
-        .get_resource::<SlIdentity>()
-        .and_then(|identity| identity.region_handle)?;
-    let at = world
+    let (region, at) = world
         .get_resource::<AgentRegionPosition>()
-        .and_then(|position| position.position.as_ref())?;
+        .and_then(AgentRegionPosition::current)?;
     world
         .get_resource::<TerrainState>()?
         .land_height(region, at.x, at.y)
@@ -482,7 +479,7 @@ pub fn read_quiescence(world: &mut World) -> QuiescenceReadout {
         region_up,
         agent_present: world
             .get_resource::<AgentRegionPosition>()
-            .is_some_and(|position| position.position.is_some()),
+            .is_some_and(|position| position.position().is_some()),
         outstanding: outstanding_by
             .as_ref()
             .map(|buckets| buckets.values().copied().fold(0_u64, u64::saturating_add)),

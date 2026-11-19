@@ -79,13 +79,14 @@ mod tests {
             },
             SlCurrentRegion,
         ));
-        app.world_mut().insert_resource(AgentRegionPosition {
-            position: Some(Vector {
+        app.world_mut().insert_resource(AgentRegionPosition::at(
+            handle,
+            Vector {
                 x: 10.0,
                 y: 20.0,
                 z: 30.0,
-            }),
-        });
+            },
+        ));
         app.world_mut().resource_mut::<SlAgentParcel>().seated_on = Some(seat);
         *app.world_mut().resource_mut::<CameraMode>() = CameraMode::Mouselook;
         let after = read_agent(app.world_mut());
@@ -570,16 +571,46 @@ mod tests {
             "nothing is outstanding before the region's first object update, \
              which is not settled: {handshaken:?}"
         );
-        app.world_mut().insert_resource(AgentRegionPosition {
-            position: Some(Vector {
+        app.world_mut().insert_resource(AgentRegionPosition::at(
+            RegionHandle::new(0),
+            Vector {
                 x: 128.0,
                 y: 128.0,
                 z: 25.0,
-            }),
-        });
+            },
+        ));
         let arrived = read_quiescence(app.world_mut());
         assert!(arrived.agent_present);
         assert!(arrived.is_quiet(), "{arrived:?}");
+        // A teleport or a crossing: the old region's position is not the own
+        // avatar arriving in the new one.
+        let destination = RegionHandle::new((256_u64 << 32) | 512);
+        app.world_mut()
+            .resource_mut::<AgentRegionPosition>()
+            .enter_region(Some(destination));
+        let moved = read_quiescence(app.world_mut());
+        assert!(
+            !moved.agent_present,
+            "the old region's position does not count: {moved:?}"
+        );
+        assert!(!moved.is_quiet(), "{moved:?}");
+        assert_eq!(read_agent(app.world_mut()).position, None);
+        app.world_mut()
+            .resource_mut::<AgentRegionPosition>()
+            .record(
+                destination,
+                Vector {
+                    x: 4.0,
+                    y: 128.0,
+                    z: 25.0,
+                },
+            );
+        let landed = read_quiescence(app.world_mut());
+        assert!(landed.agent_present, "{landed:?}");
+        assert_eq!(
+            read_agent(app.world_mut()).position,
+            Some([4.0, 128.0, 25.0])
+        );
         Ok(())
     }
 

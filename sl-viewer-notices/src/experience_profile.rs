@@ -1350,7 +1350,7 @@ fn current_location(
         .single()
         .ok()
         .and_then(|region| region.0.sim_name.clone())?;
-    let pos = position.position.as_ref()?;
+    let pos = position.position()?;
     let url = sl_types::map::Location::new(
         sim_name,
         local_coord_u8(pos.x),
