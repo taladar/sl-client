@@ -72,12 +72,23 @@ To avoid that, such a case reads an optional, gitignored fixtures file
 group(s) it needs **by position** — the membership/messaging cases use the
 first, while `chat-invite-accept-decline` uses the first two (it needs two
 distinct pending sessions). When a group is configured at the position a case
-asks for, the case reuses it; otherwise it creates a throwaway. A case that
-joins a reused group also leaves it again, so the fixture is left as it was
-found (a fresh join is also what makes the invitation case fire).
+asks for, the case reuses it; otherwise it creates a throwaway. On OpenSim a
+case that joins a reused group also leaves it again, so the fixture is left as
+it was found (a fresh join is also what makes OpenSim route the invitation
+case's first message as an invitation).
+
+On Second Life the secondary is meant to **stay** a member: a group left with
+its founder alone is purged, and an invitation reaches any member who has not
+opened the session, so `chat-invite-accept-decline` joins only a group the
+secondary is not in yet and never leaves one there. Name groups that are not
+brand new: the founder's start of a group's session seconds after founding it
+is refused `unverified`, Second Life's refusal of a non-member, while the same
+start hours later is taken. The case retries a refused start for a minute and
+records `partial` naming the refusal when it never succeeds.
 
 ```toml
-# fixtures.aditi.toml — pre-made open-enrollment groups the primary owns.
+# fixtures.aditi.toml — pre-made open-enrollment groups the primary owns
+# (and, on Second Life, the secondary is a member of).
 premade_groups = [
   "00000000-0000-0000-0000-000000000000",
   "11111111-1111-1111-1111-111111111111",

@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 328 |
 | blocked | 34 |
 | in-progress | 4 |
-| bugs | 16 |
-| done | 1597 |
+| bugs | 15 |
+| done | 1598 |
 | deferred | 30 |
 | wont-do | 24 |
 | **total** | **2164** |
@@ -1239,7 +1239,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-text-renderability-axis`](in-progress/viewer-ui-text-renderability-axis.md)
   — Upstream issue — font selection cannot see glyph-format renderability
 
-## bugs (16)
+## bugs (15)
 
 ### viewer
 
@@ -1261,9 +1261,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-automation-quiet-after-teleport-reads-old-position`](bugs/test-automation-quiet-after-teleport-reads-old-position.md)
   — After a teleport or crossing, Quiet and the agent probe still hold the old
   region's position
-- [`test-chat-invite-accept-decline-aditi-primary-not-a-member`](bugs/test-chat-invite-accept-decline-aditi-primary-not-a-member.md)
-  — chat-invite-accept-decline is always partial on aditi — the primary's group
-  start is refused "unverified"
 - [`test-conformance-cancelled-case-leaves-its-prims`](bugs/test-conformance-cancelled-case-leaves-its-prims.md)
   — A conformance case cancelled by its timeout or a panic leaves its rezzed
   prims in the region
@@ -1284,7 +1281,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1597)
+## done (1598)
 
 ### protocol
 
@@ -4002,6 +3999,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — AcceptChatInvite / DeclineChatInvite and the CAPS ChatSessionRequest p
 - [`test-chat-invite-accept-decline-aditi`](done/test-chat-invite-accept-decline-aditi-add-the-aditi-variant.md)
   — Chat invite accept/decline — [aditi] variant
+- [`test-chat-invite-accept-decline-aditi-primary-not-a-member`](done/test-chat-invite-accept-decline-aditi-primary-not-a-member.md)
+  — chat-invite-accept-decline is always partial on aditi — the primary's group
+  start is refused "unverified"
 - [`test-chat-self-echo`](done/test-chat-self-echo-say-on-a-channel-and-observe-own-chatfromsimulator.md)
   — say on a channel and observe own ChatFromSimulator
 - [`test-chat-whisper-shout-range`](done/test-chat-whisper-shout-range-verify-whisper-shout-reach-vs-normal.md)

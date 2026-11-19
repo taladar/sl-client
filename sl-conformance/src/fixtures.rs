@@ -22,7 +22,10 @@
 //! # group cases instead of creating throwaway groups per run. A case takes the
 //! # group(s) it needs by position: the membership/messaging cases use the
 //! # first, `chat-invite-accept-decline` uses the first two (it needs two
-//! # distinct pending sessions).
+//! # distinct pending sessions). On Second Life the secondary avatar should be
+//! # a member of both and is left one, and neither should be founded moments
+//! # before a run: Second Life refuses the founder's session start in a group
+//! # that young.
 //! premade_groups = [
 //!     "00000000-0000-0000-0000-000000000000",
 //!     "11111111-1111-1111-1111-111111111111",

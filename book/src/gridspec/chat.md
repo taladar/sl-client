@@ -395,6 +395,7 @@ speak.
 | a line sent with an **empty bucket** (**held**) | **refused**: `ChatterBoxSessionEventReply` "message", error "generic", to the sender alone | passed on |
 | C, who is no member, opens the session (**held**) | refused: a start reply with error "unverified" | **taken**, and C enters the roster |
 | C speaks into it (**held**) | refused, "generic" | **passed on** to every member |
+| A, the founder, opens the session of a group it founded seconds before | refused: a start reply with error "unverified", as for a non-member, every time within 2.4 s of the `CreateGroupReply` (seen five times 2026-11-19); the same group's start **taken** 2.5 h later | taken |
 
 Two things a client has to read from this. The **bucket**: the reference
 packs a one-zero-byte bucket (`EMPTY_BINARY_BUCKET`, size 1) into every

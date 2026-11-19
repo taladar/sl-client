@@ -9,11 +9,12 @@ use sl_client_tokio::{
     InviteChannel,
 };
 
-use crate::context::{TestContext, TestFailure};
+use crate::context::{Session, TestContext, TestFailure};
 use crate::grid::Grid;
 use crate::registry::{GridTest, TestFuture};
 use crate::support::{
-    self, GroupSource, REGION_TIMEOUT, REPLY_TIMEOUT, check, check_eq, is_aditi, secs_metric,
+    self, GroupSource, REGION_TIMEOUT, REPLY_TIMEOUT, check, check_eq, count_metric, is_aditi,
+    secs_metric,
 };
 
 /// The secondary is invited to two distinct group IM sessions and answers each
@@ -38,6 +39,15 @@ use crate::support::{
 /// a group's session entry has been answered, a second message in the same group
 /// arrives as a plain session message rather than a fresh invitation.
 ///
+/// On Second Life the groups are pre-made: the founder's start in a group it
+/// founded seconds before is refused `unverified` (its refusal of a non-member),
+/// while a group both avatars have been members of for a while works at once.
+/// There the secondary stays a member between runs — an invitation reaches any
+/// member who has not opened the session, and a group left with its founder
+/// alone is purged — so it joins only when it is not a member yet. Either way
+/// the primary waits for the grid to take its start, retrying a refused one for
+/// a minute, before it sends.
+///
 /// The accept/decline themselves are driven on the secondary and asserted
 /// against its registry via [`Command::QueryChatSessions`]: before answering, the
 /// group session is present as `Invited` (inviter == the primary, a text-channel
@@ -48,12 +58,10 @@ use crate::support::{
 /// OpenSim exposes no such capability, so there the accept is the optimistic
 /// local join (the simulator already added us when it routed the invite) and the
 /// decline is a UDP `SessionLeave` the module ignores — both observable only as
-/// the client-side registry transition under test. Asserting the `ChatSessionRequest`
-/// POST and its reply roster is the Aditi variant, deferred to Phase Z pending
-/// its Aditi run.
+/// the client-side registry transition under test.
 ///
-/// `2av`. Runs on OpenSim today (local secondary `Friend Tester`, Groups V2
-/// enabled — see the setup memory); `[opensim]` only, Aditi → Phase Z.
+/// `2av`, `[both]`. On OpenSim it founds two throwaway groups (Groups V2
+/// enabled); on aditi it takes the fixtures' first two `premade_groups`.
 #[derive(Debug)]
 pub struct ChatInviteAcceptDecline;
 
@@ -71,22 +79,72 @@ const DELIVERY_ATTEMPT_WINDOW: Duration = Duration::from_secs(10);
 /// How many markers to send before concluding delivery genuinely fails.
 const DELIVERY_ATTEMPTS: u32 = 6;
 
-/// The outcome when no invitation was delivered within the retry budget: an
-/// honest partial on Second Life (its group service drops messages into a
-/// freshly created group until membership has propagated — observed live), a
-/// hard failure on OpenSim (delivery is deterministic there).
-fn no_invitation_outcome(ctx: &mut TestContext, grid: Grid, half: &str) -> Result<(), TestFailure> {
-    if is_aditi(grid) {
-        ctx.mark_partial(&format!(
-            "no group-session invitation was delivered within the retry budget for the \
-             {half} half — Second Life drops messages into a freshly created group until \
-             its group service has propagated the membership"
-        ));
-        return Ok(());
+/// How long the primary keeps asking to start a group session the grid refuses.
+///
+/// Second Life refuses the founder's start in a group founded seconds earlier
+/// with `unverified` — its refusal of a non-member — and accepts the same start
+/// in the same group hours later (measured on aditi 2026-11-19: refused 2.4 s
+/// after the `CreateGroupReply`, taken 2.5 h after it). How long the refusal
+/// lasts in between is not measured, so the start is retried for a minute.
+const START_BUDGET: Duration = Duration::from_secs(60);
+
+/// How long to wait between two starts the grid refused.
+const START_RETRY_INTERVAL: Duration = Duration::from_secs(5);
+
+/// Why [`provoke_group_invitation`] has no invitation to hand back.
+#[derive(Debug)]
+enum NoInvitation {
+    /// The grid refused every start of the group's session within
+    /// [`START_BUDGET`]; the error of the last refusal.
+    StartRefused(String),
+    /// The session started, but none of the [`DELIVERY_ATTEMPTS`] markers
+    /// reached the secondary as an invitation.
+    NotDelivered {
+        /// Whether the secondary joined the group during this run.
+        fresh_join: bool,
+    },
+}
+
+/// The outcome when the secondary got no invitation for the `half` half. A
+/// refused start is the grid saying so, and on Second Life it is the young
+/// group's refusal (see [`START_BUDGET`]), so it is an honest partial there and
+/// a failure on OpenSim, which takes any member's start. An undelivered
+/// invitation after a start the grid took is a partial on Second Life only when
+/// the secondary joined moments before (its group service propagates a join
+/// asynchronously and drops messages meanwhile), and a failure otherwise.
+fn no_invitation_outcome(
+    ctx: &mut TestContext,
+    grid: Grid,
+    half: &str,
+    why: NoInvitation,
+) -> Result<(), TestFailure> {
+    match why {
+        NoInvitation::StartRefused(error) if is_aditi(grid) => {
+            ctx.mark_partial(&format!(
+                "the primary's start of the {half} half's group session was refused \
+                 \"{error}\" for {} s — Second Life refuses the founder's start in a group \
+                 founded moments before; name groups both avatars are members of as \
+                 premade_groups in the fixtures",
+                START_BUDGET.as_secs()
+            ));
+            Ok(())
+        }
+        NoInvitation::StartRefused(error) => Err(TestFailure::Assertion(format!(
+            "the primary's start of the {half} half's group session was refused: {error}"
+        ))),
+        NoInvitation::NotDelivered { fresh_join: true } if is_aditi(grid) => {
+            ctx.mark_partial(&format!(
+                "no group-session invitation was delivered within the retry budget for the \
+                 {half} half — the secondary joined the group during the run, and Second \
+                 Life drops messages to a fresh member until its group service has \
+                 propagated the membership"
+            ));
+            Ok(())
+        }
+        NoInvitation::NotDelivered { .. } => Err(TestFailure::Assertion(format!(
+            "group invitation was never delivered ({half} half)"
+        ))),
     }
-    Err(TestFailure::Assertion(format!(
-        "group invitation was never delivered ({half} half)"
-    )))
 }
 
 impl GridTest for ChatInviteAcceptDecline {
@@ -127,13 +185,12 @@ impl GridTest for ChatInviteAcceptDecline {
             })?;
 
             // --- Accept path: invite the secondary to a group, then accept. ---
-            let Some((accept_group, accept_source, accept_rtt)) =
-                provoke_group_invitation(ctx, primary_id, 0, "accept").await?
-            else {
-                return no_invitation_outcome(ctx, grid, "accept");
+            let accept = match provoke_group_invitation(ctx, primary_id, 0, "accept").await? {
+                Ok(invitation) => invitation,
+                Err(why) => return no_invitation_outcome(ctx, grid, "accept", why),
             };
             let accept_session = ChatSessionKind::Group {
-                group_id: accept_group,
+                group_id: accept.group_id,
             };
 
             // Before accepting, the registry shows the group session as a pending
@@ -158,13 +215,12 @@ impl GridTest for ChatInviteAcceptDecline {
             )?;
 
             // --- Decline path: invite the secondary to a second group, decline. ---
-            let Some((decline_group, decline_source, decline_rtt)) =
-                provoke_group_invitation(ctx, primary_id, 1, "decline").await?
-            else {
-                return no_invitation_outcome(ctx, grid, "decline");
+            let decline = match provoke_group_invitation(ctx, primary_id, 1, "decline").await? {
+                Ok(invitation) => invitation,
+                Err(why) => return no_invitation_outcome(ctx, grid, "decline", why),
             };
             let decline_session = ChatSessionKind::Group {
-                group_id: decline_group,
+                group_id: decline.group_id,
             };
 
             // Before declining, the registry shows this group session as a pending
@@ -187,16 +243,20 @@ impl GridTest for ChatInviteAcceptDecline {
                 "declined group session should be removed from the registry",
             )?;
 
-            // On the reused pre-made path, the secondary leaves the groups it
-            // joined so the fixtures are restored to founder-only for the next
-            // run — a *fresh* join is what makes the first message arrive as an
-            // invitation rather than a plain session message. On the throwaway
-            // path the groups are discarded with the run, so this is skipped.
-            for (group_id, source) in [
-                (accept_group, accept_source),
-                (decline_group, decline_source),
-            ] {
-                if source == GroupSource::Premade {
+            // On OpenSim's reused pre-made path, the secondary leaves the groups
+            // it joined so the fixtures are restored to founder-only for the
+            // next run — a *fresh* join is what makes OpenSim route the first
+            // message as an invitation rather than a plain session message. On
+            // Second Life the secondary stays a member: an invitation reaches
+            // any member who has not opened the session, and a group left with
+            // its founder alone is purged by the grid. On the throwaway path the
+            // groups are discarded with the run, so this is skipped.
+            for invitation in [&accept, &decline] {
+                if invitation.source == GroupSource::Premade
+                    && invitation.joined_this_run
+                    && !is_aditi(grid)
+                {
+                    let group_id = invitation.group_id;
                     ctx.secondary()
                         .ok_or_else(|| {
                             TestFailure::Assertion(
@@ -209,17 +269,21 @@ impl GridTest for ChatInviteAcceptDecline {
             }
 
             let metrics = ctx.metrics();
-            metrics.set_timing(&secs_metric("accept_invite_rtt"), accept_rtt.as_secs_f64());
-            metrics.set_timing(
-                &secs_metric("decline_invite_rtt"),
-                decline_rtt.as_secs_f64(),
-            );
-            metrics.set("accept_group_source", accept_source.label());
-            metrics.set("decline_group_source", decline_source.label());
-            // On OpenSim there is no `ChatSessionRequest` capability, so accept /
-            // decline are observable only as the client-side registry transition;
-            // the cap POST is the Aditi (Phase Z) variant.
-            metrics.set("chat_session_request_cap", "absent");
+            for (half, invitation) in [("accept", &accept), ("decline", &decline)] {
+                metrics.set_timing(
+                    &secs_metric(&format!("{half}_invite_rtt")),
+                    invitation.invite_rtt.as_secs_f64(),
+                );
+                metrics.set(&format!("{half}_group_source"), invitation.source.label());
+                metrics.set(
+                    &format!("{half}_secondary_joined_this_run"),
+                    invitation.joined_this_run,
+                );
+                metrics.set(
+                    &count_metric(&format!("{half}_start_attempt")),
+                    i64::from(invitation.start_attempts),
+                );
+            }
             metrics.set("accept_promoted_to_joined", true);
             metrics.set("decline_removed_entry", true);
             Ok(())
@@ -227,23 +291,41 @@ impl GridTest for ChatInviteAcceptDecline {
     }
 }
 
+/// A group-session invitation the secondary received, and how it came about.
+#[derive(Debug)]
+struct Invitation {
+    /// The group whose session the secondary was invited to.
+    group_id: GroupKey,
+    /// Where the group came from.
+    source: GroupSource,
+    /// Whether the secondary joined the group during this run (it was not yet
+    /// a member), which decides whether the run leaves it again.
+    joined_this_run: bool,
+    /// How many starts the primary sent before the grid took one.
+    start_attempts: u32,
+    /// The time from the first marker sent to the invitation arriving.
+    invite_rtt: Duration,
+}
+
 /// Takes a group (a pre-made one from [`crate::fixtures`] by `index`, or a fresh
 /// throwaway — see [`support::membership_group`]), has the secondary join it as a
-/// member, then has the primary open the group's IM session and send one marker
-/// message — which the secondary, not yet a session participant, receives as a
-/// `ChatterBoxInvitation` ([`Event::ConferenceInvited`] with `from_group`).
-/// Returns the group's id, where it came from (so the caller can leave a reused
-/// group afterward), and the send→invitation round-trip time.
+/// member unless it already is one, has the primary start the group's IM session
+/// until the grid takes the start, then has it send a marker message — which the
+/// secondary, not yet a session participant, receives as a `ChatterBoxInvitation`
+/// ([`Event::ConferenceInvited`] with `from_group`).
 ///
 /// `index` and `purpose` distinguish the two groups this case needs (one to
 /// accept, one to decline): `index` selects distinct pre-made groups by position,
 /// and `purpose` distinguishes the group name and marker text.
+///
+/// The inner `Err` says why no invitation arrived; the outer one is a failure of
+/// the run itself.
 async fn provoke_group_invitation(
     ctx: &mut TestContext,
     primary_id: AgentKey,
     index: usize,
     purpose: &str,
-) -> Result<Option<(GroupKey, GroupSource, Duration)>, TestFailure> {
+) -> Result<Result<Invitation, NoInvitation>, TestFailure> {
     // The throwaway group's name carries a wall-clock suffix so repeated
     // create-per-run does not collide on the grid's unique-name constraint; it is
     // ignored on the pre-made path. The primary owns the group either way.
@@ -259,40 +341,51 @@ async fn provoke_group_invitation(
     .await?;
     let group_id = group.group_id;
 
-    // The secondary joins the open-enrollment group, becoming a member eligible
-    // to receive the group's session traffic — but it does NOT open the session,
-    // so the first message reaches it as an invitation, not a session message.
-    let join_ok = {
+    // The secondary must be a member eligible to receive the group's session
+    // traffic — but it does NOT open the session, so the first message reaches
+    // it as an invitation, not a session message. A pre-made group on Second
+    // Life already has it as a member (it is never left there; see the
+    // cleanup), so it joins only when its membership list lacks the group.
+    let joined_this_run = {
         let secondary = ctx.secondary().ok_or_else(|| {
             TestFailure::Assertion("two-account test ran without a secondary".to_owned())
         })?;
-        secondary.send(Command::JoinGroup(group_id)).await?;
-        secondary
-            .wait_for(REPLY_TIMEOUT, |event| match event {
-                Event::JoinGroupResult {
-                    group_id: joined,
-                    success,
-                } if *joined == group_id => Some(*success),
-                _ => None,
-            })
-            .await?
+        let already_member = group.source == GroupSource::Premade
+            && secondary_memberships(secondary).await?.contains(&group_id);
+        if already_member {
+            false
+        } else {
+            secondary.send(Command::JoinGroup(group_id)).await?;
+            let join_ok = secondary
+                .wait_for(REPLY_TIMEOUT, |event| match event {
+                    Event::JoinGroupResult {
+                        group_id: joined,
+                        success,
+                    } if *joined == group_id => Some(*success),
+                    _ => None,
+                })
+                .await?;
+            check(join_ok, "secondary failed to join the group")?;
+            // Let the membership commit on the group service before the primary
+            // sends, so the distribution pass lists the secondary and routes it
+            // the invitation.
+            tokio::time::sleep(MEMBERSHIP_SETTLE).await;
+            true
+        }
     };
-    check(join_ok, "secondary failed to join the group")?;
 
-    // Let the membership commit on the group service before the primary sends, so
-    // the distribution pass lists the secondary and routes it the invitation.
-    tokio::time::sleep(MEMBERSHIP_SETTLE).await;
+    let start_attempts = match start_group_session(ctx, group_id).await? {
+        Ok(attempts) => attempts,
+        Err(error) => return Ok(Err(NoInvitation::StartRefused(error))),
+    };
 
-    // The primary opens the group session and sends a marker tagged with its
-    // own agent id and the attempt number (so the predicate ignores unrelated
-    // background group traffic). Second Life's group service propagates a
-    // fresh group/join asynchronously and drops messages into it meanwhile
-    // (see [`super::group_session_message`]), so the send is retried with a
-    // fresh marker; delivery exhaustion returns `Ok(None)` for the caller to
-    // record honestly.
-    ctx.primary()
-        .send(Command::StartGroupSession(group_id))
-        .await?;
+    // The primary sends a marker tagged with its own agent id and the attempt
+    // number (so the predicate ignores unrelated background group traffic).
+    // Second Life's group service propagates a fresh join asynchronously and
+    // drops messages to the new member meanwhile (see
+    // [`super::group_session_message`]), so the send is retried with a fresh
+    // marker; delivery exhaustion is handed back for the caller to record
+    // honestly.
     let sent_at = Instant::now();
     let mut attempt: u32 = 0;
     let invited_session = loop {
@@ -325,7 +418,11 @@ async fn provoke_group_invitation(
         {
             Ok(session) => break session,
             Err(TestFailure::Timeout(_)) if attempt < DELIVERY_ATTEMPTS => {}
-            Err(TestFailure::Timeout(_)) => return Ok(None),
+            Err(TestFailure::Timeout(_)) => {
+                return Ok(Err(NoInvitation::NotDelivered {
+                    fresh_join: joined_this_run,
+                }));
+            }
             Err(other) => return Err(other),
         }
     };
@@ -335,7 +432,76 @@ async fn provoke_group_invitation(
         &GroupKey::from(invited_session),
         &group_id,
     )?;
-    Ok(Some((group_id, group.source, invite_rtt)))
+    Ok(Ok(Invitation {
+        group_id,
+        source: group.source,
+        joined_this_run,
+        start_attempts,
+        invite_rtt,
+    }))
+}
+
+/// The groups the secondary is a member of, from a fresh
+/// [`Command::RequestAgentDataUpdate`]'s membership list.
+async fn secondary_memberships(secondary: &mut Session) -> Result<Vec<GroupKey>, TestFailure> {
+    secondary.send(Command::RequestAgentDataUpdate).await?;
+    secondary
+        .wait_for(REPLY_TIMEOUT, |event| match event {
+            Event::GroupMemberships(groups) => {
+                Some(groups.iter().map(|group| group.group_id).collect())
+            }
+            _ => None,
+        })
+        .await
+}
+
+/// Has the primary start `group_id`'s session until the grid takes the start,
+/// and returns how many starts that took — or, once [`START_BUDGET`] has run
+/// out, the error of the last refusal.
+///
+/// The grid answers every start with a `ChatterBoxSessionStartReply`
+/// ([`Event::ChatSessionStarted`]), OpenSim's group module included. A refused
+/// start drops the session, so the next start opens it afresh.
+async fn start_group_session(
+    ctx: &mut TestContext,
+    group_id: GroupKey,
+) -> Result<Result<u32, String>, TestFailure> {
+    let started = Instant::now();
+    let mut attempts: u32 = 0;
+    loop {
+        attempts = attempts.saturating_add(1);
+        let primary = ctx.primary();
+        primary.send(Command::StartGroupSession(group_id)).await?;
+        let (success, error) = primary
+            .wait_for(REPLY_TIMEOUT, |event| match event {
+                Event::ChatSessionStarted {
+                    temp_session_id,
+                    session_id,
+                    success,
+                    error,
+                    ..
+                } if GroupKey::from(temp_session_id.get()) == group_id
+                    || GroupKey::from(session_id.get()) == group_id =>
+                {
+                    Some((*success, error.clone()))
+                }
+                _ => None,
+            })
+            .await?;
+        if success {
+            return Ok(Ok(attempts));
+        }
+        tracing::info!(
+            group = %group_id.uuid(),
+            attempt = attempts,
+            error = %error,
+            "the grid refused the primary's group session start"
+        );
+        if started.elapsed() >= START_BUDGET {
+            return Ok(Err(error));
+        }
+        tokio::time::sleep(START_RETRY_INTERVAL).await;
+    }
 }
 
 /// Queries the secondary's chat-session registry and returns the entry for
