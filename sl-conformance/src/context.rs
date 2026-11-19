@@ -11,9 +11,10 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use sl_client_tokio::{
-    AgentKey, CircuitId, CircuitProbe, Client, ClientDirectories, Command, Diagnostic, Event,
-    ExperienceKey, GroupKey, InventoryCacheConfig, LoginAccount, LoginParams, LoginRejectKind,
-    LoginRequest, MeshKey, RegionHandle, RegionHandshakeReplyFlags, StartLocation, Uuid,
+    AgentKey, CircuitId, CircuitProbe, Client, ClientDirectories, Command, DeRezDestination,
+    Diagnostic, Event, ExperienceKey, GroupKey, InventoryCacheConfig, LoginAccount, LoginParams,
+    LoginRejectKind, LoginRequest, MeshKey, ObjectKey, RegionHandle, RegionHandshakeReplyFlags,
+    ScopedObjectId, StartLocation, TransactionId, Uuid,
 };
 use sl_repl::{Avatar, CooldownError, LoginCooldown};
 use time::OffsetDateTime;
@@ -25,6 +26,7 @@ use crate::fixtures::Fixtures;
 use crate::grid::Grid;
 use crate::metrics::Metrics;
 use crate::record::Completeness;
+use crate::rez_ledger::{Leftovers, RezLedger};
 
 /// How many times to retry an OpenSim login that was rejected as
 /// "already logged in" before giving up. A prior session that did not log out
@@ -42,6 +44,11 @@ const ALREADY_LOGGED_IN_RETRY_DELAY: Duration = Duration::from_secs(1);
 /// How long [`Session::logout`] waits for a clean `LoggedOut` before forcing the
 /// run loop down.
 const LOGOUT_GRACE: Duration = Duration::from_secs(15);
+
+/// How long [`Session::clear_rezzed`] waits for the grid to take away what it
+/// derezzed. A derez is answered with its kill within a second or two on both
+/// grids.
+pub const CLEAR_TIMEOUT: Duration = Duration::from_secs(20);
 
 /// A cloned handle to a session's command channel that can be used where
 /// `async` is not available.
@@ -184,6 +191,12 @@ pub struct Session {
     /// caps reporter and refreshed on every region change. A case reads a cap
     /// (e.g. `GetTexture`) from it to drive a `TextureStore`.
     caps: Arc<Mutex<std::collections::HashMap<String, String>>>,
+    /// What this session's rez commands brought into the world and it still
+    /// owns, kept by [`Session::send`] and the event forwarder rather than by
+    /// the case body, so the runner can clear it away with
+    /// [`Session::clear_rezzed`] even after cancelling the body. Carried over
+    /// a [`Session::relogin`].
+    rezzes: RezLedger,
 }
 
 impl Session {
@@ -357,10 +370,16 @@ impl Session {
 
     /// Send a command to the run loop.
     ///
+    /// A command that asks the grid for a new object is noted in the session's
+    /// rez ledger first, so the object it brings is cleared away after the case
+    /// whether or not the case gets as far as clearing it itself
+    /// ([`Session::clear_rezzed`]).
+    ///
     /// # Errors
     ///
     /// Returns [`TestFailure::Disconnected`] if the run loop has stopped.
     pub async fn send(&self, command: Command) -> Result<(), TestFailure> {
+        self.rezzes.note_command(&command, self.region_handle);
         self.commands
             .send(command)
             .await
@@ -517,6 +536,84 @@ impl Session {
             Ok(Err(error)) => Err(TestFailure::Client(error)),
             Err(join) => Err(TestFailure::Join(join.to_string())),
         }
+    }
+
+    /// Derez into the agent's Trash whatever this session's rez commands
+    /// brought into the world that is still standing in its scene, and wait
+    /// for the grid to take it away — what the runner does after every case
+    /// body, before the logout, so a body cancelled by its timeout or by a
+    /// panic before its own derez leaves nothing behind.
+    ///
+    /// A case that cleared up after itself leaves nothing for this to do. A
+    /// case that passed and still left something is told so in the log, as a
+    /// warning naming each object, since that is the case's own leak; and an
+    /// object the grid has not taken away by the end of [`CLEAR_TIMEOUT`] is
+    /// logged as an error.
+    ///
+    /// Returns the objects still standing when the wait ended (empty when
+    /// everything went), or nothing at all for a session that is not
+    /// connected.
+    pub async fn clear_rezzed(&mut self) -> Vec<ObjectKey> {
+        if !self.connected {
+            return Vec::new();
+        }
+        let Leftovers { objects, trash } = self.rezzes.leftovers();
+        if objects.is_empty() {
+            return Vec::new();
+        }
+        let avatar = avatar_label(&self.avatar);
+        for (key, scoped) in &objects {
+            tracing::warn!("{avatar} left {key} ({scoped}) standing; derezzing it into the Trash");
+        }
+        // One derez per circuit: an id means something only to the region it
+        // came from.
+        let mut by_circuit: std::collections::BTreeMap<CircuitId, Vec<ScopedObjectId>> =
+            std::collections::BTreeMap::new();
+        for (_key, scoped) in &objects {
+            by_circuit
+                .entry(scoped.circuit())
+                .or_default()
+                .push(*scoped);
+        }
+        for local_ids in by_circuit.into_values() {
+            // Without a skeleton there is no Trash to name, and ObjectDelete is
+            // the one derez that needs none (Second Life deletes; OpenSim
+            // ignores it, which the wait below then reports).
+            let command = match trash {
+                Some(folder) => Command::DerezObjects {
+                    local_ids,
+                    destination: DeRezDestination::Trash(folder),
+                    transaction_id: TransactionId::from(Uuid::new_v4()),
+                    group_id: None,
+                },
+                None => Command::DeleteObjects { local_ids },
+            };
+            if let Err(error) = self.send(command).await {
+                tracing::error!("{avatar}: the derez of its leftovers was not sent: {error}");
+            }
+        }
+        let mut standing: std::collections::BTreeSet<ScopedObjectId> =
+            objects.iter().map(|(_key, scoped)| *scoped).collect();
+        let _done = self
+            .wait_for(CLEAR_TIMEOUT, |event| {
+                if let Event::ObjectRemoved { local_id, .. } = event {
+                    standing.remove(local_id);
+                }
+                standing.is_empty().then_some(())
+            })
+            .await;
+        let left: Vec<ObjectKey> = objects
+            .iter()
+            .filter(|(_key, scoped)| standing.contains(scoped))
+            .map(|(key, _scoped)| *key)
+            .collect();
+        for key in &left {
+            tracing::error!(
+                "{avatar}: {key} still stands {} s after its derez",
+                CLEAR_TIMEOUT.as_secs()
+            );
+        }
+        left
     }
 
     /// Whether the run loop is currently live (i.e. the avatar is logged in).
@@ -697,20 +794,24 @@ impl Session {
             let label = avatar_label(&avatar);
             wait_out_cooldown(&cooldown, &label, force).await?;
         }
-        *self = connect_and_spawn(LoginSpec {
-            grid,
-            avatar: &avatar,
-            channel: &channel,
-            version: &version,
-            start_location: &start_location,
-            cooldown: &cooldown,
-            force,
-            cache_dir,
-            probe: CircuitProbe::Off,
-            options,
-            capabilities,
-            handshake_flags,
-        })
+        let rezzes = self.rezzes.clone();
+        *self = connect_and_spawn(
+            LoginSpec {
+                grid,
+                avatar: &avatar,
+                channel: &channel,
+                version: &version,
+                start_location: &start_location,
+                cooldown: &cooldown,
+                force,
+                cache_dir,
+                probe: CircuitProbe::Off,
+                options,
+                capabilities,
+                handshake_flags,
+            },
+            rezzes,
+        )
         .await?;
         Ok(())
     }
@@ -763,7 +864,11 @@ impl Session {
             wait_out_cooldown(&self.cooldown, &label, self.force).await?;
         }
         match Client::connect(LoginParams { login_uri, request }).await {
-            Ok(client) => Ok(LoginAnswer::Admitted(Box::new(spawn_session(client, spec)))),
+            Ok(client) => Ok(LoginAnswer::Admitted(Box::new(spawn_session(
+                client,
+                spec,
+                RezLedger::default(),
+            )))),
             Err(sl_client_tokio::Error::MfaChallenge(challenge)) => {
                 Ok(LoginAnswer::Challenged(challenge))
             }
@@ -966,7 +1071,7 @@ impl StandbyLogin {
 /// Returns a [`TestFailure`] if the login URI is invalid, the start location
 /// cannot be parsed, MFA is required but unavailable, or the login fails.
 pub async fn login(spec: LoginSpec<'_>) -> Result<Session, TestFailure> {
-    connect_and_spawn(spec).await
+    connect_and_spawn(spec, RezLedger::default()).await
 }
 
 /// The cache every session shares across accounts and runs:
@@ -987,11 +1092,15 @@ fn shared_cache_dir() -> PathBuf {
 /// gates the initial logins and [`Session::relogin`] waits it out for
 /// reconnections.
 ///
+/// `rezzes` is the ledger the session keeps of what it rezzes: a fresh one
+/// for a first login, the session's own for a relogin, so what the avatar
+/// rezzed before it went offline is still cleared away after the case.
+///
 /// # Errors
 ///
 /// Returns a [`TestFailure`] if the login URI is invalid, the start location
 /// cannot be parsed, MFA is required but unavailable, or the login fails.
-async fn connect_and_spawn(spec: LoginSpec<'_>) -> Result<Session, TestFailure> {
+async fn connect_and_spawn(spec: LoginSpec<'_>, rezzes: RezLedger) -> Result<Session, TestFailure> {
     let (login_uri, mut request) = login_request(&spec)?;
     let grid = spec.grid;
     let avatar = spec.avatar;
@@ -1042,7 +1151,7 @@ async fn connect_and_spawn(spec: LoginSpec<'_>) -> Result<Session, TestFailure> 
         }
     };
 
-    Ok(spawn_session(client, spec))
+    Ok(spawn_session(client, spec, rezzes))
 }
 
 /// The login endpoint and the request `spec` describes: the avatar's own name
@@ -1096,8 +1205,9 @@ fn login_request(spec: &LoginSpec<'_>) -> Result<(url::Url, LoginRequest), TestF
 }
 
 /// Spawn the run loop and its drains around a connected `client`, and
-/// assemble the live [`Session`] `spec` describes.
-fn spawn_session(mut client: Client, spec: LoginSpec<'_>) -> Session {
+/// assemble the live [`Session`] `spec` describes, keeping what it rezzes in
+/// `rezzes`.
+fn spawn_session(mut client: Client, spec: LoginSpec<'_>, rezzes: RezLedger) -> Session {
     let LoginSpec {
         grid,
         avatar,
@@ -1199,9 +1309,15 @@ fn spawn_session(mut client: Client, spec: LoginSpec<'_>) -> Session {
     // run loop once its 256-slot channel fills, freezing its command transmission
     // and packet decoding until the case happens to read it. Mirrors the
     // diagnostic-channel drain above.
+    //
+    // The forwarder is also where the session's rez ledger learns which objects
+    // its rezzes brought: it sees every event whether or not the case reads it,
+    // and it outlives a case body the runner cancels.
     let (events_tx, events_rx) = mpsc::unbounded_channel::<Event>();
+    let ledger = rezzes.clone();
     let _forward = tokio::spawn(async move {
         while let Some(event) = event_rx.recv().await {
+            ledger.observe(&event);
             if events_tx.send(event).is_err() {
                 break;
             }
@@ -1236,6 +1352,7 @@ fn spawn_session(mut client: Client, spec: LoginSpec<'_>) -> Session {
         neighbour_caps,
         connected: true,
         caps,
+        rezzes,
     }
 }
 
@@ -1494,6 +1611,20 @@ impl TestContext {
     pub fn mark_partial(&mut self, reason: &str) {
         self.completeness = Completeness::Partial;
         self.completeness_note = Some(reason.to_owned());
+    }
+
+    /// Clear away what every session's rez commands brought into the world and
+    /// is still standing ([`Session::clear_rezzed`]), returning the objects the
+    /// grid had not taken away when the wait ended.
+    pub async fn clear_rezzed(&mut self) -> Vec<ObjectKey> {
+        let mut left = self.primary.clear_rezzed().await;
+        for session in [self.secondary.as_mut(), self.tertiary.as_mut()]
+            .into_iter()
+            .flatten()
+        {
+            left.extend(session.clear_rezzed().await);
+        }
+        left
     }
 
     /// Decompose the context into its parts for the runner: the metrics,

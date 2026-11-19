@@ -20,11 +20,11 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::time::Duration;
 
-use crate::context::TestFailure;
-use crate::registry::TestFuture;
+use crate::context::{TestContext, TestFailure};
+use crate::registry::{GridTest, TestFuture};
 
 /// The overall wall-clock budget a case body gets before the runner gives up on
-/// it, unless the case ([`GridTest::timeout`](crate::registry::GridTest::timeout))
+/// it, unless the case ([`GridTest::timeout`])
 /// or the operator (`--timeout`) says otherwise.
 ///
 /// Generous on purpose: the slowest cases in the suite budget four minutes for a
@@ -38,7 +38,7 @@ pub const DEFAULT_CASE_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 /// A panic in the body is caught and returned as [`TestFailure::Panic`]; a body
 /// still running after `timeout` is dropped (cancelling it at its current await
 /// point) and returned as [`TestFailure::Timeout`]. In both cases the caller
-/// keeps its [`TestContext`](crate::context::TestContext) — the borrow the body
+/// keeps its [`TestContext`] — the borrow the body
 /// held ends here — so it can still write the record and log the sessions out.
 ///
 /// # Errors
@@ -54,6 +54,25 @@ pub async fn run_isolated(body: TestFuture<'_>, timeout: Duration) -> Result<(),
             timeout.as_secs()
         ))),
     }
+}
+
+/// Run `test`'s body against `ctx` [isolated](run_isolated), then clear away
+/// whatever the body's rezzes left standing ([`TestContext::clear_rezzed`]),
+/// however the body ended — the runner's and the offline harness's one way of
+/// running a case, so neither leaves a cancelled case's prims in the region.
+///
+/// # Errors
+///
+/// As [`run_isolated`]: the clearing never changes the case's outcome. What it
+/// found and whether it went is in the log.
+pub async fn run_and_clear(
+    test: &dyn GridTest,
+    ctx: &mut TestContext,
+    timeout: Duration,
+) -> Result<(), TestFailure> {
+    let outcome = run_isolated(test.run(ctx), timeout).await;
+    let _still_standing = ctx.clear_rezzed().await;
+    outcome
 }
 
 /// Render a caught panic payload as a message, recovering the common

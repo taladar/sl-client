@@ -509,7 +509,9 @@ async fn run(args: RunArgs) -> Result<(), Error> {
     let case_timeout = args
         .timeout
         .map_or_else(|| test.timeout(), std::time::Duration::from_secs);
-    let outcome = isolate::run_isolated(test.run(&mut ctx), case_timeout).await;
+    // Then clear away whatever the body rezzed and left standing — above all
+    // when it was cancelled before its own derez.
+    let outcome = isolate::run_and_clear(test.as_ref(), &mut ctx, case_timeout).await;
     let (metrics, completeness, completeness_note, primary_sess, secondary_sess, tertiary_sess) =
         ctx.into_parts();
 

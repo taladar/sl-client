@@ -345,6 +345,24 @@ Either way the run is recorded as a failure and the avatars are logged out. The
 failure reason is printed on the `FAIL:` line and written to the log, not into
 the record — records are committed and a message can quote grid content.
 
+**What a case rezzed is cleared after the body, however it ended**
+(`isolate::run_and_clear`, `src/rez_ledger.rs`). A cancelled or unwound body
+never reaches its own derez, so the record of what it rezzed is not the body's
+to keep: each `Session` owns a rez ledger. `Session::send` notes every command
+that asks for a new object (`RezObject`, `RezObjectFromInventory`,
+`RezObjectFromNotecard`, `RezRestoreToWorld`, `DuplicateObjects`,
+`DuplicateObjectsOnRay`), and the session's event forwarder — a task that
+outlives the body — matches the objects that then appear against them: a root
+object of the agent's own (`OBJECT_YOU_OWNER`), new to the scene, within 60 s of
+the command and 32 m (global metres, so across a border too) of where it aimed.
+An object that is killed, or passes to another owner, drops out. After the body
+the runner derezzes whatever is still standing into the agent's Trash and waits
+for the kills, before the logouts; the offline harness does the same. A case
+that passed and still left something gets a warning naming each object (its own
+leak), and an object still standing 20 s after the derez is logged as an error.
+The outcome of the case is never changed. Objects a script rezzes are not
+counted — no command asked for them.
+
 A case that **mutates grid state** must restore it on the failure path too, not
 only at the end of a happy flow. `parcel-divide-join` is the worked example: its
 divide leaves the region genuinely split, so the exercise runs under an awaited

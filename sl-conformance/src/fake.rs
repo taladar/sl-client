@@ -722,7 +722,7 @@ pub async fn run_case(test: &dyn GridTest, flavour: Grid) -> Result<FakeRun, Tes
     }
     let harness = FakeGridHarness::start(flavour).await?;
     let mut context = harness.context(test).await?;
-    let outcome = crate::isolate::run_isolated(test.run(&mut context), test.timeout()).await;
+    let outcome = crate::isolate::run_and_clear(test, &mut context, test.timeout()).await;
     let (metrics, completeness, note, primary, secondary, tertiary) = context.into_parts();
     for session in [Some(primary), secondary, tertiary].into_iter().flatten() {
         if let Err(error) = session.logout().await {

@@ -54,6 +54,7 @@ pub mod probe_corpus;
 pub mod record;
 pub mod registry;
 pub mod report;
+pub mod rez_ledger;
 pub mod support;
 pub mod teleport_trace;
 pub mod trace;
