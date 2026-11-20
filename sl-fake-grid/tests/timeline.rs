@@ -18,12 +18,11 @@ mod test {
     };
     use sl_fake_grid::scenario::STOCK_SCRIPTED_OBJECT_LOCAL_ID;
     use sl_fake_grid::{
-        AccountConfig, Action, At, FakeAgent, FakeGrid, FakeGridBuilder, RegionConfig, Scenario,
-        Timeline,
+        AccountConfig, Action, At, FakeAgent, FakeGrid, FakeGridBuilder, RegionConfig,
+        RunningClient, Scenario, Timeline, run_client,
     };
     use sl_types::lsl::Vector;
     use sl_types::map::RegionCoordinates;
-    use tokio::sync::mpsc;
 
     /// A boxed error for terse test signatures.
     type TestError = Box<dyn std::error::Error>;
@@ -123,10 +122,12 @@ mod test {
             );
         let (grid, client, _agent) = start(timeline, Vec::new()).await?;
 
-        let (event_tx, mut event_rx) = mpsc::channel::<Event>(256);
-        let (command_tx, command_rx) = mpsc::channel::<Command>(8);
-        let (diag_tx, _diag_rx) = mpsc::channel(16);
-        let run = tokio::spawn(client.run(event_tx, diag_tx, command_rx));
+        let RunningClient {
+            events: mut event_rx,
+            commands: command_tx,
+            diagnostics: _diag_rx,
+            run,
+        } = run_client(client);
 
         let mut moved = false;
         let mut marked = false;
@@ -213,10 +214,12 @@ mod test {
             );
         let (grid, client, _agent) = start(timeline, Vec::new()).await?;
 
-        let (event_tx, mut event_rx) = mpsc::channel::<Event>(256);
-        let (command_tx, command_rx) = mpsc::channel::<Command>(8);
-        let (diag_tx, _diag_rx) = mpsc::channel(16);
-        let run = tokio::spawn(client.run(event_tx, diag_tx, command_rx));
+        let RunningClient {
+            events: mut event_rx,
+            commands: command_tx,
+            diagnostics: _diag_rx,
+            run,
+        } = run_client(client);
 
         let mut seen = Vec::new();
         let deadline = whole_wait();
@@ -278,10 +281,12 @@ mod test {
             );
         let (grid, client, _agent) = start(timeline, Vec::new()).await?;
 
-        let (event_tx, mut event_rx) = mpsc::channel::<Event>(256);
-        let (command_tx, command_rx) = mpsc::channel::<Command>(8);
-        let (diag_tx, _diag_rx) = mpsc::channel(16);
-        let run = tokio::spawn(client.run(event_tx, diag_tx, command_rx));
+        let RunningClient {
+            events: mut event_rx,
+            commands: command_tx,
+            diagnostics: _diag_rx,
+            run,
+        } = run_client(client);
 
         let mut seen = Vec::new();
         let deadline = whole_wait();
@@ -331,10 +336,12 @@ mod test {
             .after(Duration::ZERO, Action::Marker("blocked".to_owned()));
         let (grid, client, _agent) = start(timeline, Vec::new()).await?;
 
-        let (event_tx, mut event_rx) = mpsc::channel::<Event>(256);
-        let (command_tx, command_rx) = mpsc::channel::<Command>(8);
-        let (diag_tx, _diag_rx) = mpsc::channel(16);
-        let run = tokio::spawn(client.run(event_tx, diag_tx, command_rx));
+        let RunningClient {
+            events: mut event_rx,
+            commands: command_tx,
+            diagnostics: _diag_rx,
+            run,
+        } = run_client(client);
 
         let deadline = whole_wait();
         loop {
@@ -409,10 +416,12 @@ mod test {
             .then(At::AfterArrival(LEAD_IN), Action::Marker("east".to_owned()));
         let (grid, client, _agent) = start(timeline, vec![east]).await?;
 
-        let (event_tx, mut event_rx) = mpsc::channel::<Event>(256);
-        let (command_tx, command_rx) = mpsc::channel::<Command>(8);
-        let (diag_tx, _diag_rx) = mpsc::channel(16);
-        let run = tokio::spawn(client.run(event_tx, diag_tx, command_rx));
+        let RunningClient {
+            events: mut event_rx,
+            commands: command_tx,
+            diagnostics: _diag_rx,
+            run,
+        } = run_client(client);
 
         let east_handle = grid.region_handle(EAST_REGION).ok_or("no eastern region")?;
         let mut arrived = false;
@@ -480,10 +489,12 @@ mod test {
         // Subscribed before the client runs, so it cannot slip past.
         let mut server_events = agent.events();
 
-        let (event_tx, mut event_rx) = mpsc::channel::<Event>(256);
-        let (command_tx, command_rx) = mpsc::channel::<Command>(8);
-        let (diag_tx, _diag_rx) = mpsc::channel(16);
-        let run = tokio::spawn(client.run(event_tx, diag_tx, command_rx));
+        let RunningClient {
+            events: mut event_rx,
+            commands: command_tx,
+            diagnostics: _diag_rx,
+            run,
+        } = run_client(client);
 
         let deadline = whole_wait();
         loop {

@@ -12,14 +12,15 @@ mod test {
     use std::time::Duration;
 
     use pretty_assertions::assert_eq;
-    use sl_client_tokio::{Client, Command, Event, LoginParams, LoginRequest, StartLocation};
+    use sl_client_tokio::{Client, Event, LoginParams, LoginRequest, StartLocation};
     use sl_fake_grid::fixtures::scripted_avatar::{
         MENU, PERMISSION_PRIM, POSE_BALL, VENDOR, VENDOR_PRICE, position, region,
     };
     use sl_fake_grid::scripted_avatars::Entry;
     use sl_fake_grid::{
         AccountConfig, AnswerPolicy, AvatarAction, DialogChoice, FakeGrid, FakeGridBuilder,
-        HeartbeatConfig, ImitatedGrid, Progress, RegionConfig, ScriptedAvatar, Target,
+        HeartbeatConfig, ImitatedGrid, Progress, RegionConfig, RunningClient, ScriptedAvatar,
+        Target, run_client,
     };
     use sl_types::lsl::{ScriptPermissions, Vector};
     use tokio::sync::mpsc;
@@ -183,12 +184,12 @@ mod test {
             ),
         })
         .await?;
-        let (event_tx, mut events) = mpsc::channel::<Event>(256);
-        let (_command_tx, command_rx) = mpsc::channel::<Command>(8);
-        let (diag_tx, _diag_rx) = mpsc::channel(16);
-        let run = tokio::spawn(async move {
-            let _ended = observer.run(event_tx, diag_tx, command_rx).await;
-        });
+        let RunningClient {
+            mut events,
+            commands: _command_tx,
+            diagnostics: _diag_rx,
+            run,
+        } = run_client(observer);
         // What the observer saw of the scripted avatar: the animations it was
         // last said to play, and the object its body was last parented to.
         let (seen_tx, mut seen) = mpsc::unbounded_channel();
@@ -344,14 +345,13 @@ mod test {
                 ),
             })
             .await?;
-            let (event_tx, mut events) = mpsc::channel::<Event>(256);
-            let (_command_tx, command_rx) = mpsc::channel::<Command>(8);
-            let (diag_tx, _diag_rx) = mpsc::channel(16);
-            let run = tokio::spawn(async move {
-                let _ended = observer.run(event_tx, diag_tx, command_rx).await;
-            });
-            // Every set the observer is told, read on as the grid ticks so
-            // the client never waits on a full channel.
+            let RunningClient {
+                mut events,
+                commands: _command_tx,
+                diagnostics: _diag_rx,
+                run,
+            } = run_client(observer);
+            // Every set the observer is told, read on as the grid ticks.
             let (sets_tx, mut sets) = mpsc::unbounded_channel();
             let watch = tokio::spawn(async move {
                 while let Some(event) = events.recv().await {
@@ -466,12 +466,12 @@ mod test {
             ),
         })
         .await?;
-        let (event_tx, mut told) = mpsc::channel::<Event>(256);
-        let (_command_tx, command_rx) = mpsc::channel::<Command>(8);
-        let (diag_tx, _diag_rx) = mpsc::channel(16);
-        let run = tokio::spawn(async move {
-            let _ended = viewer.run(event_tx, diag_tx, command_rx).await;
-        });
+        let RunningClient {
+            events: mut told,
+            commands: _command_tx,
+            diagnostics: _diag_rx,
+            run,
+        } = run_client(viewer);
         let posed = tokio::time::timeout(WAIT, async {
             while let Some(event) = told.recv().await {
                 if let Event::AvatarAnimation {
@@ -527,12 +527,12 @@ mod test {
             .login_success()
             .and_then(|success| success.agent_appearance_service.clone())
             .ok_or("a central-baking login named no appearance service")?;
-        let (event_tx, mut told) = mpsc::channel::<Event>(256);
-        let (_command_tx, command_rx) = mpsc::channel::<Command>(8);
-        let (diag_tx, _diag_rx) = mpsc::channel(16);
-        let run = tokio::spawn(async move {
-            let _ended = viewer.run(event_tx, diag_tx, command_rx).await;
-        });
+        let RunningClient {
+            events: mut told,
+            commands: _command_tx,
+            diagnostics: _diag_rx,
+            run,
+        } = run_client(viewer);
         let appearance = tokio::time::timeout(WAIT, async {
             while let Some(event) = told.recv().await {
                 if let Event::AvatarAppearance(appearance) = event

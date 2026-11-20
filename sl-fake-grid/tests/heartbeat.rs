@@ -7,9 +7,10 @@ mod test {
     use std::time::Duration;
 
     use pretty_assertions::assert_eq;
-    use sl_client_tokio::{Client, Command, Event, LoginParams, LoginRequest, StartLocation};
+    use sl_client_tokio::{Client, Event, LoginParams, LoginRequest, StartLocation};
     use sl_fake_grid::{
-        AccountConfig, FakeGrid, FakeGridBuilder, HeartbeatConfig, RegionConfig, TickStats,
+        AccountConfig, FakeGrid, FakeGridBuilder, HeartbeatConfig, RegionConfig, RunningClient,
+        TickStats, run_client,
     };
     use sl_proto::{ServerEvent, SimStatId, TimeDilation};
     use tokio::sync::mpsc;
@@ -108,13 +109,14 @@ mod test {
         let notice = tokio::time::timeout(WAIT, logins.recv()).await??;
         let agent = grid.agent(&notice).await.ok_or("no live session")?;
         let mut server_events = agent.events();
-        let (event_tx, mut event_rx) = mpsc::channel::<Event>(256);
-        let (command_tx, command_rx) = mpsc::channel::<Command>(8);
-        let (diag_tx, _diag_rx) = mpsc::channel(16);
-        let run = tokio::spawn(client.run(event_tx, diag_tx, command_rx));
+        let RunningClient {
+            events: mut event_rx,
+            commands: command_tx,
+            diagnostics: _diag_rx,
+            run,
+        } = run_client(client);
 
-        // Forward only the statistics: the client's run loop stops at the
-        // 256th unread event, which the region's ground alone outnumbers.
+        // Forward only the statistics.
         let (stats_tx, mut stats_rx) = mpsc::unbounded_channel();
         let forward = tokio::spawn(async move {
             while let Some(event) = event_rx.recv().await {

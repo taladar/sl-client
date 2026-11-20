@@ -16,6 +16,7 @@ mod test {
     };
     use sl_fake_grid::{
         AccountConfig, FakeGrid, FakeGridBuilder, HeartbeatConfig, ImitatedGrid, RegionConfig,
+        RunningClient, run_client,
     };
     use sl_proto::ServerEvent;
     use sl_types::key::AgentKey;
@@ -193,10 +194,12 @@ mod test {
         let notice = tokio::time::timeout(WAIT, logins.recv()).await??;
         let agent = grid.agent(&notice).await.ok_or("no live session")?;
         let mut server_events = agent.events();
-        let (event_tx, mut event_rx) = mpsc::channel::<Event>(256);
-        let (command_tx, command_rx) = mpsc::channel::<Command>(8);
-        let (diag_tx, _diag_rx) = mpsc::channel(16);
-        let run = tokio::spawn(client.run(event_tx, diag_tx, command_rx));
+        let RunningClient {
+            events: mut event_rx,
+            commands: command_tx,
+            diagnostics: _diag_rx,
+            run,
+        } = run_client(client);
 
         // One deadline for the whole wait: a timeout on each event is
         // never reached on a stream that keeps sending something else.
@@ -212,10 +215,6 @@ mod test {
                 break;
             }
         }
-        // Keep reading: the client's run loop waits on this channel, so a
-        // session whose events go unread stops at the 256th — which the
-        // region's ground alone outnumbers — and never sends the chat.
-        let drain = tokio::spawn(async move { while event_rx.recv().await.is_some() {} });
         command_tx
             .send(Command::Chat {
                 message: "hello twice".to_owned(),
@@ -239,7 +238,6 @@ mod test {
         }
         drop(command_tx);
         run.abort();
-        drain.abort();
         Ok(events)
     }
 
@@ -458,12 +456,13 @@ default
         let notice = tokio::time::timeout(WAIT, logins.recv()).await??;
         let agent = grid.agent(&notice).await.ok_or("no live session")?;
         let mut server_events = agent.events();
-        let (event_tx, mut event_rx) = mpsc::channel::<Event>(256);
-        let (command_tx, command_rx) = mpsc::channel::<Command>(8);
-        let (diag_tx, _diag_rx) = mpsc::channel(16);
-        let run = tokio::spawn(client.run(event_tx, diag_tx, command_rx));
-        // Read every event, or the client stops at the 256th unread one; keep
-        // what is said and what is sent of the boxes.
+        let RunningClient {
+            events: mut event_rx,
+            commands: command_tx,
+            diagnostics: _diag_rx,
+            run,
+        } = run_client(client);
+        // Keep what is said and what is sent of the boxes.
         let boxes = BOXES.map(box_key);
         let (seen_tx, mut seen) = mpsc::unbounded_channel::<String>();
         let forward = tokio::spawn(async move {

@@ -15,15 +15,14 @@ mod test {
         ChatChannel, ChatType, Client, Command, Event, LoginParams, LoginRequest, StartLocation,
     };
     use sl_fake_grid::{
-        AccountConfig, FakeGrid, FakeGridBuilder, Now, RegionConfig, Scenario, SimEventHook,
-        SimHook, system_clock, tokio_clock,
+        AccountConfig, FakeGrid, FakeGridBuilder, Now, RegionConfig, RunningClient, Scenario,
+        SimEventHook, SimHook, run_client, system_clock, tokio_clock,
     };
     use sl_proto::ServerEvent;
     use sl_wire::{
         LoginResponse, build_event_queue_request, build_login_request, build_seed_request,
         parse_login_response, parse_seed_response,
     };
-    use tokio::sync::mpsc;
 
     /// A boxed error for terse test signatures.
     type TestError = Box<dyn std::error::Error>;
@@ -120,10 +119,12 @@ mod test {
         let notice = tokio::time::timeout(WAIT, logins.recv()).await??;
         let agent = grid.agent(&notice).await.ok_or("no live session")?;
         let mut server_events = agent.events();
-        let (event_tx, mut event_rx) = mpsc::channel::<Event>(256);
-        let (command_tx, command_rx) = mpsc::channel::<Command>(8);
-        let (diag_tx, _diag_rx) = mpsc::channel(16);
-        let run = tokio::spawn(client.run(event_tx, diag_tx, command_rx));
+        let RunningClient {
+            events: mut event_rx,
+            commands: command_tx,
+            diagnostics: _diag_rx,
+            run,
+        } = run_client(client);
 
         // One deadline for the whole wait: a timeout on each event is
         // never reached on a stream that keeps sending something else.
@@ -139,10 +140,6 @@ mod test {
                 break;
             }
         }
-        // Keep reading: the client's run loop waits on this channel, so a
-        // session whose events go unread stops at the 256th — which the
-        // region's ground alone outnumbers — and never sends the chat.
-        let drain = tokio::spawn(async move { while event_rx.recv().await.is_some() {} });
         command_tx
             .send(Command::Chat {
                 message: "what time is it".to_owned(),
@@ -161,7 +158,6 @@ mod test {
         }
         drop(command_tx);
         run.abort();
-        drain.abort();
         Ok(())
     }
 

@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 328 |
 | blocked | 34 |
 | in-progress | 4 |
-| bugs | 11 |
-| done | 1602 |
+| bugs | 10 |
+| done | 1603 |
 | deferred | 30 |
 | wont-do | 24 |
 | **total** | **2164** |
@@ -1239,7 +1239,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-text-renderability-axis`](in-progress/viewer-ui-text-renderability-axis.md)
   — Upstream issue — font selection cannot see glyph-format renderability
 
-## bugs (11)
+## bugs (10)
 
 ### viewer
 
@@ -1263,15 +1263,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-conformance-upload-after-yengine-start-dropped`](bugs/test-conformance-upload-after-yengine-start-dropped.md)
   — Quick script uploads to one item on OpenSim take each other's answers, or
   fail as "operation timed out"
-- [`test-fake-grid-tests-stop-reading-client-events`](bugs/test-fake-grid-tests-stop-reading-client-events.md)
-  — Fake-grid integration tests stop reading the client's events and can stall
-  it
 - [`test-lsl-probes-corpus-order-leaks-between-probes`](bugs/test-lsl-probes-corpus-order-leaks-between-probes.md)
   — A full fake-grid probe corpus run changes two probes' results
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1602)
+## done (1603)
 
 ### protocol
 
@@ -4166,6 +4163,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-terrain-layerdata`](done/test-fake-grid-terrain-layerdata.md)
   — The fake grid sends terrain — LayerData patches, wind, clouds (blocked by
   `test-fake-grid-determinism` (done))
+- [`test-fake-grid-tests-stop-reading-client-events`](done/test-fake-grid-tests-stop-reading-client-events.md)
+  — Fake-grid integration tests stop reading the client's events and can stall
+  it
 - [`test-fake-grid-timeline`](done/test-fake-grid-timeline.md) — Scripted
   scenario timelines with markers
 - [`test-fake-grid-update-completion-item`](done/test-fake-grid-update-completion-item.md)

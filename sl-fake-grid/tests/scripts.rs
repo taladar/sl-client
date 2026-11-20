@@ -20,6 +20,7 @@ mod test {
     use sl_fake_grid::fixtures::catalogue::{ECHO_SCRIPT_CHANNEL, echo_script_item, entry};
     use sl_fake_grid::{
         AccountConfig, FakeGrid, FakeGridBuilder, HeartbeatConfig, ImitatedGrid, RegionConfig,
+        RunningClient, run_client,
     };
     use sl_proto::{ChatType, ServerEvent};
     use sl_types::chat::ChatChannel;
@@ -93,8 +94,10 @@ mod test {
         seen: mpsc::UnboundedReceiver<Seen>,
         /// What the session received from the client.
         server: broadcast::Receiver<ServerEvent>,
-        /// The client's run loop and the forwarder.
-        tasks: Vec<tokio::task::JoinHandle<()>>,
+        /// The client's run loop.
+        run: tokio::task::JoinHandle<Result<(), sl_client_tokio::Error>>,
+        /// The forwarder that filters what the client was told.
+        forward: tokio::task::JoinHandle<()>,
         /// The agent's session on the grid.
         agent: sl_fake_grid::FakeAgent,
         /// The client's circuit, which its object ids are scoped to.
@@ -182,14 +185,13 @@ mod test {
         let notice = tokio::time::timeout(WAIT, logins.recv()).await??;
         let agent = grid.agent(&notice).await.ok_or("no live session")?;
         let mut server = agent.events();
-        let (event_tx, mut event_rx) = mpsc::channel::<Event>(256);
-        let (command_tx, command_rx) = mpsc::channel::<Command>(8);
-        let (diag_tx, _diag_rx) = mpsc::channel(16);
-        let run = tokio::spawn(async move {
-            let _ended = client.run(event_tx, diag_tx, command_rx).await;
-        });
-        // Forward only what the tests watch: the client's run loop stops at
-        // the 256th unread event, which the catalogue's arrival outnumbers.
+        let RunningClient {
+            events: mut event_rx,
+            commands: command_tx,
+            diagnostics: _diag_rx,
+            run,
+        } = run_client(client);
+        // Forward only what the tests watch.
         let (seen_tx, seen) = mpsc::unbounded_channel();
         let forward = tokio::spawn(async move {
             while let Some(event) = event_rx.recv().await {
@@ -262,7 +264,8 @@ mod test {
             commands: command_tx,
             seen,
             server,
-            tasks: vec![run, forward],
+            run,
+            forward,
             agent,
             circuit,
         })
@@ -561,9 +564,8 @@ mod test {
 
         /// Ends the run.
         fn stop(self) {
-            for task in self.tasks {
-                task.abort();
-            }
+            self.run.abort();
+            self.forward.abort();
             self.grid.shutdown();
         }
     }

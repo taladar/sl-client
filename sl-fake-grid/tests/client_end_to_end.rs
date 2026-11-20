@@ -14,6 +14,7 @@ mod test {
     };
     use sl_fake_grid::{
         AccountConfig, FakeAgent, FakeGrid, FakeGridBuilder, ImitatedGrid, RegionConfig,
+        RunningClient, run_client,
     };
     use sl_proto::{ServerEvent, VoiceChannelUri};
     use sl_types::lsl::Vector;
@@ -201,10 +202,12 @@ mod test {
             ),
         })
         .await?;
-        let (event_tx, mut event_rx) = mpsc::channel::<Event>(256);
-        let (_command_tx, command_rx) = mpsc::channel::<Command>(8);
-        let (diag_tx, _diag_rx) = mpsc::channel(16);
-        let run = tokio::spawn(client.run(event_tx, diag_tx, command_rx));
+        let RunningClient {
+            events: mut event_rx,
+            commands: _command_tx,
+            diagnostics: _diag_rx,
+            run,
+        } = run_client(client);
 
         let rtt = tokio::time::timeout(WAIT, async {
             loop {
@@ -240,10 +243,12 @@ mod test {
         assert_eq!(client.map_server_url(), Some(&grid.login_uri()));
 
         let server_events = agent.events();
-        let (event_tx, mut event_rx) = mpsc::channel::<Event>(256);
-        let (command_tx, command_rx) = mpsc::channel::<Command>(8);
-        let (diag_tx, _diag_rx) = mpsc::channel(16);
-        let run = tokio::spawn(client.run(event_tx, diag_tx, command_rx));
+        let RunningClient {
+            events: mut event_rx,
+            commands: command_tx,
+            diagnostics: _diag_rx,
+            run,
+        } = run_client(client);
 
         // The circuit comes up: the grid sees the arrival, the client sees the
         // region handshake and the scenario's greeting line.
@@ -340,7 +345,7 @@ mod test {
         /// The client's root circuit id (for scoped ids).
         circuit: sl_client_tokio::CircuitId,
         /// The client event stream.
-        events: mpsc::Receiver<Event>,
+        events: mpsc::UnboundedReceiver<Event>,
         /// The client command channel.
         commands: mpsc::Sender<Command>,
         /// The run-loop task (aborted on teardown).
@@ -398,10 +403,12 @@ mod test {
         let appearance_service = client
             .login_success()
             .and_then(|success| success.agent_appearance_service.clone());
-        let (event_tx, event_rx) = mpsc::channel::<Event>(256);
-        let (command_tx, command_rx) = mpsc::channel::<Command>(8);
-        let (diag_tx, _diag_rx) = mpsc::channel(16);
-        let run = tokio::spawn(client.run(event_tx, diag_tx, command_rx));
+        let RunningClient {
+            events: event_rx,
+            commands: command_tx,
+            diagnostics: _diag_rx,
+            run,
+        } = run_client(client);
         let mut running = Running {
             _grid: grid,
             agent,
@@ -428,7 +435,8 @@ mod test {
     }
 
     impl Running {
-        /// Receives client events until `pick` returns a value.
+        /// Receives client events until `pick` returns a value, for three
+        /// `WAIT`s at the longest (see [`wait_on`]).
         async fn wait_for<T>(
             &mut self,
             pick: impl FnMut(&Event) -> Option<T>,
@@ -440,12 +448,10 @@ mod test {
         /// deadline for the whole wait and a dump of what did arrive when it
         /// expires.
         ///
-        /// [`wait_for`](Self::wait_for) restarts its timeout on every event it
-        /// receives, so a session that keeps chattering — pings, coarse
-        /// locations, the agent's own updates — keeps a wait for something that
-        /// will never arrive alive indefinitely. That is fine for waiting on
-        /// one thing that is about to happen, and useless for waiting on a set
-        /// of things that may not.
+        /// A timeout on each event would never be reached: a session that
+        /// keeps chattering — pings, coarse locations, the agent's own
+        /// updates, the wind every second — would keep a wait for something
+        /// that will never arrive alive indefinitely.
         ///
         /// **A wait consumes what it reads.** Anything that arrived before it
         /// started, or that it stepped over on the way to what it was looking
@@ -489,7 +495,7 @@ mod test {
     /// field-level form, for borrowing the grid alongside), for three `WAIT`s
     /// at the longest however many other events arrive meanwhile.
     async fn wait_on<T>(
-        events: &mut mpsc::Receiver<Event>,
+        events: &mut mpsc::UnboundedReceiver<Event>,
         mut pick: impl FnMut(&Event) -> Option<T>,
     ) -> Result<T, TestError> {
         let deadline = whole_wait();
@@ -513,7 +519,7 @@ mod test {
     /// for the legacy message falls into, which is the whole point of the
     /// switch.
     async fn wait_for_taken_item(
-        events: &mut mpsc::Receiver<Event>,
+        events: &mut mpsc::UnboundedReceiver<Event>,
     ) -> Result<sl_client_tokio::InventoryItem, TestError> {
         wait_on(events, |event| match event {
             Event::InventoryItemCreated { item, .. }
@@ -2179,10 +2185,12 @@ mod test {
         let login_uri = grid.login_uri();
         let (caps_tx, mut caps_rx) = mpsc::channel(4);
         client.set_caps_reporter(caps_tx);
-        let (event_tx, mut event_rx) = mpsc::channel::<Event>(256);
-        let (command_tx, command_rx) = mpsc::channel::<Command>(8);
-        let (diag_tx, _diag_rx) = mpsc::channel(16);
-        let run = tokio::spawn(client.run(event_tx, diag_tx, command_rx));
+        let RunningClient {
+            events: mut event_rx,
+            commands: command_tx,
+            diagnostics: _diag_rx,
+            run,
+        } = run_client(client);
 
         // A viewer arriving anywhere asks for voice the only way this
         // workspace knows how to ask -- WebRTC, since Vivox is implemented
@@ -2263,10 +2271,12 @@ mod test {
         let (_grid, client, agent) =
             connect_configured(vec![RegionConfig::default()], None, ImitatedGrid::OpenSim).await?;
         let mut server_events = agent.events();
-        let (event_tx, _event_rx) = mpsc::channel::<Event>(256);
-        let (command_tx, command_rx) = mpsc::channel::<Command>(8);
-        let (diag_tx, _diag_rx) = mpsc::channel(16);
-        let run = tokio::spawn(client.run(event_tx, diag_tx, command_rx));
+        let RunningClient {
+            events: _event_rx,
+            commands: command_tx,
+            diagnostics: _diag_rx,
+            run,
+        } = run_client(client);
 
         let report = sl_proto::AbuseReport {
             report_type: sl_proto::AbuseReportType::Complaint,
@@ -2315,10 +2325,12 @@ mod test {
         let (_grid, mut client, _agent) =
             connect_configured(vec![RegionConfig::default()], None, ImitatedGrid::OpenSim).await?;
         client.set_diagnostics(true);
-        let (event_tx, _event_rx) = mpsc::channel::<Event>(256);
-        let (command_tx, command_rx) = mpsc::channel::<Command>(8);
-        let (diag_tx, mut diag_rx) = mpsc::channel(64);
-        let run = tokio::spawn(client.run(event_tx, diag_tx, command_rx));
+        let RunningClient {
+            events: _event_rx,
+            commands: command_tx,
+            diagnostics: mut diag_rx,
+            run,
+        } = run_client(client);
 
         command_tx
             .send(Command::ModifyMaterialParams {
@@ -2353,10 +2365,12 @@ mod test {
         let (_grid, mut client, _agent) =
             connect_configured(vec![RegionConfig::default()], None, ImitatedGrid::OpenSim).await?;
         client.set_diagnostics(true);
-        let (event_tx, _event_rx) = mpsc::channel::<Event>(256);
-        let (command_tx, command_rx) = mpsc::channel::<Command>(8);
-        let (diag_tx, mut diag_rx) = mpsc::channel(64);
-        let run = tokio::spawn(client.run(event_tx, diag_tx, command_rx));
+        let RunningClient {
+            events: _event_rx,
+            commands: command_tx,
+            diagnostics: mut diag_rx,
+            run,
+        } = run_client(client);
 
         let mut expected: BTreeSet<&str> = BTreeSet::new();
         for (command, cap) in [
@@ -2419,10 +2433,12 @@ mod test {
                 connect_configured(vec![RegionConfig::default()], None, imitates).await?;
             let (caps_tx, mut caps_rx) = mpsc::channel(4);
             client.set_caps_reporter(caps_tx);
-            let (event_tx, mut event_rx) = mpsc::channel::<Event>(256);
-            let (command_tx, command_rx) = mpsc::channel::<Command>(8);
-            let (diag_tx, _diag_rx) = mpsc::channel(16);
-            let run = tokio::spawn(client.run(event_tx, diag_tx, command_rx));
+            let RunningClient {
+                events: mut event_rx,
+                commands: command_tx,
+                diagnostics: _diag_rx,
+                run,
+            } = run_client(client);
 
             // The region handshake and the agent's own appearance both arrive
             // in the arrival burst; neither is requested, so this reads the
@@ -6085,10 +6101,12 @@ default
     #[tokio::test]
     async fn the_login_skeleton_and_ais_agree_about_folder_versions() -> Result<(), TestError> {
         let (_grid, client, _agent) = connect().await?;
-        let (event_tx, mut events) = mpsc::channel::<Event>(256);
-        let (commands, command_rx) = mpsc::channel::<Command>(8);
-        let (diag_tx, _diag_rx) = mpsc::channel(16);
-        let run = tokio::spawn(client.run(event_tx, diag_tx, command_rx));
+        let RunningClient {
+            mut events,
+            commands,
+            diagnostics: _diag_rx,
+            run,
+        } = run_client(client);
 
         let skeleton = wait_on(&mut events, |event| match event {
             Event::InventorySkeleton(folders) => Some(folders.clone()),
@@ -6254,7 +6272,7 @@ default
         /// The client's root circuit id (for scoped ids).
         circuit: sl_client_tokio::CircuitId,
         /// The client event stream.
-        events: mpsc::Receiver<Event>,
+        events: mpsc::UnboundedReceiver<Event>,
         /// The client command channel.
         commands: mpsc::Sender<Command>,
         /// This avatar's grid-side session handle, for the fixtures a test
@@ -6293,10 +6311,12 @@ default
         let notice = tokio::time::timeout(WAIT, logins.recv()).await??;
         let agent = grid.agent(&notice).await.ok_or("no live session")?;
         let circuit = client.root_circuit_id().ok_or("no root circuit")?;
-        let (event_tx, mut events) = mpsc::channel::<Event>(256);
-        let (commands, command_rx) = mpsc::channel::<Command>(8);
-        let (diag_tx, _diag_rx) = mpsc::channel(16);
-        let run = tokio::spawn(client.run(event_tx, diag_tx, command_rx));
+        let RunningClient {
+            mut events,
+            commands,
+            diagnostics: _diag_rx,
+            run,
+        } = run_client(client);
         wait_on(&mut events, |event| {
             matches!(
                 event,
@@ -6818,17 +6838,6 @@ default
         Ok(builder.start().await?)
     }
 
-    /// Reads and drops everything `avatar`'s client is sent from now on, for a
-    /// viewer a test does not watch: a client whose events nobody reads stops
-    /// once its channel is full, and does nothing it is told after.
-    fn ignore_events(avatar: &mut Joined) {
-        let (_unused, closed) = mpsc::channel(1);
-        let mut events = std::mem::replace(&mut avatar.events, closed);
-        drop(tokio::spawn(async move {
-            while events.recv().await.is_some() {}
-        }));
-    }
-
     /// Whether `event` is `agent`'s avatar object, full or terse, in the
     /// region `region` — any region for `None`.
     fn avatar_update(
@@ -6858,9 +6867,8 @@ default
             let grid = two_avatars_on(imitates, vec![RegionConfig::default()]).await?;
             let mut first = join(&grid, "First").await?;
             let first_id = first.agent.agent_id();
-            let mut second = join(&grid, "Second").await?;
+            let second = join(&grid, "Second").await?;
             let second_id = second.agent.agent_id();
-            ignore_events(&mut second);
             let start = wait_on(&mut first.events, |event| {
                 avatar_update(event, second_id, None)
             })
@@ -6926,9 +6934,8 @@ default
             _other => None,
         })
         .await?;
-        let mut second = join(&grid, "Second").await?;
+        let second = join(&grid, "Second").await?;
         let second_id = second.agent.agent_id();
-        ignore_events(&mut second);
         let here = wait_on(&mut first.events, |event| {
             avatar_update(event, second_id, None)
         })
@@ -8820,10 +8827,12 @@ default
         client.set_diagnostics(true);
         let (caps_tx, mut caps_rx) = mpsc::channel(4);
         client.set_caps_reporter(caps_tx);
-        let (event_tx, mut event_rx) = mpsc::channel::<Event>(256);
-        let (command_tx, command_rx) = mpsc::channel::<Command>(8);
-        let (diag_tx, mut diag_rx) = mpsc::channel(256);
-        let run = tokio::spawn(client.run(event_tx, diag_tx, command_rx));
+        let RunningClient {
+            events: mut event_rx,
+            commands: command_tx,
+            diagnostics: mut diag_rx,
+            run,
+        } = run_client(client);
 
         let caps = tokio::time::timeout(WAIT, caps_rx.recv())
             .await?

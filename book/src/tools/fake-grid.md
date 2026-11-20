@@ -173,6 +173,18 @@ client-direction `sl-wire` codecs; `client_end_to_end.rs` runs the real
 `sl-client-tokio` stack — login POST, UDP circuit, seed fetch,
 event-queue long-poll — against it.
 
+A test that runs a real client starts its run loop with
+`sl_fake_grid::run_client`, never `Client::run` by hand. The run loop awaits
+the send of every event and diagnostic onto a bounded channel, so a session
+whose events go unread stops once the channel fills — and with it stops
+sending what it is commanded to. A region's ground alone outnumbers a channel
+of 256, so a test that reads only until the event it waits for, then commands
+something and waits on the grid to hear it, raced the fill. `run_client` drains
+both channels onto unbounded ones on tasks of their own, as `sl-conformance`'s
+sessions do, and hands back a `RunningClient`: the events, the diagnostics,
+the command sender (the loop ends when it is dropped) and the run task. A
+reader that drops its receiver leaves the client running.
+
 ## As a standalone grid
 
 ```sh
