@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 328 |
 | blocked | 34 |
 | in-progress | 4 |
-| bugs | 8 |
-| done | 1605 |
+| bugs | 7 |
+| done | 1606 |
 | deferred | 30 |
 | wont-do | 24 |
 | **total** | **2164** |
@@ -1239,7 +1239,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-text-renderability-axis`](in-progress/viewer-ui-text-renderability-axis.md)
   — Upstream issue — font selection cannot see glyph-format renderability
 
-## bugs (8)
+## bugs (7)
 
 ### viewer
 
@@ -1260,11 +1260,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`test-conformance-object-asset-format-fails-under-load`](bugs/test-conformance-object-asset-format-fails-under-load.md)
   — object_asset_format fails only in a full-workspace run, and fails early
-- [`test-conformance-upload-after-yengine-start-dropped`](bugs/test-conformance-upload-after-yengine-start-dropped.md)
-  — Quick script uploads to one item on OpenSim take each other's answers, or
-  fail as "operation timed out"
 
-## done (1605)
+## done (1606)
 
 ### protocol
 
@@ -4005,6 +4002,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — object-edit on OpenSim never sees the sit click action re-broadcast
 - [`test-conformance-script-compile-xengine-cold-start`](done/test-conformance-script-compile-xengine-cold-start.md)
   — script-compile fails its XEngine legs on a freshly started OpenSim
+- [`test-conformance-upload-after-yengine-start-dropped`](done/test-conformance-upload-after-yengine-start-dropped.md)
+  — Quick script uploads to one item on OpenSim seemed to take each other's
+  answers, or fail as "operation timed out"
 - [`test-crosscheck-day-position-is-inert`](done/test-crosscheck-day-position-is-inert.md)
   — --day-position asks for a keyframe the stock cycle does not have
 - [`test-crosscheck-pin-ui-scale`](done/test-crosscheck-pin-ui-scale.md) — A

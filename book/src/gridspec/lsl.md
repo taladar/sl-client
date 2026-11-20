@@ -520,10 +520,18 @@ assuming local is a function name`, at `local`'s next word.
 | 1100 nested parentheses | `:1: Exceeded allowed recursion depth; simplify your expression to make the code compile` | refused |
 | the item's language afterwards | **Luau**, compiled or not | LSL |
 
-The census uploads each Luau leg to a script of its own on OpenSim: YEngine
-keeps a compile's errors in one slot per item, and uploads to one item a
-second apart took each other's answers or failed
-(`test-conformance-upload-after-yengine-start-dropped`).
+The census uploads every Luau leg to one script, a second apart, as a
+viewer saving a script again and again does, and on OpenSim each upload
+gets its own answer. Uploads there once seemed to take each other's answers
+or fail as `operation timed out` half a second after they were sent: that
+was XEngine's unanswered `v3_again` upload ending in the client's 60 s
+timeout, to the microsecond, while a Luau leg was awaited, and the next leg
+then taking the late answer
+(`test-conformance-upload-after-yengine-start-dropped`). YEngine does keep
+a compile's errors in one slot per item, which the upload's handler empties
+(`XMREngine.cs`, `GetScriptErrors`), so two saves of one item in flight *at
+once* could still cross; saves that wait for each other's answers, which is
+all a viewer's editor sends, do not.
 
 ### What the viewer does with it
 

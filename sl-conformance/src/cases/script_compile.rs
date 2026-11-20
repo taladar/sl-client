@@ -42,9 +42,10 @@
 //! The `luau` backend has its own list (`luau_legs`): valid Luau, sources
 //! the reference Luau compiler refuses each in its own words, and LSL source
 //! under the Luau target; after each, the language the item is marked with.
-//! On OpenSim each goes to a script of its own, as under XEngine: YEngine
-//! keeps a compile's errors in one slot per item, and quick uploads to one
-//! item took each other's answers (`Backend::fresh_each`).
+//! They go to one script, a second apart, as a viewer saving one script
+//! again and again does: once the census waited out an unanswered upload
+//! before the next, no answer on OpenSim crossed to another upload
+//! (test-conformance-upload-after-yengine-start-dropped).
 //!
 //! What each live grid was measured to answer is written up in
 //! `book/src/gridspec/lsl.md` § Compiling and held below. `1av`. On the fake
@@ -181,14 +182,11 @@ impl Backend {
         }
     }
 
-    /// Whether every leg on `grid` is uploaded to a script of its own (see
-    /// [`Run::step`]): XEngine's, and the Luau legs' on OpenSim, which come
-    /// a second apart — YEngine posts a compile's errors in one slot per item
-    /// (`XMREngine.cs`'s `m_ScriptErrors`) for the answer to take, so quick
-    /// uploads to one item take each other's
-    /// (test-conformance-upload-after-yengine-start-dropped).
-    const fn fresh_each(self, grid: Grid) -> bool {
-        matches!(self, Self::XEngine) || (matches!(self, Self::Luau) && opensim_like(grid))
+    /// Whether every leg is uploaded to a script of its own (see
+    /// [`Run::step`]): XEngine's, which answers no upload over a running
+    /// script.
+    const fn fresh_each(self) -> bool {
+        matches!(self, Self::XEngine)
     }
 
     /// The line an OpenSim source opens with to pick its engine.
@@ -843,7 +841,7 @@ impl Run<'_> {
     ) -> Result<Answered, TestFailure> {
         let reuse = matches!(leg, "v1" | "syntax" | "v3_again");
         let stalled = self.stalled.take().is_some();
-        let fresh = if stalled || (self.backend.fresh_each(self.grid) && !reuse) {
+        let fresh = if stalled || (self.backend.fresh_each() && !reuse) {
             held.made = held.made.saturating_add(1);
             held.item = self
                 .new_script(cube, &format!("Compile {}", held.made))
@@ -2690,7 +2688,7 @@ const SECOND_LIFE: &[(&str, Answer)] = &[
 const OPENSIM: &[(&str, Answer)] = &[
     ("luau_lsl_source_compiled", Answer::Flag(true)),
     ("luau_lsl_source_errors_count", Answer::Text("0")),
-    ("luau_lsl_source_fresh_item", Answer::Flag(true)),
+    ("luau_lsl_source_fresh_item", Answer::Flag(false)),
     ("luau_lsl_source_item_asset", Answer::Text("replaced")),
     ("luau_lsl_source_item_language", Answer::Text("lsl")),
     ("luau_lsl_source_new_asset", Answer::Text("the item's id")),
@@ -2708,7 +2706,7 @@ const OPENSIM: &[(&str, Answer)] = &[
         Answer::Text("line 2 column 1"),
     ),
     ("luau_luau_attribute_errors_count", Answer::Text("1")),
-    ("luau_luau_attribute_fresh_item", Answer::Flag(true)),
+    ("luau_luau_attribute_fresh_item", Answer::Flag(false)),
     ("luau_luau_attribute_item_asset", Answer::Text("replaced")),
     ("luau_luau_attribute_item_language", Answer::Text("lsl")),
     (
@@ -2727,7 +2725,7 @@ const OPENSIM: &[(&str, Answer)] = &[
         Answer::Text("line 2 column 7"),
     ),
     ("luau_luau_break_outside_errors_count", Answer::Text("1")),
-    ("luau_luau_break_outside_fresh_item", Answer::Flag(true)),
+    ("luau_luau_break_outside_fresh_item", Answer::Flag(false)),
     (
         "luau_luau_break_outside_item_asset",
         Answer::Text("replaced"),
@@ -2749,7 +2747,7 @@ const OPENSIM: &[(&str, Answer)] = &[
         Answer::Text("line 2 column 7"),
     ),
     ("luau_luau_const_errors_count", Answer::Text("1")),
-    ("luau_luau_const_fresh_item", Answer::Flag(true)),
+    ("luau_luau_const_fresh_item", Answer::Flag(false)),
     ("luau_luau_const_item_asset", Answer::Text("replaced")),
     ("luau_luau_const_item_language", Answer::Text("lsl")),
     ("luau_luau_const_new_asset", Answer::Text("the item's id")),
@@ -2765,7 +2763,7 @@ const OPENSIM: &[(&str, Answer)] = &[
         Answer::Text("line 2 column 7"),
     ),
     ("luau_luau_continue_outside_errors_count", Answer::Text("1")),
-    ("luau_luau_continue_outside_fresh_item", Answer::Flag(true)),
+    ("luau_luau_continue_outside_fresh_item", Answer::Flag(false)),
     (
         "luau_luau_continue_outside_item_asset",
         Answer::Text("replaced"),
@@ -2793,7 +2791,7 @@ const OPENSIM: &[(&str, Answer)] = &[
     ),
     ("luau_luau_crlf_error_0_at", Answer::Text("line 2 column 7")),
     ("luau_luau_crlf_errors_count", Answer::Text("1")),
-    ("luau_luau_crlf_fresh_item", Answer::Flag(true)),
+    ("luau_luau_crlf_fresh_item", Answer::Flag(false)),
     ("luau_luau_crlf_item_asset", Answer::Text("replaced")),
     ("luau_luau_crlf_item_language", Answer::Text("lsl")),
     ("luau_luau_crlf_new_asset", Answer::Text("the item's id")),
@@ -2806,7 +2804,7 @@ const OPENSIM: &[(&str, Answer)] = &[
     ),
     ("luau_luau_empty_error_0_at", Answer::Text("nowhere")),
     ("luau_luau_empty_errors_count", Answer::Text("1")),
-    ("luau_luau_empty_fresh_item", Answer::Flag(true)),
+    ("luau_luau_empty_fresh_item", Answer::Flag(false)),
     ("luau_luau_empty_item_asset", Answer::Text("replaced")),
     ("luau_luau_empty_item_language", Answer::Text("lsl")),
     ("luau_luau_empty_new_asset", Answer::Text("the item's id")),
@@ -2822,7 +2820,7 @@ const OPENSIM: &[(&str, Answer)] = &[
         Answer::Text("line 4 column 11"),
     ),
     ("luau_luau_extensions_errors_count", Answer::Text("2")),
-    ("luau_luau_extensions_fresh_item", Answer::Flag(true)),
+    ("luau_luau_extensions_fresh_item", Answer::Flag(false)),
     ("luau_luau_extensions_item_asset", Answer::Text("replaced")),
     ("luau_luau_extensions_item_language", Answer::Text("lsl")),
     (
@@ -2838,7 +2836,7 @@ const OPENSIM: &[(&str, Answer)] = &[
     ),
     ("luau_luau_goto_error_0_at", Answer::Text("line 2 column 7")),
     ("luau_luau_goto_errors_count", Answer::Text("1")),
-    ("luau_luau_goto_fresh_item", Answer::Flag(true)),
+    ("luau_luau_goto_fresh_item", Answer::Flag(false)),
     ("luau_luau_goto_item_asset", Answer::Text("replaced")),
     ("luau_luau_goto_item_language", Answer::Text("lsl")),
     ("luau_luau_goto_new_asset", Answer::Text("the item's id")),
@@ -2854,7 +2852,7 @@ const OPENSIM: &[(&str, Answer)] = &[
         Answer::Text("line 2 column 7"),
     ),
     ("luau_luau_malformed_number_errors_count", Answer::Text("1")),
-    ("luau_luau_malformed_number_fresh_item", Answer::Flag(true)),
+    ("luau_luau_malformed_number_fresh_item", Answer::Flag(false)),
     (
         "luau_luau_malformed_number_item_asset",
         Answer::Text("replaced"),
@@ -2885,7 +2883,7 @@ const OPENSIM: &[(&str, Answer)] = &[
         Answer::Text("line 2 column 7"),
     ),
     ("luau_luau_multibyte_errors_count", Answer::Text("1")),
-    ("luau_luau_multibyte_fresh_item", Answer::Flag(true)),
+    ("luau_luau_multibyte_fresh_item", Answer::Flag(false)),
     ("luau_luau_multibyte_item_asset", Answer::Text("replaced")),
     ("luau_luau_multibyte_item_language", Answer::Text("lsl")),
     (
@@ -2904,7 +2902,7 @@ const OPENSIM: &[(&str, Answer)] = &[
         Answer::Text("line 2 column 7"),
     ),
     ("luau_luau_recursion_limit_errors_count", Answer::Text("1")),
-    ("luau_luau_recursion_limit_fresh_item", Answer::Flag(true)),
+    ("luau_luau_recursion_limit_fresh_item", Answer::Flag(false)),
     (
         "luau_luau_recursion_limit_item_asset",
         Answer::Text("replaced"),
@@ -2932,7 +2930,7 @@ const OPENSIM: &[(&str, Answer)] = &[
         Answer::Text("line 2 column 7"),
     ),
     ("luau_luau_register_limit_errors_count", Answer::Text("1")),
-    ("luau_luau_register_limit_fresh_item", Answer::Flag(true)),
+    ("luau_luau_register_limit_fresh_item", Answer::Flag(false)),
     (
         "luau_luau_register_limit_item_asset",
         Answer::Text("replaced"),
@@ -2960,7 +2958,7 @@ const OPENSIM: &[(&str, Answer)] = &[
         Answer::Text("line 2 column 7"),
     ),
     ("luau_luau_stray_end_errors_count", Answer::Text("1")),
-    ("luau_luau_stray_end_fresh_item", Answer::Flag(true)),
+    ("luau_luau_stray_end_fresh_item", Answer::Flag(false)),
     ("luau_luau_stray_end_item_asset", Answer::Text("replaced")),
     ("luau_luau_stray_end_item_language", Answer::Text("lsl")),
     (
@@ -2979,7 +2977,7 @@ const OPENSIM: &[(&str, Answer)] = &[
         Answer::Text("line 2 column 7"),
     ),
     ("luau_luau_syntax_errors_count", Answer::Text("1")),
-    ("luau_luau_syntax_fresh_item", Answer::Flag(true)),
+    ("luau_luau_syntax_fresh_item", Answer::Flag(false)),
     ("luau_luau_syntax_item_asset", Answer::Text("replaced")),
     ("luau_luau_syntax_item_language", Answer::Text("lsl")),
     ("luau_luau_syntax_mid_compiled", Answer::Flag(false)),
@@ -2992,7 +2990,7 @@ const OPENSIM: &[(&str, Answer)] = &[
         Answer::Text("line 2 column 7"),
     ),
     ("luau_luau_syntax_mid_errors_count", Answer::Text("1")),
-    ("luau_luau_syntax_mid_fresh_item", Answer::Flag(true)),
+    ("luau_luau_syntax_mid_fresh_item", Answer::Flag(false)),
     ("luau_luau_syntax_mid_item_asset", Answer::Text("replaced")),
     ("luau_luau_syntax_mid_item_language", Answer::Text("lsl")),
     (
@@ -3014,7 +3012,7 @@ const OPENSIM: &[(&str, Answer)] = &[
         Answer::Text("line 2 column 7"),
     ),
     ("luau_luau_two_errors_errors_count", Answer::Text("1")),
-    ("luau_luau_two_errors_fresh_item", Answer::Flag(true)),
+    ("luau_luau_two_errors_fresh_item", Answer::Flag(false)),
     ("luau_luau_two_errors_item_asset", Answer::Text("replaced")),
     ("luau_luau_two_errors_item_language", Answer::Text("lsl")),
     (
@@ -3033,7 +3031,7 @@ const OPENSIM: &[(&str, Answer)] = &[
         Answer::Text("line 2 column 7"),
     ),
     ("luau_luau_type_mismatch_errors_count", Answer::Text("1")),
-    ("luau_luau_type_mismatch_fresh_item", Answer::Flag(true)),
+    ("luau_luau_type_mismatch_fresh_item", Answer::Flag(false)),
     (
         "luau_luau_type_mismatch_item_asset",
         Answer::Text("replaced"),
@@ -3057,7 +3055,7 @@ const OPENSIM: &[(&str, Answer)] = &[
         Answer::Text("line 2 column 1"),
     ),
     ("luau_luau_unclosed_block_errors_count", Answer::Text("1")),
-    ("luau_luau_unclosed_block_fresh_item", Answer::Flag(true)),
+    ("luau_luau_unclosed_block_fresh_item", Answer::Flag(false)),
     (
         "luau_luau_unclosed_block_item_asset",
         Answer::Text("replaced"),
@@ -3092,7 +3090,7 @@ const OPENSIM: &[(&str, Answer)] = &[
     ),
     (
         "luau_luau_unfinished_comment_fresh_item",
-        Answer::Flag(true),
+        Answer::Flag(false),
     ),
     (
         "luau_luau_unfinished_comment_item_asset",
@@ -3132,7 +3130,7 @@ const OPENSIM: &[(&str, Answer)] = &[
     ),
     (
         "luau_luau_unterminated_string_fresh_item",
-        Answer::Flag(true),
+        Answer::Flag(false),
     ),
     (
         "luau_luau_unterminated_string_item_asset",
@@ -3166,7 +3164,7 @@ const OPENSIM: &[(&str, Answer)] = &[
         Answer::Text("line 2 column 1"),
     ),
     ("luau_luau_valid_errors_count", Answer::Text("1")),
-    ("luau_luau_valid_fresh_item", Answer::Flag(true)),
+    ("luau_luau_valid_fresh_item", Answer::Flag(false)),
     ("luau_luau_valid_item_asset", Answer::Text("replaced")),
     ("luau_luau_valid_item_language", Answer::Text("lsl")),
     ("luau_luau_valid_new_asset", Answer::Text("the item's id")),
@@ -3182,7 +3180,7 @@ const OPENSIM: &[(&str, Answer)] = &[
         Answer::Text("line 2 column 7"),
     ),
     ("luau_luau_vararg_outside_errors_count", Answer::Text("1")),
-    ("luau_luau_vararg_outside_fresh_item", Answer::Flag(true)),
+    ("luau_luau_vararg_outside_fresh_item", Answer::Flag(false)),
     (
         "luau_luau_vararg_outside_item_asset",
         Answer::Text("replaced"),
