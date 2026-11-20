@@ -156,9 +156,10 @@ impl Semantic {
 pub struct SemanticValue(pub String);
 
 /// The node is not ready for input yet — a browser view whose newly arrived
-/// document has not presented, so its engine would drop a click. The widget
-/// keeps it current; the automation model reports it as the busy state and
-/// a click waits for it to clear.
+/// document has not presented, so its engine would drop a click, or a list
+/// whose rows a pending search is about to rebuild. The widget keeps it
+/// current; the automation model reports it as the busy state of the node and
+/// of everything inside it, and a click waits for it to clear.
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Busy;
 

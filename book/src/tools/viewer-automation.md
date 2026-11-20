@@ -49,11 +49,13 @@ for screen readers. Each node has:
 - a **test id**: the entity's `Name` (`floater:build`,
   `build-pos-x:field`);
 - **states** (`disabled` — inherited from any ancestor, `checked`, `selected`,
-  `expanded`, `focused`, `hovered`, `read_only`, `busy` — a browser view whose
-  newly arrived document has not presented yet), a **value** (a field's text, a
-  combo's choice, a slider's or a spin button's number, a colour well's
-  `#rrggbb`), a text node's **colour**, its **bounds** in logical pixels and its
-  **visibility** (`visible`, `hidden`, `clipped`, `off_screen`, `covered`).
+  `expanded`, `focused`, `hovered`, `read_only`, `busy` — also inherited, a
+  browser view whose newly arrived document has not presented yet, or the
+  inventory list while a typed search waits out its debounce), a **value** (a
+  field's text, a combo's choice, a slider's or a spin button's number, a
+  colour well's `#rrggbb`), a text node's **colour**, its **bounds** in logical
+  pixels and its **visibility** (`visible`, `hidden`, `clipped`, `off_screen`,
+  `covered`).
 
 A widget the model cannot infer says what it is with a `Semantic` on its
 root at spawn (`sl_viewer_ui_core::semantic`). A list row is named by its
@@ -99,7 +101,10 @@ nothing runs while none are queued.
   target must be attached, visible, *stable* (unchanged for a few frames),
   enabled, for a click not `busy` (Chromium keeps the old page on screen and
   drops input to a newly arrived document until its first contentful paint,
-  so a click on a page whose address just changed would be lost), and the one
+  so a click on a page whose address just changed would be lost; and a row
+  of the inventory list still shows the old results for 150 ms after a
+  search is typed, so a click aimed at it lands wherever the new results put
+  something else), and the one
   a hit test at its aim point lands on; a scroll area or a virtual list is
   scrolled to bring it into view. Input goes through the
   real input path (`sl_viewer_ui_core::synthetic_input`), so a test that

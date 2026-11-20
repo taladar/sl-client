@@ -35,8 +35,8 @@ pub enum ActionabilityCheck {
     /// resolver says a click there lands on it.
     ReceivesEvents,
     /// The node is not [busy](crate::NodeState::Busy): a web page has drawn
-    /// the document it is at, so a click reaches that document. Checked by a
-    /// click.
+    /// the document it is at, so a click reaches that document, and no list
+    /// it is a row of is about to be rebuilt under it. Checked by a click.
     Ready,
     /// The build tool is active on a tool that selects. Checked by a world
     /// select or sweep, which select only in build mode (outside it a click

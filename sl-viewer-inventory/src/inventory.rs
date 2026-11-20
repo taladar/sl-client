@@ -70,7 +70,7 @@ use crate::virtual_list::{
 use bevy_flair::style::components::{ClassList, PseudoElementsSupport};
 use sl_viewer_ui_core::double_click::DoubleClickWindow;
 use sl_viewer_ui_core::glyph;
-use sl_viewer_ui_core::semantic::{Expanded, Role, Semantic, sync_expanded};
+use sl_viewer_ui_core::semantic::{Busy, Expanded, Role, Semantic, sync_expanded};
 use sl_viewer_ui_core::skin::{
     FOLDER_LABEL_CLASS, LIST_ROW_CLASS, LIST_SURFACE_CLASS, SELECTED_CLASS, TEXT_CLASS, role_class,
     set_state_class, set_state_class_on, text_role,
@@ -3070,11 +3070,21 @@ struct RebuildSources<'w> {
 /// Change ticks accumulate across the skipped frames, and
 /// [`refresh_inventory_on_show`] marks the model on every open transition, so
 /// the panel always opens onto exactly one catch-up rebuild.
+///
+/// While a query edit waits out the debounce the list is [`Busy`]: its rows
+/// still show the old query's results, and a row is about to move or go, so a
+/// click aimed at one now could land on another, or on the background.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy system: each parameter is one resource or query it reads"
+)]
 fn rebuild_view(
     sources: RebuildSources,
     ui: Option<Res<InventoryUi>>,
     mut view: ResMut<InventoryView>,
     mut lists: Query<&mut VirtualList>,
+    busy: Query<Has<Busy>>,
+    mut commands: Commands,
     time: Res<Time>,
     mut last_query: Local<String>,
     mut deferred_since: Local<Option<f32>>,
@@ -3110,12 +3120,20 @@ fn rebuild_view(
             reset_scroll = true;
         }
     }
-    if !due {
-        return;
-    }
     let Some(ui) = ui else {
         return;
     };
+    let pending = deferred_since.is_some();
+    if busy.get(ui.viewport).is_ok_and(|marked| marked != pending) {
+        if pending {
+            commands.entity(ui.viewport).insert(Busy);
+        } else {
+            commands.entity(ui.viewport).remove::<Busy>();
+        }
+    }
+    if !due {
+        return;
+    }
     // Reset the scroll only when the *content* changes wholesale — a tab switch,
     // a new search, a filter edit, or an open. Expanding or collapsing a folder
     // changes only the model, so the position is kept (the reference viewer
@@ -5552,6 +5570,70 @@ mod tests {
         // Clothing (2) is paged already; the root and Objects are not.
         assert_eq!(first, vec![key(1), key(3)]);
         assert_eq!(asked(&mut app), Vec::new(), "swept once");
+    }
+
+    /// **A list waiting out the search debounce is busy**: a query typed into
+    /// the field leaves the old rows in place until the debounce has passed,
+    /// and the list is [`super::Busy`] for exactly that long, since a click aimed at
+    /// one of those rows would land wherever the new results put something
+    /// else — or nothing.
+    #[test]
+    fn the_list_is_busy_while_a_typed_query_waits_out_the_debounce() {
+        use bevy::prelude::*;
+        let mut app = App::new();
+        app.insert_resource(sample_model());
+        app.init_resource::<super::InventoryState>();
+        app.init_resource::<super::InventoryView>();
+        app.init_resource::<crate::inventory_actions::WornAttachments>();
+        app.init_resource::<crate::inventory_filters::InventoryFilterState>();
+        app.insert_resource(crate::inventory_filters::SessionLoginTime(0));
+        // No time plugin: the clock moves only when the test moves it.
+        app.init_resource::<Time>();
+        let viewport = app.world_mut().spawn(super::VirtualList::new(20.0)).id();
+        let elsewhere = app.world_mut().spawn_empty().id();
+        app.insert_resource(super::InventoryUi {
+            panel: elsewhere,
+            viewport,
+            search: elsewhere,
+            tab_strip: elsewhere,
+        });
+        app.add_systems(Update, super::rebuild_view);
+        let busy = |app: &App| app.world().entity(viewport).contains::<super::Busy>();
+        let names = |app: &App| -> Vec<String> {
+            app.world()
+                .resource::<super::InventoryView>()
+                .rows()
+                .iter()
+                .map(|row| row.name().to_owned())
+                .collect()
+        };
+
+        app.update();
+        assert!(!busy(&app), "nothing typed, the list is ready");
+        let unfiltered = names(&app);
+
+        app.world_mut()
+            .resource_mut::<super::InventoryState>()
+            .query = "shirt".to_owned();
+        app.update();
+        assert!(busy(&app), "typed, the list waits out the debounce");
+        assert_eq!(names(&app), unfiltered, "and shows the old rows meanwhile");
+        app.world_mut()
+            .resource_mut::<Time>()
+            .advance_by(core::time::Duration::from_millis(100));
+        app.update();
+        assert!(busy(&app), "still inside the debounce");
+
+        app.world_mut()
+            .resource_mut::<Time>()
+            .advance_by(core::time::Duration::from_millis(100));
+        app.update();
+        assert!(!busy(&app), "the rebuild has landed");
+        let filtered = names(&app);
+        assert!(
+            filtered.iter().any(|name| name == "Blue shirt") && filtered != unfiltered,
+            "the rows are the query's: {filtered:?}"
+        );
     }
 
     /// The login inventory skeleton triggers a one-shot folder snapshot, so the

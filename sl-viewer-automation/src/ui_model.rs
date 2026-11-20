@@ -159,6 +159,10 @@ struct Inherited {
     disabled: bool,
     /// An ancestor is laid out away (`Display::None`).
     display_none: bool,
+    /// An ancestor is not ready for input: a list whose rows are about to be
+    /// rebuilt is busy for every row in it, as ARIA's `aria-busy` is for an
+    /// element's descendants.
+    busy: bool,
 }
 
 impl Inherited {
@@ -167,6 +171,7 @@ impl Inherited {
         Self {
             disabled: self.disabled || facts.markers.disabled,
             display_none: self.display_none || facts.node.display == Display::None,
+            busy: self.busy || facts.markers.busy,
         }
     }
 }
@@ -289,6 +294,7 @@ impl UiModel<'_, '_> {
             if let Ok(facts) = self.nodes.get(ancestor) {
                 inherited.disabled |= facts.markers.disabled;
                 inherited.display_none |= facts.node.display == Display::None;
+                inherited.busy |= facts.markers.busy;
             }
         }
         inherited
@@ -423,7 +429,7 @@ impl UiModel<'_, '_> {
             (NodeState::Expanded, facts.markers.expanded),
             (NodeState::Focused, frame.focused == Some(facts.entity)),
             (NodeState::Hovered, frame.hovered.contains(&facts.entity)),
-            (NodeState::Busy, facts.markers.busy),
+            (NodeState::Busy, inherited.busy),
         ] {
             if holds {
                 states.insert(state);

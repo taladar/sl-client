@@ -159,9 +159,11 @@ pub enum NodeState {
     Focused,
     /// Under the pointer.
     Hovered,
-    /// Not ready for input yet: a web page whose newly arrived document has
-    /// not presented (its first contentful paint), whose engine drops a click
-    /// until it has.
+    /// Not ready for input yet, itself or an ancestor: a web page whose newly
+    /// arrived document has not presented (its first contentful paint), whose
+    /// engine drops a click until it has, or a row of a list about to be
+    /// rebuilt for a search still being typed, which may not be where it is
+    /// drawn by the time a click lands.
     Busy,
 }
 

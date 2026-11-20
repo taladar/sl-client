@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 328 |
 | blocked | 34 |
 | in-progress | 4 |
-| bugs | 12 |
-| done | 1601 |
+| bugs | 11 |
+| done | 1602 |
 | deferred | 30 |
 | wont-do | 24 |
 | **total** | **2164** |
@@ -1239,7 +1239,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-text-renderability-axis`](in-progress/viewer-ui-text-renderability-axis.md)
   — Upstream issue — font selection cannot see glyph-format renderability
 
-## bugs (12)
+## bugs (11)
 
 ### viewer
 
@@ -1263,8 +1263,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-conformance-upload-after-yengine-start-dropped`](bugs/test-conformance-upload-after-yengine-start-dropped.md)
   — Quick script uploads to one item on OpenSim take each other's answers, or
   fail as "operation timed out"
-- [`test-e2e-relog-gesture-wait-margin`](bugs/test-e2e-relog-gesture-wait-margin.md)
-  — e2e_relog's active-gesture test runs at the edge of its 60 s wait
 - [`test-fake-grid-tests-stop-reading-client-events`](bugs/test-fake-grid-tests-stop-reading-client-events.md)
   — Fake-grid integration tests stop reading the client's events and can stall
   it
@@ -1273,7 +1271,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1601)
+## done (1602)
 
 ### protocol
 
@@ -4045,6 +4043,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-e2e-pilot-suite`](done/test-e2e-pilot-suite.md) — The first end-to-end
   tests — one viewer, two viewers, two regions (blocked by `test-e2e-stage`
   (done))
+- [`test-e2e-relog-gesture-wait-margin`](done/test-e2e-relog-gesture-wait-margin.md)
+  — e2e_relog's active-gesture test runs at the edge of its 60 s wait
 - [`test-e2e-skin-sheet-watch`](done/test-e2e-skin-sheet-watch.md) — End-to-end
   check that --watch-skins picks up an edited sheet
 - [`test-e2e-stage`](done/test-e2e-stage.md) — sl-e2e Stage — a fake grid,

@@ -277,6 +277,39 @@ fn a_busy_node_waits_until_it_is_ready() -> Result<(), String> {
     Ok(())
 }
 
+/// A node inside a busy container — a row of a list a pending search is about
+/// to rebuild — holds a click until the container is ready, and reports busy
+/// itself while it waits.
+#[test]
+fn a_node_in_a_busy_container_waits_until_it_is_ready() -> Result<(), String> {
+    let mut app = app();
+    let list = spawn_under_root(&mut app, (Name::new("list"), Node::default()));
+    button_in(
+        &mut app,
+        Some(list),
+        "row",
+        "Row",
+        placed(100.0, 100.0, 120.0, 30.0),
+    );
+    app.world_mut().entity_mut(list).insert(Busy);
+    settle(&mut app);
+    let mut pursuit = Pursuit::new(Locator::test_id("row"), Intent::Click);
+    assert_eq!(
+        still_waiting(&mut app, &mut pursuit, 5)?,
+        ActionabilityCheck::Ready,
+        "a busy ancestor makes it busy"
+    );
+    app.world_mut().entity_mut(list).remove::<Busy>();
+    let target = pursue(&mut app, &mut pursuit).map_err(|error| error.to_string())?;
+    interact::click(&mut app, target.aim, MouseButton::Left);
+    assert_eq!(
+        clicked(&app),
+        vec!["row".to_owned()],
+        "ready, it is clicked"
+    );
+    Ok(())
+}
+
 /// Moves the [`Drifting`] node one pixel right every frame while it has the
 /// marker.
 fn drift(mut nodes: Query<&mut Node, With<Drifting>>) {
