@@ -1,0 +1,17 @@
+grid: fake-opensim
+date: 2026-11-20
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Fake Region
+engine: sl-lsl-runtime imitating YEngine
+settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
+
+PROBE events/collision-standing rec=start region="Fake Region" channel="OpenSim" version="sl-fake-grid 0.1.0"
+# animations avatar=owner playing="falldown"
+PROBE events/collision-standing rec=phase phase=1 name=standing events="collision_start:owner" collisions=146 owner_detected=146 other_detected=0 object_detected=0 per_second="17,19,18,18,19,18,18,19" lifted=1
+# animations avatar=other playing="falldown"
+# animations avatar=owner playing="land"
+# animations avatar=other playing="land"
+# animations avatar=owner playing="stand"
+# animations avatar=other playing="stand"
+PROBE events/collision-standing rec=phase phase=2 name=gone events="collision_end:owner" collisions=0 owner_detected=0 other_detected=0 object_detected=0 per_second=""
+PROBE events/collision-standing rec=end

@@ -182,7 +182,18 @@ mod test {
         })
         .await?;
         let circuit = client.root_circuit_id().ok_or("no root circuit")?;
-        let notice = tokio::time::timeout(WAIT, logins.recv()).await??;
+        // A scripted avatar the region holds logs in too: the session is the
+        // client's own.
+        let own = client.agent_id();
+        let notice = tokio::time::timeout(WAIT, async {
+            loop {
+                let notice = logins.recv().await?;
+                if Some(notice.agent_id) == own {
+                    return Ok::<_, broadcast::error::RecvError>(notice);
+                }
+            }
+        })
+        .await??;
         let agent = grid.agent(&notice).await.ok_or("no live session")?;
         let mut server = agent.events();
         let RunningClient {
@@ -4962,6 +4973,188 @@ default
     #[tokio::test]
     async fn an_avatar_passes_through_a_volume_detect_prim_on_opensim() -> Result<(), TestError> {
         an_avatar_passes_through_a_volume_detect_prim(ImitatedGrid::OpenSim).await
+    }
+
+    /// The platform of [`a_standing_avatar_keeps_colliding_at_its_grids_pace`]
+    /// and [`avatars_stepping_on_together_are_one_collision_start`]: on
+    /// channel 7 it becomes a platform 1.5 m square and slides under the
+    /// feet of whoever spoke, its top 0.15 m above them, as
+    /// `events/collision-standing` does, or goes back; it says what it heard.
+    const PLATFORM_SOURCE: &str = "vector home;
+integer collisions;
+integer detected;
+
+default
+{
+    state_entry()
+    {
+        home = llGetPos();
+        llListen(7, \"\", NULL_KEY, \"\");
+    }
+
+    listen(integer channel, string name, key id, string message)
+    {
+        if (message == \"come\")
+        {
+            vector at = llList2Vector(llGetObjectDetails(id, [OBJECT_POS]), 0);
+            vector size = llGetAgentSize(id);
+            llSetPrimitiveParams([PRIM_SIZE, <1.5, 1.5, 0.2>]);
+            llSetRegionPos(<at.x, at.y, at.z - size.z / 2.0 + 0.05>);
+        }
+        else if (message == \"go\")
+        {
+            llSetRegionPos(home);
+        }
+        else if (message == \"report\")
+        {
+            llShout(0, \"collisions \" + (string)collisions + \" detected \" + (string)detected);
+        }
+    }
+
+    collision_start(integer n)
+    {
+        llShout(0, \"start \" + (string)n);
+    }
+
+    collision(integer n)
+    {
+        ++collisions;
+        detected += n;
+    }
+
+    collision_end(integer n)
+    {
+        llShout(0, \"end \" + (string)n);
+    }
+}
+";
+
+    /// An avatar standing on a prim keeps raising `collision` in its scripts
+    /// for as long as it stands there, at its grid's pace rather than every
+    /// tick: at the 20 ms ticks of ubODE's step, every seventh on Second Life
+    /// (7.4 a second measured, a 133 ms interval) and every third on OpenSim
+    /// (a 50 ms subscription, reported on the next step past it), over the
+    /// two seconds the platform is under it, from the tick it first stands
+    /// on it — on a grid imitating `imitated`.
+    async fn a_standing_avatar_keeps_colliding_at_its_grids_pace(
+        imitated: ImitatedGrid,
+    ) -> Result<(), TestError> {
+        let fixture = region_of(&[ScriptedBox {
+            local_id: sl_proto::RegionLocalObjectId(0xC12),
+            source: PLATFORM_SOURCE.to_owned(),
+            experience: None,
+        }])?;
+        let mut scene = scene_stepped(imitated, fixture, Duration::from_millis(20)).await?;
+        scene.tick(2).await?;
+        scene.shout("come").await?;
+        scene.tick(100).await?;
+        scene.shout("go").await?;
+        scene.tick(5).await?;
+        scene.shout("report").await?;
+        scene.tick(20).await?;
+        let collisions = if imitated == ImitatedGrid::SecondLife {
+            12
+        } else {
+            29
+        };
+        assert_eq!(
+            shouted(&mut scene).await,
+            vec![
+                "start 1".to_owned(),
+                "end 1".to_owned(),
+                format!("collisions {collisions} detected {collisions}"),
+            ]
+        );
+        scene.stop();
+        Ok(())
+    }
+
+    /// On a grid imitating Second Life.
+    #[tokio::test]
+    async fn a_standing_avatar_keeps_colliding_at_its_grids_pace_on_second_life()
+    -> Result<(), TestError> {
+        a_standing_avatar_keeps_colliding_at_its_grids_pace(ImitatedGrid::SecondLife).await
+    }
+
+    /// On a grid imitating OpenSim.
+    #[tokio::test]
+    async fn a_standing_avatar_keeps_colliding_at_its_grids_pace_on_opensim()
+    -> Result<(), TestError> {
+        a_standing_avatar_keeps_colliding_at_its_grids_pace(ImitatedGrid::OpenSim).await
+    }
+
+    /// Two avatars a platform slides under at once are one `collision_start`
+    /// detecting both, every `collision` detects both, and one
+    /// `collision_end` detects both when it leaves them, as both grids raise
+    /// them (`events/collision-standing` before it filtered the other avatar
+    /// out: Second Life and OpenSim under both engines started with one event
+    /// of two detected) — on a grid imitating `imitated`. A scripted visitor
+    /// logs in where the client does.
+    async fn avatars_stepping_on_together_are_one_collision_start(
+        imitated: ImitatedGrid,
+    ) -> Result<(), TestError> {
+        let fixture = region_of(&[ScriptedBox {
+            local_id: sl_proto::RegionLocalObjectId(0xC13),
+            source: PLATFORM_SOURCE.to_owned(),
+            experience: None,
+        }])?;
+        let mut scene = scene_with(
+            imitated,
+            fixture,
+            RegionConfig {
+                heartbeat: HeartbeatConfig::stepped(Duration::from_millis(100)),
+                scripted_avatars: vec![sl_fake_grid::ScriptedAvatar::new("Scripted", "Visitor")],
+                ..RegionConfig::default()
+            },
+            AccountConfig::new("Test", "User", "password"),
+        )
+        .await?;
+        let visitor = scene
+            .grid
+            .scripted_avatars()
+            .first()
+            .ok_or("the grid logged in no visitor")?
+            .clone();
+        let arrived = tokio::time::timeout(WAIT, visitor.arrived()).await?;
+        assert_ne!(arrived, sl_fake_grid::Progress::LoggingIn);
+        scene.tick(2).await?;
+        scene.shout("come").await?;
+        scene.tick(10).await?;
+        scene.shout("go").await?;
+        scene.tick(5).await?;
+        scene.shout("report").await?;
+        scene.tick(2).await?;
+        let heard = shouted(&mut scene).await;
+        assert_eq!(
+            heard.get(..2),
+            Some(&["start 2".to_owned(), "end 2".to_owned()][..])
+        );
+        let report = heard.get(2).ok_or("the platform did not report")?;
+        let counts: Vec<u32> = report
+            .split(' ')
+            .filter_map(|word| word.parse().ok())
+            .collect();
+        let [collisions, detected] = counts.as_slice() else {
+            return Err(format!("an unexpected report: {report}").into());
+        };
+        assert!(*collisions > 0, "no collision between: {report}");
+        assert_eq!(Some(*detected), collisions.checked_mul(2), "{report}");
+        scene.stop();
+        Ok(())
+    }
+
+    /// On a grid imitating Second Life.
+    #[tokio::test]
+    async fn avatars_stepping_on_together_are_one_collision_start_on_second_life()
+    -> Result<(), TestError> {
+        avatars_stepping_on_together_are_one_collision_start(ImitatedGrid::SecondLife).await
+    }
+
+    /// On a grid imitating OpenSim.
+    #[tokio::test]
+    async fn avatars_stepping_on_together_are_one_collision_start_on_opensim()
+    -> Result<(), TestError> {
+        avatars_stepping_on_together_are_one_collision_start(ImitatedGrid::OpenSim).await
     }
 
     /// The mover of [`move_to_target_reaches_its_target`]: on channel 7 it

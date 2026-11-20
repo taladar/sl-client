@@ -34,6 +34,12 @@
 //!   `collision` as the faller fell through it, and the faller heard nothing
 //!   of it; the faller's `llDetectedType` was 10 (`ACTIVE | SCRIPTED`).
 //!
+//! An avatar standing still on a scripted prim (`events/collision-standing`)
+//! never stops touching it: one `collision_start`, then `collision` for as
+//! long as it stands there, Second Life 6–8 a second and OpenSim 17–19
+//! ([`PhysicsPolicy::agent_collision_interval`]); two avatars stepping on at
+//! once were one `collision_start` detecting both on every grid.
+//!
 //! `llMoveToTarget` with a tau of 0.3 reached a target a metre up within a
 //! tenth of a metre in 0.69 s on Second Life and 0.71 s on OpenSim: the
 //! distance left shrinks by `e` every tau, against gravity.
@@ -211,6 +217,14 @@ pub struct PhysicsPolicy {
     /// one given it (Second Life, `physics/keyframed`: the one given while
     /// it was physical) or does nothing (OpenSim, whose motion is gone).
     pub play_resumes_last: bool,
+    /// The least time between two `collision` events a prim raises for an
+    /// avatar that goes on touching it. An avatar never rests the way a
+    /// physical object does, so its contact keeps raising them for as long as
+    /// it stands there, on both grids, but neither raises one every frame
+    /// (`events/collision-standing`, an avatar standing still on a prim for
+    /// eight seconds): Second Life 6–8 a second (59 in 8 s), OpenSim 17–19
+    /// under both engines.
+    pub agent_collision_interval: Duration,
 }
 
 /// How an object's mass follows its prims.
@@ -254,6 +268,9 @@ impl PhysicsPolicy {
         keyframed_wait_after_shape: Some(Duration::from_millis(400)),
         play_resumes_last: true,
         grab_pulls_physical: true,
+        // 59 `collision` events in 8 s: 7.4 a second, every sixth frame of
+        // its 45.
+        agent_collision_interval: Duration::from_millis(133),
     };
 
     /// OpenSim's under ubODE, measured on the local grid under both engines
@@ -275,6 +292,11 @@ impl PhysicsPolicy {
         keyframed_wait_after_shape: None,
         play_resumes_last: false,
         grab_pulls_physical: false,
+        // `SceneObjectPart` subscribes a scripted prim's physics actor to its
+        // collisions at 50 ms ("20 reports per second"), and ubODE reports
+        // on the first 20 ms step past that: every 60 ms, measured 17–19 a
+        // second.
+        agent_collision_interval: Duration::from_millis(50),
     };
 }
 
@@ -420,6 +442,10 @@ struct Touching {
     /// The scripts that were busy when it began, and hear nothing of it
     /// ([`BusyCollisions::Lost`]).
     missed: BTreeSet<CallerId>,
+    /// When, on the physics clock, the prim's scripts last heard of it — its
+    /// start or its last `collision` — which paces an avatar's
+    /// ([`PhysicsPolicy::agent_collision_interval`]).
+    told: Duration,
 }
 
 /// The region's physics: what scripts set on its objects, how each physical
@@ -1899,14 +1925,33 @@ fn scripted(world: &SceneFixtures, root: RegionLocalObjectId) -> bool {
 /// `collision_start` and `land_collision_start` for one begun,
 /// `collision` and `land_collision` for one going on, `collision_end` and
 /// `land_collision_end` for one over. A contact of an object that was
-/// physical and no longer is (`was_bodies`) ends unheard.
+/// physical and no longer is (`was_bodies`) ends unheard, and an avatar's
+/// that goes on is heard at most once every
+/// [`agent_collision_interval`](PhysicsPolicy::agent_collision_interval).
+///
+/// What one prim began, went on or stopped touching in one tick is one event
+/// of each kind, its detected each thing touched: both grids hand a prim
+/// that two avatars step onto at once one `collision_start` with two detected
+/// (`events/collision-standing`, before the probe filtered the other avatar
+/// out: Second Life `other+owner`, OpenSim `owner+other` under both
+/// engines), as OpenSim's `SceneObjectPart.SendCollisionEvent` gathers the
+/// colliders of one physics report into one event.
 fn raise(
     world: &mut SceneFixtures,
     now: BTreeMap<Contact, (Detected, bool)>,
     was_bodies: &BTreeSet<ObjectKey>,
 ) {
     let before = core::mem::take(&mut world.physics.contacts);
-    let busy_loses = world.physics.policy.busy == BusyCollisions::Lost;
+    let policy = world.physics.policy;
+    let clock = world.physics.clock;
+    let busy_loses = policy.busy == BusyCollisions::Lost;
+    let mut heard: BTreeMap<(RegionLocalObjectId, &'static str), Vec<Touching>> = BTreeMap::new();
+    let mut hear = |contact: &Contact, event: &'static str, touching: &Touching| {
+        heard
+            .entry((contact.prim, event))
+            .or_default()
+            .push(touching.clone());
+    };
     for (contact, touching) in &before {
         if now.contains_key(contact) {
             continue;
@@ -1924,21 +1969,25 @@ fn raise(
         } else {
             "collision_end"
         };
-        tell(world, contact, event, touching);
+        hear(contact, event, touching);
     }
     let mut kept = BTreeMap::new();
     for (contact, (detected, quiet)) in now {
         let land = contact.with == Collider::Land;
         let touching = match before.get(&contact) {
             Some(was) => {
-                let touching = Touching {
+                let paced = matches!(contact.with, Collider::Agent(_))
+                    && clock.saturating_sub(was.told) < policy.agent_collision_interval;
+                let mut touching = Touching {
                     detected,
                     quiet,
                     missed: was.missed.clone(),
+                    told: was.told,
                 };
-                if !quiet {
+                if !quiet && !paced {
+                    touching.told = clock;
                     let event = if land { "land_collision" } else { "collision" };
-                    tell(world, &contact, event, &touching);
+                    hear(&contact, event, &touching);
                 }
                 touching
             }
@@ -1952,19 +2001,42 @@ fn raise(
                     detected,
                     quiet,
                     missed,
+                    told: clock,
                 };
                 let event = if land {
                     "land_collision_start"
                 } else {
                     "collision_start"
                 };
-                tell(world, &contact, event, &touching);
+                hear(&contact, event, &touching);
                 touching
             }
         };
         let _was = kept.insert(contact, touching);
     }
     world.physics.contacts = kept;
+    let mut heard: Vec<((RegionLocalObjectId, &'static str), Vec<Touching>)> =
+        heard.into_iter().collect();
+    heard.sort_by_key(|((prim, event), _touchings)| (*prim, told_order(event)));
+    for ((prim, event), touchings) in heard {
+        tell(world, prim, event, &touchings);
+    }
+}
+
+/// Where in a tick's events for one prim `event` is told: OpenSim's
+/// `SceneObjectPart.PhysicsCollision` sends `collision_start`, then
+/// `collision_end`, then `collision`, then `land_collision_start`,
+/// `land_collision` and `land_collision_end`.
+fn told_order(event: &str) -> u8 {
+    match event {
+        "collision_start" => 0,
+        "collision_end" => 1,
+        "collision" => 2,
+        "land_collision_start" => 3,
+        "land_collision" => 4,
+        "land_collision_end" => 5,
+        _ => 6,
+    }
 }
 
 /// The scripts of the prim `prim` and of its root that are busy in a handler.
@@ -1984,36 +2056,60 @@ fn busy_scripts(world: &SceneFixtures, prim: RegionLocalObjectId) -> BTreeSet<Ca
         .collect()
 }
 
-/// Raises `event` about `touching` in the scripts `contact`'s prim routes it
-/// to, but those that missed the contact.
-fn tell(world: &mut SceneFixtures, contact: &Contact, event: &str, touching: &Touching) {
+/// Raises `event` about what `touchings` touch in the scripts the prim
+/// `prim` routes it to, as one event per script: a collision event detecting
+/// each of them that its `llCollisionFilter` lets through and that the script
+/// did not miss, or a land event for each (a prim touches the ground once).
+fn tell(world: &mut SceneFixtures, prim: RegionLocalObjectId, event: &str, touchings: &[Touching]) {
     let Some(event) = sl_lsl_runtime::library::event(event) else {
         tracing::error!(event, "a collision event the runtime does not know");
         return;
     };
-    if contact.with != Collider::Land
-        && let Some(filter) = world
-            .objects
-            .get(contact.prim)
-            .and_then(|prim| world.physics.filters.get(&prim.full_id))
-        && !lets_through(filter, &touching.detected)
-    {
-        return;
-    }
-    let told: Vec<CallerId> = routed(world, contact.prim, event.name)
-        .into_iter()
-        .filter(|id| !touching.missed.contains(id))
+    let land = event.name.starts_with("land_");
+    let filter = world
+        .objects
+        .get(prim)
+        .and_then(|object| world.physics.filters.get(&object.full_id))
+        .cloned();
+    let passing: Vec<&Touching> = touchings
+        .iter()
+        .filter(|touching| {
+            land || filter
+                .as_ref()
+                .is_none_or(|filter| lets_through(filter, &touching.detected))
+        })
         .collect();
-    for id in told {
+    for id in routed(world, prim, event.name) {
+        let heard: Vec<&Touching> = passing
+            .iter()
+            .copied()
+            .filter(|touching| !touching.missed.contains(&id))
+            .collect();
+        if heard.is_empty() {
+            continue;
+        }
         let engine = world.script_instances.engine_mut();
-        let posted = if contact.with == Collider::Land {
-            engine.post(
-                id,
-                event,
-                vec![Value::Vector(touching.detected.position.clone())],
-            )
+        let posted = if land {
+            heard.iter().try_for_each(|touching| {
+                engine
+                    .post(
+                        id,
+                        event,
+                        vec![Value::Vector(touching.detected.position.clone())],
+                    )
+                    .map(|_posted| ())
+            })
         } else {
-            engine.post_detected(id, event, vec![touching.detected.clone()])
+            engine
+                .post_detected(
+                    id,
+                    event,
+                    heard
+                        .iter()
+                        .map(|touching| touching.detected.clone())
+                        .collect(),
+                )
+                .map(|_posted| ())
         };
         if let Err(error) = posted {
             tracing::warn!(?id, %error, "a collision could not be posted");

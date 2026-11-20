@@ -27,6 +27,7 @@ use crate::grid::Grid;
 use crate::metrics::Metrics;
 use crate::record::Completeness;
 use crate::rez_ledger::{Leftovers, RezLedger};
+use crate::whereabouts::{Sighting, Whereabouts};
 
 /// How many times to retry an OpenSim login that was rejected as
 /// "already logged in" before giving up. A prior session that did not log out
@@ -201,9 +202,21 @@ pub struct Session {
     /// [`Session::clear_rezzed`] even after cancelling the body. Carried over
     /// a [`Session::relogin`].
     rezzes: RezLedger,
+    /// Where the session's own avatar was last seen, kept by the event
+    /// forwarder for the same reason as [`rezzes`](Self::rezzes): a case's
+    /// waits discard the updates that say so.
+    whereabouts: Whereabouts,
 }
 
 impl Session {
+    /// Where the session's own avatar was last seen: standing in a region at
+    /// a position, or seated; `None` before its first update arrived. Read
+    /// from every event the session received, whether or not a case read it.
+    #[must_use]
+    pub fn whereabouts(&self) -> Option<Sighting> {
+        self.whereabouts.last()
+    }
+
     /// The current region capability URL for `name` (e.g. `GetTexture`), or
     /// `None` if the caps have not arrived yet or the region does not offer it.
     #[must_use]
@@ -1331,9 +1344,12 @@ fn spawn_session(mut client: Client, spec: LoginSpec<'_>, rezzes: RezLedger) -> 
     // and it outlives a case body the runner cancels.
     let (events_tx, events_rx) = mpsc::unbounded_channel::<Event>();
     let ledger = rezzes.clone();
+    let whereabouts = Whereabouts::of(agent_id);
+    let seen = whereabouts.clone();
     let _forward = tokio::spawn(async move {
         while let Some(event) = event_rx.recv().await {
             ledger.observe(&event);
+            seen.observe(&event);
             if events_tx.send(event).is_err() {
                 break;
             }
@@ -1369,6 +1385,7 @@ fn spawn_session(mut client: Client, spec: LoginSpec<'_>, rezzes: RezLedger) -> 
         connected: true,
         caps,
         rezzes,
+        whereabouts,
     }
 }
 

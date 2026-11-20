@@ -1,0 +1,13 @@
+grid: aditi
+date: 2026-11-20
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Mauve
+engine: Mono
+settings: Linden Lab's; a resident cannot set them
+
+# animations avatar=other playing=""
+# animations avatar=owner playing=""
+PROBE events/collision-standing rec=start region="Mauve" channel="Luau" version="2026-11-10.42914476267"
+PROBE events/collision-standing rec=phase phase=1 name=standing events="collision_start:owner" collisions=59 owner_detected=59 other_detected=0 object_detected=0 per_second="6,7,8,7,8,7,8,7,1" lifted=1
+PROBE events/collision-standing rec=phase phase=2 name=gone events="collision_end:owner" collisions=1 owner_detected=1 other_detected=0 object_detected=0 per_second="1"
+PROBE events/collision-standing rec=end

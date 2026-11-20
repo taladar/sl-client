@@ -2,7 +2,7 @@
 // script: Probe
 // order: 2
 // drive: none
-// deadline: 300
+// deadline: 720
 // stats: active-scripts, scripts-run, script-time, time-dilation
 // vary: rezzed, reported, slowest, fastest, mean, total, real_slowest, real_mean, dilation
 //
@@ -20,6 +20,9 @@
 // the region's budget in scripts' shares. The runner notes the region's
 // active-script count, scripts-run percentage, script time and time dilation
 // meanwhile.
+// The deadline is for the fake grid imitating YEngine, which spends real CPU
+// on every iteration of every worker at YEngine's speed, some 1.9 billion in
+// all: a run there took seven minutes.
 string ID = "vm/region-budget";
 
 integer GO = -73105;

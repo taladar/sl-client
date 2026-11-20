@@ -1,0 +1,17 @@
+grid: fake-sl
+date: 2026-11-20
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Fake Region
+engine: sl-lsl-runtime imitating Mono
+settings: sl-fake-grid's: each flavour's measured timer floor, ScriptDelayFactor=1.0, the stock [OSSL] settings, llHTTPRequest answered by the injected responder
+
+PROBE events/collision-standing rec=start region="Fake Region" channel="Second Life Server" version="sl-fake-grid 0.1.0"
+# animations avatar=owner playing="falldown@other-object"
+PROBE events/collision-standing rec=phase phase=1 name=standing events="collision_start:owner" collisions=59 owner_detected=59 other_detected=0 object_detected=0 per_second="7,7,8,7,8,7,8,7" lifted=1
+# animations avatar=other playing="falldown@other-object"
+# animations avatar=owner playing="land@other-object"
+# animations avatar=other playing="land@other-object"
+# animations avatar=owner playing="stand@other-object"
+# animations avatar=other playing="stand@other-object"
+PROBE events/collision-standing rec=phase phase=2 name=gone events="collision_end:owner" collisions=0 owner_detected=0 other_detected=0 object_detected=0 per_second=""
+PROBE events/collision-standing rec=end

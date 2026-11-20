@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 328 |
 | blocked | 34 |
 | in-progress | 4 |
-| bugs | 9 |
-| done | 1604 |
+| bugs | 8 |
+| done | 1605 |
 | deferred | 30 |
 | wont-do | 24 |
 | **total** | **2164** |
@@ -1239,7 +1239,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-text-renderability-axis`](in-progress/viewer-ui-text-renderability-axis.md)
   — Upstream issue — font selection cannot see glyph-format renderability
 
-## bugs (9)
+## bugs (8)
 
 ### viewer
 
@@ -1263,10 +1263,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-conformance-upload-after-yengine-start-dropped`](bugs/test-conformance-upload-after-yengine-start-dropped.md)
   — Quick script uploads to one item on OpenSim take each other's answers, or
   fail as "operation timed out"
-- [`test-lsl-probes-corpus-order-leaks-between-probes`](bugs/test-lsl-probes-corpus-order-leaks-between-probes.md)
-  — A full fake-grid probe corpus run changes two probes' results
 
-## done (1604)
+## done (1605)
 
 ### protocol
 
@@ -4259,6 +4257,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   one script on both grids and diff what it did (blocked by
   `server-fake-grid-script-engine-wiring` (done),
   `gridspec-lsl-live-differential-runner` (done))
+- [`test-lsl-probes-corpus-order-leaks-between-probes`](done/test-lsl-probes-corpus-order-leaks-between-probes.md)
+  — A full fake-grid probe corpus run changes two probes' results
 - [`test-lsl-script-corpus`](done/test-lsl-script-corpus.md) — An executable LSL
   corpus that runs in cargo test with no grid (blocked by
   `server-lsl-vm-execution` (done))

@@ -82,11 +82,12 @@ use crate::probe_corpus::{
 };
 use crate::registry::{GridTest, TestFuture};
 use crate::support::{
-    REGION_TIMEOUT, REPLY_TIMEOUT, created_item_announcement_observing, is_opensim, is_own,
-    settle_scene, settle_scene_observing, settle_scene_with_avatar, wait_for_own_new_object,
-    walk_within_region,
+    REGION_TIMEOUT, REPLY_TIMEOUT, RETURN_RADIUS_M, created_item_announcement_observing,
+    is_opensim, is_own, return_to, settle_scene, settle_scene_observing, settle_scene_with_avatar,
+    wait_for_own_new_object, within,
 };
 use crate::teleport_trace::{other_region, request_teleport};
+use crate::whereabouts::Sighting;
 
 /// The OpenSim start location: the "Default Region" (1000,1000), centred,
 /// whose test prim is the rez placement reference. On Second Life the avatar
@@ -492,11 +493,6 @@ struct Transcript {
     /// The newest object update of each of the probe's prims, by key: where
     /// it is now, and whether it is worn.
     latest: HashMap<ObjectKey, Object>,
-    /// Where the grid last put the owner by a teleport inside the region (a
-    /// script's `llTeleportAgent`), which may be far from the build location.
-    owner_moved: Option<Vector>,
-    /// Where it last put the other avatar, likewise.
-    other_moved: Option<Vector>,
     /// The region statistics the probe asked to have noted (`stats`).
     noted_stats: Vec<Stat>,
     /// The value of each last noted.
@@ -582,22 +578,9 @@ impl Transcript {
             Event::TeleportStarted { flags } => self
                 .body
                 .push(format!("# teleport-started{by} flags={:#x}", flags.0)),
-            Event::TeleportLocal {
-                flags, position, ..
-            } => {
-                let landed = Some(Vector {
-                    x: position.x(),
-                    y: position.y(),
-                    z: position.z(),
-                });
-                if by.is_empty() {
-                    self.owner_moved = landed;
-                } else {
-                    self.other_moved = landed;
-                }
-                self.body
-                    .push(format!("# teleport-local{by} flags={:#x}", flags.0));
-            }
+            Event::TeleportLocal { flags, .. } => self
+                .body
+                .push(format!("# teleport-local{by} flags={:#x}", flags.0)),
             Event::TeleportFailed { reason, .. } => self.body.push(format!(
                 "# teleport-failed{by} reason={}",
                 quote(&self.cast.scrub(reason))
@@ -1109,6 +1092,7 @@ async fn run_corpus(ctx: &mut TestContext, xengine: bool) -> Result<(), TestFail
         };
         (settled.seen, settled.anchor, trip)
     };
+    let owner_home = home_of(ctx.primary(), "owner");
     let changes_contents = probes
         .iter()
         .any(|probe| probe.drives().contains(&Drive::Contents));
@@ -1148,6 +1132,7 @@ async fn run_corpus(ctx: &mut TestContext, xengine: bool) -> Result<(), TestFail
         }
         (clear_active_group(other).await?, other_trash)
     };
+    let other_home = ctx.secondary().and_then(|other| home_of(other, "other"));
     let Some(reference) = reference else {
         if is_opensim(grid) {
             return Err(TestFailure::Assertion(
@@ -1204,19 +1189,19 @@ async fn run_corpus(ctx: &mut TestContext, xengine: bool) -> Result<(), TestFail
             trash,
         )
         .await?;
-        // A probe's script may have teleported an avatar inside the region,
-        // and a grid that routes such a teleport (Mauve's telehub) leaves it
-        // far from the build location, out of the next probe's chat range.
-        if let Some(build) = &build_position {
+        // What a probe did to an avatar must not reach the next probe: a
+        // script's teleport inside the region (which a grid that routes it,
+        // Mauve's telehub, lands far from the build location, out of the next
+        // probe's chat range), and a stand, which leaves the avatar beside
+        // the prim it sat on, where the next probe's prim A stands and hears
+        // its collisions every frame.
+        {
             let (session, other) = ctx.primary_and_secondary().ok_or_else(|| {
                 TestFailure::State("the case runs with a secondary avatar".to_owned())
             })?;
-            for (moved, avatar) in [
-                (transcript.owner_moved.clone(), session),
-                (transcript.other_moved.clone(), other),
-            ] {
-                if let Some(from) = moved {
-                    let _stopped = walk_within_region(avatar, from, build, |_event| {}).await?;
+            for (home, avatar) in [(&owner_home, session), (&other_home, other)] {
+                if let Some(home) = home {
+                    put_back(avatar, home, &probe.id).await?;
                 }
             }
         }
@@ -1382,6 +1367,83 @@ async fn clear_active_group(session: &mut Session) -> Result<Option<bool>, TestF
         }
         Err(other) => Err(other),
     }
+}
+
+/// Where an avatar stands before the first probe, which every probe leaves
+/// it on again.
+#[derive(Debug, Clone)]
+struct Home {
+    /// The region.
+    region: RegionHandle,
+    /// The spot, in that region's coordinates.
+    position: Vector,
+}
+
+/// Where `avatar` stands now, as its session last saw it, as its [`Home`];
+/// `None`, with a warning, when it is seated or has not been seen.
+fn home_of(avatar: &Session, role: &str) -> Option<Home> {
+    match avatar.whereabouts() {
+        Some(Sighting::Standing { region, position }) => {
+            tracing::info!(role, ?position, "the avatar's spot between probes");
+            Some(Home { region, position })
+        }
+        sighting => {
+            tracing::warn!(
+                role,
+                ?sighting,
+                "the avatar is not standing where it was seen, so no probe puts it back"
+            );
+            None
+        }
+    }
+}
+
+/// Puts `avatar` back on its `home` spot after the probe `id`: stands it up
+/// if it is still seated, and walks it back if it stands more than
+/// [`RETURN_RADIUS_M`] from the spot. An avatar in another region is left to
+/// the trip that took it there.
+async fn put_back(avatar: &mut Session, home: &Home, id: &str) -> Result<(), TestFailure> {
+    let mut sighting = avatar.whereabouts();
+    if sighting == Some(Sighting::Seated) {
+        tracing::info!(probe = id, "the avatar is still seated after the probe");
+        avatar.send(Command::Stand).await?;
+        let agent = avatar
+            .agent_id()
+            .ok_or_else(|| TestFailure::Assertion("login reported no agent id".to_owned()))?;
+        avatar
+            .wait_for(STEP_TIMEOUT, |event| match event {
+                Event::ObjectAdded(object) | Event::ObjectUpdated(object)
+                    if object.full_id.uuid() == agent.uuid()
+                        && object.parent_id == RegionLocalObjectId(0) =>
+                {
+                    Some(())
+                }
+                _ => None,
+            })
+            .await?;
+        sighting = avatar.whereabouts();
+    }
+    match sighting {
+        Some(Sighting::Standing { region, position })
+            if region == home.region && !within(&position, &home.position, RETURN_RADIUS_M) =>
+        {
+            tracing::info!(
+                probe = id,
+                from = ?position,
+                to = ?home.position,
+                "putting the avatar back on its spot"
+            );
+            let _stopped = return_to(avatar, position, &home.position, |_event| {}).await?;
+        }
+        Some(Sighting::Standing { region, .. }) if region != home.region => {
+            tracing::warn!(
+                probe = id,
+                "the avatar is in another region after the probe; it is not put back"
+            );
+        }
+        _ => {}
+    }
+    Ok(())
 }
 
 /// Runs one probe: rezzes its prims, plants its scripts, drives it, keeps

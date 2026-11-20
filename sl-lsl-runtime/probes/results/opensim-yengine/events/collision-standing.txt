@@ -1,0 +1,13 @@
+grid: opensim-yengine
+date: 2026-11-20
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Default Region
+engine: YEngine
+settings: OpenSimDefaults.ini: [YEngine] MinTimerInterval=0.1; [XEngine] MinTimerInterval unset (LSL_Api default 0.5); ScriptDelayFactor=1.0, SensorMaxRange=96, SensorMaxResults=16, UseLlCastRayV3=false (defaults) on both; [YEngine] ScriptHeapSize=1024 KiB, ScriptStackSize=2048 KiB (defaults); OpenSim.ini [Network] OutboundDisallowForUserScriptsExcept=127.0.0.1:9000 (the simulator itself), [ScriptsHttpRequestModule] and llHTTPRequest limits at their defaults
+
+# chat type=say from="Object" length=14 text="Script running"
+PROBE events/collision-standing rec=start region="Default Region" channel="OpenSim" version="OpenSim 0.9.2.1 Yeti Dev   36f6d16 (Unix/Mono)"
+PROBE events/collision-standing rec=phase phase=1 name=standing events="collision_start:owner" collisions=145 owner_detected=145 other_detected=0 object_detected=0 per_second="17,18,19,18,18,19,18,18" lifted=1
+PROBE events/collision-standing rec=phase phase=2 name=gone events="collision_end:owner" collisions=1 owner_detected=1 other_detected=0 object_detected=0 per_second="1"
+PROBE events/collision-standing rec=end
+# chat by=other type=say from="Object" length=14 text="Script running"

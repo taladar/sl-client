@@ -730,6 +730,17 @@ physical, falls onto it and comes to rest; five seconds later it is put back.
 | the falling prim's own events, landing on the solid prim | `collision_start`, `collision_end` and `collision` of its own | the same | the same; on OpenSim the end of the second landing only once it is put back, and then unheard by the faller |
 | the scripted prim asleep three seconds while it is hit | **nothing at all**: no `collision_start`, `collision` or `collision_end` on waking, though the falling prim's own events show it hit | all of it queued: each start and end twice, 82–132 `collision` events | each flavour as its grid: on Second Life a script busy when a collision begins hears none of it |
 
+`events/collision-standing`: the probe's prim becomes a platform 1.5 m
+square and slides under the owner's feet, its top 0.15 m above them, for
+eight seconds, then goes back; a collision filter lets the owner alone
+through.
+
+| behaviour | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| the avatar standing on the platform | one `collision_start`, then `collision` steadily for as long as it stands there: 59 in 8 s, 6–8 a second | the same at 17–19 a second under YEngine, 11–15 under XEngine | each flavour as its grid: 59 and 146 |
+| the platform moved away | one last `collision`, then `collision_end` | the same | `collision_end` at once |
+| two avatars stepping on at once (before the filter) | one `collision_start` detecting both | the same, under both engines | the same |
+
 Where the falling prim lands after a volume-detect pass is the region's: on
 aditi it fell on to land (`land_collision_start`), on the local OpenSim on
 to the region's reference prim beneath (another `collision_start`). The fake

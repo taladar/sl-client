@@ -58,6 +58,7 @@ pub mod rez_ledger;
 pub mod support;
 pub mod teleport_trace;
 pub mod trace;
+pub mod whereabouts;
 
 pub use grid::Grid;
 pub use metrics::Metrics;

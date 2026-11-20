@@ -431,7 +431,15 @@ and every `DEBUG_CHANNEL` message they send as a `# debug-channel:` note
 line that is not a probe line as `# owner-say:`), until `end` or three minutes
 (the header's `deadline`, if it has one), then derezzes the prims to the Trash —
 and so it does when the grid refuses one of a probe's rezzes, with the prims
-already rezzed, before the run fails. For a probe whose header asks (`stats`),
+already rezzed, before the run fails. Then it puts each avatar back on the spot
+it stood on before the first probe, so that nothing a probe did to an avatar
+reaches the next one: one still seated is stood up, and one standing more than a
+metre from its spot (a stand leaves it beside the prim it sat on, where the next
+probe's prim A then hears it collide every frame; a script's teleport may land
+it at a telehub) walks back, flying first only from more than 32 m, and is
+steered again if it comes to rest elsewhere. Where an avatar stands is what its
+session's event forwarder last saw of it (`Session::whereabouts`), not what the
+runner's waits happened to read. For a probe whose header asks (`stats`),
 it notes each statistic asked for as `# sim-stats <key>=…` whenever it changes.
 It also notes what the grid sent the two viewers meanwhile, about the avatars: a
 permission question from the probe's prims (`# question`, the mask, the object's

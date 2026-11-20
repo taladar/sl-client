@@ -1034,8 +1034,188 @@ pub async fn steer_towards(
     position: &Vector,
     gait: Gait,
     budget: Duration,
+    observe: impl FnMut(&Event),
+) -> Result<(Vector, bool), TestFailure> {
+    steer(
+        session,
+        Journey {
+            from,
+            position,
+            gait,
+            budget,
+            radius: ARRIVAL_RADIUS_M,
+        },
+        observe,
+    )
+    .await
+}
+
+/// Puts the avatar back on the spot `spot` it stood on before a step moved it
+/// (a stand beside the prim it sat on, a script's teleport, held movement
+/// controls), to within [`RETURN_RADIUS_M`], starting from `from`, where it
+/// was last seen; returns where it came to rest.
+///
+/// [`walk_within_region`]'s `ARRIVAL_RADIUS_M` is a radius for reaching a
+/// build location, where any spot near it serves; a step that leaves the
+/// avatar a few metres off is then not moved at all, and whatever stands
+/// where it was left (a prim it collides with every frame) reaches the next
+/// step. So this walks there, at a nudge's pace for the last stretch, flying
+/// only the part of a long way back beyond [`RETURN_WALK_M`]; then waits for
+/// the avatar to come to rest and steers again if it did not come to rest on
+/// the spot. On Second Life an avatar coming out of a flight coasts on: it
+/// came to rest five to ten metres past a spot it had reached.
+///
+/// # Errors
+///
+/// Returns [`TestFailure::Assertion`] when the login reported no agent id or
+/// the avatar has not come to rest on the spot after [`RETURN_ATTEMPTS`]
+/// tries, and propagates the sends' and waits' failures.
+pub async fn return_to(
+    session: &mut Session,
+    from: Vector,
+    spot: &Vector,
+    mut observe: impl FnMut(&Event),
+) -> Result<Vector, TestFailure> {
+    let mut at = from;
+    for attempt in 1..=RETURN_ATTEMPTS {
+        if !within(&at, spot, RETURN_WALK_M) {
+            at = walk_within_region(session, at, spot, &mut observe).await?;
+        }
+        let (stopped, _arrived) = steer(
+            session,
+            Journey {
+                from: at,
+                position: spot,
+                gait: Gait::Walking,
+                budget: RETURN_TIMEOUT,
+                radius: RETURN_RADIUS_M,
+            },
+            &mut observe,
+        )
+        .await?;
+        at = come_to_rest(session, stopped, &mut observe).await?;
+        if within(&at, spot, RETURN_RADIUS_M) {
+            return Ok(at);
+        }
+        tracing::info!(
+            attempt,
+            x = at.x,
+            y = at.y,
+            "the avatar came to rest off its spot"
+        );
+    }
+    Err(TestFailure::Assertion(format!(
+        "could not put the avatar back on {:.1}/{:.1} (it came to rest at {:.1}/{:.1})",
+        spot.x, spot.y, at.x, at.y
+    )))
+}
+
+/// How close to its spot [`return_to`] has to bring the avatar.
+pub const RETURN_RADIUS_M: f32 = 1.0;
+
+/// How far from its spot [`return_to`] walks all the way, rather than flying
+/// the rest first: a walk of this far takes a quarter of
+/// [`RETURN_TIMEOUT`].
+pub const RETURN_WALK_M: f32 = 32.0;
+
+/// How long [`return_to`]'s walking leg may take.
+pub const RETURN_TIMEOUT: Duration = Duration::from_secs(40);
+
+/// How many times [`return_to`] steers the avatar back before it gives up.
+pub const RETURN_ATTEMPTS: u32 = 3;
+
+/// How long without an update of our own avatar counts as at rest: a grid
+/// sends none for an avatar standing still.
+const REST_QUIET: Duration = Duration::from_secs(1);
+
+/// The speed under which an updated avatar counts as at rest, metres a
+/// second.
+const REST_SPEED_M_PER_S: f32 = 0.1;
+
+/// How long [`come_to_rest`] waits at most.
+const REST_BUDGET: Duration = Duration::from_secs(15);
+
+/// Waits until the avatar, last seen at `last`, comes to rest (an update
+/// slower than [`REST_SPEED_M_PER_S`], or none for [`REST_QUIET`]), for at
+/// most [`REST_BUDGET`], and returns where it is then.
+///
+/// # Errors
+///
+/// Returns [`TestFailure::Assertion`] when the login reported no agent id,
+/// and propagates the waits' failures but their timeouts.
+async fn come_to_rest(
+    session: &mut Session,
+    mut last: Vector,
+    mut observe: impl FnMut(&Event),
+) -> Result<Vector, TestFailure> {
+    let agent = session
+        .agent_id()
+        .ok_or_else(|| TestFailure::Assertion("login reported no agent id".to_owned()))?
+        .uuid();
+    let started = Instant::now();
+    while started.elapsed() < REST_BUDGET {
+        match session
+            .wait_for(REST_QUIET, |event| {
+                observe(event);
+                match event {
+                    Event::ObjectUpdated(object) | Event::ObjectAdded(object)
+                        if object.full_id.uuid() == agent =>
+                    {
+                        Some((
+                            object.motion.position.clone(),
+                            object.motion.velocity.clone(),
+                        ))
+                    }
+                    _ => None,
+                }
+            })
+            .await
+        {
+            Ok((position, velocity)) => {
+                last = position;
+                let speed = velocity.x.hypot(velocity.y).hypot(velocity.z);
+                if speed < REST_SPEED_M_PER_S {
+                    break;
+                }
+            }
+            Err(TestFailure::Timeout(_)) => break,
+            Err(other) => return Err(other),
+        }
+    }
+    Ok(last)
+}
+
+/// Where [`steer`] goes and how.
+struct Journey<'a> {
+    /// Where the avatar was last seen.
+    from: Vector,
+    /// Where it is to go.
+    position: &'a Vector,
+    /// How it moves.
+    gait: Gait,
+    /// How long it may take.
+    budget: Duration,
+    /// How close to `position` counts as arrived, horizontally.
+    radius: f32,
+}
+
+/// [`steer_towards`], arriving within the journey's own radius.
+///
+/// # Errors
+///
+/// As [`steer_towards`].
+async fn steer(
+    session: &mut Session,
+    journey: Journey<'_>,
     mut observe: impl FnMut(&Event),
 ) -> Result<(Vector, bool), TestFailure> {
+    let Journey {
+        from,
+        position,
+        gait,
+        budget,
+        radius,
+    } = journey;
     let agent = session
         .agent_id()
         .ok_or_else(|| TestFailure::Assertion("login reported no agent id".to_owned()))?
@@ -1067,7 +1247,7 @@ pub async fn steer_towards(
             z: velocity.z.mul_add(since, reported.z),
         };
         let speed = velocity.x.hypot(velocity.y);
-        let arrived = within(&current, position, ARRIVAL_RADIUS_M);
+        let arrived = within(&current, position, radius);
         if arrived || started.elapsed() >= budget {
             tracing::info!(
                 x = current.x,
@@ -1166,7 +1346,8 @@ const NUDGE_BELOW_M_PER_S: f32 = 2.0;
 const ARRIVAL_RADIUS_M: f32 = 4.0;
 
 /// Whether `a` and `b` are within `radius` metres of each other horizontally.
-fn within(a: &Vector, b: &Vector, radius: f32) -> bool {
+#[must_use]
+pub fn within(a: &Vector, b: &Vector, radius: f32) -> bool {
     let dx = a.x - b.x;
     let dy = a.y - b.y;
     dx.mul_add(dx, dy * dy) <= radius * radius

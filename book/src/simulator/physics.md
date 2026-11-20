@@ -146,6 +146,7 @@ From `events/collision` and the `physics/*` probes
 | a landing | stops dead | bounces at the product of the two materials' restitutions (wood 0.5, so wood on wood 0.25; the ground 0.001 of the object's) when faster than 1.5 m/s — ubODE's table and `bounce_vel` |
 | an object at rest | sleeps a quarter of a second later and touches nothing, so its contacts end | keeps touching what it rests on |
 | a script busy in a handler when a collision begins | hears nothing of it | hears it all once it is free |
+| an avatar standing still on a prim | `collision` about 7.4 times a second for as long as it stands there (every sixth frame) | 17–19 times a second: a scripted prim's actor reports at most every 50 ms, on the next 20 ms step |
 | the position `land_collision_*` is handed | the ground under the object's root | the root |
 | `moving_start` / `moving_end` | for any object starting and stopping | for keyframed motion alone (`KeyframeMotion` is OpenSim's only caller) |
 | an impulse or push given to a prim that is not physical | lost | applied when it turns physical |
@@ -155,6 +156,17 @@ From `events/collision` and the `physics/*` probes
 | a keyframed motion soon after a change of the physics shape | waits until 0.4 s after the change | starts at once |
 | `KFM_CMD_PLAY` with nothing playing | plays the last motion given | nothing |
 | a drag of a physical prim | pulls it towards the grab | leaves it |
+
+An avatar never sleeps the way a resting object does, so on both grids its
+contact goes on raising `collision` (`events/collision-standing`), paced as
+the table says rather than raised every tick. What one prim began, went on or
+stopped touching in one tick is one event of each kind, detecting everything
+it touched: two avatars stepping on at once are one `collision_start` with two
+detected on both grids, as OpenSim's `SceneObjectPart.SendCollisionEvent`
+gathers one physics report's colliders into one event. One detail is not
+modelled: when the prim is moved away from a standing avatar, all three live
+engines raise one last `collision` before the `collision_end`, and the fake
+grid ends the contact at once.
 
 A spin of a physical prim turns it towards the rotation asked on both
 (`object-touch-grab`, leg 10). A physical object made non-physical drops its
