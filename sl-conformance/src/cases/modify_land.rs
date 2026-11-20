@@ -52,7 +52,9 @@ use sl_client_tokio::{
 use crate::context::{Session, TestContext, TestFailure};
 use crate::grid::Grid;
 use crate::registry::{GridTest, TestFuture};
-use crate::support::{LONG_TIMEOUT, REGION_TIMEOUT, REPLY_TIMEOUT, check, check_eq, is_opensim};
+use crate::support::{
+    DrainWindow, LONG_TIMEOUT, REGION_TIMEOUT, REPLY_TIMEOUT, check, check_eq, is_opensim,
+};
 
 /// The `start` location forcing the estate-owner avatar to the OpenSim Default
 /// Region centre, so it is within terrain-streaming range of the edited patch.
@@ -103,6 +105,9 @@ const UNDO_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// The quiet gap (no terrain patch) that marks the login terrain flood drained.
 const DRAIN_QUIET: Duration = Duration::from_secs(3);
+
+/// The most a terrain drain may take, however long the patches keep coming.
+const DRAIN_WINDOW: Duration = Duration::from_secs(30);
 
 /// Raises a patch of terrain then undoes the edit, restoring the region.
 #[derive(Debug)]
@@ -296,16 +301,18 @@ async fn wait_centre_patch(
         .await
 }
 
-/// Drains queued terrain patches until none arrives for `quiet`, so a later
+/// Drains queued terrain patches until none arrives for `quiet`, or
+/// [`DRAIN_WINDOW`] is spent, so a later
 /// [`wait_centre_patch`] sees only genuinely post-edit re-broadcasts.
 ///
 /// # Errors
 ///
 /// Propagates a [`Session::wait_for`] disconnect.
 async fn drain_terrain(session: &mut Session, quiet: Duration) -> Result<(), TestFailure> {
-    loop {
+    let window = DrainWindow::new(DRAIN_WINDOW);
+    while let Some(wait) = window.next_wait(quiet) {
         match session
-            .wait_for(quiet, |event| {
+            .wait_for(wait, |event| {
                 matches!(event, Event::TerrainPatch(_)).then_some(())
             })
             .await
@@ -315,4 +322,5 @@ async fn drain_terrain(session: &mut Session, quiet: Duration) -> Result<(), Tes
             Err(other) => return Err(other),
         }
     }
+    Ok(())
 }

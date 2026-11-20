@@ -27,6 +27,10 @@ use crate::executor::AutomationIdentity;
 /// The most frames a test waits for a line.
 const PATIENCE: u32 = 2000;
 
+/// The most pages the subscription test reads for its two entries: two acts
+/// make one or two pages, never more.
+const MOST_PAGES: u32 = 10;
+
 /// A fresh, private scratch directory for one test's sockets.
 fn scratch(test: &str) -> Result<PathBuf, String> {
     static COUNT: AtomicU32 = AtomicU32::new(0);
@@ -275,7 +279,12 @@ fn a_subscription_streams_the_log_until_it_is_ended() -> Result<(), String> {
     act(&mut app, "first");
     act(&mut app, "second");
     let mut kinds = Vec::new();
-    while kinds.len() < 2 {
+    // Each page waits at most PATIENCE frames, and the pages are counted too:
+    // a stream of empty pages would otherwise keep the loop going for good.
+    for _page in 0..MOST_PAGES {
+        if kinds.len() >= 2 {
+            break;
+        }
         match client.next(&mut app)? {
             ViewerMessage::Notification(Notification::Log { subscription, page }) => {
                 assert_eq!(subscription, RequestId(3), "under the client's id");

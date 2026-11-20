@@ -1482,9 +1482,6 @@ mod test {
     /// The name the take test gives its prim.
     const TAKEN: &str = "Taken By The Viewer";
 
-    /// A search no inventory item answers to.
-    const NO_SUCH_ITEM: &str = "no item is called this";
-
     /// The slices of an object's pie that take it: the Take sub-pie, then
     /// Take.
     const TAKE: [&str; 2] = ["pie-object-take", "pie-object-take"];
@@ -1558,14 +1555,10 @@ mod test {
             alpha.press("Ctrl+I").await?;
             let _shown = alpha.expect(&inventory).to_be_visible().await?;
         }
-        // The list narrows to a search a moment after it is typed, and a row
-        // found before that is not where a drag will find it. So the item is
-        // searched away first: it can only show again once the list has
-        // narrowed to its name, which is where it stays.
+        // The list narrows to the search a moment after it is typed; until
+        // then it is busy, and the drop finds its row again just before it
+        // presses, so the row is taken where the narrowed list draws it.
         let search = inventory.test_id("inventory:search").role(Role::Textbox);
-        let named = inventory.get(Locator::role(Role::TreeItem).named(&name));
-        let _searched = search.fill(NO_SUCH_ITEM).await?;
-        let _narrowed = alpha.expect(&named).timeout(WAIT).to_be_hidden().await?;
         let _searched = search.fill(&name).await?;
         let row = inventory
             .get(Locator::role(Role::TreeItem).named(&name))
@@ -2669,10 +2662,8 @@ mod test {
             alpha.press("Ctrl+I").await?;
             let _shown = alpha.expect(&inventory).to_be_visible().await?;
         }
+        // A busy list holds the click until it has narrowed to the search.
         let search = inventory.test_id("inventory:search").role(Role::Textbox);
-        let named = inventory.get(Locator::role(Role::TreeItem).named(&name));
-        let _searched = search.fill(NO_SUCH_ITEM).await?;
-        let _narrowed = alpha.expect(&named).timeout(WAIT).to_be_hidden().await?;
         let _searched = search.fill(&name).await?;
         let row = inventory
             .get(Locator::role(Role::TreeItem).named(&name))

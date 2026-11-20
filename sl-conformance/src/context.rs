@@ -45,6 +45,10 @@ const ALREADY_LOGGED_IN_RETRY_DELAY: Duration = Duration::from_secs(1);
 /// run loop down.
 const LOGOUT_GRACE: Duration = Duration::from_secs(15);
 
+/// How long [`Session::logout`] waits for the run loop to end once its
+/// commands are closed, before it aborts it.
+const RUN_END_GRACE: Duration = Duration::from_secs(30);
+
 /// How long [`Session::clear_rezzed`] waits for the grid to take away what it
 /// derezzed. A derez is answered with its kill within a second or two on both
 /// grids.
@@ -517,24 +521,36 @@ impl Session {
     }
 
     /// Log out cleanly: request logout, wait briefly for `LoggedOut`, then join
-    /// the run task.
+    /// the run task, for at most 30 s; a run loop that has not
+    /// ended by then is aborted.
     ///
     /// # Errors
     ///
-    /// Returns [`TestFailure::Client`] if the run loop errored, or
-    /// [`TestFailure::Join`] if the task panicked.
+    /// Returns [`TestFailure::Client`] if the run loop errored,
+    /// [`TestFailure::Join`] if the task panicked, or [`TestFailure::Timeout`]
+    /// if it had to be aborted.
     pub async fn logout(mut self) -> Result<(), TestFailure> {
-        self.commands.send(Command::Logout).await.ok();
+        // A full command channel is a run loop that has stopped reading it.
+        let _sent = tokio::time::timeout(LOGOUT_GRACE, self.commands.send(Command::Logout)).await;
         let _logged_out = self
             .wait_for(LOGOUT_GRACE, |event| {
                 matches!(event, Event::LoggedOut).then_some(())
             })
             .await;
         drop(self.commands);
-        match self.run.await {
-            Ok(Ok(())) => Ok(()),
-            Ok(Err(error)) => Err(TestFailure::Client(error)),
-            Err(join) => Err(TestFailure::Join(join.to_string())),
+        let mut run = self.run;
+        match tokio::time::timeout(RUN_END_GRACE, &mut run).await {
+            Ok(Ok(Ok(()))) => Ok(()),
+            Ok(Ok(Err(error))) => Err(TestFailure::Client(error)),
+            Ok(Err(join)) => Err(TestFailure::Join(join.to_string())),
+            Err(_elapsed) => {
+                run.abort();
+                Err(TestFailure::Timeout(format!(
+                    "the client's run loop had not ended {} s after its commands closed, and was \
+                     aborted",
+                    RUN_END_GRACE.as_secs()
+                )))
+            }
         }
     }
 

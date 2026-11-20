@@ -32,6 +32,14 @@ const TOTP_WINDOW_SECS: u64 = 30;
 /// before using its token, else wait for the next window.
 const DEFAULT_MFA_WINDOW_GUARD_SECS: u64 = 5;
 
+/// How long an MFA token command may run before it is killed: generous for
+/// one that asks a password manager, which may prompt somebody, and still a
+/// bound for one that hangs.
+const MFA_COMMAND_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// How often a running MFA token command is looked at.
+const MFA_COMMAND_POLL: Duration = Duration::from_millis(10);
+
 /// A secret string (a password or an acquired MFA token) that never reveals
 /// itself through [`Debug`](core::fmt::Debug), [`Display`](core::fmt::Display),
 /// or therefore any `tracing` log.
@@ -275,7 +283,8 @@ const fn window_wait(now_secs: u64, guard_secs: u64) -> Duration {
 /// Returns [`AuthError::Clock`] if the system clock is before the Unix epoch,
 /// [`AuthError::Io`] if the command cannot be spawned, [`AuthError::MfaFailed`]
 /// if it exits non-zero or its output is not valid UTF-8, or
-/// [`AuthError::MfaEmpty`] if its (trimmed) output is empty.
+/// [`AuthError::MfaEmpty`] if its (trimmed) output is empty, or
+/// [`AuthError::MfaTimedOut`] if it is still running after two minutes.
 pub fn acquire_mfa_token(command: &str, guard_secs: u64) -> Result<Secret, AuthError> {
     let now_secs = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -289,24 +298,62 @@ pub fn acquire_mfa_token(command: &str, guard_secs: u64) -> Result<Secret, AuthE
         );
         std::thread::sleep(wait);
     }
-    let output = std::process::Command::new("sh")
-        .arg("-c")
-        .arg(command)
-        .output()
-        .map_err(|error| AuthError::Io(error.to_string()))?;
-    if !output.status.success() {
-        return Err(AuthError::MfaFailed(format!(
-            "MFA command exited with {}",
-            output.status
-        )));
-    }
-    let token = String::from_utf8(output.stdout)
+    let stdout = run_bounded(command, MFA_COMMAND_TIMEOUT)?;
+    let token = String::from_utf8(stdout)
         .map_err(|_error| AuthError::MfaFailed("MFA command output was not UTF-8".to_owned()))?;
     let token = token.trim();
     if token.is_empty() {
         return Err(AuthError::MfaEmpty);
     }
     Ok(Secret::new(token.to_owned()))
+}
+
+/// Run `command` via `sh -c` and hand back its standard output, killing it
+/// once it has run for `limit`.
+///
+/// # Errors
+///
+/// [`AuthError::Io`] when it cannot be spawned or waited on,
+/// [`AuthError::MfaTimedOut`] when it ran out of time, and
+/// [`AuthError::MfaFailed`] when it exits non-zero.
+fn run_bounded(command: &str, limit: Duration) -> Result<Vec<u8>, AuthError> {
+    use std::io::Read as _;
+    use std::process::{Command, Stdio};
+    let io = |error: std::io::Error| AuthError::Io(error.to_string());
+    let mut child = Command::new("sh")
+        .arg("-c")
+        .arg(command)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(io)?;
+    let deadline = std::time::Instant::now()
+        .checked_add(limit)
+        .unwrap_or_else(std::time::Instant::now);
+    let status = loop {
+        if let Some(status) = child.try_wait().map_err(io)? {
+            break status;
+        }
+        if std::time::Instant::now() >= deadline {
+            // Its output is not read: a process it started may hold the
+            // pipe open past the kill.
+            child.kill().map_err(io)?;
+            let _reaped = child.wait().map_err(io)?;
+            return Err(AuthError::MfaTimedOut(limit.as_secs()));
+        }
+        std::thread::sleep(MFA_COMMAND_POLL);
+    };
+    if !status.success() {
+        return Err(AuthError::MfaFailed(format!(
+            "MFA command exited with {status}"
+        )));
+    }
+    let mut stdout = Vec::new();
+    if let Some(mut pipe) = child.stdout.take() {
+        let _read = pipe.read_to_end(&mut stdout).map_err(io)?;
+    }
+    Ok(stdout)
 }
 
 /// An error loading credentials or acquiring an MFA token.
@@ -338,13 +385,17 @@ pub enum AuthError {
     /// The MFA command produced no token.
     #[error("MFA command produced an empty token")]
     MfaEmpty,
+    /// The MFA command was still running after this many seconds, and was
+    /// killed.
+    #[error("MFA command had not finished after {0} s and was killed")]
+    MfaTimedOut(u64),
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
         AuthError, Avatar, Credentials, Duration, Secret, TOTP_WINDOW_SECS, acquire_mfa_token,
-        window_wait,
+        run_bounded, window_wait,
     };
     use pretty_assertions::assert_eq;
 
@@ -454,6 +505,29 @@ password = \"topsecret\"
     fn acquire_rejects_empty_token() {
         let result = acquire_mfa_token("true", 0);
         assert_eq!(result, Err(AuthError::MfaEmpty));
+    }
+
+    /// A command that fails is an error naming its exit.
+    #[test]
+    fn acquire_rejects_a_failing_command() {
+        let result = acquire_mfa_token("exit 3", 0);
+        assert!(
+            matches!(&result, Err(AuthError::MfaFailed(why)) if why.contains("exit status: 3")),
+            "{result:?}"
+        );
+    }
+
+    /// A command that hangs is killed once its time is up, not waited for.
+    #[test]
+    fn a_hanging_command_is_killed_at_its_limit() {
+        let started = std::time::Instant::now();
+        let result = run_bounded("exec sleep 60", Duration::from_millis(200));
+        assert_eq!(result, Err(AuthError::MfaTimedOut(0)));
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "it returned at its limit, after {:?}",
+            started.elapsed()
+        );
     }
 
     /// Multi-avatar selection honours the explicit name, the default, and the

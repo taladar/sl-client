@@ -149,7 +149,9 @@ pub use crate::in_process::{
     DEFAULT_PATIENCE, FRAME_PAUSE, HostedApp, IN_PROCESS_ID_BASE, InProcessError,
     InProcessTransport, ViewerHandle,
 };
-pub use crate::in_process_host::{BuildError, HostError, InProcessHost, ViewerLink};
+pub use crate::in_process_host::{
+    BUILD_TIMEOUT, BuildError, HostError, InProcessHost, STOP_TIMEOUT, TASK_TIMEOUT, ViewerLink,
+};
 pub use crate::locate::{find_all, find_one, shallow};
 pub use crate::manipulator_drag::{DragProgress, DragStage, HeldKeys, ManipulatorDrag};
 pub use crate::probe_sources::{

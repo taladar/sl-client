@@ -73,12 +73,15 @@ use sl_test_assets::inventory::{SavePath, SeededAsset};
 use crate::context::{Session, TestContext, TestFailure};
 use crate::grid::Grid;
 use crate::registry::{GridTest, TestFuture};
-use crate::support::{LONG_TIMEOUT, REGION_TIMEOUT, check};
+use crate::support::{DrainWindow, LONG_TIMEOUT, REGION_TIMEOUT, check};
 
 /// How long to wait for another object update before calling the arrival burst
 /// finished. Only the fake grid runs this case, and it streams its scene in one
 /// go, so this is a settling gap rather than a budget.
 const SETTLE_IDLE: Duration = Duration::from_millis(400);
+
+/// The most that drain may take, however much the region keeps streaming.
+const SETTLE_WINDOW: Duration = Duration::from_secs(10);
 
 /// Where the container prim is rezzed — the stock arrival point, a little above
 /// the fake grid's flat 25 m ground.
@@ -641,13 +644,17 @@ async fn rez_container(ctx: &mut TestContext) -> Result<Object, TestFailure> {
     let mut seen = HashSet::new();
     // Drain whatever the region already streamed, so the object rezzed below is
     // recognisable as the new one rather than as whichever update arrives next.
-    while let Ok(object) = session
-        .wait_for(SETTLE_IDLE, |event| match event {
-            Event::ObjectAdded(object) => Some((**object).clone()),
-            _other => None,
-        })
-        .await
-    {
+    let window = DrainWindow::new(SETTLE_WINDOW);
+    while let Some(wait) = window.next_wait(SETTLE_IDLE) {
+        let Ok(object) = session
+            .wait_for(wait, |event| match event {
+                Event::ObjectAdded(object) => Some((**object).clone()),
+                _other => None,
+            })
+            .await
+        else {
+            break;
+        };
         let _added = seen.insert(object.scoped_id());
     }
     session

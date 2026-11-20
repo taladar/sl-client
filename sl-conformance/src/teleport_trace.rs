@@ -20,7 +20,7 @@ use sl_client_tokio::{
 
 use crate::context::{Session, TestFailure};
 use crate::metrics::Metrics;
-use crate::support::REPLY_TIMEOUT;
+use crate::support::{DrainWindow, REPLY_TIMEOUT};
 
 /// How many grid cells to pad a neighbour search by on each side of the
 /// agent's own region: one covers every immediate neighbour.
@@ -30,6 +30,10 @@ const BLOCK_MARGIN: u32 = 1;
 /// drained. OpenSim's world-map worker batches regions with a ~50 ms sleep
 /// between batches, so this stays comfortably above that cadence.
 const BLOCK_DRAIN_QUIET: Duration = Duration::from_secs(2);
+
+/// The most a map reply's drain may take, its first block's wait included,
+/// however long the blocks keep coming.
+const BLOCK_DRAIN_WINDOW: Duration = Duration::from_secs(60);
 
 /// How long the diagnostic channel is given to deliver what the session
 /// recorded beside a failure.
@@ -439,18 +443,19 @@ pub async fn region_named(session: &mut Session, name: &str) -> Result<MapRegion
 }
 
 /// Drains the [`Event::MapBlock`] entries a map reply yields until none
-/// arrives for [`BLOCK_DRAIN_QUIET`]. The first block is awaited with the full
-/// [`REPLY_TIMEOUT`] (OpenSim queues the request onto a worker thread).
+/// arrives for [`BLOCK_DRAIN_QUIET`], or [`BLOCK_DRAIN_WINDOW`] is spent. The
+/// first block is awaited with the full [`REPLY_TIMEOUT`] (OpenSim queues the
+/// request onto a worker thread).
 async fn drain_map_blocks(session: &mut Session) -> Result<Vec<MapRegionInfo>, TestFailure> {
     let mut blocks = Vec::new();
-    loop {
-        let timeout = if blocks.is_empty() {
-            REPLY_TIMEOUT
-        } else {
-            BLOCK_DRAIN_QUIET
-        };
+    let window = DrainWindow::new(BLOCK_DRAIN_WINDOW);
+    while let Some(wait) = window.next_wait(if blocks.is_empty() {
+        REPLY_TIMEOUT
+    } else {
+        BLOCK_DRAIN_QUIET
+    }) {
         match session
-            .wait_for(timeout, |event| match event {
+            .wait_for(wait, |event| match event {
                 Event::MapBlock(region) => Some((**region).clone()),
                 _ => None,
             })
@@ -461,4 +466,5 @@ async fn drain_map_blocks(session: &mut Session) -> Result<Vec<MapRegionInfo>, T
             Err(other) => return Err(other),
         }
     }
+    Ok(blocks)
 }

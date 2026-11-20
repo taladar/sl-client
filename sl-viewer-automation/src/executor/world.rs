@@ -6,8 +6,8 @@ use std::collections::BTreeSet;
 
 use bevy::prelude::*;
 use sl_automation_proto::{
-    AutomationError, Deadline, DragAmount, DragModifiers, GroundPoint, ResponseBody, SnapSide,
-    WorldAction, WorldLocator, WorldNode, WorldWaitCondition,
+    AutomationError, Deadline, DragAmount, DragModifiers, GroundPoint, Locator, ResponseBody,
+    SnapSide, WorldAction, WorldLocator, WorldNode, WorldWaitCondition,
 };
 use sl_client_bevy::Uuid;
 use sl_viewer_ui_core::synthetic_input::InputActionId;
@@ -20,7 +20,7 @@ use super::{Clock, Started, Step, Task, automation_error, enqueue, finished};
 use crate::ground_aim::{GroundAim, GroundProgress, GroundTarget, ground_is_in_a_region};
 use crate::manipulator_drag::{DragProgress, HeldKeys, ManipulatorDrag};
 use crate::pursuit::{Intent, Progress, Pursuit};
-use crate::world_aim::{AimProgress, WorldAim, WorldIntent, WorldTarget};
+use crate::world_aim::{AimProgress, WorldAim, WorldIntent, WorldTarget, gesture};
 use crate::world_query::{WorldProgress, WorldQuery, WorldWant};
 use crate::world_sweep::{SweepProgress, WorldSweep};
 
@@ -61,6 +61,7 @@ pub(super) fn act(
         let aim = WorldAim::new(locator.clone(), intent).with_deadline(deadline);
         if reveal { aim } else { aim.without_reveal() }
     };
+    let source = drop_source(&action);
     let stage = match action {
         WorldAction::Click => ActStage::Aim(Box::new(aim(WorldIntent::Click))),
         WorldAction::DoubleClick => ActStage::Aim(Box::new(aim(WorldIntent::DoubleClick))),
@@ -75,6 +76,7 @@ pub(super) fn act(
     };
     running(WorldTask::Act(Box::new(WorldAct {
         locator,
+        source,
         reveal,
         deadline,
         stage,
@@ -97,6 +99,7 @@ pub(super) fn ground(
         let aim = GroundAim::new(ground.clone(), intent).with_deadline(deadline);
         if reveal { aim } else { aim.without_reveal() }
     };
+    let source = drop_source(&action);
     let stage = match action {
         WorldAction::Click => GroundStage::Aim(Box::new(aim(WorldIntent::Click))),
         WorldAction::DoubleClick => GroundStage::Aim(Box::new(aim(WorldIntent::DoubleClick))),
@@ -114,10 +117,28 @@ pub(super) fn ground(
     };
     running(WorldTask::Ground(Box::new(GroundAct {
         ground,
+        source,
         reveal,
         deadline,
         stage,
     })))
+}
+
+/// The UI node a drop drags from, for an action that is one.
+fn drop_source(action: &WorldAction) -> Option<Locator> {
+    match action {
+        WorldAction::DropFrom(source) => Some(source.clone()),
+        _ => None,
+    }
+}
+
+/// The source of a drop, found again once its target is aimed at, just
+/// before the press: whatever the aim did meanwhile — framing the target, or
+/// a list narrowing to a search the test typed — may have moved the row, and a
+/// press where it was lands on nothing, starts no drag, and is still played to
+/// the end as if it had.
+fn recheck(source: &Locator, deadline: Deadline) -> Box<Pursuit> {
+    Box::new(Pursuit::new(source.clone(), Intent::Click).with_deadline(deadline))
 }
 
 /// A drag of the transform handle `handle` by `amount`.
@@ -304,6 +325,8 @@ enum ActStage {
     },
     /// Aiming at the thing.
     Aim(Box<WorldAim>),
+    /// A drop aimed at the thing, finding its source again ([`recheck`]).
+    Recheck(Box<Pursuit>, Box<WorldTarget>),
     /// Playing the gesture on the thing.
     Play(InputActionId, Box<WorldTarget>),
 }
@@ -312,6 +335,8 @@ enum ActStage {
 pub(super) struct WorldAct {
     /// The thing.
     locator: WorldLocator,
+    /// For a drop, the UI node it drags from.
+    source: Option<Locator>,
     /// Whether the camera may frame it.
     reveal: bool,
     /// The deadline each wait runs under.
@@ -340,14 +365,34 @@ impl WorldAct {
                 Err(error) => Step::fail(automation_error(error)),
             },
             ActStage::Aim(aim) => match aim.poll(world) {
-                Ok(AimProgress::Ready(target)) => match enqueue(world, target.input()) {
-                    Ok(id) => {
-                        self.stage = ActStage::Play(id, Box::new(target));
-                        Step::Pending
+                Ok(AimProgress::Ready(target)) => {
+                    if let Some(source) = &self.source {
+                        self.stage =
+                            ActStage::Recheck(recheck(source, self.deadline), Box::new(target));
+                        return Step::Pending;
                     }
-                    Err(error) => Step::fail(error),
-                },
+                    match enqueue(world, target.input()) {
+                        Ok(id) => {
+                            self.stage = ActStage::Play(id, Box::new(target));
+                            Step::Pending
+                        }
+                        Err(error) => Step::fail(error),
+                    }
+                }
                 Ok(AimProgress::Waiting(_stage)) => Step::Pending,
+                Err(error) => Step::fail(automation_error(error)),
+            },
+            ActStage::Recheck(pursuit, target) => match pursuit.poll(world) {
+                Ok(Progress::Ready(found)) => {
+                    match enqueue(world, gesture(WorldIntent::DropFrom(found.aim), target.aim)) {
+                        Ok(id) => {
+                            self.stage = ActStage::Play(id, target.clone());
+                            Step::Pending
+                        }
+                        Err(error) => Step::fail(error),
+                    }
+                }
+                Ok(Progress::Waiting(_check)) => Step::Pending,
                 Err(error) => Step::fail(automation_error(error)),
             },
             ActStage::Play(id, target) => {
@@ -372,6 +417,8 @@ enum GroundStage {
     },
     /// Aiming at the point.
     Aim(Box<GroundAim>),
+    /// A drop aimed at the point, finding its source again ([`recheck`]).
+    Recheck(Box<Pursuit>, Box<GroundTarget>),
     /// Playing the gesture there.
     Play(InputActionId, Box<GroundTarget>),
 }
@@ -380,6 +427,8 @@ enum GroundStage {
 pub(super) struct GroundAct {
     /// The ground.
     ground: GroundPoint,
+    /// For a drop, the UI node it drags from.
+    source: Option<Locator>,
     /// Whether the camera may frame it.
     reveal: bool,
     /// The deadline each wait runs under.
@@ -408,15 +457,36 @@ impl GroundAct {
                 Err(error) => Step::fail(automation_error(error)),
             },
             GroundStage::Aim(aim) => match aim.poll(world) {
-                Ok(GroundProgress::Ready(target)) => match enqueue(world, target.input()) {
-                    Ok(id) => {
-                        debug!("ground gesture: {target:?}");
-                        self.stage = GroundStage::Play(id, Box::new(target));
-                        Step::Pending
+                Ok(GroundProgress::Ready(target)) => {
+                    if let Some(source) = &self.source {
+                        self.stage =
+                            GroundStage::Recheck(recheck(source, self.deadline), Box::new(target));
+                        return Step::Pending;
                     }
-                    Err(error) => Step::fail(error),
-                },
+                    match enqueue(world, target.input()) {
+                        Ok(id) => {
+                            debug!("ground gesture: {target:?}");
+                            self.stage = GroundStage::Play(id, Box::new(target));
+                            Step::Pending
+                        }
+                        Err(error) => Step::fail(error),
+                    }
+                }
                 Ok(GroundProgress::Waiting(_stage)) => Step::Pending,
+                Err(error) => Step::fail(automation_error(error)),
+            },
+            GroundStage::Recheck(pursuit, target) => match pursuit.poll(world) {
+                Ok(Progress::Ready(found)) => {
+                    match enqueue(world, gesture(WorldIntent::DropFrom(found.aim), target.aim)) {
+                        Ok(id) => {
+                            debug!("ground drop from {:?}: {target:?}", found.aim);
+                            self.stage = GroundStage::Play(id, target.clone());
+                            Step::Pending
+                        }
+                        Err(error) => Step::fail(error),
+                    }
+                }
+                Ok(Progress::Waiting(_check)) => Step::Pending,
                 Err(error) => Step::fail(automation_error(error)),
             },
             GroundStage::Play(id, target) => {

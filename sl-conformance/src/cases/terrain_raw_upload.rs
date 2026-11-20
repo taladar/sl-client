@@ -46,7 +46,7 @@ use sl_client_tokio::{Command, Event, Throttle};
 use crate::context::{Session, TestContext, TestFailure};
 use crate::grid::Grid;
 use crate::registry::{GridTest, TestFuture};
-use crate::support::{REGION_TIMEOUT, check, is_opensim, secs_metric};
+use crate::support::{DrainWindow, REGION_TIMEOUT, check, is_opensim, secs_metric};
 
 /// The bytes-per-terrain-point stride of the LL RAW heightmap format. OpenSim's
 /// `LLRAW` writer emits exactly this many bytes per point (the first two are the
@@ -81,6 +81,9 @@ const TERRAIN_TIMEOUT: Duration = Duration::from_secs(30);
 /// The quiet gap (no terrain patch) that marks the login/download terrain flood
 /// drained, so a later patch is a genuine post-upload re-broadcast.
 const DRAIN_QUIET: Duration = Duration::from_secs(3);
+
+/// The most a terrain drain may take, however long the patches keep coming.
+const DRAIN_WINDOW: Duration = Duration::from_secs(30);
 
 /// How many leading rows of the heightmap to raise. Sixteen rows span a full band
 /// of `16 × 16` patches, so at least one land patch is guaranteed to change and
@@ -273,16 +276,18 @@ async fn wait_land_patch(session: &mut Session, timeout: Duration) -> Result<(),
         .await
 }
 
-/// Drains queued terrain patches until none arrives for `quiet`, so a later
+/// Drains queued terrain patches until none arrives for `quiet`, or
+/// [`DRAIN_WINDOW`] is spent, so a later
 /// [`wait_land_patch`] sees only genuinely post-upload re-broadcasts.
 ///
 /// # Errors
 ///
 /// Propagates a [`Session::wait_for`] disconnect.
 async fn drain_terrain(session: &mut Session, quiet: Duration) -> Result<(), TestFailure> {
-    loop {
+    let window = DrainWindow::new(DRAIN_WINDOW);
+    while let Some(wait) = window.next_wait(quiet) {
         match session
-            .wait_for(quiet, |event| {
+            .wait_for(wait, |event| {
                 matches!(event, Event::TerrainPatch(_)).then_some(())
             })
             .await
@@ -292,4 +297,5 @@ async fn drain_terrain(session: &mut Session, quiet: Duration) -> Result<(), Tes
             Err(other) => return Err(other),
         }
     }
+    Ok(())
 }

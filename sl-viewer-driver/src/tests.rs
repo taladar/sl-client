@@ -20,6 +20,17 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
 use crate::{DriverError, Viewer, ViewerOptions};
 
+/// How long a test waits on its scripted viewer's task or a stream's next
+/// page.
+const PATIENCE: Duration = Duration::from_secs(30);
+
+/// What `wait` gives, or an error once [`PATIENCE`] is up.
+async fn within<T>(what: &str, wait: impl Future<Output = T>) -> Result<T, String> {
+    tokio::time::timeout(PATIENCE, wait)
+        .await
+        .map_err(|_elapsed| format!("{what}: nothing within {} s", PATIENCE.as_secs()))
+}
+
 /// A viewer's answer to a request body, or `None` to answer nothing.
 type Script = dyn Fn(&RequestBody) -> Option<Result<ResponseBody, AutomationError>> + Send + Sync;
 
@@ -221,7 +232,9 @@ async fn a_closed_viewer_fails_what_waits_on_it() -> Result<(), String> {
         matches!(&read, Err(DriverError::Closed { viewer, .. }) if viewer == "one"),
         "{read:?}"
     );
-    answering.await.map_err(|error| error.to_string())?;
+    within("the scripted viewer's end", answering)
+        .await?
+        .map_err(|error| error.to_string())?;
     let again = viewer.agent().await;
     assert!(
         matches!(again, Err(DriverError::Closed { .. })),
@@ -307,7 +320,9 @@ async fn a_subscription_streams_under_its_id_and_ends_when_dropped() -> Result<(
         .subscribe(&[LogStream::UiAction])
         .await
         .map_err(|error| error.to_string())?;
-    let page = stream.next().await.ok_or("the stream ended")?;
+    let page = within("the first page", stream.next())
+        .await?
+        .ok_or("the stream ended")?;
     assert_eq!(page.entries, vec![entry(5, "toolbar.build")]);
     drop(stream);
     tokio::time::sleep(Duration::from_millis(20)).await;
@@ -502,7 +517,9 @@ async fn a_viewer_is_driven_over_a_socket_the_same_way() -> Result<(), String> {
         .map_err(|error| error.to_string())?;
     assert_eq!(node.test_id.as_deref(), Some("ok"));
     drop(viewer);
-    serving.await.map_err(|error| error.to_string())?;
+    within("the scripted socket's end", serving)
+        .await?
+        .map_err(|error| error.to_string())?;
     fs_err::remove_dir_all(&dir).map_err(|error| error.to_string())?;
 
     let missing = Viewer::connect(&dir.join("gone.sock"), ViewerOptions::new("gone")).await;

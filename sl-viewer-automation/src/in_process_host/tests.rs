@@ -1,6 +1,7 @@
 //! Teeth for the host: viewers built on their threads answer over their links
 //! under the caller's ids, keep running while nobody waits, can be reached
-//! between frames, close their links when they exit, and never take turns.
+//! between frames, close their links when they exit, never take turns, and
+//! never hold a caller past a deadline.
 
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Mutex, PoisonError};
@@ -11,7 +12,7 @@ use sl_automation_proto::{Request, RequestBody, RequestId, ResponseBody, ViewerM
 use sl_viewer_testkit::interact::InteractionTest;
 use sl_viewer_testkit::settle;
 
-use super::{HostError, InProcessHost, ViewerLink};
+use super::{Deadlines, HostError, InProcessHost, ViewerLink};
 use crate::executor::{AutomationIdentity, AutomationPlugin};
 use crate::in_process::{InProcessError, ViewerHandle};
 
@@ -29,6 +30,16 @@ fn app(viewer: &str) -> App {
     app
 }
 
+/// How long a test waits for a message on a link, or a viewer's exit.
+const PATIENCE: core::time::Duration = core::time::Duration::from_secs(60);
+
+/// What `wait` gives, or an error once [`PATIENCE`] is up.
+async fn within<T>(what: &str, wait: impl Future<Output = T>) -> Result<T, String> {
+    tokio::time::timeout(PATIENCE, wait)
+        .await
+        .map_err(|_elapsed| format!("{what}: nothing within {} s", PATIENCE.as_secs()))
+}
+
 /// The viewer name the next hello answered on `link` under `id` names.
 async fn hello(link: &mut ViewerLink, id: u64) -> Result<String, String> {
     link.requests
@@ -37,7 +48,7 @@ async fn hello(link: &mut ViewerLink, id: u64) -> Result<String, String> {
             body: RequestBody::Hello,
         })
         .map_err(|error| error.to_string())?;
-    match link.messages.recv().await {
+    match within("the hello's answer", link.messages.recv()).await? {
         Some(ViewerMessage::Response(response)) => {
             assert_eq!(response.id, RequestId(id), "answered under the caller's id");
             match response.result {
@@ -64,7 +75,9 @@ async fn viewers_built_on_the_host_answer_over_their_links() -> Result<(), Strin
     assert_eq!(hello(&mut two, 1).await?, "two");
     host.stop().map_err(|error| error.to_string())?;
     assert!(
-        one.messages.recv().await.is_none(),
+        within("the link's end", one.messages.recv())
+            .await?
+            .is_none(),
         "a stopped host closes every link"
     );
     Ok(())
@@ -109,8 +122,15 @@ async fn an_exited_viewer_closes_its_link_after_its_last_answer() -> Result<(), 
     })
     .await
     .map_err(|error| error.to_string())?;
-    host.exited(one).await.map_err(|error| error.to_string())?;
-    assert!(link.messages.recv().await.is_none(), "the link is closed");
+    within("the exit", host.exited(one))
+        .await?
+        .map_err(|error| error.to_string())?;
+    assert!(
+        within("the link's end", link.messages.recv())
+            .await?
+            .is_none(),
+        "the link is closed"
+    );
     assert_eq!(hello(&mut other, 1).await?, "two", "the other runs on");
     Ok(())
 }
@@ -197,5 +217,86 @@ async fn a_viewer_stuck_in_a_frame_does_not_stall_another() -> Result<(), String
     );
     drop(release);
     host.stop().map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+/// A host that gives its viewers' threads a quarter of a second for
+/// everything.
+fn impatient() -> InProcessHost<App> {
+    let quarter = core::time::Duration::from_millis(250);
+    InProcessHost {
+        viewers: Mutex::new(Vec::new()),
+        deadlines: Deadlines {
+            build: quarter,
+            task: quarter,
+            stop: quarter,
+        },
+    }
+}
+
+/// A viewer whose every frame waits on `held`, hosted on `host`.
+async fn stuck(host: &InProcessHost<App>, held: Receiver<()>) -> Result<ViewerHandle, String> {
+    let (stuck, _link) = host
+        .host("stuck", move || {
+            let mut stuck = app("stuck");
+            stuck
+                .insert_resource(Stall(Mutex::new(held)))
+                .add_systems(Update, stall);
+            Ok(stuck)
+        })
+        .await
+        .map_err(|error| error.to_string())?;
+    Ok(stuck)
+}
+
+#[tokio::test]
+async fn a_build_that_never_finishes_times_out() -> Result<(), String> {
+    let host = impatient();
+    let (release, held): (Sender<()>, Receiver<()>) = channel();
+    let built = host
+        .host("slow", move || {
+            let _released = held.recv();
+            Ok(app("slow"))
+        })
+        .await;
+    assert!(
+        matches!(&built, Err(HostError::TimedOut { label, .. }) if label == "slow"),
+        "{built:?}"
+    );
+    drop(release);
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_task_on_a_viewer_stuck_in_a_frame_times_out() -> Result<(), String> {
+    let host = impatient();
+    let (release, held): (Sender<()>, Receiver<()>) = channel();
+    let viewer = stuck(&host, held).await?;
+    let ran = host.with_app(viewer, |_app| ()).await;
+    assert!(
+        matches!(&ran, Err(HostError::TimedOut { label, .. }) if label == "stuck"),
+        "{ran:?}"
+    );
+    drop(release);
+    host.stop().map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn stopping_gives_up_on_a_thread_stuck_in_a_frame() -> Result<(), String> {
+    let host = impatient();
+    let (release, held): (Sender<()>, Receiver<()>) = channel();
+    let _viewer = stuck(&host, held).await?;
+    let (_running, _link) = host
+        .host("running", || Ok(app("running")))
+        .await
+        .map_err(|error| error.to_string())?;
+    let stopped = host.stop();
+    assert!(
+        matches!(&stopped, Err(HostError::NotStopped { labels, .. }) if labels == &["stuck"]),
+        "only the stuck thread is left behind: {stopped:?}"
+    );
+    // Its commands are gone: let go, and it ends by itself.
+    drop(release);
     Ok(())
 }

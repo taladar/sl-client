@@ -1061,13 +1061,27 @@ mod tests {
     /// A client that ignores every proxy — the crate's own
     /// `http_proxy::client_builder` reads a process-global the sibling
     /// `proxy_lifecycle` test installs, and these tests must reach the loopback
-    /// stub whatever order the harness runs them in.
+    /// stub whatever order the harness runs them in — and gives up on a
+    /// request after [`REQUEST_TIMEOUT`], so a stub that stops answering fails
+    /// the test rather than holding it.
     fn direct_client() -> reqwest::Client {
-        reqwest::Client::builder()
-            .no_proxy()
+        untimed_direct_client_builder()
+            .timeout(REQUEST_TIMEOUT)
             .build()
             .expect("a direct client builds")
     }
+
+    /// [`direct_client`]'s builder without the request timeout, for a test on
+    /// a paused clock: there the timeout's timer is the next one due whenever
+    /// the runtime waits on the loopback socket, so the clock would be
+    /// advanced straight to it and every request would time out. That test's
+    /// bound is the retry budget it asserts.
+    fn untimed_direct_client_builder() -> reqwest::ClientBuilder {
+        reqwest::Client::builder().no_proxy()
+    }
+
+    /// How long [`direct_client`] waits for one request.
+    const REQUEST_TIMEOUT: core::time::Duration = core::time::Duration::from_secs(30);
 
     /// A stub capability server: it answers `refusals` requests with the
     /// `refusal` status line before serving [`FEATURES_BODY`], counting every
@@ -1166,7 +1180,9 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn a_permanent_refusal_exhausts_the_budget_and_stops() {
         let (url, served) = start_stub(usize::MAX, "503 Service Unavailable").await;
-        let http = direct_client();
+        let http = untimed_direct_client_builder()
+            .build()
+            .expect("a direct client builds");
 
         assert!(
             get_llsd(&url, CAP, &http).await.is_none(),

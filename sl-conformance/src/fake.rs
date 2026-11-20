@@ -41,6 +41,7 @@
 //! [`Credentials`]: sl_repl::Credentials
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use sl_client_tokio::{AgentKey, GroupKey, Uuid};
 use sl_repl::{Avatar, Credentials};
@@ -702,6 +703,11 @@ pub struct FakeRun {
     pub note: Option<String>,
 }
 
+/// How long [`run_case`] gives the fake grid's start and its logins, which run
+/// outside the case's own timeout. Each logout after the case is bounded by
+/// [`Session::logout`] itself.
+const OFFLINE_SETUP: Duration = Duration::from_secs(300);
+
 /// Run `test` once on a freshly started `flavour` of the fake grid and hand
 /// back what it measured: the half of [`run_offline_case`] that the runner's
 /// `run-offline` shares, so a recorded fake run is the same run the test suite
@@ -720,8 +726,21 @@ pub async fn run_case(test: &dyn GridTest, flavour: Grid) -> Result<FakeRun, Tes
             test.name()
         )));
     }
-    let harness = FakeGridHarness::start(flavour).await?;
-    let mut context = harness.context(test).await?;
+    // Outside the case's own timeout, so bounded here: a grid that never
+    // binds or a login that never completes would otherwise hold the run.
+    // The harness holds the grid up for as long as it is bound.
+    let (_harness, mut context) = tokio::time::timeout(OFFLINE_SETUP, async {
+        let harness = FakeGridHarness::start(flavour).await?;
+        let context = harness.context(test).await?;
+        Ok::<_, TestFailure>((harness, context))
+    })
+    .await
+    .map_err(|_elapsed| {
+        TestFailure::Timeout(format!(
+            "the fake grid and its logins were not up {} s after the start",
+            OFFLINE_SETUP.as_secs()
+        ))
+    })??;
     let outcome = crate::isolate::run_and_clear(test, &mut context, test.timeout()).await;
     let (metrics, completeness, note, primary, secondary, tertiary) = context.into_parts();
     for session in [Some(primary), secondary, tertiary].into_iter().flatten() {

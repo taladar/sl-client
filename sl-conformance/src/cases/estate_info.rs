@@ -35,11 +35,14 @@ use sl_client_tokio::{Command, EstateCovenant, EstateInfo, Event};
 use crate::context::{Session, TestContext, TestFailure};
 use crate::grid::Grid;
 use crate::registry::{GridTest, TestFuture};
-use crate::support::{REGION_TIMEOUT, REPLY_TIMEOUT, check, check_eq, secs_metric};
+use crate::support::{DrainWindow, REGION_TIMEOUT, REPLY_TIMEOUT, check, check_eq, secs_metric};
 
 /// The quiet gap (no further `setaccess`) that marks the estate access lists that
 /// trail an `estateupdateinfo` reply fully drained.
 const ACCESS_DRAIN_QUIET: Duration = Duration::from_secs(3);
+
+/// The most that drain may take, however long the lists keep coming.
+const ACCESS_DRAIN_WINDOW: Duration = Duration::from_secs(30);
 
 /// Requests the region's estate config + covenant and records both replies.
 ///
@@ -162,9 +165,10 @@ async fn drain_access_lists(
     quiet: Duration,
 ) -> Result<Vec<usize>, TestFailure> {
     let mut lists = Vec::new();
-    loop {
+    let window = DrainWindow::new(ACCESS_DRAIN_WINDOW);
+    while let Some(wait) = window.next_wait(quiet) {
         match session
-            .wait_for(quiet, |event| match event {
+            .wait_for(wait, |event| match event {
                 Event::EstateAccessList { members, .. } => Some(members.len()),
                 _ => None,
             })
@@ -175,4 +179,5 @@ async fn drain_access_lists(
             Err(other) => return Err(other),
         }
     }
+    Ok(lists)
 }

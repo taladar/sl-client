@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 328 |
 | blocked | 34 |
 | in-progress | 4 |
-| bugs | 10 |
-| done | 1603 |
+| bugs | 9 |
+| done | 1604 |
 | deferred | 30 |
 | wont-do | 24 |
 | **total** | **2164** |
@@ -1239,7 +1239,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-text-renderability-axis`](in-progress/viewer-ui-text-renderability-axis.md)
   — Upstream issue — font selection cannot see glyph-format renderability
 
-## bugs (10)
+## bugs (9)
 
 ### viewer
 
@@ -1265,10 +1265,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   fail as "operation timed out"
 - [`test-lsl-probes-corpus-order-leaks-between-probes`](bugs/test-lsl-probes-corpus-order-leaks-between-probes.md)
   — A full fake-grid probe corpus run changes two probes' results
-- [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
-  — Test harnesses still hold waits that nothing bounds
 
-## done (1603)
+## done (1604)
 
 ### protocol
 
@@ -4391,6 +4389,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — set_typing start/stop observed by the other
 - [`test-typing-indicator-aditi`](done/test-typing-indicator-aditi-add-the-aditi-variant.md)
   — Typing indicator — [aditi] variant
+- [`test-unbounded-waits-in-test-harnesses`](done/test-unbounded-waits-in-test-harnesses.md)
+  — Test harnesses still hold waits that nothing bounds
 - [`test-wearables-request`](done/test-wearables-request-request-current-wearables-agentwearablesrequest-and-assert-t.md)
   — request current wearables (AgentWearablesRequest) and assert the simul
 - [`viewer-full-stack-teleport-leftover-race`](done/viewer-full-stack-teleport-leftover-race.md)

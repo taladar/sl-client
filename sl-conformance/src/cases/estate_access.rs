@@ -51,13 +51,17 @@ use crate::context::{Session, TestContext, TestFailure};
 use crate::grid::Grid;
 use crate::registry::{GridTest, TestFuture};
 use crate::support::{
-    REGION_TIMEOUT, REPLY_TIMEOUT, check, check_eq, fixtures, is_opensim, secs_metric,
+    DrainWindow, REGION_TIMEOUT, REPLY_TIMEOUT, check, check_eq, fixtures, is_opensim, secs_metric,
 };
 
 /// The quiet gap (no further `setaccess`) that marks a `getinfo`/`estateaccessdelta`
 /// reply's trailing access lists fully drained. OpenSim batches the deltas with a
 /// ~500 ms poll, so this stays comfortably above that flush cadence.
 const ACCESS_DRAIN_QUIET: Duration = Duration::from_secs(3);
+
+/// The most that drain may take, its first reply's wait included, however
+/// long the lists keep coming.
+const ACCESS_DRAIN_WINDOW: Duration = Duration::from_secs(60);
 
 /// Adds an agent to two estate access lists, verifying and restoring each.
 #[derive(Debug)]
@@ -285,14 +289,14 @@ async fn drain_access_lists(
     // The first reply may lag behind the delta flush, so give it the full window;
     // once one list is in hand, further ones follow closely or not at all.
     let first_timeout = REPLY_TIMEOUT;
-    loop {
-        let timeout = if lists.is_empty() {
-            first_timeout
-        } else {
-            quiet
-        };
+    let window = DrainWindow::new(ACCESS_DRAIN_WINDOW);
+    while let Some(wait) = window.next_wait(if lists.is_empty() {
+        first_timeout
+    } else {
+        quiet
+    }) {
         match session
-            .wait_for(timeout, |event| match event {
+            .wait_for(wait, |event| match event {
                 Event::EstateAccessList { kind, members, .. } => Some((*kind, members.clone())),
                 _ => None,
             })
@@ -303,6 +307,7 @@ async fn drain_access_lists(
             Err(other) => return Err(other),
         }
     }
+    Ok(lists)
 }
 
 /// The most recent membership reported for `kind` in a drained list batch, or an

@@ -69,7 +69,7 @@ use crate::grid::Grid;
 use crate::measured::Measured;
 use crate::registry::{GridTest, TestFuture};
 use crate::support::{
-    ANNOUNCED_LEGACY, LONG_TIMEOUT, REGION_TIMEOUT, REPLY_TIMEOUT, check,
+    ANNOUNCED_LEGACY, DrainWindow, LONG_TIMEOUT, REGION_TIMEOUT, REPLY_TIMEOUT, check,
     created_item_announcement, is_aditi, is_fake,
 };
 
@@ -545,16 +545,21 @@ async fn ais3_walk(
             })
             .await?;
         // One fetch can answer in several bulk updates; take them until they
-        // stop rather than assuming a count.
-        while let Ok((folders, items)) = session
-            .wait_for(AIS_IDLE, |event| match event {
-                Event::InventoryBulkUpdate { folders, items, .. } => {
-                    Some((folders.clone(), items.clone()))
-                }
-                _other => None,
-            })
-            .await
-        {
+        // stop rather than assuming a count, and for no longer than a fetch's
+        // window, since a grid that keeps sending them never stops.
+        let window = DrainWindow::new(AIS_FETCH_WINDOW);
+        while let Some(wait) = window.next_wait(AIS_IDLE) {
+            let Ok((folders, items)) = session
+                .wait_for(wait, |event| match event {
+                    Event::InventoryBulkUpdate { folders, items, .. } => {
+                        Some((folders.clone(), items.clone()))
+                    }
+                    _other => None,
+                })
+                .await
+            else {
+                break;
+            };
             // Objects last, so the stack pops them first. A real account's tree
             // is far larger than the folder budget, and a blind walk samples
             // whichever 40 folders the queue happened to reach — two runs of
@@ -596,6 +601,9 @@ const AIS_FOLDER_BUDGET: i64 = 12;
 /// How long to wait for another AIS3 bulk update before calling the tree
 /// delivered.
 const AIS_IDLE: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// The most one folder fetch's bulk updates are read for.
+const AIS_FETCH_WINDOW: std::time::Duration = std::time::Duration::from_secs(20);
 
 /// What a rez-and-take produced.
 struct TakeOutcome {
@@ -775,17 +783,17 @@ async fn settle_scene(session: &mut Session) -> (Option<Vector>, HashSet<ScopedO
     // Two budgets, not one. A quiet region goes idle and the drain ends on the
     // gap; a busy sandbox streams somebody's rezzing the whole time and never
     // does, so the overall window is what actually ends it there.
-    let started = std::time::Instant::now();
-    while let Ok(object) = session
-        .wait_for(
-            SETTLE_IDLE.min(SETTLE_WINDOW.saturating_sub(started.elapsed())),
-            |event| match event {
+    let window = DrainWindow::new(SETTLE_WINDOW);
+    while let Some(wait) = window.next_wait(SETTLE_IDLE) {
+        let Ok(object) = session
+            .wait_for(wait, |event| match event {
                 Event::ObjectAdded(object) => Some((**object).clone()),
                 _other => None,
-            },
-        )
-        .await
-    {
+            })
+            .await
+        else {
+            break;
+        };
         if agent.is_some_and(|agent| object.full_id.uuid() == agent.uuid()) {
             own_avatar = Some(object.motion.position.clone());
         } else if any_prim.is_none() && object.pcode == pcode::PRIMITIVE {

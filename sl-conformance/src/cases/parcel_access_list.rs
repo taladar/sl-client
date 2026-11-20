@@ -54,7 +54,7 @@ use crate::context::{Session, TestContext, TestFailure};
 use crate::grid::Grid;
 use crate::measured::Measured;
 use crate::registry::{GridTest, TestFuture};
-use crate::support::{LONG_TIMEOUT, REGION_TIMEOUT, check, check_eq, is_fake};
+use crate::support::{DrainWindow, LONG_TIMEOUT, REGION_TIMEOUT, check, check_eq, is_fake};
 
 /// The western/southern edge of the queried square, in region metres — a 4×4 m
 /// square at the region centre, the parcel the other parcel cases read.
@@ -74,6 +74,9 @@ const LIST_REPLY_WINDOW: Duration = Duration::from_secs(10);
 /// How long after a reply packet the case keeps collecting further packets of
 /// the same list.
 const LIST_PACKET_WINDOW: Duration = Duration::from_secs(2);
+
+/// The most one list read may take, however long its packets keep coming.
+const LIST_READ_WINDOW: Duration = Duration::from_secs(30);
 
 /// How long to watch for alerts and parcel pushes after an update.
 const UPDATE_WATCH: Duration = Duration::from_secs(4);
@@ -405,10 +408,11 @@ impl Lists {
             })
             .await?;
         let mut read = ListRead::default();
-        let mut window = LIST_REPLY_WINDOW;
-        loop {
+        let mut gap = LIST_REPLY_WINDOW;
+        let window = DrainWindow::new(LIST_READ_WINDOW);
+        while let Some(wait) = window.next_wait(gap) {
             let packet = session
-                .wait_for(window, |event| match event {
+                .wait_for(wait, |event| match event {
                     Event::ParcelAccessList {
                         local_id,
                         scope: reply_scope,
@@ -428,12 +432,13 @@ impl Lists {
                             read.entries.push(entry);
                         }
                     }
-                    window = LIST_PACKET_WINDOW;
+                    gap = LIST_PACKET_WINDOW;
                 }
                 Err(TestFailure::Timeout(_)) => return Ok(read),
                 Err(other) => return Err(other),
             }
         }
+        Ok(read)
     }
 
     /// Replaces the `scope` list with `entries`.

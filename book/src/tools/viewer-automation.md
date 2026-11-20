@@ -118,7 +118,9 @@ nothing runs while none are queued.
   it. `open_pie` ends when a pie is open, not when the click is played: a
   click that puts none up within 30 viewer frames is played again, counted
   in frames rather than seconds so a starved viewer's slow pie is not
-  clicked over.
+  clicked over. A `drop_from` finds its source node again once its target
+  is aimed at, just before the press: framing the target, or a list
+  narrowing to a search, may have moved the row in between.
 - **Ground actions** — the same gestures (but no select) on a point of the
   ground: `viewer.world().ground("Next Door", 20.0, 128.0).double_click()`.
   Bare ground has no id, so it is addressed by a region's name and a
@@ -175,7 +177,11 @@ scrolled away or never built.
 - **In process**: `InProcessHost` builds each viewer App
   (`ViewerAppBuilder`, see the `sl-client-bevy-viewer` assembly) on a thread
   of its own and steps it there continuously, so viewers never take turns;
-  `Viewer::over_link` talks to one.
+  `Viewer::over_link` talks to one. A viewer stuck in a frame or its build
+  answers nothing, so the host bounds every wait on a thread: a build
+  `BUILD_TIMEOUT` (300 s), a `with_app` closure `TASK_TIMEOUT` (60 s), the
+  host's stop `STOP_TIMEOUT` (180 s). A thread that overruns is named in the
+  error and left behind, detached.
 - **Remote**: a viewer started with `--automation-socket [PATH]` serves one
   JSON request per line on a `0600` Unix socket; `Viewer::connect` talks to
   it. Requests that play input need `--headless`.
@@ -216,7 +222,10 @@ StageBuilder::new("about_window")
 what `SL_E2E_BACKEND` says), an account `Stage <label>` per viewer, waits
 until every viewer has logged in and gone quiet, runs the body, and always
 tears down: every viewer logs out, and a session left on the grid fails the
-test. Artifacts and each viewer's log land under `target/e2e/<test>/`.
+test. A body still running after 30 minutes is cancelled and fails the
+test; the `live` nextest profile kills no test, so this is a live run's only
+limit on a body. Artifacts and each viewer's log land under
+`target/e2e/<test>/`.
 `SL_E2E_WATCH=1` opens each viewer process's `--watch` window, so a person
 can follow a run. It needs `SL_E2E_BACKEND=process`, since an in-process
 viewer is stepped by its host, not by winit. The window shows the frame only,

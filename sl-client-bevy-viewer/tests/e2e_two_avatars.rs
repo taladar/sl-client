@@ -1011,15 +1011,22 @@ mod test {
                 let bar = alpha.ui().test_id("nearby-chat-bar").role(Role::Textbox);
                 let _typed = bar.fill("half a thought").await?;
                 // The animation request goes out first, in the same frame.
-                let (mut started, mut animated) = (false, false);
-                while !(started && animated) {
-                    let event = grid_hears(&mut heard, "typing start and animation", |event| {
-                        is_typing_start(event) || is_typing_animation(event)
-                    })
-                    .await?;
-                    started |= is_typing_start(&event);
-                    animated |= is_typing_animation(&event);
-                }
+                // One deadline for both: a repeated animation event would
+                // start each single wait afresh.
+                tokio::time::timeout(WAIT, async {
+                    let (mut started, mut animated) = (false, false);
+                    while !(started && animated) {
+                        let event = grid_hears(&mut heard, "typing start and animation", |event| {
+                            is_typing_start(event) || is_typing_animation(event)
+                        })
+                        .await?;
+                        started |= is_typing_start(&event);
+                        animated |= is_typing_animation(&event);
+                    }
+                    Ok::<_, BodyError>(())
+                })
+                .await
+                .map_err(|_elapsed| "the grid never heard both the typing start and animation")??;
                 assert_eq!(
                     logged(alpha, LogStream::Sound, "typing").await?,
                     1,
@@ -2505,8 +2512,16 @@ mod test {
         Ok(())
     }
 
-    /// Accept every offer card `viewer` shows, one at a time.
+    /// Accept every offer card `viewer` shows, one at a time, all within
+    /// [`LIVE_WAIT`]: offers that keep coming do not hold it for good.
     async fn accept_every_offer(viewer: &Viewer) -> Result<(), BodyError> {
+        tokio::time::timeout(LIVE_WAIT, accept_offers_until_none(viewer))
+            .await
+            .map_err(|_elapsed| "offer cards were still showing two minutes into accepting them")?
+    }
+
+    /// Accept every offer card `viewer` shows until it shows none.
+    async fn accept_offers_until_none(viewer: &Viewer) -> Result<(), BodyError> {
         let cards = viewer.ui().test_id("offer-invite-card");
         loop {
             let shown = cards.count().await?;
@@ -2518,12 +2533,7 @@ mod test {
                 .test_id("offer-invite-action:Accept")
                 .click()
                 .await?;
-            let resolved = tokio::time::timeout(LIVE_WAIT, async {
-                while cards.count().await? >= shown {}
-                Ok::<_, BodyError>(())
-            })
-            .await;
-            resolved.map_err(|_elapsed| "an accepted offer's card stayed")??;
+            while cards.count().await? >= shown {}
         }
     }
 

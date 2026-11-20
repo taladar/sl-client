@@ -60,8 +60,10 @@
 )]
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::io::Read as _;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::time::Duration;
 
 use sl_lsl::ast::TypeName;
 use sl_lsl::syntax::{LslArgument, LslConstant, LslEvent, LslFunction, LslKeyword, LslSyntax};
@@ -322,9 +324,51 @@ fn derive_builtins(bin: &Path) -> Option<PathBuf> {
 
 /// Run `tailslide --lint <script>` and parse its findings.
 fn run_tailslide(bin: &Path, script: &Path) -> Result<LintReport, BoxError> {
-    let output = Command::new(bin).arg("--lint").arg(script).output()?;
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stderr = lint_stderr(bin, script)?;
     Ok(parse_lint(&stderr))
+}
+
+/// How long one `tailslide --lint` run may take before it is killed: a
+/// script that hangs the oracle fails the test rather than holding it.
+const TAILSLIDE_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// Run `tailslide --lint <script>` and hand back its standard error, killing
+/// it once it has run for [`TAILSLIDE_TIMEOUT`]. The output is read on a
+/// thread of its own, so a long one never fills the pipe and stalls it.
+fn lint_stderr(bin: &Path, script: &Path) -> Result<String, String> {
+    let mut child = Command::new(bin)
+        .arg("--lint")
+        .arg(script)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| format!("running tailslide: {error}"))?;
+    let mut pipe = child
+        .stderr
+        .take()
+        .ok_or("tailslide's standard error was not piped")?;
+    let (sender, read) = std::sync::mpsc::channel();
+    let _reader = std::thread::spawn(move || {
+        let mut stderr = Vec::new();
+        let _gone = sender.send(pipe.read_to_end(&mut stderr).map(|_read| stderr));
+    });
+    let stderr = match read.recv_timeout(TAILSLIDE_TIMEOUT) {
+        Ok(stderr) => stderr.map_err(|error| format!("reading tailslide: {error}"))?,
+        Err(_late) => {
+            let _killed = child.kill();
+            let _reaped = child.wait();
+            return Err(format!(
+                "tailslide had not finished {} after {} s, and was killed",
+                script.display(),
+                TAILSLIDE_TIMEOUT.as_secs()
+            ));
+        }
+    };
+    let _status = child
+        .wait()
+        .map_err(|error| format!("waiting for tailslide: {error}"))?;
+    Ok(String::from_utf8_lossy(&stderr).into_owned())
 }
 
 /// The corpus of `.lsl` scripts to diff, sorted for a deterministic run order.

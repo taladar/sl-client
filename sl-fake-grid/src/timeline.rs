@@ -1374,7 +1374,13 @@ mod test {
                 local_ids: Vec::new(),
             })
             .map_err(|error| format!("nobody was waiting: {error}"))?;
-        let ended = waiting.await.map_err(|error| error.to_string())?;
+        // Bounded all the same: on the paused clock an idle runtime jumps
+        // to this deadline, so a wait the event failed to end fails the test
+        // at once rather than holding it.
+        let ended = tokio::time::timeout(Duration::from_secs(30), waiting)
+            .await
+            .map_err(|_elapsed| "the wait did not end when its event came".to_owned())?
+            .map_err(|error| error.to_string())?;
         if matches!(ended, Wait::Ready) {
             Ok(())
         } else {

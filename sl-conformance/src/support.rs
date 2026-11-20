@@ -35,6 +35,46 @@ pub const REPLY_TIMEOUT: Duration = Duration::from_secs(30);
 /// path rather than a single UDP packet.
 pub const LONG_TIMEOUT: Duration = Duration::from_secs(60);
 
+/// The overall window of a drain that reads a stream until it goes quiet.
+///
+/// A gap with nothing in it is what ends such a drain, and a busy stream — a
+/// sandbox where somebody is rezzing, a grid that repeats a reply — never
+/// leaves one, so a drain bounded by its gap alone runs for as long as the
+/// stream does. Each wait is capped to what is left of the window instead, and
+/// the drain ends once the window is spent:
+///
+/// ```ignore
+/// let window = DrainWindow::new(SETTLE_WINDOW);
+/// while let Some(wait) = window.next_wait(SETTLE_IDLE) {
+///     let Ok(object) = session.wait_for(wait, added).await else { break };
+///     // …
+/// }
+/// ```
+#[derive(Debug, Clone, Copy)]
+pub struct DrainWindow {
+    /// When the window is spent.
+    ends: Instant,
+}
+
+impl DrainWindow {
+    /// A window of `length`, starting now.
+    #[must_use]
+    pub fn new(length: Duration) -> Self {
+        let now = Instant::now();
+        Self {
+            ends: now.checked_add(length).unwrap_or(now),
+        }
+    }
+
+    /// How long the next wait of the drain may last: `gap`, or what is left of
+    /// the window when that is less; `None` once the window is spent.
+    #[must_use]
+    pub fn next_wait(&self, gap: Duration) -> Option<Duration> {
+        let left = self.ends.saturating_duration_since(Instant::now());
+        (!left.is_zero()).then(|| left.min(gap))
+    }
+}
+
 /// Send `command`, then await the first event for which `predicate` returns
 /// `Some`, up to `timeout`.
 ///
@@ -885,14 +925,10 @@ async fn drain_scene(
     on_event: &mut impl FnMut(&Event),
     mut observe: impl FnMut(&Object),
 ) -> Result<(), TestFailure> {
-    let started = Instant::now();
-    loop {
-        let remaining = window.saturating_sub(started.elapsed());
-        if remaining.is_zero() {
-            return Ok(());
-        }
+    let window = DrainWindow::new(window);
+    while let Some(wait) = window.next_wait(idle) {
         match session
-            .wait_for(remaining.min(idle), |event| {
+            .wait_for(wait, |event| {
                 on_event(event);
                 match event {
                     Event::ObjectAdded(object) => {
@@ -917,6 +953,7 @@ async fn drain_scene(
             Err(other) => return Err(other),
         }
     }
+    Ok(())
 }
 
 /// Moves the avatar from `from` towards `position` in its current region the
@@ -1455,12 +1492,33 @@ pub async fn wait_for_task_listing(
 #[cfg(test)]
 mod tests {
     use super::{
-        check, check_eq, content_is_ours, count_metric, fixtures, is_aditi, is_fake, is_opensim,
-        secs_metric,
+        DrainWindow, check, check_eq, content_is_ours, count_metric, fixtures, is_aditi, is_fake,
+        is_opensim, secs_metric,
     };
     use crate::context::TestFailure;
     use crate::grid::Grid;
     use pretty_assertions::assert_eq;
+    use std::time::Duration;
+
+    /// A drain window hands out the gap while plenty is left, what is left
+    /// when that is less, and nothing once it is spent.
+    #[test]
+    fn a_drain_window_caps_each_wait_and_ends() {
+        let long = DrainWindow::new(Duration::from_secs(3600));
+        assert_eq!(
+            long.next_wait(Duration::from_secs(5)),
+            Some(Duration::from_secs(5))
+        );
+        let short = DrainWindow::new(Duration::from_secs(2));
+        assert!(
+            short
+                .next_wait(Duration::from_secs(5))
+                .is_some_and(|wait| wait <= Duration::from_secs(2)),
+            "capped to what is left"
+        );
+        let spent = DrainWindow::new(Duration::ZERO);
+        assert_eq!(spent.next_wait(Duration::from_secs(5)), None);
+    }
 
     /// `check` passes a true condition and fails a false one with its message.
     #[test]

@@ -68,6 +68,16 @@ const LOGOUT: Duration = Duration::from_secs(60);
 /// How often a starting viewer process is looked at.
 const POLL: Duration = Duration::from_millis(100);
 
+/// How long a test body may run before the stage cancels it and takes the
+/// stage down, failing it: as long as the default test profile gives a
+/// whole test, and the only limit a body has in the `live` profile, which
+/// kills no test.
+const BODY: Duration = Duration::from_secs(30 * 60);
+
+/// How long the end of a backend's run waits for blocking tasks still
+/// running on its runtime.
+const RUNTIME_SHUTDOWN: Duration = Duration::from_secs(10);
+
 /// Numbers the process backend's socket directories within this process.
 static NEXT_SOCKET_DIR: AtomicU64 = AtomicU64::new(0);
 
@@ -501,8 +511,23 @@ impl StageBuilder {
             dir.display()
         );
         let stage = runtime.block_on(Stage::start(self, grid, live, backend, watch, dir))?;
-        let outcome = std::panic::catch_unwind(AssertUnwindSafe(|| runtime.block_on(body(&stage))));
+        let outcome = std::panic::catch_unwind(AssertUnwindSafe(|| {
+            runtime.block_on(async {
+                tokio::time::timeout(BODY, body(&stage))
+                    .await
+                    .unwrap_or_else(|_elapsed| {
+                        Err(format!(
+                            "it had not finished {} min after it started, and was cancelled",
+                            BODY.as_secs() / 60
+                        )
+                        .into())
+                    })
+            })
+        }));
         let teardown = runtime.block_on(stage.shutdown());
+        // A blocking task the body left running — a wait on a viewer's
+        // thread, say — would hold a plain drop of the runtime for good.
+        runtime.shutdown_timeout(RUNTIME_SHUTDOWN);
         match outcome {
             Err(panic) => {
                 if let Err(error) = teardown {
@@ -1236,7 +1261,18 @@ impl Stage {
                 // and the probe can see that before the host reports the exit.
                 // The exit, awaited here, says why.
                 Err(sl_viewer_driver::DriverError::Closed { .. }) => {
-                    host.exited(handle).await?;
+                    match tokio::time::timeout(LOGOUT, host.exited(handle)).await {
+                        Ok(exited) => exited?,
+                        Err(_elapsed) => {
+                            return Err(StageError::Login {
+                                viewer: label.clone(),
+                                reason: format!(
+                                    "it closed its link, and had not exited {} s later",
+                                    LOGOUT.as_secs()
+                                ),
+                            });
+                        }
+                    }
                 }
                 Err(source) => {
                     return Err(StageError::Driver {

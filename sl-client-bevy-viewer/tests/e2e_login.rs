@@ -216,14 +216,17 @@ mod test {
         match (flavour.login_refusals().second_login, second) {
             (SecondLogin::Admitted, Ok(client)) => {
                 // The newcomer must not outlive the stage: log it out again.
-                let (events, mut drained) = tokio::sync::mpsc::channel(256);
-                let (diagnostics, _unread) = tokio::sync::mpsc::channel(1);
-                let (commands, inbox) = tokio::sync::mpsc::channel(4);
-                let run = tokio::spawn(client.run(events, diagnostics, inbox));
-                commands.send(sl_client_tokio::Command::Logout).await?;
-                drop(commands);
-                while drained.recv().await.is_some() {}
-                run.await??;
+                // Its events and diagnostics drain on unread, so the run
+                // loop never stalls on a full channel.
+                let running = sl_fake_grid::run_client(client);
+                running
+                    .commands
+                    .send(sl_client_tokio::Command::Logout)
+                    .await?;
+                drop(running.commands);
+                tokio::time::timeout(WAIT, running.run).await.map_err(
+                    |_elapsed| "the second session had not logged out within a minute",
+                )???;
             }
             (SecondLogin::Refused, Err(sl_client_tokio::Error::LoginRejected { failure, .. }))
                 if failure.reason == "presence" => {}

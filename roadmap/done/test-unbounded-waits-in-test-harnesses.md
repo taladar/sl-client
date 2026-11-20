@@ -2,7 +2,7 @@
 id: test-unbounded-waits-in-test-harnesses
 title: Test harnesses still hold waits that nothing bounds
 topic: test
-status: bugs
+status: done
 origin: gridspec-object-rez-derez (2026-10-10) — a fake-grid test sat for two hours
 refs: [gridspec-object-rez-derez]
 ---
@@ -93,3 +93,73 @@ nothing, no drag begins, and the action reports success. `e2e_objects`
 searches its item away before it searches for it, so that the row can only
 show once the list has narrowed; the gesture should resolve its source
 last, or check that a drag began.
+
+## Resolution (2026-11-20)
+
+**The in-process host** (`sl-viewer-automation/src/in_process_host.rs`) bounds
+every wait on a viewer's thread itself, so the stage, the viewer's own
+`automation_driver` test and every other caller get it: `host` waits
+`BUILD_TIMEOUT` (300 s) for the build, `with_app` `TASK_TIMEOUT` (60 s) for its
+closure, and `stop` (and the host's drop) `STOP_TIMEOUT` (180 s) for every
+thread. An overrun is `HostError::TimedOut` / `HostError::NotStopped` naming
+the viewer; the thread is left detached rather than waited for. Tests cover a
+build that never finishes, a task on a viewer stuck in a frame, and a stop
+that leaves exactly the stuck thread behind.
+
+**The stage** (`sl-e2e/src/stage.rs`): a body still running after 30 minutes
+is cancelled and fails as a body failure, then the stage is taken down as
+usual — the `live` profile's only limit on a body. The end of a backend's run
+shuts its runtime down with a 10 s timeout, so a blocking task left running no
+longer holds the runtime's drop. The wait for the exit after a closed link
+during a login is bounded by `LOGOUT`. `Stage::start`'s other steps were
+already bounded (driver requests by their deadline plus grace, logins by
+`LOGIN`, sockets by `CONNECT`).
+
+**The second factor** moved inside the App since the audit: the viewer
+answers each challenge itself and `LOGIN` bounds the stage's wait, so there is
+no restart loop left to cap. The MFA command itself is bounded in
+`sl_repl::acquire_mfa_token`: it is killed after two minutes
+(`AuthError::MfaTimedOut`), its output not read then, since a process it
+started may hold the pipe.
+
+**End-to-end bodies**: `log_in_from_elsewhere` starts the second session
+through `sl_fake_grid::run_client` (unbounded forwarders, nothing to drain) and
+waits for its run loop at most `WAIT`; the typing test's start-and-animation
+loop and `accept_every_offer` each have one deadline for the whole loop.
+
+**Conformance drains**: `support::DrainWindow` caps each wait of a
+read-until-quiet drain to what is left of an overall window and ends the
+drain when it is spent. It is used by every drain named above (`rez_container`
+10 s, the AIS3 folder fetch 20 s, both `drain_access_lists` 30 s / 60 s, the
+parcel list read 30 s, `drain_map_blocks` 60 s), by the two `drain_terrain`s of
+`modify_land` and `terrain_raw_upload` the audit had not named (30 s), and by
+the three settle loops that already had a window of their own
+(`drain_scene`, `object_asset_format::settle_scene`). `Session::logout` now
+waits for its run loop at most 30 s after closing its commands and aborts it
+then, and `fake::run_case` bounds the grid's start and the logins, which run
+outside the case's own timeout, at 300 s.
+
+**Smaller**: the host's and the driver's tests wait on their scripted tasks,
+links and streams with a deadline; the remote subscription test counts its
+pages; the `get_llsd` tests' client has a 30 s request timeout, except the
+paused-clock one, where that timer would be the next one due whenever the
+runtime waits on the socket and every request would time out (its bound is
+the retry budget it asserts); both tailslide oracles kill a `--lint` run after
+60 s; the timeline test's join is bounded, which on the paused clock fails at
+once rather than holding.
+
+**The drop's source**: a `drop_from` on an object or the ground finds its
+source row again once the target is aimed at, just before the press, and
+drags from where the row is then. With the inventory list's busy marker during
+its search debounce, that holds a drop until the list has narrowed. Both
+`e2e_objects` workarounds that searched an item away before searching for it
+are gone.
+
+Verified: the new host, MFA, driver and remote tests and all 402
+`sl-conformance` tests pass. `e2e_objects`' take-and-rez on both fake
+flavours, with its workaround gone, passed once unloaded and once
+throttled to 15% CPU. On the local OpenSim, `a_worn_prim_follows_the_avatar`
+passed its whole body in process. The process backend then failed earlier,
+at the world right-click on the freshly rezzed prim: a phantom prim another
+test account had left at the shared build location, behind a bush, took the
+pick. That is grid debris, before any of the code changed here.
