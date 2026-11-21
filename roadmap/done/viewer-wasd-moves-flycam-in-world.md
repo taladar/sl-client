@@ -57,9 +57,11 @@ this report).
   `ToggleFlycam` message rather than assigning `CameraMode` directly, so
   `switch_camera_mode` keeps owning the rig seeding (entering) and the resnap
   (leaving) that make the switch continuous one way and a warp the other.
+
 - **Every camera-mode change is logged with the input that caused it** — the
   flycam key, the menu entry, the 6-DOF button, `Escape`, the Stop flycam button
   — so the next report of this shape is answerable from the log.
+
 - Regression tests:
   `camera_tests::the_movement_keys_do_not_touch_the_camera_outside_the_flycam`
   (the whole cluster held in third person leaves the transform untouched and the

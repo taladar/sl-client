@@ -27,6 +27,11 @@
 //!   [`TASK_TIMEOUT`] and stopping the host at most [`STOP_TIMEOUT`]; a
 //!   thread that overruns is named in the error and left behind, detached,
 //!   rather than waited for.
+//! - **A stuck viewer leaves the others threads to run on.** Bevy's task pools
+//!   are process-wide and its executor runs systems only on pool threads, so
+//!   a system blocked in one viewer's frame takes a thread from all of them.
+//!   The default pool follows the CPU count and a CPU quota, down to a single
+//!   thread, so the host creates it with at least `MIN_COMPUTE_THREADS`.
 
 use core::time::Duration;
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
@@ -34,7 +39,9 @@ use std::sync::{Mutex, PoisonError};
 use std::thread::JoinHandle;
 use std::time::Instant;
 
-use bevy::log::error;
+use bevy::app::{TaskPoolOptions, TaskPoolThreadAssignmentPolicy};
+use bevy::log::{error, warn};
+use bevy::tasks::ComputeTaskPool;
 use sl_automation_proto::{Request, ViewerMessage};
 use sl_client_bevy::log_context::spawn_named_thread;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
@@ -59,6 +66,12 @@ pub const TASK_TIMEOUT: Duration = Duration::from_secs(60);
 /// each first lets its render pipelines finish compiling, which a cold shader
 /// cache stretches to a few hundred frames.
 pub const STOP_TIMEOUT: Duration = Duration::from_secs(180);
+
+/// The fewest threads the process-wide compute pool has once a viewer is
+/// hosted: as many systems as this, less one, can be stuck across all the
+/// viewers with the others still stepping. The threads of a pool larger than
+/// the machine's CPU count only cost anything while they have work.
+const MIN_COMPUTE_THREADS: usize = 8;
 
 /// How often a stopping host looks whether its threads have ended.
 const STOP_POLL: Duration = Duration::from_millis(10);
@@ -234,6 +247,7 @@ impl<A: HostedApp + 'static> InProcessHost<A> {
         build: impl FnOnce() -> Result<A, BuildError> + Send + 'static,
     ) -> Result<(ViewerHandle, ViewerLink), HostError> {
         let label = label.into();
+        ensure_compute_threads();
         let (commands, inbox) = mpsc::channel();
         let (reply, answer) = oneshot::channel();
         let thread = {
@@ -395,6 +409,30 @@ impl<A: HostedApp + 'static> InProcessHost<A> {
             error!("{other}");
         }
         first.map_or(Ok(()), Err)
+    }
+}
+
+/// Create Bevy's task pools with at least [`MIN_COMPUTE_THREADS`] compute
+/// threads, each otherwise as Bevy would size it. A pool is created once per
+/// process, so one that something built before the first viewer cannot grow:
+/// that is said rather than left to show up as a stalled viewer.
+fn ensure_compute_threads() {
+    let defaults = TaskPoolOptions::default();
+    TaskPoolOptions {
+        compute: TaskPoolThreadAssignmentPolicy {
+            min_threads: MIN_COMPUTE_THREADS,
+            ..defaults.compute.clone()
+        },
+        ..defaults
+    }
+    .create_default_pools();
+    let threads = ComputeTaskPool::get().thread_num();
+    if threads < MIN_COMPUTE_THREADS {
+        warn!(
+            "the compute task pool was created with {threads} threads before the first \
+             in-process viewer, fewer than {MIN_COMPUTE_THREADS}: a viewer stuck in a frame \
+             can stall the others"
+        );
     }
 }
 

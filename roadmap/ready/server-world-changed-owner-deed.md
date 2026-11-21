@@ -34,8 +34,10 @@ A deed has not been measured.
   Run it on aditi (an avatar needs a group with the deed power; set one up
   and record the setup in the task), YEngine and XEngine (the local
   OpenSim's Groups V2 module).
+
 - **Write it down** in `book/src/gridspec/lsl.md`, in the owner-changes table
   of § `changed`: what a viewer's change raises.
+
 - **Raise it on the fake grid.** The fake grid holds groups
   (`sl-fake-grid/src/groups.rs`), but its object edits do not consult them
   yet. Deeding by a member with the power belongs to

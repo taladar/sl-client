@@ -2,7 +2,7 @@
 id: test-in-process-host-shared-task-pools
 title: In-process viewers share Bevy's task pools, so one stuck viewer can stall another on a small machine
 topic: test
-status: bugs
+status: done
 origin: verifying the in_process_host test deadlines under a CPU quota (2026-11-21)
 refs: [test-unbounded-waits-in-test-harnesses, test-conformance-object-asset-format-fails-under-load]
 ---
@@ -53,3 +53,21 @@ than a hang, but the second viewer would fail for the first one's fault.
 - Then choose: give the host a guaranteed minimum pool size, run each viewer's
   executor single-threaded, or document the limit and make the test say which
   pool size it needs.
+
+## Resolution (2026-11-21)
+
+Confirmed. Bevy's multi-threaded executor calls `scope_with_executor(false, …)`,
+so the calling thread never runs tasks of the global pool, and a system blocked
+on the only compute thread stops every other App. CPU affinity reproduces it
+without the slowness of a quota: under `taskset -c 0` or `0,1` (one compute
+thread) the second viewer's build never finished, under `0-3` (two) it did.
+
+`InProcessHost::host` now creates the pools before the first viewer's build,
+with Bevy's sizing except for at least `MIN_COMPUTE_THREADS` (8) compute
+threads. A pool is created once per process, so one built earlier cannot grow,
+and the host warns in that case. The guarantee is a number rather than a proof:
+eight or more systems stuck at once across all viewers would still stall the
+rest.
+
+Verified: the stuck-viewer, stop and task-timeout tests pass under `taskset` at
+one, two and four CPUs, and the first two at `CPUQuota=15%` and `200%`.

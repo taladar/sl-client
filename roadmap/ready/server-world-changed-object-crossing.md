@@ -36,8 +36,10 @@ object ever moves from one region to the next.
   "Aditi border rez & camera" notes) and both local OpenSim engines; the
   local 2×2 megaregion may hide a crossing, so check that first and use a
   region with a real neighbour if it does.
+
 - **Write it down** in `book/src/gridspec/lsl.md`, in the owner-and-region
   table of § `changed`: what a viewer's change raises.
+
 - **Cross on the fake grid.** Move an object, its contents and its running
   scripts (saved and restored as a take and a rez already are) from one
   region's store into the neighbour's, retire it on the old region's

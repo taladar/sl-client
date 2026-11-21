@@ -12,7 +12,7 @@ use sl_automation_proto::{Request, RequestBody, RequestId, ResponseBody, ViewerM
 use sl_viewer_testkit::interact::InteractionTest;
 use sl_viewer_testkit::settle;
 
-use super::{Deadlines, HostError, InProcessHost, ViewerLink};
+use super::{Deadlines, HostError, InProcessHost, MIN_COMPUTE_THREADS, ViewerLink};
 use crate::executor::{AutomationIdentity, AutomationPlugin};
 use crate::in_process::{InProcessError, ViewerHandle};
 
@@ -184,6 +184,22 @@ async fn frames(host: &InProcessHost<App>, viewer: ViewerHandle) -> Result<u64, 
     host.with_app(viewer, |app| app.world().resource::<Frames>().0)
         .await
         .map_err(|error| error.to_string())
+}
+
+#[tokio::test]
+async fn hosting_a_viewer_guarantees_the_compute_threads() -> Result<(), String> {
+    let host = InProcessHost::<App>::new();
+    let (_viewer, _link) = host
+        .host("one", || Ok(app("one")))
+        .await
+        .map_err(|error| error.to_string())?;
+    let threads = bevy::tasks::ComputeTaskPool::get().thread_num();
+    assert!(
+        threads >= MIN_COMPUTE_THREADS,
+        "{threads} compute threads on a machine reporting {} CPUs",
+        bevy::tasks::available_parallelism()
+    );
+    Ok(())
 }
 
 #[tokio::test]

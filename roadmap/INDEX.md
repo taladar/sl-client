@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 328 |
 | blocked | 34 |
 | in-progress | 4 |
-| bugs | 7 |
-| done | 1607 |
+| bugs | 6 |
+| done | 1608 |
 | deferred | 30 |
 | wont-do | 24 |
 | **total** | **2165** |
@@ -1239,7 +1239,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-text-renderability-axis`](in-progress/viewer-ui-text-renderability-axis.md)
   — Upstream issue — font selection cannot see glyph-format renderability
 
-## bugs (7)
+## bugs (6)
 
 ### viewer
 
@@ -1256,13 +1256,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-texture-filtering-in-linear-space`](bugs/viewer-texture-filtering-in-linear-space.md)
   — Colour textures are filtered after sRGB decoding, the reference before
 
-### test
-
-- [`test-in-process-host-shared-task-pools`](bugs/test-in-process-host-shared-task-pools.md)
-  — In-process viewers share Bevy's task pools, so one stuck viewer can stall
-  another on a small machine
-
-## done (1607)
+## done (1608)
 
 ### protocol
 
@@ -4237,6 +4231,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   start/stop
 - [`test-im-typing-aditi`](done/test-im-typing-aditi-add-the-aditi-variant.md) —
   IM typing — [aditi] variant
+- [`test-in-process-host-shared-task-pools`](done/test-in-process-host-shared-task-pools.md)
+  — In-process viewers share Bevy's task pools, so one stuck viewer can stall
+  another on a small machine
 - [`test-inventory-cache-skip`](done/test-inventory-cache-skip-refetch-with-matching-version-is-skipped.md)
   — refetch with matching version is skipped
 - [`test-inventory-item-ops`](done/test-inventory-item-ops-create-copy-move-link-an-item.md)

@@ -229,11 +229,13 @@ reason.
   declared. A self-staged scene (`subject: None`) is captured with the
   bare rig, takes no contexts and is listed with its reason in
   `render_matrix.rs`'s `SELF_STAGED`.
+
 - **a context axis**: a slot on `ContextSet` (and an `Axis` variant if
   subjects declare it), a stage builder in `render_stage.rs::stage`, an
   `expectation()` rule, and the budget it adds. A **toggle** is a
   `Toggle` value used only in curated R2 cells; each toggled cell is
   checked against the same cell untoggled and must differ.
+
 - **an interaction test**: `InteractionTest` (UI) or `WorldTest` (world)
   from the testkit / viewer crate; address a widget by **locator** where the
   crate can reach `sl_viewer_automation::in_app` (`click`, `fill`, `press`,
@@ -250,6 +252,7 @@ reason.
   frame — the copying system is an unordered `Update` system — so step one
   update past the input that produced the message, or an effect that did
   happen reads as "the key did nothing".
+
 - **a drag-and-drop test**: `drag_drop_tests` in `world_test.rs`. The drop
   target is whatever the **world tier's own drag pick** last resolved
   (`DragPickActive` / `DragWorldPick`), not a ray cast from the drop
@@ -259,6 +262,7 @@ reason.
   past a prim's re-tessellation — which used to leave it with no faces at
   all for a frame, and a pick answering `None`, until a rebuild started
   keeping its face entities ([[viewer-prim-rebuild-drops-a-click]]).
+
 - **a context-menu dispatch test**: open the pie with a **real
   right-click** (`world_test::right_click_at`), so the stashed target is
   the one the classifier resolved, then write the `UiAction` the slice
@@ -266,6 +270,7 @@ reason.
   pinned by the per-menu compass-address tables and, end to end, by
   `a_pie_slice_clicked_in_world_sends_its_command`. `pie_dispatch_tests`
   in `world_test.rs` is the worked example.
+
 - **a fake-grid fixture**: a `PrimFixture`/`NpcFixture` in
   `sl-fake-grid/src/fixtures/`, named in the catalogue so the viewer
   harness, the conformance fake-grid branch and the Firestorm
@@ -275,6 +280,7 @@ reason.
   answers both the LAND patches of the arrival burst and the estate RAW
   download, so "the ground is at 25 m" means the same thing on both
   paths.
+
 - **a full-stack test**: `ViewerHarness::start(fixture)` then `login()`,
   drive the grid through `grid(...)`, `mark(name)` after the grid-side
   work and `wait_marker(name)` for it, `look_from(eye, target)` to frame

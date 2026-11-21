@@ -90,6 +90,7 @@ between the removal and the next clear.
   (`lod_budget_charges_rebuilds_only_and_keeps_overflow`,
   `lod_budget_applies_all_when_under_budget`): at most `budget` builds,
   resolved entries dropped free, over-budget entries kept.
+
 - Live A/B on aditi (same tracy build, comparable camera sweeps, only
   `SL_VIEWER_LOD_APPLY_BUDGET` differs). The `apply_prim_lod` command
   flush — the spike source:

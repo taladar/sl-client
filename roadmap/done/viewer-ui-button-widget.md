@@ -40,6 +40,7 @@ from a panel. The gap is real either way; it is half the size.
   by the inline `BackgroundColor` / `BorderColor` the spec sets, and **no
   stylesheet can reach them**. (`rg -o 'ButtonSpec::(bordered|flat)\('` counts
   35, of which five are `ui_spawn`'s own tests and one a doc link in `skin.rs`.)
+
 - **40 further spawn tuples carry a button component and no `ClassList`** — a
   hand-rolled bordered, filled box that is a button in everything but the
   helper it went through. The About floater's action button is one:
@@ -60,6 +61,7 @@ from a panel. The gap is real either way; it is half the size.
   panels' buttons, a picker test fixture, the tab strip's scroll arrow and the
   two link runs (`linkified_text`, `ui_name_link`), which paint no box of their
   own.
+
 - The few that *are* skinned each re-declare `const BUTTON_CLASS: &str =
   "sk-button"` locally. **Seventeen** files did, not eight, with no shared
   constant in `skin.rs` — which had `ACTION_BUTTON_CLASS` but no

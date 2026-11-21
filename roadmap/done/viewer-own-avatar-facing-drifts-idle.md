@@ -53,6 +53,7 @@ the trace does settle:
   not one `SetRotation`, and the rendered yaw never moved. So no source in this
   viewer turns an idle avatar on its own. The drift needs an input this run did
   not have: an update the sim chose to send, or a `SetRotation` from somewhere.
+
 - **The simulator turns the body itself, and stops short.** A body rotation
   is not applied at once. SL streams the avatar turning towards it at a few
   rad/s (angular velocity 1–7 rad/s on the updates), then parks it with a final
@@ -68,6 +69,7 @@ the trace does settle:
   (and the camera that orbits it) sits a couple of degrees off the heading the
   viewer holds in `AvatarControls::yaw`. The next turn then starts from the
   held heading, not the drawn one.
+
 - **Where the reference differs.** Firestorm does not draw its own avatar from
   the echoed rotation: `LLVOAvatar::updateOrientation` takes the forward
   direction from the agent's own at-axis for `isSelf()`

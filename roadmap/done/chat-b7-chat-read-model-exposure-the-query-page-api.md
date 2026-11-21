@@ -22,21 +22,26 @@ exposure reference (from A10).
       before, limit)` on `Session`, composing the B1–B5 primitives. The list
       builder orders newest-first by `last_activity` (reusing `chat_sessions()`)
       and omits history; `ChatLifecycleView` flattens `Invited` inline.
+
 - [x] Added query `Command`s `QueryChatSessions` / `QueryChatHistoryPage {
   session, before, limit }` / `QueryFriends` and the reply `Event`s
   `ChatSessions(Arc<[ChatSessionInfo]>)` / `ChatHistoryPage { session, messages:
   Arc<[SessionMessage]>, prev }` / `FriendsSnapshot(Arc<[FriendPresence]>)` —
   `Arc<[…]>` payloads, built once and `Arc`-cloned across the channel, never
   deep `Vec` copies.
+
 - [x] tokio: handles the three queries by calling the builder and `events.send`
   (mirroring the `QueryScriptPermissions` arm); no wire send.
+
 - [x] bevy: accepts the same query commands for parity, surfacing the reply via
   `events.write` — a bevy *system* may instead borrow `&Session` and call the
   builders directly (zero round-trip), which the builders are designed for.
+
 - [x] REPL: registered `query_chat_sessions` / `query_chat_history_page`
   (`[limit]`, default 50; the opaque cursor means it always fetches the newest
   page) / `query_friends` in `registry.rs`; added the three reply `event_name`
   arms + the three `command_name` arms in `format.rs`.
+
 - [x] Tests (5 new, `tests/lifecycle.rs`): `chat_sessions_info` is
       newest-first, `Invited` flattened, no history; `history_page` is bounded
       newest-first + `prev`, paging older windows in bounded steps to `None` at

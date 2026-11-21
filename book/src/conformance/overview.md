@@ -55,6 +55,7 @@ one.
    to `credentials.toml` for OpenSim and `credentials.aditi.toml` for aditi, or
    use `--credentials <path>`. `--grid fake` needs none: it registers its own
    accounts as it starts.
+
 2. Run one test:
 
    ```sh

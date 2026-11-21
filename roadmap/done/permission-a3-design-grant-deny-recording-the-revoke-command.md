@@ -114,6 +114,7 @@ reads the mirror through public signatures returning public types —
 - `granted_permissions(&self, task_id: ObjectKey, item_id: InventoryKey) ->
   ScriptPermissions` — the granted subset for one script, `ScriptPermissions`
   empty when there is no grant (absent ≡ empty, per the deny rule).
+
 - `script_grants(&self) -> impl Iterator<Item = ScriptGrantInfo> + '_` — every
   current grant, as a new small `#[derive(Clone, Copy)]` **public** view:
 
@@ -126,6 +127,7 @@ reads the mirror through public signatures returning public types —
 
   The internal `circuit: Option<CircuitId>` (reset-scoping only) is **not**
   surfaced; `is_attachment` flattens `HolderKind` without leaking the enum.
+
 - `script_controls(&self) -> …` — reserved here, **return type finalized in A6**
   (the taken-controls tracker, likely the live `ControlFlags` or an iterator of
   `ScriptControl`). A3 fixes only the name and the "reads the A6 tracker"

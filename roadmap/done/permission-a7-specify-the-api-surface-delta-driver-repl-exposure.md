@@ -86,6 +86,7 @@ channel.** That is the design below; it adds no `Arc<Mutex>` to tokio and no
   `ScriptControlChange`, `ScriptTeleport`, and the follow-cam events
   (`SetFollowCamProperties` / `ClearFollowCamProperties`) stay exactly as
   they are. No grant/deny/revoke recording emits an event (A3).
+
 - **One new *synthesized* event:**
   `ScriptPermissionState(ScriptPermissionState)` — the reply to
   `QueryScriptPermissions`. It is **not** produced by `Session::poll` from the

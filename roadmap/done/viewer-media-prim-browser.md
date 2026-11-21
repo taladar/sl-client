@@ -102,6 +102,7 @@ Three things must not leak through that boundary:
   Windows VK code even on Linux/macOS — one ~100-line table.) For IME, feed the
   *composed* text from Bevy's `Ime::Commit` as CHAR events; full in-browser IME
   composition is a later problem.
+
 - **Zero-copy is an optimisation, never a requirement.** Ship the CPU path first
   (`OnPaint` gives BGRA + dirty rects; 8 surfaces at 512² and 30 fps is ~240
   MiB/s of `write_texture` — about 1 % of PCIe, and it is exactly what the
@@ -115,6 +116,7 @@ Three things must not leak through that boundary:
   `RenderCreation::Manual`). CEF also wants `--use-angle=gl-egl`. So treat
   zero-copy as **deferred headroom pending fixes we could contribute**, not a
   dead end — and spike it before believing any of it.
+
 - **Process model.** CEF re-execs our own binary as its subprocesses, so
   `cef_execute_process()` must run at the top of `main()`
   **before Bevy exists**; macOS additionally needs four helper `.app` bundles

@@ -60,6 +60,7 @@ Results against the four checks — **two pass, one fails, one unverified**:
    (`caret_moves_in_visual_order_across_a_bidi_boundary`): a rightward caret
    visits byte offsets non-monotonically through an RTL run, i.e. it moves in
    visual order. Selection *geometry* splitting is still only eyeballed.
+
 2. **Grapheme editing** — **fails**, and the premise that it is "inherited from
    parley" is false: `backdelete` deletes one *codepoint* except for hard line
    breaks and single emoji clusters. Follow-up:
@@ -73,8 +74,10 @@ Results against the four checks — **two pass, one fails, one unverified**:
    Only found by driving the F4 panel by hand; every headless test passed
    throughout. See [[viewer-ui-text-caret-grapheme-motion]]. Treat requirement 2
    as met only when both hold.
+
 3. **IME** — **unverified**: the dev machine has no input method configured.
    Deferred to [[viewer-ui-text-ime-verification]].
+
 4. **No tofu / colour emoji** — passes, confirmed live. CJK renders via system
    fallback; emoji render in colour.
 

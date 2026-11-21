@@ -33,6 +33,7 @@ folds and the accessors onto it with no behaviour change yet.
       `impl Iterator<Item = &InventoryFolder>` / `&InventoryItem` (folders skip
       payload-less entries); grep-confirmed no external callers, so B4's
       "deprecate the raw `&BTreeMap<Uuid, …>` accessors" item is superseded.
+
 - [x] Move `inventory_folders` / `inventory_items` / `inventory_root` /
       `next_inventory_callback` off `Session` into the model field; migrate
       every internal use to maintain the index + fetch-state: the central folds
@@ -44,12 +45,15 @@ folds and the accessors onto it with no behaviour change yet.
       `Inventory::move_item` — unlink-old + link-new), and the removal sites
       (`Inventory::purge_descendents` / `remove_folder` / `remove_item`, the
       latter two unlinking from the parent's child set).
+
 - [x] Set the authoritative folder version from the skeleton and from
   descendents replies (`Inventory::mark_folder_loaded`, at both the UDP and CAPS
   descendents arms); keep sub-folders (`version 0`) `Unknown`.
+
 - [x] **Persistence guard (from A10):** add **no** inventory clear at the four
   region-boundary sites; documented beside the chat persistence guard; assert
   that in B11.
+
 - [x] Tests: skeleton seeds roots + `Unknown`; a descendents reply flips the
   folder to `Loaded { version }` and the index lists its children; a mutation
   keeps the index consistent. (Integration tests in `lifecycle.rs` extended;

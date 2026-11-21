@@ -28,6 +28,7 @@ sl-client-bevy-viewer/assets/locales/
 ```
 
 - **`main.ftl`** is the message bundle: `key = value` pairs.
+
 - **`main.ftl.ron`** is a small [`bevy_fluent`] manifest that names the locale
   and lists its `.ftl` resources (paths relative to the manifest):
 

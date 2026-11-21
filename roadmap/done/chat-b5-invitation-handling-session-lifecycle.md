@@ -20,10 +20,12 @@ lifecycle reference (from A4) and § Invitation-handling reference (from A5).
   InviteChannel }` + `enum InviteChannel { Text, Voice, Both }`; add the
   `lifecycle` field to `ChatSession` (`ChatSession::new` default `Joined`, still
   `const`).
+
 - [x] Promotion rule: any session message / participant traffic (every
   `chat_session_mut` lazy-open) sets `lifecycle = Joined`; the new
   `mark_chat_session_invited` is the sole `Invited` setter and never demotes a
   joined session. Typing (`chat_session_get_mut`) does not promote.
+
 - [x] Classify the invite channel: `chatterbox_invitation_from_llsd`
   (`conversions.rs`) now also parses the top-level `voice`/`immediate` invite
   shape; the sibling `invite_channel_from_llsd` reads the `instantmessage` /
@@ -37,12 +39,14 @@ lifecycle reference (from A4) and § Invitation-handling reference (from A5).
     that invites are delivered **only** via the `ChatterBoxInvitation` CAPS
     event, so inbound UDP arms would be dead code (which the consolidation
     forbids).
+
 - [x] Add `Command::AcceptChatInvite` /
       `DeclineChatInvite { session_id, from_group }` +
       `Session::accept_chat_invite` / `decline_chat_invite` (accept → `Joined`;
       decline → remove). The CAPS accept-reply roster decodes into the B3
       participant list (`chat_session_roster_from_llsd`, both `agent_info` map
       and `agents` array).
+
 - [x] Runtime dual path (tokio / bevy / REPL at parity): look up
   `CAP_CHAT_SESSION_REQUEST`; if present POST `{ method, session-id }`
   (`chat_session_request_body`) with the fixed method (`"accept invitation"` /
@@ -52,8 +56,10 @@ lifecycle reference (from A4) and § Invitation-handling reference (from A5).
   reply roster with its session id; if absent, decline sends `SessionLeave`
   (`leave_group_session` / `leave_conference`). Cap added to the requested-caps
   set.
+
 - [x] Surface `lifecycle` through the new `chat_session_lifecycle()` accessor
   (so the field is read before B7).
+
 - [x] Tests: text `ConferenceInvited` (group + conf) → `Invited(channel=Text)`;
       voice → `Voice`/`Both`; `accept_chat_invite` → `Joined`; inbound traffic
       also promotes; `decline_chat_invite` removes; per-channel CAPS

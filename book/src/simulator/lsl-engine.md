@@ -381,6 +381,7 @@ scripts-run percentage.
   that had nothing to run; under YEngine that charges a loop of three
   operations a sixth more than measured. The doc comments carry the
   measurements.
+
 - **Size-proportional charges** (`vm/cost.rs`). Joining lists or strings with
   `+` costs what the grid measured for the length of the result, through the
   measured points joined by straight lines and on along the last one's slope.
@@ -395,12 +396,14 @@ scripts-run percentage.
   flavour and holds every charge to that grid's transcript within 5 %, or
   within the noise of its empty loop (some 20 ns under YEngine, 150 ns under
   XEngine).
+
 - **Overdraft.** A slice stops at the instruction that crosses its budget, and
   that one may cost more than was left — a join of a long list costs
   milliseconds. What it overdrew comes out of the instance's next shares, and
   the region's budget alike, so a script sits out the ticks its operation would
   still be running for, and doing its work in large pieces never makes it
   faster.
+
 - **Budgets.** `EngineConfig::for_step(step, flavour)` makes a script's share
   the tick's length and the region's that many times the engine's shares, so
   the numbers hold whatever step the heartbeat picks. 130 shares is aditi's:
@@ -409,10 +412,12 @@ scripts-run percentage.
   `NumThreadScriptWorkers` threads, two by default, and 16 busy scripts on the
   local OpenSim shared 2.2 scripts' rate; XEngine's pool holds up to
   `MaxThreads`, a hundred, and its total rose to 83 shares under 128 scripts.
+
 - **Sleeping** (`llSleep`, and a call's forced delay) is
   `wake = now + ceil(seconds / step)`, the seconds rounded to whole
   microseconds first so `0.2` as an `f32` — a hair above a fifth — is not
   taken for one more tick. Not positive is no sleep.
+
 - **Forced delays are each flavour's** (`vm::delays`): the keyword file's
   `sleep` where the grid agrees, the grid's own where it does not (Second
   Life's `llTextBox` takes none; OpenSim's `llModPow` a second, `llLoadURL`
@@ -430,6 +435,7 @@ scripts-run percentage.
   blocks there, sleeps before the line is said — the call returns having done
   nothing and is made again on waking (`ScriptCtx::delay_first`) — and YEngine
   after.
+
 - **Stopping is not resetting.** `set_running(false)` keeps the globals, the
   state and a handler in progress, and empties the queue; a stopped script is
   offered no events (`Posted::Stopped`), and a restarted one carries on
@@ -437,19 +443,23 @@ scripts-run percentage.
   its wake tick it resumes at once, restarted before it waits out the rest. All
   of it measured on aditi (2026-09-28), where it differs from OpenSim's YEngine
   only in the last point.
+
 - **Reset** (`llResetScript`, or `Instance::reset` from outside) puts every
   global back to its default for the initialisers to run again, drops the
   stacks, the queue, a pending state change and any sleep, and returns to
   `default`, whose `state_entry` follows the initialisers. The run flag is
   left alone.
+
 - **State changes.** `state x;` records the target; when the event handler
   ends, `state_exit` of the old state runs, the queue is discarded, and
   `state_entry` of the new one runs. `state` to the current state is no
   transition at all, and a `state` inside `state_exit` is not obeyed.
+
 - **Events.** `post(event, args)` checks the arguments against the event's
   parameters (`PostError` is a host bug) and queues the event only if the
   current state handles it (`Posted::NoHandler` otherwise). The queue's
   bound and coalescing rules are `server-lsl-state-and-events`'.
+
 - **Errors never panic the region.** A `Math Error`, a body Mono refuses
   (`InvalidProgram`), a call to a function nobody wrote
   (`RuntimeError::Unimplemented`), or a broken compiler promise
@@ -461,6 +471,7 @@ scripts-run percentage.
   (`RuntimeError::HostMemory`): see *As built: memory* below.
   `MAX_CALL_DEPTH` is only the backstop for OpenSim's engines, whose
   recursion takes the simulator down at no depth anyone measured.
+
 - **What becomes of a faulted script is the flavour's**
   (`EngineConfig::flavour`, an `EngineFlavour`; `server-lsl-runtime-errors`,
   measured in `gridspec/lsl.md` § Run-time errors). On `SecondLife` it is
@@ -469,6 +480,7 @@ scripts-run percentage.
   after. On `YEngine` it is held with its run flag still set, so it reads as
   running and answers nothing until a reset. On `XEngine` the event ends and
   the script runs on with the next one.
+
 - **The engine says the fault on `DEBUG_CHANNEL`** through `Host::say`, in the
   flavour's words: Second Life's two lines (`<prim name> [script:<script>]
   Script run-time error`, then `Math Error` / `Stack-Heap Collision`), which a
@@ -482,11 +494,13 @@ scripts-run percentage.
   YEngine's exhausted heap is the exception: it is told to the owner alone
   (`Host::owner_say`), four lines naming the item, the exception with its
   three numbers, the prim, script and place, and that a reset is needed.
+
 - **A library call refusing its arguments** (`llGetScriptState` of a missing
   script) words the refusal for the flavour through `ScriptCtx::refuse`
   (`Could not find script 'Nope'.` against OpenSim's `llGetScriptState: Can't
   find script 'Nope'`), and the engine says it after the slice; on OpenSim it
   reaches scripts as a shout. It costs the script a second on every grid.
+
 - **Second Life limits an object's error lines**: eight within sixteen seconds
   pass, the next is
   `Too many errors... dropping further messages until the flood stops`, and
@@ -500,6 +514,7 @@ scripts-run percentage.
   delivered through `Host::say_to` on `DEBUG_CHANNEL`), let one line further and
   dropped silently. Another object's lines are not affected, and OpenSim has no
   limit and says every complaint in the open.
+
 - **One run flag, read where it is kept.** `llGetScriptState(name)` asks the
   host which instance of the caller's prim is called `name`
   (`Host::script_named`) and reads that instance's run flag — the one the
@@ -509,6 +524,7 @@ scripts-run percentage.
   region's other instances while it runs (`ScriptCtx` sees their flags and
   nothing else); the caller itself reads as running, a script with no instance
   as stopped, and a name that is no script as stopped, refused as above.
+
 - **`print`** goes to `Host::print`: Second Life writes it to the
   simulator's log, where no resident sees it, so a host logs it and never
   turns it into chat. It is also what the VM's own tests observe.
@@ -1105,6 +1121,7 @@ scope of 236` as this was written):
   listing and no landing point; both resend every viewer the overlay. A
   restart's countdown after its first notice, and the restart itself, are
   `server-fake-grid-estate-actions`'.
+
 - **Inertia, floating and object teleports** — the inertia functions keep
   what they set on the object (`osGetInertiaData` reads it back of a
   physical one, the mass and centre of one that is not; `osSetInertia` reads
@@ -1116,10 +1133,12 @@ scope of 236` as this was written):
   motion, a stranger's on land the owner has no say over, or a destination
   off the region, which would be a crossing the fake grid's objects do not
   make).
+
 - **Later, with the tranche of the `ll*` functions they shadow** — URLs
   (`server-lsl-lib-http-url`). A
   task of its own takes the dynamic textures every OpenSim sign is drawn with
   (`server-fake-grid-dynamic-textures`).
+
 - **Out** — `osConsoleCommand` (the region console, which the fake grid has
   not got: `console`); `osGetSimulatorMemory*` (the host process's memory,
   meaningless for an in-process grid: `host-process`); and the readers of the

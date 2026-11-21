@@ -84,8 +84,10 @@ The diff (3 files, +125/-3):
   (`emoji_presentation_selector_is_detected`,
   `text_presentation_selector_is_detected`, `no_selector_requests_nothing`).
   These cover *detection* and are platform-independent.
+
 - Full suite green on the branch: `parley_core` + `parley` unit tests and
   `parley_tests` (156 snapshots, incl. all `draw_colr_emoji*`) — no regressions.
+
 - The *behavioural* selection change was verified **externally**, not in-tree.
   Which font each cluster resolves to, `Inter` primary + bundled Noto `CBDT`
   bound to the `Emoji` generic:

@@ -181,7 +181,12 @@ scrolled away or never built.
   answers nothing, so the host bounds every wait on a thread: a build
   `BUILD_TIMEOUT` (300 s), a `with_app` closure `TASK_TIMEOUT` (60 s), the
   host's stop `STOP_TIMEOUT` (180 s). A thread that overruns is named in the
-  error and left behind, detached.
+  error and left behind, detached. Bevy's task pools are process-wide and its
+  executor runs systems only on pool threads, so a blocked system takes a
+  thread from every viewer. The host therefore creates the compute pool with
+  at least `MIN_COMPUTE_THREADS` (8) threads however few CPUs or how small a
+  CPU quota the process has, and warns if something built a smaller pool
+  before the first viewer.
 - **Remote**: a viewer started with `--automation-socket [PATH]` serves one
   JSON request per line on a `0600` Unix socket; `Viewer::connect` talks to
   it. Requests that play input need `--headless`.

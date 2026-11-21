@@ -72,12 +72,15 @@ under the surface, plywood at 50 %):
 - **The data.** The simulator's own stored `TextureEntry` for that prim has a
   single colour default of `0000007F` and no per-face exception — every face,
   the top included, is alpha 128.
+
 - **The material.** `sl_viewer::texture_edit` shows all six faces built from
   `rgba[255, 255, 255, 128]`, `shared=true`: one interned `FaceMaterial` for the
   whole box, so the top face cannot differ from the five that look right.
+
 - **The water bucket.** `SL_VIEWER_DISABLE_PRE_WATER_PASS=1` changes the top
   face's pixels by ~4/255 — it renders the same whether or not the pre-water
   split runs at all.
+
 - **The glow pass, and the glow/alpha interaction in the face material.** There
   is a real one — `face_material.wgsl` writes the face's glow scalar into the
   fragment **alpha**, which the glow pass reads as its per-face mask, and

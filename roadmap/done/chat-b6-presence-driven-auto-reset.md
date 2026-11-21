@@ -19,8 +19,10 @@ registry (B2/B3). See § Presence-driven reset reference (from A7).
   `AgentKey` via the shared `Key`: `AgentKey(id.0)`). No session is removed and
   no per-session "offline" marker is stored (a 1:1 persists to logout; its
   peer-offline state is `!is_online(peer)`).
+
 - [x] `FriendsOnline` (`OnlineNotification`) gains **no** chat code. No session
   removal, no lifecycle change, no stored offline marker, no new `Event`.
+
 - [x] Tests (3 new, `tests/lifecycle.rs`): seed a conference roster + a 1:1
       typing entry for a friend, deliver `OfflineNotification`, assert they are
       gone from roster + `typing` **but** the sessions still exist and

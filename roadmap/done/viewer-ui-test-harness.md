@@ -99,15 +99,18 @@ work, and each part of it earned its place:
   eye can judge (is it ugly), and the discovery loop: a human spots something,
   and the fix is a **check**, which from then on runs against everything
   forever.
+
 - **A registry (`ui_element.rs`), so checks and elements compound.** Elements
   spawned ad hoc inside tests never meet the checks written later. One list
   means a new check retroactively covers every element, and a new element
   inherits the whole suite. That is the property that makes the suite grow
   rather than rot.
+
 - **Behaviour, not just the resting state.** Rendering checks cannot see a
   submenu that opens on hover. The harness drives activation and tab navigation
   through the real `bevy_ui_widgets` / `bevy_input_focus` paths and asserts on
   what happened.
+
 - **Three tiers, because one rule does not fit:**
 
   | Tier | Question | Who decides |

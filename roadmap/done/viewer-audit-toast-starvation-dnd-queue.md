@@ -94,9 +94,11 @@ manual `cycle_toasts` rotation.
 7 new, in `notification_host`:
 
 - `should_age`'s three-way pause, and the split at the visible cap.
+
 - `aged_rank` one step per interval and stopping at the top; `compare_toasts`
   showing priority winning fresh, still winning at a partial wait, and losing
   at a full one.
+
 - **The invariant**, driven through the real systems: a `Low` tip against a
   `Critical` arriving *every frame* for 80 s. It asserts the tip is shown, that
   it was not shown before its rank was earned, and that the channel never held
@@ -109,5 +111,7 @@ manual `cycle_toasts` rotation.
   constant to infinity to disable the aging made the test loop for ever instead
   of failing — taking a coordination slot with it. A test whose termination
   depends on the constant it is testing is not a test.
+
 - A queue of alerts past the cap loses none of them.
+
 - The hold list stops at its bound, drops the oldest, and counts the drops.

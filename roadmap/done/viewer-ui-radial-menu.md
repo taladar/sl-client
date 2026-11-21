@@ -30,14 +30,17 @@ The widget, and only the widget:
   **empty** — it must never shift its neighbours round to close the gap, because
   that silently re-teaches every angle the user already knows. Assigning slices
   in list order is the obvious implementation and it is the wrong one.
+
 - **Selection by angle, not by hit-test.** The slice under the pointer is
   computed from the *angle* of the mouse vector from the centre, not by testing
   a rectangle — that is the other half of what makes a pie fast: every slice is
   an equal-sized angular target, and flicking in a direction is enough, at any
   distance. A **dead zone** around the centre selects nothing, so opening the
   menu and releasing without moving cancels.
+
 - **Eight slices**, the reference's `PIE_MAX_SLICES`, at the compass points,
   with the slice centres rotated by half a slice so they align to the axes.
+
 - **Autohide: keep the idea, fix the implementation.** The idea is a
   **chain of mutually exclusive candidates for one position** — one slice holds
   "Sit" or "Stand" depending on state (`piemenu.cpp`'s own comment:
@@ -61,8 +64,10 @@ The widget, and only the widget:
   within it, and a slot with no winner stays empty. Then no state anywhere can
   move an angle, which is a property the counter-based design can only
   approximate.
+
 - **Nested sub-pies.** A slice may open another pie in place
   (`PieMenu::appendContextSubMenu`), so the mechanism is recursive.
+
 - **Do not reproduce `More >` chaining.** Eight slots is a hard budget, and the
   reference spends the overflow on a slice literally labelled `More >` that
   opens another pie — which itself has a `More >`. `menu_pie_object.xml` chains
@@ -93,6 +98,7 @@ The widget, and only the widget:
   from the centre picks the ring, in one uninterrupted gesture with no paging.
   Angular stability survives, because a direction still always means the same
   family. It composes with named sub-pies rather than competing with them.
+
 - **Placement — the hard part, and harder than for a line menu.** A line menu
   needs clearance in *one* quadrant and can simply flip or slide when it runs
   out ([[viewer-ui-context-menu]]). A pie is **centred** on the spawn point and
@@ -118,6 +124,7 @@ The widget, and only the widget:
   take a pointer lock/constraint for the menu's lifetime and drive a virtual
   cursor from relative motion, which is what a locked pointer gives us anyway.
   Prototype before committing — this is the task's one real unknown.
+
 - **Keyboard reachable.** The reference's pie is mouse-only; ours must not be —
   `viewer-ui-widget-scaffold` established that focus and tab navigation are the
   UI's spine, and a menu no keyboard can reach is a hole in it.
