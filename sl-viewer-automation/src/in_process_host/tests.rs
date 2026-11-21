@@ -220,17 +220,34 @@ async fn a_viewer_stuck_in_a_frame_does_not_stall_another() -> Result<(), String
     Ok(())
 }
 
-/// A host that gives its viewers' threads a quarter of a second for
-/// everything.
-fn impatient() -> InProcessHost<App> {
-    let quarter = core::time::Duration::from_millis(250);
+/// The deadline a test is about: short, so the test does not sit out the real
+/// one.
+const SHORT: core::time::Duration = core::time::Duration::from_millis(250);
+
+/// Every deadline a test is *not* about. Generous, because building an App or
+/// ending a thread on a machine running the whole workspace's tests can take
+/// longer than [`SHORT`] — a quarter of a second for everything is how a test
+/// about a stuck frame failed on its *build* (`did not finish being built
+/// within 0 s`) in the commit hook's run.
+const PATIENT: core::time::Duration = core::time::Duration::from_secs(60);
+
+/// How long the stop test waits for the threads: what a running viewer needs
+/// to end on a loaded machine, and no longer, since the stuck one is waited
+/// out in full.
+const STOP_UNDER_LOAD: core::time::Duration = core::time::Duration::from_secs(5);
+
+/// A host waiting [`PATIENT`] for everything but what `short` makes
+/// [`SHORT`].
+fn impatient(short: impl FnOnce(&mut Deadlines)) -> InProcessHost<App> {
+    let mut deadlines = Deadlines {
+        build: PATIENT,
+        task: PATIENT,
+        stop: PATIENT,
+    };
+    short(&mut deadlines);
     InProcessHost {
         viewers: Mutex::new(Vec::new()),
-        deadlines: Deadlines {
-            build: quarter,
-            task: quarter,
-            stop: quarter,
-        },
+        deadlines,
     }
 }
 
@@ -251,7 +268,7 @@ async fn stuck(host: &InProcessHost<App>, held: Receiver<()>) -> Result<ViewerHa
 
 #[tokio::test]
 async fn a_build_that_never_finishes_times_out() -> Result<(), String> {
-    let host = impatient();
+    let host = impatient(|deadlines| deadlines.build = SHORT);
     let (release, held): (Sender<()>, Receiver<()>) = channel();
     let built = host
         .host("slow", move || {
@@ -269,7 +286,7 @@ async fn a_build_that_never_finishes_times_out() -> Result<(), String> {
 
 #[tokio::test]
 async fn a_task_on_a_viewer_stuck_in_a_frame_times_out() -> Result<(), String> {
-    let host = impatient();
+    let host = impatient(|deadlines| deadlines.task = SHORT);
     let (release, held): (Sender<()>, Receiver<()>) = channel();
     let viewer = stuck(&host, held).await?;
     let ran = host.with_app(viewer, |_app| ()).await;
@@ -284,7 +301,9 @@ async fn a_task_on_a_viewer_stuck_in_a_frame_times_out() -> Result<(), String> {
 
 #[tokio::test]
 async fn stopping_gives_up_on_a_thread_stuck_in_a_frame() -> Result<(), String> {
-    let host = impatient();
+    // Not [`SHORT`]: the running viewer has to end within it too, and the
+    // assertion is that only the stuck one did not.
+    let host = impatient(|deadlines| deadlines.stop = STOP_UNDER_LOAD);
     let (release, held): (Sender<()>, Receiver<()>) = channel();
     let _viewer = stuck(&host, held).await?;
     let (_running, _link) = host

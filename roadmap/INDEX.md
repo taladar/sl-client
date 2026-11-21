@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 34 |
 | in-progress | 4 |
 | bugs | 7 |
-| done | 1606 |
+| done | 1607 |
 | deferred | 30 |
 | wont-do | 24 |
-| **total** | **2164** |
+| **total** | **2165** |
 
 ## ideas (131)
 
@@ -1258,10 +1258,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### test
 
-- [`test-conformance-object-asset-format-fails-under-load`](bugs/test-conformance-object-asset-format-fails-under-load.md)
-  — object_asset_format fails only in a full-workspace run, and fails early
+- [`test-in-process-host-shared-task-pools`](bugs/test-in-process-host-shared-task-pools.md)
+  — In-process viewers share Bevy's task pools, so one stuck viewer can stall
+  another on a small machine
 
-## done (1606)
+## done (1607)
 
 ### protocol
 
@@ -3998,6 +3999,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   prims in the region
 - [`test-conformance-lsl-probes-teardown-unacked`](done/test-conformance-lsl-probes-teardown-unacked.md)
   — The last derez and both logouts of an OpenSim probe run go unacknowledged
+- [`test-conformance-object-asset-format-fails-under-load`](done/test-conformance-object-asset-format-fails-under-load.md)
+  — object_asset_format fails only in a full-workspace run, and fails early
 - [`test-conformance-object-edit-click-action-opensim`](done/test-conformance-object-edit-click-action-opensim.md)
   — object-edit on OpenSim never sees the sit click action re-broadcast
 - [`test-conformance-script-compile-xengine-cold-start`](done/test-conformance-script-compile-xengine-cold-start.md)

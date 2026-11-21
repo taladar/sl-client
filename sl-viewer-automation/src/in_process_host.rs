@@ -87,7 +87,7 @@ pub enum HostError {
     Panicked(String),
     /// A viewer's thread did not answer in time: it is stuck in a frame, or
     /// in its build. The thread is left running, detached.
-    #[error("viewer {label} did not {what} within {} s", after.as_secs())]
+    #[error("viewer {label} did not {what} within {after:?}")]
     TimedOut {
         /// The viewer.
         label: String,
@@ -98,7 +98,7 @@ pub enum HostError {
     },
     /// Viewers' threads had not ended when the host gave up waiting for
     /// them; they are left running, detached.
-    #[error("the threads of viewers {labels:?} had not ended {} s after the host stopped", after.as_secs())]
+    #[error("the threads of viewers {labels:?} had not ended {after:?} after the host stopped")]
     NotStopped {
         /// The viewers.
         labels: Vec<String>,

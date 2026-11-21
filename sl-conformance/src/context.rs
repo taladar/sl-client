@@ -1278,36 +1278,18 @@ fn spawn_session(mut client: Client, spec: LoginSpec<'_>, rezzes: RezLedger) -> 
 
     // Capture the region capability map so a case can drive a TextureStore off
     // the live `GetTexture` cap. The reporter fires at startup and each region
-    // change; a drain keeps the shared map current.
+    // change; the event forwarder below keeps the shared map current.
     if let Some(capabilities) = capabilities.as_ref() {
         client.set_requested_capabilities(capabilities.iter().cloned());
     }
     // The neighbours' capability maps, as each seed answers.
     let neighbour_caps = Arc::new(Mutex::new(std::collections::HashMap::new()));
-    let (neighbour_tx, mut neighbour_rx) =
+    let (neighbour_tx, neighbour_rx) =
         mpsc::channel::<(SocketAddr, std::collections::HashMap<String, String>)>(8);
     client.set_neighbour_caps_reporter(neighbour_tx);
-    let neighbour_sink = Arc::clone(&neighbour_caps);
-    let _neighbour_drain = tokio::spawn(async move {
-        while let Some((sim, map)) = neighbour_rx.recv().await {
-            neighbour_sink
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .insert(sim, map);
-        }
-    });
     let caps = Arc::new(Mutex::new(std::collections::HashMap::new()));
-    let (caps_tx, mut caps_rx) = mpsc::channel::<std::collections::HashMap<String, String>>(4);
+    let (caps_tx, caps_rx) = mpsc::channel::<std::collections::HashMap<String, String>>(4);
     client.set_caps_reporter(caps_tx);
-    let caps_sink = Arc::clone(&caps);
-    let _caps_drain = tokio::spawn(async move {
-        while let Some(map) = caps_rx.recv().await {
-            match caps_sink.lock() {
-                Ok(mut current) => *current = map,
-                Err(poisoned) => *poisoned.into_inner() = map,
-            }
-        }
-    });
 
     let agent_id = client.agent_id();
     let login_account = client.login_account().cloned();
@@ -1315,7 +1297,7 @@ fn spawn_session(mut client: Client, spec: LoginSpec<'_>, rezzes: RezLedger) -> 
     let login_session_id = client.session_id();
     let region_handle = client.region_handle();
     let circuit_id = client.root_circuit_id();
-    let (event_tx, mut event_rx) = mpsc::channel::<Event>(256);
+    let (event_tx, event_rx) = mpsc::channel::<Event>(256);
     let (command_tx, command_rx) = mpsc::channel::<Command>(16);
     let (diag_tx, mut diag_rx) = mpsc::channel::<Diagnostic>(64);
     let diagnostics = Arc::new(Mutex::new(Vec::new()));
@@ -1341,20 +1323,28 @@ fn spawn_session(mut client: Client, spec: LoginSpec<'_>, rezzes: RezLedger) -> 
     //
     // The forwarder is also where the session's rez ledger learns which objects
     // its rezzes brought: it sees every event whether or not the case reads it,
-    // and it outlives a case body the runner cancels.
+    // and it outlives a case body the runner cancels. And it is what installs
+    // the capability maps, for the reason [`forward_session`] gives.
     let (events_tx, events_rx) = mpsc::unbounded_channel::<Event>();
     let ledger = rezzes.clone();
     let whereabouts = Whereabouts::of(agent_id);
     let seen = whereabouts.clone();
-    let _forward = tokio::spawn(async move {
-        while let Some(event) = event_rx.recv().await {
-            ledger.observe(&event);
-            seen.observe(&event);
-            if events_tx.send(event).is_err() {
-                break;
-            }
-        }
-    });
+    let _forward = tokio::spawn(forward_session(
+        SessionChannels {
+            events: event_rx,
+            caps: caps_rx,
+            neighbour_caps: neighbour_rx,
+        },
+        events_tx,
+        CapabilitySinks {
+            caps: Arc::clone(&caps),
+            neighbour_caps: Arc::clone(&neighbour_caps),
+        },
+        move |event| {
+            ledger.observe(event);
+            seen.observe(event);
+        },
+    ));
     let run = tokio::spawn(client.run(event_tx, diag_tx, command_rx));
     Session {
         agent_id,
@@ -1760,6 +1750,84 @@ pub fn now_rfc3339() -> Result<String, TestFailure> {
 type NeighbourCapabilityMaps =
     std::collections::HashMap<SocketAddr, std::collections::HashMap<String, String>>;
 
+/// The receiving ends of what a session's run loop reports: its events and the
+/// capability maps it fetched.
+struct SessionChannels {
+    /// The run loop's bounded event channel.
+    events: mpsc::Receiver<Event>,
+    /// The region's capability map, at startup and after each region change.
+    caps: mpsc::Receiver<std::collections::HashMap<String, String>>,
+    /// Each neighbour region's capability map, as its seed answers.
+    neighbour_caps: mpsc::Receiver<(SocketAddr, std::collections::HashMap<String, String>)>,
+}
+
+/// Where [`forward_session`] installs the capability maps a case reads with
+/// [`Session::cap`] and [`Session::neighbour_capability_names`].
+struct CapabilitySinks {
+    /// The current region's map.
+    caps: Arc<Mutex<std::collections::HashMap<String, String>>>,
+    /// The neighbours' maps.
+    neighbour_caps: Arc<Mutex<NeighbourCapabilityMaps>>,
+}
+
+/// Forwards a session's events onto the unbounded channel a case reads, and
+/// installs every capability map the run loop reports **before** forwarding
+/// any event the run loop sent after it.
+///
+/// **One task, biased towards the maps, because the order is the point.** The
+/// run loop hands over the region's map before it releases
+/// `CompleteAgentMovement`, so every event of the arrival comes after it. When
+/// the map was installed by a task of its own, nothing ordered that task's
+/// write against the forwarder's: a case could take `RegionHandshakeComplete`
+/// off its channel, ask [`Session::cap`] for `ViewerAsset`, and find the map
+/// still empty because the other task had not been scheduled yet — a failure
+/// that needs a loaded machine, which is where `object-asset-format` once
+/// failed a second into its second fake grid, the point it asks for that cap.
+/// Polling the map channels first on every turn means a map sent before an
+/// event is installed before that event is forwarded.
+///
+/// `observe` sees every event first, whether or not the case reads it — the
+/// rez ledger and the whereabouts are kept from it.
+async fn forward_session(
+    channels: SessionChannels,
+    events_tx: mpsc::UnboundedSender<Event>,
+    sinks: CapabilitySinks,
+    mut observe: impl FnMut(&Event) + Send,
+) {
+    let SessionChannels {
+        events: mut event_rx,
+        caps: mut caps_rx,
+        neighbour_caps: mut neighbour_rx,
+    } = channels;
+    loop {
+        tokio::select! {
+            biased;
+            Some(map) = caps_rx.recv() => {
+                *sinks
+                    .caps
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner) = map;
+            }
+            Some((sim, map)) = neighbour_rx.recv() => {
+                let _previous = sinks
+                    .neighbour_caps
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .insert(sim, map);
+            }
+            event = event_rx.recv() => {
+                let Some(event) = event else {
+                    break;
+                };
+                observe(&event);
+                if events_tx.send(event).is_err() {
+                    break;
+                }
+            }
+        }
+    }
+}
+
 /// A test failure: any reason a conformance test did not pass.
 #[derive(Debug, thiserror::Error)]
 pub enum TestFailure {
@@ -1809,10 +1877,205 @@ pub enum TestFailure {
 
 #[cfg(test)]
 mod tests {
-    use super::{enforce_cooldown, wait_out_cooldown};
+    use super::{
+        CapabilitySinks, Event, SessionChannels, enforce_cooldown, forward_session,
+        wait_out_cooldown,
+    };
+    use pretty_assertions::assert_eq;
     use sl_repl::LoginCooldown;
+    use std::collections::HashMap;
+    use std::net::SocketAddr;
     use std::path::PathBuf;
+    use std::sync::{Arc, Mutex};
     use std::time::Duration;
+    use tokio::sync::mpsc;
+
+    /// The sending ends a run loop holds, and what a case reads, around one
+    /// spawned [`forward_session`].
+    struct Forwarding {
+        /// The run loop's event sender.
+        events: mpsc::Sender<Event>,
+        /// The run loop's capability reporter.
+        caps: mpsc::Sender<HashMap<String, String>>,
+        /// The run loop's neighbour capability reporter.
+        neighbour_caps: mpsc::Sender<(SocketAddr, HashMap<String, String>)>,
+        /// What the case reads its events from.
+        forwarded: mpsc::UnboundedReceiver<Event>,
+        /// What [`Session::cap`](super::Session::cap) reads.
+        cap_map: Arc<Mutex<HashMap<String, String>>>,
+        /// What the neighbour capability names are read from.
+        neighbour_maps: Arc<Mutex<super::NeighbourCapabilityMaps>>,
+        /// How many events `observe` saw.
+        observed: Arc<Mutex<usize>>,
+    }
+
+    /// Channels for a forwarder, not yet started, so a test can queue what the
+    /// run loop sent before the forwarder first runs.
+    fn forwarding() -> (Forwarding, impl Future<Output = ()>) {
+        let (events, events_rx) = mpsc::channel(8);
+        let (caps, caps_rx) = mpsc::channel(4);
+        let (neighbour_caps, neighbour_rx) = mpsc::channel(4);
+        let (forwarded_tx, forwarded) = mpsc::unbounded_channel();
+        let cap_map = Arc::new(Mutex::new(HashMap::new()));
+        let neighbour_maps = Arc::new(Mutex::new(HashMap::new()));
+        let observed = Arc::new(Mutex::new(0_usize));
+        let counter = Arc::clone(&observed);
+        let task = forward_session(
+            SessionChannels {
+                events: events_rx,
+                caps: caps_rx,
+                neighbour_caps: neighbour_rx,
+            },
+            forwarded_tx,
+            CapabilitySinks {
+                caps: Arc::clone(&cap_map),
+                neighbour_caps: Arc::clone(&neighbour_maps),
+            },
+            move |_event| {
+                let mut count = counter
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                *count = count.saturating_add(1);
+            },
+        );
+        (
+            Forwarding {
+                events,
+                caps,
+                neighbour_caps,
+                forwarded,
+                cap_map,
+                neighbour_maps,
+                observed,
+            },
+            task,
+        )
+    }
+
+    /// A one-entry capability map.
+    fn map_of(name: &str, url: &str) -> HashMap<String, String> {
+        HashMap::from([(name.to_owned(), url.to_owned())])
+    }
+
+    /// A map the run loop reported before an event is installed by the time a
+    /// case has that event — with no yield in between, which is exactly the
+    /// window a separate drain task left open.
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_map_sent_before_an_event_is_installed_when_the_event_is_read() -> Result<(), String>
+    {
+        let (mut forwarding, task) = forwarding();
+        // Queued the way the run loop sends them: the map, then the arrival.
+        forwarding
+            .caps
+            .send(map_of("ViewerAsset", "http://127.0.0.1/asset"))
+            .await
+            .map_err(|error| format!("{error}"))?;
+        forwarding
+            .events
+            .send(Event::RegionHandshakeComplete)
+            .await
+            .map_err(|error| format!("{error}"))?;
+        let _forwarder = tokio::spawn(task);
+        let event = forwarding
+            .forwarded
+            .recv()
+            .await
+            .ok_or_else(|| "the forwarder ended without forwarding".to_owned())?;
+        assert!(matches!(event, Event::RegionHandshakeComplete));
+        let installed = forwarding
+            .cap_map
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get("ViewerAsset")
+            .cloned();
+        assert_eq!(installed.as_deref(), Some("http://127.0.0.1/asset"));
+        Ok(())
+    }
+
+    /// The same holds for a neighbour's map, and a later region map replaces
+    /// the earlier one rather than merging into it.
+    #[tokio::test(flavor = "current_thread")]
+    async fn neighbour_maps_and_a_region_change_are_installed_in_order() -> Result<(), String> {
+        let (mut forwarding, task) = forwarding();
+        let sim: SocketAddr = "127.0.0.1:9001"
+            .parse()
+            .map_err(|error| format!("{error}"))?;
+        forwarding
+            .caps
+            .send(map_of("GetTexture", "http://127.0.0.1/old"))
+            .await
+            .map_err(|error| format!("{error}"))?;
+        forwarding
+            .neighbour_caps
+            .send((sim, map_of("ObjectMedia", "http://127.0.0.1/n")))
+            .await
+            .map_err(|error| format!("{error}"))?;
+        forwarding
+            .caps
+            .send(map_of("ViewerAsset", "http://127.0.0.1/new"))
+            .await
+            .map_err(|error| format!("{error}"))?;
+        forwarding
+            .events
+            .send(Event::RegionHandshakeComplete)
+            .await
+            .map_err(|error| format!("{error}"))?;
+        let _forwarder = tokio::spawn(task);
+        let _event = forwarding
+            .forwarded
+            .recv()
+            .await
+            .ok_or_else(|| "the forwarder ended without forwarding".to_owned())?;
+        let region = forwarding
+            .cap_map
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        assert_eq!(region, map_of("ViewerAsset", "http://127.0.0.1/new"));
+        let neighbours = forwarding
+            .neighbour_maps
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        assert_eq!(
+            neighbours,
+            HashMap::from([(sim, map_of("ObjectMedia", "http://127.0.0.1/n"))])
+        );
+        Ok(())
+    }
+
+    /// Reporters that have gone away do not stop the events: a run loop drops
+    /// its reporters with itself, and a closed map channel must not end or
+    /// spin the forwarder while events still come.
+    #[tokio::test(flavor = "current_thread")]
+    async fn closed_map_channels_leave_the_events_flowing() -> Result<(), String> {
+        let (mut forwarding, task) = forwarding();
+        let forwarder = tokio::spawn(task);
+        drop(forwarding.caps);
+        drop(forwarding.neighbour_caps);
+        for _ in 0..3_u8 {
+            forwarding
+                .events
+                .send(Event::RegionHandshakeComplete)
+                .await
+                .map_err(|error| format!("{error}"))?;
+            let _event = tokio::time::timeout(Duration::from_secs(5), forwarding.forwarded.recv())
+                .await
+                .map_err(|_elapsed| "an event was not forwarded".to_owned())?
+                .ok_or_else(|| "the forwarder ended".to_owned())?;
+        }
+        drop(forwarding.events);
+        tokio::time::timeout(Duration::from_secs(5), forwarder)
+            .await
+            .map_err(|_elapsed| "the forwarder outlived its event channel".to_owned())?
+            .map_err(|error| format!("{error}"))?;
+        let observed = *forwarding
+            .observed
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        assert_eq!(observed, 3);
+        Ok(())
+    }
 
     /// A process-unique scratch directory for a cooldown test, removed on drop.
     struct ScratchDir(PathBuf);

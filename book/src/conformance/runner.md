@@ -363,6 +363,18 @@ leak), and an object still standing 20 s after the derez is logged as an error.
 The outcome of the case is never changed. Objects a script rezzes are not
 counted — no command asked for them.
 
+**A capability map is installed before the events that follow it.** The same
+forwarder installs the region's and the neighbours' capability maps that
+`Session::cap` and `Session::neighbour_capability_names` read, polling the map
+channels before the event channel on every turn
+(`context::forward_session`). The client hands over the region's map before it
+releases `CompleteAgentMovement`, so once a case has `RegionHandshakeComplete`
+the map is there. It used to be installed by a task of its own, which nothing
+ordered against the forwarder, so on a loaded machine a case could read the
+event and still find the map empty. After a region change the new map arrives
+from a fetch the client starts after the change, so `Session::cap` can still
+name the previous region's capabilities right after a `RegionChanged`.
+
 A case that **mutates grid state** must restore it on the failure path too, not
 only at the end of a happy flow. `parcel-divide-join` is the worked example: its
 divide leaves the region genuinely split, so the exercise runs under an awaited
