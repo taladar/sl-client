@@ -521,7 +521,7 @@ fn drawn_content(syntax: &CodeSyntax, current: &RichTextContent) -> RichTextCont
 
 /// A click on a `⋯` box unfolds its fold.
 fn on_placeholder_click(
-    mut click: On<Pointer<Click>>,
+    mut click: On<PointerClick>,
     placeholders: Query<&FoldPlaceholder>,
     mut folds: MessageWriter<CodeFold>,
 ) {

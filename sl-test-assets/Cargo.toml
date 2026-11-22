@@ -49,7 +49,7 @@ sl-lsl = { workspace = true }
 # The decoder behind `sl-audio`'s `decode_clip`, used directly so a fixture
 # sound is read back the way the viewer reads one without dragging the mixer
 # (and its audio device backend) into this crate's tree.
-symphonium = { version = "0.12.2", default-features = false, features = [
+symphonium = { version = "0.13.0", default-features = false, features = [
   "decode-native",
   "ogg",
   "vorbis",

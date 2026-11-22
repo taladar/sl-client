@@ -719,7 +719,7 @@ fn spawn_landmark_content(
         .id();
     let teleport = spawn_button(commands, buttons, "landmark-teleport", 3, font_size);
     commands.entity(teleport).observe(
-        move |press: On<Pointer<Press>>, mut commands: MessageWriter<SlCommand>| {
+        move |press: On<PointerPress>, mut commands: MessageWriter<SlCommand>| {
             if press.button == PointerButton::Primary {
                 commands.write(SlCommand(Command::TeleportViaLandmark {
                     landmark: Some(AssetKey::from(asset_id)),
@@ -738,7 +738,7 @@ fn spawn_landmark_content(
         font_size,
     );
     commands.entity(show_on_map).observe(
-        |press: On<Pointer<Press>>,
+        |press: On<PointerPress>,
          parents: Query<&ChildOf>,
          floaters: Query<(Entity, &Floater)>,
          windows: Query<&AboutLandmarkState>,
@@ -763,7 +763,7 @@ fn spawn_landmark_content(
     );
     let copy = spawn_button(commands, buttons, "about-landmark-copy-slurl", 5, font_size);
     commands.entity(copy).observe(
-        |press: On<Pointer<Press>>,
+        |press: On<PointerPress>,
          parents: Query<&ChildOf>,
          floaters: Query<(Entity, &Floater)>,
          windows: Query<&AboutLandmarkState>,

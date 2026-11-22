@@ -19,9 +19,9 @@ use std::time::Duration;
 use etherparse::{
     LaxNetSlice, LaxSlicedPacket, LinuxSllProtocolType, LinuxSllSlice, TransportSlice,
 };
-use pcap_file::pcap::PcapReader;
+use pcap_file::DataLink;
+use pcap_file::pcap::{PcapReader, PcapTsResolution};
 use pcap_file::pcapng::{Block, PcapNgReader};
-use pcap_file::{DataLink, TsResolution};
 use time::OffsetDateTime;
 
 use crate::trace::TraceError;
@@ -206,7 +206,7 @@ fn read_pcapng<R: Read>(reader: R) -> Result<Capture, TraceError> {
 
     while let Some(block) = reader.next_block() {
         let block = match block {
-            Ok(block) => block,
+            Ok((block, _state)) => block,
             Err(error) => {
                 capture.stopped_early = Some(error.to_string());
                 break;
@@ -243,11 +243,11 @@ fn read_pcapng<R: Read>(reader: R) -> Result<Capture, TraceError> {
 fn record_timestamp(
     seconds: u32,
     fraction: u32,
-    resolution: TsResolution,
+    resolution: PcapTsResolution,
 ) -> Result<OffsetDateTime, TraceError> {
     let per_unit = match resolution {
-        TsResolution::MicroSecond => 1_000,
-        TsResolution::NanoSecond => 1,
+        PcapTsResolution::MicroSecond => 1_000,
+        PcapTsResolution::NanoSecond => 1,
     };
     let total = i128::from(seconds)
         .checked_mul(1_000_000_000)
@@ -381,16 +381,14 @@ mod test {
         let mut writer = PcapWriter::with_header(Vec::new(), header).ok();
         if let Some(writer) = writer.as_mut() {
             for (frame, original_len) in frames {
-                writer
-                    .write_packet(&PcapPacket::new(
-                        Duration::from_secs(1),
-                        *original_len,
-                        frame,
-                    ))
-                    .ok();
+                if let Ok(packet) =
+                    PcapPacket::new(Duration::from_secs(1), *original_len, frame.as_slice())
+                {
+                    writer.write_packet(&packet).ok();
+                }
             }
         }
-        writer.map(PcapWriter::into_writer).unwrap_or_default()
+        writer.map(PcapWriter::into_inner).unwrap_or_default()
     }
 
     /// A classic `.pcap` file of whole, untruncated frames.

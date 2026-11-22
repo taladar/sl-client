@@ -1252,7 +1252,7 @@ mod test {
             app.world()
                 .get::<Node>(resting_disc)
                 .map(|node| node.border_radius.top_left),
-            Some(Val::Percent(50.0)),
+            Some(CornerRadius::circular(Val::Percent(50.0))),
             "the disc did not take its `border-radius` from the skin"
         );
         assert_eq!(
@@ -1932,7 +1932,7 @@ mod test {
         );
         assert_eq!(
             node.border_radius.top_left,
-            Val::Px(0.0),
+            CornerRadius::circular(Val::Px(0.0)),
             "`--tooltip-radius` did not square the corners"
         );
         assert_eq!(

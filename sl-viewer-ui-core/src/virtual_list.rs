@@ -188,7 +188,7 @@ pub(crate) fn spawn_list_groove(
             ChildOf(groove),
         ))
         .observe(
-            move |mut drag: On<Pointer<Drag>>,
+            move |mut drag: On<PointerDrag>,
                   mut lists: Query<(&mut VirtualList, &ComputedNode)>,
                   grooves: Query<&ComputedNode, With<VirtualScrollGroove>>| {
                 drag.propagate(false);
@@ -684,7 +684,7 @@ pub fn scroll_virtual_lists(
         MouseScrollUnit::Pixel => wheel.delta.y,
     };
     // Scroll the first hovered entity that is (or is inside) a virtual list; the
-    // mouse pointer's hover set is what `Pointer<Scroll>` itself would bubble
+    // mouse pointer's hover set is what `PointerScroll` itself would bubble
     // through, so this matches "the list the wheel is over".
     for hovered in hover_map.values().flat_map(|hits| hits.keys()) {
         let mut node = *hovered;

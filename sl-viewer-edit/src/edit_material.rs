@@ -2726,7 +2726,7 @@ type PbrSaveSession<'w> = (
 /// action (the reference's `BLANK_MATERIAL_ASSET_ID`). Applies to every selected
 /// face regardless of whether it already has a material.
 fn handle_pbr_new_press(
-    press: On<Pointer<Press>>,
+    press: On<PointerPress>,
     buttons: Query<(), With<PbrNewButton>>,
     session: Option<PbrNewSession<'_>>,
 ) {
@@ -2768,7 +2768,7 @@ fn handle_pbr_new_press(
 /// item and its callback saves the bytes over `UpdateMaterialAgentInventory`,
 /// which is what this does.
 fn handle_pbr_save_press(
-    press: On<Pointer<Press>>,
+    press: On<PointerPress>,
     buttons: Query<(), With<PbrSaveButton>>,
     faces: RenderFaceLookup,
     session: Option<PbrSaveSession<'_>>,

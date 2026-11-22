@@ -8,9 +8,7 @@ use bevy::input_focus::InputFocus;
 use bevy::picking::hover::HoverMap;
 use bevy::prelude::*;
 use bevy::text::EditableText;
-use bevy::ui::{
-    Checked, ComputedStackIndex, InteractionDisabled, Selected, UiStack, clip_check_recursive,
-};
+use bevy::ui::{Checked, ComputedStackIndex, InteractionDisabled, Selected, UiStack};
 use bevy::ui_widgets::{Button, Checkbox, RadioButton, RadioGroup, Slider, SliderValue};
 use bevy_flair::prelude::ClassList;
 use bevy_flair::style::components::PseudoElementsSupport;
@@ -124,8 +122,6 @@ struct NodeMarkers {
     pseudo_elements: Has<PseudoElementsSupport>,
     /// `bevy_ui_widgets`' headless button.
     button: Has<Button>,
-    /// `bevy_ui`'s own button, pressed through `Interaction`.
-    interaction_button: Has<bevy::ui::widget::Button>,
     /// A set of radio options.
     radio_group: Has<RadioGroup>,
     /// A check box.
@@ -205,19 +201,6 @@ pub struct UiModel<'w, 's> {
     parents: Query<'w, 's, &'static ChildOf>,
     /// Text spans under a text node, for its full content.
     spans: Query<'w, 's, &'static TextSpan>,
-    /// The clip walk's view of an ancestor, exactly as `bevy_ui`'s picking
-    /// backend reads it.
-    clipping: Query<
-        'w,
-        's,
-        (
-            &'static ComputedNode,
-            &'static UiGlobalTransform,
-            &'static Node,
-        ),
-    >,
-    /// The clip walk's parent links, stopping at an [`OverrideClip`].
-    clip_parents: Query<'w, 's, &'static ChildOf, Without<OverrideClip>>,
     /// Pickability, for whether a hit blocks the nodes below it.
     pickables: Query<'w, 's, &'static Pickable>,
     /// Form rows whose label names the controls in them.
@@ -385,7 +368,7 @@ impl UiModel<'_, '_> {
             Some(Role::Checkbox)
         } else if markers.radio {
             Some(Role::Radio)
-        } else if markers.button || markers.interaction_button {
+        } else if markers.button {
             Some(Role::Button)
         } else if markers.radio_group {
             Some(Role::RadioGroup)
@@ -784,7 +767,7 @@ impl UiModel<'_, '_> {
             if !drawn
                 || facts.computed.size == Vec2::ZERO
                 || !facts.computed.contains_point(*facts.transform, point)
-                || !clip_check_recursive(point, entity, &self.clipping, &self.clip_parents)
+                || !facts.clip.is_none_or(|clip| clip.contains_point(point))
             {
                 continue;
             }
@@ -825,7 +808,7 @@ impl UiModel<'_, '_> {
                 || size.x <= 0.0
                 || size.y <= 0.0
                 || !facts.computed.contains_point(*facts.transform, point)
-                || !clip_check_recursive(point, entity, &self.clipping, &self.clip_parents)
+                || !facts.clip.is_none_or(|clip| clip.contains_point(point))
             {
                 continue;
             }
@@ -857,7 +840,7 @@ fn visible_part(
     }
     let mut visible = physical_rect(facts.computed, facts.transform);
     if let Some(clip) = facts.clip {
-        visible = visible.intersect(clip.clip);
+        visible = visible.intersect(sl_viewer_ui_core::clip::visible_rect(clip));
         if visible.is_empty() {
             return Err(NodeVisibility::Clipped);
         }

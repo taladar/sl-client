@@ -10,6 +10,7 @@ use std::time::{Duration, Instant};
 use bevy::asset::RenderAssetUsages;
 use bevy::pbr::SkinUniforms;
 use bevy::prelude::*;
+use bevy::render::RenderApp;
 use bevy::render::extract_resource::ExtractResource;
 use bevy::render::gpu_readback::{Readback, ReadbackComplete};
 use bevy::render::render_asset::RenderAssets;
@@ -1111,7 +1112,7 @@ pub(super) struct GpuAvatarReadbackTarget {
     pub(super) buffer: Handle<ShaderBuffer>,
 }
 
-impl ExtractResource for GpuAvatarReadbackTarget {
+impl ExtractResource<RenderApp> for GpuAvatarReadbackTarget {
     type Source = Self;
 
     fn extract_resource(source: &Self) -> Self {
@@ -1145,7 +1146,10 @@ pub(super) fn init_gpu_avatar_readback(
         .unwrap_or(256)
         .saturating_mul(2)
         .saturating_mul(MAT4_BYTES);
-    let buffer = buffers.add(ShaderBuffer::with_size(bytes, RenderAssetUsages::default()));
+    let buffer = buffers.add(ShaderBuffer::with_size(
+        u64::try_from(bytes).unwrap_or(u64::MAX),
+        RenderAssetUsages::default(),
+    ));
     commands
         .spawn(Readback::buffer(buffer.clone()))
         .observe(gpu_avatar_readback_verdict);
@@ -1265,7 +1269,7 @@ pub(super) struct GpuAvatarBoundsTarget {
     pub(super) buffer: Handle<ShaderBuffer>,
 }
 
-impl ExtractResource for GpuAvatarBoundsTarget {
+impl ExtractResource<RenderApp> for GpuAvatarBoundsTarget {
     type Source = Self;
 
     fn extract_resource(source: &Self) -> Self {
@@ -1289,7 +1293,10 @@ pub(super) fn init_gpu_avatar_bounds(
 ) {
     let slots = usize::try_from(BOUND_SLOT_CAP).unwrap_or(4096);
     let bytes = slots.saturating_mul(BOUND_ENTRY_BYTES);
-    let buffer = buffers.add(ShaderBuffer::with_size(bytes, RenderAssetUsages::default()));
+    let buffer = buffers.add(ShaderBuffer::with_size(
+        u64::try_from(bytes).unwrap_or(u64::MAX),
+        RenderAssetUsages::default(),
+    ));
     commands
         .spawn(Readback::buffer(buffer.clone()))
         .observe(receive_gpu_avatar_bounds);

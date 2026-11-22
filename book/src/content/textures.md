@@ -115,7 +115,7 @@ the asset's length from a partial answer's `Content-Range`
 
 ## Bevy
 
-`sl-client-bevy` (on Bevy 0.19) bridges the store to Bevy's renderer:
+`sl-client-bevy` (on Bevy 0.20) bridges the store to Bevy's renderer:
 `upload_decoded` turns a decoded RGBA8 texture into a `bevy::image::Image`,
 ready to insert into `Assets<Image>` and use as a rendered texture. It is the
 viewer's *only* path from pixels to a world texture, so the two decisions that
@@ -138,7 +138,7 @@ A face does not simply show its texture: its texture entry carries **repeats**
 viewer applies to every texture coordinate in `xform` (`llface.cpp`) — recentre
 on `(0.5, 0.5)`, rotate, scale, offset, un-recentre. `texture_uv_transform`
 (`sl-client-bevy`) builds the same placement as a Bevy `Affine2`, and the same
-maths is in `face_material.wgsl` for the GPU texture-animation path.
+maths is in `face_material.wesl` for the GPU texture-animation path.
 
 The catch is which space it acts in. The reference works in Second Life's
 **bottom-up** texture space, where row `t = 0` is the bottom of the image,

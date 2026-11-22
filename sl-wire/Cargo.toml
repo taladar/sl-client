@@ -23,7 +23,7 @@ serde = ["dep:serde", "sl-llsd/serde", "url/serde", "uuid/serde"]
 [dependencies]
 base64 = { workspace = true }
 md5 = { workspace = true }
-miniz_oxide = { version = "0.8.9" }
+miniz_oxide = { version = "0.9.1" }
 roxmltree = { workspace = true }
 serde = { workspace = true, features = ["derive"], optional = true }
 sl-llsd = { workspace = true }

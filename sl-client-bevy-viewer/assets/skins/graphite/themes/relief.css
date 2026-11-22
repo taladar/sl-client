@@ -25,7 +25,7 @@
  * where the light is and a shaded one opposite, over a hairline frame), and
  * geometry is not what a licence covers.
  */
-@import "skins/graphite/skin.css" layer(skin);
+@import "/skins/graphite/skin.css" layer(skin);
 
 /*
  * THE CLASSIC LABEL (viewer-skin-text-shadow-role).
@@ -83,22 +83,22 @@
  * The insets are the file's: 24x24 art, 8 px corners, so a button of any size
  * draws its corners 1:1 and stretches only the 8x8 centre.
  *
- * `-bevy-image-box: border-box` is the one that decides whether any of this is
+ * `-bevy-image-visual-box: border-box` is the one that decides whether any of this is
  * visible as a BUTTON. `ImageNode::default()` paints into the **content** box
  * — inside the padding and the border — which for a widget surface is the
  * wrong box by exactly the padding: a 112x32 button with `padding: 5px 10px`
  * and a 2 px border drew its bevel at 88x18, a frame hugging the caption with
  * bare panel all round it. That reads as a button with no margin around its
  * text, when it is really a surface painted into the wrong rectangle. The
- * property exists only because this theme needed it (`-bevy-image-box` is ours,
- * added to the `bevy_flair` fork); nothing else in CSS could reach the field.
+ * property is `-bevy-image-visual-box`, which `bevy_flair` has carried since
+ * 0.9; nothing else in CSS could reach the field.
  */
 .sk-button {
   background-color: #00000000;
   border-color: #00000000;
-  -bevy-image: url("skins/graphite/widgets/push-button.png");
+  -bevy-image: url("/skins/graphite/widgets/push-button.png");
   -bevy-image-mode: sliced(8px 8px 8px 8px);
-  -bevy-image-box: border-box;
+  -bevy-image-visual-box: border-box;
 }
 
 /* The other three states the reference draws as separate textures, which is
@@ -106,15 +106,15 @@
  * are `bevy_flair`'s sync of the pointer's own state, `:disabled` follows the
  * `InteractionDisabled` a panel sets to refuse the press. */
 .sk-button:hover {
-  -bevy-image: url("skins/graphite/widgets/push-button-hover.png");
+  -bevy-image: url("/skins/graphite/widgets/push-button-hover.png");
 }
 
 .sk-button:active {
-  -bevy-image: url("skins/graphite/widgets/push-button-pressed.png");
+  -bevy-image: url("/skins/graphite/widgets/push-button-pressed.png");
 }
 
 .sk-button:disabled {
-  -bevy-image: url("skins/graphite/widgets/push-button-disabled.png");
+  -bevy-image: url("/skins/graphite/widgets/push-button-disabled.png");
 }
 
 /* The call to act (`.sk-button-primary`). The art is opaque edge to edge, so

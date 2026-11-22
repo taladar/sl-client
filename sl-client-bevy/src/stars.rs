@@ -11,7 +11,7 @@
 //!
 //! The material carries one [`StarParams`] uniform block (the reference
 //! `custom_alpha` = `star_brightness / 500`, and the twinkle animation `time`)
-//! plus the bloom texture. The accompanying `stars.wgsl` samples the bloom, tints
+//! plus the bloom texture. The accompanying `stars.wesl` samples the bloom, tints
 //! it by the per-star vertex colour, scales the alpha by `custom_alpha` and the
 //! per-star twinkle, and is drawn additively (the reference
 //! `BT_ADD_WITH_ALPHA`) so the stars add their light over the (dark, at night)
@@ -40,7 +40,7 @@ use bevy::render::render_resource::{
 };
 use bevy::shader::{Shader, ShaderRef};
 
-/// The internal handle the star shader (`stars.wgsl`) is loaded under, so the
+/// The internal handle the star shader (`stars.wesl`) is loaded under, so the
 /// material can reference it without an on-disk asset path.
 const STAR_SHADER_HANDLE: Handle<Shader> = uuid_handle!("4a7e2c93-6f1b-4d8a-b2e5-3c9f0a7d1e64");
 
@@ -50,7 +50,7 @@ const STAR_SHADER_HANDLE: Handle<Shader> = uuid_handle!("4a7e2c93-6f1b-4d8a-b2e5
 /// material (the reference `sStarTime` uniform's job).
 ///
 /// One live scalar plus a [`Vec3`] pad, filling a single 16-byte std140 uniform
-/// slot so the layout matches the `stars.wgsl` `StarParams` exactly.
+/// slot so the layout matches the `stars.wesl` `StarParams` exactly.
 #[derive(Clone, Copy, Debug, PartialEq, ShaderType)]
 pub struct StarParams {
     /// The star-field opacity, the reference `custom_alpha` = `star_brightness /
@@ -58,12 +58,12 @@ pub struct StarParams {
     /// reference `0.001` threshold, so the field only renders when this is
     /// meaningful.
     pub custom_alpha: f32,
-    /// Padding so the block fills a 16-byte std140 slot (matches `stars.wgsl`).
+    /// Padding so the block fills a 16-byte std140 slot (matches `stars.wesl`).
     pub reserved: Vec3,
 }
 
 /// The star-field material: one [`StarParams`] uniform block plus the bloom
-/// texture, shaded by `stars.wgsl`.
+/// texture, shaded by `stars.wesl`.
 ///
 /// The bloom texture may start as a placeholder; the viewer fetches the sky's
 /// referenced bloom texture (or the built-in default) **boosted** and swaps it in
@@ -127,7 +127,9 @@ pub struct StarMaterialPlugin;
 
 impl Plugin for StarMaterialPlugin {
     fn build(&self, app: &mut App) {
-        load_internal_asset!(app, STAR_SHADER_HANDLE, "stars.wgsl", Shader::from_wgsl);
+        load_internal_asset!(app, STAR_SHADER_HANDLE, "stars.wesl", |source, _| {
+            Shader::from_wesl(source, "embedded://sl_client_bevy/stars.wesl")
+        });
         app.add_plugins(MaterialPlugin::<StarMaterial>::default());
     }
 }

@@ -2893,7 +2893,7 @@ fn flexi_streamer(
 ///
 /// **Dynamic, and dynamic in a way no earlier scene was.** Nothing about this prim's
 /// *geometry* changes: the animation runs entirely in the shader
-/// ([`face_material.wgsl`](sl_viewer_kit::face_material)'s `sl_animated_uv` from
+/// ([`face_material.wesl`](sl_viewer_kit::face_material)'s `sl_animated_uv` from
 /// `globals.time`), and the vertex buffer it samples through is the same one at
 /// every sample. Because the animation is GPU-time-driven, **nothing in CPU state
 /// changes** frame to frame — a CPU digest (`sl_client_bevy_viewer::render_test`) cannot see it, so
@@ -3097,7 +3097,7 @@ fn bump_face(cx: SceneCx, root: Entity, commands: &mut Commands, assets: &mut Sc
 /// Second Life. Two prims, at the two ends of the glossiness ramp, because what
 /// `sl_viewer_world_objects::legacy_materials` does with a legacy material is write it onto the face
 /// material's extension — glossiness / environment intensity / specular colour
-/// driving the analytic Blinn-Phong lobe `face_material.wgsl` adds — and a single
+/// driving the analytic Blinn-Phong lobe `face_material.wesl` adds — and a single
 /// sample cannot show a mapping.
 ///
 /// The normal map is generated rather than fetched: the material's `normal_map` is

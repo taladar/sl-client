@@ -2485,7 +2485,7 @@ impl SearchRun<'_, '_> {
 }
 
 /// The search button: run a new search on the active category from page 0.
-fn on_search_press(press: On<Pointer<Press>>, mut search: SearchRun) {
+fn on_search_press(press: On<PointerPress>, mut search: SearchRun) {
     if press.button != PointerButton::Primary {
         return;
     }
@@ -2821,7 +2821,7 @@ fn apply_events_mode(
 
 /// An Events day-stepper press: shift the day offset (and switch to by-date mode).
 fn on_events_day_press(
-    press: On<Pointer<Press>>,
+    press: On<PointerPress>,
     buttons: Query<&EventsDayButton>,
     mut state: ResMut<SearchState>,
 ) {
@@ -2860,7 +2860,7 @@ fn enter_to_search(
 
 /// A Prev / Next press: step the category's page and re-run its query.
 fn on_paging_press(
-    press: On<Pointer<Press>>,
+    press: On<PointerPress>,
     buttons: Query<&PagingButton>,
     mut state: ResMut<SearchState>,
     settings: Option<Res<ViewerSettings>>,
@@ -3601,7 +3601,7 @@ struct DetailActionOut<'w> {
 
 /// A details-pane action button press.
 fn on_detail_action(
-    press: On<Pointer<Press>>,
+    press: On<PointerPress>,
     actions: Query<&DetailAction>,
     mut detail: ResMut<SearchDetail>,
     out: DetailActionOut,

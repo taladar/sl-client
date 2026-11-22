@@ -21,19 +21,19 @@ exclude = { workspace = true }
 # data files to ship or load at runtime, matching the other pure crates.
 # `fixed_decimal`'s `ryu` feature is what gates `Decimal::try_from_f64`, the
 # float entry point the decimal formatter needs.
-fixed_decimal = { version = "0.7.2", features = ["ryu"] }
-icu_calendar = { version = "2.2.1" }
-icu_datetime = { version = "2.2.0" }
-icu_decimal = { version = "2.2.0" }
-icu_locale_core = { version = "2.2.0" }
+fixed_decimal = { version = "0.7.3", features = ["ryu"] }
+icu_calendar = { version = "2.4.0" }
+icu_datetime = { version = "2.4.0" }
+icu_decimal = { version = "2.4.0" }
+icu_locale_core = { version = "2.4.0" }
 # The `DataError` the ICU formatter constructors return; named directly so
 # `FormatError` can wrap it. The `sync` feature switches ICU4X's internal
 # reference-counted data pointer from `Rc` to `Arc`, which is what makes the
 # formatters `Send + Sync` — required to hold `LocaleFormatters` in a Bevy
 # resource (the whole `icu` graph shares this one `icu_provider`, so enabling it
 # here makes every `icu_*` formatter thread-safe).
-icu_provider = { version = "2.2.0", features = ["sync"] }
-icu_time = { version = "2.2.0" }
+icu_provider = { version = "2.4.0", features = ["sync"] }
+icu_time = { version = "2.4.0" }
 thiserror = { workspace = true }
 
 [dev-dependencies]

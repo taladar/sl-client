@@ -724,7 +724,7 @@ pub(crate) fn spawn_media_section(
 /// A press on a Media-mode button: hand it to [`handle_media_section_actions`]
 /// unless the button is refused.
 fn on_media_section_press(
-    press: On<Pointer<Press>>,
+    press: On<PointerPress>,
     buttons: Query<&MediaSectionAction, Without<InteractionDisabled>>,
     mut actions: MessageWriter<MediaSectionAction>,
 ) {
@@ -1839,7 +1839,7 @@ fn spawn_whitelist_entry_content(
 
 /// A press on a Media Settings button.
 fn on_media_settings_press(
-    press: On<Pointer<Press>>,
+    press: On<PointerPress>,
     buttons: Query<&MediaSettingsAction, Without<InteractionDisabled>>,
     mut actions: MessageWriter<MediaSettingsAction>,
 ) {
@@ -1853,7 +1853,7 @@ fn on_media_settings_press(
 
 /// A press on a Whitelist Entry button.
 fn on_whitelist_entry_press(
-    press: On<Pointer<Press>>,
+    press: On<PointerPress>,
     buttons: Query<&WhitelistEntryAction, Without<InteractionDisabled>>,
     mut actions: MessageWriter<WhitelistEntryAction>,
 ) {

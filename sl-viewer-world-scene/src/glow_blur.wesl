@@ -9,8 +9,7 @@
 // `glowV.glsl`, are folded into the fragment here (the fullscreen vertex shader
 // gives only the base `uv`).
 
-#import bevy_core_pipeline::fullscreen_vertex_shader::FullscreenVertexOutput
-
+import bevy_core_pipeline::fullscreen_vertex_shader::FullscreenVertexOutput;
 struct GlowBlur {
     // The per-pass step: `(delta, 0)` for a horizontal pass, `(0, delta)` for a
     // vertical one, with `delta = RenderGlowWidth / glow_res`.

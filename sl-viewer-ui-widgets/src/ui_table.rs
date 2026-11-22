@@ -907,7 +907,7 @@ pub fn spawn_table(
     // entity is captured (not read from the event target, which bubbles up from a
     // clicked row), so a click on a row still focuses the viewport it lives in.
     commands.entity(viewport).observe(
-        move |press: On<Pointer<Press>>, mut focus: ResMut<InputFocus>| {
+        move |press: On<PointerPress>, mut focus: ResMut<InputFocus>| {
             if press.button == PointerButton::Primary {
                 focus.set(viewport, FocusCause::Navigated);
             }
@@ -1166,7 +1166,7 @@ fn spawn_border_resizer(
         .observe(persist_on_drag_end(root))
         // Stop a press on the handle from bubbling to the header cell and sorting —
         // grabbing the resize handle must not also flip the sort.
-        .observe(|mut press: On<Pointer<Press>>| press.propagate(false));
+        .observe(|mut press: On<PointerPress>| press.propagate(false));
 }
 
 /// The layout node for a column cell — a flexible cell (`Flex`) that grows, or a
@@ -1486,8 +1486,8 @@ fn gesture_refused(disabled: &DisabledQuery, table: Entity, target: Entity) -> b
 fn sort_header_on_press(
     table: Entity,
     column: usize,
-) -> impl Fn(On<Pointer<Press>>, Query<&mut TableState>, DisabledQuery) {
-    move |mut press: On<Pointer<Press>>,
+) -> impl Fn(On<PointerPress>, Query<&mut TableState>, DisabledQuery) {
+    move |mut press: On<PointerPress>,
           mut tables: Query<&mut TableState>,
           disabled: DisabledQuery| {
         press.propagate(false);
@@ -1522,10 +1522,8 @@ fn sort_header_on_press(
 fn resize_border_on_drag(
     root: Entity,
     left: usize,
-) -> impl Fn(On<Pointer<Drag>>, Query<&mut TableState>, DisabledQuery) {
-    move |mut drag: On<Pointer<Drag>>,
-          mut tables: Query<&mut TableState>,
-          disabled: DisabledQuery| {
+) -> impl Fn(On<PointerDrag>, Query<&mut TableState>, DisabledQuery) {
+    move |mut drag: On<PointerDrag>, mut tables: Query<&mut TableState>, disabled: DisabledQuery| {
         drag.propagate(false);
         if drag.button != PointerButton::Primary {
             return;
@@ -1564,8 +1562,8 @@ fn adjust_width(widths: &mut [f32], index: usize, delta: f32) {
 /// resize drag ends — so the write happens once per gesture, not per delta.
 fn persist_on_drag_end(
     root: Entity,
-) -> impl Fn(On<Pointer<DragEnd>>, Query<&mut TableState>, DisabledQuery) {
-    move |mut drag: On<Pointer<DragEnd>>,
+) -> impl Fn(On<PointerDragEnd>, Query<&mut TableState>, DisabledQuery) {
+    move |mut drag: On<PointerDragEnd>,
           mut tables: Query<&mut TableState>,
           disabled: DisabledQuery| {
         drag.propagate(false);
@@ -1960,7 +1958,7 @@ impl Plugin for TableWidgetPlugin {
 /// selection revision. A no-op for a [`TableSelectionMode::None`] table (so a
 /// consumer with its own row observer is unaffected) and for a parked row.
 fn select_table_row_on_press(
-    press: On<Pointer<Press>>,
+    press: On<PointerPress>,
     rows: Query<(&VirtualRow, &TableRow)>,
     keyboard: Res<ButtonInput<KeyCode>>,
     disabled: DisabledQuery,
@@ -2455,32 +2453,26 @@ mod tests {
     /// Trigger a primary press on `entity` and settle a frame — the observer call
     /// a real click makes, without a picking backend to aim one.
     fn press(app: &mut App, entity: Entity) {
-        let event = Pointer::new(
-            PointerId::Mouse,
-            location(),
-            Press {
-                button: PointerButton::Primary,
-                hit: HitData::new(Entity::PLACEHOLDER, 0.0, None, None),
-                count: 1,
-            },
+        let event = PointerPress {
             entity,
-        );
+            pointer: Pointer::new(PointerId::Mouse, location()),
+            button: PointerButton::Primary,
+            hit: HitData::new(Entity::PLACEHOLDER, 0.0, None, None),
+            count: 1,
+        };
         app.world_mut().trigger(event);
         app.update();
     }
 
     /// Trigger a primary drag of `dx` logical pixels on `entity`, then its end.
     fn drag(app: &mut App, entity: Entity, dx: f32) {
-        let event = Pointer::new(
-            PointerId::Mouse,
-            location(),
-            Drag {
-                button: PointerButton::Primary,
-                distance: Vec2::new(dx, 0.0),
-                delta: Vec2::new(dx, 0.0),
-            },
+        let event = PointerDrag {
             entity,
-        );
+            pointer: Pointer::new(PointerId::Mouse, location()),
+            button: PointerButton::Primary,
+            distance: Vec2::new(dx, 0.0),
+            delta: Vec2::new(dx, 0.0),
+        };
         app.world_mut().trigger(event);
         app.update();
     }
@@ -2705,7 +2697,7 @@ mod tests {
     /// three selection gestures — all through a laid-out table under the real
     /// pointer.
     ///
-    /// The tests above trigger `Pointer<Press>` / `Pointer<Drag>` straight at
+    /// The tests above trigger `PointerPress` / `PointerDrag` straight at
     /// an entity, so they prove the *observers* are right and say nothing about
     /// whether the pointer can reach them. Two of this widget's controls
     /// overlap by design: the border resizer sits **on top of** the trailing

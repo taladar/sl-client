@@ -1986,7 +1986,7 @@ fn update_button_enable(
 /// A press on a pooled row: the table widget already owns the selection, so this
 /// only adds the reference's double-click, which shows the beacon.
 fn on_top_objects_row_press(
-    mut press: On<Pointer<Press>>,
+    mut press: On<PointerPress>,
     rows: Query<&VirtualRow>,
     host: FloaterHost,
     mut windows: Query<(&TopObjectsState, &TopObjectsView, &mut TopObjectsClicks)>,
@@ -2104,7 +2104,7 @@ fn arm_filter(
 
 /// Send the pressed button's command, on behalf of the window it sits in.
 fn on_top_objects_action(
-    press: On<Pointer<Press>>,
+    press: On<PointerPress>,
     actions: Query<&TopObjectsAction>,
     host: FloaterHost,
     mut windows: Query<(

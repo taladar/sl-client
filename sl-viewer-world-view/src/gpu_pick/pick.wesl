@@ -28,17 +28,16 @@ struct PickUniform {
 
 @group(0) @binding(0) var<uniform> pick: PickUniform;
 
-#ifdef SKINNED
 /// Bevy's live skin palette buffer (`SkinUniforms.current_buffer`).
+@if(SKINNED)
 @group(0) @binding(1) var<storage, read> pick_joints: array<mat4x4<f32>>;
-#endif
 
 struct VertexIn {
     @location(0) position: vec3<f32>,
-#ifdef SKINNED
+    @if(SKINNED)
     @location(1) joint_indices: vec4<u32>,
+    @if(SKINNED)
     @location(2) joint_weights: vec4<f32>,
-#endif
 }
 
 struct VertexOut {
@@ -48,16 +47,16 @@ struct VertexOut {
 @vertex
 fn vertex(in: VertexIn) -> VertexOut {
     var out: VertexOut;
-#ifdef SKINNED
     // Bevy's skin_model: the weighted palette sum replaces the model matrix.
+    @if(SKINNED)
     let model = in.joint_weights.x * pick_joints[pick.skin_base + in.joint_indices.x]
         + in.joint_weights.y * pick_joints[pick.skin_base + in.joint_indices.y]
         + in.joint_weights.z * pick_joints[pick.skin_base + in.joint_indices.z]
         + in.joint_weights.w * pick_joints[pick.skin_base + in.joint_indices.w];
+    @if(SKINNED)
     out.clip_position = pick.clip_from_local * (model * vec4<f32>(in.position, 1.0));
-#else
+    @if(!SKINNED)
     out.clip_position = pick.clip_from_local * vec4<f32>(in.position, 1.0);
-#endif
     return out;
 }
 

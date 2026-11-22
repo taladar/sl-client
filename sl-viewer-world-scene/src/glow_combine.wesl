@@ -6,8 +6,7 @@
 // pass could still read it; nothing downstream does, but keeping it costs nothing
 // and matches the reference passing the frame straight through.
 
-#import bevy_core_pipeline::fullscreen_vertex_shader::FullscreenVertexOutput
-
+import bevy_core_pipeline::fullscreen_vertex_shader::FullscreenVertexOutput;
 @group(0) @binding(0) var scene_texture: texture_2d<f32>;
 @group(0) @binding(1) var scene_sampler: sampler;
 @group(0) @binding(2) var glow_texture: texture_2d<f32>;

@@ -336,7 +336,7 @@ pub fn speaker_header(speaker: &ScriptSpeaker) -> String {
 fn now_stamp(zone: Option<&LocalTimeZone>) -> String {
     let zone = zone.map_or_else(jiff::tz::TimeZone::system, |zone| zone.zone().clone());
     jiff::Timestamp::now()
-        .to_zoned(zone)
+        .to_zoned_datetime(zone)
         .strftime("%H:%M")
         .to_string()
 }

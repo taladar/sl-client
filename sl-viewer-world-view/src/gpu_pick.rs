@@ -69,7 +69,7 @@ use sl_viewer_world_api::{
 use sl_viewer_world_objects::objects::{PrimFaceEntity, SceneObject, WornPickTarget};
 use sl_viewer_world_scene::water::WaterCell;
 
-/// The internal handle `pick.wgsl` is loaded under.
+/// The internal handle `pick.wesl` is loaded under.
 const PICK_SHADER_HANDLE: Handle<Shader> = uuid_handle!("3f5d1a82-6c47-49b3-8e90-b21f7c04a6de");
 
 /// The pick view's square crop, in logical pixels per side (and texels per
@@ -566,7 +566,7 @@ fn queue_pick_tags(commands: &mut Commands, pending: Vec<PendingPickTag>) {
                 };
                 match world.get_entity_mut(entity) {
                     Ok(mut tagged) => {
-                        tagged.insert((PickId(tag), MeshTag(tag)));
+                        tagged.insert((PickId(tag), MeshTag::new(tag)));
                     }
                     // Despawned since the query ran (a region purge, an object
                     // removed by an earlier event this frame): give the slot
@@ -880,7 +880,7 @@ pub(crate) struct GpuPickTargets {
     readback_entity: Entity,
 }
 
-impl ExtractResource for GpuPickTargets {
+impl ExtractResource<RenderApp> for GpuPickTargets {
     type Source = Self;
 
     /// Clone the handles into the render world.
@@ -919,7 +919,7 @@ pub(crate) struct GpuPickSubmission {
     pub(crate) items: Vec<GpuPickItem>,
 }
 
-impl ExtractResource for GpuPickSubmission {
+impl ExtractResource<RenderApp> for GpuPickSubmission {
     type Source = Self;
 
     /// Clone the (tiny) submission into the render world.
@@ -937,7 +937,7 @@ impl ExtractResource for GpuPickSubmission {
 #[derive(Resource, Debug, Clone, Default)]
 pub(crate) struct GpuPickWarmSet(Vec<(bool, AssetId<Mesh>)>);
 
-impl ExtractResource for GpuPickWarmSet {
+impl ExtractResource<RenderApp> for GpuPickWarmSet {
     type Source = Self;
 
     /// Clone the (tiny) warm set into the render world.
@@ -1372,8 +1372,11 @@ impl Plugin for GpuPickPlugin {
         load_internal_asset!(
             app,
             PICK_SHADER_HANDLE,
-            "gpu_pick/pick.wgsl",
-            Shader::from_wgsl
+            "gpu_pick/pick.wesl",
+            |source, _| Shader::from_wesl(
+                source,
+                "embedded://sl_viewer_world_view/gpu_pick/pick.wesl"
+            )
         );
         if !app.is_plugin_added::<PickRegistryPlugin>() {
             app.add_plugins(PickRegistryPlugin);
@@ -1488,7 +1491,6 @@ pub(crate) fn id_target_view<'a>(
 
 #[cfg(test)]
 mod tests {
-    use bevy::camera::primitives::MeshAabb as _;
     use bevy::prelude::*;
     use pretty_assertions::assert_eq;
     use sl_client_bevy::{
@@ -1598,7 +1600,7 @@ mod tests {
         app.world_mut().spawn((
             Camera {
                 computed: bevy::camera::ComputedCameraValues {
-                    clip_from_view: Mat4::perspective_infinite_reverse_rh(
+                    clip_from_view: bevy::math::proj::perspective_infinite_reverse(
                         core::f32::consts::FRAC_PI_2,
                         1.0,
                         0.1,
@@ -1624,7 +1626,7 @@ mod tests {
     /// the fixture app), returning its entity.
     fn spawn_cuboid(app: &mut App, at: Vec3) -> Result<Entity, TestError> {
         let mesh = Mesh::from(Cuboid::new(2.0, 2.0, 2.0));
-        let aabb = mesh.compute_aabb().ok_or("cuboid aabb")?;
+        let aabb = bevy::camera::primitives::MeshAabb::get_aabb(&mesh).ok_or("cuboid aabb")?;
         let handle = app.world_mut().resource_mut::<Assets<Mesh>>().add(mesh);
         Ok(app
             .world_mut()
@@ -2003,7 +2005,7 @@ mod tests {
     #[test]
     fn crop_projects_the_cursor_to_centre_and_unprojects_back() -> Result<(), TestError> {
         let viewport = Vec2::new(1280.0, 720.0);
-        let clip_from_view = Mat4::perspective_infinite_reverse_rh(
+        let clip_from_view = bevy::math::proj::perspective_infinite_reverse(
             60_f32.to_radians(),
             viewport.x / viewport.y,
             0.1,

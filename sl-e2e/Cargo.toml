@@ -17,7 +17,7 @@ exclude = { workspace = true }
 
 [dependencies]
 # The in-process viewer is the viewer's own builder's App.
-bevy = { version = "0.19.0", default-features = false }
+bevy = { version = "0.20.1", default-features = false }
 fs-err = { workspace = true }
 # Blocks on the one GPU adapter probe a stage makes before it starts.
 pollster = { workspace = true }
@@ -48,7 +48,7 @@ tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "ti
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter", "fmt", "registry"] }
 # The GPU adapter probe: the same wgpu Bevy renders with, features unified.
-wgpu = { version = "29.0.3", default-features = false }
+wgpu = { version = "30.0.2", default-features = false }
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }

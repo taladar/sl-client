@@ -1389,7 +1389,7 @@ fn spawn_contents_button(
     )
     .button;
     commands.entity(button).observe(
-        // `Activate`, not `Pointer<Press>`: the headless button raises it for a
+        // `Activate`, not `PointerPress`: the headless button raises it for a
         // primary click and for `Enter` / `Space` on the focused button alike.
         move |activate: On<Activate>,
               host: FloaterHost,
@@ -2029,7 +2029,7 @@ fn dress_contents_row(
         .entity(row_entity)
         .insert(ContentsRowParts { icon, label })
         .observe(
-            move |press: On<Pointer<Press>>,
+            move |press: On<PointerPress>,
                   rows: Query<(&VirtualRow, &ChildOf)>,
                   click: Option<ContentsRowClick>| {
                 if press.button != PointerButton::Primary {
@@ -3154,7 +3154,7 @@ mod tests {
 
     /// **A contents action button acts from the keyboard as from the mouse.**
     ///
-    /// The buttons used to observe `Pointer<Press>`, so `Tab` reached them and
+    /// The buttons used to observe `PointerPress`, so `Tab` reached them and
     /// `Enter` / `Space` did nothing (`viewer-floater-buttons-ignore-keyboard-
     /// activate`). Each gesture in a fresh app, driven through the real input
     /// and focus stack, must raise the same one request.

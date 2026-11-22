@@ -230,7 +230,7 @@ fn log_view_targets(
         &bevy::render::view::ViewTarget,
         &bevy::render::camera::ExtractedCamera,
         &bevy::render::view::ExtractedView,
-        Option<&bevy::render::view::ViewDepthTexture>,
+        Option<&bevy::render::view::ViewDepthStencilTexture>,
     )>,
     opaque: Res<
         bevy::render::render_phase::ViewBinnedRenderPhases<bevy::core_pipeline::core_3d::Opaque3d>,

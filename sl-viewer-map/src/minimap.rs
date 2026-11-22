@@ -2891,7 +2891,7 @@ const DOUBLE_CLICK_SLOP: f32 = 6.0;
 /// Every parameter is optional so a gallery specimen's surface, clicked in an
 /// app without the map's session state, is inert rather than a failed observer.
 fn on_minimap_click(
-    click: On<Pointer<Click>>,
+    click: On<PointerClick>,
     time: Option<Res<Time>>,
     double_click: DoubleClickWindow,
     state: Option<ResMut<MinimapState>>,
@@ -3001,7 +3001,7 @@ fn on_minimap_click(
 ///
 /// Optional parameters: inert on a specimen (see [`on_minimap_click`]).
 fn on_minimap_drag(
-    drag: On<Pointer<Drag>>,
+    drag: On<PointerDrag>,
     keys: Option<Res<ButtonInput<KeyCode>>>,
     state: Option<ResMut<MinimapState>>,
 ) {
@@ -3023,7 +3023,7 @@ fn on_minimap_drag(
 
 /// The end of a drag re-enables auto-centring. Inert on a specimen (see
 /// [`on_minimap_click`]).
-fn on_minimap_drag_end(drag: On<Pointer<DragEnd>>, state: Option<ResMut<MinimapState>>) {
+fn on_minimap_drag_end(drag: On<PointerDragEnd>, state: Option<ResMut<MinimapState>>) {
     if drag.button == PointerButton::Primary
         && let Some(mut state) = state
     {
@@ -3036,7 +3036,7 @@ fn on_minimap_drag_end(drag: On<Pointer<DragEnd>>, state: Option<ResMut<MinimapS
 ///
 /// Optional parameters: inert on a specimen (see [`on_minimap_click`]).
 fn on_minimap_scroll(
-    mut event: On<Pointer<Scroll>>,
+    mut event: On<PointerScroll>,
     state: Option<ResMut<MinimapState>>,
     settings: Option<Res<ViewerSettings>>,
 ) {
@@ -3082,7 +3082,7 @@ fn on_minimap_scroll(
 ///
 /// Optional parameters: inert on a specimen (see [`on_minimap_click`]).
 fn on_minimap_context(
-    mut press: On<Pointer<Press>>,
+    mut press: On<PointerPress>,
     state: Option<ResMut<MinimapState>>,
     settings: Option<Res<ViewerSettings>>,
     tracking: Option<Res<MapTracking>>,
@@ -3186,7 +3186,7 @@ fn on_minimap_context(
 
     menus.write(OpenContextMenu {
         menu: &MINIMAP_MENU,
-        at: press.pointer_location.position,
+        at: press.pointer.position,
         element: MINIMAP_ELEMENT,
         conditions,
     });

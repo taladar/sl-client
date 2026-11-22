@@ -28,18 +28,18 @@
 // - `color`: linear premultiplied-nothing straight RGBA — the bubble tint, the
 //   drop-shadow black, or the glyph line colour (white for colour emoji).
 
-#import bevy_pbr::{
+import bevy_pbr::render::{
     mesh_functions,
     mesh_view_bindings as view_bindings,
-}
+};
 
 // Material params: x = fade-start distance (m), y = fade range (m),
 // z, w = unused (the reference's +25 px screen lift is baked into the mesh,
 // where the layout scale factor is known).
-@group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> params: vec4<f32>;
+@group(constants::MATERIAL_BIND_GROUP) @binding(0) var<uniform> params: vec4<f32>;
 // The glyph-atlas page this tag mesh (or page mesh) samples.
-@group(#{MATERIAL_BIND_GROUP}) @binding(1) var atlas_texture: texture_2d<f32>;
-@group(#{MATERIAL_BIND_GROUP}) @binding(2) var atlas_sampler: sampler;
+@group(constants::MATERIAL_BIND_GROUP) @binding(1) var atlas_texture: texture_2d<f32>;
+@group(constants::MATERIAL_BIND_GROUP) @binding(2) var atlas_sampler: sampler;
 
 // One tag vertex (see the channel table in the header comment).
 struct Vertex {

@@ -228,7 +228,7 @@ fn iter_bits(controls: ControlFlags) -> impl Iterator<Item = u32> {
         if remaining == 0 {
             return None;
         }
-        let bit = remaining & remaining.wrapping_neg();
+        let bit = remaining.isolate_lowest_one();
         remaining &= !bit;
         Some(bit)
     })

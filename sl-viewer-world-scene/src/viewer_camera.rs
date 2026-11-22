@@ -160,7 +160,10 @@ pub fn viewer_camera_bundle(transform: Transform) -> impl Bundle {
         // Bevy's tonemapping is switched off: `SlTonemap` (the pass and its settings,
         // mirroring the reference's `RenderTonemapType` / `RenderTonemapMix` /
         // `RenderExposure`) is this viewer's tone mapper, and two would double up.
-        Tonemapping::None,
+        (
+            Tonemapping::None,
+            bevy::core_pipeline::tonemapping::DebandDither::Disabled,
+        ),
         SlTonemap::default(),
         // The reference's dynamic exposure inputs (the `exp_min`/`exp_max` range is
         // filled per frame from the active sky by `refresh_exposure`). Only on the

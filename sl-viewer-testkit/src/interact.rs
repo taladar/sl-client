@@ -39,7 +39,7 @@ use bevy::prelude::*;
 use bevy::text::{EditableText, EditableTextSystems};
 use bevy::time::TimeUpdateStrategy;
 use bevy::ui::widget::{
-    scroll_editable_text, update_editable_text_content_size, update_editable_text_layout,
+    sync_editable_text_viewports, update_editable_text_content_size, update_editable_text_layout,
     update_editable_text_styles,
 };
 use bevy::ui::{UiStack, UiSystems, ui_focus_system, ui_stack_system};
@@ -176,7 +176,7 @@ pub fn install_ui_interaction(app: &mut App) {
 /// The *UI* half of editing is not in that plugin at all. It lives in
 /// `bevy_ui`'s `build_text_interop`, a private function of `UiPlugin`, which
 /// puts `update_editable_text_content_size` / `update_editable_text_styles`
-/// before the set and `update_editable_text_layout` / `scroll_editable_text`
+/// before the set and `sync_editable_text_viewports` / `update_editable_text_layout`
 /// after layout. All four are `pub`, so the harness picks them the way it picks
 /// [`bevy::ui::ui_layout_system`] — no fork, no upstream PR. The last of them
 /// shapes glyphs into a `FontAtlasSet` backed by `Assets<Image>`: CPU images in
@@ -208,10 +208,19 @@ pub fn install_text_editing(app: &mut App) {
     if !app.world().contains_resource::<Assets<Image>>() {
         app.init_asset::<Image>();
     }
-    // `bevy_ui` places the edit set inside its content phase (it cannot say so
-    // in `bevy_text` without a dependency cycle). Ours must agree, or the edits
-    // would apply after the layout that is supposed to read them.
-    app.configure_sets(PostUpdate, EditableTextSystems.in_set(UiSystems::Content));
+    // `bevy_ui` places the edit set between layout and post-layout (it cannot
+    // say so in `bevy_text` without a dependency cycle). Ours must agree: the
+    // edits read the viewport layout just synced, and the text layout after
+    // them reads the edits.
+    // `UiPlugin` registers this requirement and the harness does not add
+    // `UiPlugin`; without it the content-size system matches no field.
+    app.register_required_components::<EditableText, bevy::ui::widget::EditableTextContentSizeState>();
+    app.configure_sets(
+        PostUpdate,
+        EditableTextSystems
+            .after(UiSystems::Layout)
+            .before(UiSystems::PostLayout),
+    );
     app.add_systems(
         PostUpdate,
         (
@@ -222,9 +231,10 @@ pub fn install_text_editing(app: &mut App) {
                 .chain()
                 .in_set(UiSystems::Content)
                 .before(EditableTextSystems),
-            (update_editable_text_layout, scroll_editable_text)
-                .chain()
-                .in_set(UiSystems::PostLayout),
+            sync_editable_text_viewports
+                .after(UiSystems::Layout)
+                .before(EditableTextSystems),
+            update_editable_text_layout.in_set(UiSystems::PostLayout),
         ),
     );
 }
@@ -529,11 +539,11 @@ mod tests {
     #[derive(Resource, Default)]
     struct Clicks(Vec<(String, u8)>);
 
-    /// Record every `Pointer<Click>` on the observed node, with its count.
+    /// Record every `PointerClick` on the observed node, with its count.
     fn observe_clicks(app: &mut App, entity: Entity, name: &str) {
         let name = name.to_owned();
         app.world_mut().entity_mut(entity).observe(
-            move |click: On<Pointer<Click>>, mut clicks: ResMut<Clicks>| {
+            move |click: On<PointerClick>, mut clicks: ResMut<Clicks>| {
                 clicks.0.push((name.clone(), click.count));
             },
         );
@@ -612,7 +622,10 @@ mod tests {
                 let mut editable = bevy::text::EditableText::new(text);
                 editable.visible_width = Some(12.0);
                 editable.visible_lines = Some(1.0);
-                crate::spawn_under_root(&mut app, (Node::default(), editable))
+                crate::spawn_under_root(
+                    &mut app,
+                    (Node::default(), editable, bevy::ui_widgets::TextInput),
+                )
             })
             .collect();
         settle(&mut app);
@@ -971,6 +984,7 @@ mod tests {
             app,
             (
                 editor,
+                bevy::ui_widgets::TextInput,
                 Node {
                     position_type: PositionType::Absolute,
                     left: Val::Px(left),

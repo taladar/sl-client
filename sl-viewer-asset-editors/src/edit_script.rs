@@ -1284,7 +1284,7 @@ fn spawn_error_row(
 
 /// A diagnostic row was clicked: put the caret where its error is.
 fn on_error_row_press(
-    press: On<Pointer<Press>>,
+    press: On<PointerPress>,
     targets: Query<&ErrorTarget>,
     mut go_to: MessageWriter<CodeEditorGoTo>,
 ) {
@@ -1344,7 +1344,7 @@ fn spawn_editor_button(
 
 /// A bar button was pressed: open its window over the editor.
 fn on_editor_button(
-    press: On<Pointer<Press>>,
+    press: On<PointerPress>,
     buttons: Query<(&EditorButton, &EditorButtonField)>,
     mut find: MessageWriter<OpenFindReplace>,
     mut go_to: MessageWriter<OpenGoToLine>,
@@ -1367,10 +1367,7 @@ fn on_editor_button(
 
 /// Scroll the bounded diagnostics list with the mouse wheel (its own
 /// [`ScrollPosition`]), matching the notecard reader and the result lists.
-fn on_diagnostics_scroll(
-    mut event: On<Pointer<Scroll>>,
-    mut positions: Query<&mut ScrollPosition>,
-) {
+fn on_diagnostics_scroll(mut event: On<PointerScroll>, mut positions: Query<&mut ScrollPosition>) {
     /// Logical pixels one wheel notch scrolls.
     const LINE_SCROLL_PIXELS: f32 = 24.0;
     if let Ok(mut position) = positions.get_mut(event.entity) {

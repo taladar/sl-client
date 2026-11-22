@@ -21,15 +21,15 @@ exclude = { workspace = true }
 ignored = ["cef-dll-sys"]
 
 [dependencies]
-cef = { version = "150.2.1" }
+cef = { version = "156.7.0" }
 # Not called (`cef` wraps it): named so `build.rs` receives the CEF
 # distribution directory as `DEP_CEF_DLL_WRAPPER_CEF_DIR`. Keep its version
 # with `cef`'s.
-cef-dll-sys = { version = "150.2.1" }
+cef-dll-sys = { version = "156.7.0" }
 fs-err = { workspace = true }
 # The embedder's quit signals, saved before CEF starts and restored after
 # (`EmbedderSignals`): Chromium installs handlers of its own.
-libc = { version = "0.2.186" }
+libc = { version = "0.2.191" }
 serde = { workspace = true, features = ["derive"] }
 # The DevTools page events a surface follows its document's lifecycle by.
 serde_json = { workspace = true }

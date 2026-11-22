@@ -79,7 +79,7 @@ use bevy::render::render_resource::{
 };
 use bevy::render::renderer::{RenderContext, ViewQuery};
 use bevy::render::sync_component::SyncComponent;
-use bevy::render::view::{ExtractedView, ViewDepthTexture, ViewTarget};
+use bevy::render::view::{ExtractedView, ViewDepthStencilTexture, ViewTarget};
 use bevy::render::{GpuResourceAppExt as _, Render, RenderApp, RenderStartup, RenderSystems};
 
 use crate::environment::EnvironmentState;
@@ -89,7 +89,7 @@ use crate::water_fog::WaterFogSettings;
 use sl_viewer_kit::coords::sl_to_bevy_object_rotation;
 use sl_viewer_world_api::{ViewerCamera, WorldPhase};
 
-/// The internal handle the fog shader (`underwater_fog.wgsl`) is loaded under.
+/// The internal handle the fog shader (`underwater_fog.wesl`) is loaded under.
 const FOG_SHADER_HANDLE: Handle<Shader> = uuid_handle!("3f2a9c17-54e8-4b6d-a90c-2e718d43ff05");
 
 /// The per-frame underwater-fog parameters, extracted to the render world and
@@ -136,11 +136,11 @@ impl Default for UnderwaterFog {
     }
 }
 
-impl SyncComponent for UnderwaterFog {
+impl SyncComponent<RenderApp> for UnderwaterFog {
     type Target = Self;
 }
 
-impl ExtractComponent for UnderwaterFog {
+impl ExtractComponent<RenderApp> for UnderwaterFog {
     type QueryData = Read<Self>;
     type QueryFilter = With<Camera>;
     type Out = Self;
@@ -254,8 +254,11 @@ impl Plugin for UnderwaterFogPlugin {
         load_internal_asset!(
             app,
             FOG_SHADER_HANDLE,
-            "underwater_fog.wgsl",
-            Shader::from_wgsl
+            "underwater_fog.wesl",
+            |source, _| Shader::from_wesl(
+                source,
+                "embedded://sl_viewer_world_scene/underwater_fog.wesl"
+            )
         );
         app.add_plugins((
             ExtractComponentPlugin::<UnderwaterFog>::default(),
@@ -456,7 +459,7 @@ fn water_haze_system(
         &ViewTarget,
         &DynamicUniformIndex<UnderwaterFog>,
         &UnderwaterFogPipelineId,
-        &ViewDepthTexture,
+        &ViewDepthStencilTexture,
     )>,
     pipeline_cache: Res<PipelineCache>,
     pipeline_res: Res<UnderwaterFogPipeline>,
@@ -497,7 +500,7 @@ fn draw_haze(
     pipeline_id: CachedRenderPipelineId,
     view_target: &ViewTarget,
     fog_index: &DynamicUniformIndex<UnderwaterFog>,
-    view_depth: &ViewDepthTexture,
+    view_depth: &ViewDepthStencilTexture,
     pass: HazePass<'_>,
     ctx: &mut RenderContext,
 ) {
@@ -515,6 +518,15 @@ fn draw_haze(
         return;
     };
 
+    // Sampled through its depth aspect: a combined depth-stencil view cannot
+    // be bound.
+    let Some(depth_view) = view_depth
+        .attachment
+        .depth_stencil_views()
+        .depth_only_view()
+    else {
+        return;
+    };
     let bind_group = ctx.render_device().create_bind_group(
         Some(LABEL),
         &pipeline_cache.get_bind_group_layout(&pipeline_res.layout),
@@ -524,7 +536,7 @@ fn draw_haze(
             // `Camera3d::depth_texture_usages`), from which the shader reconstructs
             // each fragment's world position. Sampled, not attached — this pass does
             // no depth testing, so the buffer it reads is not bound against it.
-            view_depth.view(),
+            depth_view,
         )),
     );
 

@@ -11,7 +11,7 @@
 //! time) and the current and next wave normal maps (`normal_map` /
 //! `normal_map_next`, blended during a day-cycle transition — the blend factor
 //! stays `0.0` until the day cycle drives it, like the cloud / disc materials).
-//! The accompanying `water.wgsl` evaluates the waves, fresnel, reflection, and
+//! The accompanying `water.wesl` evaluates the waves, fresnel, reflection, and
 //! specular per fragment.
 //!
 //! The reference is a deferred shader reading the screen colour / depth buffers
@@ -47,19 +47,19 @@ use bevy::render::render_resource::{
 };
 use bevy::shader::{Shader, ShaderRef};
 
-/// The internal handle the water shader (`water.wgsl`) is loaded under, so the
+/// The internal handle the water shader (`water.wesl`) is loaded under, so the
 /// material can reference it without an on-disk asset path.
 const WATER_SHADER_HANDLE: Handle<Shader> = uuid_handle!("2f8d6c14-9b3a-4e57-8c0d-1a6f4b29e753");
 
 /// The per-frame inputs for the water surface: the region's EEP `LLSettingsWater`
 /// values the reference binds as water-shader uniforms, plus the per-frame sun
 /// direction and sky-reflection tint. The wave-scroll clock and the camera
-/// position are **not** CPU-driven: `water.wgsl` reads Bevy's `globals.time`
+/// position are **not** CPU-driven: `water.wesl` reads Bevy's `globals.time`
 /// and the view's `world_position` directly, so running waves and a moving
 /// camera never dirty the material.
 ///
 /// Laid out as `vec3` + trailing scalar pairs, closing with a `vec3` and a
-/// `vec2` + `vec2` pair, so the std140 uniform layout matches the `water.wgsl`
+/// `vec2` + `vec2` pair, so the std140 uniform layout matches the `water.wesl`
 /// `WaterParams` (`ShaderType`) exactly: a `vec3` occupies 12 bytes with 16-byte
 /// alignment, and the following scalar fills the 4-byte remainder of that 16-byte
 /// slot. The unpaired trailing `vec3` keeps those 4 bytes as padding on both
@@ -131,7 +131,7 @@ pub struct WaterParams {
 }
 
 /// The water-surface material: one [`WaterParams`] uniform block plus the current
-/// and next wave normal maps, shaded by `water.wgsl`.
+/// and next wave normal maps, shaded by `water.wesl`.
 ///
 /// The normal maps may start as placeholders (a flat +Z normal); the viewer
 /// fetches the water's referenced normal texture **boosted** and swaps it in once
@@ -279,7 +279,17 @@ impl Plugin for WaterMaterialPlugin {
     fn build(&self, app: &mut App) {
         // The surface fogs its own underside, so it imports the shared module.
         crate::water_fog::load_water_fog_shader(app);
-        load_internal_asset!(app, WATER_SHADER_HANDLE, "water.wgsl", Shader::from_wgsl);
+        load_internal_asset!(app, WATER_SHADER_HANDLE, "water.wesl", |source, _| {
+            Shader::from_wesl(source, "embedded://sl_client_bevy/water.wesl")
+        });
         app.add_plugins(MaterialPlugin::<WaterMaterial>::default());
+        // The surface samples the screen copy, whose binding a view only has
+        // with this component. Any 3D camera can see the sea (the main view, a
+        // mirror, a reflection probe), and the copy is only taken for a view
+        // with a transmissive draw.
+        app.register_required_components::<
+            bevy::camera::Camera3d,
+            bevy::pbr::ScreenSpaceTransmission,
+        >();
     }
 }

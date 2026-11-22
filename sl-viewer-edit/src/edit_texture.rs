@@ -2148,7 +2148,7 @@ fn apply_edit_to_faces(
 
 /// The Align-planar-faces action (implemented in [`crate::edit_texture_align`]).
 fn handle_tex_align_press(
-    press: On<Pointer<Press>>,
+    press: On<PointerPress>,
     _buttons: Query<&TexAlignButton>,
     globals: Query<&GlobalTransform>,
     session: Option<(

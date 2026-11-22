@@ -641,7 +641,7 @@ mod tests {
             .resource::<Assets<Mesh>>()
             .get(&handle)
             .ok_or("mesh gone")?
-            .compute_aabb()
+            .get_aabb()
             .ok_or("mesh has no computable Aabb")?;
         assert_eq!(settled, expected);
         Ok(())

@@ -645,7 +645,7 @@ fn spawn_live_emoji_cell(
     commands
         .entity(cell)
         .observe(
-            move |mut press: On<Pointer<Press>>,
+            move |mut press: On<PointerPress>,
                   cells: Query<&EmojiCell>,
                   target: Option<Res<EmojiTarget>>,
                   grids: Query<&EmojiPickerState>,
@@ -680,7 +680,7 @@ fn spawn_live_emoji_cell(
             },
         )
         .observe(
-            move |_over: On<Pointer<Over>>,
+            move |_over: On<PointerOver>,
                   cells: Query<&EmojiCell>,
                   grids: Query<(&EmojiGrid, &EmojiPickerState)>,
                   mut texts: Query<&mut Text>| {
@@ -1062,7 +1062,7 @@ fn build_emoji_picker_content(
         // Focus the viewport on a press so the wheel scrolls it rather than
         // zooming the camera (the input-context gate). The remembered target field
         // is unaffected — the viewport is not an `EditableText`.
-        .observe(|press: On<Pointer<Press>>, mut focus: ResMut<InputFocus>| {
+        .observe(|press: On<PointerPress>, mut focus: ResMut<InputFocus>| {
             if press.button == PointerButton::Primary {
                 focus.set(press.entity, FocusCause::Navigated);
             }
@@ -1129,7 +1129,7 @@ fn build_tone_row(commands: &mut Commands, parent: Entity, grid: Entity) {
     for tone in SkinTone::ALL {
         let swatch = spawn_tone_swatch(commands, row_entity, base, tone, grid);
         commands.entity(swatch).observe(
-            move |mut press: On<Pointer<Press>>, mut grids: Query<&mut EmojiPickerState>| {
+            move |mut press: On<PointerPress>, mut grids: Query<&mut EmojiPickerState>| {
                 press.propagate(false);
                 if press.button != PointerButton::Primary {
                     return;

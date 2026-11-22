@@ -10,7 +10,7 @@
 //! at all — no depth *test* either, so a tag is readable through a wall and
 //! through the sea), so depth sorting and distance fade come from the world pass
 //! rather than special-cased projection code. The
-//! vertex shader (`name_tag.wgsl`) expands the mesh into a camera-facing
+//! vertex shader (`name_tag.wesl`) expands the mesh into a camera-facing
 //! billboard whose **on-screen size is constant at every distance** (the
 //! reference's pixel-vector behaviour), pulls it toward the camera by the
 //! avatar's radius so the tag is not swallowed by its own avatar's head, and
@@ -55,7 +55,7 @@ use bevy::render::render_resource::{
 };
 use bevy::shader::ShaderRef;
 use bevy::text::{
-    ComputedTextBlock, FontAtlasSet, FontCx, LayoutCx, LetterSpacing, LineHeight, RemSize, ScaleCx,
+    ComputedTextBlock, FontAtlasSet, FontCx, LayoutCx, LetterSpacing, LineHeight, ScaleCx,
     TextBounds, TextLayoutInfo, TextPipeline, TextReader, TextSection,
 };
 use bevy::window::PrimaryWindow;
@@ -65,7 +65,7 @@ use sl_client_bevy::{AgentKey, SlIdentity};
 use sl_viewer_ui_core::ui_font::UiFont;
 use sl_viewer_world_api::{AvatarAnchor, AvatarPickTarget};
 
-/// The internal handle the name-tag shader (`name_tag.wgsl`) is loaded under,
+/// The internal handle the name-tag shader (`name_tag.wesl`) is loaded under,
 /// so the material can reference it without an on-disk asset path.
 const NAME_TAG_SHADER_HANDLE: Handle<Shader> = uuid_handle!("7c2f31d8-9b4a-4e0f-8a67-2d5c90e1b3f4");
 
@@ -121,7 +121,7 @@ pub use sl_viewer_settings::keys::name_tag_billboard::{
 pub(crate) const NEUTRAL_MESH_TAG: u32 = 0x8000_8000;
 
 /// The bias added to each signed offset component when packing into a
-/// [`MeshTag`] half (mirrors `TAG_OFFSET_BIAS` in `name_tag.wgsl`).
+/// [`MeshTag`] half (mirrors `TAG_OFFSET_BIAS` in `name_tag.wesl`).
 const TAG_OFFSET_BIAS: i32 = 0x8000;
 
 /// Pack a billboard-local anti-overlap offset (physical px, +y up) into a
@@ -262,7 +262,7 @@ impl Material for NameTagMaterial {
                 Some(bevy::render::render_resource::CompareFunction::Always);
         }
         // The SL glow pass extracts `scene_rgb * scene.a`, reading the frame's
-        // alpha channel as the per-face glow mask (`glow_extract.wgsl`). A
+        // alpha channel as the per-face glow mask (`glow_extract.wesl`). A
         // blended overlay would otherwise write its text alpha into that channel
         // and bloom — so leave the glow mask untouched, exactly as the other
         // transparent world overlays (parcel borders, particles, prim faces) do.
@@ -579,7 +579,7 @@ pub(crate) fn layout_tag_text(
                 &mut font_cx,
                 &mut layout_cx,
                 logical_viewport_size,
-                rem_size.0,
+                *rem_size,
             ) {
                 Err(
                     TextError::NoSuchFont
@@ -1134,7 +1134,7 @@ pub(crate) fn build_tag_meshes(
                 });
             let line_color = computed
                 .entities()
-                .get(glyph.section_index)
+                .get(usize::try_from(glyph.section_index).unwrap_or(usize::MAX))
                 .and_then(|section| colors.get(section.entity).ok())
                 .map_or(Color::WHITE, |text_color| text_color.0);
             let color = if glyph.atlas_info.is_alpha_mask {
@@ -1371,7 +1371,7 @@ pub fn name_tag_render_bundle(pull_radius: f32) -> impl Bundle {
         NameTagScreenRect::default(),
         NameTagSmooth::default(),
         NameTagOverlapOffset::default(),
-        bevy::mesh::MeshTag(NEUTRAL_MESH_TAG),
+        bevy::mesh::MeshTag::new(NEUTRAL_MESH_TAG),
         // An overlay, not world translucency: never drawn before the sea.
         WorldTextOverlay,
         Transform::default(),
@@ -1403,7 +1403,7 @@ fn tag_page_render_bundle(mesh: Handle<Mesh>, material: Handle<NameTagMaterial>)
         // −32768 px offset and draw the page far off-screen. (Different font
         // sizes use different atlas pages, so multi-page tags are the NORM for
         // any tag with small + name lines.)
-        MeshTag(NEUTRAL_MESH_TAG),
+        MeshTag::new(NEUTRAL_MESH_TAG),
         WorldTextOverlay,
         bevy::camera::visibility::NoFrustumCulling,
         tag_render_layers(),
@@ -1809,8 +1809,8 @@ pub(crate) fn solve_tag_overlap(
             current.x * scale_factor,
             -current.y * scale_factor,
         ));
-        if mesh_tag.0 != packed {
-            mesh_tag.0 = packed;
+        if mesh_tag.value != packed {
+            mesh_tag.value = packed;
         }
         // The hit test sees the tag where it actually renders.
         if current != Vec2::ZERO
@@ -1843,9 +1843,9 @@ pub(crate) fn sync_tag_pages(
     for (tag, children) in &tags {
         for child in children.iter() {
             if let Ok(mut page_tag) = pages.get_mut(child)
-                && page_tag.0 != tag.0
+                && page_tag.value != tag.value
             {
-                page_tag.0 = tag.0;
+                page_tag.value = tag.value;
             }
         }
     }
@@ -1902,12 +1902,9 @@ pub struct NameTagBillboardPlugin;
 
 impl Plugin for NameTagBillboardPlugin {
     fn build(&self, app: &mut App) {
-        load_internal_asset!(
-            app,
-            NAME_TAG_SHADER_HANDLE,
-            "name_tag.wgsl",
-            Shader::from_wgsl
-        );
+        load_internal_asset!(app, NAME_TAG_SHADER_HANDLE, "name_tag.wesl", |source, _| {
+            Shader::from_wesl(source, "embedded://sl_viewer_world_objects/name_tag.wesl")
+        });
         app.add_plugins(MaterialPlugin::<NameTagMaterial>::default())
             .init_resource::<NameTagMaterials>()
             .init_resource::<TagLayoutBudget>()
@@ -2340,7 +2337,9 @@ mod tests {
             sl_viewer_world_api::ViewerCamera,
             Camera {
                 computed: bevy::camera::ComputedCameraValues {
-                    clip_from_view: Mat4::orthographic_rh(-640.0, 640.0, -360.0, 360.0, 0.1, 100.0),
+                    clip_from_view: bevy::math::proj::orthographic(
+                        -640.0, 640.0, -360.0, 360.0, 0.1, 100.0,
+                    ),
                     target_info: Some(bevy::camera::RenderTargetInfo {
                         physical_size: UVec2::new(1280, 720),
                         scale_factor: 1.0,

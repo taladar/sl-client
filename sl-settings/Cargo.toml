@@ -19,7 +19,7 @@ exclude = { workspace = true }
 fs-err = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 thiserror = { workspace = true }
-toml_edit = { version = "0.25.12" }
+toml_edit = { version = "0.25.20" }
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }

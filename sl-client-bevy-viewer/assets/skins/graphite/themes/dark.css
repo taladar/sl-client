@@ -14,7 +14,7 @@
  * the theme's, so the tokens never changed). The layer *is* the id-keyed merge:
  * the base fills every token, the theme overrides its subset.
  */
-@import "skins/graphite/skin.css" layer(skin);
+@import "/skins/graphite/skin.css" layer(skin);
 
 :root {
   --surface-bg: #0a0c10fa;

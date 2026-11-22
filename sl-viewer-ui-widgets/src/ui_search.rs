@@ -402,7 +402,7 @@ fn spawn_clear_button(
         ChildOf(clear),
     ));
     commands.entity(clear).observe(
-        move |mut press: On<Pointer<Press>>,
+        move |mut press: On<PointerPress>,
               mut fields: Query<&mut EditableText>,
               disabled: Query<(), With<bevy::ui::InteractionDisabled>>,
               mut focus: ResMut<InputFocus>| {

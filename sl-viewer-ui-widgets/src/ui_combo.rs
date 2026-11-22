@@ -411,7 +411,7 @@ fn seed_value_text(commands: &mut Commands, value: Entity, spec: &ComboSpec, act
 /// Toggle the combo's popover: close it if open, else open a fresh one. Consumes
 /// the press so opening does not immediately trip the root dismiss observer.
 fn toggle_combo_popover(
-    mut press: On<Pointer<Press>>,
+    mut press: On<PointerPress>,
     anchors: Query<(&ComboOptions, Option<&ComboRowStates>)>,
     disabled: Query<(), With<bevy::ui::InteractionDisabled>>,
     popovers: Query<(Entity, &ComboPopover)>,
@@ -598,7 +598,7 @@ fn build_combo_popover(
 /// Pick a popover option: move the combo's selection, emit [`ComboChanged`], and
 /// close the popover. Consumes the press so it does not reach the root dismiss.
 fn select_combo_option(
-    mut press: On<Pointer<Press>>,
+    mut press: On<PointerPress>,
     rows: Query<&ComboOption>,
     mut combos: Query<(&mut ComboSelection, Option<&ComboRowStates>)>,
     popovers: Query<(Entity, &ComboPopover)>,
@@ -752,7 +752,7 @@ fn attach_combo_dismiss(root: Option<Res<UiRoot>>, mut commands: Commands) {
 
 /// Close every open combo popover on an outside press.
 fn dismiss_combos_on_press(
-    _press: On<Pointer<Press>>,
+    _press: On<PointerPress>,
     popovers: Query<Entity, With<ComboPopover>>,
     mut commands: Commands,
 ) {

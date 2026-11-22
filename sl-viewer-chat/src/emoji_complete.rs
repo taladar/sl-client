@@ -271,7 +271,7 @@ fn spawn_colon_row(commands: &mut Commands, popup: Entity, field: Entity, index:
         .add_child(label)
         .id();
     commands.entity(row).observe(
-        move |mut press: On<Pointer<Press>>,
+        move |mut press: On<PointerPress>,
               mut completers: Query<&mut ColonComplete>,
               mut fields: Query<&mut EditableText>,
               mut font_cx: ResMut<FontCx>,

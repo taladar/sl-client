@@ -4,7 +4,7 @@
 //! pointer.
 //!
 //! Every fixture lives in an [`InteractionTest`] app, so "covered" is the same
-//! hit test a click travels through, and "clicked" is a `Pointer<Click>` the
+//! hit test a click travels through, and "clicked" is a `PointerClick` the
 //! picking stack delivered.
 
 use bevy::prelude::*;
@@ -25,7 +25,7 @@ use sl_viewer_ui_widgets::ui_text_input::ReadOnlyField;
 
 use super::{Intent, Progress, Pursuit, PursuitError, Target};
 
-/// The names of the nodes a `Pointer<Click>` reached, in order.
+/// The names of the nodes a `PointerClick` reached, in order.
 #[derive(Resource, Debug, Default)]
 struct Clicked(Vec<String>);
 
@@ -41,7 +41,7 @@ fn app() -> App {
 fn record_clicks(app: &mut App, entity: Entity, name: &str) {
     let name = name.to_owned();
     app.world_mut().entity_mut(entity).observe(
-        move |mut click: On<Pointer<Click>>, mut clicked: ResMut<Clicked>| {
+        move |mut click: On<PointerClick>, mut clicked: ResMut<Clicked>| {
             click.propagate(false);
             clicked.0.push(name.clone());
         },
@@ -651,7 +651,7 @@ fn bind_rows(
             .insert(ClassList::new_with_classes([LIST_ROW_CLASS]))
             .with_child(Text::new(label(bound)))
             .observe(
-                |mut click: On<Pointer<Click>>,
+                |mut click: On<PointerClick>,
                  rows: Query<&VirtualRow>,
                  mut clicked: ResMut<Clicked>| {
                     click.propagate(false);

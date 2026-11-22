@@ -15,11 +15,11 @@
 // This is gated behind the `bevy_pbr` feature: only the windowed viewer needs a
 // renderer.
 
-#import bevy_pbr::{
+import bevy_pbr::render::{
     mesh_functions,
     mesh_view_bindings::globals,
     view_transformations::position_world_to_clip,
-}
+};
 
 // The twinkle clock scale: elapsed seconds * 0.5 (the reference `sStarTime` /
 // `WATER_TIME` uniform). Applied to `globals.time` here rather than uploaded as
@@ -38,9 +38,9 @@ struct StarParams {
     reserved: vec3<f32>,
 };
 
-@group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> star: StarParams;
-@group(#{MATERIAL_BIND_GROUP}) @binding(1) var diffuse_texture: texture_2d<f32>;
-@group(#{MATERIAL_BIND_GROUP}) @binding(2) var diffuse_sampler: sampler;
+@group(constants::MATERIAL_BIND_GROUP) @binding(0) var<uniform> star: StarParams;
+@group(constants::MATERIAL_BIND_GROUP) @binding(1) var diffuse_texture: texture_2d<f32>;
+@group(constants::MATERIAL_BIND_GROUP) @binding(2) var diffuse_sampler: sampler;
 
 struct Vertex {
     @builtin(instance_index) instance_index: u32,

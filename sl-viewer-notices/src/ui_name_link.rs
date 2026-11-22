@@ -214,7 +214,7 @@ pub fn spawn_name_link(commands: &mut Commands, parent: Entity, spec: NameLinkSp
     commands
         .spawn((
             Text::new(String::new()),
-            Button,
+            bevy::picking::hover::Hovered::default(),
             NameLink {
                 binding: NameBinding::Loading,
                 loading_key: spec.loading_key,
@@ -359,7 +359,7 @@ fn request_name_links(
 /// Open the bound owner's profile on a primary press — an avatar or a group
 /// profile by kind; a `Loading` / `Unset` link does nothing.
 fn on_name_link_press(
-    press: On<Pointer<Press>>,
+    press: On<PointerPress>,
     links: Query<&NameLink>,
     mut avatar_profiles: MessageWriter<OpenAvatarProfile>,
     mut group_profiles: MessageWriter<OpenGroupProfile>,

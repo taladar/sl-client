@@ -527,7 +527,7 @@ fn spawn_filters_content(
         font_size,
     );
     commands.entity(all_button).observe(
-        |press: On<Pointer<Press>>, mut state: ResMut<InventoryFilterState>| {
+        |press: On<PointerPress>, mut state: ResMut<InventoryFilterState>| {
             if press.button == PointerButton::Primary {
                 state.filter.types = TypeFilterSet::all();
             }
@@ -541,7 +541,7 @@ fn spawn_filters_content(
         font_size,
     );
     commands.entity(none_button).observe(
-        |press: On<Pointer<Press>>, mut state: ResMut<InventoryFilterState>| {
+        |press: On<PointerPress>, mut state: ResMut<InventoryFilterState>| {
             if press.button == PointerButton::Primary {
                 state.filter.types = TypeFilterSet::none();
             }
@@ -676,7 +676,7 @@ fn spawn_filters_content(
         .id();
     let reset = spawn_text_button(commands, reset_row, "inventory-filter-reset", 28, font_size);
     commands.entity(reset).observe(
-        |press: On<Pointer<Press>>,
+        |press: On<PointerPress>,
          mut state: ResMut<InventoryFilterState>,
          ui: Option<Res<InventoryFiltersUi>>,
          mut fields: Query<&mut EditableText>| {

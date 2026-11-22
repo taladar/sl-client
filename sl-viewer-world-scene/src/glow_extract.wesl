@@ -13,8 +13,7 @@
 // runs glow in `renderFinalize` after `tonemap`), so the glow is built and added in
 // display space.
 
-#import bevy_core_pipeline::fullscreen_vertex_shader::FullscreenVertexOutput
-
+import bevy_core_pipeline::fullscreen_vertex_shader::FullscreenVertexOutput;
 @group(0) @binding(0) var scene_texture: texture_2d<f32>;
 @group(0) @binding(1) var scene_sampler: sampler;
 

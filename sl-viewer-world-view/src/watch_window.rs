@@ -27,9 +27,9 @@ use bevy::render::render_asset::RenderAssets;
 use bevy::render::render_resource::TextureFormat;
 use bevy::render::renderer::{RenderDevice, RenderQueue};
 use bevy::render::texture::GpuImage;
-use bevy::render::view::ExtractedWindows;
+use bevy::render::view::ExtractedWindow;
 use bevy::render::{Render, RenderApp, RenderSystems};
-use bevy::window::{PresentMode, ViewOnlyWindow, WindowRef};
+use bevy::window::{PresentMode, PrimaryWindow, ViewOnlyWindow, WindowRef};
 
 use crate::screenshot::{CaptureSize, FramePreview, spawn_frame_preview};
 
@@ -72,6 +72,7 @@ impl Plugin for WatchWindowPlugin {
 /// The image the watch window's preview quad samples, and the render world's
 /// copy destination.
 #[derive(Resource, Debug, Clone, ExtractResource)]
+#[extract_app(RenderApp)]
 pub struct WatchPreview {
     /// The preview image, the off-screen window's size and format.
     image: Handle<Image>,
@@ -133,7 +134,7 @@ fn spawn_watch_window(
 /// in order, so the copy reads what the frame wrote.
 fn copy_frame_to_preview(
     preview: Option<Res<WatchPreview>>,
-    windows: Res<ExtractedWindows>,
+    windows: Query<&ExtractedWindow, With<PrimaryWindow>>,
     images: Res<RenderAssets<GpuImage>>,
     device: Res<RenderDevice>,
     queue: Res<RenderQueue>,
@@ -142,8 +143,8 @@ fn copy_frame_to_preview(
         return;
     };
     let Some(source) = windows
-        .primary
-        .and_then(|primary| windows.windows.get(&primary))
+        .single()
+        .ok()
         .and_then(|window| window.offscreen_texture.as_ref())
     else {
         return;

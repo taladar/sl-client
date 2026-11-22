@@ -937,7 +937,7 @@ fn spawn_link_part_nav(commands: &mut Commands, parent: Entity, font_size: f32) 
         )
         .button;
         commands.entity(button).observe(
-            move |press: On<Pointer<Press>>,
+            move |press: On<PointerPress>,
                   session: Option<(ResMut<SelectionSet>, Res<EditToolState>, Res<ObjectState>)>| {
                 // Absent only in the gallery / `ui_test` hosts.
                 if let Some((mut selection, tool, objects)) = session

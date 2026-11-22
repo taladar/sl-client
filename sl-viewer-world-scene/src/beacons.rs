@@ -68,7 +68,7 @@ use sl_viewer_world_api::AvatarState;
 use sl_viewer_world_api::TerrainState;
 use sl_viewer_world_api::ViewerCamera;
 
-/// The internal handle the beacon-beam shader (`beacon_beam.wgsl`) is loaded under,
+/// The internal handle the beacon-beam shader (`beacon_beam.wesl`) is loaded under,
 /// so the material can reference it without an on-disk asset path.
 const BEACON_BEAM_SHADER_HANDLE: Handle<Shader> =
     uuid_handle!("2f7a1c4d-8b30-4e59-9d17-6c04a2e8f513");
@@ -984,7 +984,7 @@ fn ensure_overlay(
 /// Click-to-dismiss on the direction arrow (the reference's
 /// `LLTracker::handleMouseDown`): clicking the arrow stops tracking, clearing the
 /// beacon — the arrow doubles as the stop-tracking button.
-fn on_beacon_arrow_click(mut click: On<Pointer<Click>>, mut tracking: ResMut<MapTracking>) {
+fn on_beacon_arrow_click(mut click: On<PointerClick>, mut tracking: ResMut<MapTracking>) {
     if click.button == PointerButton::Primary {
         tracking.target = None;
         click.propagate(false);
@@ -1194,8 +1194,11 @@ impl Plugin for BeaconPlugin {
         load_internal_asset!(
             app,
             BEACON_BEAM_SHADER_HANDLE,
-            "beacon_beam.wgsl",
-            Shader::from_wgsl
+            "beacon_beam.wesl",
+            |source, _| Shader::from_wesl(
+                source,
+                "embedded://sl_viewer_world_scene/beacon_beam.wesl"
+            )
         );
         app.add_plugins(MaterialPlugin::<BeaconBeamMaterial>::default())
             .init_resource::<BeaconAssets>()

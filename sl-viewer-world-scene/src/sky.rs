@@ -3,7 +3,7 @@
 //! light from the same sky.
 //!
 //! The heavy lifting is a faithful port of the reference viewer's deferred sky
-//! shaders ([`SkyMaterial`] / `sky.wgsl`, `LLVOSky` / `class1/deferred/skyV.glsl`
+//! shaders ([`SkyMaterial`] / `sky.wesl`, `LLVOSky` / `class1/deferred/skyV.glsl`
 //! + `skyF.glsl`). This module drives that material:
 //!
 //! - `setup_sky` spawns a large inward-facing dome carrying the sky material,
@@ -135,7 +135,7 @@ impl Plugin for SkyPlugin {
 }
 
 /// The radius of the sky dome, in metres. The dome's *depth* is forced to the far
-/// clip plane by `sky.wgsl` (a skybox backdrop, occluded by real geometry at any
+/// clip plane by `sky.wesl` (a skybox backdrop, occluded by real geometry at any
 /// altitude), so this radius only needs to enclose the camera and stay comfortably
 /// within the camera's far plane (4096 m) so the sphere is never frustum-culled.
 pub const SKY_DOME_RADIUS: f32 = 3000.0;
@@ -266,7 +266,7 @@ pub const MOON_DISK_RADIUS: f32 = 0.45;
 
 /// The radius of the cloud dome, in metres — the reference `LLSettingsSky::
 /// DOME_RADIUS`. The cloud layer's *depth* is forced to the far clip plane by
-/// `clouds.wgsl` (a skybox backdrop), so this large radius does not need to fit
+/// `clouds.wesl` (a skybox backdrop), so this large radius does not need to fit
 /// inside the camera far plane; it sets the directional layout and the lighting
 /// ray length (`rel_pos_len`) to match the reference.
 pub(crate) const CLOUD_DOME_RADIUS: f32 = 15000.0;
@@ -287,7 +287,7 @@ const CLOUD_DOME_OFFSET: f32 = 0.96;
 ///
 /// The count is not cosmetic. The reference evaluates the clouds' altitude fade
 /// per *vertex* and interpolates it, so the band over which clouds fade out at
-/// the horizon is one stack high — and `clouds.wgsl` does the same. `96` is the
+/// the horizon is one stack high — and `clouds.wesl` does the same. `96` is the
 /// feature table's value for every graphics class but the top one (`128`);
 /// `settings.xml`'s bare default of `64` is overwritten by the table on first
 /// run, so it is not what a reference viewer actually draws with.
@@ -303,7 +303,7 @@ const CLOUD_DOME_SLICES: usize = 192;
 const CLOUD_SCROLL_DIVISOR: f32 = 100.0;
 
 /// How often [`drive_clouds`] re-anchors the GPU-integrated cloud scroll while a
-/// rate is active. `clouds.wgsl` unwinds its hourly-wrapping `globals.time`
+/// rate is active. `clouds.wesl` unwinds its hourly-wrapping `globals.time`
 /// across **one** wrap (the face_material pattern), so the anchor must be
 /// refreshed well within an hour; half the wrap period leaves ample margin, at
 /// one material re-prepare per half hour.
@@ -313,7 +313,7 @@ const CLOUD_SCROLL_REANCHOR_SECS: f32 = 1800.0;
 const STAR_COUNT: usize = 1000;
 
 /// The radius of the star sphere, in metres, at which the star quads sit for
-/// screen projection. Their *depth* is forced to the far clip plane by `stars.wgsl`
+/// screen projection. Their *depth* is forced to the far clip plane by `stars.wesl`
 /// (a skybox backdrop, occluded by real geometry at any altitude), so this radius
 /// only sets the directional layout and — with `REFERENCE_DOME_RADIUS` — the
 /// per-star screen size; it is kept well inside the camera's 4096 m far plane so
@@ -346,7 +346,7 @@ const STAR_ROTATION_RATE_DEG: f32 = 0.01;
 /// (one step every ~5 s) so the Transform settles between steps instead of being
 /// marked changed every frame; 0.05° of star-field yaw is imperceptible.
 /// (The reference twinkle-time scale — `sStarTime = getElapsedSeconds() * 0.5` —
-/// now lives in `stars.wgsl` as `STAR_TIME_SCALE`, applied to `globals.time`.)
+/// now lives in `stars.wesl` as `STAR_TIME_SCALE`, applied to `globals.time`.)
 const STAR_ROTATION_STEP_DEG: f32 = 0.05;
 
 /// The seed for the deterministic star-placement PRNG, so the star field is
@@ -660,7 +660,7 @@ fn atmospheric_amblit(params: &SkyParams) -> Vec3 {
 }
 
 /// The lighting every lit **legacy** surface is given: the reference's deferred
-/// `softenLight` inputs for a non-PBR surface, which `sky_lighting.wgsl` lights
+/// `softenLight` inputs for a non-PBR surface, which `sky_lighting.wesl` lights
 /// prim faces, avatars, trees and terrain with.
 ///
 /// Those surfaces used to be lit by a Bevy directional light of fixed illuminance
@@ -1810,7 +1810,7 @@ pub(crate) fn apply_cloud_textures(
 /// How the cloud-noise texture is uploaded: **linear**
 /// ([`TextureUpload::DATA`]), because the noise is *data*, not colour (R18).
 ///
-/// `clouds.wgsl` ports `cloudsF.glsl`, whose density term is
+/// `clouds.wesl` ports `cloudsF.glsl`, whose density term is
 /// `cloudNoise(uv).x - 0.5` on the raw byte values — the reference binds the
 /// noise as a plain `GL_RGBA8` texture (`llvosky.cpp` even calls
 /// `setExplicitFormat(GL_RGBA8, GL_RGBA)`) and its shader has no
@@ -1971,7 +1971,7 @@ fn calc_cloud_phi(t: f32) -> f32 {
 /// `CLOUD_DOME_STACKS`×`CLOUD_DOME_SLICES` vertices over the zenith cap
 /// (`calc_cloud_phi`), each carrying the reference **baked** planar cloud
 /// texcoord `((-z0 + 1) / 2, (-x0 + 1) / 2)` of its unit dome direction.
-/// `clouds.wgsl` samples the cloud texture through this interpolated UV, so the
+/// `clouds.wesl` samples the cloud texture through this interpolated UV, so the
 /// projection matches the reference instead of being derived per fragment across
 /// a full sphere.
 ///
@@ -2348,7 +2348,7 @@ pub fn cloud_params(
         sun_moon_glow_factor: glow_factor,
         cloud_color: Vec3::from_array(color_rgb(sky.cloud_color)),
         cloud_scale: sky.cloud_scale,
-        // The scroll is integrated GPU-side (`clouds.wgsl` `cloud_scroll`), so
+        // The scroll is integrated GPU-side (`clouds.wesl` `cloud_scroll`), so
         // the layer position uploads unscrolled.
         cloud_pos_density1: Vec3::new(pd1.position_x(), pd1.position_y(), pd1.density()),
         cloud_variance: sky.cloud_variance,
@@ -2588,7 +2588,6 @@ mod tests {
         SHADOW_MAP_SIZE, build_cloud_dome_mesh, disc_drawn, quantised_day_position, resolve_sky,
         shader_light_colors, sky_ambient_light, snap_shadow_direction,
     };
-    use bevy::camera::primitives::MeshAabb as _;
     use bevy::math::Vec3;
     use bevy::mesh::{Mesh, VertexAttributeValues};
     use pretty_assertions::{assert_eq, assert_ne};
@@ -2841,8 +2840,7 @@ mod tests {
     /// than silently drifting.
     #[test]
     fn the_cloud_dome_mesh_is_centred_on_the_camera() {
-        let aabb = build_cloud_dome_mesh()
-            .compute_aabb()
+        let aabb = bevy::camera::primitives::MeshAabb::get_aabb(&build_cloud_dome_mesh())
             .expect("the cloud dome mesh has vertex positions");
         let centre = Vec3::from(aabb.center).length();
         assert!(
@@ -2886,7 +2884,7 @@ mod tests {
     }
 
     /// The clouds fade out at the horizon across the one ring of triangles whose
-    /// rows straddle the camera — `clouds.wgsl` interpolates the reference's
+    /// rows straddle the camera — `clouds.wesl` interpolates the reference's
     /// per-vertex altitude fade across it — so that ring has to be thin, or
     /// clouds smear a visible distance down onto the water. At the reference's
     /// `WLSkyDetail` it spans about half a degree of elevation.
@@ -2900,7 +2898,7 @@ mod tests {
         // One vertex per stack: the first slice of every row (theta = 0).
         let stride = CLOUD_DOME_SLICES + 1;
         let rows: Vec<&[f32; 3]> = positions.iter().step_by(stride).collect();
-        // `clouds.wgsl`'s cut: a vertex fades to zero once `y + 50` is negative.
+        // `clouds.wesl`'s cut: a vertex fades to zero once `y + 50` is negative.
         let band = rows
             .windows(2)
             .find_map(|pair| match pair {

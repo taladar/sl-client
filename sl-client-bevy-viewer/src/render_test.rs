@@ -266,7 +266,7 @@ fn headless_app() -> App {
 ///   registry had exactly that bug; it was found by running the gallery and
 ///   reading the log **by hand**, which is the loop this file exists to end.
 ///   Adding `VisibilityPlugin` here does not recover it — the validation hangs
-///   off an `On<Insert, InheritedVisibility>` observer that bails when the
+///   off an `On<Insert<InheritedVisibility>>` observer that bails when the
 ///   entity has no `ChildOf` *yet*, which is every single-bundle spawn.
 ///
 /// Both want the fuller plugin set, which means a renderer:
@@ -1828,7 +1828,7 @@ mod tests {
     /// **The texture-animation driver configures the face, and its geometry never
     /// moves.**
     ///
-    /// The animation itself now runs in the shader (`face_material.wgsl`'s
+    /// The animation itself now runs in the shader (`face_material.wesl`'s
     /// `sl_animated_uv`, paging cells from `globals.time`), so this CPU test cannot
     /// see it play — that the frame actually changes on screen is
     /// [`crate::render_readback`]'s `a_texture_animation_actually_moves_on_screen`,

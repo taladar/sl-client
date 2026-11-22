@@ -1551,7 +1551,7 @@ fn drop_preview_on_close(
 /// A chrome button press: Import (a preset off disk), Save (over the item),
 /// Save As (a new item), Revert.
 fn on_editor_button(
-    press: On<Pointer<Press>>,
+    press: On<PointerPress>,
     gate: EditorButtonGate,
     mut editors: ResMut<SettingsEditors>,
     facts: EditorFacts,

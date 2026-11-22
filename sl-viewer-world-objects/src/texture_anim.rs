@@ -16,7 +16,7 @@
 //! whose animation is turned off in-world goes static again.
 //!
 //! **P28.2 driver — GPU-side (PERF).** The animation is evaluated **in the
-//! shader** ([`face_material.wgsl`](sl_viewer_kit::face_material)'s `sl_animated_uv`, a
+//! shader** ([`face_material.wesl`](sl_viewer_kit::face_material)'s `sl_animated_uv`, a
 //! port of the reference viewer's `LLViewerTextureAnim::animateTextures`) from
 //! `globals.time`, so the material's UV is derived per-fragment on the GPU. The CPU
 //! driver [`drive_texture_animations`] therefore only writes the animation's
@@ -253,7 +253,7 @@ fn animation_placement(
 }
 
 /// Publish every running texture animation's params to its faces (P28.2), for the
-/// **GPU** animation path: the shader ([`face_material.wgsl`](sl_viewer_kit::face_material)
+/// **GPU** animation path: the shader ([`face_material.wesl`](sl_viewer_kit::face_material)
 /// `sl_animated_uv`) evaluates the animation from `globals.time` each frame, so this
 /// only writes the per-face `SlFaceParams`(sl_viewer_kit::face_material::SlFaceParams)
 /// `anim_*` fields — and **only when they change** (a fresh `llSetTextureAnim`, a

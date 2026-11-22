@@ -71,7 +71,7 @@ pub const SETTING_SHOW_PARCEL_OWNERS: &str = "ShowParcelOwners";
 /// The settings section the property-lines toggle lives under.
 const PARCEL_SECTION: &[&str] = &["world"];
 
-/// The internal handle the property-line shader (`parcel_borders.wgsl`) is loaded
+/// The internal handle the property-line shader (`parcel_borders.wesl`) is loaded
 /// under, so the material can reference it without an on-disk asset path.
 const PARCEL_BORDER_SHADER_HANDLE: Handle<Shader> =
     uuid_handle!("b3f0c9a4-6e21-4d7b-9a83-5c1f2e8d4a60");
@@ -730,8 +730,11 @@ impl Plugin for ParcelBordersPlugin {
         load_internal_asset!(
             app,
             PARCEL_BORDER_SHADER_HANDLE,
-            "parcel_borders.wgsl",
-            Shader::from_wgsl
+            "parcel_borders.wesl",
+            |source, _| Shader::from_wesl(
+                source,
+                "embedded://sl_viewer_world_scene/parcel_borders.wesl"
+            )
         );
         app.add_plugins(MaterialPlugin::<ParcelBorderMaterial>::default())
             .init_resource::<ParcelBorderState>()

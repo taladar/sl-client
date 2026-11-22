@@ -580,7 +580,7 @@ pub(crate) fn capture_with(
 
 /// Render `scene` at two different `globals.time` values and read both frames back,
 /// for verifying **GPU-time-driven** animation. A texture animation now runs
-/// entirely in the shader (`face_material.wgsl`'s `sl_animated_uv` from
+/// entirely in the shader (`face_material.wesl`'s `sl_animated_uv` from
 /// `globals.time`), so it is invisible to any CPU-state digest — the only honest
 /// check is that the rendered **pixels** actually differ over time. Both samples
 /// land at fixed scene times, so identical times render identical bytes and any
@@ -805,7 +805,7 @@ mod tests {
     /// **A texture animation actually moves on screen.**
     ///
     /// The flipbook's animation runs entirely in the shader
-    /// (`face_material.wgsl`'s `sl_animated_uv`, evaluated from `globals.time`), so
+    /// (`face_material.wesl`'s `sl_animated_uv`, evaluated from `globals.time`), so
     /// its material's CPU state does not change frame to frame — a CPU-state digest
     /// (`crate::render_test`) cannot see it, and a CPU re-evaluation would only test
     /// the Rust reference against itself. The one honest check is that the **rendered

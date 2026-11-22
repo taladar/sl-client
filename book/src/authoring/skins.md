@@ -601,7 +601,7 @@ also work on any other `ImageNode` a future widget adds):
 | Property | Sets | Use |
 | --- | --- | --- |
 | `-bevy-image-color` | the image's tint (multiplies the glyph) | recolour a white mask |
-| `-bevy-image` | the image itself (`url("skins/…/foo.png")`) | replace the glyph art |
+| `-bevy-image` | the image itself (`url("/skins/…/foo.png")`) | replace the glyph art |
 
 Every icon carries the shared class `.sk-parcel-icon` **and** a per-icon class,
 so a skin can restyle all of them at once or target one:
@@ -626,7 +626,7 @@ so a skin can restyle all of them at once or target one:
 /* Replace just one glyph with your own art. The tint still multiplies, so ship
    a white mask (or set `-bevy-image-color: #ffffff` to show it as-is). */
 .sk-parcel-icon--damage {
-  -bevy-image: url("skins/myskin/parcel-damage.png");
+  -bevy-image: url("/skins/myskin/parcel-damage.png");
 }
 ```
 
@@ -641,7 +641,7 @@ file-level suppression as its first line (`common.css` does):
 ## Making a new skin
 
 1. Copy an existing `skin.css` into `assets/skins/<yourskin>/skin.css`.
-2. Keep `@import "skins/common.css";` at the top.
+2. Keep `@import "/skins/common.css";` at the top.
 3. Change the token **values**. Do not add structural rules — those belong in
    `common.css` and are shared.
 4. Register the skin id in `src/skin.rs` (`SKINS`) so the gallery switcher and
@@ -655,7 +655,7 @@ The one kind of rule a skin *may* add is an **image surface**: a
 shape and nothing about where it sits. `vintage/skin.css` is the worked
 example — every rule that brings an image clears the background and border
 *paints* in the same block (never the border *width*, which is layout), and
-names `-bevy-image-box: border-box` so the art covers the whole widget.
+names `-bevy-image-visual-box: border-box` so the art covers the whole widget.
 Because `bevy_flair` reverts nothing, such a rule may only set properties
 `common.css` also sets on that class, so that switching to a flat skin writes
 every one of them back.
@@ -673,7 +673,7 @@ import the base skin **into a cascade layer**, and leave your overrides
 
 ```css
 /* skins/graphite/themes/dark.css */
-@import "skins/graphite/skin.css" layer(skin); /* base → a layer */
+@import "/skins/graphite/skin.css" layer(skin); /* base → a layer */
 
 :root {
   /* overrides → un-layered */
@@ -801,12 +801,12 @@ physical left/right and will not mirror; use the logical longhands instead.
 - **`var()` has no fallback value** — `var(--x, blue)` is not supported. Define
   every token.
 - **Images are local bundled files only.** A texture token points at a file
-  under the viewer's assets (`-bevy-image: url("skins/…/foo.png")`),
+  under the viewer's assets (`-bevy-image: url("/skins/…/foo.png")`),
   **never a grid asset UUID** — grid textures (a texture-picker thumbnail, a
   texture display) are *content*, handled by the render pipeline, not the skin.
   `-bevy-image-color` tints an `ImageNode` (multiplying the image); it recolours
   a white glyph mask, as the parcel-permission icons above use it.
-- **`@import` paths are asset-root-relative** — `@import "skins/common.css";`
+- **`@import` paths are asset-root-relative** — `@import "/skins/common.css";`
   resolves from the assets root, not the importing file's directory. Do **not**
   use `../`. Nested imports (theme → skin → common) work.
 - **`!important` is not supported** and is ignored.

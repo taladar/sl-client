@@ -33,7 +33,7 @@ const SHORT: Deadline = Deadline {
     millis: None,
 };
 
-/// The names of the nodes a `Pointer<Click>` reached, in order.
+/// The names of the nodes a `PointerClick` reached, in order.
 #[derive(Resource, Debug, Default)]
 struct Clicked(Vec<String>);
 
@@ -64,7 +64,7 @@ fn button(app: &mut App, name: &str, label: &str, node: Node) -> Entity {
     app.world_mut().entity_mut(button).add_child(text);
     let name = name.to_owned();
     app.world_mut().entity_mut(button).observe(
-        move |mut click: On<Pointer<Click>>, mut clicked: ResMut<Clicked>| {
+        move |mut click: On<PointerClick>, mut clicked: ResMut<Clicked>| {
             click.propagate(false);
             clicked.0.push(name.clone());
         },
@@ -164,7 +164,7 @@ fn a_click_takes_either_button_and_may_be_a_double_click() -> Result<(), String>
     app.init_resource::<Presses>();
     let target = button(&mut app, "row", "Row", placed(100.0, 100.0, 120.0, 30.0));
     app.world_mut().entity_mut(target).observe(
-        |click: On<Pointer<Click>>, mut presses: ResMut<Presses>| {
+        |click: On<PointerClick>, mut presses: ResMut<Presses>| {
             presses.0.push((click.button, click.count));
         },
     );
@@ -213,7 +213,7 @@ fn a_drag_carries_one_node_onto_another() -> Result<(), String> {
         placed(300.0, 200.0, 120.0, 30.0),
     );
     app.world_mut().entity_mut(target).observe(
-        |drop: On<Pointer<DragDrop>>, names: Query<'_, '_, &Name>, mut dropped: ResMut<Dropped>| {
+        |drop: On<PointerDragDrop>, names: Query<'_, '_, &Name>, mut dropped: ResMut<Dropped>| {
             if let Ok(name) = names.get(drop.dropped) {
                 dropped.0.push(name.as_str().to_owned());
             }
@@ -266,7 +266,7 @@ fn a_drag_by_an_offset_moves_the_pointer_that_far_with_the_node_held() -> Result
     app.init_resource::<Dragged>();
     let grip = button(&mut app, "grip", "Grip", placed(100.0, 100.0, 120.0, 30.0));
     app.world_mut().entity_mut(grip).observe(
-        |drag: On<Pointer<Drag>>, mut dragged: ResMut<Dragged>| {
+        |drag: On<PointerDrag>, mut dragged: ResMut<Dragged>| {
             dragged.0 += drag.delta;
         },
     );
@@ -366,6 +366,7 @@ fn a_fill_replaces_the_text_by_typing_and_confirms_it() -> Result<(), String> {
         (
             Name::new("field"),
             EditableText::new("old words"),
+            bevy::ui_widgets::TextInput,
             // Focusable, as every viewer field is: a click on a field with no
             // tab index bubbles its focus request to the window, which clears
             // it.
@@ -401,6 +402,7 @@ fn a_key_press_reaches_the_focused_field() -> Result<(), String> {
         (
             Name::new("field"),
             EditableText::new(""),
+            bevy::ui_widgets::TextInput,
             placed(100.0, 100.0, 240.0, 30.0),
         ),
     );

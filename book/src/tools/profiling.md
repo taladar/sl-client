@@ -64,10 +64,10 @@ history.
 **Version pin.** Tracy checks its **wire protocol version** on handshake and
 refuses to connect on any mismatch — this is effectively an *exact*
 Tracy-release match, not merely "same major version", because the protocol bumps
-between minor releases. The viewer pins `tracing-tracy = 0.11.4` to match Bevy
-0.19's `bevy_log`; that resolves to `tracy-client 0.18.4` →
-`tracy-client-sys 0.28.0`, which vendors **Tracy 0.13.1** (protocol 76). Install
-the **Tracy 0.13.x GUI** (0.13.1 to be safe). If it reports a protocol mismatch,
+between minor releases. The viewer pins `tracing-tracy = 0.12` to match Bevy
+0.20's `bevy_log`; that resolves to `tracy-client 0.19.0` →
+`tracy-client-sys 0.30.1`, which vendors **Tracy 0.14.1** (protocol 82). Install
+the **Tracy 0.14.x GUI** (0.14.1 to be safe). If it reports a protocol mismatch,
 confirm the resolved versions and the vendored Tracy release:
 
 ```console

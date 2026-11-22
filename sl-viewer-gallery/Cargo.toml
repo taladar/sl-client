@@ -18,8 +18,8 @@ publish.workspace = true
 # spec stays per-crate (see the root manifest). `system_font_discovery` because
 # the gallery is where text rendering is judged, and a missing script has to
 # fall back to the host's fonts here exactly as it does in the viewer.
-bevy = { version = "0.19.0", features = ["system_font_discovery"] }
-bevy_flair = { version = "0.8.0" }
+bevy = { version = "0.20.1", features = ["system_font_discovery"] }
+bevy_flair = { version = "0.9.0" }
 clap = { workspace = true, features = ["cargo", "derive", "env"] }
 sl-client-bevy = { workspace = true, features = [
   "bevy_pbr",

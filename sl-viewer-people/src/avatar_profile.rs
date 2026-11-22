@@ -2580,7 +2580,7 @@ fn spawn_profile_group_row(
 /// (two primary presses on the same group within the app's double-click window ([`DoubleClickWindow`])) —
 /// matching the reference's group-list double-click.
 fn on_profile_group_open(
-    press: On<Pointer<Press>>,
+    press: On<PointerPress>,
     rows: Query<&ProfileGroupRow>,
     time: Res<Time>,
     double_click: DoubleClickWindow,
@@ -2683,7 +2683,7 @@ struct ProfileActionOut<'w> {
 /// a resource: with two profiles open, "Pay" means pay *this* window's
 /// resident, and the amount is *this* window's field.
 fn on_profile_action(
-    press: On<Pointer<Press>>,
+    press: On<PointerPress>,
     actions: Query<&ProfileAction>,
     host: ProfileHost,
     mut instances: Query<(&mut ProfileState, &mut ProfileDirty, &ProfileUi)>,

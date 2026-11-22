@@ -1299,7 +1299,7 @@ mod tests {
 
     /// **Revert acts from the keyboard as from the mouse.**
     ///
-    /// The button used to observe `Pointer<Press>`, so `Tab` reached it and
+    /// The button used to observe `PointerPress`, so `Tab` reached it and
     /// `Enter` / `Space` did nothing (`viewer-floater-buttons-ignore-keyboard-
     /// activate`).
     #[test]

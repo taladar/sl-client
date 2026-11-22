@@ -238,13 +238,13 @@ fn spawn_gallery_content(commands: &mut Commands, content: Entity, font_size: f3
         1,
         font_size,
     );
-    commands.entity(back).observe(
-        |press: On<Pointer<Press>>, mut state: ResMut<GalleryState>| {
+    commands
+        .entity(back)
+        .observe(|press: On<PointerPress>, mut state: ResMut<GalleryState>| {
             if press.button == PointerButton::Primary {
                 state.go_back();
             }
-        },
-    );
+        });
     let forward = spawn_nav_button(
         commands,
         nav,
@@ -254,13 +254,13 @@ fn spawn_gallery_content(commands: &mut Commands, content: Entity, font_size: f3
         2,
         font_size,
     );
-    commands.entity(forward).observe(
-        |press: On<Pointer<Press>>, mut state: ResMut<GalleryState>| {
+    commands
+        .entity(forward)
+        .observe(|press: On<PointerPress>, mut state: ResMut<GalleryState>| {
             if press.button == PointerButton::Primary {
                 state.go_forward();
             }
-        },
-    );
+        });
     let up = spawn_nav_button(
         commands,
         nav,
@@ -271,7 +271,7 @@ fn spawn_gallery_content(commands: &mut Commands, content: Entity, font_size: f3
         font_size,
     );
     commands.entity(up).observe(
-        |press: On<Pointer<Press>>, model: Res<InventoryModel>, mut state: ResMut<GalleryState>| {
+        |press: On<PointerPress>, model: Res<InventoryModel>, mut state: ResMut<GalleryState>| {
             if press.button != PointerButton::Primary {
                 return;
             }
@@ -595,7 +595,7 @@ fn spawn_tile(commands: &mut Commands, grid: Entity, tile_spec: &Tile<'_>, font_
     } = *tile_spec;
     let tile = commands
         .spawn((
-            Button,
+            bevy::picking::hover::Hovered::default(),
             Node {
                 width: Val::Px(TILE_WIDTH),
                 padding: UiRect::all(Val::Px(4.0)),
@@ -649,7 +649,7 @@ fn spawn_tile(commands: &mut Commands, grid: Entity, tile_spec: &Tile<'_>, font_
 /// A tile was clicked: select it; a double-click descends into a folder or
 /// opens an item's preview.
 fn on_tile_press(
-    press: On<Pointer<Press>>,
+    press: On<PointerPress>,
     tiles: Query<&TileKey>,
     model: Res<InventoryModel>,
     double_click: DoubleClickWindow,
@@ -688,7 +688,7 @@ fn on_tile_press(
 /// A right-click on a tile: select it and open the same context menu the
 /// tree rows use, targeting the tile's folder / item.
 fn on_tile_context(
-    mut press: On<Pointer<Press>>,
+    mut press: On<PointerPress>,
     tiles: Query<&TileKey>,
     facts: crate::inventory_actions::InventoryMenuFacts,
     mut pick: crate::inventory_actions::InventoryMenuPick,
@@ -706,7 +706,7 @@ fn on_tile_context(
     }
     let _opened = crate::inventory_actions::open_inventory_context_menu(
         &[tile.0],
-        press.pointer_location.position,
+        press.pointer.position,
         &facts,
         // The gallery is a flat single view with no Worn / Recent membership
         // tabs, so it never offers the "Show in Main view" jump.

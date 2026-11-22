@@ -561,7 +561,7 @@ fn aim_at_pointer(
 /// click-to-set. A press in the control's corners, outside the circle, does
 /// nothing at all, as `pointInTouchCircle` refuses to capture there.
 fn on_trackball_press(
-    mut press: On<Pointer<Press>>,
+    mut press: On<PointerPress>,
     balls: TrackballQuery,
     mut drags: Query<&mut TrackballDrag>,
     disabled: Query<(), With<InteractionDisabled>>,
@@ -580,7 +580,7 @@ fn on_trackball_press(
     if disabled.contains(entity) {
         return;
     }
-    let position = press.pointer_location.position;
+    let position = press.pointer.position;
     if aim_at_pointer(entity, position, false, &balls, &ui_scale, &mut commands).is_none() {
         return;
     }
@@ -592,7 +592,7 @@ fn on_trackball_press(
 
 /// A drag re-aims at wherever the pointer now is.
 fn on_trackball_drag(
-    mut drag: On<Pointer<Drag>>,
+    mut drag: On<PointerDrag>,
     balls: TrackballQuery,
     drags: Query<&TrackballDrag>,
     disabled: Query<(), With<InteractionDisabled>>,
@@ -607,13 +607,13 @@ fn on_trackball_drag(
         return;
     }
     drag.propagate(false);
-    let position = drag.pointer_location.position;
+    let position = drag.pointer.position;
     aim_at_pointer(entity, position, false, &balls, &ui_scale, &mut commands);
 }
 
 /// The end of a drag: one last aim, marked final.
 fn on_trackball_drag_end(
-    mut drag_end: On<Pointer<DragEnd>>,
+    mut drag_end: On<PointerDragEnd>,
     balls: TrackballQuery,
     mut drags: Query<&mut TrackballDrag>,
     ui_scale: Res<UiScale>,
@@ -631,14 +631,14 @@ fn on_trackball_drag_end(
     }
     drag_end.propagate(false);
     drag.dragging = false;
-    let position = drag_end.pointer_location.position;
+    let position = drag_end.pointer.position;
     commit(entity, position, &balls, &ui_scale, &mut commands);
 }
 
 /// A release that ends a press which never became a drag — a plain click, which
 /// still commits the aim it set.
 fn on_trackball_release(
-    release: On<Pointer<Release>>,
+    release: On<PointerRelease>,
     balls: TrackballQuery,
     mut drags: Query<&mut TrackballDrag>,
     ui_scale: Res<UiScale>,
@@ -657,7 +657,7 @@ fn on_trackball_release(
     drag.dragging = false;
     commit(
         entity,
-        release.pointer_location.position,
+        release.pointer.position,
         &balls,
         &ui_scale,
         &mut commands,
@@ -665,7 +665,7 @@ fn on_trackball_release(
 }
 
 /// A cancelled pointer drops the drag without committing anything.
-fn on_trackball_cancel(cancel: On<Pointer<Cancel>>, mut drags: Query<&mut TrackballDrag>) {
+fn on_trackball_cancel(cancel: On<PointerCancel>, mut drags: Query<&mut TrackballDrag>) {
     if let Ok(mut drag) = drags.get_mut(cancel.entity) {
         drag.dragging = false;
     }

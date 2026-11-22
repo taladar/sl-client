@@ -64,7 +64,7 @@ use bevy::input_focus::tab_navigation::{NavAction, TabIndex, TabNavigation};
 use bevy::input_focus::{FocusCause, InputFocus};
 use bevy::platform::collections::{HashMap, HashSet};
 use bevy::prelude::*;
-use bevy::text::{EditableText, FontCx, LayoutCx, RemSize, ScaleCx, TextPipeline};
+use bevy::text::{EditableText, FontCx, LayoutCx, ScaleCx, TextPipeline};
 use bevy::transform::systems::{
     mark_dirty_trees, propagate_parent_transforms, sync_simple_transforms,
 };
@@ -92,6 +92,37 @@ use sl_viewer_ui_core::ui_font::register_ui_fonts;
 /// A boxed error, so a test can use `?` rather than the workspace-denied
 /// `unwrap` / `expect`.
 pub type TestError = Box<dyn core::error::Error>;
+
+/// Compute [`InheritedVisibility`] down every hierarchy, as `VisibilityPlugin`
+/// does for a real app. Public for fixtures that do not use [`LayoutTest`].
+pub fn propagate_inherited_visibility(
+    roots: Query<Entity, Without<ChildOf>>,
+    children: Query<&Children>,
+    mut nodes: Query<(&Visibility, &mut InheritedVisibility)>,
+) {
+    let mut pending: Vec<(Entity, bool)> = roots.iter().map(|root| (root, true)).collect();
+    while let Some((entity, parent_visible)) = pending.pop() {
+        let visible =
+            nodes
+                .get_mut(entity)
+                .map_or(parent_visible, |(visibility, mut inherited)| {
+                    let visible = match visibility {
+                        Visibility::Visible => true,
+                        Visibility::Hidden => false,
+                        Visibility::Inherited => parent_visible,
+                    };
+                    inherited.set_if_neq(if visible {
+                        InheritedVisibility::VISIBLE
+                    } else {
+                        InheritedVisibility::HIDDEN
+                    });
+                    visible
+                });
+        if let Ok(kids) = children.get(entity) {
+            pending.extend(kids.iter().map(|kid| (kid, visible)));
+        }
+    }
+}
 
 /// A node's border box, in physical pixels, from its computed size and where the
 /// layout put it.
@@ -379,6 +410,14 @@ impl LayoutTest {
                     .chain()
                     .in_set(UiSystems::PostLayout)
                     .before(update_clipping_system),
+            );
+            // Tab navigation skips what is not inherited-visible, and a bare
+            // harness has no `VisibilityPlugin` to compute it.
+            app.add_systems(
+                PostUpdate,
+                propagate_inherited_visibility
+                    .after(apply_panel_visibility)
+                    .before(UiSystems::Layout),
             );
         }
 
@@ -701,7 +740,9 @@ pub fn viewport_violations(app: &mut App, viewport: UVec2) -> Vec<String> {
             continue;
         }
         let node_box = border_box(computed, transform);
-        let shown = clip.map_or(node_box, |clip| node_box.intersect(clip.clip));
+        let shown = clip.map_or(node_box, |clip| {
+            node_box.intersect(sl_viewer_ui_core::clip::visible_rect(clip))
+        });
         if shown.is_empty() || shown.size().cmple(Vec2::ZERO).any() {
             continue;
         }
@@ -893,7 +934,7 @@ pub fn clipping_violations(app: &mut App) -> Vec<String> {
             (
                 entity,
                 border_box(computed, transform),
-                clip.clip,
+                sl_viewer_ui_core::clip::visible_rect(clip),
                 name.map(|name| name.to_string()),
             )
         })
@@ -1600,7 +1641,7 @@ pub fn unskinned_button_violations(app: &mut App) -> Vec<String> {
         &Node,
         &BackgroundColor,
         &BorderColor,
-    ), Or<(With<Button>, With<bevy::ui::widget::Button>)>>();
+    ), With<Button>>();
     let mut violations = Vec::new();
     for (entity, name, classes, node, background, border) in query.iter(app.world()) {
         let paints_background = background.0.alpha() > 0.0;

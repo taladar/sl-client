@@ -530,7 +530,7 @@ struct SpikeReadbackTarget {
     buffer: Handle<ShaderBuffer>,
 }
 
-impl ExtractResource for SpikeReadbackTarget {
+impl ExtractResource<RenderApp> for SpikeReadbackTarget {
     type Source = Self;
 
     fn extract_resource(source: &Self) -> Self {
@@ -564,7 +564,10 @@ struct SpikeVerdictLog {
 /// it never needs resizing when the target converges onto a bigger skin.
 fn init_spike_readback(mut commands: Commands, mut buffers: ResMut<Assets<ShaderBuffer>>) {
     let bytes = MAX_JOINTS.saturating_add(1).saturating_mul(MAT4_BYTES);
-    let buffer = buffers.add(ShaderBuffer::with_size(bytes, RenderAssetUsages::default()));
+    let buffer = buffers.add(ShaderBuffer::with_size(
+        u64::try_from(bytes).unwrap_or(u64::MAX),
+        RenderAssetUsages::default(),
+    ));
     commands
         .spawn(Readback::buffer(buffer.clone()))
         .observe(spike_readback_verdict);

@@ -26,7 +26,7 @@
 //! composited linear scene and writes a 1×1 `ExposureMap` the tone mapper then
 //! samples (mirroring the reference's `exposureMap` texture, sampled in `toneMap`).
 //! The average luminance is grid-sampled over the same central crop the reference
-//! reduces (`exposure.wgsl` documents that approximation of the mip average).
+//! reduces (`exposure.wesl` documents that approximation of the mip average).
 //!
 //! **Temporal adaptation.** History smoothing (`gExposureProgram`'s
 //! `USE_LAST_EXPOSURE` fade toward the previous frame's exposure, so a camera turn
@@ -81,7 +81,7 @@ use sl_settings::SettingValue;
 use crate::underwater_fog::UnderwaterFogPass;
 use sl_viewer_settings::ViewerSettings;
 
-/// The internal handle the exposure-sample shader (`exposure.wgsl`) is loaded under.
+/// The internal handle the exposure-sample shader (`exposure.wesl`) is loaded under.
 const EXPOSURE_SHADER_HANDLE: Handle<Shader> = uuid_handle!("2f8d61b4-7c05-4e39-9a12-c4d6e8017b52");
 
 /// The render-schedule label for the exposure pass, so the tone mapper can order
@@ -270,7 +270,7 @@ impl Default for ExposureRange {
 /// The per-frame dynamic-exposure inputs, carried on the main camera (which both
 /// carries them to the GPU as a uniform and selects the view the pass runs on, so
 /// the reflection-probe capture cameras — which must stay linear — are left alone),
-/// matching `exposure.wgsl`'s `SlExposure`.
+/// matching `exposure.wesl`'s `SlExposure`.
 #[derive(Debug, Component, Clone, Copy, ShaderType)]
 pub struct SlExposure {
     /// The exposure floor (`exp_min`), resolved from the active sky's
@@ -425,11 +425,11 @@ pub(crate) fn refresh_exposure(
     }
 }
 
-impl SyncComponent for SlExposure {
+impl SyncComponent<RenderApp> for SlExposure {
     type Target = Self;
 }
 
-impl ExtractComponent for SlExposure {
+impl ExtractComponent<RenderApp> for SlExposure {
     type QueryData = Read<Self>;
     type QueryFilter = With<Camera>;
     type Out = Self;
@@ -448,12 +448,9 @@ pub struct SlExposurePlugin;
 impl Plugin for SlExposurePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<RenderOverrides>();
-        load_internal_asset!(
-            app,
-            EXPOSURE_SHADER_HANDLE,
-            "exposure.wgsl",
-            Shader::from_wgsl
-        );
+        load_internal_asset!(app, EXPOSURE_SHADER_HANDLE, "exposure.wesl", |source, _| {
+            Shader::from_wesl(source, "embedded://sl_viewer_world_scene/exposure.wesl")
+        });
         app.init_resource::<ExposureRange>()
             .add_plugins((
                 ExtractComponentPlugin::<SlExposure>::default(),
@@ -779,7 +776,7 @@ mod tests {
 
     /// The reference `exposureF.glsl` curve
     /// `s = mix(exp_max, exp_min, pow(clamp(L / coeff, 0, 1), 2))`, the CPU mirror of
-    /// the expression `exposure.wgsl` evaluates on the reduced average luminance.
+    /// the expression `exposure.wesl` evaluates on the reduced average luminance.
     /// Test-only: at runtime the GPU pass computes it, so it lives here to pin the
     /// shader's arithmetic rather than as a compiled-but-unused function.
     fn exposure_scale(average_luminance: f32, exp_min: f32, exp_max: f32, coeff: f32) -> f32 {
@@ -792,7 +789,7 @@ mod tests {
     /// The reference `gExposureProgram` temporal ease
     /// `s = mix(prev, target, 1 - exp(-speed * dt))` with
     /// `speed = -ln(speed_error) / speed_target`, the CPU mirror of the ease
-    /// `exposure.wgsl` runs. Test-only, for the same reason as [`exposure_scale`].
+    /// `exposure.wesl` runs. Test-only, for the same reason as [`exposure_scale`].
     fn eased(prev: f32, target: f32, dt: f32, speed_error: f32, speed_target: f32) -> f32 {
         let speed = -speed_error.ln() / speed_target;
         let alpha = 1.0 - (-speed * dt).exp();

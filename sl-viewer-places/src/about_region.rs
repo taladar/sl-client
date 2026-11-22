@@ -4561,7 +4561,7 @@ fn spawn_experience_row_button(
 /// Resolve and act on a per-row experience button press, in the window it was
 /// pressed in.
 fn on_experience_row_button(
-    press: On<Pointer<Press>>,
+    press: On<PointerPress>,
     buttons: Query<&ExperienceRowButton>,
     rows: Query<&VirtualRow>,
     mut windows: Query<(&ExperiencesView, &mut AboutRegionState)>,
@@ -4695,7 +4695,7 @@ fn on_about_region_check(
 
 /// Dispatch a floater action-button press, in the window it was pressed in.
 fn on_about_region_action(
-    press: On<Pointer<Press>>,
+    press: On<PointerPress>,
     actions: Query<&AboutRegionAction>,
     mut windows: Query<(&mut AboutRegionState, &AboutRegionUi)>,
     host: FloaterHost,
@@ -4956,7 +4956,7 @@ type RegionRemoveWindows<'world, 'state> = Query<
 /// Resolve and act on a per-row access Remove press, in the window it was
 /// pressed in.
 fn on_remove_access(
-    press: On<Pointer<Press>>,
+    press: On<PointerPress>,
     buttons: Query<&RemoveAccessButton>,
     rows: Query<&VirtualRow>,
     mut windows: RegionRemoveWindows,

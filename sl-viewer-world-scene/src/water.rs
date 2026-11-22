@@ -3,7 +3,7 @@
 //! Extended-Environment (EEP) water settings.
 //!
 //! The heavy lifting is a port of the reference viewer's water shaders
-//! ([`WaterMaterial`] / `water.wgsl`, `LLDrawPoolWater`,
+//! ([`WaterMaterial`] / `water.wesl`, `LLDrawPoolWater`,
 //! `class1/environment/waterV.glsl` + `class3/environment/waterF.glsl`): scrolling
 //! wave normals, a fresnel-blended sky reflection, the water-fog deep-water tint,
 //! and a sun specular highlight. This module drives that material and places the
@@ -45,6 +45,7 @@ use std::collections::HashMap;
 use bevy::asset::RenderAssetUsages;
 use bevy::light::NotShadowCaster;
 use bevy::prelude::*;
+use bevy::render::RenderApp;
 use bevy::render::extract_resource::ExtractResource;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use sl_client_bevy::{
@@ -125,6 +126,7 @@ const HEIGHT_EPSILON: f32 = 0.05;
 /// Extracted into the render world too, where the transparency-ordering re-sort
 /// ([`crate::transparency`]) buckets every translucent item above / below it.
 #[derive(Debug, Resource, Clone, Copy, ExtractResource)]
+#[extract_app(RenderApp)]
 pub(crate) struct WaterLevel(pub(crate) f32);
 
 impl Default for WaterLevel {

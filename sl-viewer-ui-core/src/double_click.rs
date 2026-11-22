@@ -4,8 +4,8 @@
 //! the presses itself — an inventory row, a radar row, a friend, a group, a
 //! world click — asks this window how far apart two presses may be. It is the
 //! picking plugin's [`PickingSettings::multi_click_interval`], the same one
-//! picking counts [`Pointer<Press>::count`](bevy::picking::events::Press)
-//! with, so a list and a widget never disagree about one gesture.
+//! picking counts
+//! [`PointerPress::count`](bevy::picking::events::PointerPress::count) with, so a list and a widget never disagree about one gesture.
 //!
 //! It is also what the synthetic input pins while it plays a click
 //! ([`crate::synthetic_input`]): a double click played two frames apart is

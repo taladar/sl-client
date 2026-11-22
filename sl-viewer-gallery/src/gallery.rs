@@ -1556,7 +1556,7 @@ impl PointerMenuStyle {
 /// edge flip, and one in a corner exercises both edges at once — the placement
 /// cases the unit tests cover and this lets a person watch, in either widget.
 fn open_gallery_menu(
-    press: On<Pointer<Press>>,
+    press: On<PointerPress>,
     style: Res<PointerMenuStyle>,
     mut pies: MessageWriter<OpenPieMenu>,
     mut context_menus: MessageWriter<crate::menu::OpenContextMenu>,
@@ -1568,7 +1568,7 @@ fn open_gallery_menu(
         PointerMenuStyle::Pie => {
             pies.write(OpenPieMenu {
                 menu: &FIXTURE_PIE,
-                at: press.pointer_location.position,
+                at: press.pointer.position,
                 element: "radial-menu",
                 conditions: Vec::new(),
             });
@@ -1576,7 +1576,7 @@ fn open_gallery_menu(
         PointerMenuStyle::DropDown => {
             context_menus.write(crate::menu::OpenContextMenu {
                 menu: &crate::menu::FIXTURE_CONTEXT_MENU,
-                at: press.pointer_location.position,
+                at: press.pointer.position,
                 element: "context-menu",
                 conditions: Vec::new(),
             });

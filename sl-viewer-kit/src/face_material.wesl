@@ -15,9 +15,9 @@
 // bindless arrays) and a non-bindless path (plain uniform + per-binding textures),
 // mirroring how `bevy_pbr::pbr_bindings` / `pbr_fragment` are written.
 
-#import bevy_pbr::{
+import bevy_pbr::render::{
     clustered_forward as clustering,
-    lighting,
+    pbr_lighting as lighting,
     mesh_types::MESH_FLAGS_SHADOW_RECEIVER_BIT,
     mesh_view_types,
     pbr_fragment::pbr_input_from_standard_material,
@@ -32,16 +32,16 @@
     mesh_bindings::mesh,
     forward_io::{VertexOutput, FragmentOutput},
     shadows,
-}
-#import bevy_render::bindless::{bindless_samplers_filtering, bindless_textures_2d}
-#import sl_client_bevy::water_fog::{
+};
+import bevy_render::bindless::{bindless_samplers_filtering, bindless_textures_2d};
+import sl_client_bevy::water_fog::{
     WaterFogParams,
     apply_water_fog,
     water_fog_density,
     water_fog_ks,
     water_fog_no_clip,
-}
-#import sl_client_bevy::sky_lighting::{
+};
+import sl_client_bevy::sky_lighting::{
     SkyFragment,
     SkyLighting,
     sky_irradiance,
@@ -52,7 +52,7 @@
     sky_pbr_base_light,
     sky_pbr_colors,
     sky_surface_light,
-}
+};
 
 // Mirrors `SlFaceParams` (face_material.rs): only vec4 / vec2 / u32 / f32, so the
 // `encase` std140 layout matches this field-for-field.
@@ -127,10 +127,10 @@ const ANIM_SCALE: u32 = 0x40u;
 // to unwind the shader animation clock across the wrap.
 const ANIM_TIME_WRAP: f32 = 3600.0;
 
-#ifdef BINDLESS
 // The extension's bindless index table (slots 50..58, in field order): slot 50 is
 // the `#[data]` params array index, then the four map texture/sampler indices into
 // the global bindless arrays, then the shared sky-lighting texture (slots 59..60).
+@if(BINDLESS)
 struct SlFaceIndices {
     params: u32,
     specular_map: u32,
@@ -144,21 +144,32 @@ struct SlFaceIndices {
     sky_lighting: u32,
     sky_lighting_sampler: u32,
 }
-@group(#{MATERIAL_BIND_GROUP}) @binding(100) var<storage> sl_indices: array<SlFaceIndices>;
-@group(#{MATERIAL_BIND_GROUP}) @binding(101) var<storage> sl_data: array<SlFaceParams>;
-#else   // BINDLESS
-@group(#{MATERIAL_BIND_GROUP}) @binding(50) var<uniform> sl_material: SlFaceParams;
-@group(#{MATERIAL_BIND_GROUP}) @binding(51) var sl_spec_tex: texture_2d<f32>;
-@group(#{MATERIAL_BIND_GROUP}) @binding(52) var sl_spec_samp: sampler;
-@group(#{MATERIAL_BIND_GROUP}) @binding(53) var sl_normal_tex: texture_2d<f32>;
-@group(#{MATERIAL_BIND_GROUP}) @binding(54) var sl_normal_samp: sampler;
-@group(#{MATERIAL_BIND_GROUP}) @binding(55) var sl_mr_tex: texture_2d<f32>;
-@group(#{MATERIAL_BIND_GROUP}) @binding(56) var sl_mr_samp: sampler;
-@group(#{MATERIAL_BIND_GROUP}) @binding(57) var sl_emissive_tex: texture_2d<f32>;
-@group(#{MATERIAL_BIND_GROUP}) @binding(58) var sl_emissive_samp: sampler;
-@group(#{MATERIAL_BIND_GROUP}) @binding(59) var sl_sky_lighting_tex: texture_2d<f32>;
-@group(#{MATERIAL_BIND_GROUP}) @binding(60) var sl_sky_lighting_samp: sampler;
-#endif  // BINDLESS
+@if(BINDLESS)
+@group(constants::MATERIAL_BIND_GROUP) @binding(100) var<storage> sl_indices: array<SlFaceIndices>;
+@if(BINDLESS)
+@group(constants::MATERIAL_BIND_GROUP) @binding(101) var<storage> sl_data: array<SlFaceParams>;
+@if(!BINDLESS)
+@group(constants::MATERIAL_BIND_GROUP) @binding(50) var<uniform> sl_material: SlFaceParams;
+@if(!BINDLESS)
+@group(constants::MATERIAL_BIND_GROUP) @binding(51) var sl_spec_tex: texture_2d<f32>;
+@if(!BINDLESS)
+@group(constants::MATERIAL_BIND_GROUP) @binding(52) var sl_spec_samp: sampler;
+@if(!BINDLESS)
+@group(constants::MATERIAL_BIND_GROUP) @binding(53) var sl_normal_tex: texture_2d<f32>;
+@if(!BINDLESS)
+@group(constants::MATERIAL_BIND_GROUP) @binding(54) var sl_normal_samp: sampler;
+@if(!BINDLESS)
+@group(constants::MATERIAL_BIND_GROUP) @binding(55) var sl_mr_tex: texture_2d<f32>;
+@if(!BINDLESS)
+@group(constants::MATERIAL_BIND_GROUP) @binding(56) var sl_mr_samp: sampler;
+@if(!BINDLESS)
+@group(constants::MATERIAL_BIND_GROUP) @binding(57) var sl_emissive_tex: texture_2d<f32>;
+@if(!BINDLESS)
+@group(constants::MATERIAL_BIND_GROUP) @binding(58) var sl_emissive_samp: sampler;
+@if(!BINDLESS)
+@group(constants::MATERIAL_BIND_GROUP) @binding(59) var sl_sky_lighting_tex: texture_2d<f32>;
+@if(!BINDLESS)
+@group(constants::MATERIAL_BIND_GROUP) @binding(60) var sl_sky_lighting_samp: sampler;
 
 // Apply a packed 2x2 matrix (m = col0.xy, col1.xy) + translation to a UV.
 fn sl_uv(m: vec4<f32>, t: vec2<f32>, uv: vec2<f32>) -> vec2<f32> {
@@ -285,10 +296,13 @@ fn sl_animated_uv(sl: SlFaceParams, uv: vec2<f32>) -> vec2<f32> {
 // produces, but at an arbitrary UV (used to override the base colour of a texture-
 // animated face at its GPU-animated UV, independent of `base.uv_transform`).
 fn sl_sample_base_color(slot: u32, uv: vec2<f32>) -> vec4<f32> {
-#ifdef BINDLESS
+    @if(BINDLESS)
     let indices = pbr_bindings::material_indices[slot];
+    @if(BINDLESS)
     let m = pbr_bindings::material_array[indices.material];
+    @if(BINDLESS)
     var color = m.base_color;
+    @if(BINDLESS)
     if (m.flags & pbr_types::STANDARD_MATERIAL_FLAGS_BASE_COLOR_TEXTURE_BIT) != 0u {
         color = color * textureSampleBias(
             bindless_textures_2d[indices.base_color_texture],
@@ -297,9 +311,11 @@ fn sl_sample_base_color(slot: u32, uv: vec2<f32>) -> vec4<f32> {
             view.mip_bias,
         );
     }
+    @if(BINDLESS)
     return color;
-#else   // BINDLESS
+    @if(!BINDLESS)
     var color = pbr_bindings::material.base_color;
+    @if(!BINDLESS)
     if (pbr_bindings::material.flags & pbr_types::STANDARD_MATERIAL_FLAGS_BASE_COLOR_TEXTURE_BIT) != 0u {
         color = color * textureSampleBias(
             pbr_bindings::base_color_texture,
@@ -308,8 +324,8 @@ fn sl_sample_base_color(slot: u32, uv: vec2<f32>) -> vec4<f32> {
             view.mip_bias,
         );
     }
+    @if(!BINDLESS)
     return color;
-#endif  // BINDLESS
 }
 
 // Sample the legacy specular map (extension slot 51) at `uv`, returning white when
@@ -317,16 +333,15 @@ fn sl_sample_base_color(slot: u32, uv: vec2<f32>) -> vec4<f32> {
 // specular tint and the alpha the per-texel environment weight, exactly as the
 // reference `getSpecular` / `env_intensity * spec.a` read it.
 fn sl_sample_specular(slot: u32, uv: vec2<f32>) -> vec4<f32> {
-#ifdef BINDLESS
+    @if(BINDLESS)
     return textureSampleBias(
         bindless_textures_2d[sl_indices[slot].specular_map],
         bindless_samplers_filtering[sl_indices[slot].specular_map_sampler],
         uv,
         view.mip_bias,
     );
-#else   // BINDLESS
+    @if(!BINDLESS)
     return textureSampleBias(sl_spec_tex, sl_spec_samp, uv, view.mip_bias);
-#endif  // BINDLESS
 }
 
 // A per-fragment tangent basis (`mat3x3(T, B, N)`) derived from screen-space
@@ -357,18 +372,18 @@ fn sl_cotangent_frame(n: vec3<f32>, p: vec3<f32>, uv: vec2<f32>) -> mat3x3<f32> 
 // The shared sky-lighting texture's two texels (`sl_client_bevy::sky_lighting`),
 // loaded rather than sampled: they are values, not an image.
 fn sl_sky_lighting(slot: u32) -> SkyLighting {
-#ifdef BINDLESS
+    @if(BINDLESS)
     let index = sl_indices[slot].sky_lighting;
+    @if(BINDLESS)
     return sky_lighting_from_texels(
         textureLoad(bindless_textures_2d[index], vec2<i32>(0, 0), 0),
         textureLoad(bindless_textures_2d[index], vec2<i32>(1, 0), 0),
     );
-#else   // BINDLESS
+    @if(!BINDLESS)
     return sky_lighting_from_texels(
         textureLoad(sl_sky_lighting_tex, vec2<i32>(0, 0), 0),
         textureLoad(sl_sky_lighting_tex, vec2<i32>(1, 0), 0),
     );
-#endif  // BINDLESS
 }
 
 // The sun's shadow term at this fragment (`scol`, 1 = fully lit), exactly as Bevy's
@@ -532,11 +547,10 @@ fn fragment(
     var pbr_input = pbr_input_from_standard_material(in, is_front);
 
     let slot = mesh[in.instance_index].material_and_lightmap_bind_group_slot & 0xffffu;
-#ifdef BINDLESS
+    @if(BINDLESS)
     let sl = sl_data[sl_indices[slot].params];
-#else   // BINDLESS
+    @if(!BINDLESS)
     let sl = sl_material;
-#endif  // BINDLESS
 
     // The reference's `waterClip`, first thing and before any work is done for a
     // fragment that is about to be thrown away: discard the half of this draw that
@@ -567,75 +581,75 @@ fn fragment(
 // The extension maps are sampled from `base_uv`; only reachable when the mesh has
 // UVs. `map_flags` / `anim_mode` are uniforms, so each branch is uniform control
 // flow (texture sampling with implicit derivatives is valid).
-#ifdef VERTEX_UVS
     // GPU texture animation (P28.2): a running animation replaces the face's texture
     // placement with a time-derived one (evaluated here, not written per frame on the
     // CPU). `base_uv` then drives the base-colour re-sample and every extension map,
     // so the whole face animates. Inert (`ANIM_ON` clear) leaves `base_uv == in.uv`.
+    @if(VERTEX_UVS)
     var base_uv = in.uv;
+    @if(VERTEX_UVS)
     if (sl.anim_mode & ANIM_ON) != 0u {
         base_uv = sl_animated_uv(sl, in.uv);
         pbr_input.material.base_color = sl_sample_base_color(slot, base_uv);
     }
 
+    @if(VERTEX_UVS)
     if (sl.map_flags & MAP_FLAG_MR) != 0u {
         let uv = sl_uv(sl.uv_mr_mat, sl.uv_translations_a.zw, base_uv);
-#ifdef BINDLESS
+        @if(BINDLESS)
         let mr = textureSampleBias(
             bindless_textures_2d[sl_indices[slot].metallic_roughness_map],
             bindless_samplers_filtering[sl_indices[slot].metallic_roughness_map_sampler],
             uv,
             view.mip_bias,
         );
-#else   // BINDLESS
+        @if(!BINDLESS)
         let mr = textureSampleBias(sl_mr_tex, sl_mr_samp, uv, view.mip_bias);
-#endif  // BINDLESS
         // Second Life packs ORM: green = roughness, blue = metallic, red = occlusion.
         pbr_input.material.perceptual_roughness *= mr.g;
         pbr_input.material.metallic *= mr.b;
         pbr_input.diffuse_occlusion = vec3<f32>(mr.r);
     }
+    @if(VERTEX_UVS)
     if (sl.map_flags & MAP_FLAG_EMISSIVE) != 0u {
         let uv = sl_uv(sl.uv_emissive_mat, sl.uv_translations_b.xy, base_uv);
         // The emissive map is uploaded sRGB, so the sample is already linear.
-#ifdef BINDLESS
+        @if(BINDLESS)
         let e = textureSampleBias(
             bindless_textures_2d[sl_indices[slot].emissive_map],
             bindless_samplers_filtering[sl_indices[slot].emissive_map_sampler],
             uv,
             view.mip_bias,
         );
-#else   // BINDLESS
+        @if(!BINDLESS)
         let e = textureSampleBias(sl_emissive_tex, sl_emissive_samp, uv, view.mip_bias);
-#endif  // BINDLESS
         pbr_input.material.emissive = vec4<f32>(
             pbr_input.material.emissive.rgb * e.rgb,
             pbr_input.material.emissive.a,
         );
     }
+    @if(VERTEX_UVS)
     if (sl.map_flags & MAP_FLAG_NORMAL) != 0u {
         let uv = sl_uv(sl.uv_normal_mat, sl.uv_translations_a.xy, base_uv);
-#ifdef BINDLESS
+        @if(BINDLESS)
         let ns = textureSampleBias(
             bindless_textures_2d[sl_indices[slot].normal_map],
             bindless_samplers_filtering[sl_indices[slot].normal_map_sampler],
             uv,
             view.mip_bias,
         );
-#else   // BINDLESS
+        @if(!BINDLESS)
         let ns = textureSampleBias(sl_normal_tex, sl_normal_samp, uv, view.mip_bias);
-#endif  // BINDLESS
         let nt = ns.rgb;
         // A legacy normal map packs per-texel glossiness in its alpha channel.
         gloss_modulator = ns.a;
         // Prefer the mesh's own vertex tangents when it has them; SL face meshes
         // never do, so fall back to a screen-space cotangent frame (both give
         // `apply_normal_mapping` the `mat3x3(T, B, N)` it expects).
-#ifdef VERTEX_TANGENTS
+        @if(VERTEX_TANGENTS)
         let tbn = pbr_functions::calculate_tbn_mikktspace(pbr_input.world_normal, in.world_tangent);
-#else   // VERTEX_TANGENTS
+        @if(!VERTEX_TANGENTS)
         let tbn = sl_cotangent_frame(pbr_input.world_normal, pbr_input.world_position.xyz, uv);
-#endif  // VERTEX_TANGENTS
         let double_sided =
             (pbr_input.material.flags & pbr_types::STANDARD_MATERIAL_FLAGS_DOUBLE_SIDED_BIT) != 0u;
         pbr_input.N = pbr_functions::apply_normal_mapping(
@@ -648,15 +662,18 @@ fn fragment(
     }
     // The legacy specular map (its own per-map transform), read by the
     // legacy-specular block after lighting. Only a legacy face sets MAP_FLAG_SPEC.
+    @if(VERTEX_UVS)
     if (sl.map_flags & MAP_FLAG_SPEC) != 0u {
         let uv = sl_uv(sl.uv_spec_mat, sl.uv_translations_b.zw, base_uv);
         spec_sample = sl_sample_specular(slot, uv);
     }
-#endif // VERTEX_UVS
 
     // Alpha mask / cutoff, exactly as `StandardMaterial` does.
-    pbr_input.material.base_color =
-        pbr_functions::alpha_discard(pbr_input.material, pbr_input.material.base_color);
+    pbr_input.material.base_color = pbr_functions::alpha_discard(
+        pbr_input.material.flags,
+        pbr_input.material.alpha_cutoff,
+        pbr_input.material.base_color,
+    );
 
     var out: FragmentOutput;
     // Honour the `StandardMaterial` **unlit** flag, exactly as Bevy's own `pbr`

@@ -58,11 +58,11 @@ use sl_settings::SettingValue;
 use crate::tonemap::SlTonemapPass;
 use sl_viewer_settings::ViewerSettings;
 
-/// The internal handle the glow extract shader (`glow_extract.wgsl`) loads under.
+/// The internal handle the glow extract shader (`glow_extract.wesl`) loads under.
 const EXTRACT_SHADER_HANDLE: Handle<Shader> = uuid_handle!("1d4a7f60-9b28-4c15-8e33-6a0f2d95c47e");
-/// The internal handle the glow blur shader (`glow_blur.wgsl`) loads under.
+/// The internal handle the glow blur shader (`glow_blur.wesl`) loads under.
 const BLUR_SHADER_HANDLE: Handle<Shader> = uuid_handle!("3e6c9b21-5f47-4a08-9d62-8b1e0a74f3d5");
-/// The internal handle the glow combine shader (`glow_combine.wgsl`) loads under.
+/// The internal handle the glow combine shader (`glow_combine.wesl`) loads under.
 const COMBINE_SHADER_HANDLE: Handle<Shader> = uuid_handle!("7a2f4d18-6c93-4e57-8b04-1f9d3e620c8a");
 
 /// The low-res glow-buffer format — floating-point so the tone-mapped scene's glow
@@ -186,11 +186,11 @@ impl Default for SlGlow {
 /// [`GLOW_RESOLUTION`] as `f32`, for the `delta` divide (no `as` casts allowed).
 const GLOW_RESOLUTION_F32: f32 = 512.0;
 
-impl SyncComponent for SlGlow {
+impl SyncComponent<RenderApp> for SlGlow {
     type Target = Self;
 }
 
-impl ExtractComponent for SlGlow {
+impl ExtractComponent<RenderApp> for SlGlow {
     type QueryData = Read<Self>;
     type QueryFilter = With<Camera>;
     type Out = Self;
@@ -200,7 +200,7 @@ impl ExtractComponent for SlGlow {
     }
 }
 
-/// The blur uniform (`glow_blur.wgsl`'s `GlowBlur`): the per-pass step and strength.
+/// The blur uniform (`glow_blur.wesl`'s `GlowBlur`): the per-pass step and strength.
 #[derive(Clone, Copy, Default, ShaderType)]
 struct GlowBlur {
     /// `(delta, 0)` horizontal / `(0, delta)` vertical.
@@ -222,15 +222,23 @@ impl Plugin for SlGlowPlugin {
         load_internal_asset!(
             app,
             EXTRACT_SHADER_HANDLE,
-            "glow_extract.wgsl",
-            Shader::from_wgsl
+            "glow_extract.wesl",
+            |source, _| Shader::from_wesl(
+                source,
+                "embedded://sl_viewer_world_scene/glow_extract.wesl"
+            )
         );
-        load_internal_asset!(app, BLUR_SHADER_HANDLE, "glow_blur.wgsl", Shader::from_wgsl);
+        load_internal_asset!(app, BLUR_SHADER_HANDLE, "glow_blur.wesl", |source, _| {
+            Shader::from_wesl(source, "embedded://sl_viewer_world_scene/glow_blur.wesl")
+        });
         load_internal_asset!(
             app,
             COMBINE_SHADER_HANDLE,
-            "glow_combine.wgsl",
-            Shader::from_wgsl
+            "glow_combine.wesl",
+            |source, _| Shader::from_wesl(
+                source,
+                "embedded://sl_viewer_world_scene/glow_combine.wesl"
+            )
         );
         app.add_plugins(ExtractComponentPlugin::<SlGlow>::default())
             .add_systems(Update, refresh_glow);
@@ -285,11 +293,11 @@ struct SlGlowBuffers {
 /// Which glow entry point a pipeline runs — its shader handle and label.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 enum GlowStage {
-    /// The extract pass (`glow_extract.wgsl`).
+    /// The extract pass (`glow_extract.wesl`).
     Extract,
-    /// The blur pass (`glow_blur.wgsl`).
+    /// The blur pass (`glow_blur.wesl`).
     Blur,
-    /// The combine pass (`glow_combine.wgsl`).
+    /// The combine pass (`glow_combine.wesl`).
     Combine,
 }
 

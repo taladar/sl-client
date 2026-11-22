@@ -1074,7 +1074,7 @@ fn draw_sample_license(
 /// The shared press observer of this floater's actions: Copy puts the current
 /// support block on the OS clipboard; a license row selects its section.
 fn on_about_action(
-    press: On<Pointer<Press>>,
+    press: On<PointerPress>,
     actions: Query<&AboutAction>,
     mut clipboard: ResMut<Clipboard>,
     mut state: ResMut<AboutState>,

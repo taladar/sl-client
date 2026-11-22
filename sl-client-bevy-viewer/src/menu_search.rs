@@ -98,7 +98,7 @@ pub(crate) fn spawn_menu_search_field(commands: &mut Commands, parent: Entity) -
         .entity(handle.field)
         .insert(MenuSearchField)
         .observe(
-            |mut press: On<Pointer<Press>>, mut focus: ResMut<InputFocus>| {
+            |mut press: On<PointerPress>, mut focus: ResMut<InputFocus>| {
                 // Consume the press so it does not reach the menu widget's root
                 // dismiss observer — clicking the field to type must not close the
                 // menu the term just opened (`crate::menu`).

@@ -707,7 +707,7 @@ fn push_personal_edits(
 /// Reset pressed: ask first. Dropping a personal environment somebody has been
 /// building is not undoable, which is why the reference asks too.
 fn on_reset_pressed(
-    press: On<Pointer<Press>>,
+    press: On<PointerPress>,
     buttons: Query<(), With<ResetButton>>,
     disabled: Query<(), With<bevy::ui::InteractionDisabled>>,
     mut show: MessageWriter<ShowNotification>,

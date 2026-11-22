@@ -232,6 +232,7 @@ pub fn setup_text_demo(mut commands: Commands, visible: Res<TextDemoVisible>, ro
             editor.visible_lines = Some(DEMO_VISIBLE_LINES);
             panel.spawn((
                 editor,
+                bevy::ui_widgets::TextInput,
                 // The bundled sans family, via the one font-selection helper
                 // (`viewer-ui-text-font-family-selection`). It carries no emoji
                 // glyphs of its own, so emoji fall through to the `Emoji` generic

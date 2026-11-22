@@ -71,7 +71,6 @@ use std::collections::{HashMap, HashSet};
 
 use bevy::prelude::*;
 use bevy::text::{EditableText, FontCx, LayoutCx};
-use bevy::ui::widget::TextScroll;
 use sl_client_bevy::{
     AssetKey, AssetType, Command, InventoryKey, InventoryType, ItemInfo, OwnerKey, Permissions,
     SaleType, SlCommand, SlEvent, SlSessionEvent, UpdatableAssetType, Uuid,
@@ -1006,7 +1005,7 @@ const fn may_embed(item: &ItemInfo) -> bool {
 /// with once the item is in.
 #[derive(bevy::ecs::system::SystemParam)]
 struct BodyPlacement<'w, 's> {
-    /// Each body field's box, transform, target and scroll.
+    /// Each body field's box, transform and target.
     geometry: Query<
         'w,
         's,
@@ -1014,7 +1013,6 @@ struct BodyPlacement<'w, 's> {
             &'static ComputedNode,
             &'static UiGlobalTransform,
             &'static ComputedUiRenderTargetInfo,
-            &'static TextScroll,
         ),
     >,
     /// The UI scale a window point is divided by.
@@ -1083,7 +1081,7 @@ fn ingest_added_items(
             continue;
         };
         let pointer_index = add.at.and_then(|at| {
-            let (node, transform, target, scroll) = placement.geometry.get(field_entity).ok()?;
+            let (node, transform, target) = placement.geometry.get(field_entity).ok()?;
             let (editable, _body, _unsaved) = fields.get(field_entity).ok()?;
             let point = rich_text_point(
                 RichTextGeometry {
@@ -1091,7 +1089,6 @@ fn ingest_added_items(
                     node,
                     transform,
                     target,
-                    scroll,
                 },
                 placement.ui_scale.0,
                 at,

@@ -20,11 +20,11 @@
 // This is gated behind the `bevy_pbr` feature: only the windowed viewer needs a
 // renderer.
 
-#import bevy_pbr::{
+import bevy_pbr::render::{
     mesh_functions,
     mesh_view_bindings::globals,
     view_transformations::position_world_to_clip,
-}
+};
 
 // The cloud + atmospheric inputs for one sky frame. Laid out as `vec3` + trailing
 // scalar pairs so the std140 uniform layout matches the Rust `CloudParams`
@@ -92,11 +92,11 @@ fn cloud_scroll() -> vec2<f32> {
     return cloud.scroll_base + cloud.scroll_rate * elapsed;
 }
 
-@group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> cloud: CloudParams;
-@group(#{MATERIAL_BIND_GROUP}) @binding(1) var noise_texture: texture_2d<f32>;
-@group(#{MATERIAL_BIND_GROUP}) @binding(2) var noise_sampler: sampler;
-@group(#{MATERIAL_BIND_GROUP}) @binding(3) var noise_next_texture: texture_2d<f32>;
-@group(#{MATERIAL_BIND_GROUP}) @binding(4) var noise_next_sampler: sampler;
+@group(constants::MATERIAL_BIND_GROUP) @binding(0) var<uniform> cloud: CloudParams;
+@group(constants::MATERIAL_BIND_GROUP) @binding(1) var noise_texture: texture_2d<f32>;
+@group(constants::MATERIAL_BIND_GROUP) @binding(2) var noise_sampler: sampler;
+@group(constants::MATERIAL_BIND_GROUP) @binding(3) var noise_next_texture: texture_2d<f32>;
+@group(constants::MATERIAL_BIND_GROUP) @binding(4) var noise_next_sampler: sampler;
 
 struct Vertex {
     @builtin(instance_index) instance_index: u32,

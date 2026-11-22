@@ -2393,7 +2393,7 @@ pub fn reset_ui_pointer_claim(mut claim: ResMut<UiPointerClaim>) {
 /// is a node the hover-map test would also have called blocking, had it
 /// survived to be asked.
 fn claim_ui_press(
-    press: On<Pointer<Press>>,
+    press: On<PointerPress>,
     pickables: Query<&Pickable>,
     sizes: Query<&ComputedNode>,
     mut claim: ResMut<UiPointerClaim>,

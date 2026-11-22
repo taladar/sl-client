@@ -18,8 +18,7 @@
 // reflection probe's captured cubemap (linear, un-tonemapped) reproduce exactly what
 // the eye sees of the same surroundings.
 
-#import bevy_core_pipeline::fullscreen_vertex_shader::FullscreenVertexOutput
-
+import bevy_core_pipeline::fullscreen_vertex_shader::FullscreenVertexOutput;
 struct SlTonemap {
     // The reference `RenderExposure`: a scale on the linear scene colour before the
     // tone curve.

@@ -1396,7 +1396,7 @@ fn spawn_animation_preview_content(commands: &mut Commands, content: Entity, fon
 /// the button: with two previews open, the two Play buttons are the same
 /// control in two windows, and only the window says which asset it is about.
 fn play_pressed(
-    press: On<Pointer<Press>>,
+    press: On<PointerPress>,
     parents: Query<&ChildOf>,
     floaters: Query<(Entity, &Floater)>,
     windows: Query<&AnimationPreviewState>,
@@ -1409,7 +1409,7 @@ fn play_pressed(
 
 /// Stop this window's animation — [`play_pressed`]'s other half.
 fn stop_pressed(
-    press: On<Pointer<Press>>,
+    press: On<PointerPress>,
     parents: Query<&ChildOf>,
     floaters: Query<(Entity, &Floater)>,
     windows: Query<&AnimationPreviewState>,
@@ -1423,7 +1423,7 @@ fn stop_pressed(
 /// The animation of the preview window a primary press landed in — the walk
 /// both transport buttons share.
 fn pressed_animation(
-    press: &On<Pointer<Press>>,
+    press: &On<PointerPress>,
     parents: &Query<&ChildOf>,
     floaters: &Query<(Entity, &Floater)>,
     windows: &Query<&AnimationPreviewState>,

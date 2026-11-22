@@ -153,7 +153,7 @@ pub(crate) fn spawn_save_button(
 
 /// Turn a Save press into a [`SaveEditorWindow`] naming the window it came from.
 fn on_save_pressed(
-    press: On<Pointer<Press>>,
+    press: On<PointerPress>,
     parents: Query<&ChildOf>,
     floaters: Query<(Entity, &Floater)>,
     mut saves: MessageWriter<SaveEditorWindow>,

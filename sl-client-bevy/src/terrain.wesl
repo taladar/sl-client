@@ -9,14 +9,14 @@
 // and shadows, and the shared sky-lighting texture for the sky's colours. Advanced
 // terrain materials (PBR / normal / specular) remain a deferred non-goal.
 
-#import bevy_pbr::{
+import bevy_pbr::render::{
     mesh_functions,
     mesh_view_bindings as view_bindings,
     mesh_view_types,
     shadows,
     view_transformations::position_world_to_clip,
-}
-#import sl_client_bevy::sky_lighting::{
+};
+import sl_client_bevy::sky_lighting::{
     SkyFragment,
     sky_irradiance,
     sky_legacy_diffuse,
@@ -24,23 +24,23 @@
     sky_lighting_from_texels,
     sky_lighting_is_resolved,
     sky_surface_light,
-}
+};
 
-@group(#{MATERIAL_BIND_GROUP}) @binding(0) var detail0_texture: texture_2d<f32>;
-@group(#{MATERIAL_BIND_GROUP}) @binding(1) var detail0_sampler: sampler;
-@group(#{MATERIAL_BIND_GROUP}) @binding(2) var detail1_texture: texture_2d<f32>;
-@group(#{MATERIAL_BIND_GROUP}) @binding(3) var detail1_sampler: sampler;
-@group(#{MATERIAL_BIND_GROUP}) @binding(4) var detail2_texture: texture_2d<f32>;
-@group(#{MATERIAL_BIND_GROUP}) @binding(5) var detail2_sampler: sampler;
-@group(#{MATERIAL_BIND_GROUP}) @binding(6) var detail3_texture: texture_2d<f32>;
-@group(#{MATERIAL_BIND_GROUP}) @binding(7) var detail3_sampler: sampler;
+@group(constants::MATERIAL_BIND_GROUP) @binding(0) var detail0_texture: texture_2d<f32>;
+@group(constants::MATERIAL_BIND_GROUP) @binding(1) var detail0_sampler: sampler;
+@group(constants::MATERIAL_BIND_GROUP) @binding(2) var detail1_texture: texture_2d<f32>;
+@group(constants::MATERIAL_BIND_GROUP) @binding(3) var detail1_sampler: sampler;
+@group(constants::MATERIAL_BIND_GROUP) @binding(4) var detail2_texture: texture_2d<f32>;
+@group(constants::MATERIAL_BIND_GROUP) @binding(5) var detail2_sampler: sampler;
+@group(constants::MATERIAL_BIND_GROUP) @binding(6) var detail3_texture: texture_2d<f32>;
+@group(constants::MATERIAL_BIND_GROUP) @binding(7) var detail3_sampler: sampler;
 
 // The shared sky-lighting texture (`sl_client_bevy::sky_lighting`): texel 0 is
 // `(sunlit, mode)`, texel 1 `(amblit, probe_ambiance)`. Read with `textureLoad`, so
 // the sampler beside it is only there because a material texture binding comes
 // with one.
-@group(#{MATERIAL_BIND_GROUP}) @binding(8) var sky_lighting_texture: texture_2d<f32>;
-@group(#{MATERIAL_BIND_GROUP}) @binding(9) var sky_lighting_sampler: sampler;
+@group(constants::MATERIAL_BIND_GROUP) @binding(8) var sky_lighting_texture: texture_2d<f32>;
+@group(constants::MATERIAL_BIND_GROUP) @binding(9) var sky_lighting_sampler: sampler;
 
 // How the parcel-ownership tint is mapped and how strongly it shows
 // (`sl_client_bevy::TerrainOwnership`). `uv_scale` converts the mesh's tiled
@@ -51,13 +51,13 @@ struct TerrainOwnership {
     strength: f32,
     padding: vec2<f32>,
 };
-@group(#{MATERIAL_BIND_GROUP}) @binding(10) var<uniform> ownership: TerrainOwnership;
+@group(constants::MATERIAL_BIND_GROUP) @binding(10) var<uniform> ownership: TerrainOwnership;
 
 // One texel per 4 m parcel-overlay square: that square's ownership-class colour
 // in RGB and the overlay's alpha in A (the reference's
 // `LLViewerParcelOverlay` texture, drawn by its `renderOwnership` pass).
-@group(#{MATERIAL_BIND_GROUP}) @binding(11) var ownership_texture: texture_2d<f32>;
-@group(#{MATERIAL_BIND_GROUP}) @binding(12) var ownership_sampler: sampler;
+@group(constants::MATERIAL_BIND_GROUP) @binding(11) var ownership_texture: texture_2d<f32>;
+@group(constants::MATERIAL_BIND_GROUP) @binding(12) var ownership_sampler: sampler;
 
 // The flat light the ground falls back to before any sky has been resolved (a test
 // scene with no environment): the texture's seed `sunlit` and `amblit` as a plain

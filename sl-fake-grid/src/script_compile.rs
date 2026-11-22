@@ -212,7 +212,7 @@ fn without_engine_line(source: &str) -> &str {
 /// parse error and for a compile error alike (an exhausted register file, a
 /// nesting too deep). `mlua` hands back what follows the `:`.
 fn luau_errors(source: &[u8]) -> Vec<String> {
-    match mlua::Compiler::new().compile(source) {
+    match mlua::chunk::Compiler::new().compile(source) {
         Ok(_bytecode) => Vec::new(),
         Err(mlua::Error::SyntaxError { message, .. }) => vec![format!(":{message}")],
         Err(other) => vec![other.to_string()],

@@ -16,12 +16,12 @@ publish.workspace = true
 [dependencies]
 # Not a workspace dependency: members disagree about `default-features`, so the
 # spec stays per-crate (see the root manifest).
-bevy = { version = "0.19.0" }
+bevy = { version = "0.20.1" }
 # Two of its floaters put the shared `.sk-selected` class on a selected row, so
 # this crate names the CSS engine directly, as the other panel crates do.
 # Already in the closure through sl-viewer-ui-core; the package set is
 # unchanged.
-bevy_flair = { version = "0.8.0" }
+bevy_flair = { version = "0.9.0" }
 bytes = { workspace = true }
 fs-err = { workspace = true }
 image = { version = "0.25.10", default-features = false, features = [
@@ -30,10 +30,10 @@ image = { version = "0.25.10", default-features = false, features = [
   "png",
   "tga",
 ] }
-jiff = { version = "0.2.35" }
+jiff = { version = "1.0.2" }
 reqwest = { workspace = true, features = [
   "blocking",
-  "rustls-tls",
+  "rustls",
 ] }
 serde = { workspace = true, features = [
   "derive",

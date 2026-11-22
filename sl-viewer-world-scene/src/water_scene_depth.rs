@@ -1,7 +1,7 @@
 //! The opaque scene depth the water refraction rejects against
 //! (`viewer-water-refraction-smears-avatar-silhouette`).
 //!
-//! **The bug.** `water.wgsl` refracts by sampling Bevy's
+//! **The bug.** `water.wesl` refracts by sampling Bevy's
 //! `view_transmission_texture` — a copy of the screen holding the whole opaque
 //! scene — at a UV the wave normal displaces. The avatar is opaque, so it is *in*
 //! that copy, and a water fragment just outside its silhouette samples, at the
@@ -31,7 +31,7 @@
 //!
 //! So instead of re-rendering the scene, this **copies the depth already
 //! rendered**: one `copy_texture_to_texture` from the view's own
-//! [`ViewDepthTexture`] into an [`Image`] the shared [`WaterMaterial`] binds,
+//! [`ViewDepthStencilTexture`] into an [`Image`] the shared [`WaterMaterial`] binds,
 //! issued in the `Core3d` schedule after the pre-water translucency pass
 //! (`crate::transparency`'s `PreWaterPass`) and before Bevy's transmissive pass —
 //! the same seam `view_transmission_texture` is filled at, so colour and depth are
@@ -64,7 +64,7 @@ use bevy::render::render_resource::{
 };
 use bevy::render::renderer::{RenderContext, ViewQuery};
 use bevy::render::texture::GpuImage;
-use bevy::render::view::ViewDepthTexture;
+use bevy::render::view::ViewDepthStencilTexture;
 use sl_client_bevy::WaterMaterial;
 
 use crate::transparency::PreWaterPass;
@@ -120,6 +120,7 @@ impl Plugin for WaterSceneDepthPlugin {
 /// can tell the main view from a reflection-probe capture, which renders water too
 /// but must not overwrite the copy.
 #[derive(Debug, Default, Clone, Copy, Component, ExtractComponent)]
+#[extract_app(RenderApp)]
 pub struct WaterSceneDepthView;
 
 /// The [`Image`] the depth is copied into and the water material samples.
@@ -128,6 +129,7 @@ pub struct WaterSceneDepthView;
 /// world, where the material asset is a bind group and the handle is no longer
 /// reachable.
 #[derive(Debug, Default, Clone, Resource, ExtractResource)]
+#[extract_app(RenderApp)]
 pub(crate) struct WaterSceneDepthTarget {
     /// The destination image, or the default handle before
     /// [`size_water_scene_depth`] has seen a camera.
@@ -231,23 +233,23 @@ pub(crate) fn size_water_scene_depth(
 /// agree on size and sample count, which they briefly do not while a resize is
 /// working its way through.
 fn copy_water_scene_depth(
-    view: ViewQuery<&ViewDepthTexture, With<WaterSceneDepthView>>,
+    view: ViewQuery<&ViewDepthStencilTexture, With<WaterSceneDepthView>>,
     target: Res<WaterSceneDepthTarget>,
     images: Res<RenderAssets<GpuImage>>,
     mut ctx: RenderContext,
 ) {
-    let source = view.into_inner();
+    let source = view.into_inner().texture();
     let Some(destination) = images.get(&target.image) else {
         return;
     };
-    let source_size = source.texture.size();
+    let source_size = source.size();
     if source_size != destination.texture.size()
-        || source.texture.sample_count() != destination.texture.sample_count()
+        || source.sample_count() != destination.texture.sample_count()
     {
         return;
     }
     ctx.command_encoder().copy_texture_to_texture(
-        source.texture.as_image_copy(),
+        source.as_image_copy(),
         destination.texture.as_image_copy(),
         source_size,
     );

@@ -2706,7 +2706,7 @@ fn region_tooltip_lines(translator: &Translator, info: &MapRegionInfo, lines: &m
 /// Its state is optional so a gallery specimen's surface, pressed in an app
 /// without the map's session state, is inert rather than a failed observer —
 /// as are the other surface and result-row observers.
-fn on_world_map_press(press: On<Pointer<Press>>, state: Option<ResMut<WorldMapState>>) {
+fn on_world_map_press(press: On<PointerPress>, state: Option<ResMut<WorldMapState>>) {
     if press.button == PointerButton::Primary
         && let Some(mut state) = state
     {
@@ -2732,7 +2732,7 @@ const WORLD_MAP_DOUBLE_CLICK_SLOP: f32 = 6.0;
 /// region plus its region-local coordinates, which the X/Y fields take over
 /// (the reference's map click driving the location spinners).
 fn on_world_map_click(
-    click: On<Pointer<Click>>,
+    click: On<PointerClick>,
     double_click: DoubleClickWindow,
     state: Option<ResMut<WorldMapState>>,
     model: Option<Res<WorldMapModel>>,
@@ -2869,7 +2869,7 @@ fn map_look_at(agent: Option<(f64, f64)>, target_east: f64, target_north: f64) -
 
 /// A primary drag pans the map (the world map has no auto-centre; plain drag,
 /// no modifier, as in the reference).
-fn on_world_map_drag(drag: On<Pointer<Drag>>, state: Option<ResMut<WorldMapState>>) {
+fn on_world_map_drag(drag: On<PointerDrag>, state: Option<ResMut<WorldMapState>>) {
     let Some(mut state) = state else {
         return;
     };
@@ -2885,7 +2885,7 @@ fn on_world_map_drag(drag: On<Pointer<Drag>>, state: Option<ResMut<WorldMapState
 }
 
 /// A scroll wheel over the surface zooms toward the cursor.
-fn on_world_map_scroll(mut event: On<Pointer<Scroll>>, state: Option<ResMut<WorldMapState>>) {
+fn on_world_map_scroll(mut event: On<PointerScroll>, state: Option<ResMut<WorldMapState>>) {
     let Some(mut state) = state else {
         return;
     };
@@ -2908,7 +2908,7 @@ fn on_world_map_scroll(mut event: On<Pointer<Scroll>>, state: Option<ResMut<Worl
 /// A right-click (secondary press) opens the context menu with the layer
 /// toggles and zoom presets.
 fn on_world_map_context(
-    mut press: On<Pointer<Press>>,
+    mut press: On<PointerPress>,
     settings: Option<Res<ViewerSettings>>,
     state: Option<Res<WorldMapState>>,
     ui: Option<Res<WorldMapUi>>,
@@ -2950,7 +2950,7 @@ fn on_world_map_context(
     }
     menus.write(OpenContextMenu {
         menu: &WORLD_MAP_MENU,
-        at: press.pointer_location.position,
+        at: press.pointer.position,
         element: WORLD_MAP_ELEMENT,
         conditions,
     });
@@ -3155,7 +3155,7 @@ fn search_results<'model>(
 /// A wheel over the result list scrolls it (`bevy_ui` clips an
 /// `Overflow::scroll` node but does not itself move it — the app owns the
 /// wheel, as in [`crate::gallery`]).
-fn on_results_scroll(mut event: On<Pointer<Scroll>>, mut positions: Query<&mut ScrollPosition>) {
+fn on_results_scroll(mut event: On<PointerScroll>, mut positions: Query<&mut ScrollPosition>) {
     /// Logical pixels one wheel notch scrolls.
     const LINE_SCROLL_PIXELS: f32 = 24.0;
     if let Ok(mut position) = positions.get_mut(event.entity) {
@@ -3169,7 +3169,7 @@ fn on_results_scroll(mut event: On<Pointer<Scroll>>, mut positions: Query<&mut S
 /// region becomes the Teleport / Copy SLURL target at its centre, as picking
 /// a reference search result tracks the region.
 fn on_result_click(
-    click: On<Pointer<Click>>,
+    click: On<PointerClick>,
     rows: Query<&WorldMapResultRow>,
     state: Option<ResMut<WorldMapState>>,
 ) {

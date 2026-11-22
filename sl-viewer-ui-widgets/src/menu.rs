@@ -44,7 +44,7 @@
 //! placement. Everything else is **driven here**, off pointer-**press**
 //! observers on the button / entry rows, rather than through
 //! `bevy_ui_widgets`' `Button` / `MenuButton` activation. That indirection
-//! (`Pointer<Press>` → `Activate` → `MenuEvent`) proved not to fire in this app,
+//! (`PointerPress` → `Activate` → `MenuEvent`) proved not to fire in this app,
 //! whereas a plain press observer on the row is reliable — so a bar button's
 //! press toggles its menu (`MenuNav::toggle_host`), an entry's press runs it and
 //! closes the stack, and a press that reaches the UI root (i.e. landed on nothing in a
@@ -935,7 +935,7 @@ fn spawn_menu_button_as(
             ChildOf(host),
         ))
         .observe(
-            move |mut press: On<Pointer<Press>>,
+            move |mut press: On<PointerPress>,
                   mut focus: ResMut<InputFocus>,
                   mut keyboard: ResMut<MenuKeyboard>,
                   mut nav: MenuNav| {
@@ -1510,7 +1510,7 @@ fn build_menu_popup(
         ))
         // Consume a press that lands on the popup's own padding / border, so it
         // does not bubble to the root dismiss observer and close the menu.
-        .observe(|mut press: On<Pointer<Press>>| press.propagate(false))
+        .observe(|mut press: On<PointerPress>| press.propagate(false))
         .id();
     match source {
         // Jump keys are assigned per built list, so each row carries its
@@ -1780,7 +1780,7 @@ fn spawn_command_line(
 /// ([`spawn_dynamic_line`]) rows, so a picked line behaves the same either way.
 fn attach_row_press(commands: &mut Commands, row: Entity) {
     commands.entity(row).observe(
-        move |mut press: On<Pointer<Press>>,
+        move |mut press: On<PointerPress>,
               disabled: Query<Has<InteractionDisabled>>,
               mut hosts: Query<(Entity, &mut MenuHost)>,
               free: Query<Entity, With<FreeContextMenu>>,
@@ -1876,7 +1876,7 @@ fn spawn_submenu_line(
             Name::new(format!("menu-submenu:{}", sub.label_key())),
             ChildOf(popup),
         ))
-        .observe(|mut press: On<Pointer<Press>>| press.propagate(false))
+        .observe(|mut press: On<PointerPress>| press.propagate(false))
         .id();
     if let Some((key, _)) = draw.jump {
         commands.entity(row).insert(MenuMnemonic { key });
@@ -2437,7 +2437,7 @@ fn attach_menu_dismiss(root: Res<UiRoot>, mut commands: Commands) {
 /// outside every menu — the reference's click-away dismissal, with no dependence
 /// on the hover map.
 fn dismiss_menus_on_press(
-    _press: On<Pointer<Press>>,
+    _press: On<PointerPress>,
     mut hosts: Query<(Entity, &mut MenuHost)>,
     free: Query<Entity, With<FreeContextMenu>>,
     mut commands: Commands,

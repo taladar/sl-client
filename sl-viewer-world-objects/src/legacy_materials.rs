@@ -29,7 +29,7 @@
 //! specular colour, glossiness (exponent) and environment intensity are written
 //! onto the face material's [`SlFaceExt`](sl_viewer_kit::face_material::SlFaceExt) extension,
 //! which renders them as an analytic normalized Blinn-Phong specular lobe over the
-//! matte base (see `face_material.wgsl`). The face's base [`StandardMaterial`] is
+//! matte base (see `face_material.wesl`). The face's base [`StandardMaterial`] is
 //! set matte (metallic 0, roughness 1, reflectance 0) so the added lobe — not the
 //! `StandardMaterial` GGX lobe — is the whole specular story. The remaining
 //! approximation is the environment reflection (a spec-tinted ambient term with no
@@ -447,7 +447,7 @@ pub fn apply_legacy_scalars(material_asset: &mut FaceMaterial, material: &Legacy
     {
         let standard = &mut material_asset.base;
         // A legacy face's base is matte: the SL specular is the analytic Blinn-Phong
-        // lobe the extension adds (face_material.wgsl), not the `StandardMaterial`
+        // lobe the extension adds (face_material.wesl), not the `StandardMaterial`
         // GGX lobe, so metallic / roughness / reflectance are zeroed to avoid a
         // doubled highlight.
         standard.metallic = 0.0;

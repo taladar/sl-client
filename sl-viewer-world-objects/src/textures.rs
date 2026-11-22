@@ -1286,7 +1286,7 @@ pub fn compose_face_material(
     // transforms / legacy specular until the legacy pipeline populates it).
     *slot = inert_face_material(material);
     // The faithful SL glow mask (`sl_viewer_world_scene::glow`): carry the face's glow scalar into
-    // the extension; `face_material.wgsl` writes it to alpha for an opaque / mask
+    // the extension; `face_material.wesl` writes it to alpha for an opaque / mask
     // face (0 for a non-glowing face) and leaves a blend face's coverage alone. A
     // face with no glow keeps the inert `0`. Inert until the glow pass is enabled.
     slot.extension.params.glow = face.glow;

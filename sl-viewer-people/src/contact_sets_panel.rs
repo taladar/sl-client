@@ -1792,7 +1792,7 @@ fn bind_member_rows(
 
 /// A press on a pooled row selects that member.
 fn on_member_row_press(
-    mut press: On<Pointer<Press>>,
+    mut press: On<PointerPress>,
     rows: Query<&BoundMember>,
     ui: Res<ContactSetsUi>,
     mut focus: ResMut<InputFocus>,

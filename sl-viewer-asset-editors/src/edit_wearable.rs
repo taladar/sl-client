@@ -299,7 +299,7 @@ pub fn wearable_editor_floater_spec() -> FloaterSpec {
         // fixed-width track plus a font-sized readout, so the label column is
         // all that gives, and at a large font a long translated label's widest
         // word needs the extra room.
-        default_size: Some(Vec2::new(360.0, 520.0)),
+        default_size: Some(Vec2::new(384.0, 520.0)),
         min_size: Some(Vec2::new(280.0, 240.0)),
         dock_host: None,
         caps: FloaterCaps {
@@ -1358,7 +1358,7 @@ fn report_wearable_save_as(
 /// there is no hidden window left for a system to notice. It restores only this
 /// window's item, so another window's edit stays on the avatar.
 fn restore_preview_on_close(
-    removed: On<Remove, WearEdit>,
+    removed: On<Remove<WearEdit>>,
     edits: Query<&WearEdit>,
     mut preview: WearPreview,
 ) {
@@ -1726,7 +1726,7 @@ mod tests {
 
     /// **Save and Save As act from the keyboard as from the mouse.**
     ///
-    /// The chrome buttons used to observe `Pointer<Press>`, so `Tab` reached
+    /// The chrome buttons used to observe `PointerPress`, so `Tab` reached
     /// them and `Enter` / `Space` did nothing (`viewer-floater-buttons-ignore-
     /// keyboard-activate`). Each gesture, in a fresh app under the real input
     /// and focus stack, must do exactly what the click does. The buttons sit in

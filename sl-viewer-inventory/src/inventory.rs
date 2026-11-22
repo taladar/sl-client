@@ -3636,7 +3636,7 @@ fn bind_row(
 /// so an open menu's click-away dismissal still sees it); the row-vs-background
 /// distinction is therefore made geometrically, not by propagation.
 fn on_viewport_press(
-    press: On<Pointer<Press>>,
+    press: On<PointerPress>,
     ui: Res<InventoryUi>,
     view: Res<InventoryView>,
     lists: Query<&VirtualList>,
@@ -3659,7 +3659,7 @@ fn on_viewport_press(
     // `arithmetic_side_effects` convention on `glam` operators.
     let scale = computed.inverse_scale_factor();
     let top = transform.translation.y * scale - computed.size().y * scale / 2.0;
-    let offset = press.pointer_location.position.y - top + list.scroll_offset();
+    let offset = press.pointer.position.y - top + list.scroll_offset();
     if list.row_height > 0.0 && offset >= 0.0 {
         let past_end = offset / list.row_height >= index_to_f32(view.rows.len());
         if past_end {
@@ -3719,7 +3719,7 @@ struct RowPressState<'w, 's> {
 /// reference's `llfolderview` behaviour; a plain click no longer toggles, it
 /// selects).
 fn on_row_press(
-    press: On<Pointer<Press>>,
+    press: On<PointerPress>,
     geometry: RowPressGeometry,
     view: Res<InventoryView>,
     ui: Res<InventoryUi>,
@@ -3757,7 +3757,7 @@ fn on_row_press(
     *last_click = Some((now, index));
     if let RowKey::Folder(folder) = key {
         let on_arrow = arrows.get(parts.arrow).is_ok_and(|(computed, transform)| {
-            point_in_node(press.pointer_location.position, computed, transform)
+            point_in_node(press.pointer.position, computed, transform)
         });
         if on_arrow || double {
             actions.write(InventoryUiAction::ToggleFolder(folder));
@@ -4097,14 +4097,14 @@ fn spawn_inventory_content(
     let expand_all =
         spawn_toolbar_button(commands, expand_row, "inventory-expand-all", 2, font_size);
     commands.entity(expand_all).observe(
-        |_press: On<Pointer<Press>>, mut actions: MessageWriter<InventoryUiAction>| {
+        |_press: On<PointerPress>, mut actions: MessageWriter<InventoryUiAction>| {
             actions.write(InventoryUiAction::ExpandAll);
         },
     );
     let collapse_all =
         spawn_toolbar_button(commands, expand_row, "inventory-collapse-all", 3, font_size);
     commands.entity(collapse_all).observe(
-        |_press: On<Pointer<Press>>, mut actions: MessageWriter<InventoryUiAction>| {
+        |_press: On<PointerPress>, mut actions: MessageWriter<InventoryUiAction>| {
             actions.write(InventoryUiAction::CollapseAll);
         },
     );

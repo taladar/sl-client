@@ -28,6 +28,7 @@
 //! disable itself.
 
 use bevy::prelude::*;
+use bevy::render::RenderApp;
 use bevy::render::extract_resource::ExtractResource;
 use sl_viewer_settings::env_pins::{EnvPinnedSettings, PinKind};
 
@@ -117,6 +118,7 @@ pub struct ShadowOverrides {
 
 /// Every render override, per app. `Default` overrides nothing.
 #[derive(Resource, ExtractResource, Debug, Clone, PartialEq, Default)]
+#[extract_app(RenderApp)]
 pub struct RenderOverrides {
     /// The glow pass.
     pub glow: GlowOverrides,

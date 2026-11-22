@@ -47,7 +47,7 @@ use bevy::render::render_resource::{
 use bevy::shader::{Shader, ShaderRef};
 use sl_client_bevy::SKY_LIGHTING_IMAGE;
 
-/// The internal handle the face shader (`face_material.wgsl`) is loaded under, so
+/// The internal handle the face shader (`face_material.wesl`) is loaded under, so
 /// the material references it without an on-disk asset path (the repo compiles
 /// every shader in via `load_internal_asset!` rather than the `assets/` dir).
 const FACE_SHADER_HANDLE: Handle<Shader> = uuid_handle!("6b1f0a92-4c3d-4e18-9f27-2a5d7c84e061");
@@ -91,7 +91,7 @@ pub const MAP_FLAG_SPEC: u32 = 1 << 3;
 /// matrix + translation each) and the legacy specular workflow scalars.
 ///
 /// Only `f32`/`u32`/`Vec2`/`Vec4` are used (no `Vec3`), so the `encase` std140
-/// layout the `ShaderType` derive produces matches the `face_material.wgsl`
+/// layout the `ShaderType` derive produces matches the `face_material.wesl`
 /// `SlFaceParams` field-for-field without hand-inserted padding.
 #[derive(Clone, Copy, Debug, ShaderType)]
 pub struct SlFaceParams {
@@ -461,7 +461,7 @@ impl MaterialExtension for SlFaceExt {
     /// glow pass: override the target's **alpha** blend component to `(Zero, One)`
     /// (colour/coverage untouched), like the standalone alpha-blended materials. An
     /// **opaque / mask** face's pipeline has no colour blend, so this is a no-op there
-    /// and its `out.color.a = glow` mask write (in `face_material.wgsl`) still reaches
+    /// and its `out.color.a = glow` mask write (in `face_material.wesl`) still reaches
     /// the glow buffer.
     fn specialize(
         _pipeline: &MaterialExtensionPipeline,
@@ -492,7 +492,7 @@ pub fn inert_face_material(base: StandardMaterial) -> FaceMaterial {
 pub struct SlFaceMaterialPlugin;
 
 impl Plugin for SlFaceMaterialPlugin {
-    /// Compile `face_material.wgsl` under `FACE_SHADER_HANDLE` and add the
+    /// Compile `face_material.wesl` under `FACE_SHADER_HANDLE` and add the
     /// [`MaterialPlugin`] for the extended face material.
     fn build(&self, app: &mut App) {
         // The face shader imports the shared water-fog module, which a translucent
@@ -504,8 +504,8 @@ impl Plugin for SlFaceMaterialPlugin {
         load_internal_asset!(
             app,
             FACE_SHADER_HANDLE,
-            "face_material.wgsl",
-            Shader::from_wgsl
+            "face_material.wesl",
+            |source, _| Shader::from_wesl(source, "embedded://sl_viewer_kit/face_material.wesl")
         );
         app.add_plugins(MaterialPlugin::<FaceMaterial>::default());
     }

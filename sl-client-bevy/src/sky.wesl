@@ -15,10 +15,10 @@
 // This is gated behind the `bevy_pbr` feature: only the windowed viewer needs a
 // renderer.
 
-#import bevy_pbr::{
+import bevy_pbr::render::{
     mesh_functions,
     view_transformations::position_world_to_clip,
-}
+};
 
 // The atmospheric inputs for one sky frame — the `LLSettingsSky` values Firestorm
 // binds as sky-shader uniforms. Laid out as `vec3` + trailing scalar pairs so the
@@ -55,11 +55,11 @@ struct SkyParams {
     sky_hdr_scale: f32,
 };
 
-@group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> sky: SkyParams;
-@group(#{MATERIAL_BIND_GROUP}) @binding(1) var rainbow_texture: texture_2d<f32>;
-@group(#{MATERIAL_BIND_GROUP}) @binding(2) var rainbow_sampler: sampler;
-@group(#{MATERIAL_BIND_GROUP}) @binding(3) var halo_texture: texture_2d<f32>;
-@group(#{MATERIAL_BIND_GROUP}) @binding(4) var halo_sampler: sampler;
+@group(constants::MATERIAL_BIND_GROUP) @binding(0) var<uniform> sky: SkyParams;
+@group(constants::MATERIAL_BIND_GROUP) @binding(1) var rainbow_texture: texture_2d<f32>;
+@group(constants::MATERIAL_BIND_GROUP) @binding(2) var rainbow_sampler: sampler;
+@group(constants::MATERIAL_BIND_GROUP) @binding(3) var halo_texture: texture_2d<f32>;
+@group(constants::MATERIAL_BIND_GROUP) @binding(4) var halo_sampler: sampler;
 
 struct Vertex {
     @builtin(instance_index) instance_index: u32,

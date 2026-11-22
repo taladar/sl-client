@@ -247,7 +247,7 @@ use sl_viewer_ui_core::ui::{UiRoot, column};
 use sl_viewer_ui_core::ui_element::{ElementCx, RadialCentre, RadialPlacement, UiAction};
 use sl_viewer_ui_core::ui_font::UiFont;
 
-/// The internal handle the pie shader (`pie_menu.wgsl`) is loaded under.
+/// The internal handle the pie shader (`pie_menu.wesl`) is loaded under.
 const PIE_SHADER_HANDLE: Handle<Shader> = uuid_handle!("2a7f5c31-9d84-4e62-b1a7-3c05e9f8d264");
 
 /// The number of slices, mirroring the reference's `PIE_MAX_SLICES`.
@@ -692,7 +692,7 @@ pub enum SlotOutcome {
 }
 
 /// A slot's state as the shader reads it — four bits per slot, packed by
-/// [`pack_slot_states`]. The discriminants are shared with `pie_menu.wgsl` and
+/// [`pack_slot_states`]. The discriminants are shared with `pie_menu.wesl` and
 /// must be kept in step with its `STATE_*` constants.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SlotState {
@@ -708,7 +708,7 @@ enum SlotState {
 }
 
 impl SlotState {
-    /// This state's four bits, as `pie_menu.wgsl`'s `STATE_*` constants.
+    /// This state's four bits, as `pie_menu.wesl`'s `STATE_*` constants.
     ///
     /// A match rather than a discriminant cast: the numbers are a **wire format**
     /// shared with a file the compiler cannot see, so they are written down on
@@ -837,7 +837,7 @@ pub fn pick(offset: Vec2, geometry: PieGeometry, bound: Option<f32>) -> Option<C
 /// Convert a `bevy_ui` offset (**y down**) into the y-up frame the compass is
 /// reasoned about in.
 ///
-/// The single conversion, mirroring the one in `pie_menu.wgsl`. Every angle in
+/// The single conversion, mirroring the one in `pie_menu.wesl`. Every angle in
 /// this module is y-up; every screen coordinate that reaches it comes through
 /// here.
 #[must_use]
@@ -999,7 +999,7 @@ pub struct PiePlacement {
     settled_at: Option<Vec2>,
 }
 
-/// The uniform `pie_menu.wgsl` reads. Field order and padding mirror the WGSL
+/// The uniform `pie_menu.wesl` reads. Field order and padding mirror the WGSL
 /// `PieParams` exactly, so the std140 packing lines up.
 #[derive(Clone, Copy, Debug, PartialEq, ShaderType)]
 struct PieParams {
@@ -1087,7 +1087,9 @@ pub struct PieMenuPlugin;
 
 impl Plugin for PieMenuPlugin {
     fn build(&self, app: &mut App) {
-        load_internal_asset!(app, PIE_SHADER_HANDLE, "pie_menu.wgsl", Shader::from_wgsl);
+        load_internal_asset!(app, PIE_SHADER_HANDLE, "pie_menu.wesl", |source, _| {
+            Shader::from_wesl(source, "embedded://sl_viewer_ui_pie_menu/pie_menu.wesl")
+        });
         app.add_plugins(UiMaterialPlugin::<PieMenuMaterial>::default())
             .add_message::<OpenPieMenu>()
             .add_systems(
@@ -1211,7 +1213,7 @@ pub fn spawn_pie_menu(
         // **Swallow pointer presses that land on the menu**, so they do not bubble
         // up to an ancestor's open-observer (the gallery hangs one on `UiRoot`).
         // `Pickable::should_block_lower` on the ring stops entities *behind* the
-        // menu from being picked, but a `Pointer<Press>` still propagates *up* the
+        // menu from being picked, but a `PointerPress` still propagates *up* the
         // hierarchy — so a right-click in the dead zone would reach the world's
         // open-observer and reopen the menu the same frame `commit_pie_selection`
         // closed it. Left-click did not show this only because that observer is
@@ -1578,7 +1580,7 @@ pub fn fit_pie_layout(
 
 /// Stop a pointer press that landed on the menu from bubbling to an ancestor's
 /// open-observer. See the `.observe` call in [`spawn_pie_menu`] for the full why.
-fn swallow_pie_press(mut press: On<Pointer<Press>>) {
+fn swallow_pie_press(mut press: On<PointerPress>) {
     press.propagate(false);
 }
 
@@ -2287,10 +2289,7 @@ fn address_table(menu: &'static PieMenuDef) -> String {
 ///
 /// The **secondary** button, which is what a context menu is bound to on every
 /// desktop and in the reference viewer.
-fn open_pie_on_right_click(
-    mut press: On<Pointer<Press>>,
-    mut requests: MessageWriter<OpenPieMenu>,
-) {
+fn open_pie_on_right_click(mut press: On<PointerPress>, mut requests: MessageWriter<OpenPieMenu>) {
     if press.button != PointerButton::Secondary {
         return;
     }
@@ -2301,7 +2300,7 @@ fn open_pie_on_right_click(
     press.propagate(false);
     requests.write(OpenPieMenu {
         menu: &FIXTURE_PIE,
-        at: press.pointer_location.position,
+        at: press.pointer.position,
         element: "radial-menu",
         // No session here, so nothing conditional holds. The live viewer's own
         // menus will fill this from the object under the pointer.

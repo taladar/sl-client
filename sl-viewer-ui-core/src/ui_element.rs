@@ -704,6 +704,7 @@ pub fn spawn_text_editor(commands: &mut Commands, parent: Entity, cx: ElementCx)
     commands
         .spawn((
             editor,
+            bevy::ui_widgets::TextInput,
             cx.font(UiFont::Sans),
             // No text role: like the live field's, the text colour is the
             // field class's, which re-roots the field family's text.

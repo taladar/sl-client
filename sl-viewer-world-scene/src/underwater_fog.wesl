@@ -14,12 +14,12 @@
 // side of the surface the eye is on changes only where the view ray enters the
 // water, which `water_fog_no_clip` works out per fragment.
 
-#import bevy_core_pipeline::fullscreen_vertex_shader::FullscreenVertexOutput
-#import sl_client_bevy::water_fog::{
+import bevy_core_pipeline::fullscreen_vertex_shader::FullscreenVertexOutput;
+import sl_client_bevy::water_fog::{
     WaterFogParams,
     WATER_FOG_NONE,
     water_fog_no_clip,
-}
+};
 
 struct UnderwaterFog {
     // World-from-clip matrix, to reconstruct a fragment's world position from its

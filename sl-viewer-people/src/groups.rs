@@ -454,7 +454,7 @@ pub(crate) fn spawn_groups_list(
             ChildOf(list_column),
         ))
         .observe(
-            |press: On<Pointer<Press>>, ui: Res<GroupsUi>, mut focus: ResMut<InputFocus>| {
+            |press: On<PointerPress>, ui: Res<GroupsUi>, mut focus: ResMut<InputFocus>| {
                 if press.button == PointerButton::Primary {
                     focus.set(ui.viewport, FocusCause::Navigated);
                 }
@@ -576,7 +576,7 @@ fn spawn_action_button(
     );
     let button = spawned.button;
     commands.entity(button).observe(
-        move |mut press: On<Pointer<Press>>,
+        move |mut press: On<PointerPress>,
               selected: Res<SelectedGroup>,
               view: Res<GroupsView>,
               mut pending: ResMut<PendingLeaveConfirm>,
@@ -749,7 +749,7 @@ fn spawn_confirm_button(
             Pickable::IGNORE,
         ))
         .observe(
-            move |mut press: On<Pointer<Press>>,
+            move |mut press: On<PointerPress>,
                   mut pending: ResMut<PendingLeaveConfirm>,
                   mut model: ResMut<GroupsModel>,
                   mut sl: MessageWriter<SlCommand>| {
@@ -1145,7 +1145,7 @@ struct GroupRowClick<'w> {
 /// group it presents, and — on a **double-click** (two presses on the same group
 /// within the app's double-click window ([`DoubleClickWindow`])) — open its IM, exactly like the IM button.
 fn on_group_row_press(
-    press: On<Pointer<Press>>,
+    press: On<PointerPress>,
     rows: Query<&BoundGroup>,
     ui: Res<GroupsUi>,
     mut click: GroupRowClick,

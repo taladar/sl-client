@@ -1005,7 +1005,7 @@ fn publish_beacons(
 
 /// Send the pressed button's command.
 fn on_telehub_action(
-    press: On<Pointer<Press>>,
+    press: On<PointerPress>,
     actions: Query<&TelehubAction>,
     facts: TelehubFacts,
     mut commands: MessageWriter<SlCommand>,

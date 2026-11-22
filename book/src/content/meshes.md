@@ -124,7 +124,7 @@ records the case `partial`.
 
 ## Bevy
 
-`sl-client-bevy` (on Bevy 0.19, via the `bevy_mesh` feature) bridges the store
+`sl-client-bevy` (on Bevy 0.20, via the `bevy_mesh` feature) bridges the store
 to Bevy's renderer: `to_bevy_mesh` turns one decoded `Submesh` into a
 `bevy::mesh::Mesh` (a `TriangleList` with position — and, when present, normal
 and UV0 — attributes plus `u32` indices), and `to_bevy_meshes` yields one Bevy

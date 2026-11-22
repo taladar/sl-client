@@ -124,7 +124,6 @@
 
 use bevy::prelude::*;
 use bevy::text::FontCx;
-use parley::GenericFamily;
 use parley::fontique::{Blob, FallbackKey, FontInfoOverride, Script};
 
 /// The bundled `Inter` upright variable face — the UI body font. One file
@@ -290,13 +289,13 @@ const SCRIPT_FALLBACKS: &[[u8; 4]] = &[
 /// generics we actually bundle a font for are listed: pointing, say, `Cursive`
 /// at DejaVu Sans would be a lie, and the guard test bans reaching for the
 /// unbound ones anyway.
-const GENERIC_BINDINGS: &[(GenericFamily, &str)] = &[
-    (GenericFamily::SansSerif, SANS_FAMILY),
-    (GenericFamily::UiSansSerif, SANS_FAMILY),
-    (GenericFamily::SystemUi, SANS_FAMILY),
-    (GenericFamily::Monospace, MONO_FAMILY),
-    (GenericFamily::UiMonospace, MONO_FAMILY),
-    (GenericFamily::Emoji, EMOJI_FAMILY),
+const GENERIC_BINDINGS: &[(GenericFontFamily, &str)] = &[
+    (GenericFontFamily::SansSerif, SANS_FAMILY),
+    (GenericFontFamily::UiSansSerif, SANS_FAMILY),
+    (GenericFontFamily::SystemUi, SANS_FAMILY),
+    (GenericFontFamily::Monospace, MONO_FAMILY),
+    (GenericFontFamily::UiMonospace, MONO_FAMILY),
+    (GenericFontFamily::Emoji, EMOJI_FAMILY),
 ];
 
 /// Register `face` into `font_cx`'s fontique collection under `family`,

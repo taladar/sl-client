@@ -417,7 +417,7 @@ fn build_volume_select(commands: &mut Commands, container: Entity, field: Entity
         .add_child(dropdown)
         .id();
     commands.entity(button).observe(
-        move |mut press: On<Pointer<Press>>, mut nodes: Query<&mut Node, With<VolumeDropdown>>| {
+        move |mut press: On<PointerPress>, mut nodes: Query<&mut Node, With<VolumeDropdown>>| {
             press.propagate(false);
             if press.button != PointerButton::Primary {
                 return;
@@ -461,7 +461,7 @@ fn spawn_volume_option(
         ))
         .id();
     commands.entity(option).observe(
-        move |mut press: On<Pointer<Press>>,
+        move |mut press: On<PointerPress>,
               mut inputs: Query<&mut LocalChatInput>,
               mut dropdowns: Query<&mut Node, With<VolumeDropdown>>| {
             press.propagate(false);

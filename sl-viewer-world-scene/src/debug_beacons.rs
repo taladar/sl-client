@@ -66,7 +66,7 @@ use sl_viewer_kit::probe_layers::world_ui_render_layers;
 use sl_viewer_social::{DebugBeacon, DebugBeacons};
 use sl_viewer_world_api::ObjectState;
 
-/// The internal handle the marker shader (`debug_beacon.wgsl`) is loaded under, so
+/// The internal handle the marker shader (`debug_beacon.wesl`) is loaded under, so
 /// the material can reference it without an on-disk asset path.
 const DEBUG_BEACON_SHADER_HANDLE: Handle<Shader> =
     uuid_handle!("6b1d9f42-0c58-4a7e-9f23-1d8e57c0a4b6");
@@ -523,8 +523,11 @@ impl Plugin for DebugBeaconPlugin {
         load_internal_asset!(
             app,
             DEBUG_BEACON_SHADER_HANDLE,
-            "debug_beacon.wgsl",
-            Shader::from_wgsl
+            "debug_beacon.wesl",
+            |source, _| Shader::from_wesl(
+                source,
+                "embedded://sl_viewer_world_scene/debug_beacon.wesl"
+            )
         );
         app.add_plugins(MaterialPlugin::<DebugBeaconMaterial>::default())
             .init_resource::<DebugBeacons>()

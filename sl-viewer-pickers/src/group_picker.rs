@@ -567,7 +567,7 @@ struct GroupPickOut<'w> {
 
 /// Act on a press of one of a window's buttons, in the window it was pressed in.
 fn on_picker_button(
-    press: On<Pointer<Press>>,
+    press: On<PointerPress>,
     buttons: Query<&PickerButton>,
     mut windows: Query<(&mut GroupPickerState, &GroupPickerUi)>,
     host: FloaterHost,
@@ -933,7 +933,7 @@ fn spawn_group_picker_rows(
         let is_none_row = row_data.group.is_none();
         commands
             .spawn((
-                Button,
+                bevy::picking::hover::Hovered::default(),
                 Node {
                     padding: UiRect::axes(Val::Px(6.0), Val::Px(2.0)),
                     align_items: AlignItems::Center,
@@ -949,7 +949,7 @@ fn spawn_group_picker_rows(
                 ChildOf(list),
             ))
             .observe(
-                move |press: On<Pointer<Press>>,
+                move |press: On<PointerPress>,
                       mut windows: Query<&mut GroupPickerState>,
                       parents: Query<&ChildOf>,
                       floaters: Query<(Entity, &Floater)>| {
@@ -1304,7 +1304,7 @@ mod tests {
         fn spawn_open_button(commands: &mut Commands, root: Entity, name: &'static str) {
             commands
                 .spawn((
-                    Button,
+                    bevy::picking::hover::Hovered::default(),
                     Node {
                         width: Val::Px(60.0),
                         height: Val::Px(20.0),
@@ -1316,7 +1316,7 @@ mod tests {
                     ChildOf(root),
                 ))
                 .observe(
-                    |press: On<Pointer<Press>>,
+                    |press: On<PointerPress>,
                      buttons: Query<&OpenButton>,
                      mut opens: MessageWriter<OpenGroupPicker>| {
                         if let Ok(button) = buttons.get(press.entity) {

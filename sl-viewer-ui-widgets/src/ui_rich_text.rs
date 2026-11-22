@@ -79,7 +79,7 @@ use core::ops::Range;
 use bevy::input_focus::InputFocus;
 use bevy::prelude::*;
 use bevy::text::{ComputedTextBlock, EditableText, EditableTextSystems, TextBrush, TextEntity};
-use bevy::ui::{UiSystems, widget::TextScroll};
+use bevy::ui::UiSystems;
 use parley::{Cursor, InlineBox, InlineBoxKind, PositionedLayoutItem, StyleProperty};
 
 use bevy_flair::style::components::ClassList;
@@ -914,12 +914,11 @@ fn place_rich_text_objects(
         &EditableText,
         &ComputedNode,
         &UiGlobalTransform,
-        &TextScroll,
     )>,
     roots: Query<(&ComputedNode, &UiGlobalTransform)>,
     mut nodes: Query<(&mut Node, &mut Visibility)>,
 ) {
-    for (config, content, editable, node, transform, scroll) in &fields {
+    for (config, content, editable, node, transform) in &fields {
         let Some(layout) = editable.editor.try_layout() else {
             continue;
         };
@@ -935,7 +934,10 @@ fn place_rich_text_objects(
         // component because `glam`'s whole-`Vec2` operators trip the workspace's
         // `arithmetic_side_effects` lint.
         let text_box = node.content_box().min;
-        let text_origin = Vec2::new(text_box.x - scroll.0.x, text_box.y - scroll.0.y);
+        let text_origin = Vec2::new(
+            text_box.x - editable.viewport.offset.x,
+            text_box.y - editable.viewport.offset.y,
+        );
         let overlay_origin = overlay_node.padding_box().min;
 
         let mut placed: Vec<Option<Vec2>> = vec![None; content.objects.len()];
@@ -1094,14 +1096,13 @@ fn place_rich_text_underlays(
         &EditableText,
         &ComputedNode,
         &UiGlobalTransform,
-        &TextScroll,
     )>,
     focus: Res<InputFocus>,
     layers: Query<(&ComputedNode, &UiGlobalTransform, Option<&Children>)>,
     mut boxes: Query<(&mut Node, &mut ClassList), With<RichTextUnderlayBox>>,
     mut commands: Commands,
 ) {
-    for (entity, config, content, marks, editable, node, transform, scroll) in &fields {
+    for (entity, config, content, marks, editable, node, transform) in &fields {
         let Ok((underlay_node, underlay_transform, existing)) = layers.get(config.underlay) else {
             continue;
         };
@@ -1121,7 +1122,10 @@ fn place_rich_text_underlays(
         };
         let inverse_scale = node.inverse_scale_factor();
         let text_box = node.content_box();
-        let text_origin = Vec2::new(text_box.min.x - scroll.0.x, text_box.min.y - scroll.0.y);
+        let text_origin = Vec2::new(
+            text_box.min.x - editable.viewport.offset.x,
+            text_box.min.y - editable.viewport.offset.y,
+        );
         let underlay_box = underlay_node.padding_box();
         // Text space → field → world → underlay, as an object makes the trip.
         let to_underlay = |point: Vec2| {
@@ -1148,7 +1152,11 @@ fn place_rich_text_underlays(
         }
         let marked = marks.map_or(&[][..], |marks| marks.backdrops.as_slice());
         if !(content.backdrops.is_empty() && marked.is_empty()) {
-            let visible = visible_bytes(layout, scroll.0.y, scroll.0.y + text_box.height());
+            let visible = visible_bytes(
+                layout,
+                editable.viewport.offset.y,
+                editable.viewport.offset.y + text_box.height(),
+            );
             let text = editable.editor.raw_text();
             // The widget's marks first, so the consumer's boxes (spawned later,
             // so painted later) sit over them.
@@ -1223,8 +1231,6 @@ pub struct RichTextGeometry<'a> {
     pub transform: &'a UiGlobalTransform,
     /// The render target, for its scale factor.
     pub target: &'a ComputedUiRenderTargetInfo,
-    /// How far the field is scrolled.
-    pub scroll: &'a TextScroll,
 }
 
 impl core::fmt::Debug for RichTextGeometry<'_> {
@@ -1234,7 +1240,6 @@ impl core::fmt::Debug for RichTextGeometry<'_> {
             .field("node", self.node)
             .field("transform", self.transform)
             .field("target", self.target)
-            .field("scroll", self.scroll)
             .finish_non_exhaustive()
     }
 }
@@ -1277,8 +1282,8 @@ pub fn rich_text_point(
     let text_box = geometry.node.content_box().min;
     let index = Cursor::from_point(
         layout,
-        in_field.x - text_box.x + geometry.scroll.0.x,
-        in_field.y - text_box.y + geometry.scroll.0.y,
+        in_field.x - text_box.x + geometry.editable.viewport.offset.x,
+        in_field.y - text_box.y + geometry.editable.viewport.offset.y,
     )
     .index();
     // The transform's origin is the node's centre.
@@ -1297,7 +1302,7 @@ pub fn rich_text_point(
 /// maps a caret click through, so "the character under the pointer" means the
 /// same thing here as it does to the editor.
 fn dispatch_rich_text_range_clicks(
-    press: On<Pointer<Press>>,
+    press: On<PointerPress>,
     fields: Query<(
         &RichTextField,
         &RichTextContent,
@@ -1305,7 +1310,6 @@ fn dispatch_rich_text_range_clicks(
         &ComputedNode,
         &UiGlobalTransform,
         &ComputedUiRenderTargetInfo,
-        &TextScroll,
     )>,
     sections: Query<&RichTextSectionOf>,
     ui_scale: Res<UiScale>,
@@ -1319,8 +1323,7 @@ fn dispatch_rich_text_range_clicks(
     let pressed = sections
         .get(press.entity)
         .map_or(press.entity, |section| section.field);
-    let Ok((config, content, editable, node, transform, target, scroll)) = fields.get(pressed)
-    else {
+    let Ok((config, content, editable, node, transform, target)) = fields.get(pressed) else {
         return;
     };
     let Some(hit) = rich_text_point(
@@ -1329,10 +1332,9 @@ fn dispatch_rich_text_range_clicks(
             node,
             transform,
             target,
-            scroll,
         },
         ui_scale.0,
-        press.pointer_location.position,
+        press.pointer.position,
     ) else {
         return;
     };

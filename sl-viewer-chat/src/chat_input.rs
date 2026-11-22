@@ -355,14 +355,14 @@ fn spawn_emoji_button(
         ))
         .id();
     commands.entity(button).observe(
-        move |mut press: On<Pointer<Press>>, mut open: MessageWriter<OpenEmojiPicker>| {
+        move |mut press: On<PointerPress>, mut open: MessageWriter<OpenEmojiPicker>| {
             press.propagate(false);
             if press.button != PointerButton::Primary {
                 return;
             }
             open.write(OpenEmojiPicker {
                 field,
-                near: press.pointer_location.position,
+                near: press.pointer.position,
             });
         },
     );

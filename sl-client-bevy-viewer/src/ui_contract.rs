@@ -625,7 +625,7 @@ mod tests {
     /// The sweep above proves the *absence* — a middle or secondary click emits
     /// nothing — which is the half of `viewer-widget-any-mouse-button-activates`
     /// a user notices. This pins the other half: that the button survives the
-    /// `Pointer<Click>` → `Activate` boundary at all. It used not to, which is
+    /// `PointerClick` → `Activate` boundary at all. It used not to, which is
     /// why no downstream observer could have filtered even if it had wanted to,
     /// and why the fix had to be a fork of `bevy_ui_widgets` rather than 89
     /// `On<Activate>` observers each learning to check.

@@ -16,9 +16,9 @@ publish = { workspace = true }
 exclude = { workspace = true }
 
 [dependencies]
-gstreamer = { version = "0.24.4" }
-gstreamer-app = { version = "0.24.0" }
-gstreamer-video = { version = "0.24.0" }
+gstreamer = { version = "0.25.4" }
+gstreamer-app = { version = "0.25.2" }
+gstreamer-video = { version = "0.25.4" }
 sl-media = { workspace = true }
 tracing = { workspace = true }
 

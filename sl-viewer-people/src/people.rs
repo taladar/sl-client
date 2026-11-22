@@ -1536,7 +1536,7 @@ fn spawn_confirm_button(
             Pickable::IGNORE,
         ))
         .observe(
-            move |mut press: On<Pointer<Press>>,
+            move |mut press: On<PointerPress>,
                   mut pending: ResMut<PendingGrantConfirm>,
                   mut model: ResMut<FriendsModel>,
                   mut sl: MessageWriter<SlCommand>| {
@@ -1684,8 +1684,8 @@ fn augment_sortable_header(
 }
 
 /// An observer that sorts by `column` on a primary-button press.
-fn sort_on_press(column: SortColumn) -> impl Fn(On<Pointer<Press>>, MessageWriter<SortByColumn>) {
-    move |mut press: On<Pointer<Press>>, mut sort: MessageWriter<SortByColumn>| {
+fn sort_on_press(column: SortColumn) -> impl Fn(On<PointerPress>, MessageWriter<SortByColumn>) {
+    move |mut press: On<PointerPress>, mut sort: MessageWriter<SortByColumn>| {
         press.propagate(false);
         if press.button == PointerButton::Primary {
             sort.write(SortByColumn { column });
@@ -1787,7 +1787,7 @@ fn spawn_action_button(
     );
     let button = spawned.button;
     commands.entity(button).observe(
-        move |mut press: On<Pointer<Press>>,
+        move |mut press: On<PointerPress>,
               selected: Res<SelectedFriend>,
               view: Res<FriendsView>,
               model: Res<FriendsModel>,
@@ -2564,7 +2564,7 @@ fn spawn_row_rights_group(
 /// Revoking edit-objects, and toggling see-online / see-on-map either way, apply
 /// immediately.
 fn on_toggle_right(
-    mut press: On<Pointer<Press>>,
+    mut press: On<PointerPress>,
     cells: Query<(&RightCell, &CellFriend)>,
     mut model: ResMut<FriendsModel>,
     mut pending: ResMut<PendingGrantConfirm>,
@@ -2726,7 +2726,7 @@ fn bind_friend_rows(
 /// Ctrl / Shift click algebra now that the list is multi-select, and
 /// [`mirror_friend_selection`] reads its answer through.
 fn on_friend_row_press(
-    press: On<Pointer<Press>>,
+    press: On<PointerPress>,
     rows: Query<&BoundFriend>,
     ui: Res<PeopleUi>,
     double_click: DoubleClickWindow,

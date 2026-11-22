@@ -29,13 +29,13 @@ path = "src/bin/sl-conformance-trace.rs"
 clap = { workspace = true, features = ["cargo", "derive", "env"] }
 clap_complete = { workspace = true }
 clap_mangen = { workspace = true }
-etherparse = { version = "0.20.2" }
+etherparse = { version = "0.21.0" }
 fs-err = { workspace = true }
-owo-colors = "4.3.0"
-pcap-file = { version = "2.0.0" }
+owo-colors = "4.4.0"
+pcap-file = { version = "3.0.0" }
 # The world-map case asks the grid's tile server and its `MapLayer`
 # capability directly: neither is something the client crate fetches.
-reqwest = { workspace = true, features = ["rustls-tls"] }
+reqwest = { workspace = true, features = ["rustls"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 sl-anim = { workspace = true }

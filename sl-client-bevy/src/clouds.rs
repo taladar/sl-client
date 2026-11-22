@@ -9,7 +9,7 @@
 //! colour) and the current and next cloud noise textures
 //! (`cloud_noise` / `cloud_noise_next`, blended during a day-cycle transition —
 //! the blend factor stays `0.0` until the day cycle drives it in a later phase).
-//! The accompanying `clouds.wgsl` evaluates the cloud lighting and multi-octave
+//! The accompanying `clouds.wesl` evaluates the cloud lighting and multi-octave
 //! noise per fragment, exactly as the reference does per vertex + per fragment,
 //! and outputs an alpha-blended cloud colour.
 //!
@@ -30,7 +30,7 @@ use bevy::render::render_resource::{
 };
 use bevy::shader::{Shader, ShaderRef};
 
-/// The internal handle the cloud shader (`clouds.wgsl`) is loaded under, so the
+/// The internal handle the cloud shader (`clouds.wesl`) is loaded under, so the
 /// material can reference it without an on-disk asset path.
 const CLOUD_SHADER_HANDLE: Handle<Shader> = uuid_handle!("6b1e9d43-2c07-4a8f-9e5d-7f3a1c6b204d");
 
@@ -40,7 +40,7 @@ const CLOUD_SHADER_HANDLE: Handle<Shader> = uuid_handle!("6b1e9d43-2c07-4a8f-9e5
 /// and the day-cycle blend factor.
 ///
 /// Laid out as `vec3` + trailing scalar pairs so the std140 uniform layout matches
-/// the `clouds.wgsl` `CloudParams` (`ShaderType`) exactly.
+/// the `clouds.wesl` `CloudParams` (`ShaderType`) exactly.
 #[derive(Clone, Copy, Debug, PartialEq, ShaderType)]
 pub struct CloudParams {
     /// Sun (or, at night, moon) direction, Bevy Y-up, clamped like the reference
@@ -112,7 +112,7 @@ pub struct CloudParams {
 }
 
 /// The cloud-layer material: one [`CloudParams`] uniform block plus the current and
-/// next cloud noise textures, shaded by `clouds.wgsl`.
+/// next cloud noise textures, shaded by `clouds.wesl`.
 ///
 /// The noise textures may start as placeholders; the viewer fetches the sky's
 /// referenced cloud texture **boosted** and swaps it in once decoded.
@@ -178,7 +178,9 @@ pub struct CloudMaterialPlugin;
 
 impl Plugin for CloudMaterialPlugin {
     fn build(&self, app: &mut App) {
-        load_internal_asset!(app, CLOUD_SHADER_HANDLE, "clouds.wgsl", Shader::from_wgsl);
+        load_internal_asset!(app, CLOUD_SHADER_HANDLE, "clouds.wesl", |source, _| {
+            Shader::from_wesl(source, "embedded://sl_client_bevy/clouds.wesl")
+        });
         app.add_plugins(MaterialPlugin::<CloudMaterial>::default());
     }
 }

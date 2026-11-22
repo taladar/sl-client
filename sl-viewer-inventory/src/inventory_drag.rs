@@ -8,10 +8,10 @@
 //! # The gesture
 //!
 //! A primary-button drag on a pooled row starts it (`bevy_picking`'s
-//! [`Pointer<DragStart>`], which fires only past the drag threshold — a plain
+//! [`PointerDragStart`], which fires only past the drag threshold — a plain
 //! click never becomes a drag). A **ghost** — the row's icon and name —
 //! follows the pointer, [`Pickable::IGNORE`] so it never occludes the drop
-//! target under it. `Escape` cancels. On [`Pointer<DragEnd>`] the drop resolves
+//! target under it. `Escape` cancels. On [`PointerDragEnd`] the drop resolves
 //! by where the pointer is, in the reference's occlusion order:
 //!
 //! 1. **Over the inventory list** — the row under the pointer names the
@@ -599,7 +599,7 @@ pub(crate) struct PointerOcclusion<'w, 's> {
 /// for a folder row — revert the expand-toggle its press already fired (a drag
 /// is not a click, but the press arrived first).
 pub(crate) fn on_row_drag_start(
-    drag: On<Pointer<DragStart>>,
+    drag: On<PointerDragStart>,
     facts: DragStartFacts,
     mut state: ResMut<InventoryDragState>,
     mut actions: MessageWriter<InventoryUiAction>,
@@ -668,7 +668,7 @@ pub(crate) fn on_row_drag_start(
     }
     // Component-wise: whole-`Vec2` `+` is a `glam` operator the workspace
     // `arithmetic_side_effects` lint trips on.
-    let pointer = drag.pointer_location.position;
+    let pointer = drag.pointer.position;
     let at = Vec2::new(pointer.x + GHOST_OFFSET.x, pointer.y + GHOST_OFFSET.y);
     // A multi-row drag's ghost shows the count instead of one row's label.
     let (ghost_icon, ghost_label) = if sources.len() > 1 {
@@ -873,7 +873,7 @@ fn clear_row_highlights(
 /// The drag ended: resolve the drop in the reference's occlusion order (the
 /// list, an avatar in the UI, blocking UI, the world) and issue the commands.
 pub(crate) fn on_row_drag_end(
-    drag: On<Pointer<DragEnd>>,
+    drag: On<PointerDragEnd>,
     mut state: ResMut<InventoryDragState>,
     session: DragSession,
     geometry: DragGeometry,
@@ -930,7 +930,7 @@ pub(crate) fn on_row_drag_end(
     };
     commands_bevy.entity(active.ghost).despawn();
     clear_row_highlights(ui.viewport(), &mut rows);
-    let cursor = drag.pointer_location.position;
+    let cursor = drag.pointer.position;
 
     // 1. Over the inventory list (and not occluded by another floater — the
     //    hover map only carries the viewport subtree when it is on top).

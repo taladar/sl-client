@@ -1,5 +1,5 @@
 /* biome-ignore-all lint/correctness/noUnknownProperty: bevy_flair defines
-   non-standard CSS properties (-bevy-image, -bevy-image-mode, -bevy-image-box)
+   non-standard CSS properties (-bevy-image, -bevy-image-mode, -bevy-image-visual-box)
    that biome, a standard-CSS linter, does not know. */
 /* biome-ignore-all lint/correctness/noUnknownFunction: and a non-standard
    value function, sliced(), which is how bevy_flair spells nine-slicing. */
@@ -386,13 +386,13 @@
 .sk-button {
   background-color: #00000000;
   border-color: #00000000;
-  -bevy-image: url("skins/vintage/widgets/push-button.png");
+  -bevy-image: url("/skins/vintage/widgets/push-button.png");
   -bevy-image-mode: sliced(13px 13px 13px 13px);
-  -bevy-image-box: border-box;
+  -bevy-image-visual-box: border-box;
 }
 
 .sk-button:hover {
-  -bevy-image: url("skins/vintage/widgets/push-button-hover.png");
+  -bevy-image: url("/skins/vintage/widgets/push-button-hover.png");
 }
 
 /* Held, toggled on, and held while on are ONE look in Vintage — the reference
@@ -402,20 +402,20 @@
  * back on top, since the pointer is always over a button being pressed. */
 .sk-button:checked,
 .sk-button:active {
-  -bevy-image: url("skins/vintage/widgets/push-button-pressed.png");
+  -bevy-image: url("/skins/vintage/widgets/push-button-pressed.png");
 }
 
 .sk-button:checked:hover {
-  -bevy-image: url("skins/vintage/widgets/push-button-selected-hover.png");
+  -bevy-image: url("/skins/vintage/widgets/push-button-selected-hover.png");
 }
 
 .sk-button:checked:active {
-  -bevy-image: url("skins/vintage/widgets/push-button-pressed.png");
+  -bevy-image: url("/skins/vintage/widgets/push-button-pressed.png");
 }
 
 .sk-button:disabled,
 .sk-button:checked:disabled {
-  -bevy-image: url("skins/vintage/widgets/push-button-disabled.png");
+  -bevy-image: url("/skins/vintage/widgets/push-button-disabled.png");
 }
 
 /* The bottom toolbar's buttons and the flat action columns' (People, Groups,
@@ -427,38 +427,38 @@
 .sk-action-button {
   background-color: #00000000;
   border-color: #00000000;
-  -bevy-image: url("skins/vintage/widgets/push-button.png");
+  -bevy-image: url("/skins/vintage/widgets/push-button.png");
   -bevy-image-mode: sliced(13px 13px 13px 13px);
-  -bevy-image-box: border-box;
+  -bevy-image-visual-box: border-box;
 }
 
 .sk-toolbar-button:hover,
 .sk-action-button:hover {
-  -bevy-image: url("skins/vintage/widgets/push-button-hover.png");
+  -bevy-image: url("/skins/vintage/widgets/push-button-hover.png");
 }
 
 .sk-toolbar-button:checked,
 .sk-toolbar-button:active,
 .sk-action-button:checked,
 .sk-action-button:active {
-  -bevy-image: url("skins/vintage/widgets/push-button-pressed.png");
+  -bevy-image: url("/skins/vintage/widgets/push-button-pressed.png");
 }
 
 .sk-toolbar-button:checked:hover,
 .sk-action-button:checked:hover {
-  -bevy-image: url("skins/vintage/widgets/push-button-selected-hover.png");
+  -bevy-image: url("/skins/vintage/widgets/push-button-selected-hover.png");
 }
 
 .sk-toolbar-button:checked:active,
 .sk-action-button:checked:active {
-  -bevy-image: url("skins/vintage/widgets/push-button-pressed.png");
+  -bevy-image: url("/skins/vintage/widgets/push-button-pressed.png");
 }
 
 .sk-toolbar-button:disabled,
 .sk-toolbar-button:checked:disabled,
 .sk-action-button:disabled,
 .sk-action-button:checked:disabled {
-  -bevy-image: url("skins/vintage/widgets/push-button-disabled.png");
+  -bevy-image: url("/skins/vintage/widgets/push-button-disabled.png");
 }
 
 /* A text field, the search box (a field with a glyph in it) and the chat box
@@ -469,23 +469,23 @@
 .sk-field-box {
   background-color: #00000000;
   border-color: #00000000;
-  -bevy-image: url("skins/vintage/widgets/field.png");
+  -bevy-image: url("/skins/vintage/widgets/field.png");
   -bevy-image-mode: sliced(4px 4px 4px 4px);
-  -bevy-image-box: border-box;
+  -bevy-image-visual-box: border-box;
 }
 
 .sk-field:focus,
 .sk-search-field.sk-focus-within,
 .sk-field-box.sk-focus-within {
-  -bevy-image: url("skins/vintage/widgets/field-focused.png");
+  -bevy-image: url("/skins/vintage/widgets/field-focused.png");
 }
 
 .sk-field.sk-read-only {
-  -bevy-image: url("skins/vintage/widgets/field-readonly.png");
+  -bevy-image: url("/skins/vintage/widgets/field-readonly.png");
 }
 
 .sk-field:disabled {
-  -bevy-image: url("skins/vintage/widgets/field-disabled.png");
+  -bevy-image: url("/skins/vintage/widgets/field-disabled.png");
 }
 
 /* A tab: shaded mauve on a gold baseline, dark violet framed in gold when it
@@ -497,30 +497,30 @@
   border-color: #00000000;
   border-start-start-radius: 0px;
   border-start-end-radius: 0px;
-  -bevy-image: url("skins/vintage/widgets/tab.png");
+  -bevy-image: url("/skins/vintage/widgets/tab.png");
   -bevy-image-mode: sliced(6px 6px 6px 6px);
-  -bevy-image-box: border-box;
+  -bevy-image-visual-box: border-box;
 }
 
 .sk-tab:checked {
-  -bevy-image: url("skins/vintage/widgets/tab-selected.png");
+  -bevy-image: url("/skins/vintage/widgets/tab-selected.png");
 }
 
 /* The scrollbar's step arrows: square dark-grey buttons carrying a light
  * arrow (the glyph is `--scrollbar-arrow`). */
 .sk-scrollbar-arrow {
   background-color: #00000000;
-  -bevy-image: url("skins/vintage/widgets/scroll-arrow.png");
+  -bevy-image: url("/skins/vintage/widgets/scroll-arrow.png");
   -bevy-image-mode: sliced(4px 4px 4px 4px);
-  -bevy-image-box: border-box;
+  -bevy-image-visual-box: border-box;
 }
 
 .sk-scrollbar-arrow:hover {
-  -bevy-image: url("skins/vintage/widgets/scroll-arrow-hover.png");
+  -bevy-image: url("/skins/vintage/widgets/scroll-arrow-hover.png");
 }
 
 .sk-scrollbar-arrow:active {
-  -bevy-image: url("skins/vintage/widgets/scroll-arrow-pressed.png");
+  -bevy-image: url("/skins/vintage/widgets/scroll-arrow-pressed.png");
 }
 
 /* A spinner's step arrows: the same grey step buttons as the scrollbar's (the
@@ -528,22 +528,22 @@
  * one keeps the resting face and greys its glyph (`--spinner-arrow-disabled`). */
 .sk-spinner-arrow {
   background-color: #00000000;
-  -bevy-image: url("skins/vintage/widgets/scroll-arrow.png");
+  -bevy-image: url("/skins/vintage/widgets/scroll-arrow.png");
   -bevy-image-mode: sliced(4px 4px 4px 4px);
-  -bevy-image-box: border-box;
+  -bevy-image-visual-box: border-box;
 }
 
 .sk-spinner-arrow:hover {
-  -bevy-image: url("skins/vintage/widgets/scroll-arrow-hover.png");
+  -bevy-image: url("/skins/vintage/widgets/scroll-arrow-hover.png");
 }
 
 .sk-spinner-arrow:active {
-  -bevy-image: url("skins/vintage/widgets/scroll-arrow-pressed.png");
+  -bevy-image: url("/skins/vintage/widgets/scroll-arrow-pressed.png");
 }
 
 .sk-spinner-arrow:disabled {
   background-color: #00000000;
-  -bevy-image: url("skins/vintage/widgets/scroll-arrow.png");
+  -bevy-image: url("/skins/vintage/widgets/scroll-arrow.png");
 }
 
 /* A horizontal tab strip's overflow buttons: the same square grey step
@@ -551,30 +551,30 @@
  * light glyph `--tab-scroll-arrow` sits on a face rather than on the panel. */
 .sk-tab-scroll-button {
   background-color: #00000000;
-  -bevy-image: url("skins/vintage/widgets/scroll-arrow.png");
+  -bevy-image: url("/skins/vintage/widgets/scroll-arrow.png");
   -bevy-image-mode: sliced(4px 4px 4px 4px);
-  -bevy-image-box: border-box;
+  -bevy-image-visual-box: border-box;
 }
 
 .sk-tab-scroll-button:hover {
-  -bevy-image: url("skins/vintage/widgets/scroll-arrow-hover.png");
+  -bevy-image: url("/skins/vintage/widgets/scroll-arrow-hover.png");
 }
 
 .sk-tab-scroll-button:active {
-  -bevy-image: url("skins/vintage/widgets/scroll-arrow-pressed.png");
+  -bevy-image: url("/skins/vintage/widgets/scroll-arrow-pressed.png");
 }
 
 /* The scrollbar thumb: a stadium in the reference's flat blue, lifted under
  * the pointer. The groove stays a colour — the reference's is flat grey. */
 .sk-scrollbar-thumb {
   background-color: #00000000;
-  -bevy-image: url("skins/vintage/widgets/scroll-thumb.png");
+  -bevy-image: url("/skins/vintage/widgets/scroll-thumb.png");
   -bevy-image-mode: sliced(6px 6px 6px 6px);
-  -bevy-image-box: border-box;
+  -bevy-image-visual-box: border-box;
 }
 
 .sk-scrollbar-thumb:hover {
-  -bevy-image: url("skins/vintage/widgets/scroll-thumb-hover.png");
+  -bevy-image: url("/skins/vintage/widgets/scroll-thumb-hover.png");
 }
 
 /* A slider: a sunken blue groove and a round, shaded handle, dimmed on a
@@ -582,20 +582,20 @@
 .sk-slider {
   background-color: #00000000;
   border-color: #00000000;
-  -bevy-image: url("skins/vintage/widgets/slider-track.png");
+  -bevy-image: url("/skins/vintage/widgets/slider-track.png");
   -bevy-image-mode: sliced(4px 4px 4px 4px);
-  -bevy-image-box: border-box;
+  -bevy-image-visual-box: border-box;
 }
 
 .sk-slider-thumb {
   background-color: #00000000;
-  -bevy-image: url("skins/vintage/widgets/slider-thumb.png");
+  -bevy-image: url("/skins/vintage/widgets/slider-thumb.png");
   -bevy-image-mode: sliced(6px 6px 6px 6px);
-  -bevy-image-box: border-box;
+  -bevy-image-visual-box: border-box;
 }
 
 .sk-slider:disabled .sk-slider-thumb {
-  -bevy-image: url("skins/vintage/widgets/slider-thumb-disabled.png");
+  -bevy-image: url("/skins/vintage/widgets/slider-thumb-disabled.png");
 }
 
 /* The floater: DkGray in a black hairline; the front-most window's header is
@@ -604,16 +604,16 @@
 .sk-floater {
   background-color: #00000000;
   border-color: #00000000;
-  -bevy-image: url("skins/vintage/widgets/floater.png");
+  -bevy-image: url("/skins/vintage/widgets/floater.png");
   -bevy-image-mode: sliced(4px 4px 4px 4px);
-  -bevy-image-box: border-box;
+  -bevy-image-visual-box: border-box;
 }
 
 .sk-floater-title-bar.sk-frontmost {
   background-color: #00000000;
-  -bevy-image: url("skins/vintage/widgets/floater-header.png");
+  -bevy-image: url("/skins/vintage/widgets/floater-header.png");
   -bevy-image-mode: sliced(4px 4px 4px 4px);
-  -bevy-image-box: border-box;
+  -bevy-image-visual-box: border-box;
 }
 
 /* The tooltip: a light grey plate, lit along the top and left, shadowed
@@ -621,7 +621,7 @@
 .sk-tooltip {
   background-color: #00000000;
   border-color: #00000000;
-  -bevy-image: url("skins/vintage/widgets/tooltip.png");
+  -bevy-image: url("/skins/vintage/widgets/tooltip.png");
   -bevy-image-mode: sliced(4px 4px 4px 4px);
-  -bevy-image-box: border-box;
+  -bevy-image-visual-box: border-box;
 }

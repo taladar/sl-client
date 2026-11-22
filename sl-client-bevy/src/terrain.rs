@@ -8,7 +8,7 @@
 //! crate (elevation bilinear interpolation plus a Perlin transition band) and
 //! carried on the terrain mesh in the [`ATTRIBUTE_TERRAIN_WEIGHTS`] vertex
 //! attribute; the GPU side — sampling the four textures and blending them by the
-//! interpolated weight — lives in the accompanying `terrain.wgsl` shader.
+//! interpolated weight — lives in the accompanying `terrain.wesl` shader.
 //!
 //! This module is gated behind the `bevy_pbr` feature: the headless client
 //! needs no renderer, so the PBR/render stack is pulled in only by the windowed
@@ -40,7 +40,7 @@ pub const ATTRIBUTE_TERRAIN_WEIGHTS: MeshVertexAttribute = MeshVertexAttribute::
     VertexFormat::Float32x4,
 );
 
-/// The internal handle the terrain shader (`terrain.wgsl`) is loaded under, so
+/// The internal handle the terrain shader (`terrain.wesl`) is loaded under, so
 /// the material can reference it without an on-disk asset path.
 const TERRAIN_SHADER_HANDLE: Handle<Shader> = uuid_handle!("5c7e4449-8a00-4c37-9b1e-2f0d3a6b7c88");
 
@@ -190,12 +190,9 @@ pub struct TerrainMaterialPlugin;
 impl Plugin for TerrainMaterialPlugin {
     fn build(&self, app: &mut App) {
         crate::sky_lighting::load_sky_lighting(app);
-        load_internal_asset!(
-            app,
-            TERRAIN_SHADER_HANDLE,
-            "terrain.wgsl",
-            Shader::from_wgsl
-        );
+        load_internal_asset!(app, TERRAIN_SHADER_HANDLE, "terrain.wesl", |source, _| {
+            Shader::from_wesl(source, "embedded://sl_client_bevy/terrain.wesl")
+        });
         app.add_plugins(MaterialPlugin::<TerrainMaterial>::default());
     }
 }

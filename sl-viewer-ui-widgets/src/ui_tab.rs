@@ -729,7 +729,7 @@ impl Plugin for TabWidgetPlugin {
 /// opposite the content, resolved against `direction` so it mirrors under RTL;
 /// for a block (horizontal) strip it is the top or bottom, which never mirror.
 const fn tab_corner_radius(placement: TabPlacement, direction: UiDirection) -> BorderRadius {
-    let radius = Val::Px(TAB_CORNER_RADIUS);
+    let radius = CornerRadius::circular(Val::Px(TAB_CORNER_RADIUS));
     match placement {
         TabPlacement::BlockStart => BorderRadius {
             top_left: radius,
@@ -1709,7 +1709,7 @@ pub fn spawn_tab_divider(
     commands
         .entity(divider)
         .observe(
-            move |drag: On<Pointer<Drag>>,
+            move |drag: On<PointerDrag>,
                   mut widths: Query<&mut TabStripWidth>,
                   direction: Res<UiDirection>| {
                 if drag.button != PointerButton::Primary {
@@ -2212,7 +2212,14 @@ mod tests {
             .init_resource::<InputFocus>()
             .add_message::<UiAction>()
             .add_systems(Startup, spawn_ui_root)
-            .add_systems(Update, park_new_tab_stops_in_hidden_subtrees);
+            .add_systems(
+                Update,
+                (
+                    park_new_tab_stops_in_hidden_subtrees,
+                    sl_viewer_testkit::propagate_inherited_visibility,
+                )
+                    .chain(),
+            );
         app.update();
         app
     }
@@ -3513,7 +3520,7 @@ mod tests {
     /// drag on the divider between strip and panel.
     ///
     /// The tests above reach the widget through the [`ValueChange`] its
-    /// `RadioGroup` would have produced, and a hand-built `Pointer<Drag>` aimed
+    /// `RadioGroup` would have produced, and a hand-built `PointerDrag` aimed
     /// at the divider by entity. Both skip hit-testing, so both would keep
     /// passing on a strip whose buttons had been laid out somewhere no pointer
     /// can reach — behind the panel, off the edge of the container, clipped out

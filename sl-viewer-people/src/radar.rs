@@ -1350,7 +1350,7 @@ fn spawn_radar_action_button(
         .observe(
             // Each optional so a press in a host with no radar state (the
             // gallery's specimen) is a no-op rather than a failed observer.
-            move |mut press: On<Pointer<Press>>,
+            move |mut press: On<PointerPress>,
                   selected: Option<Res<RadarSelection>>,
                   profiles: Option<MessageWriter<OpenAvatarProfile>>,
                   conversations: Option<MessageWriter<OpenConversation>>| {
@@ -1488,7 +1488,7 @@ fn ingest_radar_properties(mut events: MessageReader<SlEvent>, mut state: ResMut
         let SlSessionEvent::AvatarProperties(props) = &event.0 else {
             continue;
         };
-        let today = jiff::Zoned::now().date();
+        let today = jiff::ZonedDateTime::now().date();
         let age_days = crate::radar_model::parse_born_on(&props.born_on, today);
         let payment = if props.flags & FLAG_TRANSACTED != 0 {
             PaymentInfo::Transacted
@@ -2201,7 +2201,7 @@ fn specimen_rows(cx: crate::ui_element::ElementCx) -> Vec<RadarRow> {
 /// of it, right-clicking **outside** makes that row the selection first. Which
 /// menu then opens is a matter of how many rows are in it.
 fn on_radar_row_press(
-    mut press: On<Pointer<Press>>,
+    mut press: On<PointerPress>,
     rows: Query<&BoundRadar>,
     ui: Res<RadarUi>,
     facts: RadarMenuFacts,
@@ -2260,7 +2260,7 @@ fn on_radar_row_press(
             };
             out.menus.write(OpenContextMenu {
                 menu,
-                at: press.pointer_location.position,
+                at: press.pointer.position,
                 element: RADAR_ELEMENT,
                 conditions,
             });

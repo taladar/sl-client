@@ -637,6 +637,7 @@ pub fn spawn_text_input(commands: &mut Commands, parent: Entity, spec: &TextInpu
 
     let mut field = commands.spawn((
         editor,
+        bevy::ui_widgets::TextInput,
         font.at(spec.font_size),
         TextColor(SkinPalette::default().field_text),
         // No `TextCursorStyle` here: `install_caret_style` installs the shared
@@ -826,6 +827,7 @@ fn viewer_caret_style(text_color: Color) -> TextCursorStyle {
         selection_color: fallback.selection,
         unfocused_selection_color: fallback.selection_unfocused,
         selected_text_color: None,
+        selection_radius: 0.0,
     }
 }
 
@@ -1022,6 +1024,7 @@ fn drive_caret_blink(
                 skin.selection_unfocused
             }),
             selected_text_color: None,
+            selection_radius: 0.0,
         };
         // Write only on change, so idle fields do not churn change detection.
         if *style != target {
@@ -1213,6 +1216,9 @@ fn edit_effect(edit: &TextEdit) -> EditEffect {
         | TextEdit::HardLineEnd(_)
         | TextEdit::LineStart(_)
         | TextEdit::LineEnd(_)
+        | TextEdit::ScrollByLines(_)
+        | TextEdit::ScrollTo(_)
+        | TextEdit::ScrollBy(_)
         | TextEdit::SelectAll
         | TextEdit::SelectAllIfCollapsed
         | TextEdit::MoveToPoint(_)

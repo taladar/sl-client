@@ -79,7 +79,7 @@ use sl_settings::SettingValue;
 use crate::underwater_fog::UnderwaterFogPass;
 use sl_viewer_settings::ViewerSettings;
 
-/// The internal handle the tone-map shader (`tonemap.wgsl`) is loaded under.
+/// The internal handle the tone-map shader (`tonemap.wesl`) is loaded under.
 const TONEMAP_SHADER_HANDLE: Handle<Shader> = uuid_handle!("6b1f0c94-3a27-4d58-9c11-70b4e8d5a213");
 
 /// The render-schedule label for the tone-map pass, so later passes (the glow,
@@ -285,11 +285,11 @@ pub(crate) fn refresh_tonemap_settings(
     }
 }
 
-impl SyncComponent for SlTonemap {
+impl SyncComponent<RenderApp> for SlTonemap {
     type Target = Self;
 }
 
-impl ExtractComponent for SlTonemap {
+impl ExtractComponent<RenderApp> for SlTonemap {
     type QueryData = Read<Self>;
     type QueryFilter = With<Camera>;
     type Out = Self;
@@ -308,12 +308,9 @@ pub struct SlTonemapPlugin;
 impl Plugin for SlTonemapPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<RenderOverrides>();
-        load_internal_asset!(
-            app,
-            TONEMAP_SHADER_HANDLE,
-            "tonemap.wgsl",
-            Shader::from_wgsl
-        );
+        load_internal_asset!(app, TONEMAP_SHADER_HANDLE, "tonemap.wesl", |source, _| {
+            Shader::from_wesl(source, "embedded://sl_viewer_world_scene/tonemap.wesl")
+        });
         app.add_plugins((
             ExtractComponentPlugin::<SlTonemap>::default(),
             UniformComponentPlugin::<SlTonemap>::default(),

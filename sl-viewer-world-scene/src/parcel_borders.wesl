@@ -12,11 +12,11 @@
 // region's south-west corner like the terrain patches), and the camera position
 // from the view bind group — so nothing on the CPU side changes per frame.
 
-#import bevy_pbr::{
+import bevy_pbr::render::{
     mesh_functions,
     mesh_view_bindings as view_bindings,
     view_transformations::position_world_to_clip,
-}
+};
 
 // One band vertex: its position (Second Life space, relative to the region
 // south-west corner, carried into Bevy space by the entity transform) and its

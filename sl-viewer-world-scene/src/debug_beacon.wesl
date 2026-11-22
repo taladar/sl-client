@@ -13,10 +13,10 @@
 // every beacon and the tint rides the `beacon_color` uniform, so a floater marking
 // two places in two colours costs two materials and no extra geometry.
 
-#import bevy_pbr::{
+import bevy_pbr::render::{
     mesh_functions,
     view_transformations::position_world_to_clip,
-}
+};
 
 // One marker vertex: its position in marker-local metres, carried into Bevy world
 // space by the entity transform (which places and orients the marker).
@@ -33,7 +33,7 @@ struct VertexOutput {
 
 // The marker's RGB tint (`rgb`) and alpha (`a`) — set per beacon, never mutated per
 // frame.
-@group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> beacon_color: vec4<f32>;
+@group(constants::MATERIAL_BIND_GROUP) @binding(0) var<uniform> beacon_color: vec4<f32>;
 
 @vertex
 fn vertex(in: Vertex) -> VertexOutput {

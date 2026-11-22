@@ -19,9 +19,7 @@ mod tests {
 
     use pretty_assertions::assert_eq;
 
-    use lsp_server::{
-        Connection, Message, Notification, Request, RequestId, Response, ResponseKind,
-    };
+    use lsp_server::{Connection, Message, Notification, Request, RequestId, Response};
     use lsp_types::{DocumentSymbol, SymbolInformation, SymbolKind};
     use serde_json::{Value as JsonValue, json};
     use sl_lsl::LslSyntax;
@@ -92,11 +90,11 @@ mod tests {
                     .receiver
                     .recv_timeout(WAIT)
                     .map_err(|err| err.to_string())?;
-                if let Message::Response(Response { response_kind, .. }) = message {
-                    return match response_kind {
-                        ResponseKind::Ok { result } => Ok(result),
-                        ResponseKind::Err { error } => Err(error.message),
-                    };
+                if let Message::Response(Response {
+                    response_result, ..
+                }) = message
+                {
+                    return response_result.map_err(|error| error.message);
                 }
                 // The server issues no requests of its own, so anything that is not
                 // the response is unexpected; keep waiting for the response.
@@ -358,11 +356,11 @@ mod tests {
                 .receiver
                 .recv_timeout(WAIT)
                 .map_err(|err| err.to_string())?;
-            if let Message::Response(Response { response_kind, .. }) = message {
-                match response_kind {
-                    ResponseKind::Ok { result } => break result,
-                    ResponseKind::Err { error } => return Err(error.message),
-                }
+            if let Message::Response(Response {
+                response_result, ..
+            }) = message
+            {
+                break response_result.map_err(|error| error.message)?;
             }
         };
         let caps = result

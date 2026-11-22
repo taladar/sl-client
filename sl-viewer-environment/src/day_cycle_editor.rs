@@ -1673,7 +1673,7 @@ fn strip_fraction(pointer: Vec2, rect: (Vec2, Vec2), direction: UiDirection) -> 
 /// A press on either strip: move the scrubber, and on the keyframe strip pick up
 /// whatever keyframe is under the pointer.
 fn on_day_strip_press(
-    mut press: On<Pointer<Press>>,
+    mut press: On<PointerPress>,
     strips: Query<(&DayStrip, &ComputedNode, &UiGlobalTransform)>,
     direction: Res<UiDirection>,
     mut state: ResMut<DayCycleEditorState>,
@@ -1686,7 +1686,7 @@ fn on_day_strip_press(
     };
     press.propagate(false);
     let fraction = strip_fraction(
-        press.pointer_location.position,
+        press.pointer.position,
         node_rect(computed, transform),
         *direction,
     );
@@ -1706,7 +1706,7 @@ fn on_day_strip_press(
 /// A drag on either strip: the cursor strip scrubs; the keyframe strip moves the
 /// keyframe that was picked up.
 fn on_day_strip_drag(
-    mut drag: On<Pointer<Drag>>,
+    mut drag: On<PointerDrag>,
     strips: Query<(&DayStrip, &ComputedNode, &UiGlobalTransform)>,
     direction: Res<UiDirection>,
     mut state: ResMut<DayCycleEditorState>,
@@ -1719,7 +1719,7 @@ fn on_day_strip_drag(
     };
     drag.propagate(false);
     let fraction = strip_fraction(
-        drag.pointer_location.position,
+        drag.pointer.position,
         node_rect(computed, transform),
         *direction,
     );
@@ -2139,7 +2139,7 @@ fn drop_day_preview_on_close(
 
 /// A track button: show that track's keyframes and its kind of knobs.
 fn on_day_track_button(
-    mut press: On<Pointer<Press>>,
+    mut press: On<PointerPress>,
     buttons: Query<&DayTrackButton>,
     mut state: ResMut<DayCycleEditorState>,
 ) {
@@ -2588,7 +2588,7 @@ fn set_status(texts: &mut Query<&mut Text>, status: Option<Entity>, message: &st
 
 /// A button press: the transport, the track and frame verbs, and the save row.
 fn on_day_button(
-    mut press: On<Pointer<Press>>,
+    mut press: On<PointerPress>,
     gate: DayButtonGate,
     mut state: ResMut<DayCycleEditorState>,
     support: Res<SettingsInventorySupport>,

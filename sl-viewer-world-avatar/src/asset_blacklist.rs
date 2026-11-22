@@ -203,7 +203,10 @@ pub fn format_date(epoch_secs: i64, zone: Option<&LocalTimeZone>) -> String {
         return String::new();
     };
     let zone = zone.map_or_else(jiff::tz::TimeZone::system, |zone| zone.zone().clone());
-    stamp.to_zoned(zone).strftime("%Y-%m-%d %H:%M").to_string()
+    stamp
+        .to_zoned_datetime(zone)
+        .strftime("%Y-%m-%d %H:%M")
+        .to_string()
 }
 
 // --- Resources ------------------------------------------------------------
@@ -616,7 +619,7 @@ fn populate_blacklist_rows(
 
 /// Select the pressed row (the actions act on the selection).
 fn on_blacklist_row_press(
-    mut press: On<Pointer<Press>>,
+    mut press: On<PointerPress>,
     rows: Query<&BoundBlacklist>,
     ui: Res<BlacklistUi>,
     mut focus: ResMut<InputFocus>,
@@ -989,7 +992,7 @@ mod tests {
     /// **A blacklist action button acts from the keyboard as from the mouse.**
     ///
     /// The action column used to be hand-rolled boxes observing
-    /// `Pointer<Press>`: no tab stop, and nothing for `Enter` / `Space` to
+    /// `PointerPress`: no tab stop, and nothing for `Enter` / `Space` to
     /// reach. On the button widget each gesture, in a fresh app driven through
     /// the real input and focus stack, must raise the same one request.
     #[test]

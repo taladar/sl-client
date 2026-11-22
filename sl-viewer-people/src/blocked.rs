@@ -923,7 +923,7 @@ struct BlockedOut<'w> {
 /// A press on a pooled row: primary selects; secondary selects and opens the
 /// gear menu with the open-time condition snapshot.
 fn on_blocked_row_press(
-    mut press: On<Pointer<Press>>,
+    mut press: On<PointerPress>,
     rows: Query<&BoundBlocked>,
     ui: Res<BlockedUi>,
     model: Res<MuteModel>,
@@ -960,7 +960,7 @@ fn on_blocked_row_press(
     selection.target.0 = Some(key);
     menus.write(OpenContextMenu {
         menu: &BLOCKED_MENU,
-        at: press.pointer_location.position,
+        at: press.pointer.position,
         element: BLOCKED_ELEMENT,
         conditions,
     });
@@ -1252,7 +1252,7 @@ mod tests {
 
     /// **Block Object by Name's OK acts from the keyboard as from the mouse.**
     ///
-    /// OK and Cancel used to be hand-rolled boxes observing `Pointer<Press>`:
+    /// OK and Cancel used to be hand-rolled boxes observing `PointerPress`:
     /// no tab stop, and nothing for `Enter` / `Space` to reach. On the button
     /// widget each gesture, in a fresh app driven through the real input and
     /// focus stack, must ask for the one by-name block the field names.

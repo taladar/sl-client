@@ -709,7 +709,7 @@ used-by: approx 0.5.1
    limitations under the License.
 
 === LICENSE Apache-2.0 === Apache License 2.0 ===
-used-by: nalgebra 0.35.0, parry3d 0.27.0, simba 0.10.0, simba 0.9.1
+used-by: nalgebra 0.35.0, simba 0.10.2
 
                                  Apache License
                            Version 2.0, January 2004
@@ -1528,7 +1528,7 @@ used-by: moxcms 0.8.1, pxfm 0.1.30
    limitations under the License.
 
 === LICENSE Apache-2.0 === Apache License 2.0 ===
-used-by: codespan-reporting 0.12.0, codespan-reporting 0.13.1, cpal 0.17.3, cpal 0.18.1, imgref 1.12.2, self_cell 0.10.3, self_cell 1.3.0
+used-by: codespan-reporting 0.13.1, cpal 0.17.3, cpal 0.18.2, imgref 1.12.3, self_cell 0.10.3, self_cell 1.3.0
 
                                  Apache License
                            Version 2.0, January 2004
@@ -1733,7 +1733,7 @@ used-by: codespan-reporting 0.12.0, codespan-reporting 0.13.1, cpal 0.17.3, cpal
    limitations under the License.
 
 === LICENSE Apache-2.0 === Apache License 2.0 ===
-used-by: openssl 0.10.81
+used-by: openssl 0.10.82
 
                                  Apache License
                            Version 2.0, January 2004
@@ -2553,7 +2553,7 @@ Apache License
    See the License for the specific language governing permissions and
    limitations under the License.
 === LICENSE Apache-2.0 === Apache License 2.0 ===
-used-by: ab_glyph 0.2.32, ab_glyph_rasterizer 0.1.10, accesskit_winit 0.32.2, aws-lc-sys 0.45.0, blake3 1.8.5, gl_generator 0.14.0, khronos_api 3.1.0, owned_ttf_parser 0.25.1, ryu 1.0.23, spirv 0.4.0+sdk-1.4.341.0, sync_wrapper 1.0.2
+used-by: ab_glyph 0.2.32, ab_glyph_rasterizer 0.1.10, accesskit_winit 0.33.2, audio-codec-algorithms 0.8.1, aws-lc-sys 0.47.0, blake3 1.8.7, gl_generator 0.14.0, khronos_api 3.1.0, owned_ttf_parser 0.25.1, parry3d 0.31.1, ryu 1.0.23, spirv 0.4.0+sdk-1.4.341.0, sync_wrapper 1.0.2
 
 Apache License
 Version 2.0, January 2004
@@ -3041,6 +3041,19 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 === LICENSE BSD-2-Clause === BSD 2-Clause "Simplified" License ===
+used-by: openjp2-ctypes 0.7.2, openjp2 0.7.2
+
+Copyright (c) <year> <owner> 
+
+Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the following disclaimer in the documentation and/or other materials provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+=== LICENSE BSD-2-Clause === BSD 2-Clause "Simplified" License ===
 used-by: http-cache-semantics 3.0.0
 
 Copyright 2016-2020 Kornel Lesiński
@@ -3054,7 +3067,7 @@ Redistribution and use in source and binary forms, with or without modification,
 THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 === LICENSE BSD-3-Clause === BSD 3-Clause "New" or "Revised" License ===
-used-by: encoding_rs 0.8.35
+used-by: encoding_rs 0.8.44
 
 // Copyright © WHATWG (Apple, Google, Mozilla, Microsoft).
 //
@@ -3117,39 +3130,6 @@ used-by: avif-serialize 0.8.9
 BSD 3-Clause License
 
 Copyright (c) 2020, Cloudflare, Inc.
-All rights reserved.
-
-Redistribution and use in source and binary forms, with or without
-modification, are permitted provided that the following conditions are met:
-
-1. Redistributions of source code must retain the above copyright notice, this
-   list of conditions and the following disclaimer.
-
-2. Redistributions in binary form must reproduce the above copyright notice,
-   this list of conditions and the following disclaimer in the documentation
-   and/or other materials provided with the distribution.
-
-3. Neither the name of the copyright holder nor the names of its
-   contributors may be used to endorse or promote products derived from
-   this software without specific prior written permission.
-
-THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
-FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
-DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
-SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
-CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
-OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
-=== LICENSE BSD-3-Clause === BSD 3-Clause "New" or "Revised" License ===
-used-by: pp-rs 0.2.1
-
-BSD 3-Clause License
-
-Copyright (c) 2020, Corentin Wallez
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -3340,7 +3320,7 @@ OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 === LICENSE BSD-3-Clause === BSD 3-Clause "New" or "Revised" License ===
-used-by: aws-lc-sys 0.45.0, exr 1.74.2, sha1_smol 1.0.1, vorbis_rs 0.5.6
+used-by: aws-lc-sys 0.47.0, exr 1.74.3, sha1_smol 1.0.1, vorbis_rs 0.5.6
 
 Copyright (c) <year> <owner>. 
 
@@ -3355,7 +3335,7 @@ Redistribution and use in source and binary forms, with or without modification,
 THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 === LICENSE BSD-3-Clause === BSD 3-Clause "New" or "Revised" License ===
-used-by: encoding_rs 0.8.35
+used-by: encoding_rs 0.8.44
 
 Copyright © WHATWG (Apple, Google, Mozilla, Microsoft).
 
@@ -3458,7 +3438,7 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 === LICENSE BSL-1.0 === Boost Software License 1.0 ===
-used-by: error-code 3.3.2
+used-by: error-code 3.4.0
 
 Boost Software License - Version 1.0 - August 17th, 2003
 
@@ -3485,7 +3465,7 @@ ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 === LICENSE BSL-1.0 === Boost Software License 1.0 ===
-used-by: clipboard-win 5.4.1
+used-by: clipboard-win 5.4.3
 
 Boost Software License - Version 1.0 - August 17th, 2003
 
@@ -3496,7 +3476,7 @@ The copyright notices in the Software and this entire statement, including the a
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, TITLE AND NON-INFRINGEMENT. IN NO EVENT SHALL THE COPYRIGHT HOLDERS OR ANYONE DISTRIBUTING THE SOFTWARE BE LIABLE FOR ANY DAMAGES OR OTHER LIABILITY, WHETHER IN CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 === LICENSE CC0-1.0 === Creative Commons Zero v1.0 Universal ===
-used-by: notify 8.2.0
+used-by: notify 8.2.2
 
 Creative Commons CC0 1.0 Universal
 
@@ -3539,133 +3519,8 @@ For these and/or other purposes and motivations, and without any expectation of 
      c. Affirmer disclaims responsibility for clearing rights of other persons that may apply to the Work or any use thereof, including without limitation any person's Copyright and Related Rights in the Work. Further, Affirmer disclaims responsibility for obtaining any necessary consents, permissions or other rights required for any use of the Work.
 
      d. Affirmer understands and acknowledges that Creative Commons is not a party to this document and has no duty or obligation with respect to this CC0 or use of the Work. 
-=== LICENSE CC0-1.0 === Creative Commons Zero v1.0 Universal ===
-used-by: hexf-parse 0.2.1
-
-Creative Commons Legal Code
-
-CC0 1.0 Universal
-
-    CREATIVE COMMONS CORPORATION IS NOT A LAW FIRM AND DOES NOT PROVIDE
-    LEGAL SERVICES. DISTRIBUTION OF THIS DOCUMENT DOES NOT CREATE AN
-    ATTORNEY-CLIENT RELATIONSHIP. CREATIVE COMMONS PROVIDES THIS
-    INFORMATION ON AN "AS-IS" BASIS. CREATIVE COMMONS MAKES NO WARRANTIES
-    REGARDING THE USE OF THIS DOCUMENT OR THE INFORMATION OR WORKS
-    PROVIDED HEREUNDER, AND DISCLAIMS LIABILITY FOR DAMAGES RESULTING FROM
-    THE USE OF THIS DOCUMENT OR THE INFORMATION OR WORKS PROVIDED
-    HEREUNDER.
-
-Statement of Purpose
-
-The laws of most jurisdictions throughout the world automatically confer
-exclusive Copyright and Related Rights (defined below) upon the creator
-and subsequent owner(s) (each and all, an "owner") of an original work of
-authorship and/or a database (each, a "Work").
-
-Certain owners wish to permanently relinquish those rights to a Work for
-the purpose of contributing to a commons of creative, cultural and
-scientific works ("Commons") that the public can reliably and without fear
-of later claims of infringement build upon, modify, incorporate in other
-works, reuse and redistribute as freely as possible in any form whatsoever
-and for any purposes, including without limitation commercial purposes.
-These owners may contribute to the Commons to promote the ideal of a free
-culture and the further production of creative, cultural and scientific
-works, or to gain reputation or greater distribution for their Work in
-part through the use and efforts of others.
-
-For these and/or other purposes and motivations, and without any
-expectation of additional consideration or compensation, the person
-associating CC0 with a Work (the "Affirmer"), to the extent that he or she
-is an owner of Copyright and Related Rights in the Work, voluntarily
-elects to apply CC0 to the Work and publicly distribute the Work under its
-terms, with knowledge of his or her Copyright and Related Rights in the
-Work and the meaning and intended legal effect of CC0 on those rights.
-
-1. Copyright and Related Rights. A Work made available under CC0 may be
-protected by copyright and related or neighboring rights ("Copyright and
-Related Rights"). Copyright and Related Rights include, but are not
-limited to, the following:
-
-  i. the right to reproduce, adapt, distribute, perform, display,
-     communicate, and translate a Work;
- ii. moral rights retained by the original author(s) and/or performer(s);
-iii. publicity and privacy rights pertaining to a person's image or
-     likeness depicted in a Work;
- iv. rights protecting against unfair competition in regards to a Work,
-     subject to the limitations in paragraph 4(a), below;
-  v. rights protecting the extraction, dissemination, use and reuse of data
-     in a Work;
- vi. database rights (such as those arising under Directive 96/9/EC of the
-     European Parliament and of the Council of 11 March 1996 on the legal
-     protection of databases, and under any national implementation
-     thereof, including any amended or successor version of such
-     directive); and
-vii. other similar, equivalent or corresponding rights throughout the
-     world based on applicable law or treaty, and any national
-     implementations thereof.
-
-2. Waiver. To the greatest extent permitted by, but not in contravention
-of, applicable law, Affirmer hereby overtly, fully, permanently,
-irrevocably and unconditionally waives, abandons, and surrenders all of
-Affirmer's Copyright and Related Rights and associated claims and causes
-of action, whether now known or unknown (including existing as well as
-future claims and causes of action), in the Work (i) in all territories
-worldwide, (ii) for the maximum duration provided by applicable law or
-treaty (including future time extensions), (iii) in any current or future
-medium and for any number of copies, and (iv) for any purpose whatsoever,
-including without limitation commercial, advertising or promotional
-purposes (the "Waiver"). Affirmer makes the Waiver for the benefit of each
-member of the public at large and to the detriment of Affirmer's heirs and
-successors, fully intending that such Waiver shall not be subject to
-revocation, rescission, cancellation, termination, or any other legal or
-equitable action to disrupt the quiet enjoyment of the Work by the public
-as contemplated by Affirmer's express Statement of Purpose.
-
-3. Public License Fallback. Should any part of the Waiver for any reason
-be judged legally invalid or ineffective under applicable law, then the
-Waiver shall be preserved to the maximum extent permitted taking into
-account Affirmer's express Statement of Purpose. In addition, to the
-extent the Waiver is so judged Affirmer hereby grants to each affected
-person a royalty-free, non transferable, non sublicensable, non exclusive,
-irrevocable and unconditional license to exercise Affirmer's Copyright and
-Related Rights in the Work (i) in all territories worldwide, (ii) for the
-maximum duration provided by applicable law or treaty (including future
-time extensions), (iii) in any current or future medium and for any number
-of copies, and (iv) for any purpose whatsoever, including without
-limitation commercial, advertising or promotional purposes (the
-"License"). The License shall be deemed effective as of the date CC0 was
-applied by Affirmer to the Work. Should any part of the License for any
-reason be judged legally invalid or ineffective under applicable law, such
-partial invalidity or ineffectiveness shall not invalidate the remainder
-of the License, and in such case Affirmer hereby affirms that he or she
-will not (i) exercise any of his or her remaining Copyright and Related
-Rights in the Work or (ii) assert any associated claims and causes of
-action with respect to the Work, in either case contrary to Affirmer's
-express Statement of Purpose.
-
-4. Limitations and Disclaimers.
-
- a. No trademark or patent rights held by Affirmer are waived, abandoned,
-    surrendered, licensed or otherwise affected by this document.
- b. Affirmer offers the Work as-is and makes no representations or
-    warranties of any kind concerning the Work, express, implied,
-    statutory or otherwise, including without limitation warranties of
-    title, merchantability, fitness for a particular purpose, non
-    infringement, or the absence of latent or other defects, accuracy, or
-    the present or absence of errors, whether or not discoverable, all to
-    the greatest extent permissible under applicable law.
- c. Affirmer disclaims responsibility for clearing rights of other persons
-    that may apply to the Work or any use thereof, including without
-    limitation any person's Copyright and Related Rights in the Work.
-    Further, Affirmer disclaims responsibility for obtaining any necessary
-    consents, permissions or other rights required for any use of the
-    Work.
- d. Affirmer understands and acknowledges that Creative Commons is not a
-    party to this document and has no duty or obligation with respect to
-    this CC0 or use of the Work.
-
 === LICENSE CDLA-Permissive-2.0 === Community Data License Agreement Permissive 2.0 ===
-used-by: webpki-root-certs 1.0.10, webpki-roots 1.0.10
+used-by: webpki-root-certs 1.0.12, webpki-roots 1.0.12
 
 # Community Data License Agreement - Permissive - Version 2.0
 
@@ -4363,7 +4218,7 @@ OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
 TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF
 THIS SOFTWARE.
 === LICENSE ISC === ISC License ===
-used-by: inotify 0.11.4
+used-by: inotify 0.11.5
 
 Copyright (c) Hanno Braun and contributors
 
@@ -4397,7 +4252,7 @@ OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
 CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
 === LICENSE ISC === ISC License ===
-used-by: libloading 0.8.9, libloading 0.9.0
+used-by: libloading 0.8.9, libloading 0.9.1
 
 Copyright © 2015, Simonas Kazlauskas
 
@@ -4413,7 +4268,7 @@ NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE US
 THIS SOFTWARE.
 
 === LICENSE ISC === ISC License ===
-used-by: rustls-webpki 0.103.16
+used-by: rustls-webpki 0.103.17
 
 Except as otherwise noted, this project is licensed under the following
 (ISC-style) terms:
@@ -4436,7 +4291,7 @@ The files under third-party/chromium are licensed as described in
 third-party/chromium/LICENSE.
 
 === LICENSE ISC === ISC License ===
-used-by: aws-lc-rs 1.18.1, aws-lc-sys 0.45.0
+used-by: aws-lc-rs 1.19.0, aws-lc-sys 0.47.0
 
 ISC License
 
@@ -4970,35 +4825,6 @@ The `cfg_aliases!` macro uses a lot of the code from [`tectonic_cfg_support::tar
 ---
 
 === LICENSE MIT === MIT License ===
-used-by: taffy 0.10.1
-
-# License
-
-The copyright of all contributions to this open source software library remains with the original authors, who by contributing grant others a license to freely use, share and modify their work under the MIT license below.
-
-This library was forked from the [`stretch`](https://github.com/vislyhq/stretch) crate under the MIT License, which was copyright 2018 Visly Inc.
-
-## MIT License
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-
-=== LICENSE MIT === MIT License ===
 used-by: dotenvy 0.15.7
 
 # The MIT License (MIT)
@@ -5127,7 +4953,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: mlua 0.11.6
+used-by: mlua 0.12.2
 
 Both mlua and rlua are distributed under the MIT license, which is reproduced
 below:
@@ -5156,7 +4982,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: ena 0.14.4, lazy_static 1.5.0, libfuzzer-sys 0.4.13, rayon-core 1.13.0, rayon 1.12.0
+used-by: ena 0.14.4, libfuzzer-sys 0.4.13, rayon-core 1.13.0, rayon 1.12.0
 
 Copyright (c) 2010 The Rust Project Developers
 
@@ -5238,7 +5064,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: form_urlencoded 1.2.2
+used-by: form_urlencoded 1.2.3
 
 Copyright (c) 2013-2016 The rust-url developers
 
@@ -5267,7 +5093,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: idna 1.1.0, percent-encoding 2.3.2, url 2.5.8
+used-by: idna 1.1.0, percent-encoding 2.3.2, url 2.5.9
 
 Copyright (c) 2013-2025 The rust-url developers
 
@@ -5296,7 +5122,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: backtrace 0.3.76, cc 1.3.0, cfg-if 1.0.4, cmake 0.1.58, filetime 0.2.29, find-msvc-tools 0.1.9, jobserver 0.1.35, js-sys 0.3.103, openssl-probe 0.2.1, openssl-src 300.6.1+3.6.3, openssl-sys 0.9.117, pkg-config 0.3.33, rustc-demangle 0.1.28, scoped-tls 1.0.1, socket2 0.6.5, wasm-bindgen-futures 0.4.76, wasm-bindgen-macro-support 0.2.126, wasm-bindgen-macro 0.2.126, wasm-bindgen-shared 0.2.126, wasm-bindgen 0.2.126, web-sys 0.3.103
+used-by: backtrace 0.3.77, cc 1.11.3, cfg-if 1.0.5, cmake 0.1.58, filetime 0.2.30, find-msvc-tools 0.1.15, jobserver 0.1.35, js-sys 0.3.107, openssl-probe 0.2.2, openssl-src 300.6.1+3.6.3, openssl-sys 0.9.118, pkg-config 0.3.34, rustc-demangle 0.1.28, scoped-tls 1.0.1, socket2 0.6.5, wasm-bindgen-futures 0.4.80, wasm-bindgen-macro-support 0.2.130, wasm-bindgen-macro 0.2.130, wasm-bindgen-shared 0.2.130, wasm-bindgen 0.2.130, web-sys 0.3.107
 
 Copyright (c) 2014 Alex Crichton
 
@@ -5355,7 +5181,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: mio 1.2.2
+used-by: mio 1.2.5
 
 Copyright (c) 2014 Carl Lerche and other MIO contributors
 
@@ -5407,7 +5233,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: errno 0.3.14
+used-by: errno 0.3.15
 
 Copyright (c) 2014 Chris Wong
 
@@ -5464,7 +5290,7 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 === LICENSE MIT === MIT License ===
-used-by: mime 0.3.17
+used-by: mime 0.3.18
 
 Copyright (c) 2014 Sean McArthur
 
@@ -5488,7 +5314,7 @@ THE SOFTWARE.
 
 
 === LICENSE MIT === MIT License ===
-used-by: bitflags 1.3.2, bitflags 2.13.1, log 0.4.33, num-bigint 0.4.8, num-complex 0.4.6, num-derive 0.4.2, num-integer 0.1.46, num-iter 0.1.46, num-rational 0.4.2, num-traits 0.2.19, num 0.4.3, regex-automata 0.4.16, regex-lite 0.1.9, regex-syntax 0.6.29, regex-syntax 0.8.11, regex 1.13.1
+used-by: bitflags 1.3.2, bitflags 2.13.2, glob 0.3.4, log 0.4.35, num-bigint 0.4.8, num-complex 0.4.6, num-derive 0.4.2, num-derive 0.5.1, num-integer 0.1.47, num-iter 0.1.46, num-rational 0.4.2, num-traits 0.2.19, num 0.4.3, regex-automata 0.4.19, regex-lite 0.1.9, regex-syntax 0.8.12, regex 1.13.2
 
 Copyright (c) 2014 The Rust Project Developers
 
@@ -5517,7 +5343,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: uuid 1.24.0
+used-by: uuid 1.29.3
 
 Copyright (c) 2014 The Rust Project Developers
 Copyright (c) 2018 Ashley Mannix, Christopher Armstrong, Dylan DPC, Hunar Roop Kahlon
@@ -5600,7 +5426,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: flate2 1.1.9
+used-by: flate2 1.1.11
 
 Copyright (c) 2014-2026 Alex Crichton
 
@@ -5629,7 +5455,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: hyper 1.10.1
+used-by: hyper 1.12.0
 
 Copyright (c) 2014-2026 Sean McArthur
 
@@ -5652,7 +5478,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: coreaudio-rs 0.14.2, either 1.16.0, itertools 0.14.0, itertools 0.15.0, petgraph 0.8.3, rawpointer 0.2.1
+used-by: coreaudio-rs 0.14.2, either 1.19.0, itertools 0.14.0, itertools 0.15.0, petgraph 0.8.3, rawpointer 0.2.1
 
 Copyright (c) 2015
 
@@ -5705,7 +5531,7 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: plist 1.10.0
+used-by: plist 1.10.4
 
 Copyright (c) 2015 Edward Barnard
 
@@ -5727,7 +5553,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 === LICENSE MIT === MIT License ===
-used-by: wayland-backend 0.3.15, wayland-client 0.31.14, wayland-cursor 0.31.14, wayland-protocols-plasma 0.3.12, wayland-protocols-wlr 0.3.12, wayland-protocols 0.32.13, wayland-scanner 0.31.10, wayland-sys 0.31.11
+used-by: wayland-backend 0.3.17, wayland-client 0.31.15, wayland-cursor 0.31.14, wayland-protocols-plasma 0.3.12, wayland-protocols-wlr 0.3.12, wayland-protocols 0.32.13, wayland-scanner 0.31.11, wayland-sys 0.31.11
 
 Copyright (c) 2015 Elinor Berger
 
@@ -5750,7 +5576,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: new_debug_unreachable 1.0.6, ordered-float 5.3.0
+used-by: new_debug_unreachable 1.0.6, ordered-float 5.5.1
 
 Copyright (c) 2015 Jonathan Reem
 
@@ -5779,7 +5605,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: tempfile 3.27.0, xattr 1.6.1
+used-by: tempfile 3.27.0, xattr 1.7.0
 
 Copyright (c) 2015 Steven Allen
 
@@ -5808,7 +5634,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: object 0.37.3
+used-by: object 0.40.0
 
 Copyright (c) 2015 The Gimli Developers
 
@@ -5837,7 +5663,36 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: gimli 0.32.3, heck 0.5.0, linked-hash-map 0.5.6, unicode-segmentation 1.13.3, unicode-width 0.2.2, unicode-xid 0.2.6, vec_map 0.8.2
+used-by: lalrpop-util 0.23.2
+
+Copyright (c) 2015 The LALRPOP Project Developers
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+
+=== LICENSE MIT === MIT License ===
+used-by: gimli 0.34.0, heck 0.5.0, linked-hash-map 0.5.6, unicode-segmentation 1.13.3, unicode-width 0.2.3, unicode-xid 0.2.6, vec_map 0.8.2
 
 Copyright (c) 2015 The Rust Project Developers
 
@@ -5935,29 +5790,6 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: socks 0.3.4
-
-Copyright (c) 2015 The rust-socks Developers
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-
-=== LICENSE MIT === MIT License ===
 used-by: dlib 0.5.3
 
 Copyright (c) 2015 Victor Berger
@@ -6009,7 +5841,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: schannel 0.1.29
+used-by: schannel 0.1.30
 
 Copyright (c) 2015 steffengy
 
@@ -6020,7 +5852,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: fixedbitset 0.5.7
+used-by: fixedbitset 0.5.9
 
 Copyright (c) 2015-2017
 
@@ -6186,7 +6018,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: futures-channel 0.3.33, futures-core 0.3.33, futures-executor 0.3.33, futures-io 0.3.33, futures-macro 0.3.33, futures-sink 0.3.33, futures-task 0.3.33, futures-util 0.3.33
+used-by: futures-channel 0.3.34, futures-core 0.3.34, futures-executor 0.3.34, futures-io 0.3.34, futures-macro 0.3.34, futures-sink 0.3.34, futures-task 0.3.34, futures-util 0.3.34
 
 Copyright (c) 2016 Alex Crichton
 Copyright (c) 2017 The Tokio Authors
@@ -6219,35 +6051,6 @@ DEALINGS IN THE SOFTWARE.
 used-by: hashbrown 0.14.5, hashbrown 0.15.5, hashbrown 0.16.1, hashbrown 0.17.1
 
 Copyright (c) 2016 Amanieu d'Antras
-
-Permission is hereby granted, free of charge, to any
-person obtaining a copy of this software and associated
-documentation files (the "Software"), to deal in the
-Software without restriction, including without
-limitation the rights to use, copy, modify, merge,
-publish, distribute, sublicense, and/or sell copies of
-the Software, and to permit persons to whom the Software
-is furnished to do so, subject to the following
-conditions:
-
-The above copyright notice and this permission notice
-shall be included in all copies or substantial portions
-of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
-ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
-TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
-PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
-SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
-CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
-OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
-IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-DEALINGS IN THE SOFTWARE.
-
-=== LICENSE MIT === MIT License ===
-used-by: serde_urlencoded 0.7.1
-
-Copyright (c) 2016 Anthony Ramine
 
 Permission is hereby granted, free of charge, to any
 person obtaining a copy of this software and associated
@@ -6327,7 +6130,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: hyper-rustls 0.27.9, rustls-native-certs 0.8.4, rustls 0.23.46
+used-by: hyper-rustls 0.27.10, rustls-native-certs 0.8.5, rustls 0.23.46
 
 Copyright (c) 2016 Joseph Birr-Pixton <jpixton@gmail.com>
 
@@ -6379,7 +6182,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: lock_api 0.4.14, parking_lot 0.12.5, parking_lot_core 0.9.12, rustc_version 0.4.1, thread_local 1.1.10
+used-by: lock_api 0.4.14, lock_api 0.5.0, parking_lot 0.12.5, parking_lot 0.13.0, parking_lot_core 0.10.0, parking_lot_core 0.9.12, rustc_version 0.4.1, thread_local 1.1.10
 
 Copyright (c) 2016 The Rust Project Developers
 
@@ -6500,7 +6303,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: apple-native-keyring-store 1.0.2, keyring-core 1.0.1, keyring 4.2.0, zbus-secret-service-keyring-store 1.0.1
+used-by: apple-native-keyring-store 1.0.2, keyring-core 1.1.0, keyring 4.2.0, zbus-secret-service-keyring-store 1.0.1
 
 Copyright (c) 2016 keyring Developers
 
@@ -6558,7 +6361,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: indexmap 2.14.0
+used-by: indexmap 2.14.2
 
 Copyright (c) 2016--2017
 
@@ -6587,7 +6390,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: equivalent 1.0.2
+used-by: equivalent 1.0.3
 
 Copyright (c) 2016--2023
 
@@ -6616,7 +6419,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: addr2line 0.25.1
+used-by: addr2line 0.27.1
 
 Copyright (c) 2016-2018 The gimli Developers
 
@@ -6703,31 +6506,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: reqwest 0.12.28
-
-Copyright (c) 2016-2025 Sean McArthur
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-
-
-=== LICENSE MIT === MIT License ===
-used-by: reqwest 0.13.4
+used-by: reqwest 0.13.5
 
 Copyright (c) 2016-2026 Sean McArthur
 
@@ -6922,7 +6701,7 @@ DEALINGS IN THE SOFTWARE.
 
 
 === LICENSE MIT === MIT License ===
-used-by: aligned 0.4.3, heapless 0.8.0, heapless 0.9.3
+used-by: aligned 0.4.3, heapless 0.8.0, heapless 0.9.4
 
 Copyright (c) 2017 Jorge Aparicio
 
@@ -7009,7 +6788,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: ron 0.12.2
+used-by: ron 0.12.3
 
 Copyright (c) 2017 RON developers
 
@@ -7038,7 +6817,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: redox_syscall 0.4.1, redox_syscall 0.5.18, redox_syscall 0.9.0
+used-by: redox_syscall 0.4.1, redox_syscall 0.5.18, redox_syscall 0.9.5
 
 Copyright (c) 2017 Redox OS Developers
 
@@ -7175,7 +6954,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: foreign-types-macros 0.2.3, foreign-types-shared 0.1.1, foreign-types-shared 0.3.1, foreign-types 0.3.2, foreign-types 0.5.0
+used-by: foreign-types-macros 0.2.4, foreign-types-shared 0.1.1, foreign-types-shared 0.3.1, foreign-types 0.3.2, foreign-types 0.5.0
 
 Copyright (c) 2017 The foreign-types Developers
 
@@ -7282,7 +7061,7 @@ SOFTWARE.
 
 
 === LICENSE MIT === MIT License ===
-used-by: arc-swap 1.9.2
+used-by: arc-swap 1.9.5
 
 Copyright (c) 2017 arc-swap developers
 
@@ -7311,7 +7090,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: h2 0.4.16
+used-by: h2 0.4.20
 
 Copyright (c) 2017 h2 authors
 
@@ -7340,7 +7119,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: http 1.4.2
+used-by: http 1.5.0
 
 Copyright (c) 2017 http-rs authors
 
@@ -7369,7 +7148,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: tokio-rustls 0.26.4
+used-by: tokio-rustls 0.26.6
 
 Copyright (c) 2017 quininer kel
 
@@ -7398,9 +7177,38 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: signal-hook-registry 1.4.8, signal-hook 0.4.4
+used-by: signal-hook-registry 1.4.8, signal-hook 0.4.6
 
 Copyright (c) 2017 tokio-jsonrpc developers
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+
+=== LICENSE MIT === MIT License ===
+used-by: core_detect 1.0.0
+
+Copyright (c) 2017-2020 The Rust Project Developers
 
 Permission is hereby granted, free of charge, to any
 person obtaining a copy of this software and associated
@@ -7486,7 +7294,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: bytes 1.12.1
+used-by: bytes 1.12.2
 
 Copyright (c) 2018 Carl Lerche
 
@@ -7602,6 +7410,31 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 === LICENSE MIT === MIT License ===
+used-by: logos-codegen 0.16.1, logos-derive 0.16.1, logos 0.16.1
+
+Copyright (c) 2018 Maciej Hirsz <maciej.hirsz@gmail.com>
+
+The MIT License (MIT)
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+=== LICENSE MIT === MIT License ===
 used-by: console_error_panic_hook 0.1.7
 
 Copyright (c) 2018 Nick Fitzgerald
@@ -7631,7 +7464,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: smallvec 1.15.2
+used-by: smallvec 1.16.6
 
 Copyright (c) 2018 The Servo Project Developers
 
@@ -7781,7 +7614,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: want 0.3.1
+used-by: want 0.3.2
 
 Copyright (c) 2018-2019 Sean McArthur
 
@@ -8031,7 +7864,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: zeroize 1.9.0
+used-by: zeroize 1.9.2
 
 Copyright (c) 2018-2026 The RustCrypto Project Developers
 
@@ -8090,7 +7923,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: ringbuf 0.5.2
+used-by: ringbuf 0.5.3
 
 Copyright (c) 2019 Alexey Gerasev
 
@@ -8122,35 +7955,6 @@ DEALINGS IN THE SOFTWARE.
 used-by: slab 0.4.12
 
 Copyright (c) 2019 Carl Lerche
-
-Permission is hereby granted, free of charge, to any
-person obtaining a copy of this software and associated
-documentation files (the "Software"), to deal in the
-Software without restriction, including without
-limitation the rights to use, copy, modify, merge,
-publish, distribute, sublicense, and/or sell copies of
-the Software, and to permit persons to whom the Software
-is furnished to do so, subject to the following
-conditions:
-
-The above copyright notice and this permission notice
-shall be included in all copies or substantial portions
-of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
-ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
-TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
-PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
-SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
-CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
-OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
-IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-DEALINGS IN THE SOFTWARE.
-
-=== LICENSE MIT === MIT License ===
-used-by: font-types 0.11.3, read-fonts 0.39.2, skrifa 0.42.1
-
-Copyright (c) 2019 Colin Rothfels
 
 Permission is hereby granted, free of charge, to any
 person obtaining a copy of this software and associated
@@ -8223,7 +8027,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: cfg-expr 0.20.8, presser 0.3.1
+used-by: cfg-expr 0.20.11, presser 0.3.1
 
 Copyright (c) 2019 Embark Studios
 
@@ -8252,7 +8056,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: font-types 0.12.1, read-fonts 0.41.0, read-fonts 0.42.0, skrifa 0.44.0, skrifa 0.45.0
+used-by: font-types 0.12.7, read-fonts 0.41.0, read-fonts 0.47.0, skrifa 0.44.0, skrifa 0.50.0
 
 Copyright (c) 2019 Fontations Developers
 
@@ -8281,7 +8085,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: wl-clipboard-rs 0.9.3
+used-by: wl-clipboard-rs 0.9.5
 
 Copyright (c) 2019 Ivan Molodetskikh
 
@@ -8310,7 +8114,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: bumpalo 3.20.3
+used-by: bumpalo 3.20.4
 
 Copyright (c) 2019 Nick Fitzgerald
 
@@ -8484,7 +8288,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: http-body-util 0.1.4, http-body 1.1.0
+used-by: http-body-util 0.1.5, http-body 1.1.0
 
 Copyright (c) 2019-2026 Sean McArthur & Hyper Contributors
 
@@ -8627,7 +8431,7 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 === LICENSE MIT === MIT License ===
-used-by: yazi 0.2.1
+used-by: yazi 0.2.2
 
 Copyright (c) 2020 Chad Brokaw
 
@@ -8650,7 +8454,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: rubato 4.0.0
+used-by: rubato 5.1.0
 
 Copyright (c) 2020 Henrik Enquist
 
@@ -8694,31 +8498,6 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 === LICENSE MIT === MIT License ===
-used-by: beef 0.5.2
-
-Copyright (c) 2020 Maciej Hirsz <hello@maciej.codes>
-
-The MIT License (MIT)
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-
-=== LICENSE MIT === MIT License ===
 used-by: document-features 0.2.12
 
 Copyright (c) 2020 Olivier Goffart <ogoffart@sixtyfps.io>
@@ -8742,7 +8521,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: litrs 1.0.0
+used-by: litrs 1.0.1
 
 Copyright (c) 2020 Project Developers
 
@@ -8800,7 +8579,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: memmap2 0.9.11
+used-by: memmap2 0.9.12
 
 Copyright (c) 2020 Yevhenii Reizner
 Copyright (c) 2015 Dan Burkert
@@ -8853,7 +8632,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: pollster 0.4.0
+used-by: pollster 1.0.3
 
 Copyright (c) 2020-2021 Joshua Barretto
 
@@ -8882,36 +8661,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: cpufeatures 0.3.0
-
-Copyright (c) 2020-2025 The RustCrypto Project Developers
-
-Permission is hereby granted, free of charge, to any
-person obtaining a copy of this software and associated
-documentation files (the "Software"), to deal in the
-Software without restriction, including without
-limitation the rights to use, copy, modify, merge,
-publish, distribute, sublicense, and/or sell copies of
-the Software, and to permit persons to whom the Software
-is furnished to do so, subject to the following
-conditions:
-
-The above copyright notice and this permission notice
-shall be included in all copies or substantial portions
-of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
-ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
-TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
-PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
-SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
-CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
-OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
-IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-DEALINGS IN THE SOFTWARE.
-
-=== LICENSE MIT === MIT License ===
-used-by: const-oid 0.10.2
+used-by: const-oid 0.10.3, cpufeatures 0.3.1
 
 Copyright (c) 2020-2026 The RustCrypto Project Developers
 
@@ -8969,7 +8719,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: redb 4.1.0
+used-by: redb 5.0.0
 
 Copyright (c) 2021 Christopher Berner
 
@@ -8991,7 +8741,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 === LICENSE MIT === MIT License ===
-used-by: num_threads 0.1.7
+used-by: num_threads 0.1.8
 
 Copyright (c) 2021 Jacob Pratt
 
@@ -9291,7 +9041,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: rustls-pki-types 1.15.0
+used-by: rustls-pki-types 1.16.0
 
 Copyright (c) 2023 Dirkjan Ochtman <dirkjan@ochtman.nl>
 
@@ -9320,7 +9070,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: powerfmt 0.2.0
+used-by: powerfmt 0.2.1
 
 Copyright (c) 2023 Jacob Pratt et al.
 
@@ -9417,7 +9167,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: file-id 0.2.3, notify-debouncer-full 0.7.0, notify-types 2.1.0
+used-by: file-id 0.2.3, notify-debouncer-full 0.7.0, notify-types 2.3.1
 
 Copyright (c) 2023 Notify Contributors
 
@@ -9475,7 +9225,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: hyper-util 0.1.20
+used-by: hyper-util 0.1.21
 
 Copyright (c) 2023-2025 Sean McArthur
 
@@ -9527,7 +9277,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: deranged 0.5.8
+used-by: deranged 0.5.9
 
 Copyright (c) 2024 Jacob Pratt et al.
 
@@ -9579,7 +9329,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: zbus 5.19.0, zbus_macros 5.19.0, zbus_names 4.3.4, zbus_xml 5.2.1, zvariant 5.15.0, zvariant_derive 5.15.0
+used-by: zbus 5.19.0, zbus_macros 5.19.0, zbus_names 4.3.5, zbus_xml 5.2.1, zvariant 5.15.1, zvariant_derive 5.15.1
 
 Copyright (c) 2024 Zeeshan Ali Khan & zbus contributors
 
@@ -9659,7 +9409,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: ctutils 0.4.7
+used-by: ctutils 0.4.8
 
 Copyright (c) 2025-2026 The RustCrypto Project Developers
 
@@ -9688,7 +9438,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: audioadapter-buffers 4.0.0, audioadapter-sample 4.0.0, audioadapter 4.0.0
+used-by: audioadapter-buffers 5.2.0, audioadapter-sample 5.2.0, audioadapter 5.0.0
 
 Copyright (c) 2026 Henrik Enquist
 
@@ -9711,7 +9461,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: bit-set 0.9.1
+used-by: bit-set 0.10.0
 
 Copyright (c) 2026 The Rust Project Developers
 
@@ -9740,7 +9490,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: zcheapstr 1.1.0
+used-by: zcheapstr 1.4.0
 
 Copyright (c) 2026 Zeeshan Ali Khan & zcheapstr contributors
 
@@ -9769,7 +9519,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: anstream 1.0.0, anstyle-parse 1.0.0, anstyle-query 1.1.5, anstyle-wincon 3.0.11, anstyle 1.0.14, clap 4.6.2, clap_builder 4.6.2, clap_complete 4.6.7, clap_derive 4.6.1, clap_lex 1.1.0, clap_mangen 0.3.0, colorchoice 1.0.5, is_terminal_polyfill 1.70.2, kstring 2.0.2, once_cell_polyfill 1.70.2, roff 1.1.1, serde_spanned 1.1.1, toml 1.1.3+spec-1.1.0, toml_datetime 0.7.5+spec-1.1.0, toml_datetime 1.1.1+spec-1.1.0, toml_edit 0.23.10+spec-1.0.0, toml_edit 0.25.13+spec-1.1.0, toml_parser 1.1.2+spec-1.1.0, toml_writer 1.1.2+spec-1.1.0
+used-by: annotate-snippets 0.12.18, anstream 1.0.0, anstyle-parse 1.0.0, anstyle-query 1.1.5, anstyle-wincon 3.0.11, anstyle 1.0.14, clap 4.6.9, clap_builder 4.6.7, clap_complete 4.6.12, clap_derive 4.6.9, clap_lex 1.1.2, clap_mangen 0.3.4, colorchoice 1.0.5, is_terminal_polyfill 1.70.2, kstring 2.0.5, once_cell_polyfill 1.70.2, roff 1.1.1, serde_spanned 1.1.3, toml 1.2.2+spec-1.1.0, toml_datetime 0.7.5+spec-1.1.0, toml_datetime 1.1.3+spec-1.1.0, toml_edit 0.23.10+spec-1.0.0, toml_edit 0.25.20+spec-1.1.0, toml_parser 1.1.6+spec-1.1.0, toml_writer 1.2.0+spec-1.1.0
 
 Copyright (c) Individual contributors
 
@@ -9815,7 +9565,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: time-core 0.1.9, time-macros 0.2.31, time 0.3.53
+used-by: time-core 0.1.9, time-macros 0.2.32, time 0.3.55
 
 Copyright (c) Jacob Pratt et al.
 
@@ -9867,7 +9617,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: libc 0.2.186
+used-by: libc 0.2.191
 
 Copyright (c) The Rust Project Developers
 
@@ -9983,7 +9733,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: synstructure 0.13.2
+used-by: synstructure 0.14.0
 
 Copyright 2016 Nika Layzell
 
@@ -9994,7 +9744,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: ipnet 2.12.0
+used-by: ipnet 2.12.2
 
 Copyright 2017 Juniper Networks, Inc.
 
@@ -10057,7 +9807,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: rand 0.10.2, rand 0.9.5, rand_chacha 0.9.0, rand_core 0.9.5
+used-by: rand 0.10.4, rand 0.9.5, rand_chacha 0.9.0, rand_core 0.9.5
 
 Copyright 2018 Developers of the Rand project
 Copyright (c) 2014 The Rust Project Developers
@@ -10085,6 +9835,17 @@ CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
+
+=== LICENSE MIT === MIT License ===
+used-by: multiversion-macros 0.8.1, multiversion 0.8.1
+
+Copyright 2019 Caleb Zulawski
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 === LICENSE MIT === MIT License ===
 used-by: as-raw-xcb-connection 1.0.1
@@ -10174,7 +9935,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: parlance 0.1.0, parley 0.9.0, parley_data 0.9.0
+used-by: parlance 0.1.0, parley 0.11.1, parley_data 0.11.1
 
 Copyright 2020 the Parley Authors
 
@@ -10203,6 +9964,17 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 === LICENSE MIT === MIT License ===
+used-by: target-features 0.1.6
+
+Copyright 2022 Caleb Zulawski
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+=== LICENSE MIT === MIT License ===
 used-by: extended 0.1.0
 
 Copyright 2022 Dietrich Epp
@@ -10226,7 +9998,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: ureq-proto 0.6.0
+used-by: ureq-proto 0.7.1
 
 Copyright 2022 Martin Algesten
 
@@ -10237,7 +10009,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: zerocopy-derive 0.8.54, zerocopy 0.8.54
+used-by: zerocopy-derive 0.8.64, zerocopy 0.8.64
 
 Copyright 2023 The Fuchsia Authors
 
@@ -10267,7 +10039,7 @@ DEALINGS IN THE SOFTWARE.
 
 
 === LICENSE MIT === MIT License ===
-used-by: fontique 0.9.0
+used-by: fontique 0.11.1
 
 Copyright 2024 the Parley Authors
 
@@ -10296,7 +10068,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: encoding_rs 0.8.35, utf8_iter 1.0.4
+used-by: encoding_rs 0.8.44, multiversion_no_op 1.0.0, utf8_iter 1.1.0, utf_types 1.0.0
 
 Copyright Mozilla Foundation
 
@@ -10423,7 +10195,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: lru 0.18.1
+used-by: lru 0.19.1
 
 MIT License
 
@@ -10572,7 +10344,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: pcap-file 2.0.0
+used-by: pcap-file 3.0.0
 
 MIT License
 
@@ -10622,11 +10394,12 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: weak-table 0.3.2
+used-by: weak-table 0.4.0
 
 MIT License
 
 Copyright (c) 2018 Jesse A. Tov
+Copyright 2026 Nick Mathewson
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -10697,11 +10470,37 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: crc32fast 1.5.0
+used-by: crc32fast 1.5.5
 
 MIT License
 
 Copyright (c) 2018 Sam Rijs, Alex Crichton and contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+=== LICENSE MIT === MIT License ===
+used-by: taffy 0.14.0
+
+MIT License
+
+Copyright (c) 2018 Visly Inc.
+Copyright (c) 2026 Taffy Authors
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -10797,7 +10596,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: bytemuck 1.25.1, bytemuck_derive 1.11.0
+used-by: bytemuck 1.25.2, bytemuck_derive 1.12.1
 
 MIT License
 
@@ -10860,7 +10659,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: arbitrary 1.4.2
+used-by: arbitrary 1.5.0
 
 MIT License
 
@@ -10891,7 +10690,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: ureq 3.3.0
+used-by: ureq 3.5.2
 
 MIT License
 
@@ -10966,31 +10765,6 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: guillotiere 0.6.2
-
-MIT License
-
-Copyright (c) 2019 Nicolas Silva
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-
-=== LICENSE MIT === MIT License ===
 used-by: raw-window-handle 0.6.2
 
 MIT License
@@ -11041,7 +10815,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: tokio-macros 2.7.1
+used-by: tokio-macros 2.7.2
 
 MIT License
 
@@ -11092,7 +10866,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: owo-colors 4.3.0
+used-by: owo-colors 4.4.0
 
 MIT License
 
@@ -11117,11 +10891,61 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: rfd 0.17.2
+used-by: rfd 0.18.0
 
 MIT License
 
 Copyright (c) 2020 Bilal Elmoussaoui
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+=== LICENSE MIT === MIT License ===
+used-by: wide 1.7.1
+
+MIT License
+
+Copyright (c) 2020 Daniel "Lokathor" Gee
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+=== LICENSE MIT === MIT License ===
+used-by: realfft 3.5.1
+
+MIT License
+
+Copyright (c) 2020 Henrik Enquist and RealFFT contributors
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -11180,36 +11004,11 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: xcursor 0.3.10
+used-by: xcursor 0.3.11
 
 MIT License
 
 Copyright (c) 2020 Samuele Esposito
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-
-=== LICENSE MIT === MIT License ===
-used-by: tinyvec_macros 0.1.1
-
-MIT License
-
-Copyright (c) 2020 Soveu
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -11330,7 +11129,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: bevy_fluent 0.15.0
+used-by: bevy_fluent 0.16.0
 
 MIT License
 
@@ -11355,36 +11154,11 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: jpeg2k 0.10.1
+used-by: jpeg2k 0.11.0
 
 MIT License
 
 Copyright (c) 2021 Robert Gabriel Jakabosky
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-
-=== LICENSE MIT === MIT License ===
-used-by: pulp 0.22.3
-
-MIT License
-
-Copyright (c) 2021 sarah
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -11430,7 +11204,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: rustls-platform-verifier 0.7.0
+used-by: rustls-platform-verifier 0.7.1
 
 MIT License
 
@@ -11455,7 +11229,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: rfd 0.17.2, sctk-adwaita 0.10.1
+used-by: rfd 0.18.0, sctk-adwaita 0.10.1
 
 MIT License
 
@@ -11505,7 +11279,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: arboard 3.6.1
+used-by: arboard 3.7.0
 
 MIT License
 
@@ -11530,7 +11304,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: aligned-vec 0.6.4, reborrow 0.5.5
+used-by: aligned-vec 0.6.4
 
 MIT License
 
@@ -11555,7 +11329,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: luau0-src 0.18.3+luau709
+used-by: luau0-src 0.22.0+luau740
 
 MIT License
 
@@ -11582,7 +11356,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: libredox 0.1.18
+used-by: libredox 0.1.25
 
 MIT License
 
@@ -11607,7 +11381,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: safe_arch 0.7.4, safe_arch 1.1.0
+used-by: safe_arch 1.2.0
 
 MIT License
 
@@ -11720,7 +11494,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: firewheel 0.12.1
+used-by: firewheel 0.15.0
 
 MIT License
 
@@ -11770,7 +11544,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: bevy_flair 0.8.0
+used-by: bevy_flair 0.9.0
 
 MIT License
 
@@ -11844,7 +11618,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 === LICENSE MIT === MIT License ===
-used-by: fixed-resample 0.12.1, symphonium 0.12.2
+used-by: fixed-resample 0.13.0, symphonium 0.13.0
 
 MIT License
 
@@ -11869,7 +11643,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: naga 29.0.4, wgpu-core-deps-apple 29.0.4, wgpu-core-deps-wasm 29.0.4, wgpu-core-deps-windows-linux-android 29.0.4, wgpu-core 29.0.4, wgpu-core 29.0.4, wgpu-core 29.0.4, wgpu-core 29.0.4, wgpu-core 29.0.4, wgpu-hal 29.0.4, wgpu-naga-bridge 29.0.4, wgpu-types 29.0.4, wgpu 29.0.4
+used-by: naga-types 30.0.2, naga 30.0.2, wgpu-core-deps-apple 30.0.2, wgpu-core-deps-wasm 30.0.2, wgpu-core-deps-windows-linux-android 30.0.2, wgpu-core 30.0.2, wgpu-core 30.0.2, wgpu-core 30.0.2, wgpu-core 30.0.2, wgpu-core 30.0.2, wgpu-hal 30.0.2, wgpu-naga-bridge 30.0.2, wgpu-types 30.0.2, wgpu 30.0.2
 
 MIT License
 
@@ -11918,7 +11692,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 === LICENSE MIT === MIT License ===
-used-by: accesskit_atspi_common 0.18.1, bevy_scene_macros 0.19.0, bevy_flair_core 0.8.0, bevy_flair_core_macros 0.8.0, bevy_flair_css_parser 0.8.0, bevy_flair_style 0.8.0, accesskit 0.24.1, accesskit_consumer 0.35.0, accesskit_consumer 0.36.0, accesskit_consumer 0.38.0, accesskit_macos 0.26.3, accesskit_unix 0.21.1, accesskit_windows 0.32.1, audio-core 0.2.1, block2 0.5.1, block2 0.6.2, byteorder_slice 3.0.0, cef-dll-sys 150.2.1+150.0.14, cef 150.2.1+150.0.14, cesu8 1.1.0, constgebra 0.1.4, dasp_sample 0.11.0, derive-into-owned 0.2.0, dispatch2 0.3.1, dispatch 0.2.0, download-cef 2.3.2, dpi 0.1.2, etherparse 0.20.3, firewheel-core 0.12.0, firewheel-cpal 0.12.0, firewheel-graph 0.12.1, firewheel-macros 0.12.0, firewheel-nodes 0.12.1, firewheel-symphonium 0.12.0, fluent-langneg 0.13.1, gilrs-core 0.6.8, gilrs 0.11.2, gpu-descriptor-types 0.2.0, gpu-descriptor 0.3.2, http-serde 2.1.1, intl_pluralrules 7.0.2, jni-macros 0.22.4, jni-sys-macros 0.4.1, jni 0.22.4, keyed_priority_queue 0.4.2, kinded 0.5.0, kinded_macros 0.5.0, lerp 0.5.0, lewton 0.10.2, libm 0.2.16, logos-codegen 0.13.0, logos-derive 0.13.0, logos 0.13.0, md5 0.7.0, mlua-sys 0.10.0, mutants 0.0.3, ndk-context 0.1.1, ndk-sys 0.6.0+11769913, ndk 0.9.0, nutype 0.7.0, nutype_macros 0.7.0, objc-sys 0.3.5, objc2-app-kit 0.2.2, objc2-app-kit 0.3.2, objc2-audio-toolbox 0.3.2, objc2-avf-audio 0.3.2, objc2-core-audio-types 0.3.2, objc2-core-audio 0.3.2, objc2-core-foundation 0.3.2, objc2-core-graphics 0.3.2, objc2-core-text 0.3.2, objc2-encode 4.1.0, objc2-foundation 0.2.2, objc2-foundation 0.3.2, objc2-io-kit 0.3.2, objc2-metal 0.3.2, objc2-quartz-core 0.3.2, objc2-ui-kit 0.2.2, objc2 0.5.2, objc2 0.6.4, profiling-procmacros 1.0.18, profiling 1.0.18, pulp-wasm-simd-flag 0.1.1, r-efi 5.3.0, r-efi 6.0.0, realfft 3.5.0, rstar 0.12.2, rustls-platform-verifier-android 0.1.1, simd_helpers 0.1.0, siphasher 1.0.3, sl-map-apis 0.8.0, sl-types 0.8.0, svg_fmt 0.4.5, type-map 0.5.1, uniform-cubic-splines 0.5.2, wide 0.7.33, wide 1.5.0, winapi-i686-pc-windows-gnu 0.4.0, winapi-x86_64-pc-windows-gnu 0.4.0, windows-collections 0.3.2, windows-core 0.62.2, windows-future 0.3.2, windows-implement 0.60.2, windows-interface 0.59.3, windows-link 0.2.1, windows-numerics 0.3.1, windows-registry 0.6.1, windows-result 0.4.1, windows-strings 0.5.1, windows-sys 0.45.0, windows-sys 0.52.0, windows-sys 0.59.0, windows-sys 0.60.2, windows-sys 0.61.2, windows-targets 0.42.2, windows-targets 0.52.6, windows-targets 0.53.5, windows-threading 0.2.1, windows 0.62.2, windows_aarch64_gnullvm 0.42.2, windows_aarch64_gnullvm 0.52.6, windows_aarch64_gnullvm 0.53.1, windows_aarch64_msvc 0.42.2, windows_aarch64_msvc 0.52.6, windows_aarch64_msvc 0.53.1, windows_i686_gnu 0.42.2, windows_i686_gnu 0.52.6, windows_i686_gnu 0.53.1, windows_i686_gnullvm 0.52.6, windows_i686_gnullvm 0.53.1, windows_i686_msvc 0.42.2, windows_i686_msvc 0.52.6, windows_i686_msvc 0.53.1, windows_x86_64_gnu 0.42.2, windows_x86_64_gnu 0.52.6, windows_x86_64_gnu 0.53.1, windows_x86_64_gnullvm 0.42.2, windows_x86_64_gnullvm 0.52.6, windows_x86_64_gnullvm 0.53.1, windows_x86_64_msvc 0.42.2, windows_x86_64_msvc 0.52.6, windows_x86_64_msvc 0.53.1, zune-inflate 0.2.54
+used-by: accesskit_atspi_common 0.19.1, bevy_scene_macros 0.20.1, bevy_flair_core 0.9.0, bevy_flair_core_macros 0.9.0, bevy_flair_css_parser 0.9.0, bevy_flair_style 0.9.0, accesskit 0.24.1, accesskit_consumer 0.38.0, accesskit_ios 0.1.2, accesskit_macos 0.26.3, accesskit_unix 0.22.1, accesskit_windows 0.34.0, block2 0.5.1, block2 0.6.2, byteorder_slice 3.0.0, cef-dll-sys 156.7.0+156.0.31, cef 156.7.0+156.0.31, cesu8 1.1.0, constgebra 0.1.4, dasp_sample 0.11.0, derive-into-owned 0.2.0, dispatch2 0.3.1, dispatch 0.2.0, download-cef 3.0.1, dpi 0.1.2, etherparse 0.21.0, firewheel-core 0.15.0, firewheel-cpal 0.15.0, firewheel-graph 0.15.0, firewheel-macros 0.15.0, firewheel-nodes 0.15.0, firewheel-symphonium 0.15.0, fluent-langneg 0.13.1, gilrs-core 0.6.8, gilrs 0.11.2, http-serde 2.1.1, intl_pluralrules 7.0.2, jni-macros 0.22.4, jni-sys-macros 0.4.1, jni 0.22.4, keyed_priority_queue 0.4.2, kinded 0.5.1, kinded_macros 0.5.1, lerp 0.5.0, lewton 0.10.2, libm 0.2.16, md5 0.8.1, mlua-sys 0.13.0, mutants 0.0.3, ndk-context 0.1.1, ndk-sys 0.6.0+11769913, ndk 0.9.0, nutype 0.8.0, nutype_macros 0.8.0, objc-sys 0.3.5, objc2-app-kit 0.2.2, objc2-app-kit 0.3.2, objc2-audio-toolbox 0.3.2, objc2-avf-audio 0.3.2, objc2-core-audio-types 0.3.2, objc2-core-audio 0.3.2, objc2-core-foundation 0.3.2, objc2-core-graphics 0.3.2, objc2-core-services 0.3.2, objc2-core-text 0.3.2, objc2-encode 4.1.0, objc2-foundation 0.2.2, objc2-foundation 0.3.2, objc2-io-kit 0.3.2, objc2-metal 0.3.2, objc2-quartz-core 0.3.2, objc2-ui-kit 0.2.2, objc2-uniform-type-identifiers 0.3.2, objc2 0.5.3, objc2 0.6.5, profiling-procmacros 1.0.18, profiling 1.0.18, r-efi 5.3.0, r-efi 6.0.0, rstar 0.13.1, rustls-platform-verifier-android 0.2.0, simd_helpers 0.1.0, sl-map-apis 0.13.1, sl-types 0.13.0, type-map 0.5.1, uniform-cubic-splines 0.5.2, wesl-core 0.1.0, wesl-macros 0.6.0, wesl 0.6.0, wgsl-parse 0.6.0, wgsl-types 0.6.0, winapi-i686-pc-windows-gnu 0.4.0, winapi-x86_64-pc-windows-gnu 0.4.0, windows-collections 0.3.2, windows-core 0.62.2, windows-future 0.3.2, windows-implement 0.60.2, windows-interface 0.59.3, windows-link 0.2.1, windows-numerics 0.3.1, windows-registry 0.6.1, windows-result 0.4.1, windows-strings 0.5.1, windows-sys 0.45.0, windows-sys 0.52.0, windows-sys 0.59.0, windows-sys 0.60.2, windows-sys 0.61.2, windows-targets 0.42.2, windows-targets 0.52.6, windows-targets 0.53.5, windows-threading 0.2.1, windows 0.62.2, windows_aarch64_gnullvm 0.42.2, windows_aarch64_gnullvm 0.52.6, windows_aarch64_gnullvm 0.53.1, windows_aarch64_msvc 0.42.2, windows_aarch64_msvc 0.52.6, windows_aarch64_msvc 0.53.1, windows_i686_gnu 0.42.2, windows_i686_gnu 0.52.6, windows_i686_gnu 0.53.1, windows_i686_gnullvm 0.52.6, windows_i686_gnullvm 0.53.1, windows_i686_msvc 0.42.2, windows_i686_msvc 0.52.6, windows_i686_msvc 0.53.1, windows_x86_64_gnu 0.42.2, windows_x86_64_gnu 0.52.6, windows_x86_64_gnu 0.53.1, windows_x86_64_gnullvm 0.42.2, windows_x86_64_gnullvm 0.52.6, windows_x86_64_gnullvm 0.53.1, windows_x86_64_msvc 0.42.2, windows_x86_64_msvc 0.52.6, windows_x86_64_msvc 0.53.1, zune-inflate 0.2.54
 
 MIT License
 
@@ -11940,7 +11714,7 @@ IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTI
 USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: tokio-util 0.7.19, tokio 1.54.1
+used-by: tokio-util 0.7.20, tokio 1.54.1
 
 MIT License
 
@@ -11990,7 +11764,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: zune-core 0.5.1, zune-jpeg 0.5.15
+used-by: zune-core 0.5.3, zune-jpeg 0.5.15
 
 MIT License
 
@@ -12015,7 +11789,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: miniz_oxide 0.8.9
+used-by: miniz_oxide 0.8.9, miniz_oxide 0.9.1
 
 MIT License
 
@@ -12044,7 +11818,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: miniz_oxide 0.8.9
+used-by: miniz_oxide 0.8.9, miniz_oxide 0.9.1
 
 MIT License
 
@@ -12123,34 +11897,9 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 === LICENSE MIT === MIT License ===
-used-by: bevy 0.19.0, bevy 0.19.0, bevy 0.19.0, bevy 0.19.0, bevy 0.19.0, bevy 0.19.0, bevy 0.19.0, bevy 0.19.0, bevy 0.19.0, bevy 0.19.0, bevy 0.19.0, bevy 0.19.0, bevy 0.19.0, bevy 0.19.0, bevy 0.19.0, bevy 0.19.0, bevy 0.19.0, bevy 0.19.0, bevy 0.19.0, bevy 0.19.0, bevy 0.19.0, bevy 0.19.0, bevy 0.19.0, bevy 0.19.0, bevy 0.19.0, bevy 0.19.0, bevy 0.19.0, bevy 0.19.0, bevy 0.19.0, bevy 0.19.0, bevy 0.19.0, bevy 0.19.0, bevy 0.19.0, bevy 0.19.0, bevy 0.19.0, bevy 0.19.0, bevy 0.19.0, bevy 0.19.0, bevy 0.19.0, bevy 0.19.0, bevy 0.19.0, bevy 0.19.0, bevy 0.19.0, bevy 0.19.0, bevy 0.19.0, bevy 0.19.0, bevy 0.19.0, bevy 0.19.0, bevy 0.19.0, bevy 0.19.0, bevy 0.19.0, bevy 0.19.0, bevy 0.19.0, bevy 0.19.0, bevy 0.19.0, bevy 0.19.0, bevy 0.19.0, bevy 0.19.0, bevy 0.19.0, bevy 0.19.0, bevy 0.19.0, bevy 0.19.0, bevy 0.19.0, bevy 0.19.0, bevy 0.19.0, bevy 0.19.0, bevy 0.19.0, bevy 0.19.0, bevy 0.19.0, bevy_a11y 0.19.0, bevy_android 0.19.0, bevy_animation 0.19.0, bevy_animation 0.19.0, bevy_animation_macros 0.19.0, bevy_anti_alias 0.19.0, bevy_app 0.19.0, bevy_asset 0.19.0, bevy_asset 0.19.0, bevy_asset_macros 0.19.0, bevy_audio 0.19.0, bevy_camera 0.19.0, bevy_clipboard 0.19.0, bevy_color 0.19.0, bevy_core_pipeline 0.19.0, bevy_derive 0.19.0, bevy_diagnostic 0.19.0, bevy_ecs 0.19.0, bevy_ecs 0.19.0, bevy_ecs 0.19.0, bevy_ecs_macro_logic 0.19.0, bevy_ecs_macros 0.19.0, bevy_encase_derive 0.19.0, bevy_gilrs 0.19.0, bevy_gizmos 0.19.0, bevy_gizmos 0.19.0, bevy_gizmos_macros 0.19.0, bevy_gizmos_render 0.19.0, bevy_gltf 0.19.0, bevy_image 0.19.0, bevy_input 0.19.0, bevy_input_focus 0.19.0, bevy_internal 0.19.0, bevy_light 0.19.0, bevy_log 0.19.0, bevy_macro_utils 0.19.0, bevy_material 0.19.0, bevy_material 0.19.0, bevy_material_macros 0.19.0, bevy_math 0.19.0, bevy_mesh 0.19.0, bevy_pbr 0.19.0, bevy_picking 0.19.0, bevy_platform 0.19.0, bevy_post_process 0.19.0, bevy_ptr 0.19.0, bevy_reflect 0.19.0, bevy_reflect 0.19.0, bevy_reflect_derive 0.19.0, bevy_render 0.19.0, bevy_render 0.19.0, bevy_render_macros 0.19.0, bevy_scene 0.19.0, bevy_shader 0.19.0, bevy_sprite 0.19.0, bevy_sprite_render 0.19.0, bevy_state 0.19.0, bevy_state 0.19.0, bevy_state_macros 0.19.0, bevy_tasks 0.19.0, bevy_text 0.19.0, bevy_time 0.19.0, bevy_transform 0.19.0, bevy_ui 0.19.0, bevy_ui_render 0.19.0, bevy_ui_widgets 0.19.0, bevy_utils 0.19.0, bevy_window 0.19.0, bevy_winit 0.19.0, bevy_world_serialization 0.19.0, android-activity 0.6.1, atomicow 1.2.0, disqualified 1.0.0, half 2.7.1, linebender_resource_handle 0.1.1, naga_oil 0.22.0, variadics_please 2.0.0
+used-by: bevy 0.20.1, bevy 0.20.1, bevy 0.20.1, bevy 0.20.1, bevy 0.20.1, bevy 0.20.1, bevy 0.20.1, bevy 0.20.1, bevy 0.20.1, bevy 0.20.1, bevy 0.20.1, bevy 0.20.1, bevy 0.20.1, bevy 0.20.1, bevy 0.20.1, bevy 0.20.1, bevy 0.20.1, bevy 0.20.1, bevy 0.20.1, bevy 0.20.1, bevy 0.20.1, bevy 0.20.1, bevy 0.20.1, bevy 0.20.1, bevy 0.20.1, bevy 0.20.1, bevy 0.20.1, bevy 0.20.1, bevy 0.20.1, bevy 0.20.1, bevy 0.20.1, bevy 0.20.1, bevy 0.20.1, bevy 0.20.1, bevy 0.20.1, bevy 0.20.1, bevy 0.20.1, bevy 0.20.1, bevy 0.20.1, bevy 0.20.1, bevy 0.20.1, bevy 0.20.1, bevy 0.20.1, bevy 0.20.1, bevy 0.20.1, bevy 0.20.1, bevy 0.20.1, bevy 0.20.1, bevy 0.20.1, bevy 0.20.1, bevy 0.20.1, bevy 0.20.1, bevy 0.20.1, bevy 0.20.1, bevy 0.20.1, bevy 0.20.1, bevy 0.20.1, bevy 0.20.1, bevy 0.20.1, bevy 0.20.1, bevy 0.20.1, bevy 0.20.1, bevy 0.20.1, bevy 0.20.1, bevy 0.20.1, bevy 0.20.1, bevy 0.20.1, bevy 0.20.1, bevy 0.20.1, bevy 0.20.1, bevy 0.20.1, bevy 0.20.1, bevy 0.20.1, bevy_a11y 0.20.1, bevy_android 0.20.1, bevy_animation 0.20.1, bevy_animation 0.20.1, bevy_animation_macros 0.20.1, bevy_anti_alias 0.20.1, bevy_app 0.20.1, bevy_asset 0.20.1, bevy_asset 0.20.1, bevy_asset_macros 0.20.1, bevy_audio 0.20.1, bevy_camera 0.20.1, bevy_clipboard 0.20.1, bevy_color 0.20.1, bevy_core_pipeline 0.20.1, bevy_curve 0.20.1, bevy_derive 0.20.1, bevy_diagnostic 0.20.1, bevy_ecs 0.20.1, bevy_ecs 0.20.1, bevy_ecs 0.20.1, bevy_ecs_macro_logic 0.20.1, bevy_ecs_macros 0.20.1, bevy_encase_derive 0.20.1, bevy_extract 0.20.1, bevy_extract 0.20.1, bevy_extract_macros 0.20.1, bevy_gilrs 0.20.1, bevy_gizmos 0.20.1, bevy_gizmos 0.20.1, bevy_gizmos_macros 0.20.1, bevy_gizmos_render 0.20.1, bevy_gltf 0.20.1, bevy_image 0.20.1, bevy_input 0.20.1, bevy_input_focus 0.20.1, bevy_internal 0.20.1, bevy_light 0.20.1, bevy_log 0.20.1, bevy_macro_utils 0.20.1, bevy_material 0.20.1, bevy_material 0.20.1, bevy_material_macros 0.20.1, bevy_math 0.20.1, bevy_mesh 0.20.1, bevy_pbr 0.20.1, bevy_picking 0.20.1, bevy_platform 0.20.1, bevy_post_process 0.20.1, bevy_ptr 0.20.1, bevy_reflect 0.20.1, bevy_reflect 0.20.1, bevy_reflect_derive 0.20.1, bevy_render 0.20.1, bevy_render 0.20.1, bevy_render_macros 0.20.1, bevy_scene 0.20.1, bevy_shader 0.20.1, bevy_shape 0.20.1, bevy_sprite 0.20.1, bevy_sprite_render 0.20.1, bevy_state 0.20.1, bevy_state 0.20.1, bevy_state_macros 0.20.1, bevy_tasks 0.20.1, bevy_text 0.20.1, bevy_time 0.20.1, bevy_transform 0.20.1, bevy_ui 0.20.1, bevy_ui_render 0.20.1, bevy_ui_widgets 0.20.1, bevy_utils 0.20.1, bevy_window 0.20.1, bevy_winit 0.20.1, bevy_world_serialization 0.20.1, android-activity 0.6.1, atomicow 1.2.0, bevy_curve 0.20.1, bevy_macro_utils 0.19.1, half 2.7.1, linebender_resource_handle 0.1.1, variadics_please 2.0.0
 
 MIT License
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-
-=== LICENSE MIT === MIT License ===
-used-by: grid 1.0.1
-
-MIT License
-
-Copyright (c) 2020 Armin Becher
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -12245,7 +11994,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: variadics_please 1.1.0
+used-by: disqualified 1.1.0
 
 MIT License
 
@@ -12291,7 +12040,7 @@ WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF
 OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: async-recursion 1.1.1, rustc-hash 2.1.3
+used-by: rustc-hash 2.1.3
 
 Permission is hereby granted, free of charge, to any
 person obtaining a copy of this software and associated
@@ -12317,60 +12066,7 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 === LICENSE MIT === MIT License ===
-used-by: adler2 2.0.1, anyhow 1.0.104, async-channel 2.5.0, async-executor 1.14.0, async-fs 2.2.0, async-io 2.6.0, async-lock 3.4.2, async-process 2.5.0, async-signal 0.2.14, async-task 4.7.1, async-trait 0.1.92, atomic-waker 1.1.2, blocking 1.6.2, camino 1.2.4, cargo-platform 0.3.3, cargo_metadata 0.23.1, concurrent-queue 2.5.0, ctrlc 3.5.2, displaydoc 0.2.6, dtoa 1.0.11, endi 1.1.1, erased-serde 0.4.10, evdev 0.13.2, event-listener-strategy 0.5.4, event-listener 5.4.2, fastrand 2.5.0, futures-lite 2.6.1, glam 0.32.1, gstreamer-app-sys 0.24.5, gstreamer-app 0.24.5, gstreamer-base-sys 0.24.5, gstreamer-base 0.24.5, gstreamer-sys 0.24.5, gstreamer-video-sys 0.24.5, gstreamer-video 0.24.5, gstreamer 0.24.5, hermit-abi 0.5.2, hexasphere 18.0.0, home 0.5.12, inventory 0.3.24, itoa 1.0.18, khronos-egl 6.0.0, linux-raw-sys 0.12.1, linux-raw-sys 0.4.15, lsp-server 0.9.0, num_enum 0.7.6, num_enum_derive 0.7.6, once_cell 1.21.4, option-operations 0.6.1, ordered-stream 0.2.0, parking 2.2.1, paste 1.0.15, pastey 0.1.1, pastey 0.2.3, pin-project-internal 1.1.13, pin-project-lite 0.2.17, pin-project 1.1.13, piper 0.2.5, polling 3.11.0, portable-atomic-util 0.2.7, portable-atomic 1.14.0, proc-macro-crate 3.5.0, proc-macro2 1.0.107, quote 1.0.47, ratelimit 2.0.0, rustc-hash 1.1.0, rustix 0.38.44, rustix 1.1.4, rustversion 1.0.23, semver 1.0.28, send_wrapper 0.6.0, serde 1.0.229, serde_core 1.0.229, serde_derive 1.0.229, serde_json 1.0.151, serde_repr 0.1.21, serde_yaml 0.9.34+deprecated, servo_arc 0.4.3, simd_cesu8 1.2.0, smol_str 0.2.2, syn 1.0.109, syn 2.0.119, syn 3.0.0, system-deps 7.0.8, thiserror-impl 1.0.69, thiserror-impl 2.0.19, thiserror 1.0.69, thiserror 2.0.19, typeid 1.0.3, unic-langid-impl 0.9.6, unic-langid-macros-impl 0.9.6, unic-langid-macros 0.9.6, unic-langid 0.9.6, unicode-ident 1.0.24, unsafe-libyaml 0.2.11, unsynn 0.3.0, utf8-zero 0.8.1, wasi 0.11.1+wasi-snapshot-preview1, wasip2 1.0.4+wasi-0.2.12, wit-bindgen 0.57.1, x11-dl 2.21.0, zbus-lockstep-macros 0.5.2, zbus-lockstep 0.5.2, zmij 1.0.23, zvariant_utils 4.2.0
-
-Permission is hereby granted, free of charge, to any
-person obtaining a copy of this software and associated
-documentation files (the "Software"), to deal in the
-Software without restriction, including without
-limitation the rights to use, copy, modify, merge,
-publish, distribute, sublicense, and/or sell copies of
-the Software, and to permit persons to whom the Software
-is furnished to do so, subject to the following
-conditions:
-
-The above copyright notice and this permission notice
-shall be included in all copies or substantial portions
-of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
-ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
-TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
-PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
-SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
-CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
-OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
-IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-DEALINGS IN THE SOFTWARE.
-
-=== LICENSE MIT === MIT License ===
-used-by: glow 0.17.0
-
-Permission is hereby granted, free of charge, to any
-person obtaining a copy of this software and associated
-documentation files (the "Software"), to deal in the
-Software without restriction, including without
-limitation the rights to use, copy, modify, merge,
-publish, distribute, sublicense, and/or sell copies of
-the Software, and to permit persons to whom the Software
-is furnished to do so, subject to the following
-conditions:
-
-The above copyright notice and this permission notice
-shall be included in all copies or substantial portions
-of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
-ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
-TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
-PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
-SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
-CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
-OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
-IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-DEALINGS IN THE SOFTWARE.
-=== LICENSE MIT === MIT License ===
-used-by: allocator-api2 0.2.21, fs-err 3.3.1, glamx 0.2.0
+used-by: adler2 2.0.1, anyhow 1.0.104, async-channel 2.5.0, async-executor 1.14.1, async-fs 2.2.0, async-io 2.6.0, async-lock 3.5.0, async-process 2.5.0, async-signal 0.2.14, async-task 4.7.1, async-trait 0.1.92, atomic-waker 1.1.2, blocking 1.7.0, camino 1.2.6, cargo-platform 0.3.3, cargo_metadata 0.23.1, concurrent-queue 2.5.0, ctrlc 3.5.3, displaydoc 0.2.7, dtoa 1.0.11, endi 1.1.1, erased-serde 0.4.11, evdev 0.13.2, event-listener-strategy 0.5.4, event-listener 5.4.2, fastrand 2.5.0, futures-lite 2.6.1, glam 0.33.12, glamx 0.3.1, gstreamer-app-sys 0.25.4, gstreamer-app 0.25.2, gstreamer-base-sys 0.25.4, gstreamer-base 0.25.4, gstreamer-sys 0.25.4, gstreamer-video-sys 0.25.4, gstreamer-video 0.25.4, gstreamer 0.25.4, hermit-abi 0.5.3, hexasphere 19.0.0, home 0.5.12, inventory 0.3.25, itoa 1.0.19, khronos-egl 6.0.0, lazy_static 1.5.1, lexical-core 1.0.6, lexical-parse-float 1.0.6, lexical-parse-integer 1.0.6, lexical-util 1.0.7, lexical-write-float 1.0.6, lexical-write-integer 1.0.6, lexical 7.0.5, linux-raw-sys 0.12.1, linux-raw-sys 0.4.15, lsp-server 0.10.0, num_enum 0.7.6, num_enum_derive 0.7.6, once_cell 1.21.4, option-operations 0.6.1, ordered-stream 0.2.0, parking 2.2.1, paste 1.0.15, pastey 0.1.1, pastey 0.2.3, pin-project-internal 1.2.0, pin-project-lite 0.2.18, pin-project 1.2.0, piper 0.2.5, polling 3.11.0, portable-atomic-util 0.2.8, portable-atomic 1.15.0, proc-macro-crate 3.5.0, proc-macro2 1.0.107, quote 1.0.47, ratelimit 2.0.0, rustc-hash 1.1.0, rustix 0.38.44, rustix 1.1.6, rustversion 1.0.23, semver 1.0.28, send_wrapper 0.6.0, serde 1.0.229, serde_core 1.0.229, serde_derive 1.0.229, serde_json 1.0.154, serde_repr 0.1.21, serde_yaml 0.9.34+deprecated, servo_arc 0.4.3, simd_cesu8 1.2.0, smol_str 0.2.2, syn 1.0.109, syn 2.0.119, syn 3.0.10, system-deps 9.0.1, thiserror-impl 1.0.69, thiserror-impl 2.0.21, thiserror 1.0.69, thiserror 2.0.21, typeid 1.0.3, unic-langid-impl 0.9.6, unic-langid-macros-impl 0.9.6, unic-langid-macros 0.9.6, unic-langid 0.9.6, unicode-ident 1.0.27, unsafe-libyaml 0.2.11, unsynn 0.3.0, utf8-zero 0.8.1, wasi 0.11.1+wasi-snapshot-preview1, wasip2 1.0.4+wasi-0.2.12, wit-bindgen 0.57.1, x11-dl 2.21.0, zbus-lockstep-macros 0.5.2, zbus-lockstep 0.5.2, zmij 1.0.23, zvariant_utils 4.2.0
 
 Permission is hereby granted, free of charge, to any
 person obtaining a copy of this software and associated
@@ -12397,7 +12093,60 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: winnow 0.7.15, winnow 1.0.4
+used-by: async-recursion 1.2.0, glow 0.17.0
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+=== LICENSE MIT === MIT License ===
+used-by: allocator-api2 0.2.21, fs-err 3.3.2
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+
+=== LICENSE MIT === MIT License ===
+used-by: winnow 0.7.15, winnow 1.0.5
 
 Permission is hereby granted, free of charge, to any person obtaining
 a copy of this software and associated documentation files (the
@@ -12440,7 +12189,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE
 
 === LICENSE MIT === MIT License ===
-used-by: emojis 0.8.2, raw-window-metal 1.1.0
+used-by: emojis 0.9.1, raw-window-metal 1.1.0, siphasher 1.0.4
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -12461,7 +12210,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: gio-sys 0.21.5, glib-macros 0.21.5, glib-sys 0.21.5, glib 0.21.5, gobject-sys 0.21.5
+used-by: gio-sys 0.22.11, glib-macros 0.22.11, glib-sys 0.22.11, glib 0.22.11, gobject-sys 0.22.9
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -12504,7 +12253,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: tinyvec 1.12.0
+used-by: tinyvec 1.13.3
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
 
@@ -12539,7 +12288,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: android_system_properties 0.1.5
+used-by: android_system_properties 0.1.6
 
 The MIT License (MIT)
 
@@ -12563,7 +12312,7 @@ IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: spin 0.10.1
+used-by: spin 0.12.3
 
 The MIT License (MIT)
 
@@ -12637,7 +12386,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: xml-rs 0.8.28
+used-by: xml-rs 0.8.29
 
 The MIT License (MIT)
 
@@ -12686,7 +12435,7 @@ IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: endian-type 0.1.2
+used-by: endian-type 0.2.0
 
 The MIT License (MIT)
 
@@ -12712,32 +12461,7 @@ SOFTWARE.
 
 
 === LICENSE MIT === MIT License ===
-used-by: base64 0.22.1
-
-The MIT License (MIT)
-
-Copyright (c) 2015 Alice Maz
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-
-=== LICENSE MIT === MIT License ===
-used-by: aho-corasick 1.1.4, byteorder-lite 0.1.0, byteorder 1.5.0, jiff-core 0.1.0, jiff-tzdb-platform 0.1.3, jiff-tzdb 0.1.8, jiff 0.2.35, memchr 2.8.3, termcolor 1.4.1, walkdir 2.5.0
+used-by: aho-corasick 1.1.5, byteorder-lite 0.1.0, byteorder 1.5.0, jiff-core 1.0.1, jiff-tzdb-platform 1.0.0, jiff-tzdb 1.0.0, jiff 1.0.2, memchr 2.8.3, walkdir 2.5.1
 
 The MIT License (MIT)
 
@@ -12762,7 +12486,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: nix 0.29.0, nix 0.30.1, nix 0.31.3
+used-by: nix 0.29.0, nix 0.31.4, nix 0.32.0
 
 The MIT License (MIT)
 
@@ -12814,31 +12538,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: raw-cpuid 11.6.0
-
-The MIT License (MIT)
-
-Copyright (c) 2015 Gerd Zellweger
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-=== LICENSE MIT === MIT License ===
-used-by: sysinfo 0.38.4
+used-by: sysinfo 0.39.6
 
 The MIT License (MIT)
 
@@ -12864,7 +12564,7 @@ SOFTWARE.
 
 
 === LICENSE MIT === MIT License ===
-used-by: twox-hash 2.1.3
+used-by: twox-hash 2.1.5
 
 The MIT License (MIT)
 
@@ -12889,7 +12589,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: rustyline 17.0.2
+used-by: rustyline 19.0.0
 
 The MIT License (MIT)
 
@@ -12915,7 +12615,7 @@ THE SOFTWARE.
 
 
 === LICENSE MIT === MIT License ===
-used-by: combine 4.6.7
+used-by: combine 4.6.9
 
 The MIT License (MIT)
 
@@ -12941,7 +12641,7 @@ THE SOFTWARE.
 
 
 === LICENSE MIT === MIT License ===
-used-by: nibble_vec 0.1.0, radix_trie 0.2.1
+used-by: nibble_vec 0.1.0, radix_trie 0.3.0
 
 The MIT License (MIT)
 
@@ -12989,32 +12689,6 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
-
-=== LICENSE MIT === MIT License ===
-used-by: fsevent-sys 4.1.0
-
-The MIT License (MIT)
-
-Copyright (c) 2015 Pierre Baillet
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-
 
 === LICENSE MIT === MIT License ===
 used-by: imageproc 0.27.0
@@ -13142,33 +12816,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: data-encoding 2.11.0
-
-The MIT License (MIT)
-
-Copyright (c) 2015-2020 Julien Cretin
-Copyright (c) 2017-2020 Google Inc.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-
-=== LICENSE MIT === MIT License ===
-used-by: aws-lc-sys 0.45.0
+used-by: aws-lc-sys 0.47.0
 
 The MIT License (MIT)
 
@@ -13219,6 +12867,33 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 === LICENSE MIT === MIT License ===
+used-by: quick-xml 0.42.0
+
+The MIT License (MIT)
+
+Copyright (c) 2016 Johann Tuffe
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+
+=== LICENSE MIT === MIT License ===
 used-by: lsp-types 0.97.0
 
 The MIT License (MIT)
@@ -13245,7 +12920,7 @@ THE SOFTWARE.
 
 
 === LICENSE MIT === MIT License ===
-used-by: bit_field 0.10.3
+used-by: bit_field 0.10.4
 
 The MIT License (MIT)
 
@@ -13370,7 +13045,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: console 0.16.4, indicatif 0.18.6
+used-by: console 0.16.6, indicatif 0.18.6
 
 The MIT License (MIT)
 
@@ -13396,7 +13071,7 @@ SOFTWARE.
 
 
 === LICENSE MIT === MIT License ===
-used-by: redox_users 0.5.2
+used-by: redox_users 0.5.3
 
 The MIT License (MIT)
 
@@ -13449,7 +13124,7 @@ SOFTWARE.
 
 
 === LICENSE MIT === MIT License ===
-used-by: roxmltree 0.20.0, roxmltree 0.21.1
+used-by: roxmltree 0.21.2
 
 The MIT License (MIT)
 
@@ -13474,7 +13149,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: bstr 1.13.1
+used-by: bstr 1.14.0
 
 The MIT License (MIT)
 
@@ -13499,7 +13174,31 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: crossbeam-channel 0.5.16, crossbeam-deque 0.8.7, crossbeam-epoch 0.9.20, crossbeam-queue 0.3.13, crossbeam-utils 0.8.22
+used-by: guillotiere 0.7.0
+
+The MIT License (MIT)
+
+Copyright (c) 2019 Nicolas Silva
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the "Software"), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software is furnished to do so,
+subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+=== LICENSE MIT === MIT License ===
+used-by: crossbeam-channel 0.5.17, crossbeam-deque 0.8.8, crossbeam-epoch 0.9.21, crossbeam-queue 0.3.14, crossbeam-utils 0.8.23
 
 The MIT License (MIT)
 
@@ -13528,31 +13227,6 @@ CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
-
-=== LICENSE MIT === MIT License ===
-used-by: fd-lock 4.0.4
-
-The MIT License (MIT)
-
-Copyright (c) 2019 Yoshua Wuyts
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
 
 === LICENSE MIT === MIT License ===
 used-by: async-broadcast 0.7.2
@@ -13605,7 +13279,32 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: harfrust 0.6.2
+used-by: base64 0.23.1
+
+The MIT License (MIT)
+
+Copyright (c) 2025 Alice Maz, Marshall Pierce
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+
+=== LICENSE MIT === MIT License ===
+used-by: harfrust 0.12.0
 
 The MIT License (MIT)
 
@@ -13806,7 +13505,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: quick-xml 0.39.4, quick-xml 0.41.0
+used-by: quick-xml 0.41.0
 
 The MIT License (MIT)
 
@@ -13868,7 +13567,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 === LICENSE MIT-0 === MIT No Attribution ===
-used-by: dunce 1.0.5, encase_derive 0.12.0, encase_derive_impl 0.12.0
+used-by: dunce 1.0.5, encase_derive 0.12.1, encase_derive_impl 0.12.1
 
 MIT No Attribution
 
@@ -13888,7 +13587,7 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
 SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 === LICENSE MIT-0 === MIT No Attribution ===
-used-by: encase 0.12.0
+used-by: encase 0.12.1
 
 MIT No Attribution
 
@@ -13926,7 +13625,7 @@ TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
 SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 === LICENSE MPL-2.0 === Mozilla Public License 2.0 ===
-used-by: triple_buffer 9.0.0
+used-by: triple_buffer 9.0.1
 
 Mozilla Public License Version 2.0
 ==================================
@@ -14679,7 +14378,7 @@ Exhibit B - "Incompatible With Secondary Licenses" Notice
   defined by the Mozilla Public License, v. 2.0.
 
 === LICENSE MPL-2.0 === Mozilla Public License 2.0 ===
-used-by: symphonia-codec-pcm 0.6.0, symphonia-codec-vorbis 0.6.0, symphonia-common 0.6.0, symphonia-core 0.6.0, symphonia-format-ogg 0.6.0, symphonia-format-riff 0.6.0, symphonia-metadata 0.6.0, symphonia 0.6.0
+used-by: symphonia-codec-pcm 0.6.1, symphonia-codec-vorbis 0.6.1, symphonia-common 0.6.1, symphonia-core 0.6.1, symphonia-format-ogg 0.6.1, symphonia-format-riff 0.6.1, symphonia-metadata 0.6.1, symphonia 0.6.1
 
 Mozilla Public License Version 2.0
 ==================================
@@ -15055,7 +14754,7 @@ Exhibit B - "Incompatible With Secondary Licenses" Notice
   This Source Code Form is "Incompatible With Secondary Licenses", as
   defined by the Mozilla Public License, v. 2.0.
 === LICENSE MPL-2.0 === Mozilla Public License 2.0 ===
-used-by: cssparser-color 0.5.0, cssparser-macros 0.7.0, cssparser 0.37.0
+used-by: cssparser-color 0.5.0, cssparser-macros 0.7.1, cssparser 0.37.0
 
 Mozilla Public License Version 2.0
 ==================================
@@ -15828,7 +15527,7 @@ Permission is hereby granted, free of charge, to any person obtaining a copy of 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE CONTRIBUTORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS WITH THE SOFTWARE.
 
 === LICENSE Unicode-3.0 === Unicode License v3 ===
-used-by: emojis 0.8.2, unicode-ident 1.0.24
+used-by: emojis 0.9.1, unicode-ident 1.0.27
 
 UNICODE LICENSE V3
 
@@ -15871,7 +15570,7 @@ dealings in these Data Files or Software without prior written
 authorization of the copyright holder.
 
 === LICENSE Unicode-3.0 === Unicode License v3 ===
-used-by: fixed_decimal 0.7.2, icu_calendar 2.2.1, icu_calendar_data 2.2.0, icu_collections 2.2.0, icu_datetime 2.2.0, icu_datetime_data 2.2.0, icu_decimal 2.2.0, icu_decimal_data 2.2.0, icu_locale 2.2.0, icu_locale_core 2.2.0, icu_locale_data 2.2.0, icu_normalizer 2.2.0, icu_normalizer_data 2.2.0, icu_pattern 0.4.2, icu_plurals 2.2.0, icu_plurals_data 2.2.0, icu_properties 2.2.0, icu_properties_data 2.2.0, icu_provider 2.2.0, icu_segmenter 2.2.0, icu_segmenter_data 2.2.0, icu_time 2.2.0, icu_time_data 2.2.1, ixdtf 0.6.5, litemap 0.8.2, potential_utf 0.1.5, tinystr 0.8.3, writeable 0.6.3, yoke-derive 0.8.2, yoke 0.8.3, zerofrom-derive 0.1.7, zerofrom 0.1.8, zerotrie 0.2.4, zerovec-derive 0.11.3, zerovec 0.11.6
+used-by: fixed_decimal 0.7.3, icu_calendar 2.4.0, icu_calendar_data 2.4.0, icu_collections 2.4.0, icu_datetime 2.4.0, icu_datetime_data 2.4.0, icu_decimal 2.4.0, icu_decimal_data 2.4.0, icu_locale_core 2.4.0, icu_locale_fallback 2.4.0, icu_locale_fallback_data 2.4.0, icu_normalizer 2.4.0, icu_normalizer_data 2.4.0, icu_pattern 0.5.1, icu_plurals 2.4.0, icu_plurals_data 2.4.0, icu_properties 2.4.0, icu_properties_data 2.4.0, icu_provider 2.4.0, icu_segmenter 2.4.0, icu_segmenter_data 2.4.0, icu_time 2.4.0, icu_time_data 2.4.0, ixdtf 0.6.7, litemap 0.8.3, potential_utf 0.1.6, tinystr 0.8.5, writeable 0.6.4, yoke-derive 0.8.4, yoke 0.8.4, zerofrom-derive 0.1.8, zerofrom 0.1.8, zerotrie 0.2.5, zerovec-derive 0.11.7, zerovec 0.11.9
 
 UNICODE LICENSE V3
 
@@ -15921,7 +15620,7 @@ Portions of ICU4X may have been adapted from ICU4C and/or ICU4J.
 ICU 1.8.1 to ICU 57.1 © 1995-2016 International Business Machines Corporation and others.
 
 === LICENSE Zlib === zlib License ===
-used-by: const_panic 0.2.15
+used-by: const_panic 0.2.17
 
 Copyright (c) 2021 Matias Rodriguez.
 
@@ -16047,7 +15746,7 @@ Permission is granted to anyone to use this software for any purpose, including 
      3. This notice may not be removed or altered from any source distribution.
 
 === LICENSE bzip2-1.0.6 === bzip2 and libbzip2 License v1.0.6 ===
-used-by: libbz2-rs-sys 0.2.5
+used-by: libbz2-rs-sys 0.2.7
 
 
 --------------------------------------------------------------------------

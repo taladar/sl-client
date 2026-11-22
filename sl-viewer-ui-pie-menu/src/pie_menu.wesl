@@ -17,8 +17,7 @@
 // only cursor — see `crate::pie_menu`'s placement section for why the reference's
 // pointer warp does not port, and what was given up instead.
 
-#import bevy_ui::ui_vertex_output::UiVertexOutput
-
+import bevy_ui_render::ui_vertex_output::UiVertexOutput;
 struct PieParams {
     // The ring's resting fill.
     background: vec4<f32>,

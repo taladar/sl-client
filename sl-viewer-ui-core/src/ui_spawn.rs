@@ -129,19 +129,17 @@ impl UiLabel {
 
 /// Which button component the spawned box carries.
 ///
-/// Two different `Button` types are in play in `bevy` 0.19 and a panel means
-/// one or the other, so the choice is explicit rather than guessed.
+/// A panel either observes the pointer on a plain box or wants the headless
+/// widget's `Activate`, so the choice is explicit rather than guessed.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ButtonKind {
-    /// `bevy_ui`'s [`Button`] marker: requires `Interaction` and a blocking
-    /// focus policy, and is what a panel observing `Pointer<Press>` wants.
-    #[default]
-    Interaction,
     /// `bevy_ui_widgets`' headless button: keeps a pressed state and emits
-    /// `Activate` when released, for a panel that observes that instead.
+    /// `Activate` when released, for a panel that observes that.
     Headless,
-    /// No button component at all — a plain clickable box, which is what the
-    /// flat action columns (People, Groups, My Environments) are.
+    /// No button component at all — a plain clickable box, for a panel
+    /// observing `PointerPress`. The skin gives it its hover and press states
+    /// from its classes.
+    #[default]
     Plain,
 }
 
@@ -227,7 +225,7 @@ impl ButtonSpec {
             label,
             name: name.into(),
             tab_index: None,
-            kind: ButtonKind::Interaction,
+            kind: ButtonKind::Plain,
             node: Node {
                 padding: UiRect::axes(Val::Px(BORDERED_PADDING.0), Val::Px(BORDERED_PADDING.1)),
                 border: UiRect::all(Val::Px(1.0)),
@@ -435,9 +433,6 @@ pub fn spawn_button(commands: &mut Commands, parent: Entity, spec: ButtonSpec) -
         ChildOf(parent),
     ));
     match spec.kind {
-        ButtonKind::Interaction => {
-            button.insert(Button);
-        }
         ButtonKind::Headless => {
             button.insert(bevy::ui_widgets::Button);
         }
@@ -771,7 +766,11 @@ mod tests {
             )
         });
         let world = app.world();
-        assert!(world.get::<Button>(spawned.button).is_some());
+        assert!(
+            world
+                .get::<bevy::ui_widgets::Button>(spawned.button)
+                .is_none()
+        );
         assert_eq!(
             world.get::<TabIndex>(spawned.button).map(|index| index.0),
             Some(7)
@@ -919,7 +918,11 @@ mod tests {
             )
         });
         let world = app.world();
-        assert!(world.get::<Button>(spawned.button).is_none());
+        assert!(
+            world
+                .get::<bevy::ui_widgets::Button>(spawned.button)
+                .is_none()
+        );
         assert!(world.get::<TabIndex>(spawned.button).is_none());
         let node = world
             .get::<Node>(spawned.button)

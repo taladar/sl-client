@@ -25,6 +25,7 @@ use bevy::camera::primitives::Aabb;
 use bevy::mesh::skinning::{SkinnedMesh, SkinnedMeshInverseBindposes};
 use bevy::pbr::ExternallyPosedSkin;
 use bevy::prelude::*;
+use bevy::render::RenderApp;
 use bevy::render::extract_resource::ExtractResource;
 use sl_client_bevy::{AssetKey, SkeletalDeformations, VolumeDeformations};
 
@@ -455,7 +456,7 @@ pub(crate) struct GpuAvatarStaging {
     pub(crate) param_flags: u32,
 }
 
-impl ExtractResource for GpuAvatarStaging {
+impl ExtractResource<RenderApp> for GpuAvatarStaging {
     type Source = Self;
 
     fn extract_resource(source: &Self) -> Self {

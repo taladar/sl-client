@@ -491,7 +491,7 @@ struct AvatarPickOut<'w> {
 
 /// Act on a press of one of a window's buttons, in the window it was pressed in.
 fn on_picker_button(
-    press: On<Pointer<Press>>,
+    press: On<PointerPress>,
     buttons: Query<&PickerButton>,
     mut windows: Query<(&mut AvatarPickerState, &AvatarPickerUi)>,
     host: FloaterHost,
@@ -927,7 +927,7 @@ fn spawn_picker_rows(
         let is_selected = selected.contains(&index);
         commands
             .spawn((
-                Button,
+                bevy::picking::hover::Hovered::default(),
                 Node {
                     padding: UiRect::axes(Val::Px(6.0), Val::Px(2.0)),
                     align_items: AlignItems::Center,
@@ -941,7 +941,7 @@ fn spawn_picker_rows(
                 ChildOf(list),
             ))
             .observe(
-                move |press: On<Pointer<Press>>,
+                move |press: On<PointerPress>,
                       keyboard: Res<ButtonInput<KeyCode>>,
                       mut windows: Query<&mut AvatarPickerState>,
                       parents: Query<&ChildOf>,

@@ -156,7 +156,7 @@ profile-chrome = ["bevy/trace", "bevy/trace_chrome", "dep:tracing-chrome"]
 # our `TracyLayer` and Bevy's memory allocator / frame marks share a client.
 # The raw wgpu value types Bevy does not re-export (the GPU pick pass's
 # sequence-carrying clear color) — the same pin `sl-client-bevy` uses.
-bevy = { version = "0.19.0", features = [
+bevy = { version = "0.20.1", features = [
   # The asset watcher behind `--watch-skins` (and the gallery, which always
   # watches): without it Bevy accepts `watch_for_changes_override` and watches
   # nothing. Off at run time unless asked.
@@ -168,7 +168,7 @@ bevy = { version = "0.19.0", features = [
   "system_font_discovery",
   "track_location",
 ] }
-bevy_flair = { version = "0.8.0" }
+bevy_flair = { version = "0.9.0" }
 clap = { workspace = true, features = ["cargo", "derive", "env"] }
 fluent = { version = "0.16.1" }
 fluent_content = { version = "0.0.5" }
@@ -179,7 +179,7 @@ image = { version = "0.25.10", default-features = false, features = [
   "png",
   "tga",
 ] }
-jiff = { version = "0.2.35" }
+jiff = { version = "1.0.2" }
 # The login screen's own grids file (`grids.toml`).
 serde = { workspace = true, features = ["derive"] }
 sl-account-dirs = { workspace = true }
@@ -241,9 +241,9 @@ sl-viewer-world-view = { workspace = true }
 thiserror = { workspace = true }
 toml = { workspace = true }
 tracing = { workspace = true }
-tracing-chrome = { version = "0.7.0", optional = true }
+tracing-chrome = { version = "0.7.2", optional = true }
 tracing-subscriber = { workspace = true, features = ["env-filter", "tracing-log"] }
-tracing-tracy = { version = "0.11.4", optional = true }
+tracing-tracy = { version = "0.12.0", optional = true }
 unic-langid = { version = "0.9.6", features = ["macros"] }
 url = { workspace = true }
 
@@ -251,7 +251,7 @@ url = { workspace = true }
 # leaves off by default; the Windows and macOS adapters are always compiled in.
 # Merged with the `bevy` dependency above.
 [target.'cfg(target_os = "linux")'.dependencies]
-bevy = { version = "0.19.0", features = ["accesskit_unix"] }
+bevy = { version = "0.20.1", features = ["accesskit_unix"] }
 
 [build-dependencies]
 fs-err = { workspace = true }

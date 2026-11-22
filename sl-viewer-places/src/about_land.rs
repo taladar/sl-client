@@ -3537,7 +3537,7 @@ fn on_about_land_check(
 
 /// Dispatch a floater button press, in the window it was pressed in.
 fn on_about_land_action(
-    press: On<Pointer<Press>>,
+    press: On<PointerPress>,
     actions: Query<&AboutLandAction>,
     mut windows: Query<(&mut AboutLandState, &AboutLandUi)>,
     host: FloaterHost,
@@ -3638,7 +3638,7 @@ fn on_about_land_action(
 /// Resolve and act on a per-row access Remove press, in the window it was
 /// pressed in.
 fn on_remove_access(
-    press: On<Pointer<Press>>,
+    press: On<PointerPress>,
     buttons: Query<&RemoveAccessButton>,
     rows: Query<&VirtualRow>,
     mut windows: Query<(&AllowView, &BanView, &mut AboutLandState)>,

@@ -25,8 +25,7 @@
 // `gExposureProgramNoFade` path / `SL_VIEWER_EXPOSURE_NO_FADE`) skips the ease for a
 // deterministic single-frame capture.
 
-#import bevy_core_pipeline::fullscreen_vertex_shader::FullscreenVertexOutput
-
+import bevy_core_pipeline::fullscreen_vertex_shader::FullscreenVertexOutput;
 struct SlExposure {
     // The reference `generateExposure` exposure floor (`exp_min`): the scale a
     // bright frame is pulled down to (`1 / hdr_scale` for an EEP sky, `1` legacy).

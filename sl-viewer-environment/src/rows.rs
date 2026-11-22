@@ -22,7 +22,7 @@ use sl_viewer_ui_core::semantic::LabelledBy;
 use sl_viewer_ui_core::skin::{ACTION_BUTTON_CLASS, TEXT_CLASS, text_role};
 use sl_viewer_ui_core::ui::{LogicalMargin, LogicalRect, column, row};
 use sl_viewer_ui_core::ui_font::UiFont;
-use sl_viewer_ui_core::ui_spawn::{self, ButtonKind, ButtonSpec, UiLabel};
+use sl_viewer_ui_core::ui_spawn::{self, ButtonSpec, UiLabel};
 use sl_viewer_ui_widgets::ui_color_picker::spawn_color_swatch;
 use sl_viewer_ui_widgets::ui_slider::{
     SliderFormat, SliderLabels, SliderStyle, SliderWidgetPlugin, spawn_slider,
@@ -358,7 +358,6 @@ pub fn spawn_action_button(
         commands,
         parent,
         ButtonSpec::flat(UiLabel::Key(label_key), format!("{element}-{slug}:button"))
-            .kind(ButtonKind::Interaction)
             .tab_from(tab)
             .padding(10.0, 4.0)
             .colors(ACTION_BACKGROUND, ACTION_BACKGROUND)

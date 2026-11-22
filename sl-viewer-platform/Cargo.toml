@@ -24,25 +24,25 @@ ignored = ["arboard"]
 # through XWayland on a Wayland desktop. Named here only to unify the Wayland
 # data-control protocol onto Bevy's copy. Default features off: `image-data`
 # drags in the AVIF encoder stack for image clipboards the viewer does not use.
-arboard = { version = "3.6.1", default-features = false, features = [
+arboard = { version = "3.7.0", default-features = false, features = [
   "wayland-data-control",
 ] }
 # Not a workspace dependency: members disagree about `default-features`, so the
 # spec stays per-crate (see the root manifest).
-bevy = { version = "0.19.0" }
+bevy = { version = "0.20.1" }
 directories = { version = "6.0.0" }
 fs-err = { workspace = true }
 # Local (system-timezone) time: the zone captured once at startup for every
 # surface that renders a stored timestamp as a local date (`local_time`).
-jiff = { version = "0.2.35" }
-regex = { version = "1.13.1" }
+jiff = { version = "1.0.2" }
+regex = { version = "1.13.2" }
 # The host's file-open dialog. `xdg-portal` only: under Wayland the chooser has
 # to come from `org.freedesktop.portal.FileChooser` (with a `zenity` fallback),
 # and on Windows / macOS `rfd` uses the native dialog regardless of this
 # feature. The default `wayland` feature is off because it only serves
 # `set_parent`, which this workspace cannot call — Bevy hands out a window
 # handle through an `unsafe fn` and `unsafe_code` is forbidden here.
-rfd = { version = "0.17.2", default-features = false, features = ["xdg-portal"] }
+rfd = { version = "0.18.0", default-features = false, features = ["xdg-portal"] }
 sl-audio = { path = "../sl-audio", version = "0.1.0" }
 sl-client-bevy = { workspace = true }
 thiserror = { workspace = true }

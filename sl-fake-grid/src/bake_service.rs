@@ -339,7 +339,7 @@ fn bake_id(region: BakeRegion, texture_ids: &[Uuid], visual_params: &[u8]) -> Uu
         context.consume(id.as_bytes());
     }
     context.consume(visual_params);
-    Uuid::from_bytes(context.compute().0)
+    Uuid::from_bytes(context.finalize().0)
 }
 
 /// The outfit the Current Outfit Folder of `inventory` holds: each wearable

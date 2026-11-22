@@ -15,7 +15,7 @@ publish = { workspace = true }
 exclude = { workspace = true }
 
 [dependencies]
-bevy = { version = "0.19.0", default-features = false }
+bevy = { version = "0.20.1", default-features = false }
 clap = { workspace = true, features = ["cargo", "derive", "env"] }
 clap_complete = { workspace = true }
 clap_mangen = { workspace = true }

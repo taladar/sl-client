@@ -44,7 +44,6 @@ use bevy::input_focus::{FocusedInput, InputFocus};
 use bevy::prelude::*;
 use bevy::text::{EditableText, EditableTextSystems, TextEdit};
 use bevy::ui::UiSystems;
-use bevy::ui::widget::TextScroll;
 use bevy::ui_widgets::popover::{Popover, PopoverAlign, PopoverPlacement, PopoverSide};
 use bevy_flair::style::components::ClassList;
 use sl_highlight::{CodeAssist, Completion, Completions, Hover, Note, Signature};
@@ -642,7 +641,7 @@ fn on_code_assist_key(
 /// A press on a list row accepts its entry, and gives the keyboard back to the
 /// editor.
 fn on_assist_row_press(
-    mut press: On<Pointer<Press>>,
+    mut press: On<PointerPress>,
     rows: Query<&AssistRow>,
     mut states: Query<&mut CodeAssistState>,
     mut focus: ResMut<InputFocus>,
@@ -765,7 +764,7 @@ fn update_code_assist(
 
 /// Follow the pointer over a code editor's text.
 fn on_assist_pointer_move(
-    event: On<Pointer<Move>>,
+    event: On<PointerMove>,
     time: Res<Time>,
     mut states: Query<&mut CodeAssistState>,
 ) {
@@ -773,7 +772,7 @@ fn on_assist_pointer_move(
         return;
     };
     let hover = &mut state.hover;
-    hover.pointer = Some(event.pointer_location.position);
+    hover.pointer = Some(event.pointer.position);
     hover.moved_at = time.elapsed_secs();
     hover.moved = true;
     hover.looked_up = false;
@@ -782,14 +781,14 @@ fn on_assist_pointer_move(
 
 /// The pointer coming onto a code editor's text, or one of its styled runs —
 /// which is a move off the text and back on in the same frame.
-fn on_assist_pointer_over(event: On<Pointer<Over>>, mut states: Query<&mut CodeAssistState>) {
+fn on_assist_pointer_over(event: On<PointerOver>, mut states: Query<&mut CodeAssistState>) {
     if let Ok(mut state) = states.get_mut(event.entity) {
         state.hover.left = false;
     }
 }
 
 /// The pointer leaving a code editor's text.
-fn on_assist_pointer_out(event: On<Pointer<Out>>, mut states: Query<&mut CodeAssistState>) {
+fn on_assist_pointer_out(event: On<PointerOut>, mut states: Query<&mut CodeAssistState>) {
     if let Ok(mut state) = states.get_mut(event.entity) {
         state.hover.left = true;
     }
@@ -807,11 +806,10 @@ fn update_code_hover(
         &ComputedNode,
         &UiGlobalTransform,
         &ComputedUiRenderTargetInfo,
-        &TextScroll,
     )>,
 ) {
     let now = time.elapsed_secs();
-    for (editable, assistant, mut state, node, transform, target, scroll) in &mut fields {
+    for (editable, assistant, mut state, node, transform, target) in &mut fields {
         let state = &mut *state;
         if core::mem::take(&mut state.hover.left) {
             state.hover.pointer = None;
@@ -834,7 +832,6 @@ fn update_code_hover(
                 node,
                 transform,
                 target,
-                scroll,
             },
             ui_scale.0,
             pointer,
@@ -1049,12 +1046,11 @@ fn place_code_assist(
         &CodeAssistState,
         &ComputedNode,
         &UiGlobalTransform,
-        &TextScroll,
     )>,
     layers: Query<(&ComputedNode, &UiGlobalTransform)>,
     mut nodes: Query<&mut Node>,
 ) {
-    for (editable, rich, state, node, transform, scroll) in &fields {
+    for (editable, rich, state, node, transform) in &fields {
         let caret_open = state.list.is_some() || state.signature.is_some();
         if !caret_open && state.hover.shown.is_none() {
             continue;
@@ -1067,7 +1063,10 @@ fn place_code_assist(
         };
         let inverse_scale = node.inverse_scale_factor();
         let text_box = node.content_box().min;
-        let text_origin = Vec2::new(text_box.x - scroll.0.x, text_box.y - scroll.0.y);
+        let text_origin = Vec2::new(
+            text_box.x - editable.viewport.offset.x,
+            text_box.y - editable.viewport.offset.y,
+        );
         let overlay_origin = overlay_node.padding_box().min;
         // Text space → field → world → overlay, as an object makes the trip.
         let to_overlay = |point: Vec2| {

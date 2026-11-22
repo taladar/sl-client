@@ -167,7 +167,7 @@ fn reflectance_from_shiny(shiny: u8) -> f32 {
 /// decoded diffuse) by [`register_bump_faces`] / [`apply_bump_normals`], and **glow**
 /// is handled by the faithful glow pass (`sl_viewer_world_scene::glow`): the face's glow scalar is
 /// carried on the [`SlFaceExt`](sl_viewer_kit::face_material::SlFaceExt) extension and
-/// written into the scene alpha (the glow mask) by `face_material.wgsl`, so it is not
+/// written into the scene alpha (the glow mask) by `face_material.wesl`, so it is not
 /// set here. A face with none of these flags set is left untouched.
 pub fn apply_surface_flags(material: &mut StandardMaterial, face: &TextureFace) {
     if face.fullbright() {

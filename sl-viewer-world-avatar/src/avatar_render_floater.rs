@@ -700,7 +700,7 @@ fn populate_render_settings_rows(
 
 /// Select the pressed row (the actions act on the selection).
 fn on_render_settings_row_press(
-    mut press: On<Pointer<Press>>,
+    mut press: On<PointerPress>,
     rows: Query<&BoundRenderException>,
     ui: Res<RenderSettingsUi>,
     mut focus: ResMut<InputFocus>,

@@ -97,7 +97,7 @@ members = [
 version = "0.1.0"
 authors = ["Matthias Hörmann <mhoermann@gmail.com>"]
 edition = "2024"
-rust-version = "1.94.0"
+rust-version = "1.97.1"
 readme = "README.md"
 repository = "https://github.com/taladar/sl-client"
 license = "LGPL-2.1-only"
@@ -107,36 +107,36 @@ publish = false
 [workspace.dependencies]
 # The accessibility tree the viewer builds from its semantic model. Bevy no
 # longer re-exports it, so this must be exactly the version Bevy's own
-# `bevy_a11y` / `accesskit_winit` use (0.24 for Bevy 0.19): re-pin on every
+# `bevy_a11y` / `accesskit_winit` use (0.24 for Bevy 0.20): re-pin on every
 # Bevy upgrade.
 accesskit = { version = "0.24.1" }
-arc-swap = { version = "1.9.2" }
-async-lock = { version = "3.4.2" }
-async-trait = { version = "0.1.89" }
-base64 = { version = "0.22.1" }
-bytes = { version = "1.12.1" }
-clap = { version = "4.6.2" }
-clap_complete = { version = "4.6.2" }
-clap_mangen = { version = "0.3.0" }
-crossbeam-channel = { version = "0.5.15" }
+arc-swap = { version = "1.9.5" }
+async-lock = { version = "3.5.0" }
+async-trait = { version = "0.1.92" }
+base64 = { version = "0.23.1" }
+bytes = { version = "1.12.2" }
+clap = { version = "4.6.9" }
+clap_complete = { version = "4.6.12" }
+clap_mangen = { version = "0.3.4" }
+crossbeam-channel = { version = "0.5.17" }
 dashmap = { version = "6.2.1" }
-event-listener = { version = "5.4.1" }
-flate2 = { version = "1.1.9" }
-fs-err = { version = "3.3.0" }
+event-listener = { version = "5.4.2" }
+flate2 = { version = "1.1.11" }
+fs-err = { version = "3.3.2" }
 hmac = { version = "0.13.0" }
 keyring = { version = "4.2.0" }
 md-5 = { version = "0.11.0" }
-md5 = { version = "0.7.0" }
+md5 = { version = "0.8.1" }
 num_cpus = { version = "1.17.0" }
-parking_lot = { version = "0.12.5" }
-pollster = { version = "0.4.0" }
+parking_lot = { version = "0.13.0" }
+pollster = { version = "1.0.3" }
 pretty_assertions = { version = "1.4.1" }
-regex = { version = "1.13.1" }
-reqwest = { version = "0.12.15", default-features = false }
-roxmltree = { version = "0.20.0" }
-rustyline = { version = "17.0.2" }
+regex = { version = "1.13.2" }
+reqwest = { version = "0.13.5", default-features = false }
+roxmltree = { version = "0.21.2" }
+rustyline = { version = "19.0.0" }
 serde = { version = "1.0.229" }
-serde_json = { version = "1.0.151" }
+serde_json = { version = "1.0.154" }
 sha1 = { version = "0.11.0" }
 sha2 = { version = "0.11.1" }
 sl-account-dirs = { path = "sl-account-dirs", version = "0.1.0" }
@@ -162,7 +162,7 @@ sl-repl = { path = "sl-repl", version = "0.1.0" }
 sl-secret-store = { path = "sl-secret-store", version = "0.1.0" }
 sl-settings = { path = "sl-settings", version = "0.1.0" }
 sl-test-assets = { path = "sl-test-assets", version = "0.1.0" }
-sl-types = { version = "0.8.0" }
+sl-types = { version = "0.13.0" }
 sl-viewer-asset-editors = { path = "sl-viewer-asset-editors", version = "0.1.0" }
 sl-viewer-audio = { path = "sl-viewer-audio", version = "0.1.0" }
 sl-viewer-automation = { path = "sl-viewer-automation", version = "0.1.0" }
@@ -202,16 +202,16 @@ sl-viewer-world-objects = { path = "sl-viewer-world-objects", version = "0.1.0" 
 sl-viewer-world-scene = { path = "sl-viewer-world-scene", version = "0.1.0" }
 sl-viewer-world-view = { path = "sl-viewer-world-view", version = "0.1.0" }
 sl-wire = { path = "sl-wire", version = "0.1.0" }
-thiserror = { version = "2.0.18" }
-time = { version = "0.3.49" }
-tokio = { version = "1.52.3" }
-toml = { version = "1.1.2" }
+thiserror = { version = "2.0.21" }
+time = { version = "0.3.55" }
+tokio = { version = "1.54.1" }
+toml = { version = "1.2.2" }
 tracing = { version = "0.1.44" }
 tracing-appender = { version = "0.2.5" }
 tracing-subscriber = { version = "0.3.23" }
-url = { version = "2.5.8" }
-uuid = { version = "1.18.1" }
-wgpu-types = { version = "29" }
+url = { version = "2.5.9" }
+uuid = { version = "1.29.3" }
+wgpu-types = { version = "30" }
 
 [workspace.lints.clippy]
 allow_attributes = "deny"
@@ -427,14 +427,11 @@ unescaped_backticks = "deny"
 
 # Temporarily build against a fork of parley, pinned by revision.
 #
-# `bevy_text` 0.19 pins `parley 0.9.0`, and the fixes and the one feature we
-# need are not in it. A `[patch]` must resolve to a semver-compatible version,
-# so upstream `main` (0.11) cannot be used here; `sl-client/0.9-patch` is
-# `v0.9.0` plus:
+# `bevy_text` 0.20 pins `parley 0.11`, and the fixes and the one feature we need
+# are not in it. A `[patch]` must resolve to a semver-compatible version, so the
+# fork is `v0.11.1` plus:
 #
-# 1. upstream 0.10.0's fix (linebender/parley#685) for a non-printing variation
-#    selector being required in the font's `cmap` — no emoji font maps `U+FE0F`,
-#    so `❤️` rejected the emoji font outright;
+# 1. (upstream since 0.10.0, linebender/parley#685: no longer carried);
 # 2. honouring the emoji presentation selector (VS16) in font selection, so `❤️`
 #    is not stolen by a text font that has a dingbat for `U+2764`;
 # 3. deleting one grapheme cluster in `backdelete`/`delete` rather than one
@@ -455,27 +452,32 @@ unescaped_backticks = "deny"
 #
 # 2 and 3 are submitted upstream (see roadmap/deferred/viewer-ui-text-parley-pr-*).
 # **Drop this patch** and return to a plain crates.io parley once `bevy_text`
-# moves to parley >= 0.10 and those two land in a release.
+# moves to a parley release carrying them and an equivalent of 4 and 5.
 #
 # Pinned to a rev rather than a branch so the build is reproducible; `fontique`
 # comes from the same workspace and must be patched alongside parley, or the two
 # would resolve to different builds and their `FamilyId`s would not match.
 [patch.crates-io]
-# Fork of AccessKit (github.com/taladar/accesskit, branch
-# sl-client-atspi-disabled): `accesskit_atspi_common` 0.18.1 — the version Bevy
-# 0.19's `accesskit_unix` resolves — plus upstream's #788 (6ee0558b63, first
-# released in 0.21.0): a disabled node of a role with no read-only state (a
-# button) was reported Enabled | Sensitive, so Orca read a greyed button as
-# available. Only this crate is patched: the fork's copy depends on the
+# Fork of AccessKit (github.com/taladar/accesskit): `accesskit_atspi_common`
+# 0.19.1, the version Bevy 0.20's `accesskit_unix` resolves, plus a backport of
+# upstream's #788 (6ee0558b63): a disabled node of a role with no read-only
+# state (a button) was reported Enabled | Sensitive, so Orca read a greyed button
+# as available. Only this crate is patched: the fork's copy depends on the
 # crates.io `accesskit` / `accesskit_consumer` rather than its repository
 # siblings, since each platform adapter pins its own `accesskit_consumer` and a
-# whole-repository patch would split the graph. Drop it once Bevy moves to
-# `accesskit_unix` >= the release carrying 0.21.
-accesskit_atspi_common = { git = "https://github.com/taladar/accesskit.git", rev = "418b444c86c4076d59f0604ec44d2f2f49f0572f" }
-# Fork of Bevy 0.19.0 (github.com/taladar/bevy, branch
-# sl-client-externally-posed-skin) carrying these changes vs the v0.19.0 tag,
-# and otherwise the verbatim release:
+# whole-repository patch would split the graph. Drop it once Bevy moves to an
+# `accesskit_unix` that resolves a release carrying #788.
+accesskit_atspi_common = { git = "https://github.com/taladar/accesskit.git", rev = "aefa73678e82912517fb885b52694d7af5462860" }
+# Fork of Bevy 0.20.1 (github.com/taladar/bevy) carrying these changes vs the
+# v0.20.1 tag, and otherwise the verbatim release:
 #
+# - a `bevy_ui_widgets` change that keeps Escape in a text input as it was before
+#   0.20: it collapses the selection, keeps focus and is consumed. Upstream's
+#   #25105 blurs the field and lets the key propagate, so the press that leaves
+#   a field would also reach the viewer's world Escape binding;
+# - a `bevy_ui` measure fix: a minimum is a bound, not a size. `resolve_axis`
+#   took `min-width` as the effective width, so `min-width: 0` measured a text
+#   node at zero width and every word took a line of its own;
 # - a `bevy_ui_widgets` fix that makes every widget act on the **primary**
 #   pointer button only, instead of on whichever button happened to arrive: a
 #   secondary or middle click used to press a button, tick a checkbox, pick a
@@ -502,8 +504,6 @@ accesskit_atspi_common = { git = "https://github.com/taladar/accesskit.git", rev
 #   avatar skins from `extract_skins`' iterate-every-skin per-joint gather (the
 #   non-cullable CPU floor at crowd scale), while leaving their `SkinUniforms`
 #   allocation / `current_skin_index` intact;
-# - a `bevy_ui` picking fix that continues the clip walk past a non-clipping
-#   ancestor instead of stopping at it;
 # - a `bevy_pbr` light-probe fix that rotates a reflection probe's cubemap
 #   through a separate `LightProbeComponent::get_sample_rotation` quaternion
 #   rather than by multiplying the rotation into the probe's transform, which
@@ -516,13 +516,6 @@ accesskit_atspi_common = { git = "https://github.com/taladar/accesskit.git", rev
 #   *clears* the focus another hit just acquired — so clicking a field under a
 #   transparent overlay worked or did nothing depending on `EntityHashMap`
 #   order, i.e. on entity ids;
-# - a `bevy_ui` text-measure fix that wraps a text node at its **content box**
-#   rather than its border box. `TextMeasure::measure` preferred taffy's
-#   `known_width` (the border box) over `available_width` (the same width with
-#   the node's own padding, border and scrollbar gutter already subtracted), so
-#   a `Text` node carrying its own padding was measured at a width the renderer
-#   never wraps it at and came out short by a line per padding's worth of extra
-#   width — the text then drew outside the bottom of its own box;
 # - a `bevy_text` fix that sizes a text block by the width it was **broken at**,
 #   counting the hanging space only where it fits: the space a soft wrap breaks
 #   at hangs past the wrap width (as in CSS), so `parley::Layout::full_width`
@@ -627,55 +620,43 @@ accesskit_atspi_common = { git = "https://github.com/taladar/accesskit.git", rev
 #   does not stop a compile already inside the driver, so a viewer process that
 #   returned from `main` after a clean logout ran the exit handlers (a Vulkan
 #   layer's teardown) beside it and died of SIGSEGV.
-# - `bevy_image` takes `ruzstd` 0.9.1 instead of 0.8: RUSTSEC-2026-0344, a
-#   decompression bomb in 0.8.3's decoder (the KTX2 zstd path; the API it uses
-#   is unchanged).
-# - upstream's `bevy_pbr` fix #25268 (`c7a16115c`, cherry-picked): a fragment
-#   held by several reflection probes **accumulates** their weighted irradiance
-#   in `compute_radiances`, as it already did their radiance, instead of keeping
-#   the last probe's alone — which, divided by the total weight, darkened and
-#   recoloured the ambient wherever a placed probe's volume tapers into another
-#   or into the view's default probe
-#   (`viewer-sky-irradiance-ignores-local-probes`).
 #
-# Every bevy_* crate at 0.19.0 is pinned to the same fork rev, not just
-# bevy_pbr: in the monorepo the crates are workspace members that depend on each
-# other by path, so a git patch of one pulls its siblings from the fork too;
-# leaving the siblings on crates.io would give the graph two copies of e.g.
-# bevy_render (a registry one and a fork one) that do not unify. Pinned to a rev
-# (not the branch) for reproducibility. To bump Bevy: re-cut the branch off the
-# new tag, re-apply the skin.rs/mod.rs diff, and update the rev on every line.
-bevy = { git = "https://github.com/taladar/bevy.git", rev = "0066ea07aba75f243ca16bfb01589833c2f38001" }
-bevy_a11y = { git = "https://github.com/taladar/bevy.git", rev = "0066ea07aba75f243ca16bfb01589833c2f38001" }
-bevy_android = { git = "https://github.com/taladar/bevy.git", rev = "0066ea07aba75f243ca16bfb01589833c2f38001" }
-bevy_animation = { git = "https://github.com/taladar/bevy.git", rev = "0066ea07aba75f243ca16bfb01589833c2f38001" }
-bevy_animation_macros = { git = "https://github.com/taladar/bevy.git", rev = "0066ea07aba75f243ca16bfb01589833c2f38001" }
-bevy_anti_alias = { git = "https://github.com/taladar/bevy.git", rev = "0066ea07aba75f243ca16bfb01589833c2f38001" }
-bevy_app = { git = "https://github.com/taladar/bevy.git", rev = "0066ea07aba75f243ca16bfb01589833c2f38001" }
-bevy_asset = { git = "https://github.com/taladar/bevy.git", rev = "0066ea07aba75f243ca16bfb01589833c2f38001" }
-bevy_asset_macros = { git = "https://github.com/taladar/bevy.git", rev = "0066ea07aba75f243ca16bfb01589833c2f38001" }
-bevy_audio = { git = "https://github.com/taladar/bevy.git", rev = "0066ea07aba75f243ca16bfb01589833c2f38001" }
-bevy_camera = { git = "https://github.com/taladar/bevy.git", rev = "0066ea07aba75f243ca16bfb01589833c2f38001" }
-bevy_clipboard = { git = "https://github.com/taladar/bevy.git", rev = "0066ea07aba75f243ca16bfb01589833c2f38001" }
-bevy_color = { git = "https://github.com/taladar/bevy.git", rev = "0066ea07aba75f243ca16bfb01589833c2f38001" }
-bevy_core_pipeline = { git = "https://github.com/taladar/bevy.git", rev = "0066ea07aba75f243ca16bfb01589833c2f38001" }
-bevy_derive = { git = "https://github.com/taladar/bevy.git", rev = "0066ea07aba75f243ca16bfb01589833c2f38001" }
-bevy_dev_tools = { git = "https://github.com/taladar/bevy.git", rev = "0066ea07aba75f243ca16bfb01589833c2f38001" }
-bevy_diagnostic = { git = "https://github.com/taladar/bevy.git", rev = "0066ea07aba75f243ca16bfb01589833c2f38001" }
-bevy_ecs = { git = "https://github.com/taladar/bevy.git", rev = "0066ea07aba75f243ca16bfb01589833c2f38001" }
-bevy_ecs_macro_logic = { git = "https://github.com/taladar/bevy.git", rev = "0066ea07aba75f243ca16bfb01589833c2f38001" }
-bevy_ecs_macros = { git = "https://github.com/taladar/bevy.git", rev = "0066ea07aba75f243ca16bfb01589833c2f38001" }
-bevy_encase_derive = { git = "https://github.com/taladar/bevy.git", rev = "0066ea07aba75f243ca16bfb01589833c2f38001" }
-bevy_feathers = { git = "https://github.com/taladar/bevy.git", rev = "0066ea07aba75f243ca16bfb01589833c2f38001" }
-# bevy_flair 0.8.0 + four fixes and one addition (1–4 submitted upstream, 5 not
-# yet); drop the patch once a release carries them. All flair crates come from
-# the same rev so the graph never mixes registry and git copies.
+# Every bevy_* crate is patched to the same fork, not just bevy_pbr: in the
+# monorepo the crates are workspace members that depend on each other by path,
+# so leaving the siblings on crates.io would give the graph two copies of e.g.
+# bevy_render that do not unify. To bump Bevy: re-cut the branch off the new tag
+# and re-apply these commits.
+bevy = { git = "https://github.com/taladar/bevy.git", rev = "c6b32bf1857e951ea8d0e04ecdef095e372e3faa" }
+bevy_a11y = { git = "https://github.com/taladar/bevy.git", rev = "c6b32bf1857e951ea8d0e04ecdef095e372e3faa" }
+bevy_android = { git = "https://github.com/taladar/bevy.git", rev = "c6b32bf1857e951ea8d0e04ecdef095e372e3faa" }
+bevy_animation = { git = "https://github.com/taladar/bevy.git", rev = "c6b32bf1857e951ea8d0e04ecdef095e372e3faa" }
+bevy_animation_macros = { git = "https://github.com/taladar/bevy.git", rev = "c6b32bf1857e951ea8d0e04ecdef095e372e3faa" }
+bevy_anti_alias = { git = "https://github.com/taladar/bevy.git", rev = "c6b32bf1857e951ea8d0e04ecdef095e372e3faa" }
+bevy_app = { git = "https://github.com/taladar/bevy.git", rev = "c6b32bf1857e951ea8d0e04ecdef095e372e3faa" }
+bevy_asset = { git = "https://github.com/taladar/bevy.git", rev = "c6b32bf1857e951ea8d0e04ecdef095e372e3faa" }
+bevy_asset_macros = { git = "https://github.com/taladar/bevy.git", rev = "c6b32bf1857e951ea8d0e04ecdef095e372e3faa" }
+bevy_audio = { git = "https://github.com/taladar/bevy.git", rev = "c6b32bf1857e951ea8d0e04ecdef095e372e3faa" }
+bevy_camera = { git = "https://github.com/taladar/bevy.git", rev = "c6b32bf1857e951ea8d0e04ecdef095e372e3faa" }
+bevy_clipboard = { git = "https://github.com/taladar/bevy.git", rev = "c6b32bf1857e951ea8d0e04ecdef095e372e3faa" }
+bevy_color = { git = "https://github.com/taladar/bevy.git", rev = "c6b32bf1857e951ea8d0e04ecdef095e372e3faa" }
+bevy_core_pipeline = { git = "https://github.com/taladar/bevy.git", rev = "c6b32bf1857e951ea8d0e04ecdef095e372e3faa" }
+bevy_derive = { git = "https://github.com/taladar/bevy.git", rev = "c6b32bf1857e951ea8d0e04ecdef095e372e3faa" }
+bevy_dev_tools = { git = "https://github.com/taladar/bevy.git", rev = "c6b32bf1857e951ea8d0e04ecdef095e372e3faa" }
+bevy_diagnostic = { git = "https://github.com/taladar/bevy.git", rev = "c6b32bf1857e951ea8d0e04ecdef095e372e3faa" }
+bevy_ecs = { git = "https://github.com/taladar/bevy.git", rev = "c6b32bf1857e951ea8d0e04ecdef095e372e3faa" }
+bevy_ecs_macro_logic = { git = "https://github.com/taladar/bevy.git", rev = "c6b32bf1857e951ea8d0e04ecdef095e372e3faa" }
+bevy_ecs_macros = { git = "https://github.com/taladar/bevy.git", rev = "c6b32bf1857e951ea8d0e04ecdef095e372e3faa" }
+bevy_encase_derive = { git = "https://github.com/taladar/bevy.git", rev = "c6b32bf1857e951ea8d0e04ecdef095e372e3faa" }
+bevy_feathers = { git = "https://github.com/taladar/bevy.git", rev = "c6b32bf1857e951ea8d0e04ecdef095e372e3faa" }
+# bevy_flair 0.9.0 + these fixes (1-3 submitted upstream); drop the patch once a
+# release carries them. All flair crates come from the same fork so the graph
+# never mixes registry and fork copies.
 #
-#  1. recalculate_style-on-Reset — a debug-build panic / release-build silent
+#  1. recalculate_style-on-Reset: a debug-build panic / release-build silent
 #     reset downgrade when a freshly spawned widget is swept into a
 #     sibling/descendant recalculation in the same frame.
 #  2. a text `::before` spawns without a `StyleData`, which
-#     `PseudoElement`'s insert hook `expect`s — so `PseudoElementsSupport` on
+#     `PseudoElement`'s insert hook `expect`s, so `PseudoElementsSupport` on
 #     a `Text` panics in any app without the full plugin stack (every widget
 #     unit test). The block branch of the same function already spawned one.
 #  3. a text `::before` took bevy's default 20 px `TextFont` instead of
@@ -683,75 +664,68 @@ bevy_feathers = { git = "https://github.com/taladar/bevy.git", rev = "0066ea07ab
 #     measured as part of the host's text block, so a 14 px checkbox box with
 #     a `content` tick reported 20 px of content and overflowed itself, and
 #     taffy folded that into every ancestor up to the floater.
-#  4. `-bevy-image-box` (an ADDITION, not a fix): `ImageNode::visual_box` was
-#     the one field with no property registered, so CSS could not reach it.
-#     `ImageNode` paints into the CONTENT box by default — inside the padding
-#     and border — so the `relief` theme's nine-sliced button skin was drawn
-#     at 88x18 inside a 112x32 button: a bevel hugging the caption with bare
-#     panel around it, which reads as a button that lost its padding. Every
-#     other observable (node size, handle, slicing, `ImageNodeSize`) is
-#     correct, which is what made it expensive to find.
+#  4. `sync_em_size` skips a node spawned after this frame's style pass, which
+#     has no computed values yet, instead of tripping a debug assertion.
 #  5. restyling an entity took **every** styled component on it mutably before
 #     asking whether any of its properties had changed, and the borrow alone
 #     flags a component changed — so a `background-color` animation (an unread
 #     tab's pulse) flagged `Node`, `TextFont` and `TextLayout` changed on every
 #     frame it ran, and `bevy_ui` re-laid-out and re-measured for a colour.
 #     A component is now touched only when one of its own properties changed.
-bevy_flair = { git = "https://github.com/taladar/bevy_flair.git", rev = "68c84f9a7221a57be835dcddf3601cfe6871f737" }
-bevy_flair_core = { git = "https://github.com/taladar/bevy_flair.git", rev = "68c84f9a7221a57be835dcddf3601cfe6871f737" }
-bevy_flair_core_macros = { git = "https://github.com/taladar/bevy_flair.git", rev = "68c84f9a7221a57be835dcddf3601cfe6871f737" }
-bevy_flair_css_parser = { git = "https://github.com/taladar/bevy_flair.git", rev = "68c84f9a7221a57be835dcddf3601cfe6871f737" }
-bevy_flair_style = { git = "https://github.com/taladar/bevy_flair.git", rev = "68c84f9a7221a57be835dcddf3601cfe6871f737" }
-bevy_gilrs = { git = "https://github.com/taladar/bevy.git", rev = "0066ea07aba75f243ca16bfb01589833c2f38001" }
-bevy_gizmos = { git = "https://github.com/taladar/bevy.git", rev = "0066ea07aba75f243ca16bfb01589833c2f38001" }
-bevy_gizmos_macros = { git = "https://github.com/taladar/bevy.git", rev = "0066ea07aba75f243ca16bfb01589833c2f38001" }
-bevy_gizmos_render = { git = "https://github.com/taladar/bevy.git", rev = "0066ea07aba75f243ca16bfb01589833c2f38001" }
-bevy_gltf = { git = "https://github.com/taladar/bevy.git", rev = "0066ea07aba75f243ca16bfb01589833c2f38001" }
-bevy_image = { git = "https://github.com/taladar/bevy.git", rev = "0066ea07aba75f243ca16bfb01589833c2f38001" }
-bevy_input = { git = "https://github.com/taladar/bevy.git", rev = "0066ea07aba75f243ca16bfb01589833c2f38001" }
-bevy_input_focus = { git = "https://github.com/taladar/bevy.git", rev = "0066ea07aba75f243ca16bfb01589833c2f38001" }
-bevy_internal = { git = "https://github.com/taladar/bevy.git", rev = "0066ea07aba75f243ca16bfb01589833c2f38001" }
-bevy_light = { git = "https://github.com/taladar/bevy.git", rev = "0066ea07aba75f243ca16bfb01589833c2f38001" }
-bevy_log = { git = "https://github.com/taladar/bevy.git", rev = "0066ea07aba75f243ca16bfb01589833c2f38001" }
-bevy_macro_utils = { git = "https://github.com/taladar/bevy.git", rev = "0066ea07aba75f243ca16bfb01589833c2f38001" }
-bevy_material = { git = "https://github.com/taladar/bevy.git", rev = "0066ea07aba75f243ca16bfb01589833c2f38001" }
-bevy_material_macros = { git = "https://github.com/taladar/bevy.git", rev = "0066ea07aba75f243ca16bfb01589833c2f38001" }
-bevy_math = { git = "https://github.com/taladar/bevy.git", rev = "0066ea07aba75f243ca16bfb01589833c2f38001" }
-bevy_mesh = { git = "https://github.com/taladar/bevy.git", rev = "0066ea07aba75f243ca16bfb01589833c2f38001" }
-bevy_pbr = { git = "https://github.com/taladar/bevy.git", rev = "0066ea07aba75f243ca16bfb01589833c2f38001" }
-bevy_picking = { git = "https://github.com/taladar/bevy.git", rev = "0066ea07aba75f243ca16bfb01589833c2f38001" }
-bevy_platform = { git = "https://github.com/taladar/bevy.git", rev = "0066ea07aba75f243ca16bfb01589833c2f38001" }
-bevy_post_process = { git = "https://github.com/taladar/bevy.git", rev = "0066ea07aba75f243ca16bfb01589833c2f38001" }
-bevy_ptr = { git = "https://github.com/taladar/bevy.git", rev = "0066ea07aba75f243ca16bfb01589833c2f38001" }
-bevy_reflect = { git = "https://github.com/taladar/bevy.git", rev = "0066ea07aba75f243ca16bfb01589833c2f38001" }
-bevy_reflect_derive = { git = "https://github.com/taladar/bevy.git", rev = "0066ea07aba75f243ca16bfb01589833c2f38001" }
-bevy_render = { git = "https://github.com/taladar/bevy.git", rev = "0066ea07aba75f243ca16bfb01589833c2f38001" }
-bevy_render_macros = { git = "https://github.com/taladar/bevy.git", rev = "0066ea07aba75f243ca16bfb01589833c2f38001" }
-bevy_scene = { git = "https://github.com/taladar/bevy.git", rev = "0066ea07aba75f243ca16bfb01589833c2f38001" }
-bevy_scene_macros = { git = "https://github.com/taladar/bevy.git", rev = "0066ea07aba75f243ca16bfb01589833c2f38001" }
-bevy_shader = { git = "https://github.com/taladar/bevy.git", rev = "0066ea07aba75f243ca16bfb01589833c2f38001" }
-bevy_sprite = { git = "https://github.com/taladar/bevy.git", rev = "0066ea07aba75f243ca16bfb01589833c2f38001" }
-bevy_sprite_render = { git = "https://github.com/taladar/bevy.git", rev = "0066ea07aba75f243ca16bfb01589833c2f38001" }
-bevy_state = { git = "https://github.com/taladar/bevy.git", rev = "0066ea07aba75f243ca16bfb01589833c2f38001" }
-bevy_state_macros = { git = "https://github.com/taladar/bevy.git", rev = "0066ea07aba75f243ca16bfb01589833c2f38001" }
-bevy_tasks = { git = "https://github.com/taladar/bevy.git", rev = "0066ea07aba75f243ca16bfb01589833c2f38001" }
-bevy_text = { git = "https://github.com/taladar/bevy.git", rev = "0066ea07aba75f243ca16bfb01589833c2f38001" }
-bevy_time = { git = "https://github.com/taladar/bevy.git", rev = "0066ea07aba75f243ca16bfb01589833c2f38001" }
-bevy_transform = { git = "https://github.com/taladar/bevy.git", rev = "0066ea07aba75f243ca16bfb01589833c2f38001" }
-bevy_ui = { git = "https://github.com/taladar/bevy.git", rev = "0066ea07aba75f243ca16bfb01589833c2f38001" }
-bevy_ui_render = { git = "https://github.com/taladar/bevy.git", rev = "0066ea07aba75f243ca16bfb01589833c2f38001" }
-bevy_ui_widgets = { git = "https://github.com/taladar/bevy.git", rev = "0066ea07aba75f243ca16bfb01589833c2f38001" }
-bevy_utils = { git = "https://github.com/taladar/bevy.git", rev = "0066ea07aba75f243ca16bfb01589833c2f38001" }
-bevy_window = { git = "https://github.com/taladar/bevy.git", rev = "0066ea07aba75f243ca16bfb01589833c2f38001" }
-bevy_winit = { git = "https://github.com/taladar/bevy.git", rev = "0066ea07aba75f243ca16bfb01589833c2f38001" }
-bevy_world_serialization = { git = "https://github.com/taladar/bevy.git", rev = "0066ea07aba75f243ca16bfb01589833c2f38001" }
-fontique = { git = "https://github.com/taladar/parley.git", rev = "a50a7c334575e89d31de7bc24d79172065ddea79" }
-parley = { git = "https://github.com/taladar/parley.git", rev = "a50a7c334575e89d31de7bc24d79172065ddea79" }
+bevy_flair = { git = "https://github.com/taladar/bevy_flair.git", rev = "8d195f7251b52ae733f8700b7312deada0ecc0b3" }
+bevy_flair_core = { git = "https://github.com/taladar/bevy_flair.git", rev = "8d195f7251b52ae733f8700b7312deada0ecc0b3" }
+bevy_flair_core_macros = { git = "https://github.com/taladar/bevy_flair.git", rev = "8d195f7251b52ae733f8700b7312deada0ecc0b3" }
+bevy_flair_css_parser = { git = "https://github.com/taladar/bevy_flair.git", rev = "8d195f7251b52ae733f8700b7312deada0ecc0b3" }
+bevy_flair_style = { git = "https://github.com/taladar/bevy_flair.git", rev = "8d195f7251b52ae733f8700b7312deada0ecc0b3" }
+bevy_gilrs = { git = "https://github.com/taladar/bevy.git", rev = "c6b32bf1857e951ea8d0e04ecdef095e372e3faa" }
+bevy_gizmos = { git = "https://github.com/taladar/bevy.git", rev = "c6b32bf1857e951ea8d0e04ecdef095e372e3faa" }
+bevy_gizmos_macros = { git = "https://github.com/taladar/bevy.git", rev = "c6b32bf1857e951ea8d0e04ecdef095e372e3faa" }
+bevy_gizmos_render = { git = "https://github.com/taladar/bevy.git", rev = "c6b32bf1857e951ea8d0e04ecdef095e372e3faa" }
+bevy_gltf = { git = "https://github.com/taladar/bevy.git", rev = "c6b32bf1857e951ea8d0e04ecdef095e372e3faa" }
+bevy_image = { git = "https://github.com/taladar/bevy.git", rev = "c6b32bf1857e951ea8d0e04ecdef095e372e3faa" }
+bevy_input = { git = "https://github.com/taladar/bevy.git", rev = "c6b32bf1857e951ea8d0e04ecdef095e372e3faa" }
+bevy_input_focus = { git = "https://github.com/taladar/bevy.git", rev = "c6b32bf1857e951ea8d0e04ecdef095e372e3faa" }
+bevy_internal = { git = "https://github.com/taladar/bevy.git", rev = "c6b32bf1857e951ea8d0e04ecdef095e372e3faa" }
+bevy_light = { git = "https://github.com/taladar/bevy.git", rev = "c6b32bf1857e951ea8d0e04ecdef095e372e3faa" }
+bevy_log = { git = "https://github.com/taladar/bevy.git", rev = "c6b32bf1857e951ea8d0e04ecdef095e372e3faa" }
+bevy_macro_utils = { git = "https://github.com/taladar/bevy.git", rev = "c6b32bf1857e951ea8d0e04ecdef095e372e3faa" }
+bevy_material = { git = "https://github.com/taladar/bevy.git", rev = "c6b32bf1857e951ea8d0e04ecdef095e372e3faa" }
+bevy_material_macros = { git = "https://github.com/taladar/bevy.git", rev = "c6b32bf1857e951ea8d0e04ecdef095e372e3faa" }
+bevy_math = { git = "https://github.com/taladar/bevy.git", rev = "c6b32bf1857e951ea8d0e04ecdef095e372e3faa" }
+bevy_mesh = { git = "https://github.com/taladar/bevy.git", rev = "c6b32bf1857e951ea8d0e04ecdef095e372e3faa" }
+bevy_pbr = { git = "https://github.com/taladar/bevy.git", rev = "c6b32bf1857e951ea8d0e04ecdef095e372e3faa" }
+bevy_picking = { git = "https://github.com/taladar/bevy.git", rev = "c6b32bf1857e951ea8d0e04ecdef095e372e3faa" }
+bevy_platform = { git = "https://github.com/taladar/bevy.git", rev = "c6b32bf1857e951ea8d0e04ecdef095e372e3faa" }
+bevy_post_process = { git = "https://github.com/taladar/bevy.git", rev = "c6b32bf1857e951ea8d0e04ecdef095e372e3faa" }
+bevy_ptr = { git = "https://github.com/taladar/bevy.git", rev = "c6b32bf1857e951ea8d0e04ecdef095e372e3faa" }
+bevy_reflect = { git = "https://github.com/taladar/bevy.git", rev = "c6b32bf1857e951ea8d0e04ecdef095e372e3faa" }
+bevy_reflect_derive = { git = "https://github.com/taladar/bevy.git", rev = "c6b32bf1857e951ea8d0e04ecdef095e372e3faa" }
+bevy_render = { git = "https://github.com/taladar/bevy.git", rev = "c6b32bf1857e951ea8d0e04ecdef095e372e3faa" }
+bevy_render_macros = { git = "https://github.com/taladar/bevy.git", rev = "c6b32bf1857e951ea8d0e04ecdef095e372e3faa" }
+bevy_scene = { git = "https://github.com/taladar/bevy.git", rev = "c6b32bf1857e951ea8d0e04ecdef095e372e3faa" }
+bevy_scene_macros = { git = "https://github.com/taladar/bevy.git", rev = "c6b32bf1857e951ea8d0e04ecdef095e372e3faa" }
+bevy_shader = { git = "https://github.com/taladar/bevy.git", rev = "c6b32bf1857e951ea8d0e04ecdef095e372e3faa" }
+bevy_sprite = { git = "https://github.com/taladar/bevy.git", rev = "c6b32bf1857e951ea8d0e04ecdef095e372e3faa" }
+bevy_sprite_render = { git = "https://github.com/taladar/bevy.git", rev = "c6b32bf1857e951ea8d0e04ecdef095e372e3faa" }
+bevy_state = { git = "https://github.com/taladar/bevy.git", rev = "c6b32bf1857e951ea8d0e04ecdef095e372e3faa" }
+bevy_state_macros = { git = "https://github.com/taladar/bevy.git", rev = "c6b32bf1857e951ea8d0e04ecdef095e372e3faa" }
+bevy_tasks = { git = "https://github.com/taladar/bevy.git", rev = "c6b32bf1857e951ea8d0e04ecdef095e372e3faa" }
+bevy_text = { git = "https://github.com/taladar/bevy.git", rev = "c6b32bf1857e951ea8d0e04ecdef095e372e3faa" }
+bevy_time = { git = "https://github.com/taladar/bevy.git", rev = "c6b32bf1857e951ea8d0e04ecdef095e372e3faa" }
+bevy_transform = { git = "https://github.com/taladar/bevy.git", rev = "c6b32bf1857e951ea8d0e04ecdef095e372e3faa" }
+bevy_ui = { git = "https://github.com/taladar/bevy.git", rev = "c6b32bf1857e951ea8d0e04ecdef095e372e3faa" }
+bevy_ui_render = { git = "https://github.com/taladar/bevy.git", rev = "c6b32bf1857e951ea8d0e04ecdef095e372e3faa" }
+bevy_ui_widgets = { git = "https://github.com/taladar/bevy.git", rev = "c6b32bf1857e951ea8d0e04ecdef095e372e3faa" }
+bevy_utils = { git = "https://github.com/taladar/bevy.git", rev = "c6b32bf1857e951ea8d0e04ecdef095e372e3faa" }
+bevy_window = { git = "https://github.com/taladar/bevy.git", rev = "c6b32bf1857e951ea8d0e04ecdef095e372e3faa" }
+bevy_winit = { git = "https://github.com/taladar/bevy.git", rev = "c6b32bf1857e951ea8d0e04ecdef095e372e3faa" }
+bevy_world_serialization = { git = "https://github.com/taladar/bevy.git", rev = "c6b32bf1857e951ea8d0e04ecdef095e372e3faa" }
+fontique = { git = "https://github.com/taladar/parley.git", rev = "97ac1fd3753d06b520a0b024e1e5d4d3995b3a4a" }
+parley = { git = "https://github.com/taladar/parley.git", rev = "97ac1fd3753d06b520a0b024e1e5d4d3995b3a4a" }
 
-naga = { git = "https://github.com/taladar/wgpu.git", rev = "72126feaceecfe82a2b0fa5e37ac7e787920e107" }
-# Fork of wgpu 29.0.4 (github.com/taladar/wgpu, branch
-# sl-client-texture-init-fastpath) carrying ONE change vs the v29.0.4 tag: a
-# fast path in `wgpu-core`'s texture memory-init registration
+naga = { git = "https://github.com/taladar/wgpu.git", rev = "cdd7e48da75e08a52aa2f69d34c8c769ad0b2552" }
+# Fork of wgpu 30.0.2 (github.com/taladar/wgpu) carrying ONE change vs the
+# v30.0.2 tag: a fast path in `wgpu-core`'s texture memory-init registration
 # (`register_init_action`) that short-circuits when a texture is fully
 # initialized and no discards are outstanding, skipping the per-mip
 # `check_action` walk + allocation. That bookkeeping runs once per texture use
@@ -760,41 +734,34 @@ naga = { git = "https://github.com/taladar/wgpu.git", rev = "72126feaceecfe82a2b
 # our once-uploaded, never-uninitialized textures. Behaviour is identical to the
 # unpatched slow path; only the redundant work is skipped.
 #
-# Every wgpu-monorepo crate at 29.0.4 is pinned to the same fork rev (not just
-# wgpu-core): the crates are workspace members that depend on each other by path,
-# so leaving siblings on crates.io would give the graph two non-unifying copies
-# (same reason the bevy fork pins every bevy_* crate). `naga_oil` is a separate
-# crate and stays on crates.io (it uses the forked `naga` transitively). Pinned
-# to a rev for reproducibility. NOT for upstream submission.
-wgpu = { git = "https://github.com/taladar/wgpu.git", rev = "72126feaceecfe82a2b0fa5e37ac7e787920e107" }
-wgpu-core = { git = "https://github.com/taladar/wgpu.git", rev = "72126feaceecfe82a2b0fa5e37ac7e787920e107" }
-wgpu-core-deps-apple = { git = "https://github.com/taladar/wgpu.git", rev = "72126feaceecfe82a2b0fa5e37ac7e787920e107" }
-wgpu-core-deps-wasm = { git = "https://github.com/taladar/wgpu.git", rev = "72126feaceecfe82a2b0fa5e37ac7e787920e107" }
-wgpu-core-deps-windows-linux-android = { git = "https://github.com/taladar/wgpu.git", rev = "72126feaceecfe82a2b0fa5e37ac7e787920e107" }
-wgpu-hal = { git = "https://github.com/taladar/wgpu.git", rev = "72126feaceecfe82a2b0fa5e37ac7e787920e107" }
-wgpu-naga-bridge = { git = "https://github.com/taladar/wgpu.git", rev = "72126feaceecfe82a2b0fa5e37ac7e787920e107" }
-wgpu-types = { git = "https://github.com/taladar/wgpu.git", rev = "72126feaceecfe82a2b0fa5e37ac7e787920e107" }
+# Every wgpu-monorepo crate is patched to the same fork (not just wgpu-core): the
+# crates are workspace members that depend on each other by path, so leaving
+# siblings on crates.io would give the graph two non-unifying copies (same reason
+# the bevy fork covers every bevy_* crate). NOT for upstream submission.
+wgpu = { git = "https://github.com/taladar/wgpu.git", rev = "cdd7e48da75e08a52aa2f69d34c8c769ad0b2552" }
+wgpu-core = { git = "https://github.com/taladar/wgpu.git", rev = "cdd7e48da75e08a52aa2f69d34c8c769ad0b2552" }
+wgpu-core-deps-apple = { git = "https://github.com/taladar/wgpu.git", rev = "cdd7e48da75e08a52aa2f69d34c8c769ad0b2552" }
+wgpu-core-deps-wasm = { git = "https://github.com/taladar/wgpu.git", rev = "cdd7e48da75e08a52aa2f69d34c8c769ad0b2552" }
+wgpu-core-deps-windows-linux-android = { git = "https://github.com/taladar/wgpu.git", rev = "cdd7e48da75e08a52aa2f69d34c8c769ad0b2552" }
+wgpu-hal = { git = "https://github.com/taladar/wgpu.git", rev = "cdd7e48da75e08a52aa2f69d34c8c769ad0b2552" }
+wgpu-naga-bridge = { git = "https://github.com/taladar/wgpu.git", rev = "cdd7e48da75e08a52aa2f69d34c8c769ad0b2552" }
+wgpu-types = { git = "https://github.com/taladar/wgpu.git", rev = "cdd7e48da75e08a52aa2f69d34c8c769ad0b2552" }
 
-# Fork of taffy 0.10.1 (github.com/taladar/taffy, branch
-# sl-client-flex-max-cross-available) — the version `bevy_ui` 0.19 pins —
-# carrying ONE commit vs the v0.10.1 tag, two fixes for one symptom: a column
-# flex container with an indefinite width and a `max_width` came out as tall as
-# its text laid out on a single line, while the text was finally laid out, and
-# wrapped, at the clamped width (roadmap `viewer-grid-row-height-from-unwrapped-text`).
+# Fork of taffy 0.14.0 (github.com/taladar/taffy), the version `bevy_ui` 0.20
+# pins, carrying ONE fix: a column flex container with an indefinite width and a
+# `max_width` came out as tall as its text laid out on a single line, while the
+# text was finally laid out, and wrapped, at the clamped width (roadmap
+# `viewer-grid-row-height-from-unwrapped-text`). Flexbox
+# `determine_available_space` now clamps an unknown dimension by the container's
+# own min/max size, so a grid item (always measured with no known width) sizes
+# its items into its `max_width` rather than the whole grid area. Every `bevy_ui`
+# root node is such a grid item, of the implicit viewport node.
 #
-# - flexbox `determine_available_space` now clamps an unknown dimension by the
-#   container's own min/max size, so a grid item (always measured with no known
-#   width) sizes its items into its `max_width` rather than the whole grid area.
-#   Every `bevy_ui` root node is such a grid item, of the implicit viewport node;
-# - the measure cache no longer answers a query whose known width merely equals
-#   an entry's *output* width from an entry computed with no known width, which
-#   is a different layout whenever that output was clamped. This is what upstream
-#   #911 does too; as there, a node is measured a few more times per layout.
-#
-# Upstream 0.14 carries the cache half but not the flexbox half. Pinned to a rev
-# for reproducibility; not for upstream submission. Drop when `bevy_ui` moves to
-# a taffy that carries both.
-taffy = { git = "https://github.com/taladar/taffy.git", rev = "694ada00a99af385e87cf070c511896d09aa96d5" }
+# Not for upstream submission. Drop when `bevy_ui` moves to a taffy carrying it.
+taffy = { git = "https://github.com/taladar/taffy.git", rev = "a77d92a0ae2300e5762f57718a103e5447dae92e" }
+# Part of the Bevy fork above (new crates in 0.20).
+bevy_extract = { git = "https://github.com/taladar/bevy.git", rev = "c6b32bf1857e951ea8d0e04ecdef095e372e3faa" }
+bevy_extract_macros = { git = "https://github.com/taladar/bevy.git", rev = "c6b32bf1857e951ea8d0e04ecdef095e372e3faa" }
 
 [profile.dev]
 # Light optimization for our own crates. Bevy's baseline advice leaves these at

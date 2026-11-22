@@ -94,7 +94,7 @@ use bevy::render::render_phase::{PhaseItem as _, ViewSortedRenderPhases, sort_ph
 use bevy::render::render_resource::{RenderPassDescriptor, StoreOp};
 use bevy::render::renderer::{RenderContext, ViewQuery};
 use bevy::render::sync_world::{MainEntity, MainEntityHashMap, MainEntityHashSet};
-use bevy::render::view::{ExtractedView, RetainedViewEntity, ViewDepthTexture, ViewTarget};
+use bevy::render::view::{ExtractedView, RetainedViewEntity, ViewDepthStencilTexture, ViewTarget};
 use bevy::render::{Extract, Render, RenderApp, RenderSystems};
 
 use crate::water::{DEFAULT_WATER_HEIGHT, WaterLevel};
@@ -157,7 +157,7 @@ const _: () = assert!(
 /// star field, the cloud dome — and says where in the backdrop stack it belongs.
 ///
 /// All three sit in the [`Transparent3d`] phase but are *not* world-anchored: their
-/// fragment depth is forced to the far clip plane (`clouds.wgsl`, `stars.wgsl`) or,
+/// fragment depth is forced to the far clip plane (`clouds.wesl`, `stars.wesl`) or,
 /// for the discs, is a fixed 2000 m from the eye, and the meshes themselves are
 /// centred on (or aimed from) the camera. Bevy sorts the phase by each item's mesh
 /// centre, so a camera-centred dome has a sort distance of ~0 — the *nearest*
@@ -601,7 +601,7 @@ type EarlyPassView<'w, 's> = ViewQuery<
         &'static ExtractedCamera,
         &'static ExtractedView,
         &'static ViewTarget,
-        &'static ViewDepthTexture,
+        &'static ViewDepthStencilTexture,
         Option<&'static MainPassResolutionOverride>,
     ),
 >;

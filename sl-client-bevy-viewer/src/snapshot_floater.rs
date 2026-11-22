@@ -1292,7 +1292,7 @@ fn spawn_save_task(dynamic: image::DynamicImage, dest: SaveDest) -> Task<Result<
 fn local_iso8601_stamp(zone: Option<&LocalTimeZone>) -> String {
     let zone = zone.map_or_else(jiff::tz::TimeZone::system, |zone| zone.zone().clone());
     jiff::Timestamp::now()
-        .to_zoned(zone)
+        .to_zoned_datetime(zone)
         .strftime("%Y-%m-%dT%H-%M-%S")
         .to_string()
 }

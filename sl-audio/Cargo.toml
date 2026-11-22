@@ -16,17 +16,17 @@ publish = { workspace = true }
 exclude = { workspace = true }
 
 [dependencies]
-firewheel = { version = "0.12.1", features = [
+firewheel = { version = "0.15.0", features = [
   "fast_rms_node",
   "mix_node",
   "peak_meter_node",
   "spatial_basic_node",
 ] }
-fixed-resample = { version = "0.12.1" }
+fixed-resample = { version = "0.13.0" }
 # Direct dependency purely to enable the codec features on the `symphonium`
 # instance that `firewheel-symphonium` pulls in with only `decode-native`
 # (feature unification turns these on for the shared crate).
-symphonium = { version = "0.12.2", default-features = false, features = [
+symphonium = { version = "0.13.0", default-features = false, features = [
   "decode-native",
   "fft-resampler",
   "ogg",

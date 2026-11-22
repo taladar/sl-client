@@ -112,6 +112,7 @@ impl SpecializedMeshPipeline for GpuPickPipeline {
                 shader_defs: shader_defs.clone(),
                 entry_point: Some("vertex".into()),
                 buffers: vec![vertex_layout],
+                constants: Vec::new(),
             },
             fragment: Some(FragmentState {
                 shader: PICK_SHADER_HANDLE,
@@ -122,6 +123,7 @@ impl SpecializedMeshPipeline for GpuPickPipeline {
                     blend: None,
                     write_mask: ColorWrites::ALL,
                 })],
+                constants: Vec::new(),
             }),
             primitive: PrimitiveState {
                 topology: PrimitiveTopology::TriangleList,

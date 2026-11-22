@@ -20,19 +20,19 @@
 // This is gated behind the `bevy_pbr` feature: only the windowed viewer needs a
 // renderer.
 
-#import bevy_pbr::{
+import bevy_pbr::render::{
     mesh_functions,
     mesh_view_bindings as view_bindings,
     view_transformations::depth_ndc_to_view_z,
     view_transformations::position_world_to_clip,
-}
-#import sl_client_bevy::water_fog::{
+};
+import sl_client_bevy::water_fog::{
     WaterFogParams,
     apply_water_fog,
     water_fog_ks,
     water_fog_no_clip,
     water_fog_srgb_to_linear,
-}
+};
 
 // How far *in front of* the water surface a refraction sample may sit before it is
 // rejected: the reference's `0.05` metre slack in
@@ -121,18 +121,18 @@ struct WaterParams {
     wave2_dir: vec2<f32>,
 };
 
-@group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> water: WaterParams;
-@group(#{MATERIAL_BIND_GROUP}) @binding(1) var normal_texture: texture_2d<f32>;
-@group(#{MATERIAL_BIND_GROUP}) @binding(2) var normal_sampler: sampler;
-@group(#{MATERIAL_BIND_GROUP}) @binding(3) var normal_next_texture: texture_2d<f32>;
-@group(#{MATERIAL_BIND_GROUP}) @binding(4) var normal_next_sampler: sampler;
+@group(constants::MATERIAL_BIND_GROUP) @binding(0) var<uniform> water: WaterParams;
+@group(constants::MATERIAL_BIND_GROUP) @binding(1) var normal_texture: texture_2d<f32>;
+@group(constants::MATERIAL_BIND_GROUP) @binding(2) var normal_sampler: sampler;
+@group(constants::MATERIAL_BIND_GROUP) @binding(3) var normal_next_texture: texture_2d<f32>;
+@group(constants::MATERIAL_BIND_GROUP) @binding(4) var normal_next_sampler: sampler;
 // The screen-space water-exclusion mask: 1 where water renders, 0 where a
 // water-exclusion surface ("invisiprim" successor) punches a hole in the sea. The
 // viewer renders the exclusion faces into this target with a camera slaved to the
 // main view, so it is sampled by the fragment's screen position (the reference's
 // `exclusionTex`, `class3/environment/waterF.glsl`).
-@group(#{MATERIAL_BIND_GROUP}) @binding(5) var exclusion_texture: texture_2d<f32>;
-@group(#{MATERIAL_BIND_GROUP}) @binding(6) var exclusion_sampler: sampler;
+@group(constants::MATERIAL_BIND_GROUP) @binding(5) var exclusion_texture: texture_2d<f32>;
+@group(constants::MATERIAL_BIND_GROUP) @binding(6) var exclusion_sampler: sampler;
 // The opaque scene depth the refraction rejects against (the reference's
 // `depthMap`): a copy of this view's depth buffer taken at the same point in the
 // frame as the screen copy `view_transmission_texture` holds. Multisampled to match
@@ -140,7 +140,7 @@ struct WaterParams {
 // no meaningful filtered sample. A material bind group is shared by every view, so
 // the fragment shader checks that this depth measures the same as the view it is
 // shading before believing a word of it.
-@group(#{MATERIAL_BIND_GROUP}) @binding(7) var scene_depth_texture: texture_depth_multisampled_2d;
+@group(constants::MATERIAL_BIND_GROUP) @binding(7) var scene_depth_texture: texture_depth_multisampled_2d;
 
 struct Vertex {
     @builtin(instance_index) instance_index: u32,
@@ -441,7 +441,7 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     // mirror direction (P33) so the water reflects the real surroundings rather than
     // a flat sky tint, falling back to that tint when no probe is bound.
     var reflection = water.reflection_color;
-#ifdef ENVIRONMENT_MAP
+    @if(ENVIRONMENT_MAP)
     if (view_bindings::light_probes.view_cubemap_index >= 0) {
         var refl_dir = reflect(vv, normal);
         refl_dir = quat_rotate(view_bindings::light_probes.view_rotation, refl_dir);
@@ -452,22 +452,22 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
         // — `sampleReflectionProbesWater` picks its mip off `1 - roughness`.
         let level = clamp(water.blur_multiplier, 0.0, 1.0)
             * f32(view_bindings::light_probes.smallest_specular_mip_level_for_view);
-#ifdef MULTIPLE_LIGHT_PROBES_IN_ARRAY
+        @if(MULTIPLE_LIGHT_PROBES_IN_ARRAY)
         let cube = u32(view_bindings::light_probes.view_cubemap_index);
+        @if(MULTIPLE_LIGHT_PROBES_IN_ARRAY)
         reflection = textureSampleLevel(
             view_bindings::specular_environment_maps[cube],
             view_bindings::environment_map_sampler,
             refl_dir,
             level,
         ).rgb;
-#else
+        @if(!MULTIPLE_LIGHT_PROBES_IN_ARRAY)
         reflection = textureSampleLevel(
             view_bindings::specular_environment_map,
             view_bindings::environment_map_sampler,
             refl_dir,
             level,
         ).rgb;
-#endif
         // Scale by the probe intensity *and* the view exposure (as the terrain
         // ambient and the PBR objects do): the viewer calibrates the intensity to
         // `gain / exposure` (P33.3), so the product is the gain, and at the calibrated
@@ -477,7 +477,6 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
             * view_bindings::light_probes.intensity_for_view
             * view_bindings::view.exposure;
     }
-#endif
     let radiance = reflection * radiance_scale;
     var color = mix(fb, radiance, reflect_amount);
 

@@ -219,7 +219,7 @@ mod part_flags {
     /// Follow the source position with no rotation (`LL_PART_FOLLOW_SRC_MASK`).
     pub(super) const FOLLOW_SRC: u32 = 0x10;
     // `LL_PART_FOLLOW_VELOCITY_MASK` (`0x20`) orients the billboard along the particle
-    // velocity; that is a *render* decision, applied GPU-side in `particle.wgsl` (which
+    // velocity; that is a *render* decision, applied GPU-side in `particle.wesl` (which
     // reads the bit out of the per-instance `flags`), so it is not mirrored here — the
     // CPU simulation never inspects it.
     /// Interpolate the velocity toward the source's target
@@ -889,7 +889,7 @@ pub const fn float_to_u8(value: f32) -> u8 {
 /// buffer the instanced render uploads — the CPU side of what was `build_cloud_mesh`.
 /// The camera-facing billboard expansion (`LLVOPartGroup::getGeometry`, with the
 /// `FOLLOW_VELOCITY` re-orientation) now lives in the vertex shader
-/// ([`particle.wgsl`](../particle.wgsl)); each record just carries the particle's world
+/// ([`particle.wesl`](../particle.wesl)); each record just carries the particle's world
 /// position, size, colour, velocity, and flags. Positions are in absolute Bevy world
 /// space (the cloud entity has an identity transform).
 ///
@@ -1739,7 +1739,7 @@ mod tests {
     fn instances_are_one_per_particle() {
         // A `FOLLOW_VELOCITY` (0x20) particle: the CPU carries the raw flag bits through
         // to the instance verbatim; the billboard re-orientation it selects is applied
-        // GPU-side in `particle.wgsl`.
+        // GPU-side in `particle.wesl`.
         let flags = part_flags::BOUNCE | 0x20;
         let part = Particle {
             pos: Vec3::new(1.0, 2.0, 10.0),

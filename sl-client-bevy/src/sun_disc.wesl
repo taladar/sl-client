@@ -12,10 +12,10 @@
 // This is gated behind the `bevy_pbr` feature: only the windowed viewer needs a
 // renderer.
 
-#import bevy_pbr::{
+import bevy_pbr::render::{
     mesh_functions,
     view_transformations::position_world_to_clip,
-}
+};
 
 // The per-frame disc inputs. Four scalars packed into a single 16-byte std140
 // slot, matching the Rust `SunDiscParams` (`ShaderType`) exactly.
@@ -39,11 +39,11 @@ struct SunDiscParams {
     sky_hdr_scale: f32,
 };
 
-@group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> disc: SunDiscParams;
-@group(#{MATERIAL_BIND_GROUP}) @binding(1) var diffuse_texture: texture_2d<f32>;
-@group(#{MATERIAL_BIND_GROUP}) @binding(2) var diffuse_sampler: sampler;
-@group(#{MATERIAL_BIND_GROUP}) @binding(3) var alt_texture: texture_2d<f32>;
-@group(#{MATERIAL_BIND_GROUP}) @binding(4) var alt_sampler: sampler;
+@group(constants::MATERIAL_BIND_GROUP) @binding(0) var<uniform> disc: SunDiscParams;
+@group(constants::MATERIAL_BIND_GROUP) @binding(1) var diffuse_texture: texture_2d<f32>;
+@group(constants::MATERIAL_BIND_GROUP) @binding(2) var diffuse_sampler: sampler;
+@group(constants::MATERIAL_BIND_GROUP) @binding(3) var alt_texture: texture_2d<f32>;
+@group(constants::MATERIAL_BIND_GROUP) @binding(4) var alt_sampler: sampler;
 
 struct Vertex {
     @builtin(instance_index) instance_index: u32,

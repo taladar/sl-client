@@ -109,7 +109,7 @@ static EMBEDDED_MENU: MenuDef = MenuDef {
 
 /// The skin class on an embedded-item box — a clickable object inside notecard
 /// prose. Its hover is `:hover` and nothing else; this used to be a
-/// `Pointer<Over>` / `Pointer<Out>` observer pair writing two colours by hand.
+/// `PointerOver` / `PointerOut` observer pair writing two colours by hand.
 ///
 /// Named in `sl_viewer_ui_core::skin`, because `stamp_hover_state` is driven by
 /// the list of classes with a `:hover` rule and a copy of the string here would
@@ -456,7 +456,7 @@ fn offer_copy(target: CopyTarget, out: &mut EmbeddedOutputs) {
 /// A primary press opens the item ([`EmbeddedAction`]); a secondary press
 /// opens the *Open* / *Copy to Inventory* menu on it.
 fn on_embedded_press(
-    press: On<Pointer<Press>>,
+    press: On<PointerPress>,
     boxes: Query<&EmbeddedItemBox>,
     unsaved: Query<&UnsavedEmbeddedItems>,
     If(mut out): If<EmbeddedOutputs>,
@@ -477,7 +477,7 @@ fn on_embedded_press(
             target.0 = Some(press.entity);
             menus.write(OpenContextMenu {
                 menu: &EMBEDDED_MENU,
-                at: press.pointer_location.position,
+                at: press.pointer.position,
                 element: EMBEDDED_MENU_ELEMENT,
                 conditions: Vec::new(),
             });

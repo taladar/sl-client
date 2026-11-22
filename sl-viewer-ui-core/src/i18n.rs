@@ -55,7 +55,8 @@
 //! on.
 
 use bevy::asset::{LoadState, LoadedFolder};
-use bevy::ecs::system::{IntoObserverSystem, SystemParam};
+use bevy::ecs::observer::IntoEntityObserver;
+use bevy::ecs::system::SystemParam;
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
 use bevy::ui_widgets::{Activate, Button};
@@ -1227,7 +1228,7 @@ fn demo_button<M>(
     parent: Entity,
     tab_index: i32,
     line: I18nDemoLine,
-    on_activate: impl IntoObserverSystem<Activate, (), M>,
+    on_activate: impl IntoEntityObserver<M>,
 ) {
     commands
         .spawn((

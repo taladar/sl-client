@@ -1,4 +1,4 @@
-//! The shared **water fog** shader module (`water_fog.wgsl`): the port of the
+//! The shared **water fog** shader module (`water_fog.wesl`): the port of the
 //! reference viewer's `getWaterFogViewNoClip` / `applyWaterFogViewLinear`, in one
 //! place because more than one shader has to compute it.
 //!
@@ -20,7 +20,7 @@ use bevy::app::App;
 use bevy::asset::{Handle, load_internal_asset, uuid_handle};
 use bevy::shader::Shader;
 
-/// The internal handle the shared water-fog module (`water_fog.wgsl`) is loaded
+/// The internal handle the shared water-fog module (`water_fog.wesl`) is loaded
 /// under. Shaders reach it by its `#define_import_path`
 /// (`sl_client_bevy::water_fog`), not by this handle; the handle only has to be
 /// stable so a second load replaces the module rather than adding a second one.
@@ -38,7 +38,7 @@ pub fn load_water_fog_shader(app: &mut App) {
     load_internal_asset!(
         app,
         WATER_FOG_SHADER_HANDLE,
-        "water_fog.wgsl",
-        Shader::from_wgsl
+        "water_fog.wesl",
+        |source, _| Shader::from_wesl(source, "embedded://sl_client_bevy/water_fog.wesl")
     );
 }

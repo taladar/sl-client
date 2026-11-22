@@ -490,6 +490,7 @@ struct ProbeCubeCopy {
 /// Only the **live** rigs are listed (the default probe plus the assigned pool
 /// rigs), so a free rig's stale faces are not re-blitted every frame.
 #[derive(Resource, Clone, Default, ExtractResource)]
+#[extract_app(RenderApp)]
 struct ProbeCubeCopies {
     /// One entry per live probe: the default probe, plus each assigned local probe.
     copies: Vec<ProbeCubeCopy>,
@@ -773,6 +774,7 @@ fn spawn_capture_camera(
         Hdr,
         Msaa::Off,
         Tonemapping::None,
+        bevy::core_pipeline::tonemapping::DebandDither::Disabled,
         // Render on the reflection-probe layers, never the main layer — so the
         // shadow-casting sun (on the main layer) builds no shadow cascades for
         // these cameras (viewer-perf-pipeline-specialization-stalls). The default
@@ -1733,6 +1735,7 @@ impl HeroProbeRigs {
 /// family owns its own rebuild. [`copy_hero_faces`] blits each mirror's six captured
 /// faces into its cube.
 #[derive(Resource, Clone, Default, ExtractResource)]
+#[extract_app(RenderApp)]
 struct HeroCubeCopies {
     /// One entry per bound mirror.
     copies: Vec<ProbeCubeCopy>,
@@ -1830,6 +1833,7 @@ fn spawn_hero_camera(commands: &mut Commands, rig: usize, face: usize, face_imag
         Hdr,
         Msaa::Off,
         Tonemapping::None,
+        bevy::core_pipeline::tonemapping::DebandDither::Disabled,
         // A mirror always captures dynamic content (you must see yourself), on the
         // probe layers only so the shadow sun builds no cascade for these cameras.
         local_probe_camera_render_layers(true),

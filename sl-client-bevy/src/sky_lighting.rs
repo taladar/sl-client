@@ -1,6 +1,6 @@
 //! The **sky lighting** every lit surface shares — the reference viewer's `sunlit`
 //! and `amblit` (`calcAtmosphericVars`), carried to the GPU in one small texture,
-//! plus the shader module (`sky_lighting.wgsl`) that lights a surface with them the
+//! plus the shader module (`sky_lighting.wesl`) that lights a surface with them the
 //! way the reference's deferred `softenLight` does, in both its legacy branch and
 //! its PBR (glTF) one.
 //!
@@ -15,7 +15,7 @@
 //! already uploaded to, so no material notices anything but the new values.
 //!
 //! **What a surface does with them** is the shader module's business; see
-//! `sky_lighting.wgsl`. What this side decides is only the three numbers a frame
+//! `sky_lighting.wesl`. What this side decides is only the three numbers a frame
 //! resolves to, and [`SkyLightingMode::Fallback`] — the texture's contents before
 //! any sky has been resolved, and for good in an app with no sky at all (the
 //! gallery, a test scene), where a surface keeps the lighting it had before this
@@ -40,7 +40,7 @@ pub const SKY_LIGHTING_IMAGE: Handle<Image> = uuid_handle!("c41a7e92-3b58-4f0d-8
 /// the state of having no sky at all.
 ///
 /// Stored in the texture as a float (`0`, `1`, `2`), and compared in
-/// `sky_lighting.wgsl` against the same numbers.
+/// `sky_lighting.wesl` against the same numbers.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[expect(
     clippy::module_name_repetitions,
@@ -206,8 +206,8 @@ pub fn load_sky_lighting(app: &mut App) {
     load_internal_asset!(
         app,
         SKY_LIGHTING_SHADER_HANDLE,
-        "sky_lighting.wgsl",
-        Shader::from_wgsl
+        "sky_lighting.wesl",
+        |source, _| Shader::from_wesl(source, "embedded://sl_client_bevy/sky_lighting.wesl")
     );
     if let Some(mut images) = app.world_mut().get_resource_mut::<Assets<Image>>()
         && !images.contains(&SKY_LIGHTING_IMAGE)

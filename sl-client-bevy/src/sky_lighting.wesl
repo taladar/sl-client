@@ -19,14 +19,12 @@
 // own brightness — which is the whole of why this is a port and not a Bevy
 // directional light with a well-chosen illuminance.
 
-#define_import_path sl_client_bevy::sky_lighting
 
-#import bevy_pbr::mesh_view_bindings as sky_view_bindings
-#import bevy_pbr::clustered_forward as sky_clustering
-#import bevy_pbr::lighting as sky_lighting_functions
-#ifdef ENVIRONMENT_MAP
-#import bevy_pbr::environment_map as sky_environment_map
-#endif
+import bevy_pbr::render::mesh_view_bindings as sky_view_bindings;
+import bevy_pbr::render::clustered_forward as sky_clustering;
+import bevy_pbr::render::pbr_lighting as sky_lighting_functions;
+@if(ENVIRONMENT_MAP)
+import bevy_pbr::light_probe::environment_map as sky_environment_map;
 
 // `SkyLightingMode` (sky_lighting.rs), as the texture stores it.
 const SKY_LIGHTING_MODE_EEP: f32 = 1.0;
@@ -139,7 +137,6 @@ struct SkyProbeIrradiance {
     present: bool,
 }
 
-#ifdef ENVIRONMENT_MAP
 // Bevy's own per-fragment probe lookup (`compute_radiances`) for a surface of
 // normal `n` seen along `v`: the probes whose volumes hold the fragment, blended
 // across overlapping volumes, and the view's own (default) probe for whatever
@@ -147,6 +144,7 @@ struct SkyProbeIrradiance {
 // the reflection and the ambient from the probes that hold the fragment. Both
 // results are scaled by the probe intensity and still want the view exposure.
 // `want_irradiance` false skips the diffuse sample.
+@if(ENVIRONMENT_MAP)
 fn sky_probe_radiances(
     n: vec3<f32>,
     v: vec3<f32>,
@@ -185,7 +183,6 @@ fn sky_probe_radiances(
         /*found_diffuse_indirect=*/ !want_irradiance,
     );
 }
-#endif
 
 // The irradiance arriving along `n` from the reflection probes that hold the
 // fragment (`sky_probe_radiances`), scaled by the view exposure — which the viewer
@@ -200,7 +197,7 @@ fn sky_probe_irradiance(n: vec3<f32>, fragment: SkyFragment) -> SkyProbeIrradian
     var out: SkyProbeIrradiance;
     out.irradiance = vec3<f32>(0.0);
     out.present = false;
-#ifdef ENVIRONMENT_MAP
+    @if(ENVIRONMENT_MAP)
     if (sky_view_bindings::light_probes.view_cubemap_index >= 0) {
         // The irradiance does not depend on the view direction or the roughness;
         // the normal stands in for the one and a rough surface for the other, which
@@ -209,7 +206,6 @@ fn sky_probe_irradiance(n: vec3<f32>, fragment: SkyFragment) -> SkyProbeIrradian
         out.irradiance = radiances.irradiance * sky_view_bindings::view.exposure;
         out.present = true;
     }
-#endif
     return out;
 }
 
@@ -397,13 +393,13 @@ fn sky_probe_radiance(
     perceptual_roughness: f32,
     fragment: SkyFragment,
 ) -> vec3<f32> {
-#ifdef ENVIRONMENT_MAP
     // Only the radiance is wanted here: the irradiance is `sky_irradiance`'s.
+    @if(ENVIRONMENT_MAP)
     let radiances = sky_probe_radiances(n, v, perceptual_roughness, fragment, false);
+    @if(ENVIRONMENT_MAP)
     return radiances.radiance * sky_view_bindings::view.exposure;
-#else
+    @if(!ENVIRONMENT_MAP)
     return vec3<f32>(0.0);
-#endif
 }
 
 // The reference `pbrBaseLight`, image-based and sun terms together, with the

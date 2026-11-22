@@ -19,11 +19,11 @@
 // a lit surface, and the tall upper shaft pokes above nearer geometry so the beacon
 // still reads as a waypoint from behind a building.
 
-#import bevy_pbr::{
+import bevy_pbr::render::{
     mesh_functions,
     mesh_view_bindings as view_bindings,
     view_transformations::position_world_to_clip,
-}
+};
 
 // One blade vertex: its position (blade-local metres, carried into Bevy world space
 // by the billboarded entity transform) and the soft-edge profile in the colour's
@@ -45,7 +45,7 @@ struct VertexOutput {
 
 // The shaft's RGB tint (`rgb`) and base alpha (`a`) — set per beacon-half from the
 // tracked-thing's colour code, never mutated per frame.
-@group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> beam_color: vec4<f32>;
+@group(constants::MATERIAL_BIND_GROUP) @binding(0) var<uniform> beam_color: vec4<f32>;
 
 @vertex
 fn vertex(in: Vertex) -> VertexOutput {

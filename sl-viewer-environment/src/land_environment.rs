@@ -1663,7 +1663,7 @@ fn paint_land_controls(
 
 /// An action button was pressed.
 fn on_land_action(
-    mut press: On<Pointer<Press>>,
+    mut press: On<PointerPress>,
     buttons: Query<(&PanelOf, &LandAction)>,
     disabled: Query<(), With<bevy::ui::InteractionDisabled>>,
     mut panels: Query<(
@@ -1755,7 +1755,7 @@ fn on_land_action(
 
 /// A "Use Inventory…" button was pressed: open the picker on that field.
 fn on_land_pick_pressed(
-    mut press: On<Pointer<Press>>,
+    mut press: On<PointerPress>,
     buttons: Query<(&PanelOf, &PickerButton)>,
     disabled: Query<(), With<bevy::ui::InteractionDisabled>>,
     panels: Query<&LandEnvironmentState>,

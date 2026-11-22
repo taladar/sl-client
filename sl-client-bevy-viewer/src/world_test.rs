@@ -197,7 +197,7 @@ pub(crate) fn install_camera(app: &mut App, eye: Vec3, target: Vec3) {
     let pose = Transform::from_translation(eye).looking_at(target, Vec3::Y);
     let camera = Camera {
         computed: bevy::camera::ComputedCameraValues {
-            clip_from_view: Mat4::perspective_infinite_reverse_rh(
+            clip_from_view: bevy::math::proj::perspective_infinite_reverse(
                 core::f32::consts::FRAC_PI_3,
                 aspect,
                 0.1,
@@ -3633,6 +3633,7 @@ mod camera_tests {
             app.world_mut()
                 .spawn((
                     editor,
+                    bevy::ui_widgets::TextInput,
                     Node {
                         position_type: PositionType::Absolute,
                         left: Val::Px(20.0),

@@ -202,7 +202,7 @@ fn hover_text_render_bundle(pull_radius: f32) -> impl Bundle {
         // No anti-overlap solve runs over floating text, so the shader's
         // per-instance offset stays neutral (else it unpacks tag 0 as a huge
         // negative offset and draws off-screen).
-        bevy::mesh::MeshTag(NEUTRAL_MESH_TAG),
+        bevy::mesh::MeshTag::new(NEUTRAL_MESH_TAG),
         // An overlay, not world translucency: floating text on a prim under the
         // sea is drawn over the surface, as the reference's late text pass draws
         // it, rather than into the screen copy the surface refracts.

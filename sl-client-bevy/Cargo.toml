@@ -25,7 +25,7 @@ bevy_pbr = ["bevy/bevy_pbr"]
 [dependencies]
 arc-swap = { workspace = true }
 async-trait = { workspace = true }
-bevy = { version = "0.19.0", default-features = false, features = [
+bevy = { version = "0.20.1", default-features = false, features = [
   "bevy_asset",
   "bevy_image",
   "bevy_mesh",
@@ -37,7 +37,7 @@ bytes = { workspace = true }
 crossbeam-channel = { workspace = true }
 reqwest = { workspace = true, features = [
   "blocking",
-  "rustls-tls",
+  "rustls",
 ] }
 sl-account-dirs = { workspace = true }
 sl-anim = { workspace = true }

@@ -83,7 +83,7 @@ use sl_settings::SettingValue;
 use sl_viewer_settings::ViewerSettings;
 use sl_viewer_world_api::{OverlayCamera, SETTING_RENDER_RESOLUTION_DIVISOR, ViewerCamera};
 
-/// The internal handle the upscale shader (`resolution_divisor.wgsl`) is loaded
+/// The internal handle the upscale shader (`resolution_divisor.wesl`) is loaded
 /// under.
 const UPSCALE_SHADER_HANDLE: Handle<Shader> = uuid_handle!("2d3b5a17-a7f8-4f1d-9fc5-9c71f2aea3e9");
 
@@ -219,11 +219,11 @@ pub struct WorldUpscale {
     pub image: Handle<Image>,
 }
 
-impl SyncComponent for WorldUpscale {
+impl SyncComponent<RenderApp> for WorldUpscale {
     type Target = Self;
 }
 
-impl ExtractComponent for WorldUpscale {
+impl ExtractComponent<RenderApp> for WorldUpscale {
     type QueryData = Read<Self>;
     type QueryFilter = With<Camera>;
     type Out = Self;
@@ -483,8 +483,11 @@ impl Plugin for ResolutionDivisorPlugin {
         load_internal_asset!(
             app,
             UPSCALE_SHADER_HANDLE,
-            "resolution_divisor.wgsl",
-            Shader::from_wgsl
+            "resolution_divisor.wesl",
+            |source, _| Shader::from_wesl(
+                source,
+                "embedded://sl_viewer_world_scene/resolution_divisor.wesl"
+            )
         );
         app.init_resource::<WorldRenderTarget>()
             .add_plugins(ExtractComponentPlugin::<WorldUpscale>::default())

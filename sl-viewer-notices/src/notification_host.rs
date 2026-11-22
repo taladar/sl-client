@@ -1423,19 +1423,17 @@ fn raise_notifications(
             commands
                 .entity(card.root)
                 .observe(
-                    move |_over: On<Pointer<Over>>, mut toasts: Query<&mut Toast>| {
+                    move |_over: On<PointerOver>, mut toasts: Query<&mut Toast>| {
                         if let Ok(mut toast) = toasts.get_mut(target) {
                             toast.hovered = true;
                         }
                     },
                 )
-                .observe(
-                    move |_out: On<Pointer<Out>>, mut toasts: Query<&mut Toast>| {
-                        if let Ok(mut toast) = toasts.get_mut(target) {
-                            toast.hovered = false;
-                        }
-                    },
-                );
+                .observe(move |_out: On<PointerOut>, mut toasts: Query<&mut Toast>| {
+                    if let Ok(mut toast) = toasts.get_mut(target) {
+                        toast.hovered = false;
+                    }
+                });
         }
 
         // Wire each button to a resolve carrying its name. With an input field

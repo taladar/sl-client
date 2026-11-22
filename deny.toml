@@ -74,35 +74,6 @@ ignore = [
   # { id = "RUSTSEC-0000-0000", reason = "you can specify a reason the advisory is ignored" },
   # "a-crate-that-is-yanked@0.1.1", # you can also ignore yanked crate versions if you wish
   # { crate = "a-crate-that-is-yanked@0.1.1", reason = "you can specify why you are ignoring the yanked crate" },
-  # The following three advisories are transitive dependencies of winit's
-  # Wayland backend (client-side window decorations, `sctk-adwaita`), pulled in
-  # by `bevy_winit` when `sl-client-bevy-viewer` enables the full Bevy
-  # `DefaultPlugins`. None has an available upgrade path at the versions winit
-  # 0.30 / wayland-scanner 0.31 pin, and none is on a runtime attack surface for
-  # a viewer that only ever talks to trusted grids.
-  { id = "RUSTSEC-2026-0194", reason = "quick-xml <0.41 DoS: reachable only from wayland-scanner, a build-time proc-macro parsing the compositor's own trusted protocol XML — never runtime/untrusted input. wayland-scanner 0.31.10 pins quick-xml =0.39, so no upgrade path." },
-  { id = "RUSTSEC-2026-0195", reason = "quick-xml <0.41 DoS: same as RUSTSEC-2026-0194 — build-time-only via wayland-scanner, no upgrade path at the pinned version." },
-  { id = "RUSTSEC-2026-0192", reason = "ttf-parser unmaintained: pulled in via ab_glyph -> sctk-adwaita for winit's Wayland title-bar font rendering; no maintained replacement and no runtime exposure to untrusted fonts." },
-  # A compile-time proc-macro pulled in via avian3d -> parry3d -> simba for the
-  # physics collider stack (Phase 31+). It is only flagged as unmaintained (not a
-  # vulnerability), has no runtime footprint, and cannot be swapped in a
-  # transitive dependency; parry/nalgebra's SIMD layer requires it. (The
-  # maintained fork `pastey` exists but is not selectable from here.)
-  { id = "RUSTSEC-2024-0436", reason = "paste unmaintained: a compile-time proc-macro via avian3d -> parry3d -> simba (physics colliders). No runtime footprint, no way to swap a transitive dep, and no vulnerability — just unmaintained." },
-  # The YAML parser under `serde_yaml`, which `bevy_fluent` reads a locale
-  # bundle's `.ftl.yml` manifest with. It is flagged as unmaintained (its
-  # repository is archived), not as vulnerable; `serde_yaml` is a hard
-  # dependency of `bevy_fluent` 0.15, the newest release, so there is nothing to
-  # upgrade to; and the only YAML it ever parses is the viewer's own shipped
-  # locale manifests. Drop this when `bevy_fluent` moves to another parser.
-  { id = "RUSTSEC-2024-0449", reason = "unsafe-libyaml unmaintained: via bevy_fluent -> serde_yaml, which parses only the viewer's own shipped locale manifests. Not a vulnerability, and bevy_fluent 0.15 (the newest) has no release without it." },
-  # The three zbus sub-crates were folded into zbus 6 and are no longer
-  # maintained on their own. They reach us only through bevy_winit ->
-  # accesskit_winit -> accesskit_unix, which still requires zbus 5, so there is
-  # nothing to upgrade to until accesskit moves. Drop these when it does.
-  { id = "RUSTSEC-2026-0370", reason = "zvariant unmaintained (folded into zbus 6): via bevy_winit -> accesskit_unix -> zbus 5. Not a vulnerability; accesskit_unix has no release on zbus 6." },
-  { id = "RUSTSEC-2026-0371", reason = "zbus_names unmaintained (folded into zbus 6): via bevy_winit -> accesskit_unix -> zbus 5. Not a vulnerability; accesskit_unix has no release on zbus 6." },
-  { id = "RUSTSEC-2026-0372", reason = "zvariant_derive unmaintained (folded into zbus 6): via bevy_winit -> accesskit_unix -> zbus 5. Not a vulnerability; accesskit_unix has no release on zbus 6." },
 ]
 # If this is true, then cargo deny will use the git executable to fetch advisory database.
 # If this is false, then it uses a built-in git library.
@@ -162,10 +133,14 @@ exceptions = [
   # The bzip2 licence (BSD-style permissive); libbz2-rs-sys is a build-time
   # dependency of the CEF binary downloader (download-cef -> cef-dll-sys).
   { allow = ["bzip2-1.0.6"], crate = "libbz2-rs-sys" },
-  # `openjpeg-sys` (the OpenJPEG C bindings behind `jpeg2k`, used by sl-texture
-  # for JPEG-2000 decoding) is BSD-2-Clause, a permissive license; allow it for
-  # that crate rather than project-wide.
+  # `openjpeg-sys` (the OpenJPEG C bindings `sl-j2c-encode` encodes JPEG-2000
+  # with) is BSD-2-Clause, a permissive license; allow it for that crate rather
+  # than project-wide.
   { allow = ["BSD-2-Clause"], crate = "openjpeg-sys" },
+  # `openjp2` and its `openjp2-ctypes` (the Rust port of OpenJPEG that `jpeg2k`
+  # decodes with) carry the same BSD-2-Clause license.
+  { allow = ["BSD-2-Clause"], crate = "openjp2" },
+  { allow = ["BSD-2-Clause"], crate = "openjp2-ctypes" },
   # `arrayref` (BSD-2-Clause) is a transitive dependency of blake3 via bevy_asset
   # in sl-client-bevy's Bevy dependency tree.
   { allow = ["BSD-2-Clause"], crate = "arrayref" },

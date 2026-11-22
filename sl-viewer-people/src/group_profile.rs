@@ -2416,7 +2416,7 @@ fn bind_role_rows(
 
 /// Select a role on press, showing its details and seeding its powers draft.
 fn on_role_row_press(
-    press: On<Pointer<Press>>,
+    press: On<PointerPress>,
     rows: Query<&BoundRole>,
     parents: Query<&ChildOf>,
     floaters: Query<(Entity, &Floater)>,
@@ -2950,7 +2950,7 @@ fn spawn_specimen_rows<const N: usize>(
 
 /// Select a member on press, showing its details.
 fn on_member_row_press(
-    press: On<Pointer<Press>>,
+    press: On<PointerPress>,
     rows: Query<&BoundMember>,
     parents: Query<&ChildOf>,
     floaters: Query<(Entity, &Floater)>,
@@ -3062,7 +3062,7 @@ struct GroupProfileHost<'w, 's> {
 
 /// Select a notice on press: show it, and request its full body if not cached.
 fn on_notice_row_press(
-    press: On<Pointer<Press>>,
+    press: On<PointerPress>,
     rows: Query<&BoundNotice>,
     host: GroupProfileHost,
     mut windows: Query<(
@@ -3204,7 +3204,7 @@ fn on_group_profile_check(
     reason = "one dispatch over every group-profile button kind, each arm a few lines"
 )]
 fn on_group_profile_action(
-    press: On<Pointer<Press>>,
+    press: On<PointerPress>,
     actions: Query<&GroupProfileAction>,
     host: GroupProfileHost,
     mut windows: Query<(

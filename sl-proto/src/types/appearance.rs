@@ -518,7 +518,7 @@ pub mod avatar_texture {
             return None;
         }
         context.consume(Uuid::from_u128(*seed).as_bytes());
-        Some(Uuid::from_bytes(context.compute().0))
+        Some(Uuid::from_bytes(context.finalize().0))
     }
 
     use sl_types::key::TextureKey;

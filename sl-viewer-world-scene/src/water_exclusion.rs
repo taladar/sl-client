@@ -24,7 +24,7 @@
 //! (`order = -1`) into an `R8` [`Image`] target — renders only the exclusion faces
 //! (routed onto [`WATER_EXCLUSION_LAYER`], invisible to every ordinary view) as
 //! flat black on a white clear. That image is bound into the shared
-//! [`WaterMaterial`]'s `exclusion_mask` slot, and `water.wgsl` samples it by the
+//! [`WaterMaterial`]'s `exclusion_mask` slot, and `water.wesl` samples it by the
 //! fragment's screen position and discards the sea where it reads black. Because
 //! the mask is a 2-D silhouette (rendered double-sided), it excludes the sea from
 //! every viewing angle, including looking down into an open hull.
@@ -172,6 +172,7 @@ pub(crate) fn setup_water_exclusion(
         Msaa::Off,
         // No tone mapping: the mask is a raw coverage signal, not a colour image.
         Tonemapping::None,
+        bevy::core_pipeline::tonemapping::DebandDither::Disabled,
         Name::new("water-exclusion-mask-camera"),
     ));
 

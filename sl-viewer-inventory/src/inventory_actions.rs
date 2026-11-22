@@ -1993,7 +1993,7 @@ pub(crate) fn open_inventory_context_menu(
 /// A right-click on a pooled inventory row: resolve the row it currently
 /// presents and open the matching context menu at the pointer.
 pub(crate) fn on_row_context(
-    mut press: On<Pointer<Press>>,
+    mut press: On<PointerPress>,
     rows: Query<&VirtualRow>,
     view: Res<InventoryView>,
     state: Res<crate::inventory::InventoryState>,
@@ -2029,7 +2029,7 @@ pub(crate) fn on_row_context(
     };
     let _opened = open_inventory_context_menu(
         &keys,
-        press.pointer_location.position,
+        press.pointer.position,
         &facts,
         state.tab().is_membership(),
         &mut pick,
@@ -2040,7 +2040,7 @@ pub(crate) fn on_row_context(
 /// A right-click on the list's empty background: target the agent's root
 /// folder ("My Inventory"), the reference's top-level New Folder / Paste menu.
 pub(crate) fn on_viewport_context(
-    press: On<Pointer<Press>>,
+    press: On<PointerPress>,
     model: Res<InventoryModel>,
     clipboard: Res<InventoryClipboard>,
     mut target: ResMut<InventoryMenuTarget>,
@@ -2065,7 +2065,7 @@ pub(crate) fn on_viewport_context(
     target.targets = vec![MenuTarget::Folder(info)];
     menus.write(OpenContextMenu {
         menu: &INVENTORY_FOLDER_MENU,
-        at: press.pointer_location.position,
+        at: press.pointer.position,
         element: INVENTORY_MENU_ELEMENT,
         conditions,
     });

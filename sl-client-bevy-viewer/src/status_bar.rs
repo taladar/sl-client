@@ -567,7 +567,10 @@ fn spawn_readout(
     if readout == StatusReadout::ParcelName {
         commands
             .entity(text)
-            .insert((Button, Pickable::default()))
+            .insert((
+                bevy::picking::hover::Hovered::default(),
+                Pickable::default(),
+            ))
             .observe(on_parcel_name_press);
     }
     // Mark the balance so the snapshot floater can blank it for a shot.
@@ -579,7 +582,7 @@ fn spawn_readout(
 /// Open the About Land floater on the agent's current parcel when the top-bar
 /// location read-out is clicked.
 fn on_parcel_name_press(
-    press: On<Pointer<Press>>,
+    press: On<PointerPress>,
     parcel: Res<SlAgentParcel>,
     mut about_land: MessageWriter<crate::about_land::OpenAboutLand>,
 ) {

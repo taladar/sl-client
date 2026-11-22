@@ -388,8 +388,11 @@ fn mark_shadow_caster_visibility(
         return;
     }
     let mut iter = view_visibilities.iter_many_mut(&pipeline.visible);
-    while let Some(mut view_visibility) = iter.fetch_next() {
-        view_visibility.set_visible();
+    while let Some(view_visibility) = iter.fetch_next() {
+        // A caster despawned since the last cull pass has no visibility to set.
+        if let Ok(mut view_visibility) = view_visibility {
+            view_visibility.set_visible();
+        }
     }
 }
 

@@ -225,7 +225,7 @@ pub fn spawn_material_swatch(
 /// current material id) when the swatch carries a [`MaterialSwatchValue`], else
 /// in texture mode from its [`TextureSwatchValue`].
 fn open_picker_from_swatch(
-    press: On<Pointer<Press>>,
+    press: On<PointerPress>,
     swatches: Query<(
         &TextureSwatchValue,
         &TextureSwatchField,
@@ -1309,7 +1309,7 @@ fn depth_indent(depth: usize) -> f32 {
 
 /// Toggle a folder row's expansion, lazily fetching its contents the first time.
 fn on_folder_row_press(
-    press: On<Pointer<Press>>,
+    press: On<PointerPress>,
     rows: Query<&TreeFolderRow>,
     parents: Query<&ChildOf>,
     floaters: Query<(Entity, &Floater)>,
@@ -1345,7 +1345,7 @@ fn on_folder_row_press(
 
 /// Select a texture item row: update the selection and live-preview it.
 fn on_item_row_press(
-    press: On<Pointer<Press>>,
+    press: On<PointerPress>,
     rows: Query<&TreeItemRow>,
     parents: Query<&ChildOf>,
     floaters: Query<(Entity, &Floater)>,
@@ -1504,7 +1504,7 @@ fn scroll_tree(
 
 /// A quick-choice / OK / Cancel press.
 fn on_picker_button(
-    press: On<Pointer<Press>>,
+    press: On<PointerPress>,
     buttons: Query<&PickerButton>,
     parents: Query<&ChildOf>,
     floaters: Query<(Entity, &Floater)>,

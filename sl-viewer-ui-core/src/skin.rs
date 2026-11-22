@@ -579,8 +579,8 @@ pub const TILE_CLASS: &str = "sk-tile";
 pub const INLINE_ITEM_CLASS: &str = "sk-inline-item";
 
 /// The CSS class on one row of a combo box's open drop-down. Its hover is a
-/// `:hover` rule, which replaced a hand-written `Pointer<Over>` /
-/// `Pointer<Out>` observer pair — and then painted nothing until the
+/// `:hover` rule, which replaced a hand-written `PointerOver` /
+/// `PointerOut` observer pair — and then painted nothing until the
 /// scaffold's hover stamp gave the row the state to be hovered in.
 pub const COMBO_OPTION_CLASS: &str = "sk-combo-option";
 
@@ -728,21 +728,16 @@ const HOVER_CLASSES: &[&str] = &[
 
 /// What [`stamp_hover_state`] walks: the classed nodes that could still need
 /// the hover component — everything whose `ClassList` has just changed (an
-/// insert counts) and that carries neither the modern `Hovered` nor the legacy
-/// `Interaction`.
+/// insert counts) and that does not carry `Hovered` yet.
 ///
-/// A named type because the two `Without`s and the `Changed` are what keep the
+/// A named type because the `Without` and the `Changed` are what keep the
 /// scan bounded, and a filter this load-bearing should be readable at a glance
 /// rather than spelled inline.
 type HoverCandidates<'w, 's> = Query<
     'w,
     's,
     (Entity, &'static ClassList),
-    (
-        Changed<ClassList>,
-        Without<bevy::picking::hover::Hovered>,
-        Without<Interaction>,
-    ),
+    (Changed<ClassList>, Without<bevy::picking::hover::Hovered>),
 >;
 
 /// Give everything a `:hover` rule selects the component that pseudo-class is
@@ -750,18 +745,15 @@ type HoverCandidates<'w, 's> = Query<
 ///
 /// `bevy_picking`'s `Hovered` is **opt-in** — its own docs say "typically, a
 /// simple hoverable entity or widget will have this component added to it", and
-/// nothing adds it for you — and `bevy_flair` reads exactly two things:
-/// `Hovered`, and the legacy `Interaction` that **`bevy_ui`'s** `Button`
-/// requires. Neither is implied by being pickable, or by carrying a class, or
-/// by `bevy_ui_widgets`' headless `Button`, which is a different type that
-/// requires neither.
+/// nothing adds it for you — and `bevy_flair` reads it for the pseudo-class.
+/// It is not implied by being pickable, or by carrying a class, or by
+/// `bevy_ui_widgets`' headless `Button`.
 ///
-/// So a `:hover` rule on anything that is not a `bevy_ui::Button` parsed,
-/// matched nothing, and painted nothing — silently, and only in the live
+/// So a `:hover` rule on a node without it parsed, matched nothing, and painted nothing — silently, and only in the live
 /// viewer. Three rules were in that state when this was written: the scroll
 /// list rows this was added for, the emoji grid's `.sk-tile`, and
-/// `.sk-combo-option`, the last two having had working `Pointer<Over>` /
-/// `Pointer<Out>` observer pairs *replaced* by the rule.
+/// `.sk-combo-option`, the last two having had working `PointerOver` /
+/// `PointerOut` observer pairs *replaced* by the rule.
 ///
 /// A cascade test cannot catch it, which is worth stating because this codebase
 /// leans on those: a test inserts `Hovered(true)` itself and so proves the
@@ -772,9 +764,7 @@ type HoverCandidates<'w, 's> = Query<
 /// [`stamp_focus_ring_class`]'s model: one place, and a widget built next year
 /// gets its hover by carrying the class, which is the whole claim the class
 /// makes. `Without<Hovered>` keeps the scan to nodes that still need it — the
-/// striping and selection systems touch a row's `ClassList` often — and
-/// `Without<Interaction>` leaves anything that already has the legacy component
-/// to the path it had, rather than have two systems write one pseudo-state.
+/// striping and selection systems touch a row's `ClassList` often.
 fn stamp_hover_state(mut commands: Commands, hoverable: HoverCandidates) {
     for (entity, classes) in &hoverable {
         if HOVER_CLASSES.iter().any(|class| classes.contains(*class)) {
@@ -809,10 +799,8 @@ const PRESS_CLASSES: &[&str] = &[
 struct PressTracked;
 
 /// What [`stamp_press_state`] walks: classed nodes that could still need their
-/// press tracked. Both button components are excluded because each already
-/// supplies the pseudo-state — `bevy_ui`'s through `Interaction`,
-/// `bevy_ui_widgets`' by keeping `Pressed` itself — and two writers of one
-/// state is a race.
+/// press tracked. The headless button is excluded because it keeps `Pressed`
+/// itself, and two writers of one state is a race.
 type PressCandidates<'w, 's> = Query<
     'w,
     's,
@@ -820,7 +808,6 @@ type PressCandidates<'w, 's> = Query<
     (
         Changed<ClassList>,
         Without<PressTracked>,
-        Without<Interaction>,
         Without<bevy::ui_widgets::Button>,
     ),
 >;
@@ -828,8 +815,7 @@ type PressCandidates<'w, 's> = Query<
 /// Give every button box an `:active` rule selects a press state the rule can
 /// read (`viewer-skin-active-class-means-selected-not-pressed`).
 ///
-/// `bevy_flair`'s `:active` is `Interaction::Pressed` or the `Pressed` marker,
-/// and a button spawned as a plain pickable box — every flat action button, the
+/// `bevy_flair`'s `:active` is the `Pressed` marker, and a button spawned as a plain pickable box — every flat action button, the
 /// bottom toolbar, a floater's close box — has neither. So the pressed rule
 /// parsed, matched nothing and painted nothing, which is why a press was
 /// invisible on every one of them. Keyed off the classes, on
@@ -846,10 +832,10 @@ fn stamp_press_state(mut commands: Commands, candidates: PressCandidates) {
 /// A primary press on a [`PressTracked`] box holds it down — unless it is
 /// refused, which a press must never appear to reach.
 ///
-/// Never stops the propagation: the box's own `Pointer<Press>` observer, and any
+/// Never stops the propagation: the box's own `PointerPress` observer, and any
 /// ancestor's, still see the press exactly as before.
 fn press_tracked_on_press(
-    press: On<Pointer<Press>>,
+    press: On<PointerPress>,
     tracked: Query<Has<bevy::ui::InteractionDisabled>, With<PressTracked>>,
     mut commands: Commands,
 ) {
@@ -878,7 +864,7 @@ fn release_tracked(
 
 /// [`release_tracked`] on a release over the box.
 fn press_tracked_on_release(
-    release: On<Pointer<Release>>,
+    release: On<PointerRelease>,
     tracked: Query<(), With<PressTracked>>,
     mut commands: Commands,
 ) {
@@ -889,7 +875,7 @@ fn press_tracked_on_release(
 
 /// [`release_tracked`] at the end of a drag that began on the box.
 fn press_tracked_on_drag_end(
-    drag_end: On<Pointer<DragEnd>>,
+    drag_end: On<PointerDragEnd>,
     tracked: Query<(), With<PressTracked>>,
     mut commands: Commands,
 ) {
@@ -900,7 +886,7 @@ fn press_tracked_on_drag_end(
 
 /// [`release_tracked`] when the pointer is cancelled.
 fn press_tracked_on_cancel(
-    cancel: On<Pointer<Cancel>>,
+    cancel: On<PointerCancel>,
     tracked: Query<(), With<PressTracked>>,
     mut commands: Commands,
 ) {
@@ -1736,7 +1722,7 @@ impl Default for SkinRadius {
 impl SkinRadius {
     /// Resolve these logical corners into a physical [`BorderRadius`] for the
     /// given direction: under RTL the leading corners land on the right.
-    const fn resolve(self, direction: UiDirection) -> BorderRadius {
+    fn resolve(self, direction: UiDirection) -> BorderRadius {
         let (top_left, top_right, bottom_left, bottom_right) = if direction.is_rtl() {
             (
                 self.start_end,
@@ -1753,10 +1739,10 @@ impl SkinRadius {
             )
         };
         BorderRadius {
-            top_left,
-            top_right,
-            bottom_left,
-            bottom_right,
+            top_left: top_left.into(),
+            top_right: top_right.into(),
+            bottom_left: bottom_left.into(),
+            bottom_right: bottom_right.into(),
         }
     }
 }
@@ -2241,20 +2227,20 @@ mod tests {
         assert_eq!(
             radius.resolve(UiDirection::Ltr),
             BorderRadius {
-                top_left: Val::Px(10.0),
-                top_right: Val::Px(0.0),
-                bottom_left: Val::Px(0.0),
-                bottom_right: Val::Px(0.0),
+                top_left: Val::Px(10.0).into(),
+                top_right: Val::Px(0.0).into(),
+                bottom_left: Val::Px(0.0).into(),
+                bottom_right: Val::Px(0.0).into(),
             }
         );
         assert_eq!(
             radius.resolve(UiDirection::Rtl),
             BorderRadius {
                 // The leading top corner is now on the right.
-                top_left: Val::Px(0.0),
-                top_right: Val::Px(10.0),
-                bottom_left: Val::Px(0.0),
-                bottom_right: Val::Px(0.0),
+                top_left: Val::Px(0.0).into(),
+                top_right: Val::Px(10.0).into(),
+                bottom_left: Val::Px(0.0).into(),
+                bottom_right: Val::Px(0.0).into(),
             }
         );
     }
@@ -2359,10 +2345,6 @@ mod tests {
     /// scaffold stamped it — a rule that parsed, resolved and painted never.
     /// The cascade test for that rule cannot catch this: it inserts `Hovered`
     /// itself, which is precisely the state nothing was supplying.
-    ///
-    /// Anything that already carries `Interaction` is left alone: `bevy_ui`'s
-    /// `Button` requires it, `bevy_flair` reads it for the same pseudo-state,
-    /// and two systems writing one state is a race to nowhere.
     #[test]
     fn a_hoverable_node_is_given_the_hover_component() {
         use bevy::picking::hover::Hovered;
@@ -2377,13 +2359,6 @@ mod tests {
         let table_row = app
             .world_mut()
             .spawn(ClassList::new_with_classes([TABLE_ROW_CLASS]))
-            .id();
-        let button_row = app
-            .world_mut()
-            .spawn((
-                ClassList::new_with_classes([LIST_ROW_CLASS]),
-                Interaction::default(),
-            ))
             .id();
         let nothing_hoverable = app
             .world_mut()
@@ -2401,11 +2376,6 @@ mod tests {
             "a table row never hovers without this"
         );
         assert!(
-            app.world().get::<Hovered>(button_row).is_none(),
-            "a node that already carries `Interaction` has the pseudo-state \
-             driven for it"
-        );
-        assert!(
             app.world().get::<Hovered>(nothing_hoverable).is_none(),
             "a class with no `:hover` rule gains nothing — the component is \
              only free while the set stays the set the stylesheet names"
@@ -2414,7 +2384,8 @@ mod tests {
 
     /// Trigger a pointer event on an entity by hand and settle a frame — the
     /// observer call a real press makes, without a picking backend to aim one.
-    /// A macro because `World::trigger` wants the concrete `Pointer<E>`.
+    /// A macro because `World::trigger` wants the concrete event type; `$event`
+    /// builds it from the target entity and the `Pointer`.
     macro_rules! trigger_pointer {
         ($app:expr, $entity:expr, $event:expr $(,)?) => {{
             let location = bevy::picking::pointer::Location {
@@ -2424,12 +2395,9 @@ mod tests {
                 },
                 position: Vec2::ZERO,
             };
-            $app.world_mut().trigger(Pointer::new(
-                bevy::picking::pointer::PointerId::Mouse,
-                location,
-                $event,
-                $entity,
-            ));
+            let pointer = Pointer::new(bevy::picking::pointer::PointerId::Mouse, location);
+            let event = ($event)($entity, pointer);
+            $app.world_mut().trigger(event);
             $app.update();
         }};
     }
@@ -2450,7 +2418,7 @@ mod tests {
             stamp_press_state,
         };
         use bevy::picking::backend::HitData;
-        use bevy::picking::events::{DragEnd, Press, Release};
+        use bevy::picking::events::{PointerDragEnd, PointerPress, PointerRelease};
         use bevy::picking::pointer::PointerButton;
         use bevy::ui::{InteractionDisabled, Pressed};
 
@@ -2479,13 +2447,6 @@ mod tests {
                 bevy::ui_widgets::Button,
             ))
             .id();
-        let legacy = app
-            .world_mut()
-            .spawn((
-                ClassList::new_with_classes([ACTION_BUTTON_CLASS]),
-                Interaction::default(),
-            ))
-            .id();
         let panel = app
             .world_mut()
             .spawn(ClassList::new_with_classes(["sk-panel"]))
@@ -2498,20 +2459,24 @@ mod tests {
             app.world().get::<PressTracked>(widget).is_none(),
             "a `bevy_ui_widgets` button keeps its own `Pressed`"
         );
-        assert!(
-            app.world().get::<PressTracked>(legacy).is_none(),
-            "an `Interaction` button's press is synced from that"
-        );
         assert!(app.world().get::<PressTracked>(panel).is_none());
 
-        let press = |button| Press {
-            button,
-            hit: HitData::new(Entity::PLACEHOLDER, 0.0, None, None),
-            count: 1,
+        let press = |button| {
+            move |entity, pointer| PointerPress {
+                entity,
+                pointer,
+                button,
+                hit: HitData::new(Entity::PLACEHOLDER, 0.0, None, None),
+                count: 1,
+            }
         };
-        let release = || Release {
-            button: PointerButton::Primary,
-            hit: HitData::new(Entity::PLACEHOLDER, 0.0, None, None),
+        let release = || {
+            |entity, pointer| PointerRelease {
+                entity,
+                pointer,
+                button: PointerButton::Primary,
+                hit: HitData::new(Entity::PLACEHOLDER, 0.0, None, None),
+            }
         };
         let held = |app: &App, entity| app.world().get::<Pressed>(entity).is_some();
 
@@ -2525,14 +2490,12 @@ mod tests {
 
         trigger_pointer!(app, toolbar, press(PointerButton::Primary));
         assert!(held(&app, toolbar));
-        trigger_pointer!(
-            app,
-            toolbar,
-            DragEnd {
-                button: PointerButton::Primary,
-                distance: Vec2::new(40.0, 0.0),
-            },
-        );
+        trigger_pointer!(app, toolbar, |entity, pointer| PointerDragEnd {
+            entity,
+            pointer,
+            button: PointerButton::Primary,
+            distance: Vec2::new(40.0, 0.0),
+        },);
         assert!(
             !held(&app, toolbar),
             "a drag off the box and a release elsewhere left it down"

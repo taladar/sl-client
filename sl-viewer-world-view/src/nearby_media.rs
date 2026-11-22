@@ -1470,7 +1470,7 @@ const fn enabled_if(on: bool) -> ControlShow {
     reason = "a Bevy system's parameters are its data access"
 )]
 fn on_nearby_media_row_press(
-    mut press: On<Pointer<Press>>,
+    mut press: On<PointerPress>,
     rows: Query<&BoundNearbyMedia>,
     view: Res<NearbyMediaView>,
     ui: Res<NearbyMediaUi>,
@@ -1502,7 +1502,7 @@ fn on_nearby_media_row_press(
     target.0 = Some(id);
     menus.write(OpenContextMenu {
         menu: &NEARBY_MEDIA_MENU,
-        at: press.pointer_location.position,
+        at: press.pointer.position,
         element: NEARBY_MEDIA_ELEMENT,
         conditions,
     });

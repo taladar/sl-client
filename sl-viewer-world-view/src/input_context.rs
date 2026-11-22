@@ -504,6 +504,7 @@ mod typed_tests {
         editor.visible_width = Some(16.0);
         app.world_mut().spawn((
             editor,
+            bevy::ui_widgets::TextInput,
             Node {
                 position_type: PositionType::Absolute,
                 left: Val::Px(20.0),

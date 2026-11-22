@@ -14,11 +14,11 @@
 // bind group (the lights / view uniforms `apply_pbr_lighting` needs) and the inherited
 // shader defs match its layout — see particle_render.rs::specialize.
 
-#import bevy_pbr::{
+import bevy_pbr::render::{
     mesh_view_bindings::view,
     pbr_types,
     pbr_functions,
-}
+};
 
 // The source's diffuse texture + sampler (@group(3), built per cloud in
 // particle_render.rs::prepare_particle_bind_groups).
@@ -119,24 +119,22 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     pbr_input.V = pbr_functions::calculate_view(in.world_position, pbr_input.is_orthographic);
 
     var color: vec4<f32>;
-#ifdef PARTICLE_UNLIT
     // Emissive / additive / HUD clouds are drawn at full texture brightness — the
     // reference forces FULLBRIGHT on EMISSIVE particles, and a HUD layer has no light.
+    @if(PARTICLE_UNLIT)
     color = base;
-#else
     // Non-emissive clouds are lit, matching the reference (`llvopartgroup.cpp:359` only
     // sets FULLBRIGHT for EMISSIVE particles).
+    @if(!PARTICLE_UNLIT)
     color = pbr_functions::apply_pbr_lighting(pbr_input);
-#endif
     // Fog / any in-shader post, exactly as the StandardMaterial and face-material paths do.
     color = pbr_functions::main_pass_post_lighting_processing(pbr_input, color);
 
-#ifdef PARTICLE_ADDITIVE
     // The additive path carries the per-particle glow (`PSYS_PART_*_GLOW`) in alpha:
     // the additive blend adds `color.rgb` (the fire look, which ignores alpha) and
     // accumulates this alpha into the scene alpha — the glow mask (`crate::glow`) — so
     // a glowing particle blooms and a non-glowing one (glow 0) does not.
+    @if(PARTICLE_ADDITIVE)
     color.a = clamp(in.glow, 0.0, 1.0);
-#endif
     return color;
 }

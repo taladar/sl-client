@@ -16,7 +16,7 @@ publish = { workspace = true }
 exclude = { workspace = true }
 
 [dependencies]
-logos = { version = "0.13.0" }
+logos = { version = "0.16.1" }
 sl-highlight = { workspace = true }
 
 [dev-dependencies]

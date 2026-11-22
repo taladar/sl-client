@@ -75,7 +75,6 @@ use bevy::input_focus::{FocusCause, FocusedInput, InputFocus};
 use bevy::prelude::*;
 use bevy::text::{EditableText, FontCx, LayoutCx};
 use bevy::ui::Checked;
-use bevy::ui::widget::TextScroll;
 use bevy_flair::style::components::ClassList;
 
 use sl_viewer_ui_core::i18n::Translated;
@@ -394,7 +393,6 @@ fn sync_code_gutters(
         &EditableText,
         &ComputedNode,
         &UiGlobalTransform,
-        &TextScroll,
         Option<&CodeSyntax>,
     )>,
     mut gutters: Query<
@@ -420,7 +418,7 @@ fn sync_code_gutters(
     >,
     mut commands: Commands,
 ) {
-    for (field, mut editor, editable, node, transform, scroll, syntax) in &mut fields {
+    for (field, mut editor, editable, node, transform, syntax) in &mut fields {
         let Some(layout) = editable.editor.try_layout() else {
             continue;
         };
@@ -460,8 +458,8 @@ fn sync_code_gutters(
         let inverse_scale = node.inverse_scale_factor();
         let text_box = node.content_box();
         let gutter_top = gutter_computed.padding_box().min.y;
-        let top = scroll.0.y;
-        let bottom = scroll.0.y + text_box.height();
+        let top = editable.viewport.offset.y;
+        let bottom = editable.viewport.offset.y + text_box.height();
         let font_size = editor.font_size;
 
         let mut placed = 0_usize;
@@ -495,7 +493,7 @@ fn sync_code_gutters(
             counted_to = range.start;
             let in_field = Vec2::new(
                 text_box.min.x,
-                text_box.min.y - scroll.0.y + metrics.block_min_coord,
+                text_box.min.y - editable.viewport.offset.y + metrics.block_min_coord,
             );
             let in_world = transform.affine().transform_point2(in_field);
             let local = gutter_inverse.transform_point2(in_world);
@@ -608,7 +606,7 @@ fn sync_code_gutters(
 
 /// A click on a gutter's fold toggle folds or unfolds its fold.
 fn on_fold_toggle_click(
-    mut click: On<Pointer<Click>>,
+    mut click: On<PointerClick>,
     toggles: Query<&GutterFoldToggle>,
     mut folds: MessageWriter<CodeFold>,
 ) {
@@ -647,11 +645,11 @@ fn max_scroll(editable: &EditableText, node: &ComputedNode) -> Vec2 {
 /// caret back into view — every editor's behaviour.
 fn scroll_code_editor(
     field: Entity,
-    scroll: &Scroll,
-    fields: &mut Query<(&EditableText, &ComputedNode, &mut TextScroll), With<CodeEditor>>,
+    scroll: &PointerScroll,
+    fields: &mut Query<(&mut EditableText, &ComputedNode), With<CodeEditor>>,
     shift: bool,
 ) {
-    let Ok((editable, node, mut text_scroll)) = fields.get_mut(field) else {
+    let Ok((mut editable, node)) = fields.get_mut(field) else {
         return;
     };
     let line = editable
@@ -663,38 +661,38 @@ fn scroll_code_editor(
         MouseScrollUnit::Line => line * WHEEL_LINES,
         MouseScrollUnit::Pixel => 1.0 / node.inverse_scale_factor(),
     };
-    let limit = max_scroll(editable, node);
+    let limit = max_scroll(&editable, node);
     let (dx, dy) = if shift {
         (scroll.y, 0.0)
     } else {
         (scroll.x, scroll.y)
     };
     let next = Vec2::new(
-        (text_scroll.0.x - dx * step).clamp(0.0, limit.x),
-        (text_scroll.0.y - dy * step).clamp(0.0, limit.y),
+        (editable.viewport.offset.x - dx * step).clamp(0.0, limit.x),
+        (editable.viewport.offset.y - dy * step).clamp(0.0, limit.y),
     );
-    if text_scroll.0 != next {
-        text_scroll.0 = next;
+    if editable.viewport.offset != next {
+        editable.viewport.offset = next;
     }
 }
 
 /// The wheel over a code editor's text.
 fn on_code_scroll(
-    mut event: On<Pointer<Scroll>>,
+    mut event: On<PointerScroll>,
     keys: Res<ButtonInput<KeyCode>>,
-    mut fields: Query<(&EditableText, &ComputedNode, &mut TextScroll), With<CodeEditor>>,
+    mut fields: Query<(&mut EditableText, &ComputedNode), With<CodeEditor>>,
 ) {
     let shift = keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]);
-    scroll_code_editor(event.entity, &event.event, &mut fields, shift);
+    scroll_code_editor(event.entity, &event, &mut fields, shift);
     event.propagate(false);
 }
 
 /// The wheel over a code editor's gutter scrolls its text.
 fn on_gutter_scroll(
-    mut event: On<Pointer<Scroll>>,
+    mut event: On<PointerScroll>,
     keys: Res<ButtonInput<KeyCode>>,
     editors: Query<(Entity, &CodeEditor)>,
-    mut fields: Query<(&EditableText, &ComputedNode, &mut TextScroll), With<CodeEditor>>,
+    mut fields: Query<(&mut EditableText, &ComputedNode), With<CodeEditor>>,
 ) {
     let gutter = event.entity;
     let Some((field, _editor)) = editors
@@ -704,29 +702,29 @@ fn on_gutter_scroll(
         return;
     };
     let shift = keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]);
-    scroll_code_editor(field, &event.event, &mut fields, shift);
+    scroll_code_editor(field, &event, &mut fields, shift);
     event.propagate(false);
 }
 
 /// Scroll a field so its caret is in view, a third of the way down when it was
 /// not — what a jump does, from an unfocused find window as much as from the
 /// field itself (the field follows its caret only while it has focus).
-fn reveal_caret(editable: &EditableText, node: &ComputedNode, scroll: &mut TextScroll) {
+fn reveal_caret(editable: &mut EditableText, node: &ComputedNode) {
     let Some(caret) = editable.editor.cursor_geometry(1.0) else {
         return;
     };
     let view = node.content_box().size();
     let limit = max_scroll(editable, node);
     let (x0, y0, y1) = (narrow(caret.x0), narrow(caret.y0), narrow(caret.y1));
-    let mut next = scroll.0;
+    let mut next = editable.viewport.offset;
     if y0 < next.y || y1 > next.y + view.y {
         next.y = (y0 - view.y * REVEAL_FRACTION).clamp(0.0, limit.y);
     }
     if x0 < next.x || x0 > next.x + view.x {
         next.x = (x0 - view.x * 0.5).clamp(0.0, limit.x);
     }
-    if scroll.0 != next {
-        scroll.0 = next;
+    if editable.viewport.offset != next {
+        editable.viewport.offset = next;
     }
 }
 
@@ -749,11 +747,11 @@ pub struct CodeEditorGoTo {
 /// Make each [`CodeEditorGoTo`].
 fn go_to_line(
     mut requests: MessageReader<CodeEditorGoTo>,
-    mut fields: Query<(&mut EditableText, &ComputedNode, &mut TextScroll), With<CodeEditor>>,
+    mut fields: Query<(&mut EditableText, &ComputedNode), With<CodeEditor>>,
     mut engine: TextEngine,
 ) {
     for request in requests.read() {
-        let Ok((mut editable, node, mut scroll)) = fields.get_mut(request.field) else {
+        let Ok((mut editable, node)) = fields.get_mut(request.field) else {
             continue;
         };
         let offset = line_column_offset(editable.editor.raw_text(), request.line, request.column);
@@ -761,7 +759,7 @@ fn go_to_line(
             .editor
             .driver(&mut engine.font_cx, &mut engine.layout_cx)
             .move_to_byte(offset);
-        reveal_caret(&editable, node, &mut scroll);
+        reveal_caret(&mut editable, node);
         engine.focus.set(request.field, FocusCause::Navigated);
     }
 }
@@ -1192,7 +1190,7 @@ struct FindRequest {
 /// A Search / Replace button was pressed: read the window and act on its
 /// editor.
 fn on_find_action(
-    press: On<Pointer<Press>>,
+    press: On<PointerPress>,
     actions: Query<&FindAction>,
     host: HostLookup,
     windows: Query<&FindReplaceWindow>,
@@ -1251,7 +1249,6 @@ fn selection_range(editable: &EditableText) -> Range<usize> {
 fn select_next_match(
     editable: &mut EditableText,
     node: &ComputedNode,
-    scroll: &mut TextScroll,
     query: SearchQuery<'_>,
     up: bool,
     fonts: (&mut FontCx, &mut LayoutCx),
@@ -1271,19 +1268,18 @@ fn select_next_match(
         .editor
         .driver(font_cx, layout_cx)
         .select_byte_range(found.start, found.end);
-    reveal_caret(editable, node, scroll);
+    reveal_caret(editable, node);
     true
 }
 
 /// The editors a search reads and moves through: the buffer, where it sits,
-/// how far it is scrolled, its last search, and whether it may be changed.
+/// its last search, and whether it may be changed.
 type SearchedEditors<'world, 'state> = Query<
     'world,
     'state,
     (
         &'static mut EditableText,
         &'static ComputedNode,
-        &'static mut TextScroll,
         &'static mut CodeEditor,
         Has<ReadOnlyField>,
     ),
@@ -1303,7 +1299,7 @@ fn make_find_requests(
     let repeated: Vec<FindRequest> = repeats
         .read()
         .filter_map(|repeat| {
-            let (_text, _node, _scroll, editor, _read_only) = fields.get(repeat.field).ok()?;
+            let (_text, _node, editor, _read_only) = fields.get(repeat.field).ok()?;
             let last = editor.last_search.clone()?;
             Some(FindRequest {
                 field: repeat.field,
@@ -1320,9 +1316,7 @@ fn make_find_requests(
         .map(|request| request.0.clone())
         .chain(repeated)
     {
-        let Ok((mut editable, node, mut scroll, mut editor, read_only)) =
-            fields.get_mut(request.field)
-        else {
+        let Ok((mut editable, node, mut editor, read_only)) = fields.get_mut(request.field) else {
             continue;
         };
         if request.needle.is_empty() {
@@ -1338,7 +1332,6 @@ fn make_find_requests(
                 let _found = select_next_match(
                     &mut editable,
                     node,
-                    &mut scroll,
                     query,
                     request.up,
                     (&mut font_cx, &mut layout_cx),
@@ -1365,7 +1358,6 @@ fn make_find_requests(
                 let _found = select_next_match(
                     &mut editable,
                     node,
-                    &mut scroll,
                     query,
                     request.up,
                     (&mut font_cx, &mut layout_cx),
@@ -1543,7 +1535,7 @@ fn go_from_window(
 
 /// The OK button of a Go to Line window.
 fn on_go_to_ok(
-    press: On<Pointer<Press>>,
+    press: On<PointerPress>,
     host: HostLookup,
     windows: Query<&GoToLineWindow>,
     texts: Query<&EditableText>,

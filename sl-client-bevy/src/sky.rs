@@ -7,7 +7,7 @@
 //! The material carries one [`SkyParams`] uniform block (the `LLSettingsSky`
 //! values the reference binds as sky-shader uniforms — filled per frame from the
 //! region's EEP settings and the computed sun / moon direction) plus the rainbow
-//! and halo textures. The accompanying `sky.wgsl` evaluates the atmosphere per
+//! and halo textures. The accompanying `sky.wesl` evaluates the atmosphere per
 //! fragment on a large inward-facing dome the viewer keeps centred on the camera.
 //!
 //! This module is gated behind the `bevy_pbr` feature: the headless client needs
@@ -26,7 +26,7 @@ use bevy::render::render_resource::{
 };
 use bevy::shader::{Shader, ShaderRef};
 
-/// The internal handle the sky shader (`sky.wgsl`) is loaded under, so the
+/// The internal handle the sky shader (`sky.wesl`) is loaded under, so the
 /// material can reference it without an on-disk asset path.
 const SKY_SHADER_HANDLE: Handle<Shader> = uuid_handle!("7b3e1d9a-4c22-4f8e-b0a1-6d2c9e5f4a70");
 
@@ -35,7 +35,7 @@ const SKY_SHADER_HANDLE: Handle<Shader> = uuid_handle!("7b3e1d9a-4c22-4f8e-b0a1-
 /// light direction and day/night factor.
 ///
 /// The field order (each `Vec3` paired with a trailing scalar) matches the
-/// `sky.wgsl` `SkyParams` layout so the std140 uniform packing lines up: a
+/// `sky.wesl` `SkyParams` layout so the std140 uniform packing lines up: a
 /// `vec3` occupies 12 bytes with 16-byte alignment, and the following scalar
 /// fills the 4-byte remainder of that 16-byte slot.
 #[derive(Clone, Copy, Debug, PartialEq, ShaderType)]
@@ -98,7 +98,7 @@ pub struct SkyParams {
 }
 
 /// The atmospheric sky-dome material: one [`SkyParams`] uniform block plus the
-/// rainbow and halo overlay textures, shaded by `sky.wgsl`.
+/// rainbow and halo overlay textures, shaded by `sky.wesl`.
 ///
 /// The rainbow / halo textures may start as placeholders; the viewer fetches the
 /// sky's referenced textures **boosted** and swaps them in once decoded.
@@ -163,7 +163,9 @@ pub struct SkyMaterialPlugin;
 
 impl Plugin for SkyMaterialPlugin {
     fn build(&self, app: &mut App) {
-        load_internal_asset!(app, SKY_SHADER_HANDLE, "sky.wgsl", Shader::from_wgsl);
+        load_internal_asset!(app, SKY_SHADER_HANDLE, "sky.wesl", |source, _| {
+            Shader::from_wesl(source, "embedded://sl_client_bevy/sky.wesl")
+        });
         app.add_plugins(MaterialPlugin::<SkyMaterial>::default());
     }
 }

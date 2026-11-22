@@ -16,7 +16,7 @@ publish = { workspace = true }
 exclude = { workspace = true }
 
 [dependencies]
-lsp-server = { version = "0.9.0" }
+lsp-server = { version = "0.10.0" }
 lsp-types = { version = "0.97.0" }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }

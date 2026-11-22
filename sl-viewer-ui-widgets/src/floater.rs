@@ -1560,7 +1560,7 @@ pub fn spawn_keyed_floater(
     // bubbled `Pointer` keeps the *original* hit entity in `.entity`, not the
     // ancestor the observer is attached to.
     commands.entity(floater).observe(
-        move |press: On<Pointer<Press>>, mut commands: MessageWriter<FloaterCommand>| {
+        move |press: On<PointerPress>, mut commands: MessageWriter<FloaterCommand>| {
             if press.button == PointerButton::Primary {
                 commands.write(FloaterCommand {
                     floater,
@@ -1584,7 +1584,7 @@ pub fn spawn_keyed_floater(
     // chrome the pointer actually landed.
     let title_bar = parts.title_bar;
     commands.entity(title_bar).observe(
-        move |drag: On<Pointer<Drag>>,
+        move |drag: On<PointerDrag>,
               mut floaters: Query<&mut Floater>,
               disabled: Query<(), With<bevy::ui::InteractionDisabled>>,
               direction: Res<UiDirection>,
@@ -1600,7 +1600,7 @@ pub fn spawn_keyed_floater(
         commands
             .entity(handle)
             .observe(
-                move |_drag: On<Pointer<DragStart>>,
+                move |_drag: On<PointerDragStart>,
                       mut floaters: Query<&mut Floater>,
                       disabled: Query<(), With<bevy::ui::InteractionDisabled>>,
                       computed: Query<&ComputedNode>| {
@@ -1611,7 +1611,7 @@ pub fn spawn_keyed_floater(
                 },
             )
             .observe(
-                move |drag: On<Pointer<Drag>>,
+                move |drag: On<PointerDrag>,
                       mut floaters: Query<&mut Floater>,
                       disabled: Query<(), With<bevy::ui::InteractionDisabled>>,
                       direction: Res<UiDirection>,
@@ -1632,7 +1632,7 @@ pub fn spawn_keyed_floater(
             continue;
         };
         commands.entity(button).observe(
-            move |press: On<Pointer<Press>>,
+            move |press: On<PointerPress>,
                   disabled: Query<(), With<bevy::ui::InteractionDisabled>>,
                   mut commands: MessageWriter<FloaterCommand>| {
                 if press.button != PointerButton::Primary {
@@ -1686,7 +1686,7 @@ fn chrome_refused(
 /// the pointer, or tear it off its host once dragged past the slop.
 fn drag_title(
     floater: Entity,
-    drag: &Pointer<Drag>,
+    drag: &PointerDrag,
     floaters: &mut Query<&mut Floater>,
     direction: UiDirection,
     commands: &mut MessageWriter<FloaterCommand>,
@@ -1733,7 +1733,7 @@ fn seed_content_size(
 /// host first (the reference undocks on resize).
 fn drag_resize(
     floater: Entity,
-    drag: &Pointer<Drag>,
+    drag: &PointerDrag,
     floaters: &mut Query<&mut Floater>,
     direction: UiDirection,
     commands: &mut MessageWriter<FloaterCommand>,
@@ -4297,32 +4297,26 @@ mod tests {
     /// Trigger a primary press on `entity` and settle a frame — the observer
     /// call a real click makes, without a picking backend to aim one.
     fn press(app: &mut App, entity: Entity) {
-        let event = Pointer::new(
-            PointerId::Mouse,
-            pointer_location(),
-            Press {
-                button: PointerButton::Primary,
-                hit: HitData::new(Entity::PLACEHOLDER, 0.0, None, None),
-                count: 1,
-            },
+        let event = PointerPress {
             entity,
-        );
+            pointer: Pointer::new(PointerId::Mouse, pointer_location()),
+            button: PointerButton::Primary,
+            hit: HitData::new(Entity::PLACEHOLDER, 0.0, None, None),
+            count: 1,
+        };
         app.world_mut().trigger(event);
         app.update();
     }
 
     /// Trigger a primary drag of `delta` on `entity` and settle a frame.
     fn drag(app: &mut App, entity: Entity, delta: Vec2) {
-        let event = Pointer::new(
-            PointerId::Mouse,
-            pointer_location(),
-            Drag {
-                button: PointerButton::Primary,
-                distance: delta,
-                delta,
-            },
+        let event = PointerDrag {
             entity,
-        );
+            pointer: Pointer::new(PointerId::Mouse, pointer_location()),
+            button: PointerButton::Primary,
+            distance: delta,
+            delta,
+        };
         app.world_mut().trigger(event);
         app.update();
     }
@@ -4478,7 +4472,7 @@ mod tests {
     /// that has to find each of them where it is drawn.
     ///
     /// The tests above are split between the pure geometry functions
-    /// (`drag_position`, `resize_size`) and hand-triggered `Pointer<Drag>`s
+    /// (`drag_position`, `resize_size`) and hand-triggered `PointerDrag`s
     /// aimed at an entity looked up through [`parts_of`]. What neither reaches
     /// is the chrome's **layout**: the grip is an absolutely-positioned node
     /// pinned to the trailing-bottom corner through a logical inset, drawn over
@@ -4874,7 +4868,7 @@ mod tests {
         /// **A docked window tears off only once the drag means it.**
         ///
         /// The reference's undock slop, and the one path in the manager that a
-        /// hand-written `Pointer<Drag>` cannot honestly exercise: it is a
+        /// hand-written `PointerDrag` cannot honestly exercise: it is a
         /// function of how far the pointer has travelled *since the press*, so
         /// a single synthetic event with a made-up `distance` would be pinning
         /// the number rather than the gesture.

@@ -363,7 +363,7 @@ const fn media_button(button: PointerButton) -> MediaMouseButton {
 
 /// Pointer press on a view: focus it (click-to-focus) and forward the press.
 fn on_browser_press(
-    event: On<Pointer<Press>>,
+    event: On<PointerPress>,
     views: Query<(&BrowserView, &RelativeCursorPosition)>,
     disabled: Query<(), With<bevy::ui::InteractionDisabled>>,
     surfaces: NonSend<MediaSurfaces>,
@@ -401,7 +401,7 @@ fn on_browser_press(
 
 /// Pointer release on a view: forward the button up.
 fn on_browser_release(
-    event: On<Pointer<Release>>,
+    event: On<PointerRelease>,
     views: Query<(&BrowserView, &RelativeCursorPosition)>,
     disabled: Query<(), With<bevy::ui::InteractionDisabled>>,
     surfaces: NonSend<MediaSurfaces>,
@@ -432,7 +432,7 @@ fn on_browser_release(
 
 /// Pointer motion over a view: forward the hover position.
 fn on_browser_move(
-    event: On<Pointer<bevy::picking::events::Move>>,
+    event: On<PointerMove>,
     views: Query<(&BrowserView, &RelativeCursorPosition)>,
     disabled: Query<(), With<bevy::ui::InteractionDisabled>>,
     surfaces: NonSend<MediaSurfaces>,
@@ -460,7 +460,7 @@ fn on_browser_move(
 
 /// Pointer leaving a view: tell the page.
 fn on_browser_out(
-    event: On<Pointer<bevy::picking::events::Out>>,
+    event: On<PointerOut>,
     views: Query<&BrowserView>,
     surfaces: NonSend<MediaSurfaces>,
 ) {
@@ -475,7 +475,7 @@ fn on_browser_out(
 /// Scroll over a view: forward as pixel deltas and keep it from also
 /// scrolling an enclosing UI scroll container.
 fn on_browser_scroll(
-    mut event: On<Pointer<Scroll>>,
+    mut event: On<PointerScroll>,
     views: Query<(&BrowserView, &RelativeCursorPosition)>,
     surfaces: NonSend<MediaSurfaces>,
 ) {
@@ -811,22 +811,22 @@ mod tests {
 
     /// Trigger a primary press on `entity` and settle a frame.
     fn press(app: &mut App, entity: Entity) {
-        let event = Pointer::new(
-            PointerId::Mouse,
-            Location {
-                target: NormalizedRenderTarget::None {
-                    width: 800,
-                    height: 600,
-                },
-                position: Vec2::ZERO,
-            },
-            Press {
-                button: PointerButton::Primary,
-                hit: HitData::new(Entity::PLACEHOLDER, 0.0, None, None),
-                count: 1,
-            },
+        let event = PointerPress {
             entity,
-        );
+            pointer: Pointer::new(
+                PointerId::Mouse,
+                Location {
+                    target: NormalizedRenderTarget::None {
+                        width: 800,
+                        height: 600,
+                    },
+                    position: Vec2::ZERO,
+                },
+            ),
+            button: PointerButton::Primary,
+            hit: HitData::new(Entity::PLACEHOLDER, 0.0, None, None),
+            count: 1,
+        };
         app.world_mut().trigger(event);
         app.update();
     }

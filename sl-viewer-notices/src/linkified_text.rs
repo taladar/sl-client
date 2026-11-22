@@ -292,11 +292,7 @@ pub struct LinkActivated {
 
 /// On pointer-over, publish the hovered link's URL + tooltip category so
 /// [`position_link_tooltip`] shows them.
-fn on_link_over(
-    over: On<Pointer<Over>>,
-    links: Query<&LinkNode>,
-    mut hovered: ResMut<HoveredLink>,
-) {
+fn on_link_over(over: On<PointerOver>, links: Query<&LinkNode>, mut hovered: ResMut<HoveredLink>) {
     if let Ok(link) = links.get(over.entity) {
         hovered.link = Some(HoveredLinkInfo {
             url: link.url.clone(),
@@ -306,7 +302,7 @@ fn on_link_over(
 }
 
 /// On pointer-out, clear the hovered link so the tooltip hides.
-fn on_link_out(_out: On<Pointer<Out>>, mut hovered: ResMut<HoveredLink>) {
+fn on_link_out(_out: On<PointerOut>, mut hovered: ResMut<HoveredLink>) {
     hovered.link = None;
 }
 
@@ -314,7 +310,7 @@ fn on_link_out(_out: On<Pointer<Out>>, mut hovered: ResMut<HoveredLink>) {
 /// dispatcher and consumers route it, and `dispatch_web_links` opens `Web`
 /// targets directly.
 fn on_link_press(
-    press: On<Pointer<Press>>,
+    press: On<PointerPress>,
     links: Query<&LinkNode>,
     mut activated: MessageWriter<LinkActivated>,
 ) {

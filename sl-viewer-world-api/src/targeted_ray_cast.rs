@@ -20,7 +20,6 @@
 use bevy::camera::primitives::Aabb;
 use bevy::ecs::system::SystemParam;
 use bevy::math::FloatOrd;
-use bevy::math::bounding::Aabb3d;
 use bevy::mesh::{Indices, PrimitiveTopology, VertexAttributeValues};
 use bevy::picking::mesh_picking::ray_cast::{
     Backfaces, RayMeshHit, ray_aabb_intersection_3d, ray_mesh_intersection,

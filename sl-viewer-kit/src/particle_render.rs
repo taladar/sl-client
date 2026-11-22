@@ -12,7 +12,7 @@
 //! that is the *only* per-frame upload — reused in place ([`RawBufferVec`], reallocated
 //! only when a cloud grows) rather than a fresh mesh. Textures resolve once per source
 //! and stay put. The billboard expansion and PBR lighting move into
-//! [`particle.wgsl`](../particle.wgsl).
+//! [`particle.wesl`](../particle.wesl).
 //!
 //! **How it fits Bevy 0.19.** The pipeline is derived from Bevy's [`MeshPipeline`]
 //! (mirroring the `custom_shader_instancing` example) so it inherits the mesh-view bind
@@ -78,13 +78,13 @@ use bevy::render::view::{ExtractedView, RenderVisibleEntities};
 use bevy::render::{Render, RenderApp, RenderStartup, RenderSystems};
 use bytemuck::{Pod, Zeroable};
 
-/// The internal handle the particle shader (`particle.wgsl`) is loaded under.
+/// The internal handle the particle shader (`particle.wesl`) is loaded under.
 const PARTICLE_SHADER_HANDLE: Handle<Shader> = uuid_handle!("2d7f6a10-9c4b-4e33-8a51-6f0b2c9d7e84");
 
 /// One per-particle GPU instance record — the whole of what the vertex shader needs to
 /// expand a camera-facing billboard. Packed `repr(C)` with no padding gaps so it is
 /// [`Pod`] and maps straight to the instance-rate vertex buffer (`@location(3..=7)` in
-/// [`particle.wgsl`](../particle.wgsl)).
+/// [`particle.wesl`](../particle.wesl)).
 #[derive(Clone, Copy, Debug, Pod, Zeroable)]
 #[repr(C)]
 pub struct ParticleInstance {
@@ -116,7 +116,7 @@ pub struct ParticleInstances {
     pub instances: Vec<ParticleInstance>,
 }
 
-impl ExtractComponent for ParticleInstances {
+impl ExtractComponent<RenderApp> for ParticleInstances {
     type QueryData = &'static Self;
     type QueryFilter = ();
     type Out = Self;
@@ -127,7 +127,7 @@ impl ExtractComponent for ParticleInstances {
     }
 }
 
-impl SyncComponent for ParticleInstances {
+impl SyncComponent<RenderApp> for ParticleInstances {
     type Target = Self;
 }
 
@@ -158,7 +158,7 @@ pub struct ParticleDrawParams {
     pub sort_center: Vec3,
 }
 
-impl ExtractComponent for ParticleDrawParams {
+impl ExtractComponent<RenderApp> for ParticleDrawParams {
     type QueryData = &'static Self;
     type QueryFilter = ();
     type Out = Self;
@@ -169,7 +169,7 @@ impl ExtractComponent for ParticleDrawParams {
     }
 }
 
-impl SyncComponent for ParticleDrawParams {
+impl SyncComponent<RenderApp> for ParticleDrawParams {
     type Target = Self;
 }
 
@@ -710,15 +710,12 @@ type DrawParticles = (
 pub struct ParticleRenderPlugin;
 
 impl Plugin for ParticleRenderPlugin {
-    /// Compile `particle.wgsl`, register the extract plugins for the per-cloud components,
+    /// Compile `particle.wesl`, register the extract plugins for the per-cloud components,
     /// and set up the render-app pipeline / draw command / prepare / queue systems.
     fn build(&self, app: &mut App) {
-        load_internal_asset!(
-            app,
-            PARTICLE_SHADER_HANDLE,
-            "particle.wgsl",
-            Shader::from_wgsl
-        );
+        load_internal_asset!(app, PARTICLE_SHADER_HANDLE, "particle.wesl", |source, _| {
+            Shader::from_wesl(source, "embedded://sl_viewer_kit/particle.wesl")
+        });
         app.add_plugins((
             ExtractComponentPlugin::<ParticleInstances>::default(),
             ExtractComponentPlugin::<ParticleDrawParams>::default(),

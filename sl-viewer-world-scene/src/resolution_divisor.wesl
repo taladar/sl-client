@@ -14,8 +14,7 @@
 // The magnification filter is the sampler's (linear, `ClampToEdge`), which is
 // what the reference's own blit of `mRT->screen` to the window uses.
 
-#import bevy_core_pipeline::fullscreen_vertex_shader::FullscreenVertexOutput
-
+import bevy_core_pipeline::fullscreen_vertex_shader::FullscreenVertexOutput;
 @group(0) @binding(0) var world_texture: texture_2d<f32>;
 @group(0) @binding(1) var world_sampler: sampler;
 

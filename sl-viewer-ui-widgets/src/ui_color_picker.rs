@@ -334,7 +334,7 @@ pub fn spawn_color_swatch(
 
 /// Request the picker for the clicked swatch, seeding it with the swatch's colour.
 fn open_picker_from_swatch(
-    press: On<Pointer<Press>>,
+    press: On<PointerPress>,
     swatches: Query<(&ColorSwatchValue, &ColorSwatchField)>,
     disabled: Query<(), With<bevy::ui::InteractionDisabled>>,
     mut opens: MessageWriter<OpenColorPicker>,
@@ -1637,7 +1637,7 @@ fn aim_at_pointer(
 /// A press on the field or the strip starts a gesture and aims at once — the
 /// reference's click-to-set.
 fn on_aim_press(
-    mut press: On<Pointer<Press>>,
+    mut press: On<PointerPress>,
     aims: AimQuery,
     kinds: Query<(Has<HueSaturationField>, Has<LuminanceStrip>)>,
     mut drags: Query<&mut PickerDrag>,
@@ -1658,7 +1658,7 @@ fn on_aim_press(
     }
     aim_at_pointer(
         entity,
-        press.pointer_location.position,
+        press.pointer.position,
         &aims,
         &ui_scale,
         &kinds,
@@ -1669,7 +1669,7 @@ fn on_aim_press(
 
 /// A drag re-aims at wherever the pointer now is, even off the control.
 fn on_aim_drag(
-    mut drag: On<Pointer<Drag>>,
+    mut drag: On<PointerDrag>,
     aims: AimQuery,
     kinds: Query<(Has<HueSaturationField>, Has<LuminanceStrip>)>,
     drags: Query<&PickerDrag>,
@@ -1687,7 +1687,7 @@ fn on_aim_drag(
     drag.propagate(false);
     aim_at_pointer(
         entity,
-        drag.pointer_location.position,
+        drag.pointer.position,
         &aims,
         &ui_scale,
         &kinds,
@@ -1698,7 +1698,7 @@ fn on_aim_drag(
 
 /// The end of a drag: one last aim, and the latch drops.
 fn on_aim_drag_end(
-    mut drag_end: On<Pointer<DragEnd>>,
+    mut drag_end: On<PointerDragEnd>,
     aims: AimQuery,
     kinds: Query<(Has<HueSaturationField>, Has<LuminanceStrip>)>,
     mut drags: Query<&mut PickerDrag>,
@@ -1720,7 +1720,7 @@ fn on_aim_drag_end(
     drag.0 = false;
     aim_at_pointer(
         entity,
-        drag_end.pointer_location.position,
+        drag_end.pointer.position,
         &aims,
         &ui_scale,
         &kinds,
@@ -1731,7 +1731,7 @@ fn on_aim_drag_end(
 
 /// A release that ends a press which never became a drag — a plain click, whose
 /// aim the press already set.
-fn on_aim_release(release: On<Pointer<Release>>, mut drags: Query<&mut PickerDrag>) {
+fn on_aim_release(release: On<PointerRelease>, mut drags: Query<&mut PickerDrag>) {
     if release.button != PointerButton::Primary {
         return;
     }
@@ -1741,7 +1741,7 @@ fn on_aim_release(release: On<Pointer<Release>>, mut drags: Query<&mut PickerDra
 }
 
 /// A cancelled pointer drops the gesture where it is.
-fn on_aim_cancel(cancel: On<Pointer<Cancel>>, mut drags: Query<&mut PickerDrag>) {
+fn on_aim_cancel(cancel: On<PointerCancel>, mut drags: Query<&mut PickerDrag>) {
     if let Ok(mut drag) = drags.get_mut(cancel.entity) {
         drag.0 = false;
     }
@@ -1790,7 +1790,7 @@ fn commit_color_channels(
 /// A click on a palette cell loads that colour — the reference's palette
 /// `handleMouseDown`.
 fn on_palette_press(
-    press: On<Pointer<Press>>,
+    press: On<PointerPress>,
     cells: Query<&PaletteCell>,
     palette: Res<ColorPalette>,
     parents: Query<&ChildOf>,
@@ -1814,7 +1814,7 @@ fn on_palette_press(
 /// The current colour dragged over a cell: rim it, so the drop target is
 /// obvious — the reference's highlighted entry.
 fn on_palette_drag_enter(
-    enter: On<Pointer<DragEnter>>,
+    enter: On<PointerDragEnter>,
     previews: Query<(), With<PreviewSwatch>>,
     mut borders: Query<&mut BorderColor, With<PaletteCell>>,
 ) {
@@ -1828,7 +1828,7 @@ fn on_palette_drag_enter(
 
 /// The drag leaves a cell: put its rim back.
 fn on_palette_drag_leave(
-    leave: On<Pointer<DragLeave>>,
+    leave: On<PointerDragLeave>,
     mut borders: Query<&mut BorderColor, With<PaletteCell>>,
 ) {
     if let Ok(mut border) = borders.get_mut(leave.entity) {
@@ -1853,7 +1853,7 @@ struct PaletteStore<'w, 's> {
 /// the reference's drag-from-the-swatch gesture, and its `LLUIColorTable`
 /// write-back.
 fn on_palette_drop(
-    drop: On<Pointer<DragDrop>>,
+    drop: On<PointerDragDrop>,
     previews: Query<(), With<PreviewSwatch>>,
     cells: Query<&PaletteCell>,
     parents: Query<&ChildOf>,
@@ -1972,7 +1972,7 @@ fn commit_hex_field(
 
 /// Arm or disarm the eyedropper for the pressed button's window.
 fn on_pipette_press(
-    press: On<Pointer<Press>>,
+    press: On<PointerPress>,
     buttons: Query<(), With<PipetteButton>>,
     parents: Query<&ChildOf>,
     windows: Query<(&ColorPickerState, Has<Eyedropper>)>,
@@ -2114,7 +2114,7 @@ fn disarm(window: Entity, dropper: &Eyedropper, commands: &mut Commands) {
 /// A click anywhere while the eyedropper is armed **takes** the colour under it
 /// and ends the gesture.
 fn on_pipette_shade_press(
-    mut press: On<Pointer<Press>>,
+    mut press: On<PointerPress>,
     shades: Query<&PipetteShade>,
     droppers: Query<&Eyedropper>,
     mut commands: Commands,
@@ -2389,7 +2389,7 @@ fn on_apply_now_press(
 /// OK / Cancel: OK emits [`ColorPicked`] for the requester; both close the
 /// floater.
 fn on_picker_button(
-    press: On<Pointer<Press>>,
+    press: On<PointerPress>,
     buttons: Query<&PickerButton>,
     mut windows: Query<&mut ColorPickerState>,
     parents: Query<&ChildOf>,
@@ -2581,16 +2581,13 @@ mod tests {
             },
             position: Vec2::ZERO,
         };
-        let event = Pointer::new(
-            PointerId::Mouse,
-            location,
-            Press {
-                button: PointerButton::Primary,
-                hit: HitData::new(Entity::PLACEHOLDER, 0.0, None, None),
-                count: 1,
-            },
+        let event = PointerPress {
             entity,
-        );
+            pointer: Pointer::new(PointerId::Mouse, location),
+            button: PointerButton::Primary,
+            hit: HitData::new(Entity::PLACEHOLDER, 0.0, None, None),
+            count: 1,
+        };
         app.world_mut().trigger(event);
         app.update();
     }

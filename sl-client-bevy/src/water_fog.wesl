@@ -28,7 +28,6 @@
 //   needs a distance-scaled tolerance to keep its far pixels from breaking up along
 //   the horizon.
 
-#define_import_path sl_client_bevy::water_fog
 
 // The scene-wide water fog parameters. Every consumer fills these from the same
 // region EEP water settings; they are passed as a struct rather than read from a

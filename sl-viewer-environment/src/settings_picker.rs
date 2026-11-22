@@ -59,7 +59,7 @@ use sl_viewer_ui_core::i18n::{TransArgs, Translated, Translator};
 use sl_viewer_ui_core::skin::{SELECTED_CLASS, set_state_class, set_state_class_on, text_role};
 use sl_viewer_ui_core::ui::{UiScaffoldSystems, column, row};
 use sl_viewer_ui_core::ui_font::UiFont;
-use sl_viewer_ui_core::ui_spawn::{self, ButtonKind, ButtonSpec, UiLabel};
+use sl_viewer_ui_core::ui_spawn::{self, ButtonSpec, UiLabel};
 use sl_viewer_ui_core::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists};
 use sl_viewer_ui_widgets::floater::{
     Floater, FloaterCaps, FloaterCommand, FloaterHandle, FloaterOp, FloaterOwner, FloaterSpec,
@@ -471,7 +471,6 @@ fn spawn_picker_button(
             UiLabel::key(button.label_key()),
             format!("settings-picker-{}:button", button.slug()),
         )
-        .kind(ButtonKind::Interaction)
         .tab_index(tab)
         .padding(12.0, 4.0)
         .colors(ACTION_BACKGROUND, ACTION_BACKGROUND)
@@ -768,7 +767,7 @@ fn bind_picker_rows(
 
 /// A press on a row selects it and previews the choice.
 fn on_picker_row_press(
-    mut press: On<Pointer<Press>>,
+    mut press: On<PointerPress>,
     rows: Query<&BoundPickerRow>,
     mut windows: Query<(&mut SettingsPickerState, &SettingsPickerUi)>,
     parents: Query<&ChildOf>,
@@ -804,7 +803,7 @@ fn on_picker_row_press(
 
 /// A press on OK or Cancel.
 fn on_picker_button(
-    mut press: On<Pointer<Press>>,
+    mut press: On<PointerPress>,
     buttons: Query<&PickerButton>,
     mut windows: Query<&mut SettingsPickerState>,
     parents: Query<&ChildOf>,

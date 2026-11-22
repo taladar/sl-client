@@ -36,7 +36,7 @@ use logos::Logos;
 #[logos(skip r"[ \t\r\n\x0c]+")]
 pub enum Token {
     /// A `//` single-line comment, running to just before the line break.
-    #[regex(r"//[^\r\n]*")]
+    #[regex(r"//[^\r\n]*", allow_greedy = true)]
     LineComment,
     /// A `/* … */` block comment. Error-tolerant: an unterminated `/*` runs to
     /// end-of-input, mirroring the reference viewer's two-sided delimiter.

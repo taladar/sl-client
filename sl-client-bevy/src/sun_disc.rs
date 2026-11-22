@@ -7,7 +7,7 @@
 //! The material carries one [`SunDiscParams`] uniform block plus the current and
 //! next disc textures (`diffuse` / `alt_diffuse`, blended during a day-cycle
 //! transition — the blend factor stays `0.0` until the day cycle drives it in a
-//! later phase). The accompanying `sun_disc.wgsl` samples the disc and applies
+//! later phase). The accompanying `sun_disc.wesl` samples the disc and applies
 //! the moon's brightness, transparent-pixel discard, and near-horizon alpha fade.
 //!
 //! One [`SunDiscMaterial`] instance renders the sun (`moon_mode` `0.0`,
@@ -30,7 +30,7 @@ use bevy::render::render_resource::{
 };
 use bevy::shader::{Shader, ShaderRef};
 
-/// The internal handle the sun / moon disc shader (`sun_disc.wgsl`) is loaded
+/// The internal handle the sun / moon disc shader (`sun_disc.wesl`) is loaded
 /// under, so the material can reference it without an on-disk asset path.
 const SUN_DISC_SHADER_HANDLE: Handle<Shader> = uuid_handle!("2f9c6b41-8d05-4c7e-9a3b-1e6d4f2c8a95");
 
@@ -38,7 +38,7 @@ const SUN_DISC_SHADER_HANDLE: Handle<Shader> = uuid_handle!("2f9c6b41-8d05-4c7e-
 /// heavenly-body uniforms (moon brightness, day-cycle blend factor) plus the flag
 /// and up component that select the moon's near-horizon fade.
 ///
-/// Five scalars, so the layout matches the `sun_disc.wgsl` `SunDiscParams`
+/// Five scalars, so the layout matches the `sun_disc.wesl` `SunDiscParams`
 /// exactly.
 #[derive(Clone, Copy, Debug, PartialEq, ShaderType)]
 #[expect(
@@ -69,7 +69,7 @@ pub struct SunDiscParams {
 }
 
 /// The sun / moon disc material: one [`SunDiscParams`] uniform block plus the
-/// current and next disc textures, shaded by `sun_disc.wgsl`.
+/// current and next disc textures, shaded by `sun_disc.wesl`.
 ///
 /// The disc textures may start as placeholders; the viewer fetches the sky's
 /// referenced sun / moon textures **boosted** and swaps them in once decoded.
@@ -145,12 +145,9 @@ pub struct SunDiscMaterialPlugin;
 
 impl Plugin for SunDiscMaterialPlugin {
     fn build(&self, app: &mut App) {
-        load_internal_asset!(
-            app,
-            SUN_DISC_SHADER_HANDLE,
-            "sun_disc.wgsl",
-            Shader::from_wgsl
-        );
+        load_internal_asset!(app, SUN_DISC_SHADER_HANDLE, "sun_disc.wesl", |source, _| {
+            Shader::from_wesl(source, "embedded://sl_client_bevy/sun_disc.wesl")
+        });
         app.add_plugins(MaterialPlugin::<SunDiscMaterial>::default());
     }
 }

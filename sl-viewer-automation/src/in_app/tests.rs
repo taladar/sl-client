@@ -21,7 +21,7 @@ use super::{
     press, text,
 };
 
-/// The names of the nodes a `Pointer<Click>` reached, in order.
+/// The names of the nodes a `PointerClick` reached, in order.
 #[derive(Resource, Debug, Default)]
 struct Clicked(Vec<String>);
 
@@ -54,7 +54,7 @@ fn button(app: &mut App, name: &str, label: &str, node: Node) -> Entity {
     app.world_mut().entity_mut(button).add_child(text);
     let name = name.to_owned();
     app.world_mut().entity_mut(button).observe(
-        move |mut click: On<Pointer<Click>>, mut clicked: ResMut<Clicked>| {
+        move |mut click: On<PointerClick>, mut clicked: ResMut<Clicked>| {
             click.propagate(false);
             clicked.0.push(name.clone());
         },
@@ -207,6 +207,7 @@ fn a_fill_a_press_and_a_read() -> Result<(), String> {
         (
             Name::new("field"),
             EditableText::new("old words"),
+            bevy::ui_widgets::TextInput,
             TabIndex(0),
             placed(100.0, 100.0, 240.0, 30.0),
         ),

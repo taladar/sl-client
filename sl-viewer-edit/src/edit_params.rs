@@ -4147,7 +4147,7 @@ fn handle_toggle_press(
 /// next entry and send the corresponding message (the cycle is read off the
 /// pressed button's component).
 fn handle_cycle_press(
-    press: On<Pointer<Press>>,
+    press: On<PointerPress>,
     cycles: Query<&ParamCycle>,
     fields: Query<(&ParamField, &EditableText)>,
     edit: Option<ParamEdit>,
@@ -4236,7 +4236,7 @@ fn handle_cycle_press(
 /// Its session half is read optionally, as the toggles' is: absent only in the
 /// gallery / `ui_test` hosts.
 fn handle_action_press(
-    press: On<Pointer<Press>>,
+    press: On<PointerPress>,
     actions: Query<&ParamAction>,
     session: Option<(
         Res<SelectionSet>,

@@ -436,7 +436,7 @@ pub fn conference_log_file_name(participants: &BTreeSet<AgentKey>) -> String {
     for id in participants {
         context.consume(id.uuid().to_string().as_bytes());
     }
-    let digest = context.compute();
+    let digest = context.finalize();
     format!("Ad-hoc Conference hash{digest:x}.txt")
 }
 

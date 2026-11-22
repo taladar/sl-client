@@ -1039,7 +1039,7 @@ fn on_kind_filter_toggle(
 /// A press on a pooled row: primary selects; secondary selects and opens the
 /// per-row menu with the open-time condition snapshot.
 fn on_environment_row_press(
-    mut press: On<Pointer<Press>>,
+    mut press: On<PointerPress>,
     rows: Query<&BoundEnvironment>,
     view: Res<MyEnvironmentsView>,
     model: Option<Res<InventoryModel>>,
@@ -1081,7 +1081,7 @@ fn on_environment_row_press(
     target.0 = Some(item);
     menus.write(OpenContextMenu {
         menu: &MY_ENVIRONMENTS_MENU,
-        at: press.pointer_location.position,
+        at: press.pointer.position,
         element: MY_ENVIRONMENTS_ELEMENT,
         conditions,
     });
@@ -1098,7 +1098,7 @@ fn is_modifiable(model: &InventoryModel, entry: &SettingsListRow) -> bool {
 
 /// A press on one of the bottom-row buttons.
 fn on_my_environments_button(
-    mut press: On<Pointer<Press>>,
+    mut press: On<PointerPress>,
     buttons: Query<&MyEnvironmentsButton>,
     disabled: Query<(), With<bevy::ui::InteractionDisabled>>,
     selected: Res<SelectedEnvironment>,

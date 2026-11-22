@@ -1885,7 +1885,7 @@ type LandActionSession<'w> = (
 
 /// The observer every Land-panel button runs on press.
 fn handle_land_action_press(
-    press: On<Pointer<Press>>,
+    press: On<PointerPress>,
     buttons: Query<&LandButton>,
     session: Option<LandActionSession<'_>>,
 ) {
