@@ -11,7 +11,9 @@
 //! every asset those events reference: meshes / animations / material assets
 //! copied verbatim out of the viewer's live on-disk caches, and textures
 //! **fetched at full resolution** from the live capabilities (the local cache
-//! holds only the low-LOD prefix the viewer loaded — see `run_texture_fetch`).
+//! holds only the low-LOD prefix the viewer loaded — see `run_bundle_fetch`, which
+//! also fetches meshes whole and whatever else the caches lack, and whose caller
+//! reports anything a capture could not obtain).
 //!
 //! Replay re-emits the manifest's events as synthetic [`SlEvent`](sl_client_bevy::SlEvent)s
 //! and points the asset stores at the bundle's `cache/`, so the viewer's *live*
@@ -25,15 +27,16 @@
 //! appearance (privacy). The output directory has no in-repo default and a
 //! `.gitignore` guard (`/avatar-dumps/`, `*.avatardump/`).
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use sl_client_bevy::{
-    AssetCacheLimits, AssetDiskCache, AvatarAppearance, MAX_FACES, MeshCacheLimits, MeshDiskCache,
-    Object, PlayingAnimation, RenderMaterialEntry, SculptOrMeshKey, Uuid, avatar_texture,
-    decode_texture_entry, parse_material_asset, pcode,
+    AssetBytes, AssetCacheLimits, AssetDiskCache, AssetType, AvatarAppearance, MAX_FACES,
+    MeshCacheLimits, MeshDiskCache, Object, PlayingAnimation, RenderMaterialEntry, SculptOrMeshKey,
+    Uuid, avatar_texture, decode_texture_entry, parse_material_asset, pcode,
 };
 use sl_texture::{CacheLimits as TextureCacheLimits, TextureDiskCache};
 use sl_viewer_platform::paths::ViewerPaths;
@@ -56,6 +59,12 @@ pub(crate) const ANIM_CACHE: &str = "animcache";
 /// The PBR render-material (`AT_MATERIAL`) cache kind (a generic [`sl_asset`]
 /// store on disk).
 pub(crate) const MATERIAL_CACHE: &str = "materialcache";
+
+/// The most legacy material ids one capture request carries: the limit Second
+/// Life and stock OpenSim both advertise as `MaxMaterialsPerTransaction`.
+const MATERIALS_PER_FETCH: usize = 50;
+/// How many times a capture asks for an asset its service answers `503` for.
+const FETCH_ATTEMPTS: u8 = 6;
 
 /// One captured avatar's full render inputs, serialised as `<agent>.json`.
 ///
@@ -190,7 +199,7 @@ pub(crate) struct BundleCounts {
 /// the copy tally, the full set of texture ids the avatar needs — including the
 /// maps decoded out of its PBR materials. Textures are **not** copied here: the
 /// local cache often holds only a low-LOD prefix, so they are fetched at full
-/// resolution separately (`run_texture_fetch`).
+/// resolution separately (`run_bundle_fetch`).
 ///
 /// Best-effort: a missing source entry (evicted, or never fetched) is skipped,
 /// not an error, and a viewer with no cache (`live` absent or storing nothing)
@@ -262,56 +271,379 @@ pub(crate) fn texture_fetch_urls(
     plan
 }
 
-/// Fetch each planned texture at **full resolution** and write the complete
-/// codestream into the bundle's texture cache. Blocking HTTP — run it off the
-/// main thread. Returns the count written.
-///
-/// This is what makes an offline replay show textures: a copy from the local
-/// cache would carry only the LOD prefix the live viewer happened to load, which
-/// the offline store then tries (and fails) to grow over the network.
-pub(crate) fn run_texture_fetch(bundle_dir: &Path, plan: &[(Uuid, String)], now_unix: u32) -> u32 {
-    if plan.is_empty() {
-        return 0;
-    }
-    let Ok(dest) = TextureDiskCache::open(
-        bundle_cache_dir(bundle_dir, TEXTURE_CACHE),
-        TextureCacheLimits::default(),
-    ) else {
-        return 0;
-    };
-    let Ok(client) = sl_client_bevy::http_proxy::blocking_client_builder()
-        .timeout(Duration::from_secs(30))
-        .build()
-    else {
-        return 0;
-    };
-    let mut written = 0_u32;
-    for (id, url) in plan {
-        if let Some(bytes) = fetch_full_codestream(&client, url)
-            && dest.write(*id, &bytes, now_unix).is_ok()
-        {
-            written = written.saturating_add(1);
-        }
-    }
-    written
+/// The capability URLs a capture fetches from.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct CaptureCaps {
+    /// `GetTexture`.
+    pub(crate) texture: Option<String>,
+    /// `GetMesh2`, or `GetMesh` on a grid without it.
+    pub(crate) mesh: Option<String>,
+    /// `ViewerAsset`, which serves animations and PBR materials.
+    pub(crate) viewer_asset: Option<String>,
+    /// `RenderMaterials`, which serves legacy materials.
+    pub(crate) render_materials: Option<String>,
 }
 
-/// GET the whole J2C codestream at `url`, retrying the `GetTexture` service's
-/// `503 "still baking / queued"` a few times. `None` on a hard failure (the
-/// texture is then simply absent from the bundle).
-fn fetch_full_codestream(client: &reqwest::blocking::Client, url: &str) -> Option<Vec<u8>> {
-    for _attempt in 0..6_u8 {
-        match client.get(url).header("Accept", "image/x-j2c").send() {
-            Ok(response) if response.status().is_success() => {
-                return response.bytes().ok().map(|bytes| bytes.to_vec());
+/// What a capture still has to download, over every avatar in the bundle.
+#[derive(Debug, Default)]
+pub(crate) struct FetchPlan {
+    /// Meshes, always fetched whole: a cached one may hold only the detail levels
+    /// the live viewer happened to load.
+    pub(crate) meshes: BTreeSet<Uuid>,
+    /// Animations, fetched when the live cache did not have them.
+    pub(crate) anims: BTreeSet<Uuid>,
+    /// PBR materials, fetched when the live cache did not have them.
+    pub(crate) materials: BTreeSet<Uuid>,
+    /// Textures and the URL serving each at full resolution.
+    pub(crate) textures: BTreeMap<Uuid, String>,
+}
+
+impl FetchPlan {
+    /// Add the meshes, animations and PBR materials `manifest` references.
+    pub(crate) fn add_assets(&mut self, manifest: &ReplayManifest) {
+        let assets = referenced_assets(manifest);
+        self.meshes.extend(assets.meshes);
+        self.anims.extend(assets.anims);
+        self.materials.extend(assets.materials);
+    }
+}
+
+/// What a finished capture could not obtain, by kind. Replay renders each of
+/// these wrongly or not at all, so a capture has to say so.
+#[derive(Debug, Default)]
+pub(crate) struct BundleGaps {
+    /// Legacy materials no `RenderMaterials` reply carried.
+    pub(crate) render_materials: BTreeSet<Uuid>,
+    /// Meshes that could not be fetched whole (a partial cached copy may remain).
+    pub(crate) meshes: BTreeSet<Uuid>,
+    /// Animations neither cached nor fetchable.
+    pub(crate) anims: BTreeSet<Uuid>,
+    /// PBR materials neither cached nor fetchable.
+    pub(crate) materials: BTreeSet<Uuid>,
+    /// Textures that could not be fetched at full resolution.
+    pub(crate) textures: BTreeSet<Uuid>,
+}
+
+impl BundleGaps {
+    /// Each kind with something missing, as `(name, ids)`.
+    pub(crate) fn by_kind(&self) -> Vec<(&'static str, &BTreeSet<Uuid>)> {
+        [
+            ("legacy material", &self.render_materials),
+            ("mesh", &self.meshes),
+            ("animation", &self.anims),
+            ("PBR material", &self.materials),
+            ("texture", &self.textures),
+        ]
+        .into_iter()
+        .filter(|(_kind, ids)| !ids.is_empty())
+        .collect()
+    }
+}
+
+/// The ids of `referenced` that are not in `known`.
+fn absent_ids(
+    referenced: &BTreeSet<Uuid>,
+    known: impl IntoIterator<Item = Uuid>,
+) -> BTreeSet<Uuid> {
+    let known: BTreeSet<Uuid> = known.into_iter().collect();
+    referenced.difference(&known).copied().collect()
+}
+
+/// The legacy materials `manifest`'s faces reference and it does not carry.
+pub(crate) fn absent_render_materials(manifest: &ReplayManifest) -> BTreeSet<Uuid> {
+    let mut referenced = BTreeSet::new();
+    for object in &manifest.objects {
+        for face in &decode_texture_entry(&object.texture_entry, MAX_FACES).faces {
+            if let Some(id) = face.material_id {
+                insert_non_nil(&mut referenced, id);
             }
-            Ok(response) if response.status().as_u16() == 503 => {
-                std::thread::sleep(Duration::from_millis(300));
-            }
-            _other => return None,
         }
     }
-    None
+    absent_ids(
+        &referenced,
+        manifest
+            .render_materials
+            .iter()
+            .map(|entry| entry.material_id),
+    )
+}
+
+/// Add to `manifest` the entries of `fetched` its faces reference and it lacks.
+pub(crate) fn add_render_materials(
+    manifest: &mut ReplayManifest,
+    fetched: &HashMap<Uuid, RenderMaterialEntry>,
+) {
+    for id in absent_render_materials(manifest) {
+        if let Some(entry) = fetched.get(&id) {
+            manifest.render_materials.push(entry.clone());
+        }
+    }
+}
+
+/// Fetch the legacy materials `ids` in batches the capability accepts. Blocking
+/// HTTP, so off the main thread. A batch that fails is logged, and its materials
+/// are reported as gaps by the caller.
+pub(crate) fn run_render_material_fetch(
+    cap: &str,
+    ids: &BTreeSet<Uuid>,
+) -> HashMap<Uuid, RenderMaterialEntry> {
+    let ids: Vec<Uuid> = ids.iter().copied().collect();
+    let mut fetched = HashMap::new();
+    for batch in ids.chunks(MATERIALS_PER_FETCH) {
+        match sl_client_bevy::fetch_render_materials(cap, batch) {
+            Ok(entries) => fetched.extend(entries.into_iter().map(|e| (e.material_id, e))),
+            Err(error) => {
+                tracing::warn!(
+                    "avatar dump: fetching {} legacy material(s) failed: {error}",
+                    batch.len()
+                );
+            }
+        }
+    }
+    fetched
+}
+
+/// Download everything in `plan` into the bundle's caches and return what could
+/// not be obtained. Blocking HTTP, so off the main thread.
+///
+/// Textures go last, because a PBR material fetched here can name more of them.
+/// This is what makes an offline replay faithful: a copy from the local cache
+/// carries only what the live viewer happened to load.
+pub(crate) fn run_bundle_fetch(
+    bundle_dir: &Path,
+    mut plan: FetchPlan,
+    caps: &CaptureCaps,
+    now_unix: u32,
+) -> BundleGaps {
+    let client = match sl_client_bevy::http_proxy::blocking_client_builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+    {
+        Ok(client) => client,
+        Err(error) => {
+            tracing::warn!("avatar dump: no HTTP client: {error}");
+            return BundleGaps {
+                render_materials: BTreeSet::new(),
+                meshes: plan.meshes,
+                anims: plan.anims,
+                materials: plan.materials,
+                textures: plan.textures.into_keys().collect(),
+            };
+        }
+    };
+    let meshes = fetch_meshes(
+        &client,
+        bundle_dir,
+        &plan.meshes,
+        caps.mesh.as_deref(),
+        now_unix,
+    );
+    let (anims, _fresh) = fetch_absent_assets(
+        &client,
+        bundle_dir,
+        (ANIM_CACHE, AssetType::Animation),
+        &plan.anims,
+        caps.viewer_asset.as_deref(),
+        now_unix,
+    );
+    let (materials, fresh) = fetch_absent_assets(
+        &client,
+        bundle_dir,
+        (MATERIAL_CACHE, AssetType::Material),
+        &plan.materials,
+        caps.viewer_asset.as_deref(),
+        now_unix,
+    );
+    if let Some(cap) = caps.texture.as_deref() {
+        for bytes in &fresh {
+            for id in material_textures(bytes) {
+                let _url = plan
+                    .textures
+                    .entry(id)
+                    .or_insert_with(|| format!("{cap}/?texture_id={id}"));
+            }
+        }
+    }
+    BundleGaps {
+        render_materials: BTreeSet::new(),
+        meshes,
+        anims,
+        materials,
+        textures: fetch_textures(&client, bundle_dir, &plan.textures, now_unix),
+    }
+}
+
+/// Fetch each texture's complete codestream into the bundle, returning the ids
+/// that failed.
+fn fetch_textures(
+    client: &reqwest::blocking::Client,
+    bundle_dir: &Path,
+    plan: &BTreeMap<Uuid, String>,
+    now_unix: u32,
+) -> BTreeSet<Uuid> {
+    let dest = match TextureDiskCache::open(
+        bundle_cache_dir(bundle_dir, TEXTURE_CACHE),
+        TextureCacheLimits::default(),
+    ) {
+        Ok(dest) => dest,
+        Err(error) => {
+            tracing::warn!("avatar dump: cannot open the bundle's texture cache: {error}");
+            return plan.keys().copied().collect();
+        }
+    };
+    let mut failed = BTreeSet::new();
+    for (id, url) in plan {
+        let stored = fetch_whole(client, url, "image/x-j2c").and_then(|bytes| {
+            dest.write(*id, &bytes, now_unix)
+                .map_err(|error| error.to_string())
+        });
+        if let Err(error) = stored {
+            tracing::warn!("avatar dump: texture {id}: {error}");
+            let _inserted = failed.insert(*id);
+        }
+    }
+    failed
+}
+
+/// Fetch each mesh whole into the bundle, replacing any partial cached copy, and
+/// return the ids that failed.
+fn fetch_meshes(
+    client: &reqwest::blocking::Client,
+    bundle_dir: &Path,
+    ids: &BTreeSet<Uuid>,
+    cap: Option<&str>,
+    now_unix: u32,
+) -> BTreeSet<Uuid> {
+    if ids.is_empty() {
+        return BTreeSet::new();
+    }
+    let Some(cap) = cap else {
+        tracing::warn!("avatar dump: the region offers no mesh capability");
+        return ids.clone();
+    };
+    let dest = match MeshDiskCache::open(
+        bundle_cache_dir(bundle_dir, MESH_CACHE),
+        MeshCacheLimits::default(),
+    ) {
+        Ok(dest) => dest,
+        Err(error) => {
+            tracing::warn!("avatar dump: cannot open the bundle's mesh cache: {error}");
+            return ids.clone();
+        }
+    };
+    let mut failed = BTreeSet::new();
+    for &id in ids {
+        let url = format!("{cap}/?mesh_id={id}");
+        let stored = fetch_whole(client, &url, "application/vnd.ll.mesh").and_then(|bytes| {
+            let asset = AssetBytes::from_whole(bytes).ok_or("no valid mesh header")?;
+            dest.write(id, &asset, now_unix)
+                .map_err(|error| error.to_string())
+        });
+        if let Err(error) = stored {
+            tracing::warn!("avatar dump: mesh {id}: {error}");
+            let _inserted = failed.insert(id);
+        }
+    }
+    failed
+}
+
+/// Fetch the `ViewerAsset` assets of `ids` the bundle's `kind` cache lacks.
+/// Returns the ids that failed and the bytes of those fetched.
+fn fetch_absent_assets(
+    client: &reqwest::blocking::Client,
+    bundle_dir: &Path,
+    (kind, asset_type): (&str, AssetType),
+    ids: &BTreeSet<Uuid>,
+    cap: Option<&str>,
+    now_unix: u32,
+) -> (BTreeSet<Uuid>, Vec<Bytes>) {
+    if ids.is_empty() {
+        return (BTreeSet::new(), Vec::new());
+    }
+    let dest = match AssetDiskCache::open(
+        bundle_cache_dir(bundle_dir, kind),
+        AssetCacheLimits::default(),
+    ) {
+        Ok(dest) => dest,
+        Err(error) => {
+            tracing::warn!("avatar dump: cannot open the bundle's {kind}: {error}");
+            return (ids.clone(), Vec::new());
+        }
+    };
+    let absent: Vec<Uuid> = ids
+        .iter()
+        .copied()
+        .filter(|id| dest.read(*id).is_none())
+        .collect();
+    let (Some(cap), Some(key)) = (cap, asset_type.get_asset_query_key()) else {
+        if !absent.is_empty() {
+            tracing::warn!("avatar dump: no capability serves the {kind} assets still missing");
+        }
+        return (absent.into_iter().collect(), Vec::new());
+    };
+    let mut failed = BTreeSet::new();
+    let mut fresh = Vec::new();
+    for id in absent {
+        let url = format!("{cap}/?{key}={id}");
+        let stored = fetch_whole(client, &url, "application/octet-stream").and_then(|bytes| {
+            dest.write(id, &bytes, now_unix)
+                .map_err(|error| error.to_string())?;
+            Ok(bytes)
+        });
+        match stored {
+            Ok(bytes) => fresh.push(bytes),
+            Err(error) => {
+                tracing::warn!("avatar dump: {kind} {id}: {error}");
+                let _inserted = failed.insert(id);
+            }
+        }
+    }
+    (failed, fresh)
+}
+
+/// GET the whole asset at `url`, retrying the services' `503 "queued"` a few
+/// times. The error never quotes the URL, which is a capability.
+fn fetch_whole(
+    client: &reqwest::blocking::Client,
+    url: &str,
+    accept: &str,
+) -> Result<Bytes, String> {
+    for _attempt in 0..FETCH_ATTEMPTS {
+        let response = client
+            .get(url)
+            .header("Accept", accept)
+            .send()
+            .map_err(|error| error.without_url().to_string())?;
+        let status = response.status();
+        if status.is_success() {
+            return response
+                .bytes()
+                .map_err(|error| error.without_url().to_string());
+        }
+        if status.as_u16() != 503 {
+            return Err(format!("status {status}"));
+        }
+        std::thread::sleep(Duration::from_millis(300));
+    }
+    Err("still 503 after every retry".to_owned())
+}
+
+/// The texture maps a PBR material asset names.
+fn material_textures(bytes: &[u8]) -> Vec<Uuid> {
+    let Ok(material) = parse_material_asset(bytes) else {
+        return Vec::new();
+    };
+    [
+        material.base_color_texture,
+        material.metallic_roughness_texture,
+        material.normal_texture,
+        material.emissive_texture,
+    ]
+    .into_iter()
+    .flatten()
+    .map(|texture| texture.id.uuid())
+    .filter(|id| !id.is_nil())
+    .collect()
 }
 
 /// Copy the PBR render-material (`AT_MATERIAL`) assets for `ids` from the live
@@ -345,19 +677,7 @@ fn copy_materials(
             continue;
         };
         // Enumerate the material's own texture maps so they are bundled.
-        if let Ok(material) = parse_material_asset(bytes.as_ref()) {
-            for texture in [
-                material.base_color_texture,
-                material.metallic_roughness_texture,
-                material.normal_texture,
-                material.emissive_texture,
-            ]
-            .into_iter()
-            .flatten()
-            {
-                insert_non_nil(textures, texture.id.uuid());
-            }
-        }
+        textures.extend(material_textures(bytes.as_ref()));
         if dest.write(id, bytes.as_ref(), now_unix).is_ok() {
             copied = copied.saturating_add(1);
         }
@@ -499,7 +819,31 @@ mod tests {
     use pretty_assertions::assert_eq;
     use sl_client_bevy::Uuid;
 
-    use super::{MANIFEST_VERSION, ReplayManifest, load_bundle, load_manifest, referenced_assets};
+    use super::{
+        BundleGaps, MANIFEST_VERSION, ReplayManifest, absent_ids, load_bundle, load_manifest,
+        referenced_assets,
+    };
+
+    /// What a capture still has to fetch is what is referenced and not held.
+    #[test]
+    fn only_the_ids_not_held_are_absent() {
+        let (held, missing) = (Uuid::from_u128(1), Uuid::from_u128(2));
+        let referenced = std::collections::BTreeSet::from([held, missing]);
+        assert_eq!(
+            absent_ids(&referenced, [held, Uuid::from_u128(3)]),
+            std::collections::BTreeSet::from([missing])
+        );
+    }
+
+    /// A capture reports only the kinds it actually failed to complete.
+    #[test]
+    fn a_complete_bundle_reports_no_gaps() {
+        let mut gaps = BundleGaps::default();
+        assert!(gaps.by_kind().is_empty());
+        let _inserted = gaps.meshes.insert(Uuid::from_u128(1));
+        let kinds: Vec<&str> = gaps.by_kind().into_iter().map(|(kind, _)| kind).collect();
+        assert_eq!(kinds, vec!["mesh"]);
+    }
 
     /// A minimal (empty) manifest — no heavy wire objects — for exercising the
     /// serialise / load / version-check plumbing.

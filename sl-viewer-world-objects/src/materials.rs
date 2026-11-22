@@ -908,6 +908,88 @@ pub fn register_pbr_materials(
     }
 }
 
+/// A rigged face's link to the geometry holder of the object it renders.
+///
+/// A rigged submesh is parented to its skeleton's root rather than to its object's
+/// holder, so the parent walk that joins a prim face to its
+/// [`ObjectRenderMaterials`] cannot reach it. A bake-on-mesh face carries no link:
+/// its appearance is the wearer's bake.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct RiggedFaceHolder {
+    /// The object's geometry holder.
+    pub holder: Entity,
+    /// The face's glow, for the PBR transparency gate.
+    pub glow: f32,
+}
+
+/// Join each rigged face to its object's [`ObjectRenderMaterials`], as
+/// [`register_pbr_materials`] and [`register_changed_render_materials`] do for a
+/// prim face: a worn PBR mesh commonly has a transparent placeholder for its
+/// `TextureEntry` diffuse, so without this it draws nothing at all.
+pub fn register_rigged_pbr_materials(
+    mut manager: ResMut<MaterialManager>,
+    mut textures: ResMut<TextureManager>,
+    mut materials: ResMut<Assets<FaceMaterial>>,
+    faces: Query<(
+        Entity,
+        &MeshMaterial3d<FaceMaterial>,
+        &PrimFaceEntity,
+        &RiggedFaceHolder,
+    )>,
+    fresh: Query<(), (With<RiggedFaceHolder>, Changed<PrimFaceEntity>)>,
+    changed_holders: Query<(), Changed<ObjectRenderMaterials>>,
+    holders: Query<&ObjectRenderMaterials>,
+) {
+    if fresh.is_empty() && changed_holders.is_empty() {
+        return;
+    }
+    for (entity, material, face, rigged) in &faces {
+        let is_fresh = fresh.contains(entity);
+        if !is_fresh && !changed_holders.contains(rigged.holder) {
+            continue;
+        }
+        let Ok(holder) = holders.get(rigged.holder) else {
+            continue;
+        };
+        let face_index = face.face_id.as_usize();
+        let Some(&(face_id, material_id)) = holder
+            .faces
+            .iter()
+            .find(|(index, _id)| usize::from(*index) == face_index)
+        else {
+            continue;
+        };
+        let key = (holder.scoped_id, face_id);
+        let base_uv = materials
+            .get(&material.0)
+            .map_or(Affine2::IDENTITY, |standard| standard.base.uv_transform);
+        let identity = FaceIdentity {
+            entity,
+            glow: rigged.glow,
+        };
+        // A re-bind spawns a new face with a new handle under the same key, which
+        // `refresh_face_material` would see as unchanged.
+        if is_fresh {
+            manager.register(
+                key,
+                AssetKey::from(material_id),
+                material.0.clone(),
+                base_uv,
+                identity,
+            );
+        } else if !manager.refresh_face_material(
+            key,
+            AssetKey::from(material_id),
+            &material.0,
+            base_uv,
+            identity,
+        ) {
+            continue;
+        }
+        recompose_face(&mut manager, &mut textures, &mut materials, key);
+    }
+}
+
 /// (Re)register a face's PBR material when its object's [`ObjectRenderMaterials`]
 /// **changes** — a render material assigned to (or changed on) an *existing* prim
 /// that does not re-tessellate its faces (the build tool's material assignment, an

@@ -13,18 +13,20 @@
 //! pays nothing. The heavy geometry/textures/animations are copied from the
 //! viewer's own caches, keyed by the ids in the captured events.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use bevy::prelude::*;
 use sl_client_bevy::{
-    AgentKey, AvatarAppearance, CAP_GET_TEXTURE, MAX_FACES, Object, PlayingAnimation,
-    RenderMaterialEntry, ScopedObjectId, SlCapabilities, SlEvent, SlIdentity, SlSessionEvent, Uuid,
-    decode_texture_entry, pcode,
+    AgentKey, AvatarAppearance, CAP_GET_MESH, CAP_GET_MESH2, CAP_GET_TEXTURE, CAP_RENDER_MATERIALS,
+    CAP_VIEWER_ASSET, MAX_FACES, Object, PlayingAnimation, RenderMaterialEntry, ScopedObjectId,
+    SlCapabilities, SlEvent, SlIdentity, SlSessionEvent, Uuid, decode_texture_entry, pcode,
 };
 
 use crate::replay_bundle::{
-    MANIFEST_VERSION, ReplayManifest, copy_cache_assets, run_texture_fetch, texture_fetch_urls,
+    BundleGaps, CaptureCaps, FetchPlan, MANIFEST_VERSION, ReplayManifest, absent_render_materials,
+    add_render_materials, copy_cache_assets, load_bundle, run_bundle_fetch,
+    run_render_material_fetch, texture_fetch_urls,
 };
 
 /// The environment variable that arms the capture: the directory a bundle is
@@ -49,10 +51,9 @@ pub struct ReplayCaptureStore {
     /// by its material id — so a dump can carry the ones its faces reference (the
     /// offline session cannot fetch the `RenderMaterials` cap).
     render_materials: HashMap<Uuid, RenderMaterialEntry>,
-    /// The region's `GetTexture` capability URL, so the dump can fetch each
-    /// referenced texture at full resolution (the local cache holds only the
-    /// low-LOD prefix the live viewer happened to load).
-    get_texture_cap: Option<String>,
+    /// The region's capability URLs, so the dump can fetch what the local caches
+    /// lack or hold only part of.
+    caps: CaptureCaps,
 }
 
 /// Avatar-state capture (`viewer-avatar-state-dump-replay`): retain the raw
@@ -90,7 +91,16 @@ pub fn capture_replay_inputs(
 ) {
     for SlCapabilities(map) in capabilities.read() {
         if let Some(url) = map.get(CAP_GET_TEXTURE) {
-            store.get_texture_cap = Some(url.clone());
+            store.caps.texture = Some(url.clone());
+        }
+        if let Some(url) = map.get(CAP_GET_MESH2).or_else(|| map.get(CAP_GET_MESH)) {
+            store.caps.mesh = Some(url.clone());
+        }
+        if let Some(url) = map.get(CAP_VIEWER_ASSET) {
+            store.caps.viewer_asset = Some(url.clone());
+        }
+        if let Some(url) = map.get(CAP_RENDER_MATERIALS) {
+            store.caps.render_materials = Some(url.clone());
         }
     }
     for event in events.read() {
@@ -153,41 +163,82 @@ pub fn dump_avatars_on_key(
         return;
     }
     let now_unix = unix_now();
-    // The full-resolution texture fetch inputs: the GetTexture cap and (for a
-    // central-baking grid) the appearance service that serves baked-body textures.
-    let get_texture_cap = store.get_texture_cap.clone();
+    let caps = store.caps.clone();
+    // The appearance service serves baked-body textures on a central-baking grid.
     let appearance_service = identity
         .agent_appearance_service
         .as_ref()
         .map(ToString::to_string);
-    let mut written = 0_u32;
-    let mut assets = 0_u32;
-    // The deduplicated (texture id -> full-resolution URL) fetch plan across every
-    // dumped avatar (the shared `cache/` means one fetch serves all).
-    let mut plan: HashMap<Uuid, String> = HashMap::new();
     // Each retained avatar object is one dumpable avatar.
-    for avatar in store
+    let mut manifests: Vec<ReplayManifest> = store
         .objects
         .values()
         .filter(|object| object.pcode == pcode::AVATAR)
-    {
-        let manifest = build_manifest(&store, avatar);
+        .map(|avatar| build_manifest(&store, avatar))
+        .collect();
+    // An avatar captured into this directory earlier and not here now is completed
+    // too: what its bundle lacks can still be fetched by id after it has left.
+    let present: BTreeSet<Uuid> = manifests.iter().map(|manifest| manifest.agent).collect();
+    match load_bundle(&dir) {
+        Ok(earlier) => manifests.extend(
+            earlier
+                .into_iter()
+                .filter(|manifest| !present.contains(&manifest.agent)),
+        ),
+        Err(error) => warn!("avatar dump: cannot read the earlier captures: {error}"),
+    }
+    // The legacy materials no reply had delivered yet come first: they travel in
+    // the manifests, and they name normal and specular maps to fetch below.
+    let absent: BTreeSet<Uuid> = manifests.iter().flat_map(absent_render_materials).collect();
+    info!(
+        "avatar dump: capturing {} avatar(s), fetching {} legacy material(s) not yet received \
+         — the viewer will pause until done",
+        manifests.len(),
+        absent.len(),
+    );
+    if !absent.is_empty() {
+        if let Some(cap) = caps.render_materials.clone() {
+            let fetched = sl_client_bevy::log_context::spawn_thread(move || {
+                run_render_material_fetch(&cap, &absent)
+            })
+            .join()
+            .unwrap_or_default();
+            for manifest in &mut manifests {
+                add_render_materials(manifest, &fetched);
+            }
+        } else {
+            warn!("avatar dump: the region offers no RenderMaterials capability");
+        }
+    }
+    let mut written = 0_u32;
+    let mut assets = 0_u32;
+    // What is still to download across every avatar (the shared `cache/` means one
+    // fetch serves all), and what nothing can serve.
+    let mut plan = FetchPlan::default();
+    let mut gaps = BundleGaps::default();
+    for manifest in &manifests {
         let agent = manifest.agent.to_string();
-        let (counts, textures) = copy_cache_assets(paths.as_deref(), &dir, &manifest, now_unix);
+        gaps.render_materials
+            .extend(absent_render_materials(manifest));
+        let (counts, textures) = copy_cache_assets(paths.as_deref(), &dir, manifest, now_unix);
         assets = assets
             .saturating_add(counts.meshes)
             .saturating_add(counts.anims)
             .saturating_add(counts.materials);
-        for (id, url) in texture_fetch_urls(
-            &manifest,
+        plan.add_assets(manifest);
+        let urls = texture_fetch_urls(
+            manifest,
             &textures,
-            get_texture_cap.as_deref(),
+            caps.texture.as_deref(),
             appearance_service.as_deref(),
-        ) {
-            let _previous = plan.entry(id).or_insert(url);
+        );
+        let served: BTreeSet<Uuid> = urls.iter().map(|(id, _url)| *id).collect();
+        gaps.textures.extend(textures.difference(&served));
+        for (id, url) in urls {
+            let _previous = plan.textures.entry(id).or_insert(url);
         }
         let path = dir.join(format!("{agent}.json"));
-        match serde_json::to_vec_pretty(&manifest) {
+        match serde_json::to_vec_pretty(manifest) {
             Ok(json) => match fs_err::write(&path, json) {
                 Ok(()) => written = written.saturating_add(1),
                 Err(error) => warn!("avatar dump: write {path:?}: {error}"),
@@ -195,22 +246,51 @@ pub fn dump_avatars_on_key(
             Err(error) => warn!("avatar dump: serialize {agent}: {error}"),
         }
     }
-    let plan: Vec<(Uuid, String)> = plan.into_iter().collect();
-    let total = plan.len();
     info!(
-        "avatar dump: wrote {written} avatar(s) + {assets} mesh/anim/material asset(s) to {}; \
-         fetching {total} texture(s) at full resolution — the viewer will pause until done",
+        "avatar dump: wrote {written} avatar(s) + {assets} cached asset(s) to {}; fetching {} \
+         mesh(es) whole and {} texture(s) at full resolution, plus any animation or PBR \
+         material not cached",
         dir.display(),
+        plan.meshes.len(),
+        plan.textures.len(),
     );
     // Fetch on a worker thread (so `reqwest::blocking` is never nested in a tokio
     // runtime) but block the dump on its completion: a detached thread would be
-    // killed when the operator closes the viewer, leaving the bundle's textures
-    // incomplete. The brief pause is the price of a guaranteed-complete bundle.
-    let fetched =
-        sl_client_bevy::log_context::spawn_thread(move || run_texture_fetch(&dir, &plan, now_unix))
-            .join()
-            .unwrap_or(0);
-    info!("avatar dump: fetched {fetched}/{total} full-resolution texture(s); capture complete");
+    // killed when the operator closes the viewer, leaving the bundle incomplete.
+    // The pause is the price of a bundle that holds everything it references.
+    let requested = (
+        plan.meshes.clone(),
+        plan.anims.clone(),
+        plan.materials.clone(),
+        plan.textures.keys().copied().collect::<BTreeSet<Uuid>>(),
+    );
+    let fetched = sl_client_bevy::log_context::spawn_thread(move || {
+        run_bundle_fetch(&dir, plan, &caps, now_unix)
+    })
+    .join()
+    .unwrap_or_else(|_panicked| BundleGaps {
+        render_materials: BTreeSet::new(),
+        meshes: requested.0,
+        anims: requested.1,
+        materials: requested.2,
+        textures: requested.3,
+    });
+    gaps.meshes.extend(fetched.meshes);
+    gaps.anims.extend(fetched.anims);
+    gaps.materials.extend(fetched.materials);
+    gaps.textures.extend(fetched.textures);
+    let missing = gaps.by_kind();
+    if missing.is_empty() {
+        info!("avatar dump: capture complete, every referenced asset is in the bundle");
+    }
+    for (kind, ids) in missing {
+        let listed: Vec<String> = ids.iter().map(ToString::to_string).collect();
+        warn!(
+            "avatar dump: capture INCOMPLETE, {} {kind}(s) missing: {}",
+            ids.len(),
+            listed.join(", ")
+        );
+    }
 }
 
 /// Build one avatar's [`ReplayManifest`]: the avatar object, its attachment tree,

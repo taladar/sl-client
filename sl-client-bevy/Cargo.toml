@@ -29,6 +29,8 @@ bevy = { version = "0.20.1", default-features = false, features = [
   "bevy_asset",
   "bevy_image",
   "bevy_mesh",
+  # MikkTSpace tangents for rigged meshes, as the reference generates them.
+  "bevy_mikktspace",
   # Per-frame avatar visual-param morphs (P31.12a) attach Bevy native morph
   # targets to the base-mesh assets; `Mesh::set_morph_targets` is gated on this.
   "morph",

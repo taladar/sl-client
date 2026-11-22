@@ -783,6 +783,13 @@ fn fragment(
     let opaque_pass = alpha_mode == pbr_types::STANDARD_MATERIAL_FLAGS_ALPHA_MODE_OPAQUE
         || alpha_mode == pbr_types::STANDARD_MATERIAL_FLAGS_ALPHA_MODE_MASK;
 
+    // A blended face that writes depth (rigged alpha) must not write it for what
+    // cannot be seen: the reference's `minimum_alpha` (`MINIMUM_ALPHA`, about 1/255).
+    @if(SL_WRITE_DEPTH)
+    if !opaque_pass && out.color.a < 0.004 {
+        discard;
+    }
+
     // The water fog, for a **translucent** face only (`viewer-underwater-fog-swallows-translucency`).
     //
     // An opaque or alpha-masked face is drawn in the opaque pass, which the

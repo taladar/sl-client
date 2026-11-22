@@ -995,6 +995,9 @@ struct DecodedAlpha {
     has_alpha: bool,
     /// That alpha channel holds genuinely transparent texels.
     has_transparency: bool,
+    /// That alpha channel is a one-bit mask rather than real translucency
+    /// (the reference's `LLImageGL::getIsAlphaMask`).
+    is_mask: bool,
 }
 
 /// One face-texture drape deferred past a frame's [`TextureApplyBudget`]: the diffuse
@@ -1259,16 +1262,8 @@ pub fn compose_face_material(
         // re-tessellation on approach, a shape change, a derender/re-create)
         // popped back in opaque, losing the alpha-texture transparency its
         // first build had gained when the texture decoded.
-        let has_alpha = stores
-            .store
-            .get(texture_id)
-            .is_some_and(|decoded| texture_has_alpha(decoded));
-        let has_transparency = has_alpha
-            && stores
-                .store
-                .get(texture_id)
-                .is_some_and(|decoded| texture_has_transparency(decoded));
-        resolve_texture_alpha_mode(&mut material, texture_alpha, has_alpha, has_transparency);
+        let alpha = decoded_alpha(stores.store, texture_id);
+        resolve_texture_alpha_mode(&mut material, texture_alpha, alpha);
     }
     // Legacy per-face surface flags (P27.4): fullbright / glow / shiny fold onto
     // this material as it is built (bump needs the decoded diffuse and is applied
@@ -1353,12 +1348,7 @@ fn drape_face_texture(
     // (R25a): `NONE` means opaque in the reference even over an alpha texture, so
     // the material must win regardless of whether it or this decode applied last.
     if !legacy.is_alpha_overridden(material.id()) {
-        resolve_texture_alpha_mode(
-            &mut face.base,
-            texture_alpha,
-            alpha.has_alpha,
-            alpha.has_transparency,
-        );
+        resolve_texture_alpha_mode(&mut face.base, texture_alpha, alpha);
     }
     true
 }
@@ -1403,9 +1393,11 @@ fn decoded_alpha(store: &DecodedTextures, id: TextureKey) -> DecodedAlpha {
         && store
             .get(id)
             .is_some_and(|decoded| texture_has_transparency(decoded));
+    let is_mask = store.get(id).is_some_and(|decoded| decoded.is_alpha_mask);
     DecodedAlpha {
         has_alpha,
         has_transparency,
+        is_mask,
     }
 }
 
@@ -1813,12 +1805,13 @@ fn drain_deferred(
 }
 
 /// Resolve a texture-alpha face's mode (reference-faithful, R22d): an ordinary
-/// face alpha-*masks* off its texture alpha (an invisible prim stays cut, solid
-/// texels stay solid); a rigged face cannot mask, so one with genuinely
-/// transparent texels alpha-*blends* (hair / eyelashes render soft, not as a
-/// solid card). A texture with no real transparency stays opaque. A face
-/// already blending (a non-opaque tint) is left blending; a `LLMaterial` mode
-/// later wins.
+/// face alpha-*masks* off a texture whose alpha is a one-bit mask (an invisible
+/// prim stays cut, solid texels stay solid) and alpha-*blends* off any other
+/// alpha, as `LLFace::canRenderAsMask` does, so a pane of partial alpha is glass
+/// and not a solid sheet; a rigged face cannot mask, so one with genuinely
+/// transparent texels blends (hair / eyelashes render soft, not as a solid
+/// card). A texture with no real transparency stays opaque. A face already
+/// blending (a non-opaque tint) is left blending; a `LLMaterial` mode later wins.
 ///
 /// Shared by both moments a face meets its decoded texture: the parked path
 /// ([`apply_prim_textures`], texture decoded after the face was built) and the
@@ -1827,17 +1820,19 @@ fn drain_deferred(
 fn resolve_texture_alpha_mode(
     material: &mut StandardMaterial,
     texture_alpha: TextureAlpha,
-    has_alpha: bool,
-    has_transparency: bool,
+    alpha: DecodedAlpha,
 ) {
     if material.alpha_mode != AlphaMode::Opaque {
         return;
     }
     match texture_alpha {
-        TextureAlpha::Mask if has_alpha => {
+        TextureAlpha::Mask if alpha.has_alpha && alpha.is_mask => {
             material.alpha_mode = AlphaMode::Mask(FACE_ALPHA_MASK_CUTOFF);
         }
-        TextureAlpha::Blend if has_transparency => {
+        TextureAlpha::Mask if alpha.has_alpha => {
+            material.alpha_mode = AlphaMode::Blend;
+        }
+        TextureAlpha::Blend if alpha.has_transparency => {
             material.alpha_mode = AlphaMode::Blend;
         }
         _keep_opaque => {}
@@ -1966,23 +1961,27 @@ mod tests {
             alpha_mode: AlphaMode::Opaque,
             ..StandardMaterial::default()
         };
-        resolve_texture_alpha_mode(&mut face, TextureAlpha::Mask, true, false);
+        resolve_texture_alpha_mode(&mut face, TextureAlpha::Mask, MASK);
         assert_eq!(face.alpha_mode, AlphaMode::Mask(FACE_ALPHA_MASK_CUTOFF));
+        // …and blends off alpha that is not a one-bit mask: a pane of glass.
+        face.alpha_mode = AlphaMode::Opaque;
+        resolve_texture_alpha_mode(&mut face, TextureAlpha::Mask, GLASS);
+        assert_eq!(face.alpha_mode, AlphaMode::Blend);
         // A rigged face blends when the texture holds real transparency…
         face.alpha_mode = AlphaMode::Opaque;
-        resolve_texture_alpha_mode(&mut face, TextureAlpha::Blend, true, true);
+        resolve_texture_alpha_mode(&mut face, TextureAlpha::Blend, GLASS);
         assert_eq!(face.alpha_mode, AlphaMode::Blend);
         // …but not off a merely-present, fully-solid alpha channel.
         face.alpha_mode = AlphaMode::Opaque;
-        resolve_texture_alpha_mode(&mut face, TextureAlpha::Blend, true, false);
+        resolve_texture_alpha_mode(&mut face, TextureAlpha::Blend, MASK);
         assert_eq!(face.alpha_mode, AlphaMode::Opaque);
         // An alpha-free texture never upgrades.
         face.alpha_mode = AlphaMode::Opaque;
-        resolve_texture_alpha_mode(&mut face, TextureAlpha::Mask, false, false);
+        resolve_texture_alpha_mode(&mut face, TextureAlpha::Mask, OPAQUE);
         assert_eq!(face.alpha_mode, AlphaMode::Opaque);
         // A tint-blending face is left blending.
         face.alpha_mode = AlphaMode::Blend;
-        resolve_texture_alpha_mode(&mut face, TextureAlpha::Mask, true, false);
+        resolve_texture_alpha_mode(&mut face, TextureAlpha::Mask, MASK);
         assert_eq!(face.alpha_mode, AlphaMode::Blend);
     }
 
@@ -2009,6 +2008,21 @@ mod tests {
     const OPAQUE: DecodedAlpha = DecodedAlpha {
         has_alpha: false,
         has_transparency: false,
+        is_mask: true,
+    };
+
+    /// An alpha channel that is a one-bit mask and solid everywhere.
+    const MASK: DecodedAlpha = DecodedAlpha {
+        has_alpha: true,
+        has_transparency: false,
+        is_mask: true,
+    };
+
+    /// An alpha channel of real translucency.
+    const GLASS: DecodedAlpha = DecodedAlpha {
+        has_alpha: true,
+        has_transparency: true,
+        is_mask: false,
     };
 
     /// Add one untextured face material and return its handle.

@@ -315,6 +315,7 @@ fn face_material_pipeline() -> ScheduleConfigs<ScheduleSystem> {
             // its faces, so register the change here — `register_pbr_materials`
             // only sees freshly-spawned faces.
             register_changed_render_materials,
+            crate::materials::register_rigged_pbr_materials,
             // Phase 3: a render material cleared in-world removes the holder, so
             // revert each of its faces to Blinn-Phong / diffuse (and bring back
             // their legacy specular / normal, no longer superseded).

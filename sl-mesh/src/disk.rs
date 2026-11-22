@@ -79,6 +79,20 @@ impl AssetBytes {
         &self.data
     }
 
+    /// A complete mesh asset fetched in one piece, with every block its header
+    /// names and `data` covers marked present. `None` if `data` has no valid
+    /// mesh header.
+    #[must_use]
+    pub fn from_whole(data: Bytes) -> Option<Self> {
+        let (header, header_size) = crate::decode::parse_header(&data)?;
+        let flags = crate::store::all_present_flags_from(Some(header), header_size, data.len());
+        Some(Self {
+            data,
+            header_size,
+            flags,
+        })
+    }
+
     /// An asset with only the header region fetched (no blocks yet).
     pub(crate) const fn header_only(data: Bytes, header_size: usize) -> Self {
         Self {

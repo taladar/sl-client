@@ -671,7 +671,11 @@ fn all_present_flags(header: &MeshHeader, header_size: usize, data_len: usize) -
 }
 
 /// [`all_present_flags`] over an optional header (no flags if it is absent).
-fn all_present_flags_from(header: Option<MeshHeader>, header_size: usize, data_len: usize) -> u32 {
+pub(crate) fn all_present_flags_from(
+    header: Option<MeshHeader>,
+    header_size: usize,
+    data_len: usize,
+) -> u32 {
     header.map_or(0, |header| {
         all_present_flags(&header, header_size, data_len)
     })

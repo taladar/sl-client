@@ -1482,6 +1482,8 @@ impl CefMediaBackend {
     /// process, the cache directory cannot be created, or CEF itself refuses
     /// to initialise.
     pub fn initialize(config: &BackendConfig) -> Result<Self, MediaError> {
+        #[cfg(all(target_os = "linux", target_env = "gnu"))]
+        crate::mallinfo::retain();
         if CEF_INITIALIZED.swap(true, Ordering::SeqCst) {
             return Err(MediaError::Init(String::from(
                 "CEF was already initialised in this process",

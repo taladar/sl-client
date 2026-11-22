@@ -565,6 +565,11 @@ pub struct RiggedStores<'w, 's> {
     prim_textures: ResMut<'w, PrimTextures>,
     /// The cross-object tessellation cache.
     cache: ResMut<'w, GeometryCache>,
+    /// Where a rigged face's legacy material is registered.
+    legacy: ResMut<'w, sl_viewer_world_objects::legacy_materials::LegacyMaterialManager>,
+    /// Which faces of an object carry a PBR material, which supersedes a legacy one.
+    render_materials:
+        Query<'w, 's, &'static sl_viewer_world_objects::materials::ObjectRenderMaterials>,
 }
 
 /// Bind every worn rigged mesh attachment whose skeleton instance is now
@@ -812,7 +817,13 @@ pub fn apply_rigged_attachments(
                 // A worn mesh's submeshes carry their worn-object identity for the
                 // attachment pies; an animesh (`bind_agent` `None`) is not worn.
                 worn: bind_agent.is_some().then_some(scoped),
+                object: scoped,
                 mesh_key: key,
+                holder: mirrors
+                    .state
+                    .objects()
+                    .get(&scoped)
+                    .map(|tracked| tracked.geometry),
             },
             &mut stores,
         );
@@ -927,7 +938,22 @@ pub fn apply_rigged_attachments(
             }
             (None, None) => {}
         }
-        debug!("bound rigged mesh {key} to its skeleton");
+        debug!(
+            "bound rigged mesh {key} to its skeleton: LOD {:?}, {} submesh(es), {} vertices, {} \
+             indices",
+            decoded.lod,
+            decoded.submeshes.len(),
+            decoded
+                .submeshes
+                .iter()
+                .map(|submesh| submesh.positions.len())
+                .sum::<usize>(),
+            decoded
+                .submeshes
+                .iter()
+                .map(|submesh| submesh.indices.len())
+                .sum::<usize>(),
+        );
     }
 }
 
@@ -1017,8 +1043,12 @@ struct RiggedBind<'a> {
     agent: Option<AgentKey>,
     /// The worn object's id, carried onto the submeshes for the attachment pies.
     worn: Option<ScopedObjectId>,
+    /// The object being bound, worn or animesh, whose id orders its alpha faces.
+    object: ScopedObjectId,
     /// The mesh asset key, part of the geometry cache key.
     mesh_key: MeshKey,
+    /// The object's geometry holder, which carries its PBR material table.
+    holder: Option<Entity>,
 }
 
 /// Spawn one skinned child entity per non-empty submesh of a decoded rigged mesh
@@ -1052,7 +1082,9 @@ fn build_rigged_submeshes(bind: &RiggedBind<'_>, stores: &mut RiggedStores) -> V
         slot,
         agent,
         worn,
+        object,
         mesh_key,
+        holder: object_holder,
     } = bind;
     let entry = decode_texture_entry(texture_entry, decoded.submeshes.len());
     // The slot every face falls back to when the object carries no texture entry.
@@ -1147,12 +1179,40 @@ fn build_rigged_submeshes(bind: &RiggedBind<'_>, stores: &mut RiggedStores) -> V
                 TextureAlpha::Blend,
             ),
         };
+        // Every rigged face owns its material, so this reaches no other draw.
+        if let Some(mut asset) = stores.materials.get_mut(&material) {
+            asset.extension.write_depth = true;
+        }
+        // A rigged face honours its `LLMaterial` like any other: the alpha mode
+        // decides whether its texture's alpha means anything at all, so a face set
+        // to "none" over a zero-alpha texture is solid rather than invisible. A
+        // bake-on-mesh face takes its alpha from the bake instead.
+        let has_pbr = object_holder.is_some_and(|holder| {
+            stores.render_materials.get(holder).is_ok_and(|table| {
+                table
+                    .faces
+                    .iter()
+                    .any(|(face, _id)| usize::from(*face) == index)
+            })
+        });
+        if bom.is_none()
+            && !has_pbr
+            && let Some(material_id) = texture_face.material_id
+            && !material_id.is_nil()
+        {
+            stores.legacy.register(material.clone(), material_id);
+        }
         // The submesh index is the Linden face index; a mesh has few faces, so the
         // widening never saturates in practice (a clamp keeps it lint-clean).
-        let face_id = PrimFaceId::new(u16::try_from(index).unwrap_or(u16::MAX));
+        let face_index = u16::try_from(index).unwrap_or(u16::MAX);
+        let face_id = PrimFaceId::new(face_index);
         let mut spawned = stores.commands.spawn((
             Mesh3d(mesh),
             MeshMaterial3d(material),
+            sl_viewer_world_api::RiggedDrawOrder {
+                object: object.id.0,
+                face: face_index,
+            },
             SkinnedMesh {
                 inverse_bindposes: inverse_bindposes.clone(),
                 joints: joint_entities.to_vec(),
@@ -1170,6 +1230,11 @@ fn build_rigged_submeshes(bind: &RiggedBind<'_>, stores: &mut RiggedStores) -> V
         ));
         if let Some(bom) = bom {
             spawned.insert(bom);
+        } else if let Some(holder) = object_holder {
+            spawned.insert(sl_viewer_world_objects::materials::RiggedFaceHolder {
+                holder,
+                glow: texture_face.glow,
+            });
         }
         // A worn rigged submesh is part of its wearer's drawn silhouette — on a
         // modern mesh-body avatar the *base* body is hidden, so without this tag

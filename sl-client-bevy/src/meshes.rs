@@ -24,6 +24,7 @@ use sl_mesh::{
     AssetFetcher, DecodedMesh, FetchChunk, FetchError, MeshSkin, Submesh, VertexWeights,
 };
 use sl_proto::MeshKey;
+use tracing::warn;
 
 use crate::async_http::{fetch_range_async, shared_async_client};
 use crate::async_runtime::run_on_shared_runtime;
@@ -102,6 +103,16 @@ pub fn to_bevy_rigged_mesh(submesh: &Submesh, skin: &MeshSkin) -> Mesh {
         VertexAttributeValues::Uint16x4(joint_indices),
     );
     mesh.insert_attribute(Mesh::ATTRIBUTE_JOINT_WEIGHT, joint_weights);
+    // The reference gives every mesh MikkTSpace tangents when it loads it
+    // (`LLVolumeFace::cacheOptimize`). Without them a normal map falls back to a
+    // frame derived per triangle, which jumps at each edge and shows on glossy
+    // hair as a pattern of individual triangles.
+    if !submesh.normals.is_empty()
+        && !submesh.uvs.is_empty()
+        && let Err(error) = mesh.generate_tangents()
+    {
+        warn!("rigged mesh tangents could not be generated: {error}");
+    }
     mesh
 }
 

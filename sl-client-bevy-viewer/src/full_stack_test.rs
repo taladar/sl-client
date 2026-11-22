@@ -1282,6 +1282,8 @@ fn screenshot_the_window(
 
 #[cfg(test)]
 mod tests {
+    mod crowd;
+
     use super::{
         Duration, FRAME, HarnessOptions, Recorded, SceneWork, ViewerHarness, stock_fixture,
     };

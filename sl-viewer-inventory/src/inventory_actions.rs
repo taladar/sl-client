@@ -786,6 +786,13 @@ pub(crate) struct WornAttachments {
 /// departure to read as a move rather than a detach.
 const DETACH_SETTLE_SECS: f32 = 5.0;
 
+/// How long the set of attachments on our avatar must hold still after login
+/// before whatever the Current Outfit Folder lists and the avatar lacks is
+/// attached, in seconds. The simulator re-sends a returning avatar's attachments
+/// over the first seconds of a session, and asking for one still on its way
+/// would be a request for something already worn.
+const OUTFIT_RESTORE_SETTLE_SECS: f32 = 10.0;
+
 /// The Current Outfit Folder half of the reference's attachment bookkeeping
 /// (`LLAttachmentsMgr` / `LLAppearanceMgr::unregisterAttachment`): an
 /// attachment's COF link is written when its object **arrives** on our avatar,
@@ -804,6 +811,11 @@ pub(crate) struct AttachmentCofSync {
     /// Attachments whose COF link has been asked for and not yet seen, so a
     /// link is requested once rather than every frame until it lands.
     linking: HashSet<InventoryKey>,
+    /// The session whose outfit has been restored, so it happens once per login.
+    restored_session: Option<Uuid>,
+    /// The attachment count being watched for the restore to settle, and when
+    /// it last changed.
+    restore_watch: Option<(usize, f32)>,
 }
 
 /// What one [`AttachmentCofSync::step`] asks of the Current Outfit Folder.
@@ -863,6 +875,49 @@ impl AttachmentCofSync {
         actions.link.sort_unstable_by_key(|item| item.uuid());
         actions.unlink.sort_unstable_by_key(|item| item.uuid());
         actions
+    }
+
+    /// The outfit's attachments to put back on after a login: what the Current
+    /// Outfit Folder lists (`outfit`) and the avatar does not wear (`current`),
+    /// once per `session` and only after the worn set has held still for
+    /// [`OUTFIT_RESTORE_SETTLE_SECS`] — the attach half of the reference's
+    /// `LLAgentWearables::findAttachmentsAddRemoveInfo`. `ready` holds it back
+    /// until the COF's contents and our own avatar are known.
+    pub(crate) fn restore_missing(
+        &mut self,
+        session: Option<Uuid>,
+        current: &HashMap<InventoryKey, ScopedObjectId>,
+        outfit: &[InventoryKey],
+        now: f32,
+        ready: bool,
+    ) -> Vec<InventoryKey> {
+        if session.is_none() || self.restored_session == session {
+            return Vec::new();
+        }
+        if !ready {
+            self.restore_watch = None;
+            return Vec::new();
+        }
+        let since = match self.restore_watch {
+            Some((count, since)) if count == current.len() => since,
+            _changed => {
+                self.restore_watch = Some((current.len(), now));
+                now
+            }
+        };
+        if now - since < OUTFIT_RESTORE_SETTLE_SECS {
+            return Vec::new();
+        }
+        self.restored_session = session;
+        self.restore_watch = None;
+        let mut missing: Vec<InventoryKey> = outfit
+            .iter()
+            .copied()
+            .filter(|item| !current.contains_key(item))
+            .collect();
+        missing.sort_unstable_by_key(|item| item.uuid());
+        missing.dedup();
+        missing
     }
 }
 
@@ -926,6 +981,56 @@ fn sync_worn_attachments(
         }
     }
     write_cof_commands(&model, batch, &mut commands);
+
+    let outfit: Vec<InventoryKey> = cof_links
+        .iter()
+        .filter(|(link, _slot)| is_attachment_item(link))
+        .map(|(link, _slot)| InventoryKey::from(link.asset_id))
+        .collect();
+    let own_avatar_known = identity
+        .agent_id
+        .is_some_and(|agent| avatars.root_entity_of(agent).is_some());
+    let missing = sync.restore_missing(
+        identity.session_id,
+        &current,
+        &outfit,
+        time.elapsed_secs(),
+        cof_loaded && own_avatar_known,
+    );
+    let attachments: Vec<RezAttachment> = missing
+        .iter()
+        .filter_map(|item| {
+            let (link, _slot) = cof_links
+                .iter()
+                .find(|(link, _slot)| link.asset_id == item.uuid())?;
+            Some(RezAttachment {
+                item_id: *item,
+                owner_id: identity
+                    .agent_id
+                    .map_or_else(Uuid::nil, |agent| agent.uuid()),
+                attachment_point: AttachmentPoint::Default,
+                mode: AttachmentMode::Add,
+                name: link.name.clone(),
+                description: link.description.clone(),
+            })
+        })
+        .collect();
+    if !attachments.is_empty() {
+        let named: Vec<String> = attachments
+            .iter()
+            .map(|attachment| format!("{:?} ({})", attachment.name, attachment.item_id))
+            .collect();
+        info!(
+            "outfit: attaching {} Current Outfit item(s) missing from the avatar: {}",
+            attachments.len(),
+            named.join(", ")
+        );
+        commands.write(SlCommand(Command::RezAttachments {
+            compound_id: TransactionId::from(Uuid::new_v4()),
+            detach: DetachOrder::Keep,
+            attachments,
+        }));
+    }
 }
 
 /// The read-only sources [`sync_worn_attachments`] observes, bundled as one
@@ -5701,6 +5806,58 @@ mod tests {
         assert_eq!(
             sync.step(&current, 0.3, true, ours, linked),
             CofSyncActions::default()
+        );
+    }
+
+    /// After a login, what the outfit lists and the avatar lacks is attached
+    /// once the arriving attachments have settled, and once per session.
+    #[test]
+    fn a_login_restores_the_outfits_missing_attachments_once() {
+        use super::{AttachmentCofSync, OUTFIT_RESTORE_SETTLE_SECS};
+        let worn = InventoryKey::from(Uuid::from_u128(0x17E));
+        let boots = InventoryKey::from(Uuid::from_u128(0xB007));
+        let outfit = [worn, boots];
+        let session = Some(Uuid::from_u128(1));
+        let empty = HashMap::new();
+        let arrived = HashMap::from([(worn, avatar_object(1))]);
+        let settle = OUTFIT_RESTORE_SETTLE_SECS;
+        let mut sync = AttachmentCofSync::default();
+
+        assert!(
+            sync.restore_missing(session, &empty, &outfit, 100.0, false)
+                .is_empty(),
+            "nothing before the COF and our avatar are known"
+        );
+        assert!(
+            sync.restore_missing(session, &empty, &outfit, 101.0, true)
+                .is_empty()
+        );
+        assert!(
+            sync.restore_missing(session, &arrived, &outfit, 101.0 + settle - 1.0, true)
+                .is_empty(),
+            "an attachment arriving restarts the wait"
+        );
+        assert!(
+            sync.restore_missing(session, &arrived, &outfit, 101.0 + settle, true)
+                .is_empty(),
+            "the wait counts from the last arrival"
+        );
+        assert_eq!(
+            sync.restore_missing(session, &arrived, &outfit, 100.0 + 2.0 * settle, true),
+            vec![boots],
+            "only what the avatar lacks"
+        );
+        assert!(
+            sync.restore_missing(session, &arrived, &outfit, 500.0, true)
+                .is_empty(),
+            "once per session: a later detach is not undone"
+        );
+        let next = Some(Uuid::from_u128(2));
+        let _watching = sync.restore_missing(next, &arrived, &outfit, 600.0, true);
+        assert_eq!(
+            sync.restore_missing(next, &arrived, &outfit, 600.0 + settle, true),
+            vec![boots],
+            "a new login restores again"
         );
     }
 

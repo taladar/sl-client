@@ -12,6 +12,11 @@
 /// best-effort (a source tarball build simply has no `SL_VIEWER_GIT_DESCRIBE`).
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("cargo::rustc-link-arg-bins=-Wl,-rpath,$ORIGIN");
+    // CEF reads glibc's 32-bit `mallinfo`, and crashes once the heap passes 2 GiB;
+    // `sl_cef::mallinfo` replaces it, which takes the executable exporting it.
+    for target in ["bins", "tests"] {
+        println!("cargo::rustc-link-arg-{target}=-Wl,--export-dynamic-symbol=mallinfo");
+    }
     println!("cargo::rerun-if-changed=build.rs");
 
     let manifest_dir = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR")?);

@@ -25,7 +25,7 @@ use sl_proto::{
     CAP_LAND_RESOURCES, CAP_LIBRARY_API_V3, CAP_LSL_SYNTAX, CAP_MESH_UPLOAD_FLAG,
     CAP_NEW_FILE_AGENT_INVENTORY, CAP_OBJECT_MEDIA_NAVIGATE, CAP_PARCEL_PROPERTIES_UPDATE,
     CAP_PARCEL_VOICE_INFO, CAP_PRODUCT_INFO_REQUEST, CAP_PROVISION_VOICE_ACCOUNT,
-    CAP_READ_OFFLINE_MSGS, CAP_REGION_SCHEDULE, CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS,
+    CAP_READ_OFFLINE_MSGS, CAP_REGION_SCHEDULE, CAP_REMOTE_PARCEL_REQUEST,
     CAP_REQUEST_TASK_INVENTORY, CAP_SEARCH_STAT_REQUEST, CAP_SEND_POSTCARD, CAP_SEND_USER_REPORT,
     CAP_SEND_USER_REPORT_WITH_SCREENSHOT, CAP_SET_DISPLAY_NAME, CAP_SIMULATOR_FEATURES,
     CAP_UNTRUSTED_SIMULATOR_MESSAGE, CAP_UPDATE_EXPERIENCE, CAP_UPDATE_SCRIPT_AGENT,
@@ -191,6 +191,10 @@ pub use sl_proto::CAP_INCREMENT_COF_VERSION;
 // `Command::FetchMesh` path) resolves the cap URL from an [`SlCapabilities`] map
 // and hands it to a [`BevyMeshFetcher`].
 pub use sl_proto::{CAP_GET_MESH, CAP_GET_MESH2};
+// The legacy-material capability, for a frontend that fetches materials itself
+// (an avatar capture) through [`fetch_render_materials`].
+pub use crate::materials::fetch_render_materials;
+pub use sl_proto::CAP_RENDER_MATERIALS;
 // The `ViewerAsset` capability name, the generic-asset counterpart of
 // [`CAP_GET_TEXTURE`]: a frontend driving the [`AssetStore`] directly resolves
 // the cap URL from an [`SlCapabilities`] map and hands it to a

@@ -5,8 +5,8 @@ use bevy::prelude::*;
 use crossbeam_channel::Sender;
 use sl_proto::Event as SessionEvent;
 use sl_proto::{
-    CAP_MODIFY_MATERIAL_PARAMS, Llsd, Uuid, build_render_materials_request, parse_llsd_xml,
-    parse_render_materials_response,
+    CAP_MODIFY_MATERIAL_PARAMS, Llsd, RenderMaterialEntry, Uuid, build_render_materials_request,
+    parse_llsd_xml, parse_render_materials_response,
 };
 
 /// POSTs a `RenderMaterials` request for `material_ids` (the zipped binary-LLSD
@@ -40,6 +40,39 @@ pub(crate) fn run_render_materials_fetch(
         })
         .unwrap_or_default();
     deliver(asset_tx, SessionEvent::RenderMaterials(materials));
+}
+
+/// POSTs a `RenderMaterials` request for `material_ids` and returns the decoded
+/// materials, for a caller that must know the outcome before it goes on (an
+/// avatar capture, which blocks until its bundle is complete).
+///
+/// # Errors
+///
+/// Returns a description of a transport failure, a non-success status or an
+/// undecodable reply.
+pub fn fetch_render_materials(
+    cap_url: &str,
+    material_ids: &[Uuid],
+) -> Result<Vec<RenderMaterialEntry>, String> {
+    let http = crate::http_proxy::blocking_client_builder()
+        .timeout(EVENT_QUEUE_TIMEOUT)
+        .build()
+        .map_err(|error| error.to_string())?;
+    let response = http
+        .post(cap_url)
+        .header("Content-Type", "application/llsd+xml")
+        .body(build_render_materials_request(material_ids))
+        .send()
+        // A capability URL is a secret, and reqwest's errors quote it.
+        .map_err(|error| error.without_url().to_string())?;
+    let status = response.status();
+    if !status.is_success() {
+        return Err(format!("status {status}"));
+    }
+    let text = response
+        .text()
+        .map_err(|error| error.without_url().to_string())?;
+    parse_render_materials_response(&text).map_err(|error| error.to_string())
 }
 
 /// PUTs a `RenderMaterials` request that sets (or clears) legacy materials on

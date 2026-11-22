@@ -588,6 +588,19 @@ pub struct ObjectParticleSystem {
     pub system: ParticleSystem,
 }
 
+/// Where a **rigged** face belongs in the reference's rigged alpha pass, which
+/// runs ahead of all other alpha and does not sort by distance: its faces keep
+/// their original order, object by object and face by face, and rely on the depth
+/// they write (`LLVolumeGeometryManager::genDrawInfo`, "rigged items use depth
+/// buffer"). The layers of a hairstyle are authored against that order.
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct RiggedDrawOrder {
+    /// The region-local id of the object the face belongs to.
+    pub object: u32,
+    /// The face's index within that object.
+    pub face: u16,
+}
+
 /// The top of the pixel-area priority range: [`Priority::from_pixel_area`]
 /// saturates here (`FULL_RESOLUTION_PIXEL_AREA` = `2048 * 2048`). Boost
 /// priorities sit *strictly above* this, so a boosted asset always outranks even

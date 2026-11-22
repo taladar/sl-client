@@ -166,8 +166,9 @@ impl LegacyMaterialManager {
 
     /// Register a face material handle against its legacy material id: park the
     /// handle until the material arrives and queue the id for fetch if it is not
-    /// already known / requested.
-    fn register(&mut self, handle: Handle<FaceMaterial>, material_id: Uuid) {
+    /// already known / requested. Public for the rigged bind, whose faces are
+    /// not prim faces and so never reach [`register_legacy_materials`].
+    pub fn register(&mut self, handle: Handle<FaceMaterial>, material_id: Uuid) {
         self.pending_faces
             .entry(material_id)
             .or_default()

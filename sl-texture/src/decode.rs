@@ -52,6 +52,10 @@ pub struct DecodedImage {
     /// [`Self::min_alpha`]): `max_alpha < cutoff` ⇔ "every texel below
     /// cutoff". `0` for an empty image — test [`Self::min_alpha`] first.
     pub max_alpha: u8,
+    /// Whether the alpha channel is a one-bit mask rather than real
+    /// translucency ([`alpha_is_mask`]), computed with the alpha range, off
+    /// the frame thread. A fully opaque image counts as a mask.
+    pub is_alpha_mask: bool,
     /// Every mip level below [`Self::pixels`], when it was built where the
     /// pixels were made ([`Self::with_mips`]) — the store's decode and
     /// downsample tasks, off the frame thread — so an upload need not build it
@@ -75,6 +79,78 @@ pub fn alpha_range(pixels: &[u8]) -> (u8, u8) {
     (min, max)
 }
 
+/// How many buckets [`alpha_is_mask`] quantizes an alpha byte into.
+const ALPHA_BUCKETS: usize = 16;
+
+/// Add `weight` samples of `alpha` to its bucket of `histogram`.
+fn count_alpha(histogram: &mut [u64; ALPHA_BUCKETS], alpha: u32, weight: u64) {
+    let bucket = usize::try_from(alpha / 16).unwrap_or(ALPHA_BUCKETS);
+    if let Some(slot) = histogram.get_mut(bucket) {
+        *slot = slot.saturating_add(weight);
+    }
+}
+
+/// Whether an RGBA8 image's alpha channel is a **one-bit mask** rather than real
+/// translucency: the reference viewer's `LLImageGL::analyzeAlphaData`, which
+/// decides whether a face may be alpha-tested or must alpha-blend.
+///
+/// A histogram of the alpha values, with a 2x2 box-filtered copy added in so that
+/// high-frequency alpha, which aliases worst when tested, counts as mid-range. It
+/// is not a mask if more than 1/48 of the samples are mid-range, or if all of them
+/// sit in one half of the range without being at that half's absolute extreme: a
+/// uniformly 60% pane is glass, however few distinct values it holds.
+#[must_use]
+pub fn alpha_is_mask(pixels: &[u8], width: u32, height: u32) -> bool {
+    // Nearly every texture is solid, and a solid one needs no histogram.
+    if alpha_range(pixels).0 == u8::MAX {
+        return true;
+    }
+    let columns = usize::try_from(width).unwrap_or(0);
+    let rows = usize::try_from(height).unwrap_or(0);
+    let alpha = |x: usize, y: usize| -> u32 {
+        let texel = y.saturating_mul(columns).saturating_add(x);
+        let at = texel.saturating_mul(RGBA_CHANNELS).saturating_add(3);
+        pixels.get(at).copied().map_or(0, u32::from)
+    };
+    let mut histogram = [0_u64; ALPHA_BUCKETS];
+    let mut total = 0_u64;
+    let mut length = 0_u64;
+    if columns >= 2 && rows >= 2 {
+        for y in (0..rows.saturating_sub(1)).step_by(2) {
+            for x in (0..columns.saturating_sub(1)).step_by(2) {
+                let block = [
+                    alpha(x, y),
+                    alpha(x, y.saturating_add(1)),
+                    alpha(x.saturating_add(1), y),
+                    alpha(x.saturating_add(1), y.saturating_add(1)),
+                ];
+                let sum = block.iter().sum::<u32>();
+                for sample in block {
+                    count_alpha(&mut histogram, sample, 1);
+                }
+                count_alpha(&mut histogram, sum / 4, 4);
+                total = total.saturating_add(u64::from(sum).saturating_mul(2));
+                length = length.saturating_add(8);
+            }
+        }
+    } else {
+        for y in 0..rows {
+            for x in 0..columns {
+                let sample = alpha(x, y);
+                count_alpha(&mut histogram, sample, 1);
+                total = total.saturating_add(u64::from(sample));
+                length = length.saturating_add(1);
+            }
+        }
+    }
+    let sum_of = |buckets: core::ops::Range<usize>| -> u64 {
+        histogram.get(buckets).map_or(0, |slice| slice.iter().sum())
+    };
+    let clumped_low = sum_of(0..8) == length && total != 0;
+    let clumped_high = sum_of(8..ALPHA_BUCKETS) == length && total != length.saturating_mul(255);
+    sum_of(2..13) <= length / 48 && !clumped_low && !clumped_high
+}
+
 impl DecodedImage {
     /// Build a decoded image, computing [`Self::min_alpha`] /
     /// [`Self::max_alpha`] from `pixels` (see [`alpha_range`]). Prefer this
@@ -90,6 +166,7 @@ impl DecodedImage {
         aux: Option<Bytes>,
     ) -> Self {
         let (min_alpha, max_alpha) = alpha_range(&pixels);
+        let is_alpha_mask = alpha_is_mask(&pixels, width, height);
         Self {
             width,
             height,
@@ -99,6 +176,7 @@ impl DecodedImage {
             aux,
             min_alpha,
             max_alpha,
+            is_alpha_mask,
             mips: None,
         }
     }
@@ -221,6 +299,7 @@ pub fn decode_j2c(
         return Err(DecodeError::Empty);
     }
     let (min_alpha, max_alpha) = alpha_range(&pixels);
+    let is_alpha_mask = alpha_is_mask(&pixels, data.width, data.height);
     Ok(DecodedImage {
         width: data.width,
         height: data.height,
@@ -230,6 +309,7 @@ pub fn decode_j2c(
         aux: None,
         min_alpha,
         max_alpha,
+        is_alpha_mask,
         mips: None,
     }
     .with_mips())
@@ -295,6 +375,7 @@ fn decode_multicomponent(
         (mask.len() >= pixel_count).then(|| Bytes::from(mask))
     };
     let (min_alpha, max_alpha) = alpha_range(&pixels);
+    let is_alpha_mask = alpha_is_mask(&pixels, width, height);
     Ok(DecodedImage {
         width,
         height,
@@ -304,6 +385,7 @@ fn decode_multicomponent(
         aux,
         min_alpha,
         max_alpha,
+        is_alpha_mask,
         mips: None,
     }
     .with_mips())
@@ -430,6 +512,7 @@ pub fn downsample(image: &DecodedImage, target: DiscardLevel) -> DecodedImage {
         level = level.coarser();
     }
     let (min_alpha, max_alpha) = alpha_range(&pixels);
+    let is_alpha_mask = alpha_is_mask(&pixels, width, height);
     DecodedImage {
         width,
         height,
@@ -439,6 +522,7 @@ pub fn downsample(image: &DecodedImage, target: DiscardLevel) -> DecodedImage {
         aux: aux.map(Bytes::from),
         min_alpha,
         max_alpha,
+        is_alpha_mask,
         mips: None,
     }
     .with_mips()
@@ -496,6 +580,40 @@ fn halve_channels(pixels: &[u8], width: u32, height: u32, channels: usize) -> (V
 
 #[cfg(test)]
 mod tests {
+    /// An 8x8 image whose alpha at each texel is `alpha(x, y)`.
+    fn alpha_image(alpha: impl Fn(u32, u32) -> u8) -> Vec<u8> {
+        let mut pixels = Vec::new();
+        for y in 0..8 {
+            for x in 0..8 {
+                pixels.extend_from_slice(&[255, 255, 255, alpha(x, y)]);
+            }
+        }
+        pixels
+    }
+
+    /// The reference's rule: a two-valued alpha with clean edges is a mask, and
+    /// uniform or graded partial alpha is translucency.
+    #[test]
+    fn only_a_two_valued_alpha_is_a_mask() {
+        let is_mask = |pixels: Vec<u8>| super::alpha_is_mask(&pixels, 8, 8);
+        assert!(is_mask(alpha_image(|_x, _y| 255)), "solid");
+        assert!(is_mask(alpha_image(|_x, _y| 0)), "fully cut");
+        assert!(
+            is_mask(alpha_image(|x, _y| if x < 4 { 0 } else { 255 })),
+            "a cut-out with a clean edge on a block boundary"
+        );
+        assert!(!is_mask(alpha_image(|_x, _y| 150)), "a uniform glass pane");
+        assert!(
+            !is_mask(alpha_image(|_x, _y| 240)),
+            "clumped high, not solid"
+        );
+        assert!(!is_mask(alpha_image(|_x, _y| 10)), "clumped low, not cut");
+        assert!(
+            !is_mask(alpha_image(|x, y| u8::try_from((x + y) * 18).unwrap_or(0))),
+            "a gradient"
+        );
+    }
+
     use super::{DecodedImage, downsample, halve_rgba8};
     use bytes::Bytes;
     use pretty_assertions::assert_eq;

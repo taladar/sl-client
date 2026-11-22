@@ -380,6 +380,7 @@ impl Default for SlFaceParams {
 #[derive(Asset, TypePath, AsBindGroup, Clone, Debug)]
 #[data(50, SlFaceParams, binding_array(101))]
 #[bindless(index_table(range(50..61), binding(100)))]
+#[bind_group_data(SlFaceKey)]
 pub struct SlFaceExt {
     /// The per-map transforms and legacy specular scalars (packed into the bindless
     /// data array at slot 50 via [`From<&SlFaceExt>`](SlFaceParams)).
@@ -415,6 +416,30 @@ pub struct SlFaceExt {
     #[texture(59)]
     #[sampler(60)]
     pub sky_lighting: Handle<Image>,
+    /// Whether a blended draw of this face writes depth, which the reference does
+    /// for **rigged** alpha (`LLDrawPoolAlpha::forwardRender`). A rigged mesh is one
+    /// draw whose triangles overlap, as the layers of a hairstyle do, and nothing
+    /// sorts them: without depth a layer further back paints over a nearer one
+    /// wherever the index order has it later, which breaks the surface up into
+    /// individual triangles.
+    pub write_depth: bool,
+}
+
+/// The pipeline permutation an [`SlFaceExt`] selects.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct SlFaceKey {
+    /// [`SlFaceExt::write_depth`].
+    write_depth: bool,
+}
+
+impl From<&SlFaceExt> for SlFaceKey {
+    /// The permutation of `extension`.
+    fn from(extension: &SlFaceExt) -> Self {
+        Self {
+            write_depth: extension.write_depth,
+        }
+    }
 }
 
 impl From<&SlFaceExt> for SlFaceParams {
@@ -437,6 +462,7 @@ impl SlFaceExt {
             metallic_roughness_map: Handle::default(),
             emissive_map: Handle::default(),
             sky_lighting: SKY_LIGHTING_IMAGE,
+            write_depth: false,
         }
     }
 }
@@ -463,13 +489,25 @@ impl MaterialExtension for SlFaceExt {
     /// **opaque / mask** face's pipeline has no colour blend, so this is a no-op there
     /// and its `out.color.a = glow` mask write (in `face_material.wesl`) still reaches
     /// the glow buffer.
+    ///
+    /// A face with [`write_depth`](SlFaceExt::write_depth) also keeps depth writes
+    /// on in its blended pipeline, and the shader then discards what is all but
+    /// invisible so that it cannot hide what stands behind it.
     fn specialize(
         _pipeline: &MaterialExtensionPipeline,
         descriptor: &mut RenderPipelineDescriptor,
         _layout: &MeshVertexBufferLayoutRef,
-        _key: MaterialExtensionKey<Self>,
+        key: MaterialExtensionKey<Self>,
     ) -> Result<(), SpecializedMeshPipelineError> {
         sl_client_bevy::preserve_glow_mask_alpha(descriptor);
+        if key.bind_group_data.write_depth {
+            if let Some(depth) = descriptor.depth_stencil.as_mut() {
+                depth.depth_write_enabled = Some(true);
+            }
+            if let Some(fragment) = descriptor.fragment.as_mut() {
+                fragment.shader_defs.push("SL_WRITE_DEPTH".into());
+            }
+        }
         Ok(())
     }
 }

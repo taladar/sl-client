@@ -98,7 +98,8 @@ use bevy::render::view::{ExtractedView, RetainedViewEntity, ViewDepthStencilText
 use bevy::render::{Extract, Render, RenderApp, RenderSystems};
 
 use crate::water::{DEFAULT_WATER_HEIGHT, WaterLevel};
-use crate::water_clip::WaterClipSide;
+use crate::water_clip::{WaterClipSide, WaterClipTwin};
+use sl_viewer_world_api::RiggedDrawOrder;
 use sl_viewer_world_objects::name_tag_billboard::WorldTextOverlay;
 
 /// The system set the pre-water translucency pass runs in, so the water haze
@@ -244,6 +245,44 @@ fn extract_world_text_overlays(
     overlays.0.extend(markers.iter().map(MainEntity::from));
 }
 
+/// The [`RiggedDrawOrder`] of every rigged face and of its water-clip twin, keyed
+/// by main-world entity for the same reason [`SkyBackdrops`] is.
+#[derive(Resource, Default, Debug)]
+pub(crate) struct RiggedDrawOrders(MainEntityHashMap<RiggedDrawOrder>);
+
+/// Mirror the main world's [`RiggedDrawOrder`]s into the render world. A twin
+/// draws the other half of its face, so it takes that face's place in the order.
+fn extract_rigged_draw_orders(
+    mut orders: ResMut<RiggedDrawOrders>,
+    faces: Extract<Query<(Entity, &RiggedDrawOrder)>>,
+    twins: Extract<Query<(Entity, &ChildOf), With<WaterClipTwin>>>,
+) {
+    orders.0.clear();
+    orders.0.extend(
+        faces
+            .iter()
+            .map(|(entity, order)| (MainEntity::from(entity), *order)),
+    );
+    for (twin, child_of) in &twins {
+        if let Ok((_face, order)) = faces.get(child_of.parent()) {
+            let _previous = orders.0.insert(MainEntity::from(twin), *order);
+        }
+    }
+}
+
+/// The order of two items within one bucket: rigged alpha first and in its
+/// [`RiggedDrawOrder`], then everything else back to front, as the reference's
+/// `LLDrawPoolAlpha::render` draws its rigged pass before its regular one.
+const fn within_bucket_order(
+    rigged: Option<RiggedDrawOrder>,
+    distance: f32,
+) -> (bool, Option<RiggedDrawOrder>, FloatOrd) {
+    match rigged {
+        Some(_) => (false, rigged, FloatOrd(0.0)),
+        None => (true, None, FloatOrd(distance)),
+    }
+}
+
 /// Where each view's sorted [`Transparent3d`] phase divides into the two prefixes
 /// the viewer draws in passes of its own: the items on the far side of the water
 /// surface from that view's eye (the reference's `POOL_ALPHA_PRE_WATER`), and the
@@ -291,6 +330,8 @@ struct SplitSources<'w> {
     overlays: Res<'w, WorldTextOverlays>,
     /// The water clip sides each view is on.
     clips: Res<'w, crate::water_clip::WaterClipSides>,
+    /// The rigged faces' place in the rigged alpha pass.
+    rigged: Res<'w, RiggedDrawOrders>,
 }
 
 /// Re-sort each view's [`Transparent3d`] phase by `(bucket, backdrop order,
@@ -323,6 +364,7 @@ fn sort_transparent_by_water(
         backdrops,
         overlays,
         clips,
+        rigged,
     } = sources;
     let level = water_level.map_or(DEFAULT_WATER_HEIGHT, |water_level| water_level.0);
     // Each view's eye height, to resolve its side of the surface below.
@@ -364,7 +406,8 @@ fn sort_transparent_by_water(
                 overlays.0.contains(&item.entity.1),
                 clips.get(item.entity.1),
             );
-            (bucket, order, FloatOrd(item.distance))
+            let within = within_bucket_order(rigged.0.get(&item.entity.1).copied(), item.distance);
+            (bucket, order, within)
         });
         if overrides.pre_water_pass_disabled {
             // The A/B knob: leave the whole phase to Bevy's transparent pass, so a
@@ -742,6 +785,7 @@ impl Plugin for TransparencyOrderPlugin {
             .init_resource::<PreWaterSplit>()
             .init_resource::<SkyBackdrops>()
             .init_resource::<WorldTextOverlays>()
+            .init_resource::<RiggedDrawOrders>()
             // The straddling-face split's mirror is read by the sort below, and
             // `init_resource` is idempotent — so the sort works whether or not
             // `crate::water_clip::WaterClipPlugin` is also added, and simply sees no
@@ -749,7 +793,11 @@ impl Plugin for TransparencyOrderPlugin {
             .init_resource::<crate::water_clip::WaterClipSides>()
             .add_systems(
                 ExtractSchedule,
-                (extract_sky_backdrops, extract_world_text_overlays),
+                (
+                    extract_sky_backdrops,
+                    extract_world_text_overlays,
+                    extract_rigged_draw_orders,
+                ),
             )
             .add_systems(
                 Render,

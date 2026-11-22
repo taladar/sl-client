@@ -313,7 +313,10 @@ impl MeshManager {
             // here without failing the geometry fetch.
             let skin = match store.get_skin(id).await {
                 Ok(entry) => entry.skin(),
-                Err(_error) => None,
+                Err(error) => {
+                    warn!("mesh {id} skin fetch/decode failed, so it draws unrigged: {error}");
+                    None
+                }
             };
             Some((geometry, skin, header))
         });

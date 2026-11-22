@@ -46,4 +46,6 @@
 pub use sl_media::*;
 
 pub mod chromium;
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+pub mod mallinfo;
 pub mod vk;
