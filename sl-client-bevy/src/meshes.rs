@@ -113,7 +113,26 @@ pub fn to_bevy_rigged_mesh(submesh: &Submesh, skin: &MeshSkin) -> Mesh {
     {
         warn!("rigged mesh tangents could not be generated: {error}");
     }
+    if let Some(indices) = reference_triangle_order(&submesh.indices, vertex_count) {
+        mesh.insert_indices(Indices::U32(indices));
+    }
     mesh
+}
+
+/// `indices` in the triangle order the reference draws them in: it optimizes every
+/// mesh face for the vertex cache when it loads it, after generating tangents
+/// (`LLVolumeFace::cacheOptimize`). This is more than a speed-up here. Rigged alpha
+/// writes depth, so the order decides which layer of a hair mesh hides which, and
+/// content is authored against what the reference shows.
+///
+/// `None`, leaving the mesh as it came, for indices the optimizer cannot take: not
+/// whole triangles, or naming a vertex that does not exist.
+fn reference_triangle_order(indices: &[u32], vertex_count: usize) -> Option<Vec<u32>> {
+    let in_range = indices
+        .iter()
+        .all(|&index| usize::try_from(index).is_ok_and(|index| index < vertex_count));
+    (!indices.is_empty() && indices.len().is_multiple_of(3) && in_range)
+        .then(|| meshopt::optimize_vertex_cache(indices, vertex_count))
 }
 
 /// Pack one vertex's [`VertexWeights`] into the four `(joint index, weight)` slots
@@ -355,7 +374,10 @@ impl AssetFetcher<MeshKey> for BevyMeshFetcher {
 
 #[cfg(test)]
 mod tests {
-    use super::{rigged_inverse_bindposes, to_bevy_mesh, to_bevy_meshes, to_bevy_rigged_mesh};
+    use super::{
+        reference_triangle_order, rigged_inverse_bindposes, to_bevy_mesh, to_bevy_meshes,
+        to_bevy_rigged_mesh,
+    };
     use bevy::math::Vec3;
     use bevy::mesh::{Mesh, VertexAttributeValues};
     use pretty_assertions::assert_eq;
@@ -364,6 +386,42 @@ mod tests {
 
     /// A boxed error so tests can use `?` instead of disallowed `unwrap`/`expect`.
     type TestError = Box<dyn core::error::Error>;
+
+    /// The reference's order draws the same triangles, only in another sequence.
+    #[test]
+    fn reordering_keeps_every_triangle() {
+        let indices: Vec<u32> = vec![0, 1, 2, 5, 6, 7, 2, 1, 3, 3, 1, 4, 7, 6, 8];
+        let reordered = reference_triangle_order(&indices, 9).unwrap_or_default();
+        let canonical = |list: &[u32]| {
+            let mut triangles: Vec<[u32; 3]> = list
+                .as_chunks::<3>()
+                .0
+                .iter()
+                .copied()
+                .map(|mut triangle| {
+                    // The winding is kept, so compare from the smallest vertex.
+                    let first = triangle
+                        .iter()
+                        .enumerate()
+                        .min_by_key(|(_slot, vertex)| **vertex)
+                        .map_or(0, |(slot, _vertex)| slot);
+                    triangle.rotate_left(first);
+                    triangle
+                })
+                .collect();
+            triangles.sort_unstable();
+            triangles
+        };
+        assert_eq!(canonical(&reordered), canonical(&indices));
+    }
+
+    /// Indices the optimizer cannot take leave the mesh as it came.
+    #[test]
+    fn malformed_indices_are_not_reordered() {
+        assert_eq!(reference_triangle_order(&[0, 1, 9], 3), None);
+        assert_eq!(reference_triangle_order(&[0, 1], 3), None);
+        assert_eq!(reference_triangle_order(&[], 3), None);
+    }
 
     /// A single-triangle submesh with positions, normals, UVs, and indices.
     fn triangle() -> Submesh {

@@ -37,6 +37,8 @@ bevy = { version = "0.20.1", default-features = false, features = [
 ] }
 bytes = { workspace = true }
 crossbeam-channel = { workspace = true }
+# The reference's triangle order for rigged meshes (`LLVolumeFace::cacheOptimize`).
+meshopt = { version = "0.7.0" }
 reqwest = { workspace = true, features = [
   "blocking",
   "rustls",

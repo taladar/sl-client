@@ -25,6 +25,7 @@ use sl_client_bevy::{
 };
 
 use crate::replay_bundle::ReplayManifest;
+use crate::scene_capture::SceneReplay;
 
 /// Avatar-state replay (viewer-avatar-state-dump-replay): inject a captured
 /// bundle's events once and drive the optional test rig (orbit light /
@@ -67,6 +68,11 @@ pub struct ReplayConfig {
     /// Set once the events have been injected, so [`inject_replay_bundle`] fires
     /// exactly one time.
     injected: bool,
+    /// A whole-region recording, delivered instead of the manifests; taken when
+    /// it is injected.
+    scene: Option<SceneReplay>,
+    /// Where the recording's first avatar stands, for framing the camera.
+    scene_focus: Option<Vec3>,
 }
 
 impl ReplayConfig {
@@ -84,6 +90,18 @@ impl ReplayConfig {
             orbit_light,
             reflection_probe,
             injected: false,
+            scene: None,
+            scene_focus: None,
+        }
+    }
+
+    /// Build the config for a whole-region recording.
+    #[must_use]
+    pub fn from_scene(scene: SceneReplay, orbit_light: bool, reflection_probe: bool) -> Self {
+        Self {
+            scene_focus: scene.focus,
+            scene: Some(scene),
+            ..Self::new(Vec::new(), orbit_light, reflection_probe)
         }
     }
 
@@ -91,6 +109,9 @@ impl ReplayConfig {
     /// metres), for framing the camera before the world exists. `None` when no
     /// avatar object was captured.
     pub fn primary_position(&self) -> Option<Vec3> {
+        if self.scene_focus.is_some() {
+            return self.scene_focus;
+        }
         let object = self
             .manifests
             .iter()
@@ -169,6 +190,25 @@ pub(crate) fn inject_replay_bundle(
     {
         identity.region_handle = Some(object.region_handle);
         identity.circuit_id = Some(object.circuit);
+    }
+
+    // A whole-region recording brings its own region and events.
+    if let Some(scene) = config.scene.take() {
+        identity.region_handle = scene.region_handle;
+        identity.circuit_id = scene.circuit;
+        // What marks the region as current, without which the scene never
+        // counts as settled. No packet is ever sent to this address.
+        if let Some(circuit) = scene.circuit {
+            events.write(SlEvent(SlSessionEvent::CircuitEstablished {
+                sim: std::net::SocketAddr::from(([127, 0, 0, 1], 0)),
+                circuit,
+            }));
+        }
+        let count = scene.events.len();
+        for event in scene.events {
+            events.write(SlEvent(event.into_session_event()));
+        }
+        info!("scene replay: delivered {count} event(s)");
     }
 
     // Re-emit the captured events verbatim: the avatar objects + their attachment

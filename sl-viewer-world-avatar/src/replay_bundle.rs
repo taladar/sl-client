@@ -29,12 +29,14 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::time::{Duration, Instant};
 
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use sl_client_bevy::{
-    AssetBytes, AssetCacheLimits, AssetDiskCache, AssetType, AvatarAppearance, MAX_FACES,
+    AssetBytes, AssetCacheLimits, AssetDiskCache, AssetType, AvatarAppearance, CAP_GET_MESH,
+    CAP_GET_MESH2, CAP_GET_TEXTURE, CAP_RENDER_MATERIALS, CAP_VIEWER_ASSET, MAX_FACES,
     MeshCacheLimits, MeshDiskCache, Object, PlayingAnimation, RenderMaterialEntry, SculptOrMeshKey,
     Uuid, avatar_texture, decode_texture_entry, parse_material_asset, pcode,
 };
@@ -63,8 +65,23 @@ pub(crate) const MATERIAL_CACHE: &str = "materialcache";
 /// The most legacy material ids one capture request carries: the limit Second
 /// Life and stock OpenSim both advertise as `MaxMaterialsPerTransaction`.
 const MATERIALS_PER_FETCH: usize = 50;
-/// How many times a capture asks for an asset its service answers `503` for.
-const FETCH_ATTEMPTS: u8 = 6;
+/// How many times a [`RetryPolicy::Brief`] capture asks again after a failure.
+const BRIEF_RETRIES: u8 = 5;
+/// The pause between a [`RetryPolicy::Brief`] capture's attempts, in milliseconds.
+const BRIEF_DELAY_MS: u64 = 300;
+/// The pauses of a [`RetryPolicy::Patient`] capture, in milliseconds: about a
+/// minute in all, which outlasts a service that is only busy.
+const PATIENT_DELAYS_MS: [u64; 7] = [500, 1_000, 2_000, 4_000, 8_000, 16_000, 30_000];
+/// The longest a service's own `Retry-After` is honoured for.
+const MAX_RETRY_AFTER: Duration = Duration::from_secs(60);
+/// How often a retry's pause looks for a cancellation.
+const CANCEL_POLL: Duration = Duration::from_millis(50);
+/// The error of a download given up because the capture was cancelled. Those
+/// assets are reported as missing like any other, without a warning each.
+const CANCELLED: &str = "cancelled";
+/// How many downloads a capture runs at once. A whole region references
+/// thousands of assets, which one connection would take hours over.
+const FETCH_WORKERS: usize = 8;
 
 /// One captured avatar's full render inputs, serialised as `<agent>.json`.
 ///
@@ -148,7 +165,7 @@ pub(crate) fn referenced_assets(manifest: &ReplayManifest) -> ReferencedAssets {
 }
 
 /// Fold one object's referenced asset ids into `assets`.
-fn collect_object_assets(object: &Object, assets: &mut ReferencedAssets) {
+pub(crate) fn collect_object_assets(object: &Object, assets: &mut ReferencedAssets) {
     // The object's sculpt/mesh: a mesh id lands in the mesh cache, a sculpt map
     // in the texture cache.
     if let Some(sculpt) = &object.extra.sculpt {
@@ -176,8 +193,9 @@ fn collect_object_assets(object: &Object, assets: &mut ReferencedAssets) {
 }
 
 /// Insert `id` into `set` unless it is the nil UUID (no asset).
-fn insert_non_nil(set: &mut BTreeSet<Uuid>, id: Uuid) {
-    if !id.is_nil() {
+pub(crate) fn insert_non_nil(set: &mut BTreeSet<Uuid>, id: Uuid) {
+    // The all-ones id is a sentinel too (`GLTF_OVERRIDE_NULL_UUID`), never an asset.
+    if !id.is_nil() && !id.is_max() {
         let _inserted = set.insert(id);
     }
 }
@@ -212,6 +230,19 @@ pub(crate) fn copy_cache_assets(
     now_unix: u32,
 ) -> (BundleCounts, BTreeSet<Uuid>) {
     let mut assets = referenced_assets(manifest);
+    let counts = copy_referenced(live, bundle_dir, &mut assets, now_unix);
+    (counts, assets.textures)
+}
+
+/// Copy the meshes, animations and PBR materials of `assets` from the live caches
+/// into the bundle, adding the texture maps those materials name to
+/// `assets.textures`.
+pub(crate) fn copy_referenced(
+    live: Option<&ViewerPaths>,
+    bundle_dir: &Path,
+    assets: &mut ReferencedAssets,
+    now_unix: u32,
+) -> BundleCounts {
     // Copy the PBR material assets, expanding each into the texture maps it
     // references so they join the texture fetch set.
     let materials = copy_materials(
@@ -221,12 +252,11 @@ pub(crate) fn copy_cache_assets(
         &mut assets.textures,
         now_unix,
     );
-    let counts = BundleCounts {
+    BundleCounts {
         meshes: copy_meshes(live, bundle_dir, &assets.meshes, now_unix),
         anims: copy_anims(live, bundle_dir, &assets.anims, now_unix),
         materials,
-    };
-    (counts, assets.textures)
+    }
 }
 
 /// Build the (texture id → full-resolution source URL) fetch list for a
@@ -240,9 +270,25 @@ pub(crate) fn texture_fetch_urls(
     get_texture_cap: Option<&str>,
     appearance_service: Option<&str>,
 ) -> Vec<(Uuid, String)> {
-    // The baked-body ids and the URL that serves each, from the appearance's
-    // per-slot texture entry.
-    let mut bake_urls: HashMap<Uuid, String> = HashMap::new();
+    let bake_urls = bake_fetch_urls(manifest, appearance_service);
+    let mut plan = Vec::new();
+    for &id in textures {
+        if let Some(url) = bake_urls.get(&id) {
+            plan.push((id, url.clone()));
+        } else if let Some(cap) = get_texture_cap {
+            plan.push((id, format!("{cap}/?texture_id={id}")));
+        }
+    }
+    plan
+}
+
+/// The baked-body texture ids of `manifest`'s appearance and the appearance-service
+/// URL that serves each.
+pub(crate) fn bake_fetch_urls(
+    manifest: &ReplayManifest,
+    appearance_service: Option<&str>,
+) -> HashMap<Uuid, String> {
+    let mut bake_urls = HashMap::new();
     if let (Some(service), Some(appearance)) = (appearance_service, manifest.appearance.as_ref()) {
         for slot in 0..MAX_FACES {
             let Some(name) = bake_service_slot_name(slot) else {
@@ -260,15 +306,59 @@ pub(crate) fn texture_fetch_urls(
             }
         }
     }
-    let mut plan = Vec::new();
-    for &id in textures {
-        if let Some(url) = bake_urls.get(&id) {
-            plan.push((id, url.clone()));
-        } else if let Some(cap) = get_texture_cap {
-            plan.push((id, format!("{cap}/?texture_id={id}")));
+    bake_urls
+}
+
+/// How hard a capture tries to get an asset from a struggling service.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum RetryPolicy {
+    /// A few quick attempts, for a capture that holds up the frame.
+    Brief,
+    /// Exponential backoff, for one running in the background.
+    Patient,
+}
+
+impl RetryPolicy {
+    /// The pause before retry number `attempt` (from `0`), or `None` when the
+    /// policy has given up.
+    fn delay(self, attempt: u8) -> Option<Duration> {
+        match self {
+            Self::Brief => (attempt < BRIEF_RETRIES).then(|| Duration::from_millis(BRIEF_DELAY_MS)),
+            Self::Patient => PATIENT_DELAYS_MS
+                .get(usize::from(attempt))
+                .map(|delay| Duration::from_millis(*delay)),
         }
     }
-    plan
+}
+
+/// Whether an HTTP status says the service may answer differently later.
+const fn is_transient(status: u16) -> bool {
+    matches!(status, 429 | 500 | 502 | 503 | 504)
+}
+
+/// An HTTP client and how persistently it retries.
+struct Downloader<'cancel> {
+    /// The client.
+    client: reqwest::blocking::Client,
+    /// The retry policy.
+    retry: RetryPolicy,
+    /// Set to give up on everything not yet downloaded.
+    cancel: &'cancel AtomicBool,
+}
+
+impl Downloader<'_> {
+    /// Whether the capture has been cancelled.
+    fn is_cancelled(&self) -> bool {
+        self.cancel.load(Ordering::Relaxed)
+    }
+
+    /// Wait for `delay`, or until the capture is cancelled.
+    fn pause(&self, delay: Duration) {
+        let started = Instant::now();
+        while started.elapsed() < delay && !self.is_cancelled() {
+            std::thread::sleep(CANCEL_POLL.min(delay.saturating_sub(started.elapsed())));
+        }
+    }
 }
 
 /// The capability URLs a capture fetches from.
@@ -282,6 +372,24 @@ pub(crate) struct CaptureCaps {
     pub(crate) viewer_asset: Option<String>,
     /// `RenderMaterials`, which serves legacy materials.
     pub(crate) render_materials: Option<String>,
+}
+
+impl CaptureCaps {
+    /// Take the URLs a capture uses from a region's capability map.
+    pub(crate) fn update(&mut self, map: &HashMap<String, String>) {
+        if let Some(url) = map.get(CAP_GET_TEXTURE) {
+            self.texture = Some(url.clone());
+        }
+        if let Some(url) = map.get(CAP_GET_MESH2).or_else(|| map.get(CAP_GET_MESH)) {
+            self.mesh = Some(url.clone());
+        }
+        if let Some(url) = map.get(CAP_VIEWER_ASSET) {
+            self.viewer_asset = Some(url.clone());
+        }
+        if let Some(url) = map.get(CAP_RENDER_MATERIALS) {
+            self.render_materials = Some(url.clone());
+        }
+    }
 }
 
 /// What a capture still has to download, over every avatar in the bundle.
@@ -414,12 +522,18 @@ pub(crate) fn run_bundle_fetch(
     mut plan: FetchPlan,
     caps: &CaptureCaps,
     now_unix: u32,
+    retry: RetryPolicy,
+    cancel: &AtomicBool,
 ) -> BundleGaps {
     let client = match sl_client_bevy::http_proxy::blocking_client_builder()
         .timeout(Duration::from_secs(30))
         .build()
     {
-        Ok(client) => client,
+        Ok(client) => Downloader {
+            client,
+            retry,
+            cancel,
+        },
         Err(error) => {
             tracing::warn!("avatar dump: no HTTP client: {error}");
             return BundleGaps {
@@ -476,14 +590,17 @@ pub(crate) fn run_bundle_fetch(
 /// Fetch each texture's complete codestream into the bundle, returning the ids
 /// that failed.
 fn fetch_textures(
-    client: &reqwest::blocking::Client,
+    client: &Downloader<'_>,
     bundle_dir: &Path,
     plan: &BTreeMap<Uuid, String>,
     now_unix: u32,
 ) -> BTreeSet<Uuid> {
     let dest = match TextureDiskCache::open(
         bundle_cache_dir(bundle_dir, TEXTURE_CACHE),
-        TextureCacheLimits::default(),
+        TextureCacheLimits {
+            max_entries: usize::MAX,
+            max_bytes: u64::MAX,
+        },
     ) {
         Ok(dest) => dest,
         Err(error) => {
@@ -491,24 +608,58 @@ fn fetch_textures(
             return plan.keys().copied().collect();
         }
     };
-    let mut failed = BTreeSet::new();
-    for (id, url) in plan {
+    let items: Vec<(&Uuid, &String)> = plan.iter().collect();
+    fetch_concurrently(&items, |(id, url)| {
         let stored = fetch_whole(client, url, "image/x-j2c").and_then(|bytes| {
-            dest.write(*id, &bytes, now_unix)
+            dest.write(**id, &bytes, now_unix)
                 .map_err(|error| error.to_string())
         });
-        if let Err(error) = stored {
-            tracing::warn!("avatar dump: texture {id}: {error}");
-            let _inserted = failed.insert(*id);
-        }
-    }
-    failed
+        stored.err().map(|error| {
+            if error != CANCELLED {
+                tracing::warn!("avatar dump: texture {id}: {error}");
+            }
+            **id
+        })
+    })
+    .into_iter()
+    .collect()
+}
+
+/// Run `fetch` over `items` on [`FETCH_WORKERS`] threads and collect what it
+/// returns. A panic in a worker propagates to the caller, which then reports the
+/// whole fetch as failed rather than silently losing an item.
+fn fetch_concurrently<T: Sync, R: Send>(
+    items: &[T],
+    fetch: impl Fn(&T) -> Option<R> + Sync,
+) -> Vec<R> {
+    let next = AtomicUsize::new(0);
+    std::thread::scope(|scope| {
+        let workers: Vec<_> = std::iter::repeat_with(|| {
+            scope.spawn(|| {
+                let mut results = Vec::new();
+                while let Some(item) = items.get(next.fetch_add(1, Ordering::Relaxed)) {
+                    results.extend(fetch(item));
+                }
+                results
+            })
+        })
+        .take(FETCH_WORKERS)
+        .collect();
+        workers
+            .into_iter()
+            .flat_map(|worker| {
+                worker
+                    .join()
+                    .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
+            })
+            .collect()
+    })
 }
 
 /// Fetch each mesh whole into the bundle, replacing any partial cached copy, and
 /// return the ids that failed.
 fn fetch_meshes(
-    client: &reqwest::blocking::Client,
+    client: &Downloader<'_>,
     bundle_dir: &Path,
     ids: &BTreeSet<Uuid>,
     cap: Option<&str>,
@@ -523,7 +674,7 @@ fn fetch_meshes(
     };
     let dest = match MeshDiskCache::open(
         bundle_cache_dir(bundle_dir, MESH_CACHE),
-        MeshCacheLimits::default(),
+        unbounded_mesh_limits(),
     ) {
         Ok(dest) => dest,
         Err(error) => {
@@ -531,26 +682,63 @@ fn fetch_meshes(
             return ids.clone();
         }
     };
-    let mut failed = BTreeSet::new();
-    for &id in ids {
+    let items: Vec<Uuid> = ids.iter().copied().collect();
+    fetch_concurrently(&items, |&id| {
         let url = format!("{cap}/?mesh_id={id}");
         let stored = fetch_whole(client, &url, "application/vnd.ll.mesh").and_then(|bytes| {
             let asset = AssetBytes::from_whole(bytes).ok_or("no valid mesh header")?;
             dest.write(id, &asset, now_unix)
                 .map_err(|error| error.to_string())
         });
-        if let Err(error) = stored {
-            tracing::warn!("avatar dump: mesh {id}: {error}");
-            let _inserted = failed.insert(id);
-        }
+        stored.err().map(|error| {
+            if error != CANCELLED {
+                tracing::warn!("avatar dump: mesh {id}: {error}");
+            }
+            id
+        })
+    })
+    .into_iter()
+    .collect()
+}
+
+/// Those of `ids` the bundle's texture cache does not hold. If the cache cannot be
+/// opened, that is all of them.
+pub(crate) fn textures_not_bundled(bundle_dir: &Path, ids: &BTreeSet<Uuid>) -> BTreeSet<Uuid> {
+    let Ok(cache) = TextureDiskCache::open(
+        bundle_cache_dir(bundle_dir, TEXTURE_CACHE),
+        TextureCacheLimits {
+            max_entries: usize::MAX,
+            max_bytes: u64::MAX,
+        },
+    ) else {
+        return ids.clone();
+    };
+    ids.iter()
+        .copied()
+        .filter(|id| cache.read(*id).is_none())
+        .collect()
+}
+
+/// A bundle's mesh cache keeps everything: eviction would lose part of the capture.
+const fn unbounded_mesh_limits() -> MeshCacheLimits {
+    MeshCacheLimits {
+        max_entries: usize::MAX,
+        max_bytes: u64::MAX,
     }
-    failed
+}
+
+/// A bundle's asset caches keep everything, as [`unbounded_mesh_limits`].
+const fn unbounded_asset_limits() -> AssetCacheLimits {
+    AssetCacheLimits {
+        max_entries: usize::MAX,
+        max_bytes: u64::MAX,
+    }
 }
 
 /// Fetch the `ViewerAsset` assets of `ids` the bundle's `kind` cache lacks.
 /// Returns the ids that failed and the bytes of those fetched.
 fn fetch_absent_assets(
-    client: &reqwest::blocking::Client,
+    client: &Downloader<'_>,
     bundle_dir: &Path,
     (kind, asset_type): (&str, AssetType),
     ids: &BTreeSet<Uuid>,
@@ -560,16 +748,14 @@ fn fetch_absent_assets(
     if ids.is_empty() {
         return (BTreeSet::new(), Vec::new());
     }
-    let dest = match AssetDiskCache::open(
-        bundle_cache_dir(bundle_dir, kind),
-        AssetCacheLimits::default(),
-    ) {
-        Ok(dest) => dest,
-        Err(error) => {
-            tracing::warn!("avatar dump: cannot open the bundle's {kind}: {error}");
-            return (ids.clone(), Vec::new());
-        }
-    };
+    let dest =
+        match AssetDiskCache::open(bundle_cache_dir(bundle_dir, kind), unbounded_asset_limits()) {
+            Ok(dest) => dest,
+            Err(error) => {
+                tracing::warn!("avatar dump: cannot open the bundle's {kind}: {error}");
+                return (ids.clone(), Vec::new());
+            }
+        };
     let absent: Vec<Uuid> = ids
         .iter()
         .copied()
@@ -581,19 +767,26 @@ fn fetch_absent_assets(
         }
         return (absent.into_iter().collect(), Vec::new());
     };
-    let mut failed = BTreeSet::new();
-    let mut fresh = Vec::new();
-    for id in absent {
+    let outcomes = fetch_concurrently(&absent, |&id| {
         let url = format!("{cap}/?{key}={id}");
         let stored = fetch_whole(client, &url, "application/octet-stream").and_then(|bytes| {
             dest.write(id, &bytes, now_unix)
                 .map_err(|error| error.to_string())?;
             Ok(bytes)
         });
-        match stored {
-            Ok(bytes) => fresh.push(bytes),
-            Err(error) => {
+        Some(stored.map_err(|error| {
+            if error != CANCELLED {
                 tracing::warn!("avatar dump: {kind} {id}: {error}");
+            }
+            id
+        }))
+    });
+    let mut failed = BTreeSet::new();
+    let mut fresh = Vec::new();
+    for outcome in outcomes {
+        match outcome {
+            Ok(bytes) => fresh.push(bytes),
+            Err(id) => {
                 let _inserted = failed.insert(id);
             }
         }
@@ -601,31 +794,50 @@ fn fetch_absent_assets(
     (failed, fresh)
 }
 
-/// GET the whole asset at `url`, retrying the services' `503 "queued"` a few
-/// times. The error never quotes the URL, which is a capability.
-fn fetch_whole(
-    client: &reqwest::blocking::Client,
-    url: &str,
-    accept: &str,
-) -> Result<Bytes, String> {
-    for _attempt in 0..FETCH_ATTEMPTS {
-        let response = client
-            .get(url)
-            .header("Accept", accept)
-            .send()
-            .map_err(|error| error.without_url().to_string())?;
-        let status = response.status();
-        if status.is_success() {
-            return response
-                .bytes()
-                .map_err(|error| error.without_url().to_string());
+/// GET the whole asset at `url`, retrying a transient failure as `downloader`'s
+/// policy says and honouring a `Retry-After`. The error never quotes the URL,
+/// which is a capability.
+fn fetch_whole(downloader: &Downloader<'_>, url: &str, accept: &str) -> Result<Bytes, String> {
+    let mut attempt = 0_u8;
+    loop {
+        if downloader.is_cancelled() {
+            return Err(CANCELLED.to_owned());
         }
-        if status.as_u16() != 503 {
-            return Err(format!("status {status}"));
-        }
-        std::thread::sleep(Duration::from_millis(300));
+        let (failure, retry_after) =
+            match downloader.client.get(url).header("Accept", accept).send() {
+                Ok(response) if response.status().is_success() => match response.bytes() {
+                    Ok(bytes) => return Ok(bytes),
+                    Err(error) => (error.without_url().to_string(), None),
+                },
+                Ok(response) => {
+                    let status = response.status();
+                    if !is_transient(status.as_u16()) {
+                        return Err(format!("status {status}"));
+                    }
+                    (format!("status {status}"), retry_after(&response))
+                }
+                Err(error) => (error.without_url().to_string(), None),
+            };
+        let Some(delay) = downloader.retry.delay(attempt) else {
+            return Err(format!("{failure}, after {attempt} retries"));
+        };
+        downloader.pause(retry_after.map_or(delay, |asked| asked.max(delay)));
+        attempt = attempt.saturating_add(1);
     }
-    Err("still 503 after every retry".to_owned())
+}
+
+/// The pause a response's `Retry-After` asks for in seconds, within
+/// [`MAX_RETRY_AFTER`]. The HTTP-date form is not used by these services.
+fn retry_after(response: &reqwest::blocking::Response) -> Option<Duration> {
+    let seconds: u64 = response
+        .headers()
+        .get(reqwest::header::RETRY_AFTER)?
+        .to_str()
+        .ok()?
+        .trim()
+        .parse()
+        .ok()?;
+    Some(Duration::from_secs(seconds).min(MAX_RETRY_AFTER))
 }
 
 /// The texture maps a PBR material asset names.
@@ -667,7 +879,7 @@ fn copy_materials(
     };
     let Ok(dest) = AssetDiskCache::open(
         bundle_cache_dir(bundle_dir, MATERIAL_CACHE),
-        AssetCacheLimits::default(),
+        unbounded_asset_limits(),
     ) else {
         return 0;
     };
@@ -713,7 +925,7 @@ fn copy_meshes(
     };
     let Ok(dest) = MeshDiskCache::open(
         bundle_cache_dir(bundle_dir, MESH_CACHE),
-        MeshCacheLimits::default(),
+        unbounded_mesh_limits(),
     ) else {
         return 0;
     };
@@ -748,7 +960,7 @@ fn copy_anims(
     };
     let Ok(dest) = AssetDiskCache::open(
         bundle_cache_dir(bundle_dir, ANIM_CACHE),
-        AssetCacheLimits::default(),
+        unbounded_asset_limits(),
     ) else {
         return 0;
     };
@@ -816,13 +1028,104 @@ pub fn load_bundle(bundle_dir: &Path) -> Result<Vec<ReplayManifest>, String> {
 
 #[cfg(test)]
 mod tests {
+    use std::io::{Read as _, Write as _};
+    use std::net::TcpListener;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::time::{Duration, Instant};
+
     use pretty_assertions::assert_eq;
     use sl_client_bevy::Uuid;
 
     use super::{
-        BundleGaps, MANIFEST_VERSION, ReplayManifest, absent_ids, load_bundle, load_manifest,
-        referenced_assets,
+        BRIEF_RETRIES, BundleGaps, CANCELLED, Downloader, MANIFEST_VERSION, PATIENT_DELAYS_MS,
+        ReplayManifest, RetryPolicy, absent_ids, fetch_whole, is_transient, load_bundle,
+        load_manifest, referenced_assets,
     };
+
+    /// A patient capture backs off exponentially and eventually gives up.
+    #[test]
+    fn patient_retries_back_off_and_end() {
+        let delays: Vec<u64> = (0..=u8::MAX)
+            .map_while(|attempt| RetryPolicy::Patient.delay(attempt))
+            .map(|delay| u64::try_from(delay.as_millis()).unwrap_or(u64::MAX))
+            .collect();
+        assert_eq!(delays, PATIENT_DELAYS_MS);
+        assert!(delays.windows(2).all(|pair| pair.first() < pair.get(1)));
+        assert_eq!(RetryPolicy::Brief.delay(BRIEF_RETRIES), None);
+    }
+
+    /// Only a status that can change is worth asking again for.
+    #[test]
+    fn only_server_side_failures_are_retried() {
+        for status in [429, 500, 502, 503, 504] {
+            assert!(is_transient(status), "{status}");
+        }
+        for status in [400, 403, 404, 410] {
+            assert!(!is_transient(status), "{status}");
+        }
+    }
+
+    /// A service that is busy at first still delivers the asset.
+    #[test]
+    fn a_busy_service_is_retried_until_it_answers() -> Result<(), String> {
+        let listener = TcpListener::bind("127.0.0.1:0").map_err(|error| error.to_string())?;
+        let port = listener
+            .local_addr()
+            .map_err(|error| error.to_string())?
+            .port();
+        let server = std::thread::spawn(move || {
+            for reply in [
+                "HTTP/1.1 503 Busy\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                "HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: close\r\n\r\nasset",
+            ] {
+                let Ok((mut stream, _peer)) = listener.accept() else {
+                    return;
+                };
+                let mut request = [0_u8; 1024];
+                let _read = stream.read(&mut request);
+                let _written = stream.write_all(reply.as_bytes());
+            }
+        });
+        let cancel = AtomicBool::new(false);
+        let downloader = Downloader {
+            client: reqwest::blocking::Client::builder()
+                .no_proxy()
+                .build()
+                .map_err(|error| error.to_string())?,
+            retry: RetryPolicy::Brief,
+            cancel: &cancel,
+        };
+        let bytes = fetch_whole(&downloader, &format!("http://127.0.0.1:{port}/"), "*/*")?;
+        assert_eq!(bytes.as_ref(), b"asset");
+        server.join().map_err(|_panic| "server panicked")?;
+        Ok(())
+    }
+
+    /// A cancelled capture leaves a long backoff at once.
+    #[test]
+    fn cancelling_ends_a_retry_pause() -> Result<(), String> {
+        let cancel = AtomicBool::new(false);
+        let downloader = Downloader {
+            client: reqwest::blocking::Client::builder()
+                .no_proxy()
+                .build()
+                .map_err(|error| error.to_string())?,
+            retry: RetryPolicy::Patient,
+            cancel: &cancel,
+        };
+        let started = Instant::now();
+        std::thread::scope(|scope| {
+            let _canceller = scope.spawn(|| {
+                std::thread::sleep(Duration::from_millis(100));
+                cancel.store(true, Ordering::Relaxed);
+            });
+            downloader.pause(Duration::from_secs(30));
+        });
+        assert!(started.elapsed() < Duration::from_secs(5));
+        let refusal = fetch_whole(&downloader, "http://127.0.0.1:1/", "*/*").err();
+        assert_eq!(refusal.as_deref(), Some(CANCELLED));
+        Ok(())
+    }
 
     /// What a capture still has to fetch is what is referenced and not held.
     #[test]

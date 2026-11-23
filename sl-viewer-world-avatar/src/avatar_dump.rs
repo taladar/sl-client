@@ -18,15 +18,15 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use bevy::prelude::*;
 use sl_client_bevy::{
-    AgentKey, AvatarAppearance, CAP_GET_MESH, CAP_GET_MESH2, CAP_GET_TEXTURE, CAP_RENDER_MATERIALS,
-    CAP_VIEWER_ASSET, MAX_FACES, Object, PlayingAnimation, RenderMaterialEntry, ScopedObjectId,
-    SlCapabilities, SlEvent, SlIdentity, SlSessionEvent, Uuid, decode_texture_entry, pcode,
+    AgentKey, AvatarAppearance, MAX_FACES, Object, PlayingAnimation, RenderMaterialEntry,
+    ScopedObjectId, SlCapabilities, SlEvent, SlIdentity, SlSessionEvent, Uuid,
+    decode_texture_entry, pcode,
 };
 
 use crate::replay_bundle::{
-    BundleGaps, CaptureCaps, FetchPlan, MANIFEST_VERSION, ReplayManifest, absent_render_materials,
-    add_render_materials, copy_cache_assets, load_bundle, run_bundle_fetch,
-    run_render_material_fetch, texture_fetch_urls,
+    BundleGaps, CaptureCaps, FetchPlan, MANIFEST_VERSION, ReplayManifest, RetryPolicy,
+    absent_render_materials, add_render_materials, copy_cache_assets, load_bundle,
+    run_bundle_fetch, run_render_material_fetch, texture_fetch_urls,
 };
 
 /// The environment variable that arms the capture: the directory a bundle is
@@ -90,18 +90,7 @@ pub fn capture_replay_inputs(
     mut store: ResMut<ReplayCaptureStore>,
 ) {
     for SlCapabilities(map) in capabilities.read() {
-        if let Some(url) = map.get(CAP_GET_TEXTURE) {
-            store.caps.texture = Some(url.clone());
-        }
-        if let Some(url) = map.get(CAP_GET_MESH2).or_else(|| map.get(CAP_GET_MESH)) {
-            store.caps.mesh = Some(url.clone());
-        }
-        if let Some(url) = map.get(CAP_VIEWER_ASSET) {
-            store.caps.viewer_asset = Some(url.clone());
-        }
-        if let Some(url) = map.get(CAP_RENDER_MATERIALS) {
-            store.caps.render_materials = Some(url.clone());
-        }
+        store.caps.update(map);
     }
     for event in events.read() {
         match &event.0 {
@@ -265,7 +254,14 @@ pub fn dump_avatars_on_key(
         plan.textures.keys().copied().collect::<BTreeSet<Uuid>>(),
     );
     let fetched = sl_client_bevy::log_context::spawn_thread(move || {
-        run_bundle_fetch(&dir, plan, &caps, now_unix)
+        run_bundle_fetch(
+            &dir,
+            plan,
+            &caps,
+            now_unix,
+            RetryPolicy::Brief,
+            &std::sync::atomic::AtomicBool::new(false),
+        )
     })
     .join()
     .unwrap_or_else(|_panicked| BundleGaps {

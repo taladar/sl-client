@@ -63,6 +63,7 @@ pub mod procedural;
 pub mod reach;
 pub mod replay_bundle;
 pub mod rigged_attachments;
+pub mod scene_capture;
 pub mod typing;
 
 pub use plugin::WorldAvatarPlugin;

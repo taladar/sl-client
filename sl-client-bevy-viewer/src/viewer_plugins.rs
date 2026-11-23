@@ -1128,6 +1128,9 @@ impl Plugin for ViewerShellPlugins {
             // Avatar-state capture (viewer-avatar-state-dump-replay), which adds
             // nothing at all unless `SL_VIEWER_DUMP_DIR` is set.
             .add_plugins(crate::avatar_dump::AvatarDumpPlugin)
+            // The region timeline recorder (viewer-perf-region-capture-replay), which
+            // adds nothing at all unless `SL_VIEWER_SCENE_CAPTURE_DIR` is set.
+            .add_plugins(sl_viewer_world_avatar::scene_capture::SceneCapturePlugin)
             // Frame-time / FPS instruments — the smoothed FPS the status area
             // (`crate::status_bar`) shows and the frame budget the fetch/decode pipeline
             // work is watched against.

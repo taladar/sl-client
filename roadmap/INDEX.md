@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 131 |
-| ready | 328 |
-| blocked | 34 |
+| ready | 329 |
+| blocked | 35 |
 | in-progress | 4 |
 | bugs | 7 |
 | done | 1608 |
 | deferred | 30 |
 | wont-do | 24 |
-| **total** | **2166** |
+| **total** | **2168** |
 
 ## ideas (131)
 
@@ -317,7 +317,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-lsl-opensim-function-set`](ideas/gridspec-lsl-opensim-function-set.md)
   — Measure which library functions OpenSim's engines compile
 
-## ready (328)
+## ready (329)
 
 ### protocol
 
@@ -790,6 +790,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Reflection-probe quality settings (detail, resolution, pool, budget)
 - [`viewer-perf-probe-scheduling`](ready/viewer-perf-probe-scheduling.md) —
   Change-driven probe capture scheduling (zero idle cost)
+- [`viewer-perf-region-capture-replay`](ready/viewer-perf-region-capture-replay.md)
+  — Capture a whole region and replay it as a rendering benchmark
 - [`viewer-perf-render-app-bound-frame`](ready/viewer-perf-render-app-bound-frame.md)
   — Average frame is now render-app bound (render graph / GPU draw)
 - [`viewer-perf-teleport-overlay-idle-visibility`](ready/viewer-perf-teleport-overlay-idle-visibility.md)
@@ -1113,7 +1115,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-sl-mfa-challenge`](ready/gridspec-sl-mfa-challenge.md) — Record
   Second Life's MFA challenge and whether a remembered mfa_hash gets past it
 
-## blocked (34)
+## blocked (35)
 
 ### viewer
 
@@ -1159,6 +1161,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-pathfinding-navmesh-view`](blocked/viewer-pathfinding-navmesh-view.md)
   — Render and test the region's navmesh (blocked by
   `viewer-pathfinding-floaters`)
+- [`viewer-perf-arrival-timeline-replay`](blocked/viewer-perf-arrival-timeline-replay.md)
+  — Replay a captured arrival timeline to measure streaming spikes (blocked by
+  `viewer-perf-region-capture-replay`)
 - [`viewer-projector-lights-spot-shadows`](blocked/viewer-projector-lights-spot-shadows.md)
   — Projector spot-shadow tier (blocked by `viewer-projector-lights-textured`)
 - [`viewer-render-matrix-glow-over-water`](blocked/viewer-render-matrix-glow-over-water.md)

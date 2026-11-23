@@ -214,6 +214,10 @@ impl ViewerPaths {
     /// setting, or the 2 GiB default).
     #[must_use]
     pub fn texture_cache_max_bytes(&self) -> u64 {
+        // A replay's cache is a bundle: evicting from it would lose the capture.
+        if self.replay_cache_root.is_some() {
+            return u64::MAX;
+        }
         self.overrides
             .texture_cache_max_bytes
             .unwrap_or(DEFAULT_CACHE_MAX_BYTES)
@@ -224,6 +228,10 @@ impl ViewerPaths {
     /// independently (the `AssetCacheSizeMb` setting, or the 2 GiB default).
     #[must_use]
     pub fn asset_cache_max_bytes(&self) -> u64 {
+        // A replay's cache is a bundle: evicting from it would lose the capture.
+        if self.replay_cache_root.is_some() {
+            return u64::MAX;
+        }
         self.overrides
             .asset_cache_max_bytes
             .unwrap_or(DEFAULT_CACHE_MAX_BYTES)
@@ -710,6 +718,8 @@ mod tests {
             replay.live_asset_cache_dir("meshcache"),
             Some(Path::new("/tmp/elsewhere/meshcache").to_path_buf())
         );
+        assert_eq!(replay.asset_cache_max_bytes(), u64::MAX);
+        assert_eq!(replay.texture_cache_max_bytes(), u64::MAX);
         assert_eq!(
             ViewerPaths::default().asset_cache_max_bytes(),
             super::DEFAULT_CACHE_MAX_BYTES

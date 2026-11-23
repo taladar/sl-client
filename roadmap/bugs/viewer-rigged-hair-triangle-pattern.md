@@ -9,6 +9,18 @@ refs: [viewer-mesh-hair-not-rendering]
 
 Context: [context/viewer.md](../context/viewer.md).
 
+## Cause and fix
+
+Triangle order. Rigged alpha writes depth, so a triangle drawn early hides the
+hair layers behind it, even where its texture is nearly transparent. The
+reference runs every mesh face through `meshopt_optimizeVertexCache`
+(`LLVolumeFace::cacheOptimize`), and content is authored against that order.
+Reversing our order made the holes far worse, and applying the reference's
+removed them. `to_bevy_rigged_mesh` now does the same.
+
+Replays of both captured hairs are clean from behind and from the side. A live
+session has not confirmed it yet, so this stays open until one does.
+
 ## Observation
 
 One avatar's long rigged mesh hair (39 linked prims, up to 8 faces each, two
@@ -33,25 +45,18 @@ Each of these matches the reference, and they are in place:
 - Rigged meshes carry MikkTSpace tangents (`LLVolumeFace::cacheOptimize`). The
   pale triangles remain.
 
-## The open lead
+## What was ruled out
 
-The hair's two legacy materials are the only ones of this avatar's faces the
-capture does not have. The `RenderMaterials` capability answered for 9 of the 11
-materials requested while the avatar was away, and not for these two. So every
-replay so far has drawn the hair without its real alpha mode, and possibly
-without normal and specular maps.
+The hair's legacy materials were missing from the first capture and looked like
+the cause. A second capture holds every asset of another affected avatar, and
+it still showed the triangles until the order was fixed.
 
-Firestorm tracks material requests per region, so the region may serve them only
-while the wearer is present. That is not established.
+## A second capture
+
+A local region recording from 2026-11-23 (see
+[viewer-perf-region-capture-replay](../ready/viewer-perf-region-capture-replay.md))
+includes a different avatar, wearing different hair, with the same fault.
 
 ## To find out
 
-- Capture with the avatar in the region (`SL_VIEWER_DUMP_DIR`, Ctrl+Alt+D). The
-  capture now fetches what is missing and logs `capture INCOMPLETE` with the ids
-  of anything it could not get.
-- If the materials arrive, replay with them and see whether the triangles
-  remain.
-- If they do not, the grid is not serving them to Firestorm either, and the
-  cause is elsewhere in how we draw this mesh. Compare the index order next: the
-  reference cache-optimizes a mesh's indices, which changes which triangle
-  writes depth first now that rigged alpha does.
+- Confirm in a live session that affected hair draws whole.

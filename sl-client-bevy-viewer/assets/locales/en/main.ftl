@@ -3977,6 +3977,13 @@ snapshot-status-saving = Working…
 snapshot-saved = Saved snapshot to { $path }
 snapshot-save-failed = Could not save the snapshot: { $error }
 snapshot-no-dir = No snapshot folder is available on this system.
+# The region recording's bundle has ended (nearby chat).
+scene-capture-complete = Scene capture complete: { $path }
+scene-capture-incomplete = Scene capture incomplete, { $missing ->
+    [one] 1 asset
+   *[other] { $missing } assets
+} missing: { $path }
+scene-capture-failed = Scene capture failed, see the log: { $path }
 # The destination tabs.
 snapshot-tab-disk = Disk
 snapshot-tab-postcard = Postcard

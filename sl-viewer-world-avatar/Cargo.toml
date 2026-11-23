@@ -23,6 +23,7 @@ bevy = { version = "0.20.1" }
 # unchanged.
 bevy_flair = { version = "0.9.0" }
 bytes = { workspace = true }
+flate2 = { workspace = true }
 fs-err = { workspace = true }
 image = { version = "0.25.10", default-features = false, features = [
   "bmp",

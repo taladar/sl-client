@@ -2363,6 +2363,23 @@ fn tree_species_byte(object: &Object) -> u8 {
     object.data.first().copied().unwrap_or(0)
 }
 
+/// The diffuse texture of a Linden tree or grass object, which comes from its
+/// species table rather than a `TextureEntry`. `None` for any other object. An
+/// unknown species resolves to species 0, as when it is drawn.
+#[must_use]
+pub fn plant_texture(object: &Object) -> Option<Uuid> {
+    match object.pcode {
+        pcode::TREE | pcode::NEW_TREE => tree_species(tree_species_byte(object))
+            .or_else(|| tree_species(0))
+            .map(|tree| tree.texture_id.uuid()),
+        // Grass keeps its species in `State`, unlike a tree.
+        pcode::GRASS => grass_species(object.state)
+            .or_else(|| grass_species(0))
+            .map(|grass| grass.texture_id.uuid()),
+        _other => None,
+    }
+}
+
 /// Generate a Linden tree's branch / leaf geometry for `species_byte` at
 /// `TreeTier` `tier` and spawn its single face entity under `parent`, textured
 /// with the species diffuse through the Phase 6 pipeline (P26.2).

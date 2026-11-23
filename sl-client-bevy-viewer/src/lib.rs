@@ -1177,23 +1177,34 @@ fn run_replay(options: &Options, bundle_dir: &Path) -> Result<(), Error> {
         "replay: assets served from {:?}",
         paths.asset_cache_dir("texturecache")
     );
-    let manifests = crate::replay_bundle::load_bundle(bundle_dir).map_err(Error::Replay)?;
-    if manifests.is_empty() {
-        return Err(Error::Replay(format!(
-            "no avatar manifests (*.json) in {}",
+    let config = if sl_viewer_world_avatar::scene_capture::is_recording(bundle_dir) {
+        let scene =
+            sl_viewer_world_avatar::scene_capture::load_scene(bundle_dir).map_err(Error::Replay)?;
+        info!("replaying the region recording {}", bundle_dir.display());
+        crate::avatar_replay::ReplayConfig::from_scene(
+            scene,
+            options.replay_orbit_light,
+            options.replay_reflection_probe,
+        )
+    } else {
+        let manifests = crate::replay_bundle::load_bundle(bundle_dir).map_err(Error::Replay)?;
+        if manifests.is_empty() {
+            return Err(Error::Replay(format!(
+                "no avatar manifests (*.json) in {}",
+                bundle_dir.display()
+            )));
+        }
+        info!(
+            "replaying {} avatar(s) from {}",
+            manifests.len(),
             bundle_dir.display()
-        )));
-    }
-    info!(
-        "replaying {} avatar(s) from {}",
-        manifests.len(),
-        bundle_dir.display()
-    );
-    let config = crate::avatar_replay::ReplayConfig::new(
-        manifests,
-        options.replay_orbit_light,
-        options.replay_reflection_probe,
-    );
+        );
+        crate::avatar_replay::ReplayConfig::new(
+            manifests,
+            options.replay_orbit_light,
+            options.replay_reflection_probe,
+        )
+    };
 
     // Frame the camera on the primary avatar unless the operator fixed a pose.
     let camera_start = fixed_camera_start(options).unwrap_or_else(|| replay_camera_start(&config));
