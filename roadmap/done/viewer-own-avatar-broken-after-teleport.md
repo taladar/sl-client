@@ -2,12 +2,41 @@
 id: viewer-own-avatar-broken-after-teleport
 title: Own avatar looks broken after a teleport
 topic: viewer
-status: bugs
+status: done
 origin: live aditi testing (2026-08-10, ground-probe session)
 refs: [viewer-perf-avatar-ground-probe]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
+
+## Cause and fix (2026-11-23)
+
+The own outfit's rigged meshes waited behind the rest of the region.
+`apply_rigged_attachments` spends the per-frame `MeshUploadBudget` after the
+object systems, stopped as soon as it was empty, and took pending meshes in
+query order. While a busy region streamed in, the own attachments had arrived
+and were seated within about 2 s but were not built for up to 35 s. A mesh-body
+wearer's base body is hidden, so the avatar was partly or wholly missing until
+then, with its name tag still drawn.
+
+The own avatar's rigged meshes now build first and are not held to the budget.
+
+Measured on aditi over 14 world-map teleports between Mauve and Ahern, as the
+time from arrival until at least 40 of the outfit's 51 shown parts were drawn:
+
+| | slowest | arrivals over 10 s | avatar missing in the 30 s frame |
+| --- | --- | --- | --- |
+| before | 34.7 s | 3 | 1 |
+| after | 11.0 s | 1 | 0 |
+
+The report predates these measurements and described the avatar as incomplete
+rather than missing. A partly built outfit is the same fault seen earlier in
+its load, but the original session cannot be replayed to prove it was this.
+
+A separate stall found in these runs is
+[[viewer-teleport-back-gets-no-answer]].
+
+## Original report
 
 Observed live on aditi: the **own** avatar looked **incomplete** after a
 **cross-region teleport** (to a region with sit targets). Before the

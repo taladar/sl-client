@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 35 |
 | in-progress | 4 |
 | bugs | 7 |
-| done | 1608 |
+| done | 1609 |
 | deferred | 30 |
 | wont-do | 24 |
-| **total** | **2168** |
+| **total** | **2169** |
 
 ## ideas (131)
 
@@ -1254,16 +1254,16 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Some worn mesh hair does not render (visible in Firestorm)
 - [`viewer-near-avatar-stuck-coarse-sphere`](bugs/viewer-near-avatar-stuck-coarse-sphere.md)
   — A nearby avatar stays a coarse sphere even as the camera closes in
-- [`viewer-own-avatar-broken-after-teleport`](bugs/viewer-own-avatar-broken-after-teleport.md)
-  — Own avatar looks broken after a teleport
 - [`viewer-perf-steady-state-46fps-ceiling`](bugs/viewer-perf-steady-state-46fps-ceiling.md)
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
 - [`viewer-rigged-hair-triangle-pattern`](bugs/viewer-rigged-hair-triangle-pattern.md)
   — Rigged mesh hair shows a pattern of individual triangles
+- [`viewer-teleport-back-gets-no-answer`](bugs/viewer-teleport-back-gets-no-answer.md)
+  — A teleport back to a recently left region can get no answer from the grid
 - [`viewer-texture-filtering-in-linear-space`](bugs/viewer-texture-filtering-in-linear-space.md)
   — Colour textures are filtered after sRGB decoding, the reference before
 
-## done (1608)
+## done (1609)
 
 ### protocol
 
@@ -2627,6 +2627,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-outline-swallows-thin-hollow-prim`](done/viewer-outline-swallows-thin-hollow-prim.md)
   — The selection outline fills a thin-walled hollow prim white instead of
   outlining it
+- [`viewer-own-avatar-broken-after-teleport`](done/viewer-own-avatar-broken-after-teleport.md)
+  — Own avatar looks broken after a teleport
 - [`viewer-own-avatar-facing-drifts-idle`](done/viewer-own-avatar-facing-drifts-idle.md)
   — Own avatar forward direction drifts every few seconds while idle
 - [`viewer-own-avatar-vanishes-near-ground`](done/viewer-own-avatar-vanishes-near-ground.md)

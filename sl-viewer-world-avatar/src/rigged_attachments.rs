@@ -535,6 +535,18 @@ pub struct RiggedMirrors<'w> {
     /// The run's debug avatar knobs: whether the joint overrides (R1) reach
     /// the skeleton at all.
     overrides: Res<'w, crate::avatar_overrides::AvatarOverrides>,
+    /// Who this viewer is, so its own worn meshes build ahead of a crowd's.
+    identity: Option<Res<'w, SlIdentity>>,
+}
+
+/// `pending` with the items `is_own` accepts moved to the front, each marked
+/// with that answer, the order inside either group kept.
+fn own_wearer_first<T>(pending: Vec<T>, is_own: impl Fn(&T) -> bool) -> Vec<(T, bool)> {
+    let (own, others): (Vec<T>, Vec<T>) = pending.into_iter().partition(|item| is_own(item));
+    own.into_iter()
+        .map(|item| (item, true))
+        .chain(others.into_iter().map(|item| (item, false)))
+        .collect()
 }
 
 /// The stores a skinned attachment build spawns and writes through, bundled as
@@ -615,13 +627,24 @@ pub fn apply_rigged_attachments(
     // below can borrow `builds` immutably before the final update.
     let pending =
         builds.scoped_pending_on(|pending| matches!(pending, PendingGeometry::RiggedMesh(_)));
-    for (scoped, entity) in pending {
+    // The own outfit goes first and is not held to the budget: the systems
+    // ahead of this one can spend all of it for as long as a busy region
+    // streams in, and a mesh-body wearer's base body is hidden, so until these
+    // build the own avatar is not drawn at all.
+    let own_agent = mirrors
+        .identity
+        .as_ref()
+        .and_then(|identity| identity.agent_id);
+    let pending = own_wearer_first(pending, |&(scoped, _entity)| {
+        own_agent.is_some() && mirrors.avatars.wearer_of(scoped) == own_agent
+    });
+    for ((scoped, entity), own) in pending {
         // A skinned build is among the heaviest per-object costs (submesh
         // meshes + inverse bindposes + skeleton binding); spend from the
         // shared decode-apply budget so a crowd's worth of rigged bodies
         // binds over several frames. The unbuilt rest stays pending and is
         // re-collected next frame.
-        if budget.remaining == 0 {
+        if budget.remaining == 0 && !own {
             break;
         }
         if !mirrors.state.objects().contains_key(&scoped) {
@@ -1322,10 +1345,24 @@ mod tests {
     };
     use sl_viewer_world_objects::objects::fixture_object;
 
-    use super::{AttachmentAdoptSkipLog, RigPlacement, adopt_pending_attachments, rig_placement};
+    use super::{
+        AttachmentAdoptSkipLog, RigPlacement, adopt_pending_attachments, own_wearer_first,
+        rig_placement,
+    };
 
     /// A boxed test error, so a test can use `?`.
     type TestError = Box<dyn core::error::Error>;
+
+    /// The own outfit is built first wherever the scene listed it, and the
+    /// order inside the own items and the others is kept.
+    #[test]
+    fn the_own_outfit_goes_ahead_of_a_crowd() {
+        let ordered = own_wearer_first(vec![1, 10, 2, 11, 3], |&item| item >= 10);
+        assert_eq!(
+            ordered,
+            vec![(10, true), (11, true), (1, false), (2, false), (3, false)]
+        );
+    }
 
     /// The wearer's avatar object, as the object mirror scopes it.
     const WEARER: ScopedObjectId = ScopedObjectId::new(CircuitId::new(1), RegionLocalObjectId(100));
