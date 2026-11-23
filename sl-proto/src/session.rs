@@ -37,12 +37,14 @@ const AGENT_UPDATE_INTERVAL: Duration = Duration::from_millis(1000);
 pub const LOGOUT_TIMEOUT: Duration = Duration::from_secs(5);
 /// How long to wait for a `TeleportFinish` before declaring the teleport failed.
 const TELEPORT_TIMEOUT: Duration = Duration::from_secs(30);
-/// How long after a teleport fails ahead of its own start a `TeleportStart`
-/// that arrives outside a teleport is still taken as part of the failed one.
+/// How long after a teleport fails or is cancelled ahead of its own start a
+/// `TeleportStart` that arrives outside a teleport is still taken as part of
+/// the ended one.
 ///
 /// Second Life sends a refused teleport's `TeleportStart` over UDP and its
 /// `TeleportFailed` over the event queue, so the two can arrive in either
-/// order; a start that comes second would otherwise begin a teleport of the
+/// order, and a cancel can overtake the start too; a start that comes second
+/// would otherwise begin a teleport of the
 /// grid's own that nothing ends. Ignoring it is safe for a teleport the grid
 /// really does start in the window: that one ends in a `TeleportFinish` (or a
 /// `TeleportLocal`), which the session honours without a start. Long enough
@@ -1700,8 +1702,8 @@ enum TeleportPhase {
         /// be flattened to `RegionHandle(0)` while the phase is in flight.
         target: Option<RegionHandle>,
         /// Whether its `TeleportStart` has arrived. Read when the teleport
-        /// fails over the event queue: a failure ahead of its start means the
-        /// start is still on its way (see `LATE_TELEPORT_START_WINDOW`).
+        /// fails or is cancelled: an end ahead of its start means the start
+        /// may still be on its way (see `LATE_TELEPORT_START_WINDOW`).
         start_seen: bool,
     },
     /// A teleport finished or a region border was crossed: the new root circuit
@@ -1967,10 +1969,10 @@ pub struct Session {
     /// `RegionHandshake`).
     teleport: TeleportPhase,
     /// Until when a `TeleportStart` that arrives outside a teleport is taken as
-    /// a straggler of the teleport that just failed, not as one the grid
-    /// started (see [`LATE_TELEPORT_START_WINDOW`]). Set by an event-queue
-    /// `TeleportFailed` that ends a teleport whose start had not arrived;
-    /// `None` when none has.
+    /// a straggler of the teleport that just ended, not as one the grid
+    /// started (see [`LATE_TELEPORT_START_WINDOW`]). Set by a `TeleportFailed`
+    /// or a cancel that ends a teleport whose start had not arrived; `None`
+    /// when none has.
     late_teleport_start_until: Option<Instant>,
     /// A teleport handover in flight whose destination has not yet confirmed (see
     /// [`PendingHandover`]). `Some` only between sending the destination's

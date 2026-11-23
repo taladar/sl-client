@@ -17797,6 +17797,224 @@ mod test {
         Ok(())
     }
 
+    /// A `TeleportStart` as the source region sends it.
+    fn teleport_start_message() -> AnyMessage {
+        AnyMessage::TeleportStart(TeleportStart {
+            info: TeleportStartInfoBlock { teleport_flags: 16 },
+        })
+    }
+
+    /// Requests a teleport and clears what it sent and surfaced.
+    fn request_teleport(session: &mut Session, now: Instant) -> Result<(), TestError> {
+        drain(session)?;
+        drain_events(session);
+        session.teleport_to(
+            RegionHandle(0x0003_E800_0003_E900),
+            region_coords(128.0, 128.0, 30.0),
+            vec3(1.0, 0.0, 0.0),
+            now,
+        )?;
+        drain(session)?;
+        drain_events(session);
+        Ok(())
+    }
+
+    /// A start that arrives after the user cancelled its teleport starts
+    /// nothing: no overlay, no thirty seconds in which a landmark teleport is
+    /// refused, and no spurious timeout.
+    #[test]
+    fn a_start_after_a_cancel_starts_nothing() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        request_teleport(&mut session, now)?;
+        session.cancel_teleport(now)?;
+        drain(&mut session)?;
+        let start = server_message(&teleport_start_message(), 900, true)?;
+        session.handle_datagram(sim_addr(), &start, now)?;
+        assert_eq!(
+            teleport_phases(&drain_events(&mut session)),
+            Vec::<&str>::new(),
+            "the late start should be ignored"
+        );
+        session
+            .teleport_via_landmark(None, after(now, 1_000)?)
+            .map_err(|error| format!("a landmark teleport should be accepted: {error}"))?;
+        session.cancel_teleport(after(now, 1_000)?)?;
+        session.handle_timeout(after(now, 31_000)?);
+        assert_eq!(
+            teleport_phases(&drain_events(&mut session)),
+            Vec::<&str>::new(),
+            "no teleport should be left running to time out"
+        );
+        Ok(())
+    }
+
+    /// The grid's own answer to a cancel can come before the start as well.
+    #[test]
+    fn a_start_after_a_confirmed_cancel_starts_nothing() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        request_teleport(&mut session, now)?;
+        session.cancel_teleport(now)?;
+        let body = sl_proto::parse_llsd_xml(caps_teleport_failed_xml())?;
+        session.handle_caps_event("TeleportFailed", &body, now)?;
+        let start = server_message(&teleport_start_message(), 900, true)?;
+        session.handle_datagram(sim_addr(), &start, now)?;
+        assert_eq!(
+            teleport_phases(&drain_events(&mut session)),
+            vec!["failed"],
+            "only the grid's answer should surface"
+        );
+        Ok(())
+    }
+
+    /// A UDP failure can overtake its start when the start's first copy is
+    /// lost and resent.
+    #[test]
+    fn a_start_after_a_udp_failure_starts_nothing() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        request_teleport(&mut session, now)?;
+        let failed = AnyMessage::TeleportFailed(TeleportFailed {
+            info: TeleportFailedInfoBlock {
+                agent_id: uuid::Uuid::nil(),
+                reason: b"no access\0".to_vec(),
+            },
+            alert_info: Vec::new(),
+        });
+        session.handle_datagram(sim_addr(), &server_message(&failed, 900, true)?, now)?;
+        let start = server_message(&teleport_start_message(), 901, true)?;
+        session.handle_datagram(sim_addr(), &start, now)?;
+        assert_eq!(
+            teleport_phases(&drain_events(&mut session)),
+            vec!["failed"],
+            "the late start should be ignored"
+        );
+        session.handle_timeout(after(now, 31_000)?);
+        assert_eq!(
+            teleport_phases(&drain_events(&mut session)),
+            Vec::<&str>::new(),
+            "no teleport should be left running to time out"
+        );
+        Ok(())
+    }
+
+    /// A cancel after the teleport's start leaves no straggler, so the next
+    /// start is a teleport the grid began.
+    #[test]
+    fn a_cancel_after_its_start_leaves_the_next_start_alone() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        request_teleport(&mut session, now)?;
+        let first = server_message(&teleport_start_message(), 900, true)?;
+        session.handle_datagram(sim_addr(), &first, now)?;
+        session.cancel_teleport(now)?;
+        let second = server_message(&teleport_start_message(), 901, true)?;
+        session.handle_datagram(sim_addr(), &second, now)?;
+        assert_eq!(
+            teleport_phases(&drain_events(&mut session)),
+            vec!["started", "started"],
+            "a start after a started teleport's cancel is the grid's own"
+        );
+        Ok(())
+    }
+
+    /// The window a cancel opens closes again.
+    #[test]
+    fn a_start_long_after_a_cancel_is_the_grids_own_teleport() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        request_teleport(&mut session, now)?;
+        session.cancel_teleport(now)?;
+        let start = server_message(&teleport_start_message(), 900, true)?;
+        session.handle_datagram(sim_addr(), &start, after(now, 11_000)?)?;
+        assert_eq!(
+            teleport_phases(&drain_events(&mut session)),
+            vec!["started"],
+            "a start after the window should enter a remote teleport"
+        );
+        Ok(())
+    }
+
+    /// A teleport the grid really does start inside a cancel's window still
+    /// completes, by its finish.
+    #[test]
+    fn a_grid_teleport_finishing_after_a_cancel_is_still_honoured() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        request_teleport(&mut session, now)?;
+        session.cancel_teleport(now)?;
+        let start = server_message(&teleport_start_message(), 900, true)?;
+        session.handle_datagram(sim_addr(), &start, now)?;
+        let body = sl_proto::parse_llsd_xml(caps_teleport_finish_xml())?;
+        session.handle_caps_event("TeleportFinish", &body, after(now, 1_000)?)?;
+        assert_eq!(
+            teleport_phases(&drain_events(&mut session)),
+            vec!["started", "finished"],
+            "a finish in the window is a teleport the grid decided on"
+        );
+        Ok(())
+    }
+
+    /// Replacing a teleport cancels it, so the replaced teleport's start can
+    /// be read as the new one's. If the new one is then refused, its own start
+    /// is still covered by the window the replacement opened.
+    #[test]
+    fn a_refused_replacement_ignores_its_late_start() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        request_teleport(&mut session, now)?;
+        session.teleport_to(
+            RegionHandle(0x0003_E800_0003_EA00),
+            region_coords(128.0, 128.0, 30.0),
+            vec3(1.0, 0.0, 0.0),
+            now,
+        )?;
+        drain(&mut session)?;
+        let replaced = server_message(&teleport_start_message(), 900, true)?;
+        session.handle_datagram(sim_addr(), &replaced, now)?;
+        let body = sl_proto::parse_llsd_xml(caps_teleport_failed_xml())?;
+        session.handle_caps_event("TeleportFailed", &body, now)?;
+        let own = server_message(&teleport_start_message(), 901, true)?;
+        session.handle_datagram(sim_addr(), &own, now)?;
+        assert_eq!(
+            teleport_phases(&drain_events(&mut session)),
+            vec!["started", "failed"],
+            "the refused replacement's own start should be ignored"
+        );
+        Ok(())
+    }
+
+    /// A failure leaves nothing behind that refuses a later teleport of the
+    /// grid's: all of its phases surface.
+    #[test]
+    fn a_failure_does_not_refuse_a_later_grid_teleport() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        refused_teleport_with_late_start(&mut session, now)?;
+        let later = after(now, 11_000)?;
+        let start = server_message(&teleport_start_message(), 902, true)?;
+        session.handle_datagram(sim_addr(), &start, later)?;
+        let progress = AnyMessage::TeleportProgress(TeleportProgress {
+            agent_data: TeleportProgressAgentDataBlock {
+                agent_id: uuid::Uuid::nil(),
+            },
+            info: TeleportProgressInfoBlock {
+                teleport_flags: 16,
+                message: b"sending_dest\0".to_vec(),
+            },
+        });
+        session.handle_datagram(sim_addr(), &server_message(&progress, 903, true)?, later)?;
+        let body = sl_proto::parse_llsd_xml(caps_teleport_finish_xml())?;
+        session.handle_caps_event("TeleportFinish", &body, later)?;
+        assert_eq!(
+            teleport_phases(&drain_events(&mut session)),
+            vec!["started", "progress", "finished"],
+            "the grid's teleport should run as a teleport"
+        );
+        Ok(())
+    }
+
     #[test]
     fn agent_movement_complete_completes_handover_once() -> Result<(), TestError> {
         let now = Instant::now();

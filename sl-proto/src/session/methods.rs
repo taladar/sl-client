@@ -740,26 +740,7 @@ impl Session {
             // OpenSim sends the UDP message. Either way the teleport is over.
             CapsEvent::TeleportFailed => {
                 if let Some((reason, alert_info)) = teleport_failed_from_caps_llsd(body) {
-                    // Second Life starts a teleport over UDP before it fails
-                    // it here, so a failure ahead of the start means the start
-                    // is still on its way: watch for it, so that it does not
-                    // begin a teleport of the grid's own that nothing ends. A
-                    // failure with no teleport in flight, or after its start,
-                    // has no straggler to wait for, and the next start is a
-                    // real one.
-                    if matches!(self.state, SessionState::Teleporting)
-                        && matches!(
-                            self.teleport,
-                            TeleportPhase::Requested {
-                                start_seen: false,
-                                ..
-                            }
-                        )
-                    {
-                        self.late_teleport_start_until =
-                            Some(deadline(now, LATE_TELEPORT_START_WINDOW));
-                    }
-                    self.teleport_refused(reason, alert_info);
+                    self.teleport_refused(reason, alert_info, now);
                 } else {
                     self.caps_decode_failed(message);
                 }
@@ -4825,12 +4806,13 @@ impl Session {
                 // `EntityTransferModule` sends it on its two teleport paths
                 // only — so nothing here misfires for a crossing.)
                 //
-                // A start shortly after a teleport failed ahead of its own
-                // start belongs to the failed one: Second Life sends the start
-                // over UDP and the failure over the event queue, so the start
-                // can come second, and taking it as the grid's own would begin
-                // a teleport that nothing ends (see the `TeleportFailed` arm of
-                // `handle_caps_event`). The reference viewer has the same exposure
+                // A start shortly after a teleport ended ahead of its own start
+                // belongs to the ended one: Second Life sends the start over
+                // UDP and the failure over the event queue, a cancel can
+                // overtake it, and a resent datagram can arrive after a later
+                // one. Taking it as the grid's own would begin a teleport that
+                // nothing ends (see `expect_late_teleport_start`). The
+                // reference viewer has the same exposure
                 // (`process_teleport_start` enters `TELEPORT_START` from
                 // `TELEPORT_NONE` unconditionally).
                 if matches!(self.state, SessionState::Teleporting) {
@@ -4897,6 +4879,7 @@ impl Session {
                         message: trimmed_string(&block.message),
                         extra_params: trimmed_string(&block.extra_params),
                     }),
+                    now,
                 );
             }
             AnyMessage::TeleportFinish(finish) => {
@@ -15201,12 +15184,32 @@ impl Session {
         }
     }
 
+    /// Called as a teleport ends by failure or cancel, before its phase is
+    /// cleared. If its `TeleportStart` has not arrived, that start may still be
+    /// on its way, so watch for it: it must not begin a teleport of the grid's
+    /// own that nothing ends. A teleport that ends after its start, or with
+    /// none in flight, has no straggler, and the next start is a real one.
+    fn expect_late_teleport_start(&mut self, now: Instant) {
+        if matches!(self.state, SessionState::Teleporting)
+            && matches!(
+                self.teleport,
+                TeleportPhase::Requested {
+                    start_seen: false,
+                    ..
+                }
+            )
+        {
+            self.late_teleport_start_until = Some(deadline(now, LATE_TELEPORT_START_WINDOW));
+        }
+    }
+
     /// The simulator refused or gave up on a teleport (`TeleportFailed`, over
     /// UDP or the event queue): leaves the teleporting state, drops a handover
     /// that was already under way and surfaces [`Event::TeleportFailed`]. The
     /// event is surfaced even with no teleport in flight, since a simulator
     /// also sends the message for a teleport it started itself.
-    fn teleport_refused(&mut self, reason: String, alert_info: Option<AlertInfo>) {
+    fn teleport_refused(&mut self, reason: String, alert_info: Option<AlertInfo>, now: Instant) {
+        self.expect_late_teleport_start(now);
         if matches!(self.state, SessionState::Teleporting) {
             self.abort_pending_handover();
             self.state = SessionState::Active;
@@ -15326,6 +15329,7 @@ impl Session {
             .as_mut()
             .ok_or(Error::NoCircuit)?
             .send_teleport_cancel(now)?;
+        self.expect_late_teleport_start(now);
         if matches!(self.state, SessionState::Teleporting) {
             // Deferred teardown kept the source region live: drop only the pending
             // destination and return to the source, so a cancelled teleport never

@@ -862,11 +862,14 @@ fn message_line(entry: &Entry) -> Option<String> {
 mod tests {
     use super::{
         Entry, Outcome, Phase, TeleportFlow, confirms_a_cancel, detail_line, failure_reason,
-        message_line, progress_text_key, status_line, teleport_readout,
+        message_line, progress_text_key, status_line, teleport_readout, watchdog,
     };
-    use bevy::prelude::World;
+    use bevy::ecs::system::RunSystemOnce as _;
+    use bevy::prelude::{Messages, Time, World};
+    use core::time::Duration;
     use pretty_assertions::assert_eq;
     use sl_automation_proto::{TeleportReadout, TeleportState};
+    use sl_client_bevy::SlCommand;
 
     /// A pending entry begun at time 0, for the state-transition assertions.
     fn pending() -> Entry {
@@ -966,6 +969,55 @@ mod tests {
             (restarted - 9.0).abs() < 1.0e-9,
             "a resolved entry is replaced by a fresh one",
         );
+    }
+
+    /// A teleport is timed from its own start, not from the one before it: a
+    /// long-finished teleport neither flags the next as slow nor gives up on
+    /// it, and the next still gets its full time.
+    #[test]
+    fn the_watchdog_times_each_teleport_from_its_own_start()
+    -> Result<(), Box<dyn core::error::Error>> {
+        let mut world = World::new();
+        world.insert_resource(Time::<()>::default());
+        world.init_resource::<Messages<SlCommand>>();
+        let mut flow = TeleportFlow::default();
+        flow.begin(0.0, None, None);
+        if let Some(entry) = flow.entry.as_mut() {
+            entry.outcome = Outcome::Failed {
+                reason: "refused".to_owned(),
+                detail: None,
+            };
+        }
+        // The next teleport's first event, long after the last one ended.
+        flow.pending_entry(100.0);
+        world.insert_resource(flow);
+
+        world
+            .resource_mut::<Time>()
+            .advance_to(Duration::from_secs(101));
+        world
+            .run_system_once(watchdog)
+            .map_err(|error| format!("{error:?}"))?;
+        let entry = world.resource::<TeleportFlow>().entry.as_ref();
+        assert!(
+            entry.is_some_and(|entry| matches!(entry.outcome, Outcome::Pending) && !entry.stalled),
+            "one second in, the teleport is neither slow nor given up on",
+        );
+        assert_eq!(world.resource::<Messages<SlCommand>>().len(), 0);
+
+        world
+            .resource_mut::<Time>()
+            .advance_to(Duration::from_secs(138));
+        world
+            .run_system_once(watchdog)
+            .map_err(|error| format!("{error:?}"))?;
+        let entry = world.resource::<TeleportFlow>().entry.as_ref();
+        assert!(
+            entry.is_some_and(|entry| matches!(entry.outcome, Outcome::Failed { .. })),
+            "the hard limit still applies, from the teleport's own start",
+        );
+        assert_eq!(world.resource::<Messages<SlCommand>>().len(), 1);
+        Ok(())
     }
 
     /// The status line follows the phase while pending and the outcome once

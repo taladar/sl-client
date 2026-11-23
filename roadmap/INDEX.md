@@ -15,11 +15,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 329 |
 | blocked | 35 |
 | in-progress | 4 |
-| bugs | 7 |
+| bugs | 19 |
 | done | 1609 |
 | deferred | 30 |
 | wont-do | 24 |
-| **total** | **2169** |
+| **total** | **2181** |
 
 ## ideas (131)
 
@@ -1244,16 +1244,40 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-text-renderability-axis`](in-progress/viewer-ui-text-renderability-axis.md)
   — Upstream issue — font selection cannot see glyph-format renderability
 
-## bugs (7)
+## bugs (19)
+
+### protocol
+
+- [`protocol-cancel-after-teleport-finish-strands-agent`](bugs/protocol-cancel-after-teleport-finish-strands-agent.md)
+  — Cancelling a teleport after its TeleportFinish strands the agent
+- [`protocol-cancelled-reply-ends-replacement-teleport`](bugs/protocol-cancelled-reply-ends-replacement-teleport.md)
+  — A replaced teleport's TPCancelled reply may end the teleport that replaced
+  it
+- [`protocol-event-queue-switch-waits-on-old-poll`](bugs/protocol-event-queue-switch-waits-on-old-poll.md)
+  — The Bevy event-queue worker can miss a region switch for a whole long poll
+- [`protocol-killed-object-resurrected-by-resend`](bugs/protocol-killed-object-resurrected-by-resend.md)
+  — A resent ObjectUpdate after KillObject may leave a ghost object
+- [`protocol-late-eac-suppresses-neighbour-seed`](bugs/protocol-late-eac-suppresses-neighbour-seed.md)
+  — A late EstablishAgentCommunication may suppress a neighbour's next seed
+- [`protocol-late-teleport-finish-after-failure`](bugs/protocol-late-teleport-finish-after-failure.md)
+  — A TeleportFinish handled after its TeleportFailed starts a phantom teleport
+- [`protocol-logout-during-handover-is-undone`](bugs/protocol-logout-during-handover-is-undone.md)
+  — A logout during a teleport handover is silently undone
 
 ### viewer
 
+- [`viewer-environment-not-requested-after-region-change`](bugs/viewer-environment-not-requested-after-region-change.md)
+  — The region environment is not requested again after a crossing or teleport
 - [`viewer-live-opensim-world-renders-white`](bugs/viewer-live-opensim-world-renders-white.md)
   — The world renders all white at times on the live OpenSim grid
 - [`viewer-mesh-hair-not-rendering`](bugs/viewer-mesh-hair-not-rendering.md) —
   Some worn mesh hair does not render (visible in Firestorm)
 - [`viewer-near-avatar-stuck-coarse-sphere`](bugs/viewer-near-avatar-stuck-coarse-sphere.md)
   — A nearby avatar stays a coarse sphere even as the camera closes in
+- [`viewer-outfit-change-during-bake-is-lost`](bugs/viewer-outfit-change-during-bake-is-lost.md)
+  — An outfit change during the server bake handshake is lost
+- [`viewer-parcel-environment-reply-from-old-region`](bugs/viewer-parcel-environment-reply-from-old-region.md)
+  — A parcel environment reply from the old region may match by local id
 - [`viewer-perf-steady-state-46fps-ceiling`](bugs/viewer-perf-steady-state-46fps-ceiling.md)
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
 - [`viewer-rigged-hair-triangle-pattern`](bugs/viewer-rigged-hair-triangle-pattern.md)
@@ -1262,6 +1286,16 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A teleport back to a recently left region can get no answer from the grid
 - [`viewer-texture-filtering-in-linear-space`](bugs/viewer-texture-filtering-in-linear-space.md)
   — Colour textures are filtered after sRGB decoding, the reference before
+
+### chat
+
+- [`chat-group-line-before-memberships-splits-session`](bugs/chat-group-line-before-memberships-splits-session.md)
+  — A group chat line before the membership list opens a separate conference
+
+### inventory
+
+- [`inventory-stale-folder-fetch-overwrites-newer-state`](bugs/inventory-stale-folder-fetch-overwrites-newer-state.md)
+  — A stale folder fetch overwrites newer inventory, including the outfit folder
 
 ## done (1609)
 
