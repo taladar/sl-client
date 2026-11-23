@@ -768,6 +768,36 @@ struct Options {
     /// image-based-lighting materials have a probe to sample. Off by default.
     #[clap(long)]
     replay_reflection_probe: bool,
+    /// Time a fixed run of frames of the `--replay` scene and write the results
+    /// to this JSON file, then exit. Needs `--headless`, whose frames are not
+    /// capped or tied to a display. The clock stands still while the scene
+    /// loads and then advances a fixed 1/60 s per frame, and the sky is pinned,
+    /// so two builds render the same frames.
+    #[clap(long, value_name = "PATH", requires_all = ["replay", "headless"])]
+    replay_benchmark: Option<PathBuf>,
+    /// How many frames `--replay-benchmark` times.
+    #[clap(long, default_value_t = 1200, requires = "replay_benchmark")]
+    replay_benchmark_frames: u32,
+    /// How many untimed frames run between loading and timing, so exposure,
+    /// reflection probes and GPU pipelines have settled.
+    #[clap(long, default_value_t = 300, requires = "replay_benchmark")]
+    replay_benchmark_warmup: u32,
+    /// Which part of the scene `--replay-benchmark` draws: `all`, `world`
+    /// (no avatars) or `avatars` (no terrain or other objects).
+    #[clap(long, value_enum, default_value_t, requires = "replay_benchmark")]
+    replay_benchmark_layers: sl_viewer_world_view::replay_benchmark::BenchmarkLayers,
+    /// The position in the day cycle (`0.0..=1.0`) `--replay-benchmark` pins
+    /// the sky to.
+    #[clap(long, default_value_t = 0.5, requires = "replay_benchmark")]
+    replay_benchmark_day_position: f32,
+    /// How many seconds the scene may take to load before the benchmark fails.
+    #[clap(long, default_value_t = 600, requires = "replay_benchmark")]
+    replay_benchmark_timeout: u64,
+    /// A JSON array of `{"position":[x,y,z],"look_at":[x,y,z]}` keys in region
+    /// coordinates, which the camera moves through evenly over the timed
+    /// frames. Without it the camera holds its start pose.
+    #[clap(long, value_name = "PATH", requires = "replay_benchmark")]
+    replay_camera_path: Option<PathBuf>,
     /// Run with no OS window and no display: the viewer renders the world and
     /// its interface into an off-screen window of `--capture-size` (default
     /// 1920x1080) at a UI scale factor of 1, at a fixed 60 frames a second.
@@ -1234,6 +1264,30 @@ fn run_replay(options: &Options, bundle_dir: &Path) -> Result<(), Error> {
     // no-network intent explicit.
     app_options.content.fetch_server_chat_history = false;
     app_options.content.replay = Some(config);
+    if let Some(output) = options.replay_benchmark.clone() {
+        let day_position = options.replay_benchmark_day_position.clamp(0.0, 1.0);
+        let camera_path = options
+            .replay_camera_path
+            .as_deref()
+            .map(sl_viewer_world_view::replay_benchmark::load_camera_path)
+            .transpose()
+            .map_err(Error::Replay)?
+            .unwrap_or_default();
+        let mut overrides = crate::render_overrides::RenderOverrides::from_env();
+        overrides.day_position = Some(day_position);
+        app_options.render_overrides = Some(overrides);
+        app_options.content.benchmark =
+            Some(sl_viewer_world_view::replay_benchmark::ReplayBenchmark {
+                output,
+                frames: options.replay_benchmark_frames.max(1),
+                warmup: options.replay_benchmark_warmup,
+                layers: options.replay_benchmark_layers,
+                day_position,
+                camera_path,
+                load_timeout: core::time::Duration::from_secs(options.replay_benchmark_timeout),
+                version: options.version.clone(),
+            });
+    }
     app_options.camera.start = CameraStart {
         orbit: sl_viewer_world_api::OrbitSeed::from_env(),
         ..camera_start

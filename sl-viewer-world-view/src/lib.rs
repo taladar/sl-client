@@ -47,6 +47,7 @@ pub mod panorama;
 pub mod parcel_media;
 pub mod physics;
 pub mod quiescence;
+pub mod replay_benchmark;
 pub mod scene_dump;
 pub mod screenshot;
 pub mod session;

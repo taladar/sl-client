@@ -53,6 +53,13 @@ impl Default for FirstPersonAvatarVisible {
     }
 }
 
+/// Present while no avatar is drawn at all, for a replay benchmark that measures
+/// the world without them. The avatar layer's derender system owns each avatar
+/// anchor's visibility, so it is the one that honours this; a second writer
+/// would flip the anchors every frame and pay for it in the frames being timed.
+#[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SuppressAllAvatars;
+
 /// A request to enter [`CameraMode::Flycam`], or to leave it for third person —
 /// the same toggle the 6-DOF device's first button pulses, written by anything
 /// outside the world layer that offers the user a way in or out (the menu bar's

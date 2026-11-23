@@ -761,7 +761,9 @@ pub fn update_texture_caps(
 /// cache and announce it with a [`TextureDecoded`] message (emitted on failure
 /// too, so parked consumers can release their fallback state).
 pub fn poll_textures(
-    time: Res<Time>,
+    // Real time: a retry backoff waits for the outside world, so it must keep
+    // running while the simulation clock is paused.
+    time: Res<Time<Real>>,
     mut manager: ResMut<TextureManager>,
     mut store: ResMut<DecodedTextures>,
     mut decoded: MessageWriter<TextureDecoded>,

@@ -219,6 +219,9 @@ pub struct SessionContent {
     /// The avatar-state replay bundle (`--replay`), or `None` for a live login.
     /// Its presence is what puts the session in offline mode.
     pub replay: Option<crate::avatar_replay::ReplayConfig>,
+    /// The frame-time benchmark to run over that replay
+    /// (`--replay-benchmark`), or `None` for an ordinary replay.
+    pub benchmark: Option<sl_viewer_world_view::replay_benchmark::ReplayBenchmark>,
 }
 
 /// The unattended capture harness's configuration: where the PNG sequence
@@ -496,6 +499,7 @@ impl ViewerAppBuilder {
             repeat_animation,
             fetch_server_chat_history,
             replay,
+            benchmark,
         } = content;
         // Offline (avatar-state replay) mode: the plugin registers its event/resource
         // substrate but never logs in; the session is fed synthetic events from the
@@ -724,9 +728,13 @@ impl ViewerAppBuilder {
                     );
                 } else {
                     app.add_plugins(default_plugins.disable::<WinitPlugin>())
-                        .add_plugins(ScheduleRunnerPlugin::run_loop(
-                            core::time::Duration::from_secs_f64(1.0 / HEADLESS_FRAME_RATE),
-                        ));
+                        .add_plugins(ScheduleRunnerPlugin::run_loop(if benchmark.is_some() {
+                            // A frame-rate cap would hide every frame faster
+                            // than it, which is what a benchmark measures.
+                            core::time::Duration::ZERO
+                        } else {
+                            core::time::Duration::from_secs_f64(1.0 / HEADLESS_FRAME_RATE)
+                        }));
                 }
                 spawn_offscreen_window(&mut app, size);
                 app.add_plugins(sl_viewer_ui_core::synthetic_input::SyntheticInputPlugin);
@@ -942,6 +950,11 @@ impl ViewerAppBuilder {
         if let Some(config) = replay {
             app.insert_resource(config)
                 .add_plugins(crate::avatar_replay::AvatarReplayPlugin);
+        }
+        if let Some(benchmark) = benchmark {
+            app.add_plugins(
+                sl_viewer_world_view::replay_benchmark::ReplayBenchmarkPlugin { benchmark },
+            );
         }
         // In screenshot mode, capture a numbered PNG sequence after a startup delay,
         // then quit (the R11 offline-inspection harness) — from the window, or from

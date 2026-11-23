@@ -696,7 +696,9 @@ pub fn update_mesh_caps(
 /// cache and announce it with a [`MeshDecoded`] message (emitted on failure too,
 /// so the object system can stop waiting on it).
 pub fn poll_meshes(
-    time: Res<Time>,
+    // Real time: a retry backoff waits for the outside world, so it must keep
+    // running while the simulation clock is paused.
+    time: Res<Time<Real>>,
     mut manager: ResMut<MeshManager>,
     mut decoded: MessageWriter<MeshDecoded>,
 ) {

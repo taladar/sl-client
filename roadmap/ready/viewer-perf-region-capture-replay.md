@@ -61,9 +61,18 @@ p99 frame times from the `finished frame` messages in the settled window.
 - [x] Resume the Aditi recording for its 15 tree and grass textures. The first
   bundle did not know plants take theirs from a species table.
 - [x] Closing the viewer cancels a running bundle and waits at most 5 s.
-- [ ] Frozen environment, fixed animation clock, camera path.
-- [ ] Layer switches.
-- [ ] A/B comparison script.
+- [x] Frozen environment, fixed animation clock, camera path
+  (`--replay-benchmark`, `--replay-camera-path`). The simulation clock is
+  paused while the scene loads, then steps 1/60 s per frame. Two runs of the
+  Aditi recording rendered matching frames.
+- [x] Layer switches (`--replay-benchmark-layers all|world|avatars`).
+- [x] A/B comparison script (`scripts/replay-ab.py`), alternating runs ABBA.
+  Comparing one build with itself over 8 runs of 400 frames, the run-to-run
+  spread was 6% at p50, 11% at p95 and 27% at p99, so a smaller change at
+  those percentiles cannot be told from noise on this machine.
+- [ ] Reduce that spread, or use more rounds, before trusting small p99 changes.
+
+Particle emitters still use an unseeded random source.
 
 A distant teleport during a recording is not handled yet: the timeline does not
 carry `RegionChanged`, so replay would not purge the earlier region.

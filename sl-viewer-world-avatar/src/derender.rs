@@ -626,6 +626,7 @@ pub(crate) fn hide_suppressed_avatars(
     identity: Option<Res<SlIdentity>>,
     mode: Option<Res<CameraMode>>,
     body_visible: Option<Res<FirstPersonAvatarVisible>>,
+    suppress_all: Option<Res<sl_viewer_world_api::SuppressAllAvatars>>,
     mut visibilities: Query<&mut Visibility>,
 ) {
     let own = identity.as_deref().and_then(|identity| identity.agent_id);
@@ -635,7 +636,10 @@ pub(crate) fn hide_suppressed_avatars(
         let Ok(mut visibility) = visibilities.get_mut(anchor) else {
             continue;
         };
-        let wanted = if list.hides_in_world(agent.uuid()) || (own_hidden && Some(agent) == own) {
+        let wanted = if suppress_all.is_some()
+            || list.hides_in_world(agent.uuid())
+            || (own_hidden && Some(agent) == own)
+        {
             Visibility::Hidden
         } else {
             Visibility::Inherited
