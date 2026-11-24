@@ -2,7 +2,7 @@
 id: protocol-late-eac-suppresses-neighbour-seed
 title: A late EstablishAgentCommunication may suppress a neighbour's next seed
 topic: protocol
-status: bugs
+status: done
 origin: mixed-channel race audit (2026-11-23)
 ---
 
@@ -29,3 +29,18 @@ That neighbour's capability map is never fetched again.
 ## Fix
 
 Emit a held seed again when `announce_neighbour` opens a new child.
+
+## Fix (2026-11-24)
+
+Fixed differently from the plan above: the late seed is never held. The
+`EstablishAgentCommunication` handler now drops a seed for a simulator with no
+open circuit, which is what Firestorm does for an unknown region
+(`LLEstablishAgentCommunication::post` in `llworld.cpp`).
+
+- A teleport destination is always a child circuit before its seed matters, so
+  it is unaffected.
+- Second Life repeats the event every few seconds, so a seed that arrives before
+  `EnableSimulator` opens the child is resent anyway.
+
+Test: `a_seed_behind_its_neighbours_retirement_is_dropped`
+(`sl-proto/tests/lifecycle.rs`).

@@ -14303,6 +14303,54 @@ mod test {
         Ok(())
     }
 
+    /// The event queue can deliver a neighbour's seed behind the UDP
+    /// `DisableSimulator` that retired it. That seed names no circuit and is
+    /// dropped; held, it would make the same seed read as already known when
+    /// the neighbour comes back, and its capabilities would never be fetched.
+    #[test]
+    fn a_seed_behind_its_neighbours_retirement_is_dropped() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        let enable = sl_proto::parse_llsd_xml(
+            "<llsd><map><key>SimulatorInfo</key><array><map>\
+                <key>Handle</key><binary>AAPpAAAD6AA=</binary>\
+                <key>IP</key><binary>fwAAAQ==</binary>\
+                <key>Port</key><integer>9001</integer>\
+                </map></array></map></llsd>",
+        )?;
+        let seed = sl_proto::parse_llsd_xml(
+            "<llsd><map>\
+                <key>agent-id</key><uuid>00000000-0000-0000-0000-000000000001</uuid>\
+                <key>sim-ip-and-port</key><string>127.0.0.1:9001</string>\
+                <key>seed-capability</key><string>http://127.0.0.1:9001/seedB</string>\
+                </map></llsd>",
+        )?;
+        let seeds = |session: &mut Session| {
+            drain_events(session)
+                .iter()
+                .filter(|event| matches!(event, Event::NeighborSeed { .. }))
+                .count()
+        };
+
+        session.handle_caps_event("EnableSimulator", &enable, now)?;
+        session.handle_caps_event("EstablishAgentCommunication", &seed, now)?;
+        assert_eq!(seeds(&mut session), 1);
+
+        let disable = server_datagram(MessageId::Low(152), &[], 3, true)?;
+        session.handle_datagram(sim_b(), &disable, now)?;
+        session.handle_caps_event("EstablishAgentCommunication", &seed, now)?;
+        assert_eq!(seeds(&mut session), 0, "no circuit takes the late seed");
+
+        // The neighbour comes back with the seed it had: news again.
+        session.handle_caps_event("EnableSimulator", &enable, now)?;
+        session.handle_caps_event("EstablishAgentCommunication", &seed, now)?;
+        assert_eq!(seeds(&mut session), 1);
+        Ok(())
+    }
+
     #[test]
     fn caps_enable_simulator_opens_child_circuit() -> Result<(), TestError> {
         let now = Instant::now();
@@ -20519,6 +20567,65 @@ mod test {
                 ))
                 .is_none()
         );
+        Ok(())
+    }
+
+    /// A packet the region sent before a `KillObject` can arrive after it — a
+    /// resend of one that was lost, which keeps its original sequence number.
+    /// The update it carries is dropped, and so is a cache probe that would
+    /// fetch the object back; an update sent after the kill is the object
+    /// returning and is taken.
+    #[test]
+    fn an_update_sent_before_its_objects_kill_is_dropped() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        let circuit = session.root_circuit_id().ok_or("no circuit")?;
+        let id = ScopedObjectId::new(circuit, sl_proto::RegionLocalObjectId(400));
+        drain(&mut session)?;
+
+        let update = object_update(400, 0x5678, zero_vec());
+        session.handle_datagram(sim_addr(), &server_message(&update, 5, true)?, now)?;
+        let kill = AnyMessage::KillObject(KillObject {
+            object_data: vec![KillObjectObjectDataBlock { id: 400 }],
+        });
+        session.handle_datagram(sim_addr(), &server_message(&kill, 8, true)?, now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        // Packet 7, lost the first time, resent after the kill.
+        session.handle_datagram(sim_addr(), &server_message(&update, 7, true)?, now)?;
+        assert!(session.object(id).is_none(), "the resend brought it back");
+        assert!(
+            !drain_events(&mut session)
+                .iter()
+                .any(|event| matches!(event, Event::ObjectAdded(_))),
+        );
+
+        // Packet 6, a cache probe naming it, would ask for it again.
+        let cached = AnyMessage::ObjectUpdateCached(ObjectUpdateCached {
+            region_data: ObjectUpdateCachedRegionDataBlock {
+                region_handle: OBJ_REGION,
+                time_dilation: 0xFFFF,
+            },
+            object_data: vec![ObjectUpdateCachedObjectDataBlock {
+                id: 400,
+                crc: 7,
+                update_flags: 0,
+            }],
+        });
+        session.handle_datagram(sim_addr(), &server_message(&cached, 6, true)?, now)?;
+        assert!(
+            !drain(&mut session)?.iter().any(|message| matches!(
+                message,
+                AnyMessage::RequestMultipleObjects(request)
+                    if request.object_data.iter().any(|object| object.id == 400)
+            )),
+            "the stale probe fetched the killed object"
+        );
+
+        // Packet 9: sent after the kill, the object is back for real.
+        session.handle_datagram(sim_addr(), &server_message(&update, 9, true)?, now)?;
+        assert!(session.object(id).is_some());
         Ok(())
     }
 

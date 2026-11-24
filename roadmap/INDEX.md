@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 329 |
 | blocked | 35 |
 | in-progress | 4 |
-| bugs | 12 |
-| done | 1616 |
+| bugs | 10 |
+| done | 1618 |
 | deferred | 30 |
 | wont-do | 24 |
 | **total** | **2181** |
@@ -1244,14 +1244,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-text-renderability-axis`](in-progress/viewer-ui-text-renderability-axis.md)
   — Upstream issue — font selection cannot see glyph-format renderability
 
-## bugs (12)
-
-### protocol
-
-- [`protocol-killed-object-resurrected-by-resend`](bugs/protocol-killed-object-resurrected-by-resend.md)
-  — A resent ObjectUpdate after KillObject may leave a ghost object
-- [`protocol-late-eac-suppresses-neighbour-seed`](bugs/protocol-late-eac-suppresses-neighbour-seed.md)
-  — A late EstablishAgentCommunication may suppress a neighbour's next seed
+## bugs (10)
 
 ### viewer
 
@@ -1282,7 +1275,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`inventory-stale-folder-fetch-overwrites-newer-state`](bugs/inventory-stale-folder-fetch-overwrites-newer-state.md)
   — A stale folder fetch overwrites newer inventory, including the outfit folder
 
-## done (1616)
+## done (1618)
 
 ### protocol
 
@@ -1534,6 +1527,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   call or start p2p voice
 - [`protocol-join-session-voice-provisions-vivox`](done/protocol-join-session-voice-provisions-vivox.md)
   — Joining a session's voice posts a Vivox account provision
+- [`protocol-killed-object-resurrected-by-resend`](done/protocol-killed-object-resurrected-by-resend.md)
+  — A resent ObjectUpdate after KillObject may leave a ghost object
+- [`protocol-late-eac-suppresses-neighbour-seed`](done/protocol-late-eac-suppresses-neighbour-seed.md)
+  — A late EstablishAgentCommunication may suppress a neighbour's next seed
 - [`protocol-late-teleport-finish-after-failure`](done/protocol-late-teleport-finish-after-failure.md)
   — A TeleportFinish handled after its TeleportFailed starts a phantom teleport
 - [`protocol-login-options-max-agent-groups-unrequested`](done/protocol-login-options-max-agent-groups-unrequested.md)

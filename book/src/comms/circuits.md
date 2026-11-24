@@ -102,3 +102,16 @@ How each grid pings a circuit, resends on it and gives it up is measured in
 > - The neighbour/handover events are `Event` variants in
 >   `sl-proto/src/types/event.rs` (look for the `EnableSimulator` /
 >   `EstablishAgentCommunication` / region-change handling).
+> - The seed rides the event queue and the retirement (`DisableSimulator`) rides
+>   UDP, so a seed can arrive after its child is gone. The session drops a seed
+>   for a simulator it has no circuit to, as Firestorm drops one for an unknown
+>   region. Kept, it would make the neighbour's identical seed look already
+>   known when the neighbour came back, and that child's capabilities would
+>   never be fetched. Second Life repeats the event every few seconds, so a
+>   neighbour that is still there loses nothing.
+> - A `KillObject` is remembered for a minute with the sequence number of the
+>   packet that carried it. A resent packet keeps its original number, so an
+>   object update numbered below the kill was sent while the object still
+>   existed: it is dropped, and so is a cache probe or terse update that would
+>   ask for the object again. An update numbered above the kill is the object
+>   coming back and is taken.

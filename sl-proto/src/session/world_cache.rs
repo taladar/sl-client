@@ -14,9 +14,11 @@ use super::ParentRequest;
 use crate::scoped_id::{CircuitId, ScopedObjectId};
 use crate::types::{Object, ParcelInfo, TerrainPatch};
 use sl_types::key::ObjectKey;
-use sl_wire::{RegionFlags, RegionHandle, RegionLocalObjectId, RegionLocalParcelId};
+use sl_wire::{
+    RegionFlags, RegionHandle, RegionLocalObjectId, RegionLocalParcelId, SequenceNumber,
+};
 use std::collections::{BTreeMap, BTreeSet};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use uuid::Uuid;
 
 /// One region's object cache, keyed by region-local id.
@@ -78,6 +80,31 @@ pub(crate) struct WorldCache {
     /// until its own kill lands, and each mention would otherwise ask it to
     /// re-send the object, which would supersede the live copy in turn.
     superseded: BTreeSet<ScopedObjectId>,
+    /// Objects their region killed lately, with the packet that killed each
+    /// ([`note_kill`](Self::note_kill)), so an update the simulator sent
+    /// before the kill and that arrives after it — a resend of a lost packet —
+    /// does not bring the object back
+    /// ([`sent_before_kill`](Self::sent_before_kill)).
+    kills: BTreeMap<ScopedObjectId, Kill>,
+}
+
+/// How long a kill is remembered. A simulator gives up resending a packet
+/// within seconds; the window only bounds the record and keeps the sequence
+/// comparison far from a wrap of the counter.
+const KILL_MEMORY: Duration = Duration::from_secs(60);
+
+/// How far behind a kill's sequence number an update's may lie and still count
+/// as sent before it: half the counter's range, the usual serial-number
+/// comparison.
+const SEQUENCE_HALF_RANGE: u32 = 1 << 31;
+
+/// One remembered kill: the packet that carried it and when it arrived.
+#[derive(Debug, Clone, Copy)]
+struct Kill {
+    /// The sequence number of the packet carrying the `KillObject`.
+    sequence: SequenceNumber,
+    /// When the kill arrived.
+    at: Instant,
 }
 
 impl WorldCache {
@@ -97,6 +124,7 @@ impl WorldCache {
             script_request_circuits: BTreeMap::new(),
             by_full_id: BTreeMap::new(),
             superseded: BTreeSet::new(),
+            kills: BTreeMap::new(),
         }
     }
 
@@ -133,6 +161,7 @@ impl WorldCache {
         self.by_full_id
             .retain(|_full_id, scoped| scoped.circuit != circuit);
         self.superseded.retain(|scoped| scoped.circuit != circuit);
+        self.kills.retain(|scoped, _kill| scoped.circuit != circuit);
         self.objects.remove(&circuit).unwrap_or_default()
     }
 
@@ -286,6 +315,47 @@ impl WorldCache {
     /// [`supersede`](Self::supersede): its region is not to be asked for it.
     pub(crate) fn is_superseded(&self, scoped: ScopedObjectId) -> bool {
         self.superseded.contains(&scoped)
+    }
+
+    /// Remember that the packet `sequence` killed `scoped`, arriving at `now`,
+    /// and forget kills older than [`KILL_MEMORY`].
+    pub(crate) fn note_kill(
+        &mut self,
+        scoped: ScopedObjectId,
+        sequence: SequenceNumber,
+        now: Instant,
+    ) {
+        self.kills
+            .retain(|_scoped, kill| now.saturating_duration_since(kill.at) < KILL_MEMORY);
+        let _replaced = self.kills.insert(scoped, Kill { sequence, at: now });
+    }
+
+    /// Whether an update for `scoped` carried by the packet `sequence` was sent
+    /// before the region killed that object.
+    ///
+    /// A simulator numbers its packets as it sends them and a resend keeps the
+    /// original number, so an update numbered below the kill is one the region
+    /// sent while the object still existed. One numbered above it is the
+    /// object back for real — in view again, or rezzed under a reused id — and
+    /// ends the record. When the two numbers are too far apart to order (a
+    /// counter that wraps short of 32 bits), the update is kept.
+    pub(crate) fn sent_before_kill(
+        &mut self,
+        scoped: ScopedObjectId,
+        sequence: SequenceNumber,
+        now: Instant,
+    ) -> bool {
+        let Some(kill) = self.kills.get(&scoped).copied() else {
+            return false;
+        };
+        let behind = kill.sequence.get().wrapping_sub(sequence.get());
+        let stale = now.saturating_duration_since(kill.at) < KILL_MEMORY
+            && behind != 0
+            && behind < SEQUENCE_HALF_RANGE;
+        if !stale {
+            let _ended = self.kills.remove(&scoped);
+        }
+        stale
     }
 
     /// Drop `full_id`'s index entry if it still points at `scoped` (a newer

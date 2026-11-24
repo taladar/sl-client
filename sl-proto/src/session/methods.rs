@@ -831,7 +831,21 @@ impl Session {
             // open the child circuit; cache it for when the child is promoted to
             // root on a border crossing.
             CapsEvent::EstablishAgentCommunication => {
-                if let Some((sim, seed)) = establish_agent_communication_from_llsd(body) {
+                let Some((sim, seed)) = establish_agent_communication_from_llsd(body) else {
+                    self.caps_decode_failed(message);
+                    return Ok(());
+                };
+                if self.circuit_id_for(sim).is_none() {
+                    // A seed for a simulator no circuit is open to is dropped,
+                    // as Firestorm drops one for an unknown region. It is
+                    // late: the event queue delivered it behind the UDP
+                    // `DisableSimulator` that retired the child. Held, it
+                    // would read as already known when the neighbour comes
+                    // back with the same seed, and that child's capabilities
+                    // would never be fetched. A neighbour that is still there
+                    // repeats the event, so nothing it needs is lost.
+                    tracing::debug!(%sim, "dropping a seed for a simulator with no circuit");
+                } else {
                     // Second Life repeats this event — every five seconds for
                     // some neighbours, and for all of them when the draw
                     // distance changes — always with the seed it sent first. A
@@ -850,8 +864,6 @@ impl Session {
                             seed_capability: seed,
                         });
                     }
-                } else {
-                    self.caps_decode_failed(message);
                 }
             }
             // The agent has physically crossed a region border; OpenSim signals
@@ -2675,8 +2687,8 @@ impl Session {
         // reply's exact shape (`RUST_LOG=sl_proto::wire=trace`).
         tracing::trace!(target: "sl_proto::wire", name = message.name(), %from, ?message, "UDP message");
         let handled = match role {
-            CircuitRole::Root => self.dispatch(from, &message, now),
-            CircuitRole::Child => self.dispatch_child(from, &message, now),
+            CircuitRole::Root => self.dispatch(from, parsed.sequence, &message, now),
+            CircuitRole::Child => self.dispatch_child(from, parsed.sequence, &message, now),
         };
         if let Err(error) = handled {
             let name = message.name();
@@ -3020,15 +3032,17 @@ impl Session {
     /// signals that mean something only to a child — the confirmation of a
     /// deferred teleport handover, and the circuit's retirement. The crossing
     /// into a child region is driven by `CrossedRegion` on the root circuit.
+    /// `sequence` is the number of the packet that carried `message`.
     fn dispatch_child(
         &mut self,
         from: SocketAddr,
+        sequence: SequenceNumber,
         message: &AnyMessage,
         now: Instant,
     ) -> Result<(), Error> {
         // A child agent still receives the neighbour region's object stream;
         // cache it so a roaming/proximity bot sees adjacent regions too.
-        if self.try_dispatch_object(from, message, now)? {
+        if self.try_dispatch_object(from, sequence, message, now)? {
             return Ok(());
         }
         // Everything a child shares with the root circuit, handled once for
@@ -3140,9 +3154,15 @@ impl Session {
     /// `ScriptRunningReply`, `ScriptDialog`, `ScriptQuestion`) that arrive on the
     /// root *and* child circuits, keyed by the source simulator `from`. Returns `true`
     /// if `message` was an object message (and thus fully handled here).
+    ///
+    /// `sequence`, the number of the packet carrying `message`, orders an
+    /// update against a kill of the same object: an update the region sent
+    /// before its `KillObject` is dropped
+    /// ([`update_predates_kill`](Self::update_predates_kill)).
     fn try_dispatch_object(
         &mut self,
         from: SocketAddr,
+        sequence: SequenceNumber,
         message: &AnyMessage,
         now: Instant,
     ) -> Result<bool, Error> {
@@ -3152,7 +3172,11 @@ impl Session {
                 self.note_time_dilation(from, region_handle, update.region_data.time_dilation);
                 let mut batch = self.open_object_batch(from, ObjectUpdateForm::Full, region_handle);
                 for block in &update.object_data {
-                    batch.name(self, RegionLocalObjectId(block.id));
+                    let local_id = RegionLocalObjectId(block.id);
+                    batch.name(self, local_id);
+                    if self.update_predates_kill(from, sequence, local_id, now) {
+                        continue;
+                    }
                     self.upsert_object(from, now, object_from_full_update(block, region_handle)?);
                 }
                 batch.close(self);
@@ -3169,6 +3193,9 @@ impl Session {
                         block.update_flags,
                     ) {
                         batch.name(self, object.local_id);
+                        if self.update_predates_kill(from, sequence, object.local_id, now) {
+                            continue;
+                        }
                         self.upsert_object(from, now, object);
                     }
                 }
@@ -3209,6 +3236,9 @@ impl Session {
                 );
                 batch.entries = entries;
                 batch.close(self);
+                // A probe sent before the object's kill must not fetch it back.
+                misses
+                    .retain(|&local_id| !self.update_predates_kill(from, sequence, local_id, now));
                 self.request_object_ids(from, &misses, now);
             }
             AnyMessage::ImprovedTerseObjectUpdate(update) => {
@@ -3238,6 +3268,10 @@ impl Session {
                     }
                 }
                 batch.close(self);
+                // A killed object is no longer held, so its late motion would
+                // otherwise read as a miss and fetch it back.
+                misses
+                    .retain(|&local_id| !self.update_predates_kill(from, sequence, local_id, now));
                 self.request_object_ids(from, &misses, now);
             }
             AnyMessage::KillObject(kill) => {
@@ -3276,6 +3310,10 @@ impl Session {
                     }
                 }
                 for id in going {
+                    // Remembered so an update the region sent before this kill,
+                    // arriving behind it as a resend, cannot bring it back.
+                    self.world
+                        .note_kill(ScopedObjectId::new(circuit_id, id), sequence, now);
                     let removed = self
                         .world
                         .remove_object(ScopedObjectId::new(circuit_id, id));
@@ -3829,6 +3867,36 @@ impl Session {
         true
     }
 
+    /// Whether an update for `local_id` from the region at `from`, carried by
+    /// the packet numbered `sequence`, was sent before that region killed the
+    /// object — a resend of a lost packet overtaken by the kill, or a reordered
+    /// one. Such an update is dropped — the guard Firestorm carries compiled
+    /// out (`IGNORE_DEAD` in `llviewerobjectlist.cpp`). Left in, it would put
+    /// the killed object back in the scene with nothing to remove it again.
+    fn update_predates_kill(
+        &mut self,
+        from: SocketAddr,
+        sequence: SequenceNumber,
+        local_id: RegionLocalObjectId,
+        now: Instant,
+    ) -> bool {
+        let Some(circuit) = self.circuit_id_for(from) else {
+            return false;
+        };
+        let stale =
+            self.world
+                .sent_before_kill(ScopedObjectId::new(circuit, local_id), sequence, now);
+        if stale {
+            tracing::debug!(
+                %from,
+                ?local_id,
+                %sequence,
+                "dropping an object update the region sent before killing the object"
+            );
+        }
+        stale
+    }
+
     /// Sends a `RequestMultipleObjects` (full cache-miss) for the given local ids
     /// on the circuit at `from` (root or child). Best-effort: a missing circuit or
     /// encode failure is ignored (these are speculative fetches driven by the
@@ -4222,16 +4290,18 @@ impl Session {
         }
     }
 
-    /// Acts on a decoded inbound message received on the root circuit `from`.
+    /// Acts on a decoded inbound message received on the root circuit `from`,
+    /// carried by the packet numbered `sequence`.
     fn dispatch(
         &mut self,
         from: SocketAddr,
+        sequence: SequenceNumber,
         message: &AnyMessage,
         now: Instant,
     ) -> Result<(), Error> {
         // Object/scene-graph updates arrive on the root *and* child circuits;
         // handle them uniformly, keyed by the source sim.
-        if self.try_dispatch_object(from, message, now)? {
+        if self.try_dispatch_object(from, sequence, message, now)? {
             return Ok(());
         }
         match message {
