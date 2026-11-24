@@ -106,6 +106,17 @@ struct FolderEntry {
     /// [`INVENTORY_FETCH_MAX_ATTEMPTS`](crate::INVENTORY_FETCH_MAX_ATTEMPTS)
     /// gives up on the folder ([`Failed`](FolderState::Failed)).
     fetch_failures: u32,
+    /// Whether the folder's contents changed while its descendents request was
+    /// in flight — an item filed, moved or removed, a sub-folder added or
+    /// taken away, or a newer version reported by an AIS3 reply. The reply to
+    /// that request may describe the folder from before the change, so it is
+    /// not folded ([`Inventory::fold_descendents`]).
+    changed_while_fetching: bool,
+    /// The version of the last reply refused as stale, until the folder next
+    /// loads. A UDP reply comes in several packets; once the first is refused,
+    /// the rest of that reply, arriving while no new fetch is in flight, are
+    /// refused with it.
+    refused_version: Option<i32>,
     /// The keys of this folder's immediate sub-folders.
     child_folders: BTreeSet<InventoryFolderKey>,
     /// The keys of the items filed directly in this folder.
@@ -120,6 +131,11 @@ impl FolderEntry {
     /// the failure count is left alone so a retry series still converges on
     /// [`Failed`](FolderState::Failed).
     fn start_fetch(&mut self, now: Instant) {
+        // A request sent now sees every change made so far; one already in
+        // flight does not, so its record of a change stands.
+        if !matches!(self.state, FolderState::Fetching) {
+            self.changed_while_fetching = false;
+        }
         self.state = FolderState::Fetching;
         self.fetch_deadline = Some(
             now.checked_add(crate::INVENTORY_FETCH_TIMEOUT)
@@ -134,7 +150,39 @@ impl FolderEntry {
     const fn clear_fetch(&mut self) {
         self.fetch_deadline = None;
         self.fetch_failures = 0;
+        self.changed_while_fetching = false;
+        self.refused_version = None;
     }
+}
+
+/// What became of a descendents reply offered to
+/// [`Inventory::fold_descendents`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DescendentsFold {
+    /// Folded in: the folder is [`Loaded`](FolderState::Loaded) at the reply's
+    /// version.
+    Applied,
+    /// Older than what the model holds, so dropped: the folder is back to
+    /// [`Unknown`](FolderState::Unknown) and is to be fetched again.
+    Stale,
+}
+
+/// One folder's descendents as a reply lists them, for
+/// [`Inventory::fold_descendents`].
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct DescendentsReply<'reply> {
+    /// The folder the reply describes.
+    pub(crate) folder: InventoryFolderKey,
+    /// The folder's version as the reply states it.
+    pub(crate) version: i32,
+    /// The sub-folders the reply lists.
+    pub(crate) folders: &'reply [InventoryFolder],
+    /// The items the reply lists.
+    pub(crate) items: &'reply [InventoryItem],
+    /// Whether the reply lists the whole folder. A capability or AIS3 reply
+    /// does; a UDP `InventoryDescendents` can be one of several packets, each
+    /// with part of the contents.
+    pub(crate) complete: bool,
 }
 
 /// The held inventory model — both the agent tree and the Library tree.
@@ -369,9 +417,21 @@ impl Inventory {
             state: FolderState::Unknown,
             fetch_deadline: None,
             fetch_failures: 0,
+            changed_while_fetching: false,
+            refused_version: None,
             child_folders: BTreeSet::new(),
             child_items: BTreeSet::new(),
         })
+    }
+
+    /// Records that `folder`'s contents changed, which matters only while its
+    /// descendents request is in flight: the reply may predate the change.
+    fn note_change(&mut self, folder: InventoryFolderKey) {
+        if let Some(entry) = self.folders.get_mut(&folder)
+            && matches!(entry.state, FolderState::Fetching)
+        {
+            entry.changed_while_fetching = true;
+        }
     }
 
     /// Inserts or updates a folder's metadata under `owner`, maintaining the
@@ -397,6 +457,12 @@ impl Inventory {
         {
             folder.version = existing.version;
         }
+        if let Some(old) = old_parent {
+            self.note_change(old);
+        }
+        if let Some(new) = new_parent {
+            self.note_change(new);
+        }
         if old_parent != new_parent {
             if let Some(old) = old_parent
                 && let Some(parent) = self.folders.get_mut(&old)
@@ -418,6 +484,10 @@ impl Inventory {
         let key = item.item_id;
         let new_folder = item.folder_id;
         let old_folder = self.items.get(&key).map(|existing| existing.folder_id);
+        if let Some(old) = old_folder {
+            self.note_change(old);
+        }
+        self.note_change(new_folder);
         if old_folder != Some(new_folder) {
             if let Some(old) = old_folder
                 && let Some(folder) = self.folders.get_mut(&old)
@@ -441,6 +511,8 @@ impl Inventory {
             return true;
         }
         held.asset_id = asset_id;
+        let folder = held.folder_id;
+        self.note_change(folder);
         self.dirty = true;
         true
     }
@@ -478,7 +550,26 @@ impl Inventory {
     /// state after a create / move / remove our optimistic cache cannot fully mirror
     /// — chiefly a Current Outfit Folder link removal (its DELETE reply carries no
     /// removed item, so nothing else drops the stale link).
+    ///
+    /// A folder whose fetch is in flight stays [`Fetching`](FolderState::Fetching)
+    /// but has its version advanced and the change recorded, so the reply — which
+    /// may describe the folder from before the mutation — is not folded and the
+    /// folder is fetched again ([`fold_descendents`](Self::fold_descendents)).
     pub(crate) fn invalidate_folder(&mut self, folder: InventoryFolderKey, version: i32) {
+        if let Some(entry) = self.folders.get_mut(&folder)
+            && matches!(entry.state, FolderState::Fetching)
+            && entry
+                .folder
+                .as_ref()
+                .is_none_or(|payload| version > payload.version)
+        {
+            entry.changed_while_fetching = true;
+            if let Some(payload) = entry.folder.as_mut() {
+                payload.version = version;
+            }
+            self.dirty = true;
+            return;
+        }
         if let Some(entry) = self.folders.get_mut(&folder)
             && let FolderState::Loaded { version: current } = entry.state
             && version > current
@@ -518,6 +609,10 @@ impl Inventory {
             }
             None => return,
         };
+        if let Some(old) = old_parent {
+            self.note_change(old);
+        }
+        self.note_change(new_parent);
         if old_parent == Some(new_parent) {
             return;
         }
@@ -552,6 +647,8 @@ impl Inventory {
             }
             None => return,
         };
+        self.note_change(old_folder);
+        self.note_change(new_folder);
         if old_folder == new_folder {
             return;
         }
@@ -569,6 +666,8 @@ impl Inventory {
         self.dirty = true;
         if let Some(payload) = self.items.get_mut(&item) {
             payload.flags = flags;
+            let folder = payload.folder_id;
+            self.note_change(folder);
         }
     }
 
@@ -576,6 +675,7 @@ impl Inventory {
     /// (whole subtrees) — leaving the folder's own (now-empty) entry in place.
     pub(crate) fn purge_descendents(&mut self, folder: InventoryFolderKey) {
         self.dirty = true;
+        self.note_change(folder);
         let Some((child_folders, child_items)) = self
             .folders
             .get(&folder)
@@ -607,21 +707,105 @@ impl Inventory {
             .and_then(|entry| entry.folder.as_ref())
             .and_then(|payload| payload.parent_id);
         self.folders.remove(&folder);
-        if let Some(parent) = parent
-            && let Some(parent) = self.folders.get_mut(&parent)
-        {
-            parent.child_folders.remove(&folder);
+        if let Some(parent) = parent {
+            self.note_change(parent);
+            if let Some(parent) = self.folders.get_mut(&parent) {
+                parent.child_folders.remove(&folder);
+            }
         }
     }
 
     /// Removes an item, unlinking it from its containing folder's child set.
     pub(crate) fn remove_item(&mut self, item: InventoryKey) {
         self.dirty = true;
-        if let Some(payload) = self.items.remove(&item)
-            && let Some(folder) = self.folders.get_mut(&payload.folder_id)
-        {
-            folder.child_items.remove(&item);
+        if let Some(payload) = self.items.remove(&item) {
+            self.note_change(payload.folder_id);
+            if let Some(folder) = self.folders.get_mut(&payload.folder_id) {
+                folder.child_items.remove(&item);
+            }
         }
+    }
+
+    /// Folds one folder's descendents reply into the model, unless it is older
+    /// than what the model holds.
+    ///
+    /// A reply is stale when the folder changed while its request was in
+    /// flight, or when it states a version below the one held — an AIS3 reply
+    /// advanced it in the meantime. Folded, a stale reply would put back what
+    /// was removed and move the version backwards, the Current Outfit Folder's
+    /// included. It is dropped instead. When it was the answer to the fetch in
+    /// flight, the folder returns to [`Unknown`](FolderState::Unknown) to be
+    /// fetched again, and the refusal counts against the folder's retry
+    /// budget: once that is spent the reply is folded anyway, so a grid whose
+    /// versions disagree across channels costs a few fetches, not an endless
+    /// loop. The other packets of a refused UDP reply are refused with it.
+    ///
+    /// A current reply that lists the whole folder
+    /// ([`complete`](DescendentsReply::complete)) also drops the items and
+    /// sub-folders the model holds there but the reply no longer names: they
+    /// were moved or deleted somewhere this model did not hear of.
+    pub(crate) fn fold_descendents(
+        &mut self,
+        reply: DescendentsReply<'_>,
+        owner: InventoryOwner,
+    ) -> DescendentsFold {
+        if let Some(entry) = self.folders.get_mut(&reply.folder) {
+            let fetching = matches!(entry.state, FolderState::Fetching);
+            let behind = entry
+                .folder
+                .as_ref()
+                .is_some_and(|payload| reply.version < payload.version);
+            let rest_of_refused = !fetching && entry.refused_version == Some(reply.version);
+            if entry.changed_while_fetching || behind || rest_of_refused {
+                if !fetching {
+                    return DescendentsFold::Stale;
+                }
+                let failures = entry.fetch_failures.saturating_add(1);
+                if failures < crate::INVENTORY_FETCH_MAX_ATTEMPTS {
+                    entry.state = FolderState::Unknown;
+                    entry.fetch_deadline = None;
+                    entry.fetch_failures = failures;
+                    entry.changed_while_fetching = false;
+                    entry.refused_version = Some(reply.version);
+                    return DescendentsFold::Stale;
+                }
+            }
+        }
+        for folder in reply.folders {
+            self.cache_folder(folder.clone(), owner);
+        }
+        for item in reply.items {
+            self.cache_item(item.clone(), owner);
+        }
+        if reply.complete
+            && let Some(entry) = self.folders.get(&reply.folder)
+        {
+            let listed_items: BTreeSet<InventoryKey> =
+                reply.items.iter().map(|item| item.item_id).collect();
+            let listed_folders: BTreeSet<InventoryFolderKey> = reply
+                .folders
+                .iter()
+                .map(|folder| folder.folder_id)
+                .collect();
+            let gone_items: Vec<InventoryKey> = entry
+                .child_items
+                .difference(&listed_items)
+                .copied()
+                .collect();
+            let gone_folders: Vec<InventoryFolderKey> = entry
+                .child_folders
+                .difference(&listed_folders)
+                .copied()
+                .collect();
+            for item in gone_items {
+                self.remove_item(item);
+            }
+            for folder in gone_folders {
+                self.remove_folder(folder);
+            }
+        }
+        self.mark_folder_loaded(reply.folder, reply.version, owner);
+        DescendentsFold::Applied
     }
 
     // ---- background-fetch scheduling (B6) -----------------------------------
@@ -875,7 +1059,9 @@ mod tests {
     use sl_wire::Permissions5;
     use uuid::Uuid;
 
-    use super::{FolderState, Instant, Inventory, InventoryOwner};
+    use super::{
+        DescendentsFold, DescendentsReply, FolderState, Instant, Inventory, InventoryOwner,
+    };
     use crate::types::{InventoryFolder, InventoryItem};
 
     /// A folder key from a small constant.
@@ -1336,5 +1522,156 @@ mod tests {
         let second = inv.next_callback();
         assert_eq!(first.get(), 1);
         assert_eq!(second.get(), 2);
+    }
+
+    /// A descendents reply listing `folders` and `items` of folder `id` at
+    /// `version`, whole when `complete`.
+    fn reply<'reply>(
+        id: u128,
+        version: i32,
+        folders: &'reply [InventoryFolder],
+        items: &'reply [InventoryItem],
+        complete: bool,
+    ) -> DescendentsReply<'reply> {
+        DescendentsReply {
+            folder: fk(id),
+            version,
+            folders,
+            items,
+            complete,
+        }
+    }
+
+    /// A model holding folder `0xF0` at version 4 with items `0xD1` and `0xD2`,
+    /// loaded, and a fetch of it now in flight.
+    fn fetching_outfit(now: Instant) -> Inventory {
+        let mut inv = Inventory::new();
+        inv.cache_folder(folder(0xF0, None, 4), InventoryOwner::Agent);
+        let held = [item(0xD1, 0xF0), item(0xD2, 0xF0)];
+        let fold = inv.fold_descendents(reply(0xF0, 4, &[], &held, true), InventoryOwner::Agent);
+        assert_eq!(fold, DescendentsFold::Applied);
+        inv.mark_folder_fetching(fk(0xF0), now);
+        inv
+    }
+
+    /// The audit's bad order: a link is removed while the folder's fetch is in
+    /// flight, and the reply, sent before the removal, lands after it. It is
+    /// refused rather than putting the link back, and the folder goes back to
+    /// the crawl; the next reply is current and is folded.
+    #[test]
+    fn a_reply_overtaken_by_a_removal_is_refused() {
+        let now = Instant::now();
+        let mut inv = fetching_outfit(now);
+        inv.remove_item(ik(0xD2));
+
+        let before = [item(0xD1, 0xF0), item(0xD2, 0xF0)];
+        let fold = inv.fold_descendents(reply(0xF0, 4, &[], &before, true), InventoryOwner::Agent);
+        assert_eq!(fold, DescendentsFold::Stale);
+        assert_eq!(child_item_ids(&inv, 0xF0), vec![0xD1], "the link came back");
+        assert_eq!(inv.folder_state(fk(0xF0)), Some(FolderState::Unknown));
+
+        inv.mark_folder_fetching(fk(0xF0), now);
+        let after = [item(0xD1, 0xF0)];
+        let fold = inv.fold_descendents(reply(0xF0, 5, &[], &after, true), InventoryOwner::Agent);
+        assert_eq!(fold, DescendentsFold::Applied);
+        assert_eq!(
+            inv.folder_state(fk(0xF0)),
+            Some(FolderState::Loaded { version: 5 })
+        );
+    }
+
+    /// An AIS3 reply that advances a folder mid-fetch moves its version on at
+    /// once; the older fetch reply cannot move it back.
+    #[test]
+    fn a_reply_older_than_an_ais_update_is_refused() {
+        let now = Instant::now();
+        let mut inv = fetching_outfit(now);
+        inv.invalidate_folder(fk(0xF0), 6);
+        assert_eq!(inv.folder(fk(0xF0)).map(|f| f.version), Some(6));
+
+        let old = [item(0xD1, 0xF0), item(0xD2, 0xF0)];
+        let fold = inv.fold_descendents(reply(0xF0, 5, &[], &old, true), InventoryOwner::Agent);
+        assert_eq!(fold, DescendentsFold::Stale);
+        assert_eq!(inv.folder(fk(0xF0)).map(|f| f.version), Some(6));
+    }
+
+    /// A current reply that lists the whole folder drops what it no longer
+    /// names, items and sub-folders alike; one packet of a UDP reply lists
+    /// only part of the folder and drops nothing.
+    #[test]
+    fn a_complete_reply_prunes_what_it_omits() {
+        let now = Instant::now();
+        let mut inv = Inventory::new();
+        inv.cache_folder(folder(0xF0, None, 4), InventoryOwner::Agent);
+        inv.cache_folder(folder(0xF1, Some(0xF0), 1), InventoryOwner::Agent);
+        inv.cache_item(item(0xD1, 0xF0), InventoryOwner::Agent);
+        inv.cache_item(item(0xD2, 0xF0), InventoryOwner::Agent);
+        inv.mark_folder_fetching(fk(0xF0), now);
+
+        let part = [item(0xD1, 0xF0)];
+        let fold = inv.fold_descendents(reply(0xF0, 5, &[], &part, false), InventoryOwner::Agent);
+        assert_eq!(fold, DescendentsFold::Applied);
+        assert_eq!(child_item_ids(&inv, 0xF0), vec![0xD1, 0xD2]);
+        assert_eq!(child_folder_ids(&inv, 0xF0), vec![0xF1]);
+
+        inv.mark_folder_fetching(fk(0xF0), now);
+        let fold = inv.fold_descendents(reply(0xF0, 6, &[], &part, true), InventoryOwner::Agent);
+        assert_eq!(fold, DescendentsFold::Applied);
+        assert_eq!(child_item_ids(&inv, 0xF0), vec![0xD1]);
+        assert_eq!(child_folder_ids(&inv, 0xF0), Vec::<u128>::new());
+        assert!(inv.item(ik(0xD2)).is_none());
+    }
+
+    /// The other packets of a refused UDP reply are refused with it, without
+    /// spending the folder's retry budget.
+    #[test]
+    fn the_rest_of_a_refused_reply_is_refused_with_it() {
+        let now = Instant::now();
+        let mut inv = fetching_outfit(now);
+        inv.remove_item(ik(0xD2));
+        let first = [item(0xD1, 0xF0)];
+        let second = [item(0xD2, 0xF0)];
+        assert_eq!(
+            inv.fold_descendents(reply(0xF0, 4, &[], &first, false), InventoryOwner::Agent),
+            DescendentsFold::Stale
+        );
+        assert_eq!(
+            inv.fold_descendents(reply(0xF0, 4, &[], &second, false), InventoryOwner::Agent),
+            DescendentsFold::Stale
+        );
+        assert!(inv.item(ik(0xD2)).is_none());
+        assert_eq!(
+            inv.folders.get(&fk(0xF0)).map(|e| e.fetch_failures),
+            Some(1)
+        );
+    }
+
+    /// A grid whose versions disagree across channels must not make the folder
+    /// refetch forever: once the retry budget is spent, the reply is folded.
+    #[test]
+    fn refusals_end_with_the_retry_budget() {
+        let now = Instant::now();
+        let mut inv = fetching_outfit(now);
+        inv.invalidate_folder(fk(0xF0), 9);
+        let listed = [item(0xD1, 0xF0)];
+        let mut refusals = 0_u32;
+        while inv.fold_descendents(reply(0xF0, 5, &[], &listed, true), InventoryOwner::Agent)
+            == DescendentsFold::Stale
+        {
+            refusals = refusals.saturating_add(1);
+            assert!(
+                refusals < crate::INVENTORY_FETCH_MAX_ATTEMPTS,
+                "it never gave in"
+            );
+            inv.mark_folder_fetching(fk(0xF0), now);
+        }
+        assert_eq!(
+            refusals,
+            crate::INVENTORY_FETCH_MAX_ATTEMPTS.saturating_sub(1)
+        );
+        assert_eq!(
+            inv.folder_state(fk(0xF0)),
+            Some(FolderState::Loaded { version: 5 })
+        );
     }
 }

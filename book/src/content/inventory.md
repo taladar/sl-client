@@ -88,6 +88,23 @@ folder can even be *known to exist* before its own metadata arrives — the entr
 then tracks its state and child links with an absent payload until the metadata
 lands.
 
+A descendents reply can be overtaken while it is in flight: an AIS3 mutation or
+a grid push (`RemoveInventoryObjects`, a bulk update) changes the folder after
+the grid answered the fetch. `Inventory::fold_descendents` therefore drops a
+reply in two cases: the folder changed while the fetch was in flight, or the
+reply states a version below the one held (an AIS3 reply's
+`_updated_category_versions` advances it immediately). The folder goes back to
+`Unknown` to be fetched again. The session asks for it itself when the
+background crawl is off. Each refusal counts against the folder's retry budget,
+and once that is spent the reply is taken anyway, so versions that disagree
+across channels cannot keep the folder refetching forever.
+
+A current reply that lists the whole folder (a capability or AIS3 reply)
+replaces its contents: items and sub-folders it no longer names are dropped.
+A UDP reply may be one of several packets and prunes nothing. Without these
+rules, a link taken out of the Current Outfit Folder came back and the folder's
+version moved backwards.
+
 ## Reading the held model
 
 The roots are `Session::inventory_root` and `Session::library_root` (each an

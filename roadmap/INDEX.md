@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 329 |
 | blocked | 35 |
 | in-progress | 4 |
-| bugs | 10 |
-| done | 1618 |
+| bugs | 8 |
+| done | 1620 |
 | deferred | 30 |
 | wont-do | 24 |
 | **total** | **2181** |
@@ -1244,7 +1244,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-text-renderability-axis`](in-progress/viewer-ui-text-renderability-axis.md)
   — Upstream issue — font selection cannot see glyph-format renderability
 
-## bugs (10)
+## bugs (8)
 
 ### viewer
 
@@ -1254,8 +1254,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Some worn mesh hair does not render (visible in Firestorm)
 - [`viewer-near-avatar-stuck-coarse-sphere`](bugs/viewer-near-avatar-stuck-coarse-sphere.md)
   — A nearby avatar stays a coarse sphere even as the camera closes in
-- [`viewer-outfit-change-during-bake-is-lost`](bugs/viewer-outfit-change-during-bake-is-lost.md)
-  — An outfit change during the server bake handshake is lost
 - [`viewer-perf-steady-state-46fps-ceiling`](bugs/viewer-perf-steady-state-46fps-ceiling.md)
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
 - [`viewer-rigged-hair-triangle-pattern`](bugs/viewer-rigged-hair-triangle-pattern.md)
@@ -1270,12 +1268,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-line-before-memberships-splits-session`](bugs/chat-group-line-before-memberships-splits-session.md)
   — A group chat line before the membership list opens a separate conference
 
-### inventory
-
-- [`inventory-stale-folder-fetch-overwrites-newer-state`](bugs/inventory-stale-folder-fetch-overwrites-newer-state.md)
-  — A stale folder fetch overwrites newer inventory, including the outfit folder
-
-## done (1618)
+## done (1620)
 
 ### protocol
 
@@ -2653,6 +2646,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-opensim-trash-folder-not-resolved`](done/viewer-opensim-trash-folder-not-resolved.md)
   — OpenSim — object-pie Delete does nothing (Trash system folder never
   resolved)
+- [`viewer-outfit-change-during-bake-is-lost`](done/viewer-outfit-change-during-bake-is-lost.md)
+  — An outfit change during the server bake handshake is lost
 - [`viewer-outline-swallows-thin-hollow-prim`](done/viewer-outline-swallows-thin-hollow-prim.md)
   — The selection outline fills a thin-walled hollow prim white instead of
   outlining it
@@ -3915,6 +3910,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Command/Event pull-bridge
 - [`inventory-b9`](done/inventory-b9-clientdirectories-struct-chat-log-retrofit.md)
   — ClientDirectories struct + chat-log retrofit
+- [`inventory-stale-folder-fetch-overwrites-newer-state`](done/inventory-stale-folder-fetch-overwrites-newer-state.md)
+  — A stale folder fetch overwrites newer inventory, including the outfit folder
 
 ### missing
 

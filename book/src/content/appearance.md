@@ -41,6 +41,14 @@ of **baked textures** (head, upper body, lower body, …). Historically the
   and the region bakes, via the `UpdateAvatarAppearance` capability. The client
   requests this with `Command::RequestServerAppearanceUpdate`.
 
+The request names a Current Outfit Folder version, and the grid bakes that
+version. If the outfit changes while a request is in flight, the bake answering
+it may show the old outfit. The viewer (`sl-viewer-world-avatar`'s
+`appearance.rs`) therefore notes a change that arrives mid-handshake, whether a
+new `AgentWearables` or a newer copy of the outfit folder. Once the grid answers
+the request in flight, it reads the outfit folder version again and requests
+one more bake, however many changes were noted.
+
 Other avatars' finished appearance arrives as `Event::AvatarAppearance` (the
 baked texture set and visual parameters); the client can also answer
 cached-texture queries (`Command::RequestCachedTextures` →

@@ -140,6 +140,50 @@ pub struct ServerBakeState {
     own_appearance_seen: bool,
     /// The appearance refresh in flight, if any.
     refresh: Option<CofRefresh>,
+    /// Whether the outfit changed while a handshake was under way.
+    outfit_during_round: OutfitDuringRound,
+}
+
+/// Whether the outfit changed while a handshake round was under way. The round
+/// in flight may already have read the Current Outfit Folder version, or sent
+/// its request with it, so it cannot be relied on to cover the change; another
+/// round runs once it ends ([`BakeStage::Done`]).
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+enum OutfitDuringRound {
+    /// Nothing changed since the round began.
+    #[default]
+    Unchanged,
+    /// The outfit changed: bake again when the round ends.
+    Changed,
+}
+
+impl ServerBakeState {
+    /// Whether a handshake round is under way: its folder snapshot or its bake
+    /// request is awaiting an answer.
+    const fn in_handshake(&self) -> bool {
+        matches!(
+            self.stage,
+            BakeStage::FoldersRequested | BakeStage::BakeRequested
+        )
+    }
+
+    /// Ends the round in flight and, when the outfit changed during it, starts
+    /// the next one by reading the Current Outfit Folder version again.
+    fn finish_round(&mut self, writer: &mut MessageWriter<SlCommand>) {
+        self.stage = BakeStage::Done;
+        if core::mem::take(&mut self.outfit_during_round) == OutfitDuringRound::Changed {
+            self.start_round(writer);
+            debug!("the outfit changed during the bake; re-running the server appearance bake");
+        }
+    }
+
+    /// Starts a handshake round by snapshotting the inventory folders to read
+    /// the current Current Outfit Folder version.
+    fn start_round(&mut self, writer: &mut MessageWriter<SlCommand>) {
+        writer.write(SlCommand(Command::QueryInventoryFolders));
+        self.stage = BakeStage::FoldersRequested;
+        self.attempts = 0;
+    }
 }
 
 /// The version of the agent's Current Outfit Folder in the inventory-folder
@@ -221,11 +265,11 @@ pub fn drive_server_bake(
                 expected_cof_version,
             } if state.stage == BakeStage::BakeRequested => {
                 if *success {
-                    state.stage = BakeStage::Done;
                     info!(
                         "server appearance bake accepted (COF version {})",
                         state.cof_version
                     );
+                    state.finish_round(&mut writer);
                 } else if let Some(expected) = *expected_cof_version
                     && expected != state.cof_version
                     && state.attempts < MAX_BAKE_ATTEMPTS
@@ -238,11 +282,11 @@ pub fn drive_server_bake(
                     }));
                     debug!("COF version mismatch; retrying the bake at version {expected}");
                 } else {
-                    state.stage = BakeStage::Done;
                     let reason = error
                         .clone()
                         .unwrap_or_else(|| "no reason given".to_owned());
                     warn!("server appearance bake not accepted: {reason}");
+                    state.finish_round(&mut writer);
                 }
             }
             // The simulator lost one of our baked textures and is asking for a
@@ -253,9 +297,7 @@ pub fn drive_server_bake(
             SlSessionEvent::RebakeAvatarTextures { .. }
                 if state.cap_available && state.stage == BakeStage::Done =>
             {
-                writer.write(SlCommand(Command::QueryInventoryFolders));
-                state.stage = BakeStage::FoldersRequested;
-                state.attempts = 0;
+                state.start_round(&mut writer);
                 debug!("simulator requested a rebake; re-running the server appearance bake");
             }
             // A runtime outfit change (took off / swapped a worn layer): the sim
@@ -267,16 +309,22 @@ pub fn drive_server_bake(
             // re-bake in `bake_inputs`. The re-read picks up the new COF version;
             // should the version-bump `BulkUpdateInventory` not have landed yet, the
             // grid answers with the version it `expected` and the existing mismatch
-            // recovery retries with it. A change mid-handshake is ignored — the
-            // in-flight bake reads the latest cached version. Inert without the
-            // capability (OpenSim, which the local composite covers instead).
+            // recovery retries with it. A change mid-handshake waits for the
+            // round in flight to end and then runs another (`outfit_during_round`):
+            // that round may have read the version, or sent it, before the
+            // change. Inert without the capability (OpenSim, which the local
+            // composite covers instead).
             SlSessionEvent::AgentWearables { .. }
                 if state.cap_available && state.stage == BakeStage::Done =>
             {
-                writer.write(SlCommand(Command::QueryInventoryFolders));
-                state.stage = BakeStage::FoldersRequested;
-                state.attempts = 0;
+                state.start_round(&mut writer);
                 debug!("own outfit changed at runtime; re-running the server appearance bake");
+            }
+            SlSessionEvent::AgentWearables { .. }
+                if state.cap_available && state.in_handshake() =>
+            {
+                state.outfit_during_round = OutfitDuringRound::Changed;
+                debug!("own outfit changed during the bake handshake; baking again after it");
             }
             // The Current Outfit Folder's contents reconverged after a wear /
             // take-off / detach mutated its links (its re-fetch, driven by the AIS3
@@ -293,10 +341,20 @@ pub fn drive_server_bake(
                 && state.cof_folder == Some(*folder_id)
                 && *version > state.cof_version =>
             {
-                writer.write(SlCommand(Command::QueryInventoryFolders));
-                state.stage = BakeStage::FoldersRequested;
-                state.attempts = 0;
+                state.start_round(&mut writer);
                 debug!("Current Outfit Folder reconverged; re-running the server appearance bake");
+            }
+            SlSessionEvent::InventoryDescendents {
+                folder_id, version, ..
+            } if state.cap_available
+                && state.in_handshake()
+                && state.cof_folder == Some(*folder_id)
+                && *version > state.cof_version =>
+            {
+                state.outfit_during_round = OutfitDuringRound::Changed;
+                debug!(
+                    "Current Outfit Folder changed during the bake handshake; baking again after it"
+                );
             }
             // An appearance for our own avatar. One with visual params is the
             // grid's account of us; one without, after a real one, says the grid
@@ -617,6 +675,74 @@ mod tests {
             }],
         )?;
         assert!(commands.is_empty());
+        assert_eq!(
+            world.resource::<ServerBakeState>().stage,
+            super::BakeStage::Done
+        );
+        Ok(())
+    }
+
+    /// An outfit change that lands after the bake request went out cannot be
+    /// covered by it: once that round ends, accepted or not, another reads
+    /// the Current Outfit Folder again. Both triggers count, the legacy
+    /// wearables and the outfit folder's own re-fetch, and two changes in one
+    /// round make one more round, not two.
+    #[test]
+    fn an_outfit_change_during_the_bake_bakes_again_after_it() -> Result<(), String> {
+        let mut world = bake_world();
+        let map = [CAP_UPDATE_AVATAR_APPEARANCE]
+            .into_iter()
+            .map(|name| (name.to_owned(), format!("https://caps.example/{name}")))
+            .collect();
+        let _written = world.write_message(SlCapabilities(map));
+        let _query = step(&mut world, Vec::new())?;
+        let (commands, _) = step(
+            &mut world,
+            vec![SlSessionEvent::InventoryFolders(
+                vec![folder(FolderType::CurrentOutfit, 160)].into(),
+            )],
+        )?;
+        assert!(matches!(
+            commands.as_slice(),
+            [Command::RequestServerAppearanceUpdate { cof_version: 160 }]
+        ));
+
+        let cof_refetched = SlSessionEvent::InventoryDescendents {
+            folder_id: InventoryFolderKey::from(Uuid::from_u128(0)),
+            version: 161,
+            descendents: 0,
+            folders: Vec::new(),
+            items: Vec::new(),
+        };
+        let wearables = SlSessionEvent::AgentWearables {
+            serial: 2,
+            wearables: Vec::new(),
+        };
+        let (commands, _) = step(&mut world, vec![wearables, cof_refetched])?;
+        assert!(commands.is_empty(), "the round in flight must finish first");
+
+        let accepted = SlSessionEvent::ServerAppearanceUpdate {
+            success: true,
+            error: None,
+            expected_cof_version: None,
+        };
+        let (commands, _) = step(&mut world, vec![accepted.clone()])?;
+        assert!(matches!(
+            commands.as_slice(),
+            [Command::QueryInventoryFolders]
+        ));
+        let (commands, _) = step(
+            &mut world,
+            vec![SlSessionEvent::InventoryFolders(
+                vec![folder(FolderType::CurrentOutfit, 161)].into(),
+            )],
+        )?;
+        assert!(matches!(
+            commands.as_slice(),
+            [Command::RequestServerAppearanceUpdate { cof_version: 161 }]
+        ));
+        let (commands, _) = step(&mut world, vec![accepted])?;
+        assert!(commands.is_empty(), "one change, one more round");
         assert_eq!(
             world.resource::<ServerBakeState>().stage,
             super::BakeStage::Done

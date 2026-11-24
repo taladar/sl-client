@@ -35,6 +35,7 @@ use super::conversions::{
     skeleton_folder, teleport_failed_from_caps_llsd, teleport_finish_from_llsd, trimmed_string,
     voice_channel_info_from_llsd, windlight_refresh_from_llsd,
 };
+use super::inventory::{DescendentsFold, DescendentsReply};
 use super::transfers::Transfers;
 use super::world_cache::WorldCache;
 use super::{
@@ -892,9 +893,16 @@ impl Session {
                         // to — agent or Library — so a `FetchLibDescendents2`
                         // response folds under the Library owner.
                         let owner = self.inventory_reply_owner(*folder_id);
-                        self.cache_inventory(folders, items, owner);
-                        self.inventory
-                            .mark_folder_loaded(*folder_id, *version, owner);
+                        let reply = DescendentsReply {
+                            folder: *folder_id,
+                            version: *version,
+                            folders,
+                            items,
+                            complete: true,
+                        };
+                        if !self.fold_descendents(reply, owner, now) {
+                            continue;
+                        }
                     }
                     self.events.push_back(event);
                 }
@@ -919,9 +927,17 @@ impl Session {
                         ..
                     } = &listing
                     {
-                        self.cache_inventory(folders, items, owner);
-                        self.inventory
-                            .mark_folder_loaded(*folder_id, *version, owner);
+                        // Every folder the listing opened is listed whole.
+                        let reply = DescendentsReply {
+                            folder: *folder_id,
+                            version: *version,
+                            folders,
+                            items,
+                            complete: true,
+                        };
+                        if !self.fold_descendents(reply, owner, now) {
+                            continue;
+                        }
                     }
                     self.events.push_back(listing);
                 }
@@ -4844,16 +4860,24 @@ impl Session {
                 // Route into the tree the target folder belongs to (agent or
                 // Library), so a UDP Library fetch stays in the Library tree.
                 let owner = self.inventory_reply_owner(folder_id);
-                self.cache_inventory(&folders, &items, owner);
-                self.inventory
-                    .mark_folder_loaded(folder_id, reply.agent_data.version, owner);
-                self.events.push_back(Event::InventoryDescendents {
-                    folder_id,
+                // A large folder comes in several of these, each with part of
+                // the contents, so none of them may prune what it omits.
+                let partial = DescendentsReply {
+                    folder: folder_id,
                     version: reply.agent_data.version,
-                    descendents: reply.agent_data.descendents,
-                    folders,
-                    items,
-                });
+                    folders: &folders,
+                    items: &items,
+                    complete: false,
+                };
+                if self.fold_descendents(partial, owner, now) {
+                    self.events.push_back(Event::InventoryDescendents {
+                        folder_id,
+                        version: reply.agent_data.version,
+                        descendents: reply.agent_data.descendents,
+                        folders,
+                        items,
+                    });
+                }
             }
             // A single item the simulator created or whose asset it replaced
             // (the reply to `CreateInventoryItem`, or an accepted inventory
@@ -12225,6 +12249,44 @@ impl Session {
         }
         for item in items {
             self.inventory.cache_item(item.clone(), owner);
+        }
+    }
+
+    /// Folds one folder's descendents reply into the held model, returning
+    /// whether it was taken. A reply older than what the model holds is
+    /// dropped ([`Inventory::fold_descendents`]), and the caller surfaces
+    /// nothing for it: a consumer that read it would put back what was removed.
+    ///
+    /// A folder the refusal leaves [`Unknown`](FolderState::Unknown) is
+    /// fetched again by the background crawl. With the crawl off, nothing
+    /// else would fetch it, and a consumer waiting on the folder would wait
+    /// forever, so the session asks for it itself.
+    fn fold_descendents(
+        &mut self,
+        reply: DescendentsReply<'_>,
+        owner: InventoryOwner,
+        now: Instant,
+    ) -> bool {
+        match self.inventory.fold_descendents(reply, owner) {
+            DescendentsFold::Applied => true,
+            DescendentsFold::Stale => {
+                tracing::debug!(
+                    folder = %reply.folder,
+                    version = reply.version,
+                    "dropping an inventory descendents reply older than the held folder"
+                );
+                if !self.background_inventory_fetch
+                    && self.inventory.folder_state(reply.folder) == Some(FolderState::Unknown)
+                    && let Err(error) = self.request_folder_contents(reply.folder, now)
+                {
+                    tracing::warn!(
+                        folder = %reply.folder,
+                        %error,
+                        "could not fetch an inventory folder again after a stale reply"
+                    );
+                }
+                false
+            }
         }
     }
 
