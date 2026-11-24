@@ -369,6 +369,7 @@ const fn event_name(event: &Event) -> &'static str {
         Event::ConferenceSessionParticipant { .. } => "conference_session_participant",
         Event::ConferenceInvited { .. } => "conference_invited",
         Event::ChatSessionStarted { .. } => "chat_session_started",
+        Event::ChatSessionMovedToGroup { .. } => "chat_session_moved_to_group",
         Event::ChatSessionAgentsUpdated { .. } => "chat_session_agents_updated",
         Event::ChatSessionEventReply { .. } => "chat_session_event_reply",
         Event::ChatSessionForceClosed { .. } => "chat_session_force_closed",

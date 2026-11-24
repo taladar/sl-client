@@ -778,6 +778,7 @@ impl Survey {
             | Event::ConferenceSessionParticipant { .. }
             | Event::ConferenceInvited { .. }
             | Event::ChatSessionStarted { .. }
+            | Event::ChatSessionMovedToGroup { .. }
             | Event::ChatSessionAgentsUpdated { .. }
             | Event::ChatSessionEventReply { .. }
             | Event::ChatSessionForceClosed { .. }

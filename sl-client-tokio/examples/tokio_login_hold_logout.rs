@@ -305,6 +305,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             } => info!(
                 "chat session {temp_session_id:?} started as {session_id:?}                  (success={success}) named {session_name:?}"
             ),
+            Event::ChatSessionMovedToGroup { group_id } => {
+                info!("conference session moved onto group {group_id:?}");
+            }
             Event::ChatSessionAgentsUpdated {
                 session_id,
                 updates,

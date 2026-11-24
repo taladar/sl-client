@@ -2,7 +2,7 @@
 id: chat-group-line-before-memberships-splits-session
 title: A group chat line before the membership list opens a separate conference
 topic: chat
-status: bugs
+status: done
 origin: mixed-channel race audit (2026-11-23)
 ---
 
@@ -32,3 +32,24 @@ rest of the login.
 
 When a membership list arrives, re-key matching Conference sessions to Group
 and emit an event so the UI moves the tab.
+
+## Fix (2026-11-24)
+
+Fixed as planned.
+
+- When `note_memberships` takes a membership list or a successful join, it
+  moves a `Conference` session under a group's id onto that group's session.
+  A group session already open absorbs it, its lines first, adding its roster,
+  typers and unread count.
+- `Event::ChatSessionMovedToGroup` is queued before the membership event, and
+  the viewer's Conversations floater moves the tab with `rekey`.
+- `rekey` now puts the moved tab's lines in front when it merges into an
+  existing tab. That is also the right order for a conference we started
+  whose invitation beat the start reply.
+
+Transcript lines already written to disk stay in the conference's file.
+
+Tests: `a_group_line_before_the_memberships_moves_to_the_group` in
+`sl-proto/tests/lifecycle.rs`, and the strengthened merge check in
+`a_started_conference_follows_the_grid_s_session_id` in
+`sl-viewer-people/src/conversations.rs`.

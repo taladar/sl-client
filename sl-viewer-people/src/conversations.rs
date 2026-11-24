@@ -718,6 +718,10 @@ impl ConversationModel {
     /// session id *we* minted follows the grid's answer onto the id the session
     /// really has ([`SlSessionEvent::ChatSessionStarted`]).
     ///
+    /// It also moves a group conversation that was opened as a conference
+    /// because its first line beat the membership list
+    /// ([`SlSessionEvent::ChatSessionMovedToGroup`]).
+    ///
     /// If a conversation already exists under `to` (the invitation to our own
     /// conference outran the start reply), the two are merged into it rather
     /// than left as two tabs for one session. Returns whether anything moved,
@@ -733,7 +737,11 @@ impl ConversationModel {
         match self.index_of(to) {
             Some(existing) => {
                 if let Some(entry) = self.entries.get_mut(existing) {
-                    entry.lines.extend(moved.lines);
+                    // The moved conversation began first in both cases that
+                    // move one (our own conference's first lines, a group line
+                    // filed as a conference), so its lines go in front.
+                    let later = std::mem::replace(&mut entry.lines, moved.lines);
+                    entry.lines.extend(later);
                     while entry.lines.len() > HISTORY_CAP {
                         entry.lines.pop_front();
                     }
@@ -2215,6 +2223,16 @@ pub(crate) fn ingest_conversation_events(
                     info!("conversations: conference start refused: {error}");
                     let _closed = model.close(from);
                 }
+            }
+            // A group line that beat the membership list was filed as a
+            // conference; the runtime has moved its registry entry onto the
+            // group, so the tab follows it rather than leaving the
+            // conversation split across a Conference and a Group tab.
+            SlSessionEvent::ChatSessionMovedToGroup { group_id } => {
+                let _moved = model.rekey(
+                    ConversationKey::Conference(ImSessionId::from(group_id.uuid())),
+                    ConversationKey::Group(*group_id),
+                );
             }
             // Harvest group names so a group tab is titled for the group, not a
             // raw id (mirrors the chat-log's name harvesting).
@@ -3879,9 +3897,16 @@ mod tests {
         model.push_remote(second, speaker, "Avatar One", "from the invitation");
         assert!(model.rekey(real, second));
         assert_eq!(
-            get(&model, second).map(|entry| entry.lines.len()),
-            Some(2),
-            "both transcripts ended up in the one surviving tab"
+            get(&model, second).map(|entry| entry
+                .lines
+                .iter()
+                .map(|line| line.body.clone())
+                .collect::<Vec<_>>()),
+            Some(vec![
+                "before the reply".to_owned(),
+                "from the invitation".to_owned()
+            ]),
+            "both transcripts ended up in the one surviving tab, the moved one first"
         );
         assert!(!model.has_conversation(real));
     }

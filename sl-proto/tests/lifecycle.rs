@@ -4620,6 +4620,134 @@ mod test {
         Ok(())
     }
 
+    /// A group line that beats the membership list (Second Life, just after
+    /// login) is filed as a conference; when the list names the group, that
+    /// conference moves onto the group session (merging, its lines first, into
+    /// one already open) and the move is announced before the memberships, so
+    /// one conversation does not run on in two sessions. A conference under an
+    /// id that is no group stays where it is.
+    #[test]
+    fn a_group_line_before_the_memberships_moves_to_the_group() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let group = uuid::Uuid::from_u128(0x6720);
+        let other = uuid::Uuid::from_u128(0x6721);
+        let line = |id: uuid::Uuid, from_group: bool, text: &str| {
+            AnyMessage::ImprovedInstantMessage(ImprovedInstantMessage {
+                agent_data: ImprovedInstantMessageAgentDataBlock {
+                    agent_id: uuid::Uuid::from_u128(0x6722),
+                    session_id: uuid::Uuid::nil(),
+                },
+                message_block: ImprovedInstantMessageMessageBlockBlock {
+                    from_group,
+                    to_agent_id: uuid::Uuid::from_u128(1),
+                    parent_estate_id: 0,
+                    region_id: uuid::Uuid::nil(),
+                    position: Vector {
+                        x: 0.0,
+                        y: 0.0,
+                        z: 0.0,
+                    },
+                    offline: 0,
+                    dialog: 17,
+                    id,
+                    timestamp: 0,
+                    from_agent_name: b"Friend Tester\0".to_vec(),
+                    message: format!("{text}\0").into_bytes(),
+                    binary_bucket: vec![0],
+                },
+                estate_block: ImprovedInstantMessageEstateBlockBlock { estate_id: 0 },
+                meta_data: Vec::new(),
+            })
+        };
+        session.handle_datagram(
+            sim_addr(),
+            &server_message(&line(group, false, "first"), 9, true)?,
+            now,
+        )?;
+        session.handle_datagram(
+            sim_addr(),
+            &server_message(&line(other, false, "elsewhere"), 10, true)?,
+            now,
+        )?;
+        // A group session already open under the group (an OpenSim-style line
+        // with `from_group` set), which the conference must merge into.
+        session.handle_datagram(
+            sim_addr(),
+            &server_message(&line(group, true, "second"), 11, true)?,
+            now,
+        )?;
+        drain(&mut session)?;
+        let conference = ChatSessionKind::Conference {
+            id: ImSessionId::from(group),
+        };
+        let group_kind = ChatSessionKind::Group {
+            group_id: GroupKey::from(group),
+        };
+        assert!(session.chat_sessions().any(|kind| kind == conference));
+        assert!(session.chat_sessions().any(|kind| kind == group_kind));
+
+        let memberships = Event::GroupMemberships(vec![sl_proto::GroupMembership {
+            group_id: GroupKey::from(group),
+            group_powers: 0,
+            accept_notices: true,
+            group_insignia_id: sl_proto::TextureKey::from(uuid::Uuid::nil()),
+            contribution: sl_proto::LandArea(0),
+            group_name: "A Group".to_owned(),
+        }]);
+        session.handle_caps_event(
+            "AgentGroupDataUpdate",
+            &sl_proto::group_memberships_to_caps_llsd(&memberships)?,
+            now,
+        )?;
+        let events = drain_events(&mut session);
+        let moved = events.iter().position(|event| {
+            matches!(
+                event,
+                Event::ChatSessionMovedToGroup { group_id } if group_id.uuid() == group
+            )
+        });
+        let listed = events
+            .iter()
+            .position(|event| matches!(event, Event::GroupMemberships(_)));
+        assert!(
+            matches!((moved, listed), (Some(moved), Some(listed)) if moved < listed),
+            "the move is announced, before the memberships: {events:?}"
+        );
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(event, Event::ChatSessionMovedToGroup { .. }))
+                .count(),
+            1,
+            "only the group's conference moved"
+        );
+        assert!(!session.chat_sessions().any(|kind| kind == conference));
+        assert!(session.chat_sessions().any(|kind| kind
+            == ChatSessionKind::Conference {
+                id: ImSessionId::from(other)
+            }));
+        let texts: Vec<&str> = session
+            .history(group_kind)
+            .map(|message| message.text.as_str())
+            .collect();
+        assert_eq!(texts, ["first", "second"]);
+        assert_eq!(session.unread(group_kind), 2);
+
+        // A later line under the group goes to the group session.
+        session.handle_datagram(
+            sim_addr(),
+            &server_message(&line(group, false, "third"), 12, true)?,
+            now,
+        )?;
+        drain(&mut session)?;
+        assert!(!session.chat_sessions().any(|kind| kind == conference));
+        assert_eq!(session.history_len(group_kind), 3);
+        Ok(())
+    }
+
     #[test]
     fn group_session_message_surfaces_event() -> Result<(), TestError> {
         let now = Instant::now();

@@ -133,7 +133,13 @@ Second Life sends group chat — the lines and the invitations — with
 `from_group` **clear**, so `Session` reads a session line as a group's by its
 id: one of the groups the agent is in (it keeps the list from
 `AgentGroupDataUpdate`, joins, leaves and drops), or a group session that is
-open. And Second Life refuses a session line with an empty bucket; every
+open. A line or invitation that arrives before that list, as one can just
+after login, is filed as a conference; when the list (or a join) names its id
+as a group, the conference moves onto the group's session, merging into one
+already open with its lines first, and `Event::ChatSessionMovedToGroup`,
+queued before the membership event, tells the driver to move its own tab. The
+transcript lines already written to disk stay in the conference's file. And
+Second Life refuses a session line with an empty bucket; every
 session line goes out with the reference's one zero byte. What each grid does
 with a session is measured in [Grid Behaviour: Group and conference
 sessions](../gridspec/chat.md#group-and-conference-sessions).

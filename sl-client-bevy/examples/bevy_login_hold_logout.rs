@@ -417,6 +417,7 @@ fn on_events(
             | SlSessionEvent::ConferenceSessionParticipant { .. }
             | SlSessionEvent::ConferenceInvited { .. }
             | SlSessionEvent::ChatSessionStarted { .. }
+            | SlSessionEvent::ChatSessionMovedToGroup { .. }
             | SlSessionEvent::ChatSessionAgentsUpdated { .. }
             | SlSessionEvent::ChatSessionEventReply { .. }
             | SlSessionEvent::ChatSessionForceClosed { .. }

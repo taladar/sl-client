@@ -1434,6 +1434,20 @@ pub enum Event {
         /// The grid's failure reason (empty on success).
         error: String,
     },
+    /// A session opened as an ad-hoc conference turned out to be a group's.
+    /// Second Life sends group chat with `from_group` clear, so a group line
+    /// (or invitation) that arrives before the agent's group memberships is
+    /// read as a conference; when the membership list (or a join) names that
+    /// id as a group, the session registry moves the
+    /// [`Conference`](ChatSessionKind::Conference) entry onto the
+    /// [`Group`](ChatSessionKind::Group) one, merging into a group session
+    /// already open, before this event is surfaced. A driver moves whatever
+    /// *it* keyed by the conference (an open conversation tab, say). Surfaced
+    /// before the membership event that caused it.
+    ChatSessionMovedToGroup {
+        /// The group, whose id is also the id the conference was opened under.
+        group_id: GroupKey,
+    },
     /// The grid's answer to something said or done in a group or conference
     /// session — the CAPS event-queue `ChatterBoxSessionEventReply`. The
     /// reference shows the error of a refusal and nothing else.

@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 329 |
 | blocked | 35 |
 | in-progress | 4 |
-| bugs | 8 |
-| done | 1620 |
+| bugs | 7 |
+| done | 1621 |
 | deferred | 30 |
 | wont-do | 24 |
 | **total** | **2181** |
@@ -1244,7 +1244,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-text-renderability-axis`](in-progress/viewer-ui-text-renderability-axis.md)
   — Upstream issue — font selection cannot see glyph-format renderability
 
-## bugs (8)
+## bugs (7)
 
 ### viewer
 
@@ -1263,12 +1263,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-texture-filtering-in-linear-space`](bugs/viewer-texture-filtering-in-linear-space.md)
   — Colour textures are filtered after sRGB decoding, the reference before
 
-### chat
-
-- [`chat-group-line-before-memberships-splits-session`](bugs/chat-group-line-before-memberships-splits-session.md)
-  — A group chat line before the membership list opens a separate conference
-
-## done (1620)
+## done (1621)
 
 ### protocol
 
@@ -3824,6 +3819,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Optional local chat-log files (runtime, all text chat)
 - [`chat-group-history-server-side`](done/chat-group-history-server-side.md) —
   Server-side group / session chat history ("fetch history")
+- [`chat-group-line-before-memberships-splits-session`](done/chat-group-line-before-memberships-splits-session.md)
+  — A group chat line before the membership list opens a separate conference
 - [`chat-invitation-line-transcript-gaps`](done/chat-invitation-line-transcript-gaps.md)
   — A conference invitation's line is not transcribed, and a group one is under
   Do Not Disturb

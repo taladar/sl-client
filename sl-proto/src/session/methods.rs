@@ -8052,12 +8052,17 @@ impl Session {
         match event {
             Event::GroupMemberships(groups) => {
                 self.member_groups = groups.iter().map(|group| group.group_id).collect();
+                let joined: Vec<GroupKey> = self.member_groups.iter().copied().collect();
+                for group_id in joined {
+                    self.move_conference_to_group(group_id);
+                }
             }
             Event::JoinGroupResult {
                 group_id,
                 success: true,
             } => {
                 self.member_groups.insert(*group_id);
+                self.move_conference_to_group(*group_id);
             }
             Event::LeaveGroupResult {
                 group_id,
@@ -8069,6 +8074,35 @@ impl Session {
             }
             _ => {}
         }
+    }
+
+    /// Moves a conference session opened under `group_id` onto that group's
+    /// session, now that the agent is known to be in the group. Second Life
+    /// sends group chat with `from_group` clear, so a line or invitation that
+    /// arrived before the membership list was filed as a conference; left
+    /// there, one conversation would run on in two sessions for the rest of
+    /// the login. A group session already open absorbs it. Queues
+    /// [`Event::ChatSessionMovedToGroup`] when anything moved.
+    fn move_conference_to_group(&mut self, group_id: GroupKey) {
+        let conference = ChatSessionKind::Conference {
+            id: ImSessionId::from(group_id.uuid()),
+        };
+        let Some(earlier) = self.chat_sessions.remove(&conference) else {
+            return;
+        };
+        match self
+            .chat_sessions
+            .entry(ChatSessionKind::Group { group_id })
+        {
+            std::collections::btree_map::Entry::Occupied(mut existing) => {
+                existing.get_mut().absorb_earlier(earlier);
+            }
+            std::collections::btree_map::Entry::Vacant(slot) => {
+                let _session = slot.insert(earlier);
+            }
+        }
+        self.events
+            .push_back(Event::ChatSessionMovedToGroup { group_id });
     }
 
     /// Whether session traffic under `session` is a group session's: it says

@@ -627,6 +627,34 @@ impl ChatSession {
         self.participants.extend(agents);
     }
 
+    /// Folds `earlier`, the same conversation tracked under another key until
+    /// now, into this session: its log goes in front of ours (it began first),
+    /// trimmed to [`HISTORY_CAP`] keeping the newest, and its roster, typers
+    /// and unread count are added to ours. A pending invitation here takes
+    /// `earlier`'s joined state, since traffic there meant we were in the
+    /// session. Voice and server history stay ours: they belong to the session
+    /// as the grid now names it.
+    pub(crate) fn absorb_earlier(&mut self, earlier: Self) {
+        let mut history = earlier.history;
+        history.extend(self.history.drain(..));
+        while history.len() > HISTORY_CAP {
+            let _dropped = history.pop_front();
+        }
+        self.history = history;
+        self.participants.extend(earlier.participants);
+        for (agent, since) in earlier.typing {
+            let entry = self.typing.entry(agent).or_insert(since);
+            *entry = (*entry).max(since);
+        }
+        self.unread = self.unread.saturating_add(earlier.unread);
+        self.last_activity = self.last_activity.max(earlier.last_activity);
+        if matches!(self.lifecycle, ChatSessionLifecycle::Invited(_))
+            && earlier.lifecycle == ChatSessionLifecycle::Joined
+        {
+            self.lifecycle = ChatSessionLifecycle::Joined;
+        }
+    }
+
     /// Drops `agent` from every per-agent set: an avatar who went offline is no
     /// longer typing, no longer in the roster, and no longer voice-connected.
     /// Idempotent — it layers with the sim's own `SessionLeave` and the typing
