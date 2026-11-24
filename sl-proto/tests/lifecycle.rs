@@ -16708,6 +16708,103 @@ mod test {
         Ok(())
     }
 
+    /// A distant teleport keeps the circuit to the region it left, as the
+    /// reference viewer keeps every circuit it has opened: the region's pings
+    /// are answered after the agent has gone, and a teleport back carries on
+    /// over that circuit, its sequence numbers continuing, rather than opening
+    /// a new one numbered from 1. Left silent past the inactivity timeout, the
+    /// kept circuit is dropped.
+    #[test]
+    fn a_distant_teleport_keeps_the_circuit_it_left() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut session, mut grid) = grid_session(now)?;
+        session.teleport_to(
+            RegionHandle(C_HANDLE),
+            region_coords(128.0, 128.0, 30.0),
+            vec3(1.0, 0.0, 0.0),
+            now,
+        )?;
+        grid.teleport_finish(&mut session, sim_addr(), sim_c(), now)?;
+        grid.pump(&mut session, now)?;
+        assert_eq!(session.region_handle(), Some(RegionHandle(C_HANDLE)));
+        drain_events(&mut session);
+
+        let ping = |id: u8| {
+            AnyMessage::StartPingCheck(sl_wire::messages::StartPingCheck {
+                ping_id: sl_wire::messages::StartPingCheckPingIDBlock {
+                    ping_id: id,
+                    oldest_unacked: 0,
+                },
+            })
+        };
+        session.handle_datagram(sim_addr(), &server_message(&ping(7), 2000, false)?, now)?;
+        assert!(
+            matches!(
+                take_transmit_to(&mut session, sim_addr()),
+                Some(AnyMessage::CompletePingCheck(reply)) if reply.ping_id.ping_id == 7
+            ),
+            "the region left behind still has its ping answered"
+        );
+        assert!(
+            drain_events(&mut session)
+                .iter()
+                .all(|event| !matches!(event, Event::Ping { sim, .. } if *sim == sim_addr())),
+            "nothing about the region left behind reaches the application"
+        );
+
+        // Back again: the first datagram to the old simulator continues its
+        // numbering.
+        session.teleport_to(
+            RegionHandle(SRC_HANDLE),
+            region_coords(128.0, 128.0, 30.0),
+            vec3(1.0, 0.0, 0.0),
+            now,
+        )?;
+        grid.teleport_finish(&mut session, sim_c(), sim_addr(), now)?;
+        let mut first = None;
+        while let Some(transmit) = session.poll_transmit() {
+            if transmit.destination == sim_addr() {
+                first = Some(transmit);
+                break;
+            }
+        }
+        let first = first.ok_or("expected a datagram to the region returned to")?;
+        assert!(matches!(decode(&first)?, AnyMessage::UseCircuitCode(_)));
+        // The header's sequence number, big-endian by hand (the workspace
+        // forbids the endianness-explicit conversions).
+        let sequence = first
+            .payload
+            .get(1..5)
+            .ok_or("short datagram")?
+            .iter()
+            .fold(0_u32, |acc, byte| (acc << 8) | u32::from(*byte));
+        assert!(
+            sequence > 1,
+            "the kept circuit's numbering carries on: {sequence}"
+        );
+        grid.pump(&mut session, now)?;
+        assert_eq!(session.region_handle(), Some(RegionHandle(SRC_HANDLE)));
+
+        // The circuit kept to C goes silent while the root goes on talking.
+        drain_events(&mut session);
+        let root_alive = now + Duration::from_secs(40);
+        session.handle_datagram(
+            sim_addr(),
+            &server_message(&ping(8), 2500, false)?,
+            root_alive,
+        )?;
+        let later = now + Duration::from_secs(46);
+        session.handle_timeout(later);
+        assert!(!session.is_closed());
+        while session.poll_transmit().is_some() {}
+        session.handle_datagram(sim_c(), &server_message(&ping(9), 3000, false)?, later)?;
+        assert!(
+            take_transmit_to(&mut session, sim_c()).is_none(),
+            "a kept circuit gone silent is dropped"
+        );
+        Ok(())
+    }
+
     /// A distant teleport's destination greets the client **before** the
     /// handover commits, on a circuit that is still a child — and its
     /// `RegionInfoHandshake` already names the destination's handle, so a

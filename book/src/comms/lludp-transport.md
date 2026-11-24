@@ -152,3 +152,13 @@ When a value comes out wrong by byte-swap, this is almost always the cause.
 >   add only what is theirs — which of their own messages the session cannot
 >   survive losing (`severity_of`).
 > - `PacketAck` is a generated message (see [Messages](messages.md)).
+> - Two `tracing` targets log the client's UDP traffic, each message with every
+>   block and field. `sl_proto::wire` logs each inbound message before the
+>   session reads it. `sl_proto::wire::sent` logs each message a circuit sends,
+>   with the simulator it goes to. `RUST_LOG=sl_proto::wire=trace` turns on
+>   both. `RUST_LOG=sl_proto::wire::sent=trace` turns on only the sent side,
+>   which is small enough to leave on through a long live run that would
+>   otherwise drown in the inbound object stream. For a log of message names
+>   alone, `sl_proto::session::methods=trace` logs each inbound UDP message and
+>   CAPS event by name. A stalled request is found by pairing the sent line
+>   with what did (or did not) come back.

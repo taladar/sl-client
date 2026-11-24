@@ -415,6 +415,17 @@ impl Circuit {
         reliability: Reliability,
         now: Instant,
     ) -> Result<(), WireError> {
+        // Our side of the exchange, beside the inbound `sl_proto::wire` trace,
+        // so a wire log of a stalled step shows what was asked as well as
+        // what came back (`RUST_LOG=sl_proto::wire=trace`; the sent side alone,
+        // without the inbound object stream, is `sl_proto::wire::sent=trace`).
+        tracing::trace!(
+            target: "sl_proto::wire::sent",
+            name = message.name(),
+            to = %self.sim_addr,
+            ?message,
+            "UDP message sent"
+        );
         self.link
             .send(message, reliability, severity_of(message), now)
     }

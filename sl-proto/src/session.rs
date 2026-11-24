@@ -1970,6 +1970,18 @@ pub struct Session {
     /// `EstablishAgentCommunication` event), keyed by simulator address; used as
     /// the new seed when a child is promoted to root.
     child_seeds: BTreeMap<SocketAddr, url::Url>,
+    /// Circuits to the regions a distant teleport left behind, keyed by
+    /// simulator address. The reference viewer never tears a circuit down when
+    /// it drops a region (its `disableCircuit` finds no circuit code on the
+    /// viewer side), so it goes on acking, answering pings and pinging. When
+    /// this session dropped the circuit instead, a teleport back to the
+    /// region about a minute later arrived (on aditi) with the capabilities
+    /// of the first visit revoked, and the region answered no further
+    /// teleport request. These are kept at the transport level only
+    /// — acks, pings, resends — and reused by a later circuit to the same
+    /// simulator. One is dropped when it goes silent past the inactivity
+    /// timeout or its simulator sends `DisableSimulator`.
+    departed: BTreeMap<SocketAddr, Circuit>,
     /// A monotonic counter for minting a fresh [`CircuitId`] each time a circuit
     /// instance is established (never zero — zero is the "no circuit" sentinel).
     next_circuit_id: u64,

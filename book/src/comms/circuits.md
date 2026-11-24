@@ -68,6 +68,15 @@ A [teleport](../content/teleport.md) to a distant region is similar but
 deliberate rather than incidental. Either way, the multi-circuit machinery is
 what makes seamless movement across a contiguous grid possible.
 
+A circuit outlives the region it was opened for. The reference viewer never
+tears one down when it drops a region, because its `disableCircuit` finds no
+circuit code on the viewer side, so it goes on acking, answering pings and
+pinging the region the agent left. A teleport back to that simulator reuses the
+same circuit, and its sequence numbers continue. On Second Life, a client that
+dropped the circuit instead and teleported back about a minute later found the
+first visit's capabilities revoked (404), and the region answered no further
+teleport request.
+
 How each grid pings a circuit, resends on it and gives it up is measured in
 [Grid Behaviour → Session](../gridspec/session.md#circuits).
 
@@ -86,7 +95,12 @@ How each grid pings a circuit, resends on it and gives it up is measured in
 >   the `send_use_circuit_code`, `send_complete_agent_movement`, and
 >   `send_region_handshake_reply` helpers used during the handshake.
 > - The owning `Session` (`sl-proto/src/session.rs`) holds the root circuit and
->   any child circuits, and handles promotion on region change.
+>   any child circuits, and handles promotion on region change. A distant
+>   teleport moves the old root and its children into `Session::departed`.
+>   There they are kept at the transport level only (acks, pings, resends,
+>   and `DisableSimulator` to end one), and the next circuit to the same
+>   simulator takes one back under a fresh circuit id. A departed circuit that
+>   stays silent past the inactivity timeout is dropped.
 > - A request **about an object** goes to the region the object is in, not
 >   to the root: a `ScopedObjectId` names its circuit directly, and an
 >   object-key request (`RequestObjectPropertiesFamily`, `RequestPayPrice`,

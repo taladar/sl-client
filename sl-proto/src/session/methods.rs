@@ -295,6 +295,7 @@ impl Session {
             circuit: None,
             children: BTreeMap::new(),
             child_seeds: BTreeMap::new(),
+            departed: BTreeMap::new(),
             next_circuit_id: 1,
             draw_distance: DEFAULT_DRAW_DISTANCE,
             controls: ControlFlags::empty(),
@@ -1930,7 +1931,17 @@ impl Session {
             // clear emits no per-object removals). Only a genuine positional jump
             // reaches here (adjacency is checked in `begin_handover`), so the
             // neighbour circuits being cleared really are out of range.
-            self.children.clear();
+            //
+            // Their circuits are not torn down but kept going at the transport
+            // level, as the reference viewer keeps every circuit it has opened
+            // ([`Session::departed`]).
+            let left = core::mem::take(&mut self.children);
+            for (sim, circuit) in left
+                .into_iter()
+                .chain(old_root.map(|old| (old.sim_addr, old)))
+            {
+                self.depart_circuit(sim, circuit);
+            }
             self.child_seeds.clear();
             // The destination's handshake already arrived on its circuit, which
             // is the new root and is not torn down: what it said about the
@@ -2047,6 +2058,112 @@ impl Session {
         self.retire_child(pending.dest, NeighborRetirement::TransferAbandoned);
     }
 
+    /// Keeps `circuit`, to a region the agent has left, going at the transport
+    /// level only ([`Session::departed`]): its region timers stop, its acks,
+    /// resends and keep-alive ping go on.
+    fn depart_circuit(&mut self, sim: SocketAddr, mut circuit: Circuit) {
+        circuit.timers.agent_update = None;
+        circuit.timers.logout = None;
+        circuit.timers.teleport = None;
+        circuit.timers.sit = None;
+        tracing::debug!(%sim, "keeping the circuit to a region left behind");
+        let _replaced = self.departed.insert(sim, circuit);
+    }
+
+    /// Takes back the departed circuit to `sim`, if one is still open, under a
+    /// fresh circuit id: the region it reaches is a new visit, and its
+    /// region-local ids must not resolve against anything from the last one.
+    /// Its sequence numbers carry on, as the reference viewer's do on a
+    /// circuit it opens again.
+    fn reclaim_departed(&mut self, sim: SocketAddr) -> Option<Circuit> {
+        let mut circuit = self.departed.remove(&sim)?;
+        circuit.id = self.mint_circuit_id();
+        tracing::debug!(%sim, "reusing the circuit kept from an earlier visit");
+        Some(circuit)
+    }
+
+    /// Takes in a datagram from a simulator whose region the agent has left
+    /// ([`Session::departed`]): acks and duplicate suppression as on any
+    /// circuit, an answer to its ping, its acks of our packets, and a
+    /// `DisableSimulator` that ends it. Nothing reaches the world: the region
+    /// is no longer part of it.
+    fn handle_departed_datagram(
+        &mut self,
+        from: SocketAddr,
+        datagram: &[u8],
+        now: Instant,
+    ) -> Result<(), Error> {
+        let parsed = parse_datagram(datagram)?;
+        let Some(circuit) = self.departed.get_mut(&from) else {
+            return Ok(());
+        };
+        circuit.note_received(now);
+        circuit.record_acks(&parsed.acks);
+        if parsed.flags.contains(PacketFlags::RELIABLE) {
+            circuit.queue_ack(parsed.sequence, now);
+            if !circuit.mark_seen(parsed.sequence) {
+                return Ok(());
+            }
+        }
+        let decoded;
+        let body = if parsed.flags.contains(PacketFlags::ZEROCODED) {
+            decoded = zero_decode(parsed.body)?;
+            decoded.as_slice()
+        } else {
+            parsed.body
+        };
+        let mut reader =
+            if parsed.flags.contains(PacketFlags::ZEROCODED) && ends_in_zero_run(parsed.body) {
+                Reader::with_zero_tail(body)
+            } else {
+                Reader::new(body)
+            };
+        let id = MessageId::decode(&mut reader)?;
+        let Ok(message) = AnyMessage::decode(id, &mut reader) else {
+            return Ok(());
+        };
+        tracing::trace!(name = message.name(), %from, "inbound message on a departed circuit");
+        match message {
+            AnyMessage::StartPingCheck(ping) => {
+                circuit.send_complete_ping_check(PingId(ping.ping_id.ping_id), now)?;
+            }
+            AnyMessage::CompletePingCheck(reply) => {
+                let _rtt = circuit.record_ping_reply(PingId(reply.ping_id.ping_id), now);
+            }
+            AnyMessage::PacketAck(ack) => {
+                for packet in &ack.packets {
+                    circuit.record_acks(&[SequenceNumber(packet.id)]);
+                }
+            }
+            AnyMessage::DisableSimulator(_) => {
+                tracing::debug!(%from, "a region left behind closed its circuit");
+                let _closed = self.departed.remove(&from);
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// Services the circuits to regions left behind: drops one gone silent,
+    /// and otherwise flushes its owed acks, resends, and pings it on the same
+    /// cadence as a live circuit.
+    fn run_departed_circuit_timers(&mut self, now: Instant) {
+        self.departed
+            .retain(|_sim, circuit| now < circuit.inactivity_deadline());
+        for (sim, circuit) in &mut self.departed {
+            let _exhausted = circuit.process_resends(now);
+            if circuit.ack_flush_deadline().is_some_and(|d| now >= d)
+                && let Err(error) = circuit.flush_acks(now)
+            {
+                tracing::warn!(%sim, %error, "failed to flush owed acks on a departed circuit");
+            }
+            if circuit.timers.ping.is_some_and(|d| now >= d) {
+                let _ignored = circuit.send_start_ping_check(now);
+                circuit.timers.ping = Some(deadline(now, PING_INTERVAL));
+            }
+        }
+    }
+
     /// Drops the child circuit to `sim` and everything held for it — its seed,
     /// its objects and coarse dots ([`forget_sim_objects`](Self::forget_sim_objects))
     /// — and reports the region as gone with an [`Event::NeighborRetired`], so a
@@ -2138,16 +2255,25 @@ impl Session {
             return Ok(());
         };
         let (agent_id, session_id, code) = (root.agent_id, root.session_id, root.code);
-        let circuit_id = self.mint_circuit_id();
-        let mut child = Circuit::new(
-            circuit_id,
-            sim,
-            agent_id,
-            session_id,
-            code,
-            self.draw_distance.clone(),
-            now,
-        );
+        // A simulator whose region we left keeps the circuit we had to it
+        // ([`Session::departed`]); a new visit carries on over it, as the
+        // reference viewer's does, and still announces itself with
+        // `UseCircuitCode`.
+        let mut child = match self.reclaim_departed(sim) {
+            Some(kept) => kept,
+            None => {
+                let circuit_id = self.mint_circuit_id();
+                Circuit::new(
+                    circuit_id,
+                    sim,
+                    agent_id,
+                    session_id,
+                    code,
+                    self.draw_distance.clone(),
+                    now,
+                )
+            }
+        };
         child.send_use_circuit_code(now)?;
         // Advertise the throttle on the child too, so the neighbour opens up its
         // object stream to this child agent (it otherwise uses conservative
@@ -2607,6 +2733,9 @@ impl Session {
         // Accept traffic from the root circuit or any open child circuit; ignore
         // anything else.
         let Some(role) = self.circuit_role(from) else {
+            if self.departed.contains_key(&from) {
+                return self.handle_departed_datagram(from, datagram, now);
+            }
             return Ok(());
         };
 
@@ -6508,6 +6637,7 @@ impl Session {
         self.expire_sit(now);
         self.run_root_circuit_timers(now)?;
         self.run_child_circuit_timers(now);
+        self.run_departed_circuit_timers(now);
 
         Ok(())
     }
@@ -16070,7 +16200,7 @@ impl Session {
                 payload,
             });
         }
-        for circuit in self.children.values_mut() {
+        for circuit in self.children.values_mut().chain(self.departed.values_mut()) {
             if let Some(payload) = circuit.pop_outbound() {
                 return Some(Transmit {
                     destination: circuit.sim_addr,
@@ -16125,6 +16255,13 @@ impl Session {
             merge_deadline(&mut earliest, child.timers.agent_update);
             merge_deadline(&mut earliest, child.timers.ping);
             merge_deadline(&mut earliest, child.next_resend_deadline());
+        }
+        // And the circuits kept to regions left behind.
+        for departed in self.departed.values() {
+            merge_deadline(&mut earliest, Some(departed.inactivity_deadline()));
+            merge_deadline(&mut earliest, departed.ack_flush_deadline());
+            merge_deadline(&mut earliest, departed.timers.ping);
+            merge_deadline(&mut earliest, departed.next_resend_deadline());
         }
         earliest
     }

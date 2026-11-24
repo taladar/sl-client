@@ -316,7 +316,8 @@ estate owner bans a second avatar that holds no estate rights) and
 parcel), and on 2026-10-28 by `ban-line-trigger` (aditi: the camera moved round
 one). The UDP shapes are read from the raw messages:
 `RUST_LOG=sl_proto::wire=trace` logs every inbound message, each block and
-field, before the session reads anything out of it.
+field, before the session reads anything out of it, and every message sent
+(see [LLUDP transport](../comms/lludp-transport.md)).
 
 ### The lists
 
