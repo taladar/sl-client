@@ -272,6 +272,13 @@ A region's — or an individual parcel's — sky, water, and **day cycle** are t
 parcel that only inherits, a refused change, OpenSim's bare acceptance of a set
 — is in [Grid Behaviour → Environment](../gridspec/environment.md).
 
+A request can still be in flight when the agent changes region. Its reply
+names the region it came from (`region_id`), and the session drops a reply
+naming a region other than the one the agent is in, as the reference viewer
+does. A reply that names no region is kept. The viewer asks again after every
+region change, but it waits for the new region's capability map first. Until
+that map lands, the runtime still holds the old region's `ExtEnvironment` URL.
+
 `EnvironmentSettings` holds the parcel/region id, the **day length** and
 **offset** (in seconds), the three **track altitudes** at which the sky changes
 with height, and the **day cycle** itself. A `DayCycle` is:

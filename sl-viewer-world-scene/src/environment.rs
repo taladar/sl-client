@@ -21,8 +21,8 @@ use bevy::prelude::*;
 use sl_client_bevy::{
     AssetKey, Command, DayCycle, DayCycleFrame, EnvironmentAsset, EnvironmentPushAction,
     EnvironmentSettings, ExperienceEnvironmentPush, ExperienceKey, Llsd, SettingsKind, SkySettings,
-    SlCommand, SlEvent, SlSessionEvent, Uuid, WaterSettings, sky_with_blended_values,
-    water_with_blended_values,
+    SlCapabilities, SlCommand, SlEvent, SlSessionEvent, Uuid, WaterSettings,
+    sky_with_blended_values, water_with_blended_values,
 };
 use sl_settings::SettingValue;
 use sl_viewer_settings::ViewerSettings;
@@ -575,6 +575,10 @@ const MAX_ENV_ATTEMPTS: u32 = 12;
 /// Seconds between environment-request retries while a request is outstanding.
 const ENV_RETRY_INTERVAL: f32 = 3.0;
 
+/// How long, in seconds, the environment requests wait after a region change
+/// for the new region's capability map before asking anyway.
+const CAPS_WAIT: f32 = 10.0;
+
 /// The settings section the environment's own knobs live under.
 pub const ENVIRONMENT_SECTION: &[&str] = &["environment"];
 
@@ -913,6 +917,17 @@ pub struct EnvironmentState {
     req_attempts: u32,
     /// The earliest time (`Time::elapsed_secs`) the next retry may fire.
     req_next_retry_at: f32,
+    /// Until when (`Time::elapsed_secs`) every environment request is held
+    /// back after a region change, waiting for the new region's capability
+    /// map. `None` when nothing is waiting.
+    ///
+    /// The runtime keeps the old region's map until the new one lands, so a
+    /// request sent in between would go to the region the agent just left —
+    /// the reference waits the same way
+    /// (`LLEnvironment::onRegionChange` → `setCapabilitiesReceivedCallback`).
+    /// A deadline rather than a flag, because a region whose seed fetch fails
+    /// never sends a map, and its sky is still worth asking for.
+    caps_wait_until: Option<f32>,
 }
 
 impl Default for EnvironmentState {
@@ -941,6 +956,7 @@ impl Default for EnvironmentState {
             req_pending: false,
             req_attempts: 0,
             req_next_retry_at: 0.0,
+            caps_wait_until: None,
         }
     }
 }
@@ -1043,6 +1059,45 @@ impl EnvironmentState {
             && !self.push.is_empty()
         {
             self.experience_recheck = Some(parcel_id);
+        }
+    }
+
+    /// Drop everything that belonged to the region the agent has left: the
+    /// pushed experience skies, and the parcel being stood on together with its
+    /// environment and any request for it.
+    ///
+    /// An experience's injected sky does not cross a region line: the reference
+    /// drops the whole `ENV_PUSH` layer at a region change, and there is no way
+    /// to keep it honest across one — the destination region has its own idea
+    /// of which experiences it admits, and the script that pushed the sky is
+    /// back where the agent left it. Parcel ids are region-local, so the one
+    /// being stood on names nothing here any more; the next `SlAgentParcel`
+    /// mirror asks again for the new region's.
+    fn forget_region(&mut self) {
+        self.clear_pushed(DEFAULT_TRANSITION);
+        self.parcel = None;
+        self.parcel_id = None;
+        self.parcel_env_version = -1;
+        self.parcel_req = None;
+        self.standing_parcel = None;
+        self.experience_recheck = None;
+        self.apply();
+    }
+
+    /// Whether requests are still held back for the new region's capability
+    /// map at `now`, ending the wait once its deadline has passed.
+    fn waiting_for_caps(&mut self, now: f32) -> bool {
+        match self.caps_wait_until {
+            Some(until) if now < until => true,
+            Some(_) => {
+                warn!(
+                    "the new region's capabilities did not arrive within {CAPS_WAIT} s; \
+                     requesting its environment anyway"
+                );
+                self.caps_wait_until = None;
+                false
+            }
+            None => false,
         }
     }
 
@@ -1975,9 +2030,9 @@ pub fn resolve_local_environment_pick(
 /// whole-region settings here (`parcel_id: None`).
 ///
 /// The handshake alone was not enough, and that was a bug rather than a
-/// simplification. A handshake happens at login and at a border crossing, so an
-/// estate that changed its sky under an avatar **already standing in the
-/// region** never reached that viewer: it kept drawing whatever it fetched on
+/// simplification. The arrival notices come only at login and at a region
+/// change, so an estate that changed its sky under an avatar **already standing
+/// in the region** never reached that viewer: it kept drawing whatever it fetched on
 /// arrival for the rest of the session. The reference viewer re-reads on the
 /// message a simulator sends when those settings are saved — `RegionInfo`,
 /// routed through `LLViewerRegion::processRegionInfo` into
@@ -1992,18 +2047,36 @@ pub fn resolve_local_environment_pick(
 /// This asks for the whole-region settings (`parcel_id: None`); the parcel the
 /// agent is standing on is asked about separately, by
 /// [`request_parcel_environment`].
+///
+/// A login arrives as `RegionHandshakeComplete`, but a border crossing or a
+/// teleport arrives as `RegionChanged`, and both mean a new region. After a
+/// `RegionChanged` the request waits for the new region's capability map
+/// ([`SlCapabilities`]), because until it lands the runtime still holds the
+/// old region's `ExtEnvironment` URL.
 pub fn request_environment(
     time: Res<Time>,
     mut events: MessageReader<SlEvent>,
+    mut capabilities: MessageReader<SlCapabilities>,
     mut commands: MessageWriter<SlCommand>,
     mut state: ResMut<EnvironmentState>,
 ) {
-    // A handshake (initial login or a border crossing) starts a fresh request
-    // cycle for the new region's environment, and so does a `RegionInfo` —
-    // which is how a change made while the avatar stands here arrives.
+    let now = time.elapsed_secs();
+    // Read the maps before the events. The runtime reports a map it fetched
+    // before a region change ahead of that change in the same tick, so a map
+    // read alongside a `RegionChanged` is the old region's, and must not end
+    // the wait the change starts.
+    if capabilities.read().count() > 0 && state.caps_wait_until.take().is_some() {
+        debug!("the new region's capabilities arrived; requesting its environment");
+        state.req_next_retry_at = 0.0;
+    }
+    // A handshake (initial login) or a region change (a border crossing or a
+    // teleport) starts a fresh request cycle for the new region's environment,
+    // and so does a `RegionInfo` — which is how a change made while the avatar
+    // stands here arrives.
     for event in events.read() {
         let reason = match event.0 {
             SlSessionEvent::RegionHandshakeComplete => "region handshake complete",
+            SlSessionEvent::RegionChanged { .. } => "region changed",
             SlSessionEvent::RegionLimits(_) => "region info received",
             _ => continue,
         };
@@ -2011,32 +2084,21 @@ pub fn request_environment(
         state.req_pending = true;
         state.req_attempts = 0;
         state.req_next_retry_at = 0.0;
-        if matches!(event.0, SlSessionEvent::RegionHandshakeComplete) {
-            // An experience's injected sky does not cross a region line: the
-            // reference drops the whole `ENV_PUSH` layer here, and there is no
-            // way to keep it honest across the crossing — the destination
-            // region has its own idea of which experiences it admits, and the
-            // script that pushed the sky is back where the agent left it.
-            state.clear_pushed(DEFAULT_TRANSITION);
-            // Parcel ids are region-local, so the one being stood on means
-            // nothing here any more — and neither does its environment. The
-            // next `SlAgentParcel` mirror re-asks for the new region's. Only a
-            // handshake means a new region; a `RegionInfo` is this one saying
-            // its own settings were saved.
-            state.parcel = None;
-            state.parcel_id = None;
-            state.parcel_env_version = -1;
-            state.parcel_req = None;
-            state.standing_parcel = None;
-            state.experience_recheck = None;
-            state.apply();
+        match event.0 {
+            SlSessionEvent::RegionHandshakeComplete => state.forget_region(),
+            SlSessionEvent::RegionChanged { .. } => {
+                state.forget_region();
+                state.caps_wait_until = Some(now + CAPS_WAIT);
+            }
+            // A `RegionInfo` is this region saying its own settings were
+            // saved: nothing it held belongs to another region.
+            _ => {}
         }
     }
 
-    if !state.req_pending {
+    if !state.req_pending || state.waiting_for_caps(now) {
         return;
     }
-    let now = time.elapsed_secs();
     if now < state.req_next_retry_at {
         return;
     }
@@ -2117,7 +2179,9 @@ pub fn request_parcel_environment(
         return;
     };
     let now = time.elapsed_secs();
-    if now < request.next_retry_at {
+    // A parcel id names a parcel of the region whose capability is asked, so
+    // the same wait as the region's request applies.
+    if state.waiting_for_caps(now) || now < request.next_retry_at {
         return;
     }
     if request.attempts >= MAX_ENV_ATTEMPTS {
@@ -2382,7 +2446,7 @@ mod tests {
     use pretty_assertions::{assert_eq, assert_ne};
 
     use bevy::prelude::*;
-    use sl_client_bevy::{Command, SlCommand, SlEvent, SlSessionEvent};
+    use sl_client_bevy::{Command, SlCapabilities, SlCommand, SlEvent, SlSessionEvent};
 
     use super::{
         DayPositionPin, EditPreviewer, EnvironmentAsset, EnvironmentPushAction,
@@ -2835,10 +2899,106 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(bevy::time::TimePlugin);
         app.add_message::<SlEvent>();
+        app.add_message::<SlCapabilities>();
         app.add_message::<SlCommand>();
         app.init_resource::<EnvironmentState>();
-        app.add_systems(Update, super::request_environment);
+        app.add_systems(
+            Update,
+            (
+                super::request_environment,
+                super::request_parcel_environment,
+            )
+                .chain(),
+        );
         app
+    }
+
+    /// A `RegionChanged` to a neighbour, as a crossing or a teleport ends.
+    fn region_changed() -> SlEvent {
+        SlEvent(SlSessionEvent::RegionChanged {
+            region_handle: sl_client_bevy::RegionHandle(0x0003_E800_0003_E900),
+            sim: std::net::SocketAddr::from(([127, 0, 0, 1], 9001)),
+            circuit: sl_client_bevy::CircuitId(2),
+            world_reset: false,
+        })
+    }
+
+    /// The new region's capability map arriving.
+    fn new_region_caps() -> SlCapabilities {
+        SlCapabilities(std::collections::HashMap::from([(
+            "ExtEnvironment".to_owned(),
+            "http://127.0.0.1:9001/env".to_owned(),
+        )]))
+    }
+
+    /// **A crossing or a teleport re-reads the environment, once the new
+    /// region's capabilities are in.**
+    ///
+    /// A region change arrives as `RegionChanged`, never as the login's
+    /// handshake notice, and nothing re-read the sky on it: the old region's
+    /// stayed. The request waits for the new map, because until it lands the
+    /// runtime would send it to the old region's `ExtEnvironment`.
+    #[test]
+    fn a_region_change_re_reads_the_environment_after_its_capabilities() {
+        let mut app = env_app();
+        app.world_mut().write_message(region_changed());
+        assert_eq!(
+            requests(&mut app),
+            Vec::<i32>::new(),
+            "nothing may go out on the old region's capability"
+        );
+        app.world_mut().write_message(new_region_caps());
+        assert_eq!(
+            requests(&mut app),
+            vec![-1],
+            "the new region's map releases the request"
+        );
+    }
+
+    /// The map that arrives in the same frame as the change was fetched before
+    /// it, so it is the old region's and does not release the request.
+    #[test]
+    fn a_map_beside_the_region_change_is_the_old_regions() {
+        let mut app = env_app();
+        app.world_mut().write_message(new_region_caps());
+        app.world_mut().write_message(region_changed());
+        assert_eq!(requests(&mut app), Vec::<i32>::new());
+    }
+
+    /// A parcel known before the new map lands is not asked about on the old
+    /// region's capability either; the map releases both requests.
+    #[test]
+    fn a_parcel_request_waits_for_the_new_regions_capabilities() {
+        let mut app = env_app();
+        app.world_mut().write_message(region_changed());
+        assert_eq!(requests(&mut app), Vec::<i32>::new());
+        app.world_mut()
+            .resource_mut::<EnvironmentState>()
+            .set_agent_parcel(Some(7), 1);
+        assert_eq!(requests(&mut app), Vec::<i32>::new());
+        app.world_mut().write_message(new_region_caps());
+        assert_eq!(requests(&mut app), vec![-1, 7]);
+    }
+
+    /// The region change drops what the region left behind: the parcel it
+    /// stood on, that parcel's sky and the request for it.
+    #[test]
+    fn a_region_change_forgets_the_parcel_left_behind() {
+        let mut app = env_app();
+        {
+            let mut state = app.world_mut().resource_mut::<EnvironmentState>();
+            state.ingest_reply(reply(-1, 1234));
+            state.set_agent_parcel(Some(3), 1);
+            state.set_standing_parcel(Some(3));
+            state.ingest_reply(parcel_reply(3, 1234, "parcel"));
+            assert!(state.parcel_environment().is_some());
+        }
+        app.world_mut().write_message(region_changed());
+        app.update();
+        let state = app.world().resource::<EnvironmentState>();
+        assert!(state.parcel_environment().is_none());
+        assert_eq!(state.standing_parcel(), None);
+        assert!(state.parcel_req.is_none());
     }
 
     /// **A `RegionInfo` re-reads the region's environment.**

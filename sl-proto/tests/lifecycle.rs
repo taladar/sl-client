@@ -12824,6 +12824,142 @@ mod test {
         Ok(())
     }
 
+    /// A `RegionHandshake` from a region with the id `region_id`.
+    fn region_handshake_with_id(name: &str, region_id: u128) -> AnyMessage {
+        let mut message = region_handshake_msg(13, 0, name, "", "");
+        if let AnyMessage::RegionHandshake(ref mut handshake) = message {
+            handshake.region_info2.region_id = uuid::Uuid::from_u128(region_id);
+        }
+        message
+    }
+
+    /// An `ExtEnvironment` GET reply for the whole region, naming `region_id`
+    /// (`None` for a reply that names no region).
+    fn environment_reply_from(region_id: Option<u128>) -> Result<Llsd, TestError> {
+        let region = region_id.map_or_else(String::new, |id| {
+            format!(
+                "<key>region_id</key><uuid>{}</uuid>",
+                uuid::Uuid::from_u128(id)
+            )
+        });
+        Ok(parse_llsd_xml(&format!(
+            "<llsd><map><key>environment</key><map>\
+             <key>parcel_id</key><integer>-1</integer>{region}\
+             <key>day_length</key><integer>14400</integer>\
+             </map><key>success</key><boolean>1</boolean></map></llsd>"
+        ))?)
+    }
+
+    /// Whether `session` surfaced an environment this frame.
+    fn surfaced_environment(session: &mut Session) -> bool {
+        drain_events(session)
+            .iter()
+            .any(|event| matches!(event, Event::Environment(_)))
+    }
+
+    /// **An environment reply from the region the agent has left is dropped.**
+    ///
+    /// A request in flight across a region change is answered by the old
+    /// region, and its parcel ids and sky belong there: taken, it painted the
+    /// old region's sky (or one of its parcels') over the new one. The reply
+    /// names its region, which the reference checks too.
+    #[test]
+    fn an_environment_reply_from_another_region_is_dropped() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = awaiting_handshake(now)?;
+        let handshake = server_message(&region_handshake_with_id("Here", 0xA), 1, true)?;
+        session.handle_datagram(sim_addr(), &handshake, now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        session.handle_caps_event(
+            sl_proto::CAP_EXT_ENVIRONMENT,
+            &environment_reply_from(Some(0xB))?,
+            now,
+        )?;
+        assert!(
+            !surfaced_environment(&mut session),
+            "another region's environment must not reach the viewer"
+        );
+        session.handle_caps_event(
+            sl_proto::CAP_EXT_ENVIRONMENT,
+            &environment_reply_from(Some(0xA))?,
+            now,
+        )?;
+        assert!(surfaced_environment(&mut session), "this region's is taken");
+        session.handle_caps_event(
+            sl_proto::CAP_EXT_ENVIRONMENT,
+            &environment_reply_from(None)?,
+            now,
+        )?;
+        assert!(
+            surfaced_environment(&mut session),
+            "a reply naming no region gives nothing to compare, so it is taken"
+        );
+        Ok(())
+    }
+
+    /// A distant teleport clears the old world, but not what the destination's
+    /// handshake said about the new region: a reply from the region left
+    /// behind is still recognised afterwards, and the new region's is taken.
+    #[test]
+    fn a_distant_teleport_keeps_the_new_regions_identity() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+        // The source region greets again, this time naming itself.
+        let handshake = server_message(&region_handshake_with_id("Source", 0xA), 50, true)?;
+        session.handle_datagram(sim_addr(), &handshake, now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        let handle = 0x0003_E800_0003_E900;
+        session.teleport_to(
+            RegionHandle(handle),
+            region_coords(128.0, 128.0, 30.0),
+            vec3(1.0, 0.0, 0.0),
+            now,
+        )?;
+        drain(&mut session)?;
+        session.handle_datagram(sim_addr(), &teleport_finish_to_sim_b(handle, 2)?, now)?;
+        drain(&mut session)?;
+        let greeting = server_message(&region_handshake_with_id("Destination", 0xB), 1, true)?;
+        session.handle_datagram(sim_b(), &greeting, now)?;
+        session.handle_datagram(
+            sim_b(),
+            &server_message(&agent_movement_complete_msg(handle), 2, true)?,
+            now,
+        )?;
+        let changed = drain_events(&mut session).into_iter().any(|event| {
+            matches!(
+                event,
+                Event::RegionChanged {
+                    world_reset: true,
+                    ..
+                }
+            )
+        });
+        assert!(changed, "expected a distant RegionChanged");
+
+        session.handle_caps_event(
+            sl_proto::CAP_EXT_ENVIRONMENT,
+            &environment_reply_from(Some(0xA))?,
+            now,
+        )?;
+        assert!(
+            !surfaced_environment(&mut session),
+            "the source region's late reply must not reach the viewer"
+        );
+        session.handle_caps_event(
+            sl_proto::CAP_EXT_ENVIRONMENT,
+            &environment_reply_from(Some(0xB))?,
+            now,
+        )?;
+        assert!(surfaced_environment(&mut session));
+        Ok(())
+    }
+
     #[test]
     fn ext_environment_caps_surfaces_day_cycle() -> Result<(), TestError> {
         let now = Instant::now();

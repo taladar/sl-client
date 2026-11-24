@@ -2,7 +2,7 @@
 id: viewer-environment-not-requested-after-region-change
 title: The region environment is not requested again after a crossing or teleport
 topic: viewer
-status: bugs
+status: done
 origin: mixed-channel race audit (2026-11-23)
 refs: [viewer-parcel-environment-reply-from-old-region]
 ---
@@ -32,3 +32,16 @@ remembered parcel and its environment survive the region change.
 Run the same reset and request on `RegionChanged`, but send the request only
 after the new region's capability map has landed, as Firestorm does in
 `llenvironment.cpp`. Otherwise the GET goes to the old region's URL.
+
+## Fix (2026-11-24)
+
+`request_environment` now treats `RegionChanged` like the login handshake: it
+drops the pushed experience skies and the parcel left behind
+(`EnvironmentState::forget_region`) and starts a new request cycle. After a
+`RegionChanged`, the region and parcel requests are held until the next
+`SlCapabilities` map, or for at most 10 s. The runtime reports a map it fetched
+before a region change ahead of that change in the same tick, so a map read in
+the same frame as the change does not release the requests.
+
+Unit tests cover the re-read after the new map, a map beside the change, the
+parcel request waiting too, and the parcel being forgotten.

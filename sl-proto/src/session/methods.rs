@@ -645,6 +645,20 @@ impl Session {
                 }
             }
             CapsEvent::ExtEnvironment => match environment_reply_from_llsd(body) {
+                // A reply from the region the agent has since left: its parcel
+                // ids and its sky belong to that region, and taking it would
+                // paint the old region's environment over the new one. The
+                // reference drops it the same way (`recordEnvironment`); a reply
+                // that names no region is kept, as it does.
+                EnvironmentReply::Settings(environment)
+                    if self.is_another_regions(environment.region_id) =>
+                {
+                    tracing::debug!(
+                        region_id = %environment.region_id,
+                        parcel_id = environment.parcel_id,
+                        "an environment reply from a region the agent has left is ignored"
+                    );
+                }
                 EnvironmentReply::Settings(environment) => {
                     self.events.push_back(Event::Environment(environment));
                 }
@@ -1890,7 +1904,26 @@ impl Session {
             // neighbour circuits being cleared really are out of range.
             self.children.clear();
             self.child_seeds.clear();
+            // The destination's handshake already arrived on its circuit, which
+            // is the new root and is not torn down: what it said about the
+            // region survives the clear, or the region's flags and id would be
+            // unknown until the next handshake.
+            let handshake = self.circuit.as_ref().map(|circuit| {
+                (
+                    circuit.id,
+                    self.world.region_flags(circuit.id),
+                    self.world.region_id(circuit.id),
+                )
+            });
             self.world.reset();
+            if let Some((circuit_id, flags, region_id)) = handshake {
+                if let Some(flags) = flags {
+                    self.world.note_region_flags(circuit_id, flags);
+                }
+                if let Some(region_id) = region_id {
+                    self.world.note_region_id(circuit_id, region_id);
+                }
+            }
         } else {
             // Neighbour teleport: demote the old root to a child of the new region
             // and keep the whole world (objects / terrain / regions / neighbours),
@@ -2776,6 +2809,7 @@ impl Session {
                 let identity = region_identity(handshake, region_handle)?;
                 if let Some(circuit_id) = self.circuit_id_for(from) {
                     self.note_region_flags(circuit_id, identity.flags());
+                    self.world.note_region_id(circuit_id, identity.region_id);
                 }
                 self.events
                     .push_back(Event::RegionInfoHandshake(Box::new(identity)));
@@ -4084,6 +4118,18 @@ impl Session {
     /// as it stands, not as it stood on arrival.
     fn note_region_flags(&mut self, circuit: CircuitId, flags: RegionFlags) {
         self.world.note_region_flags(circuit, flags);
+    }
+
+    /// Whether `region_id`, as a capability reply names it, is a region other
+    /// than the one the agent is in. `false` when either side is unknown: a
+    /// reply naming no region, or a root region whose handshake has not been
+    /// seen, gives nothing to compare.
+    fn is_another_regions(&self, region_id: uuid::Uuid) -> bool {
+        !region_id.is_nil()
+            && self
+                .root_circuit_id()
+                .and_then(|circuit| self.world.region_id(circuit))
+                .is_some_and(|current| !current.is_nil() && current != region_id)
     }
 
     /// Folds a `ParcelProperties` into the per-circuit parcel cache for `circuit`,

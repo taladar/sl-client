@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 329 |
 | blocked | 35 |
 | in-progress | 4 |
-| bugs | 14 |
-| done | 1614 |
+| bugs | 12 |
+| done | 1616 |
 | deferred | 30 |
 | wont-do | 24 |
 | **total** | **2181** |
@@ -1244,7 +1244,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-text-renderability-axis`](in-progress/viewer-ui-text-renderability-axis.md)
   — Upstream issue — font selection cannot see glyph-format renderability
 
-## bugs (14)
+## bugs (12)
 
 ### protocol
 
@@ -1255,8 +1255,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### viewer
 
-- [`viewer-environment-not-requested-after-region-change`](bugs/viewer-environment-not-requested-after-region-change.md)
-  — The region environment is not requested again after a crossing or teleport
 - [`viewer-live-opensim-world-renders-white`](bugs/viewer-live-opensim-world-renders-white.md)
   — The world renders all white at times on the live OpenSim grid
 - [`viewer-mesh-hair-not-rendering`](bugs/viewer-mesh-hair-not-rendering.md) —
@@ -1265,8 +1263,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A nearby avatar stays a coarse sphere even as the camera closes in
 - [`viewer-outfit-change-during-bake-is-lost`](bugs/viewer-outfit-change-during-bake-is-lost.md)
   — An outfit change during the server bake handshake is lost
-- [`viewer-parcel-environment-reply-from-old-region`](bugs/viewer-parcel-environment-reply-from-old-region.md)
-  — A parcel environment reply from the old region may match by local id
 - [`viewer-perf-steady-state-46fps-ceiling`](bugs/viewer-perf-steady-state-46fps-ceiling.md)
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
 - [`viewer-rigged-hair-triangle-pattern`](bugs/viewer-rigged-hair-triangle-pattern.md)
@@ -1286,7 +1282,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`inventory-stale-folder-fetch-overwrites-newer-state`](bugs/inventory-stale-folder-fetch-overwrites-newer-state.md)
   — A stale folder fetch overwrites newer inventory, including the outfit folder
 
-## done (1614)
+## done (1616)
 
 ### protocol
 
@@ -2163,6 +2159,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (done))
 - [`viewer-environment-not-refetched-on-region-info`](done/viewer-environment-not-refetched-on-region-info.md)
   — An estate's sky change never reaches a viewer that is already standing there
+- [`viewer-environment-not-requested-after-region-change`](done/viewer-environment-not-requested-after-region-change.md)
+  — The region environment is not requested again after a crossing or teleport
 - [`viewer-environment-personal-lighting`](done/viewer-environment-personal-lighting.md)
   — Personal lighting — local environment override (blocked by
   `viewer-ui-widget-scaffold` (done))
@@ -2856,6 +2854,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-parcel-borders-render`](done/viewer-parcel-borders-render.md) —
   In-world parcel borders (property lines) (blocked by
   `viewer-parcel-overlay-decode` (done))
+- [`viewer-parcel-environment-reply-from-old-region`](done/viewer-parcel-environment-reply-from-old-region.md)
+  — A parcel environment reply from the old region may match by local id
 - [`viewer-parcel-join-split`](done/viewer-parcel-join-split.md) — Parcel join /
   split (blocked by `viewer-input-action-map` (done),
   `viewer-parcel-overlay-decode` (done))

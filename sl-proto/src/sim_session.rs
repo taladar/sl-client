@@ -5053,17 +5053,24 @@ impl SimSession {
     /// The `ExtEnvironment` reply body for `parcel_id` as things stand: its
     /// own environment, or — for a parcel that has none — the `is_default`
     /// body both grids answer with, which carries no day cycle.
+    ///
+    /// Every body names this region, whatever id the stored settings carried:
+    /// a viewer drops a reply naming another region as a leftover from the one
+    /// it left, and a driver may store settings recorded somewhere else.
     pub(crate) fn environment_body(&self, parcel_id: i32) -> Llsd {
         if let Some(own) = &self.agent_environment {
             let mut own = own.clone();
             own.parcel_id = parcel_id;
+            own.region_id = self.region_id;
             return crate::session::environment_to_llsd(&own);
         }
         if parcel_id == -1
             || (self.parcel_environments == ParcelEnvironments::Served
                 && self.environments.contains_key(&parcel_id))
         {
-            return crate::session::environment_to_llsd(&self.environment(parcel_id));
+            let mut served = self.environment(parcel_id);
+            served.region_id = self.region_id;
+            return crate::session::environment_to_llsd(&served);
         }
         let region = self.environment(-1);
         crate::session::inheriting_environment_to_llsd(

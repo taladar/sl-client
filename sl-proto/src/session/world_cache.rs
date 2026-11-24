@@ -17,6 +17,7 @@ use sl_types::key::ObjectKey;
 use sl_wire::{RegionFlags, RegionHandle, RegionLocalObjectId, RegionLocalParcelId};
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Instant;
+use uuid::Uuid;
 
 /// One region's object cache, keyed by region-local id.
 pub(crate) type SimObjects = BTreeMap<RegionLocalObjectId, Object>;
@@ -49,6 +50,10 @@ pub(crate) struct WorldCache {
     regions: BTreeMap<CircuitId, RegionHandle>,
     /// The raw `RegionFlags` each region's `RegionHandshake` carried.
     region_flags: BTreeMap<CircuitId, RegionFlags>,
+    /// The globally-unique id each region's `RegionHandshake` carried, so a
+    /// capability reply naming its region can be matched against the region
+    /// the agent is in.
+    region_ids: BTreeMap<CircuitId, Uuid>,
     /// The parcels each region has pushed, keyed by region-local parcel id.
     parcels: BTreeMap<CircuitId, SimParcels>,
     /// The last raw time-dilation value seen per circuit, so a steady region
@@ -85,6 +90,7 @@ impl WorldCache {
             terrain: BTreeMap::new(),
             regions: BTreeMap::new(),
             region_flags: BTreeMap::new(),
+            region_ids: BTreeMap::new(),
             parcels: BTreeMap::new(),
             time_dilation: BTreeMap::new(),
             own_avatar: BTreeMap::new(),
@@ -114,6 +120,7 @@ impl WorldCache {
         self.terrain.remove(&circuit);
         self.regions.remove(&circuit);
         self.region_flags.remove(&circuit);
+        self.region_ids.remove(&circuit);
         self.parcels.remove(&circuit);
         self.time_dilation.remove(&circuit);
         self.own_avatar.remove(&circuit);
@@ -148,6 +155,16 @@ impl WorldCache {
     /// seen.
     pub(crate) fn region_flags(&self, circuit: CircuitId) -> Option<RegionFlags> {
         self.region_flags.get(&circuit).copied()
+    }
+
+    /// Records the region id `circuit`'s `RegionHandshake` carried.
+    pub(crate) fn note_region_id(&mut self, circuit: CircuitId, region_id: Uuid) {
+        self.region_ids.insert(circuit, region_id);
+    }
+
+    /// The region id of `circuit`'s region, if its handshake has been seen.
+    pub(crate) fn region_id(&self, circuit: CircuitId) -> Option<Uuid> {
+        self.region_ids.get(&circuit).copied()
     }
 
     /// Records the raw time dilation for `circuit`, returning `true` when it
