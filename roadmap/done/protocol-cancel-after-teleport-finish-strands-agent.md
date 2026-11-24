@@ -2,7 +2,7 @@
 id: protocol-cancel-after-teleport-finish-strands-agent
 title: Cancelling a teleport after its TeleportFinish strands the agent
 topic: protocol
-status: bugs
+status: done
 origin: mixed-channel race audit (2026-11-23)
 refs: [protocol-teleport-deferred-teardown-handover, protocol-logout-during-handover-is-undone]
 ---
@@ -10,6 +10,17 @@ refs: [protocol-teleport-deferred-teardown-handover, protocol-logout-during-hand
 Context: [context/protocol.md](../context/protocol.md).
 
 Confirmed by reading the client code and OpenSim's. Not reproduced live.
+
+## Fix (2026-11-24)
+
+The overlay no longer offers Cancel once the teleport is arriving, and a start
+or progress line handled after the finish no longer moves it back to an earlier
+phase. `cancel_teleport` does nothing once a handover is pending; the teleport
+timeout still abandons a destination that never confirms.
+
+A new teleport requested in that state still replaces the pending one, as
+before. Firestorm lets it through on purpose as the way out of a stuck
+teleport, and `handover_teleport_supersedes_pending` keeps that behaviour.
 
 ## Bad order
 

@@ -2,7 +2,7 @@
 id: protocol-logout-during-handover-is-undone
 title: A logout during a teleport handover is silently undone
 topic: protocol
-status: bugs
+status: done
 origin: mixed-channel race audit (2026-11-23)
 refs: [protocol-cancel-after-teleport-finish-strands-agent]
 ---
@@ -10,6 +10,13 @@ refs: [protocol-cancel-after-teleport-finish-strands-agent]
 Context: [context/protocol.md](../context/protocol.md).
 
 Confirmed by reading the code. Not reproduced live.
+
+## Fix (2026-11-24)
+
+A logout during a handover goes to the destination as well as the source,
+because the grid may already hold the agent there. The destination's
+`AgentMovementComplete` no longer commits the handover while logging out, and
+the first `LogoutReply` from either region ends the session once.
 
 ## Bad order
 

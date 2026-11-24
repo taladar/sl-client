@@ -2,7 +2,7 @@
 id: protocol-cancelled-reply-ends-replacement-teleport
 title: A replaced teleport's TPCancelled reply may end the teleport that replaced it
 topic: protocol
-status: bugs
+status: done
 origin: mixed-channel race audit (2026-11-23)
 ---
 
@@ -10,6 +10,13 @@ Context: [context/protocol.md](../context/protocol.md).
 
 Plausible. The client side is traced, but Second Life's reply order is
 unconfirmed.
+
+## Fix (2026-11-24)
+
+Each cancel sent to the grid is counted for 10 s. A `TPCancelled` answer that
+arrives while another teleport is running uses up one of them and leaves that
+teleport alone. With nothing in flight the answer still surfaces, so the
+overlay closes on it as before.
 
 ## Bad order
 

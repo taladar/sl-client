@@ -34,6 +34,11 @@ and the position/orientation within it. There are a few flavours:
   the session reverts to its prior active state. Whether the *grid* stops is
   the grid's business — Second Life reports the teleport failed, OpenSim
   usually completes it — and the session follows a teleport that carries on.
+  Once the `TeleportFinish` has arrived the grid has already moved the agent,
+  so a cancel then does nothing and the teleport completes. A late
+  `TeleportStart` from a cancelled teleport, and Second Life's `TPCancelled`
+  answer arriving during a teleport requested after the cancel, are both
+  ignored.
 
 How each grid narrates, completes, refuses and cancels a teleport — the
 progress lines, the flags, which transport a failure arrives on — is measured

@@ -1,32 +1,33 @@
 //! CAPS subsystem lifecycle: seed/map fetch and the EventQueueGet long-poll.
 //!
 //! The event queue is served by a **single long-lived worker thread** that polls
-//! exactly one region's `EventQueueGet` at a time (the current root) and
-//! re-targets on a [`EqCommand::Switch`] when the agent changes region. Using one
-//! thread — rather than dropping and respawning a poller on every `RegionChanged`
-//! — is what makes concurrent duplicate pollers against the *same* queue
-//! structurally impossible: under rapid teleports/crossings the old respawn model
-//! left a poller lingering (up to `EVENT_QUEUE_TIMEOUT`) on a region's queue while
-//! a second poller started on the same queue, corrupting `EventQueueGet`'s
-//! ack-sequenced id stream and dropping events (a lost `CrossedRegion` froze the
-//! avatar). The events channel is persistent across region changes, so no batch
-//! is discarded mid-transition; a switch abandons the old region's queue (the sim
-//! retires it on timeout) rather than trying to close it, because a `done: true`
-//! close blocks like a long-poll on OpenSim and would stall the switch.
+//! the current root region's `EventQueueGet` and re-targets on an
+//! [`EqCommand::Switch`] when the agent changes region. Each long poll runs on a
+//! thread of its own, so a switch takes effect while the old region's poll is
+//! still held open by the simulator.
+//!
+//! The worker tracks every poll still open and never starts a second one on the
+//! same queue, even after leaving a region and coming back. Concurrent pollers
+//! on one queue corrupt `EventQueueGet`'s ack-sequenced id stream and drop events
+//! (a lost `CrossedRegion` froze the avatar). The events channel is persistent
+//! across region changes, so no batch is discarded mid-transition; a switch
+//! abandons the old region's queue (the sim retires it on timeout) rather than
+//! trying to close it, because a `done: true` close blocks like a long-poll on
+//! OpenSim and would stall the switch.
 
 use crate::{Caps, EVENT_QUEUE_TIMEOUT, deliver};
 use bevy::prelude::*;
-use crossbeam_channel::{Receiver, RecvTimeoutError, Sender, TryRecvError, unbounded};
+use crossbeam_channel::{Receiver, Sender, TryRecvError, after, never, select, unbounded};
 use reqwest::blocking::Client as ReqwestBlockingClient;
 use sl_client_common::retry::{MAX_TRANSIENT_RETRIES, transient_backoff};
 use sl_proto::{
     Llsd, Session, build_event_queue_request, build_seed_request, parse_event_queue_response,
     parse_seed_response,
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// The reserved `(message, body)` key a CAPS helper sends over the events
 /// channel when its request failed before producing a reply. The driver
@@ -261,6 +262,71 @@ enum PollOutcome {
     ReceiverGone,
 }
 
+/// A decoded `EventQueueGet` reply: its batch id and its `(message, body)`
+/// events.
+type PollReply = (i32, Vec<(String, Llsd)>);
+
+/// A long poll that has returned, as its thread reports it to the worker.
+struct FinishedPoll {
+    /// The queue it polled.
+    url: String,
+    /// The worker's [`generation`](EventQueueWorker::generation) when it
+    /// started. An older one means the worker has switched away since.
+    generation: u64,
+    /// Its reply, or `None` for an idle timeout or a transient error.
+    reply: Option<PollReply>,
+}
+
+/// Performs one `EventQueueGet` long poll. A failed round has already waited out
+/// its backoff when this returns, so the queue stays marked as polled until it
+/// may be polled again.
+fn fetch_poll(http: &ReqwestBlockingClient, url: &str, ack: Option<i32>) -> Option<PollReply> {
+    let response = match http
+        .post(url)
+        .header("Content-Type", "application/llsd+xml")
+        .body(build_event_queue_request(ack, false))
+        .send()
+    {
+        Ok(response) => response,
+        Err(error) => {
+            tracing::trace!(%error, "event queue: poll request errored; retrying");
+            std::thread::sleep(POLL_ERROR_BACKOFF);
+            return None;
+        }
+    };
+    // A timeout with no events returns a non-2xx (e.g. 502); re-poll with the
+    // same ack after a short pause.
+    if !response.status().is_success() {
+        std::thread::sleep(Duration::from_millis(200));
+        return None;
+    }
+    // A body that cannot be read, or that does not parse, is as transient as
+    // a failed request — and backs off the same way, or a grid answering a
+    // broken `200` spins this thread as fast as the network allows.
+    let text = match response.text() {
+        Ok(text) => text,
+        Err(error) => {
+            tracing::trace!(%error, "event queue: poll body could not be read; retrying");
+            std::thread::sleep(POLL_ERROR_BACKOFF);
+            return None;
+        }
+    };
+    let parsed = match parse_event_queue_response(&text) {
+        Ok(parsed) => parsed,
+        Err(error) => {
+            tracing::trace!(%error, "event queue: poll body did not parse; retrying");
+            std::thread::sleep(POLL_ERROR_BACKOFF);
+            return None;
+        }
+    };
+    let events = parsed
+        .events
+        .into_iter()
+        .map(|event| (event.message, event.body))
+        .collect();
+    Some((parsed.id, events))
+}
+
 /// The single event-queue worker's per-region state: the HTTP client, the seed
 /// it is polling, that region's `EventQueueGet` URL, and the last ack id.
 struct EventQueueWorker {
@@ -280,6 +346,12 @@ struct EventQueueWorker {
     seed_failures: u32,
     /// The capability names every seed fetch asks for.
     requested: Arc<[String]>,
+    /// Every queue with a long poll still open, including queues the worker
+    /// has switched away from. A queue listed here is not polled again.
+    in_flight: HashSet<String>,
+    /// Counts the switches between regions, so a returning poll can tell
+    /// whether it belongs to the current visit.
+    generation: u64,
 }
 
 impl EventQueueWorker {
@@ -303,6 +375,16 @@ impl EventQueueWorker {
                 return None;
             }
         };
+        Some(Self::with_client(http, seed, requested, map_tx))
+    }
+
+    /// Builds the worker for `seed` on the HTTP client `http`.
+    fn with_client(
+        http: ReqwestBlockingClient,
+        seed: url::Url,
+        requested: Arc<[String]>,
+        map_tx: &Sender<Result<HashMap<String, String>, String>>,
+    ) -> Self {
         let outcome = fetch_caps(&http, &seed, &requested, map_tx);
         let mut worker = Self {
             http,
@@ -311,12 +393,14 @@ impl EventQueueWorker {
             ack: None,
             seed_failures: 0,
             requested,
+            in_flight: HashSet::new(),
+            generation: 0,
         };
         worker.apply_seed(outcome);
         if let Some(url) = &worker.event_queue_url {
             tracing::info!(%url, "event queue: polling started");
         }
-        Some(worker)
+        worker
     }
 
     /// Records a seed fetch's outcome: a served map ends the retry budget
@@ -368,11 +452,10 @@ impl EventQueueWorker {
     /// OpenSim that POST blocks like a normal long-poll (measured ~58 s to the
     /// timeout), which would stall the switch and hang the crossing; and doing it
     /// in a detached thread would leave a request racing the worker's own poll if
-    /// the agent crosses straight back into the region. The events that mattered
-    /// were already delivered before this switch (the `CrossedRegion` that
-    /// triggered it), the old region's trailing events are irrelevant once we have
-    /// crossed away, and the sim retires the abandoned queue on its own timeout —
-    /// a re-visit then polls it fresh, still with a single poller.
+    /// the agent crosses straight back into the region. A poll still open on the
+    /// old queue runs out on its own thread; a re-visit waits for it
+    /// ([`in_flight`](Self::in_flight)) and then polls fresh, still with a single
+    /// poller.
     fn switch(&mut self, seed: url::Url, map_tx: &Sender<Result<HashMap<String, String>, String>>) {
         if seed == self.seed && self.event_queue_url.is_some() {
             return;
@@ -380,6 +463,7 @@ impl EventQueueWorker {
         if let Some(old_url) = self.event_queue_url.take() {
             tracing::debug!(%old_url, "event queue: abandoning the old region queue on switch");
         }
+        self.generation = self.generation.wrapping_add(1);
         self.seed = seed;
         self.ack = None;
         // A new region starts with a fresh retry budget: the old region's
@@ -392,72 +476,69 @@ impl EventQueueWorker {
         }
     }
 
-    /// Performs one `EventQueueGet` long-poll round against the current queue,
-    /// forwarding every decoded event to `caps_tx`. A pulled batch is forwarded in
-    /// full before returning, so an event taken off the wire is never discarded.
-    fn poll_round(&mut self, caps_tx: &Sender<(String, Llsd)>) -> PollOutcome {
+    /// Starts a long poll on the current queue, unless it has none or a poll
+    /// is still open on it from this visit or an earlier one.
+    fn start_poll(&mut self, done_tx: &Sender<FinishedPoll>) {
         let Some(url) = self.event_queue_url.clone() else {
+            return;
+        };
+        if !self.in_flight.insert(url.clone()) {
+            return;
+        }
+        let http = self.http.clone();
+        let ack = self.ack;
+        let generation = self.generation;
+        let done_tx = done_tx.clone();
+        crate::log_context::spawn_thread(move || {
+            let reply = fetch_poll(&http, &url, ack);
+            // A closed channel means the worker has exited.
+            let _ignored = done_tx.send(FinishedPoll {
+                url,
+                generation,
+                reply,
+            });
+        });
+    }
+
+    /// Takes in a returned poll, forwarding every event it carries, so an event
+    /// taken off the wire is never discarded. Only a poll of the current visit
+    /// moves the ack or asks the worker to wait for a region switch.
+    fn finish_poll(
+        &mut self,
+        finished: FinishedPoll,
+        caps_tx: &Sender<(String, Llsd)>,
+    ) -> PollOutcome {
+        let FinishedPoll {
+            url,
+            generation,
+            reply,
+        } = finished;
+        self.in_flight.remove(&url);
+        let current =
+            generation == self.generation && self.event_queue_url.as_deref() == Some(url.as_str());
+        let Some((id, events)) = reply else {
             return PollOutcome::Idle;
         };
-        let response = match self
-            .http
-            .post(&url)
-            .header("Content-Type", "application/llsd+xml")
-            .body(build_event_queue_request(self.ack, false))
-            .send()
-        {
-            Ok(response) => response,
-            Err(error) => {
-                tracing::trace!(%error, "event queue: poll request errored; retrying");
-                std::thread::sleep(POLL_ERROR_BACKOFF);
-                return PollOutcome::Idle;
-            }
-        };
-        // A timeout with no events returns a non-2xx (e.g. 502); re-poll with the
-        // same ack after a short pause.
-        if !response.status().is_success() {
-            std::thread::sleep(Duration::from_millis(200));
+        if current {
+            self.ack = Some(id);
+        }
+        if events.is_empty() {
             return PollOutcome::Idle;
         }
-        // A body that cannot be read, or that does not parse, is as transient as
-        // a failed request — and backs off the same way, or a grid answering a
-        // broken `200` spins this thread as fast as the network allows.
-        let text = match response.text() {
-            Ok(text) => text,
-            Err(error) => {
-                tracing::trace!(%error, "event queue: poll body could not be read; retrying");
-                std::thread::sleep(POLL_ERROR_BACKOFF);
-                return PollOutcome::Idle;
-            }
-        };
-        let parsed = match parse_event_queue_response(&text) {
-            Ok(parsed) => parsed,
-            Err(error) => {
-                tracing::trace!(%error, "event queue: poll body did not parse; retrying");
-                std::thread::sleep(POLL_ERROR_BACKOFF);
-                return PollOutcome::Idle;
-            }
-        };
-        self.ack = Some(parsed.id);
-        if parsed.events.is_empty() {
-            return PollOutcome::Idle;
-        }
-        let names: Vec<&str> = parsed
-            .events
-            .iter()
-            .map(|event| event.message.as_str())
-            .collect();
-        let region_change = names
-            .iter()
-            .any(|name| *name == "CrossedRegion" || *name == "TeleportFinish");
+        let names: Vec<&str> = events.iter().map(|(name, _body)| name.as_str()).collect();
+        let region_change = current
+            && names
+                .iter()
+                .any(|name| *name == "CrossedRegion" || *name == "TeleportFinish");
         tracing::debug!(
-            id = parsed.id,
+            id,
             count = names.len(),
             ?names,
+            current,
             "event queue: delivering batch"
         );
-        for event in parsed.events {
-            if caps_tx.send((event.message, event.body)).is_err() {
+        for event in events {
+            if caps_tx.send(event).is_err() {
                 return PollOutcome::ReceiverGone;
             }
         }
@@ -465,9 +546,13 @@ impl EventQueueWorker {
     }
 }
 
-/// The single event-queue worker loop: poll the current region's queue, applying
-/// any pending [`EqCommand::Switch`] between rounds. Exits when the command
-/// channel closes (the [`Caps`] was dropped) or the events receiver is gone.
+/// How long the worker holds off re-polling a queue whose last batch announced a
+/// region change, waiting for the driver's switch. The bound lets it resume if no
+/// switch comes (a teleport that fails), and covers a slow frame under load.
+const REGION_CHANGE_HOLD: Duration = Duration::from_secs(2);
+
+/// Builds the event-queue worker and runs it. Exits when the command channel
+/// closes (the [`Caps`] was dropped) or the events receiver is gone.
 fn run_event_queue(
     initial_seed: url::Url,
     requested: Arc<[String]>,
@@ -475,60 +560,81 @@ fn run_event_queue(
     caps_tx: &Sender<(String, Llsd)>,
     map_tx: &Sender<Result<HashMap<String, String>, String>>,
 ) {
-    let Some(mut worker) = EventQueueWorker::new(initial_seed, requested, map_tx) else {
-        return;
-    };
+    if let Some(worker) = EventQueueWorker::new(initial_seed, requested, map_tx) {
+        drive_event_queue(worker, command_rx, caps_tx, map_tx);
+    }
+}
+
+/// The event-queue worker loop: keeps a poll open on the current region's queue
+/// and reacts to whichever comes first, a returned poll or an
+/// [`EqCommand::Switch`].
+fn drive_event_queue(
+    mut worker: EventQueueWorker,
+    command_rx: &Receiver<EqCommand>,
+    caps_tx: &Sender<(String, Llsd)>,
+    map_tx: &Sender<Result<HashMap<String, String>, String>>,
+) {
+    let (done_tx, done_rx) = unbounded();
+    // Set after a batch announced a region change, so the stale queue is not
+    // polled while the driver's switch is on its way.
+    let mut hold_until: Option<Instant> = None;
     loop {
         // Apply every queued switch before polling, so a just-issued region change
         // is honoured before we poll a now-stale queue.
         loop {
             match command_rx.try_recv() {
-                Ok(EqCommand::Switch(seed)) => worker.switch(seed, map_tx),
+                Ok(EqCommand::Switch(seed)) => {
+                    worker.switch(seed, map_tx);
+                    hold_until = None;
+                }
                 Err(TryRecvError::Empty) => break,
                 Err(TryRecvError::Disconnected) => return,
             }
         }
-        if worker.event_queue_url.is_none() {
-            // Nothing to poll. A *failed* seed fetch is retried on a backoff — a
-            // region that advertises no event queue answers the same way every
-            // time, so only a failure is worth repeating, and leaving a region
-            // queueless over one transient error strands the agent (its own
-            // `CrossedRegion` is an event-queue event). Once the budget is spent,
-            // block for a command so the thread does not spin.
-            match worker.seed_retry_backoff() {
-                Some(backoff) => match command_rx.recv_timeout(backoff) {
-                    Ok(EqCommand::Switch(seed)) => worker.switch(seed, map_tx),
-                    Err(RecvTimeoutError::Timeout) => worker.retry_seed(map_tx),
-                    Err(RecvTimeoutError::Disconnected) => return,
-                },
-                None => match command_rx.recv() {
-                    Ok(EqCommand::Switch(seed)) => worker.switch(seed, map_tx),
-                    Err(_) => return,
-                },
-            }
-            continue;
+        let now = Instant::now();
+        hold_until = hold_until.filter(|until| now < *until);
+        if hold_until.is_none() {
+            worker.start_poll(&done_tx);
         }
-        match worker.poll_round(caps_tx) {
-            PollOutcome::ReceiverGone => return,
-            PollOutcome::Delivered {
-                region_change: true,
-            } => {
-                // The batch carried a CrossedRegion / TeleportFinish: the driver
-                // will re-target us to the new region. Wait (bounded) for that
-                // switch before polling the now-stale queue again — a re-poll here
-                // could block a full long-poll on a region we have already left.
-                // The bound lets us resume if no switch comes (e.g. a teleport that
-                // fails), and is generous enough to cover a slow frame under load.
-                match command_rx.recv_timeout(Duration::from_secs(2)) {
-                    Ok(EqCommand::Switch(seed)) => worker.switch(seed, map_tx),
-                    Err(RecvTimeoutError::Timeout) => {}
-                    Err(RecvTimeoutError::Disconnected) => return,
+        // With no queue, a *failed* seed fetch is retried on a backoff — a region
+        // that advertises no event queue answers the same way every time, so only
+        // a failure is worth repeating, and leaving a region queueless over one
+        // transient error strands the agent (its own `CrossedRegion` is an
+        // event-queue event). Once the budget is spent, only a command wakes this.
+        let seed_retry = if worker.event_queue_url.is_none() {
+            worker.seed_retry_backoff()
+        } else {
+            None
+        };
+        let wake = hold_until
+            .map(|until| until.saturating_duration_since(now))
+            .or(seed_retry);
+        let timer = wake.map_or_else(never, after);
+        select! {
+            recv(command_rx) -> command => match command {
+                Ok(EqCommand::Switch(seed)) => {
+                    worker.switch(seed, map_tx);
+                    hold_until = None;
                 }
-            }
-            PollOutcome::Delivered {
-                region_change: false,
-            }
-            | PollOutcome::Idle => {}
+                Err(_) => return,
+            },
+            recv(done_rx) -> finished => {
+                let Ok(finished) = finished else {
+                    return;
+                };
+                match worker.finish_poll(finished, caps_tx) {
+                    PollOutcome::ReceiverGone => return,
+                    PollOutcome::Delivered { region_change: true } => {
+                        hold_until = Instant::now().checked_add(REGION_CHANGE_HOLD);
+                    }
+                    PollOutcome::Delivered { region_change: false } | PollOutcome::Idle => {}
+                }
+            },
+            recv(timer) -> _ => {
+                if seed_retry.is_some() && worker.event_queue_url.is_none() {
+                    worker.retry_seed(map_tx);
+                }
+            },
         }
     }
 }
@@ -540,8 +646,14 @@ mod tests {
         reason = "a failed expectation is the intended failure signal in a unit test"
     )]
 
-    use super::{EventQueueWorker, MAX_SEED_FETCH_RETRIES, SeedOutcome};
+    use super::{
+        EqCommand, EventQueueWorker, MAX_SEED_FETCH_RETRIES, SeedOutcome, drive_event_queue,
+    };
+    use crossbeam_channel::{Receiver, Sender, bounded, unbounded};
     use pretty_assertions::assert_eq;
+    use std::collections::HashSet;
+    use std::io::{Read as _, Write as _};
+    use std::net::{SocketAddr, TcpListener, TcpStream};
     use std::time::Duration;
 
     /// A worker parked on a placeholder seed, with no fetch performed: the retry
@@ -559,6 +671,8 @@ mod tests {
             ack: None,
             seed_failures: 0,
             requested: std::sync::Arc::from(Vec::<String>::new()),
+            in_flight: HashSet::new(),
+            generation: 0,
         }
     }
 
@@ -619,5 +733,152 @@ mod tests {
             worker.seed_retry_backoff(),
             Some(Duration::from_millis(200))
         );
+    }
+
+    /// A long poll as the stub grid holds it: which queue, and the handle whose
+    /// drop lets it return.
+    type HeldPoll = (String, Sender<()>);
+
+    /// How long a poll that should arrive is given to do so.
+    const POLL_ARRIVES: Duration = Duration::from_secs(5);
+
+    /// Answers one request: a seed with that region's queue, or a long poll
+    /// that stays open until its [`HeldPoll`] handle is dropped.
+    fn serve_connection(mut stream: TcpStream, addr: SocketAddr, polls: &Sender<HeldPoll>) {
+        let mut request = Vec::new();
+        let mut chunk = [0_u8; 1024];
+        let body_read = loop {
+            let read = stream.read(&mut chunk).expect("the request is readable");
+            request.extend(chunk.iter().take(read));
+            let text = String::from_utf8_lossy(&request);
+            if let Some((head, body)) = text.split_once("\r\n\r\n") {
+                let length = head
+                    .lines()
+                    .find_map(|line| {
+                        let (name, value) = line.split_once(':')?;
+                        name.eq_ignore_ascii_case("content-length")
+                            .then(|| value.trim().parse::<usize>().ok())?
+                    })
+                    .unwrap_or(0);
+                if body.len() >= length {
+                    break head.to_owned();
+                }
+            }
+            assert!(read > 0, "the client hung up mid-request");
+        };
+        let path = body_read
+            .split_whitespace()
+            .nth(1)
+            .expect("the request names a path")
+            .to_owned();
+        let reply = if let Some(region) = path.strip_prefix("/seed/") {
+            let body = format!(
+                "<llsd><map><key>EventQueueGet</key>\
+                 <string>http://{addr}/eq/{region}</string></map></llsd>"
+            );
+            format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            )
+        } else {
+            let region = path.trim_start_matches("/eq/").to_owned();
+            let (release_tx, release_rx) = bounded::<()>(0);
+            if polls.send((region, release_tx)).is_err() {
+                return;
+            }
+            // Returns when the test drops the handle.
+            let _released = release_rx.recv();
+            "HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_owned()
+        };
+        // The client may be gone by the time a held poll is released.
+        let _ignored = stream.write_all(reply.as_bytes());
+    }
+
+    /// A stub grid on a loopback port, and the event-queue worker running
+    /// against its region `a`. The client bypasses the process-global proxy a
+    /// sibling test installs.
+    fn stub_grid() -> (SocketAddr, Sender<EqCommand>, Receiver<HeldPoll>) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("a loopback port binds");
+        let addr = listener.local_addr().expect("the port has an address");
+        let (polls_tx, polls_rx) = unbounded();
+        std::thread::spawn(move || {
+            for stream in listener.incoming().map_while(Result::ok) {
+                let polls = polls_tx.clone();
+                std::thread::spawn(move || serve_connection(stream, addr, &polls));
+            }
+        });
+        let (command_tx, command_rx) = unbounded();
+        let (caps_tx, caps_rx) = unbounded();
+        let (map_tx, map_rx) = unbounded();
+        std::thread::spawn(move || {
+            let http = reqwest::blocking::Client::builder()
+                .no_proxy()
+                .timeout(Duration::from_secs(30))
+                .build()
+                .expect("a direct blocking client builds");
+            let seed = seed_url(addr, "a");
+            let requested = std::sync::Arc::from(Vec::<String>::new());
+            let worker = EventQueueWorker::with_client(http, seed, requested, &map_tx);
+            drive_event_queue(worker, &command_rx, &caps_tx, &map_tx);
+            drop(caps_rx);
+            drop(map_rx);
+        });
+        (addr, command_tx, polls_rx)
+    }
+
+    /// The seed capability of the stub grid's `region`.
+    fn seed_url(addr: SocketAddr, region: &str) -> url::Url {
+        format!("http://{addr}/seed/{region}")
+            .parse()
+            .expect("the stub seed URL parses")
+    }
+
+    /// A region switch takes effect while the simulator still holds the old
+    /// region's long poll open.
+    #[test]
+    fn a_switch_does_not_wait_for_the_old_long_poll() {
+        let (addr, commands, polls) = stub_grid();
+        let (first, _hold_a) = polls
+            .recv_timeout(POLL_ARRIVES)
+            .expect("region a is polled");
+        assert_eq!(first, "a");
+
+        commands
+            .send(EqCommand::Switch(seed_url(addr, "b")))
+            .expect("the worker is running");
+        let (second, _hold_b) = polls
+            .recv_timeout(POLL_ARRIVES)
+            .expect("region b is polled while a's poll is still open");
+        assert_eq!(second, "b");
+    }
+
+    /// Coming back to a region whose abandoned poll is still open must not put
+    /// a second poller on that queue.
+    #[test]
+    fn a_revisit_waits_for_the_poll_it_abandoned() {
+        let (addr, commands, polls) = stub_grid();
+        let (_first, hold_a) = polls
+            .recv_timeout(POLL_ARRIVES)
+            .expect("region a is polled");
+        commands
+            .send(EqCommand::Switch(seed_url(addr, "b")))
+            .expect("the worker is running");
+        let (_second, _hold_b) = polls
+            .recv_timeout(POLL_ARRIVES)
+            .expect("region b is polled");
+
+        commands
+            .send(EqCommand::Switch(seed_url(addr, "a")))
+            .expect("the worker is running");
+        assert!(
+            polls.recv_timeout(Duration::from_millis(500)).is_err(),
+            "a's queue still has an open poll, so it must not get a second one"
+        );
+
+        drop(hold_a);
+        let (again, _hold_again) = polls
+            .recv_timeout(POLL_ARRIVES)
+            .expect("region a is polled again once its old poll has returned");
+        assert_eq!(again, "a");
     }
 }

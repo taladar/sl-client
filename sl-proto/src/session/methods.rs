@@ -44,14 +44,16 @@ use super::{
     FriendPresence, GrantStatus, HolderKind, IDENTITY_ROTATION, INVENTORY_FETCH_MAX_ATTEMPTS,
     INVENTORY_SAVE_TIMEOUT, Inventory, InventoryOwner, LATE_TELEPORT_START_WINDOW, LOGOUT_TIMEOUT,
     MAX_XFER_DOWNLOAD_BYTES, MessageCursor, OfferedUpload, PARENT_REQUEST_WARN_ATTEMPTS,
-    PendingHandover, PendingInventorySave, PendingInvite, SIT_REFUSAL_ALERTS, SIT_REFUSAL_TEXTS,
-    SIT_TIMEOUT, ScriptGrant, ScriptHolder, ServerHistoryFetch, ServerHistoryMessage,
-    ServerHistoryState, Session, SessionMessage, SessionState, SessionTransition,
-    SessionVoiceFailure, SessionVoiceRequest, SitState, TELEPORT_TIMEOUT,
-    TEXTURE_DOWNLOAD_MAX_ATTEMPTS, TEXTURE_DOWNLOAD_STALL_TIMEOUT, TYPING_TIMEOUT, TakenControls,
+    PendingHandover, PendingInventorySave, PendingInvite, RefusedTeleport, SIT_REFUSAL_ALERTS,
+    SIT_REFUSAL_TEXTS, SIT_TIMEOUT, ScriptGrant, ScriptHolder, ServerHistoryFetch,
+    ServerHistoryMessage, ServerHistoryState, Session, SessionMessage, SessionState,
+    SessionTransition, SessionVoiceFailure, SessionVoiceRequest, SitState,
+    TELEPORT_CANCELLED_ALERT, TELEPORT_TIMEOUT, TEXTURE_DOWNLOAD_MAX_ATTEMPTS,
+    TEXTURE_DOWNLOAD_STALL_TIMEOUT, TYPING_TIMEOUT, TakenControls, TeleportFailedVia,
     TeleportPhase, TextureDownload, TransferDownload, TransferProgress, TransferPurpose,
-    VoiceChannelInfo, XFER_OFFER_TIMEOUT, XFER_REFUSED_RESULT, XFER_STALL_TIMEOUT,
-    XFER_TIMEOUT_RESULT, XferDownload, XferPurpose, XferUpload, deadline, merge_deadline,
+    UnansweredCancels, VoiceChannelInfo, XFER_OFFER_TIMEOUT, XFER_REFUSED_RESULT,
+    XFER_STALL_TIMEOUT, XFER_TIMEOUT_RESULT, XferDownload, XferPurpose, XferUpload, deadline,
+    merge_deadline,
 };
 use crate::GroupRoleKey;
 use crate::asset_keys::{AnimationKey, AssetKey};
@@ -302,6 +304,8 @@ impl Session {
             sit: SitState::NotSitting,
             teleport: TeleportPhase::Idle,
             late_teleport_start_until: None,
+            refused_teleport: None,
+            unanswered_cancels: None,
             pending_handover: None,
             script_grants: BTreeMap::new(),
             taken_controls: TakenControls {
@@ -740,13 +744,15 @@ impl Session {
             // OpenSim sends the UDP message. Either way the teleport is over.
             CapsEvent::TeleportFailed => {
                 if let Some((reason, alert_info)) = teleport_failed_from_caps_llsd(body) {
-                    self.teleport_refused(reason, alert_info, now);
+                    self.teleport_refused(reason, alert_info, TeleportFailedVia::EventQueue, now);
                 } else {
                     self.caps_decode_failed(message);
                 }
             }
             CapsEvent::TeleportFinish => {
-                if let Some(finish) = teleport_finish_from_llsd(body) {
+                if let Some(finish) = teleport_finish_from_llsd(body)
+                    .filter(|finish| !self.is_refused_teleports_finish(finish.region_handle, now))
+                {
                     // A finish without a start: the simulator decided on this
                     // teleport (see the UDP arm) — enter the teleport now.
                     if !matches!(self.state, SessionState::Teleporting)
@@ -779,8 +785,13 @@ impl Session {
                         });
                     }
                     self.begin_handover(finish.dest, region_handle, Some(finish.seed), now)?;
-                } else {
+                } else if teleport_finish_from_llsd(body).is_none() {
                     self.caps_decode_failed(message);
+                } else {
+                    // OpenSim queues the finish and can then fail the transfer
+                    // over UDP, keeping the agent in the source region.
+                    tracing::debug!("ignoring a TeleportFinish behind its teleport's failure");
+                    self.refused_teleport = None;
                 }
             }
             // A neighbouring region is announced over the CAPS event queue (the
@@ -1832,6 +1843,10 @@ impl Session {
         simulator_version: String,
         now: Instant,
     ) {
+        // Logging out ends the session wherever the agent lands.
+        if matches!(self.state, SessionState::LoggingOut) {
+            return;
+        }
         let arrival = pose.region_handle;
         let Some(pending) = self.pending_handover.take() else {
             return;
@@ -1909,6 +1924,7 @@ impl Session {
             }
         }
         self.teleport = TeleportPhase::Idle;
+        self.refused_teleport = None;
         self.state = SessionState::Active;
         if let Some((sim, circuit)) = self
             .circuit
@@ -3003,6 +3019,14 @@ impl Session {
                 let pose = ArrivalPose::from_movement_complete(&complete.data);
                 let version = trimmed_string(&complete.sim_data.channel_version);
                 self.commit_handover(from, pose, version, now);
+            }
+            // A logout during a handover also goes to the destination, which
+            // may already hold the agent.
+            AnyMessage::LogoutReply(_)
+                if matches!(self.state, SessionState::LoggingOut)
+                    && self.pending_handover.as_ref().map(|pending| pending.dest) == Some(from) =>
+            {
+                self.logged_out();
             }
             AnyMessage::DisableSimulator(_) => {
                 // The simulator is retiring this child circuit: its objects
@@ -4879,6 +4903,7 @@ impl Session {
                         message: trimmed_string(&block.message),
                         extra_params: trimmed_string(&block.extra_params),
                     }),
+                    TeleportFailedVia::Udp,
                     now,
                 );
             }
@@ -6277,10 +6302,7 @@ impl Session {
                     });
                 }
             }
-            AnyMessage::LogoutReply(_) => {
-                self.state = SessionState::Closed;
-                self.events.push_back(Event::LoggedOut);
-            }
+            AnyMessage::LogoutReply(_) => self.logged_out(),
             _ => {
                 // Everything the root circuit shares with a child-agent circuit
                 // is handled once, for both, in `dispatch_shared`. It runs
@@ -15184,6 +15206,44 @@ impl Session {
         }
     }
 
+    /// Whether a `TeleportFinish` naming `destination` belongs to a teleport
+    /// just refused over UDP. A finish with no destination, or for any other
+    /// region, may be the grid really moving the agent and is never taken for
+    /// the refused one.
+    fn is_refused_teleports_finish(&self, destination: Option<RegionHandle>, now: Instant) -> bool {
+        !matches!(self.state, SessionState::Teleporting)
+            && self
+                .refused_teleport
+                .is_some_and(|refused| now < refused.until && destination == Some(refused.target))
+    }
+
+    /// Notes that a cancel went to the grid and may yet be answered.
+    fn note_unanswered_cancel(&mut self, now: Instant) {
+        let count = self
+            .unanswered_cancels
+            .filter(|cancels| now < cancels.until)
+            .map_or(0, |cancels| cancels.count);
+        self.unanswered_cancels = Some(UnansweredCancels {
+            count: count.saturating_add(1),
+            until: deadline(now, LATE_TELEPORT_START_WINDOW),
+        });
+    }
+
+    /// Counts one cancel as answered; `false` if none was outstanding.
+    fn take_unanswered_cancel(&mut self, now: Instant) -> bool {
+        let Some(cancels) = self.unanswered_cancels.take() else {
+            return false;
+        };
+        if now >= cancels.until {
+            return false;
+        }
+        let count = cancels.count.saturating_sub(1);
+        if count > 0 {
+            self.unanswered_cancels = Some(UnansweredCancels { count, ..cancels });
+        }
+        true
+    }
+
     /// Called as a teleport ends by failure or cancel, before its phase is
     /// cleared. If its `TeleportStart` has not arrived, that start may still be
     /// on its way, so watch for it: it must not begin a teleport of the grid's
@@ -15208,7 +15268,39 @@ impl Session {
     /// that was already under way and surfaces [`Event::TeleportFailed`]. The
     /// event is surfaced even with no teleport in flight, since a simulator
     /// also sends the message for a teleport it started itself.
-    fn teleport_refused(&mut self, reason: String, alert_info: Option<AlertInfo>, now: Instant) {
+    ///
+    /// The answer to an earlier cancel is not about the teleport now in flight,
+    /// so it leaves that teleport running and surfaces nothing.
+    fn teleport_refused(
+        &mut self,
+        reason: String,
+        alert_info: Option<AlertInfo>,
+        via: TeleportFailedVia,
+        now: Instant,
+    ) {
+        let answers_a_cancel = alert_info
+            .as_ref()
+            .is_some_and(|alert| alert.message.trim() == TELEPORT_CANCELLED_ALERT)
+            && self.take_unanswered_cancel(now);
+        if answers_a_cancel && matches!(self.state, SessionState::Teleporting) {
+            tracing::debug!("the grid answered an earlier cancel; the current teleport goes on");
+            return;
+        }
+        self.refused_teleport = match self.teleport {
+            TeleportPhase::Requested {
+                target: Some(target),
+                ..
+            } if via == TeleportFailedVia::Udp
+                && matches!(self.state, SessionState::Teleporting)
+                && self.pending_handover.is_none() =>
+            {
+                Some(RefusedTeleport {
+                    target,
+                    until: deadline(now, LATE_TELEPORT_START_WINDOW),
+                })
+            }
+            _ => None,
+        };
         self.expect_late_teleport_start(now);
         if matches!(self.state, SessionState::Teleporting) {
             self.abort_pending_handover();
@@ -15253,7 +15345,12 @@ impl Session {
             // drop the pending destination, reset the phase to idle — then request
             // the new one from the now-active state. Without this the second
             // request would be rejected and the first would linger.
-            SessionState::Teleporting => self.cancel_teleport(now)?,
+            //
+            // Unlike a plain cancel this also gives up a handover whose
+            // destination has not confirmed: the reference viewer lets a new
+            // teleport through in that state because it is the way out of a
+            // stuck one.
+            SessionState::Teleporting => self.abandon_teleport(now)?,
             // A crossing (or login) is still finalizing (`AwaitingHandshake`).
             // Force it to complete — the destination circuit is already the root
             // and the confirming handshake was merely lost — then teleport from
@@ -15319,11 +15416,27 @@ impl Session {
     /// teleport timeout; if no teleport is in flight the message is still sent
     /// but has no local effect.
     ///
+    /// Once the `TeleportFinish` has arrived this does nothing. The grid has
+    /// already moved the agent and does not check for a cancel after that, so
+    /// staying behind would strand the session in a region the agent has left,
+    /// and the reference viewer offers no Cancel at that point either. The
+    /// teleport timeout still guards a destination that never confirms.
+    ///
     /// # Errors
     ///
     /// Returns [`Error::NoCircuit`] if no circuit is established, or
     /// [`Error::Wire`] if the request fails to encode.
     pub fn cancel_teleport(&mut self, now: Instant) -> Result<(), Error> {
+        if self.pending_handover.is_some() {
+            tracing::debug!("not cancelling a teleport the grid has already carried out");
+            return Ok(());
+        }
+        self.abandon_teleport(now)
+    }
+
+    /// Tells the grid the teleport in flight is off and returns to the source
+    /// region, dropping any handover that was under way.
+    fn abandon_teleport(&mut self, now: Instant) -> Result<(), Error> {
         // Send `TeleportCancel` on the (still-live source) root circuit.
         self.circuit
             .as_mut()
@@ -15331,10 +15444,7 @@ impl Session {
             .send_teleport_cancel(now)?;
         self.expect_late_teleport_start(now);
         if matches!(self.state, SessionState::Teleporting) {
-            // Deferred teardown kept the source region live: drop only the pending
-            // destination and return to the source, so a cancelled teleport never
-            // strands the session (this is what makes the viewer watchdog's
-            // `CancelTeleport` actually recover a hung handover).
+            self.note_unanswered_cancel(now);
             self.abort_pending_handover();
             if let Some(circuit) = self.circuit.as_mut() {
                 circuit.timers.teleport = None;
@@ -15685,6 +15795,9 @@ impl Session {
         if matches!(self.state, SessionState::Closed | SessionState::LoggingOut) {
             return;
         }
+        // During a handover the grid may already hold the agent at the
+        // destination, so that region is told as well.
+        let destination = self.pending_handover.as_ref().map(|pending| pending.dest);
         match self.circuit.as_mut() {
             Some(circuit) => {
                 if circuit.send_logout_request(now).is_err() {
@@ -15693,9 +15806,24 @@ impl Session {
                 }
                 circuit.timers.logout = Some(deadline(now, LOGOUT_TIMEOUT));
                 self.state = SessionState::LoggingOut;
+                if let Some(child) = destination.and_then(|sim| self.children.get_mut(&sim))
+                    && child.send_logout_request(now).is_err()
+                {
+                    self.close(DisconnectReason::ProtocolError);
+                }
             }
             None => self.close(DisconnectReason::ProtocolError),
         }
+    }
+
+    /// The grid confirmed the logout. With a handover in flight both regions
+    /// may answer, and only the first ends the session.
+    fn logged_out(&mut self) {
+        if matches!(self.state, SessionState::Closed) {
+            return;
+        }
+        self.state = SessionState::Closed;
+        self.events.push_back(Event::LoggedOut);
     }
 
     /// The next datagram to transmit, if any: the root circuit's queue first,

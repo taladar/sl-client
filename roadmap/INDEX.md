@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 329 |
 | blocked | 35 |
 | in-progress | 4 |
-| bugs | 19 |
-| done | 1609 |
+| bugs | 14 |
+| done | 1614 |
 | deferred | 30 |
 | wont-do | 24 |
 | **total** | **2181** |
@@ -1244,25 +1244,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-text-renderability-axis`](in-progress/viewer-ui-text-renderability-axis.md)
   — Upstream issue — font selection cannot see glyph-format renderability
 
-## bugs (19)
+## bugs (14)
 
 ### protocol
 
-- [`protocol-cancel-after-teleport-finish-strands-agent`](bugs/protocol-cancel-after-teleport-finish-strands-agent.md)
-  — Cancelling a teleport after its TeleportFinish strands the agent
-- [`protocol-cancelled-reply-ends-replacement-teleport`](bugs/protocol-cancelled-reply-ends-replacement-teleport.md)
-  — A replaced teleport's TPCancelled reply may end the teleport that replaced
-  it
-- [`protocol-event-queue-switch-waits-on-old-poll`](bugs/protocol-event-queue-switch-waits-on-old-poll.md)
-  — The Bevy event-queue worker can miss a region switch for a whole long poll
 - [`protocol-killed-object-resurrected-by-resend`](bugs/protocol-killed-object-resurrected-by-resend.md)
   — A resent ObjectUpdate after KillObject may leave a ghost object
 - [`protocol-late-eac-suppresses-neighbour-seed`](bugs/protocol-late-eac-suppresses-neighbour-seed.md)
   — A late EstablishAgentCommunication may suppress a neighbour's next seed
-- [`protocol-late-teleport-finish-after-failure`](bugs/protocol-late-teleport-finish-after-failure.md)
-  — A TeleportFinish handled after its TeleportFailed starts a phantom teleport
-- [`protocol-logout-during-handover-is-undone`](bugs/protocol-logout-during-handover-is-undone.md)
-  — A logout during a teleport handover is silently undone
 
 ### viewer
 
@@ -1297,7 +1286,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`inventory-stale-folder-fetch-overwrites-newer-state`](bugs/inventory-stale-folder-fetch-overwrites-newer-state.md)
   — A stale folder fetch overwrites newer inventory, including the outfit folder
 
-## done (1609)
+## done (1614)
 
 ### protocol
 
@@ -1494,6 +1483,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`protocol-avatar-render-info`](done/protocol-avatar-render-info.md) —
   AvatarRenderInfo — client request, SimCaps service and fake-grid answers
   (blocked by `gridspec-avatar-render-info` (done))
+- [`protocol-cancel-after-teleport-finish-strands-agent`](done/protocol-cancel-after-teleport-finish-strands-agent.md)
+  — Cancelling a teleport after its TeleportFinish strands the agent
+- [`protocol-cancelled-reply-ends-replacement-teleport`](done/protocol-cancelled-reply-ends-replacement-teleport.md)
+  — A replaced teleport's TPCancelled reply may end the teleport that replaced
+  it
 - [`protocol-cap-agent-profile`](done/protocol-cap-agent-profile.md) — Read and
   write profiles over the AgentProfile capability (blocked by
   `gridspec-profiles` (done))
@@ -1527,6 +1521,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`protocol-classified-query-wrong-flag-space`](done/protocol-classified-query-wrong-flag-space.md)
   — DirClassifiedQuery sends DirFind maturity bits instead of classified-query
   bits
+- [`protocol-event-queue-switch-waits-on-old-poll`](done/protocol-event-queue-switch-waits-on-old-poll.md)
+  — The Bevy event-queue worker can miss a region switch for a whole long poll
 - [`protocol-experience-environment-push`](done/protocol-experience-environment-push.md)
   — An experience can set the sky, and nothing in this stack can say so
 - [`protocol-experience-parcel-recheck`](done/protocol-experience-parcel-recheck.md)
@@ -1542,8 +1538,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   call or start p2p voice
 - [`protocol-join-session-voice-provisions-vivox`](done/protocol-join-session-voice-provisions-vivox.md)
   — Joining a session's voice posts a Vivox account provision
+- [`protocol-late-teleport-finish-after-failure`](done/protocol-late-teleport-finish-after-failure.md)
+  — A TeleportFinish handled after its TeleportFailed starts a phantom teleport
 - [`protocol-login-options-max-agent-groups-unrequested`](done/protocol-login-options-max-agent-groups-unrequested.md)
   — max-agent-groups is never requested at login but is gated on the option
+- [`protocol-logout-during-handover-is-undone`](done/protocol-logout-during-handover-is-undone.md)
+  — A logout during a teleport handover is silently undone
 - [`protocol-logout-reply-sometimes-missing-on-opensim`](done/protocol-logout-reply-sometimes-missing-on-opensim.md)
   — A logout on the local OpenSim sometimes gets no LogoutReply
 - [`protocol-lsl-syntax`](done/protocol-lsl-syntax.md) — LSLSyntax capability —

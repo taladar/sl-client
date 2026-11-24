@@ -101,7 +101,7 @@ const BUTTON_BG: Color = Color::srgb(0.22, 0.25, 0.31);
 const RETRY_BG: Color = Color::srgb(0.22, 0.40, 0.60);
 
 /// Which phase of the handshake the teleport is currently in, for the status line.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum Phase {
     /// The request was sent; awaiting the first server acknowledgement.
     Requested,
@@ -511,7 +511,8 @@ fn ingest_events(
         match &event.0 {
             SlSessionEvent::TeleportStarted { flags } => {
                 let entry = flow.pending_entry(now);
-                entry.phase = Phase::Requested;
+                // A start handled after the finish must not move it back.
+                entry.phase = entry.phase.max(Phase::Requested);
                 entry.uncancellable = flags.contains(TeleportFlags::DISABLE_CANCEL);
                 entry.updated_at = now;
                 // The reference viewer's "teleport out" chime as the flow begins.
@@ -521,7 +522,7 @@ fn ingest_events(
             }
             SlSessionEvent::TeleportProgress { message, .. } => {
                 let entry = flow.pending_entry(now);
-                entry.phase = Phase::InProgress;
+                entry.phase = entry.phase.max(Phase::InProgress);
                 entry.message = (!message.is_empty()).then(|| {
                     progress_text_key(message)
                         .map_or_else(|| message.clone(), |key| translator.get(key))
@@ -793,9 +794,7 @@ fn render_overlay(time: Res<Time>, mut flow: ResMut<TeleportFlow>, parts: Overla
     // nothing on a fleeting success.
     for (kind, mut visibility) in &mut overlay_buttons {
         let wanted = match kind {
-            OverlayButton::Cancel => {
-                matches!(entry.outcome, Outcome::Pending) && !entry.uncancellable
-            }
+            OverlayButton::Cancel => offers_cancel(entry),
             OverlayButton::Dismiss => matches!(entry.outcome, Outcome::Failed { .. }),
             OverlayButton::Retry => {
                 matches!(entry.outcome, Outcome::Failed { .. }) && entry.retry.is_some()
@@ -810,6 +809,15 @@ fn render_overlay(time: Res<Time>, mut flow: ResMut<TeleportFlow>, parts: Overla
             *visibility = next;
         }
     }
+}
+
+/// Whether the overlay offers Cancel: while pending, unless the simulator ruled
+/// it out, and not once the `TeleportFinish` has arrived, because the grid has
+/// then already moved the agent.
+fn offers_cancel(entry: &Entry) -> bool {
+    matches!(entry.outcome, Outcome::Pending)
+        && !entry.uncancellable
+        && entry.phase != Phase::Arriving
 }
 
 /// The status (phase) line for `entry`.
@@ -862,7 +870,7 @@ fn message_line(entry: &Entry) -> Option<String> {
 mod tests {
     use super::{
         Entry, Outcome, Phase, TeleportFlow, confirms_a_cancel, detail_line, failure_reason,
-        message_line, progress_text_key, status_line, teleport_readout, watchdog,
+        message_line, offers_cancel, progress_text_key, status_line, teleport_readout, watchdog,
     };
     use bevy::ecs::system::RunSystemOnce as _;
     use bevy::prelude::{Messages, Time, World};
@@ -1018,6 +1026,33 @@ mod tests {
         );
         assert_eq!(world.resource::<Messages<SlCommand>>().len(), 1);
         Ok(())
+    }
+
+    /// Cancel is offered until the grid has answered with the finish, and not
+    /// for a teleport the simulator ruled it out on.
+    #[test]
+    fn cancel_is_offered_only_before_the_finish() {
+        let mut entry = pending();
+        assert!(offers_cancel(&entry));
+        entry.phase = Phase::InProgress;
+        assert!(offers_cancel(&entry));
+        entry.phase = Phase::Arriving;
+        assert!(
+            !offers_cancel(&entry),
+            "the grid has already moved the agent"
+        );
+        entry.phase = Phase::Requested;
+        entry.uncancellable = true;
+        assert!(!offers_cancel(&entry));
+    }
+
+    /// A start or progress line handled after the finish leaves the teleport
+    /// arriving, so Cancel does not come back.
+    #[test]
+    fn a_late_phase_does_not_move_the_teleport_back() {
+        assert_eq!(Phase::Arriving.max(Phase::Requested), Phase::Arriving);
+        assert_eq!(Phase::Arriving.max(Phase::InProgress), Phase::Arriving);
+        assert_eq!(Phase::Requested.max(Phase::InProgress), Phase::InProgress);
     }
 
     /// The status line follows the phase while pending and the outcome once

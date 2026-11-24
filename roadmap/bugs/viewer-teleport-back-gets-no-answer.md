@@ -25,6 +25,13 @@ asking again.
 
 Two runs are too few to say the time spent in a region is the cause.
 
+On 2026-11-24 a third 60 s run stalled at the same step, three requests in a
+row, after the event-queue worker was changed to switch queues without waiting
+for the old long poll ([[protocol-event-queue-switch-waits-on-old-poll]]). The
+queue re-targeted within a second of both earlier arrivals, so a stale queue
+is not the cause. A 30 s run on the same build made 14 teleports without a
+stall.
+
 ## To find out
 
 - What the viewer sent for the stalled request, and whether the simulator

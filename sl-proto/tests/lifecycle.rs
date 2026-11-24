@@ -16665,15 +16665,80 @@ mod test {
         Ok(())
     }
 
-    /// Cancelling a teleport mid-handover returns to the source region and drops
-    /// the freshly-opened destination circuit (so a later teleport there is fresh
-    /// again, not a promote).
+    /// An `AgentMovementComplete` placing the agent in the region `handle`.
+    fn agent_movement_complete(handle: u64) -> AnyMessage {
+        AnyMessage::AgentMovementComplete(AgentMovementComplete {
+            agent_data: AgentMovementCompleteAgentDataBlock {
+                agent_id: uuid::Uuid::nil(),
+                session_id: uuid::Uuid::nil(),
+            },
+            data: AgentMovementCompleteDataBlock {
+                position: vec3(128.0, 128.0, 30.0),
+                look_at: vec3(1.0, 0.0, 0.0),
+                region_handle: handle,
+                timestamp: 0,
+            },
+            sim_data: AgentMovementCompleteSimDataBlock {
+                channel_version: b"test".to_vec(),
+            },
+        })
+    }
+
+    /// A `LogoutReply` with no inventory data.
+    fn logout_reply_datagram(sequence: u32) -> Result<Vec<u8>, TestError> {
+        let mut body = Writer::new();
+        body.put_uuid(uuid::Uuid::nil());
+        body.put_uuid(uuid::Uuid::nil());
+        body.put_u8(0);
+        server_datagram(MessageId::Low(253), &body.into_bytes(), sequence, true)
+    }
+
+    /// Past its `TeleportFinish` the grid has moved the agent, so a cancel
+    /// changes nothing: nothing goes on the wire, the destination stays
+    /// connected, and its confirmation still completes the teleport.
     #[test]
-    fn handover_cancel_returns_to_source() -> Result<(), TestError> {
+    fn a_cancel_after_the_finish_still_arrives() -> Result<(), TestError> {
         let now = Instant::now();
         let (mut session, mut grid) = grid_session(now)?;
         let source_circuit = session.root_circuit_id();
+        session.teleport_to(
+            RegionHandle(C_HANDLE),
+            region_coords(128.0, 128.0, 30.0),
+            vec3(1.0, 0.0, 0.0),
+            now,
+        )?;
+        grid.teleport_finish(&mut session, sim_addr(), sim_c(), now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
 
+        session.cancel_teleport(now)?;
+        let sent = drain(&mut session)?;
+        assert!(
+            !sent
+                .iter()
+                .any(|m| matches!(m, AnyMessage::TeleportCancel(_))),
+            "a teleport the grid carried out cannot be cancelled, got {sent:?}"
+        );
+        assert_eq!(session.root_circuit_id(), source_circuit);
+
+        let arrived = server_message(&agent_movement_complete(C_HANDLE), 700, true)?;
+        session.handle_datagram(sim_c(), &arrived, now)?;
+        let changed = take_region_changed(&mut session).ok_or("expected a RegionChanged")?;
+        assert_eq!(
+            changed.1,
+            sim_c(),
+            "the agent arrives where the grid put it"
+        );
+        Ok(())
+    }
+
+    /// A handover whose destination never confirms is still abandoned by the
+    /// teleport timeout, after a cancel changed nothing.
+    #[test]
+    fn a_cancelled_handover_that_never_confirms_times_out() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut session, mut grid) = grid_session(now)?;
+        let source_circuit = session.root_circuit_id();
         session.teleport_to(
             RegionHandle(C_HANDLE),
             region_coords(128.0, 128.0, 30.0),
@@ -16682,15 +16747,25 @@ mod test {
         )?;
         grid.teleport_finish(&mut session, sim_addr(), sim_c(), now)?;
         drain(&mut session)?; // do not confirm the destination
-
+        drain_events(&mut session);
         session.cancel_teleport(now)?;
-        assert_eq!(
-            session.root_circuit_id(),
-            source_circuit,
-            "cancelling returns to the untouched source region"
-        );
 
-        // The dropped destination circuit means a fresh teleport there next time.
+        session.handle_timeout(after(now, 31_000)?);
+        assert_eq!(
+            teleport_phases(&drain_events(&mut session)),
+            vec!["failed"],
+            "the timeout still ends a handover that never confirms"
+        );
+        assert_eq!(session.root_circuit_id(), source_circuit);
+        Ok(())
+    }
+
+    /// The destination's arrival must not undo a logout made during the
+    /// handover: both regions are told, and the session ends.
+    #[test]
+    fn a_logout_during_a_handover_is_not_undone() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut session, mut grid) = grid_session(now)?;
         session.teleport_to(
             RegionHandle(C_HANDLE),
             region_coords(128.0, 128.0, 30.0),
@@ -16698,11 +16773,44 @@ mod test {
             now,
         )?;
         grid.teleport_finish(&mut session, sim_addr(), sim_c(), now)?;
-        grid.pump(&mut session, now)?;
-        let changed = take_region_changed(&mut session).ok_or("expected a RegionChanged")?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        session.initiate_logout(now);
+        let mut told = Vec::new();
+        while let Some(transmit) = session.poll_transmit() {
+            if matches!(decode(&transmit)?, AnyMessage::LogoutRequest(_)) {
+                told.push(transmit.destination);
+            }
+        }
         assert!(
-            changed.2,
-            "the re-teleport is a fresh distant teleport (world reset)"
+            told.contains(&sim_addr()),
+            "the source is told, got {told:?}"
+        );
+        assert!(
+            told.contains(&sim_c()),
+            "the destination is told, got {told:?}"
+        );
+
+        let arrived = server_message(&agent_movement_complete(C_HANDLE), 700, true)?;
+        session.handle_datagram(sim_c(), &arrived, now)?;
+        let events = drain_events(&mut session);
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, Event::RegionChanged { .. })),
+            "the arrival must not resume the session, got {events:?}"
+        );
+
+        session.handle_datagram(sim_c(), &logout_reply_datagram(701)?, now)?;
+        session.handle_datagram(sim_addr(), &logout_reply_datagram(702)?, now)?;
+        assert_eq!(
+            drain_events(&mut session)
+                .iter()
+                .filter(|e| matches!(e, Event::LoggedOut))
+                .count(),
+            1,
+            "both regions may answer, and the session ends once"
         );
         Ok(())
     }
@@ -18012,6 +18120,216 @@ mod test {
             vec!["started", "progress", "finished"],
             "the grid's teleport should run as a teleport"
         );
+        Ok(())
+    }
+
+    /// A `TeleportFailed` over UDP, with an optional alert key.
+    fn udp_teleport_failed(alert: Option<&str>) -> AnyMessage {
+        AnyMessage::TeleportFailed(TeleportFailed {
+            info: TeleportFailedInfoBlock {
+                agent_id: uuid::Uuid::nil(),
+                reason: b"failed\0".to_vec(),
+            },
+            alert_info: alert
+                .map(|key| TeleportFailedAlertInfoBlock {
+                    message: key.as_bytes().to_vec(),
+                    extra_params: Vec::new(),
+                })
+                .into_iter()
+                .collect(),
+        })
+    }
+
+    /// The region [`caps_named_teleport_finish_xml`] names as its destination.
+    const NAMED_FINISH_HANDLE: u64 = 0x0003_E800_0003_E900;
+
+    /// A CAPS `TeleportFinish` that names its destination region.
+    fn caps_named_teleport_finish_xml() -> &'static str {
+        "<llsd><map><key>Info</key><array><map>\
+            <key>SimIP</key><binary>fwAAAQ==</binary>\
+            <key>SimPort</key><integer>9001</integer>\
+            <key>RegionHandle</key><binary>AAPoAAAD6QA=</binary>\
+            <key>SeedCapability</key><string>http://127.0.0.1:9001/seed</string>\
+            <key>SimAccess</key><integer>21</integer>\
+            <key>TeleportFlags</key><integer>12</integer>\
+            </map></array></map></llsd>"
+    }
+
+    /// OpenSim can queue the finish and then fail the transfer over UDP. A
+    /// finish naming the refused region, handled after that failure, starts
+    /// nothing.
+    #[test]
+    fn a_finish_behind_its_udp_failure_starts_nothing() -> Result<(), TestError> {
+        let target = NAMED_FINISH_HANDLE;
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+        session.teleport_to(
+            RegionHandle(target),
+            region_coords(128.0, 128.0, 30.0),
+            vec3(1.0, 0.0, 0.0),
+            now,
+        )?;
+        drain(&mut session)?;
+        let failed = server_message(&udp_teleport_failed(None), 900, true)?;
+        session.handle_datagram(sim_addr(), &failed, now)?;
+        let body = sl_proto::parse_llsd_xml(caps_named_teleport_finish_xml())?;
+        session.handle_caps_event("TeleportFinish", &body, now)?;
+        assert_eq!(
+            teleport_phases(&drain_events(&mut session)),
+            vec!["failed"],
+            "the finish belongs to the refused teleport"
+        );
+        session.handle_timeout(after(now, 31_000)?);
+        assert_eq!(
+            teleport_phases(&drain_events(&mut session)),
+            Vec::<&str>::new(),
+            "no teleport should be left running to time out"
+        );
+        Ok(())
+    }
+
+    /// A finish that does not name the refused region, or comes after the
+    /// window, may be the grid really moving the agent, and is honoured.
+    #[test]
+    fn a_finish_the_refusal_cannot_explain_is_honoured() -> Result<(), TestError> {
+        let target = NAMED_FINISH_HANDLE;
+        let body = sl_proto::parse_llsd_xml(caps_named_teleport_finish_xml())?;
+        for (aimed_at, delay) in [(target.wrapping_add(256), 0), (target, 11_000)] {
+            let now = Instant::now();
+            let mut session = established(now)?;
+            drain(&mut session)?;
+            drain_events(&mut session);
+            session.teleport_to(
+                RegionHandle(aimed_at),
+                region_coords(128.0, 128.0, 30.0),
+                vec3(1.0, 0.0, 0.0),
+                now,
+            )?;
+            drain(&mut session)?;
+            let failed = server_message(&udp_teleport_failed(None), 900, true)?;
+            session.handle_datagram(sim_addr(), &failed, now)?;
+            session.handle_caps_event("TeleportFinish", &body, after(now, delay)?)?;
+            assert_eq!(
+                teleport_phases(&drain_events(&mut session)),
+                vec!["failed", "started", "finished"],
+                "aimed at {aimed_at:#x}, {delay} ms later"
+            );
+        }
+        Ok(())
+    }
+
+    /// A refusal over the event queue, Second Life's channel, has no finish
+    /// behind it, so a finish naming the same region is the grid's own.
+    #[test]
+    fn a_finish_after_an_event_queue_refusal_is_honoured() -> Result<(), TestError> {
+        let target = NAMED_FINISH_HANDLE;
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+        session.teleport_to(
+            RegionHandle(target),
+            region_coords(128.0, 128.0, 30.0),
+            vec3(1.0, 0.0, 0.0),
+            now,
+        )?;
+        drain(&mut session)?;
+        let refused = sl_proto::parse_llsd_xml(caps_teleport_failed_xml())?;
+        session.handle_caps_event("TeleportFailed", &refused, now)?;
+        let body = sl_proto::parse_llsd_xml(caps_named_teleport_finish_xml())?;
+        session.handle_caps_event("TeleportFinish", &body, now)?;
+        assert_eq!(
+            teleport_phases(&drain_events(&mut session)),
+            vec!["failed", "started", "finished"],
+        );
+        Ok(())
+    }
+
+    /// The answer to a replaced teleport's cancel leaves its replacement
+    /// running, and the replacement's own failure still ends it.
+    #[test]
+    fn a_cancel_answer_does_not_end_the_replacement() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        request_teleport(&mut session, now)?;
+        session.teleport_to(
+            RegionHandle(0x0003_E800_0003_EA00),
+            region_coords(128.0, 128.0, 30.0),
+            vec3(1.0, 0.0, 0.0),
+            now,
+        )?;
+        drain(&mut session)?;
+        let answer = server_message(&udp_teleport_failed(Some("TPCancelled")), 900, true)?;
+        session.handle_datagram(sim_addr(), &answer, now)?;
+        assert_eq!(
+            teleport_phases(&drain_events(&mut session)),
+            Vec::<&str>::new(),
+            "the answer is about the replaced teleport"
+        );
+        let body = sl_proto::parse_llsd_xml(caps_teleport_finish_xml())?;
+        session.handle_caps_event("TeleportFinish", &body, now)?;
+        assert_eq!(
+            teleport_phases(&drain_events(&mut session)),
+            vec!["finished"],
+            "the replacement is still in flight, not a new grid teleport"
+        );
+        Ok(())
+    }
+
+    /// One cancel excuses one answer: a second `TPCancelled` ends the teleport.
+    #[test]
+    fn only_as_many_answers_as_cancels_are_ignored() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        request_teleport(&mut session, now)?;
+        session.teleport_to(
+            RegionHandle(0x0003_E800_0003_EA00),
+            region_coords(128.0, 128.0, 30.0),
+            vec3(1.0, 0.0, 0.0),
+            now,
+        )?;
+        drain(&mut session)?;
+        for sequence in [900, 901] {
+            let answer = server_message(&udp_teleport_failed(Some("TPCancelled")), sequence, true)?;
+            session.handle_datagram(sim_addr(), &answer, now)?;
+        }
+        assert_eq!(teleport_phases(&drain_events(&mut session)), vec!["failed"]);
+        Ok(())
+    }
+
+    /// With no other teleport in flight the answer to a cancel still surfaces,
+    /// and the viewer closes its overlay on it.
+    #[test]
+    fn a_cancel_answer_with_nothing_in_flight_surfaces() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        request_teleport(&mut session, now)?;
+        session.cancel_teleport(now)?;
+        let answer = server_message(&udp_teleport_failed(Some("TPCancelled")), 900, true)?;
+        session.handle_datagram(sim_addr(), &answer, now)?;
+        assert_eq!(teleport_phases(&drain_events(&mut session)), vec!["failed"]);
+        Ok(())
+    }
+
+    /// An expected answer stops being expected, so a `TPCancelled` long after
+    /// the cancel ends the teleport it arrives during.
+    #[test]
+    fn a_cancel_answer_long_after_the_cancel_is_not_excused() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        request_teleport(&mut session, now)?;
+        session.teleport_to(
+            RegionHandle(0x0003_E800_0003_EA00),
+            region_coords(128.0, 128.0, 30.0),
+            vec3(1.0, 0.0, 0.0),
+            now,
+        )?;
+        drain(&mut session)?;
+        let answer = server_message(&udp_teleport_failed(Some("TPCancelled")), 900, true)?;
+        session.handle_datagram(sim_addr(), &answer, after(now, 11_000)?)?;
+        assert_eq!(teleport_phases(&drain_events(&mut session)), vec!["failed"]);
         Ok(())
     }
 

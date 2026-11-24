@@ -50,6 +50,8 @@ const TELEPORT_TIMEOUT: Duration = Duration::from_secs(30);
 /// `TeleportLocal`), which the session honours without a start. Long enough
 /// to cover a reliable datagram's resends after a lost first copy.
 const LATE_TELEPORT_START_WINDOW: Duration = Duration::from_secs(10);
+/// The alert key under which Second Life answers a `TeleportCancel`.
+const TELEPORT_CANCELLED_ALERT: &str = "TPCancelled";
 /// How long to wait for an `AvatarSitResponse` before giving up on a sit
 /// request and surfacing a [`Diagnostic::ExpectedReplyMissing`](crate::Diagnostic::ExpectedReplyMissing).
 const SIT_TIMEOUT: Duration = Duration::from_secs(15);
@@ -1723,6 +1725,36 @@ enum TeleportPhase {
     },
 }
 
+/// The channel a `TeleportFailed` arrived on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TeleportFailedVia {
+    /// A UDP message, which OpenSim uses. Its `TeleportFinish` can already be
+    /// on the event queue, so the failure can overtake it.
+    Udp,
+    /// An event-queue event, which Second Life uses.
+    EventQueue,
+}
+
+/// A teleport to a known region that the grid refused over UDP, whose
+/// `TeleportFinish` may still be on the event queue.
+#[derive(Debug, Clone, Copy)]
+struct RefusedTeleport {
+    /// The region the refused teleport was aimed at.
+    target: RegionHandle,
+    /// When a finish naming `target` stops being taken for this teleport's.
+    until: Instant,
+}
+
+/// Cancels sent to the grid whose `TPCancelled` answers have not arrived.
+/// OpenSim sends no answer, so the count expires rather than waiting for one.
+#[derive(Debug, Clone, Copy)]
+struct UnansweredCancels {
+    /// How many answers may still arrive.
+    count: u32,
+    /// When they stop being expected.
+    until: Instant,
+}
+
 /// A teleport handover whose destination has been contacted but not yet
 /// confirmed: `CompleteAgentMovement` has gone out on the destination's **child**
 /// circuit, and the session is waiting for the destination's
@@ -1974,6 +2006,12 @@ pub struct Session {
     /// or a cancel that ends a teleport whose start had not arrived; `None`
     /// when none has.
     late_teleport_start_until: Option<Instant>,
+    /// The last teleport refused over UDP, while its `TeleportFinish` could
+    /// still be behind the refusal on the event queue.
+    refused_teleport: Option<RefusedTeleport>,
+    /// Cancels whose answers may still arrive, so that one does not end the
+    /// teleport requested after it.
+    unanswered_cancels: Option<UnansweredCancels>,
     /// A teleport handover in flight whose destination has not yet confirmed (see
     /// [`PendingHandover`]). `Some` only between sending the destination's
     /// `CompleteAgentMovement` and its `AgentMovementComplete`; the source region
