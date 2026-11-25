@@ -93,6 +93,10 @@ impl Material for StarMaterial {
     /// The stars are drawn additively over the (opaque) sky dome — the reference
     /// `BT_ADD_WITH_ALPHA`, so the black areas of the bloom texture add nothing
     /// and only the bright star texels light up the sky.
+    ///
+    /// `AlphaMode::Add` is Bevy's premultiplied pipeline, so `stars.wesl` hands it
+    /// the colour already scaled by the (clamped) star alpha and an alpha of zero;
+    /// any other alpha would scale the sky behind the star by `1 - alpha`.
     fn alpha_mode(&self) -> AlphaMode {
         AlphaMode::Add
     }

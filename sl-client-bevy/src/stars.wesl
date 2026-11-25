@@ -105,11 +105,20 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let rgb = srgb_to_linear(col.rgb) * in.color.rgb;
 
     // `starsF.glsl`: fade the whole field in with `custom_alpha`, amplify, and
-    // twinkle. The additive blend makes the black bloom texels invisible, so only
-    // the bright star texels light the sky.
+    // twinkle.
     let factor = smoothstep(0.0, 0.9, star.custom_alpha);
     var alpha = col.a * factor * 32.0;
     alpha = alpha * twinkle(in.screenpos);
 
-    return vec4<f32>(rgb, alpha);
+    // The reference blends with `BT_ADD_WITH_ALPHA` (`SRC_ALPHA, ONE`) into an
+    // 8-bit G-buffer target, which clamps the fragment to [0, 1] before blending,
+    // so a star adds `rgb * min(alpha, 1)` and never takes anything away. Bevy's
+    // `AlphaMode::Add` is the premultiplied pipeline (`ONE, ONE_MINUS_SRC_ALPHA`),
+    // which expects the shader to premultiply and zero the alpha, as the PBR
+    // shader does; handed the amplified alpha raw (up to 32) it scaled the sky
+    // behind each star by `1 - alpha` and drew black specks over the daytime sky
+    // (`viewer-stars-render-black-in-daylight`). The target here is HDR float, so
+    // the reference's clamp is written out.
+    let coverage = clamp(alpha, 0.0, 1.0);
+    return vec4<f32>(rgb * coverage, 0.0);
 }

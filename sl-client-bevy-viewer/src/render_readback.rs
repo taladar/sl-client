@@ -1306,6 +1306,194 @@ mod tests {
         Ok(())
     }
 
+    /// How far the [`STAR_BLEND_STAGE`] camera stands from its two star quads.
+    const STAR_BLEND_DISTANCE: f32 = 12.0;
+
+    /// The side of each [`STAR_BLEND_STAGE`] star quad, in metres. Large on
+    /// purpose: the star shader seeds its twinkle from the model-space vertex
+    /// position, so a big quad runs through several twinkle cycles and holds
+    /// fragments at every star alpha, where a unit quad near the origin would sit
+    /// at a twinkle near zero and show nothing either way.
+    const STAR_QUAD_SIDE: f32 = 6.0;
+
+    /// The SL x of each [`STAR_BLEND_STAGE`] star quad's centre: the black-texel
+    /// one left, the white-texel one right, a gap between them.
+    const STAR_QUAD_X: [f32; 2] = [-3.3, 3.3];
+
+    /// The flat colour the star quads are drawn over: the camera's clear colour,
+    /// since the field is pinned to the far plane and any prim behind it would
+    /// occlude it.
+    const STAR_BACKGROUND: Color = Color::srgb(0.5, 0.5, 0.5);
+
+    /// An empty stage looking at the two star quads [`spawn_star_quads`] adds.
+    const STAR_BLEND_STAGE: RenderScene = RenderScene {
+        id: "test-star-blend",
+        what: "two star-field quads over a flat clear colour",
+        timeline: Timeline { samples: &[0.0] },
+        lighting: SceneLighting::Own,
+        camera: SceneCamera {
+            position: Vec3::new(0.0, -STAR_BLEND_DISTANCE, 0.0),
+            look_at: Vec3::ZERO,
+        },
+        spawn: |_cx, _root, _commands, _assets| {},
+        subject: None,
+        applies: &[],
+    };
+
+    /// **A star adds light to the sky and never takes it away**
+    /// (`viewer-stars-render-black-in-daylight`).
+    ///
+    /// The reference draws the field with `SRC_ALPHA, ONE` into an 8-bit target,
+    /// so each star adds `rgb * min(alpha, 1)`. Bevy's `AlphaMode::Add` is the
+    /// premultiplied pipeline, and the star shader used to hand it the amplified
+    /// star alpha (up to 32) unpremultiplied, so the sky behind a star was scaled
+    /// by `1 - alpha`: black specks over the blue daytime sky.
+    ///
+    /// The stage draws one star quad textured with a black bloom texel, which
+    /// must leave the background exactly as it was, and one with a white texel,
+    /// which must brighten it somewhere and darken it nowhere.
+    #[test]
+    fn a_star_adds_light_and_never_darkens_the_sky() -> Result<(), TestError> {
+        let basis = crate::render_scene::scene_root_transform().rotation;
+        let points = STAR_QUAD_X.map(|x| basis.mul_vec3(Vec3::new(x, 0.0, 0.0)));
+        let Some((frame, projected)) =
+            capture_with(&STAR_BLEND_STAGE, SceneCx::new(), &points, |app| {
+                app.add_systems(Startup, spawn_star_quads)
+                    .add_systems(PreUpdate, (linear_output, star_background));
+            })
+        else {
+            warn!("skipping: no frame came back, so this machine has no usable GPU adapter");
+            return Ok(());
+        };
+        let (black_at, white_at) = projected
+            .get(0)
+            .zip(projected.get(1))
+            .ok_or("a star quad did not project onto the frame")?;
+        let background = crate::pixel_oracle::corner_background(&frame);
+        assert!(
+            background.x > 0.3 && background.x < 0.7,
+            "the background rendered {background:?}, so the stage is not showing its clear \
+             colour and the comparison below proves nothing"
+        );
+        // A box well inside each quad's (about 110-pixel) footprint.
+        let patch = |at: Vec2| -> Vec<Vec4> {
+            #[expect(
+                clippy::as_conversions,
+                clippy::cast_possible_truncation,
+                clippy::cast_sign_loss,
+                reason = "a projected point inside the 256-pixel frame, rounded to its pixel"
+            )]
+            let (cx, cy) = (at.x.round().max(0.0) as u32, at.y.round().max(0.0) as u32);
+            let mut pixels = Vec::new();
+            for y in cy.saturating_sub(35)..cy.saturating_add(35) {
+                for x in cx.saturating_sub(35)..cx.saturating_add(35) {
+                    pixels.extend(frame.pixel(x, y));
+                }
+            }
+            pixels
+        };
+        let darkest = |pixels: &[Vec4]| {
+            pixels
+                .iter()
+                .map(|pixel| pixel.x.min(pixel.y).min(pixel.z))
+                .fold(f32::INFINITY, f32::min)
+        };
+        let black = patch(black_at);
+        let white = patch(white_at);
+        assert!(
+            !black.is_empty() && !white.is_empty(),
+            "a star quad's patch is off the frame"
+        );
+        let floor = background.x - 3.0 / 255.0;
+        assert!(
+            darkest(&black) >= floor,
+            "a star whose bloom texel is black darkened the background {background:?} to {}: \
+             the star pass is subtracting the sky behind it instead of adding to it",
+            darkest(&black)
+        );
+        assert!(
+            darkest(&white) >= floor,
+            "a white star darkened the background {background:?} to {} somewhere: the star \
+             pass is subtracting the sky behind it instead of adding to it",
+            darkest(&white)
+        );
+        let brightest = white
+            .iter()
+            .map(|pixel| pixel.x)
+            .fold(f32::NEG_INFINITY, f32::max);
+        assert!(
+            brightest > background.x + 0.2,
+            "a white star at full brightness never rose above the background {background:?} \
+             (brightest {brightest}), so the star pass drew nothing and the darkening checks \
+             above prove nothing"
+        );
+        Ok(())
+    }
+
+    /// Clear the readback camera to [`STAR_BACKGROUND`] rather than to black, so a
+    /// star that darkens what is behind it has something to darken.
+    fn star_background(mut cameras: Query<&mut Camera, With<ViewerCamera>>) {
+        for mut camera in &mut cameras {
+            let already = matches!(
+                camera.clear_color,
+                ClearColorConfig::Custom(colour) if colour == STAR_BACKGROUND
+            );
+            if !already {
+                camera.clear_color = ClearColorConfig::Custom(STAR_BACKGROUND);
+            }
+        }
+    }
+
+    /// Spawn the [`STAR_BLEND_STAGE`]'s two star quads, drawn by the viewer's own
+    /// [`sl_client_bevy::StarMaterial`] at full star brightness: one textured
+    /// with a black bloom texel, one with a white one.
+    fn spawn_star_quads(
+        mut commands: Commands,
+        mut meshes: ResMut<Assets<Mesh>>,
+        mut images: ResMut<Assets<Image>>,
+        mut materials: ResMut<Assets<sl_client_bevy::StarMaterial>>,
+    ) {
+        use bevy::asset::RenderAssetUsages;
+        use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
+
+        let basis = crate::render_scene::scene_root_transform().rotation;
+        // A quad in Bevy's XY plane faces +Z; a quarter turn about X turns it to
+        // face -Y, the camera, in the Second Life frame the basis maps from.
+        let facing_camera = Quat::from_rotation_x(core::f32::consts::FRAC_PI_2);
+        let quad = Mesh::from(Rectangle::new(STAR_QUAD_SIDE, STAR_QUAD_SIDE));
+        let vertices = quad.count_vertices();
+        let quad = meshes
+            .add(quad.with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, vec![[1.0_f32; 4]; vertices]));
+        for (x, texel) in STAR_QUAD_X.into_iter().zip([[0, 0, 0, 255], [255; 4]]) {
+            // A world colour texture, uploaded as the viewer uploads a fetched one.
+            let bloom = images.add(Image::new_fill(
+                Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
+                TextureDimension::D2,
+                &texel,
+                TextureFormat::Rgba8Unorm,
+                RenderAssetUsages::default(),
+            ));
+            let material = materials.add(sl_client_bevy::StarMaterial {
+                params: sl_client_bevy::StarParams {
+                    custom_alpha: 1.0,
+                    reserved: Vec3::ZERO,
+                },
+                diffuse: bloom,
+            });
+            commands.spawn((
+                Mesh3d(quad.clone()),
+                MeshMaterial3d(material),
+                Transform::from_translation(basis.mul_vec3(Vec3::new(x, 0.0, 0.0)))
+                    .with_rotation(basis.mul_quat(facing_camera)),
+                Name::new("star-blend/quad"),
+            ));
+        }
+    }
+
     /// Take the readback camera's untonemapped output, so a byte the stage drew is
     /// as close to the byte the frame holds as the pipeline allows.
     fn linear_output(mut cameras: Query<&mut Tonemapping, With<ViewerCamera>>) {

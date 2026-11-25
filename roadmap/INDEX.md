@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 131 |
-| ready | 329 |
+| ready | 330 |
 | blocked | 35 |
 | in-progress | 4 |
-| bugs | 6 |
-| done | 1623 |
+| bugs | 5 |
+| done | 1624 |
 | deferred | 30 |
 | wont-do | 24 |
-| **total** | **2182** |
+| **total** | **2183** |
 
 ## ideas (131)
 
@@ -317,7 +317,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-lsl-opensim-function-set`](ideas/gridspec-lsl-opensim-function-set.md)
   — Measure which library functions OpenSim's engines compile
 
-## ready (329)
+## ready (330)
 
 ### protocol
 
@@ -942,6 +942,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-spacenav-input-tests`](ready/viewer-spacenav-input-tests.md) — 6-DOF
   input reactions via the SpacenavInput seam (blocked by
   `viewer-world-test-harness` (done))
+- [`viewer-stars-add-in-encoded-space`](ready/viewer-stars-add-in-encoded-space.md)
+  — Daytime stars are fainter than the reference's, which adds them encoded
 - [`viewer-statistics-floater`](ready/viewer-statistics-floater.md) — Statistics
   floater (viewer + sim stats, lag meter) (blocked by
   `viewer-ui-widget-scaffold` (done))
@@ -1244,7 +1246,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-text-renderability-axis`](in-progress/viewer-ui-text-renderability-axis.md)
   — Upstream issue — font selection cannot see glyph-format renderability
 
-## bugs (6)
+## bugs (5)
 
 ### viewer
 
@@ -1258,10 +1260,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
 - [`viewer-rigged-hair-triangle-pattern`](bugs/viewer-rigged-hair-triangle-pattern.md)
   — Rigged mesh hair shows a pattern of individual triangles
-- [`viewer-stars-render-black-in-daylight`](bugs/viewer-stars-render-black-in-daylight.md)
-  — The star field draws black specks over the daytime sky
 
-## done (1623)
+## done (1624)
 
 ### protocol
 
@@ -3379,6 +3379,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   picks / classifieds (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-spacenav-ignore-when-window-unfocused`](done/viewer-spacenav-ignore-when-window-unfocused.md)
   — SpaceNavigator drives the viewer even when its window is not focused
+- [`viewer-stars-render-black-in-daylight`](done/viewer-stars-render-black-in-daylight.md)
+  — The star field draws black specks over the daytime sky
 - [`viewer-static-asset-library`](done/viewer-static-asset-library.md) — Ship
   the viewer's static assets and answer every fetch from them first
 - [`viewer-stood-avatar-height-lost-under-load`](done/viewer-stood-avatar-height-lost-under-load.md)
