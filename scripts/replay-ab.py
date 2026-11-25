@@ -52,6 +52,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--camera-look-at")
     parser.add_argument("--camera-path", type=Path)
     parser.add_argument(
+        "--pipelined",
+        action="store_true",
+        help="overlap main and render worlds as a window does "
+        "(--replay-benchmark-pipelined); both binaries must support it",
+    )
+    parser.add_argument(
         "--viewer-assets", type=Path, default=Path("viewer-assets/character")
     )
     parser.add_argument("--output", type=Path, help="write the comparison as JSON here")
@@ -99,6 +105,8 @@ def run_once(args: argparse.Namespace, binary: Path, scratch: Path) -> dict:
         command.append(f"--camera-look-at={args.camera_look_at}")
     if args.camera_path:
         command += ["--replay-camera-path", str(args.camera_path)]
+    if args.pipelined:
+        command.append("--replay-benchmark-pipelined")
     log = scratch / "viewer.log"
     with log.open("w") as sink:
         result = subprocess.run(

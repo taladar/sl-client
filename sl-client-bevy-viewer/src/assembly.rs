@@ -699,21 +699,26 @@ impl ViewerAppBuilder {
                 .add_plugins(ScheduleRunnerPlugin::run_loop(core::time::Duration::ZERO));
             }
             WindowMode::Headless { size, watch } => {
-                let default_plugins = default_plugins
-                    .set(WindowPlugin {
-                        // The primary window is spawned below, off-screen.
-                        primary_window: None,
-                        // Nothing closes the off-screen window; the run ends
-                        // through the session's logout, like any quit.
-                        exit_condition: ExitCondition::DontExit,
-                        // A close of the watch window is a quit request that
-                        // `handle_quit_requests` turns into a graceful logout.
-                        close_when_requested: false,
-                        ..default()
-                    })
-                    // As `Windowless`: one `update` is exactly one rendered frame,
-                    // which is what the automation tier counts in.
-                    .disable::<PipelinedRenderingPlugin>();
+                let default_plugins = default_plugins.set(WindowPlugin {
+                    // The primary window is spawned below, off-screen.
+                    primary_window: None,
+                    // Nothing closes the off-screen window; the run ends
+                    // through the session's logout, like any quit.
+                    exit_condition: ExitCondition::DontExit,
+                    // A close of the watch window is a quit request that
+                    // `handle_quit_requests` turns into a graceful logout.
+                    close_when_requested: false,
+                    ..default()
+                });
+                // As `Windowless`: one `update` is exactly one rendered frame,
+                // which is what the automation tier counts in. A benchmark asked
+                // to time the frame a window would show keeps the render thread
+                // (`--replay-benchmark-pipelined`).
+                let default_plugins = if benchmark.as_ref().is_some_and(|run| run.pipelined) {
+                    default_plugins
+                } else {
+                    default_plugins.disable::<PipelinedRenderingPlugin>()
+                };
                 if watch {
                     // winit for the watch window only: it creates no platform
                     // window for the off-screen one, and drops every input event

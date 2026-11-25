@@ -70,6 +70,10 @@ p99 frame times from the `finished frame` messages in the settled window.
   Comparing one build with itself over 8 runs of 400 frames, the run-to-run
   spread was 6% at p50, 11% at p95 and 27% at p99, so a smaller change at
   those percentiles cannot be told from noise on this machine.
+- [x] Time the frame a window shows (`--replay-benchmark-pipelined`,
+  `replay-ab.py --pipelined`): headless runs the render world inline, so a frame
+  costs main and render added together. On the local region at 4K that is
+  18.5 ms inline against 10.0 ms pipelined.
 - [ ] Reduce that spread, or use more rounds, before trusting small p99 changes.
 
 Particle emitters still use an unseeded random source.

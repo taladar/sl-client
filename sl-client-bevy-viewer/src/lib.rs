@@ -793,6 +793,12 @@ struct Options {
     /// How many seconds the scene may take to load before the benchmark fails.
     #[clap(long, default_value_t = 600, requires = "replay_benchmark")]
     replay_benchmark_timeout: u64,
+    /// Run the render world on Bevy's render thread, overlapping the main
+    /// world as a windowed viewer does, so `--replay-benchmark` times the frame
+    /// a live window would show. Without it the render world runs inline after
+    /// the main world and a frame costs both, which is what a profile wants.
+    #[clap(long, requires = "replay_benchmark")]
+    replay_benchmark_pipelined: bool,
     /// A JSON array of `{"position":[x,y,z],"look_at":[x,y,z]}` keys in region
     /// coordinates, which the camera moves through evenly over the timed
     /// frames. Without it the camera holds its start pose.
@@ -1286,6 +1292,7 @@ fn run_replay(options: &Options, bundle_dir: &Path) -> Result<(), Error> {
                 camera_path,
                 load_timeout: core::time::Duration::from_secs(options.replay_benchmark_timeout),
                 version: options.version.clone(),
+                pipelined: options.replay_benchmark_pipelined,
             });
     }
     app_options.camera.start = CameraStart {

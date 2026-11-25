@@ -17,7 +17,15 @@
 //!    path by frame number, and each frame's wall-clock duration is recorded.
 //!
 //! Every frame therefore simulates the same moment in every run, and only the
-//! time it took to produce differs. Particle emitters still draw from an
+//! time it took to produce differs.
+//!
+//! A headless viewer renders inline by default: the render world runs on the
+//! main thread after the main world, so a frame costs both added together. A
+//! windowed viewer overlaps them on Bevy's render thread, and its frame costs
+//! the longer of the two plus the extract between them.
+//! [`ReplayBenchmark::pipelined`] keeps that render thread, so the frame time
+//! is the one a live window would show; inline frames are the ones to profile,
+//! because each system's cost then lands on the frame that ran it. Particle emitters still draw from an
 //! unseeded random source, so their exact positions vary between runs.
 
 use core::time::Duration;
@@ -42,8 +50,9 @@ pub const STEP: Duration = Duration::from_nanos(16_666_667);
 /// How many consecutive quiet frames count as loaded.
 const QUIET_HOLD_FRAMES: u32 = 30;
 
-/// The version of the report's layout.
-const REPORT_SCHEMA_VERSION: u32 = 1;
+/// The version of the report's layout. Version 2 added
+/// [`BenchmarkReport::pipelined`].
+const REPORT_SCHEMA_VERSION: u32 = 2;
 
 /// Which part of the scene a benchmark draws, to attribute frame cost.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, clap::ValueEnum)]
@@ -151,6 +160,9 @@ pub struct ReplayBenchmark {
     pub load_timeout: Duration,
     /// The version of the build, reported with the results.
     pub version: String,
+    /// Whether the render world runs on Bevy's render thread, overlapping the
+    /// main world as in a windowed viewer, instead of inline after it.
+    pub pipelined: bool,
 }
 
 /// Where a run has got to.
@@ -256,6 +268,10 @@ pub struct BenchmarkReport {
     pub camera_keys: usize,
     /// How long the scene took to load, in seconds.
     pub load_seconds: f64,
+    /// Whether the render world overlapped the main world on its own thread
+    /// (`false` in a version 1 report, which only rendered inline).
+    #[serde(default)]
+    pub pipelined: bool,
     /// The percentile summary of [`Self::frame_ms`].
     pub summary: FrameTimeSummary,
     /// Every timed frame, in milliseconds, in order.
@@ -367,6 +383,7 @@ fn advance_benchmark(
                     warmup_frames: benchmark.warmup,
                     camera_keys: benchmark.camera_path.len(),
                     load_seconds: run.load_time.as_secs_f64(),
+                    pipelined: benchmark.pipelined,
                     summary: summarise(&run.frame_ms),
                     frame_ms: core::mem::take(&mut run.frame_ms),
                 };
@@ -466,7 +483,7 @@ mod tests {
     use bevy::prelude::*;
     use pretty_assertions::assert_eq;
 
-    use super::{BenchmarkLayers, CameraKey, percentile, pose_on_path, summarise};
+    use super::{BenchmarkLayers, BenchmarkReport, CameraKey, percentile, pose_on_path, summarise};
 
     /// Whether two values agree to well within what these tests distinguish.
     fn close(left: f64, right: f64) -> bool {
@@ -487,6 +504,20 @@ mod tests {
         for percent in [50, 95, 99, 100] {
             assert!(close(percentile(&sorted, percent), f64::from(percent)));
         }
+    }
+
+    /// A version 1 report predates the render-thread switch and only ever
+    /// rendered inline, so it must still read, as an inline run.
+    #[test]
+    fn a_version_one_report_reads_as_an_inline_run() -> Result<(), serde_json::Error> {
+        let report: BenchmarkReport = serde_json::from_str(
+            r#"{"schema_version":1,"version":"0.1.0","layers":"all","day_position":0.5,
+            "day_position_source":"Region","step_seconds":0.016666667,"warmup_frames":300,
+            "camera_keys":0,"load_seconds":2.0,"summary":{"mean_ms":1.0,"p50_ms":1.0,
+            "p95_ms":1.0,"p99_ms":1.0,"max_ms":1.0},"frame_ms":[1.0]}"#,
+        )?;
+        assert!(!report.pipelined);
+        Ok(())
     }
 
     #[test]

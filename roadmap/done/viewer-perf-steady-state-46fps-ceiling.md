@@ -2,12 +2,48 @@
 id: viewer-perf-steady-state-46fps-ceiling
 title: Steady-state frame rate caps at ~46 fps on the local grid (was 60)
 topic: viewer
-status: bugs
+status: done
 origin: A/B verification runs for the run-condition gating pass (2026-08-10)
-refs: [viewer-profiling]
+refs: [viewer-profiling, viewer-perf-region-capture-replay, viewer-perf-render-app-bound-frame]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
+
+## Resolved (2026-11-25): the local grid runs above 60 fps
+
+Measured on a recording of the local `Default Region` (taken headless from a
+fresh login, the same login camera pose, 44 objects and the own avatar),
+replayed with `--replay-benchmark` at 3840x2160, 1,200 timed frames after 300
+of warm-up, two runs each:
+
+| render world | p50 | p95 | p99 |
+| --- | --- | --- | --- |
+| on Bevy's render thread (`--replay-benchmark-pipelined`) | **10.0 ms** | 12.2-12.4 ms | 15.1-15.5 ms |
+| inline after the main world (the benchmark's default) | 18.4-18.6 ms | 20.5 ms | 22.9-23.1 ms |
+
+A windowed viewer runs the pipelined way, so the local scene now has about
+6 ms of headroom under the 16.7 ms of 60 fps, and even its 99th percentile is
+under it. 1920x1080 measured the same as 3840x2160 inline (18.5 ms), so the
+frame is CPU time, not GPU fill. No single change fixed it: the work recorded
+below (ground probe, shadow visibility, the UI relayout and text fixes, the
+wgpu init fast path, the Bevy 0.20 upgrade) added up.
+
+Under Tracy the inline frame is `Main` 15.3 ms + `Render` 14.8 ms + extract
+1.3 ms. Neither has a dominant system: `Main` is spread over many small ones,
+and `Render` is `submit_pending_command_buffers` 5.1 ms and `camera_driver`
+3.1 ms, then the prepare and queue phase.
+
+The benchmark used to run inline only. Headless mode turns off the render
+thread so that one update is one frame, which the automation needs. That made
+its frame time the sum of the two worlds, which no window shows, so a
+recording looked slower than the live viewer. `--replay-benchmark-pipelined`
+(and `scripts/replay-ab.py --pipelined`) keeps the render thread and times the
+frame a window would show. Profile inline, since then each system's cost lands
+on the frame that ran it.
+
+Aditi's denser scenes are still well under 60 fps (about 27 fps on
+2026-09-25). That is the render-app bound average frame, tracked in
+[[viewer-perf-render-app-bound-frame]], not this local-grid regression.
 
 During the [[viewer-perf-inventory-view-visibility-gate]] verification
 (2026-08-10, `performance` branch, local OpenSim, 3840x2160 window — the

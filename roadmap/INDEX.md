@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 330 |
 | blocked | 35 |
 | in-progress | 4 |
-| bugs | 5 |
-| done | 1624 |
+| bugs | 4 |
+| done | 1625 |
 | deferred | 30 |
 | wont-do | 24 |
 | **total** | **2183** |
@@ -1246,7 +1246,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-text-renderability-axis`](in-progress/viewer-ui-text-renderability-axis.md)
   — Upstream issue — font selection cannot see glyph-format renderability
 
-## bugs (5)
+## bugs (4)
 
 ### viewer
 
@@ -1256,12 +1256,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Some worn mesh hair does not render (visible in Firestorm)
 - [`viewer-near-avatar-stuck-coarse-sphere`](bugs/viewer-near-avatar-stuck-coarse-sphere.md)
   — A nearby avatar stays a coarse sphere even as the camera closes in
-- [`viewer-perf-steady-state-46fps-ceiling`](bugs/viewer-perf-steady-state-46fps-ceiling.md)
-  — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
 - [`viewer-rigged-hair-triangle-pattern`](bugs/viewer-rigged-hair-triangle-pattern.md)
   — Rigged mesh hair shows a pattern of individual triangles
 
-## done (1624)
+## done (1625)
 
 ### protocol
 
@@ -2958,6 +2956,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Incremental shadow-caster extraction (O(changed), not O(all) per frame)
 - [`viewer-perf-slfaceext-material-reprep`](done/viewer-perf-slfaceext-material-reprep.md)
   — Investigate per-frame re-prep of SlFaceExt face materials during rez
+- [`viewer-perf-steady-state-46fps-ceiling`](done/viewer-perf-steady-state-46fps-ceiling.md)
+  — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
 - [`viewer-perf-terrain-update-per-frame`](done/viewer-perf-terrain-update-per-frame.md)
   — Dirty-gate terrain::update_terrain (runs every frame)
 - [`viewer-perf-terse-update-fast-path`](done/viewer-perf-terse-update-fast-path.md)
