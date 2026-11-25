@@ -1745,6 +1745,27 @@ struct RefusedTeleport {
     until: Instant,
 }
 
+/// How long a circuit to a region the agent has left ([`Session::departed`])
+/// is kept without an answer to its own pings: the reference viewer's circuit
+/// timeout (`circuit_timeout` in `llstartup.cpp`, checked against the last
+/// `CompletePingCheck` in `LLCircuitData::checkCircuitTimeout`).
+const DEPARTED_CIRCUIT_TIMEOUT: Duration = Duration::from_secs(100);
+
+/// A circuit to a region the agent has left, kept at the transport level
+/// ([`Session::departed`]).
+#[derive(Debug)]
+struct DepartedCircuit {
+    /// The circuit itself, with its numbering and unacked packets.
+    circuit: Circuit,
+    /// When it is dropped unless one of its pings is answered first.
+    alive_until: Instant,
+    /// Whether its simulator has sent `DisableSimulator`, which removes the
+    /// region from the reference viewer's world (and stops its event-queue
+    /// poll) while its circuit goes on. A region not yet disabled is still
+    /// [held](Session::holds_region).
+    disabled: bool,
+}
+
 /// Cancels sent to the grid whose `TPCancelled` answers have not arrived.
 /// OpenSim sends no answer, so the count expires rather than waiting for one.
 #[derive(Debug, Clone, Copy)]
@@ -1970,18 +1991,22 @@ pub struct Session {
     /// `EstablishAgentCommunication` event), keyed by simulator address; used as
     /// the new seed when a child is promoted to root.
     child_seeds: BTreeMap<SocketAddr, url::Url>,
-    /// Circuits to the regions a distant teleport left behind, keyed by
-    /// simulator address. The reference viewer never tears a circuit down when
-    /// it drops a region (its `disableCircuit` finds no circuit code on the
-    /// viewer side), so it goes on acking, answering pings and pinging. When
-    /// this session dropped the circuit instead, a teleport back to the
-    /// region about a minute later arrived (on aditi) with the capabilities
-    /// of the first visit revoked, and the region answered no further
-    /// teleport request. These are kept at the transport level only
-    /// — acks, pings, resends — and reused by a later circuit to the same
-    /// simulator. One is dropped when it goes silent past the inactivity
-    /// timeout or its simulator sends `DisableSimulator`.
-    departed: BTreeMap<SocketAddr, Circuit>,
+    /// Circuits to regions the agent is no longer in, keyed by simulator
+    /// address: the regions a distant teleport left behind, and neighbours
+    /// retired by `DisableSimulator` or an abandoned teleport transfer. The
+    /// reference viewer never tears a circuit down when it drops a region,
+    /// not even on `DisableSimulator` (its `disableCircuit` finds no circuit
+    /// code on the viewer side), so it goes on acking, answering pings and
+    /// pinging. When this session dropped the circuit instead, a teleport back
+    /// to the region about a minute later arrived (on aditi) with the
+    /// capabilities of the first visit revoked, and the region answered no
+    /// further teleport request; aditi sends the region left behind a
+    /// `DisableSimulator` about 50 s after the agent goes. These are kept at
+    /// the transport level only — acks, pings, resends — and reused by a later
+    /// circuit to the same simulator. One is dropped only when its pings go
+    /// unanswered for [`DEPARTED_CIRCUIT_TIMEOUT`], as the reference viewer
+    /// drops a circuit.
+    departed: BTreeMap<SocketAddr, DepartedCircuit>,
     /// A monotonic counter for minting a fresh [`CircuitId`] each time a circuit
     /// instance is established (never zero — zero is the "no circuit" sentinel).
     next_circuit_id: u64,

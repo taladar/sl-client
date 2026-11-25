@@ -17,6 +17,8 @@
 //!   caches the Firestorm format needs).
 //! - [`error_chain`] — an error with every cause it carries, as one line, so a
 //!   failure reason keeps the part that says *why*.
+//! - [`event_queues`] — the event queues of every region a session holds, as
+//!   a sans-IO plan of seed fetches and long polls each runtime carries out.
 //! - [`inventory_cache`] — the gzipped on-disk inventory skeleton cache, loaded
 //!   into a [`Session`](sl_proto::Session) at login and saved back on a timer.
 //! - [`lsl_syntax_cache`] — the gzipped on-disk cache of the grid's
@@ -35,6 +37,7 @@
 
 pub mod chat_log;
 pub mod error_chain;
+pub mod event_queues;
 pub mod inventory_cache;
 pub mod lsl_syntax_cache;
 pub mod ranges;

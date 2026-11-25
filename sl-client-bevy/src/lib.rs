@@ -991,11 +991,12 @@ struct LslSyntaxState {
     last_id: Option<Uuid>,
 }
 
-/// The CAPS subsystem for one region: a background thread fetches the capability
-/// map (reported over `map_rx`) then long-polls `EventQueueGet`, forwarding each
-/// decoded event over `events_rx`. One-shot CAPS fetches (inventory) run on their
-/// own threads and report back over the same `events_tx`. Dropping it signals the
-/// poller thread to stop after its in-flight request returns.
+/// The CAPS subsystem: the event-queue runner fetches each held region's
+/// capability map (the root's reported over `map_rx`, a neighbour's over
+/// `neighbour_map_rx`) and long-polls every held region's `EventQueueGet`,
+/// handing each event to the session with its region
+/// ([`Caps::pump`](crate::caps::EventQueueRunner)). One-shot CAPS fetches
+/// (inventory) run on their own threads and report back over `events_tx`.
 pub(crate) struct Caps {
     /// Receives decoded event-queue events and CAPS responses (e.g. inventory).
     pub(crate) events_rx: Receiver<(String, Llsd)>,
@@ -1016,6 +1017,8 @@ pub(crate) struct Caps {
     /// readable error if the seed-capabilities fetch failed (which fails the login
     /// while still awaiting initial caps, and merely degrades a region change).
     pub(crate) map_rx: Receiver<Result<HashMap<String, String>, String>>,
+    /// Where the event-queue runner sends the root region's map.
+    pub(crate) map_tx: Sender<Result<HashMap<String, String>, String>>,
     /// The cached capability map (cap name → URL), empty until discovered.
     pub(crate) map: HashMap<String, String>,
     /// Receives each neighbouring region's capability map (or why it could not
@@ -1024,12 +1027,10 @@ pub(crate) struct Caps {
     pub(crate) neighbour_map_rx: Receiver<crate::caps::NeighbourMapOutcome>,
     /// A sender clone for the neighbour seed fetches.
     pub(crate) neighbour_map_tx: Sender<crate::caps::NeighbourMapOutcome>,
-    /// Commands the single long-lived event-queue worker thread — a
-    /// [`EqCommand::Switch`](crate::caps::EqCommand) on every region change
-    /// re-targets it at the new root's seed instead of spawning a second poller.
-    /// Dropping the [`Caps`] closes this channel, so the worker exits after its
-    /// current poll.
-    pub(crate) command_tx: crossbeam_channel::Sender<crate::caps::EqCommand>,
+    /// Fetches the seed and polls the event queue of every region the session
+    /// holds, driven by [`Caps::pump`] each network tick. `None` when no HTTP
+    /// client could be built (reported over `map_rx`).
+    pub(crate) runner: Option<crate::caps::EventQueueRunner>,
     /// The capability names every seed request asks for, the neighbours'
     /// included.
     pub(crate) requested: Arc<[String]>,
@@ -1767,9 +1768,11 @@ fn advance_running(
         Err(_timeout_or_other) => {}
     }
 
-    // Cache the capability map once the poller discovers it, then drain any CAPS
-    // payloads (event-queue events plus inventory responses).
+    // Take in the seed fetches and event-queue polls of every held region
+    // (handing each event to the session with its region), cache the root's
+    // capability map once fetched, then drain the other CAPS payloads.
     if let Some(caps) = caps.as_mut() {
+        caps.pump(&mut session, now);
         while let Ok(result) = caps.map_rx.try_recv() {
             let map = match result {
                 Ok(map) => map,
@@ -2104,32 +2107,34 @@ fn advance_running(
         report(outbound, NetOutbound::Diagnostic(diagnostic));
     }
 
-    // Surface events. A region change brings a new seed capability, so restart
-    // the event-queue poller against the new region (dropping the old poller
-    // signals its thread to stop).
+    // Surface events. A region change brings a new seed capability, so the
+    // event-queue runner gets a new root region.
     let mut done = false;
     let mut region_changed = false;
     while let Some(event) = session.poll_event() {
         match &event {
             SessionEvent::Disconnected(_) | SessionEvent::LoggedOut => done = true,
             SessionEvent::RegionChanged { .. } => region_changed = true,
+            // The destination's seed is fetched (and its event queue polled)
+            // as soon as the finish names it, as the reference does.
+            SessionEvent::TeleportFinished { .. } => {
+                if let Some(caps) = caps.as_mut() {
+                    caps.add_destination(&session);
+                }
+            }
             // POST a neighbour's seed capability so the simulator streams that
             // region's scene to the child circuit (its `SendInitialData` is gated
-            // on the seed having been requested). One-shot, off the ECS thread.
-            // The map it answers with is kept for object-addressed capability
-            // requests about that neighbour's objects.
+            // on the seed having been requested), and poll its event queue as
+            // the reference does. The map it answers with is kept for
+            // object-addressed capability requests about that neighbour's
+            // objects.
             SessionEvent::NeighborSeed {
                 sim,
                 seed_capability,
-            } => match caps.as_ref() {
+            } => match caps.as_mut() {
                 Some(caps) => {
                     neighbours.fetch_started(*sim);
-                    fetch_neighbour_caps(
-                        *sim,
-                        seed_capability.clone(),
-                        Arc::clone(&caps.requested),
-                        caps.neighbour_map_tx.clone(),
-                    );
+                    caps.add_neighbour(*sim, seed_capability.clone());
                 }
                 // No CAPS subsystem, so nothing sends a capability request that
                 // could use the map: POST the seed for the scene alone.
@@ -2194,13 +2199,13 @@ fn advance_running(
         report(outbound, NetOutbound::Event(event));
     }
     if region_changed {
-        // Re-target the single event-queue worker at the new root region rather
-        // than dropping + respawning a poller (which, under rapid region changes,
-        // left two pollers racing on one region's ack-sequenced queue and lost
-        // events). If the worker was never started (no seed at login yet), start
-        // it now.
+        // Make the new region the root of the event-queue runner: a region
+        // already polled (a neighbour crossed into) keeps its queue and its
+        // map, and the region left goes on being polled while the session
+        // holds it. If the runner was never started (no seed at login yet),
+        // start it now.
         match caps.as_mut() {
-            Some(existing) => existing.switch_to(&session),
+            Some(existing) => existing.set_root(&session),
             None => caps = start_caps(&session, &requested_capabilities),
         }
     }

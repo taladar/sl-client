@@ -3,8 +3,6 @@
 //! region that knows its objects — see [`sl_proto::NeighbourCaps`].
 
 use std::collections::HashMap;
-use std::net::SocketAddr;
-use std::sync::Arc;
 use std::time::Instant;
 
 use reqwest::Client as ReqwestClient;
@@ -16,38 +14,8 @@ use sl_proto::{
 };
 use tokio::sync::mpsc;
 
-use crate::caps::{MAX_SEED_FETCH_RETRIES, deliver, fetch_capabilities, report_caps_failure};
+use crate::caps::{deliver, report_caps_failure};
 use crate::voice::{post_cap_llsd, post_voice_cap};
-use sl_client_common::retry::transient_backoff;
-
-/// A neighbouring region's capability map, or why it could not be fetched,
-/// keyed by the neighbour's simulator address.
-pub(crate) type NeighbourMapOutcome = (SocketAddr, Result<HashMap<String, String>, String>);
-
-/// POSTs a neighbour region's seed capability, so the simulator marks the
-/// agent's capabilities as sent and begins streaming that region's scene to
-/// the child circuit, and reports the neighbour's capability map (or why it
-/// could not be had) over `map_tx` — the map object-addressed capability
-/// requests about the neighbour's objects are sent to. A failed fetch is
-/// retried like the root region's.
-pub(crate) async fn fetch_neighbour_caps(
-    sim: SocketAddr,
-    seed: url::Url,
-    requested: Arc<[String]>,
-    http: ReqwestClient,
-    map_tx: mpsc::Sender<NeighbourMapOutcome>,
-) {
-    let mut outcome = fetch_capabilities(Some(&seed), &http, &requested).await;
-    for attempt in 0..MAX_SEED_FETCH_RETRIES {
-        let Err(error) = &outcome else {
-            break;
-        };
-        tracing::warn!(%sim, %seed, attempt, %error, "neighbour seed-capabilities fetch failed");
-        tokio::time::sleep(transient_backoff(attempt)).await;
-        outcome = fetch_capabilities(Some(&seed), &http, &requested).await;
-    }
-    deliver(&map_tx, (sim, outcome.map_err(|error| error.to_string()))).await;
-}
 
 /// Routes `command` — first routed at `since` — to the regions that know its
 /// objects and spawns the POSTs, or parks it while a neighbour's capability

@@ -102,6 +102,47 @@ client ──▶ POST EventQueueGet  { ack: N }   ← immediately re-poll, ackin
 - A non-success status (or empty timeout response) just means "nothing yet" —
   the client re-polls. The loop runs for the life of the circuit.
 
+### One queue per region
+
+Every region has its own queue, and a viewer polls the queue of **every**
+region it holds, not only the one the agent stands in. The reference viewer
+starts an `LLEventPoll` as soon as a region's capability map names
+`EventQueueGet` (`LLViewerRegion::setCapability`), for each neighbour as
+much as for the root. It stops a region's poll only when it removes the
+region. For a region the agent left by teleport that happens on the region's
+`DisableSimulator`, about 50 s later on Second Life. Each event is
+dispatched with its region as the sender.
+
+On Second Life a client that polls only the root's queue gets visible
+symptoms:
+
+- Each neighbour repeats `EstablishAgentCommunication` every five seconds,
+  and about every two minutes disables its child agent and is re-enabled.
+- A region the agent left for a minute and then teleported back to handed
+  over the seed of the first visit, whose capabilities answered 404, and it
+  ignored the next teleport request.
+
+> **In this codebase**
+>
+> - The plan lives in `sl-client-common`'s `event_queues::EventQueues`: each
+>   region's seed, map, queue URL and ack, and its seed fetch's retry budget.
+>   It does no I/O. Both drivers carry its actions out: a seed POST and a
+>   long poll each run on a thread (bevy) or a task (tokio) of their own.
+> - Which regions to poll is `Session::holds_region`: the root, every
+>   neighbour, and a region left by teleport until its `DisableSimulator`.
+> - A crossing into a neighbour already polled keeps its queue and its map;
+>   its seed is not POSTed again, as the reference ignores a duplicate seed.
+> - Events go to `Session::handle_caps_event_from` with the region they came
+>   from. `ParcelProperties`, `LandStatReply` and `ParcelObjectOwnersReply`
+>   from a region other than the root are not applied, because they describe
+>   the root region here. Every other event is taken whichever queue
+>   delivered it.
+> - At most one poll is open on a queue, also across a region being dropped
+>   and held again. Two polls on one queue corrupt its ack-sequenced id
+>   stream. A queue is never closed with `done: true`, which blocks like a
+>   long poll on OpenSim. A poll left open on a dropped region returns on
+>   its own, and its events still reach the session.
+
 The event queue is where a lot of *content-layer* behaviour actually surfaces,
 so many chapters in the next part end with "…delivered via the event queue." A
 notable example: rich parcel data (`ParcelProperties`) arrives here rather than

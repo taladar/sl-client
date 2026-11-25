@@ -220,8 +220,9 @@ mod upload;
 mod voice;
 use crate::appearance::{increment_cof_version, request_server_appearance_update};
 use crate::caps::{
-    CAPS_FAILURE_PREFIX, abort_task, deliver, fetch_capabilities, make_sleep, refetch_capabilities,
-    spawn_event_queue, spawn_simulator_features,
+    CAPS_FAILURE_PREFIX, FinishedPoll, FinishedSeed, SEED_CAPABILITIES_TAG, deliver, earliest,
+    fetch_capabilities, make_sleep, report_caps_failure, run_poll, run_seed_fetch,
+    spawn_simulator_features,
 };
 use crate::experiences::{
     fetch_experience_admin, fetch_experience_contributor, fetch_group_experiences,
@@ -248,6 +249,7 @@ use crate::upload::{
 };
 use crate::voice::{post_voice_cap, post_voice_signaling};
 use sl_client_common::chat_log::ChatLog;
+use sl_client_common::event_queues::{Action as QueueAction, EventQueues};
 use sl_client_common::inventory_cache::InventoryCache;
 use sl_client_common::lsl_syntax_cache::LslSyntaxCache;
 
@@ -800,12 +802,14 @@ impl Client {
         // The replies to `ChatSessionRequest` POSTs, each carrying the session
         // it was posted for: the reply names none of its own.
         let (chat_replies_tx, mut chat_replies_rx) = mpsc::channel::<ChatSessionReply>(16);
-        // A region change re-fetches the map in a detached task
-        // ([`refetch_capabilities`]) rather than inline, so the round-trip never
-        // stalls the UDP pump; the new map arrives over this channel. Each map is
-        // stamped with the generation of the region change that asked for it, so a
-        // slow fetch overtaken by a second crossing cannot install a stale map.
-        let (caps_map_tx, mut caps_map_rx) = mpsc::channel::<(u64, HashMap<String, String>)>(4);
+        // The seed fetches and event-queue long polls of every region the
+        // session holds, planned by `queues` and run as detached tasks (never
+        // inline: this loop is the only thing pumping UDP) that report over
+        // these channels. Dropping `queue_tasks` on the way out aborts them.
+        let mut queues = EventQueues::new();
+        let mut queue_tasks = tokio::task::JoinSet::new();
+        let (seed_done_tx, mut seed_done_rx) = mpsc::channel::<FinishedSeed>(16);
+        let (poll_done_tx, mut poll_done_rx) = mpsc::channel::<FinishedPoll>(16);
         // An asset upload that **binds an inventory item** — one that creates
         // one, and one that rewrites one — completes into this channel rather
         // than straight out to the client, because the session's inventory has
@@ -816,11 +820,7 @@ impl Client {
         let (upload_events, mut upload_rx) = mpsc::channel::<Event>(16);
         // Each neighbouring region's capability map, fetched when its seed
         // arrives, for object-addressed capability requests about its objects.
-        let (neighbour_map_tx, mut neighbour_map_rx) =
-            mpsc::channel::<object_caps::NeighbourMapOutcome>(8);
         let mut neighbours = NeighbourCaps::default();
-        let mut caps_generation: u64 = 0;
-        let mut caps_refetch_task: Option<tokio::task::JoinHandle<()>> = None;
         // The region must serve capabilities: fail login (propagating the readable
         // error) rather than proceed into a capless session. Releasing the deferred
         // `CompleteAgentMovement` only now, on success, also guarantees the simulator
@@ -839,7 +839,17 @@ impl Client {
             deliver(reporter, caps.clone()).await;
         }
         spawn_simulator_features(&caps, &http, &caps_tx);
-        let mut caps_task = spawn_event_queue(&caps, &http, &caps_tx);
+        match (
+            self.session.root_simulator(),
+            self.session.seed_capability(),
+        ) {
+            (Some(root), Some(seed)) => queues.set_root_fetched(root, seed.clone(), caps.clone()),
+            _ => {
+                tracing::warn!(
+                    "no root circuit or seed after login: the event queue is not polled"
+                );
+            }
+        }
 
         // The optional local chat-log writer. Constructed even when disabled (its
         // methods short-circuit on the empty enabled-set) so the tap sites stay
@@ -881,13 +891,13 @@ impl Client {
 
             while let Some(event) = self.session.poll_event() {
                 let terminal = matches!(event, Event::Disconnected(_) | Event::LoggedOut);
-                // A region change brings a new seed capability, so re-fetch the
-                // capability map and restart the event-queue poller.
+                // A region change brings a new root region, whose map is
+                // installed once fetched.
                 let region_changed = matches!(event, Event::RegionChanged { .. });
                 // POST a neighbour's seed capability so the simulator starts
                 // streaming that region's scene to the child circuit (its
-                // `SendInitialData` is gated on the seed having been requested).
-                // Detached: the POST must not block the main loop. The map it
+                // `SendInitialData` is gated on the seed having been requested),
+                // and poll its event queue, as the reference does. The map it
                 // answers with is kept for object-addressed capability requests
                 // about that neighbour's objects.
                 if let Event::NeighborSeed {
@@ -896,13 +906,15 @@ impl Client {
                 } = &event
                 {
                     neighbours.fetch_started(*sim);
-                    tokio::spawn(object_caps::fetch_neighbour_caps(
-                        *sim,
-                        seed_capability.clone(),
-                        Arc::clone(&self.requested_capabilities),
-                        http.clone(),
-                        neighbour_map_tx.clone(),
-                    ));
+                    queues.add_neighbour(*sim, seed_capability.clone());
+                }
+                // A teleport's destination has its seed fetched (and its event
+                // queue polled) as soon as the finish names it, before the
+                // arrival is confirmed, as the reference does.
+                if matches!(event, Event::TeleportFinished { .. })
+                    && let Some((sim, seed)) = self.session.handover_destination()
+                {
+                    queues.add_destination(sim, seed.clone());
                 }
                 // Tap the event for the local chat log (best-effort, no-op when
                 // disabled) before forwarding it on.
@@ -963,42 +975,33 @@ impl Client {
                 }
                 deliver(&events, event).await;
                 if region_changed {
-                    // Stop polling the region we have left before anything else:
-                    // its queue is stale, and a poller still blocked in a long
-                    // poll there would corrupt the ack stream if the agent
-                    // crossed straight back.
-                    abort_task(&mut caps_task);
-                    // A region change's cap fetch is best-effort and **detached**:
-                    // the session is already established, so a failure degrades
+                    // The new region becomes the root of the event-queue plan: a
+                    // region already polled (a neighbour crossed into) keeps its
+                    // queue and its map, and the region left goes on being
+                    // polled while the session holds it. A failed fetch degrades
                     // the new region rather than failing the session (unlike the
-                    // initial login) — and it must not run inline, because this
-                    // loop is the only thing pumping UDP. A second crossing while
-                    // a fetch is still in flight supersedes it, by both aborting
-                    // the task and bumping the generation the reply is matched on.
-                    abort_task(&mut caps_refetch_task);
-                    caps_generation = caps_generation.wrapping_add(1);
-                    caps_refetch_task = Some(tokio::spawn(refetch_capabilities(
-                        caps_generation,
-                        self.session.seed_capability().cloned(),
-                        Arc::clone(&self.requested_capabilities),
-                        http.clone(),
-                        caps_map_tx.clone(),
-                        caps_tx.clone(),
-                    )));
+                    // initial login), and until a fetch lands the previous map
+                    // stays in place.
+                    match (
+                        self.session.root_simulator(),
+                        self.session.seed_capability(),
+                    ) {
+                        (Some(root), Some(seed)) => queues.set_root(root, seed.clone()),
+                        _ => {
+                            tracing::warn!("the region change carried no capability-seed URL");
+                            report_caps_failure(&caps_tx, SEED_CAPABILITIES_TAG).await;
+                        }
+                    }
                 }
                 if terminal {
                     // Persist the inventory cache before exit (Firestorm's
                     // save-at-cleanup); a no-op when the cache is disabled.
                     inventory_cache.save(&mut self.session);
-                    abort_task(&mut caps_task);
-                    abort_task(&mut caps_refetch_task);
                     return Ok(());
                 }
             }
             if self.session.is_closed() {
                 inventory_cache.save(&mut self.session);
-                abort_task(&mut caps_task);
-                abort_task(&mut caps_refetch_task);
                 return Ok(());
             }
             // The optional dirty/idle inventory-cache save (crash-safety beyond
@@ -1164,37 +1167,32 @@ impl Client {
             object_caps::dispatch_parked(&self.session, &caps, &mut neighbours, &http, &caps_tx)
                 .await;
 
-            let sleep = make_sleep(self.session.poll_timeout());
-            tokio::pin!(sleep);
-
-            tokio::select! {
-                result = self.socket.recv_from(&mut self.recv_buf) => {
-                    let (len, from) = result?;
-                    // One packet this client cannot frame spoils that packet, not
-                    // the session (a message that frames but fails to decode or
-                    // to handle is already dropped inside the session). Logged
-                    // at `error`, because it is a gap to fix.
-                    if let Some(datagram) = self.recv_buf.get(..len)
-                        && let Err(error) = self.session.handle_datagram(from, datagram, Instant::now())
-                    {
-                        tracing::error!(
-                            %from,
-                            "dropping a datagram whose packet framing failed to parse: {error}"
-                        );
+            // Carry out the event-queue plan: stop polling the regions the
+            // session dropped, and start every seed fetch and long poll now
+            // due; install a root map that arrived.
+            while queue_tasks.try_join_next().is_some() {}
+            queues.retain(|sim| self.session.holds_region(sim));
+            for action in queues.take_actions(Instant::now()) {
+                match action {
+                    QueueAction::FetchSeed { sim, seed } => {
+                        queue_tasks.spawn(run_seed_fetch(
+                            sim,
+                            seed,
+                            Arc::clone(&self.requested_capabilities),
+                            http.clone(),
+                            seed_done_tx.clone(),
+                        ));
                     }
-                }
-                caps_map = caps_map_rx.recv() => {
-                    // A detached region-change refetch finished. A map stamped
-                    // with a superseded generation is dropped: a second crossing
-                    // while the first fetch was in flight already re-aimed the
-                    // session, and installing the older map would point every
-                    // capability at a region we have left. Until a fetch lands,
-                    // the previous region's map stays in place — its cap URLs are
-                    // stale but mostly still answer, which degrades a command
-                    // issued mid-crossing rather than dropping it silently.
-                    if let Some((generation, map)) = caps_map
-                        && generation == caps_generation
-                    {
+                    QueueAction::Poll { sim, url, ack } => {
+                        queue_tasks.spawn(run_poll(
+                            sim,
+                            url,
+                            ack,
+                            http.clone(),
+                            poll_done_tx.clone(),
+                        ));
+                    }
+                    QueueAction::RootMap(Ok(map)) => {
                         caps = map;
                         self.session.start_avatar_render_info(
                             caps.contains_key(CAP_AVATAR_RENDER_INFO),
@@ -1213,26 +1211,26 @@ impl Client {
                             && let Some(url) = caps.get(CAP_INTEREST_LIST).cloned()
                         {
                             let body = build_interest_list_request(mode);
-                            tokio::spawn(post_voice_cap(url, body, CAP_INTEREST_LIST, http.clone(), caps_tx.clone()));
-                        }
-                        // The region change already aborted the old poller; abort
-                        // again so that even a map arriving without one (a retry
-                        // that outlived its region change) cannot leave two
-                        // pollers on the same queue.
-                        abort_task(&mut caps_task);
-                        caps_task = spawn_event_queue(&caps, &http, &caps_tx);
-                        if caps_task.is_none() {
-                            tracing::warn!(
-                                capabilities = caps.len(),
-                                "the region advertises no EventQueueGet — no CrossedRegion / TeleportFinish will arrive"
-                            );
+                            tokio::spawn(post_voice_cap(
+                                url,
+                                body,
+                                CAP_INTEREST_LIST,
+                                http.clone(),
+                                caps_tx.clone(),
+                            ));
                         }
                     }
-                }
-                neighbour_map = neighbour_map_rx.recv() => {
-                    if let Some((sim, outcome)) = neighbour_map {
+                    QueueAction::RootMap(Err(reason)) => {
+                        tracing::warn!(
+                            "the region-change seed-capabilities fetch failed: {reason}"
+                        );
+                        report_caps_failure(&caps_tx, SEED_CAPABILITIES_TAG).await;
+                    }
+                    QueueAction::NeighbourMap { sim, outcome } => {
                         match &outcome {
-                            Err(reason) => tracing::warn!(%sim, "a neighbour region's capabilities could not be fetched: {reason}"),
+                            Err(reason) => {
+                                tracing::warn!(%sim, "a neighbour region's capabilities could not be fetched: {reason}");
+                            }
                             Ok(map) => {
                                 if let Some(reporter) = &self.neighbour_caps_reporter {
                                     deliver(reporter, (sim, map.clone())).await;
@@ -1240,6 +1238,53 @@ impl Client {
                             }
                         }
                         neighbours.fetched(sim, outcome);
+                    }
+                }
+            }
+
+            let sleep = make_sleep(earliest(
+                self.session.poll_timeout(),
+                queues.next_deadline(),
+            ));
+            tokio::pin!(sleep);
+
+            tokio::select! {
+                result = self.socket.recv_from(&mut self.recv_buf) => {
+                    let (len, from) = result?;
+                    // One packet this client cannot frame spoils that packet, not
+                    // the session (a message that frames but fails to decode or
+                    // to handle is already dropped inside the session). Logged
+                    // at `error`, because it is a gap to fix.
+                    if let Some(datagram) = self.recv_buf.get(..len)
+                        && let Err(error) = self.session.handle_datagram(from, datagram, Instant::now())
+                    {
+                        tracing::error!(
+                            %from,
+                            "dropping a datagram whose packet framing failed to parse: {error}"
+                        );
+                    }
+                }
+                finished = seed_done_rx.recv() => {
+                    if let Some(FinishedSeed { sim, seed, outcome }) = finished {
+                        queues.seed_fetched(sim, &seed, outcome, Instant::now());
+                    }
+                }
+                finished = poll_done_rx.recv() => {
+                    if let Some(FinishedPoll { sim, url, reply }) = finished {
+                        let batch = reply.as_ref().map(|(id, _events)| *id);
+                        for (message, body) in reply.map(|(_id, events)| events).unwrap_or_default() {
+                            // The body as the grid sent it, before any decode
+                            // (`RUST_LOG=sl_client_tokio::wire=trace`).
+                            tracing::trace!(
+                                target: "sl_client_tokio::wire",
+                                message = %message,
+                                %sim,
+                                body = ?body,
+                                "event-queue body"
+                            );
+                            self.session.handle_caps_event_from(sim, &message, &body, Instant::now())?;
+                        }
+                        queues.poll_finished(sim, &url, batch);
                     }
                 }
                 upload_event = upload_rx.recv() => {

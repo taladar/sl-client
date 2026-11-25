@@ -41,18 +41,18 @@ use super::world_cache::WorldCache;
 use super::{
     AGENT_UPDATE_INTERVAL, ASSET_TRANSFER_TIMEOUT, ArrivalPose, ChatLifecycleView, ChatSession,
     ChatSessionInfo, ChatSessionKind, ChatSessionLifecycle, ChatSessionReply,
-    ChatSessionRequestPurpose, Circuit, CircuitRole, DEFAULT_DRAW_DISTANCE, FolderState,
-    FriendPresence, GrantStatus, HolderKind, IDENTITY_ROTATION, INVENTORY_FETCH_MAX_ATTEMPTS,
-    INVENTORY_SAVE_TIMEOUT, Inventory, InventoryOwner, LATE_TELEPORT_START_WINDOW, LOGOUT_TIMEOUT,
-    MAX_XFER_DOWNLOAD_BYTES, MessageCursor, OfferedUpload, PARENT_REQUEST_WARN_ATTEMPTS,
-    PendingHandover, PendingInventorySave, PendingInvite, RefusedTeleport, SIT_REFUSAL_ALERTS,
-    SIT_REFUSAL_TEXTS, SIT_TIMEOUT, ScriptGrant, ScriptHolder, ServerHistoryFetch,
-    ServerHistoryMessage, ServerHistoryState, Session, SessionMessage, SessionState,
-    SessionTransition, SessionVoiceFailure, SessionVoiceRequest, SitState,
-    TELEPORT_CANCELLED_ALERT, TELEPORT_TIMEOUT, TEXTURE_DOWNLOAD_MAX_ATTEMPTS,
-    TEXTURE_DOWNLOAD_STALL_TIMEOUT, TYPING_TIMEOUT, TakenControls, TeleportFailedVia,
-    TeleportPhase, TextureDownload, TransferDownload, TransferProgress, TransferPurpose,
-    UnansweredCancels, VoiceChannelInfo, XFER_OFFER_TIMEOUT, XFER_REFUSED_RESULT,
+    ChatSessionRequestPurpose, Circuit, CircuitRole, DEFAULT_DRAW_DISTANCE,
+    DEPARTED_CIRCUIT_TIMEOUT, DepartedCircuit, FolderState, FriendPresence, GrantStatus,
+    HolderKind, IDENTITY_ROTATION, INVENTORY_FETCH_MAX_ATTEMPTS, INVENTORY_SAVE_TIMEOUT, Inventory,
+    InventoryOwner, LATE_TELEPORT_START_WINDOW, LOGOUT_TIMEOUT, MAX_XFER_DOWNLOAD_BYTES,
+    MessageCursor, OfferedUpload, PARENT_REQUEST_WARN_ATTEMPTS, PendingHandover,
+    PendingInventorySave, PendingInvite, RefusedTeleport, SIT_REFUSAL_ALERTS, SIT_REFUSAL_TEXTS,
+    SIT_TIMEOUT, ScriptGrant, ScriptHolder, ServerHistoryFetch, ServerHistoryMessage,
+    ServerHistoryState, Session, SessionMessage, SessionState, SessionTransition,
+    SessionVoiceFailure, SessionVoiceRequest, SitState, TELEPORT_CANCELLED_ALERT, TELEPORT_TIMEOUT,
+    TEXTURE_DOWNLOAD_MAX_ATTEMPTS, TEXTURE_DOWNLOAD_STALL_TIMEOUT, TYPING_TIMEOUT, TakenControls,
+    TeleportFailedVia, TeleportPhase, TextureDownload, TransferDownload, TransferProgress,
+    TransferPurpose, UnansweredCancels, VoiceChannelInfo, XFER_OFFER_TIMEOUT, XFER_REFUSED_RESULT,
     XFER_STALL_TIMEOUT, XFER_TIMEOUT_RESULT, XferDownload, XferPurpose, XferUpload, deadline,
     merge_deadline,
 };
@@ -600,6 +600,93 @@ impl Session {
     #[must_use]
     pub fn openid_token(&self) -> Option<&str> {
         self.openid_token.as_deref()
+    }
+
+    /// The address of the root region's simulator, once a circuit is open.
+    /// Events from that region's event queue are the ones
+    /// [`handle_caps_event_from`](Self::handle_caps_event_from) takes as the
+    /// root's.
+    #[must_use]
+    pub fn root_simulator(&self) -> Option<SocketAddr> {
+        self.circuit.as_ref().map(|root| root.sim_addr)
+    }
+
+    /// The destination of the teleport handover in flight, and the seed
+    /// capability its `TeleportFinish` named, once the finish has arrived and
+    /// until the destination confirms the arrival. The reference viewer POSTs
+    /// that seed (and so starts polling the destination's event queue) as soon
+    /// as the finish arrives, right after `CompleteAgentMovement`, not when the
+    /// arrival is confirmed. A driver does the same.
+    #[must_use]
+    pub fn handover_destination(&self) -> Option<(SocketAddr, &url::Url)> {
+        let pending = self.pending_handover.as_ref()?;
+        Some((pending.dest, pending.seed.as_ref()?))
+    }
+
+    /// Whether the session still holds the region whose simulator is at `sim`,
+    /// the way the reference viewer holds a region in its world: the root, a
+    /// neighbour with a child circuit, or a region left behind that has not
+    /// yet sent `DisableSimulator`. A driver polls the event queue of every
+    /// region held and stops polling one once this turns `false`, as the
+    /// reference keeps an `LLEventPoll` for each region until the region is
+    /// removed.
+    #[must_use]
+    pub fn holds_region(&self, sim: SocketAddr) -> bool {
+        self.circuit
+            .as_ref()
+            .is_some_and(|root| root.sim_addr == sim)
+            || self.children.contains_key(&sim)
+            || self
+                .departed
+                .get(&sim)
+                .is_some_and(|departed| !departed.disabled)
+    }
+
+    /// Feeds an event from the event queue of the region whose simulator is at
+    /// `sim` into the session. Events from the root region's queue are taken
+    /// exactly as [`handle_caps_event`](Self::handle_caps_event) takes them.
+    /// The reference viewer polls every region's queue and dispatches each
+    /// event with its region as the sender. The handlers that describe a
+    /// region (`ParcelProperties`, `LandStatReply`, `ParcelObjectOwnersReply`)
+    /// are about the root region here, so one of those from any other region
+    /// is not applied. Every other event is taken whichever queue it came
+    /// from.
+    ///
+    /// # Errors
+    ///
+    /// As [`handle_caps_event`](Self::handle_caps_event).
+    pub fn handle_caps_event_from(
+        &mut self,
+        sim: SocketAddr,
+        message: &str,
+        body: &Llsd,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let from_root = self
+            .circuit
+            .as_ref()
+            .is_some_and(|root| root.sim_addr == sim);
+        if !from_root
+            && matches!(
+                CapsEvent::from_tag(message),
+                Some(
+                    CapsEvent::ParcelProperties
+                        | CapsEvent::LandStatReply
+                        | CapsEvent::ParcelObjectOwnersReply
+                )
+            )
+        {
+            tracing::debug!(
+                event = message,
+                %sim,
+                "an event describing a region other than the agent's is not applied"
+            );
+            return Ok(());
+        }
+        if !from_root {
+            tracing::trace!(event = message, %sim, "inbound CAPS event from a region other than the root");
+        }
+        self.handle_caps_event(message, body, now)
     }
 
     /// Feeds a parsed CAPS response into the session, surfacing any recognised
@@ -1799,7 +1886,7 @@ impl Session {
         if self.pending_handover.as_ref().map(|pending| pending.dest) == Some(dest) {
             return Ok(());
         }
-        self.abort_pending_handover();
+        self.abort_pending_handover(now);
         // Prefer the destination seed from the `TeleportFinish`; fall back to the
         // one cached from a pre-opened child's `EstablishAgentCommunication`.
         let seed = seed_capability.or_else(|| self.child_seeds.get(&dest).cloned());
@@ -1940,7 +2027,7 @@ impl Session {
                 .into_iter()
                 .chain(old_root.map(|old| (old.sim_addr, old)))
             {
-                self.depart_circuit(sim, circuit);
+                self.depart_circuit(sim, circuit, false, now);
             }
             self.child_seeds.clear();
             // The destination's handshake already arrived on its circuit, which
@@ -2051,23 +2138,45 @@ impl Session {
     /// handover is pending. If the destination was a genuine neighbour, the sim
     /// re-advertises it with `EnableSimulator` (or it is re-established the next
     /// time we transfer there); we do not fabricate a child the sim has dropped.
-    fn abort_pending_handover(&mut self) {
+    fn abort_pending_handover(&mut self, now: Instant) {
         let Some(pending) = self.pending_handover.take() else {
             return;
         };
-        self.retire_child(pending.dest, NeighborRetirement::TransferAbandoned);
+        self.retire_child(pending.dest, NeighborRetirement::TransferAbandoned, now);
     }
 
     /// Keeps `circuit`, to a region the agent has left, going at the transport
     /// level only ([`Session::departed`]): its region timers stop, its acks,
     /// resends and keep-alive ping go on.
-    fn depart_circuit(&mut self, sim: SocketAddr, mut circuit: Circuit) {
+    ///
+    /// `disabled` is whether the region has already sent `DisableSimulator`
+    /// (a neighbour retired by one), which ends its hold on the region but not
+    /// the circuit.
+    fn depart_circuit(
+        &mut self,
+        sim: SocketAddr,
+        mut circuit: Circuit,
+        disabled: bool,
+        now: Instant,
+    ) {
         circuit.timers.agent_update = None;
         circuit.timers.logout = None;
         circuit.timers.teleport = None;
         circuit.timers.sit = None;
+        // A circuit that was not pinging yet (a child dropped before arrival)
+        // starts now: its liveness is judged by the answers.
+        if circuit.timers.ping.is_none() {
+            circuit.timers.ping = Some(deadline(now, PING_INTERVAL));
+        }
         tracing::debug!(%sim, "keeping the circuit to a region left behind");
-        let _replaced = self.departed.insert(sim, circuit);
+        let _replaced = self.departed.insert(
+            sim,
+            DepartedCircuit {
+                circuit,
+                alive_until: deadline(now, DEPARTED_CIRCUIT_TIMEOUT),
+                disabled,
+            },
+        );
     }
 
     /// Takes back the departed circuit to `sim`, if one is still open, under a
@@ -2075,18 +2184,29 @@ impl Session {
     /// region-local ids must not resolve against anything from the last one.
     /// Its sequence numbers carry on, as the reference viewer's do on a
     /// circuit it opens again.
-    fn reclaim_departed(&mut self, sim: SocketAddr) -> Option<Circuit> {
-        let mut circuit = self.departed.remove(&sim)?;
+    fn reclaim_departed(&mut self, sim: SocketAddr, now: Instant) -> Option<Circuit> {
+        let mut circuit = self.departed.remove(&sim)?.circuit;
         circuit.id = self.mint_circuit_id();
+        // The inactivity clock restarts with the visit: what the circuit heard
+        // while kept was judged by its pings, not by this timer.
+        circuit.note_received(now);
+        // The simulator answers the new visit's `UseCircuitCode` with a
+        // circuit of its own, numbered from 1 again (seen on aditi: its pings
+        // restart at 1). The numbers seen on the last visit say nothing about
+        // this one; kept, they made the arrival's reliable `RegionHandshake`
+        // and `AgentMovementComplete` read as duplicates.
+        circuit.forget_seen();
         tracing::debug!(%sim, "reusing the circuit kept from an earlier visit");
         Some(circuit)
     }
 
     /// Takes in a datagram from a simulator whose region the agent has left
     /// ([`Session::departed`]): acks and duplicate suppression as on any
-    /// circuit, an answer to its ping, its acks of our packets, and a
-    /// `DisableSimulator` that ends it. Nothing reaches the world: the region
-    /// is no longer part of it.
+    /// circuit, an answer to its ping, and its acks of our packets. An answer
+    /// to our own ping keeps it alive for another
+    /// [`DEPARTED_CIRCUIT_TIMEOUT`]. A `DisableSimulator` does not end it, as
+    /// it does not end the reference viewer's. Nothing reaches the world: the
+    /// region is no longer part of it.
     fn handle_departed_datagram(
         &mut self,
         from: SocketAddr,
@@ -2094,14 +2214,20 @@ impl Session {
         now: Instant,
     ) -> Result<(), Error> {
         let parsed = parse_datagram(datagram)?;
-        let Some(circuit) = self.departed.get_mut(&from) else {
+        let Some(DepartedCircuit {
+            circuit,
+            alive_until,
+            disabled,
+        }) = self.departed.get_mut(&from)
+        else {
             return Ok(());
         };
         circuit.note_received(now);
         circuit.record_acks(&parsed.acks);
         if parsed.flags.contains(PacketFlags::RELIABLE) {
             circuit.queue_ack(parsed.sequence, now);
-            if !circuit.mark_seen(parsed.sequence) {
+            if !circuit.accept_reliable(parsed.sequence, parsed.flags.contains(PacketFlags::RESENT))
+            {
                 return Ok(());
             }
         }
@@ -2128,7 +2254,12 @@ impl Session {
                 circuit.send_complete_ping_check(PingId(ping.ping_id.ping_id), now)?;
             }
             AnyMessage::CompletePingCheck(reply) => {
-                let _rtt = circuit.record_ping_reply(PingId(reply.ping_id.ping_id), now);
+                if circuit
+                    .record_ping_reply(PingId(reply.ping_id.ping_id), now)
+                    .is_some()
+                {
+                    *alive_until = deadline(now, DEPARTED_CIRCUIT_TIMEOUT);
+                }
             }
             AnyMessage::PacketAck(ack) => {
                 for packet in &ack.packets {
@@ -2136,21 +2267,27 @@ impl Session {
                 }
             }
             AnyMessage::DisableSimulator(_) => {
-                tracing::debug!(%from, "a region left behind closed its circuit");
-                let _closed = self.departed.remove(&from);
+                tracing::debug!(%from, "a region left behind disabled its simulator; keeping the circuit");
+                *disabled = true;
             }
             _ => {}
         }
         Ok(())
     }
 
-    /// Services the circuits to regions left behind: drops one gone silent,
-    /// and otherwise flushes its owed acks, resends, and pings it on the same
-    /// cadence as a live circuit.
+    /// Services the circuits to regions left behind: drops one whose pings
+    /// have gone unanswered for [`DEPARTED_CIRCUIT_TIMEOUT`], and otherwise
+    /// flushes its owed acks, resends, and pings it on the same cadence as a
+    /// live circuit.
     fn run_departed_circuit_timers(&mut self, now: Instant) {
-        self.departed
-            .retain(|_sim, circuit| now < circuit.inactivity_deadline());
-        for (sim, circuit) in &mut self.departed {
+        self.departed.retain(|sim, departed| {
+            let alive = now < departed.alive_until;
+            if !alive {
+                tracing::debug!(%sim, "dropping a kept circuit whose pings went unanswered");
+            }
+            alive
+        });
+        for (sim, DepartedCircuit { circuit, .. }) in &mut self.departed {
             let _exhausted = circuit.process_resends(now);
             if circuit.ack_flush_deadline().is_some_and(|d| now >= d)
                 && let Err(error) = circuit.flush_acks(now)
@@ -2171,11 +2308,22 @@ impl Session {
     /// event comes last: by the time a consumer reads it, the region's contents
     /// have already been removed one by one.
     ///
+    /// A retired region's circuit is kept at the transport level
+    /// ([`Session::departed`]), as the reference viewer keeps it, unless it was
+    /// retired for going silent.
+    ///
     /// A no-op for an address no child circuit is open to.
-    fn retire_child(&mut self, sim: SocketAddr, reason: NeighborRetirement) {
+    fn retire_child(&mut self, sim: SocketAddr, reason: NeighborRetirement, now: Instant) {
         let circuit_id = self.circuit_id_for(sim);
-        if self.children.remove(&sim).is_none() {
+        let Some(retired) = self.children.remove(&sim) else {
             return;
+        };
+        match reason {
+            NeighborRetirement::Disabled => self.depart_circuit(sim, retired, true, now),
+            NeighborRetirement::TransferAbandoned => {
+                self.depart_circuit(sim, retired, false, now);
+            }
+            NeighborRetirement::Silent => {}
         }
         self.child_seeds.remove(&sim);
         let Some(circuit) = circuit_id else {
@@ -2259,7 +2407,7 @@ impl Session {
         // ([`Session::departed`]); a new visit carries on over it, as the
         // reference viewer's does, and still announces itself with
         // `UseCircuitCode`.
-        let mut child = match self.reclaim_departed(sim) {
+        let mut child = match self.reclaim_departed(sim, now) {
             Some(kept) => kept,
             None => {
                 let circuit_id = self.mint_circuit_id();
@@ -2347,7 +2495,7 @@ impl Session {
             SessionState::Active => {}
             SessionState::AwaitingHandshake => self.complete_arrival(now),
             SessionState::Teleporting => {
-                self.abort_pending_handover();
+                self.abort_pending_handover(now);
                 if let Some(circuit) = self.circuit.as_mut() {
                     circuit.timers.teleport = None;
                 }
@@ -2752,7 +2900,7 @@ impl Session {
                 if !withhold_acks {
                     circuit.queue_ack(parsed.sequence, now);
                 }
-                circuit.mark_seen(parsed.sequence)
+                circuit.accept_reliable(parsed.sequence, parsed.flags.contains(PacketFlags::RESENT))
             } else {
                 true
             }
@@ -3225,7 +3373,7 @@ impl Session {
                 // The simulator is retiring this child circuit: its objects
                 // and coarse (minimap) dots go, and the region is reported as
                 // gone.
-                self.retire_child(from, NeighborRetirement::Disabled);
+                self.retire_child(from, NeighborRetirement::Disabled, now);
             }
             _ => {
                 self.push_diagnostic(Diagnostic::UnhandledMessage {
@@ -6725,7 +6873,7 @@ impl Session {
         // drop only the pending destination and stay put, so a lost confirmation
         // fails the teleport in place rather than stranding the session with its
         // child circuits torn down.
-        self.abort_pending_handover();
+        self.abort_pending_handover(now);
         self.state = SessionState::Active;
         self.teleport = TeleportPhase::Idle;
         if let Some(circuit) = self.circuit.as_mut() {
@@ -6911,7 +7059,7 @@ impl Session {
             });
         }
         for addr in dead {
-            self.retire_child(addr, NeighborRetirement::Silent);
+            self.retire_child(addr, NeighborRetirement::Silent, now);
         }
     }
 
@@ -15645,7 +15793,7 @@ impl Session {
         };
         self.expect_late_teleport_start(now);
         if matches!(self.state, SessionState::Teleporting) {
-            self.abort_pending_handover();
+            self.abort_pending_handover(now);
             self.state = SessionState::Active;
             self.teleport = TeleportPhase::Idle;
             if let Some(circuit) = self.circuit.as_mut() {
@@ -15787,7 +15935,7 @@ impl Session {
         self.expect_late_teleport_start(now);
         if matches!(self.state, SessionState::Teleporting) {
             self.note_unanswered_cancel(now);
-            self.abort_pending_handover();
+            self.abort_pending_handover(now);
             if let Some(circuit) = self.circuit.as_mut() {
                 circuit.timers.teleport = None;
             }
@@ -16200,7 +16348,11 @@ impl Session {
                 payload,
             });
         }
-        for circuit in self.children.values_mut().chain(self.departed.values_mut()) {
+        for circuit in self.children.values_mut().chain(
+            self.departed
+                .values_mut()
+                .map(|departed| &mut departed.circuit),
+        ) {
             if let Some(payload) = circuit.pop_outbound() {
                 return Some(Transmit {
                     destination: circuit.sim_addr,
@@ -16257,11 +16409,16 @@ impl Session {
             merge_deadline(&mut earliest, child.next_resend_deadline());
         }
         // And the circuits kept to regions left behind.
-        for departed in self.departed.values() {
-            merge_deadline(&mut earliest, Some(departed.inactivity_deadline()));
-            merge_deadline(&mut earliest, departed.ack_flush_deadline());
-            merge_deadline(&mut earliest, departed.timers.ping);
-            merge_deadline(&mut earliest, departed.next_resend_deadline());
+        for DepartedCircuit {
+            circuit,
+            alive_until,
+            ..
+        } in self.departed.values()
+        {
+            merge_deadline(&mut earliest, Some(*alive_until));
+            merge_deadline(&mut earliest, circuit.ack_flush_deadline());
+            merge_deadline(&mut earliest, circuit.timers.ping);
+            merge_deadline(&mut earliest, circuit.next_resend_deadline());
         }
         earliest
     }

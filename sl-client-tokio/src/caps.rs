@@ -1,13 +1,16 @@
-//! CAPS lifecycle: capability fetch, event-queue spawn/poll, task helpers.
+//! CAPS lifecycle: capability fetch, the seed POSTs and long polls the
+//! [`EventQueues`](sl_client_common::event_queues::EventQueues) plan asks for,
+//! task helpers.
 
 use crate::IDLE_SLEEP;
 use reqwest::Client as ReqwestClient;
-use sl_client_common::retry::{MAX_TRANSIENT_RETRIES, transient_backoff};
+use sl_client_common::event_queues::CapabilityMap;
 use sl_proto::{
     CAP_SIMULATOR_FEATURES, Llsd, build_event_queue_request, build_seed_request,
     parse_event_queue_response, parse_seed_response,
 };
 use std::collections::HashMap;
+use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
@@ -29,13 +32,6 @@ pub(crate) const CAPS_FAILURE_PREFIX: &str = "\0caps-failure\0";
 /// capability map could not be fetched is *visible* rather than silently
 /// stripped of its event queue, asset caps and inventory.
 pub(crate) const SEED_CAPABILITIES_TAG: &str = "Seed/capabilities";
-
-/// How many times a region-change seed-capabilities fetch is retried before
-/// [`refetch_capabilities`] gives up and reports the failure. Shares the asset
-/// fetchers' transient-error budget: the seed POST fails for the same reasons
-/// (a sim still spinning up the new region's cap handlers answers a transient
-/// error before it answers the map).
-pub(crate) const MAX_SEED_FETCH_RETRIES: u32 = MAX_TRANSIENT_RETRIES;
 
 /// The pause before re-polling `EventQueueGet` after a round that produced no
 /// usable reply — a transport error, an unreadable body, or a body that did not
@@ -67,13 +63,6 @@ pub(crate) async fn deliver<T>(tx: &mpsc::Sender<T>, value: T) {
     tx.send(value).await.ok();
 }
 
-/// Aborts a running task handle, if present.
-pub(crate) fn abort_task(task: &mut Option<tokio::task::JoinHandle<()>>) {
-    if let Some(handle) = task.take() {
-        handle.abort();
-    }
-}
-
 /// Fetches the region's capability map by POSTing the seed with the requested
 /// capability names, returning the cap-name → URL map (empty on any failure or
 /// if no seed is known yet).
@@ -102,58 +91,6 @@ pub(crate) async fn fetch_capabilities(
     })
 }
 
-/// Re-fetches a region's capability map **off the run loop** after a region
-/// change, retrying a transient failure with exponential backoff, and hands the
-/// result to the run loop over `map_tx` stamped with `generation`.
-///
-/// Region change is the one capability fetch that must not run inline. The run
-/// loop is the session's only UDP pump, so awaiting a seed round-trip there
-/// stalls `recv_from`, the ACKs and the retransmits for as long as the grid
-/// takes to answer — up to the client's 60 s HTTP timeout, long enough for the
-/// simulator to drop the circuit. (The initial-login fetch at the head of
-/// [`Client::run`](crate::Client::run) is deliberately inline instead: nothing
-/// is pumping yet, and a region that serves no capabilities must fail the login
-/// rather than be entered.)
-///
-/// A failure that survives every retry is reported over `caps_tx` under
-/// [`SEED_CAPABILITIES_TAG`] rather than swallowed into an empty map, and the
-/// run loop keeps the previous region's map until a fetch succeeds — a
-/// half-degraded region beats one whose every capability silently vanished.
-pub(crate) async fn refetch_capabilities(
-    generation: u64,
-    seed: Option<url::Url>,
-    requested: Arc<[String]>,
-    http: ReqwestClient,
-    map_tx: mpsc::Sender<(u64, HashMap<String, String>)>,
-    caps_tx: mpsc::Sender<(String, Llsd)>,
-) {
-    let Some(seed) = seed else {
-        tracing::warn!("the region change carried no capability-seed URL");
-        report_caps_failure(&caps_tx, SEED_CAPABILITIES_TAG).await;
-        return;
-    };
-    for attempt in 0..=MAX_SEED_FETCH_RETRIES {
-        match fetch_capabilities(Some(&seed), &http, &requested).await {
-            Ok(capabilities) => {
-                deliver(&map_tx, (generation, capabilities)).await;
-                return;
-            }
-            Err(error) => {
-                tracing::warn!(
-                    %seed,
-                    %error,
-                    attempt,
-                    "the region-change seed-capabilities fetch failed"
-                );
-                if attempt < MAX_SEED_FETCH_RETRIES {
-                    tokio::time::sleep(transient_backoff(attempt)).await;
-                }
-            }
-        }
-    }
-    report_caps_failure(&caps_tx, SEED_CAPABILITIES_TAG).await;
-}
-
 /// GETs the `SimulatorFeatures` capability (when the region advertises it),
 /// forwarding the region's feature flags to `caps_tx` for decoding into
 /// [`Event::SimulatorFeatures`](sl_proto::Event::SimulatorFeatures). The viewer
@@ -175,79 +112,122 @@ pub(crate) fn spawn_simulator_features(
     }
 }
 
-/// Spawns the event-queue long-poll task for the `EventQueueGet` capability in
-/// `caps`, or `None` if the region did not provide one.
-pub(crate) fn spawn_event_queue(
-    caps: &HashMap<String, String>,
-    http: &ReqwestClient,
-    caps_tx: &mpsc::Sender<(String, Llsd)>,
-) -> Option<tokio::task::JoinHandle<()>> {
-    let event_queue_url = caps.get("EventQueueGet")?.clone();
-    Some(tokio::spawn(run_event_queue(
-        event_queue_url,
-        http.clone(),
-        caps_tx.clone(),
-    )))
+/// A seed POST that has returned.
+pub(crate) struct FinishedSeed {
+    /// The region it was for.
+    pub(crate) sim: SocketAddr,
+    /// The seed it POSTed.
+    pub(crate) seed: url::Url,
+    /// The map, or why there is none.
+    pub(crate) outcome: Result<CapabilityMap, String>,
 }
 
-/// Long-polls the `EventQueueGet` capability at `event_queue_url`, forwarding each
-/// decoded event to `caps_tx` until a request fails fatally or the receiver is
-/// dropped (e.g. on region change).
-pub(crate) async fn run_event_queue(
-    event_queue_url: String,
+/// A decoded `EventQueueGet` reply: its batch id and its `(message, body)`
+/// events.
+pub(crate) type PollReply = (i32, Vec<(String, Llsd)>);
+
+/// A long poll that has returned.
+pub(crate) struct FinishedPoll {
+    /// The region whose queue it polled.
+    pub(crate) sim: SocketAddr,
+    /// The queue.
+    pub(crate) url: String,
+    /// Its reply, or `None` for an idle timeout or a transient error.
+    pub(crate) reply: Option<PollReply>,
+}
+
+/// POSTs `seed` for the region at `sim` (one attempt; the plan schedules the
+/// retries) and reports what it answered over `done_tx`.
+pub(crate) async fn run_seed_fetch(
+    sim: SocketAddr,
+    seed: url::Url,
+    requested: Arc<[String]>,
     http: ReqwestClient,
-    caps_tx: mpsc::Sender<(String, Llsd)>,
+    done_tx: mpsc::Sender<FinishedSeed>,
 ) {
-    let mut ack: Option<i32> = None;
-    loop {
-        let request_body = build_event_queue_request(ack, false);
-        let response = match http
-            .post(&event_queue_url)
-            .header("Content-Type", "application/llsd+xml")
-            .body(request_body)
-            .send()
-            .await
-        {
-            Ok(response) => response,
-            // A long poll the grid holds past the client's timeout ends here
-            // every idle minute, so this is not worth more than a debug line.
-            Err(error) => {
-                tracing::debug!(%event_queue_url, "event queue: the poll failed: {error}");
-                tokio::time::sleep(POLL_ERROR_BACKOFF).await;
-                continue;
-            }
-        };
-        // A timeout with no events returns a non-2xx (e.g. 502); re-poll with
-        // the same ack after a short pause.
-        if !response.status().is_success() {
-            tokio::time::sleep(Duration::from_millis(200)).await;
-            continue;
+    let outcome = fetch_capabilities(Some(&seed), &http, &requested)
+        .await
+        .map_err(|error| error.to_string());
+    deliver(&done_tx, FinishedSeed { sim, seed, outcome }).await;
+}
+
+/// Runs one `EventQueueGet` long poll on `url`, the queue of the region at
+/// `sim`, and reports its reply over `done_tx`. A failed round has already
+/// waited out its backoff when it is reported, so the queue stays marked as
+/// polled until it may be polled again.
+pub(crate) async fn run_poll(
+    sim: SocketAddr,
+    url: String,
+    ack: Option<i32>,
+    http: ReqwestClient,
+    done_tx: mpsc::Sender<FinishedPoll>,
+) {
+    let reply = poll_once(&url, ack, &http).await;
+    deliver(&done_tx, FinishedPoll { sim, url, reply }).await;
+}
+
+/// One `EventQueueGet` long poll on `event_queue_url`: its batch, or `None`
+/// for a round that carried none, after the round's backoff.
+async fn poll_once(
+    event_queue_url: &str,
+    ack: Option<i32>,
+    http: &ReqwestClient,
+) -> Option<PollReply> {
+    let response = match http
+        .post(event_queue_url)
+        .header("Content-Type", "application/llsd+xml")
+        .body(build_event_queue_request(ack, false))
+        .send()
+        .await
+    {
+        Ok(response) => response,
+        // A long poll the grid holds past the client's timeout ends here
+        // every idle minute, so this is not worth more than a debug line.
+        Err(error) => {
+            tracing::debug!(%event_queue_url, "event queue: the poll failed: {error}");
+            tokio::time::sleep(POLL_ERROR_BACKOFF).await;
+            return None;
         }
-        // A body that cannot be read, or that does not parse, is as transient as
-        // a failed request — and back off the same way, or a grid answering a
-        // broken `200` spins this task as fast as the network allows.
-        let text = match response.text().await {
-            Ok(text) => text,
-            Err(error) => {
-                tracing::warn!(%event_queue_url, "event queue: the reply body could not be read: {error}");
-                tokio::time::sleep(POLL_ERROR_BACKOFF).await;
-                continue;
-            }
-        };
-        let parsed = match parse_event_queue_response(&text) {
-            Ok(parsed) => parsed,
-            Err(error) => {
-                tracing::warn!(%event_queue_url, "event queue: the reply did not parse: {error}");
-                tokio::time::sleep(POLL_ERROR_BACKOFF).await;
-                continue;
-            }
-        };
-        ack = Some(parsed.id);
-        for event in parsed.events {
-            if caps_tx.send((event.message, event.body)).await.is_err() {
-                return;
-            }
+    };
+    // A timeout with no events returns a non-2xx (e.g. 502); re-poll with the
+    // same ack after a short pause.
+    if !response.status().is_success() {
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        return None;
+    }
+    // A body that cannot be read, or that does not parse, is as transient as a
+    // failed request — and backs off the same way, or a grid answering a
+    // broken `200` spins as fast as the network allows.
+    let text = match response.text().await {
+        Ok(text) => text,
+        Err(error) => {
+            tracing::warn!(%event_queue_url, "event queue: the reply body could not be read: {error}");
+            tokio::time::sleep(POLL_ERROR_BACKOFF).await;
+            return None;
         }
+    };
+    let parsed = match parse_event_queue_response(&text) {
+        Ok(parsed) => parsed,
+        Err(error) => {
+            tracing::warn!(%event_queue_url, "event queue: the reply did not parse: {error}");
+            tokio::time::sleep(POLL_ERROR_BACKOFF).await;
+            return None;
+        }
+    };
+    let events = parsed
+        .events
+        .into_iter()
+        .map(|event| (event.message, event.body))
+        .collect();
+    Some((parsed.id, events))
+}
+
+/// The earlier of two optional deadlines.
+pub(crate) fn earliest(first: Option<Instant>, second: Option<Instant>) -> Option<Instant> {
+    match (first, second) {
+        (Some(first), Some(second)) => Some(first.min(second)),
+        (first, None) => first,
+        (None, second) => second,
     }
 }
 
@@ -267,55 +247,16 @@ mod tests {
         reason = "a failed expectation is the intended failure signal in a unit test"
     )]
 
-    use super::{CAPS_FAILURE_PREFIX, SEED_CAPABILITIES_TAG, refetch_capabilities};
+    use super::{FinishedSeed, run_seed_fetch};
     use pretty_assertions::assert_eq;
-    use std::collections::HashMap;
+    use std::net::SocketAddr;
     use std::sync::Arc;
     use tokio::sync::mpsc;
 
-    /// The default requested capability list, as the client holds it.
-    fn requested() -> Arc<[String]> {
-        sl_proto::REQUESTED_CAPABILITIES
-            .iter()
-            .map(|&name| name.to_owned())
-            .collect()
-    }
-
-    /// The `(message, body)` key a reported seed failure arrives under.
-    fn failure_key() -> String {
-        format!("{CAPS_FAILURE_PREFIX}{SEED_CAPABILITIES_TAG}")
-    }
-
-    /// A region change that carried no seed capability cannot be fetched at all:
-    /// it reports the failure immediately — no retries, and no empty map passed
-    /// off as the region's capabilities.
+    /// A seed URL nothing is listening on is reported as a failure, keyed by
+    /// its region and seed, so the plan can schedule the retry.
     #[tokio::test]
-    async fn a_region_change_without_a_seed_reports_the_failure() {
-        let http = crate::http_proxy::client_builder()
-            .build()
-            .expect("a direct client builds");
-        let (map_tx, mut map_rx) = mpsc::channel::<(u64, HashMap<String, String>)>(4);
-        let (caps_tx, mut caps_rx) = mpsc::channel(4);
-
-        refetch_capabilities(1, None, requested(), http, map_tx, caps_tx).await;
-
-        assert!(
-            map_rx.try_recv().is_err(),
-            "a failed fetch must not install a capability map"
-        );
-        let (message, _body) = caps_rx.try_recv().expect("the failure is reported");
-        assert_eq!(message, failure_key());
-        assert!(
-            caps_rx.try_recv().is_err(),
-            "exactly one failure is reported"
-        );
-    }
-
-    /// A seed URL nothing is listening on fails every attempt: the refetch spends
-    /// its whole retry budget, then reports exactly one failure and still
-    /// installs no map. Time is paused so the backoffs cost no wall clock.
-    #[tokio::test(start_paused = true)]
-    async fn a_dead_seed_exhausts_the_budget_then_reports_once() {
+    async fn a_dead_seed_reports_its_failure() {
         // Bind and drop, so the port is known-free and the connect is refused
         // rather than left hanging on the timeout.
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
@@ -326,24 +267,21 @@ mod tests {
         let seed: url::Url = format!("http://{address}/cap/seed")
             .parse()
             .expect("the seed URL parses");
-
         let http = crate::http_proxy::client_builder()
             .build()
             .expect("a direct client builds");
-        let (map_tx, mut map_rx) = mpsc::channel::<(u64, HashMap<String, String>)>(4);
-        let (caps_tx, mut caps_rx) = mpsc::channel(4);
+        let (done_tx, mut done_rx) = mpsc::channel(1);
+        let sim = SocketAddr::from(([127, 0, 0, 1], 13_000));
 
-        refetch_capabilities(2, Some(seed), requested(), http, map_tx, caps_tx).await;
+        run_seed_fetch(sim, seed.clone(), Arc::from(Vec::new()), http, done_tx).await;
 
-        assert!(
-            map_rx.try_recv().is_err(),
-            "a failed fetch must not install a capability map"
-        );
-        let (message, _body) = caps_rx.try_recv().expect("the failure is reported");
-        assert_eq!(message, failure_key());
-        assert!(
-            caps_rx.try_recv().is_err(),
-            "exactly one failure is reported, not one per retry"
-        );
+        let FinishedSeed {
+            sim: reported_sim,
+            seed: reported_seed,
+            outcome,
+        } = done_rx.try_recv().expect("the outcome is reported");
+        assert_eq!(reported_sim, sim);
+        assert_eq!(reported_seed, seed);
+        assert!(outcome.is_err(), "a refused connection is a failure");
     }
 }

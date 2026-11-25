@@ -14,9 +14,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ideas | 131 |
 | ready | 329 |
 | blocked | 35 |
-| in-progress | 5 |
+| in-progress | 4 |
 | bugs | 6 |
-| done | 1621 |
+| done | 1622 |
 | deferred | 30 |
 | wont-do | 24 |
 | **total** | **2181** |
@@ -1231,12 +1231,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-voice`](blocked/gridspec-voice.md) — Voice provisioning and
   signalling on each grid (blocked by `viewer-voice-audio`)
 
-## in-progress (5)
+## in-progress (4)
 
 ### viewer
 
-- [`viewer-teleport-back-gets-no-answer`](in-progress/viewer-teleport-back-gets-no-answer.md)
-  — A teleport back to a recently left region can get no answer from the grid
 - [`viewer-ui-text-caret-grapheme-motion`](in-progress/viewer-ui-text-caret-grapheme-motion.md)
   — Upstream issue — parley caret motion steps one codepoint, not one grapheme
 - [`viewer-ui-text-parley-pr-backdelete`](in-progress/viewer-ui-text-parley-pr-backdelete.md)
@@ -1263,7 +1261,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-texture-filtering-in-linear-space`](bugs/viewer-texture-filtering-in-linear-space.md)
   — Colour textures are filtered after sRGB decoding, the reference before
 
-## done (1621)
+## done (1622)
 
 ### protocol
 
@@ -3404,6 +3402,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Seven tables carry two stacked scrollbars, because the consumer adds one
 - [`viewer-takeoff-hold-jumps-instead-of-flying`](done/viewer-takeoff-hold-jumps-instead-of-flying.md)
   — Holding the fly key jumps instead of taking off
+- [`viewer-teleport-back-gets-no-answer`](done/viewer-teleport-back-gets-no-answer.md)
+  — A teleport back to a recently left region can get no answer from the grid
 - [`viewer-teleport-flow-progress`](done/viewer-teleport-flow-progress.md) —
   Teleport flow — progress screen & arrival (blocked by
   `viewer-ui-notification-host` (done))

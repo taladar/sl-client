@@ -6120,9 +6120,17 @@ impl Circuit {
         self.link.record_acks(ids);
     }
 
-    /// Records an inbound reliable `sequence`; returns `true` if it is new.
-    pub(crate) fn mark_seen(&mut self, sequence: SequenceNumber) -> bool {
-        self.link.mark_seen(sequence)
+    /// Records an inbound reliable `sequence` and says whether to take it:
+    /// `false` only for a duplicate flagged as a resend
+    /// ([`ReliableLink::accept_reliable`]).
+    pub(crate) fn accept_reliable(&mut self, sequence: SequenceNumber, resent: bool) -> bool {
+        self.link.accept_reliable(sequence, resent)
+    }
+
+    /// Forgets every inbound sequence number seen: the simulator has started
+    /// the circuit's numbering again.
+    pub(crate) fn forget_seen(&mut self) {
+        self.link.forget_seen();
     }
 
     /// Flushes owed acknowledgements as one or more `PacketAck` messages.

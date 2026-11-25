@@ -70,6 +70,16 @@ and incrementing per packet. Reliability is opt-in per packet:
   message. In every case the exhausted packet is reported as an
   `ExpectedReplyMissing` [diagnostic](sessions.md#diagnostics) labelled with the
   message name, so a reply that never came is visible rather than silent.
+- The receiver acks every reliable packet and remembers its number. It drops a
+  packet as a duplicate only when the packet carries `RESENT` and its number
+  was seen before, as the reference viewer does (`isDuplicateResend`). A first
+  transmission is always taken. A simulator that answers a new
+  `UseCircuitCode` on an address it already talked to starts that circuit's
+  numbering at 1 again. The client keeps the circuit across the visits
+  ([Circuits](circuits.md)), so it forgets the numbers it saw when it reuses
+  one. Dropping every repeated number, as this client once did, lost the
+  arrival's reliable `RegionHandshake` and `AgentMovementComplete` on a return
+  visit, and the teleport timed out.
 - The receiver acknowledges a reliable packet in one of two ways: by appending
   its sequence number to some other outgoing datagram (the `ACK` flag), or — for
   batches — by sending an explicit `PacketAck` message. Appended acks are the

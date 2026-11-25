@@ -603,6 +603,77 @@ mod test {
         Ok(())
     }
 
+    /// A reliable inbound ping with `flags`, numbered `sequence`.
+    fn reliable_ping(ping_id: u8, sequence: u32, flags: PacketFlags) -> Result<Vec<u8>, TestError> {
+        let message = AnyMessage::StartPingCheck(sl_wire::messages::StartPingCheck {
+            ping_id: sl_wire::messages::StartPingCheckPingIDBlock {
+                ping_id,
+                oldest_unacked: 0,
+            },
+        });
+        let mut writer = Writer::new();
+        message.id().encode(&mut writer)?;
+        message.encode_body(&mut writer)?;
+        Ok(encode_datagram(
+            flags,
+            SequenceNumber(sequence),
+            &writer.into_bytes(),
+        ))
+    }
+
+    /// Whether the session answered ping `ping_id` to the root simulator.
+    fn answered_ping(session: &mut Session, ping_id: u8) -> bool {
+        let mut answered = false;
+        while let Some(transmit) = session.poll_transmit() {
+            if transmit.destination == sim_addr()
+                && matches!(
+                    decode(&transmit),
+                    Ok(AnyMessage::CompletePingCheck(reply)) if reply.ping_id.ping_id == ping_id
+                )
+            {
+                answered = true;
+            }
+        }
+        answered
+    }
+
+    /// A duplicate is dropped only when it is flagged as a resend, as the
+    /// reference viewer drops one (`isDuplicateResend`). A first transmission
+    /// with a number seen before is taken: a simulator that starts a circuit's
+    /// numbering again (a kept circuit reused on a return visit) would
+    /// otherwise lose the arrival's `RegionHandshake` and
+    /// `AgentMovementComplete` as duplicates.
+    #[test]
+    fn only_a_resend_of_a_packet_already_taken_is_dropped() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        session.handle_datagram(
+            sim_addr(),
+            &reliable_ping(1, 50, PacketFlags::RELIABLE)?,
+            now,
+        )?;
+        assert!(answered_ping(&mut session, 1), "a new packet is taken");
+
+        let resend = PacketFlags::RELIABLE.with(PacketFlags::RESENT);
+        session.handle_datagram(sim_addr(), &reliable_ping(1, 50, resend)?, now)?;
+        assert!(
+            !answered_ping(&mut session, 1),
+            "a resend of a packet already taken is dropped"
+        );
+
+        session.handle_datagram(
+            sim_addr(),
+            &reliable_ping(2, 50, PacketFlags::RELIABLE)?,
+            now,
+        )?;
+        assert!(
+            answered_ping(&mut session, 2),
+            "a first transmission is taken even under a number seen before"
+        );
+        Ok(())
+    }
+
     #[test]
     fn retransmits_unacknowledged_reliable_packets() -> Result<(), TestError> {
         let now = Instant::now();
@@ -14300,8 +14371,13 @@ mod test {
         Ok(())
     }
 
+    /// A neighbour retired by `DisableSimulator` leaves the world, but its
+    /// circuit is kept at the transport level, as the reference viewer keeps
+    /// it: the region's pings are still answered, nothing it sends reaches the
+    /// application, and a later `EnableSimulator` carries on over the same
+    /// circuit, its numbering continuing.
     #[test]
-    fn disable_simulator_retires_child_circuit() -> Result<(), TestError> {
+    fn disable_simulator_keeps_the_retired_child_circuit() -> Result<(), TestError> {
         let now = Instant::now();
         let mut session = established(now)?;
         drain(&mut session)?;
@@ -14311,13 +14387,46 @@ mod test {
         // The simulator retires the child circuit.
         let disable = server_datagram(MessageId::Low(152), &[], 3, true)?;
         session.handle_datagram(sim_b(), &disable, now)?;
+        assert!(
+            drain_events(&mut session).iter().any(
+                |event| matches!(event, Event::NeighborRetired { sim, .. } if *sim == sim_b())
+            ),
+            "the region leaves the world"
+        );
 
-        // A ping from that (now-closed) child is ignored — no reply.
+        // A ping from the retired neighbour is still answered.
         let ping = server_datagram(MessageId::High(1), &[0x2A, 0, 0, 0, 0], 4, false)?;
         session.handle_datagram(sim_b(), &ping, now)?;
         assert!(
-            take_transmit_to(&mut session, sim_b()).is_none(),
-            "a retired child circuit should not answer"
+            matches!(
+                take_transmit_to(&mut session, sim_b()),
+                Some(AnyMessage::CompletePingCheck(reply)) if reply.ping_id.ping_id == 0x2A
+            ),
+            "a retired neighbour's circuit is kept"
+        );
+        assert!(
+            drain_events(&mut session)
+                .iter()
+                .all(|event| !matches!(event, Event::Ping { sim, .. } if *sim == sim_b())),
+            "nothing from a retired neighbour reaches the application"
+        );
+
+        // Enabled again: the first datagram continues the kept numbering.
+        enable_neighbour_b(&mut session, 10, now)?;
+        let mut first = None;
+        while let Some(transmit) = session.poll_transmit() {
+            if transmit.destination == sim_b() {
+                first = Some(transmit);
+                break;
+            }
+        }
+        let first = first.ok_or("expected a datagram to the re-enabled neighbour")?;
+        assert!(matches!(decode(&first)?, AnyMessage::UseCircuitCode(_)));
+        let parsed = parse_datagram(&first.payload)?;
+        assert!(
+            parsed.sequence.get() > 1,
+            "the kept circuit's numbering carries on: {}",
+            parsed.sequence.get()
         );
         Ok(())
     }
@@ -16712,8 +16821,8 @@ mod test {
     /// reference viewer keeps every circuit it has opened: the region's pings
     /// are answered after the agent has gone, and a teleport back carries on
     /// over that circuit, its sequence numbers continuing, rather than opening
-    /// a new one numbered from 1. Left silent past the inactivity timeout, the
-    /// kept circuit is dropped.
+    /// a new one numbered from 1. A `DisableSimulator` from the region does not
+    /// end it; 100 s without an answer to its own pings does.
     #[test]
     fn a_distant_teleport_keeps_the_circuit_it_left() -> Result<(), TestError> {
         let now = Instant::now();
@@ -16785,22 +16894,111 @@ mod test {
         grid.pump(&mut session, now)?;
         assert_eq!(session.region_handle(), Some(RegionHandle(SRC_HANDLE)));
 
-        // The circuit kept to C goes silent while the root goes on talking.
-        drain_events(&mut session);
-        let root_alive = now + Duration::from_secs(40);
-        session.handle_datagram(
-            sim_addr(),
-            &server_message(&ping(8), 2500, false)?,
-            root_alive,
-        )?;
-        let later = now + Duration::from_secs(46);
-        session.handle_timeout(later);
-        assert!(!session.is_closed());
+        // The simulator numbers the new visit's circuit from 1 again, so even a
+        // resend under a number the last visit used is new on this one.
         while session.poll_transmit().is_some() {}
-        session.handle_datagram(sim_c(), &server_message(&ping(9), 3000, false)?, later)?;
+        let resend = PacketFlags::RELIABLE.with(PacketFlags::RESENT);
+        session.handle_datagram(sim_addr(), &reliable_ping(42, 1, resend)?, now)?;
+        assert!(
+            answered_ping(&mut session, 42),
+            "a reused circuit forgets the numbers of the last visit"
+        );
+
+        // C disables its simulator, as aditi does about 50 s after the agent
+        // goes; the reference viewer keeps its circuit through that, and so
+        // does the session.
+        drain_events(&mut session);
+        let disable = AnyMessage::DisableSimulator(sl_wire::messages::DisableSimulator {});
+        session.handle_datagram(sim_c(), &server_message(&disable, 3000, true)?, now)?;
+        session.handle_datagram(sim_c(), &server_message(&ping(9), 3001, false)?, now)?;
+        assert!(
+            matches!(
+                take_transmit_to(&mut session, sim_c()),
+                Some(AnyMessage::CompletePingCheck(reply)) if reply.ping_id.ping_id == 9
+            ),
+            "a DisableSimulator does not end a kept circuit"
+        );
+
+        // The root goes on talking and acknowledging throughout, so only C's
+        // own liveness is tested below. `settle` hands every queued datagram
+        // over, acknowledging the root's reliable ones as its simulator would,
+        // and returns the ids of the pings sent to C.
+        let mut root_sequence = 2500;
+        let mut settle = |session: &mut Session, at: Instant| -> Result<Vec<u8>, TestError> {
+            let mut acks = Vec::new();
+            let mut pings_to_c = Vec::new();
+            while let Some(transmit) = session.poll_transmit() {
+                let parsed = parse_datagram(&transmit.payload)?;
+                if transmit.destination == sim_addr()
+                    && parsed.flags.contains(PacketFlags::RELIABLE)
+                {
+                    acks.push(PacketAckPacketsBlock {
+                        id: parsed.sequence.get(),
+                    });
+                } else if transmit.destination == sim_c()
+                    && let AnyMessage::StartPingCheck(start) = decode(&transmit)?
+                {
+                    pings_to_c.push(start.ping_id.ping_id);
+                }
+            }
+            root_sequence += 1;
+            let ack = AnyMessage::PacketAck(PacketAck { packets: acks });
+            session.handle_datagram(
+                sim_addr(),
+                &server_message(&ack, root_sequence, false)?,
+                at,
+            )?;
+            Ok(pings_to_c)
+        };
+        // C's own ping, sent while it is kept, answered at 60 s.
+        let answered = now + Duration::from_secs(60);
+        let _none = settle(&mut session, now)?;
+        session.handle_timeout(now + Duration::from_secs(30));
+        let _pings = settle(&mut session, now + Duration::from_secs(30))?;
+        session.handle_timeout(answered);
+        let sent_ping = *settle(&mut session, answered)?
+            .last()
+            .ok_or("the kept circuit pings its region")?;
+        let reply = AnyMessage::CompletePingCheck(sl_wire::messages::CompletePingCheck {
+            ping_id: sl_wire::messages::CompletePingCheckPingIDBlock { ping_id: sent_ping },
+        });
+        session.handle_datagram(sim_c(), &server_message(&reply, 3002, false)?, answered)?;
+
+        // Past 100 s from the departure, but within 100 s of the answer: kept.
+        let extended = now + Duration::from_secs(101);
+        session.handle_timeout(now + Duration::from_secs(90));
+        let _pings = settle(&mut session, now + Duration::from_secs(90))?;
+        session.handle_timeout(extended);
+        let _pings = settle(&mut session, extended)?;
+        session.handle_datagram(sim_c(), &server_message(&ping(10), 3003, false)?, extended)?;
+        assert!(
+            take_transmit_to(&mut session, sim_c()).is_some(),
+            "an answered ping keeps a kept circuit alive"
+        );
+
+        // 100 s after the last answer, with every ping since unanswered (the
+        // region's own pings do not count): dropped.
+        let mut at = extended;
+        let mut inbound = 3004;
+        while at < answered + Duration::from_secs(100) {
+            at += Duration::from_secs(5);
+            session.handle_datagram(sim_c(), &server_message(&ping(11), inbound, false)?, at)?;
+            inbound += 1;
+            session.handle_timeout(at);
+            let _pings = settle(&mut session, at)?;
+        }
+        let dropped = answered + Duration::from_secs(101);
+        session.handle_timeout(dropped);
+        assert!(!session.is_closed());
+        let _pings = settle(&mut session, dropped)?;
+        session.handle_datagram(
+            sim_c(),
+            &server_message(&ping(12), inbound, false)?,
+            dropped,
+        )?;
         assert!(
             take_transmit_to(&mut session, sim_c()).is_none(),
-            "a kept circuit gone silent is dropped"
+            "a kept circuit whose pings go unanswered is dropped"
         );
         Ok(())
     }
@@ -17633,6 +17831,119 @@ mod test {
             update.agent_data.camera_center.x.to_bits(),
             0.0_f32.to_bits()
         );
+        Ok(())
+    }
+
+    /// The reference viewer polls every region's event queue and attributes
+    /// each event to its region. A `ParcelProperties` from a neighbour's
+    /// queue describes that neighbour, not the parcel the agent is on, so it
+    /// is not surfaced as the agent's parcel. From the root's queue it is.
+    #[test]
+    fn a_neighbours_parcel_event_is_not_taken_as_the_agents() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        enable_neighbour_b(&mut session, 9, now)?;
+        while session.poll_transmit().is_some() {}
+        drain_events(&mut session);
+        let xml = "<llsd><map><key>ParcelData</key><array><map>\
+            <key>LocalID</key><integer>3</integer>\
+            <key>SequenceID</key><integer>9</integer>\
+            </map></array></map></llsd>";
+        let body = sl_proto::parse_llsd_xml(xml)?;
+
+        session.handle_caps_event_from(sim_b(), "ParcelProperties", &body, now)?;
+        assert!(
+            drain_events(&mut session)
+                .iter()
+                .all(|event| !matches!(event, Event::ParcelProperties(_))),
+            "a neighbour's parcel is not the agent's"
+        );
+
+        session.handle_caps_event_from(sim_addr(), "ParcelProperties", &body, now)?;
+        assert!(
+            drain_events(&mut session)
+                .iter()
+                .any(|event| matches!(event, Event::ParcelProperties(_))),
+            "the root region's parcel event is taken"
+        );
+        Ok(())
+    }
+
+    /// Any other event from a neighbour's queue is taken as it would be from
+    /// the root's: here, a neighbour announcing its own neighbour.
+    #[test]
+    fn a_neighbours_queue_event_is_taken() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        enable_neighbour_b(&mut session, 9, now)?;
+        while session.poll_transmit().is_some() {}
+        drain_events(&mut session);
+        let seed: url::Url = "http://127.0.0.1:9001/cap/seed-b".parse()?;
+        let body = sl_proto::parse_llsd_xml(&format!(
+            "<llsd><map><key>sim-ip-and-port</key><string>{}</string>\
+             <key>seed-capability</key><string>{seed}</string></map></llsd>",
+            sim_b()
+        ))?;
+        session.handle_caps_event_from(sim_b(), "EstablishAgentCommunication", &body, now)?;
+        assert!(
+            drain_events(&mut session).iter().any(|event| matches!(
+                event,
+                Event::NeighborSeed { sim, seed_capability } if *sim == sim_b() && *seed_capability == seed
+            )),
+            "the neighbour's seed is surfaced"
+        );
+        Ok(())
+    }
+
+    /// A region stays held, and its event queue polled, as long as the
+    /// reference viewer keeps it in its world: the root and each neighbour,
+    /// and a region left by teleport until it sends `DisableSimulator`. A
+    /// neighbour retired by `DisableSimulator` is no longer held although its
+    /// circuit is kept.
+    #[test]
+    fn regions_are_held_until_they_disable_the_agent() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        enable_neighbour_b(&mut session, 9, now)?;
+        while session.poll_transmit().is_some() {}
+        assert!(session.holds_region(sim_addr()), "the root is held");
+        assert!(session.holds_region(sim_b()), "a neighbour is held");
+        assert_eq!(session.root_simulator(), Some(sim_addr()));
+
+        let disable = server_datagram(MessageId::Low(152), &[], 3, true)?;
+        session.handle_datagram(sim_b(), &disable, now)?;
+        assert!(
+            !session.holds_region(sim_b()),
+            "a neighbour that disabled the agent is not held"
+        );
+        Ok(())
+    }
+
+    /// The region a distant teleport left is held until it disables the agent.
+    #[test]
+    fn a_region_left_by_teleport_is_held_until_disabled() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut session, mut grid) = grid_session(now)?;
+        session.teleport_to(
+            RegionHandle(C_HANDLE),
+            region_coords(128.0, 128.0, 30.0),
+            vec3(1.0, 0.0, 0.0),
+            now,
+        )?;
+        grid.teleport_finish(&mut session, sim_addr(), sim_c(), now)?;
+        grid.pump(&mut session, now)?;
+        assert_eq!(session.root_simulator(), Some(sim_c()));
+        assert!(
+            session.holds_region(sim_addr()),
+            "the region left is held until it disables the agent"
+        );
+        let disable = AnyMessage::DisableSimulator(sl_wire::messages::DisableSimulator {});
+        session.handle_datagram(sim_addr(), &server_message(&disable, 4000, true)?, now)?;
+        assert!(!session.holds_region(sim_addr()));
+        assert!(session.holds_region(sim_c()));
         Ok(())
     }
 

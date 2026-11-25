@@ -481,6 +481,24 @@ impl ReliableLink {
         self.seen.insert(sequence)
     }
 
+    /// Records an inbound reliable `sequence` and says whether to take it:
+    /// `false` only for a packet flagged `resent` whose number was seen
+    /// before. The reference viewer drops a duplicate the same way, only when
+    /// it is flagged as a resend (`LLMessageSystem::checkMessages`,
+    /// `isDuplicateResend`). A first transmission is always taken, so a
+    /// simulator that starts a circuit's numbering again is not mistaken for a
+    /// stream of duplicates.
+    pub(crate) fn accept_reliable(&mut self, sequence: SequenceNumber, resent: bool) -> bool {
+        let fresh = self.seen.insert(sequence);
+        fresh || !resent
+    }
+
+    /// Forgets every inbound sequence number seen, as the reference does when
+    /// a circuit's inbound numbering is reset (`setPacketInID`).
+    pub(crate) fn forget_seen(&mut self) {
+        self.seen = SeenWindow::default();
+    }
+
     /// Flushes owed acknowledgements as one or more `PacketAck` messages.
     ///
     /// A message that fails to encode does not take the acks batched behind it

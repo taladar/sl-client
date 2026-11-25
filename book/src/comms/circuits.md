@@ -96,11 +96,14 @@ How each grid pings a circuit, resends on it and gives it up is measured in
 >   `send_region_handshake_reply` helpers used during the handshake.
 > - The owning `Session` (`sl-proto/src/session.rs`) holds the root circuit and
 >   any child circuits, and handles promotion on region change. A distant
->   teleport moves the old root and its children into `Session::departed`.
->   There they are kept at the transport level only (acks, pings, resends,
->   and `DisableSimulator` to end one), and the next circuit to the same
->   simulator takes one back under a fresh circuit id. A departed circuit that
->   stays silent past the inactivity timeout is dropped.
+>   teleport moves the old root and its children into `Session::departed`, and
+>   so does a neighbour retired by `DisableSimulator` or by an abandoned
+>   teleport transfer. There they are kept at the transport level only (acks,
+>   pings, resends), and the next circuit to the same simulator takes one back
+>   under a fresh circuit id, its numbering continuing. As in the reference
+>   viewer, whose `disableCircuit` finds no circuit code on the viewer side, a
+>   `DisableSimulator` does not end a kept circuit. Only 100 s without an
+>   answer to its own pings does (the reference's `circuit_timeout`).
 > - A request **about an object** goes to the region the object is in, not
 >   to the root: a `ScopedObjectId` names its circuit directly, and an
 >   object-key request (`RequestObjectPropertiesFamily`, `RequestPayPrice`,
