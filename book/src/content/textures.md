@@ -120,10 +120,22 @@ the asset's length from a partial answer's `Content-Range`
 ready to insert into `Assets<Image>` and use as a rendered texture. It is the
 viewer's *only* path from pixels to a world texture, so the two decisions that
 are easy to get silently wrong are made once: a `TextureUpload` argument says
-whether the bytes are a picture (`TextureUpload::COLOR`, sRGB) or numbers a
-shader reads verbatim (`TextureUpload::DATA`, linear — normal maps, noise
-fields, masks), and every upload repeats on every axis, because Bevy's default
-clamp-to-edge smears a face's edge texel wherever a UV leaves the unit square.
+whether the bytes are a picture or numbers a shader reads verbatim
+(`TextureUpload::DATA`, linear — normal maps, noise fields, masks), and every
+upload repeats on every axis, because Bevy's default clamp-to-edge smears a
+face's edge texel wherever a UV leaves the unit square.
+
+A picture drawn in the world (`TextureUpload::WORLD_COLOR`) is uploaded as
+plain `Rgba8Unorm`, not `Rgba8UnormSrgb`, and the material's shader decodes the
+sample with `sl_client_bevy::srgb` (`srgb_to_linear`). This follows the
+reference viewer, which keeps its textures as `GL_RGBA8` and decodes in the
+shader. The order matters wherever the sampler blends texels. Filtering the
+encoded bytes turns a black-and-white blend into 128, while an sRGB format
+decodes each texel first and gives about 188. A picture whose shader is not ours
+and expects a linear sample, such as a UI image, uses `TextureUpload::UI_COLOR`
+(`Rgba8UnormSrgb`). A media surface's image is shown both in the UI and on a
+face, so it stays sRGB-format, and its face material says so with
+`MAP_FLAG_BASE_DECODED`.
 `upload_pixels` is the same upload for pixels the viewer generated itself (the
 bump-map generator, the placeholder swatches).
 `BevyTextureFetcher` is a blocking-HTTP `TextureFetcher` for a Bevy app

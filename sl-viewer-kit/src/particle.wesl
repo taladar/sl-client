@@ -19,6 +19,7 @@ import bevy_pbr::render::{
     pbr_types,
     pbr_functions,
 };
+import sl_client_bevy::srgb::decode_srgb_sample;
 
 // The source's diffuse texture + sampler (@group(3), built per cloud in
 // particle_render.rs::prepare_particle_bind_groups).
@@ -101,7 +102,9 @@ fn vertex(vertex: Vertex) -> VertexOutput {
 
 @fragment
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
-    let tex = textureSample(particle_texture, particle_sampler, in.uv);
+    // The sprite holds encoded sRGB bytes (`TextureUpload::WORLD_COLOR`); decode the
+    // filtered sample, as the reference decodes its fullbright / alpha samples.
+    let tex = decode_srgb_sample(textureSample(particle_texture, particle_sampler, in.uv));
     let base = tex * in.color;
 
     // A billboard is a matte (roughness 1, metallic 0) surface tinted by the sprite; build

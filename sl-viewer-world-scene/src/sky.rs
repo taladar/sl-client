@@ -1276,7 +1276,7 @@ pub(crate) fn apply_sky_textures(
             // default moisture / ice of 0 makes it a no-op anyway).
             continue;
         };
-        let handle = images.add(upload_decoded(decoded, TextureUpload::COLOR));
+        let handle = images.add(upload_decoded(decoded, TextureUpload::WORLD_COLOR));
         let Some(mut material) = materials.get_mut(&state.material) else {
             return;
         };
@@ -1584,7 +1584,7 @@ pub(crate) fn apply_disc_textures(
                 texel(edge_w, edge_h),
             );
         }
-        let handle = images.add(upload_decoded(decoded, TextureUpload::COLOR));
+        let handle = images.add(upload_decoded(decoded, TextureUpload::WORLD_COLOR));
         let target = if is_sun {
             &state.sun_material
         } else {
@@ -1943,7 +1943,7 @@ pub(crate) fn apply_star_textures(
             // The fetch/decode failed; the field keeps its (transparent) placeholder.
             continue;
         };
-        let handle = images.add(upload_decoded(decoded, TextureUpload::COLOR));
+        let handle = images.add(upload_decoded(decoded, TextureUpload::WORLD_COLOR));
         if let Some(mut material) = materials.get_mut(&state.material) {
             material.diffuse = handle;
         }

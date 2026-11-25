@@ -145,6 +145,8 @@ pub struct SunDiscMaterialPlugin;
 
 impl Plugin for SunDiscMaterialPlugin {
     fn build(&self, app: &mut App) {
+        // The shader decodes its sRGB texture samples with the shared module.
+        crate::srgb::load_srgb_shader(app);
         load_internal_asset!(app, SUN_DISC_SHADER_HANDLE, "sun_disc.wesl", |source, _| {
             Shader::from_wesl(source, "embedded://sl_client_bevy/sun_disc.wesl")
         });

@@ -41,6 +41,7 @@ import sl_client_bevy::water_fog::{
     water_fog_ks,
     water_fog_no_clip,
 };
+import sl_client_bevy::srgb::{decode_srgb_sample, srgb_to_linear};
 import sl_client_bevy::sky_lighting::{
     SkyFragment,
     SkyLighting,
@@ -103,6 +104,11 @@ const MAP_FLAG_NORMAL: u32 = 1u;
 const MAP_FLAG_MR: u32 = 2u;
 const MAP_FLAG_EMISSIVE: u32 = 4u;
 const MAP_FLAG_SPEC: u32 = 8u;
+// The base-colour texture is an sRGB-format image whose sampler already decodes it
+// (a media surface, whose image the UI shows too), so the shader must not decode it
+// again. Clear for every texture the world uploads (`TextureUpload::WORLD_COLOR`),
+// which holds the encoded bytes and is decoded here after filtering.
+const MAP_FLAG_BASE_DECODED: u32 = 16u;
 
 // Must match the `SL_FACE_MODE_*` constants in face_material.rs.
 const SL_FACE_MODE_PBR: u32 = 0u;
@@ -291,11 +297,12 @@ fn sl_animated_uv(sl: SlFaceParams, uv: vec2<f32>) -> vec2<f32> {
     return sl_texture_uv_transform(rotation, offset_s, offset_t, scale_s, scale_t, uv);
 }
 
-// Re-sample the base `StandardMaterial`'s base-colour texture at `uv` and multiply by
-// the base-colour factor — the same result `pbr_input_from_standard_material`
-// produces, but at an arbitrary UV (used to override the base colour of a texture-
-// animated face at its GPU-animated UV, independent of `base.uv_transform`).
-fn sl_sample_base_color(slot: u32, uv: vec2<f32>) -> vec4<f32> {
+// Re-sample the base `StandardMaterial`'s base-colour texture at `uv`, decode it from
+// sRGB unless `decoded` says its sampler already has, and multiply by the base-colour
+// factor — the result `pbr_input_from_standard_material` would produce if it decoded
+// after filtering, as the reference does, at an arbitrary UV (the GPU-animated UV of a
+// texture-animated face, or the material's own UV for every other face).
+fn sl_sample_base_color(slot: u32, uv: vec2<f32>, decoded: bool) -> vec4<f32> {
     @if(BINDLESS)
     let indices = pbr_bindings::material_indices[slot];
     @if(BINDLESS)
@@ -304,12 +311,13 @@ fn sl_sample_base_color(slot: u32, uv: vec2<f32>) -> vec4<f32> {
     var color = m.base_color;
     @if(BINDLESS)
     if (m.flags & pbr_types::STANDARD_MATERIAL_FLAGS_BASE_COLOR_TEXTURE_BIT) != 0u {
-        color = color * textureSampleBias(
+        let sampled = textureSampleBias(
             bindless_textures_2d[indices.base_color_texture],
             bindless_samplers_filtering[indices.base_color_sampler],
             uv,
             view.mip_bias,
         );
+        color = color * select(decode_srgb_sample(sampled), sampled, decoded);
     }
     @if(BINDLESS)
     return color;
@@ -317,12 +325,13 @@ fn sl_sample_base_color(slot: u32, uv: vec2<f32>) -> vec4<f32> {
     var color = pbr_bindings::material.base_color;
     @if(!BINDLESS)
     if (pbr_bindings::material.flags & pbr_types::STANDARD_MATERIAL_FLAGS_BASE_COLOR_TEXTURE_BIT) != 0u {
-        color = color * textureSampleBias(
+        let sampled = textureSampleBias(
             pbr_bindings::base_color_texture,
             pbr_bindings::base_color_sampler,
             uv,
             view.mip_bias,
         );
+        color = color * select(decode_srgb_sample(sampled), sampled, decoded);
     }
     @if(!BINDLESS)
     return color;
@@ -330,18 +339,20 @@ fn sl_sample_base_color(slot: u32, uv: vec2<f32>) -> vec4<f32> {
 
 // Sample the legacy specular map (extension slot 51) at `uv`, returning white when
 // the face carries none (a spec-colour-only material). The RGB is the per-texel
-// specular tint and the alpha the per-texel environment weight, exactly as the
+// specular tint, decoded from sRGB after filtering as `materialF.glsl` decodes
+// `spec.rgb`, and the alpha the per-texel environment weight, exactly as the
 // reference `getSpecular` / `env_intensity * spec.a` read it.
 fn sl_sample_specular(slot: u32, uv: vec2<f32>) -> vec4<f32> {
     @if(BINDLESS)
-    return textureSampleBias(
+    let sampled = textureSampleBias(
         bindless_textures_2d[sl_indices[slot].specular_map],
         bindless_samplers_filtering[sl_indices[slot].specular_map_sampler],
         uv,
         view.mip_bias,
     );
     @if(!BINDLESS)
-    return textureSampleBias(sl_spec_tex, sl_spec_samp, uv, view.mip_bias);
+    let sampled = textureSampleBias(sl_spec_tex, sl_spec_samp, uv, view.mip_bias);
+    return decode_srgb_sample(sampled);
 }
 
 // A per-fragment tangent basis (`mat3x3(T, B, N)`) derived from screen-space
@@ -585,12 +596,26 @@ fn fragment(
     // placement with a time-derived one (evaluated here, not written per frame on the
     // CPU). `base_uv` then drives the base-colour re-sample and every extension map,
     // so the whole face animates. Inert (`ANIM_ON` clear) leaves `base_uv == in.uv`.
+    //
+    // The base colour is re-sampled here in either case, because Bevy's sample is the
+    // filtered *encoded* value of a world texture (uploaded `Rgba8Unorm`, as the
+    // reference keeps its textures) and has to be decoded before it is multiplied by
+    // anything. Only the colour is replaced: alpha is never encoded, so Bevy's alpha
+    // (with its alpha-to-coverage sharpening) stands.
     @if(VERTEX_UVS)
     var base_uv = in.uv;
     @if(VERTEX_UVS)
+    let base_decoded = (sl.map_flags & MAP_FLAG_BASE_DECODED) != 0u;
+    @if(VERTEX_UVS)
     if (sl.anim_mode & ANIM_ON) != 0u {
         base_uv = sl_animated_uv(sl, in.uv);
-        pbr_input.material.base_color = sl_sample_base_color(slot, base_uv);
+        pbr_input.material.base_color = sl_sample_base_color(slot, base_uv, base_decoded);
+    } else if !base_decoded {
+        let uv = (pbr_input.material.uv_transform * vec3<f32>(in.uv, 1.0)).xy;
+        var rgb = sl_sample_base_color(slot, uv, false).rgb;
+        @if(VERTEX_COLORS)
+        rgb = rgb * in.color.rgb;
+        pbr_input.material.base_color = vec4<f32>(rgb, pbr_input.material.base_color.a);
     }
 
     @if(VERTEX_UVS)
@@ -613,7 +638,8 @@ fn fragment(
     @if(VERTEX_UVS)
     if (sl.map_flags & MAP_FLAG_EMISSIVE) != 0u {
         let uv = sl_uv(sl.uv_emissive_mat, sl.uv_translations_b.xy, base_uv);
-        // The emissive map is uploaded sRGB, so the sample is already linear.
+        // The emissive map holds encoded sRGB bytes; decode the filtered sample, as
+        // `pbropaqueF.glsl` does (`srgb_to_linear(texture(emissiveMap, …).rgb)`).
         @if(BINDLESS)
         let e = textureSampleBias(
             bindless_textures_2d[sl_indices[slot].emissive_map],
@@ -624,7 +650,7 @@ fn fragment(
         @if(!BINDLESS)
         let e = textureSampleBias(sl_emissive_tex, sl_emissive_samp, uv, view.mip_bias);
         pbr_input.material.emissive = vec4<f32>(
-            pbr_input.material.emissive.rgb * e.rgb,
+            pbr_input.material.emissive.rgb * srgb_to_linear(e.rgb),
             pbr_input.material.emissive.a,
         );
     }
@@ -697,8 +723,9 @@ fn fragment(
         //
         // The direction toward the active body is still Bevy's directional light,
         // which the sky aims (texel-snapped); only its colour and strength are
-        // ignored. `base_color` is the linear albedo: the texture is uploaded sRGB,
-        // which is the `srgb_to_linear` the reference applies to its G-buffer.
+        // ignored. `base_color` is the linear albedo: the texture sample was decoded
+        // above, after filtering, which is the `srgb_to_linear` the reference applies
+        // to its G-buffer.
         let n = pbr_input.N;
         let light_dir = normalize(lights.directional_lights[0].direction_to_light);
         let shadow = sl_sun_shadow(pbr_input);

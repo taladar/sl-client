@@ -788,7 +788,7 @@ fn default_particle_image() -> Image {
     }
     // `COLOR` so the white blob reads the same brightness as fetched sprites, and —
     // see the doc comment — repeating, like every other texture path here.
-    upload_pixels(SIZE, SIZE, data, TextureUpload::COLOR)
+    upload_pixels(SIZE, SIZE, data, TextureUpload::WORLD_COLOR)
 }
 
 /// The blend mode a particle system's blend function implies: an additive
@@ -1281,7 +1281,7 @@ fn apply_cloud_texture(
                 // (`TAM_CLAMP`), but a billboard quad's UVs span exactly
                 // `[0, 1]`, so nothing ever samples off the end and the
                 // difference is unobservable — see [`default_particle_image`].
-                cloud.texture = images.add(upload_decoded(decoded, TextureUpload::COLOR));
+                cloud.texture = images.add(upload_decoded(decoded, TextureUpload::WORLD_COLOR));
                 cloud.texture_applied = true;
             }
         }

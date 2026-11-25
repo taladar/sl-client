@@ -1776,7 +1776,9 @@ impl FromWorld for FaceCursorAssets {
             },
             TextureDimension::D2,
             data,
-            TextureFormat::Rgba8UnormSrgb,
+            // Encoded bytes, like every texture a face samples: the face shader
+            // decodes its base colour after filtering (`TextureUpload::WORLD_COLOR`).
+            TextureFormat::Rgba8Unorm,
             RenderAssetUsages::RENDER_WORLD,
         );
         // Wrap the tile so a face's repeat count draws that many grid cells.

@@ -591,12 +591,14 @@ The pure blend/ease maths live in the new `sl-anim` `blend` module +
   joins each `Added<PrimFaceEntity>` face to its holder to discover the material
   id. One component + one query; no builder signature churn.
 
-- **Colour-space split matters:** base-colour/emissive maps upload sRGB
-  (`TextureUpload::COLOR`), normal/metallic-roughness upload **linear**
-  (`TextureUpload::DATA`) — `pbr_map_upload(srgb)` picks between them. The
-  decode (raw RGBA8) is shared with the diffuse pipeline via
-  `TextureManager`; only the GPU image format differs, so `materials.rs` keeps
-  its own `(TextureKey, srgb)` image cache. SL packs ORM in the
+- **Colour-space split matters:** base-colour/emissive maps upload as
+  encoded sRGB that the face shader decodes after filtering
+  (`TextureUpload::WORLD_COLOR`), normal/metallic-roughness upload **linear**
+  (`TextureUpload::DATA`) — `pbr_map_upload(srgb)` picks between them. Both
+  are `Rgba8Unorm` on the GPU, so the split is about which shader decodes a
+  sample, not the image format. The decode (raw RGBA8) is shared with the
+  diffuse pipeline via `TextureManager`, and `materials.rs` keeps its own
+  `(TextureKey, srgb)` image cache. SL packs ORM in the
   metallic-roughness map (red=occlusion), so that one image is set on **both**
   `metallic_roughness_texture` and `occlusion_texture` (Bevy samples MR from
   G/B, occlusion from R).

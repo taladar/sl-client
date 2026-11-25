@@ -16,6 +16,7 @@ import bevy_pbr::render::{
     mesh_functions,
     view_transformations::position_world_to_clip,
 };
+import sl_client_bevy::srgb::srgb_to_linear;
 
 // The per-frame disc inputs. Four scalars packed into a single 16-byte std140
 // slot, matching the Rust `SunDiscParams` (`ShaderType`) exactly.
@@ -81,12 +82,13 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
         discard;
     }
 
-    // The disc texture is uploaded sRGB, so `textureSample` already returns it in
-    // linear space; scaling by `sky_hdr_scale` matches the reference's
+    // The disc texture holds encoded sRGB bytes (`TextureUpload::WORLD_COLOR`), so
+    // the blended sample is decoded here, after filtering, as `sunDiscF.glsl` does;
+    // scaling by `sky_hdr_scale` matches the reference's
     // `srgb_to_linear(color) * sky_hdr_scale` over the whole WL sky. 1.0 for a
     // legacy sky (a no-op); > 1.0 for an EEP probe-ambiance sky so the disc blows
     // out.
-    var rgb = c.rgb * disc.brightness * disc.sky_hdr_scale;
+    var rgb = srgb_to_linear(c.rgb) * disc.brightness * disc.sky_hdr_scale;
     var alpha = c.a;
 
     // `moonF.glsl`: restore the pre-EEP alpha fade of the moon near the horizon.

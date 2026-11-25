@@ -16,6 +16,7 @@ import bevy_pbr::render::{
     shadows,
     view_transformations::position_world_to_clip,
 };
+import sl_client_bevy::srgb::srgb_to_linear;
 import sl_client_bevy::sky_lighting::{
     SkyFragment,
     sky_irradiance,
@@ -113,7 +114,12 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let c1 = textureSample(detail1_texture, detail1_sampler, in.uv);
     let c2 = textureSample(detail2_texture, detail2_sampler, in.uv);
     let c3 = textureSample(detail3_texture, detail3_sampler, in.uv);
-    let base = c0 * weights.x + c1 * weights.y + c2 * weights.z + c3 * weights.w;
+    // The detail textures hold encoded sRGB bytes (`TextureUpload::WORLD_COLOR`), and
+    // the reference blends them encoded and decodes the result: `terrainF.glsl` writes
+    // the mix to the G-buffer, which `softenLight` decodes. Decoding each sample first
+    // would blend in linear light and lighten every transition.
+    let mixed = c0 * weights.x + c1 * weights.y + c2 * weights.z + c3 * weights.w;
+    let base = vec4<f32>(srgb_to_linear(mixed.rgb), mixed.a);
 
     let normal = normalize(in.world_normal);
 
@@ -153,9 +159,9 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     var color: vec3<f32>;
     if (sky_lighting_is_resolved(lighting)) {
         // The reference's legacy branch of `softenLight`: terrain writes its splat
-        // to the G-buffer like any other legacy surface and is lit there. The detail
-        // textures are uploaded sRGB, so `base` is already the linear albedo the
-        // branch converts its G-buffer colour to.
+        // to the G-buffer like any other legacy surface and is lit there. `base` was
+        // decoded above, which is the conversion the branch applies to its G-buffer
+        // colour.
         let light = sky_surface_light(lighting, normal, sun_dir);
         // Where the fragment is, for the reflection probes whose volumes hold it.
         let fragment = SkyFragment(

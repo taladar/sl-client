@@ -694,7 +694,7 @@ fn apply_detail_texture(
             // The fetch/decode failed; the region keeps the flat placeholder.
             return;
         };
-        slot.insert(images.add(upload_decoded(decoded, TextureUpload::COLOR)));
+        slot.insert(images.add(upload_decoded(decoded, TextureUpload::WORLD_COLOR)));
         debug!("built tiling image for terrain detail texture {id}");
     }
     let regions: Vec<RegionHandle> = state.regions.keys().copied().collect();
@@ -779,7 +779,7 @@ pub fn placeholder_image() -> Image {
         1,
         1,
         TERRAIN_PLACEHOLDER_COLOR.to_vec(),
-        TextureUpload::COLOR,
+        TextureUpload::WORLD_COLOR,
     )
 }
 

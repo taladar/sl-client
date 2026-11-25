@@ -380,6 +380,8 @@ pub use crate::sky_lighting::{
     SKY_LIGHTING_IMAGE, SkyLighting, SkyLightingMode, load_sky_lighting, write_sky_lighting,
 };
 #[cfg(feature = "bevy_pbr")]
+pub use crate::srgb::{SRGB_SHADER_HANDLE, load_srgb_shader};
+#[cfg(feature = "bevy_pbr")]
 pub use crate::stars::{StarMaterial, StarMaterialPlugin, StarParams};
 #[cfg(feature = "bevy_pbr")]
 pub use crate::sun_disc::{SunDiscMaterial, SunDiscMaterialPlugin, SunDiscParams};
@@ -424,6 +426,8 @@ pub mod prims;
 pub mod sky;
 #[cfg(feature = "bevy_pbr")]
 pub mod sky_lighting;
+#[cfg(feature = "bevy_pbr")]
+pub mod srgb;
 #[cfg(feature = "bevy_pbr")]
 pub mod stars;
 #[cfg(feature = "bevy_pbr")]

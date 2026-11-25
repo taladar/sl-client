@@ -111,7 +111,11 @@ fn rainbow(d: f32) -> vec3<f32> {
     let interior_coord = max(0.0, dd - 0.25) * 4.2857;
     dd = clamp(dd, 0.0, 0.25) + interior_coord;
     let rad = (sky.droplet_radius - 5.0) / 1024.0;
-    let sampled = textureSample(rainbow_texture, rainbow_sampler, vec2<f32>(rad + 0.5, dd)).rgb;
+    // The rainbow and halo textures hold encoded sRGB bytes
+    // (`TextureUpload::WORLD_COLOR`); each sample is decoded after filtering.
+    let sampled = srgb_to_linear(
+        textureSample(rainbow_texture, rainbow_sampler, vec2<f32>(rad + 0.5, dd)).rgb,
+    );
     return pow(sampled, vec3<f32>(1.8)) * sky.moisture_level;
 }
 
@@ -120,7 +124,8 @@ fn rainbow(d: f32) -> vec3<f32> {
 fn halo22(d: f32) -> vec3<f32> {
     let dd = clamp(d, 0.1, 1.0);
     let v = sqrt(clamp(1.0 - (dd * dd), 0.0, 1.0));
-    return textureSample(halo_texture, halo_sampler, vec2<f32>(0.0, v)).rgb * sky.ice_level;
+    let sampled = textureSample(halo_texture, halo_sampler, vec2<f32>(0.0, v)).rgb;
+    return srgb_to_linear(sampled) * sky.ice_level;
 }
 
 @fragment

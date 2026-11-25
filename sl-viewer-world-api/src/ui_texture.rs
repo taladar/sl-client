@@ -136,7 +136,7 @@ impl UiTextureImages {
         {
             return handle;
         }
-        let handle = images.add(upload_decoded(decoded, TextureUpload::COLOR));
+        let handle = images.add(upload_decoded(decoded, TextureUpload::UI_COLOR));
         let _replaced = self.uploaded.insert(
             key,
             UploadedImage {

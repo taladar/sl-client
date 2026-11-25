@@ -624,7 +624,8 @@ mod tests {
         CellVerdict, Marker, Patch, Silhouette, centroid, differing_pixels, dominant, read_cell,
     };
     use crate::render_scene::{
-        RenderScene, SCENES, SceneAssets, SceneCamera, SceneCx, SceneLighting, Timeline,
+        RenderScene, SCENES, SceneAssets, SceneCamera, SceneCx, SceneLighting,
+        TEXTURE_FILTER_BLEND_X, TEXTURE_FILTER_FLAT_X, TEXTURE_FILTER_STAGE, Timeline,
     };
     use crate::render_test::{TestError, capture_logs};
     use crate::underwater_fog::UnderwaterFogPlugin;
@@ -1243,6 +1244,76 @@ mod tests {
              what this test thinks it is, so its other half proves nothing",
         );
         Ok(())
+    }
+
+    /// **A world texture is filtered before it is decoded, as the reference's is**
+    /// (`viewer-texture-filtering-in-linear-space`).
+    ///
+    /// The reference keeps fetched textures as plain `GL_RGBA8` and decodes sRGB in
+    /// the shader, so the hardware blends the encoded bytes: halfway between a black
+    /// and a white texel is byte 128. This viewer used `Rgba8UnormSrgb`, which
+    /// decodes each texel first and blends in linear light, so the same point came
+    /// out as byte 188, and every magnified or minified high-contrast texture was
+    /// lighter than the reference's.
+    ///
+    /// The stage draws that blend beside a flat texel of byte 128, both unlit. With
+    /// the decode after the filter the two match whatever happens to the colour
+    /// afterwards; with it before, the blend is far brighter than the flat plate.
+    #[test]
+    fn a_world_texture_is_filtered_before_it_is_decoded() -> Result<(), TestError> {
+        let basis = crate::render_scene::scene_root_transform().rotation;
+        let points = [TEXTURE_FILTER_BLEND_X, TEXTURE_FILTER_FLAT_X]
+            .map(|x| basis.mul_vec3(Vec3::new(x, 0.0, 0.0)));
+        let Some((frame, projected)) =
+            capture_with(&TEXTURE_FILTER_STAGE, SceneCx::new(), &points, |app| {
+                app.add_systems(PreUpdate, linear_output);
+            })
+        else {
+            warn!("skipping: no frame came back, so this machine has no usable GPU adapter");
+            return Ok(());
+        };
+        let (blend_at, flat_at) = projected
+            .get(0)
+            .zip(projected.get(1))
+            .ok_or("a plate did not project onto the frame")?;
+        let pixel_at = |at: Vec2| {
+            #[expect(
+                clippy::as_conversions,
+                clippy::cast_possible_truncation,
+                clippy::cast_sign_loss,
+                reason = "a projected point inside the 256-pixel frame, rounded to its pixel"
+            )]
+            let (x, y) = (at.x.round().max(0.0) as u32, at.y.round().max(0.0) as u32);
+            frame.pixel(x, y)
+        };
+        let blend = pixel_at(blend_at).ok_or("the blend plate's centre is off the frame")?;
+        let flat = pixel_at(flat_at).ok_or("the flat plate's centre is off the frame")?;
+        assert!(
+            flat.x > 0.1 && flat.x < 0.9,
+            "the flat byte-128 plate rendered {flat:?}, so the stage is not showing the plates \
+             and the comparison below proves nothing"
+        );
+        let difference = (blend.x - flat.x)
+            .abs()
+            .max((blend.y - flat.y).abs())
+            .max((blend.z - flat.z).abs());
+        assert!(
+            difference < 6.0 / 255.0,
+            "halfway between a black and a white texel rendered {blend:?}, where a flat texel of \
+             byte 128 rendered {flat:?}: the texture was filtered after its sRGB decode (in \
+             linear light) rather than before it, as the reference filters"
+        );
+        Ok(())
+    }
+
+    /// Take the readback camera's untonemapped output, so a byte the stage drew is
+    /// as close to the byte the frame holds as the pipeline allows.
+    fn linear_output(mut cameras: Query<&mut Tonemapping, With<ViewerCamera>>) {
+        for mut tonemapping in &mut cameras {
+            if *tonemapping != Tonemapping::None {
+                *tonemapping = Tonemapping::None;
+            }
+        }
     }
 
     /// The colour the placed probe of [`capture_box_in_sky_ambient`] captured:

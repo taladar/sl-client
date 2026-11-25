@@ -713,6 +713,8 @@ impl Plugin for ParticleRenderPlugin {
     /// Compile `particle.wesl`, register the extract plugins for the per-cloud components,
     /// and set up the render-app pipeline / draw command / prepare / queue systems.
     fn build(&self, app: &mut App) {
+        // The particle shader decodes its sRGB sprite samples with the shared module.
+        sl_client_bevy::load_srgb_shader(app);
         load_internal_asset!(app, PARTICLE_SHADER_HANDLE, "particle.wesl", |source, _| {
             Shader::from_wesl(source, "embedded://sl_viewer_kit/particle.wesl")
         });

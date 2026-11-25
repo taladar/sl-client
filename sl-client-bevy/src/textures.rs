@@ -28,10 +28,11 @@ use sl_client_common::retry::{MAX_TRANSIENT_RETRIES, is_transient_status, transi
 /// The `Accept` header a `GetTexture` codestream fetch sends.
 const TEXTURE_ACCEPT: &str = "image/x-j2c";
 
-/// Whether a texture's bytes are **colour** — sRGB-encoded, so the GPU decodes
-/// each sample to linear before any lighting maths touches it — or **data**,
-/// whose bytes already *are* the numbers the shader wants and must reach it
-/// untouched.
+/// Whether a texture's bytes are **colour** — sRGB-encoded, so something must
+/// decode each sample to linear before any lighting maths touches it — or
+/// **data**, whose bytes already *are* the numbers the shader wants and must
+/// reach it untouched; and, for colour, **who** decodes it: the sampler or the
+/// shader.
 ///
 /// This is the one decision a texture upload cannot take by convention, and
 /// getting it wrong is silent: the image is the right size, the right pixels and
@@ -43,10 +44,24 @@ const TEXTURE_ACCEPT: &str = "image/x-j2c";
 /// cloud-noise texels clearing a density threshold ~46% should have cleared.
 /// Uploading colour as data is the same mistake mirrored: everything the user
 /// sees comes out washed out and too bright.
+///
+/// The two colour variants differ only in **when** the decode happens relative to
+/// filtering, and that is visible: [`Srgb`](Self::Srgb) decodes each texel before
+/// the GPU blends them (a blend of black and white is a linear 0.5, about 188
+/// once encoded for display), [`EncodedSrgb`](Self::EncodedSrgb) blends the bytes
+/// and leaves the decode to the shader (the same blend is 128). The reference
+/// viewer does the latter for every texture it draws in the world.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ColorSpace {
-    /// sRGB-encoded colour: what the user sees *as an image* — a prim's diffuse
-    /// map, an avatar bake, a legacy specular map's RGB tint, a UI thumbnail.
+    /// sRGB-encoded colour that the shader decodes **after** filtering, as the
+    /// reference viewer does (`srgb_to_linear` on a plain `GL_RGBA8` sample): a
+    /// prim's diffuse map, an avatar bake, a legacy specular map's RGB tint, a
+    /// sky or terrain texture. Uploaded `Rgba8Unorm`, so **only** a shader that
+    /// applies `sl_client_bevy::srgb`'s decode to the sample may read it.
+    EncodedSrgb,
+    /// sRGB-encoded colour that the **sampler** decodes, per texel, before
+    /// filtering (`Rgba8UnormSrgb`): for a consumer whose shader is not ours and
+    /// expects a linear sample, such as a UI image node.
     Srgb,
     /// Linear data: pixels that are numbers rather than a picture — a normal
     /// map, a noise field, a mask.
@@ -71,8 +86,16 @@ pub struct TextureUpload {
 }
 
 impl TextureUpload {
-    /// A picture: sRGB bytes, smoothly filtered.
-    pub const COLOR: Self = Self {
+    /// A picture drawn in the world: sRGB bytes, smoothly filtered as stored and
+    /// decoded by the material's shader ([`ColorSpace::EncodedSrgb`]).
+    pub const WORLD_COLOR: Self = Self {
+        color_space: ColorSpace::EncodedSrgb,
+        crisp: false,
+    };
+
+    /// A picture shown by a shader that expects a linear sample, such as a UI
+    /// image: sRGB bytes decoded by the sampler ([`ColorSpace::Srgb`]).
+    pub const UI_COLOR: Self = Self {
         color_space: ColorSpace::Srgb,
         crisp: false,
     };
@@ -91,6 +114,15 @@ impl TextureUpload {
         Self {
             color_space: self.color_space,
             crisp: true,
+        }
+    }
+
+    /// The texture format this upload stores its bytes in.
+    #[must_use]
+    pub const fn format(self) -> TextureFormat {
+        match self.color_space {
+            ColorSpace::Srgb => TextureFormat::Rgba8UnormSrgb,
+            ColorSpace::EncodedSrgb | ColorSpace::Linear => TextureFormat::Rgba8Unorm,
         }
     }
 }
@@ -167,10 +199,7 @@ fn image_with_levels(
             depth_or_array_layers: 1,
         },
         TextureDimension::D2,
-        match upload.color_space {
-            ColorSpace::Srgb => TextureFormat::Rgba8UnormSrgb,
-            ColorSpace::Linear => TextureFormat::Rgba8Unorm,
-        },
+        upload.format(),
         RenderAssetUsages::default(),
     );
     if let Some(chain) = chain {
@@ -647,29 +676,32 @@ mod tests {
             Bytes::from(vec![0x7F_u8; 2 * 2 * 4]),
             None,
         );
-        let image = upload_decoded(&decoded, TextureUpload::COLOR);
+        let image = upload_decoded(&decoded, TextureUpload::WORLD_COLOR);
         assert_eq!(image.width(), 2);
         assert_eq!(image.height(), 2);
     }
 
     /// The colour space is the argument's to choose, and it is the only thing it
-    /// chooses about the bytes: a picture is `Rgba8UnormSrgb`, numbers are
-    /// `Rgba8Unorm`.
+    /// chooses about the bytes: a world picture is `Rgba8Unorm` (its shader
+    /// decodes it after filtering, as the reference's does), a UI picture
+    /// `Rgba8UnormSrgb` (its sampler decodes it), numbers are `Rgba8Unorm`.
     #[test]
     fn color_space_picks_the_texture_format() {
         let pixels = vec![0x80_u8; 2 * 2 * 4];
-        assert_eq!(
-            upload_pixels(2, 2, pixels.clone(), TextureUpload::COLOR)
-                .texture_descriptor
-                .format,
-            TextureFormat::Rgba8UnormSrgb
-        );
-        assert_eq!(
-            upload_pixels(2, 2, pixels, TextureUpload::DATA)
-                .texture_descriptor
-                .format,
-            TextureFormat::Rgba8Unorm
-        );
+        for (upload, format) in [
+            (TextureUpload::WORLD_COLOR, TextureFormat::Rgba8Unorm),
+            (TextureUpload::UI_COLOR, TextureFormat::Rgba8UnormSrgb),
+            (TextureUpload::DATA, TextureFormat::Rgba8Unorm),
+        ] {
+            assert_eq!(
+                upload_pixels(2, 2, pixels.clone(), upload)
+                    .texture_descriptor
+                    .format,
+                format,
+                "{upload:?}"
+            );
+            assert_eq!(upload.format(), format, "{upload:?}");
+        }
     }
 
     /// Every upload repeats on every axis, whatever else it asks for — the R22h
@@ -677,9 +709,10 @@ mod tests {
     #[test]
     fn every_upload_repeats() {
         for upload in [
-            TextureUpload::COLOR,
+            TextureUpload::WORLD_COLOR,
+            TextureUpload::UI_COLOR,
             TextureUpload::DATA,
-            TextureUpload::COLOR.crisp(),
+            TextureUpload::WORLD_COLOR.crisp(),
         ] {
             let image = upload_pixels(1, 1, vec![0, 0, 0, 255], upload);
             let ImageSampler::Descriptor(descriptor) = image.sampler else {
@@ -717,8 +750,8 @@ mod tests {
         let bare = DecodedImage::new(4, 4, 4, DiscardLevel::FULL, Bytes::from(pixels), None);
         let chained = bare.clone().with_mips();
         assert!(bare.mips.is_none() && chained.mips.is_some());
-        let built_here = upload_decoded(&bare, TextureUpload::COLOR);
-        let reused = upload_decoded(&chained, TextureUpload::COLOR);
+        let built_here = upload_decoded(&bare, TextureUpload::WORLD_COLOR);
+        let reused = upload_decoded(&chained, TextureUpload::WORLD_COLOR);
         assert_eq!(built_here.data, reused.data);
         assert_eq!(
             built_here.texture_descriptor.mip_level_count,
@@ -734,7 +767,7 @@ mod tests {
     #[test]
     fn an_upload_carries_its_whole_mip_chain() {
         let pixels: Vec<u8> = (0..8_u8 * 4 * 4).collect();
-        let image = upload_pixels(8, 4, pixels.clone(), TextureUpload::COLOR);
+        let image = upload_pixels(8, 4, pixels.clone(), TextureUpload::WORLD_COLOR);
         // 8×4, 4×2, 2×1, 1×1.
         assert_eq!(image.texture_descriptor.mip_level_count, 4);
         let data = image.data.unwrap_or_default();

@@ -20,6 +20,7 @@ import bevy_pbr::render::{
     mesh_view_bindings::globals,
     view_transformations::position_world_to_clip,
 };
+import sl_client_bevy::srgb::srgb_to_linear;
 
 // The twinkle clock scale: elapsed seconds * 0.5 (the reference `sStarTime` /
 // `WATER_TIME` uniform). Applied to `globals.time` here rather than uploaded as
@@ -99,7 +100,9 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     var col = textureSample(diffuse_texture, diffuse_sampler, in.uv);
 
     // Tint by the per-star colour (a near-white with a little red / blue variance).
-    let rgb = col.rgb * in.color.rgb;
+    // The bloom texture holds encoded sRGB bytes (`TextureUpload::WORLD_COLOR`),
+    // decoded after filtering as the reference's sky pass is.
+    let rgb = srgb_to_linear(col.rgb) * in.color.rgb;
 
     // `starsF.glsl`: fade the whole field in with `custom_alpha`, amplify, and
     // twinkle. The additive blend makes the black bloom texels invisible, so only

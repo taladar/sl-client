@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 35 |
 | in-progress | 4 |
 | bugs | 6 |
-| done | 1622 |
+| done | 1623 |
 | deferred | 30 |
 | wont-do | 24 |
-| **total** | **2181** |
+| **total** | **2182** |
 
 ## ideas (131)
 
@@ -1258,10 +1258,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
 - [`viewer-rigged-hair-triangle-pattern`](bugs/viewer-rigged-hair-triangle-pattern.md)
   — Rigged mesh hair shows a pattern of individual triangles
-- [`viewer-texture-filtering-in-linear-space`](bugs/viewer-texture-filtering-in-linear-space.md)
-  — Colour textures are filtered after sRGB decoding, the reference before
+- [`viewer-stars-render-black-in-daylight`](bugs/viewer-stars-render-black-in-daylight.md)
+  — The star field draws black specks over the daytime sky
 
-## done (1622)
+## done (1623)
 
 ### protocol
 
@@ -3434,6 +3434,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-texture-anisotropic-filtering-missing`](done/viewer-texture-anisotropic-filtering-missing.md)
   — A texture's level-of-detail change never reached the faces sampling it (seen
   as soft checker edges, blamed on anisotropy)
+- [`viewer-texture-filtering-in-linear-space`](done/viewer-texture-filtering-in-linear-space.md)
+  — Colour textures are filtered after sRGB decoding, the reference before
 - [`viewer-texture-mip-chain-missing`](done/viewer-texture-mip-chain-missing.md)
   — Face textures are uploaded without a mip chain
 - [`viewer-texture-picker-inventory-tree`](done/viewer-texture-picker-inventory-tree.md)

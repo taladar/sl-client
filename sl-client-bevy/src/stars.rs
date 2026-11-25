@@ -127,6 +127,8 @@ pub struct StarMaterialPlugin;
 
 impl Plugin for StarMaterialPlugin {
     fn build(&self, app: &mut App) {
+        // The shader decodes its sRGB texture samples with the shared module.
+        crate::srgb::load_srgb_shader(app);
         load_internal_asset!(app, STAR_SHADER_HANDLE, "stars.wesl", |source, _| {
             Shader::from_wesl(source, "embedded://sl_client_bevy/stars.wesl")
         });

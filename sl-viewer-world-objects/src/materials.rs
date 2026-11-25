@@ -111,14 +111,14 @@ pub struct ObjectRenderMaterials {
 /// Which PBR texture slot of a [`StandardMaterial`] a fetched map fills.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PbrSlot {
-    /// The base-colour (albedo) texture, sampled sRGB.
+    /// The base-colour (albedo) texture, sRGB-encoded (decoded by the face shader).
     BaseColor,
     /// The packed metallic-roughness (ORM) texture, sampled linear; also drives
     /// the occlusion slot (Bevy reads occlusion from its red channel).
     MetallicRoughness,
     /// The tangent-space normal map, sampled linear.
     Normal,
-    /// The emissive texture, sampled sRGB.
+    /// The emissive texture, sRGB-encoded (decoded by the face shader).
     Emissive,
 }
 
@@ -808,7 +808,7 @@ fn build_asset_store(
 /// must read verbatim.
 const fn pbr_map_upload(srgb: bool) -> TextureUpload {
     if srgb {
-        TextureUpload::COLOR
+        TextureUpload::WORLD_COLOR
     } else {
         TextureUpload::DATA
     }

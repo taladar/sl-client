@@ -364,7 +364,7 @@ fn uv_grid_image() -> Image {
     let width = u32::try_from(size).unwrap_or(0);
     // `crisp`: nearest-filtered, so the grid lines stay hard-edged under
     // magnification rather than blurring into the gradient.
-    upload_pixels(width, width, pixels, TextureUpload::COLOR.crisp())
+    upload_pixels(width, width, pixels, TextureUpload::WORLD_COLOR.crisp())
 }
 
 /// A marker on one avatar attachment-point node (P16.2) — the node parented to a
@@ -2653,7 +2653,7 @@ impl AvatarBakeMaterials {
                 decoded.width, decoded.height, decoded.components, decoded.discard_level
             );
         }
-        let handle = images.add(upload_decoded(decoded, TextureUpload::COLOR));
+        let handle = images.add(upload_decoded(decoded, TextureUpload::WORLD_COLOR));
         let _inserted = self.images.insert(id, handle.clone());
         let _classified = self.alpha.insert(id, alpha);
         Some((handle, alpha))
@@ -3114,7 +3114,7 @@ fn run_local_bake_job(job: &LocalBakeJob) -> CompositedRegions {
         let alpha = classify_bake_alpha(&decoded);
         regions.push((
             region.slot(),
-            upload_decoded(&decoded, TextureUpload::COLOR),
+            upload_decoded(&decoded, TextureUpload::WORLD_COLOR),
             alpha,
         ));
         summary.push(format!(

@@ -190,6 +190,8 @@ pub struct TerrainMaterialPlugin;
 impl Plugin for TerrainMaterialPlugin {
     fn build(&self, app: &mut App) {
         crate::sky_lighting::load_sky_lighting(app);
+        // The shader decodes its sRGB texture samples with the shared module.
+        crate::srgb::load_srgb_shader(app);
         load_internal_asset!(app, TERRAIN_SHADER_HANDLE, "terrain.wesl", |source, _| {
             Shader::from_wesl(source, "embedded://sl_client_bevy/terrain.wesl")
         });

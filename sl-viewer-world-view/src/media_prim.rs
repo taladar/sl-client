@@ -39,7 +39,7 @@ use bevy::window::{CursorIcon, PrimaryWindow, SystemCursorIcon};
 use sl_cef::{
     CursorKind, KeyInput, MediaKind, SurfaceConfig, SurfaceTrust, ValidatedMediaUrl, classify_url,
 };
-use sl_viewer_kit::face_material::{FaceMaterial, inert_face_material};
+use sl_viewer_kit::face_material::{FaceMaterial, SlFaceExt};
 use sl_viewer_media::browser_widget::BrowserView;
 use sl_viewer_media::media_engine::{
     MediaEngine, MediaEngineKind, MediaEngineSystems, MediaSurfaceId, MediaSurfaces,
@@ -1049,14 +1049,19 @@ pub(crate) fn media_material(
     slot: &mut sl_viewer_media::media_engine::MediaSlot,
     uv_transform: bevy::math::Affine2,
 ) -> Handle<FaceMaterial> {
-    let material = materials.add(inert_face_material(StandardMaterial {
-        base_color: Color::WHITE,
-        base_color_texture: Some(slot.image.clone()),
-        // Media renders fullbright in the reference viewer.
-        unlit: true,
-        uv_transform,
-        ..default()
-    }));
+    let material = materials.add(FaceMaterial {
+        base: StandardMaterial {
+            base_color: Color::WHITE,
+            base_color_texture: Some(slot.image.clone()),
+            // Media renders fullbright in the reference viewer.
+            unlit: true,
+            uv_transform,
+            ..default()
+        },
+        // The surface's image is an sRGB-format one (the UI's browser view shows the
+        // same image), so its sampler decodes it and the face shader must not.
+        extension: SlFaceExt::sampler_decoded_base(),
+    });
     // Drop the ids of materials no face wears any more (the engine's own prune
     // only runs on a surface resize, which need never happen), then record the
     // new one. `get`, not `get_mut`: a prune must not mark a live material

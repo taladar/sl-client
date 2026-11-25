@@ -1457,7 +1457,7 @@ fn prim_textured_tiling(
     // fixture that built the `Image` by hand would be testing the fixture.
     let image = assets.images.add(upload_decoded(
         &uv_reference_texture(),
-        TextureUpload::COLOR,
+        TextureUpload::WORLD_COLOR,
     ));
     let material = assets.materials.add(inert_face_material(StandardMaterial {
         base_color: Color::WHITE,
@@ -1716,7 +1716,7 @@ fn mesh_cube(_cx: SceneCx, root: Entity, commands: &mut Commands, assets: &mut S
     };
     let image = assets.images.add(upload_decoded(
         &uv_reference_texture(),
-        TextureUpload::COLOR,
+        TextureUpload::WORLD_COLOR,
     ));
     for (index, submesh) in decoded.submeshes.iter().enumerate() {
         let mesh = assets.meshes.add(to_bevy_mesh(submesh));
@@ -2924,7 +2924,7 @@ fn texture_anim_flipbook(
     };
     let image = assets.images.add(upload_decoded(
         &uv_reference_texture(),
-        TextureUpload::COLOR,
+        TextureUpload::WORLD_COLOR,
     ));
     let object = commands
         .spawn((
@@ -3034,7 +3034,7 @@ fn bump_face(cx: SceneCx, root: Entity, commands: &mut Commands, assets: &mut Sc
     let decoded = Arc::new(uv_reference_texture());
     let diffuse = assets
         .images
-        .add(upload_decoded(&decoded, TextureUpload::COLOR));
+        .add(upload_decoded(&decoded, TextureUpload::WORLD_COLOR));
     // Through the real generator, which is where the sampler is set — building the
     // normal map by hand here would be testing the fixture.
     let normal = assets
@@ -3115,7 +3115,7 @@ fn legacy_material_face(
     let decoded = Arc::new(uv_reference_texture());
     let diffuse = assets
         .images
-        .add(upload_decoded(&decoded, TextureUpload::COLOR));
+        .add(upload_decoded(&decoded, TextureUpload::WORLD_COLOR));
     // A normal map is not a colour image; the fixture's is the generated one, so
     // the scene shows a plausible surface rather than a colour ramp read as
     // normals.
@@ -4424,6 +4424,103 @@ fn spawn_sea(
         ));
     }
     space
+}
+
+/// How far the [`TEXTURE_FILTER_STAGE`] camera stands in front of its two
+/// plates, in metres: close enough that each plate is about 150 pixels wide in
+/// the 256-pixel readback frame, so one pixel of drift from a plate's centre moves
+/// the sampled blend by well under one percent.
+const TEXTURE_FILTER_DISTANCE: f32 = 1.5;
+
+/// The SL x of the [`TEXTURE_FILTER_STAGE`] plate showing a magnified
+/// black-and-white pair of texels; its centre is where the sampler blends the two
+/// half and half.
+pub const TEXTURE_FILTER_BLEND_X: f32 = -0.55;
+
+/// The SL x of the [`TEXTURE_FILTER_STAGE`] plate showing one flat texel of byte
+/// 128 — what a half-and-half blend of black and white is in the **encoded**
+/// bytes, which is where the reference viewer filters.
+pub const TEXTURE_FILTER_FLAT_X: f32 = 0.55;
+
+/// A stage for the order of texture filtering and the sRGB decode
+/// (`viewer-texture-filtering-in-linear-space`): two unlit plates side by side
+/// facing the camera. The left one is a two-texel black-and-white texture
+/// stretched across it, so its centre is the sampler's 50/50 blend of the two; the
+/// right one is a single texel of byte 128.
+///
+/// The reference keeps its textures as plain bytes and decodes sRGB in the shader,
+/// after the hardware filtered them, so the blend is byte 128 decoded — exactly
+/// the right plate. Decoding each texel first (an sRGB texture format) blends in
+/// linear light, which comes out as byte 188. Comparing the two plates in one
+/// frame makes the check independent of everything after the material (exposure,
+/// tonemapping, the display encode), since both go through it alike.
+///
+/// Not in [`SCENES`]: it checks one thing, and the matrix of contexts has nothing
+/// to add to it.
+pub const TEXTURE_FILTER_STAGE: RenderScene = RenderScene {
+    id: "test-texture-filter-order",
+    what: "a magnified black/white texel pair beside a flat byte-128 texel, both unlit",
+    timeline: Timeline { samples: &[0.0] },
+    lighting: SceneLighting::Own,
+    camera: SceneCamera {
+        position: Vec3::new(0.0, -TEXTURE_FILTER_DISTANCE, 0.0),
+        look_at: Vec3::ZERO,
+    },
+    spawn: texture_filter_stage,
+    subject: None,
+    applies: &[],
+};
+
+/// [`TEXTURE_FILTER_STAGE`]'s two plates, uploaded through the world texture path
+/// ([`TextureUpload::WORLD_COLOR`]) and drawn by the face material.
+fn texture_filter_stage(
+    _cx: SceneCx,
+    root: Entity,
+    commands: &mut Commands,
+    assets: &mut SceneAssets<'_>,
+) {
+    let pair = DecodedTexture::new(
+        2,
+        1,
+        4,
+        DiscardLevel::FULL,
+        Bytes::from(vec![0, 0, 0, 255, 255, 255, 255, 255]),
+        None,
+    );
+    let flat = DecodedTexture::new(
+        1,
+        1,
+        4,
+        DiscardLevel::FULL,
+        Bytes::from(vec![128, 128, 128, 255]),
+        None,
+    );
+    // A unit plate in Bevy's XY plane faces +Z; a quarter turn about X turns that
+    // to face -Y, the camera, in the root's Second Life frame.
+    let facing_camera = Quat::from_rotation_x(core::f32::consts::FRAC_PI_2);
+    let plate = assets.meshes.add(Mesh::from(Rectangle::new(1.0, 1.0)));
+    for (name, x, decoded) in [
+        ("texture-filter/blend", TEXTURE_FILTER_BLEND_X, pair),
+        ("texture-filter/flat", TEXTURE_FILTER_FLAT_X, flat),
+    ] {
+        let image = assets
+            .images
+            .add(upload_decoded(&decoded, TextureUpload::WORLD_COLOR));
+        let material = assets.materials.add(inert_face_material(StandardMaterial {
+            base_color: Color::WHITE,
+            base_color_texture: Some(image),
+            unlit: true,
+            ..default()
+        }));
+        commands.spawn((
+            Mesh3d(plate.clone()),
+            MeshMaterial3d(material),
+            Transform::from_xyz(x, 0.0, 0.0).with_rotation(facing_camera),
+            Name::new(name),
+            ChildOf(root),
+            NotShadowCaster,
+        ));
+    }
 }
 
 #[cfg(test)]

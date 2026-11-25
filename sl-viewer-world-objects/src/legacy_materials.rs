@@ -231,15 +231,14 @@ impl LegacyMaterialManager {
 pub const NORMAL_MAP_UPLOAD: TextureUpload = TextureUpload::DATA;
 
 /// How a legacy material's **specular** map is uploaded: its RGB is a tint the
-/// creator authored in sRGB, so the GPU decodes it and the shader sample is
-/// already linear, like the reference's `srgb_to_linear(spec.rgb)`. The alpha
-/// channel (the per-texel environment weight) is unaffected by the transfer.
-pub const SPECULAR_MAP_UPLOAD: TextureUpload = TextureUpload::COLOR;
+/// creator authored in sRGB, kept encoded so the face shader decodes the filtered
+/// sample, as the reference's `srgb_to_linear(spec.rgb)` does. The alpha channel
+/// (the per-texel environment weight) is never encoded.
+pub const SPECULAR_MAP_UPLOAD: TextureUpload = TextureUpload::WORLD_COLOR;
 
 /// The linear specular highlight tint a legacy material's sRGB-encoded specular
 /// colour (`0..=255` RGB) maps to — the reference `srgb_to_linear(specular_color)`,
-/// which its RGB and the (linear-sampled sRGB) specular map are multiplied together
-/// in.
+/// which its RGB and the (shader-decoded) specular map are multiplied together in.
 fn linear_specular_color(specular_color: [u8; 4]) -> [f32; 3] {
     let [r, g, b, _a] = specular_color;
     let linear = Color::srgb_u8(r, g, b).to_linear();

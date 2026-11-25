@@ -1517,7 +1517,7 @@ fn refresh_lod_image(
     let Some(image) = store.get(id) else {
         return;
     };
-    let refreshed = upload_decoded(image, TextureUpload::COLOR);
+    let refreshed = upload_decoded(image, TextureUpload::WORLD_COLOR);
     let _replaced = images.insert(&handle, refreshed);
     if let Some(material_ids) = prim_textures.materials.get_mut(&id) {
         // Touch each live material (prune any whose face was despawned). The touch
@@ -1854,7 +1854,7 @@ fn prim_image(
         return Some(handle.clone());
     }
     let decoded = store.get(id)?;
-    let handle = images.add(upload_decoded(decoded, TextureUpload::COLOR));
+    let handle = images.add(upload_decoded(decoded, TextureUpload::WORLD_COLOR));
     let _inserted = prim_textures.images.insert(id, handle.clone());
     Some(handle)
 }

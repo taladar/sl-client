@@ -1110,7 +1110,7 @@ impl DecodedTextures {
         if is_absent_texture(id) {
             DiffuseImage::Absent
         } else if let Some(decoded) = self.decoded.get(&id) {
-            DiffuseImage::Ready(images.add(upload_decoded(decoded, TextureUpload::COLOR)))
+            DiffuseImage::Ready(images.add(upload_decoded(decoded, TextureUpload::WORLD_COLOR)))
         } else {
             DiffuseImage::Pending
         }

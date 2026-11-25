@@ -20,8 +20,13 @@
 //! The extension is **inert** for a plain diffuse / avatar face
 //! ([`SlFaceExt::inert`]): diffuse mode, no re-sample flags, identity transforms,
 //! and the shared sky-lighting texture. Until a sky has been resolved (and for
-//! good in an app with none) such a face renders exactly as a bare
-//! `StandardMaterial` would. This
+//! good in an app with none) such a face renders as a bare `StandardMaterial`
+//! would, but for one thing: its base-colour texture holds **encoded** sRGB bytes
+//! ([`TextureUpload::WORLD_COLOR`](sl_client_bevy::TextureUpload::WORLD_COLOR)),
+//! which the shader decodes after the GPU has filtered them, as the reference
+//! viewer does — so a world texture must never be put on a plain
+//! `StandardMaterial`, which would show it undecoded and washed out (see
+//! [`MAP_FLAG_BASE_DECODED`] for the one exception). This
 //! lets every face carry one stable [`FaceMaterial`] handle that the whole face
 //! pipeline mutates in place (writing `.base` for the `StandardMaterial` fields it
 //! always set, and `.extension` for the per-map transforms / legacy specular),
@@ -86,6 +91,19 @@ pub const MAP_FLAG_EMISSIVE: u32 = 1 << 2;
 /// [`SlFaceParams::map_flags`] bit: sample the legacy specular map (extension slot)
 /// at [`uv_spec`](SlFaceParams::uv_spec_mat).
 pub const MAP_FLAG_SPEC: u32 = 1 << 3;
+/// [`SlFaceParams::map_flags`] bit: the base `StandardMaterial`'s base-colour
+/// texture is an **sRGB-format** image that its sampler decodes, so the shader must
+/// not decode it again.
+///
+/// Clear for everything the world draws: a world colour texture is uploaded
+/// [`TextureUpload::WORLD_COLOR`](sl_client_bevy::TextureUpload::WORLD_COLOR)
+/// (`Rgba8Unorm`), the GPU filters its **encoded** bytes, and the face shader
+/// decodes the filtered sample — the reference viewer's order, and a visibly
+/// different result from decoding each texel before the blend
+/// (`viewer-texture-filtering-in-linear-space`). Set only where the base image is
+/// shared with a consumer that needs a linear sample: a media surface's image is
+/// also shown in the UI's browser view ([`SlFaceExt::sampler_decoded_base`]).
+pub const MAP_FLAG_BASE_DECODED: u32 = 1 << 4;
 
 /// The extension's uniform block: the per-map UV transforms (as a packed 2×2
 /// matrix + translation each) and the legacy specular workflow scalars.
@@ -465,6 +483,17 @@ impl SlFaceExt {
             write_depth: false,
         }
     }
+
+    /// The inert extension for a face whose base-colour texture is an
+    /// **sRGB-format** image that its sampler decodes ([`MAP_FLAG_BASE_DECODED`]),
+    /// rather than a world upload the shader decodes — a media surface, whose image
+    /// the UI's browser view shows as well and so cannot hold encoded bytes.
+    #[must_use]
+    pub fn sampler_decoded_base() -> Self {
+        let mut extension = Self::inert();
+        extension.params.map_flags |= MAP_FLAG_BASE_DECODED;
+        extension
+    }
 }
 
 impl Default for SlFaceExt {
@@ -539,6 +568,8 @@ impl Plugin for SlFaceMaterialPlugin {
         sl_client_bevy::load_water_fog_shader(app);
         // And the sky-lighting module and texture every legacy face is lit by.
         sl_client_bevy::load_sky_lighting(app);
+        // And the sRGB decode it applies to every colour-texture sample.
+        sl_client_bevy::load_srgb_shader(app);
         load_internal_asset!(
             app,
             FACE_SHADER_HANDLE,
@@ -555,8 +586,8 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     use super::{
-        MAP_FLAG_EMISSIVE, MAP_FLAG_MR, MAP_FLAG_NORMAL, MAP_FLAG_SPEC, SL_FACE_MODE_DIFFUSE,
-        SL_FACE_MODE_LEGACY, SL_FACE_MODE_PBR, SlFaceParams,
+        MAP_FLAG_BASE_DECODED, MAP_FLAG_EMISSIVE, MAP_FLAG_MR, MAP_FLAG_NORMAL, MAP_FLAG_SPEC,
+        SL_FACE_MODE_DIFFUSE, SL_FACE_MODE_LEGACY, SL_FACE_MODE_PBR, SlFaceParams,
     };
 
     /// The identity 2x2 packed the way the shader reads it.
@@ -601,12 +632,13 @@ mod tests {
             MAP_FLAG_MR,
             MAP_FLAG_EMISSIVE,
             MAP_FLAG_SPEC,
+            MAP_FLAG_BASE_DECODED,
         ];
         for flag in flags {
             assert_eq!(flag.count_ones(), 1, "{flag:#x} is not a single bit");
         }
         let union = flags.iter().fold(0_u32, |acc, flag| acc | flag);
-        assert_eq!(union.count_ones(), 4, "two map flags share a bit");
+        assert_eq!(union.count_ones(), 5, "two map flags share a bit");
     }
 
     #[test]
