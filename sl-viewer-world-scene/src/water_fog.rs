@@ -19,7 +19,10 @@
 //! into the four values the shaders want, and
 //! `apply_water_fog_to_face_materials` carries them into every
 //! [`FaceMaterial`] — the material every prim, mesh, sculpt, avatar, attachment and
-//! editor overlay face renders through.
+//! editor overlay face renders through — while `mirror_water_fog_to_particles`
+//! hands the same values to the particle renderer ([`ParticleWaterFog`]), which is
+//! a custom instanced pipeline rather than a material and so carries them in one
+//! shared uniform of its own.
 //!
 //! # Why the parameters are carried, and not looked up
 //!
@@ -66,6 +69,7 @@ use crate::render_overrides::RenderOverrides;
 use crate::sky::day_position;
 use crate::water::{DEFAULT_WATER_HEIGHT, WaterLevel, drive_water};
 use sl_viewer_kit::face_material::FaceMaterial;
+use sl_viewer_kit::particle_render::ParticleWaterFog;
 
 /// The scene-wide water fog, as every consumer needs it: the authored fog colour,
 /// the density on each side of the surface, and the surface height.
@@ -272,8 +276,31 @@ pub(crate) fn apply_water_fog_to_face_materials(
     }
 }
 
+/// Hand the scene's water fog to the particle renderer, whose billboards fog
+/// themselves in `particle.wesl` for the same reason a translucent face does.
+///
+/// A write-on-change, like the settings it mirrors: the particle renderer extracts
+/// and uploads [`ParticleWaterFog`] only on the frame it changed.
+pub(crate) fn mirror_water_fog_to_particles(
+    settings: Res<WaterFogSettings>,
+    mut particles: ResMut<ParticleWaterFog>,
+) {
+    let WaterFogSettings {
+        color,
+        density_above,
+        density_submerged,
+        level,
+    } = *settings;
+    particles.set_if_neq(ParticleWaterFog {
+        color,
+        density_above,
+        density_submerged,
+        level,
+    });
+}
+
 /// Resolves the scene's water fog each frame and carries it into the face
-/// materials. Added by [`UnderwaterFogPlugin`](crate::underwater_fog::UnderwaterFogPlugin),
+/// materials and the particle renderer. Added by [`UnderwaterFogPlugin`](crate::underwater_fog::UnderwaterFogPlugin),
 /// which owns the other half of the same effect — the two are always registered
 /// together, so the fullscreen haze and the materials' own fog can never be in
 /// force one without the other.
@@ -289,13 +316,20 @@ impl Plugin for WaterFogPlugin {
             // runs the haze pass over an empty stage — so the plugin stands alone at
             // the default sea level rather than failing to run without one.
             .init_resource::<WaterLevel>()
+            // The particle renderer's copy. Its own plugin initialises it too; either
+            // may be registered first, and the fog does not need particles to run.
+            .init_resource::<ParticleWaterFog>()
             .add_systems(
                 Update,
-                // After the ocean, whose own system publishes the water level these
-                // settings are measured from. The water *material* reads the
-                // settings a frame late as a result, which is why they carry nothing
-                // that changes while anyone is looking.
-                update_water_fog_settings.after(drive_water),
+                (
+                    // After the ocean, whose own system publishes the water level
+                    // these settings are measured from. The water *material* reads
+                    // the settings a frame late as a result, which is why they carry
+                    // nothing that changes while anyone is looking.
+                    update_water_fog_settings.after(drive_water),
+                    // The same frame's settings, ahead of the render extraction.
+                    mirror_water_fog_to_particles.after(update_water_fog_settings),
+                ),
             )
             .add_systems(
                 PostUpdate,
@@ -317,13 +351,14 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     use super::{
-        WaterFogSettings, apply_water_fog_to_face_materials, modified_water_fog_density,
-        update_water_fog_settings,
+        WaterFogSettings, apply_water_fog_to_face_materials, mirror_water_fog_to_particles,
+        modified_water_fog_density, update_water_fog_settings,
     };
     use crate::environment::EnvironmentState;
     use crate::render_overrides::RenderOverrides;
     use crate::water::WaterLevel;
     use sl_viewer_kit::face_material::{FaceMaterial, SlFaceExt};
+    use sl_viewer_kit::particle_render::ParticleWaterFog;
 
     /// A fog density is the expected one, to within a relative tolerance that leaves
     /// room for the last bit of a `powf` — and, since every comparison against a
@@ -525,6 +560,65 @@ mod tests {
             (params.water_level - WaterLevel::default().0).abs() < f32::EPSILON,
             "the settled material still carries the water level, got {}",
             params.water_level,
+        );
+        Ok(())
+    }
+
+    /// The particle renderer gets the **same** fog the materials do — both densities,
+    /// the colour and the level — and a settled scene stops writing it, since the
+    /// renderer re-uploads its uniform on every change.
+    #[test]
+    fn the_particles_get_the_same_fog_and_a_settled_scene_stops_writing()
+    -> Result<(), Box<dyn core::error::Error>> {
+        let mut app = fog_app();
+        app.init_resource::<ParticleWaterFog>().add_systems(
+            Update,
+            mirror_water_fog_to_particles.after(update_water_fog_settings),
+        );
+        {
+            let mut environment = app
+                .world_mut()
+                .get_resource_mut::<EnvironmentState>()
+                .ok_or("the environment resource was just inserted")?;
+            for water in environment.settings.day_cycle.water_frames.values_mut() {
+                water.water_fog_density = 4.0;
+                water.underwater_fog_mod = 0.5;
+            }
+        }
+        app.world_mut().resource_mut::<WaterLevel>().0 = 17.5;
+
+        app.update();
+
+        let settings = *app.world().resource::<WaterFogSettings>();
+        let particles = *app.world().resource::<ParticleWaterFog>();
+        assert_eq!(
+            particles,
+            ParticleWaterFog {
+                color: settings.color,
+                density_above: settings.density_above,
+                density_submerged: settings.density_submerged,
+                level: settings.level,
+            },
+        );
+        assert_density(particles.density_above, 4.0);
+        assert_density(particles.density_submerged, 2.0);
+        assert!(
+            (particles.level - 17.5).abs() < f32::EPSILON,
+            "the particles' water level is the scene's, got {}",
+            particles.level,
+        );
+
+        let written = app
+            .world()
+            .resource_ref::<ParticleWaterFog>()
+            .last_changed();
+        app.update();
+        assert_eq!(
+            app.world()
+                .resource_ref::<ParticleWaterFog>()
+                .last_changed(),
+            written,
+            "a settled scene must not rewrite the particles' fog",
         );
         Ok(())
     }

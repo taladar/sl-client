@@ -10,21 +10,45 @@
 // / additive / HUD clouds, `PARTICLE_UNLIT`) or runs it through Bevy's PBR lighting
 // (non-emissive clouds, matching the reference lighting all but `EMISSIVE` particles).
 //
+// A billboard under the water surface is fogged here, per fragment, as the reference's
+// alpha pool fogs its particles (`applySkyAndWaterFog`): a particle writes no depth, so
+// the fullscreen haze pass cannot measure it.
+//
 // The pipeline is specialized from Bevy's `MeshPipeline`, so `@group(0)` is the mesh-view
 // bind group (the lights / view uniforms `apply_pbr_lighting` needs) and the inherited
 // shader defs match its layout — see particle_render.rs::specialize.
 
 import bevy_pbr::render::{
-    mesh_view_bindings::view,
+    mesh_view_bindings::{lights, view},
     pbr_types,
     pbr_functions,
 };
 import sl_client_bevy::srgb::decode_srgb_sample;
+import sl_client_bevy::water_fog::{
+    WaterFogParams,
+    apply_water_fog,
+    water_fog_density,
+    water_fog_ks,
+    water_fog_no_clip,
+};
 
-// The source's diffuse texture + sampler (@group(3), built per cloud in
-// particle_render.rs::prepare_particle_bind_groups).
+// The scene's water fog (`ParticleFogUniform` in particle_render.rs), packed as
+// `face_material.wesl` packs the same values.
+struct ParticleWaterFog {
+    // The authored (sRGB) fog colour, and in `w` the density while the eye is above
+    // the surface.
+    color: vec4<f32>,
+    // The density while the eye is submerged (`getModifiedWaterFogDensity`).
+    submerged_density: f32,
+    // The water surface height (world `y`).
+    level: f32,
+};
+
+// The source's diffuse texture + sampler, and the one fog uniform every cloud shares
+// (@group(3), built per cloud in particle_render.rs::prepare_particle_bind_groups).
 @group(3) @binding(0) var particle_texture: texture_2d<f32>;
 @group(3) @binding(1) var particle_sampler: sampler;
+@group(3) @binding(2) var<uniform> particle_fog: ParticleWaterFog;
 
 // `part_flags::FOLLOW_VELOCITY` (llpartdata.h `LL_PART_FOLLOW_VELOCITY_MASK`).
 const FOLLOW_VELOCITY: u32 = 0x20u;
@@ -132,6 +156,31 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     color = pbr_functions::apply_pbr_lighting(pbr_input);
     // Fog / any in-shader post, exactly as the StandardMaterial and face-material paths do.
     color = pbr_functions::main_pass_post_lighting_processing(pbr_input, color);
+
+    // The water fog, for a billboard under the surface — the same arithmetic, gates
+    // and inputs as `face_material.wesl`'s translucent branch, so a particle and the
+    // translucent face beside it fog alike. A fragment above the surface is not in
+    // the water (the reference's clip); a zero density is a scene with no fog; and a
+    // view with no directional light is the HUD, which is never under the sea. Every
+    // blend fogs alike, as the reference's alpha pool does: the radiance goes through
+    // the fog and the coverage (or, additive, the glow below) is left alone.
+    let fog_density = water_fog_density(
+        view.world_position.xyz,
+        particle_fog.level,
+        particle_fog.color.w,
+        particle_fog.submerged_density,
+    );
+    if fog_density != 0.0
+        && lights.n_directional_lights != 0u
+        && in.world_position.y <= particle_fog.level {
+        var fog_params: WaterFogParams;
+        fog_params.color = particle_fog.color.rgb;
+        fog_params.density = fog_density;
+        fog_params.ks = water_fog_ks(normalize(lights.directional_lights[0].direction_to_light).y);
+        fog_params.level = particle_fog.level;
+        let fog = water_fog_no_clip(view.world_position.xyz, in.world_position.xyz, fog_params);
+        color = vec4<f32>(apply_water_fog(color.rgb, fog), color.a);
+    }
 
     // The additive path carries the per-particle glow (`PSYS_PART_*_GLOW`) in alpha:
     // the additive blend adds `color.rgb` (the fire look, which ignores alpha) and

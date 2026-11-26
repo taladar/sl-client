@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 130 |
-| ready | 327 |
+| ready | 326 |
 | blocked | 35 |
 | in-progress | 4 |
-| bugs | 4 |
-| done | 1629 |
+| bugs | 5 |
+| done | 1630 |
 | deferred | 30 |
 | wont-do | 24 |
-| **total** | **2183** |
+| **total** | **2184** |
 
 ## ideas (130)
 
@@ -315,7 +315,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-lsl-opensim-function-set`](ideas/gridspec-lsl-opensim-function-set.md)
   — Measure which library functions OpenSim's engines compile
 
-## ready (327)
+## ready (326)
 
 ### protocol
 
@@ -986,8 +986,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-styling-interaction-tests`](ready/viewer-ui-styling-interaction-tests.md)
   — bevy_flair state styling under synthetic hover and focus (blocked by
   `viewer-ui-interaction-harness` (done))
-- [`viewer-underwater-alpha-fog-remaining-materials`](ready/viewer-underwater-alpha-fog-remaining-materials.md)
-  — The particle billboards do not carry the water fog
 - [`viewer-url-context-menus`](ready/viewer-url-context-menus.md) — Right-click
   context menus on linkified text and names
 - [`viewer-usb-route-map-display`](ready/viewer-usb-route-map-display.md) — USB
@@ -1238,7 +1236,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-text-renderability-axis`](in-progress/viewer-ui-text-renderability-axis.md)
   — Upstream issue — font selection cannot see glyph-format renderability
 
-## bugs (4)
+## bugs (5)
 
 ### viewer
 
@@ -1248,10 +1246,13 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Some worn mesh hair does not render (visible in Firestorm)
 - [`viewer-near-avatar-stuck-coarse-sphere`](bugs/viewer-near-avatar-stuck-coarse-sphere.md)
   — A nearby avatar stays a coarse sphere even as the camera closes in
+- [`viewer-particle-additive-ignores-source-factor`](bugs/viewer-particle-additive-ignores-source-factor.md)
+  — Additive particles ignore the system's source blend factor, so transparent
+  texels add light
 - [`viewer-rigged-hair-triangle-pattern`](bugs/viewer-rigged-hair-triangle-pattern.md)
   — Rigged mesh hair shows a pattern of individual triangles
 
-## done (1629)
+## done (1630)
 
 ### protocol
 
@@ -3585,6 +3586,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   scaffold (bevy_ui plugin + conventions anchor) (blocked by
   `viewer-ui-text-foundation` (done), `viewer-ui-text-grapheme-backdelete`
   (done))
+- [`viewer-underwater-alpha-fog-remaining-materials`](done/viewer-underwater-alpha-fog-remaining-materials.md)
+  — The particle billboards do not carry the water fog
 - [`viewer-underwater-fog-background-flicker`](done/viewer-underwater-fog-background-flicker.md)
   — Background flickers behind the underwater fog while walking underwater
 - [`viewer-underwater-fog-swallows-translucency`](done/viewer-underwater-fog-swallows-translucency.md)

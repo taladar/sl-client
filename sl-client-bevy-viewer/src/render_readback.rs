@@ -1430,6 +1430,185 @@ mod tests {
         Ok(())
     }
 
+    /// How far the [`PARTICLE_FOG_STAGE`]'s two billboards stand from the
+    /// waterline, one under it and one over it, in metres.
+    const PARTICLE_FOG_OFFSET: f32 = 2.5;
+
+    /// The side of each [`PARTICLE_FOG_STAGE`] billboard, in metres: small enough
+    /// that the submerged one is wholly under the surface and the other wholly
+    /// over it, large enough to cover a patch of pixels.
+    const PARTICLE_FOG_SIDE: f32 = 3.0;
+
+    /// The water fog density the [`PARTICLE_FOG_STAGE`] runs with — well above a
+    /// region's usual 4, so a few metres of water take most of the billboard's
+    /// light and the fogged and unfogged readings are far apart.
+    const PARTICLE_FOG_DENSITY: f32 = 16.0;
+
+    /// Where the [`PARTICLE_FOG_STAGE`]'s billboards stand, in Second Life metres:
+    /// the submerged one first, then the one over the surface.
+    const PARTICLE_FOG_POINTS: [Vec3; 2] = [
+        Vec3::new(
+            -PARTICLE_FOG_OFFSET,
+            0.0,
+            SCENE_WATER_LEVEL - PARTICLE_FOG_OFFSET,
+        ),
+        Vec3::new(
+            PARTICLE_FOG_OFFSET,
+            0.0,
+            SCENE_WATER_LEVEL + PARTICLE_FOG_OFFSET,
+        ),
+    ];
+
+    /// An eye just over the sea, looking at the waterline where
+    /// [`spawn_fog_particles`] stands one billboard under the surface and one
+    /// over it.
+    const PARTICLE_FOG_STAGE: RenderScene = RenderScene {
+        id: "test-particle-water-fog",
+        what: "one white particle billboard under the water surface and one above it",
+        timeline: Timeline { samples: &[0.0] },
+        lighting: SceneLighting::Own,
+        camera: SceneCamera {
+            position: Vec3::new(0.0, -12.0, SCENE_WATER_LEVEL + 1.5),
+            look_at: Vec3::new(0.0, 0.0, SCENE_WATER_LEVEL),
+        },
+        spawn: |_cx, _root, _commands, _assets| {},
+        subject: None,
+        applies: &[],
+    };
+
+    /// **A particle under the water surface is fogged, as the reference fogs it**
+    /// (`viewer-underwater-alpha-fog-remaining-materials`).
+    ///
+    /// A particle is alpha content and writes no depth, so the fullscreen haze pass
+    /// cannot fog it; the reference fogs it per fragment in its alpha pool
+    /// (`applySkyAndWaterFog`), and so must `particle.wesl`. The stage draws two
+    /// identical unlit white billboards, one a few metres under the surface and one
+    /// over it, in a thick fog. The one over the surface is the control: it must come
+    /// out white, which proves the billboards drew at all. The submerged one must come
+    /// out dark, most of its light taken by the water between it and the eye; drawn
+    /// unfogged it reads exactly as white as the control.
+    #[test]
+    fn a_particle_under_the_water_is_fogged() -> Result<(), TestError> {
+        let basis = crate::render_scene::scene_root_transform().rotation;
+        let points = PARTICLE_FOG_POINTS.map(|point| basis.mul_vec3(point));
+        let Some((frame, projected)) =
+            capture_with(&PARTICLE_FOG_STAGE, SceneCx::new(), &points, |app| {
+                app.init_resource::<EnvironmentState>();
+                if let Some(mut environment) =
+                    app.world_mut().get_resource_mut::<EnvironmentState>()
+                {
+                    for water in environment.settings.day_cycle.water_frames.values_mut() {
+                        water.water_fog_density = PARTICLE_FOG_DENSITY;
+                    }
+                }
+                app.add_plugins((
+                    UnderwaterFogPlugin,
+                    crate::particle_render::ParticleRenderPlugin,
+                ))
+                .add_systems(
+                    Startup,
+                    (
+                        crate::particle_render::setup_particle_quad,
+                        spawn_fog_particles,
+                    )
+                        .chain(),
+                )
+                .add_systems(PreUpdate, linear_output);
+            })
+        else {
+            warn!("skipping: no frame came back, so this machine has no usable GPU adapter");
+            return Ok(());
+        };
+        let (under_at, over_at) = projected
+            .get(0)
+            .zip(projected.get(1))
+            .ok_or("a particle did not project onto the frame")?;
+        // The brightest channel, averaged over a box well inside each billboard's
+        // (about 50-pixel) footprint.
+        let patch_brightness = |at: Vec2| -> Option<f32> {
+            #[expect(
+                clippy::as_conversions,
+                clippy::cast_possible_truncation,
+                clippy::cast_sign_loss,
+                reason = "a projected point inside the 256-pixel frame, rounded to its pixel"
+            )]
+            let (cx, cy) = (at.x.round().max(0.0) as u32, at.y.round().max(0.0) as u32);
+            let mut sum = 0.0_f32;
+            let mut count = 0.0_f32;
+            for y in cy.saturating_sub(12)..cy.saturating_add(12) {
+                for x in cx.saturating_sub(12)..cx.saturating_add(12) {
+                    if let Some(pixel) = frame.pixel(x, y) {
+                        sum += pixel.x.max(pixel.y).max(pixel.z);
+                        count += 1.0;
+                    }
+                }
+            }
+            (count > 0.0).then(|| sum / count)
+        };
+        let under = patch_brightness(under_at).ok_or("the submerged particle is off the frame")?;
+        let over =
+            patch_brightness(over_at).ok_or("the particle over the water is off the frame")?;
+        assert!(
+            over > 0.9,
+            "the white particle over the water came out at {over}, so the billboards did not \
+             draw and the fog check proves nothing"
+        );
+        assert!(
+            under < 0.5,
+            "the white particle {PARTICLE_FOG_OFFSET} m under the water came out at {under} \
+             (the one over it at {over}): the particle shader is not applying the water fog"
+        );
+        Ok(())
+    }
+
+    /// Spawn the [`PARTICLE_FOG_STAGE`]'s cloud — the two billboards of
+    /// [`PARTICLE_FOG_POINTS`], unlit white, through the viewer's own instanced
+    /// particle renderer — and the directional light the particle shader takes its
+    /// fog `KS` term from (a view without one is the HUD, which it never fogs).
+    fn spawn_fog_particles(
+        mut commands: Commands,
+        quad: Res<crate::particle_render::ParticleQuad>,
+        mut images: ResMut<Assets<Image>>,
+    ) {
+        use crate::particle_render::{
+            ParticleBlend, ParticleDrawParams, ParticleInstance, ParticleInstances,
+        };
+        use bevy::camera::visibility::NoFrustumCulling;
+        use bevy::render::batching::NoAutomaticBatching;
+
+        let basis = crate::render_scene::scene_root_transform().rotation;
+        let instances = PARTICLE_FOG_POINTS
+            .iter()
+            .map(|point| ParticleInstance {
+                position: basis.mul_vec3(*point).to_array(),
+                scale: [PARTICLE_FOG_SIDE, PARTICLE_FOG_SIDE],
+                color: [1.0; 4],
+                velocity: [0.0; 3],
+                flags: 0,
+                glow: 0.0,
+            })
+            .collect();
+        commands.spawn((
+            Mesh3d(quad.mesh.clone()),
+            Transform::IDENTITY,
+            NoFrustumCulling,
+            NoAutomaticBatching,
+            ParticleInstances { instances },
+            ParticleDrawParams {
+                texture: images.add(one_texel([255; 4])),
+                blend: ParticleBlend::Alpha,
+                unlit: true,
+                sort_center: basis.mul_vec3(Vec3::new(0.0, 0.0, SCENE_WATER_LEVEL)),
+            },
+            Name::new("particle-water-fog/cloud"),
+        ));
+        // Straight down, so the fog's `KS` is the reference's for a sun overhead.
+        commands.spawn((
+            DirectionalLight::default(),
+            Transform::from_xyz(0.0, 100.0, 0.0).looking_at(Vec3::ZERO, Vec3::Z),
+        ));
+    }
+
     /// Clear the readback camera to [`STAR_BACKGROUND`] rather than to black, so a
     /// star that darkens what is behind it has something to darken.
     fn star_background(mut cameras: Query<&mut Camera, With<ViewerCamera>>) {

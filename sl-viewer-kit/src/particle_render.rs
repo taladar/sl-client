@@ -36,6 +36,17 @@
 //! filtered by [`RenderLayers`](bevy::camera::visibility::RenderLayers) (a
 //! [`NoFrustumCulling`](bevy::camera::visibility::NoFrustumCulling) cloud stays in that list — only the frustum test is skipped).
 //!
+//! **Water fog.** A particle is alpha content blended at its own depth, which writes
+//! none, so the fullscreen haze pass (`sl_viewer_world_scene::underwater_fog`) cannot
+//! fog it: measured from the depth buffer it would be fogged by whatever stands behind
+//! it. The reference fogs its particles per fragment, in the alpha pool
+//! (`applySkyAndWaterFog` in `fullbrightF.glsl` / `alphaF.glsl`), and so does this
+//! shader, from the scene-wide [`ParticleWaterFog`] that `sl-viewer-world-scene` fills.
+//! The values reach the GPU in **one** uniform buffer every cloud's `@group(3)` binds
+//! (`ParticleFogUniformBuffer`), rewritten in place when the fog changes, so a new
+//! region or an environment edit reaches every live cloud without rebuilding a single
+//! bind group.
+//!
 //! Reference (read-only): `LLVOPartGroup::getGeometry` — the camera-facing billboard the
 //! vertex shader ports; particles are drawn `FULLBRIGHT` only when `EMISSIVE`
 //! (`llvopartgroup.cpp:359`), so a non-emissive cloud is lit and an emissive / additive
@@ -55,6 +66,7 @@ use bevy::platform::collections::HashSet;
 use bevy::prelude::*;
 use bevy::render::camera::ExtractedCamera;
 use bevy::render::extract_component::{ExtractComponent, ExtractComponentPlugin};
+use bevy::render::extract_resource::{ExtractResource, ExtractResourcePlugin};
 use bevy::render::mesh::allocator::MeshAllocator;
 use bevy::render::mesh::{RenderMesh, RenderMeshBufferInfo};
 use bevy::render::render_asset::RenderAssets;
@@ -62,13 +74,14 @@ use bevy::render::render_phase::{
     AddRenderCommand as _, DrawFunctions, PhaseItem, PhaseItemExtraIndex, RenderCommand,
     RenderCommandResult, SetItemPipeline, TrackedRenderPass, ViewSortedRenderPhases,
 };
-use bevy::render::render_resource::binding_types::{sampler, texture_2d};
+use bevy::render::render_resource::binding_types::{sampler, texture_2d, uniform_buffer};
 use bevy::render::render_resource::{
     BindGroup, BindGroupEntries, BindGroupLayout, BindGroupLayoutDescriptor,
-    BindGroupLayoutEntries, BlendComponent, BlendFactor, BlendOperation, BlendState, BufferUsages,
-    PipelineCache, RawBufferVec, RenderPipelineDescriptor, SamplerBindingType, ShaderStages,
-    SpecializedMeshPipeline, SpecializedMeshPipelineError, SpecializedMeshPipelines,
-    TextureSampleType, VertexAttribute, VertexFormat, VertexStepMode,
+    BindGroupLayoutEntries, BlendComponent, BlendFactor, BlendOperation, BlendState, BufferId,
+    BufferUsages, PipelineCache, RawBufferVec, RenderPipelineDescriptor, SamplerBindingType,
+    ShaderStages, ShaderType, SpecializedMeshPipeline, SpecializedMeshPipelineError,
+    SpecializedMeshPipelines, TextureSampleType, UniformBuffer, VertexAttribute, VertexFormat,
+    VertexStepMode,
 };
 use bevy::render::renderer::{RenderDevice, RenderQueue};
 use bevy::render::sync_component::SyncComponent;
@@ -173,6 +186,72 @@ impl SyncComponent<RenderApp> for ParticleDrawParams {
     type Target = Self;
 }
 
+/// The scene's **water fog**, as the particle shader applies it to a billboard under
+/// the surface: the authored fog colour, the density on each side of the surface, and
+/// the surface height.
+///
+/// The same four values `sl_viewer_world_scene::water_fog::WaterFogSettings` resolves
+/// for the face materials and the haze pass, mirrored here because the dependency runs
+/// from the scene layer to this crate and not the other way. The default is a zero
+/// density, which fogs nothing — the state of a scene with no water settings yet, of
+/// the gallery, and of `SL_VIEWER_DISABLE_UNDERWATER_FOG=1`.
+///
+/// The `KS` term is not carried: the shader derives it from the view's directional
+/// light, exactly as `face_material.wesl` does, so the two fog the same point alike.
+#[derive(Resource, Clone, Copy, Debug, Default, PartialEq)]
+pub struct ParticleWaterFog {
+    /// The **authored** (sRGB) water fog colour; the shader decodes it.
+    pub color: Vec3,
+    /// The fog density while the eye is above the surface.
+    pub density_above: f32,
+    /// The fog density while the eye is submerged.
+    pub density_submerged: f32,
+    /// The water surface height, in Bevy world metres (`y`).
+    pub level: f32,
+}
+
+impl ExtractResource<RenderApp> for ParticleWaterFog {
+    type Source = Self;
+
+    /// Copy the fog into the render world; run only when it changed.
+    fn extract_resource(source: &Self::Source) -> Self {
+        *source
+    }
+}
+
+/// [`ParticleWaterFog`] as `particle.wesl` declares it (`ParticleWaterFog` there):
+/// the colour with the above-water density in `w`, the submerged density and the
+/// level — the packing `face_material.wesl` uses for the same values.
+#[derive(Clone, Copy, Debug, Default, PartialEq, ShaderType)]
+struct ParticleFogUniform {
+    /// The authored fog colour (`xyz`) and the above-water density (`w`).
+    color: Vec4,
+    /// The density while the eye is submerged.
+    submerged_density: f32,
+    /// The water surface height.
+    level: f32,
+}
+
+impl From<ParticleWaterFog> for ParticleFogUniform {
+    /// Pack the fog the way the shader reads it.
+    fn from(fog: ParticleWaterFog) -> Self {
+        Self {
+            color: fog.color.extend(fog.density_above),
+            submerged_density: fog.density_submerged,
+            level: fog.level,
+        }
+    }
+}
+
+/// The render world's one water-fog uniform buffer, bound by every cloud's
+/// `@group(3)`. Rewritten in place by [`prepare_particle_fog`] when the fog changes;
+/// the buffer itself is created once, so the bind groups built over it stay valid.
+#[derive(Resource, Default)]
+struct ParticleFogUniformBuffer {
+    /// The GPU-side copy of the fog.
+    buffer: UniformBuffer<ParticleFogUniform>,
+}
+
 /// The one shared unit-quad mesh every particle cloud instances — uploaded once at
 /// startup ([`setup_particle_quad`]) and never rebuilt, replacing the per-source
 /// per-frame dynamic mesh of Phase 30.
@@ -226,14 +305,18 @@ struct InstanceBuffer {
     buffer: RawBufferVec<ParticleInstance>,
 }
 
-/// A cloud's material bind group (`@group(3)`: diffuse texture + sampler), cached on its
-/// render-world entity and rebuilt only when the source's texture changes.
+/// A cloud's material bind group (`@group(3)`: diffuse texture + sampler + the shared
+/// water-fog uniform), cached on its render-world entity and rebuilt only when the
+/// source's texture changes (or, defensively, if the fog buffer were ever recreated).
 #[derive(Component)]
 struct ParticleBindGroup {
-    /// The bound texture + sampler bind group.
+    /// The bound texture + sampler + fog bind group.
     bind_group: BindGroup,
     /// The texture the bind group was built for; a change triggers a rebuild.
     texture: AssetId<Image>,
+    /// The fog buffer the bind group was built over; a different one triggers a
+    /// rebuild, so a cloud can never keep reading a buffer that is no longer written.
+    fog_buffer: BufferId,
 }
 
 /// The custom particle render pipeline: Bevy's [`MeshPipeline`] (for the view / mesh bind
@@ -246,7 +329,8 @@ struct ParticlePipeline {
     mesh_pipeline: MeshPipeline,
     /// The particle shader (both vertex and fragment stages).
     shader: Handle<Shader>,
-    /// The compiled `@group(3)` material bind-group layout (diffuse texture + sampler),
+    /// The compiled `@group(3)` material bind-group layout (diffuse texture + sampler +
+    /// water-fog uniform),
     /// used to build each cloud's bind group in [`prepare_particle_bind_groups`].
     material_layout: BindGroupLayout,
     /// The same layout as a descriptor, pushed onto each specialized pipeline's
@@ -278,6 +362,7 @@ fn init_particle_pipeline(
         (
             texture_2d(TextureSampleType::Float { filterable: true }),
             sampler(SamplerBindingType::Filtering),
+            uniform_buffer::<ParticleFogUniform>(false),
         ),
     );
     let material_layout =
@@ -436,20 +521,46 @@ fn prepare_instance_buffers(
     }
 }
 
+/// `PrepareResources`: write the scene's water fog into the shared uniform buffer, on
+/// the frame it changed (and on the first, when the buffer is created). A settled scene
+/// writes nothing.
+fn prepare_particle_fog(
+    fog: Res<ParticleWaterFog>,
+    mut uniform: ResMut<ParticleFogUniformBuffer>,
+    render_device: Res<RenderDevice>,
+    render_queue: Res<RenderQueue>,
+) {
+    if !fog.is_changed() && uniform.buffer.buffer().is_some() {
+        return;
+    }
+    uniform.buffer.set(ParticleFogUniform::from(*fog));
+    uniform.buffer.write_buffer(&render_device, &render_queue);
+}
+
 /// `PrepareBindGroups`: build each cloud's `@group(3)` material bind group from its
-/// diffuse texture, rebuilding only when the texture changes (or on first sight, once the
-/// [`GpuImage`] has uploaded). A cloud whose texture has not finished uploading keeps no
-/// bind group and is skipped by the draw command until it is ready.
+/// diffuse texture and the shared fog buffer, rebuilding only when either changes (or on
+/// first sight, once the [`GpuImage`] has uploaded). A cloud whose texture has not
+/// finished uploading keeps no bind group and is skipped by the draw command until it is
+/// ready.
 fn prepare_particle_bind_groups(
     mut commands: Commands,
     clouds: Query<(Entity, &ParticleDrawParams, Option<&ParticleBindGroup>)>,
     pipeline: Res<ParticlePipeline>,
+    fog: Res<ParticleFogUniformBuffer>,
     images: Res<RenderAssets<GpuImage>>,
     render_device: Res<RenderDevice>,
 ) {
+    // Written by `prepare_particle_fog` earlier in the same frame, so this only
+    // fails if that system did not run — and then no cloud can be drawn correctly.
+    let Some(fog_buffer) = fog.buffer.buffer() else {
+        return;
+    };
+    let fog_buffer_id = fog_buffer.id();
     for (entity, params, existing) in &clouds {
         let texture_id = params.texture.id();
-        if existing.is_some_and(|bind_group| bind_group.texture == texture_id) {
+        if existing.is_some_and(|bind_group| {
+            bind_group.texture == texture_id && bind_group.fog_buffer == fog_buffer_id
+        }) {
             continue;
         }
         let Some(gpu_image) = images.get(texture_id) else {
@@ -458,11 +569,16 @@ fn prepare_particle_bind_groups(
         let bind_group = render_device.create_bind_group(
             "particle_material_bind_group",
             &pipeline.material_layout,
-            &BindGroupEntries::sequential((&gpu_image.texture_view, &gpu_image.sampler)),
+            &BindGroupEntries::sequential((
+                &gpu_image.texture_view,
+                &gpu_image.sampler,
+                fog_buffer.as_entire_binding(),
+            )),
         );
         commands.entity(entity).insert(ParticleBindGroup {
             bind_group,
             texture: texture_id,
+            fog_buffer: fog_buffer_id,
         });
     }
 }
@@ -582,7 +698,7 @@ fn queue_particles(
     }
 }
 
-/// Bind a cloud's `@group(3)` material bind group (diffuse texture + sampler), read from
+/// Bind a cloud's `@group(3)` material bind group (diffuse texture + sampler + fog), read from
 /// the [`ParticleBindGroup`] component on the item entity. Modelled on Bevy's
 /// `SetMaterialBindGroup`, but per-item rather than per-material-asset.
 struct SetParticleMaterialBindGroup<const I: usize>;
@@ -713,21 +829,29 @@ impl Plugin for ParticleRenderPlugin {
     /// Compile `particle.wesl`, register the extract plugins for the per-cloud components,
     /// and set up the render-app pipeline / draw command / prepare / queue systems.
     fn build(&self, app: &mut App) {
-        // The particle shader decodes its sRGB sprite samples with the shared module.
+        // The particle shader decodes its sRGB sprite samples with the shared module,
+        // and fogs a billboard under the surface with the shared water-fog one.
         sl_client_bevy::load_srgb_shader(app);
+        sl_client_bevy::load_water_fog_shader(app);
         load_internal_asset!(app, PARTICLE_SHADER_HANDLE, "particle.wesl", |source, _| {
             Shader::from_wesl(source, "embedded://sl_viewer_kit/particle.wesl")
         });
         app.add_plugins((
             ExtractComponentPlugin::<ParticleInstances>::default(),
             ExtractComponentPlugin::<ParticleDrawParams>::default(),
+            ExtractResourcePlugin::<ParticleWaterFog>::default(),
         ));
+        // No fog until the scene layer fills it in — and the gallery, which has no
+        // water, never does.
+        app.init_resource::<ParticleWaterFog>();
         let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
             return;
         };
         render_app
             .add_render_command::<Transparent3d, DrawParticles>()
             .init_resource::<SpecializedMeshPipelines<ParticlePipeline>>()
+            .init_resource::<ParticleWaterFog>()
+            .init_resource::<ParticleFogUniformBuffer>()
             .add_systems(
                 RenderStartup,
                 init_particle_pipeline.after(MeshPipelineSystems),
@@ -737,6 +861,7 @@ impl Plugin for ParticleRenderPlugin {
                 (
                     queue_particles.in_set(RenderSystems::QueueMeshes),
                     prepare_instance_buffers.in_set(RenderSystems::PrepareResources),
+                    prepare_particle_fog.in_set(RenderSystems::PrepareResources),
                     prepare_particle_bind_groups.in_set(RenderSystems::PrepareBindGroups),
                 ),
             );
@@ -745,8 +870,13 @@ impl Plugin for ParticleRenderPlugin {
 
 #[cfg(test)]
 mod tests {
-    use super::{ParticleInstance, instance_buffer_layout, particle_quad_mesh};
+    use super::{
+        ParticleFogUniform, ParticleInstance, ParticleWaterFog, instance_buffer_layout,
+        particle_quad_mesh,
+    };
+    use bevy::math::{Vec3, Vec4};
     use bevy::mesh::{Indices, Mesh, PrimitiveTopology, VertexAttributeValues};
+    use bevy::render::render_resource::ShaderType as _;
     use bevy::render::render_resource::{VertexFormat, VertexStepMode};
     use pretty_assertions::assert_eq;
 
@@ -824,5 +954,37 @@ mod tests {
             unreachable!("the layout has a location-7 attribute")
         };
         assert_eq!(flags.format, VertexFormat::Uint32);
+    }
+
+    /// The fog packs the way `particle.wesl` reads it — the above-water density in
+    /// the colour's `w`, as `face_material.wesl` packs the same values — and the
+    /// uniform is the 32 bytes the shader's `ParticleWaterFog` struct occupies.
+    #[test]
+    fn the_fog_packs_as_the_shader_reads_it() {
+        let packed = ParticleFogUniform::from(ParticleWaterFog {
+            color: Vec3::new(0.1, 0.2, 0.3),
+            density_above: 4.0,
+            density_submerged: 2.0,
+            level: 20.0,
+        });
+        assert_eq!(
+            packed,
+            ParticleFogUniform {
+                color: Vec4::new(0.1, 0.2, 0.3, 4.0),
+                submerged_density: 2.0,
+                level: 20.0,
+            }
+        );
+        assert_eq!(ParticleFogUniform::min_size().get(), 32);
+    }
+
+    /// The default fog fogs nothing: a zero density is the shader's "no fog" gate, so
+    /// a scene that never fills the resource in (the gallery) draws its particles
+    /// exactly as before.
+    #[test]
+    fn the_default_fog_has_no_density() {
+        let fog = ParticleWaterFog::default();
+        assert_eq!(fog.density_above.to_bits(), 0.0_f32.to_bits());
+        assert_eq!(fog.density_submerged.to_bits(), 0.0_f32.to_bits());
     }
 }
