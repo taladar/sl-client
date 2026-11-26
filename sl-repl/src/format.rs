@@ -533,6 +533,7 @@ const fn command_name(command: &Command) -> &'static str {
         Command::GodDeleteClassified { .. } => "god_delete_classified",
         Command::RequestFolderContents(..) => "request_folder_contents",
         Command::FetchInventoryFolders(..) => "fetch_inventory_folders",
+        Command::FetchInventoryItems(..) => "fetch_inventory_items",
         Command::CreateInventoryFolder { .. } => "create_inventory_folder",
         Command::UpdateInventoryFolder { .. } => "update_inventory_folder",
         Command::MoveInventoryFolder { .. } => "move_inventory_folder",

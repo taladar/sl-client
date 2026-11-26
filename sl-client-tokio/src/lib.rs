@@ -106,6 +106,7 @@ use crate::http::{
 };
 use crate::inventory::{
     fetch_ais3_folders, fetch_folder_contents, fetch_group_members, fetch_inventory,
+    fetch_inventory_items,
 };
 use crate::marketplace::dispatch_marketplace_request;
 use crate::materials::{fetch_render_materials, post_modify_material_params, set_render_materials};
@@ -1493,6 +1494,16 @@ impl Client {
                                         caps_tx.clone(),
                                     ));
                                 }
+                            }
+                            Some(Command::FetchInventoryItems(items)) => {
+                                fetch_inventory_items(
+                                    &mut self.session,
+                                    &items,
+                                    &caps,
+                                    &http,
+                                    &caps_tx,
+                                    Instant::now(),
+                                )?;
                             }
                             Some(Command::CreateInventoryFolder { folder_id, parent_id, folder_type, name }) => {
                                 // Second Life creates a folder through AIS3, as the reference's

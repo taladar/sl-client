@@ -69,6 +69,16 @@ capability found none on either grid.
 | a Library item through `FetchInventory2` | `200`, no items | the same | the same |
 | a Library item through `FetchLib2` | identical to the folder fetch's | no capability | each flavour as its grid |
 
+`inventory-item-fetch` asks for three items of each tree and an id nobody has
+in one `Command::FetchInventoryItems`, and holds every answer to the item's
+folder listing, field by field. On OpenSim the Library items go out as UDP
+`FetchInventory` (no `FetchLib2`) and nothing comes back for them; the case
+asserts that silence.
+
+| case | Second Life | OpenSim |
+| --- | --- | --- |
+| `inventory-item-fetch` | passed (2026-11-26) | passed (2026-11-26) |
+
 ### The UDP fetches
 
 | sent raw | Second Life | OpenSim | fake grid |
@@ -76,6 +86,7 @@ capability found none on either grid.
 | `FetchInventoryDescendents`, the agent's root | **nothing** | `InventoryDescendents`, over several packets | Second Life flavour: a `FeatureDisabled` (a deliberate deviation, below); OpenSim flavour: `InventoryDescendents` |
 | `FetchInventoryDescendents`, the Library's root | nothing | `InventoryDescendents` | as above |
 | `FetchInventory`, one item | nothing | `FetchInventoryReply` | each flavour as its grid |
+| `FetchInventory`, a Library item addressed to the Library owner | nothing | **nothing**: its inventory service does not hold the Library (2026-11-26) | nothing |
 
 The fake grid's Second Life flavour answers the deprecated folder fetch with a
 `FeatureDisabled` rather than aditi's silence on purpose

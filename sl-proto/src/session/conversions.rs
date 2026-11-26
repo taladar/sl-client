@@ -55,11 +55,12 @@ use sl_wire::messages::{
     AvatarGroupsReplyGroupDataBlock, AvatarInterestsReplyPropertiesDataBlock,
     AvatarPropertiesReplyPropertiesDataBlock, BulkUpdateInventoryFolderDataBlock,
     BulkUpdateInventoryItemDataBlock, ChatFromSimulatorChatDataBlock, ClassifiedInfoReplyDataBlock,
-    EnableSimulatorSimulatorInfoBlock, EstateOwnerMessageParamListBlock, GroupAccountDetailsReply,
-    GroupAccountSummaryReply, GroupAccountTransactionsReply,
-    GroupActiveProposalItemReplyProposalDataBlock, GroupMembersReplyMemberDataBlock,
-    GroupNoticesListReplyDataBlock, GroupProfileReplyGroupDataBlock,
-    GroupRoleDataReplyRoleDataBlock, GroupTitlesReplyGroupDataBlock, GroupVoteHistoryItemReply,
+    EnableSimulatorSimulatorInfoBlock, EstateOwnerMessageParamListBlock,
+    FetchInventoryReplyInventoryDataBlock, GroupAccountDetailsReply, GroupAccountSummaryReply,
+    GroupAccountTransactionsReply, GroupActiveProposalItemReplyProposalDataBlock,
+    GroupMembersReplyMemberDataBlock, GroupNoticesListReplyDataBlock,
+    GroupProfileReplyGroupDataBlock, GroupRoleDataReplyRoleDataBlock,
+    GroupTitlesReplyGroupDataBlock, GroupVoteHistoryItemReply,
     ImprovedInstantMessageAgentDataBlock, ImprovedInstantMessageMessageBlockBlock,
     InventoryDescendentsFolderDataBlock, InventoryDescendentsItemDataBlock, MapBlockReply,
     MapBlockReplyAgentDataBlock, MapBlockReplyDataBlock, MapBlockReplySizeBlock, MapItemReply,
@@ -2889,6 +2890,46 @@ pub(crate) fn inventory_item_from_create(
             data.group_id,
             data.group_owned,
         ),
+        last_owner_id: Uuid::nil(),
+        creator_id: AgentKey::from(data.creator_id),
+        group: crate::types::group_from_wire(data.group_id),
+        permissions: Permissions5 {
+            base: Permissions::from_bits(data.base_mask),
+            owner: Permissions::from_bits(data.owner_mask),
+            group: Permissions::from_bits(data.group_mask),
+            everyone: Permissions::from_bits(data.everyone_mask),
+            next_owner: Permissions::from_bits(data.next_owner_mask),
+        },
+    })
+}
+
+/// Builds an [`InventoryItem`] from a `FetchInventoryReply` entry (the answer to
+/// the legacy per-item `FetchInventory`).
+pub(crate) fn inventory_item_from_fetch_reply(
+    data: &FetchInventoryReplyInventoryDataBlock,
+) -> Result<InventoryItem, sl_wire::WireError> {
+    Ok(InventoryItem {
+        item_id: InventoryKey::from(data.item_id),
+        folder_id: InventoryFolderKey::from(data.folder_id),
+        name: trimmed_string(&data.name),
+        description: trimmed_string(&data.description),
+        asset_id: data.asset_id,
+        item_type: data.r#type,
+        inv_type: data.inv_type,
+        flags: data.flags,
+        sale_type: data.sale_type,
+        sale_price: crate::types::linden_price_from_wire(
+            data.sale_type != 0,
+            "SalePrice",
+            data.sale_price,
+        )?,
+        creation_date: data.creation_date,
+        owner: crate::types::inventory_owner_from_wire(
+            data.owner_id,
+            data.group_id,
+            data.group_owned,
+        ),
+        // The UDP reply carries no previous-owner id.
         last_owner_id: Uuid::nil(),
         creator_id: AgentKey::from(data.creator_id),
         group: crate::types::group_from_wire(data.group_id),

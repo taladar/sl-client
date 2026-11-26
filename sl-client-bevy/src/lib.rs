@@ -196,7 +196,7 @@ use crate::http::{
     run_script_metadata, run_task_inventory, search_stat, set_display_name, upload_profile_image,
 };
 use crate::inventory::{
-    fetch_folder_contents, run_ais3_folder_fetches, run_group_members_fetch,
+    fetch_folder_contents, fetch_inventory_items, run_ais3_folder_fetches, run_group_members_fetch,
     run_increment_cof_version, run_inventory_fetch, run_server_appearance_update,
 };
 use crate::marketplace::dispatch_marketplace_request;
@@ -2108,6 +2108,9 @@ fn apply_command(
         }
         Command::RequestFolderContents(folder_id) => {
             fetch_folder_contents(session, *folder_id, caps, now)?;
+        }
+        Command::FetchInventoryItems(items) => {
+            fetch_inventory_items(session, items, caps, now)?;
         }
         Command::FetchInventoryFolders(folder_ids) => {
             if let Some(caps) = caps

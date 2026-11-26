@@ -22,17 +22,18 @@ use super::conversions::{
     group_members_from_caps_llsd, group_membership, group_memberships_from_caps_llsd, group_names,
     group_notice, group_profile, group_role, group_title, group_vote_history_item, index_into,
     instant_message, inventory_descendents_from_llsd, inventory_folder, inventory_item,
-    inventory_item_from_create, inventory_offer_bucket, land_products_from_llsd,
-    land_stat_reply_from_caps_llsd, map_block_batch, map_item, map_layer, map_region_info,
-    money_balance, nav_mesh_status_from_llsd, neighbor_info, object_from_full_update,
-    object_properties, offline_messages_from_llsd, open_region_info_from_llsd, pack_uuids,
-    packages_of, parcel_info, parcel_info_from_llsd, parcel_object_owners_from_caps_llsd,
-    parse_lure_region_handle, parse_mute_list, parse_task_inventory, parse_uuid_string, pick_info,
-    places_reply_from_caps_llsd, region_identity, region_limits,
-    remove_inventory_objects_from_llsd, required_voice_version_from_llsd, script_dialog,
-    script_permission_request, script_running_from_caps_llsd, server_appearance_update_from_llsd,
-    session_history_from_llsd, set_display_name_reply_from_llsd, sim_console_response_from_llsd,
-    skeleton_folder, teleport_failed_from_caps_llsd, teleport_finish_from_llsd, trimmed_string,
+    inventory_item_from_create, inventory_item_from_fetch_reply, inventory_offer_bucket,
+    land_products_from_llsd, land_stat_reply_from_caps_llsd, map_block_batch, map_item, map_layer,
+    map_region_info, money_balance, nav_mesh_status_from_llsd, neighbor_info,
+    object_from_full_update, object_properties, offline_messages_from_llsd,
+    open_region_info_from_llsd, pack_uuids, packages_of, parcel_info, parcel_info_from_llsd,
+    parcel_object_owners_from_caps_llsd, parse_lure_region_handle, parse_mute_list,
+    parse_task_inventory, parse_uuid_string, pick_info, places_reply_from_caps_llsd,
+    region_identity, region_limits, remove_inventory_objects_from_llsd,
+    required_voice_version_from_llsd, script_dialog, script_permission_request,
+    script_running_from_caps_llsd, server_appearance_update_from_llsd, session_history_from_llsd,
+    set_display_name_reply_from_llsd, sim_console_response_from_llsd, skeleton_folder,
+    teleport_failed_from_caps_llsd, teleport_finish_from_llsd, trimmed_string,
     voice_channel_info_from_llsd, windlight_refresh_from_llsd,
 };
 use super::inventory::{DescendentsFold, DescendentsReply};
@@ -44,15 +45,16 @@ use super::{
     ChatSessionRequestPurpose, Circuit, CircuitRole, DEFAULT_DRAW_DISTANCE,
     DEPARTED_CIRCUIT_TIMEOUT, DepartedCircuit, FolderState, FriendPresence, GrantStatus,
     HolderKind, IDENTITY_ROTATION, INVENTORY_FETCH_MAX_ATTEMPTS, INVENTORY_SAVE_TIMEOUT, Inventory,
-    InventoryOwner, LATE_TELEPORT_START_WINDOW, LOGOUT_TIMEOUT, MAX_XFER_DOWNLOAD_BYTES,
-    MessageCursor, OfferedUpload, PARENT_REQUEST_WARN_ATTEMPTS, PendingHandover,
-    PendingInventorySave, PendingInvite, RefusedTeleport, SIT_REFUSAL_ALERTS, SIT_REFUSAL_TEXTS,
-    SIT_TIMEOUT, ScriptGrant, ScriptHolder, ServerHistoryFetch, ServerHistoryMessage,
-    ServerHistoryState, Session, SessionMessage, SessionState, SessionTransition,
-    SessionVoiceFailure, SessionVoiceRequest, SitState, TELEPORT_CANCELLED_ALERT, TELEPORT_TIMEOUT,
-    TEXTURE_DOWNLOAD_MAX_ATTEMPTS, TEXTURE_DOWNLOAD_STALL_TIMEOUT, TYPING_TIMEOUT, TakenControls,
-    TeleportFailedVia, TeleportPhase, TextureDownload, TransferDownload, TransferProgress,
-    TransferPurpose, UnansweredCancels, VoiceChannelInfo, XFER_OFFER_TIMEOUT, XFER_REFUSED_RESULT,
+    InventoryOwner, ItemFetchRequest, LATE_TELEPORT_START_WINDOW, LOGOUT_TIMEOUT,
+    MAX_XFER_DOWNLOAD_BYTES, MessageCursor, OfferedUpload, PARENT_REQUEST_WARN_ATTEMPTS,
+    PendingHandover, PendingInventorySave, PendingInvite, RefusedTeleport, SIT_REFUSAL_ALERTS,
+    SIT_REFUSAL_TEXTS, SIT_TIMEOUT, ScriptGrant, ScriptHolder, ServerHistoryFetch,
+    ServerHistoryMessage, ServerHistoryState, Session, SessionMessage, SessionState,
+    SessionTransition, SessionVoiceFailure, SessionVoiceRequest, SitState,
+    TELEPORT_CANCELLED_ALERT, TELEPORT_TIMEOUT, TEXTURE_DOWNLOAD_MAX_ATTEMPTS,
+    TEXTURE_DOWNLOAD_STALL_TIMEOUT, TYPING_TIMEOUT, TakenControls, TeleportFailedVia,
+    TeleportPhase, TextureDownload, TransferDownload, TransferProgress, TransferPurpose,
+    UnansweredCancels, VoiceChannelInfo, XFER_OFFER_TIMEOUT, XFER_REFUSED_RESULT,
     XFER_STALL_TIMEOUT, XFER_TIMEOUT_RESULT, XferDownload, XferPurpose, XferUpload, deadline,
     merge_deadline,
 };
@@ -5173,6 +5175,35 @@ impl Session {
                         transaction_id: reply.agent_data.transaction_id,
                         callback_id,
                         item,
+                    });
+                }
+            }
+            // The answer to the legacy per-item `FetchInventory`
+            // (`Session::request_inventory_items`). Each item folds into the tree
+            // its folder belongs to, so a Library item stays in the Library, and
+            // the batch surfaces as the same bulk update the capability reply
+            // becomes (nil transaction id: the fetch has none).
+            AnyMessage::FetchInventoryReply(reply) => {
+                let items: Vec<InventoryItem> = reply
+                    .inventory_data
+                    .iter()
+                    .map(inventory_item_from_fetch_reply)
+                    .collect::<Result<Vec<_>, _>>()?
+                    .into_iter()
+                    .filter(|item| !item.item_id.uuid().is_nil())
+                    .collect();
+                if !items.is_empty() {
+                    let (library, agent): (Vec<InventoryItem>, Vec<InventoryItem>) =
+                        items.iter().cloned().partition(|item| {
+                            self.inventory_reply_owner(item.folder_id) == InventoryOwner::Library
+                        });
+                    self.cache_inventory(&[], &agent, InventoryOwner::Agent);
+                    self.cache_inventory(&[], &library, InventoryOwner::Library);
+                    self.events.push_back(Event::InventoryBulkUpdate {
+                        transaction_id: Uuid::nil(),
+                        folders: Vec::new(),
+                        items,
+                        item_callbacks: Vec::new(),
                     });
                 }
             }
@@ -12105,6 +12136,95 @@ impl Session {
     #[must_use]
     pub fn login_success(&self) -> Option<&sl_wire::LoginSuccess> {
         self.login_success.as_deref()
+    }
+
+    /// Which tree — the agent's own inventory ([`InventoryOwner::Agent`]) or the
+    /// shared Library ([`InventoryOwner::Library`]) — the held model files the
+    /// item `item_id` in, or `None` if the item, or the folder it names, is not
+    /// in the model.
+    #[must_use]
+    pub fn inventory_item_owner(&self, item_id: InventoryKey) -> Option<InventoryOwner> {
+        let item = self.inventory.item(item_id)?;
+        self.inventory.folder_owner(item.folder_id)
+    }
+
+    /// Splits a per-item fetch of `items` into one [`ItemFetchRequest`] per
+    /// tree, in the order agent then Library, leaving out a tree none of the
+    /// items belongs to (so an empty `items` yields no request at all).
+    ///
+    /// An item the held model files in the Library is fetched from the Library,
+    /// addressed to the Library owner; every other item — including one the
+    /// model does not hold yet, which is the usual reason to fetch it — from the
+    /// agent's tree, addressed to the agent. That is the reference's
+    /// `fetchItemsFromServer` split, which goes by the item's owner. A Library
+    /// item while the login named no Library owner stays with the agent's
+    /// request, since there is no one else to address it to.
+    ///
+    /// The runtime POSTs each request's [`body`](ItemFetchRequest::body) to its
+    /// [`capability`](ItemFetchRequest::capability) where the region grants it
+    /// and feeds the reply to [`Session::handle_caps_event`] under the same
+    /// name, which merges the items and surfaces them as an
+    /// [`Event::InventoryBulkUpdate`]. Where the region does not grant it, the
+    /// runtime sends the same request over UDP with
+    /// [`Session::request_inventory_items`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] before login, when there is no agent id to
+    /// address the request with.
+    pub fn item_fetch_requests(
+        &self,
+        items: &[InventoryKey],
+    ) -> Result<Vec<ItemFetchRequest>, Error> {
+        let agent_id = self.agent_id().ok_or(Error::NoCircuit)?.uuid();
+        let library_owner = self.inventory.library_owner().map(|owner| owner.uuid());
+        let mut agent = Vec::new();
+        let mut library = Vec::new();
+        for &item_id in items {
+            match (self.inventory_item_owner(item_id), library_owner) {
+                (Some(InventoryOwner::Library), Some(owner_id)) => {
+                    library.push(sl_wire::FetchItemRef { owner_id, item_id });
+                }
+                _ => agent.push(sl_wire::FetchItemRef {
+                    owner_id: agent_id,
+                    item_id,
+                }),
+            }
+        }
+        Ok([
+            (InventoryOwner::Agent, agent),
+            (InventoryOwner::Library, library),
+        ]
+        .into_iter()
+        .filter(|(_, items)| !items.is_empty())
+        .map(|(tree, items)| ItemFetchRequest {
+            tree,
+            agent_id,
+            items,
+        })
+        .collect())
+    }
+
+    /// Sends `request` as the legacy UDP `FetchInventory`, the per-item fetch
+    /// of a region that grants neither `FetchInventory2` nor `FetchLib2`. The
+    /// region answers with a `FetchInventoryReply`, which the session merges
+    /// into the tree each item's folder belongs to and surfaces as an
+    /// [`Event::InventoryBulkUpdate`] — the same event the capability reply
+    /// becomes. OpenSim answers it; Second Life, which always grants the
+    /// capabilities, does not.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn request_inventory_items(
+        &mut self,
+        request: &ItemFetchRequest,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_fetch_inventory(&request.items, now)?;
+        Ok(())
     }
 
     /// Requests the contents (sub-folders and items) of the inventory folder

@@ -10814,6 +10814,88 @@ mod test {
         Ok(())
     }
 
+    /// The **legacy UDP per-item fetch**, both halves: the client's
+    /// `FetchInventory` (the fallback of a region without `FetchInventory2`)
+    /// reaches an OpenSim-dialect simulator, which answers with
+    /// `FetchInventoryReply`, and the client folds the answer into the held
+    /// model and surfaces it as one bulk update per reply. Forty items is two
+    /// messages each way (the client sends 32 blocks to a message), so losing
+    /// a chunk loses items; an id the grid does not hold, and a Library item,
+    /// are left out.
+    #[test]
+    fn session_udp_item_fetch_is_answered_and_merged() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        sim.set_inventory_dialect(sl_proto::InventoryDialect::OpenSim);
+        drain_client(&mut client);
+        drain_server(&mut sim);
+
+        let folder = InventoryFolderKey::from(uuid::Uuid::from_u128(0x2_0000));
+        let wanted: Vec<InventoryKey> = (0..40_u128)
+            .map(|index| InventoryKey::from(uuid::Uuid::from_u128(0x2_0100 + index)))
+            .collect();
+        for (index, &item_id) in wanted.iter().enumerate() {
+            sim.agent_inventory_mut().insert_item(InventoryItem {
+                item_id,
+                folder_id: folder,
+                name: format!("Item {index}"),
+                ..wearable_item()
+            });
+        }
+        // OpenSim's inventory service does not hold the Library, so a Library
+        // item is left out of the answer like an id nobody has.
+        let library_item = InventoryKey::from(uuid::Uuid::from_u128(0x2_0900));
+        sim.library_inventory_mut().insert_item(InventoryItem {
+            item_id: library_item,
+            folder_id: InventoryFolderKey::from(uuid::Uuid::from_u128(0x2_0800)),
+            name: "Library Item".to_owned(),
+            ..wearable_item()
+        });
+        let mut asked = wanted.clone();
+        asked.push(InventoryKey::from(uuid::Uuid::from_u128(0xdead)));
+        asked.push(library_item);
+
+        let requests = client.item_fetch_requests(&asked)?;
+        assert_eq!(requests.len(), 1);
+        for request in &requests {
+            assert_eq!(request.capability(), sl_proto::CAP_FETCH_INVENTORY_ITEM);
+            client.request_inventory_items(request, now)?;
+        }
+        pump(&mut client, &mut sim, now)?;
+        pump(&mut client, &mut sim, now)?;
+
+        let mut fetched = Vec::new();
+        let mut replies = 0_usize;
+        for event in drain_client(&mut client) {
+            if let Event::InventoryBulkUpdate {
+                transaction_id,
+                folders,
+                items,
+                ..
+            } = event
+            {
+                replies += 1;
+                assert!(transaction_id.is_nil());
+                assert!(folders.is_empty());
+                fetched.extend(items.into_iter().map(|item| item.item_id));
+            }
+        }
+        assert_eq!(replies, 2);
+        fetched.sort();
+        let mut expected = wanted.clone();
+        expected.sort();
+        assert_eq!(fetched, expected);
+        assert_eq!(
+            wanted
+                .iter()
+                .filter(|&&item| client.inventory_item_owner(item)
+                    == Some(sl_proto::InventoryOwner::Agent))
+                .count(),
+            40
+        );
+        Ok(())
+    }
+
     /// The **deprecated UDP inventory fetch**, both halves: the client's
     /// `FetchInventoryDescendents` reaches the simulator as a typed
     /// [`ServerEvent::RequestInventoryDescendents`] — which is what took it off

@@ -14143,16 +14143,20 @@ impl SimSession {
             }
             AnyMessage::FetchInventory(fetch) => {
                 // OpenSim answers the deprecated per-item fetch with a
-                // `FetchInventoryReply`; Second Life says nothing.
+                // `FetchInventoryReply`; Second Life says nothing. OpenSim reads
+                // the items out of its inventory service
+                // (`AsyncInventorySender.ProcessQueue`), which does not hold
+                // the Library — that is served from memory by the Library
+                // module — so a Library item is left out, and a fetch of
+                // nothing but Library items gets no reply at all (measured on
+                // the local OpenSim, 2026-11-26).
                 if self.inventory_dialect == crate::InventoryDialect::OpenSim {
                     let items: Vec<InventoryItem> = fetch
                         .inventory_data
                         .iter()
                         .filter_map(|block| {
-                            let item = InventoryKey::from(block.item_id);
                             self.agent_inventory
-                                .item(item)
-                                .or_else(|| self.library_inventory.item(item))
+                                .item(InventoryKey::from(block.item_id))
                                 .cloned()
                         })
                         .collect();

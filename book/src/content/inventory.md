@@ -176,6 +176,31 @@ The explicit pulls work regardless of the flag:
 `Session::request_folder_contents(id)` (UDP) and
 `Command::FetchInventoryFolders(ids)` (CAPS) fetch on demand.
 
+### Fetching items by id
+
+`Command::FetchInventoryItems(ids)` fetches single items rather than whole
+folders: an item whose folder is too large to refetch for one entry, or one
+the held model does not hold yet. `Session::item_fetch_requests(ids)` splits
+the ids into one `ItemFetchRequest` per tree, as the reference's
+`fetchItemsFromServer` does: an item the model files in the Library is asked
+of `FetchLib2`, addressed to the Library owner, and every other item —
+including one the model does not hold — of `FetchInventory2`, addressed to the
+agent (Second Life answers a Library item through `FetchInventory2` with no
+items at all). Both runtimes POST each request's `body()` to its
+`capability()` and hand the reply back under that name; where the region does
+not grant it they send the same request as the legacy UDP `FetchInventory`
+(`Session::request_inventory_items`, 32 items to a message), whose
+`FetchInventoryReply` the session decodes too. Either answer is merged into
+the tree each item's folder belongs to and surfaces as one
+`Event::InventoryBulkUpdate` with a nil transaction id. An id the grid does not
+hold is left out of the answer, never reported as an entry.
+
+A Library item cannot be fetched by id on OpenSim at all: it grants no
+`FetchLib2`, and it answers the UDP fetch out of its inventory service, which
+does not hold the Library (the Library module serves it from memory), so the
+request goes unanswered — as it does for the reference viewer. Fetch its folder
+instead. The `inventory-item-fetch` conformance case measures both grids.
+
 ## The Command / Event pull-bridge
 
 The channel-based runtimes (the tokio client, and any consumer talking to the

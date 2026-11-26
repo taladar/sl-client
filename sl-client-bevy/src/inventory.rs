@@ -1,5 +1,6 @@
 //! Inventory / group-member / appearance capability fetches.
 
+use crate::caps::report_caps_failure;
 use crate::http::run_get_caps_llsd;
 use crate::{Caps, EVENT_QUEUE_TIMEOUT, deliver};
 use bevy::prelude::*;
@@ -7,9 +8,10 @@ use crossbeam_channel::Sender;
 use sl_proto::{
     AIS3_FETCH_INVENTORY_TAG, AIS3_FETCH_LIBRARY_TAG, CAP_FETCH_INVENTORY, CAP_FETCH_LIBRARY,
     CAP_GROUP_MEMBER_DATA, CAP_INCREMENT_COF_VERSION, CAP_INVENTORY_API_V3, CAP_LIBRARY_API_V3,
-    CAP_UPDATE_AVATAR_APPEARANCE, Error, GroupKey, InventoryFolderKey, InventoryOwner, Llsd,
-    Session, Uuid, ais_category_children_fetch_url, build_fetch_inventory_request,
-    build_group_member_data_request, build_update_avatar_appearance_request, parse_llsd_xml,
+    CAP_UPDATE_AVATAR_APPEARANCE, Error, GroupKey, InventoryFolderKey, InventoryKey,
+    InventoryOwner, Llsd, Session, Uuid, ais_category_children_fetch_url,
+    build_fetch_inventory_request, build_group_member_data_request,
+    build_update_avatar_appearance_request, parse_llsd_xml,
 };
 use std::time::Instant;
 
@@ -79,6 +81,95 @@ pub(crate) fn fetch_folder_contents(
         }
     }
     Ok(())
+}
+
+/// Fetches `items` by id ([`Command::FetchInventoryItems`](sl_proto::Command::FetchInventoryItems)):
+/// one request per tree the held model files them in
+/// ([`Session::item_fetch_requests`]), POSTed to `FetchInventory2` /
+/// `FetchLib2` on a worker thread where the region grants it, else sent as the
+/// legacy UDP `FetchInventory` ([`Session::request_inventory_items`]). Every
+/// road decodes to
+/// [`SessionEvent::InventoryBulkUpdate`](sl_proto::Event::InventoryBulkUpdate).
+/// Mirrors the tokio `fetch_inventory_items`.
+///
+/// # Errors
+///
+/// Returns [`Error::NoCircuit`] before login, and the UDP fallback's send
+/// error. The CAPS POST is fire-and-forget: a failure is reported as a failure
+/// of its capability.
+pub(crate) fn fetch_inventory_items(
+    session: &mut Session,
+    items: &[InventoryKey],
+    caps: Option<&Caps>,
+    now: Instant,
+) -> Result<(), Error> {
+    for request in session.item_fetch_requests(items)? {
+        let cap = request.capability();
+        match caps.and_then(|caps| Some((caps.map.get(cap).cloned()?, caps.events_tx.clone()))) {
+            Some((url, events_tx)) => {
+                let body = request.body();
+                crate::log_context::spawn_thread(move || {
+                    run_item_fetch(&url, body, cap, &events_tx);
+                });
+            }
+            None => session.request_inventory_items(&request, now)?,
+        }
+    }
+    Ok(())
+}
+
+/// POSTs one per-item fetch `body` to the `cap` (`FetchInventory2` /
+/// `FetchLib2`) URL (blocking) and forwards the LLSD reply to `caps_tx` tagged
+/// `cap`, for the session to merge. A POST that cannot be sent, is rejected, or
+/// answers with something that is not LLSD is logged and reported as a failure
+/// of `cap`, so a fetch that never works does not look like one still pending.
+/// Mirrors the tokio `post_item_fetch`.
+fn run_item_fetch(
+    cap_url: &str,
+    body: String,
+    cap: &'static str,
+    caps_tx: &Sender<(String, Llsd)>,
+) {
+    let http = match crate::http_proxy::blocking_client_builder()
+        .timeout(EVENT_QUEUE_TIMEOUT)
+        .build()
+    {
+        Ok(http) => http,
+        Err(error) => {
+            tracing::warn!("could not build the HTTP client for the {cap} item fetch: {error}");
+            report_caps_failure(caps_tx, cap);
+            return;
+        }
+    };
+    let response = match http
+        .post(cap_url)
+        .header("Content-Type", "application/llsd+xml")
+        .body(body)
+        .send()
+    {
+        Ok(response) if response.status().is_success() => response,
+        Ok(response) => {
+            tracing::warn!(status = %response.status(), "the {cap} item fetch was rejected");
+            report_caps_failure(caps_tx, cap);
+            return;
+        }
+        Err(error) => {
+            tracing::warn!("the {cap} item fetch could not be sent: {error}");
+            report_caps_failure(caps_tx, cap);
+            return;
+        }
+    };
+    let parsed = match response.text() {
+        Ok(text) => parse_llsd_xml(&text).map_err(|error| error.to_string()),
+        Err(error) => Err(error.to_string()),
+    };
+    match parsed {
+        Ok(llsd) => deliver(caps_tx, (cap.to_owned(), llsd)),
+        Err(error) => {
+            tracing::warn!("the {cap} item fetch reply could not be read: {error}");
+            report_caps_failure(caps_tx, cap);
+        }
+    }
 }
 
 /// The AIS3 capability a folder of the agent's tree (`library == false`) or of

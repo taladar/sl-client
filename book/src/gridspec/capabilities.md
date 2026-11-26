@@ -36,7 +36,7 @@ What OpenSim refuses, grouped by what a viewer loses:
 
 | area | refused on OpenSim | what a viewer does instead |
 | --- | --- | --- |
-| inventory | `InventoryAPIv3`, `LibraryAPIv3`, `FetchLib2`, `FetchLibDescendents2` | `FetchInventoryDescendents2` / `FetchInventory2` for the agent's tree and its background crawl, UDP `FetchInventoryDescendents` for the Library |
+| inventory | `InventoryAPIv3`, `LibraryAPIv3`, `FetchLib2`, `FetchLibDescendents2` | `FetchInventoryDescendents2` / `FetchInventory2` for the agent's tree and its background crawl, UDP `FetchInventoryDescendents` for the Library; a Library item cannot be fetched by id (the UDP `FetchInventory` goes unanswered) |
 | experiences | `AgentExperiences`, `ExperiencePreferences`, `ExperienceQuery`, `FindExperienceByName`, `GetAdminExperiences`, `GetCreatorExperiences`, `GetExperienceInfo`, `GetExperiences`, `GroupExperiences`, `IsExperienceAdmin`, `IsExperienceContributor`, `RegionExperiences`, `UpdateExperience` | nothing: stock OpenSim has no experiences; the client reports each request it cannot send, and the viewer says experiences are not available here (since 2026-11-13, below) |
 | voice | `ProvisionVoiceAccountRequest`, `ParcelVoiceInfoRequest`, `VoiceSignalingRequest` | nothing: a stock region loads no voice module (each request reported, as above) |
 | groups and chat | `AcceptGroupInvite`, `DeclineGroupInvite`, `ChatSessionRequest` | the UDP `ImprovedInstantMessage` forms; a session's server-side history is not available |

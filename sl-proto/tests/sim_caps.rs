@@ -53,11 +53,11 @@ mod test {
         DayCycle, DisplayName, EnvironmentSettings, EnvironmentUpdate, Event, ExperienceInfo,
         ExperienceKey, ExperiencePermission, ExperienceProperties, ExperienceUpdate,
         FaceMaterialPut, GroupKey, ImDialog, ImSessionId, InMemoryAssetSource, InstantMessage,
-        InventoryFolder, InventoryFolderKey, InventoryItem, InventoryKey, LAND_RESOURCE_DETAIL_TAG,
-        LAND_RESOURCE_SUMMARY_TAG, LLSD_XML_CONTENT_TYPE, LegacyMaterial, LoginParams, LslKeyword,
-        LslSyntax, MaterialOverrideUpdate, MediaEntry, ObjectCost, ObjectKey, ObjectMediaState,
-        ObjectPhysicsData, OwnerKey, ParcelKey, ParcelScriptResources, Permissions5,
-        PhysicsShapeType, REQUESTED_CAPABILITIES, RegionCoordinates, RegionHandle,
+        InventoryFolder, InventoryFolderKey, InventoryItem, InventoryKey, InventoryOwner,
+        LAND_RESOURCE_DETAIL_TAG, LAND_RESOURCE_SUMMARY_TAG, LLSD_XML_CONTENT_TYPE, LegacyMaterial,
+        LoginParams, LslKeyword, LslSyntax, MaterialOverrideUpdate, MediaEntry, ObjectCost,
+        ObjectKey, ObjectMediaState, ObjectPhysicsData, OwnerKey, ParcelKey, ParcelScriptResources,
+        Permissions5, PhysicsShapeType, REQUESTED_CAPABILITIES, RegionCoordinates, RegionHandle,
         RegionLocalParcelId, RemoteParcelRequest, ResourceAmount, ResourceSummary,
         ScriptedObjectInfo, ScriptedObjectResources, SelectedCostKind, SelectedResourceCost,
         ServerEvent, ServerHistoryMessage, Session, SimCaps, SimChatSessionKind, SimParcel,
@@ -2966,6 +2966,115 @@ mod test {
                 .collect::<Vec<_>>(),
             vec!["Library Texture".to_owned()]
         );
+        Ok(())
+    }
+
+    /// `Session::item_fetch_requests` asks each item of the tree the held model
+    /// files it in: a Library item of `FetchLib2`, addressed to the Library
+    /// owner, and an agent item — or one the model does not hold — of
+    /// `FetchInventory2`, addressed to the agent. Each request's body, POSTed
+    /// to its own capability and fed back under that name, merges the items
+    /// into the right tree; the grid leaves the unknown id out.
+    #[test]
+    fn item_fetch_requests_route_each_item_to_its_tree() -> Result<(), TestError> {
+        let mut caps = new_caps()?;
+        let mut sim = new_sim();
+        seed_inventory(&mut sim);
+        let now = Instant::now();
+        let agent = uuid::Uuid::from_u128(1);
+        let library_owner = uuid::Uuid::from_u128(0x11B0);
+        let mut client = new_client()?;
+        let mut login = LoginSuccess::minimal(
+            AgentKey::from(agent),
+            uuid::Uuid::from_u128(2),
+            uuid::Uuid::from_u128(3),
+            CircuitCode(0x0011_2233),
+            Ipv4Addr::new(127, 0, 0, 1),
+            9000,
+            "http://127.0.0.1:9000/seed".parse()?,
+        );
+        login.library_owner = Some(AgentKey::from(library_owner));
+        client.handle_login_response(LoginResponse::Success(Box::new(login)), now)?;
+        drain_client(&mut client);
+
+        // The model learns the Library texture is the Library's.
+        let body = build_fetch_inventory_items_request(
+            agent,
+            &[FetchItemRef {
+                owner_id: library_owner,
+                item_id: item_key(LIB_TEXTURE),
+            }],
+        );
+        let path = granted_cap_path(&caps, CAP_FETCH_LIBRARY_ITEM)?;
+        let (_, reply) = respond(&mut caps, &mut sim, &post(&path, &body))?;
+        client.handle_caps_event(CAP_FETCH_LIBRARY_ITEM, &parse_llsd_xml(&reply)?, now)?;
+        drain_client(&mut client);
+        assert_eq!(
+            client.inventory_item_owner(item_key(LIB_TEXTURE)),
+            Some(InventoryOwner::Library)
+        );
+        assert_eq!(client.inventory_item_owner(item_key(AGENT_HAT)), None);
+
+        let requests = client.item_fetch_requests(&[
+            item_key(AGENT_HAT),
+            item_key(LIB_TEXTURE),
+            item_key(0xdead),
+        ])?;
+        assert_eq!(
+            requests
+                .iter()
+                .map(|request| (request.tree, request.capability(), request.agent_id))
+                .collect::<Vec<_>>(),
+            vec![
+                (InventoryOwner::Agent, CAP_FETCH_INVENTORY_ITEM, agent),
+                (InventoryOwner::Library, CAP_FETCH_LIBRARY_ITEM, agent),
+            ]
+        );
+        assert_eq!(
+            requests.first().map(|request| request.items.clone()),
+            Some(vec![
+                FetchItemRef {
+                    owner_id: agent,
+                    item_id: item_key(AGENT_HAT),
+                },
+                FetchItemRef {
+                    owner_id: agent,
+                    item_id: item_key(0xdead),
+                },
+            ])
+        );
+        assert_eq!(
+            requests.get(1).map(|request| request.items.clone()),
+            Some(vec![FetchItemRef {
+                owner_id: library_owner,
+                item_id: item_key(LIB_TEXTURE),
+            }])
+        );
+
+        let mut fetched = Vec::new();
+        for request in &requests {
+            let path = granted_cap_path(&caps, request.capability())?;
+            let (status, reply) = respond(&mut caps, &mut sim, &post(&path, &request.body()))?;
+            assert_eq!(status, 200);
+            client.handle_caps_event(request.capability(), &parse_llsd_xml(&reply)?, now)?;
+            for event in drain_client(&mut client) {
+                if let Event::InventoryBulkUpdate { items, .. } = event {
+                    fetched.extend(items.into_iter().map(|item| item.item_id));
+                }
+            }
+        }
+        assert_eq!(fetched, vec![item_key(AGENT_HAT), item_key(LIB_TEXTURE)]);
+        assert_eq!(
+            client.inventory_item_owner(item_key(AGENT_HAT)),
+            Some(InventoryOwner::Agent)
+        );
+        assert_eq!(
+            client.inventory_item_owner(item_key(LIB_TEXTURE)),
+            Some(InventoryOwner::Library)
+        );
+
+        // Nothing to fetch is no request at all.
+        assert!(client.item_fetch_requests(&[])?.is_empty());
         Ok(())
     }
 

@@ -2506,6 +2506,18 @@ fn all_specs() -> Vec<CommandSpec> {
             },
         },
         CommandSpec {
+            name: "fetch_inventory_items",
+            usage: "<item_ids: id,id,…>",
+            build: |args, ctx| {
+                Ok(Command::FetchInventoryItems(
+                    args.vec_uuid(ctx, "item_ids", 0)?
+                        .into_iter()
+                        .map(InventoryKey::from)
+                        .collect(),
+                ))
+            },
+        },
+        CommandSpec {
             name: "query_inventory_folder",
             usage: "<folder_id> [limit]",
             // The `before` page cursor is opaque (the runtime mints it on a reply),

@@ -1,13 +1,14 @@
 //! Inventory capability fetches (AIS / FetchInventory, GroupMemberData).
 
-use crate::caps::deliver;
+use crate::caps::{deliver, report_caps_failure};
 use crate::http::get_caps_llsd;
 use reqwest::Client as ReqwestClient;
 use sl_proto::{
     AIS3_FETCH_INVENTORY_TAG, AIS3_FETCH_LIBRARY_TAG, CAP_FETCH_INVENTORY, CAP_FETCH_LIBRARY,
     CAP_GROUP_MEMBER_DATA, CAP_INVENTORY_API_V3, CAP_LIBRARY_API_V3, Error as ProtoError, GroupKey,
-    InventoryFolderKey, InventoryOwner, Llsd, Session, Uuid, ais_category_children_fetch_url,
-    build_fetch_inventory_request, build_group_member_data_request, parse_llsd_xml,
+    InventoryFolderKey, InventoryKey, InventoryOwner, Llsd, Session, Uuid,
+    ais_category_children_fetch_url, build_fetch_inventory_request,
+    build_group_member_data_request, parse_llsd_xml,
 };
 use std::collections::HashMap;
 use std::time::Instant;
@@ -78,6 +79,88 @@ pub(crate) fn fetch_folder_contents(
             Ok(())
         }
         None => session.request_folder_contents(folder_id, now),
+    }
+}
+
+/// Fetches `items` by id ([`Command::FetchInventoryItems`](sl_proto::Command::FetchInventoryItems)):
+/// one request per tree the held model files them in
+/// ([`Session::item_fetch_requests`]), POSTed to `FetchInventory2` /
+/// `FetchLib2` where the region grants it, else sent as the legacy UDP
+/// `FetchInventory` ([`Session::request_inventory_items`]). Every road decodes
+/// to [`Event::InventoryBulkUpdate`](sl_proto::Event::InventoryBulkUpdate).
+///
+/// # Errors
+///
+/// Returns [`Error::NoCircuit`](sl_proto::Error::NoCircuit) before login, and
+/// the UDP fallback's send error. The CAPS POST is fire-and-forget: a failure
+/// is reported as a failure of its capability.
+pub(crate) fn fetch_inventory_items(
+    session: &mut Session,
+    items: &[InventoryKey],
+    caps: &HashMap<String, String>,
+    http: &ReqwestClient,
+    caps_tx: &mpsc::Sender<(String, Llsd)>,
+    now: Instant,
+) -> Result<(), ProtoError> {
+    for request in session.item_fetch_requests(items)? {
+        let cap = request.capability();
+        match caps.get(cap) {
+            Some(url) => {
+                tokio::spawn(post_item_fetch(
+                    url.clone(),
+                    request.body(),
+                    cap,
+                    http.clone(),
+                    caps_tx.clone(),
+                ));
+            }
+            None => session.request_inventory_items(&request, now)?,
+        }
+    }
+    Ok(())
+}
+
+/// POSTs one per-item fetch `body` to the `cap` (`FetchInventory2` /
+/// `FetchLib2`) URL and forwards the LLSD reply to `caps_tx` tagged `cap`, for
+/// the session to merge. A POST that cannot be sent, is rejected, or answers
+/// with something that is not LLSD is logged and reported as a failure of
+/// `cap`, so a fetch that never works does not look like one still pending.
+async fn post_item_fetch(
+    cap_url: String,
+    body: String,
+    cap: &'static str,
+    http: ReqwestClient,
+    caps_tx: mpsc::Sender<(String, Llsd)>,
+) {
+    let response = match http
+        .post(&cap_url)
+        .header("Content-Type", "application/llsd+xml")
+        .body(body)
+        .send()
+        .await
+    {
+        Ok(response) if response.status().is_success() => response,
+        Ok(response) => {
+            tracing::warn!(status = %response.status(), "the {cap} item fetch was rejected");
+            report_caps_failure(&caps_tx, cap).await;
+            return;
+        }
+        Err(error) => {
+            tracing::warn!("the {cap} item fetch could not be sent: {error}");
+            report_caps_failure(&caps_tx, cap).await;
+            return;
+        }
+    };
+    let parsed = match response.text().await {
+        Ok(text) => parse_llsd_xml(&text).map_err(|error| error.to_string()),
+        Err(error) => Err(error.to_string()),
+    };
+    match parsed {
+        Ok(llsd) => deliver(&caps_tx, (cap.to_owned(), llsd)).await,
+        Err(error) => {
+            tracing::warn!("the {cap} item fetch reply could not be read: {error}");
+            report_caps_failure(&caps_tx, cap).await;
+        }
     }
 }
 

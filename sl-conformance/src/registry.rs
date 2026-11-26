@@ -134,6 +134,7 @@ pub fn registry() -> Vec<Box<dyn GridTest>> {
         Box::new(crate::cases::inventory_tree_crawl::InventoryTreeCrawl),
         Box::new(crate::cases::library_tree_fetch::LibraryTreeFetch),
         Box::new(crate::cases::inventory_item_ops::InventoryItemOps),
+        Box::new(crate::cases::inventory_item_fetch::InventoryItemFetch),
         Box::new(crate::cases::inventory_cache_skip::InventoryCacheSkip),
         Box::new(crate::cases::give_inventory::GiveInventory),
         Box::new(crate::cases::ais3_folder_lifecycle::Ais3FolderLifecycle),

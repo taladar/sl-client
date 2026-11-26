@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 130 |
-| ready | 328 |
+| ready | 327 |
 | blocked | 35 |
 | in-progress | 4 |
 | bugs | 4 |
-| done | 1628 |
+| done | 1629 |
 | deferred | 30 |
 | wont-do | 24 |
 | **total** | **2183** |
@@ -315,7 +315,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-lsl-opensim-function-set`](ideas/gridspec-lsl-opensim-function-set.md)
   — Measure which library functions OpenSim's engines compile
 
-## ready (328)
+## ready (327)
 
 ### protocol
 
@@ -329,8 +329,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — SimSession's 54 fields mix the driver's serving stores with the circuit
 - [`protocol-cap-update-agent-information`](ready/protocol-cap-update-agent-information.md)
   — Set the maturity preference over UpdateAgentInformation
-- [`protocol-fetch-inventory-items-request`](ready/protocol-fetch-inventory-items-request.md)
-  — Fetching inventory items by id (FetchInventory2's request half)
 - [`protocol-sim-profile-messages`](ready/protocol-sim-profile-messages.md) —
   SimSession — decode profile requests and send profile replies
 - [`protocol-sl-llsd-serde`](ready/protocol-sl-llsd-serde.md) — serde
@@ -1253,7 +1251,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-rigged-hair-triangle-pattern`](bugs/viewer-rigged-hair-triangle-pattern.md)
   — Rigged mesh hair shows a pattern of individual triangles
 
-## done (1628)
+## done (1629)
 
 ### protocol
 
@@ -1498,6 +1496,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — An experience's sky follows you off its land, and nothing takes it back
 - [`protocol-experience-search-paging`](done/protocol-experience-search-paging.md)
   — Carry the experience search's paging URLs through to the viewer
+- [`protocol-fetch-inventory-items-request`](done/protocol-fetch-inventory-items-request.md)
+  — Fetching inventory items by id (FetchInventory2's request half)
 - [`protocol-group-fetch-history-403-on-aditi`](done/protocol-group-fetch-history-403-on-aditi.md)
   — A group session's automatic fetch history is answered 403 on aditi
 - [`protocol-im-states-no-position`](done/protocol-im-states-no-position.md) —

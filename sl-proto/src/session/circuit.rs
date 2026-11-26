@@ -86,9 +86,10 @@ use sl_wire::messages::{
     EventInfoRequestEventDataBlock, EventNotificationAddRequest,
     EventNotificationAddRequestAgentDataBlock, EventNotificationAddRequestEventDataBlock,
     EventNotificationRemoveRequest, EventNotificationRemoveRequestAgentDataBlock,
-    EventNotificationRemoveRequestEventDataBlock, FetchInventoryDescendents,
-    FetchInventoryDescendentsAgentDataBlock, FetchInventoryDescendentsInventoryDataBlock,
-    FindAgent, FindAgentAgentBlockBlock, GenericMessage, GenericMessageAgentDataBlock,
+    EventNotificationRemoveRequestEventDataBlock, FetchInventory, FetchInventoryAgentDataBlock,
+    FetchInventoryDescendents, FetchInventoryDescendentsAgentDataBlock,
+    FetchInventoryDescendentsInventoryDataBlock, FetchInventoryInventoryDataBlock, FindAgent,
+    FindAgentAgentBlockBlock, GenericMessage, GenericMessageAgentDataBlock,
     GenericMessageMethodDataBlock, GenericMessageParamListBlock, GodKickUser,
     GodKickUserUserInfoBlock, GodlikeMessage, GodlikeMessageAgentDataBlock,
     GodlikeMessageMethodDataBlock, GodlikeMessageParamListBlock, GrantUserRights,
@@ -348,6 +349,12 @@ const fn severity_of(message: &AnyMessage) -> ReliableSeverity {
 /// ([`fill_messages`]), as `LLSelectMgr::sendListToRegions`
 /// splits it, the MTU permitting.
 const SELECTION_OBJECTS_PER_MESSAGE: usize = 254;
+
+/// How many item blocks one legacy `FetchInventory` carries. The reference
+/// fills a message until `isSendFull` says another block would cross its
+/// 1200-byte MTU; each block is two ids (32 bytes), so 32 blocks keep the
+/// message near 1 KiB with room for the header and the agent block.
+pub(crate) const FETCH_INVENTORY_ITEMS_PER_MESSAGE: usize = 32;
 
 /// How many root objects one `DeRezObject` carries, and how many packets one
 /// take may span: the reference's `MAX_ROOTS_PER_PACKET` and
@@ -2916,6 +2923,35 @@ impl Circuit {
             },
         });
         self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues the legacy per-item `FetchInventory` reliably, for `items`, in as
+    /// many messages as it takes to keep each one to
+    /// [`FETCH_INVENTORY_ITEMS_PER_MESSAGE`] blocks — the reference starts a new
+    /// message whenever the current one is full (`isSendFull`). Each block is
+    /// 32 bytes, so a full message stays well inside one datagram.
+    pub(crate) fn send_fetch_inventory(
+        &mut self,
+        items: &[sl_wire::FetchItemRef],
+        now: Instant,
+    ) -> Result<(), WireError> {
+        for chunk in items.chunks(FETCH_INVENTORY_ITEMS_PER_MESSAGE) {
+            let message = AnyMessage::FetchInventory(FetchInventory {
+                agent_data: FetchInventoryAgentDataBlock {
+                    agent_id: self.agent_id.uuid(),
+                    session_id: self.session_id,
+                },
+                inventory_data: chunk
+                    .iter()
+                    .map(|item| FetchInventoryInventoryDataBlock {
+                        owner_id: item.owner_id,
+                        item_id: item.item_id.uuid(),
+                    })
+                    .collect(),
+            });
+            self.send(&message, Reliability::Reliable, now)?;
+        }
+        Ok(())
     }
 
     /// Queues a `CreateInventoryFolder` reliably (a new folder `folder_id` named

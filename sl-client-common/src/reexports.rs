@@ -96,7 +96,7 @@ macro_rules! runtime_reexports {
             ImDialog, ImSessionId, ImageCodec, InstantMessage, InterestListMode, InterestListReply,
             InterestsUpdate, InventoryCacheConfig, InventoryCallbackId, InventoryCursor,
             InventoryFolder, InventoryFolderKey, InventoryItem, InventoryItemOrFolderKey,
-            InventoryKey, InventoryOffer, InventoryOwner, InventoryType, InviteChannel, ItemInfo,
+            InventoryKey, InventoryOffer, InventoryOwner, InventoryType, InviteChannel, ItemFetchRequest, ItemInfo,
             KEYFRAME_SLOP, Key, Kilobits, LOGOUT_TIMEOUT, LandArea, LandBrushAction,
             LandBrushRadius, LandBrushSize, LandEdit, LandImpact, LandProduct, LandSearchType,
             LandStatExtended, LandStatItem, LandStatReportType, LandStatScore, LandingType,

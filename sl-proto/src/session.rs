@@ -2289,7 +2289,7 @@ pub use chat_session::{
     SessionMessage, SessionTransition, SessionVoiceFailure, SessionVoiceRequest, VoiceChannelInfo,
     VoiceChannelState,
 };
-pub use inventory::{FolderState, InventoryOwner};
+pub use inventory::{FolderState, InventoryOwner, ItemFetchRequest};
 pub use inventory_cache::INVENTORY_CACHE_VERSION;
 pub use legacy_preset::{
     LEGACY_DAY_SKY_FRAME_PREFIX, LEGACY_DAY_WATER_FRAME_PREFIX, LEGACY_DAY_WATER_PRESET,

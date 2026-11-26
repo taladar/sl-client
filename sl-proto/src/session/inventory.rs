@@ -45,6 +45,48 @@ pub enum InventoryOwner {
     Library,
 }
 
+/// One per-item inventory fetch, for the items of one tree: the body of a
+/// `FetchInventory2` (agent) or `FetchLib2` (Library) POST, or of the legacy
+/// UDP `FetchInventory` a region without those capabilities is asked instead.
+///
+/// Built by [`Session::item_fetch_requests`](crate::Session::item_fetch_requests),
+/// which splits the requested items by the tree the held model files them in,
+/// as the reference's `fetchItemsFromServer` splits them between its two
+/// capabilities.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ItemFetchRequest {
+    /// The tree every item of this request belongs to.
+    pub tree: InventoryOwner,
+    /// The requesting agent.
+    pub agent_id: Uuid,
+    /// The items, each addressed to its tree's owner (the agent, or the
+    /// Library owner).
+    pub items: Vec<sl_wire::FetchItemRef>,
+}
+
+impl ItemFetchRequest {
+    /// The capability this request is POSTed to, which is also the tag its
+    /// reply is handed back to
+    /// [`Session::handle_caps_event`](crate::Session::handle_caps_event) under:
+    /// [`CAP_FETCH_INVENTORY_ITEM`](crate::CAP_FETCH_INVENTORY_ITEM) for the
+    /// agent's tree, [`CAP_FETCH_LIBRARY_ITEM`](crate::CAP_FETCH_LIBRARY_ITEM)
+    /// for the Library.
+    #[must_use]
+    pub const fn capability(&self) -> &'static str {
+        match self.tree {
+            InventoryOwner::Agent => crate::CAP_FETCH_INVENTORY_ITEM,
+            InventoryOwner::Library => crate::CAP_FETCH_LIBRARY_ITEM,
+        }
+    }
+
+    /// The LLSD-XML body of the capability POST:
+    /// `{ agent_id, items: [ { owner_id, item_id } ] }`.
+    #[must_use]
+    pub fn body(&self) -> String {
+        sl_wire::build_fetch_inventory_items_request(self.agent_id, &self.items)
+    }
+}
+
 /// The fetch state of a folder's *contents* (its immediate children), tracked
 /// separately from [`InventoryFolder::version`] — which records the folder's
 /// authoritative version even while its contents are unfetched: a skeleton

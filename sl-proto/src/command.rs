@@ -260,6 +260,17 @@ pub enum Command {
     /// path (`FetchInventoryDescendents2`) — the modern path used on Second Life.
     /// Each folder's contents arrive as an [`Event::InventoryDescendents`](crate::Event::InventoryDescendents).
     FetchInventoryFolders(Vec<InventoryFolderKey>),
+    /// Fetch inventory **items** by id — the per-item fetch, for an item whose
+    /// folder is too large to refetch for one entry, or one the held model
+    /// does not have yet. Each item is asked of the tree the held model files
+    /// it in: `FetchInventory2` for the agent's own items (and any item the
+    /// model does not hold), `FetchLib2` for the Library's, or the legacy UDP
+    /// `FetchInventory` where the region grants neither (see
+    /// [`Session::item_fetch_requests`](crate::Session::item_fetch_requests)).
+    /// The items arrive merged into the held model as an
+    /// [`Event::InventoryBulkUpdate`](crate::Event::InventoryBulkUpdate) with a
+    /// nil transaction id; an item the grid does not know is left out of it.
+    FetchInventoryItems(Vec<InventoryKey>),
     /// Query one bounded page of an inventory folder's held contents from the
     /// in-memory model. The runtime replies with
     /// [`Event::InventoryFolderPage`](crate::Event::InventoryFolderPage) built from
@@ -3274,6 +3285,7 @@ impl Command {
             Self::GodDeleteClassified { .. } => "GodDeleteClassified",
             Self::RequestFolderContents(..) => "RequestFolderContents",
             Self::FetchInventoryFolders(..) => "FetchInventoryFolders",
+            Self::FetchInventoryItems(..) => "FetchInventoryItems",
             Self::QueryInventoryFolder { .. } => "QueryInventoryFolder",
             Self::QueryInventoryRoots => "QueryInventoryRoots",
             Self::QueryInventoryFolders => "QueryInventoryFolders",

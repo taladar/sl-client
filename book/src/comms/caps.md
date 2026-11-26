@@ -516,7 +516,10 @@ driver persisting inventory.
   `{ agent_id, items }` over the same flat item shape the descendents
   caps use). Unknown ids are omitted (OpenSim-identical) and the reply
   never carries an `error` member — the viewer treats one as a failed
-  fetch. The client now requests both caps and folds their replies into
+  fetch. The client requests both caps, asks them through
+  `Command::FetchInventoryItems` (routed per tree by
+  `Session::item_fetch_requests`, with the legacy UDP `FetchInventory` where
+  neither is granted) and folds their replies into
   `Event::InventoryBulkUpdate`. Note the real cap name is `FetchLib2`,
   not "FetchLibrary2".
 - **`InventoryAPIv3` / `LibraryAPIv3`** route on HTTP verb × URL sub-path
