@@ -12,6 +12,10 @@
 //! `fs` plus pure logic — so they live here instead, and both runtimes depend
 //! on this crate:
 //!
+//! - [`avatar_dirs`] — the per-avatar directories of the disk features,
+//!   resolved at login once the agent's UUID is known.
+//! - [`agent_parcel`] — the agent's current parcel, fly permission and seat,
+//!   as one snapshot mirrored out of the session.
 //! - [`chat_log`] — the file-I/O shell over `sl_proto`'s sans-IO chat-log core
 //!   (the local wall clock, the transcript append/seek, and the name/path
 //!   caches the Firestorm format needs).
@@ -23,8 +27,11 @@
 //!   into a [`Session`](sl_proto::Session) at login and saved back on a timer.
 //! - [`lsl_syntax_cache`] — the gzipped on-disk cache of the grid's
 //!   `LSLSyntax` capability document, keyed by the id the grid advertises.
+//! - [`parcel_overlays`] — the parcel-ownership overlay grids of every held
+//!   region, reassembled from the pushed chunks.
 //! - [`ranges`] — what a partial answer says of the whole asset's length,
 //!   read from its `Content-Range`.
+//! - [`reexports`] — the one list of library items both runtimes re-export.
 //! - [`retry`] — the transient-HTTP-error retry policy (which statuses are
 //!   worth retrying, and the backoff before each attempt). It yields a
 //!   [`Duration`](std::time::Duration); *how* to wait it out is the caller's
@@ -35,10 +42,14 @@
 //! proxy shells differ by more than half their lines, and everything that owns
 //! a task, a channel or a timer cannot be shared at all.
 
+pub mod agent_parcel;
+pub mod avatar_dirs;
 pub mod chat_log;
 pub mod error_chain;
 pub mod event_queues;
 pub mod inventory_cache;
 pub mod lsl_syntax_cache;
+pub mod parcel_overlays;
 pub mod ranges;
+pub mod reexports;
 pub mod retry;

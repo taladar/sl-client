@@ -25,7 +25,6 @@ reqwest = { workspace = true, features = [
 ] }
 sl-asset = { workspace = true }
 sl-client-common = { workspace = true }
-sl-material = { workspace = true }
 sl-mesh = { workspace = true }
 sl-proto = { workspace = true }
 sl-texture = { path = "../sl-texture", version = "0.1.0" }

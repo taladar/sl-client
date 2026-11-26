@@ -1,7 +1,6 @@
 #![doc = include_str!("../README.md")]
 
 use std::net::{SocketAddr, UdpSocket};
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -32,10 +31,10 @@ use sl_proto::{
     CAP_UPDATE_SCRIPT_TASK, CAP_UPLOAD_AGENT_PROFILE_IMAGE, CAP_USER_INFO, CAP_VOICE_SIGNALING,
     CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE, CHAT_SESSION_DECLINE_P2P_VOICE,
     CHAT_SESSION_FETCH_HISTORY, CHAT_SESSION_INVITE, CHAT_SESSION_START_CONFERENCE,
-    Event as SessionEvent, HomeLocationRequest, INVENTORY_FETCH_MAX_IN_FLIGHT, LoginResponse,
+    Event as SessionEvent, HomeLocationRequest, INVENTORY_FETCH_MAX_IN_FLIGHT,
     MODIFY_REGION_WRITE_TAG, NeighbourCaps, NewFileAgentInventoryRequest,
-    OFFLINE_DRAIN_CAPABILITIES, RECV_BUFFER_SIZE, REQUESTED_CAPABILITIES, Session, SessionMessage,
-    UserInfoUpdate, agent_profile_notes_body, agent_profile_put_body, agent_profile_url,
+    OFFLINE_DRAIN_CAPABILITIES, RECV_BUFFER_SIZE, Session, UserInfoUpdate,
+    agent_profile_notes_body, agent_profile_put_body, agent_profile_url,
     ais_category_children_fetch_url, ais_category_children_url, ais_category_url,
     ais_create_category_url, ais_item_url, associate_inventory_request, avatar_picker_search_query,
     build_agent_preferences_request, build_ais_create_category_body, build_ais_create_link_body,
@@ -60,303 +59,15 @@ use sl_proto::{
     parse_login_response, set_display_name_body, update_listing_request,
 };
 
-// Re-export the core types a consumer needs to configure the plugin, drive the
-// survey commands, and read events. `Event` is aliased to avoid clashing with
-// Bevy's `Event` derive.
-pub use sl_proto::{
-    ASSET_CODE_LINK, ASSET_CODE_LINK_FOLDER, ActiveGroup, AdultListingBits, AgentKey,
-    AgentOrObjectKey, AgentPreferences, AlertInfo, AnimatedObjects, AnimationKey, AnyMessage,
-    Arrival, AssetKey, AssetUpdateLocation, AssociateInventory, AttachmentMode, AttachmentPoint,
-    AvatarAppearance, AvatarClassified, AvatarGroupMembership, AvatarInterests, AvatarName,
-    AvatarPick, AvatarPickerResult, AvatarProperties, AvatarRenderInfo, AvatarRenderReport,
-    BUILTIN_UI_SOUNDS, Camera, CameraError, ChatAudible, ChatChannel, ChatLogConfig, ChatMessage,
-    ChatSessionAgentUpdate, ChatSessionKind, ChatSessionReply, ChatSessionRequestPurpose,
-    ChatSource, ChatSourceType, ChatType, ChatTypeNotAVolume, Child, CircuitCode, CircuitId,
-    CircuitProbe, ClassifiedCategory, ClassifiedClickStats, ClassifiedInfo, ClassifiedKey,
-    ClassifiedQueryFlags, ClassifiedSearchClicks, ClassifiedUpdate, ClickAction, ClientDirectories,
-    ClockStyle, CloudPosDensity, CoarseLocation, Color, ColorAlpha, ColumnUnit, Command,
-    ControlFlags, ConversationKind, CreateGroupParams, CreateListing, DEFAULT_BLOOM_TEXTURE,
-    DEFAULT_CLOUD_TEXTURE, DEFAULT_HALO_TEXTURE, DEFAULT_MOON_TEXTURE, DEFAULT_PRIM_TEXTURE,
-    DEFAULT_RAINBOW_TEXTURE, DEFAULT_SUN_TEXTURE, DEFAULT_WATER_NORMAL_TEXTURE, DayCycle,
-    DayCycleFrame, DayNames, DayTrack, DeRezDestination, DensityLayer, DetachOrder, Diagnostic,
-    DirClassifiedResult, DirEventResult, DirFindFlags, DirGroupResult, DirLandResult,
-    DirPeopleResult, DirPlaceResult, Direction, DirectoryVisibility, DisconnectReason, DisplayName,
-    DisplayNameUpdate, Distance, DynamicMenus, EconomyData, EnvironmentAsset,
-    EnvironmentPushAction, EnvironmentSettings, EnvironmentUpdate, Error as SessionError,
-    EstateAccessDelta, EstateAccessKind, EstateAccessLists, EstateBan, EstateCovenant, EstateInfo,
-    EstateInfoUpdate, EventId, EventInfo, ExperienceEnvironmentPush, ExperienceEvent,
-    ExperienceEventPermission, ExperienceInfo, ExperienceKey, ExperienceLocation,
-    ExperiencePermission, ExperienceProperties, ExperienceSearchPage, ExperienceUpdate,
-    ExtendedMesh, FaceMaterialPut, FlexibleData, FolderInfo, FolderState, FolderType, Friend,
-    FriendKey, FriendPresence, FriendRights, GestureActivation, GlobalCoordinates, Glow,
-    GltfMaterialOverride, GridCoordinates, GroupBan, GroupBanAction, GroupInvitationReceived,
-    GroupKey, GroupMember, GroupMembership, GroupNotice, GroupNoticeAttachment, GroupNoticeItem,
-    GroupNoticeKey, GroupNoticeReceived, GroupProfile, GroupRequestId, GroupRole, GroupRoleChange,
-    GroupRoleEdit, GroupRoleKey, GroupRoleMember, GroupRoleMemberChange, GroupRoleUpdateType,
-    GroupTitle, HomeLocation, HomeLocationAnswer, IceCandidate, ImDialog, ImSessionId,
-    InstantMessage, InterestListMode, InterestListReply, InterestsUpdate, InventoryCacheConfig,
-    InventoryCallbackId, InventoryCursor, InventoryFolder, InventoryFolderKey, InventoryItem,
-    InventoryItemOrFolderKey, InventoryKey, InventoryOffer, InventoryOwner, InventoryType,
-    InviteChannel, ItemInfo, KEYFRAME_SLOP, Key, Kilobits, LOGOUT_TIMEOUT, LandArea,
-    LandBrushAction, LandBrushRadius, LandBrushSize, LandEdit, LandImpact, LandProduct,
-    LandSearchType, LandStatExtended, LandStatItem, LandStatReportType, LandStatScore, LandingType,
-    LegacyMaterial, LegacyPresetError, LightData, LightImage, LindenAmount, LindenBalance, Listing,
-    ListingId, Llsd, LoadUrlRequest, LoggedChatType, LoginAccount, LoginFailure, LoginParams,
-    LoginRejectKind, LoginRequest, LoginServer, LookAtType, LureDestination, LureId, MAX_FACES,
-    MEDIA_PERM_ALL, MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP, MEDIA_PERM_NONE, MEDIA_PERM_OWNER,
-    MUTE_LIST_LIMIT, MapBlockBatch, MapBlockKind, MapBlockRecord, MapItem, MapItemType, MapLayer,
-    MapRegionInfo, MapRequestFlags, MarketplaceApiError, MarketplaceApiErrorKind,
-    MarketplaceAssociateInventoryInfo, MarketplaceInventoryInfo, MarketplaceOperation, Material,
-    MaterialOverrideUpdate, Maturity, MediaEntry, MerchantStatus, MeshKey, MeshUploadStatus,
-    MessageCursor, MessageId, MessageStatus, MfaChallenge, ModifyRegionAnswer, MoneyBalance,
-    MoneyTransaction, MoneyTransactionType, MovementMode, MuteEntry, MuteFlags, MuteList, MuteType,
-    NearbyHistoryLine, NegativeBalanceError, NeighborInfo, NeighborRetirement, NewInventoryItem,
-    NewInventoryLink, Object, ObjectBuyItem, ObjectExtraParams, ObjectFlagSettings, ObjectKey,
-    ObjectMediaResponse, ObjectMotion, ObjectPermMasks, ObjectPhysicsData, ObjectPlayingAnimation,
-    ObjectProperties, ObjectPropertiesFamily, ObjectStreamBatch, ObjectStreamEntry,
-    ObjectTransform, ObjectUpdateForm, OpenRegionInfo, OpenSimExtras, OwnerKey, PacketFlags,
-    ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelCollision,
-    ParcelDetails, ParcelFlags, ParcelInfo, ParcelKey, ParcelListingFlags, ParcelMediaCommand,
-    ParcelMediaData, ParcelMediaUpdateInfo, ParcelObjectOwner, ParcelObjectOwnersPart,
-    ParcelOverlayCell, ParcelOverlayGrid, ParcelOverlayInfo, ParcelOwnership, ParcelRect,
-    ParcelRequestResult, ParcelReturnType, ParcelStatus, ParcelUpdate, ParcelVoiceInfo,
-    ParticleSystem, PermissionField, Permissions, Permissions5, PhysicsShapeType,
-    PhysicsShapeTypes, PickInfo, PickKey, PickUpdate, PingId, PlayingAnimation, PointAtType,
-    PrimShape, PrimShapeParams, ProductType, ProfileImage, ProfileUpdate, ProposalCandidateId,
-    ProposalVoteId, QueryId, ReflectionProbe, ReflectionProbeFlags, RegionChatSettings,
-    RegionCombatSettings, RegionCoordinates, RegionDebugUpdate, RegionFlags, RegionHandle,
-    RegionHandshakeReplyFlags, RegionIdentity, RegionInfoDispatch, RegionInfoUpdate, RegionLimits,
-    RegionLocalObjectId, RegionLocalParcelId, RegionName, RegionRestartNotice, RegionSchedule,
-    RegionTerrainComposition, RegionTerrainUpdate, Reliability, RemoteParcelRequest,
-    RenderLimitCounts, RenderMaterialEntry, RenderMaterialRef, RestartDays, RestartWhen,
-    RestoreItem, RezAttachment, RezObjectParams, RezScriptParams, Rotation, SKY_TRACK_COUNT,
-    SaleInfo, SaleType, Scale, ScopedObjectId, ScopedParcelId, ScriptCompileError, ScriptControl,
-    ScriptControlAction, ScriptDialog, ScriptLanguage, ScriptMetadata, ScriptPermissionRequest,
-    ScriptPermissions, ScriptTarget, ScriptTeleportRequest, ScriptUploadLocation, SculptData,
-    SculptOrMeshKey, SequenceNumber, ServerHistoryMessage, SessionTransition, SetDisplayNameReply,
-    SettingsKind, SimStatId, SimulatorFeatures, SkySettings, SoundFlags, SoundPreload,
-    StartLocation, StartLocationParseError, StartLocationSlot, SurfaceInfo, TRACK_MAX,
-    TaskInventoryCapReply, TaskInventoryItem, TaskInventoryKey, TaskInventoryReply, TelehubInfo,
-    TeleportFlags, TerraformArea, TerrainLayerBatch, TerrainLayerType, TerrainMaterialOverrides,
-    TerrainPatch, TerrainPatchHeader, TextureAnimation, TextureEntry, TextureFace, TextureKey,
-    Throttle, ThrottleBuilder, ThrottleError, ThumbnailTarget, TimestampFormat, TransactionFlags,
-    TransactionId, TransferId, Transmit, TriggeredSound, UI_SOUND_ALERT, UI_SOUND_CLICK,
-    UI_SOUND_IM_OR_OFFER, UI_SOUND_INVALID_OP, UI_SOUND_MONEY_DOWN, UI_SOUND_MONEY_UP,
-    UI_SOUND_NEARBY_CHAT, UI_SOUND_SNAPSHOT, UI_SOUND_TELEPORT_OUT, UI_SOUND_TYPING,
-    UI_SOUND_WINDOW_CLOSE, UI_SOUND_WINDOW_OPEN, UpdatableAssetType, UpdateGroupInfoParams,
-    UpdateListing, UploadClass, UserInfo, Uuid, Vector, ViewerEffect, ViewerEffectData,
-    ViewerEffectType, VoiceAccountInfo, VoiceProvisionRequest, WaterSettings, Wearable,
-    WearableType, WireError, XferId, XferListing, avatar_texture, azimuth_altitude_to_rotation,
-    build_get_metadata_request, chat_text_muted, decode_particle_system, decode_texture_anim,
-    decode_texture_entry, encode_texture_entry, environment_asset_from_bytes,
-    environment_asset_to_bytes, expected_upload_cost, grid_to_handle, group_powers,
-    handle_to_global, handle_to_grid, legacy_day_cycle_from_bytes, legacy_preset_from_bytes,
-    legacy_preset_name, parse_get_metadata_reply, parse_task_inventory,
-    parse_task_inventory_cap_reply, particle_pattern, pcode, prim_flags,
-    rotation_to_azimuth_altitude, sim_access, sky_with_blended_values, sky_with_pushed_values,
-    stamp_get_metadata_reply, stamp_task_inventory_cap_reply, task_inventory_cap_url,
-    texture_anim_mode, water_with_blended_values, water_with_pushed_values,
-};
-// Linden's four ported WindLight sky presets and the day cycle that schedules
-// them: content both halves of the protocol need, so it lives in `sl-proto`
-// (see its `sky_presets`) and reaches the viewer through here.
-#[doc(no_inline)]
-pub use sl_proto::{Asset, AssetType, ImageCodec, Texture, TransferStatus};
-pub use sl_proto::{
-    MIDDAY, MIDNIGHT, PRESET_DAY_CYCLE_NAME, PRESET_DAY_KEYFRAMES, SUNRISE, SUNSET, SkyPreset,
-    install_preset_day_cycle, preset_day_cycle, preset_sky_schedule, sky_settings_from,
-};
-pub use sl_proto::{WireLandmarkAsset, landmark_to_wire, parse_landmark};
-// The two encodings of an inventory item update: the AIS3 `PATCH` body this
-// runtime sends where the region grants AIS3, and the legacy UDP message.
-pub use sl_proto::{ais_item_update_body, update_inventory_item_message};
-// The functions Second Life compiles and leaves out of the `LSLSyntax` document
-// it serves, for the script editor to add to that table.
-pub use sl_proto::second_life_unserved_syntax;
-// The `GetTexture` capability name, so a frontend driving the texture store
-// directly (rather than the `Command::FetchTexture` path) can resolve the cap
-// URL from an [`SlCapabilities`] map and hand it to a [`BevyTextureFetcher`].
-pub use sl_proto::CAP_GET_TEXTURE;
-// The `UpdateAvatarAppearance` capability name, so a frontend can detect the
-// modern server-side (central) bake and trigger it — a POST driven by the
-// `Command::RequestServerAppearanceUpdate` command — from an [`SlCapabilities`]
-// map, without depending on `sl_proto` directly.
-pub use sl_proto::CAP_UPDATE_AVATAR_APPEARANCE;
-// The `IncrementCOFVersion` capability name, so a frontend can tell whether the
-// grid offers the Current Outfit Folder version bump the appearance refresh
-// starts with (`Command::IncrementCofVersion`).
-pub use sl_proto::CAP_INCREMENT_COF_VERSION;
-// The `GetMesh2` / `GetMesh` capability names, the mesh counterpart of
-// [`CAP_GET_TEXTURE`]: a frontend driving the mesh store directly (rather than the
-// `Command::FetchMesh` path) resolves the cap URL from an [`SlCapabilities`] map
-// and hands it to a [`BevyMeshFetcher`].
-pub use sl_proto::{CAP_GET_MESH, CAP_GET_MESH2};
+// The library items this runtime re-exports, so a consumer can depend on it
+// alone. The list is shared with the tokio runtime (see
+// `sl_client_common::reexports`), so the two cannot drift apart. `Event` is
+// aliased so it does not clash with Bevy's `Event` derive.
+sl_client_common::runtime_reexports!();
+pub use sl_proto::{DisconnectReason as SessionDisconnectReason, Event as SlSessionEvent};
 // The legacy-material capability, for a frontend that fetches materials itself
 // (an avatar capture) through [`fetch_render_materials`].
 pub use crate::materials::fetch_render_materials;
-pub use sl_proto::CAP_RENDER_MATERIALS;
-// The `ViewerAsset` capability name, the generic-asset counterpart of
-// [`CAP_GET_TEXTURE`]: a frontend driving the [`AssetStore`] directly resolves
-// the cap URL from an [`SlCapabilities`] map and hands it to a
-// [`BevyAssetFetcher`] (used to fetch worn wearable assets for client-side
-// baking).
-pub use sl_proto::CAP_GET_OBJECT_COST;
-// The two `UpdateSettings*Inventory` capability names, so a frontend can ask the
-// question the reference's `LLEnvironment::isInventoryEnabled` asks of an
-// [`SlCapabilities`] map — *does this grid store settings assets at all* — and
-// gate its settings creators and saves on the answer. Neither URL is used
-// directly: the saves go through `Command::UpdateInventoryAsset`, which resolves
-// the cap itself.
-pub use sl_proto::CAP_UPLOAD_BAKED_TEXTURE;
-pub use sl_proto::CAP_VIEWER_ASSET;
-pub use sl_proto::{CAP_UPDATE_SETTINGS_AGENT_INVENTORY, CAP_UPDATE_SETTINGS_TASK_INVENTORY};
-// The `ObjectMedia` capability name, so a frontend can ask what the reference's
-// `LLPanelFace::refreshMedia` asks of the region before it offers to add media to
-// a face: does this region serve media-on-a-prim at all. The URL itself is not
-// used directly: `Command::SetObjectMedia` resolves the cap.
-pub use sl_proto::CAP_OBJECT_MEDIA;
-// The `DispatchRegionInfo` capability name, for the Region/Estate floater's
-// question: may the fly-over and search settings be saved here at all — only
-// the capability carries them. `Command::SetRegionInfo` resolves the cap.
-pub use sl_proto::CAP_DISPATCH_REGION_INFO;
-// The `ModifyRegion` capability name, for the Region/Estate floater's Terrain
-// tab: may the PBR terrain materials' transforms be read and written here at
-// all (Second Life grants it, OpenSim does not). The two terrain-override
-// commands resolve the cap.
-pub use sl_proto::CAP_MODIFY_REGION;
-// The `ModifyMaterialParams` capability name, for the same question about PBR
-// materials: a region that grants none (a stock OpenSim) takes no PBR edit, so
-// a frontend greys what would send one. `Command::ModifyMaterialParams`
-// resolves the cap.
-pub use sl_proto::CAP_MODIFY_MATERIAL_PARAMS;
-// The experience capability names a frontend asks [`SlGrantedCapabilities`]
-// about before it waits on an experience list, search or record: a region that
-// grants none (a stock OpenSim) answers none, so the surface says experiences
-// are not available here. The experience commands resolve the caps.
-pub use sl_proto::{
-    CAP_FIND_EXPERIENCE_BY_NAME, CAP_GET_EXPERIENCE_INFO, CAP_GET_EXPERIENCES,
-    CAP_REGION_EXPERIENCES,
-};
-pub use sl_proto::{DisconnectReason as SessionDisconnectReason, Event as SlSessionEvent};
-// The decoding, LOD-aware texture store, re-exported so a Bevy app can build and
-// drive one (`sl_texture::TextureEntry`/`TextureReadLease` stay accessible as
-// `sl_texture::…` to avoid colliding with `sl_proto`'s prim-face `TextureEntry`).
-pub use sl_proto::DiscardLevel;
-// `StoreStats` / `GateStats` (the pipeline-status snapshots) are the same shared
-// `sl-asset-sched` types across the texture / mesh / asset stores, so they are
-// re-exported once here (from `sl_texture`) rather than three times.
-pub use sl_texture::{
-    AssetFetcher, CacheLimits, DecodedImage as DecodedTexture, FULL_RESOLUTION_PIXEL_AREA,
-    FetchChunk, GateStats, NotRemotelyFetchable, Priority, RemoteTextureSource, ScreenMetrics,
-    StoreStats, TextureError, TextureFetchType, TextureFetcher, TextureProgress, TextureRequest,
-    TextureStore,
-};
-// The decoding, LOD-aware mesh store (the mesh counterpart of the texture
-// store). `Priority` and `MeshKey` are already re-exported (from `sl_texture` /
-// `sl_proto`); the mesh `CacheLimits` is aliased so it does not collide with the
-// texture one.
-pub use sl_mesh::{
-    AssetBytes, CacheLimits as MeshCacheLimits, DEFAULT_LOD_FACTOR, DecodedMesh, MeshDiskCache,
-    MeshEntry, MeshError, MeshFetcher, MeshHeader, MeshLod, MeshPhysics, MeshProgress,
-    MeshReadLease, MeshRequest, MeshSkin, MeshStore, PhysicsConvex, Submesh, VertexWeights,
-    est_triangles_by_lod,
-};
-
-// The generic-asset store (the opaque-blob counterpart of the texture/mesh
-// stores), fetched whole over the `ViewerAsset` capability. Its `CacheLimits` is
-// aliased so it does not collide with the texture/mesh ones; `Priority`,
-// `AssetKey`, and `AssetType` are already re-exported.
-pub use sl_asset::{
-    AssetDiskCache, AssetEntry, AssetError, AssetProgress, AssetRef, AssetStore, BlobFetcher,
-    CacheLimits as AssetCacheLimits, StaticAssetLibrary,
-};
-
-// The GLTF (PBR) render-material asset decoder (`AT_MATERIAL`), the material
-// counterpart of `sl_mesh` / `sl_texture`: the viewer fetches a material asset
-// over the `ViewerAsset` capability (the generic `AssetStore` above) and decodes
-// it into a `GltfMaterial` it maps onto a Bevy `StandardMaterial`, sourcing each
-// referenced texture from the shared `TextureStore` (P27.1). `MaterialOverride`
-// (P27.2) is the per-face delta the viewer layers on the base material, decoded
-// from a GLTF material-override `GenericStreamingMessage`.
-pub use sl_material::{
-    GltfAlphaMode, GltfMaterial, GltfTexture, GltfTextureTransform,
-    MaterialError as GltfMaterialError, MaterialOverride, TextureOverride,
-    TextureTransformOverride, encode_material_asset, encode_override_gltf_json,
-    parse_gltf_material_document, parse_material_asset, parse_material_override,
-};
-
-// The pure prim-tessellation geometry (no store/fetcher — a prim is tessellated
-// on the CPU from its shape parameters, not fetched). Re-exported so the viewer
-// can dequantize a `PrimShapeParams` into a float shape, tessellate it at a
-// `PrimLod`, and feed the resulting faces through `to_bevy_prim_mesh`. The
-// dequantized float shape is aliased `PrimShapeFloat` so it does not collide
-// with `sl_proto`'s quantized rez-params `PrimShape`.
-pub use sl_prim::{
-    FlexiAttributes, FlexiChain, HoleType, LodScaleBias, PRIM_LOD_COUNT, PathByteForm, PathCurve,
-    PrimFace, PrimFaceId, PrimLod, PrimMesh, PrimShape as PrimShapeFloat, ProfileCurve,
-    lod_triangle_counts, tessellate, tessellate_with_path,
-};
-
-// The pure sculpt-texture tessellation geometry (the sculpt counterpart of
-// `sl_prim`; likewise no store/fetcher — a sculpt is stitched on the CPU from a
-// decoded sculpt map, which the viewer sources from the shared `TextureStore`).
-// Re-exported so the viewer can feed a `DecodedTexture` (= `sl_texture`'s
-// `DecodedImage`) plus the object's `sculpt_type` byte into the stitcher and feed
-// the resulting `PrimMesh` faces through `to_bevy_prim_mesh`. Its `tessellate` is
-// aliased `tessellate_sculpt` so it does not collide with `sl_prim`'s prim
-// `tessellate`; `PrimFace` / `PrimMesh` are already re-exported (from `sl_prim`).
-// The function is taken by its module-qualified path (`tessellate::tessellate`)
-// so only the value is aliased — `sl_sculpt::tessellate` is *both* a module and a
-// function, and a bare `tessellate as …` would rename both and make doc links to
-// the name ambiguous.
-pub use sl_sculpt::tessellate::tessellate as tessellate_sculpt;
-pub use sl_sculpt::{MAX_SUBDIVISIONS, SculptParams, SculptStitch, mesh_resolution};
-
-// The pure Linden-tree geometry (the `LLVOTree` counterpart of `sl_prim` /
-// `sl_sculpt`; likewise no store/fetcher — a tree's branch / leaf geometry is
-// generated on the CPU from its species-table entry, selected by the object's
-// `state` byte). Re-exported so the viewer can look up a `TreeSpecies`, generate
-// its `TreeMesh` at a `TreeLod` (or a distance `billboard_geometry` imposter),
-// and feed it through [`to_bevy_tree_mesh`]. `RADIUS_SCALE_FACTOR` / `YAW_DEGREES`
-// are the outer-scale placement constants the viewer applies at the transform.
-pub use sl_tree::{
-    RADIUS_SCALE_FACTOR as TREE_RADIUS_SCALE_FACTOR, TreeLod, TreeMesh, TreeSpecies,
-    YAW_DEGREES as TREE_YAW_DEGREES, billboard_geometry as tree_billboard_geometry, tree_geometry,
-    tree_species,
-};
-
-// The pure Linden-grass geometry (the `LLVOGrass` counterpart of the tree path
-// above; likewise no store/fetcher — a grass clump's blade geometry is generated
-// on the CPU from its species-table entry, selected by the object's `state` byte,
-// and the object scale). Re-exported so the viewer can look up a `GrassSpecies`,
-// generate its `GrassMesh`, and feed it through [`to_bevy_grass_mesh`].
-pub use sl_tree::{GRASS_MAX_BLADES, GrassMesh, GrassSpecies, grass_geometry, grass_species};
-
-// The pure system-avatar decoders (skeleton / base body / visual params), the
-// avatar counterpart of `sl_mesh` / `sl_texture`. Re-exported so the viewer can
-// parse the standard Linden `character/` assets and drive them through
-// [`to_bevy_base_mesh`] / [`BevySkeleton`]. `AttachmentPoint` is already
-// re-exported (from `sl_proto`, which `sl_avatar` re-exports too).
-pub use sl_avatar::{
-    AppearanceValues, AttachmentPointDef, AttachmentPoints, BaseMesh, BaseMeshError, BodyPhysics,
-    BodyPhysicsState, BodySizeMetrics, BoneDeform, CollisionVolume, ColorOp, ColorRamp,
-    HAND_POSE_MORPH_PARAMS, Joint, JointSample, MaskTexture, MorphMask, MorphMasks, MorphWeights,
-    MorphedMesh, PHYSICS_MORPH_PARAMS, ParamEffect, ParamError, ParamGroup, ParamSex,
-    PartMorphMask, PhysicsDrivenParam, PhysicsMotion, PhysicsMotionConfig, PhysicsSettings,
-    RUNTIME_MORPH_PARAMS, ResolvedParams, SaleType as WearableSaleType, SkeletalDeformations,
-    Skeleton, SkeletonError, VisualParam, VisualParams, VolumeDeform, VolumeDeformations,
-    VolumeMorph, WearableAsset, WearableError, WearablePermissions, combine_layer_color,
-    global_color, global_color_params, hand_pose_morph_param, is_runtime_morph_param,
-};
-
-// The client-side avatar baker (`sl-bake`, the OpenSim / legacy path): compose a
-// bake region from ordered wearable layers, and the per-region layer plan (P15).
-pub use sl_bake::{
-    BAKE_SIZE, BakeRegion, BakedImage, Layer, LayerKind, LayerSource, LayerTint, PlannedLayer,
-    ShapeMask, ShapeMaskSpec, StaticLayers, TexGen, assemble_layers, bake_region, composite_region,
-    load_static_layers, region_layers, region_plan, region_texture_ids, shape_mask_files,
-    static_layer_files,
-};
 
 pub use crate::animations::{SampledJoint, sample_motion};
 pub use crate::assets::BevyAssetFetcher;
@@ -510,36 +221,6 @@ pub use crate::world::{
 
 /// How long to wait for a single CAPS event-queue long-poll before retrying.
 const EVENT_QUEUE_TIMEOUT: Duration = Duration::from_secs(60);
-
-/// Per-avatar directory derivation for the disk features, keyed by grid + avatar
-/// name with UUID-based rename discovery (see [`sl_account_dirs`]).
-///
-/// When set on [`SlClientPlugin`], the driver resolves the avatar's directory at
-/// login (once the login response yields the agent UUID, before any disk feature
-/// is touched) and points the chat-log and inventory-cache directories at
-/// `<base>/<grid>/<name>/` under each feature's own accounts root — overriding
-/// any explicit [`ClientDirectories::agent_chat_log_dir`] /
-/// [`ClientDirectories::agent_cache_dir`]. The two roots are kept separate so
-/// each feature honours its XDG category (chat logs under a state root, the
-/// regenerable inventory cache under a cache root). This is how the reconcile
-/// (and a paid name change) is handled inline at the synchronous login point,
-/// rather than the host pre-supplying a fixed per-account path before the UUID is
-/// known.
-#[derive(Debug, Clone)]
-pub struct AccountDirsConfig {
-    /// The grid segment (from `sl_account_dirs::grid_dir_name`).
-    pub grid: String,
-    /// The readable avatar segment (from `sl_account_dirs::avatar_dir_name`).
-    pub avatar: String,
-    /// The accounts root the per-avatar chat-log directory lives under (e.g. an
-    /// XDG state dir's `accounts` subdirectory), or `None` to leave chat logging
-    /// to the fixed [`ClientDirectories::agent_chat_log_dir`].
-    pub chat_log_base: Option<PathBuf>,
-    /// The accounts root the per-avatar inventory-cache directory lives under
-    /// (e.g. an XDG cache dir's `accounts` subdirectory), or `None` to leave the
-    /// cache to the fixed [`ClientDirectories::agent_cache_dir`].
-    pub inventory_cache_base: Option<PathBuf>,
-}
 
 /// The Bevy plugin that drives a sans-I/O [`Session`] from ECS systems.
 #[expect(
@@ -930,7 +611,7 @@ enum NetOutbound {
     Identity(Box<SlIdentity>),
     /// The agent's parcel / fly / seat mirror, sent whenever it changes and
     /// mirrored into the [`SlAgentParcel`] resource.
-    AgentParcel(Box<SlAgentParcel>),
+    AgentParcel(Box<AgentParcel>),
     /// The grid requires a multi-factor one-time code ([`SlMfaChallenge`]).
     Mfa(MfaChallenge),
     /// A retryable "already logged in" rejection ([`SlLoginRejected`]).
@@ -974,7 +655,7 @@ struct RunningSession {
     lsl_syntax: Box<LslSyntaxState>,
     /// The last agent parcel / fly / seat mirror sent to the app, so only a
     /// change crosses the channel.
-    agent_parcel: SlAgentParcel,
+    agent_parcel: AgentParcel,
     /// The neighbouring regions' capability maps, and the object-addressed
     /// capability requests waiting for one.
     neighbours: Box<NeighbourCaps>,
@@ -1282,7 +963,7 @@ fn drive(
                 capabilities.write(SlCapabilities(map));
             }
             Ok(NetOutbound::Identity(new_identity)) => *identity = *new_identity,
-            Ok(NetOutbound::AgentParcel(parcel)) => *agent_parcel = *parcel,
+            Ok(NetOutbound::AgentParcel(parcel)) => *agent_parcel = SlAgentParcel(*parcel),
             // Both end the session thread on purpose: the login stopped for an
             // answer the driver has to supply. Marking the session ended keeps
             // the thread's exit from reading as a crash below, which raced the
@@ -1526,7 +1207,7 @@ fn login_phase(
                         chat_log,
                         inventory_cache,
                         lsl_syntax,
-                        agent_parcel: SlAgentParcel::default(),
+                        agent_parcel: AgentParcel::default(),
                         neighbours: Box::default(),
                         requested_capabilities: Arc::clone(&config.requested_capabilities),
                     })
@@ -1568,56 +1249,6 @@ fn login_phase(
             send_disconnect(outbound, DisconnectReason::ProtocolError);
             None
         }
-    }
-}
-
-/// Resolve the effective per-account directories at login.
-///
-/// With no [`AccountDirsConfig`] (or no agent id), the fixed `base` directories
-/// are used unchanged. Otherwise the avatar's `<accounts_base>/<grid>/<name>/`
-/// directory is reconciled (creating it, or renaming it if the agent UUID shows
-/// a name change) and the chat-log / inventory-cache directories are pointed at
-/// its `chat` / `inventorycache` subdirectories. A reconcile failure logs and
-/// falls back to `base`, so a disk-permission problem never blocks login.
-fn resolve_account_directories(
-    base: &ClientDirectories,
-    account_dirs: Option<&AccountDirsConfig>,
-    agent_id: Option<AgentKey>,
-) -> ClientDirectories {
-    let (Some(account), Some(agent)) = (account_dirs, agent_id) else {
-        return base.clone();
-    };
-    let uuid = agent.uuid();
-    // Reconcile one feature's accounts root to this avatar's directory, falling
-    // back to the root as-is on a filesystem error so the feature still works
-    // (un-keyed) rather than being silently disabled.
-    let resolve = |accounts_base: &Option<PathBuf>| -> Option<PathBuf> {
-        let accounts_base = accounts_base.as_ref()?;
-        match sl_account_dirs::reconcile_account_dir(
-            accounts_base,
-            &account.grid,
-            &account.avatar,
-            uuid,
-        ) {
-            Ok(dir) => {
-                if let Some(collision) = dir.outcome.collision_warning(&account.avatar) {
-                    tracing::warn!("under {}: {collision}", accounts_base.display());
-                }
-                Some(dir.path)
-            }
-            Err(error) => {
-                tracing::warn!(
-                    "could not resolve account directory under {}: {error}",
-                    accounts_base.display()
-                );
-                Some(accounts_base.clone())
-            }
-        }
-    };
-    ClientDirectories {
-        agent_chat_log_dir: resolve(&account.chat_log_base),
-        agent_cache_dir: resolve(&account.inventory_cache_base),
-        shared_cache_dir: base.shared_cache_dir.clone(),
     }
 }
 
@@ -2227,10 +1858,7 @@ fn advance_running(
     // Mirror the agent's parcel / fly / seat for the ECS side (e.g. the
     // viewer's take-off gate), sending only when something changed so a quiet
     // tick crosses the channel with nothing.
-    let mut refreshed = agent_parcel.clone();
-    refreshed.refresh_from(&session);
-    if refreshed != agent_parcel {
-        agent_parcel = refreshed;
+    if agent_parcel.refresh_from(&session) {
         report(
             outbound,
             NetOutbound::AgentParcel(Box::new(agent_parcel.clone())),

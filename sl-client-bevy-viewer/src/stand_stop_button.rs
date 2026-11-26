@@ -45,6 +45,8 @@
 //!
 //! Reference (Firestorm, read-only): `llmoveview` (`LLPanelStandStopFlying`, the
 //! stand / stop-flying button pair and its visibility rules).
+//!
+//! [`SlAgentParcel::seated_on`]: sl_client_bevy::AgentParcel::seated_on
 
 use bevy::ecs::system::SystemParam;
 use bevy::input_focus::InputFocus;
@@ -277,8 +279,10 @@ impl CameraExit<'_, '_> {
 /// Whether the local avatar is seated — on an object (the session's
 /// [`SlAgentParcel::seated_on`]) or on the ground (the viewer-tracked
 /// [`SelfGroundSit`]).
+///
+/// [`SlAgentParcel::seated_on`]: sl_client_bevy::AgentParcel::seated_on
 const fn is_seated(parcel: &SlAgentParcel, ground_sit: &SelfGroundSit) -> bool {
-    parcel.seated_on.is_some() || ground_sit.sitting
+    parcel.0.seated_on.is_some() || ground_sit.sitting
 }
 
 /// Whether one state button's own state holds. Each is independent — the caller
@@ -340,7 +344,7 @@ mod tests {
     use crate::world_api::CameraMode;
     use crate::world_api::SelfGroundSit;
     use pretty_assertions::assert_eq;
-    use sl_client_bevy::{ObjectKey, SlAgentParcel, Uuid};
+    use sl_client_bevy::{AgentParcel, ObjectKey, SlAgentParcel, Uuid};
 
     /// An arbitrary object key, for the "seated on an object" assertions.
     fn a_seat() -> ObjectKey {
@@ -349,10 +353,10 @@ mod tests {
 
     /// A parcel with the given object-seat, for the seated-state assertions.
     fn parcel(seated_on: Option<ObjectKey>) -> SlAgentParcel {
-        SlAgentParcel {
+        SlAgentParcel(AgentParcel {
             seated_on,
-            ..SlAgentParcel::default()
-        }
+            ..AgentParcel::default()
+        })
     }
 
     /// Sitting on an object or on the ground both count as seated; standing does

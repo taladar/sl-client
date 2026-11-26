@@ -172,6 +172,8 @@ fn ingest_sit_result(mut events: MessageReader<SlEvent>, mut sit_camera: ResMut<
 /// own object stream (a non-zero `ParentID` — the very signal that draws the avatar
 /// on the seat), so it says whether the sit actually happened, but not for the
 /// camera's purposes which object it happened on. Conjoined, they answer both.
+///
+/// [`SlAgentParcel::seated_on`]: sl_client_bevy::AgentParcel::seated_on
 fn seated_on(
     parcel: &SlAgentParcel,
     identity: &SlIdentity,

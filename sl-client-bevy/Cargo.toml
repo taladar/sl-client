@@ -43,17 +43,13 @@ reqwest = { workspace = true, features = [
   "blocking",
   "rustls",
 ] }
-sl-account-dirs = { workspace = true }
 sl-anim = { workspace = true }
 sl-asset = { workspace = true }
 sl-avatar = { workspace = true }
-sl-bake = { path = "../sl-bake", version = "0.1.0" }
 sl-client-common = { workspace = true }
-sl-material = { workspace = true }
 sl-mesh = { workspace = true }
 sl-prim = { workspace = true }
 sl-proto = { workspace = true }
-sl-sculpt = { path = "../sl-sculpt", version = "0.1.0" }
 sl-texture = { path = "../sl-texture", version = "0.1.0" }
 sl-tree = { path = "../sl-tree", version = "0.1.0" }
 # The small shared runtime the async asset fetchers drive (`async_runtime.rs`):

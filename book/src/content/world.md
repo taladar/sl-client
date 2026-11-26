@@ -450,7 +450,13 @@ None of these has a reply; the client just acts on them.
 >   `ParcelOverlay` / `ParcelDwell`. Overlay chunks are tagged with their
 >   source circuit's region (`ParcelOverlayInfo::region_handle`) — the same
 >   stream arrives on the root and neighbour child circuits, so a consumer
->   (the minimap) can assemble one grid per region.
+>   (the minimap) can assemble one grid per region. That assembly, and when a
+>   held grid stops being true, is `sl-client-common`'s
+>   `ParcelOverlays::apply`, which the Bevy runtime folds into its
+>   `SlParcelOverlay` resource and a tokio consumer folds the forwarded events
+>   through itself. The agent's own parcel, fly permission and seat are one
+>   `AgentParcel` snapshot, the Bevy `SlAgentParcel` resource or the tokio
+>   `Client::set_agent_parcel_reporter` channel.
 > - Parcel management (`JoinParcels`, `DivideParcel`,
 >   `RequestParcelObjectOwners`, `BuyParcelPass`, `DisableParcelObjects`,
 >   `RequestParcelInfo`) maps to the UDP encoders in

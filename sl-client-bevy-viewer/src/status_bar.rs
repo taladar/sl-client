@@ -205,6 +205,8 @@ struct ParcelIcons {
     /// Whether the agent may fly here — the region block-fly bit and the parcel
     /// allow-fly bit already combined ([`SlAgentParcel::can_fly`], the reference
     /// viewer's `LLAgent::canFly`).
+    ///
+    /// [`SlAgentParcel::can_fly`]: sl_client_bevy::AgentParcel::can_fly
     can_fly: bool,
 }
 

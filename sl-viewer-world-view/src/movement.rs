@@ -287,6 +287,8 @@ pub(crate) struct CameraGaze<'w> {
 /// its up axis flies up / down exactly as PageUp / PageDown do, and its twist turns
 /// the body. It only drives the avatar when flycam is off (in flycam it drives the
 /// camera instead, via `crate::camera::drive_flycam`).
+///
+/// [`SlAgentParcel::seated_on`]: sl_client_bevy::AgentParcel::seated_on
 pub(crate) fn drive_avatar_controls(
     mut input: MovementInput,
     world: MovementWorld,

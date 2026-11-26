@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 131 |
-| ready | 330 |
+| ready | 329 |
 | blocked | 35 |
 | in-progress | 4 |
 | bugs | 4 |
-| done | 1625 |
+| done | 1626 |
 | deferred | 30 |
 | wont-do | 24 |
 | **total** | **2183** |
@@ -317,7 +317,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-lsl-opensim-function-set`](ideas/gridspec-lsl-opensim-function-set.md)
   — Measure which library functions OpenSim's engines compile
 
-## ready (330)
+## ready (329)
 
 ### protocol
 
@@ -327,8 +327,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Fuzz the wire and asset decoders
 - [`protocol-audit-j2c-encode-lint-config`](ready/protocol-audit-j2c-encode-lint-config.md)
   — The one crate with unsafe FFI has the workspace's weakest lint configuration
-- [`protocol-audit-runtime-parity-gaps`](ready/protocol-audit-runtime-parity-gaps.md)
-  — Re-exports and derived login state reach only the bevy runtime
 - [`protocol-audit-sim-session-stores`](ready/protocol-audit-sim-session-stores.md)
   — SimSession's 54 fields mix the driver's serving stores with the circuit
 - [`protocol-cap-update-agent-information`](ready/protocol-cap-update-agent-information.md)
@@ -1259,7 +1257,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-rigged-hair-triangle-pattern`](bugs/viewer-rigged-hair-triangle-pattern.md)
   — Rigged mesh hair shows a pattern of individual triangles
 
-## done (1625)
+## done (1626)
 
 ### protocol
 
@@ -1439,6 +1437,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   HandshakeFailed
 - [`protocol-audit-roxmltree-nesting-in-sl-wire`](done/protocol-audit-roxmltree-nesting-in-sl-wire.md)
   — sl-wire's own XML parsing has no nesting guard
+- [`protocol-audit-runtime-parity-gaps`](done/protocol-audit-runtime-parity-gaps.md)
+  — Re-exports and derived login state reach only the bevy runtime
 - [`protocol-audit-runtime-shared-crate`](done/protocol-audit-runtime-shared-crate.md)
   — 1677 byte-identical lines are duplicated between the two runtime crates
 - [`protocol-audit-session-god-object`](done/protocol-audit-session-god-object.md)

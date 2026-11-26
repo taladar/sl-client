@@ -10,10 +10,9 @@ use std::time::{Duration, Instant};
 use rustyline::error::ReadlineError;
 use rustyline::{DefaultEditor, ExternalPrinter};
 use sl_client_tokio::{
-    Client, ClientDirectories, Command, Event, LoginParams, LoginRejectKind, LoginRequest,
-    StartLocation,
+    AccountDirsConfig, Client, ClientDirectories, Command, Diagnostic, Event, LoginParams,
+    LoginRejectKind, LoginRequest, StartLocation,
 };
-use sl_proto::Diagnostic;
 use sl_repl::{
     Avatar, Credentials, MetaCommand, ReplAction, ScriptDriver, ScriptLine, ScriptOutput,
     ScriptRecorder, SessionContext, check_script_file, format_command, format_diagnostic,
@@ -699,34 +698,22 @@ async fn run_repl(args: RunArgs) -> Result<(), Error> {
     // Key the chat-log directory by grid + avatar name (with UUID rename
     // discovery), so transcripts from the same avatar name on different grids do
     // not collide — `--chat-log-dir` is treated as the accounts base. The agent
-    // UUID is known now (post-login) and no cache has been touched yet.
-    let agent_chat_log_dir = match (
-        args.chat_log.chat_log_dir(),
-        client.agent_id().map(|agent| agent.uuid()),
-        login_uri.parse::<url::Url>(),
-    ) {
-        (Some(base), Some(uuid), Ok(url)) => {
-            let grid = sl_account_dirs::grid_dir_name(&url);
-            let name = sl_account_dirs::avatar_dir_name(avatar.first(), avatar.last());
-            match sl_account_dirs::reconcile_account_dir(&base, &grid, &name, uuid) {
-                Ok(dir) => {
-                    if let Some(collision) = dir.outcome.collision_warning(&name) {
-                        tracing::warn!("chat-log: {collision}");
-                    }
-                    Some(dir.path)
-                }
-                Err(error) => {
-                    tracing::warn!("chat-log: could not resolve account directory: {error}");
-                    Some(base)
-                }
-            }
-        }
-        // No base configured (chat logging off), no agent id, or an unparsable
-        // login URI: fall back to the base as given (old behaviour).
-        (base, _agent, _url) => base,
-    };
+    // The client resolves it when the run starts, as the Bevy REPL's plugin does.
+    // An unparsable login URI leaves the base as given.
+    let chat_log_base = args.chat_log.chat_log_dir();
+    client.set_account_dirs(
+        chat_log_base
+            .clone()
+            .zip(login_uri.parse::<url::Url>().ok())
+            .map(|(chat_log_base, url)| AccountDirsConfig {
+                grid: sl_account_dirs::grid_dir_name(&url),
+                avatar: sl_account_dirs::avatar_dir_name(avatar.first(), avatar.last()),
+                chat_log_base: Some(chat_log_base),
+                inventory_cache_base: None,
+            }),
+    );
     client.set_directories(ClientDirectories {
-        agent_chat_log_dir,
+        agent_chat_log_dir: chat_log_base,
         ..ClientDirectories::default()
     });
     // The REPL exercises the full client, so crawl inventory in the background.

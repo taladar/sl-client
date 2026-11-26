@@ -1439,7 +1439,7 @@ pub fn stand_up(ground_sit: &mut SelfGroundSit, commands: &mut MessageWriter<SlC
 /// tracks) or on the ground (which only the viewer does).
 #[must_use]
 pub const fn self_sitting(parcel: &SlAgentParcel, ground_sit: &SelfGroundSit) -> bool {
-    parcel.seated_on.is_some() || ground_sit.sitting
+    parcel.0.seated_on.is_some() || ground_sit.sitting
 }
 
 /// The rebindable **Sit/Stand** action ([`Action::ToggleSit`], the reference's

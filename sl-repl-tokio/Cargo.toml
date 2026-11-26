@@ -24,7 +24,6 @@ fs-err = { workspace = true }
 rustyline = { workspace = true }
 sl-account-dirs = { workspace = true }
 sl-client-tokio = { workspace = true }
-sl-proto = { workspace = true }
 sl-repl = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["full"] }

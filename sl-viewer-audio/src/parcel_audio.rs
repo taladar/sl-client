@@ -59,6 +59,8 @@
 //!
 //! Reference (Firestorm, read-only): `llviewermedia_streamingaudio`,
 //! `llviewerparcelmedia`, `llpanelnearbymedia`.
+//!
+//! [`SlAgentParcel::current`]: sl_client_bevy::AgentParcel::current
 
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;

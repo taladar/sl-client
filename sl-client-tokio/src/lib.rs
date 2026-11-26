@@ -10,31 +10,27 @@ use reqwest::Client as ReqwestClient;
 use reqwest::Error as ReqwestError;
 use thiserror::Error;
 use tokio::net::UdpSocket;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch};
 
 use sl_proto::{
     AIS3_FETCH_INVENTORY_TAG, AIS3_FETCH_LIBRARY_TAG, AVATAR_PICKER_PAGE_SIZE,
     CAP_ACCEPT_FRIENDSHIP, CAP_ACCEPT_GROUP_INVITE, CAP_AGENT_EXPERIENCES, CAP_AGENT_PREFERENCES,
     CAP_AGENT_PROFILE, CAP_ATTACHMENT_RESOURCES, CAP_AVATAR_PICKER_SEARCH, CAP_AVATAR_RENDER_INFO,
     CAP_CHAT_SESSION_REQUEST, CAP_COPY_INVENTORY_FROM_NOTECARD, CAP_CREATE_INVENTORY_CATEGORY,
-    CAP_DECLINE_FRIENDSHIP, CAP_DECLINE_GROUP_INVITE, CAP_DIRECT_DELIVERY,
-    CAP_DISPATCH_REGION_INFO, CAP_ESTATE_ACCESS, CAP_EXPERIENCE_PREFERENCES, CAP_EXPERIENCE_QUERY,
-    CAP_EXT_ENVIRONMENT, CAP_FETCH_INVENTORY, CAP_FETCH_LIBRARY, CAP_FIND_EXPERIENCE_BY_NAME,
-    CAP_GET_ADMIN_EXPERIENCES, CAP_GET_CREATOR_EXPERIENCES, CAP_GET_DISPLAY_NAMES,
-    CAP_GET_EXPERIENCE_INFO, CAP_GET_EXPERIENCES, CAP_GET_MESH, CAP_GET_MESH2, CAP_GET_METADATA,
-    CAP_GET_TEXTURE, CAP_GROUP_API_V1, CAP_GROUP_EXPERIENCES, CAP_GROUP_MEMBER_DATA,
-    CAP_HOME_LOCATION, CAP_INCREMENT_COF_VERSION, CAP_INTEREST_LIST, CAP_INVENTORY_API_V3,
+    CAP_DECLINE_FRIENDSHIP, CAP_DECLINE_GROUP_INVITE, CAP_DIRECT_DELIVERY, CAP_ESTATE_ACCESS,
+    CAP_EXPERIENCE_PREFERENCES, CAP_EXPERIENCE_QUERY, CAP_EXT_ENVIRONMENT, CAP_FETCH_INVENTORY,
+    CAP_FETCH_LIBRARY, CAP_GET_ADMIN_EXPERIENCES, CAP_GET_CREATOR_EXPERIENCES,
+    CAP_GET_DISPLAY_NAMES, CAP_GET_METADATA, CAP_GROUP_API_V1, CAP_GROUP_EXPERIENCES,
+    CAP_GROUP_MEMBER_DATA, CAP_HOME_LOCATION, CAP_INTEREST_LIST, CAP_INVENTORY_API_V3,
     CAP_INVENTORY_THUMBNAIL_UPLOAD, CAP_IS_EXPERIENCE_ADMIN, CAP_IS_EXPERIENCE_CONTRIBUTOR,
     CAP_LAND_RESOURCES, CAP_LIBRARY_API_V3, CAP_LSL_SYNTAX, CAP_MESH_UPLOAD_FLAG,
-    CAP_MODIFY_MATERIAL_PARAMS, CAP_MODIFY_REGION, CAP_NEW_FILE_AGENT_INVENTORY, CAP_OBJECT_MEDIA,
-    CAP_OBJECT_MEDIA_NAVIGATE, CAP_PARCEL_PROPERTIES_UPDATE, CAP_PARCEL_VOICE_INFO,
-    CAP_PRODUCT_INFO_REQUEST, CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS,
-    CAP_REGION_EXPERIENCES, CAP_REGION_SCHEDULE, CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS,
+    CAP_NEW_FILE_AGENT_INVENTORY, CAP_OBJECT_MEDIA_NAVIGATE, CAP_PARCEL_PROPERTIES_UPDATE,
+    CAP_PARCEL_VOICE_INFO, CAP_PRODUCT_INFO_REQUEST, CAP_PROVISION_VOICE_ACCOUNT,
+    CAP_READ_OFFLINE_MSGS, CAP_REGION_SCHEDULE, CAP_REMOTE_PARCEL_REQUEST,
     CAP_REQUEST_TASK_INVENTORY, CAP_SEARCH_STAT_REQUEST, CAP_SEND_POSTCARD, CAP_SEND_USER_REPORT,
     CAP_SEND_USER_REPORT_WITH_SCREENSHOT, CAP_SET_DISPLAY_NAME, CAP_SIMULATOR_FEATURES,
-    CAP_UNTRUSTED_SIMULATOR_MESSAGE, CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE,
-    CAP_UPDATE_SCRIPT_AGENT, CAP_UPDATE_SCRIPT_TASK, CAP_UPLOAD_AGENT_PROFILE_IMAGE,
-    CAP_UPLOAD_BAKED_TEXTURE, CAP_USER_INFO, CAP_VIEWER_ASSET, CAP_VOICE_SIGNALING,
+    CAP_UNTRUSTED_SIMULATOR_MESSAGE, CAP_UPDATE_EXPERIENCE, CAP_UPDATE_SCRIPT_AGENT,
+    CAP_UPDATE_SCRIPT_TASK, CAP_UPLOAD_AGENT_PROFILE_IMAGE, CAP_USER_INFO, CAP_VOICE_SIGNALING,
     CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE, CHAT_SESSION_DECLINE_P2P_VOICE,
     CHAT_SESSION_FETCH_HISTORY, CHAT_SESSION_INVITE, CHAT_SESSION_START_CONFERENCE,
     HomeLocationRequest, INVENTORY_FETCH_MAX_IN_FLIGHT, NeighbourCaps,
@@ -63,140 +59,11 @@ use sl_proto::{
     merchant_status_request, parse_login_response, set_display_name_body, update_listing_request,
 };
 
-// Re-export the core types a consumer needs so they can depend on this crate
-// alone.
-pub use sl_proto::{
-    ActiveGroup, AdultListingBits, AgentKey, AgentOrObjectKey, AgentPreferences, AlertInfo,
-    AnimatedObjects, AnimationKey, AnyMessage, Arrival, Asset, AssetKey, AssetType,
-    AssetUpdateLocation, AssociateInventory, AttachmentMode, AttachmentPoint, AvatarAppearance,
-    AvatarAttachment, AvatarClassified, AvatarGroupMembership, AvatarInterests, AvatarPick,
-    AvatarPickerResult, AvatarProperties, AvatarRenderInfo, AvatarRenderReport, BUILTIN_UI_SOUNDS,
-    Camera, CameraError, ChatAudible, ChatChannel, ChatLifecycleView, ChatLogConfig, ChatMessage,
-    ChatSessionAgentUpdate, ChatSessionInfo, ChatSessionKind, ChatSessionReply,
-    ChatSessionRequestPurpose, ChatSource, ChatSourceType, ChatType, ChatTypeNotAVolume, Child,
-    CircuitCode, CircuitId, CircuitProbe, ClassifiedCategory, ClassifiedClickStats, ClassifiedInfo,
-    ClassifiedKey, ClassifiedQueryFlags, ClassifiedSearchClicks, ClassifiedUpdate, ClickAction,
-    ClientDirectories, ClockStyle, CoarseLocation, Color, ColorAlpha, ColumnUnit, Command,
-    ControlFlags, ConversationKind, CreateGroupParams, CreateListing, DEFAULT_PRIM_TEXTURE,
-    DayCycle, DayCycleFrame, DeRezDestination, DetachOrder, Diagnostic, DirClassifiedResult,
-    DirEventResult, DirFindFlags, DirGroupResult, DirLandResult, DirPeopleResult, DirPlaceResult,
-    Direction, DirectoryVisibility, DiscardLevel, DisconnectReason, DisplayName, DisplayNameUpdate,
-    Distance, DynamicMenus, EconomyData, EjectAction, EnvironmentPushAction, EnvironmentSettings,
-    EnvironmentUpdate, EstateAccessDelta, EstateAccessKind, EstateAccessLists, EstateBan,
-    EstateCovenant, EstateInfo, EstateInfoUpdate, Event, ExperienceEnvironmentPush,
-    ExperienceEvent, ExperienceEventPermission, ExperienceInfo, ExperienceKey, ExperienceLocation,
-    ExperiencePermission, ExperienceProperties, ExperienceSearchPage, ExperienceUpdate,
-    ExtendedMesh, FaceMaterialPut, FlexibleData, FolderInfo, FolderState, FolderType, FreezeAction,
-    Friend, FriendKey, FriendPresence, FriendRights, GestureActivation, GlobalCoordinates, Glow,
-    GltfMaterialOverride, GodKickAction, GodKickTarget, GodRegionUpdate, GridCoordinates, GroupBan,
-    GroupBanAction, GroupKey, GroupMember, GroupMembership, GroupNotice, GroupNoticeAttachment,
-    GroupNoticeKey, GroupProfile, GroupRequestId, GroupRole, GroupRoleChange, GroupRoleEdit,
-    GroupRoleKey, GroupRoleMember, GroupRoleMemberChange, GroupRoleUpdateType, GroupTitle,
-    HomeLocation, HomeLocationAnswer, IceCandidate, ImDialog, ImSessionId, ImageCodec,
-    InstantMessage, InterestListMode, InterestListReply, InterestsUpdate, InventoryCacheConfig,
-    InventoryCallbackId, InventoryCursor, InventoryFolder, InventoryFolderKey, InventoryItem,
-    InventoryItemOrFolderKey, InventoryKey, InventoryOffer, InventoryOwner, InventoryType,
-    InviteChannel, ItemInfo, Key, Kilobits, LOGOUT_TIMEOUT, LandArea, LandBrushAction,
-    LandBrushRadius, LandBrushSize, LandEdit, LandImpact, LandProduct, LandSearchType,
-    LandStatExtended, LandStatItem, LandStatReportType, LandStatScore, LandingType, LegacyMaterial,
-    LightData, LightImage, LindenAmount, LindenBalance, Listing, ListingId, Llsd, LoadUrlRequest,
-    LoggedChatType, LoginAccount, LoginFailure, LoginParams, LoginRejectKind, LoginRequest,
-    LoginResponse, LoginSuccess, LookAtType, LureDestination, LureId, MAX_FACES, MEDIA_PERM_ALL,
-    MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP, MEDIA_PERM_NONE, MEDIA_PERM_OWNER, MapBlockBatch,
-    MapBlockKind, MapBlockRecord, MapItem, MapItemType, MapLayer, MapRegionInfo, MapRequestFlags,
-    MarketplaceApiError, MarketplaceApiErrorKind, MarketplaceAssociateInventoryInfo,
-    MarketplaceInventoryInfo, MarketplaceOperation, Material, MaterialOverrideUpdate, Maturity,
-    MediaEntry, MerchantStatus, MeshKey, MeshUploadStatus, MessageCursor, MfaChallenge,
-    ModifyRegionAnswer, MoneyBalance, MoneyTransaction, MoneyTransactionType, MovementMode,
-    MuteEntry, MuteFlags, MuteType, NearbyHistoryLine, NegativeBalanceError, NeighborInfo,
-    NeighborRetirement, NewInventoryItem, NewInventoryLink, Object, ObjectBuyItem,
-    ObjectExtraParams, ObjectFlagSettings, ObjectKey, ObjectMediaResponse, ObjectMotion,
-    ObjectPermMasks, ObjectPhysicsData, ObjectProperties, ObjectPropertiesFamily,
-    ObjectStreamBatch, ObjectStreamEntry, ObjectTransform, ObjectUpdateForm, OpenRegionInfo,
-    OpenSimExtras, OwnerKey, PacketFlags, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope,
-    ParcelCategory, ParcelCollision, ParcelDetails, ParcelFlags, ParcelInfo, ParcelKey,
-    ParcelListingFlags, ParcelMediaCommand, ParcelMediaData, ParcelMediaUpdateInfo,
-    ParcelObjectOwner, ParcelObjectOwnersPart, ParcelOverlayCell, ParcelOverlayGrid,
-    ParcelOverlayInfo, ParcelOwnership, ParcelRect, ParcelRequestResult, ParcelReturnType,
-    ParcelStatus, ParcelUpdate, ParcelVoiceInfo, ParticleSystem, PermissionField, Permissions,
-    Permissions5, PhysicsShapeType, PhysicsShapeTypes, PickInfo, PickKey, PickUpdate, PingId,
-    PlacesResult, PlayingAnimation, PointAtType, PrimShape, PrimShapeParams, ProductType,
-    ProfileImage, ProfileUpdate, ProposalCandidateId, ProposalVoteId, QueryId,
-    REQUESTED_CAPABILITIES, ReflectionProbe, ReflectionProbeFlags, RegionChatSettings,
-    RegionCombatSettings, RegionCoordinates, RegionDebugUpdate, RegionFlags, RegionHandle,
-    RegionHandshakeReplyFlags, RegionIdentity, RegionInfoDispatch, RegionInfoUpdate, RegionLimits,
-    RegionLocalObjectId, RegionLocalParcelId, RegionName, RegionRestartNotice, RegionSchedule,
-    RegionStats, RegionTerrainComposition, RegionTerrainUpdate, Reliability, RemoteParcelRequest,
-    RenderLimitCounts, RenderMaterialEntry, RenderMaterialRef, RestartDays, RestartWhen,
-    RestoreItem, RezAttachment, RezObjectParams, RezScriptParams, Rotation, SaleType,
-    ScopedObjectId, ScopedParcelId, ScriptCompileError, ScriptControl, ScriptControlAction,
-    ScriptDialog, ScriptLanguage, ScriptMetadata, ScriptPermissionRequest, ScriptPermissions,
-    ScriptTarget, ScriptTeleportRequest, ScriptUploadLocation, SculptData, SculptOrMeshKey,
-    SequenceNumber, ServerHistoryMessage, SessionMessage, SessionTransition, SetDisplayNameReply,
-    SimStatId, SimWideDeleteFlags, SimulatorFeatures, SimulatorTime, SkySettings, SoundFlags,
-    SoundPreload, StartLocation, StartLocationParseError, StartLocationSlot, SurfaceInfo,
-    TaskInventoryCapReply, TaskInventoryItem, TaskInventoryKey, TaskInventoryReply, TeleportFlags,
-    TerraformArea, TerrainLayerBatch, TerrainLayerType, TerrainMaterialOverrides, TerrainPatch,
-    TerrainPatchHeader, Texture, TextureAnimation, TextureEntry, TextureFace, TextureKey, Throttle,
-    ThrottleBuilder, ThrottleError, ThumbnailTarget, TimestampFormat, TransactionFlags,
-    TransactionId, TransferId, TransferStatus, Transmit, TriggeredSound, UI_SOUND_ALERT,
-    UI_SOUND_CLICK, UI_SOUND_IM_OR_OFFER, UI_SOUND_INVALID_OP, UI_SOUND_MONEY_DOWN,
-    UI_SOUND_MONEY_UP, UI_SOUND_NEARBY_CHAT, UI_SOUND_SNAPSHOT, UI_SOUND_TELEPORT_OUT,
-    UI_SOUND_TYPING, UI_SOUND_WINDOW_CLOSE, UI_SOUND_WINDOW_OPEN, UpdatableAssetType,
-    UpdateGroupInfoParams, UpdateListing, UploadClass, UserInfo, Uuid, Vector, ViewerEffect,
-    ViewerEffectData, ViewerEffectType, VoiceAccountInfo, VoiceProvisionRequest, WaterSettings,
-    Wearable, WearableType, XferId, XferListing, avatar_texture, build_get_metadata_request,
-    decode_particle_system, decode_texture_anim, decode_texture_entry, encode_texture_entry,
-    expected_upload_cost, grid_to_handle, group_powers, handle_to_global, handle_to_grid, j2c,
-    parse_get_metadata_reply, parse_task_inventory, parse_task_inventory_cap_reply,
-    particle_pattern, pcode, prim_flags, sim_access, stamp_get_metadata_reply,
-    stamp_task_inventory_cap_reply, task_inventory_cap_url, texture_anim_mode,
-};
-// `sl_texture::TextureEntry` (the store's LOD-aware texture object) and
-// `TextureReadLease` are reachable as `sl_texture::…`; they are not re-exported
-// flat because `TextureEntry` would collide with `sl_proto`'s prim-face type.
-// `StoreStats` / `GateStats` (the pipeline-status snapshots) are the same shared
-// `sl-asset-sched` types across the texture / mesh / asset stores, so they are
-// re-exported once here (from `sl_texture`) rather than three times.
-// The two encodings of an inventory item update: the AIS3 `PATCH` body this
-// runtime sends where the region grants AIS3, and the legacy UDP message.
-pub use sl_proto::{ais_item_update_body, update_inventory_item_message};
-pub use sl_texture::{
-    AssetFetcher, CacheLimits, DecodedImage as DecodedTexture, FetchChunk, GateStats,
-    NotRemotelyFetchable, Priority, RemoteTextureSource, StoreStats, TextureError,
-    TextureFetchType, TextureFetcher, TextureProgress, TextureRequest, TextureStore,
-};
-// The decoding, LOD-aware mesh store (the mesh counterpart of the texture
-// store). `Priority` and `MeshKey` are already re-exported (from `sl_texture` /
-// `sl_proto`); the mesh `CacheLimits` is aliased so it does not collide with the
-// texture one.
-pub use sl_mesh::{
-    CacheLimits as MeshCacheLimits, DEFAULT_LOD_FACTOR, DecodedMesh, MeshEntry, MeshError,
-    MeshFetcher, MeshLod, MeshPhysics, MeshProgress, MeshReadLease, MeshRequest, MeshSkin,
-    MeshStore, Submesh,
-};
-
-// The generic-asset store (the opaque-blob counterpart of the texture/mesh
-// stores), fetched whole over the `ViewerAsset` capability. Its `CacheLimits` is
-// aliased so it does not collide with the texture/mesh ones; `Priority`,
-// `AssetKey`, and `AssetType` are already re-exported.
-pub use sl_asset::{
-    AssetEntry, AssetError, AssetProgress, AssetRef, AssetStore, BlobFetcher,
-    CacheLimits as AssetCacheLimits, FetchError as AssetFetchError,
-};
-
-// The GLTF (PBR) render-material asset decoder (`AT_MATERIAL`), the material
-// counterpart of `sl_mesh` / `sl_texture`: a client fetches a material asset
-// over the `ViewerAsset` capability (the generic `AssetStore` above) and decodes
-// it into a renderer-agnostic `GltfMaterial` (P27.1), plus the per-face
-// `MaterialOverride` delta (P27.2) layered on the base material. Kept at parity
-// with the Bevy runtime.
-pub use sl_material::{
-    GltfAlphaMode, GltfMaterial, GltfTexture, GltfTextureTransform,
-    MaterialError as GltfMaterialError, MaterialOverride, TextureOverride,
-    TextureTransformOverride, parse_gltf_material_document, parse_material_asset,
-    parse_material_override,
-};
+// The library items this runtime re-exports, so a consumer can depend on it
+// alone. The list is shared with the Bevy runtime (see
+// `sl_client_common::reexports`), so the two cannot drift apart.
+sl_client_common::runtime_reexports!();
+pub use sl_proto::Event;
 
 pub use crate::assets::{ReqwestAssetFetcher, load_asset_dir};
 pub use crate::meshes::ReqwestMeshFetcher;
@@ -479,6 +346,9 @@ pub struct Client {
     /// The optional channel over which [`Client::run`] reports each neighbour
     /// region's capability map, keyed by the neighbour's simulator address.
     neighbour_caps_reporter: Option<mpsc::Sender<(SocketAddr, HashMap<String, String>)>>,
+    /// The optional channel over which [`Client::run`] publishes the agent's
+    /// current parcel, fly permission and seat whenever any of them changes.
+    agent_parcel_reporter: Option<watch::Sender<AgentParcel>>,
     /// The capability names every seed request asks for — the root region's,
     /// a region change's and each neighbour's:
     /// [`REQUESTED_CAPABILITIES`] unless
@@ -493,6 +363,11 @@ pub struct Client {
     /// all-`None`, disabling every disk feature; set via
     /// [`Client::set_directories`] before [`Client::run`].
     directories: ClientDirectories,
+    /// Optional per-avatar directory derivation for the disk features, resolved
+    /// against [`directories`](Self::directories) when [`Client::run`] starts
+    /// (the agent's UUID is known by then). Set via
+    /// [`Client::set_account_dirs`] before [`Client::run`].
+    account_dirs: Option<AccountDirsConfig>,
     /// The inventory disk-cache configuration. Off by default; once enabled (and
     /// paired with [`ClientDirectories::agent_cache_dir`]), [`Client::run`] loads
     /// the cache at login, reconciles it against the skeleton, and persists it on
@@ -570,12 +445,14 @@ impl Client {
             recv_buf: vec![0u8; RECV_BUFFER_SIZE],
             caps_reporter: None,
             neighbour_caps_reporter: None,
+            agent_parcel_reporter: None,
             requested_capabilities: sl_proto::REQUESTED_CAPABILITIES
                 .iter()
                 .map(|&name| name.to_owned())
                 .collect(),
             chat_log_config: ChatLogConfig::default(),
             directories: ClientDirectories::default(),
+            account_dirs: None,
             inventory_cache_config: InventoryCacheConfig::default(),
         })
     }
@@ -703,6 +580,15 @@ impl Client {
         self.neighbour_caps_reporter = Some(reporter);
     }
 
+    /// Sets the channel over which [`Client::run`] publishes the agent's
+    /// current parcel, fly permission and seat ([`AgentParcel`]) whenever any
+    /// of them changes, the counterpart of the Bevy runtime's `SlAgentParcel`
+    /// resource. A `watch` channel, because a consumer wants the latest state,
+    /// not every step to it. Call before [`Client::run`].
+    pub fn set_agent_parcel_reporter(&mut self, reporter: watch::Sender<AgentParcel>) {
+        self.agent_parcel_reporter = Some(reporter);
+    }
+
     /// Sets the `Flags` every `RegionHandshakeReply` carries: what the client
     /// tells a simulator about its object cache
     /// ([`RegionHandshakeReplyFlags`]). Call before [`Client::run`].
@@ -738,6 +624,18 @@ impl Client {
     /// [`Client::run`].
     pub fn set_directories(&mut self, directories: ClientDirectories) {
         self.directories = directories;
+    }
+
+    /// Sets the per-avatar directory derivation for the disk features. When set,
+    /// [`Client::run`] resolves the chat-log and inventory-cache directories to
+    /// the avatar's `<accounts_base>/<grid>/<name>/` directory before either
+    /// opens a file (with rename discovery, see [`resolve_account_directories`]),
+    /// overriding the corresponding fixed fields of
+    /// [`Client::set_directories`]. Default `None` (use the fixed directories
+    /// as-is). The Bevy runtime's `SlClientPlugin::account_dirs` does the same.
+    /// Call before [`Client::run`].
+    pub fn set_account_dirs(&mut self, account_dirs: Option<AccountDirsConfig>) {
+        self.account_dirs = account_dirs;
     }
 
     /// Sets the inventory disk-cache configuration. Off by default; once enabled
@@ -851,12 +749,20 @@ impl Client {
             }
         }
 
+        // The per-avatar directories, resolved now that the login response has
+        // named the agent and before any disk feature below opens a file.
+        let directories = resolve_account_directories(
+            &self.directories,
+            self.account_dirs.as_ref(),
+            self.session.agent_id(),
+        );
+
         // The optional local chat-log writer. Constructed even when disabled (its
         // methods short-circuit on the empty enabled-set) so the tap sites stay
         // unconditional; it owns the only file I/O in the runtime.
         let mut chat_log = ChatLog::new(
             self.chat_log_config.clone(),
-            self.directories.agent_chat_log_dir.clone(),
+            directories.agent_chat_log_dir.clone(),
             self.session.agent_legacy_name(),
             self.session.agent_id(),
         );
@@ -866,7 +772,7 @@ impl Client {
         // stay unconditional. It owns the gzip envelope and the crash-safe write.
         let mut inventory_cache = InventoryCache::new(
             self.inventory_cache_config,
-            self.directories.agent_cache_dir.clone(),
+            directories.agent_cache_dir.clone(),
             self.session.agent_id(),
             Instant::now(),
         );
@@ -875,8 +781,11 @@ impl Client {
         // (cross-account) cache directory. `last_lsl_syntax_id` tracks the id we
         // have already fetched/loaded so a region change that keeps the same id
         // costs nothing, and a change triggers exactly one fetch (or cache load).
-        let lsl_syntax_cache = LslSyntaxCache::new(self.directories.shared_cache_dir.clone());
+        let lsl_syntax_cache = LslSyntaxCache::new(directories.shared_cache_dir.clone());
         let mut last_lsl_syntax_id: Option<Uuid> = None;
+
+        // The last agent parcel published over `agent_parcel_reporter`.
+        let mut agent_parcel = AgentParcel::default();
 
         loop {
             while let Some(transmit) = self.session.poll_transmit() {
@@ -1008,6 +917,14 @@ impl Client {
             // Firestorm's shutdown-only save); self-gating on the dirty flag and
             // the save interval, so a clean or disabled cache costs nothing.
             inventory_cache.maybe_save(&mut self.session, Instant::now());
+
+            // Publish the agent's parcel / fly / seat when something changed,
+            // so a quiet iteration wakes no receiver.
+            if let Some(reporter) = &self.agent_parcel_reporter
+                && agent_parcel.refresh_from(&self.session)
+            {
+                drop(reporter.send_replace(agent_parcel.clone()));
+            }
 
             // Background inventory crawl: when enabled, sweep the next bounded
             // batch of unfetched folders and fetch each over the most modern road

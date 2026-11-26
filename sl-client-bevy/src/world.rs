@@ -18,10 +18,12 @@ use std::net::SocketAddr;
 use bevy::prelude::*;
 
 use sl_proto::{
-    AgentKey, CircuitCode, CircuitId, DEFAULT_GRIDS_PER_EDGE, Event as SessionEvent, ObjectKey,
-    ParcelInfo, ParcelOverlayGrid, ParcelOverlayInfo, RegionFlags, RegionHandle, RegionIdentity,
-    RegionLimits, RegionLocalParcelId, Session, Uuid,
+    AgentKey, CircuitCode, CircuitId, Event as SessionEvent, ParcelInfo, RegionFlags, RegionHandle,
+    RegionIdentity, RegionLimits, RegionLocalParcelId, Uuid,
 };
+
+use sl_client_common::agent_parcel::AgentParcel;
+use sl_client_common::parcel_overlays::ParcelOverlays;
 
 use crate::SlEvent;
 
@@ -79,167 +81,33 @@ pub struct SlIdentity {
     pub circuit_id: Option<CircuitId>,
 }
 
-/// The agent's current parcel and derived fly permission, mirrored from the
-/// driven [`Session`] each frame so ECS systems can read them without holding the
-/// session. The resolution logic lives in `sl-proto`
-/// ([`Session::current_parcel`] / [`Session::can_fly`]) so the tokio client
-/// shares it; this resource is just the Bevy-side bridge.
+/// The agent's current parcel and derived fly permission and seat
+/// ([`AgentParcel`]), mirrored from the driven
+/// [`Session`](sl_proto::Session) whenever any of them changes so ECS systems
+/// can read them without holding the session. The resolution lives in
+/// `sl-proto` ([`Session::current_parcel`](sl_proto::Session::current_parcel) /
+/// [`Session::can_fly`](sl_proto::Session::can_fly) /
+/// [`Session::seat`](sl_proto::Session::seat)) and the snapshot in
+/// `sl-client-common`, which the tokio client shares; this resource is just the
+/// Bevy-side bridge, and dereferences to the snapshot (`parcel.can_fly`).
 ///
-/// [`current`](Self::current) is `None` until the agent's parcel resolves (the
-/// simulator pushes it on region entry / parcel crossing);
-/// [`can_fly`](Self::can_fly) combines the region-wide fly block and the parcel's
-/// `ALLOW_FLY`, and is permissive while the parcel is unknown (so a take-off is
-/// not blocked before the push arrives) — but `false` before login.
-#[derive(Resource, Default, Debug, Clone, PartialEq)]
-pub struct SlAgentParcel {
-    /// The parcel the agent currently stands on, or `None` before it resolves.
-    pub current: Option<ParcelInfo>,
-    /// Whether the agent may start flying where it currently stands.
-    pub can_fly: bool,
-    /// The object the agent is currently seated on, or `None` if it is not seated
-    /// on an object (standing, ground-sitting, or a sit request still pending).
-    ///
-    /// Mirrored from [`Session::seat`], which **keeps the seat across a plain
-    /// region crossing** (a vehicle carries the agent over the border), so a
-    /// consumer can trust this signal through a crossing without debouncing — it
-    /// only clears on a real stand / teleport. The viewer routes a seated agent's
-    /// steering keys to the vehicle rather than turning the avatar, and follows
-    /// the seat with the camera. A temporary lodger here (the "agent state
-    /// mirrored each frame" resource); the sit/stand task may move it to its own
-    /// resource.
-    pub seated_on: Option<ObjectKey>,
-}
+/// The viewer routes a seated agent's steering keys to the vehicle rather than
+/// turning the avatar, and follows the seat with the camera.
+#[derive(Resource, Default, Debug, Clone, PartialEq, Deref, DerefMut)]
+pub struct SlAgentParcel(pub AgentParcel);
 
-impl SlAgentParcel {
-    /// Refreshes the mirror from the driven session: the fly permission and seat
-    /// are read every frame (cheap), while the current parcel is re-cloned only
-    /// when it actually changes (a structural compare avoids cloning its ~½ KiB
-    /// bitmap and strings on every unchanged frame).
-    pub(crate) fn refresh_from(&mut self, session: &Session) {
-        self.can_fly = session.can_fly();
-        self.seated_on = session.seat();
-        let current = session.current_parcel();
-        if self.current.as_ref() != current {
-            self.current = current.cloned();
-        }
-    }
-}
-
-/// The reassembled parcel-ownership overlays — per region, the 64×64 grid of
-/// per-square ownership colour and boundary/sound flags the simulator pushes as
-/// four [`ParcelOverlay`](sl_proto::Event::ParcelOverlay) chunks.
-///
-/// The simulator sends a region's overlay unprompted on entry (there is no
-/// overlay-request message — the reference viewer relies on the same push) and
-/// re-broadcasts the whole overlay when a parcel is split, joined, or sold, so
-/// this resource stays current simply by folding in each chunk. Chunks arrive
-/// on the root circuit *and* on neighbour child circuits, each tagged with its
-/// source region ([`ParcelOverlayInfo::region_handle`]), so neighbour regions
-/// accumulate their own grids (Second Life pushes them on child-agent
-/// establishment; OpenSim only on parcel changes). The **current** region's
-/// grid is discarded and rebuilt on every region change, so a consumer never
-/// reads a stale grid for the region it stands in: check
-/// [`region`](Self::region) / [`is_complete`](Self::is_complete) before
-/// trusting [`grid`](Self::grid).
+/// The reassembled parcel-ownership overlays of every held region
+/// ([`ParcelOverlays`]), folded from the session event stream by
+/// the world-maintenance system. The reassembly and its sequencing live in
+/// `sl-client-common`, which the tokio client shares; this resource
+/// dereferences to it (`overlay.grid_of(region)`).
 ///
 /// Two consumers want these grids: the minimap parcel-colour overlay (all
-/// regions, via [`grid_of`](Self::grid_of)) and the in-world sound clamp (the
-/// `sound_local` bit) — the current region's grid stays available through
-/// [`grid`](Self::grid).
-#[derive(Resource, Default, Debug, Clone)]
-pub struct SlParcelOverlay {
-    /// The current (root) region, or `None` before the circuit is up. Chunks
-    /// arriving without a region tag are attributed here.
-    region: Option<RegionHandle>,
-    /// The reassembled grid per region.
-    grids: HashMap<RegionHandle, ParcelOverlayGrid>,
-}
-
-impl SlParcelOverlay {
-    /// The current region the untagged chunks are attributed to, or `None`
-    /// before any region is known.
-    #[must_use]
-    pub const fn region(&self) -> Option<RegionHandle> {
-        self.region
-    }
-
-    /// The **current** region's reassembled overlay grid, or `None` before its
-    /// first chunk arrives. Pair with [`is_complete`](Self::is_complete) to
-    /// know whether every chunk is in.
-    #[must_use]
-    pub fn grid(&self) -> Option<&ParcelOverlayGrid> {
-        self.grids.get(&self.region?)
-    }
-
-    /// The reassembled overlay grid of `region` (the current region or a
-    /// neighbour), or `None` before its first chunk arrives.
-    #[must_use]
-    pub fn grid_of(&self, region: RegionHandle) -> Option<&ParcelOverlayGrid> {
-        self.grids.get(&region)
-    }
-
-    /// Whether the current region's grid exists and every one of its chunks
-    /// has arrived.
-    #[must_use]
-    pub fn is_complete(&self) -> bool {
-        self.grid().is_some_and(ParcelOverlayGrid::is_complete)
-    }
-
-    /// Put an already-assembled grid in place as `region`'s overlay, for unit
-    /// tests of a consumer (the property-line bands) that need a region to have
-    /// a grid without driving a whole session's chunk stream through the
-    /// world-maintenance system.
-    ///
-    /// Not `#[cfg(test)]`: the consumers live in other crates, and a `cfg(test)`
-    /// item is not compiled when a *dependent* crate runs its tests. The
-    /// `_for_test` name is the documentation — nothing in a running viewer
-    /// should call it.
-    pub fn insert_grid_for_test(&mut self, region: RegionHandle, grid: ParcelOverlayGrid) {
-        self.grids.insert(region, grid);
-    }
-
-    /// Drops the overlay grid of `region`: its child circuit was retired, and
-    /// a region announced again sends its overlay afresh.
-    fn forget(&mut self, region: RegionHandle) {
-        let _grid = self.grids.remove(&region);
-    }
-
-    /// Folds one pushed overlay chunk into its region's grid, creating the
-    /// grid (sized for a standard 256 m region) on the first chunk. An untagged
-    /// chunk (region handle 0 — the source circuit was not yet associated)
-    /// goes to the current region; a malformed chunk is logged and dropped,
-    /// leaving the grid intact.
-    fn ingest(&mut self, info: &ParcelOverlayInfo) {
-        let region = if info.region_handle.0 == 0 {
-            match self.region {
-                Some(region) => region,
-                None => {
-                    tracing::warn!("dropping a parcel-overlay chunk with no attributable region");
-                    return;
-                }
-            }
-        } else {
-            info.region_handle
-        };
-        let grid = self
-            .grids
-            .entry(region)
-            .or_insert_with(|| ParcelOverlayGrid::new(DEFAULT_GRIDS_PER_EDGE));
-        if let Err(error) = grid.ingest_chunk(info.sequence_id, &info.data) {
-            tracing::warn!(%error, "dropping malformed parcel-overlay chunk");
-        }
-    }
-
-    /// Records the region the next untagged chunks describe on a region
-    /// change, discarding any grid already held for it — the destination
-    /// re-pushes its overlay on entry, so the grid rebuilds from scratch and a
-    /// consumer never reads a stale grid for the region the agent stands in.
-    /// Neighbour grids are kept (their regions re-push on their own churn).
-    fn reset_for_region(&mut self, region: RegionHandle) {
-        self.region = Some(region);
-        self.grids.remove(&region);
-    }
-}
+/// regions, via [`ParcelOverlays::grid_of`]) and the in-world sound clamp (the
+/// `sound_local` bit), which reads the current region's grid through
+/// [`ParcelOverlays::grid`].
+#[derive(Resource, Default, Debug, Clone, Deref, DerefMut)]
+pub struct SlParcelOverlay(pub ParcelOverlays);
 
 /// A region the client knows about — the login/root region and every neighbour
 /// announced via `EnableSimulator`. The handle and sim address are the region's
@@ -325,6 +193,7 @@ pub(crate) fn maintain_world(
     mut commands: Commands,
 ) {
     for SlEvent(event) in events.read() {
+        overlay.apply(event, identity.region_handle);
         match event {
             // The root circuit came up: the login region's handle is already in
             // the identity resource; pair it with the sim address to spawn (or
@@ -333,9 +202,6 @@ pub(crate) fn maintain_world(
                 identity.circuit_id = Some(*circuit);
                 if let Some(handle) = identity.region_handle {
                     set_current_region(&mut commands, &mut index, handle, *sim);
-                    // Record the login region so the overlay grid, assembled from
-                    // the chunks the sim pushes on entry, is attributed to it.
-                    overlay.reset_for_region(handle);
                 }
             }
             SessionEvent::RegionInfoHandshake(region_identity) => {
@@ -407,18 +273,9 @@ pub(crate) fn maintain_world(
                 ..
             } => {
                 retire_neighbor(&mut commands, &mut index, *handle);
-                if index.current != Some(*handle) {
-                    overlay.forget(*handle);
-                }
             }
             SessionEvent::ParcelProperties(info) => {
                 upsert_parcel(&mut commands, &mut index, (**info).clone());
-            }
-            // Overlay chunks arrive unprompted on region entry (and after any
-            // parcel edit), on the root and neighbour child circuits alike.
-            // Fold each into its source region's grid.
-            SessionEvent::ParcelOverlay(info) => {
-                overlay.ingest(info);
             }
             // A teleport handover completed: the destination is now the root
             // region. Update the global handle and move the current marker.
@@ -439,14 +296,10 @@ pub(crate) fn maintain_world(
                     clear_world(&mut commands, &mut index);
                 }
                 set_current_region(&mut commands, &mut index, *region_handle, *sim);
-                // Drop the previous region's overlay; the destination re-pushes
-                // its own on entry.
-                overlay.reset_for_region(*region_handle);
             }
             SessionEvent::Disconnected(_) | SessionEvent::LoggedOut => {
                 clear_world(&mut commands, &mut index);
                 index.pending_identities.clear();
-                *overlay = SlParcelOverlay::default();
             }
             _other => {}
         }
@@ -1045,6 +898,8 @@ mod tests {
     /// Chunks tagged with a neighbour region assemble into that region's own
     /// grid without touching the current region's, and both stay readable
     /// through [`SlParcelOverlay::grid_of`].
+    ///
+    /// [`SlParcelOverlay::grid_of`]: sl_client_common::parcel_overlays::ParcelOverlays::grid_of
     #[test]
     fn neighbour_overlay_chunks_assemble_per_region() {
         let mut app = world_app();
