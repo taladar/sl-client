@@ -11,17 +11,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 131 |
-| ready | 329 |
+| ideas | 130 |
+| ready | 328 |
 | blocked | 35 |
 | in-progress | 4 |
 | bugs | 4 |
-| done | 1626 |
+| done | 1628 |
 | deferred | 30 |
 | wont-do | 24 |
 | **total** | **2183** |
 
-## ideas (131)
+## ideas (130)
 
 ### protocol
 
@@ -183,8 +183,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A slider's readout a user can type into, as the reference's LLSliderCtrl
 - [`viewer-snapshot-scene-sidecar`](ideas/viewer-snapshot-scene-sidecar.md) —
   Say what a snapshot is a picture of
-- [`viewer-stars-srgb-linearize`](ideas/viewer-stars-srgb-linearize.md) —
-  Linearize the star field like the sky / clouds
 - [`viewer-statistics-ping`](ideas/viewer-statistics-ping.md) — Show the ping to
   the simulator, and its packet loss, in the viewer
 - [`viewer-status-bar-toggle-options`](ideas/viewer-status-bar-toggle-options.md)
@@ -317,7 +315,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-lsl-opensim-function-set`](ideas/gridspec-lsl-opensim-function-set.md)
   — Measure which library functions OpenSim's engines compile
 
-## ready (329)
+## ready (328)
 
 ### protocol
 
@@ -940,8 +938,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-spacenav-input-tests`](ready/viewer-spacenav-input-tests.md) — 6-DOF
   input reactions via the SpacenavInput seam (blocked by
   `viewer-world-test-harness` (done))
-- [`viewer-stars-add-in-encoded-space`](ready/viewer-stars-add-in-encoded-space.md)
-  — Daytime stars are fainter than the reference's, which adds them encoded
 - [`viewer-statistics-floater`](ready/viewer-statistics-floater.md) — Statistics
   floater (viewer + sim stats, lag meter) (blocked by
   `viewer-ui-widget-scaffold` (done))
@@ -1257,7 +1253,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-rigged-hair-triangle-pattern`](bugs/viewer-rigged-hair-triangle-pattern.md)
   — Rigged mesh hair shows a pattern of individual triangles
 
-## done (1626)
+## done (1628)
 
 ### protocol
 
@@ -3379,8 +3375,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   picks / classifieds (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-spacenav-ignore-when-window-unfocused`](done/viewer-spacenav-ignore-when-window-unfocused.md)
   — SpaceNavigator drives the viewer even when its window is not focused
+- [`viewer-stars-add-in-encoded-space`](done/viewer-stars-add-in-encoded-space.md)
+  — Daytime stars are fainter than the reference's, which adds them encoded
 - [`viewer-stars-render-black-in-daylight`](done/viewer-stars-render-black-in-daylight.md)
   — The star field draws black specks over the daytime sky
+- [`viewer-stars-srgb-linearize`](done/viewer-stars-srgb-linearize.md) —
+  Linearize the star field like the sky / clouds
 - [`viewer-static-asset-library`](done/viewer-static-asset-library.md) — Ship
   the viewer's static assets and answer every fetch from them first
 - [`viewer-stood-avatar-height-lost-under-load`](done/viewer-stood-avatar-height-lost-under-load.md)

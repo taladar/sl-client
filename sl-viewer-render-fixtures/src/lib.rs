@@ -3396,6 +3396,10 @@ fn spawn_atmosphere(
         ),
         cloud_noise: placeholder.clone(),
         cloud_noise_next: placeholder.clone(),
+        // The dome's own inputs: a cloud is mixed with the encoded sky behind it.
+        sky: resolved.params,
+        rainbow: placeholder.clone(),
+        halo: placeholder.clone(),
     });
     commands.spawn((
         Mesh3d(assets.meshes.add(build_cloud_dome_mesh())),
@@ -3426,6 +3430,10 @@ fn spawn_atmosphere(
             reserved: Vec3::ZERO,
         },
         diffuse: placeholder.clone(),
+        // The dome's own inputs: a star is added to the encoded sky behind it.
+        sky: resolved.params,
+        rainbow: placeholder.clone(),
+        halo: placeholder.clone(),
     });
     commands.spawn((
         Mesh3d(assets.meshes.add(build_star_mesh())),

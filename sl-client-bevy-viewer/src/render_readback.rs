@@ -1453,9 +1453,6 @@ mod tests {
         mut images: ResMut<Assets<Image>>,
         mut materials: ResMut<Assets<sl_client_bevy::StarMaterial>>,
     ) {
-        use bevy::asset::RenderAssetUsages;
-        use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
-
         let basis = crate::render_scene::scene_root_transform().rotation;
         // A quad in Bevy's XY plane faces +Z; a quarter turn about X turns it to
         // face -Y, the camera, in the Second Life frame the basis maps from.
@@ -1465,25 +1462,8 @@ mod tests {
         let quad = meshes
             .add(quad.with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, vec![[1.0_f32; 4]; vertices]));
         for (x, texel) in STAR_QUAD_X.into_iter().zip([[0, 0, 0, 255], [255; 4]]) {
-            // A world colour texture, uploaded as the viewer uploads a fetched one.
-            let bloom = images.add(Image::new_fill(
-                Extent3d {
-                    width: 1,
-                    height: 1,
-                    depth_or_array_layers: 1,
-                },
-                TextureDimension::D2,
-                &texel,
-                TextureFormat::Rgba8Unorm,
-                RenderAssetUsages::default(),
-            ));
-            let material = materials.add(sl_client_bevy::StarMaterial {
-                params: sl_client_bevy::StarParams {
-                    custom_alpha: 1.0,
-                    reserved: Vec3::ZERO,
-                },
-                diffuse: bloom,
-            });
+            let bloom = images.add(one_texel(texel));
+            let material = materials.add(full_brightness_star(bloom, &mut images));
             commands.spawn((
                 Mesh3d(quad.clone()),
                 MeshMaterial3d(material),
@@ -1491,6 +1471,222 @@ mod tests {
                     .with_rotation(basis.mul_quat(facing_camera)),
                 Name::new("star-blend/quad"),
             ));
+        }
+    }
+
+    /// A [`sl_client_bevy::StarMaterial`] at full star brightness with the bloom
+    /// texture `bloom`, over the viewer's legacy default sky (the inputs
+    /// [`spawn_star_over_sky`] draws its dome with).
+    fn full_brightness_star(
+        bloom: Handle<Image>,
+        images: &mut Assets<Image>,
+    ) -> sl_client_bevy::StarMaterial {
+        let placeholder = images.add(sl_viewer_world_scene::sky::placeholder_image());
+        sl_client_bevy::StarMaterial {
+            params: sl_client_bevy::StarParams {
+                custom_alpha: 1.0,
+                reserved: Vec3::ZERO,
+            },
+            diffuse: bloom,
+            sky: star_test_sky(),
+            rainbow: placeholder.clone(),
+            halo: placeholder,
+        }
+    }
+
+    /// The sky the star stages assume behind their stars: the viewer's built-in
+    /// legacy default, resolved as `drive_sky` resolves it.
+    fn star_test_sky() -> sl_client_bevy::SkyParams {
+        let sky = sl_client_bevy::SkySettings::legacy_windlight_default("Default");
+        sl_viewer_world_scene::sky::resolve_sky(&sky).params
+    }
+
+    /// A 1×1 world colour texture holding `texel`, uploaded as the viewer uploads
+    /// a fetched one.
+    fn one_texel(texel: [u8; 4]) -> Image {
+        use bevy::asset::RenderAssetUsages;
+        use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
+
+        Image::new_fill(
+            Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            TextureDimension::D2,
+            &texel,
+            TextureFormat::Rgba8Unorm,
+            RenderAssetUsages::default(),
+        )
+    }
+
+    /// The grey of the [`STAR_OVER_SKY_STAGE`] star's bloom texel. A quarter of
+    /// full scale: enough to tell the two ways of adding it apart by a factor of
+    /// several, small enough that the encoded sum stays below white.
+    const STAR_OVER_SKY_TEXEL: u8 = 64;
+
+    /// Where the [`STAR_OVER_SKY_STAGE`] camera stands: below and in front of the
+    /// star quad, so it looks up at it about 45 degrees into the sky rather than at
+    /// the bright horizon haze.
+    const STAR_OVER_SKY_CAMERA: Vec3 = Vec3::new(0.0, -10.0, -10.0);
+
+    /// An empty stage looking up at the one star quad [`spawn_star_over_sky`] adds
+    /// in front of a sky dome.
+    const STAR_OVER_SKY_STAGE: RenderScene = RenderScene {
+        id: "test-star-over-sky",
+        what: "one grey star-field quad over the viewer's default daytime sky",
+        timeline: Timeline { samples: &[0.0] },
+        lighting: SceneLighting::Own,
+        camera: SceneCamera {
+            position: STAR_OVER_SKY_CAMERA,
+            look_at: Vec3::ZERO,
+        },
+        spawn: |_cx, _root, _commands, _assets| {},
+        subject: None,
+        applies: &[],
+    };
+
+    /// **A star is added to the encoded sky, as the reference adds it**
+    /// (`viewer-stars-add-in-encoded-space`).
+    ///
+    /// The reference writes the WindLight sky into an 8-bit G-buffer encoded, adds
+    /// each star's raw texel to it, and decodes the sum. With the frame read back
+    /// encoded and nothing between the sky and the frame (unit exposure, no tone
+    /// mapper), a star pixel therefore reads as the sky beside it plus the star's
+    /// texel, channel by channel. Adding the decoded texel to the decoded sky in
+    /// linear light, as the star pass did, lifts a mid-blue sky by a fraction of
+    /// that, which is why daytime stars were far fainter than Firestorm's.
+    #[test]
+    fn a_star_is_added_to_the_encoded_sky() -> Result<(), TestError> {
+        let Some((frame, projected)) =
+            capture_with(&STAR_OVER_SKY_STAGE, SceneCx::new(), &[Vec3::ZERO], |app| {
+                app.add_systems(Startup, spawn_star_over_sky)
+                    .add_systems(PreUpdate, (linear_output, unit_exposure));
+            })
+        else {
+            warn!("skipping: no frame came back, so this machine has no usable GPU adapter");
+            return Ok(());
+        };
+        let centre = projected
+            .get(0)
+            .ok_or("the star quad did not project onto the frame")?;
+        #[expect(
+            clippy::as_conversions,
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            reason = "a projected point inside the 256-pixel frame, rounded to its pixel"
+        )]
+        let (cx, cy) = (
+            centre.x.round().max(0.0) as u32,
+            centre.y.round().max(0.0) as u32,
+        );
+        let texel = f32::from(STAR_OVER_SKY_TEXEL) / 255.0;
+        // Per row of a box inside the quad, the sky is read beside the quad on
+        // both sides of it, at the same height, so the sky's vertical gradient
+        // cancels; per channel, the lift is the star pixel less that sky.
+        let mut lifts = Vec::new();
+        let mut skies = Vec::new();
+        for y in cy.saturating_sub(15)..cy.saturating_add(15) {
+            let (Some(left), Some(right)) = (
+                frame.pixel(cx.saturating_sub(80), y),
+                frame.pixel(cx.saturating_add(80), y),
+            ) else {
+                continue;
+            };
+            let sky = left.lerp(right, 0.5);
+            for x in cx.saturating_sub(15)..cx.saturating_add(15) {
+                let Some(star) = frame.pixel(x, y) else {
+                    continue;
+                };
+                for (star, sky) in star
+                    .truncate()
+                    .to_array()
+                    .into_iter()
+                    .zip(sky.truncate().to_array())
+                {
+                    // Only a channel whose sky is mid-range, so neither the clamp
+                    // at white nor the linear toe hides the difference.
+                    if sky > 0.15 && sky + texel < 0.95 {
+                        lifts.push(star - sky);
+                        skies.push(sky);
+                    }
+                }
+            }
+        }
+        assert!(
+            lifts.len() > 100,
+            "only {} channel samples had a mid-range sky behind them (skies seen: {:?}), so the \
+             stage is not showing a daytime sky behind its star and the check below proves \
+             nothing",
+            lifts.len(),
+            skies.iter().take(6).collect::<Vec<_>>()
+        );
+        // The twinkle leaves a few per cent of the quad's fragments below full
+        // coverage, so judge the median.
+        lifts.sort_by(f32::total_cmp);
+        let median = lifts.get(lifts.len() / 2).copied().unwrap_or_default();
+        assert!(
+            (median - texel).abs() < 0.04,
+            "a star whose bloom texel is {texel:.3} lifted the encoded sky behind it by {median:.3} \
+             (median over {} samples): the reference adds the texel to the encoded sky, so the \
+             lift should be the texel itself; a lift far below it is the star added in linear \
+             light",
+            lifts.len()
+        );
+        Ok(())
+    }
+
+    /// Spawn the [`STAR_OVER_SKY_STAGE`]'s sky dome, centred on the camera as the
+    /// viewer centres it, and one star quad textured with a grey bloom texel.
+    fn spawn_star_over_sky(
+        mut commands: Commands,
+        mut meshes: ResMut<Assets<Mesh>>,
+        mut images: ResMut<Assets<Image>>,
+        mut stars: ResMut<Assets<sl_client_bevy::StarMaterial>>,
+        mut skies: ResMut<Assets<sl_client_bevy::SkyMaterial>>,
+    ) {
+        let basis = crate::render_scene::scene_root_transform().rotation;
+        let placeholder = images.add(sl_viewer_world_scene::sky::placeholder_image());
+        let dome = skies.add(sl_client_bevy::SkyMaterial {
+            params: star_test_sky(),
+            rainbow: placeholder.clone(),
+            halo: placeholder,
+        });
+        commands.spawn((
+            Mesh3d(meshes.add(Sphere::new(sl_viewer_world_scene::sky::SKY_DOME_RADIUS))),
+            MeshMaterial3d(dome),
+            Transform::from_translation(basis.mul_vec3(STAR_OVER_SKY_CAMERA)),
+            bevy::light::NotShadowCaster,
+            Name::new("star-over-sky/dome"),
+        ));
+
+        // A quad in Bevy's XY plane faces +Z; a quarter turn about X turns it to
+        // face -Y, toward the camera, in the Second Life frame the basis maps from.
+        let facing_camera = Quat::from_rotation_x(core::f32::consts::FRAC_PI_2);
+        let quad = Mesh::from(Rectangle::new(STAR_QUAD_SIDE, STAR_QUAD_SIDE));
+        let vertices = quad.count_vertices();
+        let quad = meshes
+            .add(quad.with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, vec![[1.0_f32; 4]; vertices]));
+        let grey = STAR_OVER_SKY_TEXEL;
+        let bloom = images.add(one_texel([grey, grey, grey, 255]));
+        let material = stars.add(full_brightness_star(bloom, &mut images));
+        commands.spawn((
+            Mesh3d(quad),
+            MeshMaterial3d(material),
+            Transform::from_rotation(basis.mul_quat(facing_camera)),
+            Name::new("star-over-sky/quad"),
+        ));
+    }
+
+    /// Pin the readback camera's exposure to a gain of exactly 1, so the frame
+    /// holds the colour the sky and star passes wrote.
+    fn unit_exposure(mut cameras: Query<&mut bevy::camera::Exposure, With<ViewerCamera>>) {
+        // `Exposure::exposure` is `1 / (1.2 * 2^ev100)`.
+        let ev100 = -(1.2_f32.log2());
+        for mut exposure in &mut cameras {
+            if exposure.ev100.to_bits() != ev100.to_bits() {
+                exposure.ev100 = ev100;
+            }
         }
     }
 

@@ -10,8 +10,16 @@
 //! (`cloud_noise` / `cloud_noise_next`, blended during a day-cycle transition —
 //! the blend factor stays `0.0` until the day cycle drives it in a later phase).
 //! The accompanying `clouds.wesl` evaluates the cloud lighting and multi-octave
-//! noise per fragment, exactly as the reference does per vertex + per fragment,
-//! and outputs an alpha-blended cloud colour.
+//! noise per fragment, exactly as the reference does per vertex + per fragment.
+//!
+//! **The cloud is mixed with the encoded sky.** The reference alpha-blends the
+//! cloud into its 8-bit G-buffer over the sky's *encoded* value and decodes the
+//! mix afterwards (`softenLight`), which leaves a soft cloud edge over a mid-blue
+//! sky well below the same mix in linear light. So the material also carries the
+//! sky dome's inputs (the [`SkyParams`] block and the rainbow / halo overlays,
+//! mirrored from the dome's material): the shader evaluates the sky behind its
+//! pixel and, through a premultiplied blend, leaves exactly the decoded mix there
+//! (`viewer-stars-add-in-encoded-space`).
 //!
 //! This module is gated behind the `bevy_pbr` feature: the headless client needs
 //! no renderer, so the PBR/render stack is pulled in only by the windowed viewer.
@@ -29,6 +37,8 @@ use bevy::render::render_resource::{
     AsBindGroup, RenderPipelineDescriptor, ShaderType, SpecializedMeshPipelineError,
 };
 use bevy::shader::{Shader, ShaderRef};
+
+use crate::sky::SkyParams;
 
 /// The internal handle the cloud shader (`clouds.wesl`) is loaded under, so the
 /// material can reference it without an on-disk asset path.
@@ -87,15 +97,6 @@ pub struct CloudParams {
     /// (`cloud_noise_next`) noise textures during a day-cycle transition. `0.0`
     /// until the day cycle drives it, so only `cloud_noise` is used for now.
     pub blend_factor: f32,
-    /// Whether to apply the reference `srgb_to_linear` to the cloud colour before
-    /// the tone mapper (`1.0` on, `0.0` off) — the `SL_VIEWER_SKY_LINEARIZE` A/B
-    /// knob, matching the sky dome.
-    pub linearize: f32,
-    /// The sky's "fake HDR" scale (`SKY_HDR_SCALE`), applied to the linearised
-    /// cloud colour before tone-mapping, matching the sky dome. `1.0` for a legacy
-    /// / classic-mode sky; `sqrt(gamma) * 2` for an EEP reflection-probe-ambiance
-    /// sky (the sl-proto `SkySettings::sky_hdr_scale`).
-    pub sky_hdr_scale: f32,
     /// The `globals.time` value (wrapped-clock seconds) at which the scroll
     /// anchor below was taken. The shader integrates the scroll GPU-side —
     /// `scroll_base + scroll_rate * (globals.time - scroll_ref_time)`, unwound
@@ -112,7 +113,8 @@ pub struct CloudParams {
 }
 
 /// The cloud-layer material: one [`CloudParams`] uniform block plus the current and
-/// next cloud noise textures, shaded by `clouds.wesl`.
+/// next cloud noise textures, shaded by `clouds.wesl`, and a copy of the sky dome's
+/// inputs so the shader knows the encoded sky each cloud is mixed with.
 ///
 /// The noise textures may start as placeholders; the viewer fetches the sky's
 /// referenced cloud texture **boosted** and swaps it in once decoded.
@@ -130,6 +132,18 @@ pub struct CloudMaterial {
     #[texture(3)]
     #[sampler(4)]
     pub cloud_noise_next: Handle<Image>,
+    /// The sky dome's atmospheric inputs, the same block its
+    /// [`SkyMaterial`](crate::SkyMaterial) carries.
+    #[uniform(5)]
+    pub sky: SkyParams,
+    /// The sky dome's rainbow overlay texture.
+    #[texture(6)]
+    #[sampler(7)]
+    pub rainbow: Handle<Image>,
+    /// The sky dome's 22-degree ice-halo overlay texture.
+    #[texture(8)]
+    #[sampler(9)]
+    pub halo: Handle<Image>,
 }
 
 impl Material for CloudMaterial {
@@ -144,9 +158,11 @@ impl Material for CloudMaterial {
     }
 
     /// The cloud layer is drawn as an alpha-blended dome over the (opaque) sky
-    /// dome.
+    /// dome, **premultiplied** (`ONE, ONE_MINUS_SRC_ALPHA`): `clouds.wesl` hands it
+    /// the decoded encoded-space mix less what the blend keeps of the sky, so the
+    /// sum is the reference's mix rather than a mix in linear light.
     fn alpha_mode(&self) -> AlphaMode {
-        AlphaMode::Blend
+        AlphaMode::Premultiplied
     }
 
     /// Pin the vertex buffer layout to the position attribute (the shader derives
@@ -178,6 +194,8 @@ pub struct CloudMaterialPlugin;
 
 impl Plugin for CloudMaterialPlugin {
     fn build(&self, app: &mut App) {
+        // The shader evaluates the sky behind each cloud with the shared module.
+        crate::sky::load_sky_colour_shader(app);
         load_internal_asset!(app, CLOUD_SHADER_HANDLE, "clouds.wesl", |source, _| {
             Shader::from_wesl(source, "embedded://sl_client_bevy/clouds.wesl")
         });

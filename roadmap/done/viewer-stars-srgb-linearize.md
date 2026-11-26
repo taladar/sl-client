@@ -2,9 +2,9 @@
 id: viewer-stars-srgb-linearize
 title: Linearize the star field like the sky / clouds
 topic: viewer
-status: ideas
+status: done
 origin: viewer-clouds-sun-occlusion-horizon-contact sky-colour fix (2026-08-03)
-refs: [viewer-clouds-sun-occlusion-horizon-contact]
+refs: [viewer-clouds-sun-occlusion-horizon-contact, viewer-stars-add-in-encoded-space]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
@@ -21,3 +21,10 @@ reported issue.
 the reference, which linearizes the whole composited WL-sky including the
 additive stars), and confirm on a night sky that the field's brightness / colour
 still reads right against the (now linearized) night sky. Small, low priority.
+
+## Done (2026-11-26)
+
+By [[viewer-stars-add-in-encoded-space]], more exactly than asked: the star
+pass now adds its texel to the encoded sky behind it and decodes the sum with
+the sky's own `srgb_to_linear` and `sky_hdr_scale`, which is how the reference
+linearises the composited WL sky. Checked on a night sky against Firestorm.

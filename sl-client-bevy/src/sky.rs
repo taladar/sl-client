@@ -30,12 +30,36 @@ use bevy::shader::{Shader, ShaderRef};
 /// material can reference it without an on-disk asset path.
 const SKY_SHADER_HANDLE: Handle<Shader> = uuid_handle!("7b3e1d9a-4c22-4f8e-b0a1-6d2c9e5f4a70");
 
+/// The internal handle the shared sky-colour module (`sky_colour.wesl`) is
+/// loaded under. Shaders reach it by its import path
+/// (`sl_client_bevy::sky_colour`); the handle only has to be stable so a second
+/// load replaces the module rather than adding a second one.
+const SKY_COLOUR_SHADER_HANDLE: Handle<Shader> =
+    uuid_handle!("c2f6a4e8-91d3-4b57-8e0f-3a7d5c1b9e42");
+
+/// Load the shared sky-colour shader module (`sl_client_bevy::sky_colour`: the
+/// [`SkyParams`] block, the atmosphere `skyF.glsl` writes into the reference's
+/// G-buffer, and `softenLight`'s decode of it), and the sRGB module it imports.
+///
+/// The sky dome draws it, and the star field evaluates it at its own pixels to
+/// add each star where the reference does, to the encoded sky. Idempotent; call
+/// it from `build`, before the material plugin that needs it.
+pub fn load_sky_colour_shader(app: &mut App) {
+    crate::srgb::load_srgb_shader(app);
+    load_internal_asset!(
+        app,
+        SKY_COLOUR_SHADER_HANDLE,
+        "sky_colour.wesl",
+        |source, _| { Shader::from_wesl(source, "embedded://sl_client_bevy/sky_colour.wesl") }
+    );
+}
+
 /// The atmospheric inputs for one sky frame: the `LLSettingsSky` values the
 /// reference viewer binds as sky-shader uniforms, plus the per-frame sun / moon
 /// light direction and day/night factor.
 ///
 /// The field order (each `Vec3` paired with a trailing scalar) matches the
-/// `sky.wesl` `SkyParams` layout so the std140 uniform packing lines up: a
+/// `sky_colour.wesl` `SkyParams` layout so the std140 uniform packing lines up: a
 /// `vec3` occupies 12 bytes with 16-byte alignment, and the following scalar
 /// fills the 4-byte remainder of that 16-byte slot.
 #[derive(Clone, Copy, Debug, PartialEq, ShaderType)]
@@ -95,6 +119,12 @@ pub struct SkyParams {
     /// shipped default); `sqrt(gamma) * 2` for an EEP sky with a non-zero
     /// reflection-probe ambiance (the sl-proto `SkySettings::sky_hdr_scale`).
     pub sky_hdr_scale: f32,
+    /// The radius of the sky dome the atmosphere is drawn on, in metres. The sky
+    /// colour is a function of the camera-relative point on that dome; the dome
+    /// itself reads the point off its mesh, while the star field and the cloud
+    /// layer, which evaluate the sky behind them, scale their view direction to
+    /// this radius.
+    pub dome_radius: f32,
 }
 
 /// The atmospheric sky-dome material: one [`SkyParams`] uniform block plus the
@@ -163,6 +193,7 @@ pub struct SkyMaterialPlugin;
 
 impl Plugin for SkyMaterialPlugin {
     fn build(&self, app: &mut App) {
+        load_sky_colour_shader(app);
         load_internal_asset!(app, SKY_SHADER_HANDLE, "sky.wesl", |source, _| {
             Shader::from_wesl(source, "embedded://sl_client_bevy/sky.wesl")
         });

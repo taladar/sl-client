@@ -123,11 +123,19 @@ impl Plugin for SkyPlugin {
                 apply_disc_textures,
                 // Cloud layer (P22.4): fold the same active sky frame into the
                 // cloud material, accumulate the scroll, and swap in the noise.
-                drive_clouds.after(WorldPhase::CameraPositioned),
+                // After the dome's own writes, whose inputs it mirrors.
+                drive_clouds
+                    .after(WorldPhase::CameraPositioned)
+                    .after(drive_sky)
+                    .after(apply_sky_textures),
                 apply_cloud_textures,
                 // Star field (P22.5): centre / rotate the field on the camera,
                 // fade it in with `star_brightness`, and swap in the bloom.
-                drive_stars.after(WorldPhase::CameraPositioned),
+                // After the dome's own writes, whose inputs it mirrors.
+                drive_stars
+                    .after(WorldPhase::CameraPositioned)
+                    .after(drive_sky)
+                    .after(apply_sky_textures),
                 apply_star_textures,
             ),
         );
@@ -1611,7 +1619,11 @@ pub(crate) fn setup_clouds(
     let material = materials.add(CloudMaterial {
         params: default_cloud_params(),
         cloud_noise: placeholder.clone(),
-        cloud_noise_next: placeholder,
+        cloud_noise_next: placeholder.clone(),
+        // `drive_clouds` mirrors the sky dome's inputs in from its first frame.
+        sky: default_sky_params(),
+        rainbow: placeholder.clone(),
+        halo: placeholder,
     });
     commands.spawn((
         Mesh3d(meshes.add(build_cloud_dome_mesh())),
@@ -1643,16 +1655,16 @@ pub(crate) fn setup_clouds(
 pub(crate) fn drive_clouds(
     time: Res<Time>,
     camera: Query<&GlobalTransform, With<ViewerCamera>>,
-    inputs: SkyInputs,
+    environment: Res<EnvironmentState>,
     mut state: ResMut<CloudState>,
-    mut materials: ResMut<Assets<CloudMaterial>>,
-    mut textures: ResMut<TextureManager>,
+    stores: BackdropStores<CloudMaterial>,
+    sky_dome: SkyDomeMaterial,
     mut dome: Query<&mut Visibility, With<CloudDome>>,
 ) {
-    let SkyInputs {
-        environment,
-        overrides,
-    } = inputs;
+    let BackdropStores {
+        mut materials,
+        mut textures,
+    } = stores;
     let altitude = camera.single().map_or(0.0, |camera| camera.translation().y);
     let position = day_position(&environment);
     let Some(sky) = environment.sky_at(altitude, position) else {
@@ -1700,18 +1712,14 @@ pub(crate) fn drive_clouds(
     // scrolling cloud layer re-prepares nothing — and with a live day cycle they
     // are identical between day-cycle sampling steps (`DAY_POSITION_STEPS`),
     // which is the only reason this float-equality compare ever holds on a grid.
-    let params = overridden_cloud_params(
-        cloud_params(
-            &sky,
-            resolved.lightnorm,
-            resolved.sun_up_factor,
-            resolved.glow_factor,
-            state.scroll_ref_time,
-            state.scroll_rate,
-            state.scroll_base,
-        ),
+    let params = cloud_params(
         &sky,
-        &overrides.sky,
+        resolved.lightnorm,
+        resolved.sun_up_factor,
+        resolved.glow_factor,
+        state.scroll_ref_time,
+        state.scroll_rate,
+        state.scroll_base,
     );
     if materials
         .get(&state.material)
@@ -1719,6 +1727,19 @@ pub(crate) fn drive_clouds(
         && let Some(mut material) = materials.get_mut(&state.material)
     {
         material.params = params;
+    }
+
+    // The sky dome's inputs, so the shader knows the encoded sky each cloud is
+    // mixed with (its colour pipeline, overrides included, is the dome's).
+    if let Some(dome) = sky_dome.materials.get(&sky_dome.state.material)
+        && materials.get(&state.material).is_some_and(|material| {
+            dome_inputs_differ(dome, &material.sky, &material.rainbow, &material.halo)
+        })
+        && let Some(mut material) = materials.get_mut(&state.material)
+    {
+        material.sky = dome.params;
+        material.rainbow = dome.rainbow.clone();
+        material.halo = dome.halo.clone();
     }
 
     // A frame that names no cloud noise has no clouds — the reference binds no
@@ -1836,7 +1857,11 @@ pub(crate) fn setup_stars(
             custom_alpha: 0.0,
             reserved: Vec3::ZERO,
         },
-        diffuse: placeholder,
+        diffuse: placeholder.clone(),
+        // `drive_stars` mirrors the sky dome's inputs in from its first frame.
+        sky: default_sky_params(),
+        rainbow: placeholder.clone(),
+        halo: placeholder,
     });
     commands.spawn((
         Mesh3d(meshes.add(build_star_mesh())),
@@ -1857,18 +1882,57 @@ pub(crate) fn setup_stars(
     });
 }
 
+/// The sky dome's material, read-only, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): [`drive_stars`] and
+/// [`drive_clouds`] mirror its inputs into their materials, since a star is added
+/// to, and a cloud mixed with, the encoded sky behind it.
+#[derive(bevy::ecs::system::SystemParam)]
+pub(crate) struct SkyDomeMaterial<'w> {
+    /// Which material is the dome's.
+    state: Res<'w, SkyState>,
+    /// The sky materials.
+    materials: Res<'w, Assets<SkyMaterial>>,
+}
+
+/// The stores a backdrop drawn over the sky dome (the star field, the cloud
+/// layer) is painted through, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): its material and the texture
+/// manager its maps are fetched through.
+#[derive(bevy::ecs::system::SystemParam)]
+pub(crate) struct BackdropStores<'w, M: Material> {
+    /// The backdrop's materials.
+    materials: ResMut<'w, Assets<M>>,
+    /// The texture manager the backdrop's maps are fetched through.
+    textures: ResMut<'w, TextureManager>,
+}
+
+/// Whether a material's copy of the sky dome's inputs (`sky`, `rainbow`, `halo`)
+/// is out of date against the dome's own material.
+fn dome_inputs_differ(
+    dome: &SkyMaterial,
+    sky: &SkyParams,
+    rainbow: &Handle<Image>,
+    halo: &Handle<Image>,
+) -> bool {
+    *sky != dome.params || *rainbow != dome.rainbow || *halo != dome.halo
+}
+
 /// Centre and slowly rotate the star field on the camera, fold the active sky
-/// frame's `star_brightness` and the twinkle time into the material, show / hide
-/// the field, and (re)request the sky's bloom texture boosted.
+/// frame's `star_brightness` and the sky dome's inputs into the material, show /
+/// hide the field, and (re)request the sky's bloom texture boosted.
 pub(crate) fn drive_stars(
     time: Res<Time>,
     camera: Query<&GlobalTransform, With<ViewerCamera>>,
     environment: Res<EnvironmentState>,
     mut state: ResMut<StarState>,
-    mut materials: ResMut<Assets<StarMaterial>>,
-    mut textures: ResMut<TextureManager>,
+    stores: BackdropStores<StarMaterial>,
+    sky_dome: SkyDomeMaterial,
     mut field: Query<(&mut Transform, &mut Visibility), With<StarField>>,
 ) {
+    let BackdropStores {
+        mut materials,
+        mut textures,
+    } = stores;
     let Ok(camera) = camera.single() else {
         return;
     };
@@ -1913,6 +1977,20 @@ pub(crate) fn drive_stars(
         && let Some(mut material) = materials.get_mut(&state.material)
     {
         material.params.custom_alpha = custom_alpha;
+    }
+
+    // The sky dome's inputs, so the shader knows the encoded sky each star is
+    // added to. The same compare-then-`get_mut`: the dome's material only changes
+    // when `drive_sky` or `apply_sky_textures` wrote it, so neither does this one.
+    if let Some(dome) = sky_dome.materials.get(&sky_dome.state.material)
+        && materials.get(&state.material).is_some_and(|material| {
+            dome_inputs_differ(dome, &material.sky, &material.rainbow, &material.halo)
+        })
+        && let Some(mut material) = materials.get_mut(&state.material)
+    {
+        material.sky = dome.params;
+        material.rainbow = dome.rainbow.clone();
+        material.halo = dome.halo.clone();
     }
 
     // Fetch the sky's bloom texture boosted (the sky frame's own, or the reference
@@ -2298,6 +2376,7 @@ fn sky_params(
         ice_level: sky.ice_level,
         linearize,
         sky_hdr_scale,
+        dome_radius: SKY_DOME_RADIUS,
     }
 }
 
@@ -2312,8 +2391,8 @@ pub(crate) fn default_sky_params() -> SkyParams {
 /// direction, day/night factor, glow factor, and accumulated scroll offset. The
 /// scroll is folded into `cloud_pos_density1` the way the reference
 /// `LLSettingsVOSky::applySpecial` does (the x offset negated). The colour
-/// pipeline is the reference's; a system applies the app's overrides to it
-/// (`overridden_cloud_params`).
+/// pipeline is not here: a cloud pixel is decoded as the sky's, with the dome's
+/// inputs `drive_clouds` mirrors into the material.
 #[must_use]
 pub fn cloud_params(
     sky: &SkySettings,
@@ -2328,7 +2407,6 @@ pub fn cloud_params(
     // sky overwrites its light colours exactly as it does the sky dome's — see
     // [`shader_light_colors`].
     let (sunlight, moonlight) = shader_light_colors(sky);
-    let (linearize, sky_hdr_scale) = colour_pipeline(sky, &SkyOverrides::default());
     let pd1 = sky.cloud_pos_density1;
     let pd2 = sky.cloud_pos_density2;
     CloudParams {
@@ -2354,8 +2432,6 @@ pub fn cloud_params(
         cloud_variance: sky.cloud_variance,
         cloud_pos_density2: Vec3::new(pd2.position_x(), pd2.position_y(), pd2.density()),
         blend_factor: 0.0,
-        linearize,
-        sky_hdr_scale,
         scroll_ref_time,
         scroll_rate,
         scroll_base,
@@ -2378,21 +2454,6 @@ fn overridden_sky_params(
 ) -> SkyParams {
     let (linearize, sky_hdr_scale) = colour_pipeline(sky, overrides);
     SkyParams {
-        linearize,
-        sky_hdr_scale,
-        ..params
-    }
-}
-
-/// The cloud uniforms `params` with `sky`'s colour pipeline under the app's
-/// `overrides` ([`colour_pipeline`]).
-fn overridden_cloud_params(
-    params: CloudParams,
-    sky: &SkySettings,
-    overrides: &SkyOverrides,
-) -> CloudParams {
-    let (linearize, sky_hdr_scale) = colour_pipeline(sky, overrides);
-    CloudParams {
         linearize,
         sky_hdr_scale,
         ..params

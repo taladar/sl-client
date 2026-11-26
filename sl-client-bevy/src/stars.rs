@@ -10,12 +10,20 @@
 //! this material shades it.
 //!
 //! The material carries one [`StarParams`] uniform block (the reference
-//! `custom_alpha` = `star_brightness / 500`, and the twinkle animation `time`)
-//! plus the bloom texture. The accompanying `stars.wesl` samples the bloom, tints
-//! it by the per-star vertex colour, scales the alpha by `custom_alpha` and the
-//! per-star twinkle, and is drawn additively (the reference
-//! `BT_ADD_WITH_ALPHA`) so the stars add their light over the (dark, at night)
-//! sky.
+//! `custom_alpha` = `star_brightness / 500`) plus the bloom texture. The
+//! accompanying `stars.wesl` samples the bloom, tints it by the per-star vertex
+//! colour, scales the alpha by `custom_alpha` and the per-star twinkle, and is
+//! drawn additively (the reference `BT_ADD_WITH_ALPHA`) so the stars add their
+//! light over the sky.
+//!
+//! **The star is added to the encoded sky.** The reference writes the WindLight
+//! sky into its 8-bit G-buffer encoded, adds each star's raw texel to that, and
+//! only then decodes the sum (`softenLight`). On a mid-blue sky that lifts a
+//! pixel far more than adding the decoded texel in linear light does, so the
+//! material also carries the sky's own inputs (the [`SkyParams`] block and the
+//! rainbow / halo overlays, which the viewer mirrors from the sky dome's
+//! material): the shader evaluates the sky at its pixel and adds the difference
+//! the reference's encoded sum makes (`viewer-stars-add-in-encoded-space`).
 //!
 //! **Single bloom texture, no A/B blend.** The reference binds both the current
 //! and next bloom textures (`getBloomTex` / `getBloomTexNext`), but the deferred
@@ -40,6 +48,8 @@ use bevy::render::render_resource::{
 };
 use bevy::shader::{Shader, ShaderRef};
 
+use crate::sky::SkyParams;
+
 /// The internal handle the star shader (`stars.wesl`) is loaded under, so the
 /// material can reference it without an on-disk asset path.
 const STAR_SHADER_HANDLE: Handle<Shader> = uuid_handle!("4a7e2c93-6f1b-4d8a-b2e5-3c9f0a7d1e64");
@@ -63,7 +73,8 @@ pub struct StarParams {
 }
 
 /// The star-field material: one [`StarParams`] uniform block plus the bloom
-/// texture, shaded by `stars.wesl`.
+/// texture, shaded by `stars.wesl`, and a copy of the sky dome's inputs so the
+/// shader knows the encoded sky each star is added to.
 ///
 /// The bloom texture may start as a placeholder; the viewer fetches the sky's
 /// referenced bloom texture (or the built-in default) **boosted** and swaps it in
@@ -77,6 +88,18 @@ pub struct StarMaterial {
     #[texture(1)]
     #[sampler(2)]
     pub diffuse: Handle<Image>,
+    /// The sky dome's atmospheric inputs, the same block its
+    /// [`SkyMaterial`](crate::SkyMaterial) carries.
+    #[uniform(3)]
+    pub sky: SkyParams,
+    /// The sky dome's rainbow overlay texture.
+    #[texture(4)]
+    #[sampler(5)]
+    pub rainbow: Handle<Image>,
+    /// The sky dome's 22-degree ice-halo overlay texture.
+    #[texture(6)]
+    #[sampler(7)]
+    pub halo: Handle<Image>,
 }
 
 impl Material for StarMaterial {
@@ -95,8 +118,9 @@ impl Material for StarMaterial {
     /// and only the bright star texels light up the sky.
     ///
     /// `AlphaMode::Add` is Bevy's premultiplied pipeline, so `stars.wesl` hands it
-    /// the colour already scaled by the (clamped) star alpha and an alpha of zero;
-    /// any other alpha would scale the sky behind the star by `1 - alpha`.
+    /// the light the star adds (the reference's encoded-space sum, less the sky
+    /// already drawn) and an alpha of zero; any other alpha would scale the sky
+    /// behind the star by `1 - alpha`.
     fn alpha_mode(&self) -> AlphaMode {
         AlphaMode::Add
     }
@@ -131,8 +155,9 @@ pub struct StarMaterialPlugin;
 
 impl Plugin for StarMaterialPlugin {
     fn build(&self, app: &mut App) {
-        // The shader decodes its sRGB texture samples with the shared module.
-        crate::srgb::load_srgb_shader(app);
+        // The shader evaluates the sky (and decodes its sRGB texture samples) with
+        // the shared modules.
+        crate::sky::load_sky_colour_shader(app);
         load_internal_asset!(app, STAR_SHADER_HANDLE, "stars.wesl", |source, _| {
             Shader::from_wesl(source, "embedded://sl_client_bevy/stars.wesl")
         });

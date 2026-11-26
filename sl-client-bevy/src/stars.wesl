@@ -9,7 +9,12 @@
 // sphere just inside the (opaque) sky / cloud domes so they depth-test in *front*
 // of the sky and are occluded by near scene geometry, and relies on additive
 // blending (the reference `BT_ADD_WITH_ALPHA`) to add the star light over the
-// dark night sky. The per-star twinkle seed (`screenpos`) is the reference's:
+// sky.
+//
+// The reference adds a star to the sky's *encoded* G-buffer value and decodes the
+// sum afterwards (`softenLight`); a blend state cannot read the destination to do
+// that, so the fragment evaluates the sky itself (`sky_colour.wesl`, the dome's
+// own maths and inputs) and adds the difference the reference's sum makes. The per-star twinkle seed (`screenpos`) is the reference's:
 // the model-space vertex position scaled by a sawtooth of time.
 //
 // This is gated behind the `bevy_pbr` feature: only the windowed viewer needs a
@@ -17,10 +22,10 @@
 
 import bevy_pbr::render::{
     mesh_functions,
-    mesh_view_bindings::globals,
+    mesh_view_bindings::{globals, view},
     view_transformations::position_world_to_clip,
 };
-import sl_client_bevy::srgb::srgb_to_linear;
+import sl_client_bevy::sky_colour::{SkyParams, sky_decoded_colour, sky_encoded_colour_along};
 
 // The twinkle clock scale: elapsed seconds * 0.5 (the reference `sStarTime` /
 // `WATER_TIME` uniform). Applied to `globals.time` here rather than uploaded as
@@ -42,6 +47,12 @@ struct StarParams {
 @group(constants::MATERIAL_BIND_GROUP) @binding(0) var<uniform> star: StarParams;
 @group(constants::MATERIAL_BIND_GROUP) @binding(1) var diffuse_texture: texture_2d<f32>;
 @group(constants::MATERIAL_BIND_GROUP) @binding(2) var diffuse_sampler: sampler;
+// The sky dome's own inputs, mirrored from its material.
+@group(constants::MATERIAL_BIND_GROUP) @binding(3) var<uniform> sky: SkyParams;
+@group(constants::MATERIAL_BIND_GROUP) @binding(4) var rainbow_texture: texture_2d<f32>;
+@group(constants::MATERIAL_BIND_GROUP) @binding(5) var rainbow_sampler: sampler;
+@group(constants::MATERIAL_BIND_GROUP) @binding(6) var halo_texture: texture_2d<f32>;
+@group(constants::MATERIAL_BIND_GROUP) @binding(7) var halo_sampler: sampler;
 
 struct Vertex {
     @builtin(instance_index) instance_index: u32,
@@ -56,6 +67,9 @@ struct VertexOutput {
     @location(1) color: vec4<f32>,
     // The per-star twinkle seed (`starsV.glsl` `screenpos`).
     @location(2) screenpos: vec2<f32>,
+    // The fragment's world position, for the view direction the sky behind it is
+    // evaluated along.
+    @location(3) world_position: vec3<f32>,
 };
 
 @vertex
@@ -67,6 +81,7 @@ fn vertex(vertex: Vertex) -> VertexOutput {
         vec4<f32>(vertex.position, 1.0),
     );
     out.clip_position = position_world_to_clip(world_position.xyz);
+    out.world_position = world_position.xyz;
     // Skybox depth: force the star quads to the reverse-Z far clip plane (ndc z =
     // 0) so the field renders as an infinitely distant backdrop, occluded by real
     // scene geometry at any altitude (as `sky.wgsl` does for the sky dome). This is
@@ -97,12 +112,12 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     // The reference deferred `starsF.glsl` samples `diffuseMap` twice and `mix`es
     // by `blend_factor` — i.e. the same map for both — so a single sample is
     // faithful (the day-cycle bloom blend is a no-op for stars).
-    var col = textureSample(diffuse_texture, diffuse_sampler, in.uv);
+    let col = textureSample(diffuse_texture, diffuse_sampler, in.uv);
 
     // Tint by the per-star colour (a near-white with a little red / blue variance).
-    // The bloom texture holds encoded sRGB bytes (`TextureUpload::WORLD_COLOR`),
-    // decoded after filtering as the reference's sky pass is.
-    let rgb = srgb_to_linear(col.rgb) * in.color.rgb;
+    // The bloom texel stays encoded: `starsF.glsl` adds the raw texel to the
+    // encoded sky, and the sum is what gets decoded.
+    let star_rgb = col.rgb * in.color.rgb;
 
     // `starsF.glsl`: fade the whole field in with `custom_alpha`, amplify, and
     // twinkle.
@@ -112,13 +127,32 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
 
     // The reference blends with `BT_ADD_WITH_ALPHA` (`SRC_ALPHA, ONE`) into an
     // 8-bit G-buffer target, which clamps the fragment to [0, 1] before blending,
-    // so a star adds `rgb * min(alpha, 1)` and never takes anything away. Bevy's
-    // `AlphaMode::Add` is the premultiplied pipeline (`ONE, ONE_MINUS_SRC_ALPHA`),
-    // which expects the shader to premultiply and zero the alpha, as the PBR
-    // shader does; handed the amplified alpha raw (up to 32) it scaled the sky
-    // behind each star by `1 - alpha` and drew black specks over the daytime sky
-    // (`viewer-stars-render-black-in-daylight`). The target here is HDR float, so
-    // the reference's clamp is written out.
+    // so a star adds `rgb * min(alpha, 1)`.
     let coverage = clamp(alpha, 0.0, 1.0);
-    return vec4<f32>(rgb * coverage, 0.0);
+
+    // What it adds to is the sky's encoded value, which the 8-bit target clamps
+    // again, and `softenLight` decodes the sum. Evaluate the sky the dome drew at
+    // this pixel (the view direction, at the dome's radius) and add the difference
+    // between the decoded sum and the decoded sky alone. On a mid-blue daytime sky
+    // that is several times what adding the decoded texel in linear light gave
+    // (`viewer-stars-add-in-encoded-space`), and it carries `sky_hdr_scale` too.
+    let direction = normalize(in.world_position - view.world_position);
+    let sky_encoded = sky_encoded_colour_along(
+        sky,
+        direction,
+        rainbow_texture,
+        rainbow_sampler,
+        halo_texture,
+        halo_sampler,
+    );
+    let with_star = clamp(sky_encoded + star_rgb * coverage, vec3<f32>(0.0), vec3<f32>(1.0));
+    let added = sky_decoded_colour(sky, with_star) - sky_decoded_colour(sky, sky_encoded);
+
+    // Bevy's `AlphaMode::Add` is the premultiplied pipeline (`ONE,
+    // ONE_MINUS_SRC_ALPHA`), so the alpha must be zero or the sky behind the star
+    // is scaled by `1 - alpha`: handed the amplified alpha raw (up to 32) it drew
+    // black specks over the daytime sky (`viewer-stars-render-black-in-daylight`).
+    // The decode is monotonic, so `added` is never negative; the `max` states that
+    // a star never takes light away.
+    return vec4<f32>(max(added, vec3<f32>(0.0)), 0.0);
 }

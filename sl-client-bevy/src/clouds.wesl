@@ -22,8 +22,11 @@
 
 import bevy_pbr::render::{
     mesh_functions,
-    mesh_view_bindings::globals,
+    mesh_view_bindings::{globals, view},
     view_transformations::position_world_to_clip,
+};
+import sl_client_bevy::sky_colour::{
+    SkyParams, sky_decoded_colour, sky_encoded_colour_along,
 };
 
 // The cloud + atmospheric inputs for one sky frame. Laid out as `vec3` + trailing
@@ -60,13 +63,6 @@ struct CloudParams {
     // Blend factor between the current and next noise textures during a day-cycle
     // transition. 0.0 until the day cycle (P22.6) drives it.
     blend_factor: f32,
-    // 1.0 to apply srgb_to_linear to the cloud colour (the default), 0.0 to skip
-    // it (the `SL_VIEWER_SKY_LINEARIZE` A/B knob).
-    linearize: f32,
-    // The "fake HDR" scale (`SKY_HDR_SCALE`): 1.0 for a legacy sky, sqrt(gamma)*2
-    // for an EEP reflection-probe-ambiance sky. Applied after linearisation to
-    // match the sky dome (the reference `softenLight` WL-sky branch).
-    sky_hdr_scale: f32,
     // The `globals.time` (wrapped seconds) at which `scroll_base` was anchored.
     scroll_ref_time: f32,
     // The scroll rate, in offset units per second (`cloud_scroll_rate / 100`).
@@ -97,6 +93,12 @@ fn cloud_scroll() -> vec2<f32> {
 @group(constants::MATERIAL_BIND_GROUP) @binding(2) var noise_sampler: sampler;
 @group(constants::MATERIAL_BIND_GROUP) @binding(3) var noise_next_texture: texture_2d<f32>;
 @group(constants::MATERIAL_BIND_GROUP) @binding(4) var noise_next_sampler: sampler;
+// The sky dome's own inputs, mirrored from its material.
+@group(constants::MATERIAL_BIND_GROUP) @binding(5) var<uniform> sky: SkyParams;
+@group(constants::MATERIAL_BIND_GROUP) @binding(6) var rainbow_texture: texture_2d<f32>;
+@group(constants::MATERIAL_BIND_GROUP) @binding(7) var rainbow_sampler: sampler;
+@group(constants::MATERIAL_BIND_GROUP) @binding(8) var halo_texture: texture_2d<f32>;
+@group(constants::MATERIAL_BIND_GROUP) @binding(9) var halo_sampler: sampler;
 
 struct Vertex {
     @builtin(instance_index) instance_index: u32,
@@ -122,6 +124,9 @@ struct VertexOutput {
     // The reference's `altitude_blend_factor`, computed per vertex and
     // interpolated (see `vertex`).
     @location(2) altitude_blend_factor: f32,
+    // The fragment's world position, for the view direction the sky behind it is
+    // evaluated along.
+    @location(3) world_position: vec3<f32>,
 };
 
 // The reference's `altitude_blend_factor` for one dome vertex (`cloudsV.glsl`):
@@ -144,6 +149,7 @@ fn vertex(vertex: Vertex) -> VertexOutput {
         vec4<f32>(vertex.position, 1.0),
     );
     out.clip_position = position_world_to_clip(world_position.xyz);
+    out.world_position = world_position.xyz;
     // Skybox depth: force the cloud dome to the reverse-Z far clip plane (ndc z =
     // 0) so it renders as an infinitely distant backdrop, occluded by real scene
     // geometry at any altitude (as `sky.wgsl` does for the sky dome). The layer is
@@ -158,15 +164,6 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     // (`viewer-clouds-horizon-waterline-contact`).
     out.altitude_blend_factor = altitude_blend_factor(vertex.position);
     return out;
-}
-
-// The reference `srgb_to_linear`, applied to WL-sky (including cloud) pixels in
-// the deferred `softenLight` SKIP_ATMOS branch before the tone mapper. See the
-// matching note in `sky.wgsl`.
-fn srgb_to_linear(cs: vec3<f32>) -> vec3<f32> {
-    let low = cs / 12.92;
-    let high = pow((cs + 0.055) / 1.055, vec3<f32>(2.4));
-    return mix(low, high, step(vec3<f32>(0.04045), cs));
 }
 
 // Sample the cloud noise, mixing the current and next textures by the blend factor
@@ -322,13 +319,26 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     // so a lit cloud caps at `1.0 · sky_hdr_scale`, matching the sky dome.
     color = clamp(color, vec3<f32>(0.0), vec3<f32>(1.0));
 
-    // Linearise like the reference `softenLight` SKIP_ATMOS branch (see the note in
-    // `sky.wgsl`), so the cloud layer sits in the same space as the sky dome it
-    // composites over and is not washed out by our linear tone mapper. Gated by the
-    // `SL_VIEWER_SKY_LINEARIZE` A/B knob.
-    var out = select(color, srgb_to_linear(color), cloud.linearize > 0.5);
-    // Scale for fake HDR to match the sky dome (`softenLight`:
-    // `color *= sky_hdr_scale`) — 1.0 for a legacy sky (a no-op).
-    out = out * cloud.sky_hdr_scale;
-    return vec4<f32>(out, alpha1);
+    // The reference blends this colour with `alpha1` (`SRC_ALPHA,
+    // ONE_MINUS_SRC_ALPHA`) over the sky's *encoded* G-buffer value, and its
+    // `softenLight` SKIP_ATMOS branch decodes the mix (`sky_decoded_colour`: the
+    // sky's own decode and fake-HDR scale, A/B knobs included). Mixing the decoded colours in linear light instead lifted a soft cloud
+    // edge over a mid-blue sky far above the reference's. Evaluate the sky the dome
+    // drew behind this pixel and hand the premultiplied blend the decoded mix less
+    // what the blend keeps of that sky, `(1 - alpha1) * decoded sky`: the blend's
+    // sum is then the reference's decoded mix.
+    let direction = normalize(in.world_position - view.world_position);
+    let sky_encoded = sky_encoded_colour_along(
+        sky,
+        direction,
+        rainbow_texture,
+        rainbow_sampler,
+        halo_texture,
+        halo_sampler,
+    );
+    let mixed_decoded = sky_decoded_colour(sky, mix(sky_encoded, color, alpha1));
+    let sky_decoded = sky_decoded_colour(sky, sky_encoded);
+    // This can go below zero (a dark cloud over a brighter sky); the HDR target
+    // is float, so the blend carries the negative term exactly.
+    return vec4<f32>(mixed_decoded - (1.0 - alpha1) * sky_decoded, alpha1);
 }
