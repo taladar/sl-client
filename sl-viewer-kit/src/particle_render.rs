@@ -47,6 +47,13 @@
 //! region or an environment edit reaches every live cloud without rebuilding a single
 //! bind group.
 //!
+//! **Blending and glow.** A cloud blends with its system's own `(source, destination)`
+//! factor pair ([`ParticleBlend`]), as `LLDrawPoolAlpha` sets it per draw, so the
+//! fragment's alpha must be its coverage. The glow therefore cannot ride in that alpha:
+//! a cloud with any glow is drawn a second time, writing only the scene alpha (the glow
+//! mask) — the reference's emissive pass, which draws a glowing alpha face again with
+//! `(ZERO, ONE, ONE, ONE)`.
+//!
 //! Reference (read-only): `LLVOPartGroup::getGeometry` — the camera-facing billboard the
 //! vertex shader ports; particles are drawn `FULLBRIGHT` only when `EMISSIVE`
 //! (`llvopartgroup.cpp:359`), so a non-emissive cloud is lit and an emissive / additive
@@ -78,10 +85,10 @@ use bevy::render::render_resource::binding_types::{sampler, texture_2d, uniform_
 use bevy::render::render_resource::{
     BindGroup, BindGroupEntries, BindGroupLayout, BindGroupLayoutDescriptor,
     BindGroupLayoutEntries, BlendComponent, BlendFactor, BlendOperation, BlendState, BufferId,
-    BufferUsages, PipelineCache, RawBufferVec, RenderPipelineDescriptor, SamplerBindingType,
-    ShaderStages, ShaderType, SpecializedMeshPipeline, SpecializedMeshPipelineError,
-    SpecializedMeshPipelines, TextureSampleType, UniformBuffer, VertexAttribute, VertexFormat,
-    VertexStepMode,
+    BufferUsages, ColorWrites, PipelineCache, RawBufferVec, RenderPipelineDescriptor,
+    SamplerBindingType, ShaderStages, ShaderType, SpecializedMeshPipeline,
+    SpecializedMeshPipelineError, SpecializedMeshPipelines, TextureSampleType, UniformBuffer,
+    VertexAttribute, VertexFormat, VertexStepMode,
 };
 use bevy::render::renderer::{RenderDevice, RenderQueue};
 use bevy::render::sync_component::SyncComponent;
@@ -115,8 +122,9 @@ pub struct ParticleInstance {
     /// `@location(7)`.
     pub flags: u32,
     /// The per-particle glow (`PSYS_PART_*_GLOW`, `0.0..=1.0`), interpolated over the
-    /// particle's life. Fed into the scene alpha (the glow mask) by the **additive**
-    /// path so a glowing particle blooms under the glow pass. Attribute `@location(8)`.
+    /// particle's life. The cloud's glow draw adds it, times the texel's alpha, to the
+    /// scene alpha (the glow mask), so a glowing particle blooms under the glow pass
+    /// whatever its blend function. Attribute `@location(8)`.
     pub glow: f32,
 }
 
@@ -144,15 +152,183 @@ impl SyncComponent<RenderApp> for ParticleInstances {
     type Target = Self;
 }
 
-/// How a cloud's particles blend into the frame — the alpha mode its blend function
-/// implies. A whole system shares one blend function (it lives on the particle
-/// template), so one choice per cloud drives the pipeline specialization.
+/// One factor of a particle system's colour blend function — the `LL_PART_BF_*`
+/// values of `LLPartData` (`llpartdata.h`), which are numerically the reference
+/// renderer's `LLRender::eBlendFactor`, so the viewer hands the wire byte to
+/// `gGL.blendFunc` unchanged.
+///
+/// The two destination-alpha factors are listed although `LLPartData::validBlendFunc`
+/// refuses them (`UNSUPPORTED_DEST_ALPHA`, `UNSUPPORTED_ONE_MINUS_DEST_ALPHA`): that
+/// check runs where a script sets the system, and a viewer that receives one draws it
+/// with the matching GL factor regardless, so this does too.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum ParticleBlend {
-    /// Ordinary source-over alpha blending (`SrcAlpha` / `OneMinusSrcAlpha`).
-    Alpha,
-    /// Additive blending (destination factor `ONE`) — the glow / fire look.
-    Additive,
+pub enum ParticleBlendFactor {
+    /// `LL_PART_BF_ONE` (0).
+    One,
+    /// `LL_PART_BF_ZERO` (1).
+    Zero,
+    /// `LL_PART_BF_DEST_COLOR` (2).
+    DestColor,
+    /// `LL_PART_BF_SOURCE_COLOR` (3).
+    SourceColor,
+    /// `LL_PART_BF_ONE_MINUS_DEST_COLOR` (4).
+    OneMinusDestColor,
+    /// `LL_PART_BF_ONE_MINUS_SOURCE_COLOR` (5).
+    OneMinusSourceColor,
+    /// `BF_DEST_ALPHA` (6), unsupported by `LLPartData` but drawable.
+    DestAlpha,
+    /// `LL_PART_BF_SOURCE_ALPHA` (7).
+    SourceAlpha,
+    /// `BF_ONE_MINUS_DEST_ALPHA` (8), unsupported by `LLPartData` but drawable.
+    OneMinusDestAlpha,
+    /// `LL_PART_BF_ONE_MINUS_SOURCE_ALPHA` (9).
+    OneMinusSourceAlpha,
+}
+
+impl ParticleBlendFactor {
+    /// The factor a wire byte names, or `None` past the end of the enumeration
+    /// (`LL_PART_BF_COUNT` and up), which names no blend factor at all.
+    #[must_use]
+    pub const fn from_wire(value: u8) -> Option<Self> {
+        Some(match value {
+            0 => Self::One,
+            1 => Self::Zero,
+            2 => Self::DestColor,
+            3 => Self::SourceColor,
+            4 => Self::OneMinusDestColor,
+            5 => Self::OneMinusSourceColor,
+            6 => Self::DestAlpha,
+            7 => Self::SourceAlpha,
+            8 => Self::OneMinusDestAlpha,
+            9 => Self::OneMinusSourceAlpha,
+            _ => return None,
+        })
+    }
+
+    /// The `wgpu` factor this one is, as `LLRender` maps it to GL's
+    /// (`sGLBlendFactor` in `llrender.cpp`).
+    const fn to_wgpu(self) -> BlendFactor {
+        match self {
+            Self::One => BlendFactor::One,
+            Self::Zero => BlendFactor::Zero,
+            Self::DestColor => BlendFactor::Dst,
+            Self::SourceColor => BlendFactor::Src,
+            Self::OneMinusDestColor => BlendFactor::OneMinusDst,
+            Self::OneMinusSourceColor => BlendFactor::OneMinusSrc,
+            Self::DestAlpha => BlendFactor::DstAlpha,
+            Self::SourceAlpha => BlendFactor::SrcAlpha,
+            Self::OneMinusDestAlpha => BlendFactor::OneMinusDstAlpha,
+            Self::OneMinusSourceAlpha => BlendFactor::OneMinusSrcAlpha,
+        }
+    }
+}
+
+/// How a cloud's particles blend into the frame: the system's own colour blend
+/// function, source and destination factor, drawn as the reference draws it
+/// (`gGL.blendFunc(params.mBlendFuncSrc, params.mBlendFuncDst, …)` in
+/// `lldrawpoolalpha.cpp`). A whole system shares one blend function (it lives on the
+/// particle template), so one pair per cloud drives the pipeline specialization.
+///
+/// The usual additive system, `(SOURCE_ALPHA, ONE)`, therefore adds `rgb * alpha`,
+/// and a transparent texel adds nothing; only a system that asks for `(ONE, ONE)`
+/// adds its texels at full weight.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct ParticleBlend {
+    /// The source factor.
+    pub source: ParticleBlendFactor,
+    /// The destination factor.
+    pub destination: ParticleBlendFactor,
+}
+
+impl ParticleBlend {
+    /// Ordinary source-over alpha blending, `(SOURCE_ALPHA, ONE_MINUS_SOURCE_ALPHA)`:
+    /// the default of every particle system (`LLPartData`'s constructor) and of the
+    /// reference's own `LLViewerPart`s.
+    pub const ALPHA: Self = Self {
+        source: ParticleBlendFactor::SourceAlpha,
+        destination: ParticleBlendFactor::OneMinusSourceAlpha,
+    };
+
+    /// The blend a system's two wire bytes name. A byte that names no factor at all
+    /// (`LL_PART_BF_COUNT` and up, which the reference would index its GL table out
+    /// of bounds with) falls back to that side of [`ALPHA`](Self::ALPHA).
+    #[must_use]
+    pub const fn from_wire(source: u8, destination: u8) -> Self {
+        Self {
+            source: match ParticleBlendFactor::from_wire(source) {
+                Some(factor) => factor,
+                None => Self::ALPHA.source,
+            },
+            destination: match ParticleBlendFactor::from_wire(destination) {
+                Some(factor) => factor,
+                None => Self::ALPHA.destination,
+            },
+        }
+    }
+
+    /// Whether this is an additive blend (a destination factor of `ONE`) — the glow /
+    /// fire look, which the scene layer draws unlit.
+    #[must_use]
+    pub fn is_additive(self) -> bool {
+        self.destination == ParticleBlendFactor::One
+    }
+
+    /// Whether the fragment discards a texel below the reference's `MINIMUM_ALPHA`.
+    /// `LLDrawPoolAlpha` drops the minimum to zero for a draw whose blend function
+    /// names `SOURCE_ALPHA` on neither side ("a custom blend function that may
+    /// require rendering of 'invisible' fragments") and keeps it otherwise.
+    fn discards_transparent_texels(self) -> bool {
+        self.source == ParticleBlendFactor::SourceAlpha
+            || self.destination == ParticleBlendFactor::SourceAlpha
+    }
+
+    /// The colour target's blend state for the cloud's main draw: this pair on the
+    /// colour channels, and alpha left alone (`(Zero, One)`) so the draw never
+    /// disturbs the glow mask the scene alpha carries. A particle's glow reaches the
+    /// mask in its own draw, [`glow_pass_blend`].
+    const fn blend_state(self) -> BlendState {
+        BlendState {
+            color: BlendComponent {
+                src_factor: self.source.to_wgpu(),
+                dst_factor: self.destination.to_wgpu(),
+                operation: BlendOperation::Add,
+            },
+            alpha: BlendComponent {
+                src_factor: BlendFactor::Zero,
+                dst_factor: BlendFactor::One,
+                operation: BlendOperation::Add,
+            },
+        }
+    }
+}
+
+/// The colour target's blend state for a cloud's **glow** draw: the colour channels
+/// untouched, the fragment's alpha (the texel's alpha times the particle's glow)
+/// added to the scene alpha, the glow mask. The reference's emissive pass in
+/// `LLDrawPoolAlpha` (`gGL.blendFunc(BF_ZERO, BF_ONE, BF_ONE, BF_ONE)`, "don't touch
+/// color, add to alpha (glow)").
+const fn glow_pass_blend() -> BlendState {
+    BlendState {
+        color: BlendComponent {
+            src_factor: BlendFactor::Zero,
+            dst_factor: BlendFactor::One,
+            operation: BlendOperation::Add,
+        },
+        alpha: BlendComponent {
+            src_factor: BlendFactor::One,
+            dst_factor: BlendFactor::One,
+            operation: BlendOperation::Add,
+        },
+    }
+}
+
+/// Which of a cloud's two draws a pipeline variant performs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+enum ParticlePass {
+    /// The billboards themselves, blended with the system's own function.
+    Main,
+    /// The glow, written to the scene alpha only — drawn for a cloud that has any.
+    Glow,
 }
 
 /// The per-cloud render parameters, extracted to the render world: the diffuse texture,
@@ -162,7 +338,7 @@ pub enum ParticleBlend {
 pub struct ParticleDrawParams {
     /// The resolved diffuse texture (the source's sprite, or the default soft blob).
     pub texture: Handle<Image>,
-    /// The blend mode the source's blend function implies.
+    /// The source's colour blend function.
     pub blend: ParticleBlend,
     /// Whether the cloud renders unlit (emissive / additive / HUD) rather than lit.
     pub unlit: bool,
@@ -339,16 +515,45 @@ struct ParticlePipeline {
     material_layout_desc: BindGroupLayoutDescriptor,
 }
 
-/// The specialization key: the base mesh-pipeline key (view + topology bits) plus the two
-/// per-cloud choices — unlit vs lit, and the blend mode.
+/// The specialization key: the base mesh-pipeline key (view + topology bits) plus the
+/// per-cloud choices — which draw, unlit vs lit, and the blend function.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 struct ParticleKey {
     /// The inherited mesh-pipeline key (MSAA / tonemap / view-projection / topology).
     mesh_key: MeshPipelineKey,
+    /// Which of the cloud's draws this variant performs.
+    pass: ParticlePass,
     /// Whether this variant is drawn unlit (fullbright) rather than PBR-lit.
     unlit: bool,
-    /// The blend mode this variant writes with.
+    /// The blend function this variant writes with.
     blend: ParticleBlend,
+}
+
+impl ParticleKey {
+    /// The key for one of a cloud's draws. The glow draw reads neither the lighting
+    /// nor the blend function, so its key drops both and every glowing cloud in a
+    /// view shares one glow pipeline.
+    const fn new(
+        mesh_key: MeshPipelineKey,
+        pass: ParticlePass,
+        unlit: bool,
+        blend: ParticleBlend,
+    ) -> Self {
+        match pass {
+            ParticlePass::Main => Self {
+                mesh_key,
+                pass,
+                unlit,
+                blend,
+            },
+            ParticlePass::Glow => Self {
+                mesh_key,
+                pass,
+                unlit: true,
+                blend: ParticleBlend::ALPHA,
+            },
+        }
+    }
 }
 
 /// `RenderStartup`: build the [`ParticlePipeline`] once the [`MeshPipeline`] exists.
@@ -437,8 +642,8 @@ impl SpecializedMeshPipeline for ParticlePipeline {
         key: Self::Key,
         layout: &MeshVertexBufferLayoutRef,
     ) -> Result<RenderPipelineDescriptor, SpecializedMeshPipelineError> {
-        // Fold the alpha bits into the mesh key so `MeshPipeline` sets a sane transparent
-        // target + disables depth writes; additive overrides the target blend below.
+        // Fold the alpha bits into the mesh key so `MeshPipeline` sets a transparent
+        // target and disables depth writes; the target's blend is replaced below.
         let mesh_key = key.mesh_key | MeshPipelineKey::BLEND_ALPHA;
         let mut descriptor = self.mesh_pipeline.specialize(mesh_key, layout)?;
 
@@ -451,44 +656,34 @@ impl SpecializedMeshPipeline for ParticlePipeline {
             if key.unlit {
                 fragment.shader_defs.push("PARTICLE_UNLIT".into());
             }
-            if key.blend == ParticleBlend::Additive {
-                // The additive path carries the per-particle glow in alpha:
-                // `PARTICLE_ADDITIVE` makes the fragment write `glow` (not coverage) to
-                // alpha, and the additive alpha blend `(One, One)` accumulates it into the
-                // scene alpha — the glow mask — so a glowing particle blooms under the
-                // glow pass (`glow`), weighted by particle density.
-                fragment.shader_defs.push("PARTICLE_ADDITIVE".into());
-                if let Some(Some(target)) = fragment.targets.first_mut() {
-                    // Additive (destination `ONE`): the glow / fire look.
-                    target.blend = Some(BlendState {
-                        color: BlendComponent {
-                            src_factor: BlendFactor::One,
-                            dst_factor: BlendFactor::One,
-                            operation: BlendOperation::Add,
-                        },
-                        alpha: BlendComponent {
-                            src_factor: BlendFactor::One,
-                            dst_factor: BlendFactor::One,
-                            operation: BlendOperation::Add,
-                        },
-                    });
+            let blend = match key.pass {
+                // The main draw blends with the system's own pair, the fragment's
+                // alpha its coverage, so a `SOURCE_ALPHA` factor weights by it as the
+                // reference's does; and it discards the near-transparent texels the
+                // reference discards for that pair.
+                ParticlePass::Main => {
+                    if key.blend.discards_transparent_texels() {
+                        fragment.shader_defs.push("PARTICLE_MINIMUM_ALPHA".into());
+                    }
+                    key.blend.blend_state()
+                }
+                // The glow draw writes the texel's alpha times the glow, to alpha only.
+                ParticlePass::Glow => {
+                    fragment.shader_defs.push("PARTICLE_GLOW".into());
+                    glow_pass_blend()
+                }
+            };
+            for target in fragment.targets.iter_mut().flatten() {
+                target.blend = Some(blend);
+                if key.pass == ParticlePass::Glow {
+                    target.write_mask = ColorWrites::ALPHA;
                 }
             }
         }
         // Particles never write depth (they are unsorted transparent billboards); the
-        // `BLEND_ALPHA` branch already set this, but make it explicit for the additive
-        // override path too.
+        // `BLEND_ALPHA` branch already set this, but make it explicit.
         if let Some(depth) = descriptor.depth_stencil.as_mut() {
             depth.depth_write_enabled = Some(false);
-        }
-        // A non-additive (alpha-blend) particle keeps its coverage in alpha for the
-        // colour blend, so it must not corrupt the glow mask: override its alpha blend
-        // to `(Zero, One)`. Such a particle therefore does not glow (a documented
-        // limitation — glowing particles are the additive / emissive kind, handled
-        // above). The additive path deliberately keeps `(One, One)` to feed glow to the
-        // mask, so it is excluded here.
-        if key.blend != ParticleBlend::Additive {
-            sl_client_bevy::preserve_glow_mask_alpha(&mut descriptor);
         }
         Ok(descriptor)
     }
@@ -609,7 +804,7 @@ struct ParticlePipelines<'w> {
 fn queue_particles(
     draw_functions: Res<DrawFunctions<Transparent3d>>,
     pipelines: ParticlePipelines,
-    clouds: Query<(Entity, &MainEntity, &ParticleDrawParams)>,
+    clouds: Query<(Entity, &MainEntity, &ParticleDrawParams, &ParticleInstances)>,
     mut transparent_phases: ResMut<ViewSortedRenderPhases<Transparent3d>>,
     view_key_cache: Res<ViewKeyCache>,
     views: Query<(&ExtractedView, &RenderVisibleEntities, &ExtractedCamera)>,
@@ -652,7 +847,7 @@ fn queue_particles(
             }
         }
 
-        for (entity, main_entity, params) in &clouds {
+        for (entity, main_entity, params, instances) in &clouds {
             if !visible.contains(main_entity) {
                 continue;
             }
@@ -668,32 +863,43 @@ fn queue_particles(
                     mesh.primitive_topology(),
                     mesh.index_format(),
                 );
-            let key = ParticleKey {
-                mesh_key,
-                unlit: params.unlit,
-                blend: params.blend,
+            // The billboards, and — for a cloud with any glow — the glow, drawn again
+            // into the scene alpha as the reference's alpha pool draws a glowing
+            // alpha face a second time. The two draws touch disjoint channels, so
+            // their order within the sort does not matter.
+            let glows = instances
+                .instances
+                .iter()
+                .any(|instance| instance.glow > 0.0);
+            let passes: &[ParticlePass] = if glows {
+                &[ParticlePass::Main, ParticlePass::Glow]
+            } else {
+                &[ParticlePass::Main]
             };
-            let pipeline_id =
-                match specialized.specialize(&pipeline_cache, &pipeline, key, &mesh.layout) {
-                    Ok(id) => id,
-                    Err(error) => {
-                        error!("particle pipeline specialization failed: {error}");
-                        continue;
-                    }
-                };
-            transparent_phase.add_retained(Transparent3d {
-                sorting_info: TransparentSortingInfo3d::Sorted {
-                    mesh_center: params.sort_center,
-                    depth_bias: 0.0,
-                },
-                entity: (entity, *main_entity),
-                pipeline: pipeline_id,
-                draw_function: draw_particles,
-                distance: 0.0,
-                batch_range: 0..1,
-                extra_index: PhaseItemExtraIndex::None,
-                indexed: true,
-            });
+            for &pass in passes {
+                let key = ParticleKey::new(mesh_key, pass, params.unlit, params.blend);
+                let pipeline_id =
+                    match specialized.specialize(&pipeline_cache, &pipeline, key, &mesh.layout) {
+                        Ok(id) => id,
+                        Err(error) => {
+                            error!("particle pipeline specialization failed: {error}");
+                            continue;
+                        }
+                    };
+                transparent_phase.add_retained(Transparent3d {
+                    sorting_info: TransparentSortingInfo3d::Sorted {
+                        mesh_center: params.sort_center,
+                        depth_bias: 0.0,
+                    },
+                    entity: (entity, *main_entity),
+                    pipeline: pipeline_id,
+                    draw_function: draw_particles,
+                    distance: 0.0,
+                    batch_range: 0..1,
+                    extra_index: PhaseItemExtraIndex::None,
+                    indexed: true,
+                });
+            }
         }
     }
 }
@@ -871,12 +1077,15 @@ impl Plugin for ParticleRenderPlugin {
 #[cfg(test)]
 mod tests {
     use super::{
-        ParticleFogUniform, ParticleInstance, ParticleWaterFog, instance_buffer_layout,
+        ParticleBlend, ParticleBlendFactor, ParticleFogUniform, ParticleInstance, ParticleKey,
+        ParticlePass, ParticleWaterFog, glow_pass_blend, instance_buffer_layout,
         particle_quad_mesh,
     };
     use bevy::math::{Vec3, Vec4};
     use bevy::mesh::{Indices, Mesh, PrimitiveTopology, VertexAttributeValues};
+    use bevy::pbr::MeshPipelineKey;
     use bevy::render::render_resource::ShaderType as _;
+    use bevy::render::render_resource::{BlendComponent, BlendFactor, BlendOperation};
     use bevy::render::render_resource::{VertexFormat, VertexStepMode};
     use pretty_assertions::assert_eq;
 
@@ -986,5 +1195,138 @@ mod tests {
         let fog = ParticleWaterFog::default();
         assert_eq!(fog.density_above.to_bits(), 0.0_f32.to_bits());
         assert_eq!(fog.density_submerged.to_bits(), 0.0_f32.to_bits());
+    }
+    /// Every wire byte below `LL_PART_BF_COUNT` names the factor of the same number
+    /// in `LLRender::eBlendFactor`, and maps to the GL factor `LLRender` uses for it.
+    #[test]
+    fn every_wire_factor_maps_as_the_reference_maps_it() {
+        let expected = [
+            (ParticleBlendFactor::One, BlendFactor::One),
+            (ParticleBlendFactor::Zero, BlendFactor::Zero),
+            (ParticleBlendFactor::DestColor, BlendFactor::Dst),
+            (ParticleBlendFactor::SourceColor, BlendFactor::Src),
+            (
+                ParticleBlendFactor::OneMinusDestColor,
+                BlendFactor::OneMinusDst,
+            ),
+            (
+                ParticleBlendFactor::OneMinusSourceColor,
+                BlendFactor::OneMinusSrc,
+            ),
+            (ParticleBlendFactor::DestAlpha, BlendFactor::DstAlpha),
+            (ParticleBlendFactor::SourceAlpha, BlendFactor::SrcAlpha),
+            (
+                ParticleBlendFactor::OneMinusDestAlpha,
+                BlendFactor::OneMinusDstAlpha,
+            ),
+            (
+                ParticleBlendFactor::OneMinusSourceAlpha,
+                BlendFactor::OneMinusSrcAlpha,
+            ),
+        ];
+        for (byte, (factor, wgpu)) in (0_u8..).zip(expected) {
+            assert_eq!(
+                ParticleBlendFactor::from_wire(byte),
+                Some(factor),
+                "byte {byte}"
+            );
+            assert_eq!(factor.to_wgpu(), wgpu, "byte {byte}");
+        }
+        assert_eq!(ParticleBlendFactor::from_wire(10), None);
+        assert_eq!(ParticleBlendFactor::from_wire(255), None);
+    }
+
+    /// A byte that names no factor falls back to that side of the default
+    /// source-over blend, and leaves the other side as the system set it.
+    #[test]
+    fn an_unknown_factor_falls_back_to_the_default_side() {
+        assert_eq!(
+            ParticleBlend::from_wire(200, 0),
+            ParticleBlend {
+                source: ParticleBlendFactor::SourceAlpha,
+                destination: ParticleBlendFactor::One,
+            }
+        );
+        assert_eq!(
+            ParticleBlend::from_wire(0, 200),
+            ParticleBlend {
+                source: ParticleBlendFactor::One,
+                destination: ParticleBlendFactor::OneMinusSourceAlpha,
+            }
+        );
+        assert_eq!(ParticleBlend::from_wire(7, 9), ParticleBlend::ALPHA);
+    }
+
+    /// The main draw blends the colour with the system's own pair — the usual
+    /// additive `(SOURCE_ALPHA, ONE)` keeps its source alpha, the bug this guards —
+    /// and leaves the scene alpha (the glow mask) alone.
+    #[test]
+    fn the_main_draw_blends_with_the_systems_own_pair() {
+        let additive = ParticleBlend::from_wire(7, 0);
+        let state = additive.blend_state();
+        assert_eq!(
+            state.color,
+            BlendComponent {
+                src_factor: BlendFactor::SrcAlpha,
+                dst_factor: BlendFactor::One,
+                operation: BlendOperation::Add,
+            }
+        );
+        assert_eq!(
+            state.alpha,
+            BlendComponent {
+                src_factor: BlendFactor::Zero,
+                dst_factor: BlendFactor::One,
+                operation: BlendOperation::Add,
+            }
+        );
+        let modulate = ParticleBlend::from_wire(2, 1).blend_state();
+        assert_eq!(modulate.color.src_factor, BlendFactor::Dst);
+        assert_eq!(modulate.color.dst_factor, BlendFactor::Zero);
+    }
+
+    /// The glow draw leaves the colour alone and adds to the glow mask, as the
+    /// reference's emissive pass does.
+    #[test]
+    fn the_glow_draw_only_adds_to_alpha() {
+        let state = glow_pass_blend();
+        assert_eq!(state.color.src_factor, BlendFactor::Zero);
+        assert_eq!(state.color.dst_factor, BlendFactor::One);
+        assert_eq!(state.alpha.src_factor, BlendFactor::One);
+        assert_eq!(state.alpha.dst_factor, BlendFactor::One);
+    }
+
+    /// The near-transparent texels are discarded exactly when the reference keeps
+    /// its minimum alpha: when `SOURCE_ALPHA` is one of the two factors.
+    #[test]
+    fn transparent_texels_are_discarded_as_the_reference_discards_them() {
+        assert!(ParticleBlend::ALPHA.discards_transparent_texels());
+        assert!(ParticleBlend::from_wire(7, 0).discards_transparent_texels());
+        assert!(ParticleBlend::from_wire(0, 7).discards_transparent_texels());
+        assert!(!ParticleBlend::from_wire(0, 0).discards_transparent_texels());
+        assert!(!ParticleBlend::from_wire(0, 9).discards_transparent_texels());
+    }
+
+    /// The glow draw's key drops the lighting and the blend function, which it does
+    /// not read, so every glowing cloud shares one glow pipeline per view.
+    #[test]
+    fn glow_keys_ignore_lighting_and_blend() {
+        let mesh_key = MeshPipelineKey::empty();
+        let a = ParticleKey::new(
+            mesh_key,
+            ParticlePass::Glow,
+            false,
+            ParticleBlend::from_wire(7, 0),
+        );
+        let b = ParticleKey::new(mesh_key, ParticlePass::Glow, true, ParticleBlend::ALPHA);
+        assert!(a == b, "two glow draws specialised apart");
+        let c = ParticleKey::new(
+            mesh_key,
+            ParticlePass::Main,
+            false,
+            ParticleBlend::from_wire(7, 0),
+        );
+        let d = ParticleKey::new(mesh_key, ParticlePass::Main, false, ParticleBlend::ALPHA);
+        assert!(c != d, "two blend functions shared one main pipeline");
     }
 }

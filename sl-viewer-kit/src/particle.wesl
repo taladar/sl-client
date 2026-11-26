@@ -9,6 +9,8 @@
 // tints it by the per-instance colour, and either returns it directly (unlit — emissive
 // / additive / HUD clouds, `PARTICLE_UNLIT`) or runs it through Bevy's PBR lighting
 // (non-emissive clouds, matching the reference lighting all but `EMISSIVE` particles).
+// Its alpha is the coverage, which the system's own blend function weights by. A cloud
+// with glow is drawn a second time with `PARTICLE_GLOW`, writing only the glow mask.
 //
 // A billboard under the water surface is fogged here, per fragment, as the reference's
 // alpha pool fogs its particles (`applySkyAndWaterFog`): a particle writes no depth, so
@@ -52,6 +54,9 @@ struct ParticleWaterFog {
 
 // `part_flags::FOLLOW_VELOCITY` (llpartdata.h `LL_PART_FOLLOW_VELOCITY_MASK`).
 const FOLLOW_VELOCITY: u32 = 0x20u;
+
+// The reference's `MINIMUM_ALPHA` (`lldrawpoolalpha.cpp`, "~ 1/255").
+const MINIMUM_ALPHA: f32 = 0.004;
 
 struct Vertex {
     // The shared unit-quad corner in [-0.5, 0.5] (xy), z = 0.
@@ -129,7 +134,22 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     // The sprite holds encoded sRGB bytes (`TextureUpload::WORLD_COLOR`); decode the
     // filtered sample, as the reference decodes its fullbright / alpha samples.
     let tex = decode_srgb_sample(textureSample(particle_texture, particle_sampler, in.uv));
+
+    // The glow draw (`PARTICLE_GLOW`) writes alpha only: the texel's alpha times the
+    // particle's glow, added to the glow mask — the reference's `emissiveF.glsl`,
+    // whose vertex colour is the glow (`diffuseLookup(...).a * vertex_color.a`).
+    @if(PARTICLE_GLOW)
+    return vec4<f32>(0.0, 0.0, 0.0, max(tex.a * in.glow, 0.0));
+
     let base = tex * in.color;
+
+    // A texel too transparent to see is dropped, as the reference's alpha shaders
+    // drop it below `minimum_alpha` — kept, as there, only for a blend function with
+    // `SOURCE_ALPHA` on one side (see particle_render.rs, `ParticleBlend`).
+    @if(PARTICLE_MINIMUM_ALPHA)
+    if base.a < MINIMUM_ALPHA {
+        discard;
+    }
 
     // A billboard is a matte (roughness 1, metallic 0) surface tinted by the sprite; build
     // the PbrInput even on the unlit path so the shared fog / post step has the fragment's
@@ -182,11 +202,7 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
         color = vec4<f32>(apply_water_fog(color.rgb, fog), color.a);
     }
 
-    // The additive path carries the per-particle glow (`PSYS_PART_*_GLOW`) in alpha:
-    // the additive blend adds `color.rgb` (the fire look, which ignores alpha) and
-    // accumulates this alpha into the scene alpha — the glow mask (`crate::glow`) — so
-    // a glowing particle blooms and a non-glowing one (glow 0) does not.
-    @if(PARTICLE_ADDITIVE)
-    color.a = clamp(in.glow, 0.0, 1.0);
+    // The alpha is the coverage, which the system's own blend function weights by;
+    // the glow reaches the glow mask in the cloud's separate glow draw above.
     return color;
 }

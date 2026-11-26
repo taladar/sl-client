@@ -238,11 +238,6 @@ mod part_flags {
 /// emission applies an extra outer-angle rotation.
 const LL_PART_USE_NEW_ANGLE: u32 = 0x02;
 
-/// The `LL_PART_BF_ONE` blend factor (`LLPartData` blend-func enum): a
-/// destination factor of `ONE` is additive blending (the glow / fire look), any
-/// other is ordinary source-over alpha blending.
-const LL_PART_BF_ONE: u8 = 0;
-
 /// A small deterministic pseudo-random generator (a xorshift64* variant) standing
 /// in for the reference viewer's `ll_frand`. Seeded per source so different
 /// emitters diverge and the simulation is reproducible in tests (the workspace
@@ -337,8 +332,8 @@ struct Particle {
     start_glow: f32,
     /// The end glow.
     end_glow: f32,
-    /// The current interpolated glow, fed to the vertex so the additive path can write
-    /// it into the scene alpha (the glow mask).
+    /// The current interpolated glow, fed to the vertex so the cloud's glow draw can
+    /// add it into the scene alpha (the glow mask).
     glow: f32,
     /// The `FOLLOW_SRC` position offset from the source, retained between steps so
     /// the particle drifts *with* the moving source (`mPosOffset`).
@@ -791,17 +786,12 @@ fn default_particle_image() -> Image {
     upload_pixels(SIZE, SIZE, data, TextureUpload::WORLD_COLOR)
 }
 
-/// The blend mode a particle system's blend function implies: an additive
-/// (destination `ONE`) blend is the glow / fire look; anything else is ordinary
-/// source-over alpha. A whole system shares one blend function (it lives on the
-/// system's particle *template*), so one choice per cloud drives the pipeline
+/// The colour blend function a particle system draws with: its own source and
+/// destination factor. A whole system shares one blend function (it lives on the
+/// system's particle *template*), so one pair per cloud drives the pipeline
 /// specialization in [`particle_render`](sl_viewer_kit::particle_render).
 const fn particle_blend(system: &ParticleSystem) -> ParticleBlend {
-    if system.part_blend_func_dest == LL_PART_BF_ONE {
-        ParticleBlend::Additive
-    } else {
-        ParticleBlend::Alpha
-    }
+    ParticleBlend::from_wire(system.part_blend_func_source, system.part_blend_func_dest)
 }
 
 /// Whether a cloud renders unlit (fullbright): an `EMISSIVE` system, one that
@@ -809,10 +799,8 @@ const fn particle_blend(system: &ParticleSystem) -> ParticleBlend {
 /// cloud (P35.4 — no light is on the HUD layer, so a lit HUD material renders
 /// black, and the reference forces `LLFace::FULLBRIGHT` on every HUD face). A whole
 /// system shares its particle-template flags, so the choice is system-wide.
-const fn is_unlit(system: &ParticleSystem, is_hud: bool) -> bool {
-    is_hud
-        || system.part_flags & part_flags::EMISSIVE != 0
-        || system.part_blend_func_dest == LL_PART_BF_ONE
+fn is_unlit(system: &ParticleSystem, is_hud: bool) -> bool {
+    is_hud || system.part_flags & part_flags::EMISSIVE != 0 || particle_blend(system).is_additive()
 }
 
 /// Convert a Second Life [`Vector`](sl_client_bevy::Vector) into a Bevy [`Vec3`]
@@ -1469,7 +1457,7 @@ mod tests {
         part_flags, particle_blend,
     };
     use bevy::math::{Quat, Vec3};
-    use sl_viewer_kit::particle_render::ParticleBlend;
+    use sl_viewer_kit::particle_render::{ParticleBlend, ParticleBlendFactor};
 
     /// The seed the emitter tests use, so the pseudo-random sequence is fixed.
     const TEST_SEED: u64 = 0x1234_5678;
@@ -1951,17 +1939,36 @@ mod tests {
         }
     }
 
-    /// Additive-blend (destination `ONE`) systems are drawn unlit and additive; an
-    /// ordinary alpha system blends and (absent the emissive flag) is lit.
+    /// A cloud carries its system's own blend pair, source factor included: the
+    /// usual additive system `(SOURCE_ALPHA, ONE)` keeps its `SOURCE_ALPHA`, so it
+    /// adds `rgb * alpha` rather than `rgb`, and is drawn unlit; an ordinary alpha
+    /// system blends source-over and (absent the emissive flag) is lit.
     #[test]
     fn blend_mode_follows_the_blend_function() {
         let mut additive = live_system();
-        additive.part_blend_func_dest = super::LL_PART_BF_ONE;
-        assert_eq!(particle_blend(&additive), ParticleBlend::Additive);
+        additive.part_blend_func_dest = 0; // LL_PART_BF_ONE
+        assert_eq!(
+            particle_blend(&additive),
+            ParticleBlend {
+                source: ParticleBlendFactor::SourceAlpha,
+                destination: ParticleBlendFactor::One,
+            }
+        );
         assert!(is_unlit(&additive, false));
 
-        let alpha = live_system(); // dest 9 (one-minus-src-alpha).
-        assert_eq!(particle_blend(&alpha), ParticleBlend::Alpha);
+        let mut full_weight = live_system();
+        full_weight.part_blend_func_source = 0;
+        full_weight.part_blend_func_dest = 0;
+        assert_eq!(
+            particle_blend(&full_weight),
+            ParticleBlend {
+                source: ParticleBlendFactor::One,
+                destination: ParticleBlendFactor::One,
+            }
+        );
+
+        let alpha = live_system(); // (7, 9): source alpha, one minus source alpha.
+        assert_eq!(particle_blend(&alpha), ParticleBlend::ALPHA);
         assert!(!is_unlit(&alpha, false));
     }
 

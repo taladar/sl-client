@@ -1596,7 +1596,7 @@ mod tests {
             ParticleInstances { instances },
             ParticleDrawParams {
                 texture: images.add(one_texel([255; 4])),
-                blend: ParticleBlend::Alpha,
+                blend: ParticleBlend::ALPHA,
                 unlit: true,
                 sort_center: basis.mul_vec3(Vec3::new(0.0, 0.0, SCENE_WATER_LEVEL)),
             },
@@ -1607,6 +1607,304 @@ mod tests {
             DirectionalLight::default(),
             Transform::from_xyz(0.0, 100.0, 0.0).looking_at(Vec3::ZERO, Vec3::Z),
         ));
+    }
+
+    /// How far in front of the camera the [`PARTICLE_BLEND_STAGE`]'s billboards
+    /// stand, in metres.
+    const PARTICLE_BLEND_DISTANCE: f32 = 12.0;
+
+    /// The side of each [`PARTICLE_BLEND_STAGE`] billboard, in metres.
+    const PARTICLE_BLEND_SIDE: f32 = 3.0;
+
+    /// The [`PARTICLE_BLEND_STAGE`]'s two billboards, side by side in Second Life
+    /// metres: the half-transparent one left, the opaque control right.
+    const PARTICLE_BLEND_POINTS: [Vec3; 2] = [Vec3::new(-2.5, 0.0, 0.0), Vec3::new(2.5, 0.0, 0.0)];
+
+    /// The alpha byte of the [`PARTICLE_BLEND_STAGE`]'s half-transparent texel.
+    const PARTICLE_BLEND_HALF_ALPHA: u8 = 128;
+
+    /// An empty stage, cleared to black, looking at the two additive billboards
+    /// [`spawn_additive_particles`] adds.
+    const PARTICLE_BLEND_STAGE: RenderScene = RenderScene {
+        id: "test-particle-additive-blend",
+        what: "two additive white particle billboards over black, one half transparent",
+        timeline: Timeline { samples: &[0.0] },
+        lighting: SceneLighting::Own,
+        camera: SceneCamera {
+            position: Vec3::new(0.0, -PARTICLE_BLEND_DISTANCE, 0.0),
+            look_at: Vec3::ZERO,
+        },
+        spawn: |_cx, _root, _commands, _assets| {},
+        subject: None,
+        applies: &[],
+    };
+
+    /// **An additive particle adds its colour weighted by its alpha, as the
+    /// reference adds it** (`viewer-particle-additive-ignores-source-factor`).
+    ///
+    /// The usual additive system is `(SOURCE_ALPHA, ONE)`, and the reference draws
+    /// it with exactly that blend function, so a texel adds `rgb * alpha`. The stage
+    /// draws two such clouds over black, each one white billboard: one texel half
+    /// transparent, one opaque. The opaque one is the control — it must come out
+    /// white. The half-transparent one must add half as much light; drawn `(ONE,
+    /// ONE)`, as the blend used to be, it reads exactly as white as the control.
+    #[test]
+    fn an_additive_particle_adds_its_colour_weighted_by_alpha() -> Result<(), TestError> {
+        let basis = crate::render_scene::scene_root_transform().rotation;
+        let points = PARTICLE_BLEND_POINTS.map(|point| basis.mul_vec3(point));
+        let Some((frame, projected)) =
+            capture_with(&PARTICLE_BLEND_STAGE, SceneCx::new(), &points, |app| {
+                app.add_plugins(crate::particle_render::ParticleRenderPlugin)
+                    .add_systems(
+                        Startup,
+                        (
+                            crate::particle_render::setup_particle_quad,
+                            spawn_additive_particles,
+                        )
+                            .chain(),
+                    )
+                    .add_systems(PreUpdate, (linear_output, black_background));
+            })
+        else {
+            warn!("skipping: no frame came back, so this machine has no usable GPU adapter");
+            return Ok(());
+        };
+        let (half_at, opaque_at) = projected
+            .get(0)
+            .zip(projected.get(1))
+            .ok_or("a particle did not project onto the frame")?;
+        // The brightest channel, decoded to linear light and averaged over a box well
+        // inside each billboard's footprint.
+        let patch_linear = |at: Vec2| -> Option<f32> {
+            #[expect(
+                clippy::as_conversions,
+                clippy::cast_possible_truncation,
+                clippy::cast_sign_loss,
+                reason = "a projected point inside the 256-pixel frame, rounded to its pixel"
+            )]
+            let (cx, cy) = (at.x.round().max(0.0) as u32, at.y.round().max(0.0) as u32);
+            let mut sum = 0.0_f32;
+            let mut count = 0.0_f32;
+            for y in cy.saturating_sub(10)..cy.saturating_add(10) {
+                for x in cx.saturating_sub(10)..cx.saturating_add(10) {
+                    if let Some(pixel) = frame.pixel(x, y) {
+                        let encoded = pixel.x.max(pixel.y).max(pixel.z);
+                        sum += Color::srgb(encoded, encoded, encoded).to_linear().red;
+                        count += 1.0;
+                    }
+                }
+            }
+            (count > 0.0).then(|| sum / count)
+        };
+        let half = patch_linear(half_at).ok_or("the half-transparent particle is off the frame")?;
+        let opaque = patch_linear(opaque_at).ok_or("the opaque particle is off the frame")?;
+        assert!(
+            opaque > 0.9,
+            "the opaque additive particle came out at {opaque}, so the billboards did not \
+             draw and the blend check proves nothing"
+        );
+        let expected = f32::from(PARTICLE_BLEND_HALF_ALPHA) / 255.0;
+        let ratio = half / opaque;
+        assert!(
+            (ratio - expected).abs() < 0.1,
+            "the half-transparent additive particle added {half} against the opaque one's \
+             {opaque} (a ratio of {ratio}, want {expected}): the blend is not weighting the \
+             colour by the source alpha"
+        );
+        Ok(())
+    }
+
+    /// One cloud of a two-cloud particle stage: its texel's alpha byte, its blend
+    /// function and its particle's glow.
+    type StageCloud = (u8, crate::particle_render::ParticleBlend, f32);
+
+    /// The usual additive blend, `(SOURCE_ALPHA, ONE)`.
+    const ADDITIVE: crate::particle_render::ParticleBlend = crate::particle_render::ParticleBlend {
+        source: crate::particle_render::ParticleBlendFactor::SourceAlpha,
+        destination: crate::particle_render::ParticleBlendFactor::One,
+    };
+
+    /// Spawn the [`PARTICLE_BLEND_STAGE`]'s two clouds, each one unlit white
+    /// billboard drawn `(SOURCE_ALPHA, ONE)` through the viewer's own instanced
+    /// particle renderer: the left with a half-transparent texel, the right with an
+    /// opaque one.
+    fn spawn_additive_particles(
+        commands: Commands,
+        quad: Res<crate::particle_render::ParticleQuad>,
+        images: ResMut<Assets<Image>>,
+    ) {
+        spawn_particle_pair(
+            commands,
+            &quad,
+            images,
+            [
+                (PARTICLE_BLEND_HALF_ALPHA, ADDITIVE, 0.0),
+                (255, ADDITIVE, 0.0),
+            ],
+        );
+    }
+
+    /// Spawn the [`PARTICLE_BLEND_STAGE`] clouds of
+    /// [`a_particle_glows_by_its_texel_alpha_whatever_its_blend`]: on the left an
+    /// opaque source-over billboard at half glow, on the right a half-transparent
+    /// additive one at full glow.
+    fn spawn_glowing_particles(
+        commands: Commands,
+        quad: Res<crate::particle_render::ParticleQuad>,
+        images: ResMut<Assets<Image>>,
+    ) {
+        spawn_particle_pair(
+            commands,
+            &quad,
+            images,
+            [
+                (255, crate::particle_render::ParticleBlend::ALPHA, 0.5),
+                (PARTICLE_BLEND_HALF_ALPHA, ADDITIVE, 1.0),
+            ],
+        );
+    }
+
+    /// Spawn one cloud per entry of `clouds` at the matching
+    /// [`PARTICLE_BLEND_POINTS`], each one unlit white billboard.
+    fn spawn_particle_pair(
+        mut commands: Commands,
+        quad: &crate::particle_render::ParticleQuad,
+        mut images: ResMut<Assets<Image>>,
+        clouds: [StageCloud; 2],
+    ) {
+        use crate::particle_render::{ParticleDrawParams, ParticleInstance, ParticleInstances};
+        use bevy::camera::visibility::NoFrustumCulling;
+        use bevy::render::batching::NoAutomaticBatching;
+
+        let basis = crate::render_scene::scene_root_transform().rotation;
+        for (point, (alpha, blend, glow)) in PARTICLE_BLEND_POINTS.iter().zip(clouds) {
+            let position = basis.mul_vec3(*point);
+            commands.spawn((
+                Mesh3d(quad.mesh.clone()),
+                Transform::IDENTITY,
+                NoFrustumCulling,
+                NoAutomaticBatching,
+                ParticleInstances {
+                    instances: vec![ParticleInstance {
+                        position: position.to_array(),
+                        scale: [PARTICLE_BLEND_SIDE, PARTICLE_BLEND_SIDE],
+                        color: [1.0; 4],
+                        velocity: [0.0; 3],
+                        flags: 0,
+                        glow,
+                    }],
+                },
+                ParticleDrawParams {
+                    texture: images.add(one_texel([255, 255, 255, alpha])),
+                    blend,
+                    unlit: true,
+                    sort_center: position,
+                },
+                Name::new("particle-blend-stage/cloud"),
+            ));
+        }
+    }
+
+    /// **A particle's glow reaches the glow mask weighted by its texel's alpha,
+    /// whatever its blend function** (`viewer-particle-additive-ignores-source-factor`).
+    ///
+    /// The reference draws a glowing particle a second time, adding the texel's
+    /// alpha times the glow to the frame's alpha (`emissiveF.glsl`), for every blend
+    /// function. The frame is cleared to transparent black, so its alpha over each
+    /// billboard is exactly the glow it took. On the left an opaque source-over
+    /// billboard at half glow must leave half; it used to leave none, since only an
+    /// additive cloud wrote glow. On the right a half-transparent additive billboard
+    /// at full glow must also leave half; it used to leave all of it, its glow
+    /// written whatever the texel's alpha.
+    #[test]
+    fn a_particle_glows_by_its_texel_alpha_whatever_its_blend() -> Result<(), TestError> {
+        let basis = crate::render_scene::scene_root_transform().rotation;
+        let points = PARTICLE_BLEND_POINTS.map(|point| basis.mul_vec3(point));
+        let Some((frame, projected)) =
+            capture_with(&PARTICLE_BLEND_STAGE, SceneCx::new(), &points, |app| {
+                app.add_plugins(crate::particle_render::ParticleRenderPlugin)
+                    .add_systems(
+                        Startup,
+                        (
+                            crate::particle_render::setup_particle_quad,
+                            spawn_glowing_particles,
+                        )
+                            .chain(),
+                    )
+                    .add_systems(PreUpdate, (linear_output, transparent_background));
+            })
+        else {
+            warn!("skipping: no frame came back, so this machine has no usable GPU adapter");
+            return Ok(());
+        };
+        let (alpha_at, additive_at) = projected
+            .get(0)
+            .zip(projected.get(1))
+            .ok_or("a particle did not project onto the frame")?;
+        // The frame's alpha, averaged over a box well inside each billboard.
+        let patch_alpha = |at: Vec2| -> Option<f32> {
+            #[expect(
+                clippy::as_conversions,
+                clippy::cast_possible_truncation,
+                clippy::cast_sign_loss,
+                reason = "a projected point inside the 256-pixel frame, rounded to its pixel"
+            )]
+            let (cx, cy) = (at.x.round().max(0.0) as u32, at.y.round().max(0.0) as u32);
+            let mut sum = 0.0_f32;
+            let mut count = 0.0_f32;
+            for y in cy.saturating_sub(10)..cy.saturating_add(10) {
+                for x in cx.saturating_sub(10)..cx.saturating_add(10) {
+                    if let Some(pixel) = frame.pixel(x, y) {
+                        sum += pixel.w;
+                        count += 1.0;
+                    }
+                }
+            }
+            (count > 0.0).then(|| sum / count)
+        };
+        let source_over =
+            patch_alpha(alpha_at).ok_or("the source-over particle is off the frame")?;
+        let additive = patch_alpha(additive_at).ok_or("the additive particle is off the frame")?;
+        assert!(
+            (source_over - 0.5).abs() < 0.08,
+            "the opaque source-over particle at half glow left {source_over} in the glow \
+             mask, want 0.5: its glow draw did not run"
+        );
+        let expected = f32::from(PARTICLE_BLEND_HALF_ALPHA) / 255.0;
+        assert!(
+            (additive - expected).abs() < 0.08,
+            "the half-transparent additive particle at full glow left {additive} in the \
+             glow mask, want {expected}: its glow is not weighted by the texel's alpha"
+        );
+        Ok(())
+    }
+
+    /// Clear the readback camera to transparent black, so the frame's alpha (the
+    /// glow mask) over a billboard is the glow it drew and nothing else.
+    fn transparent_background(mut cameras: Query<&mut Camera, With<ViewerCamera>>) {
+        for mut camera in &mut cameras {
+            let already = matches!(
+                camera.clear_color,
+                ClearColorConfig::Custom(colour) if colour == Color::NONE
+            );
+            if !already {
+                camera.clear_color = ClearColorConfig::Custom(Color::NONE);
+            }
+        }
+    }
+
+    /// Clear the readback camera to black, so an additive draw's contribution is
+    /// the whole of what the frame holds there.
+    fn black_background(mut cameras: Query<&mut Camera, With<ViewerCamera>>) {
+        for mut camera in &mut cameras {
+            let already = matches!(
+                camera.clear_color,
+                ClearColorConfig::Custom(colour) if colour == Color::BLACK
+            );
+            if !already {
+                camera.clear_color = ClearColorConfig::Custom(Color::BLACK);
+            }
+        }
     }
 
     /// Clear the readback camera to [`STAR_BACKGROUND`] rather than to black, so a

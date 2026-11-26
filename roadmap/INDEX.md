@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 326 |
 | blocked | 35 |
 | in-progress | 4 |
-| bugs | 5 |
-| done | 1630 |
+| bugs | 4 |
+| done | 1631 |
 | deferred | 30 |
 | wont-do | 24 |
 | **total** | **2184** |
@@ -1236,7 +1236,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-text-renderability-axis`](in-progress/viewer-ui-text-renderability-axis.md)
   — Upstream issue — font selection cannot see glyph-format renderability
 
-## bugs (5)
+## bugs (4)
 
 ### viewer
 
@@ -1246,13 +1246,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Some worn mesh hair does not render (visible in Firestorm)
 - [`viewer-near-avatar-stuck-coarse-sphere`](bugs/viewer-near-avatar-stuck-coarse-sphere.md)
   — A nearby avatar stays a coarse sphere even as the camera closes in
-- [`viewer-particle-additive-ignores-source-factor`](bugs/viewer-particle-additive-ignores-source-factor.md)
-  — Additive particles ignore the system's source blend factor, so transparent
-  texels add light
 - [`viewer-rigged-hair-triangle-pattern`](bugs/viewer-rigged-hair-triangle-pattern.md)
   — Rigged mesh hair shows a pattern of individual triangles
 
-## done (1630)
+## done (1631)
 
 ### protocol
 
@@ -2853,6 +2850,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Decode ParcelOverlay into a 64×64 grid resource
 - [`viewer-parcel-owners-terrain-overlay`](done/viewer-parcel-owners-terrain-overlay.md)
   — Land Owners — in-world terrain ownership colour fill
+- [`viewer-particle-additive-ignores-source-factor`](done/viewer-particle-additive-ignores-source-factor.md)
+  — Additive particles ignore the system's source blend factor, so transparent
+  texels add light
 - [`viewer-particle-water-ordering`](done/viewer-particle-water-ordering.md) —
   Translucent content (particles) orders wrong against the water surface
 - [`viewer-pbr-blinn-phong-build-preview`](done/viewer-pbr-blinn-phong-build-preview.md)
