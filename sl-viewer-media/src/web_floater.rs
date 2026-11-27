@@ -43,7 +43,7 @@ use sl_viewer_intents::{OpenWebBrowser, WebTarget};
 use sl_viewer_platform::system_browser::{ExternalUrl, normalize_web_url, open_in_system_browser};
 use sl_viewer_settings::ViewerSettings;
 use sl_viewer_ui_core::glyph;
-use sl_viewer_ui_core::i18n::Translated;
+use sl_viewer_ui_core::i18n::{TransArgs, Translated, Translator};
 use sl_viewer_ui_core::skin::{DISABLED_TEXT_CLASS, role_class, set_state_class_on, text_role};
 use sl_viewer_ui_core::skin_palette::SkinPalette;
 use sl_viewer_ui_core::ui::{UiPanelShown, column, row};
@@ -669,6 +669,8 @@ struct WebChrome<'w, 's> {
     font_cx: ResMut<'w, FontCx>,
     /// Its layout context.
     layout_cx: ResMut<'w, LayoutCx>,
+    /// The words of the status row.
+    translator: Translator<'w>,
 }
 
 /// Mirror each shown window's view status into its chrome: title, address
@@ -730,7 +732,7 @@ fn draw_web_status(
         visibilities,
         font_cx,
         layout_cx,
-        ..
+        translator,
     } = chrome;
     // The address mirrors the page unless the user is editing it. Set through
     // the parley editor + a layout refresh (the `ui_text_input` revert idiom)
@@ -770,7 +772,10 @@ fn draw_web_status(
         let want = if let Some(error) = &status.load_error {
             error.clone()
         } else if status.loading {
-            format!("Loading… {:.0}%", status.progress * 100.0)
+            translator.format(
+                "web-browser-loading",
+                &TransArgs::new().int("percent", loading_percent(status.progress)),
+            )
         } else {
             String::new()
         };
@@ -778,6 +783,16 @@ fn draw_web_status(
             text.0 = want;
         }
     }
+}
+
+/// A load's progress (`0.0..=1.0`) as the whole percentage the status row
+/// shows, clamped so a surface reporting past either end cannot say more than
+/// done or less than nothing.
+fn loading_percent(progress: f64) -> i64 {
+    let percent = (progress.clamp(0.0, 1.0) * 100.0).round();
+    (0_u8..=100)
+        .find(|whole| (f64::from(*whole) - percent).abs() < 0.5)
+        .map_or(0, i64::from)
 }
 
 #[cfg(test)]
@@ -789,7 +804,7 @@ mod tests {
     use sl_viewer_ui_core::ui::UiRoot;
     use sl_viewer_ui_widgets::floater::{Floater, FloaterPlugin};
 
-    use super::{WebFloaterPlugin, WebWindow, normalize_web_url};
+    use super::{WebFloaterPlugin, WebWindow, loading_percent, normalize_web_url};
     use crate::media_engine::MediaSurfaces;
 
     /// A headless app with the floater manager and the browser windows, and
@@ -858,6 +873,19 @@ mod tests {
                     .map(|view| view.initial_url.as_str().to_owned())
             })
             .collect()
+    }
+
+    /// The status row's percentage is the load's progress rounded to a whole
+    /// percent, and never past either end however the surface reports it.
+    #[test]
+    fn the_loading_percentage_is_whole_and_clamped() {
+        assert_eq!(loading_percent(0.0), 0);
+        assert_eq!(loading_percent(0.424), 42);
+        assert_eq!(loading_percent(0.426), 43);
+        assert_eq!(loading_percent(1.0), 100);
+        assert_eq!(loading_percent(1.7), 100);
+        assert_eq!(loading_percent(-0.2), 0);
+        assert_eq!(loading_percent(f64::NAN), 0);
     }
 
     /// Two pages from two openers (the menu, a chat link) are two windows —

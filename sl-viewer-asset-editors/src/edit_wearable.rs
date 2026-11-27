@@ -91,6 +91,7 @@ use crate::floater::{
     FloaterCaps, FloaterHandle, FloaterHost, FloaterKey, FloaterSpec, FloaterSystems,
     KeyedFloaterOpen, KeyedFloaters,
 };
+use crate::i18n::{TransArgs, Translated, Translator};
 use crate::intents::TexturePicked;
 use crate::intents::{ItemCreationFinished, PendingItemCreations, new_wearable_command};
 use crate::inventory::{InventoryModel, OpenWearableEditor};
@@ -198,6 +199,8 @@ enum WearButton {
 /// long as its window.
 #[derive(Component)]
 struct WearEdit {
+    /// The window's title node, which names the wearable.
+    title: Entity,
     /// The item being edited (its permissions / folder feed Save).
     item: ItemInfo,
     /// The wearable slot.
@@ -268,6 +271,7 @@ impl Plugin for EditWearablePlugin {
                     // the inventory window, and the later raise wins.
                     open_wearable_editor.after(FloaterSystems::Commands),
                     (
+                        title_wearable_windows,
                         apply_wear_texture_picked,
                         apply_wear_tint_picked,
                         apply_wear_gender_radio,
@@ -335,15 +339,42 @@ const fn wearable_tint_params(slot: WearableType) -> Option<[i32; 3]> {
 }
 
 /// The texture-picker slots a wearable type exposes: each `TextureEntry` layer
-/// the slot supplies, with a display label. Derived from
+/// the slot supplies, with its label's Fluent key. Derived from
 /// [`avatar_texture::LAYER_TEXTURES`] (skin → three bodypaint layers, hair → one,
 /// a clothing layer → its fabric, alpha → its masks, …).
 fn wearable_texture_slots(slot: WearableType) -> Vec<(usize, String)> {
     avatar_texture::LAYER_TEXTURES
         .iter()
         .filter(|(_slot, _name, wearable)| *wearable == slot)
-        .map(|(te, name, _wearable)| (*te, prettify(name)))
+        .map(|(te, name, _wearable)| (*te, texture_slot_key(name)))
         .collect()
+}
+
+/// The Fluent key of a layer texture slot's label: the `avatar_lad` layer
+/// name (`upper_bodypaint`) as `wearable-texture-upper-bodypaint`.
+fn texture_slot_key(name: &str) -> String {
+    format!("wearable-texture-{}", name.replace('_', "-"))
+}
+
+/// The Fluent key an avatar parameter's label is worded by: the label
+/// (`avatar_lad`'s `label`, or the prettified name) as a slug under
+/// `avatar-param-` — `Sleeve Length` is `avatar-param-sleeve-length`. The
+/// reference looks the same label up with `LLTrans::getString`.
+fn avatar_param_key(label: &str) -> String {
+    let mut key = String::from("avatar-param-");
+    let mut gap = false;
+    for ch in label.chars() {
+        if ch.is_ascii_alphanumeric() {
+            if gap && !key.ends_with('-') {
+                key.push('-');
+            }
+            gap = false;
+            key.push(ch.to_ascii_lowercase());
+        } else {
+            gap = true;
+        }
+    }
+    key
 }
 
 /// Turn an `avatar_lad` layer name (`upper_bodypaint`) into a display label
@@ -401,6 +432,8 @@ struct WearSeed<'w> {
     library: Option<Res<'w, AvatarAssetLibrary>>,
     /// The inventory, for a link's target.
     inventory: Option<Res<'w, InventoryModel>>,
+    /// Which slider labels the bundle words.
+    translator: Translator<'w>,
 }
 
 /// Open a wearable **per wearable** (`viewer-key-wearable-editor`): raise its
@@ -436,11 +469,6 @@ fn build_wearable_window(
     seed: &WearSeed,
 ) {
     let slot = wearable_type_of(&item);
-    // The title node carries no Fluent key, so a direct text set is not fought
-    // by the translator.
-    commands
-        .entity(handle.title_text)
-        .insert(Text::new(format!("Edit: {}", item.name)));
 
     // Seed the edited asset from this item's worn asset (falling back to a
     // fresh defaults asset if the outfit's bake inputs are not assembled yet).
@@ -465,7 +493,10 @@ fn build_wearable_window(
     // the saved asset is complete and the sliders start at the right place.
     let sliders: Vec<ParamSliderSpec> = library
         .map(|library| editable_params(library, slot, sex, tint_params))
-        .unwrap_or_default();
+        .unwrap_or_default()
+        .into_iter()
+        .map(|slider| slider.worded_by(&seed.translator))
+        .collect();
     for slider in &sliders {
         let _prev = edited.params.entry(slider.id).or_insert(slider.value);
     }
@@ -488,6 +519,7 @@ fn build_wearable_window(
         // guard asks first ([`track_wearable_unsaved`]).
         UnsavedWork::default(),
         WearEdit {
+            title: handle.title_text,
             item,
             wearable_type: slot,
             original: edited.clone(),
@@ -543,12 +575,8 @@ fn spawn_wearable_controls(
             ChildOf(content),
         ))
         .id();
-    for (kind, label) in [
-        (WearButton::Save, "Save"),
-        (WearButton::SaveAs, "Save As"),
-        (WearButton::Revert, "Revert"),
-    ] {
-        spawn_action_button(commands, button_row, kind, label, &mut tab, font_size);
+    for kind in [WearButton::Save, WearButton::SaveAs, WearButton::Revert] {
+        spawn_action_button(commands, button_row, kind, &mut tab, font_size);
     }
     let status = commands
         .spawn((
@@ -601,7 +629,12 @@ fn spawn_wearable_controls(
     // Body sub-tab). Other slots have neither.
     let mut height_label = None;
     if edited.wearable_type == WearableType::Shape {
-        let height_row = spawn_labeled_row(commands, list, "Height", font_size);
+        let height_row = spawn_labeled_row(
+            commands,
+            list,
+            UiLabel::key("wearable-editor-height"),
+            font_size,
+        );
         height_label = Some(
             commands
                 .spawn((
@@ -615,8 +648,16 @@ fn spawn_wearable_controls(
         let male = gender_param
             .and_then(|id| edited.params.get(&id).copied())
             .unwrap_or(0.0);
-        let gender_row = spawn_labeled_row(commands, list, "Gender", font_size);
-        let labels = [String::from("Female"), String::from("Male")];
+        let gender_row = spawn_labeled_row(
+            commands,
+            list,
+            UiLabel::key("wearable-editor-gender"),
+            font_size,
+        );
+        let labels = [
+            String::from("wearable-editor-female"),
+            String::from("wearable-editor-male"),
+        ];
         let group = spawn_radio_group(
             commands,
             gender_row,
@@ -627,20 +668,20 @@ fn spawn_wearable_controls(
                 tab_index: tab,
                 font_size,
                 layout: RadioLayout::Row,
-                translate_labels: false,
+                translate_labels: true,
             },
         );
         commands.entity(group).insert(WearGenderRadio);
         tab = tab.saturating_add(1);
     }
 
-    for (te, label) in wearable_texture_slots(edited.wearable_type) {
+    for (te, label_key) in wearable_texture_slots(edited.wearable_type) {
         let current = edited
             .textures
             .get(&u32::try_from(te).unwrap_or_default())
             .copied()
             .map_or_else(|| TextureKey::from(Uuid::nil()), TextureKey::from);
-        let picker_row = spawn_labeled_row(commands, list, &label, font_size);
+        let picker_row = spawn_labeled_row(commands, list, UiLabel::key(label_key), font_size);
         let swatch = spawn_texture_swatch(commands, picker_row, "wearable", tab, current);
         commands.entity(swatch).insert(WearTextureSwatch(te));
         tab = tab.saturating_add(1);
@@ -649,7 +690,12 @@ fn spawn_wearable_controls(
     let mut tint_swatch = None;
     if let Some([r, g, b]) = wearable_tint_params(edited.wearable_type) {
         let color = tint_color(edited, [r, g, b]);
-        let tint_row = spawn_labeled_row(commands, list, "Color / Tint", font_size);
+        let tint_row = spawn_labeled_row(
+            commands,
+            list,
+            UiLabel::key("wearable-editor-tint"),
+            font_size,
+        );
         let swatch = spawn_color_swatch(commands, tint_row, "wearable-tint", tab, color);
         commands.entity(swatch).insert(WearTintSwatch);
         tint_swatch = Some(swatch);
@@ -676,21 +722,22 @@ fn spawn_wearable_controls(
 /// a sample **shirt** — its fabric picker (the slot list the live editor
 /// derives), its tint swatch on a sample colour and a handful of fit sliders.
 ///
-/// The sliders are sample rows rather than the slot's real `avatar_lad`
-/// params: those come from the avatar-asset library, which a specimen does not
-/// load. The ids and ranges are the shirt's own.
+/// The sliders are a sample of the slot's `avatar_lad` params rather than the
+/// library's list: that comes from the avatar-asset library, which a specimen
+/// does not load. The ids, labels and ranges are the shirt's own, and the
+/// labels are worded by the bundle as the live editor's are.
 pub fn spawn_wearable_editor_specimen(
     commands: &mut Commands,
     parent: Entity,
     cx: crate::ui_element::ElementCx,
 ) -> Entity {
     let sliders = [
-        (600, "Sleeve Length", 0.0, 0.85, 0.7, false),
-        (601, "Shirt Bottom", 0.0, 1.0, 0.8, false),
-        (602, "Collar Front", 0.0, 1.0, 0.35, false),
-        (778, "Collar Back", 0.0, 1.0, 0.75, false),
-        (828, "Loose Shirt", 0.0, 1.0, 0.2, false),
-        (868, "Shirt Wrinkles", 0.0, 1.0, 0.0, true),
+        (800, "Sleeve Length", 0.0, 1.0, 0.7, false),
+        (801, "Shirt Bottom", 0.0, 1.0, 0.8, false),
+        (802, "Collar Front", 0.0, 1.0, 0.35, false),
+        (781, "Collar Back", 0.0, 1.0, 0.75, false),
+        (828, "Shirt Fit", 0.0, 1.0, 0.2, false),
+        (840, "Sleeve Looseness", 0.0, 1.5, 0.4, false),
     ]
     .into_iter()
     .map(|(id, label, min, max, value, is_bake)| ParamSliderSpec {
@@ -699,7 +746,7 @@ pub fn spawn_wearable_editor_specimen(
         min,
         max,
         value,
-        label: cx.text(label),
+        label: UiLabel::key(avatar_param_key(label)),
     })
     .collect::<Vec<_>>();
     let mut params = sliders
@@ -736,8 +783,24 @@ struct ParamSliderSpec {
     max: f32,
     /// Where the thumb starts — the worn value, or the param's default.
     value: f32,
-    /// The row's label, from `avatar_lad` or prettified from the param name.
-    label: String,
+    /// The row's label: the bundle's words for the `avatar_lad` label (or the
+    /// prettified param name), or that text itself where the bundle has none.
+    label: UiLabel,
+}
+
+impl ParamSliderSpec {
+    /// This slider with its label worded by the bundle, when the bundle has
+    /// words for it. A definitions file the viewer was pointed at may name a
+    /// parameter no string covers; that one keeps its own text.
+    fn worded_by(mut self, translator: &Translator) -> Self {
+        if let UiLabel::Literal(text) = &self.label {
+            let key = avatar_param_key(text);
+            if translator.lookup(&key).is_some() {
+                self.label = UiLabel::key(key);
+            }
+        }
+        self
+    }
 }
 
 /// The editor-tweakable params of a slot, filtered by the avatar's sex and
@@ -774,7 +837,7 @@ fn editable_params(
                 min: param.min,
                 max: param.max,
                 value: param.default,
-                label,
+                label: UiLabel::Literal(label),
             }
         })
         .collect()
@@ -819,13 +882,13 @@ fn tint_color(asset: &WearableAsset, [r, g, b]: [i32; 3]) -> Color {
 fn spawn_labeled_row(
     commands: &mut Commands,
     parent: Entity,
-    label: &str,
+    label: UiLabel,
     font_size: f32,
 ) -> Entity {
     ui_spawn::spawn_labeled_row(
         commands,
         parent,
-        LabeledRowSpec::new(UiLabel::literal(label))
+        LabeledRowSpec::new(label)
             .label_color(LABEL_COLOR)
             .font_size(font_size)
             .label_width(Val::Px(120.0)),
@@ -850,7 +913,7 @@ fn spawn_param_slider(
         value,
         ref label,
     } = spec;
-    let row_entity = spawn_labeled_row(commands, parent, label, font_size);
+    let row_entity = spawn_labeled_row(commands, parent, label.clone(), font_size);
     let range = SliderRange::new(min, max);
     let track = spawn_slider(
         commands,
@@ -881,14 +944,20 @@ fn spawn_action_button(
     commands: &mut Commands,
     parent: Entity,
     kind: WearButton,
-    label: &str,
     tab: &mut i32,
     font_size: f32,
 ) {
+    // The node name keeps the English words as a stable locator; the label is
+    // the bundle's.
+    let (label_key, name) = match kind {
+        WearButton::Save => ("wearable-editor-save", "wearable-button:Save"),
+        WearButton::SaveAs => ("wearable-editor-save-as", "wearable-button:Save As"),
+        WearButton::Revert => ("wearable-editor-revert", "wearable-button:Revert"),
+    };
     let button = ui_spawn::spawn_button(
         commands,
         parent,
-        ButtonSpec::bordered(UiLabel::literal(label), format!("wearable-button:{label}"))
+        ButtonSpec::bordered(UiLabel::key(label_key), name)
             .kind(ButtonKind::Headless)
             .tab_from(tab)
             .padding(10.0, 3.0)
@@ -1075,7 +1144,7 @@ fn on_wear_button(
     mut edits: Query<&mut WearEdit>,
     mut preview: Option<WearPreview>,
     out: Option<WearSaveOut>,
-    mut texts: Query<&mut Text>,
+    mut ecs: Commands,
 ) {
     // Absent only in the gallery, whose specimen has no edit. The preview is
     // too, and only Revert reads it, so only Revert asks for it.
@@ -1123,7 +1192,7 @@ fn on_wear_button(
             // `report_wearable_save_as` answers on what it publishes.
             pending.enqueue(transaction, &name);
             edit.creation = Some(transaction);
-            set_status(&mut texts, edit.status, "Saving a copy…");
+            set_status(&mut ecs, edit.status, "wearable-editor-status-saving-copy");
         }
         WearButton::Revert => {
             let Some(preview) = preview.as_mut() else {
@@ -1136,7 +1205,7 @@ fn on_wear_button(
             // Back to what was opened on, so there is nothing unsaved left to
             // ask about on a close.
             edit.dirty = false;
-            set_status(&mut texts, edit.status, "Reverted.");
+            set_status(&mut ecs, edit.status, "wearable-editor-status-reverted");
         }
     }
 }
@@ -1251,7 +1320,7 @@ fn save_wearable(
     mut requests: MessageReader<SaveEditorWindow>,
     mut edits: Query<&mut WearEdit>,
     mut commands: MessageWriter<SlCommand>,
-    mut texts: Query<&mut Text>,
+    mut ecs: Commands,
 ) {
     for request in requests.read() {
         // Another editor's window, or one closed since the request was raised.
@@ -1268,7 +1337,7 @@ fn save_wearable(
             data,
         }));
         edit.saving = Some(transaction_id);
-        set_status(&mut texts, edit.status, "Saving…");
+        set_status(&mut ecs, edit.status, "wearable-editor-status-saving");
     }
 }
 
@@ -1278,7 +1347,7 @@ fn report_wearable_save(
     mut events: MessageReader<SlEvent>,
     mut edits: Query<&mut WearEdit>,
     mut inventory: Option<ResMut<InventoryModel>>,
-    mut texts: Query<&mut Text>,
+    mut commands: Commands,
 ) {
     for event in events.read() {
         let SlSessionEvent::InventoryAssetSaved {
@@ -1314,8 +1383,12 @@ fn report_wearable_save(
                 let _folder = model.rebind_asset(edit.item.item_id, *asset_id);
             }
         }
-        let message = if *success { "Saved." } else { "Save failed." };
-        set_status(&mut texts, edit.status, message);
+        let message = if *success {
+            "wearable-editor-status-saved"
+        } else {
+            "wearable-editor-status-failed"
+        };
+        set_status(&mut commands, edit.status, message);
     }
 }
 
@@ -1324,7 +1397,7 @@ fn report_wearable_save(
 fn report_wearable_save_as(
     mut finished: MessageReader<ItemCreationFinished>,
     mut edits: Query<&mut WearEdit>,
-    mut texts: Query<&mut Text>,
+    mut commands: Commands,
 ) {
     for creation in finished.read() {
         let Some(mut edit) = edits
@@ -1335,11 +1408,11 @@ fn report_wearable_save_as(
         };
         edit.creation = None;
         let message = if creation.item.is_some() {
-            "Saved a copy to inventory."
+            "wearable-editor-status-copy-saved"
         } else {
-            "Saving a copy failed."
+            "wearable-editor-status-copy-failed"
         };
-        set_status(&mut texts, edit.status, message);
+        set_status(&mut commands, edit.status, message);
     }
 }
 
@@ -1460,12 +1533,35 @@ const fn map_sale_type(sale: SaleType) -> WearableSaleType {
     }
 }
 
-/// Write a one-line status message into the editor's readout.
-fn set_status(texts: &mut Query<&mut Text>, node: Option<Entity>, message: &str) {
+/// Bind the editor's readout to the one-line status message under the Fluent
+/// key `key`. Rebinding the key is what re-resolves it.
+fn set_status(commands: &mut Commands, node: Option<Entity>, key: &'static str) {
     if let Some(node) = node
-        && let Ok(mut text) = texts.get_mut(node)
+        && let Ok(mut entity) = commands.get_entity(node)
     {
-        message.clone_into(&mut text.0);
+        entity.insert(Translated::new(key));
+    }
+}
+
+/// Name each new window's wearable in its title, and every window's again
+/// when the locale changes. The title node carries no Fluent key of its own,
+/// so this text set is not fought by the translator.
+fn title_wearable_windows(
+    translator: Translator,
+    edits: Query<Ref<WearEdit>>,
+    mut texts: Query<&mut Text>,
+) {
+    let relocalised = translator.changed();
+    for edit in &edits {
+        if !relocalised && !edit.is_added() {
+            continue;
+        }
+        if let Ok(mut text) = texts.get_mut(edit.title) {
+            text.0 = translator.format(
+                "wearable-editor-title",
+                &TransArgs::new().text("name", &edit.item.name),
+            );
+        }
     }
 }
 
@@ -1485,6 +1581,78 @@ mod tests {
     /// A boxed error so tests can use `?` rather than the disallowed `unwrap` /
     /// `expect`.
     type TestError = Box<dyn core::error::Error>;
+
+    /// An avatar parameter's label names its string as a slug: ASCII letters
+    /// and digits, lower-cased, every other run collapsed into one dash.
+    #[test]
+    fn an_avatar_param_label_names_its_string_as_a_slug() {
+        use super::avatar_param_key;
+        assert_eq!(
+            avatar_param_key("Sleeve Length"),
+            "avatar-param-sleeve-length"
+        );
+        assert_eq!(avatar_param_key("Color/Tint"), "avatar-param-color-tint");
+        assert_eq!(avatar_param_key("Lip Ratio"), "avatar-param-lip-ratio");
+        assert_eq!(
+            avatar_param_key("  Mixed -- Case 2 "),
+            "avatar-param-mixed-case-2"
+        );
+    }
+
+    /// The keys the English bundle defines, read the way
+    /// `sl-client-bevy-viewer`'s own key check reads them: one `key =` per
+    /// line, a selector's variants and continuations indented away.
+    fn english_keys() -> Result<HashSet<String>, TestError> {
+        let bundle = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../sl-client-bevy-viewer/assets/locales/en/main.ftl");
+        Ok(fs_err::read_to_string(bundle)?
+            .lines()
+            .filter_map(|line| line.split_once(" ="))
+            .map(|(key, _value)| key.to_owned())
+            .collect())
+    }
+
+    /// **Every label the editor can draw has English words.** Each slot's
+    /// texture pickers, and every slider the vendored `avatar_lad.xml` gives
+    /// any slot for either sex: a missing one would draw `avatar_lad`'s own
+    /// English rather than the bundle's, and never translate.
+    #[test]
+    fn every_editor_label_has_an_english_string() -> Result<(), TestError> {
+        use super::{
+            avatar_param_key, editable_params, wearable_texture_slots, wearable_tint_params,
+        };
+        use crate::avatar_assets::AvatarAssetLibrary;
+        use sl_client_bevy::ParamSex;
+        let defined = english_keys()?;
+        let library = AvatarAssetLibrary::load(
+            &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../viewer-assets/character"),
+        )?;
+        let mut missing = std::collections::BTreeSet::new();
+        for code in 0_u8..=16 {
+            let slot = WearableType::from_code(code);
+            for (_te, key) in wearable_texture_slots(slot) {
+                if !defined.contains(&key) {
+                    missing.insert(key);
+                }
+            }
+            for sex in [ParamSex::Female, ParamSex::Male] {
+                for slider in editable_params(&library, slot, sex, wearable_tint_params(slot)) {
+                    let super::UiLabel::Literal(text) = slider.label else {
+                        continue;
+                    };
+                    let key = avatar_param_key(&text);
+                    if !defined.contains(&key) {
+                        missing.insert(format!("{key} ({text})"));
+                    }
+                }
+            }
+        }
+        assert!(
+            missing.is_empty(),
+            "these editor labels have no English string: {missing:#?}"
+        );
+        Ok(())
+    }
 
     /// The worn wearable item `id` of `slot`.
     fn wearable(id: u128, slot: WearableType) -> ItemInfo {
@@ -1554,6 +1722,7 @@ mod tests {
     fn open_edit(status: Entity) -> WearEdit {
         let asset = asset("A shirt", WearableType::Shirt);
         WearEdit {
+            title: Entity::PLACEHOLDER,
             item: shirt(),
             wearable_type: WearableType::Shirt,
             original: asset.clone(),
@@ -1586,11 +1755,12 @@ mod tests {
             .ok_or_else(|| TestError::from("the window has no edit"))
     }
 
-    /// What the status readout says.
+    /// The Fluent key the status readout is bound to — what it says, in
+    /// whichever locale — or nothing while it is blank.
     fn status_of(app: &App, status: Entity) -> String {
         app.world()
-            .get::<Text>(status)
-            .map(|text| text.0.clone())
+            .get::<crate::i18n::Translated>(status)
+            .map(|label| label.key().to_owned())
             .unwrap_or_default()
     }
 
@@ -1634,7 +1804,7 @@ mod tests {
                 success: true,
             }));
         app.update();
-        assert_eq!(status_of(&app, status), "Saved.");
+        assert_eq!(status_of(&app, status), "wearable-editor-status-saved");
         let edit = edit_of(&app, window)?;
         assert_eq!(edit.saving, None, "the save is no longer in flight");
         assert!(
@@ -1663,7 +1833,7 @@ mod tests {
                 success: false,
             }));
         app.update();
-        assert_eq!(status_of(&app, status), "Save failed.");
+        assert_eq!(status_of(&app, status), "wearable-editor-status-failed");
         assert!(
             edit_of(&app, window)?.dirty,
             "a refused save must not clear the unsaved work"
@@ -1703,7 +1873,7 @@ mod tests {
                 item: Some(InventoryKey::from(Uuid::from_u128(0xFF))),
             });
         app.update();
-        assert_eq!(status_of(&app, status), "Saved a copy to inventory.");
+        assert_eq!(status_of(&app, status), "wearable-editor-status-copy-saved");
         Ok(())
     }
 
@@ -1720,7 +1890,10 @@ mod tests {
                 item: None,
             });
         app.update();
-        assert_eq!(status_of(&app, status), "Saving a copy failed.");
+        assert_eq!(
+            status_of(&app, status),
+            "wearable-editor-status-copy-failed"
+        );
         Ok(())
     }
 
@@ -1789,17 +1962,8 @@ mod tests {
                     // window has no box for a pointer to find.
                     commands.entity(window.root).insert(UiPanelShown(true));
                     let mut tab = 0_i32;
-                    for (kind, label) in
-                        [(WearButton::Save, "Save"), (WearButton::SaveAs, "Save As")]
-                    {
-                        spawn_action_button(
-                            &mut commands,
-                            window.content,
-                            kind,
-                            label,
-                            &mut tab,
-                            13.0,
-                        );
+                    for kind in [WearButton::Save, WearButton::SaveAs] {
+                        spawn_action_button(&mut commands, window.content, kind, &mut tab, 13.0);
                     }
                     let status = commands
                         .spawn((Text::new(String::new()), ChildOf(window.content)))
@@ -1857,7 +2021,11 @@ mod tests {
             let (_window, copied) = after("wearable-button:Save As", gesture)?;
             assert_eq!(
                 copied,
-                (Vec::new(), 1, "Saving a copy…".to_owned()),
+                (
+                    Vec::new(),
+                    1,
+                    "wearable-editor-status-saving-copy".to_owned()
+                ),
                 "Save As by {how} sends one copy"
             );
         }
@@ -1933,6 +2101,8 @@ mod tests {
                     )
                         .chain(),
                 );
+            // The open path words its sliders through the translator.
+            crate::i18n::install_untranslated(&mut app);
             let root = app.world_mut().spawn(Node::default()).id();
             app.insert_resource(UiRoot(root));
             app.update();

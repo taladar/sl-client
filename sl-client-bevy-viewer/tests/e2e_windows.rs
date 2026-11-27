@@ -791,7 +791,12 @@ mod test {
                 let again = open_wearable(alpha, (WearableType::Shirt, 1), SLEEVE_LENGTH).await?;
                 let windows = alpha
                     .ui()
-                    .locator(Locator::role(Role::Window).named("Edit: Stage Shirt Layer"))
+                    // The title is `wearable-editor-title`, whose name
+                    // placeable Fluent isolates.
+                    .locator(
+                        Locator::role(Role::Window)
+                            .named("Edit: \u{2068}Stage Shirt Layer\u{2069}"),
+                    )
                     .count()
                     .await?;
                 assert_eq!(windows, 1, "the shirt's two rows opened two windows");
@@ -2590,7 +2595,8 @@ mod test {
                 query.press("Enter").await?;
                 let places = search.test_id("search-status-places");
                 let wanted = if second_life {
-                    "Showing 1\u{2013}100"
+                    // Fluent isolates each interpolated number.
+                    "Showing \u{2068}1\u{2069}\u{2013}\u{2068}100\u{2069}"
                 } else {
                     unanswered
                 };

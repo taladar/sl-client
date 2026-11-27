@@ -74,7 +74,7 @@ use crate::floater::{
     Floater, FloaterCaps, FloaterCommand, FloaterHandle, FloaterOp, FloaterOwner, FloaterSpec,
     FloaterSystems, KeyedFloaterOpen, KeyedFloaters, host_floater, picker_identity,
 };
-use crate::i18n::Translated;
+use crate::i18n::{TransArgs, Translated, Translator};
 use crate::intents::{OpenTexturePicker, PickerKind, TexturePicked};
 use crate::inventory::{InventoryModel, MAX_FOLDER_DEPTH, item_icon, query_folder_page};
 use crate::material_preview::MaterialPreview;
@@ -406,6 +406,7 @@ impl Plugin for TexturePickerPlugin {
                         refresh_tree_on_inventory,
                         watch_search_filter,
                         rebuild_tree,
+                        label_tree_counts,
                         paint_tree_selection,
                         request_preview_texture,
                         sync_material_preview_pane,
@@ -719,7 +720,14 @@ pub fn spawn_texture_picker_specimen(
             .entry::<ClassList>()
             .and_modify(move |mut classes| set_state_class(&mut classes, SELECTED_CLASS, selected));
     }
-    commands.entity(parts.count).insert(Text::new(count));
+    // The read-out is worded by the bundle, which takes the translator — so it
+    // is written in a queued step, by the pass the live window uses.
+    commands.entity(parts.count).insert(count);
+    commands.queue(|world: &mut World| {
+        if let Err(error) = world.run_system_cached(label_tree_counts) {
+            warn!("texture picker specimen: the count read-out was not written: {error}");
+        }
+    });
     let quick_display = quick_choice_display(state.kind);
     for button in [parts.blank_button, parts.default_button] {
         commands
@@ -1111,7 +1119,6 @@ fn rebuild_tree(
     mut windows: Query<(&mut TexturePickerState, &TexturePickerUi)>,
     inventory: Res<InventoryModel>,
     trees: Query<&Children>,
-    mut counts: Query<&mut Text>,
     mut commands: Commands,
 ) {
     for (mut state, ui) in &mut windows {
@@ -1136,14 +1143,27 @@ fn rebuild_tree(
         }
         let (count, _rows) =
             spawn_tree_rows(&mut commands, ui.tree, &rows, state.kind, PICKER_FONT);
-        if let Ok(mut text) = counts.get_mut(ui.count) {
-            text.0 = count;
+        commands.entity(ui.count).insert(count);
+    }
+}
+
+/// Word each tree's count read-out from its [`TreeCount`]: when the count
+/// changed, and every one of them when the locale did.
+fn label_tree_counts(translator: Translator, mut counts: Query<(Ref<TreeCount>, &mut Text)>) {
+    let relocalised = translator.changed();
+    for (count, mut text) in &mut counts {
+        if !relocalised && !count.is_changed() {
+            continue;
+        }
+        let wanted = count.resolve(&translator);
+        if text.0 != wanted {
+            text.0 = wanted;
         }
     }
 }
 
 /// Spawn the first [`MAX_ROWS`] of `rows` into `tree` at `font_size`, and
-/// return the count read-out's text for them with the spawned rows (in `rows`
+/// return the count read-out for them with the spawned rows (in `rows`
 /// order). What the rebuild draws, and the specimen with it.
 fn spawn_tree_rows(
     commands: &mut Commands,
@@ -1151,26 +1171,52 @@ fn spawn_tree_rows(
     rows: &[TreeRow],
     kind: PickerKind,
     font_size: f32,
-) -> (String, Vec<Entity>) {
-    let total = rows.len();
-    let shown = total.min(MAX_ROWS);
+) -> (TreeCount, Vec<Entity>) {
+    let count = TreeCount::of(rows.len());
+    let shown = count.shown;
     let spawned = rows
         .get(..shown)
         .unwrap_or_default()
         .iter()
         .map(|row_data| spawn_tree_row(commands, tree, row_data, kind, font_size))
         .collect();
-    (count_label(total), spawned)
+    (count, spawned)
 }
 
-/// The count read-out's text for a tree of `total` rows: the total, or — when
-/// [`MAX_ROWS`] caps what is drawn — how many of them are shown.
-fn count_label(total: usize) -> String {
-    let shown = total.min(MAX_ROWS);
-    if total > shown {
-        format!("{shown} / {total} — refine search")
-    } else {
-        format!("{total}")
+/// What a tree's count read-out says, on the read-out's node: how many rows
+/// the tree has, and how many of them [`MAX_ROWS`] lets it draw.
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+struct TreeCount {
+    /// The rows drawn.
+    shown: usize,
+    /// The rows the tree has.
+    total: usize,
+}
+
+impl TreeCount {
+    /// The read-out for a tree of `total` rows.
+    fn of(total: usize) -> Self {
+        Self {
+            shown: total.min(MAX_ROWS),
+            total,
+        }
+    }
+
+    /// The read-out in the active locale: the total, or — when [`MAX_ROWS`]
+    /// caps what is drawn — how many of them are shown, and a nudge to narrow
+    /// the search.
+    fn resolve(self, translator: &Translator) -> String {
+        let wide = |value: usize| i64::try_from(value).unwrap_or(i64::MAX);
+        if self.total > self.shown {
+            translator.format(
+                "texture-picker-count-capped",
+                &TransArgs::new()
+                    .int("shown", wide(self.shown))
+                    .int("total", wide(self.total)),
+            )
+        } else {
+            translator.integer(wide(self.total))
+        }
     }
 }
 
@@ -1583,8 +1629,30 @@ fn close_picker(
 
 #[cfg(test)]
 mod tests {
-    use super::{PickerKind, item_matches};
+    use super::{MAX_ROWS, PickerKind, TreeCount, item_matches};
+    use pretty_assertions::assert_eq;
     use sl_client_bevy::InventoryType;
+
+    /// The tree's read-out counts every row, and says how many are drawn only
+    /// when the cap holds some back.
+    #[test]
+    fn the_tree_count_says_when_the_cap_holds_rows_back() {
+        assert_eq!(TreeCount::of(3), TreeCount { shown: 3, total: 3 });
+        assert_eq!(
+            TreeCount::of(MAX_ROWS),
+            TreeCount {
+                shown: MAX_ROWS,
+                total: MAX_ROWS
+            }
+        );
+        assert_eq!(
+            TreeCount::of(MAX_ROWS + 5),
+            TreeCount {
+                shown: MAX_ROWS,
+                total: MAX_ROWS + 5
+            }
+        );
+    }
 
     /// Texture mode lists texture and snapshot items and nothing else — a
     /// material must not leak into a texture pick.
@@ -1667,6 +1735,8 @@ mod tests {
         /// choices has to work in anyway.
         fn picker_app() -> App {
             let mut app = InteractionTest::new().build();
+            // The tree's count read-out is worded through the translator.
+            crate::i18n::install_untranslated(&mut app);
             app.init_resource::<InventoryModel>()
                 .init_resource::<DecodedTextures>()
                 .add_message::<BoostTexture>()

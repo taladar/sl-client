@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 130 |
-| ready | 326 |
+| ready | 325 |
 | blocked | 35 |
 | in-progress | 4 |
 | bugs | 4 |
-| done | 1631 |
+| done | 1632 |
 | deferred | 30 |
 | wont-do | 24 |
 | **total** | **2184** |
@@ -315,7 +315,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-lsl-opensim-function-set`](ideas/gridspec-lsl-opensim-function-set.md)
   — Measure which library functions OpenSim's engines compile
 
-## ready (326)
+## ready (325)
 
 ### protocol
 
@@ -574,8 +574,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-i18n-chat-translation`](ready/viewer-i18n-chat-translation.md) —
   Machine translation of chat / IM (blocked by `viewer-i18n-fluent-scaffold`
   (done), `viewer-chat-history-panel` (done))
-- [`viewer-i18n-floater-literal-english`](ready/viewer-i18n-floater-literal-english.md)
-  — Several floaters still draw literal English instead of translation keys
 - [`viewer-i18n-locale-selection`](ready/viewer-i18n-locale-selection.md) —
   Locale detection, override & runtime switch (blocked by
   `viewer-i18n-fluent-scaffold` (done), `viewer-ui-settings-store` (done))
@@ -1249,7 +1247,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-rigged-hair-triangle-pattern`](bugs/viewer-rigged-hair-triangle-pattern.md)
   — Rigged mesh hair shows a pattern of individual triangles
 
-## done (1631)
+## done (1632)
 
 ### protocol
 
@@ -2254,6 +2252,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A HUD attachment is built, seated and visible, and never reaches the frame
 - [`viewer-hud-context-menu`](done/viewer-hud-context-menu.md) — HUD context /
   pie menu entries (blocked by `viewer-ui-radial-menu` (done))
+- [`viewer-i18n-floater-literal-english`](done/viewer-i18n-floater-literal-english.md)
+  — Several floaters still draw literal English instead of translation keys
 - [`viewer-i18n-fluent-scaffold`](done/viewer-i18n-fluent-scaffold.md) — i18n
   scaffold (Project Fluent via bevy_fluent) (blocked by
   `viewer-ui-widget-scaffold` (done))

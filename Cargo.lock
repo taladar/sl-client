@@ -9906,6 +9906,7 @@ version = "0.1.0"
 dependencies = [
  "bevy",
  "bevy_flair",
+ "fs-err",
  "pretty_assertions",
  "sl-client-bevy",
  "sl-highlight",

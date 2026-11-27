@@ -55,7 +55,7 @@ use crate::browser_widget::{
 use crate::floater::{
     DeferredFloaterContent, FloaterCaps, FloaterHandle, FloaterSpec, spawn_floater,
 };
-use crate::i18n::{Translated, UiLocale};
+use crate::i18n::{TransArgs, Translated, Translator, UiLocale};
 use crate::intents::OpenAvatarProfile;
 use crate::intents::OpenGroupProfile;
 use crate::intents::RequestFriendship;
@@ -177,7 +177,7 @@ const TAB_ORDER: [SearchTab; 7] = [
 ];
 
 /// A directory category (a tab that runs a wire query — every tab but Web).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum SearchCategory {
     /// People.
     People,
@@ -244,8 +244,13 @@ const LAND_SALE_ORDER: [LandSaleFilter; 4] = [
     LandSaleFilter::Estate,
 ];
 
-/// The Land sale-type option labels.
-const LAND_SALE_LABELS: [&str; 4] = ["All", "Auction", "Mainland", "Estate"];
+/// The Land sale-type option labels' Fluent keys.
+const LAND_SALE_LABELS: [&str; 4] = [
+    "search-land-sale-all",
+    "search-land-sale-auction",
+    "search-land-sale-mainland",
+    "search-land-sale-estate",
+];
 
 impl LandSaleFilter {
     /// The wire sale-type mask this filter selects.
@@ -282,8 +287,13 @@ const LAND_SORT_ORDER: [LandSort; 4] = [
     LandSort::PerMeter,
 ];
 
-/// The Land sort option labels.
-const LAND_SORT_LABELS: [&str; 4] = ["Price", "Name", "Area", "Price / m²"];
+/// The Land sort option labels' Fluent keys.
+const LAND_SORT_LABELS: [&str; 4] = [
+    "search-land-sort-price",
+    "search-land-sort-name",
+    "search-land-sort-area",
+    "search-land-sort-ppm",
+];
 
 impl LandSort {
     /// The wire sort flag this order selects.
@@ -321,16 +331,16 @@ const PLACES_CATEGORIES: [ParcelCategory; 8] = [
     ParcelCategory::Adult,
 ];
 
-/// The Places category labels.
+/// The Places category labels' Fluent keys.
 const PLACES_CATEGORY_LABELS: [&str; 8] = [
-    "Any",
-    "Linden",
-    "Residential",
-    "Commercial",
-    "Industrial",
-    "Parks & Rec",
-    "Other",
-    "Adult",
+    "search-places-category-any",
+    "search-places-category-linden",
+    "search-places-category-residential",
+    "search-places-category-commercial",
+    "search-places-category-industrial",
+    "search-places-category-parks",
+    "search-places-category-other",
+    "search-places-category-adult",
 ];
 
 /// The Classifieds category options, in combo order.
@@ -347,35 +357,37 @@ const CLASSIFIED_CATEGORIES: [ClassifiedCategory; 10] = [
     ClassifiedCategory::Personal,
 ];
 
-/// The Classifieds category labels.
+/// The Classifieds category labels' Fluent keys, also what a classified's
+/// details pane names its category with.
 const CLASSIFIED_CATEGORY_LABELS: [&str; 10] = [
-    "Any",
-    "Shopping",
-    "Land Rental",
-    "Property Rental",
-    "Attraction",
-    "New Products",
-    "Employment",
-    "Wanted",
-    "Service",
-    "Personal",
+    "search-classified-category-any",
+    "search-classified-category-shopping",
+    "search-classified-category-land-rental",
+    "search-classified-category-property-rental",
+    "search-classified-category-attraction",
+    "search-classified-category-new-products",
+    "search-classified-category-employment",
+    "search-classified-category-wanted",
+    "search-classified-category-service",
+    "search-classified-category-personal",
 ];
 
-/// The Events category options: the wire category number paired with a label.
+/// The Events category options: the wire category number paired with its
+/// label's Fluent key.
 const EVENT_CATEGORIES: [(u32, &str); 13] = [
-    (0, "Any"),
-    (18, "Discussion"),
-    (19, "Sports"),
-    (30, "Live DJ"),
-    (20, "Live Music"),
-    (22, "Commercial"),
-    (23, "Nightlife"),
-    (24, "Games/Contests"),
-    (25, "Pageants"),
-    (26, "Education"),
-    (27, "Arts and Culture"),
-    (28, "Charity/Support"),
-    (29, "Miscellaneous"),
+    (0, "search-event-category-any"),
+    (18, "search-event-category-discussion"),
+    (19, "search-event-category-sports"),
+    (30, "search-event-category-live-dj"),
+    (20, "search-event-category-live-music"),
+    (22, "search-event-category-commercial"),
+    (23, "search-event-category-nightlife"),
+    (24, "search-event-category-games"),
+    (25, "search-event-category-pageants"),
+    (26, "search-event-category-education"),
+    (27, "search-event-category-arts"),
+    (28, "search-event-category-charity"),
+    (29, "search-event-category-miscellaneous"),
 ];
 
 // ---------------------------------------------------------------------------
@@ -1609,8 +1621,10 @@ pub fn spawn_search_specimen(
     .collect();
 
     let table = parts.ui.groups;
+    // A Groups row has no cell the bundle words, so no translator is needed.
+    let words = CellWords::default();
     let rows: Vec<Vec<(String, Color)>> = (0..state.result_count(category))
-        .map(|index| result_cells(category, index, &state))
+        .map(|index| result_cells(category, index, &state, &words))
         .collect();
     let bound = spawn_specimen_table_rows(
         commands,
@@ -1633,17 +1647,24 @@ pub fn spawn_search_specimen(
             .entry::<ClassList>()
             .and_modify(|mut classes| set_state_class(&mut classes, SELECTED_CLASS, true));
     }
-    commands
-        .entity(table.count)
-        .insert(Text::new(count_label(&state, category, Instant::now())));
-
+    let count = count_label(&state, category, Instant::now());
     let subject = subject_request(category, 0, &state)
         .map_or(DetailSubject::None, |(subject, _request)| subject);
-    for (field, entity) in parts.detail_values {
-        commands
-            .entity(entity)
-            .insert(Text::new(detail_field_value(field, &subject)));
-    }
+    // The count line and the pane's lines are worded by the bundle, which
+    // takes the translator — so they are written in a queued step.
+    let lines: Vec<(Entity, DetailText)> = parts
+        .detail_values
+        .iter()
+        .map(|(field, entity)| (*entity, detail_field_value(*field, &subject)))
+        .collect();
+    let count_entity = table.count;
+    commands.queue(move |world: &mut World| {
+        if let Err(error) =
+            world.run_system_cached_with(write_search_specimen_lines, (count_entity, count, lines))
+        {
+            warn!("search specimen: the count and details lines were not written: {error}");
+        }
+    });
     for (action, entity) in parts.detail_actions {
         let display = shown_display(detail_action_visible(action, &subject));
         commands
@@ -1657,6 +1678,28 @@ pub fn spawn_search_specimen(
         .entry::<Node>()
         .and_modify(move |mut node| node.display = pane);
     parent
+}
+
+/// What the specimen's queued step writes: the count line's node and its
+/// line, and each details-pane node with its line.
+type SpecimenLines = (Entity, CountLine, Vec<(Entity, DetailText)>);
+
+/// The specimen's count line and details-pane lines, resolved as the live
+/// passes resolve them. The sample names inside them already went through the
+/// cell's text transform; the bundle's words are the locale's.
+fn write_search_specimen_lines(
+    In((count_entity, count, lines)): In<SpecimenLines>,
+    translator: Translator,
+    mut texts: Query<&mut Text>,
+) {
+    if let Ok(mut text) = texts.get_mut(count_entity) {
+        text.0 = count.resolve(&translator);
+    }
+    for (entity, line) in lines {
+        if let Ok(mut text) = texts.get_mut(entity) {
+            text.0 = line.resolve(&translator);
+        }
+    }
 }
 
 /// The `display` a shown / hidden node takes.
@@ -2134,7 +2177,7 @@ fn spawn_events_day_button(commands: &mut Commands, parent: Entity, forward: boo
         .observe(on_events_day_press);
 }
 
-/// Spawn the Events category combo over the [`EVENT_CATEGORIES`] labels.
+/// Spawn the Events category combo over the [`EVENT_CATEGORIES`] label keys.
 fn spawn_events_category_combo(commands: &mut Commands, parent: Entity, font_size: f32) -> Entity {
     let labels: Vec<String> = EVENT_CATEGORIES
         .iter()
@@ -2149,7 +2192,7 @@ fn spawn_events_category_combo(commands: &mut Commands, parent: Entity, font_siz
             active: 0,
             tab_index: 0,
             font_size,
-            translate_labels: false,
+            translate_labels: true,
         },
     )
 }
@@ -2372,7 +2415,7 @@ fn spawn_limit_field(
     field
 }
 
-/// Spawn a filter combo over literal English labels, returning the anchor.
+/// Spawn a filter combo over its labels' Fluent keys, returning the anchor.
 fn spawn_category_combo(
     commands: &mut Commands,
     parent: Entity,
@@ -2390,7 +2433,7 @@ fn spawn_category_combo(
             active: 0,
             tab_index: 0,
             font_size,
-            translate_labels: false,
+            translate_labels: true,
         },
     )
 }
@@ -3007,6 +3050,7 @@ struct SearchRowWidgets<'w, 's> {
 fn rebind_search_rows(
     mut ui: Option<ResMut<SearchUi>>,
     state: Res<SearchState>,
+    translator: Translator,
     widgets: SearchRowWidgets,
 ) {
     let SearchRowWidgets {
@@ -3046,11 +3090,12 @@ fn rebind_search_rows(
         }
     }
     // Bind every pooled row's cells from its result.
+    let words = CellWords::new(&translator);
     for (row, tag, cells) in &rows {
         let Some(index) = row.index else {
             continue;
         };
-        bind_row(tag.0, index, cells, &state, &mut texts);
+        bind_row(tag.0, index, cells, &state, &words, &mut texts);
     }
 }
 
@@ -3066,15 +3111,37 @@ const fn state_page_revision(state: &SearchState, category: SearchCategory) -> u
     }
 }
 
+/// The words a result cell may show that are not the grid's own, resolved from
+/// the bundle once per pass rather than once per cell.
+#[derive(Debug, Clone, Default)]
+struct CellWords {
+    /// A land row's type when the grid's land products do not name it — the
+    /// reference's `land_type_unknown`.
+    unknown_land_type: String,
+}
+
+impl CellWords {
+    /// The words in the active locale.
+    fn new(translator: &Translator) -> Self {
+        Self {
+            unknown_land_type: translator.get("search-land-type-unknown"),
+        }
+    }
+}
+
 /// Bind one row's cells from `results[index]` of its category.
 fn bind_row(
     category: SearchCategory,
     index: usize,
     cells: &TableRowCells,
     state: &SearchState,
+    words: &CellWords,
     texts: &mut Query<(&mut Text, &mut TextColor, Option<&mut ClassList>)>,
 ) {
-    for (column, (value, color)) in result_cells(category, index, state).into_iter().enumerate() {
+    for (column, (value, color)) in result_cells(category, index, state, words)
+        .into_iter()
+        .enumerate()
+    {
         if let Some(cell) = cells.cell(column) {
             set_table_cell(texts, cell, &value, color);
         }
@@ -3088,6 +3155,7 @@ fn result_cells(
     category: SearchCategory,
     index: usize,
     state: &SearchState,
+    words: &CellWords,
 ) -> Vec<(String, Color)> {
     match category {
         SearchCategory::People => state
@@ -3130,7 +3198,10 @@ fn result_cells(
                     (land_price(result), SECONDARY_COLOR),
                     (format!("{}", result.actual_area), SECONDARY_COLOR),
                     (land_ppm(result), SECONDARY_COLOR),
-                    (land_type(result, &state.land_types), SECONDARY_COLOR),
+                    (
+                        land_type(result, &state.land_types, &words.unknown_land_type),
+                        SECONDARY_COLOR,
+                    ),
                 ]
             }),
         SearchCategory::Events => state
@@ -3159,16 +3230,20 @@ fn result_cells(
 }
 
 /// A land result's type cell: what the grid's land products call its
-/// `ProductSKU`, or "Unknown" — the reference's `land_type_unknown` — for a
+/// `ProductSKU`, or `unknown` — the reference's `land_type_unknown` — for a
 /// row without one (a UDP reply carries none) or one the list does not name.
-fn land_type(result: &DirLandResult, land_types: &HashMap<String, String>) -> String {
+fn land_type(
+    result: &DirLandResult,
+    land_types: &HashMap<String, String>,
+    unknown: &str,
+) -> String {
     result
         .product_sku
         .as_ref()
         .and_then(|sku| land_types.get(sku))
         .filter(|description| !description.is_empty())
         .cloned()
-        .unwrap_or_else(|| "Unknown".to_owned())
+        .unwrap_or_else(|| unknown.to_owned())
 }
 
 /// A land result's price cell: its asking price, or a dash when not for sale.
@@ -3394,18 +3469,19 @@ fn update_detail_pane(
     detail: Res<SearchDetail>,
     state: Res<SearchState>,
     ui: Option<Res<SearchUi>>,
+    translator: Translator,
     mut fields: Query<(&DetailField, &mut Text)>,
     mut buttons: Query<(&DetailAction, &mut Node), Without<DetailField>>,
     mut panels: Query<&mut Node, (Without<DetailField>, Without<DetailAction>)>,
 ) {
-    if !detail.is_changed() {
+    if !detail.is_changed() && !translator.changed() {
         return;
     }
     let Some(ui) = ui else {
         return;
     };
     for (field, mut text) in &mut fields {
-        let value = detail_field_value(*field, &detail.subject);
+        let value = detail_field_value(*field, &detail.subject).resolve(&translator);
         if text.0 != value {
             text.0 = value;
         }
@@ -3420,26 +3496,72 @@ fn update_detail_pane(
     }
 }
 
-/// The text for a details-pane value field from the subject.
-fn detail_field_value(field: DetailField, subject: &DetailSubject) -> String {
+/// What a details-pane value field shows: the grid's own text, or a line of
+/// the bundle's built from the subject.
+///
+/// A value rather than the finished string, so the pane's content is decided
+/// by a pure function a test can read, and the words by the bundle at the one
+/// place that holds a [`Translator`].
+#[derive(Debug, Clone, PartialEq)]
+enum DetailText {
+    /// Text the grid sent (a name, a description) or a number, drawn as it is.
+    Plain(String),
+    /// An argument-free line of the bundle.
+    Key(&'static str),
+    /// A line of the bundle with integer arguments.
+    Count(&'static str, Vec<(&'static str, i64)>),
+    /// A line of the bundle with text arguments — a date or an amount the grid
+    /// formatted.
+    Words(&'static str, Vec<(&'static str, String)>),
+}
+
+impl DetailText {
+    /// The empty field.
+    const fn empty() -> Self {
+        Self::Plain(String::new())
+    }
+
+    /// The finished string in the active locale.
+    fn resolve(&self, translator: &Translator) -> String {
+        match self {
+            Self::Plain(text) => text.clone(),
+            Self::Key(key) => translator.get(key),
+            Self::Count(key, args) => translator.format(
+                key,
+                &args
+                    .iter()
+                    .fold(TransArgs::new(), |acc, (name, value)| acc.int(name, *value)),
+            ),
+            Self::Words(key, args) => translator.format(
+                key,
+                &args
+                    .iter()
+                    .fold(TransArgs::new(), |acc, (name, value)| acc.text(name, value)),
+            ),
+        }
+    }
+}
+
+/// What a details-pane value field shows for the subject.
+fn detail_field_value(field: DetailField, subject: &DetailSubject) -> DetailText {
+    let plain = |text: &str| DetailText::Plain(text.to_owned());
     match subject {
-        DetailSubject::None => String::new(),
+        DetailSubject::None => DetailText::empty(),
         DetailSubject::Person { name, props, .. } => match field {
-            DetailField::Title => name.clone(),
-            DetailField::Aux1 => props
-                .as_ref()
-                .map_or_else(String::new, |p| format!("Born {}", p.born_on)),
-            DetailField::Aux2 => props.as_ref().map_or_else(String::new, |p| {
-                if p.partner_id.is_some() {
-                    "Partnered".to_owned()
-                } else {
-                    String::new()
-                }
+            DetailField::Title => plain(name),
+            DetailField::Aux1 => props.as_ref().map_or_else(DetailText::empty, |p| {
+                DetailText::Words("search-detail-born", vec![("date", p.born_on.clone())])
             }),
+            DetailField::Aux2 => props
+                .as_ref()
+                .filter(|p| p.partner_id.is_some())
+                .map_or_else(DetailText::empty, |_p| {
+                    DetailText::Key("search-detail-partnered")
+                }),
             DetailField::Description => props
                 .as_ref()
-                .map_or_else(String::new, |p| p.about_text.clone()),
-            DetailField::Location => String::new(),
+                .map_or_else(DetailText::empty, |p| plain(&p.about_text)),
+            DetailField::Location => DetailText::empty(),
         },
         DetailSubject::Group {
             name,
@@ -3447,74 +3569,108 @@ fn detail_field_value(field: DetailField, subject: &DetailSubject) -> String {
             profile,
             ..
         } => match field {
-            DetailField::Title => name.clone(),
+            DetailField::Title => plain(name),
             DetailField::Aux1 => {
                 let count = profile.as_ref().map_or(*members, |p| p.member_count);
-                format!("{count} members")
+                DetailText::Count("search-detail-members", vec![("count", i64::from(count))])
             }
-            DetailField::Aux2 => profile.as_ref().map_or_else(String::new, |p| {
-                if p.open_enrollment {
-                    "Open enrollment".to_owned()
+            DetailField::Aux2 => profile.as_ref().map_or_else(DetailText::empty, |p| {
+                DetailText::Key(if p.open_enrollment {
+                    "search-detail-open-enrollment"
                 } else {
-                    "Invitation only".to_owned()
-                }
+                    "search-detail-invitation-only"
+                })
             }),
             DetailField::Description => profile
                 .as_ref()
-                .map_or_else(String::new, |p| p.charter.clone()),
-            DetailField::Location => String::new(),
+                .map_or_else(DetailText::empty, |p| plain(&p.charter)),
+            DetailField::Location => DetailText::empty(),
         },
         DetailSubject::Parcel { name, details, .. } => match field {
-            DetailField::Title => name.clone(),
-            DetailField::Aux1 => details
-                .as_ref()
-                .map_or_else(String::new, |d| format!("Traffic: {:.0}", d.dwell)),
+            DetailField::Title => plain(name),
+            DetailField::Aux1 => details.as_ref().map_or_else(DetailText::empty, |d| {
+                DetailText::Words(
+                    "search-detail-traffic",
+                    vec![("traffic", format!("{:.0}", d.dwell))],
+                )
+            }),
             DetailField::Aux2 => details
                 .as_ref()
-                .map_or_else(String::new, |d| format!("{}", d.actual_area)),
-            DetailField::Location => details.as_ref().map_or_else(String::new, |d| {
-                location_label(d.sim_name.as_ref(), &d.global_position)
+                .map_or_else(DetailText::empty, |d| plain(&d.actual_area.to_string())),
+            DetailField::Location => details.as_ref().map_or_else(DetailText::empty, |d| {
+                DetailText::Plain(location_label(d.sim_name.as_ref(), &d.global_position))
             }),
             DetailField::Description => details
                 .as_ref()
-                .map_or_else(String::new, |d| d.description.clone()),
+                .map_or_else(DetailText::empty, |d| plain(&d.description)),
         },
         DetailSubject::Event { name, info, .. } => match field {
-            DetailField::Title => name.clone(),
-            DetailField::Aux1 => info.as_ref().map_or_else(String::new, |i| {
-                format!("{} \u{2022} {} min", i.date, i.duration)
+            DetailField::Title => plain(name),
+            DetailField::Aux1 => info.as_ref().map_or_else(DetailText::empty, |i| {
+                DetailText::Words(
+                    "search-detail-event-when",
+                    vec![
+                        ("date", i.date.clone()),
+                        ("minutes", i.duration.to_string()),
+                    ],
+                )
             }),
-            DetailField::Aux2 => info.as_ref().map_or_else(String::new, event_cover_label),
-            DetailField::Location => info.as_ref().map_or_else(String::new, |i| {
-                location_label(i.sim_name.as_ref(), &i.global_position)
-            }),
-            DetailField::Description => info
-                .as_ref()
-                .map_or_else(String::new, |i| i.description.clone()),
-        },
-        DetailSubject::Classified { name, info, .. } => match field {
-            DetailField::Title => name.clone(),
-            DetailField::Aux1 => info
-                .as_ref()
-                .map_or_else(String::new, |i| format!("{}", i.category)),
             DetailField::Aux2 => info
                 .as_ref()
-                .map_or_else(String::new, |i| format!("{} / wk", i.price_for_listing)),
-            DetailField::Location => info.as_ref().map_or_else(String::new, |i| {
-                location_label(i.sim_name.as_ref(), &i.pos_global)
+                .map_or_else(DetailText::empty, event_cover_label),
+            DetailField::Location => info.as_ref().map_or_else(DetailText::empty, |i| {
+                DetailText::Plain(location_label(i.sim_name.as_ref(), &i.global_position))
             }),
             DetailField::Description => info
                 .as_ref()
-                .map_or_else(String::new, |i| i.description.clone()),
+                .map_or_else(DetailText::empty, |i| plain(&i.description)),
+        },
+        DetailSubject::Classified { name, info, .. } => match field {
+            DetailField::Title => plain(name),
+            DetailField::Aux1 => info
+                .as_ref()
+                .map_or_else(DetailText::empty, |i| classified_category_label(i.category)),
+            DetailField::Aux2 => info.as_ref().map_or_else(DetailText::empty, |i| {
+                DetailText::Words(
+                    "search-detail-classified-price",
+                    vec![("price", i.price_for_listing.to_string())],
+                )
+            }),
+            DetailField::Location => info.as_ref().map_or_else(DetailText::empty, |i| {
+                DetailText::Plain(location_label(i.sim_name.as_ref(), &i.pos_global))
+            }),
+            DetailField::Description => info
+                .as_ref()
+                .map_or_else(DetailText::empty, |i| plain(&i.description)),
         },
     }
 }
 
+/// A classified's category, named as the Classifieds filter names it, or by
+/// its number for one the filter does not list.
+fn classified_category_label(category: ClassifiedCategory) -> DetailText {
+    CLASSIFIED_CATEGORIES
+        .iter()
+        .position(|listed| *listed == category)
+        .and_then(|index| CLASSIFIED_CATEGORY_LABELS.get(index))
+        .map_or_else(
+            || {
+                DetailText::Words(
+                    "search-classified-category-unknown",
+                    vec![("number", category.to_string())],
+                )
+            },
+            |key| DetailText::Key(key),
+        )
+}
+
 /// An event's cover-charge aux line.
-fn event_cover_label(info: &EventInfo) -> String {
+fn event_cover_label(info: &EventInfo) -> DetailText {
     match &info.amount {
-        Some(amount) => format!("Cover: {amount}"),
-        None => "Free".to_owned(),
+        Some(amount) => {
+            DetailText::Words("search-detail-cover", vec![("amount", amount.to_string())])
+        }
+        None => DetailText::Key("search-detail-free"),
     }
 }
 
@@ -3703,68 +3859,172 @@ fn teleport_destination(
 
 /// Keep each category's status line current — also while nothing changes, so
 /// a search the grid never answers is said to be one — and the Events day
-/// label.
+/// label. A line is formatted again only when what it says changed or the
+/// locale did.
 fn update_search_counts(
     state: Res<SearchState>,
     ui: Option<Res<SearchUi>>,
+    translator: Translator,
+    mut shown: Local<HashMap<SearchCategory, CountLine>>,
+    mut shown_day: Local<Option<EventsDay>>,
     mut counts: Query<(&SearchCount, &mut Text), Without<DetailField>>,
     mut labels: Query<&mut Text, (Without<SearchCount>, Without<DetailField>)>,
 ) {
     let now = Instant::now();
+    let relocalised = translator.changed();
     for (count, mut text) in &mut counts {
-        let wanted = count_label(&state, count.0, now);
+        let line = count_label(&state, count.0, now);
+        if !relocalised && shown.get(&count.0) == Some(&line) {
+            continue;
+        }
+        let wanted = line.resolve(&translator);
         if text.0 != wanted {
             text.0 = wanted;
         }
+        let _previous = shown.insert(count.0, line);
     }
     if let Some(ui) = ui
         && let Ok(mut text) = labels.get_mut(ui.events_day_label)
     {
-        let wanted = events_day_label(state.events_mode, state.events_day);
-        if text.0 != wanted {
-            text.0 = wanted;
+        let day = events_day_label(state.events_mode, state.events_day);
+        if relocalised || *shown_day != Some(day) {
+            let wanted = day.resolve(&translator);
+            if text.0 != wanted {
+                text.0 = wanted;
+            }
+            *shown_day = Some(day);
         }
+    }
+}
+
+/// What a category's status line says: the range of the page shown, or why
+/// there is nothing to show.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CountLine {
+    /// Results `first` to `last` (1-based, inclusive) are on the page.
+    Showing {
+        /// The first result shown.
+        first: usize,
+        /// The last result shown.
+        last: usize,
+    },
+    /// Nothing has been searched for yet.
+    NoResults,
+    /// The grid's search is switched off.
+    Disabled,
+    /// The grid refused a word in the search text.
+    BannedWord,
+    /// The search text is too short for the grid.
+    TooShort,
+    /// The grid answered with nothing.
+    NothingFound,
+    /// The grid has not answered within [`SEARCH_ANSWER_TIMEOUT`].
+    NoAnswer,
+    /// The search is on its way.
+    Searching,
+}
+
+impl CountLine {
+    /// The line in the active locale.
+    fn resolve(self, translator: &Translator) -> String {
+        let key = match self {
+            Self::Showing { first, last } => {
+                let wide = |value: usize| i64::try_from(value).unwrap_or(i64::MAX);
+                return translator.format(
+                    "search-count-showing",
+                    &TransArgs::new()
+                        .int("first", wide(first))
+                        .int("last", wide(last)),
+                );
+            }
+            Self::NoResults => "search-count-no-results",
+            Self::Disabled => "search-count-disabled",
+            Self::BannedWord => "search-count-banned-word",
+            Self::TooShort => "search-count-too-short",
+            Self::NothingFound => "search-count-nothing-found",
+            Self::NoAnswer => "search-count-no-answer",
+            Self::Searching => "search-count-searching",
+        };
+        translator.get(key)
     }
 }
 
 /// A category's status line at `now`: the range of the page shown, or why
 /// there is nothing to show — not searched yet, still searching, refused by the
 /// grid's status, nothing found, or no answer at all.
-fn count_label(state: &SearchState, category: SearchCategory, now: Instant) -> String {
+fn count_label(state: &SearchState, category: SearchCategory, now: Instant) -> CountLine {
     let progress = state.progress(category);
     if progress.shown > 0 {
         let start = usize::try_from(state.query_start(category)).unwrap_or(0);
-        let first = start.saturating_add(1);
-        let last = start.saturating_add(progress.shown);
-        return format!("Showing {first}\u{2013}{last}");
+        return CountLine::Showing {
+            first: start.saturating_add(1),
+            last: start.saturating_add(progress.shown),
+        };
     }
     let Some(sent_at) = progress.sent_at else {
-        return "No results".to_owned();
+        return CountLine::NoResults;
     };
     if progress.status & STATUS_SEARCH_DISABLED != 0 {
-        "Search is disabled on this grid".to_owned()
+        CountLine::Disabled
     } else if progress.status & STATUS_BANNED_WORD != 0 {
-        "The search text holds a word the grid refuses".to_owned()
+        CountLine::BannedWord
     } else if progress.status & STATUS_SHORT_STRING != 0 {
-        "The search text is too short".to_owned()
+        CountLine::TooShort
     } else if progress.answered {
-        "Nothing found".to_owned()
+        CountLine::NothingFound
     } else if now.saturating_duration_since(sent_at) >= SEARCH_ANSWER_TIMEOUT {
-        "The grid did not answer this search".to_owned()
+        CountLine::NoAnswer
     } else {
-        "Searching\u{2026}".to_owned()
+        CountLine::Searching
+    }
+}
+
+/// What the Events day label says.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EventsDay {
+    /// Current mode: ongoing and upcoming events.
+    Upcoming,
+    /// Today's events.
+    Today,
+    /// Tomorrow's.
+    Tomorrow,
+    /// Yesterday's.
+    Yesterday,
+    /// That many days ahead (two or more).
+    Ahead(i32),
+    /// That many days back (two or more).
+    Ago(i32),
+}
+
+impl EventsDay {
+    /// The label in the active locale.
+    fn resolve(self, translator: &Translator) -> String {
+        match self {
+            Self::Upcoming => translator.get("search-events-current"),
+            Self::Today => translator.get("search-events-today"),
+            Self::Tomorrow => translator.get("search-events-tomorrow"),
+            Self::Yesterday => translator.get("search-events-yesterday"),
+            Self::Ahead(days) => translator.format(
+                "search-events-days-ahead",
+                &TransArgs::new().int("days", i64::from(days)),
+            ),
+            Self::Ago(days) => translator.format(
+                "search-events-days-ago",
+                &TransArgs::new().int("days", i64::from(days)),
+            ),
+        }
     }
 }
 
 /// The Events day-offset label ("Today" / "+2 days" / …).
-fn events_day_label(mode: EventsMode, day: i32) -> String {
+const fn events_day_label(mode: EventsMode, day: i32) -> EventsDay {
     match (mode, day) {
-        (EventsMode::Current, _any) => "Upcoming".to_owned(),
-        (EventsMode::ByDate, 0) => "Today".to_owned(),
-        (EventsMode::ByDate, 1) => "Tomorrow".to_owned(),
-        (EventsMode::ByDate, -1) => "Yesterday".to_owned(),
-        (EventsMode::ByDate, other) if other > 0 => format!("+{other} days"),
-        (EventsMode::ByDate, other) => format!("{other} days"),
+        (EventsMode::Current, _any) => EventsDay::Upcoming,
+        (EventsMode::ByDate, 0) => EventsDay::Today,
+        (EventsMode::ByDate, 1) => EventsDay::Tomorrow,
+        (EventsMode::ByDate, -1) => EventsDay::Yesterday,
+        (EventsMode::ByDate, other) if other > 0 => EventsDay::Ahead(other),
+        (EventsMode::ByDate, other) => EventsDay::Ago(other.saturating_neg()),
     }
 }
 
@@ -3802,11 +4062,12 @@ fn request_detail_snapshot(
 mod tests {
 
     use super::{
-        AgentKey, CATEGORY_ORDER, ClassifiedKey, DirClassifiedResult, DirEventResult,
-        DirGroupResult, DirLandResult, DirPeopleResult, DirPlaceResult, DirRow, EventId,
-        EventsMode, GroupKey, LandSaleFilter, LandSort, PAGE_SIZE_USIZE, Page, ParcelKey, QueryId,
-        SEARCH_ANSWER_TIMEOUT, STATUS_SHORT_STRING, SearchCategory, SearchState, SearchTab, Uuid,
-        build_sl_search_url, count_label, events_query_text, land_type,
+        AgentKey, CATEGORY_ORDER, ClassifiedKey, CountLine, DetailField, DetailSubject, DetailText,
+        DirClassifiedResult, DirEventResult, DirGroupResult, DirLandResult, DirPeopleResult,
+        DirPlaceResult, DirRow, EventId, EventsDay, EventsMode, GroupKey, LandSaleFilter, LandSort,
+        PAGE_SIZE_USIZE, Page, ParcelKey, QueryId, SEARCH_ANSWER_TIMEOUT, STATUS_SHORT_STRING,
+        SearchCategory, SearchState, SearchTab, Uuid, build_sl_search_url, count_label,
+        detail_field_value, events_day_label, events_query_text, land_type,
     };
     use pretty_assertions::assert_eq;
     use sl_client_bevy::{ClassifiedQueryFlags, LandArea, LindenAmount, ParcelCategory};
@@ -4142,39 +4403,103 @@ mod tests {
         let now = Instant::now();
         let mut state = SearchState::default();
         let category = SearchCategory::Places;
-        assert_eq!(count_label(&state, category, now), "No results");
+        assert_eq!(count_label(&state, category, now), CountLine::NoResults);
 
         state.places.begin_query(query(1));
         let sent = state.places.sent_at.unwrap_or(now);
-        assert_eq!(count_label(&state, category, sent), "Searching\u{2026}");
+        assert_eq!(count_label(&state, category, sent), CountLine::Searching);
         // OpenSim answers no places search: past the timeout, say so.
         let later = sent + SEARCH_ANSWER_TIMEOUT + Duration::from_secs(1);
-        assert_eq!(
-            count_label(&state, category, later),
-            "The grid did not answer this search"
-        );
+        assert_eq!(count_label(&state, category, later), CountLine::NoAnswer);
 
         // An answer with nothing in it is "nothing found", however late.
         state.places.append_reply(Vec::new());
-        assert_eq!(count_label(&state, category, later), "Nothing found");
+        assert_eq!(
+            count_label(&state, category, later),
+            CountLine::NothingFound
+        );
 
         // The grid's own refusal outranks that.
         state.places.note_status(STATUS_SHORT_STRING);
-        assert_eq!(
-            count_label(&state, category, later),
-            "The search text is too short"
-        );
+        assert_eq!(count_label(&state, category, later), CountLine::TooShort);
 
         state.people.begin_query(query(2));
         state.people.append_reply(people(3));
         assert_eq!(
             count_label(&state, SearchCategory::People, now),
-            "Showing 1\u{2013}3"
+            CountLine::Showing { first: 1, last: 3 }
+        );
+    }
+
+    /// The Events day label names the near days and counts the far ones in
+    /// both directions, always as a positive number of days.
+    #[test]
+    fn the_events_day_label_counts_days_both_ways() {
+        assert_eq!(
+            events_day_label(EventsMode::Current, 5),
+            EventsDay::Upcoming
+        );
+        assert_eq!(events_day_label(EventsMode::ByDate, 0), EventsDay::Today);
+        assert_eq!(events_day_label(EventsMode::ByDate, 1), EventsDay::Tomorrow);
+        assert_eq!(
+            events_day_label(EventsMode::ByDate, -1),
+            EventsDay::Yesterday
+        );
+        assert_eq!(events_day_label(EventsMode::ByDate, 3), EventsDay::Ahead(3));
+        assert_eq!(events_day_label(EventsMode::ByDate, -4), EventsDay::Ago(4));
+    }
+
+    /// The details pane draws the grid's own text as it came, and every word
+    /// of its own from the bundle: a group's member count is a plural line
+    /// with the profile's count winning over the search row's.
+    #[test]
+    fn the_details_pane_words_its_lines_from_the_bundle() {
+        let group = DetailSubject::Group {
+            group: GroupKey::from(Uuid::from_u128(7)),
+            name: "A group".to_owned(),
+            members: 12,
+            profile: None,
+        };
+        assert_eq!(
+            detail_field_value(DetailField::Title, &group),
+            DetailText::Plain("A group".to_owned())
+        );
+        assert_eq!(
+            detail_field_value(DetailField::Aux1, &group),
+            DetailText::Count("search-detail-members", vec![("count", 12)])
+        );
+        // Before the profile lands there is no enrollment line at all.
+        assert_eq!(
+            detail_field_value(DetailField::Aux2, &group),
+            DetailText::Plain(String::new())
+        );
+        assert_eq!(
+            detail_field_value(DetailField::Aux1, &DetailSubject::None),
+            DetailText::Plain(String::new())
+        );
+    }
+
+    /// A classified's category is named as the Classifieds filter names it,
+    /// and one the filter does not list by its number.
+    #[test]
+    fn a_classifieds_category_is_named_as_the_filter_names_it() {
+        use super::{ClassifiedCategory, classified_category_label};
+        assert_eq!(
+            classified_category_label(ClassifiedCategory::LandRental),
+            DetailText::Key("search-classified-category-land-rental")
+        );
+        assert_eq!(
+            classified_category_label(ClassifiedCategory::Unknown(42)),
+            DetailText::Words(
+                "search-classified-category-unknown",
+                vec![("number", "42".to_owned())]
+            )
         );
     }
 
     /// A land row's type is what the land products call its SKU, and the
-    /// reference's "Unknown" for a row without one or one the list lacks.
+    /// reference's "Unknown" (the word it is handed) for a row without one or
+    /// one the list lacks.
     #[test]
     fn a_land_rows_type_is_named_by_its_product() {
         let row = |sku: Option<&str>| DirLandResult {
@@ -4189,11 +4514,11 @@ mod tests {
         let types: HashMap<String, String> =
             [("023".to_owned(), "Mainland / Full Region".to_owned())].into();
         assert_eq!(
-            land_type(&row(Some("023")), &types),
+            land_type(&row(Some("023")), &types, "Unknown"),
             "Mainland / Full Region"
         );
-        assert_eq!(land_type(&row(Some("999")), &types), "Unknown");
-        assert_eq!(land_type(&row(None), &types), "Unknown");
+        assert_eq!(land_type(&row(Some("999")), &types, "Unknown"), "Unknown");
+        assert_eq!(land_type(&row(None), &types, "Unknown"), "Unknown");
     }
 
     /// The classifieds' ratings travel in their own bit space, packed as the
@@ -4239,7 +4564,7 @@ mod tests {
         state.refuse_short(SearchCategory::People);
         assert_eq!(
             count_label(&state, SearchCategory::People, Instant::now()),
-            "The search text is too short"
+            CountLine::TooShort
         );
     }
 

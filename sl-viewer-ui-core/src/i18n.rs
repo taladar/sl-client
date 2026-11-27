@@ -726,6 +726,34 @@ impl Translator<'_> {
         self.finish(key, content)
     }
 
+    /// Resolve a key the bundle may not define, `None` on a miss — and the miss
+    /// is not reported.
+    ///
+    /// For a key **derived from data** rather than written in the source: an
+    /// avatar parameter's label from `avatar_lad.xml` names its string the way
+    /// the reference's `LLTrans::getString(display_name)` does, and a
+    /// definitions file the viewer was pointed at may carry a parameter the
+    /// bundle has never heard of. The caller then draws the data's own text,
+    /// where [`get`](Self::get) would draw the key. The pseudolocale applies
+    /// to a hit as it does to every lookup.
+    #[must_use]
+    pub fn lookup(&self, key: &str) -> Option<String> {
+        let raw = self.localization.content(key).or_else(|| {
+            if self.has_bundle() {
+                return None;
+            }
+            self.bundleless
+                .as_ref()
+                .and_then(|table| table.get(key))
+                .map(str::to_owned)
+        })?;
+        Some(if self.locale.pseudo {
+            pseudolocalise(&raw)
+        } else {
+            raw
+        })
+    }
+
     /// Whether the negotiated chain holds a bundle at all. `false` for the
     /// frames before the locale folder loads, and for the whole life of a
     /// headless harness.

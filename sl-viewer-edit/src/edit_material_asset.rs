@@ -73,6 +73,7 @@ use crate::floater::{
     FloaterCaps, FloaterHandle, FloaterHost, FloaterKey, FloaterSpec, FloaterSystems,
     KeyedFloaterOpen, KeyedFloaters,
 };
+use crate::i18n::{TransArgs, Translated, Translator};
 use crate::intents::{NotecardSource, TexturePicked};
 use crate::inventory::{InventoryModel, OpenMaterialEditor};
 use crate::material_preview::MaterialPreview;
@@ -82,7 +83,6 @@ use crate::ui_color_picker::{ColorPicked, ColorSwatchValue, spawn_color_swatch};
 use crate::ui_font::UiFont;
 use crate::ui_spawn::{self, ButtonKind, ButtonSpec, LabeledRowSpec, UiLabel};
 use crate::ui_spinner::{FieldCommits, SpinStep, SpinnerSpec, format_spin_value, spawn_spinner};
-use crate::ui_text::set_node_text;
 use crate::ui_text_input::{TextInputKind, TextInputSpec};
 use crate::ui_texture_picker::{TextureSwatchValue, spawn_texture_swatch};
 use sl_viewer_ui_core::skin::text_role;
@@ -202,6 +202,8 @@ enum MatPhase {
 /// long as its window.
 #[derive(Component)]
 struct MatEdit {
+    /// The window's title node, which names the material.
+    title: Entity,
     /// The window's content column, which the controls are (re)built into.
     content: Entity,
     /// The item being edited.
@@ -253,6 +255,7 @@ impl Plugin for EditMaterialAssetPlugin {
                 // raise wins.
                 open_material_editor.after(FloaterSystems::Commands),
                 (
+                    title_material_windows,
                     populate_material_editor,
                     apply_mat_texture_picked,
                     apply_mat_color_picked,
@@ -337,27 +340,25 @@ fn open_material_editor(
     }
 }
 
-/// Furnish a freshly spawned material window: its title, a loading line, and
-/// the [`MatEdit`] the per-window systems find it by.
+/// Furnish a freshly spawned material window: a loading line, and the
+/// [`MatEdit`] the per-window systems find it by (and title it from —
+/// [`title_material_windows`]).
 fn build_material_window(
     commands: &mut Commands,
     handle: FloaterHandle,
     item: ItemInfo,
     can_save: bool,
 ) {
-    // The title node carries no Fluent key, so a direct text set is not fought
-    // by the translator.
-    commands
-        .entity(handle.title_text)
-        .insert(Text::new(format!("Edit: {}", item.name)));
     commands.spawn((
-        Text::new("Loading material…"),
+        Text::default(),
+        Translated::new("material-editor-loading"),
         UiFont::Sans.at(FONT),
         text_role(LABEL_COLOR),
         ChildOf(handle.content),
     ));
     let asset = AssetKey::from(item.asset_id);
     commands.entity(handle.root).insert(MatEdit {
+        title: handle.title_text,
         content: handle.content,
         item,
         asset,
@@ -372,6 +373,28 @@ fn build_material_window(
         double_check: None,
         status: None,
     });
+}
+
+/// Name each new window's material in its title, and every window's again
+/// when the locale changes. The title node carries no Fluent key of its own,
+/// so this text set is not fought by the translator.
+fn title_material_windows(
+    translator: Translator,
+    edits: Query<Ref<MatEdit>>,
+    mut texts: Query<&mut Text>,
+) {
+    let relocalised = translator.changed();
+    for edit in &edits {
+        if !relocalised && !edit.is_added() {
+            continue;
+        }
+        if let Ok(mut text) = texts.get_mut(edit.title) {
+            text.0 = translator.format(
+                "material-editor-title",
+                &TransArgs::new().text("name", &edit.item.name),
+            );
+        }
+    }
 }
 
 /// Build each window's controls once its material asset has decoded, and
@@ -477,20 +500,15 @@ fn spawn_material_controls(
             ChildOf(content),
         ))
         .id();
-    for (kind, label) in [(MatButton::Save, "Save"), (MatButton::Revert, "Revert")] {
+    for kind in [MatButton::Save, MatButton::Revert] {
         if kind == MatButton::Save && !can_save {
             continue;
         }
-        spawn_mat_button(commands, button_row, kind, label, &mut tab, font_size);
+        spawn_mat_button(commands, button_row, kind, &mut tab, font_size);
     }
-    let note = if can_save {
-        String::new()
-    } else {
-        "In a notecard: copy it to your inventory to save changes.".to_owned()
-    };
     let status = commands
         .spawn((
-            Text::new(note),
+            Text::default(),
             UiFont::Sans.at(font_size),
             text_role(LABEL_COLOR),
             Name::new("material-status"),
@@ -501,6 +519,9 @@ fn spawn_material_controls(
             ChildOf(content),
         ))
         .id();
+    if !can_save {
+        set_status(commands, status, "material-editor-notecard-note");
+    }
 
     // Preview sphere.
     let preview = commands
@@ -519,7 +540,7 @@ fn spawn_material_controls(
         .id();
 
     // Base colour: tint swatch + texture.
-    let base_row = spawn_labeled_row(commands, content, "Base Color", font_size);
+    let base_row = spawn_labeled_row(commands, content, "material-editor-base-color", font_size);
     let base_color = base_linear_color(material);
     let swatch = spawn_color_swatch(commands, base_row, "material-base", tab, base_color);
     commands.entity(swatch).insert(MatColorSlot::Base);
@@ -538,7 +559,7 @@ fn spawn_material_controls(
     spawn_factor_spinner(
         commands,
         content,
-        "Metallic",
+        "material-editor-metallic",
         MatFactor::Metallic,
         material.metallic_factor,
         &mut tab,
@@ -547,13 +568,18 @@ fn spawn_material_controls(
     spawn_factor_spinner(
         commands,
         content,
-        "Roughness",
+        "material-editor-roughness",
         MatFactor::Roughness,
         material.roughness_factor,
         &mut tab,
         font_size,
     );
-    let mr_row = spawn_labeled_row(commands, content, "Metal/Rough Map", font_size);
+    let mr_row = spawn_labeled_row(
+        commands,
+        content,
+        "material-editor-metal-rough-map",
+        font_size,
+    );
     let mr_tex = spawn_texture_swatch(
         commands,
         mr_row,
@@ -567,7 +593,7 @@ fn spawn_material_controls(
     tab = tab.saturating_add(1);
 
     // Normal map.
-    let normal_row = spawn_labeled_row(commands, content, "Normal Map", font_size);
+    let normal_row = spawn_labeled_row(commands, content, "material-editor-normal-map", font_size);
     let normal_tex = spawn_texture_swatch(
         commands,
         normal_row,
@@ -579,7 +605,7 @@ fn spawn_material_controls(
     tab = tab.saturating_add(1);
 
     // Emissive: tint swatch + texture.
-    let emissive_row = spawn_labeled_row(commands, content, "Emissive", font_size);
+    let emissive_row = spawn_labeled_row(commands, content, "material-editor-emissive", font_size);
     let emissive_color = Color::linear_rgb(
         material.emissive_factor.first().copied().unwrap_or(0.0),
         material.emissive_factor.get(1).copied().unwrap_or(0.0),
@@ -605,11 +631,11 @@ fn spawn_material_controls(
     tab = tab.saturating_add(1);
 
     // Alpha mode (cycle) + cutoff.
-    let alpha_row = spawn_labeled_row(commands, content, "Alpha Mode", font_size);
+    let alpha_row = spawn_labeled_row(commands, content, "material-editor-alpha-mode", font_size);
     let alpha_label = spawn_text_button(
         commands,
         alpha_row,
-        alpha_mode_name(material.alpha_mode),
+        alpha_mode_key(material.alpha_mode),
         MatAlphaButton,
         &mut tab,
         font_size,
@@ -617,7 +643,7 @@ fn spawn_material_controls(
     spawn_factor_spinner(
         commands,
         content,
-        "Alpha Cutoff",
+        "material-editor-alpha-cutoff",
         MatFactor::Cutoff,
         material.alpha_cutoff,
         &mut tab,
@@ -627,7 +653,8 @@ fn spawn_material_controls(
     // Double-sided toggle: the shared checkbox widget, caption-less because this
     // editor's rows carry their label in a leading column (as the alerts table
     // does) rather than beside each control.
-    let double_row = spawn_labeled_row(commands, content, "Double Sided", font_size);
+    let double_row =
+        spawn_labeled_row(commands, content, "material-editor-double-sided", font_size);
     let double_check = spawn_checkbox(
         commands,
         double_row,
@@ -659,18 +686,18 @@ fn spawn_material_controls(
 // Control spawn helpers.
 // ---------------------------------------------------------------------------
 
-/// Spawn a labelled row at `font_size` and return the row entity to parent the
-/// control into.
+/// Spawn a row labelled by the Fluent key `label_key` at `font_size` and
+/// return the row entity to parent the control into.
 fn spawn_labeled_row(
     commands: &mut Commands,
     parent: Entity,
-    label: &str,
+    label_key: &'static str,
     font_size: f32,
 ) -> Entity {
     ui_spawn::spawn_labeled_row(
         commands,
         parent,
-        LabeledRowSpec::new(UiLabel::literal(label))
+        LabeledRowSpec::new(UiLabel::key(label_key))
             .label_color(LABEL_COLOR)
             .font_size(font_size)
             .label_width(Val::Px(column_width(LABEL_WIDTH, font_size)))
@@ -684,7 +711,7 @@ fn spawn_labeled_row(
 fn spawn_factor_spinner(
     commands: &mut Commands,
     parent: Entity,
-    label: &str,
+    label: &'static str,
     kind: MatFactor,
     value: f32,
     tab: &mut i32,
@@ -710,12 +737,13 @@ fn spawn_factor_spinner(
     *tab = tab.saturating_add(1);
 }
 
-/// Spawn a bordered text button at `font_size` carrying `marker`, and return
-/// its label node so the caller can update the button's text later.
+/// Spawn a bordered text button labelled by the Fluent key `label_key` at
+/// `font_size` carrying `marker`, and return its label node so the caller can
+/// rebind the button's key later.
 fn spawn_text_button(
     commands: &mut Commands,
     parent: Entity,
-    label: &str,
+    label_key: &'static str,
     marker: impl Component,
     tab: &mut i32,
     font_size: f32,
@@ -723,7 +751,7 @@ fn spawn_text_button(
     let spawned = ui_spawn::spawn_button(
         commands,
         parent,
-        ButtonSpec::bordered(UiLabel::literal(label), "material-text-button")
+        ButtonSpec::bordered(UiLabel::key(label_key), "material-text-button")
             .kind(ButtonKind::Headless)
             .tab_from(tab)
             .padding(10.0, 3.0)
@@ -743,23 +771,25 @@ fn spawn_mat_button(
     commands: &mut Commands,
     parent: Entity,
     kind: MatButton,
-    label: &str,
     tab: &mut i32,
     font_size: f32,
 ) {
+    // The node name keeps the English word as a stable locator; the label is
+    // the bundle's.
+    let (label_key, name) = match kind {
+        MatButton::Save => ("material-editor-save", "material-button:Save"),
+        MatButton::Revert => ("material-editor-revert", "material-button:Revert"),
+    };
     let button = ui_spawn::spawn_button(
         commands,
         parent,
-        ButtonSpec::bordered(
-            UiLabel::literal(label.to_owned()),
-            format!("material-button:{label}"),
-        )
-        .kind(ButtonKind::Headless)
-        .tab_from(tab)
-        .padding(10.0, 3.0)
-        .colors(BUTTON_BACKGROUND, CONTROL_BORDER)
-        .label_color(LABEL_COLOR)
-        .font_size(font_size),
+        ButtonSpec::bordered(UiLabel::key(label_key), name)
+            .kind(ButtonKind::Headless)
+            .tab_from(tab)
+            .padding(10.0, 3.0)
+            .colors(BUTTON_BACKGROUND, CONTROL_BORDER)
+            .label_color(LABEL_COLOR)
+            .font_size(font_size),
     )
     .button;
     commands
@@ -886,7 +916,7 @@ fn on_mat_toggle(
     alpha: Query<&MatAlphaButton>,
     host: FloaterHost,
     mut edits: Query<&mut MatEdit>,
-    mut texts: Query<&mut Text>,
+    mut commands: Commands,
 ) {
     // No edit only in the gallery, whose specimen has no window of its own.
     let Some(mut edit) = host
@@ -897,11 +927,9 @@ fn on_mat_toggle(
     };
     if alpha.get(activate.entity).is_ok() {
         edit.edited.alpha_mode = next_alpha_mode(edit.edited.alpha_mode);
-        set_node_text(
-            &mut texts,
-            edit.alpha_label,
-            alpha_mode_name(edit.edited.alpha_mode),
-        );
+        if let Some(label) = edit.alpha_label {
+            set_status(&mut commands, label, alpha_mode_key(edit.edited.alpha_mode));
+        }
         edit.dirty = true;
     }
 }
@@ -960,7 +988,7 @@ fn on_mat_action_button(
     host: FloaterHost,
     mut edits: Query<&mut MatEdit>,
     commands: Option<MessageWriter<SlCommand>>,
-    mut texts: Query<&mut Text>,
+    mut ecs: Commands,
 ) {
     let Ok(kind) = buttons.get(activate.entity).copied() else {
         return;
@@ -989,14 +1017,14 @@ fn on_mat_action_button(
                 data: encode_material_asset(&edit.edited),
             }));
             edit.saving = true;
-            set_node_text(&mut texts, edit.status, "Saving…");
+            set_window_status(&mut ecs, edit.status, "material-editor-status-saving");
         }
         MatButton::Revert => {
             edit.edited = edit.original;
             // Rebuild the swatches / sliders from the restored material.
             edit.phase = MatPhase::Rebuild;
             edit.dirty = true;
-            set_node_text(&mut texts, edit.status, "Reverted.");
+            set_window_status(&mut ecs, edit.status, "material-editor-status-reverted");
         }
     }
 }
@@ -1013,7 +1041,7 @@ fn report_material_save(
     mut events: MessageReader<SlEvent>,
     mut edits: Query<&mut MatEdit>,
     mut inventory: Option<ResMut<InventoryModel>>,
-    mut texts: Query<&mut Text>,
+    mut commands: Commands,
 ) {
     let frame: Vec<&SlEvent> = events.read().collect();
     if frame.is_empty() {
@@ -1041,14 +1069,14 @@ fn report_material_save(
                     if let Some(model) = inventory.as_mut() {
                         let _folder = model.rebind_asset(edit.item.item_id, *new_asset);
                     }
-                    set_node_text(&mut texts, edit.status, "Saved.");
+                    set_window_status(&mut commands, edit.status, "material-editor-status-saved");
                 }
                 // A failure names no item, so every window with a save in
                 // flight hears it.
                 SlSessionEvent::AssetUploadFailed { reason } => {
                     warn!("material save failed: {reason}");
                     edit.saving = false;
-                    set_node_text(&mut texts, edit.status, "Save failed.");
+                    set_window_status(&mut commands, edit.status, "material-editor-status-failed");
                 }
                 _other => {}
             }
@@ -1100,12 +1128,27 @@ fn material_texture(picked: TextureKey, existing: Option<GltfTexture>) -> Option
     })
 }
 
-/// The display name of an alpha mode.
-const fn alpha_mode_name(mode: GltfAlphaMode) -> &'static str {
+/// The Fluent key of an alpha mode's display name.
+const fn alpha_mode_key(mode: GltfAlphaMode) -> &'static str {
     match mode {
-        GltfAlphaMode::Opaque => "Opaque",
-        GltfAlphaMode::Mask => "Mask",
-        GltfAlphaMode::Blend => "Blend",
+        GltfAlphaMode::Opaque => "material-editor-alpha-opaque",
+        GltfAlphaMode::Mask => "material-editor-alpha-mask",
+        GltfAlphaMode::Blend => "material-editor-alpha-blend",
+    }
+}
+
+/// Bind `node`'s text to the Fluent key `key` — a status line or a label whose
+/// words follow the editor's state. Rebinding the key is what re-resolves it.
+fn set_status(commands: &mut Commands, node: Entity, key: &'static str) {
+    if let Ok(mut entity) = commands.get_entity(node) {
+        entity.insert(Translated::new(key));
+    }
+}
+
+/// [`set_status`] on a window's status line, once it has one.
+fn set_window_status(commands: &mut Commands, status: Option<Entity>, key: &'static str) {
+    if let Some(node) = status {
+        set_status(commands, node, key);
     }
 }
 
@@ -1121,7 +1164,7 @@ const fn next_alpha_mode(mode: GltfAlphaMode) -> GltfAlphaMode {
 #[cfg(test)]
 mod tests {
     use super::{
-        MatAlphaButton, MatButton, MatEdit, MatPhase, material_editor_floater_spec,
+        MatAlphaButton, MatButton, MatEdit, MatPhase, alpha_mode_key, material_editor_floater_spec,
         spawn_mat_button, spawn_text_button,
     };
     use crate::floater::{FloaterPlugin, spawn_floater};
@@ -1203,6 +1246,8 @@ mod tests {
     /// reaches its edit through the window it lives in.
     fn editor_app() -> Result<App, String> {
         let mut app = InteractionTest::new().build();
+        // Every key answers with itself, so a button label reads as its key.
+        crate::i18n::install_untranslated(&mut app);
         app.add_message::<SlCommand>().add_plugins(FloaterPlugin);
         app.add_systems(
             Startup,
@@ -1213,18 +1258,11 @@ mod tests {
                 commands.entity(window.root).insert(UiPanelShown(true));
                 let content = window.content;
                 let mut tab = 0_i32;
-                spawn_mat_button(
-                    &mut commands,
-                    content,
-                    MatButton::Revert,
-                    "Revert",
-                    &mut tab,
-                    13.0,
-                );
+                spawn_mat_button(&mut commands, content, MatButton::Revert, &mut tab, 13.0);
                 let alpha_label = spawn_text_button(
                     &mut commands,
                     content,
-                    "Opaque",
+                    alpha_mode_key(GltfAlphaMode::Opaque),
                     MatAlphaButton,
                     &mut tab,
                     13.0,
@@ -1237,6 +1275,7 @@ mod tests {
                     ..GltfMaterial::default()
                 };
                 commands.entity(window.root).insert(MatEdit {
+                    title: window.title_text,
                     content,
                     item: item(),
                     asset: AssetKey::from(Uuid::from_u128(0x33)),
@@ -1268,7 +1307,7 @@ mod tests {
     }
 
     /// The open edit's state after `gesture` on the node named `node`: its
-    /// status line, whether it went back to the original material, its phase
+    /// status line's key, whether it went back to the original material, its phase
     /// and its alpha mode.
     fn after(
         node: &str,
@@ -1284,10 +1323,12 @@ mod tests {
             .iter(app.world())
             .next()
             .ok_or("the edit went away")?;
+        // The key the status line is bound to: what it says, in whichever
+        // locale.
         let status = edit
             .status
-            .and_then(|status| app.world().get::<Text>(status))
-            .map(|text| text.0.clone())
+            .and_then(|status| app.world().get::<crate::i18n::Translated>(status))
+            .map(|label| label.key().to_owned())
             .unwrap_or_default();
         Ok((
             status,
@@ -1308,7 +1349,7 @@ mod tests {
             assert_eq!(
                 after(REVERT, gesture)?,
                 (
-                    "Reverted.".to_owned(),
+                    "material-editor-status-reverted".to_owned(),
                     true,
                     MatPhase::Rebuild,
                     GltfAlphaMode::Opaque
