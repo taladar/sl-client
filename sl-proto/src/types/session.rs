@@ -1,5 +1,6 @@
 //! Session setup and control: login parameters, throttle, camera, transmit.
 
+use std::collections::BTreeMap;
 use std::net::SocketAddr;
 
 use sl_types::lsl::Vector;
@@ -844,12 +845,24 @@ pub struct Transmit {
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub enum DisconnectReason {
-    /// The login server rejected the credentials.
+    /// The login server refused the login (or the login could not complete).
     LoginFailed {
         /// The machine-readable reason code.
         reason: String,
-        /// The human-readable message.
+        /// The human-readable message, in the grid's own (English) words.
         message: String,
+        /// The localization key Second Life sends with a refusal
+        /// (`message_id`, e.g. `LoginFailedAuthenticationFailed`), which a
+        /// viewer looks up in its own strings to say the refusal in the user's
+        /// language. `None` from OpenSim, and for a failure made by the client.
+        message_id: Option<String>,
+        /// The substitution arguments for `message_id` (`message_args`, e.g.
+        /// `TIME` for a suspension's end). Empty when the grid sent none.
+        message_args: BTreeMap<String, String>,
+        /// The incident id Second Life stamps on a refusal
+        /// (`Linden_Error_Code`), what its support asks for. `None` from
+        /// OpenSim, and for a failure made by the client.
+        error_code: Option<String>,
     },
     /// No traffic was received within the inactivity budget.
     Timeout,
@@ -871,6 +884,35 @@ pub enum DisconnectReason {
         /// The human-readable reason the simulator gave for the kick.
         message: String,
     },
+}
+
+impl DisconnectReason {
+    /// A login that failed on the client's side, or for a reason the grid
+    /// gave no localization key for: a [`LoginFailed`](Self::LoginFailed)
+    /// with only `reason` and `message`.
+    #[must_use]
+    pub fn login_failed(reason: impl Into<String>, message: impl Into<String>) -> Self {
+        Self::LoginFailed {
+            reason: reason.into(),
+            message: message.into(),
+            message_id: None,
+            message_args: BTreeMap::new(),
+            error_code: None,
+        }
+    }
+
+    /// The [`LoginFailed`](Self::LoginFailed) for a refusal the grid sent,
+    /// keeping its localization key, arguments and incident id.
+    #[must_use]
+    pub fn refused(failure: sl_wire::LoginFailure) -> Self {
+        Self::LoginFailed {
+            reason: failure.reason,
+            message: failure.message,
+            message_id: failure.message_id,
+            message_args: failure.message_args,
+            error_code: failure.error_code,
+        }
+    }
 }
 
 #[cfg(test)]

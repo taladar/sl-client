@@ -47,6 +47,7 @@ pub(crate) use sl_viewer_world_avatar::avatar_overrides;
 pub mod assembly;
 pub mod login_flow;
 pub mod login_grids;
+mod login_refusal;
 mod login_screen;
 mod secrets;
 /// Every module that declares settings, in registration order.

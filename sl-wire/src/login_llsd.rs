@@ -161,6 +161,9 @@ pub fn build_login_response_llsd(response: &LoginResponse) -> String {
                 "message".to_owned(),
                 Llsd::String(challenge.message.clone()),
             );
+            if let Some(message_id) = &challenge.message_id {
+                map.insert("message_id".to_owned(), Llsd::String(message_id.clone()));
+            }
             if let Some(mfa_hash) = &challenge.mfa_hash {
                 map.insert("mfa_hash".to_owned(), Llsd::String(mfa_hash.clone()));
             }
@@ -276,6 +279,7 @@ pub fn parse_login_response_llsd(body: &str) -> Result<LoginResponse, WireError>
             return Ok(LoginResponse::MfaChallenge(MfaChallenge {
                 mfa_hash: map.get("mfa_hash").and_then(llsd_scalar_string),
                 message,
+                message_id: map.get("message_id").and_then(llsd_scalar_string),
                 response_fields,
             }));
         }

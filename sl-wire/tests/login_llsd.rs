@@ -283,10 +283,12 @@ mod test {
         let challenge = MfaChallenge {
             mfa_hash: Some("challengehash".to_owned()),
             message: "Enter your token".to_owned(),
+            message_id: Some("LoginFailedAuthenticationMFARequired".to_owned()),
             // A parse lists the fields it was handed; a builder ignores the list.
             response_fields: vec![
                 "login".to_owned(),
                 "message".to_owned(),
+                "message_id".to_owned(),
                 "mfa_hash".to_owned(),
                 "reason".to_owned(),
             ],

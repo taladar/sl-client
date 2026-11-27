@@ -56,7 +56,17 @@ it sends whether or not the request set `extended_errors`, and an incident id
 (`Linden_Error_Code`). What each grid answers a wrong password, an unknown
 account and a second login with is in
 [Grid Behaviour → Login](../gridspec/login.md#refusals). Failures surface as
-`DisconnectReason::LoginFailed`.
+`DisconnectReason::LoginFailed`, which keeps the key, its arguments and the
+incident id beside the `reason` and `message`. A second-factor challenge may
+carry a `message_id` too (`MfaChallenge::message_id`).
+
+The viewer's login screen says a refusal the way the reference does
+(`llstartup.cpp`): it looks the `message_id` up in its own strings, the
+reference's `LoginFailed*` and `LogoutFailed*` set kept under `login-refusal-`
+keys, with the arguments filled in — a suspension's end put on the user's own
+clock when it is an instant, else marked Pacific Time — and shows the grid's
+`message` for a key it does not know, and always on OpenSim, which sends none.
+The incident id is shown under the notice with a button that copies it.
 
 Several rejections are really *gates* the client can clear by re-sending the
 same login with one flag flipped, and the reference viewer does exactly that:
@@ -233,7 +243,10 @@ config-like sections as a one-element array wrapping a map).
 >   `sl-client-tokio/src/lib.rs` (redirects bounded by
 >   `MAX_LOGIN_REDIRECTS`) and the example
 >   `sl-client-tokio/examples/tokio_login_hold_logout.rs`.
-> - `DisconnectReason::LoginFailed { reason, message }`
->   (`sl-proto/src/types/session.rs`) reports a rejected login;
+> - `DisconnectReason::LoginFailed { reason, message, message_id,
+>   message_args, error_code }` (`sl-proto/src/types/session.rs`) reports a
+>   rejected login (`DisconnectReason::refused` builds it from a
+>   `LoginFailure`); the viewer's wording of it is
+>   `sl-client-bevy-viewer/src/login_refusal.rs`;
 >   `LoginFailure::kind()` classifies the retry-guiding reasons
 >   (`Tos`, `CriticalMessage`, `UpdateRequired`, `AlreadyLoggedIn`).

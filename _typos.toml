@@ -158,3 +158,8 @@ bg_writeable_color = "bg_writeable_color"
 # exception handling"), in the stack trace the engine owner-says when a script
 # faults; the probe results (sl-lsl-runtime/probes/results/) keep it verbatim.
 CallSEH = "CallSEH"
+# `LoginFailedAcountSuspended` is the reference viewer's own (misspelled)
+# `strings.xml` name for the suspended-account refusal, and so the
+# `message_id` Second Life sends with one; the login screen's refusal table
+# (sl-client-bevy-viewer/src/login_refusal.rs) has to match it exactly.
+LoginFailedAcountSuspended = "LoginFailedAcountSuspended"

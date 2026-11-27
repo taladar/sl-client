@@ -2633,10 +2633,7 @@ impl Session {
         }
         match response {
             sl_wire::LoginResponse::Failure(failure) => {
-                self.close(DisconnectReason::LoginFailed {
-                    reason: failure.reason,
-                    message: failure.message,
-                });
+                self.close(DisconnectReason::refused(failure));
             }
             // A driver performs the interactive MFA retry during its login
             // phase; if a challenge reaches the session it is treated as a
@@ -2645,6 +2642,9 @@ impl Session {
                 self.close(DisconnectReason::LoginFailed {
                     reason: "mfa_challenge".to_owned(),
                     message: challenge.message,
+                    message_id: challenge.message_id,
+                    message_args: BTreeMap::new(),
+                    error_code: None,
                 });
             }
             // A login redirect: stay in the fresh state and aim the pending
@@ -2841,10 +2841,7 @@ impl Session {
     /// [`is_awaiting_initial_capabilities`](Self::is_awaiting_initial_capabilities).
     pub fn fail_no_capabilities(&mut self, message: String) {
         self.pending_complete_movement = false;
-        self.close(DisconnectReason::LoginFailed {
-            reason: "no_capabilities".to_owned(),
-            message,
-        });
+        self.close(DisconnectReason::login_failed("no_capabilities", message));
     }
 
     /// Send the deferred initial-login `CompleteAgentMovement` if one is pending,

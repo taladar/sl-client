@@ -1120,14 +1120,14 @@ fn login_phase(
                 if redirects >= MAX_LOGIN_REDIRECTS {
                     send_disconnect(
                         outbound,
-                        DisconnectReason::LoginFailed {
-                            reason: "indeterminate".to_owned(),
-                            message: format!(
+                        DisconnectReason::login_failed(
+                            "indeterminate",
+                            format!(
                                 "login redirected more than {MAX_LOGIN_REDIRECTS} times \
                                  (next: {})",
                                 redirect.next_url
                             ),
-                        },
+                        ),
                     );
                     return None;
                 }
@@ -1229,13 +1229,7 @@ fn login_phase(
             if failure.kind() == LoginRejectKind::AlreadyLoggedIn {
                 report(outbound, NetOutbound::Rejected(failure));
             } else {
-                send_disconnect(
-                    outbound,
-                    DisconnectReason::LoginFailed {
-                        reason: failure.reason,
-                        message: failure.message,
-                    },
-                );
+                send_disconnect(outbound, DisconnectReason::refused(failure));
             }
             None
         }

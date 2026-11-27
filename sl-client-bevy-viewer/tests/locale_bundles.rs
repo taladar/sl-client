@@ -128,4 +128,41 @@ mod test {
         }
         Ok(())
     }
+
+    /// The login refusal strings say what the reference's do: the wrong
+    /// password's checklist keeps its indented bullets, and a suspension's
+    /// end and a required version are filled in.
+    #[test]
+    fn login_refusals_read_as_the_reference_words_them() -> Result<(), TestError> {
+        let bundle = bundle(langid!("en"), EN_FTL)?;
+        let line = |key: &str, args: &FluentArgs<'_>| -> Result<String, TestError> {
+            bundle
+                .content(Request::new(key).args(args))
+                .ok_or_else(|| format!("no {key}").into())
+        };
+        assert_eq!(
+            line("login-refusal-authentication-failed", &FluentArgs::new())?,
+            "Sorry! We couldn't log you in.\n\
+             Please check to make sure you entered the right\n    \
+             * Username (like bobsmith12 or steller.sunshine)\n    \
+             * Password\n    \
+             * Second Factor Token (if enabled)\n\
+             Also, please make sure your Caps Lock key is off."
+        );
+        let mut time = FluentArgs::new();
+        time.set("time", FluentValue::from("Monday noon Pacific Time"));
+        assert_eq!(
+            line("login-refusal-account-suspended", &time)?,
+            "Your account is not accessible until\n\
+             Monday noon Pacific Time.\n\
+             If you feel this is an error, please contact support@secondlife.com."
+        );
+        let mut version = FluentArgs::new();
+        version.set("version", FluentValue::from("7.2.1"));
+        assert_eq!(
+            line("login-refusal-required-update", &version)?,
+            "Required viewer update: 7.2.1"
+        );
+        Ok(())
+    }
 }

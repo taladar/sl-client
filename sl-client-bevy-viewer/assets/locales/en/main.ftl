@@ -6194,3 +6194,117 @@ login-notice-grid-added = Added { $message }.
 login-notice-grid-unsaved = The grid is listed, but could not be kept for next time: { $message }
 login-notice-grid-removed = Removed { $message }.
 login-notice-grid-not-removed = { $message }
+# The row under the notice holding a refusal's incident id, which the grid's
+# support asks for, and the button copying it.
+login-incident-label = Incident id:
+login-incident-copy = Copy
+# A login refusal, by the localization key (message_id) Second Life sends it
+# with: the reference's LoginFailed* and LogoutFailed* strings (strings.xml).
+# The grid's own words are shown for a key not listed here. $time is when a
+# suspension or maintenance ends, $version the viewer version required, $start
+# and $end the hours an account may log in.
+login-refusal-failed =
+    Login process did not complete due to system issues. Try again in a few minutes.
+    If you feel this is an error, please contact the grid support.
+login-refusal-viewer-not-permitted =
+    The viewer you are using can no longer access Second Life. Please visit the following page to download a new viewer:
+    http://secondlife.com/download
+
+    For more information, see our FAQ below:
+    http://secondlife.com/viewer-access-faq
+login-refusal-required-update = Required viewer update: { $version }
+login-refusal-already-logged-in = This agent is already logged in.
+login-refusal-authentication-failed =
+    Sorry! We couldn't log you in.
+    Please check to make sure you entered the right
+    { "    *" } Username (like bobsmith12 or steller.sunshine)
+    { "    *" } Password
+    { "    *" } Second Factor Token (if enabled)
+    Also, please make sure your Caps Lock key is off.
+login-refusal-password-changed =
+    As a security precaution your password has been changed.
+    Please go to your account page at http://secondlife.com/password
+    and answer the security question to reset your password.
+    We are very sorry for the inconvenience.
+login-refusal-password-reset =
+    We made some changes to our system and you will need to reset your password.
+    Please go to your account page at http://secondlife.com/password
+    and answer the security question to reset your password.
+    We are very sorry for the inconvenience.
+login-refusal-employees-only =
+    Second Life is temporarily closed for maintenance.
+    Logins are currently restricted to employees only.
+    Check www.secondlife.com/status for updates.
+login-refusal-premium-only =
+    Second Life logins are temporarily restricted in order to make sure that those in-world have the best possible experience.
+
+    People with free accounts will not be able to access Second Life during this time, to make room for those who have paid for Second Life.
+login-refusal-computer-prohibited =
+    Second Life cannot be accessed from this computer.
+    If you feel this is an error, please contact
+    support@secondlife.com.
+login-refusal-account-suspended =
+    Your account is not accessible until
+    { $time }.
+    If you feel this is an error, please contact support@secondlife.com.
+login-refusal-account-disabled =
+    We are unable to complete your request at this time.
+    Please contact Second Life support for assistance at http://support.secondlife.com.
+login-refusal-transform-error =
+    Data inconsistency found during login.
+    Please contact support@secondlife.com.
+login-refusal-account-maintenance =
+    Your account is undergoing minor maintenance.
+    Your account is not accessible until
+    { $time }.
+    If you feel this is an error, please contact support@secondlife.com.
+login-refusal-pending-logout-fault = Request for logout responded with a fault from simulator.
+login-refusal-pending-logout =
+    The system is logging you out right now.
+    Please wait a minute before you try logging in again.
+login-refusal-unable-to-create-session = Unable to create valid session.
+login-refusal-unable-to-connect-to-simulator = Unable to connect to a simulator.
+login-refusal-restricted-hours =
+    Your account can only access Second Life
+    between { $start } and { $end } Pacific Time.
+    Please come back during those hours.
+    If you feel this is an error, please contact support@secondlife.com.
+login-refusal-incorrect-parameters =
+    Incorrect parameters.
+    If you feel this is an error, please contact support@secondlife.com.
+login-refusal-first-name-not-alphanumeric =
+    First name parameter must be alphanumeric.
+    If you feel this is an error, please contact support@secondlife.com.
+login-refusal-last-name-not-alphanumeric =
+    Last name parameter must be alphanumeric.
+    If you feel this is an error, please contact support@secondlife.com.
+login-refusal-logging-out-session =
+    The system has begun logging out your last session.
+    Please try logging in again in a minute.
+login-refusal-mfa-required =
+    To continue logging in, enter a new token from your multifactor authentication app.
+    If you feel this is an error, please contact support@secondlife.com
+login-refusal-region-going-offline =
+    Region is going offline.
+    Please try logging in again in a minute.
+login-refusal-agent-not-in-region =
+    Agent not in region.
+    Please try logging in again in a minute.
+login-refusal-pending-login =
+    The region was logging in another session.
+    Please try logging in again in a minute.
+login-refusal-logging-out =
+    The region was logging out the previous session.
+    Please try logging in again in a minute.
+login-refusal-still-logging-out =
+    The region is still logging out the previous session.
+    Please try logging in again in a minute.
+login-refusal-logout-succeeded =
+    Region has logged out last session.
+    Please try logging in again in a minute.
+login-refusal-logout-begun =
+    Region has begun the logout process.
+    Please try logging in again in a minute.
+# A suspension's end the grid sent as text rather than as an instant, which
+# the reference marks as Pacific Time. $time is the grid's text.
+login-refusal-pacific-time = { $time } Pacific Time

@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 130 |
-| ready | 325 |
+| ready | 324 |
 | blocked | 35 |
 | in-progress | 4 |
 | bugs | 4 |
-| done | 1632 |
+| done | 1633 |
 | deferred | 30 |
 | wont-do | 24 |
 | **total** | **2184** |
@@ -315,7 +315,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-lsl-opensim-function-set`](ideas/gridspec-lsl-opensim-function-set.md)
   — Measure which library functions OpenSim's engines compile
 
-## ready (325)
+## ready (324)
 
 ### protocol
 
@@ -639,9 +639,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-local-textures`](ready/viewer-local-textures.md) — Local textures —
   file-backed textures with live reload (blocked by `viewer-ui-texture-picker`
   (done))
-- [`viewer-login-refusal-localised-text`](ready/viewer-login-refusal-localised-text.md)
-  — Show a login refusal in the user's language from its message_id (blocked by
-  `viewer-login-screen` (done))
 - [`viewer-login-tos`](ready/viewer-login-tos.md) — Login TOS / critical-message
   acceptance (blocked by `viewer-login-screen` (done))
 - [`viewer-lookat-faithful`](ready/viewer-lookat-faithful.md) — Faithful look-at
@@ -1247,7 +1244,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-rigged-hair-triangle-pattern`](bugs/viewer-rigged-hair-triangle-pattern.md)
   — Rigged mesh hair shows a pattern of individual triangles
 
-## done (1632)
+## done (1633)
 
 ### protocol
 
@@ -2380,6 +2377,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-load-url-body-links`](done/viewer-load-url-body-links.md) — Script
   web-page toast body — clickable URLs / SLURLs (blocked by
   `viewer-url-linkification` (done))
+- [`viewer-login-refusal-localised-text`](done/viewer-login-refusal-localised-text.md)
+  — Show a login refusal in the user's language from its message_id (blocked by
+  `viewer-login-screen` (done))
 - [`viewer-login-saved-passwords`](done/viewer-login-saved-passwords.md) — Login
   screen — remember the password (blocked by `viewer-secret-store` (done))
 - [`viewer-login-screen`](done/viewer-login-screen.md) — Login screen — grid

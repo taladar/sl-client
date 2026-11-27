@@ -415,6 +415,10 @@ pub struct MfaChallenge {
     pub mfa_hash: Option<String>,
     /// The human-readable challenge message.
     pub message: String,
+    /// A localization key for the message (`message_id`, e.g.
+    /// `"LoginFailedAuthenticationMFARequired"`), which the reference viewer
+    /// shows in place of [`message`](Self::message) when it has the string.
+    pub message_id: Option<String>,
     /// The name of every top-level field the challenge carried, sorted — what
     /// the grid sent, including members this struct does not model. Empty on
     /// a challenge built here rather than parsed; a builder ignores it.
@@ -1302,6 +1306,7 @@ pub fn parse_login_response(xml: &str) -> Result<LoginResponse, WireError> {
             return Ok(LoginResponse::MfaChallenge(MfaChallenge {
                 mfa_hash: members.get("mfa_hash").cloned(),
                 message,
+                message_id: members.get("message_id").cloned(),
                 response_fields: member_names(response_struct),
             }));
         }
@@ -2145,6 +2150,7 @@ pub fn build_login_response(response: &LoginResponse) -> String {
             push_string_member(&mut out, "login", "false");
             push_string_member(&mut out, "reason", "mfa_challenge");
             push_string_member(&mut out, "message", &challenge.message);
+            push_opt_string_member(&mut out, "message_id", challenge.message_id.as_deref());
             if let Some(mfa_hash) = &challenge.mfa_hash {
                 push_string_member(&mut out, "mfa_hash", mfa_hash);
             }
@@ -2776,6 +2782,7 @@ impl LoginServer {
             return Some(LoginResponse::MfaChallenge(MfaChallenge {
                 mfa_hash: Some(mfa.mfa_hash.clone()),
                 message: mfa.challenge_message.clone(),
+                message_id: None,
                 response_fields: Vec::new(),
             }));
         }

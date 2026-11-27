@@ -173,10 +173,11 @@ wire crate's own text for a scenario that asks for it.
 - The e2e test `e2e_login` logs in on both fake flavours, through a second
   factor, and past a terms-of-service and a critical-message gate.
 - A refused login started from a credentials file ends the run with the
-  grid's reason and text, word for word; on the login screen the same text
-  is said on the panel and the next try may follow (`e2e_login_screen`).
-  It does not read `message_id`, so Second Life's text is shown in English
-  whatever the locale (`viewer-login-refusal-localised-text`).
+  grid's reason and text, word for word. On the login screen the refusal is
+  said on the panel, from the viewer's own string for the `message_id` when
+  it has one (so in the user's language) and in the grid's words otherwise,
+  with the `Linden_Error_Code` under it to copy, and the next try may follow
+  (`e2e_login_screen`, on the Second Life flavour).
 - A viewer kicked by a second login exits cleanly, with the grid's reason in
   its log; `viewer-disconnect-screen` is what shows it. `e2e_login` holds
   both to each fake flavour: the refusal's words, and the kick.

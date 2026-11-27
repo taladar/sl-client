@@ -78,6 +78,7 @@ use crate::floater::{ActiveFloater, Floater, FloaterCommand, FloaterOp, toggle_f
 use crate::i18n::{TransArgs, Translator};
 use crate::login_flow::{LoginScope, PendingLogin, SecondFactorSource};
 use crate::login_grids::GridList;
+use crate::login_refusal::GridText;
 use crate::menu::{MenuBarDef, MenuCommand, MenuConditions, MenuDef, MenuItemDef, spawn_menu_bar};
 use crate::secrets::{SecretAnswer, SecretOp, SecretOutcome, SecretRequest};
 use crate::settings::ViewerSettings;
@@ -187,6 +188,8 @@ enum LoginPanelRequest {
     AddGrid,
     /// Remove the chosen grid.
     RemoveGrid,
+    /// Copy the refusal's incident id to the clipboard.
+    CopyIncident,
 }
 
 /// The login page's parts.
@@ -216,6 +219,11 @@ struct LoginPanelUi {
     connect: Entity,
     /// The line the panel's notices are written to.
     notice: Entity,
+    /// The row under the notice holding a refusal's incident id and its Copy
+    /// button, shown while the notice has an incident id.
+    incident_row: Entity,
+    /// The incident id's text in that row.
+    incident: Entity,
     /// The second-factor row, shown while a challenge waits.
     token_row: Entity,
     /// The second-factor token field.
@@ -233,6 +241,27 @@ enum Notice {
     Key(&'static str),
     /// A notice whose `$message` is the grid's (or the system's) own words.
     Message(&'static str, String),
+    /// The grid refused the login: what it said, worded from its
+    /// localization key where this viewer has the string, and the incident
+    /// id it stamped on the refusal, which the panel shows to copy.
+    Refused {
+        /// What the grid said.
+        text: GridText,
+        /// The refusal's incident id (`Linden_Error_Code`), if it had one.
+        incident: Option<String>,
+    },
+    /// The grid asked for a second factor, in the words it asked with.
+    Challenge(GridText),
+}
+
+impl Notice {
+    /// The incident id this notice shows beside it, if any.
+    fn incident(&self) -> Option<&str> {
+        match self {
+            Self::Refused { incident, .. } => incident.as_deref(),
+            Self::None | Self::Key(_) | Self::Message(..) | Self::Challenge(_) => None,
+        }
+    }
 }
 
 /// Where the panel wants the keyboard next.
@@ -353,6 +382,7 @@ impl Plugin for LoginScreenPlugin {
                     reflect_the_panel,
                     give_focus,
                     write_the_notice,
+                    copy_the_incident,
                     write_the_remember_note,
                     reflect_the_menu,
                     handle_login_menu,
@@ -688,6 +718,40 @@ fn spawn_login_page(
     );
     commands.entity(notice).insert(Name::new("login-notice"));
 
+    // A refusal's incident id, what the grid's support asks for, with a
+    // button to copy it.
+    let incident_row = spawn_labeled_row(
+        &mut commands,
+        panel,
+        LabeledRowSpec::new(UiLabel::key("login-incident-label"))
+            .font_size(PANEL_FONT)
+            .label_color(palette.text_muted)
+            .label_min_width(Val::Px(LABEL_MIN_WIDTH))
+            .name("login-incident-row"),
+    )
+    .row;
+    commands.entity(incident_row).insert(UiPanelShown(false));
+    let incident = spawn_label(
+        &mut commands,
+        incident_row,
+        UiLabel::literal(String::new()),
+        palette.text_primary,
+        PANEL_FONT,
+    );
+    commands
+        .entity(incident)
+        .insert(Name::new("login-incident"));
+    let _copy = spawn_request_button(
+        &mut commands,
+        incident_row,
+        "login-incident-copy",
+        LoginPanelRequest::CopyIncident,
+        13,
+    );
+    // The Copy button names the clipboard; a host without Bevy's clipboard
+    // plugin gets a private one.
+    commands.queue(crate::clipboard::init_private_clipboard);
+
     commands.insert_resource(grids);
     commands.insert_resource(LoginPanelUi {
         page,
@@ -702,6 +766,8 @@ fn spawn_login_page(
         start_region,
         connect,
         notice,
+        incident_row,
+        incident,
         token_row,
         token,
     });
@@ -1140,9 +1206,20 @@ fn remove_grid(
 /// The notice for a login that ended before the agent arrived.
 fn ended_notice(reason: &SessionDisconnectReason) -> Notice {
     match reason {
-        SessionDisconnectReason::LoginFailed { message, .. } => {
-            Notice::Message("login-notice-refused", message.clone())
-        }
+        SessionDisconnectReason::LoginFailed {
+            message,
+            message_id,
+            message_args,
+            error_code,
+            ..
+        } => Notice::Refused {
+            text: GridText {
+                message: message.clone(),
+                message_id: message_id.clone(),
+                message_args: message_args.clone(),
+            },
+            incident: error_code.clone(),
+        },
         SessionDisconnectReason::Timeout => Notice::Key("login-notice-timeout"),
         SessionDisconnectReason::HandshakeFailed => Notice::Key("login-notice-handshake"),
         SessionDisconnectReason::ProtocolError => Notice::Key("login-notice-unreachable"),
@@ -1196,7 +1273,10 @@ fn follow_the_login(
         }
     }
     for rejection in rejected.read() {
-        state.notice = Notice::Message("login-notice-refused", rejection.0.message.clone());
+        state.notice = Notice::Refused {
+            incident: rejection.0.error_code.clone(),
+            text: GridText::from(rejection.0.clone()),
+        };
         state.focus.get_or_insert(FocusWanted::FirstBlank);
     }
     for challenge in challenges.read() {
@@ -1206,7 +1286,10 @@ fn follow_the_login(
         state.challenge = Some(WaitingChallenge {
             mfa_hash: challenge.0.mfa_hash.clone(),
         });
-        state.notice = Notice::Message("login-notice-token", challenge.0.message.clone());
+        state.notice = Notice::Challenge(GridText {
+            message_id: challenge.0.message_id.clone(),
+            ..GridText::plain(challenge.0.message.clone())
+        });
         state.focus = Some(FocusWanted::Token);
     }
 }
@@ -1500,7 +1583,12 @@ fn current_notice(status: SlSessionStatus, in_world: bool, state: &LoginPanelSta
     }
 }
 
-/// Write the notice line when what it says changes, or the locale does.
+/// Write the notice line when what it says changes, or the locale does, and
+/// show the incident row with the notice's incident id while it has one.
+///
+/// What the grid said is worded from its localization key where this viewer
+/// has the string ([`GridText::localise`]); a suspension's end is put on the
+/// user's own clock, so the system time zone is read here.
 fn write_the_notice(
     ui: Res<LoginPanelUi>,
     status: Res<SlSessionStatus>,
@@ -1508,22 +1596,56 @@ fn write_the_notice(
     mut state: ResMut<LoginPanelState>,
     translator: Translator,
     mut texts: Query<&mut Text>,
+    mut rows: Query<&mut UiPanelShown>,
 ) {
     let notice = current_notice(*status, session.agent_in_world(), &state);
     if state.shown.as_ref() == Some(&notice) && !translator.changed() {
         return;
     }
+    let grid_text = |key: &str, text: &GridText| {
+        let message = text.localise(&translator, &jiff::tz::TimeZone::system());
+        translator.format(key, &TransArgs::new().text("message", &message))
+    };
     let text = match &notice {
         Notice::None => String::new(),
         Notice::Key(key) => translator.get(key),
         Notice::Message(key, message) => {
             translator.format(key, &TransArgs::new().text("message", message))
         }
+        Notice::Refused { text, .. } => grid_text("login-notice-refused", text),
+        Notice::Challenge(text) => grid_text("login-notice-token", text),
     };
     if let Ok(mut shown) = texts.get_mut(ui.notice) {
         shown.0 = text;
     }
+    let incident = notice.incident();
+    if let Ok(mut shown) = texts.get_mut(ui.incident) {
+        incident.unwrap_or_default().clone_into(&mut shown.0);
+    }
+    if let Ok(mut shown) = rows.get_mut(ui.incident_row)
+        && shown.0 != incident.is_some()
+    {
+        shown.0 = incident.is_some();
+    }
     state.shown = Some(notice);
+}
+
+/// Copy the incident id the panel shows to the clipboard, when its Copy
+/// button asks.
+fn copy_the_incident(
+    mut requests: MessageReader<LoginPanelRequest>,
+    state: Res<LoginPanelState>,
+    mut clipboard: ResMut<Clipboard>,
+) {
+    if !requests
+        .read()
+        .any(|request| *request == LoginPanelRequest::CopyIncident)
+    {
+        return;
+    }
+    if let Some(incident) = state.shown.as_ref().and_then(Notice::incident) {
+        crate::clipboard::copy_to_clipboard(&mut clipboard, incident);
+    }
 }
 
 /// Write the line under Remember password when what it says changes, or the

@@ -8,8 +8,10 @@
 //!   until the agent arrives; then the page is gone and the menu bar is back.
 //!   Before it, the pre-login menu opens Preferences over the page and its
 //!   Close Window closes it again.
-//! - **A wrong password.** The grid's refusal is said on the panel, the
-//!   window stays open, and the next try with the right password gets in.
+//! - **A wrong password.** The grid's refusal is said on the panel, in the
+//!   viewer's own string for the localization key Second Life sent, with the
+//!   refusal's incident id beside it; the window stays open, and the next try
+//!   with the right password gets in.
 //! - **A second factor.** A challenge shows the token row; the token typed
 //!   there is the same login again, and it gets in.
 //! - **The keyboard alone.** The name field has the keyboard when the page
@@ -144,10 +146,26 @@ mod test {
             let alpha = &stage.viewer("Alpha")?;
             add_the_grid(stage, alpha).await?;
             log_in(stage, alpha, "not the password").await?;
+            // Said from the viewer's own string for Second Life's
+            // `LoginFailedAuthenticationFailed`, with the refusal's incident
+            // id beside it to copy. (Fluent isolates the inserted text, so the
+            // two halves are matched apart.)
             let _refused = alpha
                 .expect(&alpha.ui().test_id("login-notice"))
                 .timeout(WAIT)
                 .to_contain_text("The grid refused the login")
+                .await?;
+            let _worded = alpha
+                .expect(&alpha.ui().test_id("login-notice"))
+                .to_contain_text("Please check to make sure you entered the right")
+                .await?;
+            let _incident = alpha
+                .expect(&alpha.ui().test_id("login-incident"))
+                .to_contain_text("1-")
+                .await?;
+            let _row = alpha
+                .expect(&alpha.ui().test_id("login-incident-row"))
+                .to_be_visible()
                 .await?;
             let _still = alpha
                 .expect(&alpha.ui().test_id("login-page"))
