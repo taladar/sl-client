@@ -1263,8 +1263,10 @@ fn aim_deltas(delta: Vec2, sensitivity: f32, invert_y: bool) -> (f32, f32) {
 /// Drive the flycam's free position and orientation from the movement actions, the
 /// SpaceNavigator, a right-drag mouse-look, and the [`CameraSpin`] auto-rotation.
 ///
-/// The flycam eye is the entity `Transform`'s translation; the WASD actions,
-/// `Space`/`Ctrl` and the 6-DOF device translate it along the current basis. The
+/// The flycam eye is the entity `Transform`'s translation; the `Flycam*`
+/// actions (the WASD cluster, `E` / `C`) and the 6-DOF device translate it
+/// along the current basis, while the avatar's own movement actions stay with
+/// `crate::movement::drive_avatar_controls`. The
 /// orientation is composed **incrementally in the camera's local frame** (a
 /// quaternion multiply), not rebuilt from accumulated Euler angles — so it is true
 /// 6-DOF with no gimbal lock looking straight up or down, and rotations act on the
@@ -1388,22 +1390,22 @@ pub(crate) fn drive_flycam(
     // Keyboard translation along the camera basis (unaffected by the device
     // feathering), accumulated per component so the arithmetic stays in plain `f32`.
     let mut move_vec = Vec3::ZERO;
-    if input.actions.pressed(Action::MoveForward) {
+    if input.actions.pressed(Action::FlycamForward) {
         move_vec = vadd(move_vec, forward);
     }
-    if input.actions.pressed(Action::MoveBackward) {
+    if input.actions.pressed(Action::FlycamBackward) {
         move_vec = vsub(move_vec, forward);
     }
-    if input.actions.pressed(Action::MoveRight) {
+    if input.actions.pressed(Action::FlycamRight) {
         move_vec = vadd(move_vec, right);
     }
-    if input.actions.pressed(Action::MoveLeft) {
+    if input.actions.pressed(Action::FlycamLeft) {
         move_vec = vsub(move_vec, right);
     }
-    if input.actions.pressed(Action::MoveUp) {
+    if input.actions.pressed(Action::FlycamUp) {
         move_vec = vadd(move_vec, Vec3::Y);
     }
-    if input.actions.pressed(Action::MoveDown) {
+    if input.actions.pressed(Action::FlycamDown) {
         move_vec = vsub(move_vec, Vec3::Y);
     }
     let length_squared = move_vec.length_squared();

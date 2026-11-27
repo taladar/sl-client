@@ -5497,14 +5497,14 @@ mod movement_tests {
         );
     }
 
-    /// **Flycam parks the body but keeps it in the air**: switching the camera to
-    /// the free-fly spectator drops every movement bit — the keys drive the
-    /// camera there, not the avatar — while a `FLY` already advertised stays,
-    /// because clearing it would land a hovering avatar the instant the view
-    /// changed.
+    /// **A held `W` stops reaching the body in flycam, and a hovering avatar
+    /// stays up**: switching the camera to the free-fly spectator turns the
+    /// WASD cluster into camera keys, so a walk held on `W` drops its motion
+    /// bit, while a `FLY` already advertised stays, because clearing it would
+    /// land a hovering avatar the instant the view changed.
     ///
     /// The paired negative is the same switch made while walking on the ground:
-    /// there the parked set is empty, so "keeps FLY" is a rule about flight
+    /// there the set left is empty, so "keeps FLY" is a rule about flight
     /// rather than about the flags simply never being cleared.
     #[test]
     fn flycam_parks_the_body_and_keeps_a_hovering_avatar_up() {
@@ -5550,7 +5550,90 @@ mod movement_tests {
         assert_eq!(
             drain_controls(&mut app),
             Vec::new(),
-            "…and the still-held walk key no longer reaches the avatar at all"
+            "…and the still-held W, a camera key now, no longer reaches the avatar \
+             at all"
+        );
+    }
+
+    /// **The avatar keys still drive the avatar in flycam**
+    /// (viewer-flycam-avatar-movement-keys): the reference's flycam moves the
+    /// camera on its own controls and leaves the keyboard's movement keys on the
+    /// avatar, so the arrows walk and turn it, `PageUp` flies it up and `F`
+    /// toggles its flight — the same flags they put on the wire in third
+    /// person — while `W`, the flycam's own key, puts nothing there.
+    ///
+    /// Until the fix the movement driver returned early in flycam, so every one
+    /// of these was dead.
+    #[test]
+    fn the_avatar_keys_drive_the_avatar_in_flycam() {
+        let arrow_up = (KeyCode::ArrowUp, Key::ArrowUp);
+        let arrow_left = (KeyCode::ArrowLeft, Key::ArrowLeft);
+        let flycam_app = || {
+            let mut app = movement_app(false);
+            *app.world_mut().resource_mut::<CameraMode>() = CameraMode::Flycam;
+            settle(&mut app, 2);
+            let _entered = drain_movement(&mut app);
+            app
+        };
+
+        // The arrow walks forward.
+        let mut app = flycam_app();
+        hold(&mut app, &arrow_up, 2);
+        assert_eq!(
+            drain_controls(&mut app),
+            vec![ControlFlags::AT_POS],
+            "the up arrow walks the avatar in flycam"
+        );
+        release(&mut app, &arrow_up);
+        assert_eq!(
+            drain_controls(&mut app),
+            vec![ControlFlags::empty()],
+            "…and releasing it stops the walk"
+        );
+
+        // The control: the flycam's own forward key moves no body.
+        hold(&mut app, &forward_key(), 4);
+        assert_eq!(
+            drain_controls(&mut app),
+            Vec::new(),
+            "W flies the camera in flycam and puts nothing on the wire"
+        );
+        release(&mut app, &forward_key());
+
+        // The left arrow turns the body and advertises the new facing.
+        let mut app = flycam_app();
+        let before = heading(&app);
+        hold(&mut app, &arrow_left, 4);
+        let (controls, rotations) = drain_movement(&mut app);
+        let after = heading(&app);
+        assert!(
+            after > before && !rotations.is_empty(),
+            "the left arrow turns the avatar in flycam (was {before}, got {after}, \
+             {} rotation send(s), controls {controls:?})",
+            rotations.len()
+        );
+        release(&mut app, &arrow_left);
+
+        // PageUp ascends, and F toggles flight on top of it.
+        let mut app = flycam_app();
+        hold(&mut app, &ascend_key(), 2);
+        assert_eq!(
+            drain_controls(&mut app),
+            vec![ControlFlags::UP_POS],
+            "PageUp ascends the avatar in flycam"
+        );
+        release(&mut app, &ascend_key());
+        let _released = drain_controls(&mut app);
+        interact::tap(&mut app, fly_key().0, fly_key().1);
+        settle(&mut app, 1);
+        assert_eq!(
+            drain_controls(&mut app),
+            vec![ControlFlags::FLY],
+            "F toggles the avatar's flight in flycam"
+        );
+        assert!(
+            app.world().resource::<AvatarControls>().flying,
+            "…and the viewer knows it is flying"
         );
     }
 

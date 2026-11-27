@@ -23,10 +23,10 @@
 //!
 //! There is no precedence between them: they answer *independent* states, and a
 //! state that holds is one the user may want out of, whatever else also holds.
-//! Flying **and** in the flycam shows both — the flycam deliberately parks the
-//! avatar with the fly bit set so a detached camera does not leave the body
-//! plummeting, so "stop the camera" and "stop the flying" are two different
-//! exits. Seated **and** in the flycam likewise shows both.
+//! Flying **and** in the flycam shows both — entering the flycam keeps the fly
+//! bit set so a detached camera does not leave the body plummeting, and the
+//! avatar keys still fly it there, so "stop the camera" and "stop the flying"
+//! are two different exits. Seated **and** in the flycam likewise shows both.
 //!
 //! The one pair that never co-occurs is Stand and Stop Flying: a seated avatar is
 //! not flying, so [`wants_button`] does not offer to land one. That caps the slot

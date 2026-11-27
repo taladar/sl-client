@@ -44,7 +44,9 @@ use sl_client_bevy::{Command, ControlFlags, Rotation, SlAgentParcel, SlCommand, 
 
 use crate::camera::CameraAim;
 use crate::input_action::Action;
-use sl_viewer_spacenav::{AvatarAxisSettings, AvatarNavSmoothing, SpacenavInput, avatar_nav_drive};
+use sl_viewer_spacenav::{
+    AvatarAxisSettings, AvatarNavDrive, AvatarNavSmoothing, SpacenavInput, avatar_nav_drive,
+};
 
 use sl_viewer_world_api::AvatarState;
 use sl_viewer_world_api::TerrainState;
@@ -266,8 +268,11 @@ pub(crate) struct CameraGaze<'w> {
 /// The actions mean different things by camera mode, deliberately close to the
 /// reference so scripted vehicles behave:
 ///
-/// - **Flycam** — the actions drive the *camera* not the avatar, so this stops the
-///   body (once) and bows out.
+/// - **Flycam** — the camera moves on its own keys (`Action::Flycam*`, the WASD
+///   cluster) and the 6-DOF device, so neither reaches this driver; the avatar
+///   keys still drive the avatar exactly as in third person, as the reference's
+///   flycam leaves the keyboard to the avatar. A flying avatar with no key held
+///   keeps `FLY` and hovers, so switching the camera never drops it.
 /// - **Seated on a vehicle** — left / right (or the SpaceNavigator's twist) send the
 ///   **yaw** control bits that *steer the vehicle*, never turning the avatar body,
 ///   while forward / back and up / down send their control bits unchanged — so the
@@ -286,7 +291,8 @@ pub(crate) struct CameraGaze<'w> {
 /// forward axis walks (either source moving the avatar, neither blocking the other),
 /// its up axis flies up / down exactly as PageUp / PageDown do, and its twist turns
 /// the body. It only drives the avatar when flycam is off (in flycam it drives the
-/// camera instead, via `crate::camera::drive_flycam`).
+/// camera instead, via `crate::camera::drive_flycam`), as the reference's
+/// `LLViewerJoystick` calls `moveFlycam` *instead of* `moveAvatar`.
 ///
 /// [`SlAgentParcel::seated_on`]: sl_client_bevy::AgentParcel::seated_on
 pub(crate) fn drive_avatar_controls(
@@ -311,33 +317,21 @@ pub(crate) fn drive_avatar_controls(
     // huge feathered turn jump.
     let dt = time.delta_secs().min(0.2);
 
-    // In flycam the movement actions drive the camera (`crate::camera::drive_flycam`),
-    // not the avatar. Park the body: drop every *movement* bit so it stops walking /
-    // ascending, but keep the `FLY` flag if it was flying — clearing it would make
-    // the simulator land the avatar, so a hovering avatar would plummet the moment
-    // the camera switched to flycam. With `FLY` set and no motion bits the avatar
-    // just hovers in place, which is what a spectator flycam wants.
-    if *gaze.mode == CameraMode::Flycam {
-        let parked = away_bit.union(if controls.flying {
-            ControlFlags::FLY
-        } else {
-            ControlFlags::empty()
-        });
-        if controls.last_controls != parked {
-            writer.write(SlCommand(Command::SetControls(parked)));
-            controls.last_controls = parked;
-        }
-        return;
-    }
-
     // The SpaceNavigator's walk / fly / turn contribution this frame (empty when no
     // device is connected — the axes are zero), composed with the keyboard below.
-    let nav = avatar_nav_drive(
-        &input.spacenav,
-        &input.avatar_axes,
-        &mut input.nav_smoothing,
-        dt,
-    );
+    // In flycam the device flies the camera (`crate::camera::drive_flycam`) and
+    // contributes nothing here; the keyboard's avatar keys still do, since the
+    // flycam's own keys are separate actions this driver never reads.
+    let nav = if *gaze.mode == CameraMode::Flycam {
+        AvatarNavDrive::default()
+    } else {
+        avatar_nav_drive(
+            &input.spacenav,
+            &input.avatar_axes,
+            &mut input.nav_smoothing,
+            dt,
+        )
+    };
 
     let seated = world.agent.seated_on.is_some();
     let mouselook = *gaze.mode == CameraMode::Mouselook;
@@ -565,8 +559,8 @@ pub(crate) fn drive_avatar_controls(
     // whatever this frame's input turned it to, and is advertised at once rather
     // than waiting out the turning throttle. Taken here, after the per-mode turn
     // above, so it wins over the mouselook aim; a seated avatar is left alone for
-    // the same reason its keys are (the vehicle owns its orientation), and so is
-    // flycam, which returned above with the body parked.
+    // the same reason its keys are (the vehicle owns its orientation). Flycam
+    // takes it like any other mode: the body is still the avatar's to turn.
     if let Some(heading) = controls.forced_heading.take() {
         controls.yaw = heading;
         // A forced heading is authoritative even before the own avatar has

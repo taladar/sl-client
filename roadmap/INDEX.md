@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 130 |
-| ready | 324 |
+| ready | 323 |
 | blocked | 35 |
 | in-progress | 4 |
 | bugs | 4 |
-| done | 1633 |
+| done | 1634 |
 | deferred | 30 |
 | wont-do | 24 |
 | **total** | **2184** |
@@ -315,7 +315,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-lsl-opensim-function-set`](ideas/gridspec-lsl-opensim-function-set.md)
   — Measure which library functions OpenSim's engines compile
 
-## ready (324)
+## ready (323)
 
 ### protocol
 
@@ -531,8 +531,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-floaters-decoupled-from-the-session`](ready/viewer-floaters-decoupled-from-the-session.md)
   — Floater UI behaviour is welded to the session, so it runs nowhere else — not
   the gallery, not a unit test
-- [`viewer-flycam-avatar-movement-keys`](ready/viewer-flycam-avatar-movement-keys.md)
-  — Avatar movement keys do nothing in flycam mode
 - [`viewer-fs-bridge-lifecycle`](ready/viewer-fs-bridge-lifecycle.md) —
   Firestorm LSL bridge — create, attach, version and repair it
 - [`viewer-fullscreen-mode`](ready/viewer-fullscreen-mode.md) — Fullscreen /
@@ -1244,7 +1242,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-rigged-hair-triangle-pattern`](bugs/viewer-rigged-hair-triangle-pattern.md)
   — Rigged mesh hair shows a pattern of individual triangles
 
-## done (1633)
+## done (1634)
 
 ### protocol
 
@@ -2198,6 +2196,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A window's z-order climbed without end, over the lists, bars and menus
 - [`viewer-floaters-never-reread-after-a-push`](done/viewer-floaters-never-reread-after-a-push.md)
   — A floater seeds its draft once and reverts what it never saw
+- [`viewer-flycam-avatar-movement-keys`](done/viewer-flycam-avatar-movement-keys.md)
+  — Avatar movement keys do nothing in flycam mode
 - [`viewer-flycam-stop-button-overlaps-chat`](done/viewer-flycam-stop-button-overlaps-chat.md)
   — "Stop flycam" button overlaps the "Chat" button in the bottom bar
 - [`viewer-fps-label-intermittent`](done/viewer-fps-label-intermittent.md) — FPS

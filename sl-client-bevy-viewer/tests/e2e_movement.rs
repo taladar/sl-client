@@ -23,7 +23,9 @@
 //! over its ground. An uploaded stand, as an animation overrider plays one on
 //! a live grid, keeps its own legs, so the feet go unchecked there. A second
 //! stage, on the fake grid only, stands the avatar on a slope and checks that
-//! one foot rests higher than the other.
+//! one foot rests higher than the other. A third switches the camera to the
+//! flycam and checks that `W` then flies only the camera while the arrow still
+//! walks the avatar ([[viewer-flycam-avatar-movement-keys]]).
 //!
 //! It runs on the fake grid, whose avatar controller moves the avatar to each
 //! flavour's measurements (`sl_fake_grid::movement`) — the Second Life flavour
@@ -37,7 +39,9 @@
 mod test {
     use core::time::Duration;
 
-    use sl_automation_proto::{AgentReadout, FeetReadout, FootReadout};
+    use pretty_assertions::assert_eq;
+    use serde_json::json;
+    use sl_automation_proto::{AgentReadout, CameraView, FeetReadout, FootReadout, Probe};
     use sl_e2e::{BodyError, Stage, StageBuilder};
     use sl_fake_grid::{Heightfield, RegionConfig, TerrainFixture};
     use sl_proto::RegionCoordinates;
@@ -415,6 +419,100 @@ mod test {
                 assert!(
                     (left - right).abs() >= UPHILL,
                     "the feet stand on level ground, not the slope: {feet:?}"
+                );
+                Ok(())
+            })?;
+        Ok(())
+    }
+
+    /// How many frames the flycam's own forward key is held: at its 10 m/s
+    /// and the headless viewer's 60 Hz, ten metres.
+    const FLY_FRAMES: u32 = 60;
+
+    /// How far the flycam must have flown from where it started.
+    const FLOWN: f32 = 4.0;
+
+    /// How long the grid is given to show a walk nobody asked for, after the
+    /// camera has flown: a step it was sent would be back well within it.
+    const NO_WALK_WITHIN: Duration = Duration::from_secs(2);
+
+    /// How far the avatar may drift while only the camera flies: well under
+    /// the metre a single step coasts on.
+    const STILL_WITHIN: f32 = 0.25;
+
+    /// The agent's camera eye, or an error saying the viewer reports none.
+    fn eye_of(agent: &AgentReadout) -> Result<[f32; 3], BodyError> {
+        agent
+            .camera_eye
+            .ok_or_else(|| format!("the viewer reports no camera eye: {agent:?}").into())
+    }
+
+    /// The straight-line distance between two points.
+    fn distance(a: [f32; 3], b: [f32; 3]) -> f32 {
+        let [ax, ay, az] = a;
+        let [bx, by, bz] = b;
+        ((ax - bx).powi(2) + (ay - by).powi(2) + (az - bz).powi(2)).sqrt()
+    }
+
+    /// **The avatar keys in the flycam** ([[viewer-flycam-avatar-movement-keys]]):
+    /// with the camera switched to the flycam, `W` — the flycam's own forward
+    /// key — flies the camera and leaves the avatar where it stands, while the
+    /// arrow still walks the avatar, as the reference's flycam leaves the
+    /// keyboard's movement keys to the avatar. Until the fix every avatar key
+    /// was dead in the flycam.
+    ///
+    /// It starts where the login puts it, so it runs on a live grid too: it
+    /// walks once, which stops short of the fake grid's stock box east of the
+    /// landing point.
+    #[test]
+    fn the_arrow_walks_the_avatar_in_the_flycam_and_w_flies_only_the_camera()
+    -> Result<(), TestError> {
+        StageBuilder::new("movement_flycam")
+            .viewer_binary(VIEWER)
+            .viewer("Alpha")
+            .run(async |stage: &Stage| {
+                let alpha = &stage.viewer("Alpha")?;
+                let from = position_known(alpha).await?;
+                alpha.press("Alt+Shift+F").await?;
+                let _flycam = alpha
+                    .expect_state(Probe::Agent)
+                    .at("/camera")
+                    .to_equal(json!(CameraView::Flycam))
+                    .await?;
+
+                // The flycam's own key: the camera flies, the body stays.
+                let started = eye_of(&alpha.agent().await?)?;
+                alpha.hold("w", FLY_FRAMES).await?;
+                let mut flown = eye_of(&alpha.agent().await?)?;
+                for _read in 0..60 {
+                    if distance(flown, started) >= FLOWN {
+                        break;
+                    }
+                    flown = eye_of(&alpha.agent().await?)?;
+                }
+                assert!(
+                    distance(flown, started) >= FLOWN,
+                    "W flew the flycam from {started:?} to {flown:?}"
+                );
+                tokio::time::sleep(NO_WALK_WITHIN).await;
+                let stayed = position_of(&alpha.agent().await?)?;
+                assert!(
+                    ground_distance(stayed, from) < STILL_WITHIN,
+                    "W in the flycam moved the avatar from {from:?} to {stayed:?}"
+                );
+
+                // The avatar's key: the body walks, and the camera stays a
+                // flycam.
+                let walked = walk(alpha).await?;
+                assert!(
+                    walked >= WALKED,
+                    "the arrow in the flycam moved the avatar {walked} m"
+                );
+                let after = alpha.agent().await?;
+                assert_eq!(
+                    after.camera,
+                    Some(CameraView::Flycam),
+                    "walking the avatar left the flycam"
                 );
                 Ok(())
             })?;

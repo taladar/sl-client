@@ -22,7 +22,9 @@
 //! - **Per-mode profiles.** `InputBindings` holds one `BindingProfile` per
 //!   `InputMode`, mirroring the per-mode blocks of the reference's `keys.xml`.
 //!   One physical key means different things in third-person vs. flycam — `W`
-//!   walks the avatar in third person and slides the *camera* in flycam.
+//!   walks the avatar in third person and slides the *camera* in flycam, where
+//!   it resolves to [`Action::FlycamForward`] rather than
+//!   [`Action::MoveForward`].
 //! - **Many-to-one bindings.** A profile is a `key -> target` map, so several
 //!   keys can drive one action (both `W` and `↑` → [`Action::MoveForward`]); a
 //!   key resolves to exactly one action in a given mode.
@@ -55,26 +57,40 @@ use sl_viewer_world_api::InputContext;
 /// A named viewer action a binding can drive — the stable target the camera and
 /// avatar-movement systems consume instead of a raw key.
 ///
-/// The movement actions are interpreted by *whoever owns motion in the active
-/// mode*: in third-person / mouselook they advertise avatar intent
-/// ([`crate::movement`]); in flycam they translate the free camera
-/// ([`crate::camera`]). Same action, different consumer — which is the whole
-/// point of the per-`InputMode` profiles.
+/// The `Move*` actions always drive the **avatar** ([`crate::movement`]), in
+/// every mode — flycam included, as in the reference, whose flycam moves the
+/// camera on the 6-DOF device and leaves the keyboard's movement keys on the
+/// avatar. The `Flycam*` actions translate the free camera
+/// ([`crate::camera`]) and are bound only in the flycam profile, on keys
+/// that profile does not also give the avatar, so one key never moves both.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Action {
-    /// Walk the avatar forward, or slide the flycam forward.
+    /// Walk the avatar forward.
     MoveForward,
-    /// Walk the avatar back, or slide the flycam back.
+    /// Walk the avatar back.
     MoveBackward,
-    /// Turn the avatar left, or slide the flycam left.
+    /// Turn the avatar left (strafe left in mouselook).
     MoveLeft,
-    /// Turn the avatar right, or slide the flycam right.
+    /// Turn the avatar right (strafe right in mouselook).
     MoveRight,
-    /// Ascend (fly up), or raise the flycam.
+    /// Ascend (fly up, or a held take-off).
     MoveUp,
-    /// Descend (fly down), or lower the flycam.
+    /// Descend (fly down).
     MoveDown,
-    /// Run / move fast (a held modifier, not a toggle).
+    /// Slide the flycam forward along its view.
+    FlycamForward,
+    /// Slide the flycam back along its view.
+    FlycamBackward,
+    /// Slide the flycam left.
+    FlycamLeft,
+    /// Slide the flycam right.
+    FlycamRight,
+    /// Raise the flycam.
+    FlycamUp,
+    /// Lower the flycam.
+    FlycamDown,
+    /// Run / move fast (a held modifier, not a toggle): runs the avatar, and
+    /// speeds the flycam up while it is moving.
     Run,
     /// Toggle flight on the avatar.
     ToggleFly,
@@ -92,13 +108,19 @@ pub enum Action {
 
 impl Action {
     /// Every action, for the per-frame reconciliation in `update_action_input`.
-    pub(crate) const ALL: [Self; 11] = [
+    pub(crate) const ALL: [Self; 17] = [
         Self::MoveForward,
         Self::MoveBackward,
         Self::MoveLeft,
         Self::MoveRight,
         Self::MoveUp,
         Self::MoveDown,
+        Self::FlycamForward,
+        Self::FlycamBackward,
+        Self::FlycamLeft,
+        Self::FlycamRight,
+        Self::FlycamUp,
+        Self::FlycamDown,
         Self::Run,
         Self::ToggleFly,
         Self::ToggleMouselook,
@@ -154,7 +176,8 @@ pub(crate) enum InputMode {
     /// First-person mouselook: the movement keys still drive the avatar; the
     /// mouse aims.
     Mouselook,
-    /// Free flycam: the movement keys drive the camera, not the avatar.
+    /// Free flycam: the WASD cluster drives the camera, while the arrow keys,
+    /// `PageUp` / `PageDown` and the fly toggle still drive the avatar.
     Flycam,
 }
 
@@ -222,10 +245,11 @@ impl Default for InputBindings {
     ///
     /// Third-person and mouselook share an avatar-driving profile — `W`/`↑`
     /// forward, `A`/`←` turn, `Shift` run, `F` fly, `PageUp`/`E` up while flying —
-    /// mirroring the reference's default `keys.xml`. Flycam rebinds the same WASD
-    /// cluster to the *camera* (`Space`/`Ctrl` for vertical), the difference the
-    /// per-mode split exists to express. Mouselook and flycam are toggled with the
-    /// same keys from either side so they read as their own off switch.
+    /// mirroring the reference's default `keys.xml`. Flycam rebinds the WASD
+    /// cluster and `E` / `C` to the *camera*, the difference the per-mode split
+    /// exists to express, and leaves the rest of the avatar keys on the avatar.
+    /// Mouselook and flycam are toggled with the same keys from either side so
+    /// they read as their own off switch.
     fn default() -> Self {
         // Avatar-driving profile, shared by third-person and mouselook.
         let avatar = BindingProfile::default()
@@ -246,20 +270,31 @@ impl Default for InputBindings {
             .action(KeyCode::KeyF, Action::ToggleFly)
             .action(KeyCode::KeyM, Action::ToggleMouselook);
 
-        // Flycam: the WASD cluster drives the camera; `E` / `C` (and
-        // `PageUp` / `PageDown`) raise and lower it, `Shift` moves fast. `M`
-        // still drops to mouselook. Deliberately NOT `Space` / `Ctrl`: a bare
-        // modifier as a movement key collides with every chord shortcut —
-        // holding `Ctrl` for `Ctrl+B` would sink the camera.
+        // Flycam: the WASD cluster drives the camera and `E` / `C` raise and
+        // lower it. Everything else the avatar profile binds stays on the
+        // avatar, as the reference's flycam leaves the keyboard to the avatar:
+        // the arrows walk and turn it, `PageUp` / `PageDown` fly it up and
+        // down, `F` toggles its flight. The two key sets are disjoint, so no key
+        // moves both the camera and the body. `Shift` is the one shared key,
+        // a modifier rather than a motion: it runs the avatar and speeds the
+        // camera, each only while that one is moving. `M` still drops to
+        // mouselook. Deliberately NOT `Space` / `Ctrl` for the camera's
+        // vertical: a bare modifier as a movement key collides with every chord
+        // shortcut — holding `Ctrl` for `Ctrl+B` would sink the camera.
         let flycam = BindingProfile::default()
-            .action(KeyCode::KeyW, Action::MoveForward)
-            .action(KeyCode::KeyS, Action::MoveBackward)
-            .action(KeyCode::KeyA, Action::MoveLeft)
-            .action(KeyCode::KeyD, Action::MoveRight)
-            .action(KeyCode::KeyE, Action::MoveUp)
+            .action(KeyCode::KeyW, Action::FlycamForward)
+            .action(KeyCode::KeyS, Action::FlycamBackward)
+            .action(KeyCode::KeyA, Action::FlycamLeft)
+            .action(KeyCode::KeyD, Action::FlycamRight)
+            .action(KeyCode::KeyE, Action::FlycamUp)
+            .action(KeyCode::KeyC, Action::FlycamDown)
+            .action(KeyCode::ArrowUp, Action::MoveForward)
+            .action(KeyCode::ArrowDown, Action::MoveBackward)
+            .action(KeyCode::ArrowLeft, Action::MoveLeft)
+            .action(KeyCode::ArrowRight, Action::MoveRight)
             .action(KeyCode::PageUp, Action::MoveUp)
-            .action(KeyCode::KeyC, Action::MoveDown)
             .action(KeyCode::PageDown, Action::MoveDown)
+            .action(KeyCode::KeyF, Action::ToggleFly)
             .action(KeyCode::ShiftLeft, Action::Run)
             .action(KeyCode::ShiftRight, Action::Run)
             .action(KeyCode::KeyM, Action::ToggleMouselook);
@@ -406,31 +441,96 @@ mod tests {
         }
     }
 
-    /// The same physical key means different things in different modes: the
-    /// arrow keys drive the avatar in third-person but are unbound in flycam
-    /// (which keeps the WASD cluster only), while `E` raises in both.
+    /// The same physical key means different things in different modes: `W`
+    /// and `E` drive the avatar in third person and the camera in flycam.
     #[test]
     fn a_key_resolves_per_mode() {
-        // `ArrowUp` is bound only in the avatar profile.
-        let mut app = action_app(InputContext::World);
-        *app.world_mut().resource_mut::<InputMode>() = InputMode::Flycam;
-        press(&mut app, KeyCode::ArrowUp);
-        assert!(
-            !app.world()
-                .resource::<ButtonInput<Action>>()
-                .pressed(Action::MoveForward),
-            "ArrowUp does nothing in flycam"
-        );
+        for (key, avatar, camera) in [
+            (KeyCode::KeyW, Action::MoveForward, Action::FlycamForward),
+            (KeyCode::KeyE, Action::MoveUp, Action::FlycamUp),
+        ] {
+            let mut app = action_app(InputContext::World);
+            press(&mut app, key);
+            let actions = app.world().resource::<ButtonInput<Action>>();
+            assert!(
+                actions.pressed(avatar) && !actions.pressed(camera),
+                "{key:?} drives the avatar in third person"
+            );
 
-        let mut app = action_app(InputContext::World);
-        *app.world_mut().resource_mut::<InputMode>() = InputMode::Flycam;
-        press(&mut app, KeyCode::KeyE);
+            let mut app = action_app(InputContext::World);
+            *app.world_mut().resource_mut::<InputMode>() = InputMode::Flycam;
+            press(&mut app, key);
+            let actions = app.world().resource::<ButtonInput<Action>>();
+            assert!(
+                actions.pressed(camera) && !actions.pressed(avatar),
+                "{key:?} drives the camera, not the avatar, in flycam"
+            );
+        }
+    }
+
+    /// **The avatar keys still reach the avatar in flycam**, as the
+    /// reference's flycam leaves the keyboard to the avatar: the arrows walk
+    /// and turn it, `PageUp` / `PageDown` fly it, `F` toggles flight — each
+    /// resolving to the same action it does in third person.
+    #[test]
+    fn the_avatar_keys_drive_the_avatar_in_flycam() {
+        for (key, action) in [
+            (KeyCode::ArrowUp, Action::MoveForward),
+            (KeyCode::ArrowDown, Action::MoveBackward),
+            (KeyCode::ArrowLeft, Action::MoveLeft),
+            (KeyCode::ArrowRight, Action::MoveRight),
+            (KeyCode::PageUp, Action::MoveUp),
+            (KeyCode::PageDown, Action::MoveDown),
+            (KeyCode::KeyF, Action::ToggleFly),
+        ] {
+            let mut app = action_app(InputContext::World);
+            *app.world_mut().resource_mut::<InputMode>() = InputMode::Flycam;
+            press(&mut app, key);
+            let actions = app.world().resource::<ButtonInput<Action>>();
+            let held: Vec<Action> = Action::ALL
+                .into_iter()
+                .filter(|held| actions.pressed(*held))
+                .collect();
+            assert_eq!(held, vec![action], "{key:?} in flycam");
+        }
+    }
+
+    /// **No key moves both the camera and the avatar in flycam**: the flycam
+    /// profile's camera keys and avatar-motion keys are disjoint sets, and no
+    /// `Flycam*` action is bound outside the flycam profile.
+    #[test]
+    fn no_key_moves_both_the_flycam_and_the_avatar() {
+        const CAMERA: [Action; 6] = [
+            Action::FlycamForward,
+            Action::FlycamBackward,
+            Action::FlycamLeft,
+            Action::FlycamRight,
+            Action::FlycamUp,
+            Action::FlycamDown,
+        ];
+        let bindings = InputBindings::default();
+        let flycam = bindings.profile(InputMode::Flycam);
+        let camera_bound = |action: Action| {
+            flycam.is_some_and(|profile| {
+                profile
+                    .iter()
+                    .any(|(_key, target)| target == BindingTarget::Action(action))
+            })
+        };
         assert!(
-            app.world()
-                .resource::<ButtonInput<Action>>()
-                .pressed(Action::MoveUp),
-            "E raises the flycam in flycam mode"
+            CAMERA.into_iter().all(camera_bound),
+            "every flycam direction has a key"
         );
+        for mode in [InputMode::ThirdPerson, InputMode::Mouselook] {
+            let leaked = bindings.profile(mode).is_some_and(|profile| {
+                profile.iter().any(|(_key, target)| {
+                    CAMERA
+                        .into_iter()
+                        .any(|action| target == BindingTarget::Action(action))
+                })
+            });
+            assert!(!leaked, "{mode:?} binds no flycam camera action");
+        }
     }
 
     /// Bare modifiers are never movement keys: holding `Ctrl` (a chord
@@ -444,8 +544,8 @@ mod tests {
             press(&mut app, key);
             let actions = app.world().resource::<ButtonInput<Action>>();
             assert!(
-                !actions.pressed(Action::MoveDown) && !actions.pressed(Action::MoveUp),
-                "{key:?} must not move the flycam"
+                Action::ALL.iter().all(|&action| !actions.pressed(action)),
+                "{key:?} must not move the flycam or the avatar"
             );
         }
     }
@@ -621,29 +721,37 @@ mod typed_tests {
         held
     }
 
-    /// **One physical key, two meanings**: the arrow keys drive the avatar in
-    /// third person and are unbound in flycam, which keeps the WASD cluster
-    /// only. Driven from the key up, so the whole resolution chain — winit
+    /// **One physical key, two meanings**: `W` walks the avatar in third
+    /// person and slides the camera in flycam, while the arrow walks the avatar
+    /// in both. Driven from the key up, so the whole resolution chain — winit
     /// message, `ButtonInput<KeyCode>`, the mode's profile — is in the picture.
     #[test]
-    fn an_arrow_key_resolves_per_mode_from_a_real_press() {
+    fn a_key_resolves_per_mode_from_a_real_press() {
+        let w = (KeyCode::KeyW, Key::Character("w".into()));
+        let arrow = (KeyCode::ArrowUp, Key::ArrowUp);
+
         let mut app = moded_app(InputMode::ThirdPerson);
         assert_eq!(
-            actions_while_held(&mut app, &[(KeyCode::ArrowUp, Key::ArrowUp)]),
+            actions_while_held(&mut app, core::slice::from_ref(&w)),
+            vec![Action::MoveForward],
+            "in third person W walks the avatar"
+        );
+        assert_eq!(
+            actions_while_held(&mut app, core::slice::from_ref(&arrow)),
             vec![Action::MoveForward],
             "in third person the arrow walks the avatar"
         );
 
         let mut app = moded_app(InputMode::Flycam);
         assert_eq!(
-            actions_while_held(&mut app, &[(KeyCode::ArrowUp, Key::ArrowUp)]),
-            Vec::new(),
-            "in flycam the same arrow is unbound"
+            actions_while_held(&mut app, &[w]),
+            vec![Action::FlycamForward],
+            "in flycam W slides the camera"
         );
         assert_eq!(
-            actions_while_held(&mut app, &[(KeyCode::KeyW, Key::Character("w".into()))]),
+            actions_while_held(&mut app, &[arrow]),
             vec![Action::MoveForward],
-            "…while the WASD cluster still drives the camera"
+            "…while the arrow still walks the avatar"
         );
     }
 
