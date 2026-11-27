@@ -29,7 +29,7 @@ path = "src/bin/sl-conformance-trace.rs"
 clap = { workspace = true, features = ["cargo", "derive", "env"] }
 clap_complete = { workspace = true }
 clap_mangen = { workspace = true }
-etherparse = { version = "0.21.0" }
+etherparse = { version = "0.21.1" }
 fs-err = { workspace = true }
 owo-colors = "4.4.0"
 pcap-file = { version = "3.0.0" }
@@ -71,9 +71,6 @@ tracing = { workspace = true }
 tracing-appender = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter", "tracing-log"] }
 url = { workspace = true }
-
-[target.'cfg(target_os = "linux")'.dependencies]
-tracing-journald = "0.3.2"
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }

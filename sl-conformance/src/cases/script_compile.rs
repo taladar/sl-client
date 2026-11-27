@@ -4274,6 +4274,28 @@ const FAKE_SL_PENDING: &[(&str, &str)] = &[
     ("lsl2_large_code_error_0_at", "server-lsl-lso-memory"),
 ];
 
+/// Where the Second Life flavour's Luau compiler answers a Luau leg otherwise
+/// than Second Life was measured to, by metric, and why. Held by
+/// `the_fake_grid_compiles_the_luau_legs_as_measured`, and a fake-sl run of
+/// the case is excused them.
+const FAKE_SL_LUAU_DEVIATIONS: &[(&str, &str)] = &[
+    ("luau_luau_register_limit_compiled", LUAU_DEAD_LOCAL_REUSE),
+    ("luau_luau_register_limit_error_0", LUAU_DEAD_LOCAL_REUSE),
+    ("luau_luau_register_limit_error_0_at", LUAU_DEAD_LOCAL_REUSE),
+    (
+        "luau_luau_register_limit_errors_count",
+        LUAU_DEAD_LOCAL_REUSE,
+    ),
+];
+
+/// Why the fake grid compiles `luau_register_limit` where Second Life refuses
+/// it.
+const LUAU_DEAD_LOCAL_REUSE: &str = "the fake grid's Luau (0.748, through mlua 0.12.3) releases a \
+    local's register after its last use and hands it to the next local, so the leg's 201 \
+    never-read locals never hold more than one register at a time and the 200-local limit never \
+    trips; the older Luau Second Life was measured with counts every local still in scope and \
+    refuses the leg";
+
 /// Whether `key` is an error's text (`…_error_<n>`) rather than where it is
 /// or how many there are. The fake grid's compiler words its errors its own
 /// way where the situation is the same (a missing expression, an undeclared
@@ -4285,9 +4307,10 @@ fn is_error_text(key: &str) -> bool {
 }
 
 /// Holds `metrics` to `grid`'s table: a fake grid's, but for the compile
-/// answers its compiler is known to give otherwise ([`KNOWN_DEVIATIONS`]),
-/// the errors' wording ([`is_error_text`]), what is still open on the Second
-/// Life flavour ([`FAKE_SL_PENDING`]) and the XEngine legs it does not run.
+/// answers its compiler is known to give otherwise ([`KNOWN_DEVIATIONS`],
+/// and [`FAKE_SL_LUAU_DEVIATIONS`] on the Second Life flavour), the errors'
+/// wording ([`is_error_text`]), what is still open on the Second Life flavour
+/// ([`FAKE_SL_PENDING`]) and the XEngine legs it does not run.
 fn hold(grid: Grid, metrics: &Metrics) -> Result<(), TestFailure> {
     let table = if opensim_like(grid) {
         OPENSIM
@@ -4302,6 +4325,10 @@ fn hold(grid: Grid, metrics: &Metrics) -> Result<(), TestFailure> {
                     && FAKE_SL_PENDING
                         .iter()
                         .any(|(suffix, _task)| key.ends_with(suffix)))
+                || (grid == Grid::FakeSl
+                    && FAKE_SL_LUAU_DEVIATIONS
+                        .iter()
+                        .any(|(deviation, _why)| *deviation == key))
                 || KNOWN_DEVIATIONS
                     .iter()
                     .any(|(deviation, _why)| *deviation == key))
@@ -4329,8 +4356,9 @@ mod tests {
     use std::collections::BTreeMap;
 
     use super::{
-        Answer, BROKEN, Backend, KNOWN_DEVIATIONS, LUAU, OPENSIM, SECOND_LIFE, SIZES, UNSERVED,
-        large_code_source, luau_legs, sized_source, valid_source, without_uuids,
+        Answer, BROKEN, Backend, FAKE_SL_LUAU_DEVIATIONS, KNOWN_DEVIATIONS, LUAU, OPENSIM,
+        SECOND_LIFE, SIZES, UNSERVED, large_code_source, luau_legs, sized_source, valid_source,
+        without_uuids,
     };
     use crate::grid::Grid;
     use crate::metrics::Metrics;
@@ -4468,10 +4496,6 @@ mod tests {
         assert_eq!(found, known, "deviations: {deviations:#?}");
     }
 
-    /// Where the fake grid's compiler answers a Luau leg otherwise than the
-    /// grid it imitates, by metric, and why.
-    const LUAU_KNOWN_DEVIATIONS: &[(&str, &str)] = &[];
-
     /// The fake grid answers every Luau leg as each grid was measured to:
     /// Second Life with the reference Luau compiler's own words, the item
     /// marked Luau; OpenSim reading the source as LSL under YEngine — whether
@@ -4514,11 +4538,11 @@ mod tests {
                 }
             }
         }
-        let known: Vec<&str> = LUAU_KNOWN_DEVIATIONS
+        let known: Vec<String> = FAKE_SL_LUAU_DEVIATIONS
             .iter()
-            .map(|(key, _why)| *key)
+            .map(|(key, _why)| format!("{:?} {key}", ImitatedGrid::SecondLife))
             .collect();
-        let found: Vec<&str> = deviations.keys().map(String::as_str).collect();
+        let found: Vec<String> = deviations.keys().cloned().collect();
         assert_eq!(found, known, "deviations: {deviations:#?}");
     }
 

@@ -754,17 +754,23 @@ mod tests {
     }
 
     /// A compile error past the parse — the register file exhausted — is
-    /// answered in the same `:<line>: ` form as a syntax error.
+    /// answered in the same `:<line>: ` form as a syntax error. The locals are
+    /// all returned at the end so each stays live: Luau 0.748 hands a local's
+    /// register to the next one after its last use, so never-read locals no
+    /// longer exhaust it.
     #[test]
     fn a_luau_compile_error_is_worded_as_a_syntax_error_is() {
         let mut locals = String::new();
+        let mut names = Vec::new();
         for index in 0..201 {
             let index = index.to_string();
             for piece in ["    local v", &index, " = tostring(", &index, ")\n"] {
                 locals.push_str(piece);
             }
+            names.push(format!("v{index}"));
         }
-        let source = format!("local function f()\n{locals}end\n");
+        let names = names.join(", ");
+        let source = format!("local function f()\n{locals}    return {names}\nend\n");
         assert_eq!(
             luau_errors(source.as_bytes()),
             vec![

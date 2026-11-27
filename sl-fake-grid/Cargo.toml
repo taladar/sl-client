@@ -28,12 +28,12 @@ clap = { workspace = true, features = ["cargo", "derive", "env"] }
 fs-err = { workspace = true }
 http = "1.5.0"
 http-body-util = "0.1.5"
-hyper = { version = "1.12.0", features = ["http1", "server"] }
+hyper = { version = "1.13.0", features = ["http1", "server"] }
 hyper-util = { version = "0.1.21", features = ["tokio"] }
 md5 = { workspace = true }
 # Second Life's Luau target is compiled by the reference Luau compiler, whose
 # own error text is what the grid answers (`script_compile::luau_errors`).
-mlua = { version = "0.12.2", features = ["luau"] }
+mlua = { version = "0.12.3", features = ["luau"] }
 parking_lot = { workspace = true }
 sl-avatar = { workspace = true }
 # The central bake service composites with the client's own baker.

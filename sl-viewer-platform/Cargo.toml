@@ -34,7 +34,7 @@ directories = { version = "6.0.0" }
 fs-err = { workspace = true }
 # Local (system-timezone) time: the zone captured once at startup for every
 # surface that renders a stored timestamp as a local date (`local_time`).
-jiff = { version = "1.0.2" }
+jiff = { version = "1.0.3" }
 regex = { version = "1.13.2" }
 # The host's file-open dialog. `xdg-portal` only: under Wayland the chooser has
 # to come from `org.freedesktop.portal.FileChooser` (with a `zenity` fallback),

@@ -25,7 +25,7 @@ sl-automation-proto = { workspace = true }
 sl-client-bevy = { workspace = true, features = [
   "bevy_pbr",
 ] }
-sl-map-apis = { version = "0.13.1" }
+sl-map-apis = { version = "0.13.3" }
 sl-settings = { path = "../sl-settings", version = "0.1.0" }
 sl-terrain = { path = "../sl-terrain", version = "0.1.0" }
 sl-types = { workspace = true }

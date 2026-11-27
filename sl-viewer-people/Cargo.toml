@@ -19,7 +19,7 @@ publish.workspace = true
 bevy = { version = "0.20.1" }
 bevy_flair = { version = "0.9.0" }
 fs-err = { workspace = true }
-jiff = { version = "1.0.2" }
+jiff = { version = "1.0.3" }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 sl-anim = { workspace = true }

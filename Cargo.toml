@@ -115,7 +115,7 @@ async-lock = { version = "3.5.0" }
 async-trait = { version = "0.1.92" }
 base64 = { version = "0.23.1" }
 bytes = { version = "1.12.2" }
-clap = { version = "4.6.9" }
+clap = { version = "4.6.10" }
 clap_complete = { version = "4.6.12" }
 clap_mangen = { version = "0.3.4" }
 crossbeam-channel = { version = "0.5.17" }
@@ -138,7 +138,7 @@ rustyline = { version = "19.0.0" }
 serde = { version = "1.0.229" }
 serde_json = { version = "1.0.154" }
 sha1 = { version = "0.11.0" }
-sha2 = { version = "0.11.1" }
+sha2 = { version = "0.11.2" }
 sl-account-dirs = { path = "sl-account-dirs", version = "0.1.0" }
 sl-anim = { path = "sl-anim", version = "0.1.0" }
 sl-asset = { path = "sl-asset", version = "0.1.0" }
@@ -162,7 +162,7 @@ sl-repl = { path = "sl-repl", version = "0.1.0" }
 sl-secret-store = { path = "sl-secret-store", version = "0.1.0" }
 sl-settings = { path = "sl-settings", version = "0.1.0" }
 sl-test-assets = { path = "sl-test-assets", version = "0.1.0" }
-sl-types = { version = "0.13.0" }
+sl-types = { version = "0.13.1" }
 sl-viewer-asset-editors = { path = "sl-viewer-asset-editors", version = "0.1.0" }
 sl-viewer-audio = { path = "sl-viewer-audio", version = "0.1.0" }
 sl-viewer-automation = { path = "sl-viewer-automation", version = "0.1.0" }
@@ -205,7 +205,7 @@ sl-wire = { path = "sl-wire", version = "0.1.0" }
 thiserror = { version = "2.0.21" }
 time = { version = "0.3.55" }
 tokio = { version = "1.54.1" }
-toml = { version = "1.2.2" }
+toml = { version = "1.2.3" }
 tracing = { version = "0.1.44" }
 tracing-appender = { version = "0.2.5" }
 tracing-subscriber = { version = "0.3.23" }

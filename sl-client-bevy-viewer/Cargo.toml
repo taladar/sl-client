@@ -179,7 +179,7 @@ image = { version = "0.25.10", default-features = false, features = [
   "png",
   "tga",
 ] }
-jiff = { version = "1.0.2" }
+jiff = { version = "1.0.3" }
 # The login screen's own grids file (`grids.toml`).
 serde = { workspace = true, features = ["derive"] }
 sl-account-dirs = { workspace = true }
